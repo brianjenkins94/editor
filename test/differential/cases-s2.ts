@@ -86,6 +86,11 @@ export const S2_CASES: string[] = [
 	`const o = { _v: 0, get v() { return this._v; }, set v(n) { this._v = n * 10; } }; o.v = 4; o.v`,
 	`const o = { greet(name) { return "hi " + name; } }; o.greet("world")`,
 
+	// --- class static blocks (ES2022) ---
+	`class A { static x = 1; static { A.x = A.x + 10; } static y = A.x * 2; } A.x + A.y`,
+	`class C { static list = []; static { for (let i = 0; i < 3; i++) C.list.push(i * i); } } C.list.join()`,
+	`class D { static tag; static { this.tag = "via-this"; } } D.tag`,
+
 	// --- enum runtime-emit (Node runs the tsc-emitted enum object) ---
 	`enum E { A, B, C } E.A + E.B + E.C`,
 	`enum E { A, B, C } E[2]`,

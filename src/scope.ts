@@ -40,6 +40,9 @@ export class Scope {
 	classMeta?: unknown;
 	/** `new.target` for the current function scope. */
 	newTarget?: unknown;
+	/** the guest function this (function) scope belongs to — its flags tell `yield*`/`for await`
+	 *  whether they're inside an async generator. */
+	functionMeta?: unknown;
 
 	constructor(parent?: Scope, isolated = false) {
 		this.parent = parent;

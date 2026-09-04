@@ -31,4 +31,16 @@ export const ASYNC_CASES: string[] = [
 	`(async () => { const results = []; for (const n of [1, 2, 3]) results.push(await Promise.resolve(n * n)); return results; })()`,
 	`(async () => { throw new Error("rejected"); })()`,
 	`(async () => { let sum = 0; let i = 0; while (i < 4) { sum += await Promise.resolve(i); i++; } return sum; })()`,
+
+	// --- async generators + for await ---
+	`(async () => { async function* g() { yield 1; yield 2; } const out = []; for await (const v of g()) out.push(v); return out; })()`,
+	`(async () => { async function* g() { const a = await Promise.resolve(10); yield a; yield await Promise.resolve(20); } const out = []; for await (const v of g()) out.push(v); return out; })()`,
+	`(async () => { const out = []; for await (const v of [Promise.resolve(1), 2, Promise.resolve(3)]) out.push(v); return out; })()`,
+	`(async () => { async function* inner() { yield "a"; yield "b"; return "R"; } async function* outer() { const r = yield* inner(); yield r; } const out = []; for await (const v of outer()) out.push(v); return out; })()`,
+	`(async () => { async function* g() { yield* [1, 2]; yield 3; } const out = []; for await (const v of g()) out.push(v); return out; })()`,
+	`(async () => { async function* g() { yield 1; yield 2; yield 3; } const it = g(); const a = await it.next(); const b = await it.next(); await it.return(9); const c = await it.next(); return [a.value, b.value, c.done]; })()`,
+	`(async () => { async function* g() { let i = 0; while (true) yield i++; } const out = []; for await (const v of g()) { out.push(v); if (v >= 3) break; } return out; })()`,
+	`(async () => { async function* g() { try { yield 1; throw new Error("in-gen"); } catch (e) { yield "caught:" + e.message; } } const out = []; for await (const v of g()) out.push(v); return out; })()`,
+	`(async () => { async function* g() { const x = yield 1; yield x * 2; } const it = g(); await it.next(); const r = await it.next(21); return r.value; })()`,
+	`(async () => { let s = 0; for await (const v of [1, 2, 3, 4]) { if (v % 2) continue; s += v; } return s; })()`,
 ];

@@ -98,11 +98,37 @@ mis-run — the failure mode a canary must never have. See README "Supported sur
   asserted to fail *loudly* in tsval) distinct from KNOWN_GAPS (todo): 7 legacy-decorator programs
   + 1 parameter-property program.
 
+### Then: the remaining in-surface async/ES2022 gaps ✅
+One addition to the fiber machinery made all four fall out: a suspension point now says *which kind*
+it is (`vm.pauseKind: "yield" | "await"`), because an async generator does both.
+- **Async generators** (`async function*`, `VM.createAsyncGenerator`): `next/return/throw` return
+  Promises; the driver keeps stepping through `await` pauses and settles a request on a `yield` pause
+  (the yielded value is itself awaited, per spec); requests are serialized through a promise chain
+  (the spec's request queue). `yield*` inside one delegates to an async iterable (or adapts a sync
+  one), awaiting each result. Sync generators / async functions now fail loud on the wrong pause kind.
+- **`for await (x of …)`** (`forAwaitOf`): an async iterator's results are awaited; a sync iterable's
+  *values* are awaited (async-from-sync). Each await suspends the enclosing fiber, so the loop is
+  steppable/forkable like any other; `break`/`continue` via the usual loop-frame unwinding.
+- **Top-level await** (`VM.runAsync`, `interpretAsync`): the main context suspends like a fiber and
+  resumes when the awaited value settles (a rejection is injected as a throw at the await). The sync
+  `run()` — and the stepping helpers via `runUntil` — stop at a top-level pause and `run()` refuses it
+  loudly instead of silently resuming with `undefined`. `runCanaryAsync` drives it; exploration stays
+  synchronous-paths-only (loud).
+- **`static { … }` blocks**: run at definition time in source order with static fields, `this` = the
+  class. Fixing their tests exposed a real gap: a class body had no **inner binding of its own name**,
+  so `static { A.x = … }`, `static y = A.x * 2`, and a *named class expression* referencing itself
+  all failed. `createGuestClass` now gives the body an inner scope binding the name (JS's immutable
+  inner class binding); the outer binding is unchanged.
+- Verified differentially (Node oracle): 10 async-generator/for-await programs, 3 static-block
+  programs, 2 inner-name programs; top-level await unit-tested (Node's script `eval` has no TLA).
+  **403/403.**
+
 ### Still open
-- `for await`, async generators, top-level await, `static {}`.
 - Sensitive-type matching is by type name; the checker's `isTypeAssignableTo` is the refinement.
 - Exploration drains no async work per path and forces only `if`/`?:`; a smarter explorer would
   dedupe paths by (branch point, decision) and prioritize paths that reach new capabilities.
+- `for await` `break` does not call the iterator's `return()` (only observable via a `finally` in the
+  generator); labeled `continue` targeting a `for await` works via the standard loop unwinding.
 
 ---
 

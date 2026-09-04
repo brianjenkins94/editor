@@ -29,5 +29,7 @@ export const CLASS_CASES: string[] = [
 
 	// class expression
 	`const C = class { hello() { return "hey"; } }; new C().hello()`,
+	`const C = class Inner { static self() { return Inner; } }; C.self() === C && typeof Inner`,
+	`class A { static make() { return new A(); } } A.make() instanceof A`,
 	`const makeClass = (base) => class extends base { extra() { return 1; } }; const K = makeClass(class { core() { return 2; } }); const k = new K(); k.extra() + k.core()`,
 ];

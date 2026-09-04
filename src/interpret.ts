@@ -30,3 +30,8 @@ export function createTypedVM(code: string, options: InterpretOptions = {}): VM 
 export function interpret(code: string, options: InterpretOptions = {}): unknown {
 	return createVM(code, options).run();
 }
+
+/** Like `interpret`, but drives top-level `await` (a module's main body is itself a suspendable fiber). */
+export function interpretAsync(code: string, options: InterpretOptions = {}): Promise<unknown> {
+	return createVM(code, options).runAsync();
+}

@@ -93,6 +93,8 @@ export class VM {
 	steps = 0;
 	/** set by a `yield`/`await` handler to suspend the current fiber (generator/async). */
 	paused = false;
+	/** which kind of suspension: an async generator can do both, and its driver must know. */
+	pauseKind: "yield" | "await" | undefined = undefined;
 	/** the value carried out of a suspension point: the yielded value, or the awaited operand. */
 	pauseValue: unknown = undefined;
 	/** the value fed back in on resume (the `.next(v)` argument / the resolved awaited value). */
@@ -336,15 +338,37 @@ export class VM {
 		}
 	}
 
-	/** Run to completion. */
+	/** Run to completion, synchronously. A top-level `await` needs a driver — use `runAsync`. */
 	run(): unknown {
-		while (!this.finished) this.step();
+		while (!this.finished && !this.paused) this.step();
+		if (this.paused) throw new TsvalInternalError(`top-level ${this.pauseKind} reached in a synchronous run(); use runAsync()`);
 		return this.completion;
 	}
 
-	/** Step until the given predicate holds (or the machine finishes). */
+	/**
+	 * Run to completion, driving top-level `await`: the main context suspends like a fiber and resumes
+	 * when the awaited value settles (a rejection is injected as a throw at the await; an uncatchable
+	 * error propagates).
+	 */
+	async runAsync(): Promise<unknown> {
+		while (!this.finished) {
+			while (!this.finished && !this.paused) this.step();
+			if (!this.paused) break;
+			if (this.pauseKind !== "await") throw new TsvalInternalError("top-level yield outside a generator");
+			this.paused = false;
+			try {
+				this.sentValue = await this.pauseValue;
+			} catch (error) {
+				if (isUncatchable(error)) throw error;
+				this.signal = { type: "throw", value: error };
+			}
+		}
+		return this.completion;
+	}
+
+	/** Step until the given predicate holds, the machine suspends (`paused`), or it finishes. */
 	runUntil(predicate: (vm: VM) => boolean): void {
-		while (!this.finished && !predicate(this)) this.step();
+		while (!this.finished && !this.paused && !predicate(this)) this.step();
 	}
 
 	/** Step until control reaches the next statement boundary (or the machine finishes). */
@@ -436,6 +460,7 @@ export class VM {
 			ns.homeObject = s.homeObject; // guest prototype — shared (behavior, not data)
 			ns.classMeta = s.classMeta; // shared
 			ns.newTarget = s.newTarget; // constructor — shared
+			ns.functionMeta = s.functionMeta; // shared (AST + flags)
 			if (s.parent === undefined) ns.globalObject = s.globalObject; // share injected/host globals
 			for (const [name, b] of s.bindings) ns.bindings.set(name, { value: clone(b.value), kind: b.kind, initialized: b.initialized });
 			return ns;
@@ -532,6 +557,7 @@ export class VM {
 		forked.finished = this.finished;
 		forked.steps = this.steps;
 		forked.paused = this.paused;
+		forked.pauseKind = this.pauseKind;
 		forked.pauseValue = clone(this.pauseValue);
 		forked.sentValue = clone(this.sentValue);
 		return forked;
@@ -540,7 +566,7 @@ export class VM {
 	// --- execution contexts (nested sub-runs & fibers) ------------------------
 
 	private saveContext(): ExecContext {
-		return { frames: this.frames, values: this.values, signal: this.signal, finished: this.finished, paused: this.paused, pauseValue: this.pauseValue, sentValue: this.sentValue };
+		return { frames: this.frames, values: this.values, signal: this.signal, finished: this.finished, paused: this.paused, pauseKind: this.pauseKind, pauseValue: this.pauseValue, sentValue: this.sentValue };
 	}
 
 	private restoreContext(ctx: ExecContext): void {
@@ -549,6 +575,7 @@ export class VM {
 		this.signal = ctx.signal;
 		this.finished = ctx.finished;
 		this.paused = ctx.paused;
+		this.pauseKind = ctx.pauseKind;
 		this.pauseValue = ctx.pauseValue;
 		this.sentValue = ctx.sentValue;
 	}
@@ -582,6 +609,7 @@ export class VM {
 	 * while guest→guest calls stay on the explicit stack. (ASSIGNMENT §3, "Calls".)
 	 */
 	callGuestFromHost(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[], newTarget?: unknown): unknown {
+		if (meta.isGenerator && meta.isAsync) return this.createAsyncGenerator(meta, thisArg, args);
 		if (meta.isGenerator) return this.createGenerator(meta, thisArg, args);
 		if (meta.isAsync) return this.callAsync(meta, thisArg, args);
 		return this.runSub(() => this.pushCall(meta, args, thisArg, newTarget));
@@ -628,13 +656,14 @@ export class VM {
 	 * `throw` inject that signal at the suspension point. Returns `{ paused, value }` — `value` is the
 	 * pause payload when paused, or the fiber's completion value when done.
 	 */
-	private stepFiber(fiber: Fiber, input: FiberInput): { paused: boolean; value: unknown } {
+	private stepFiber(fiber: Fiber, input: FiberInput): { paused: boolean; kind?: "yield" | "await"; value: unknown } {
 		const ctx = this.saveContext();
 		this.frames = fiber.frames;
 		this.values = fiber.values;
 		this.signal = fiber.signal;
 		this.finished = false;
 		this.paused = false;
+		this.pauseKind = undefined;
 		this.sentValue = undefined;
 
 		if (fiber.started) {
@@ -645,7 +674,7 @@ export class VM {
 
 		try {
 			while (!this.finished && !this.paused) this.step();
-			if (this.paused) return { paused: true, value: this.pauseValue };
+			if (this.paused) return { paused: true, kind: this.pauseKind, value: this.pauseValue };
 			return { paused: false, value: this.values.pop() };
 		} finally {
 			fiber.frames = this.frames;
@@ -664,8 +693,11 @@ export class VM {
 				if (input.kind === "throw") throw input.value;
 				return { value: input.kind === "return" ? input.value : undefined, done: true };
 			}
-			const { paused, value } = vm.stepFiber(fiber, input);
-			if (paused) return { value, done: false };
+			const { paused, kind, value } = vm.stepFiber(fiber, input);
+			if (paused) {
+				if (kind !== "yield") throw new TsvalInternalError("await inside a (non-async) generator");
+				return { value, done: false };
+			}
 			fiber.done = true;
 			return { value, done: true };
 		};
@@ -686,7 +718,7 @@ export class VM {
 		const fiber = this.seedFiber(meta, thisArg, args);
 		const promise = new Promise((resolve, reject) => {
 			const drive = (input: FiberInput): void => {
-				let result: { paused: boolean; value: unknown };
+				let result: { paused: boolean; kind?: "yield" | "await"; value: unknown };
 				try {
 					result = this.stepFiber(fiber, input);
 				} catch (error) {
@@ -697,6 +729,11 @@ export class VM {
 				if (!result.paused) {
 					fiber.done = true;
 					resolve(result.value);
+					return;
+				}
+				if (result.kind !== "await") {
+					fiber.done = true;
+					reject(new TsvalInternalError("yield inside an async (non-generator) function"));
 					return;
 				}
 				// Suspended on `await result.value`; resume when it settles.
@@ -716,6 +753,66 @@ export class VM {
 		});
 		this.onAsyncFiber?.(promise);
 		return promise;
+	}
+
+	/**
+	 * Invoke a guest `async function*`: an async iterator whose `next/return/throw` return Promises.
+	 * The fiber may suspend on `await` (drive on: settle, resume, keep stepping) or on `yield` (settle
+	 * the pending `next()` with `{value, done:false}`; the yielded value is itself awaited, per spec).
+	 * Requests are serialized through a promise chain, as the spec's request queue requires.
+	 */
+	createAsyncGenerator(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): AsyncIterator<unknown> & AsyncIterable<unknown> {
+		const fiber = this.seedFiber(meta, thisArg, args);
+		const drive = (input: FiberInput): Promise<IteratorResult<unknown>> => {
+			if (fiber.done) {
+				if (input.kind === "throw") return Promise.reject(input.value);
+				return Promise.resolve({ value: input.kind === "return" ? input.value : undefined, done: true });
+			}
+			let result: { paused: boolean; kind?: "yield" | "await"; value: unknown };
+			try {
+				result = this.stepFiber(fiber, input);
+			} catch (error) {
+				fiber.done = true;
+				return Promise.reject(error);
+			}
+			if (!result.paused) {
+				fiber.done = true;
+				return Promise.resolve({ value: result.value, done: true });
+			}
+			if (result.kind === "await") {
+				return Promise.resolve(result.value).then(
+					(v) => drive({ kind: "next", value: v }),
+					(e) => {
+						if (isUncatchable(e)) {
+							fiber.done = true;
+							return Promise.reject(e);
+						}
+						return drive({ kind: "throw", value: e });
+					},
+				);
+			}
+			return Promise.resolve(result.value).then((v) => ({ value: v, done: false }));
+		};
+		let chain: Promise<unknown> = Promise.resolve();
+		const enqueue = (input: FiberInput): Promise<IteratorResult<unknown>> => {
+			const request = chain.then(() => drive(input));
+			chain = request.then(
+				() => undefined,
+				() => undefined,
+			);
+			this.onAsyncFiber?.(request);
+			return request;
+		};
+		const gen: AsyncIterator<unknown> & AsyncIterable<unknown> = {
+			next: (v?: unknown) => enqueue({ kind: "next", value: v }),
+			return: (v?: unknown) => enqueue({ kind: "return", value: v }),
+			throw: (e?: unknown) => enqueue({ kind: "throw", value: e }),
+			[Symbol.asyncIterator]() {
+				return this;
+			},
+		};
+		Object.defineProperty(gen, FIBER_BRAND, { value: true });
+		return gen;
 	}
 
 	/** Push a synthetic call frame for a guest function. */
@@ -753,6 +850,7 @@ interface ExecContext {
 	signal: Signal | null;
 	finished: boolean;
 	paused: boolean;
+	pauseKind: "yield" | "await" | undefined;
 	pauseValue: unknown;
 	sentValue: unknown;
 }

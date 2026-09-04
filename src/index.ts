@@ -3,7 +3,7 @@ export type { Frame, Signal, VMOptions, Handler } from "./vm.ts";
 export { Scope } from "./scope.ts";
 export type { Binding, BindingKind } from "./scope.ts";
 export { parse, syntaxKindName, ts } from "./frontend.ts";
-export { createVM, createTypedVM, interpret } from "./interpret.ts";
+export { createVM, createTypedVM, interpret, interpretAsync } from "./interpret.ts";
 export type { InterpretOptions } from "./interpret.ts";
 export { createTypedProgram, typeOfNode } from "./program.ts";
 export type { TypedProgram } from "./program.ts";

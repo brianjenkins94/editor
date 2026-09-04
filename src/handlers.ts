@@ -407,7 +407,7 @@ function copyPerIteration(frame: Frame): void {
 
 on(K.ForOfStatement, (vm, frame) => {
 	const node = frame.node as ts.ForOfStatement;
-	if (node.awaitModifier) unimplemented(`for-await-of`);
+	if (node.awaitModifier) return forAwaitOf(vm, frame, node);
 	if (frame.phase === 0) {
 		frame.isLoop = true;
 		frame.continuePhase = 2;
@@ -427,6 +427,42 @@ on(K.ForOfStatement, (vm, frame) => {
 		frame.phase = 2;
 	}
 });
+
+// `for await (x of iterable)`: an async iterator's `.next()` results are awaited; a sync iterable's
+// *values* are awaited (the spec's async-from-sync adaptation). Each await suspends the enclosing
+// fiber, which is what makes the loop steppable/forkable like any other.
+function forAwaitOf(vm: VM, frame: Frame, node: ts.ForOfStatement): void {
+	if (frame.phase === 0) {
+		frame.isLoop = true;
+		frame.continuePhase = 2;
+		vm.pushNode(node.expression, frame.scope);
+		frame.phase = 1;
+	} else if (frame.phase === 1) {
+		const { iterator, sync } = getAsyncOrSyncIterator(vm.pop());
+		frame.iterator = iterator;
+		frame.syncIterator = sync;
+		frame.phase = 2;
+	} else if (frame.phase === 2) {
+		const step = (frame.iterator as Iterator<unknown>).next();
+		if (frame.syncIterator) {
+			const result = step as IteratorResult<unknown>;
+			if (result.done) return void vm.frames.pop();
+			suspend(vm, frame, "await", result.value, 3); // await the element itself
+		} else {
+			suspend(vm, frame, "await", step, 4); // await the result object
+		}
+	} else if (frame.phase === 3) {
+		bindForTarget(vm, frame, node.initializer, resumed(vm));
+		frame.phase = 5;
+	} else if (frame.phase === 4) {
+		const result = resumed(vm) as IteratorResult<unknown>;
+		if (result.done) return void vm.frames.pop();
+		bindForTarget(vm, frame, node.initializer, vm.fromHost(result.value));
+		frame.phase = 5;
+	} else {
+		frame.phase = 2;
+	}
+}
 
 on(K.ForInStatement, (vm, frame) => {
 	const node = frame.node as ts.ForInStatement;
@@ -938,14 +974,10 @@ on(K.YieldExpression, (vm, frame) => {
 			vm.pushNode(node.expression, frame.scope);
 			frame.phase = 1;
 		} else {
-			vm.pauseValue = undefined;
-			vm.paused = true;
-			frame.phase = 2;
+			suspend(vm, frame, "yield", undefined, 2);
 		}
 	} else if (frame.phase === 1) {
-		vm.pauseValue = vm.pop();
-		vm.paused = true;
-		frame.phase = 2;
+		suspend(vm, frame, "yield", vm.pop(), 2);
 	} else {
 		vm.frames.pop();
 		vm.push(vm.fromHost(vm.sentValue)); // `.next(v)` comes from the host caller
@@ -953,34 +985,69 @@ on(K.YieldExpression, (vm, frame) => {
 	}
 });
 
+/** Park the current frame at `resumePhase` and suspend the fiber with a payload of the given kind. */
+function suspend(vm: VM, frame: Frame, kind: "yield" | "await", value: unknown, resumePhase: number): void {
+	vm.pauseValue = value;
+	vm.pauseKind = kind;
+	vm.paused = true;
+	frame.phase = resumePhase;
+}
+
+/** Take the value fed back in on resume (the `.next(v)` argument / the settled awaited value). */
+function resumed(vm: VM): unknown {
+	const value = vm.fromHost(vm.sentValue);
+	vm.sentValue = undefined;
+	return value;
+}
+
+/** The guest function whose body `scope` belongs to (arrows are transparent), if any. */
+function enclosingFunctionMeta(scope: Scope): GuestFunctionMeta | undefined {
+	for (let s: Scope | undefined = scope; s; s = s.parent) if (s.functionMeta !== undefined) return s.functionMeta as GuestFunctionMeta;
+	return undefined;
+}
+
+/** An async iterator for `iterable` (`Symbol.asyncIterator`, else its sync iterator), and which it is. */
+function getAsyncOrSyncIterator(iterable: unknown): { iterator: Iterator<unknown> | AsyncIterator<unknown>; sync: boolean } {
+	const asyncFactory = (iterable as { [Symbol.asyncIterator]?: () => AsyncIterator<unknown> })?.[Symbol.asyncIterator];
+	if (typeof asyncFactory === "function") return { iterator: asyncFactory.call(iterable), sync: false };
+	return { iterator: (iterable as Iterable<unknown>)[Symbol.iterator](), sync: true };
+}
+
 // `yield* iterable`: drive the inner iterator, re-yielding each value; the `yield*` expression's own
-// value is the inner iterator's completion (`return`) value.
+// value is the inner iterator's completion (`return`) value. Inside an `async function*` the inner
+// iterator is async (or a sync one adapted): each `.next()` result is awaited before it is re-yielded.
 function yieldStar(vm: VM, frame: Frame, node: ts.YieldExpression): void {
+	const meta = enclosingFunctionMeta(frame.scope);
+	const asyncGen = meta?.isAsync === true && meta.isGenerator;
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression as ts.Expression, frame.scope);
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
-		frame.iterator = (vm.pop() as Iterable<unknown>)[Symbol.iterator]();
+		frame.iterator = asyncGen ? getAsyncOrSyncIterator(vm.pop()).iterator : (vm.pop() as Iterable<unknown>)[Symbol.iterator]();
 		frame.sent = undefined;
 		frame.phase = 2;
 	} else if (frame.phase === 2) {
-		const result = (frame.iterator as Iterator<unknown>).next(frame.sent);
-		if (result.done) {
-			frame.result = vm.fromHost(result.value);
-			frame.phase = 4;
-			return;
-		}
-		vm.pauseValue = vm.fromHost(result.value);
-		vm.paused = true;
-		frame.phase = 3;
+		const step = (frame.iterator as Iterator<unknown>).next(frame.sent);
+		if (asyncGen) return suspend(vm, frame, "await", step, 5); // result object arrives on resume
+		settleDelegate(vm, frame, step as IteratorResult<unknown>);
+	} else if (frame.phase === 5) {
+		settleDelegate(vm, frame, resumed(vm) as IteratorResult<unknown>);
 	} else if (frame.phase === 3) {
-		frame.sent = vm.sentValue;
-		vm.sentValue = undefined;
+		frame.sent = resumed(vm);
 		frame.phase = 2;
 	} else {
 		vm.frames.pop();
 		vm.push(frame.result);
 	}
+}
+
+function settleDelegate(vm: VM, frame: Frame, result: IteratorResult<unknown>): void {
+	if (result.done) {
+		frame.result = vm.fromHost(result.value);
+		frame.phase = 4;
+		return;
+	}
+	suspend(vm, frame, "yield", vm.fromHost(result.value), 3);
 }
 
 on(K.AwaitExpression, (vm, frame) => {
@@ -989,9 +1056,7 @@ on(K.AwaitExpression, (vm, frame) => {
 		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
-		vm.pauseValue = vm.pop();
-		vm.paused = true;
-		frame.phase = 2;
+		suspend(vm, frame, "await", vm.pop(), 2);
 	} else {
 		vm.frames.pop();
 		vm.push(vm.fromHost(vm.sentValue)); // the resolved value of a (host) promise enters guest land
@@ -1334,6 +1399,10 @@ on(K.CallExpression, (vm, frame) => {
 			const meta = calleeVal.__tsval;
 			// Generator / async calls produce a generator object / Promise instead of running the body
 			// on the main stack (they run as suspendable fibers).
+			if (meta.isGenerator && meta.isAsync) {
+				vm.frames.pop();
+				return vm.push(vm.createAsyncGenerator(meta, frame.thisArg, args));
+			}
 			if (meta.isGenerator) {
 				vm.frames.pop();
 				return vm.push(vm.createGenerator(meta, frame.thisArg, args));
@@ -1450,11 +1519,15 @@ function memberKey(vm: VM, name: ts.PropertyName | undefined, scope: Scope): Pro
 	return propertyName(name);
 }
 
-export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, scope: Scope): GuestClass {
+export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerScope: Scope): GuestClass {
 	assertSupportedClassSurface(node);
 	const heritage = node.heritageClauses?.find((h) => h.token === K.ExtendsKeyword);
-	const superClass = heritage ? vm.evalNodeSync(heritage.types[0].expression, scope) : undefined;
+	const superClass = heritage ? vm.evalNodeSync(heritage.types[0].expression, outerScope) : undefined;
 	const proto = superClass != null ? Object.create((superClass as GuestClass).prototype) : {};
+	// The class body sees an inner, immutable binding of its own name (so static initializers,
+	// `static {}` blocks and methods can refer to it — also for a *named class expression*, whose name
+	// is visible only inside). Bound once the constructor exists, below.
+	const scope = new Scope(outerScope, false);
 	const meta: ClassMeta = { node, closure: scope, superClass, proto, instanceFields: [] };
 
 	const Ctor = function (this: unknown, ...args: unknown[]): unknown {
@@ -1468,6 +1541,10 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, scope: S
 	// Always set: an anonymous class expression is `""`, and V8 would otherwise infer the host
 	// variable's name ("Ctor") — observable via `.name`.
 	Object.defineProperty(Ctor, "name", { value: node.name?.text ?? "", configurable: true });
+	if (node.name) {
+		scope.declareLexical(node.name.text, "const");
+		scope.initialize(node.name.text, Ctor);
+	}
 
 	for (const member of node.members) {
 		const target = hasStatic(member) ? (Ctor as unknown as object) : proto;
@@ -1492,6 +1569,9 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, scope: S
 			} else {
 				meta.instanceFields.push({ name: key, initializer: member.initializer });
 			}
+		} else if (ts.isClassStaticBlockDeclaration(member)) {
+			// `static { … }` runs at definition time, in source order with static fields, `this` = the class.
+			vm.evalNodeSync(member.body, fieldScope(meta, Ctor, Ctor as object));
 		} else if (ts.isSemicolonClassElement(member)) {
 			// ignore stray `;`
 		} else {
@@ -1671,6 +1751,7 @@ syntheticHandlers.call = (vm, frame) => {
 			fnScope.initialize("arguments", frame.args as unknown[]);
 		}
 		bindParameters(vm, fnScope, node.parameters, frame.args as unknown[]);
+		fnScope.functionMeta = meta;
 		frame.scope = fnScope;
 
 		if (ts.isBlock(node.body!)) {

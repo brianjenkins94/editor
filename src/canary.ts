@@ -643,6 +643,7 @@ export function exploreCanary(code: string, options: ExploreOptions): Exploratio
 					}
 				}
 				vm.step();
+				if (vm.paused) throw new Error("exploration: top-level await is not supported (synchronous paths only)");
 			}
 			report.completion = vm.completion;
 		} catch (error) {
@@ -671,13 +672,12 @@ export function exploreCanary(code: string, options: ExploreOptions): Exploratio
  * timer callback is observed and can trip the tripwire. `maxDrainMs` bounds a never-cleared interval.
  */
 export async function runCanaryAsync(code: string, options: CanaryOptions & { maxDrainMs?: number }): Promise<CanaryReport> {
-	const run = startCanary(code, options);
-	if (isThenable(run.report.completion)) {
-		try {
-			run.report.completion = await run.report.completion;
-		} catch (error) {
-			if (!(error instanceof CanaryDivergenceError)) run.report.error = error;
-		}
+	const run = prepareCanary(code, options);
+	try {
+		run.report.completion = await run.vm.runAsync(); // drives top-level await
+		if (isThenable(run.report.completion)) run.report.completion = await run.report.completion;
+	} catch (error) {
+		if (!(error instanceof CanaryDivergenceError)) run.report.error = error;
 	}
 	await run.pending.drain(options.maxDrainMs ?? 2000);
 	return finishReport(run);
