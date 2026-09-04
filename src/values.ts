@@ -27,6 +27,10 @@ export interface GuestFunctionMeta {
 	name: string;
 	/** Arrow functions capture `this` lexically; they have no own `this`/`arguments`. */
 	isArrow: boolean;
+	/** `function*` / `async function*` — invocation returns a generator (runs lazily). */
+	isGenerator: boolean;
+	/** `async` — invocation returns a Promise, driven by `await` suspensions. */
+	isAsync: boolean;
 	/** [[HomeObject]] — the object the method lives on, used to resolve `super.x` (class methods). */
 	homeObject?: object;
 }

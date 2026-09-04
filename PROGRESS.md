@@ -5,6 +5,50 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## S3 — Stepping API + async/generators ✅ (2026-09-04)
+
+**Status: green.** `npm test` → 170/170 (165 differential incl. 12 generator + 11 awaited-async, +
+5 VM/stepping, + 5 new stepping/fiber tests). Typecheck clean. This is the payoff for the explicit-
+stack design: suspension falls out of saving/restoring the machine's own stacks.
+
+### Fibers (the suspension substrate, `src/vm.ts`)
+- A **fiber** = a snapshot of the machine's mutable state `{ frames, values, signal }` plus `done`/
+  `started`. `stepFiber(fiber, input)` swaps a fiber in, runs `while (!finished && !paused)`, and swaps
+  back — resuming feeds `sentValue` (a `.next(v)` / resolved await) or injects a `return`/`throw`
+  signal at the suspension point. `ExecContext` save/restore now backs `callGuestFromHost`,
+  `evalNodeSync`, `constructGuestSync` (all via `runSub`) **and** fibers, so nesting is safe.
+- **`yield` / `await`** (`handlers.ts`) suspend by setting `vm.paused` + `vm.pauseValue` and parking
+  the frame at phase 2; on resume phase 2 yields `vm.sentValue`. Same mechanism for both; the driver
+  interprets the payload (generator: the yielded value; async: the awaited operand).
+
+### Generators
+- `function*` calls return a lazy generator object (`VM.createGenerator`) with `next/return/throw/
+  [Symbol.iterator]`. Verified: `[...g()]`, `for-of`, spread, bidirectional `yield` (sending values
+  in), `yield*` (delegation + return value), infinite generators (`while (true) yield`), `return`
+  mid-body, destructuring inside generators, `.throw()`/`.return()` injection.
+
+### async / await
+- `async` calls return a real host **Promise** (`VM.callAsync`), driven by `await` suspensions:
+  each `await` parks the fiber and attaches `.then` to the operand, resuming with the resolved value or
+  injecting a `throw` on rejection. Verified: sequential awaits, `await` in loops, `Promise.all`,
+  nested async, `try/catch` around `await`, real `setTimeout`, rejection → Promise rejection.
+- Async/generator functions cross the host stack at the fiber boundary (the driver is host-scheduled);
+  the body itself runs on the explicit stack and is fully suspendable.
+
+### Stepping API polish
+- `addBreakpoint(pos)` / `addBreakpointsByLine(...)` + `runToBreakpoint()` (statement-level — a
+  statement and a same-position child expression are disambiguated). `currentNode`, `location(node?)`
+  (0-based line/char via the stored `sourceFile`), `atStatementBoundary()`, `atBreakpoint()`.
+
+### Open after S3
+- `for await...of`, async generators (`async function*`), top-level await → still `throw`/unsupported.
+- Object-literal method/accessor shorthand; `static {}` blocks; exotic host-`extends`; recursive `var`
+  hoisting (all carried from S2).
+- **Next: S4** — snapshot/fork (`clone()` of frames+values+scope graph, sharing host objects/shims by
+  side-table). Fibers are already plain-data contexts, which sets this up.
+
+---
+
 ## S2 (part 2) — Classes ✅ (2026-09-04)
 
 **Status: green.** `npm test` → 132/132 (127 differential + 5 VM/stepping). Typecheck clean.

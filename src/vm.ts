@@ -61,6 +61,12 @@ export class VM {
 	finished = false;
 	/** monotonic count of `step()` calls — a free step budget (ASSIGNMENT §3). */
 	steps = 0;
+	/** set by a `yield`/`await` handler to suspend the current fiber (generator/async). */
+	paused = false;
+	/** the value carried out of a suspension point: the yielded value, or the awaited operand. */
+	pauseValue: unknown = undefined;
+	/** the value fed back in on resume (the `.next(v)` argument / the resolved awaited value). */
+	sentValue: unknown = undefined;
 
 	constructor(options: VMOptions = {}) {
 		this.rootScope = new Scope(undefined, true);
@@ -70,8 +76,14 @@ export class VM {
 		this.rootScope.realGlobals = options.realGlobals ?? true;
 	}
 
+	/** The loaded program, kept for source-position lookups (breakpoints, `location`). */
+	sourceFile: ts.SourceFile | undefined;
+	/** Breakpoints, as node start positions (see `addBreakpoint` / `addBreakpointsByLine`). */
+	readonly breakpoints = new Set<number>();
+
 	/** Seat a parsed SourceFile as the initial frame. */
 	load(sourceFile: ts.SourceFile): void {
+		this.sourceFile = sourceFile;
 		this.pushNode(sourceFile, this.rootScope);
 	}
 
@@ -265,13 +277,94 @@ export class VM {
 
 	/** Step until control reaches the next statement boundary (or the machine finishes). */
 	stepStatement(): void {
-		const isStmtBoundary = (vm: VM): boolean => {
-			const f = vm.top;
-			return f !== undefined && f.kind === undefined && f.phase === 0 && f.node !== null && isStatement(f.node);
-		};
 		// Advance at least one step, then run until the *next* fresh statement frame.
 		this.step();
-		this.runUntil(isStmtBoundary);
+		this.runUntil((vm) => vm.atStatementBoundary());
+	}
+
+	/** True when the top frame is about to begin evaluating a statement node (fresh, phase 0). */
+	atStatementBoundary(): boolean {
+		const f = this.top;
+		return f !== undefined && f.kind === undefined && f.phase === 0 && f.node !== null && isStatement(f.node);
+	}
+
+	/** The node the top frame is about to work on (or is working on), for inspection/UI. */
+	get currentNode(): ts.Node | null {
+		return this.top?.node ?? null;
+	}
+
+	/** The 0-based line/character (and raw position) of a node, for debugger UIs. */
+	location(node: ts.Node | null = this.currentNode): { line: number; character: number; pos: number } | null {
+		if (node == null || this.sourceFile == null) return null;
+		const pos = node.getStart(this.sourceFile);
+		const { line, character } = this.sourceFile.getLineAndCharacterOfPosition(pos);
+		return { line, character, pos };
+	}
+
+	/** Add a breakpoint at a node's start position. */
+	addBreakpoint(pos: number): void {
+		this.breakpoints.add(pos);
+	}
+
+	/** Add breakpoints by 1-based source line: breaks at the first statement starting on each line. */
+	addBreakpointsByLine(...lines: number[]): void {
+		if (this.sourceFile == null) return;
+		const wanted = new Set(lines);
+		const visit = (node: ts.Node): void => {
+			if (isStatement(node)) {
+				const line = this.sourceFile!.getLineAndCharacterOfPosition(node.getStart(this.sourceFile!)).line + 1;
+				if (wanted.has(line)) this.breakpoints.add(node.getStart(this.sourceFile!));
+			}
+			node.forEachChild(visit);
+		};
+		this.sourceFile.forEachChild(visit);
+	}
+
+	/** True when the top frame is a fresh statement sitting on a breakpoint. */
+	atBreakpoint(): boolean {
+		const f = this.top;
+		if (f === undefined || f.kind !== undefined || f.phase !== 0 || f.node === null || this.sourceFile === undefined) return false;
+		// Statement-level only: a statement and a child expression can share a start position.
+		return isStatement(f.node) && this.breakpoints.has(f.node.getStart(this.sourceFile));
+	}
+
+	/** Run until the next breakpoint (or completion). Advances at least one step. */
+	runToBreakpoint(): void {
+		this.step();
+		this.runUntil((vm) => vm.atBreakpoint());
+	}
+
+	// --- execution contexts (nested sub-runs & fibers) ------------------------
+
+	private saveContext(): ExecContext {
+		return { frames: this.frames, values: this.values, signal: this.signal, finished: this.finished, paused: this.paused, pauseValue: this.pauseValue, sentValue: this.sentValue };
+	}
+
+	private restoreContext(ctx: ExecContext): void {
+		this.frames = ctx.frames;
+		this.values = ctx.values;
+		this.signal = ctx.signal;
+		this.finished = ctx.finished;
+		this.paused = ctx.paused;
+		this.pauseValue = ctx.pauseValue;
+		this.sentValue = ctx.sentValue;
+	}
+
+	/** Run a fresh private context seeded by `seed`, to completion, and return the top value. */
+	private runSub(seed: () => void): unknown {
+		const ctx = this.saveContext();
+		this.frames = [];
+		this.values = [];
+		this.signal = null;
+		this.finished = false;
+		this.paused = false;
+		seed();
+		try {
+			while (!this.finished) this.step();
+			return this.values.pop();
+		} finally {
+			this.restoreContext(ctx);
+		}
 	}
 
 	/**
@@ -280,21 +373,9 @@ export class VM {
 	 * while guest→guest calls stay on the explicit stack. (ASSIGNMENT §3, "Calls".)
 	 */
 	callGuestFromHost(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): unknown {
-		const saved = { frames: this.frames, values: this.values, signal: this.signal, finished: this.finished };
-		this.frames = [];
-		this.values = [];
-		this.signal = null;
-		this.finished = false;
-		this.pushCall(meta, args, thisArg);
-		try {
-			while (!this.finished) this.step();
-			return this.values.pop();
-		} finally {
-			this.frames = saved.frames;
-			this.values = saved.values;
-			this.signal = saved.signal;
-			this.finished = saved.finished;
-		}
+		if (meta.isGenerator) return this.createGenerator(meta, thisArg, args);
+		if (meta.isAsync) return this.callAsync(meta, thisArg, args);
+		return this.runSub(() => this.pushCall(meta, args, thisArg));
 	}
 
 	/**
@@ -304,21 +385,7 @@ export class VM {
 	 * calls it makes still run on the explicit (sub-)stack; only the entry uses the host stack.
 	 */
 	evalNodeSync(node: ts.Node, scope: Scope): unknown {
-		const saved = { frames: this.frames, values: this.values, signal: this.signal, finished: this.finished };
-		this.frames = [];
-		this.values = [];
-		this.signal = null;
-		this.finished = false;
-		this.pushNode(node, scope);
-		try {
-			while (!this.finished) this.step();
-			return this.values.pop();
-		} finally {
-			this.frames = saved.frames;
-			this.values = saved.values;
-			this.signal = saved.signal;
-			this.finished = saved.finished;
-		}
+		return this.runSub(() => this.pushNode(node, scope));
 	}
 
 	/**
@@ -327,21 +394,109 @@ export class VM {
 	 * directly (steppable). The `frame.kind === "construct"` handler lives in handlers.ts.
 	 */
 	constructGuestSync(ctor: unknown, args: unknown[]): unknown {
-		const saved = { frames: this.frames, values: this.values, signal: this.signal, finished: this.finished };
+		return this.runSub(() => this.frames.push({ kind: "construct", node: null, phase: 0, scope: this.rootScope, valuesBase: 0, ctor, args, isNew: true, newTarget: ctor }));
+	}
+
+	// --- fibers: generators & async (machine suspension, ASSIGNMENT §3) -------
+
+	/** Build a suspended execution context (a "fiber") seeded with a call frame, without running it. */
+	private seedFiber(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): Fiber {
+		const ctx = this.saveContext();
 		this.frames = [];
 		this.values = [];
 		this.signal = null;
 		this.finished = false;
-		this.frames.push({ kind: "construct", node: null, phase: 0, scope: this.rootScope, valuesBase: 0, ctor, args, isNew: true, newTarget: ctor });
-		try {
-			while (!this.finished) this.step();
-			return this.values.pop();
-		} finally {
-			this.frames = saved.frames;
-			this.values = saved.values;
-			this.signal = saved.signal;
-			this.finished = saved.finished;
+		this.paused = false;
+		this.pushCall(meta, args, thisArg);
+		const fiber: Fiber = { frames: this.frames, values: this.values, signal: this.signal, done: false, started: false };
+		this.restoreContext(ctx);
+		return fiber;
+	}
+
+	/**
+	 * Run a fiber until it next suspends (`yield`/`await`) or completes. `input` is fed to the
+	 * suspension point on resume: `next` supplies the value the `yield`/`await` produces; `return`/
+	 * `throw` inject that signal at the suspension point. Returns `{ paused, value }` — `value` is the
+	 * pause payload when paused, or the fiber's completion value when done.
+	 */
+	private stepFiber(fiber: Fiber, input: FiberInput): { paused: boolean; value: unknown } {
+		const ctx = this.saveContext();
+		this.frames = fiber.frames;
+		this.values = fiber.values;
+		this.signal = fiber.signal;
+		this.finished = false;
+		this.paused = false;
+		this.sentValue = undefined;
+
+		if (fiber.started) {
+			if (input.kind === "next") this.sentValue = input.value;
+			else this.signal = { type: input.kind, value: input.value };
 		}
+		fiber.started = true;
+
+		try {
+			while (!this.finished && !this.paused) this.step();
+			if (this.paused) return { paused: true, value: this.pauseValue };
+			return { paused: false, value: this.values.pop() };
+		} finally {
+			fiber.frames = this.frames;
+			fiber.values = this.values;
+			fiber.signal = this.signal;
+			this.restoreContext(ctx);
+		}
+	}
+
+	/** Create a guest generator object (lazy: the body runs on `.next()`). */
+	createGenerator(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): Iterator<unknown> & Iterable<unknown> {
+		const fiber = this.seedFiber(meta, thisArg, args);
+		const vm = this;
+		const resume = (input: FiberInput): IteratorResult<unknown> => {
+			if (fiber.done) {
+				if (input.kind === "throw") throw input.value;
+				return { value: input.kind === "return" ? input.value : undefined, done: true };
+			}
+			const { paused, value } = vm.stepFiber(fiber, input);
+			if (paused) return { value, done: false };
+			fiber.done = true;
+			return { value, done: true };
+		};
+		const gen: Iterator<unknown> & Iterable<unknown> = {
+			next: (v?: unknown) => resume({ kind: "next", value: v }),
+			return: (v?: unknown) => resume({ kind: "return", value: v }),
+			throw: (e?: unknown) => resume({ kind: "throw", value: e }),
+			[Symbol.iterator]() {
+				return this;
+			},
+		};
+		return gen;
+	}
+
+	/** Invoke a guest async function: returns a real Promise, driven by `await` suspensions. */
+	callAsync(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): Promise<unknown> {
+		const fiber = this.seedFiber(meta, thisArg, args);
+		return new Promise((resolve, reject) => {
+			const drive = (input: FiberInput): void => {
+				let result: { paused: boolean; value: unknown };
+				try {
+					result = this.stepFiber(fiber, input);
+				} catch (error) {
+					fiber.done = true;
+					reject(error);
+					return;
+				}
+				if (!result.paused) {
+					fiber.done = true;
+					resolve(result.value);
+					return;
+				}
+				// Suspended on `await result.value`; resume when it settles.
+				Promise.resolve(result.value).then(
+					(v) => drive({ kind: "next", value: v }),
+					(e) => drive({ kind: "throw", value: e }),
+				);
+			};
+			drive({ kind: "next", value: undefined });
+		});
 	}
 
 	/** Push a synthetic call frame for a guest function. */
@@ -364,3 +519,26 @@ export class VM {
 function isStatement(node: ts.Node): boolean {
 	return node.kind >= ts.SyntaxKind.FirstStatement && node.kind <= ts.SyntaxKind.LastStatement;
 }
+
+/** A full snapshot of the machine's mutable execution state, for nested sub-runs and fibers. */
+interface ExecContext {
+	frames: Frame[];
+	values: unknown[];
+	signal: Signal | null;
+	finished: boolean;
+	paused: boolean;
+	pauseValue: unknown;
+	sentValue: unknown;
+}
+
+/** A suspendable execution context — the backing store for a generator or async function. */
+interface Fiber {
+	frames: Frame[];
+	values: unknown[];
+	signal: Signal | null;
+	done: boolean;
+	started: boolean;
+}
+
+/** How a fiber is resumed: with a value, or by injecting a return/throw at the suspension point. */
+type FiberInput = { kind: "next"; value: unknown } | { kind: "return"; value: unknown } | { kind: "throw"; value: unknown };

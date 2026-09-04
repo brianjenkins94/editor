@@ -52,11 +52,14 @@ function hoist(vm: VM, scope: Scope, statements: readonly ts.Statement[]): void 
 // ============================================================================
 
 export function createGuestFunction(vm: VM, node: GuestFunctionNode, closure: Scope, homeObject?: object): GuestFunction {
+	const modifierFlags = ts.getCombinedModifierFlags(node as ts.Declaration);
 	const meta: GuestFunctionMeta = {
 		node,
 		closure,
 		name: node.name != null && ts.isIdentifier(node.name) ? node.name.text : "",
 		isArrow: node.kind === K.ArrowFunction,
+		isGenerator: (node as ts.FunctionLikeDeclaration).asteriskToken != null,
+		isAsync: (modifierFlags & ts.ModifierFlags.Async) !== 0,
 		homeObject,
 	};
 	const fn = function (this: unknown, ...args: unknown[]): unknown {
@@ -812,6 +815,84 @@ on(K.VoidExpression, (vm, frame) => {
 });
 
 // ============================================================================
+// Suspension: yield / await (machine suspension, ASSIGNMENT §3)
+// ============================================================================
+//
+// `yield` and `await` suspend the current fiber by setting `vm.paused` and stashing the pause payload
+// in `vm.pauseValue`. The fiber driver (VM.createGenerator / VM.callAsync) stops, hands control out,
+// and on resume feeds a value back via `vm.sentValue` (or injects a return/throw signal). Left as a
+// frame at phase 2, the suspension point resumes exactly where it left off.
+
+on(K.YieldExpression, (vm, frame) => {
+	const node = frame.node as ts.YieldExpression;
+	if (node.asteriskToken) return yieldStar(vm, frame, node);
+	if (frame.phase === 0) {
+		if (node.expression) {
+			vm.pushNode(node.expression, frame.scope);
+			frame.phase = 1;
+		} else {
+			vm.pauseValue = undefined;
+			vm.paused = true;
+			frame.phase = 2;
+		}
+	} else if (frame.phase === 1) {
+		vm.pauseValue = vm.pop();
+		vm.paused = true;
+		frame.phase = 2;
+	} else {
+		vm.frames.pop();
+		vm.push(vm.sentValue);
+		vm.sentValue = undefined;
+	}
+});
+
+// `yield* iterable`: drive the inner iterator, re-yielding each value; the `yield*` expression's own
+// value is the inner iterator's completion (`return`) value.
+function yieldStar(vm: VM, frame: Frame, node: ts.YieldExpression): void {
+	if (frame.phase === 0) {
+		vm.pushNode(node.expression as ts.Expression, frame.scope);
+		frame.phase = 1;
+	} else if (frame.phase === 1) {
+		frame.iterator = (vm.pop() as Iterable<unknown>)[Symbol.iterator]();
+		frame.sent = undefined;
+		frame.phase = 2;
+	} else if (frame.phase === 2) {
+		const result = (frame.iterator as Iterator<unknown>).next(frame.sent);
+		if (result.done) {
+			frame.result = result.value;
+			frame.phase = 4;
+			return;
+		}
+		vm.pauseValue = result.value;
+		vm.paused = true;
+		frame.phase = 3;
+	} else if (frame.phase === 3) {
+		frame.sent = vm.sentValue;
+		vm.sentValue = undefined;
+		frame.phase = 2;
+	} else {
+		vm.frames.pop();
+		vm.push(frame.result);
+	}
+}
+
+on(K.AwaitExpression, (vm, frame) => {
+	const node = frame.node as ts.AwaitExpression;
+	if (frame.phase === 0) {
+		vm.pushNode(node.expression, frame.scope);
+		frame.phase = 1;
+	} else if (frame.phase === 1) {
+		vm.pauseValue = vm.pop();
+		vm.paused = true;
+		frame.phase = 2;
+	} else {
+		vm.frames.pop();
+		vm.push(vm.sentValue);
+		vm.sentValue = undefined;
+	}
+});
+
+// ============================================================================
 // Binary & conditional
 // ============================================================================
 
@@ -1131,7 +1212,18 @@ on(K.CallExpression, (vm, frame) => {
 		const calleeVal = vm.pop();
 
 		if (isGuestFunction(calleeVal)) {
-			vm.pushCall(calleeVal.__tsval, args, frame.thisArg);
+			const meta = calleeVal.__tsval;
+			// Generator / async calls produce a generator object / Promise instead of running the body
+			// on the main stack (they run as suspendable fibers).
+			if (meta.isGenerator) {
+				vm.frames.pop();
+				return vm.push(vm.createGenerator(meta, frame.thisArg, args));
+			}
+			if (meta.isAsync) {
+				vm.frames.pop();
+				return vm.push(vm.callAsync(meta, frame.thisArg, args));
+			}
+			vm.pushCall(meta, args, frame.thisArg);
 			frame.phase = 4; // resume after the call returns its value
 			return;
 		}

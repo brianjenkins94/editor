@@ -55,6 +55,30 @@ export function runTsval(code: string): RunResult {
 	}
 }
 
+/** Await a (possibly-thenable) run result, folding a rejection into `threw`. */
+async function settle(run: RunResult): Promise<RunResult> {
+	if (run.threw) return run;
+	try {
+		return { ...run, value: await run.value };
+	} catch (error) {
+		return { value: undefined, logs: run.logs, threw: true, error };
+	}
+}
+
+/**
+ * Async variant: for programs whose completion value is a Promise (async IIFEs). Awaits both sides —
+ * their `console` output accumulates during the awaited microtasks — then compares.
+ */
+export async function assertDifferentialAsync(code: string): Promise<void> {
+	const oracle = await settle(runNode(code));
+	const actual = await settle(runTsval(code));
+
+	assert.strictEqual(actual.threw, oracle.threw, `throw mismatch for:\n${code}` + (oracle.threw ? `\n  node error: ${(oracle.error as Error)?.message}` : "") + (actual.threw ? `\n  tsval error: ${(actual.error as Error)?.message}` : ""));
+	if (oracle.threw) return;
+	assert.deepStrictEqual(actual.value, oracle.value, `resolved value mismatch for:\n${code}`);
+	assert.deepStrictEqual(actual.logs, oracle.logs, `console output mismatch for:\n${code}`);
+}
+
 /** Assert that tsval and Node agree on all observable effects for `code`. */
 export function assertDifferential(code: string): void {
 	const oracle = runNode(code);
