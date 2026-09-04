@@ -17,11 +17,11 @@
  * runtime) — reported in `observed`.
  */
 
-import { UNCATCHABLE } from "./errors.ts";
+import { UNCATCHABLE, isUncatchable } from "./errors.ts";
 import { createVM, createTypedVM } from "./interpret.ts";
 import type { InterpretOptions } from "./interpret.ts";
 import { typeOfNode } from "./program.ts";
-import type { VM } from "./vm.ts";
+import type { HostGuard, VM } from "./vm.ts";
 
 /** One capability the guest reached at runtime, shaped like silo's `Reach`. */
 export interface CanaryEvent {
@@ -57,6 +57,9 @@ export interface CanaryReport {
 	error?: unknown;
 	/** reaches whose resource argument had a sensitive static type (type-directed, S6). */
 	sensitiveFlows: CanaryEvent[];
+	/** async work (fibers / timers) still outstanding when the report was produced. Non-zero from the
+	 *  synchronous `runCanary` is itself a failure (`ok: false`) — use `runCanaryAsync`. */
+	pendingAsync: number;
 }
 
 export interface CanaryOptions {
@@ -103,6 +106,8 @@ export function covers(predicted: Iterable<string>, capability: string): boolean
 /** Collects reaches, annotates them (types), and trips the tripwire on any unpredicted capability. */
 class Recorder {
 	readonly events: CanaryEvent[] = [];
+	/** set the moment a divergence fires — wherever it fires (sync run, fiber, timer). */
+	divergence: CanaryEvent | undefined;
 	private readonly predicted: Set<string>;
 	private readonly annotate: (event: CanaryEvent) => void;
 	constructor(predicted: Set<string>, annotate: (event: CanaryEvent) => void) {
@@ -113,7 +118,62 @@ class Recorder {
 	record(event: CanaryEvent): void {
 		this.annotate(event);
 		this.events.push(event);
-		if (!covers(this.predicted, event.capability)) throw new CanaryDivergenceError(event);
+		if (!covers(this.predicted, event.capability)) {
+			this.divergence ??= event;
+			throw new CanaryDivergenceError(event);
+		}
+	}
+}
+
+/** Outstanding async work started by the guest: async fibers and timer/microtask callbacks. */
+class PendingWork {
+	private readonly fibers = new Set<Promise<unknown>>();
+	private timers = 0;
+	private settleWaiters: (() => void)[] = [];
+
+	get count(): number {
+		return this.fibers.size + this.timers;
+	}
+
+	trackFiber(promise: Promise<unknown>): void {
+		this.fibers.add(promise);
+		// Observe settlement without turning a divergence into an unhandled rejection: it's already
+		// recorded in the Recorder; the async runner reads it from there.
+		promise.then(
+			() => this.done(promise),
+			() => this.done(promise),
+		);
+	}
+
+	timerStarted(): void {
+		this.timers++;
+	}
+
+	timerFinished(): void {
+		this.timers--;
+		this.notify();
+	}
+
+	private done(promise: Promise<unknown>): void {
+		this.fibers.delete(promise);
+		this.notify();
+	}
+
+	private notify(): void {
+		const waiters = this.settleWaiters;
+		this.settleWaiters = [];
+		for (const w of waiters) w();
+	}
+
+	/** Resolve once no work is outstanding (or `maxMs` elapses — e.g. a never-cleared interval). */
+	async drain(maxMs: number): Promise<void> {
+		const deadline = Date.now() + maxMs;
+		while (this.count > 0 && Date.now() < deadline) {
+			await new Promise<void>((resolve) => {
+				this.settleWaiters.push(resolve);
+				setTimeout(resolve, Math.min(20, Math.max(1, deadline - Date.now())));
+			});
+		}
 	}
 }
 
@@ -142,9 +202,29 @@ function httpVerbSafe(method: unknown): boolean {
 	return m === "GET" || m === "HEAD" || m === "OPTIONS";
 }
 
-/** Build the shimmed capability environment (globals + module resolver) bound to a recorder. */
-function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): { globals: Record<string, unknown>; resolveModule: (s: string) => unknown } {
+// The real code-from-string constructors. Every real intrinsic leaks them (`[].constructor.constructor`
+// is `Function`), so the sanitized environment must catch them at the host boundary, not by name.
+const REAL_EVAL = globalThis.eval;
+const CODE_CONSTRUCTORS = new Set<unknown>([
+	Function,
+	Object.getPrototypeOf(async function () {}).constructor,
+	Object.getPrototypeOf(function* () {}).constructor,
+	Object.getPrototypeOf(async function* () {}).constructor,
+]);
+const { call: FN_CALL, apply: FN_APPLY, bind: FN_BIND } = Function.prototype;
+const { then: PROMISE_THEN, catch: PROMISE_CATCH, finally: PROMISE_FINALLY } = Promise.prototype;
+
+interface Environment {
+	globals: Record<string, unknown>;
+	resolveModule: (s: string) => unknown;
+	hostGuard: HostGuard;
+	pending: PendingWork;
+}
+
+/** Build the shimmed capability environment (globals + module resolver + host guard) bound to a recorder. */
+function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Environment {
 	const stubResponse = () => ({ ok: true, status: 200, statusText: "OK", headers: {}, text: async () => "", json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) });
+	const pending = new PendingWork();
 
 	// --- net ---
 	const fetchShim = (input: unknown, init?: { method?: string }) => {
@@ -214,9 +294,118 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): { gl
 		recorder.record({ capability: "eval", value: String(args[args.length - 1] ?? ""), callee: "Function", safe: false });
 		return () => undefined;
 	};
+	const isCodeConstructor = (v: unknown): boolean => CODE_CONSTRUCTORS.has(v) || v === REAL_EVAL;
+	const shimFor = (v: unknown): unknown => (v === REAL_EVAL ? evalShim : FunctionShim);
+
+	// Promise reactions run from host land as microtasks. Wrap the callbacks so (a) a divergence inside
+	// one is swallowed — it's already recorded, and letting it reject the derived promise would only
+	// surface as an unhandled rejection — and (b) the reaction counts as pending work until the source
+	// promise settles, so `runCanaryAsync` waits for it.
+	const wrapReaction = (method: (...a: unknown[]) => unknown) =>
+		function (this: Promise<unknown>, ...callbacks: unknown[]): unknown {
+			let open = true;
+			pending.timerStarted();
+			const finish = (): void => {
+				if (!open) return;
+				open = false;
+				pending.timerFinished();
+			};
+			PROMISE_THEN.call(this, finish, finish); // settle-based, whichever reaction path runs
+			const wrapped = callbacks.map((cb) =>
+				typeof cb !== "function"
+					? cb
+					: (...a: unknown[]) => {
+							try {
+								return (cb as (...x: unknown[]) => unknown)(...a);
+							} catch (error) {
+								if (error instanceof CanaryDivergenceError) return undefined;
+								throw error;
+							}
+						},
+			);
+			return method.apply(this, wrapped);
+		};
+	const guardedReactions = new Map<unknown, (...a: unknown[]) => unknown>([
+		[PROMISE_THEN, wrapReaction(PROMISE_THEN as (...a: unknown[]) => unknown)],
+		[PROMISE_CATCH, wrapReaction(PROMISE_CATCH as (...a: unknown[]) => unknown)],
+		[PROMISE_FINALLY, wrapReaction(PROMISE_FINALLY as (...a: unknown[]) => unknown)],
+	]);
+
+	// --- the host guard: keeps the sandbox closed at the interpreter's host boundary ---
+	const hostGuard: HostGuard = {
+		// Any read/return that yields a real code-from-string constructor becomes the shim.
+		sanitize: (value) => (isCodeConstructor(value) ? shimFor(value) : value),
+		// Vet callables at invocation, including `Function.prototype.call/apply/bind` aimed at one.
+		beforeCall: (callee, thisArg) => {
+			if (isCodeConstructor(callee)) return shimFor(callee) as (...a: unknown[]) => unknown;
+			if ((callee === FN_CALL || callee === FN_APPLY || callee === FN_BIND) && isCodeConstructor(thisArg)) {
+				const shim = shimFor(thisArg) as (...a: unknown[]) => unknown;
+				if (callee === FN_BIND) return () => shim;
+				return (...a: unknown[]) => (callee === FN_APPLY ? shim(...((a[1] as unknown[]) ?? [])) : shim(...a.slice(1)));
+			}
+			return guardedReactions.get(callee) ?? callee;
+		},
+	};
+
+	// `Reflect.apply/construct` invoke from host land, bypassing the interpreter's call boundary: wrap.
+	// (Reflect's methods are non-enumerable, so copy by name rather than spread.)
+	const guardedReflect = Object.fromEntries(Object.getOwnPropertyNames(Reflect).map((name) => [name, (Reflect as unknown as Record<string, unknown>)[name]])) as Record<string, unknown>;
+	guardedReflect.apply = (target: unknown, thisArg: unknown, args: ArrayLike<unknown>) => Reflect.apply(hostGuard.beforeCall!(target as (...a: unknown[]) => unknown, thisArg, false), thisArg, Array.from(args));
+	guardedReflect.construct = (target: unknown, args: ArrayLike<unknown>, newTarget?: unknown) => {
+		const vetted = hostGuard.beforeCall!(target as (...a: unknown[]) => unknown, undefined, true) as unknown as new (...a: unknown[]) => unknown;
+		return Reflect.construct(vetted, Array.from(args), (newTarget ?? vetted) as new (...a: unknown[]) => unknown);
+	};
+
+	// Timers: a string callback is `eval`; a function callback is tracked as pending async work, and a
+	// divergence inside it is recorded (already in the Recorder) rather than escaping as uncaught.
+	const runLater = (cb: unknown, args: unknown[], name: string): (() => void) | undefined => {
+		if (typeof cb !== "function") {
+			recorder.record({ capability: "eval", value: String(cb), callee: name, safe: false });
+			return undefined;
+		}
+		pending.timerStarted();
+		return () => {
+			try {
+				(cb as (...a: unknown[]) => unknown)(...args);
+			} catch (error) {
+				if (!isUncatchable(error)) throw error;
+				if (!(error instanceof CanaryDivergenceError)) throw error; // an interpreter bug stays loud
+			} finally {
+				pending.timerFinished();
+			}
+		};
+	};
+	const setTimeoutShim = (cb: unknown, ms?: number, ...args: unknown[]) => {
+		const task = runLater(cb, args, "setTimeout");
+		return task === undefined ? 0 : setTimeout(task, ms);
+	};
+	const setIntervalShim = (cb: unknown, ms?: number, ...args: unknown[]) => {
+		if (typeof cb !== "function") return void runLater(cb, args, "setInterval");
+		pending.timerStarted();
+		return setInterval(() => {
+			try {
+				(cb as (...a: unknown[]) => unknown)(...args);
+			} catch (error) {
+				if (!(error instanceof CanaryDivergenceError)) throw error;
+			}
+		}, ms);
+	};
+	const clearIntervalShim = (id: ReturnType<typeof setInterval>) => {
+		clearInterval(id);
+		pending.timerFinished();
+	};
+	const queueMicrotaskShim = (cb: unknown) => {
+		const task = runLater(cb, [], "queueMicrotask");
+		if (task !== undefined) queueMicrotask(task);
+	};
 
 	const globals: Record<string, unknown> = {
 		...safeGlobals(),
+		Reflect: guardedReflect,
+		setTimeout: setTimeoutShim,
+		setInterval: setIntervalShim,
+		clearInterval: clearIntervalShim,
+		queueMicrotask: queueMicrotaskShim,
 		fetch: fetchShim,
 		WebSocket: WebSocketShim,
 		process: processShim,
@@ -250,14 +439,17 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): { gl
 	globals.require = (spec: string) => builtinModules[spec];
 
 	const resolveModule = (spec: string): unknown => builtinModules[spec] ?? (options.modules ?? {})[spec];
-	return { globals, resolveModule };
+	return { globals, resolveModule, hostGuard, pending };
 }
 
-/**
- * Run `code` under the canary. Returns a report; when runtime reaches a capability outside `predicted`
- * it hard-aborts (`aborted: true`, `divergence` set) — route that to review.
- */
-export function runCanary(code: string, options: CanaryOptions): CanaryReport {
+interface CanaryRun {
+	recorder: Recorder;
+	pending: PendingWork;
+	report: CanaryReport;
+}
+
+/** Shared by the sync and async runners: build the environment, run the synchronous part. */
+function startCanary(code: string, options: CanaryOptions): CanaryRun {
 	const predicted = new Set(options.predicted);
 	const useTypes = options.useTypes === true || (options.sensitiveTypes?.length ?? 0) > 0;
 	const sensitive = new Set(options.sensitiveTypes ?? []);
@@ -268,32 +460,75 @@ export function runCanary(code: string, options: CanaryOptions): CanaryReport {
 		const site = context.vm?.callSite;
 		const checker = context.vm?.typeChecker;
 		if (site === undefined || checker === undefined) return;
-		const valueType = typeOfNode(checker, site.arguments[0]);
+		const valueType = typeOfNode(checker, site.arguments?.[0]);
 		if (valueType === undefined) return;
 		event.valueType = valueType;
 		if ([...sensitive].some((name) => valueType === name || valueType.includes(name))) event.sensitive = true;
 	};
 
 	const recorder = new Recorder(predicted, annotate);
-	const { globals, resolveModule } = capabilityEnvironment(recorder, options);
-	const vmOptions: InterpretOptions = { globals, resolveModule, realGlobals: false, fileName: options.fileName };
-	const report: CanaryReport = { ok: true, aborted: false, predicted: [...predicted].sort(), observed: recorder.events, observedCaps: [], sensitiveFlows: [] };
+	const { globals, resolveModule, hostGuard, pending } = capabilityEnvironment(recorder, options);
+	const vmOptions: InterpretOptions = { globals, resolveModule, hostGuard, realGlobals: false, fileName: options.fileName, onAsyncFiber: (p) => pending.trackFiber(p) };
+	const report: CanaryReport = { ok: true, aborted: false, predicted: [...predicted].sort(), observed: recorder.events, observedCaps: [], sensitiveFlows: [], pendingAsync: 0 };
 
 	try {
 		const vm = useTypes ? createTypedVM(code, vmOptions) : createVM(code, vmOptions);
 		context.vm = vm;
 		report.completion = vm.run();
 	} catch (error) {
-		if (error instanceof CanaryDivergenceError) {
-			report.ok = false;
-			report.aborted = true;
-			report.divergence = error.event;
-		} else {
-			report.error = error; // a normal guest error that escaped — not a divergence
-		}
+		if (!(error instanceof CanaryDivergenceError)) report.error = error; // a normal guest error, or an interpreter bug
 	}
+	return { recorder, pending, report };
+}
 
+function finishReport({ recorder, pending, report }: CanaryRun): CanaryReport {
+	if (recorder.divergence !== undefined) {
+		report.ok = false;
+		report.aborted = true;
+		report.divergence = recorder.divergence;
+	}
+	report.pendingAsync = pending.count;
 	report.observedCaps = [...new Set(recorder.events.map((e) => e.capability))].sort();
 	report.sensitiveFlows = recorder.events.filter((e) => e.sensitive === true);
 	return report;
+}
+
+const isThenable = (v: unknown): v is PromiseLike<unknown> => typeof (v as { then?: unknown })?.then === "function";
+
+/**
+ * Run `code` under the canary, **synchronously**. Returns a report; when runtime reaches a capability
+ * outside `predicted` it hard-aborts (`aborted: true`, `divergence` set) — route that to review.
+ *
+ * A capability reached *after* an `await`, in a `.then`, or in a timer happens after this returns and
+ * would be invisible here — so a run that leaves async work outstanding (or completes to a Promise)
+ * is reported as a failure (`ok: false`, `pendingAsync > 0`). Use `runCanaryAsync` for such code.
+ */
+export function runCanary(code: string, options: CanaryOptions): CanaryReport {
+	const run = startCanary(code, options);
+	const report = finishReport(run);
+	// Only *tracked guest work* counts (fibers, timers, promise reactions). A host promise as the
+	// completion value (e.g. a bare `fetch(url)`) carries no pending guest code.
+	if (report.pendingAsync > 0) {
+		report.ok = false;
+		report.error ??= new Error(`canary: ${report.pendingAsync} async task(s) outstanding — reaches after an await/timer would be lost; use runCanaryAsync`);
+	}
+	return report;
+}
+
+/**
+ * Async-aware canary: awaits the program's completion (if it's a Promise), then drains every async
+ * fiber and timer the guest started, so a reach that happens after an `await`, in a `.then`, or in a
+ * timer callback is observed and can trip the tripwire. `maxDrainMs` bounds a never-cleared interval.
+ */
+export async function runCanaryAsync(code: string, options: CanaryOptions & { maxDrainMs?: number }): Promise<CanaryReport> {
+	const run = startCanary(code, options);
+	if (isThenable(run.report.completion)) {
+		try {
+			run.report.completion = await run.report.completion;
+		} catch (error) {
+			if (!(error instanceof CanaryDivergenceError)) run.report.error = error;
+		}
+	}
+	await run.pending.drain(options.maxDrainMs ?? 2000);
+	return finishReport(run);
 }

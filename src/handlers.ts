@@ -39,16 +39,37 @@ function hoist(vm: VM, scope: Scope, statements: readonly ts.Statement[]): void 
 			const flags = statement.declarationList.flags;
 			const isLet = (flags & ts.NodeFlags.Let) !== 0;
 			const isConst = (flags & ts.NodeFlags.Const) !== 0;
-			for (const decl of statement.declarationList.declarations) {
-				if (ts.isIdentifier(decl.name)) {
-					if (isConst) scope.declareLexical(decl.name.text, "const");
-					else if (isLet) scope.declareLexical(decl.name.text, "let");
-					else scope.declareVar(decl.name.text);
+			if (isLet || isConst) {
+				for (const decl of statement.declarationList.declarations) {
+					for (const name of bindingNames(decl.name)) scope.declareLexical(name, isConst ? "const" : "let");
 				}
-				// destructuring binding names: S2
 			}
 		}
 	}
+	// `var` is function-scoped no matter how deeply nested in blocks/loops/try/switch: collect
+	// recursively (not into nested functions/classes, which are their own var scope). Idempotent, so
+	// re-running at each block entry is harmless.
+	for (const name of collectVarNames(statements)) scope.declareVar(name);
+}
+
+/** All identifiers bound by a (possibly destructuring) binding name. */
+function bindingNames(name: ts.BindingName, out: string[] = []): string[] {
+	if (ts.isIdentifier(name)) out.push(name.text);
+	else for (const element of name.elements) if (!ts.isOmittedExpression(element)) bindingNames(element.name, out);
+	return out;
+}
+
+/** Names of every `var` declared anywhere in `statements`, excluding nested function/class bodies. */
+function collectVarNames(statements: readonly ts.Node[], out: string[] = []): string[] {
+	const visit = (node: ts.Node): void => {
+		if (ts.isFunctionLike(node) || ts.isClassLike(node)) return; // own var scope
+		if (ts.isVariableDeclarationList(node) && (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0) {
+			for (const decl of node.declarations) bindingNames(decl.name, out);
+		}
+		ts.forEachChild(node, visit);
+	};
+	for (const statement of statements) visit(statement);
+	return out;
 }
 
 // ============================================================================
@@ -247,14 +268,14 @@ function bindImport(vm: VM, scope: Scope, node: ts.ImportDeclaration): void {
 		scope.declareLexical(name, "const");
 		scope.initialize(name, value);
 	};
-	if (clause.name) bind(clause.name.text, (ns as { default?: unknown }).default ?? ns); // default import
+	if (clause.name) bind(clause.name.text, vm.fromHost((ns as { default?: unknown }).default ?? ns)); // default import
 	const bindings = clause.namedBindings;
 	if (bindings && ts.isNamespaceImport(bindings)) {
 		bind(bindings.name.text, ns);
 	} else if (bindings && ts.isNamedImports(bindings)) {
 		for (const element of bindings.elements) {
 			if (element.isTypeOnly) continue;
-			bind(element.name.text, ns[(element.propertyName ?? element.name).text]);
+			bind(element.name.text, vm.fromHost(ns[(element.propertyName ?? element.name).text]));
 		}
 	}
 }
@@ -399,7 +420,7 @@ on(K.ForOfStatement, (vm, frame) => {
 	} else if (frame.phase === 2) {
 		const result = (frame.iterator as Iterator<unknown>).next();
 		if (result.done) return void vm.frames.pop();
-		bindForTarget(vm, frame, node.initializer, result.value);
+		bindForTarget(vm, frame, node.initializer, vm.fromHost(result.value));
 		frame.phase = 3;
 	} else {
 		frame.phase = 2;
@@ -609,7 +630,8 @@ on(K.RegularExpressionLiteral, (vm, frame) => {
 on(K.Identifier, (vm, frame) => {
 	const node = frame.node as ts.Identifier;
 	vm.frames.pop();
-	vm.push(frame.scope.get(node.text));
+	// Globals are host values; guest bindings pass through the guard unchanged (identity by default).
+	vm.push(vm.fromHost(frame.scope.get(node.text)));
 });
 
 on(K.ThisKeyword, (vm, frame) => {
@@ -713,7 +735,7 @@ on(K.ObjectLiteralExpression, (vm, frame) => {
 			} else if (ts.isShorthandPropertyAssignment(prop)) {
 				obj[prop.name.text] = values[cursor++];
 			} else if (ts.isSpreadAssignment(prop)) {
-				Object.assign(obj, values[cursor++]);
+				spreadInto(vm, obj, values[cursor++]); // own enumerable props, each through the guard
 			} else if (ts.isMethodDeclaration(prop)) {
 				Object.defineProperty(obj, memberKey(vm, prop.name, frame.scope), { value: createGuestFunction(vm, prop, frame.scope, obj), writable: true, enumerable: true, configurable: true });
 			} else if (ts.isGetAccessorDeclaration(prop) || ts.isSetAccessorDeclaration(prop)) {
@@ -729,6 +751,15 @@ on(K.ObjectLiteralExpression, (vm, frame) => {
 		vm.push(obj);
 	}
 });
+
+/** `{ ...source }`: copy own enumerable props (string + symbol keys), each value through the guard. */
+function spreadInto(vm: VM, target: Record<PropertyKey, unknown>, source: unknown): void {
+	if (source == null) return;
+	const src = Object(source) as Record<PropertyKey, unknown>;
+	for (const key of Reflect.ownKeys(src)) {
+		if (Object.getOwnPropertyDescriptor(src, key)?.enumerable) target[key] = vm.fromHost(src[key]);
+	}
+}
 
 function propertyName(name: ts.PropertyName | ts.Identifier): string {
 	if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
@@ -747,7 +778,7 @@ on(K.PropertyAccessExpression, (vm, frame) => {
 		const home = frame.scope.getHomeObject();
 		const proto = home != null ? Object.getPrototypeOf(home) : undefined;
 		vm.frames.pop();
-		return void vm.push((proto as Record<string, unknown>)?.[node.name.text]);
+		return void vm.push(vm.fromHost((proto as Record<string, unknown>)?.[node.name.text]));
 	}
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);
@@ -759,7 +790,9 @@ on(K.PropertyAccessExpression, (vm, frame) => {
 			if (node.questionDotToken) return vm.push(undefined);
 			throw new TypeError(`Cannot read properties of ${obj} (reading '${node.name.text}')`);
 		}
-		vm.push((obj as Record<string, unknown>)[node.name.text]);
+		// Every property read is a host→guest crossing (e.g. `[].constructor.constructor` is the real
+		// `Function`): route it through the guard.
+		vm.push(vm.fromHost((obj as Record<string, unknown>)[node.name.text]));
 	}
 });
 
@@ -779,7 +812,7 @@ on(K.ElementAccessExpression, (vm, frame) => {
 			if (node.questionDotToken) return vm.push(undefined);
 			throw new TypeError(`Cannot read properties of ${obj} (reading '${String(index)}')`);
 		}
-		vm.push((obj as Record<PropertyKey, unknown>)[index as PropertyKey]);
+		vm.push(vm.fromHost((obj as Record<PropertyKey, unknown>)[index as PropertyKey]));
 	}
 });
 
@@ -905,7 +938,7 @@ on(K.YieldExpression, (vm, frame) => {
 		frame.phase = 2;
 	} else {
 		vm.frames.pop();
-		vm.push(vm.sentValue);
+		vm.push(vm.fromHost(vm.sentValue)); // `.next(v)` comes from the host caller
 		vm.sentValue = undefined;
 	}
 });
@@ -923,11 +956,11 @@ function yieldStar(vm: VM, frame: Frame, node: ts.YieldExpression): void {
 	} else if (frame.phase === 2) {
 		const result = (frame.iterator as Iterator<unknown>).next(frame.sent);
 		if (result.done) {
-			frame.result = result.value;
+			frame.result = vm.fromHost(result.value);
 			frame.phase = 4;
 			return;
 		}
-		vm.pauseValue = result.value;
+		vm.pauseValue = vm.fromHost(result.value);
 		vm.paused = true;
 		frame.phase = 3;
 	} else if (frame.phase === 3) {
@@ -951,7 +984,7 @@ on(K.AwaitExpression, (vm, frame) => {
 		frame.phase = 2;
 	} else {
 		vm.frames.pop();
-		vm.push(vm.sentValue);
+		vm.push(vm.fromHost(vm.sentValue)); // the resolved value of a (host) promise enters guest land
 		vm.sentValue = undefined;
 	}
 });
@@ -1097,11 +1130,11 @@ function assignPattern(vm: VM, scope: Scope, target: ts.Expression, value: unkno
 			} else if (ts.isPropertyAssignment(prop)) {
 				const key = memberKey(vm, prop.name, scope);
 				used.add(key);
-				assignPatternElement(vm, scope, prop.initializer, (value as Record<PropertyKey, unknown>)[key]);
+				assignPatternElement(vm, scope, prop.initializer, vm.fromHost((value as Record<PropertyKey, unknown>)[key]));
 			} else if (ts.isShorthandPropertyAssignment(prop)) {
 				const key = prop.name.text;
 				used.add(key);
-				let v = (value as Record<string, unknown>)[key];
+				let v = vm.fromHost((value as Record<string, unknown>)[key]);
 				if (v === undefined && prop.objectAssignmentInitializer) v = vm.evalNodeSync(prop.objectAssignmentInitializer, scope);
 				scope.set(key, v);
 			} else {
@@ -1308,15 +1341,9 @@ on(K.CallExpression, (vm, frame) => {
 			if (node.questionDotToken && calleeVal == null) return vm.push(undefined);
 			throw new TypeError(`${describe(node.expression)} is not a function`);
 		}
-		// Expose the callsite while the host function runs, so a capability shim can introspect the
-		// static type of its argument (type-directed canary, S6). Restored immediately after.
-		const previousSite = vm.callSite;
-		vm.callSite = node;
-		try {
-			vm.push((calleeVal as (...a: unknown[]) => unknown).apply(frame.thisArg, args));
-		} finally {
-			vm.callSite = previousSite;
-		}
+		// Through the host guard (vets the callable, sanitizes the result) with the callsite exposed so a
+		// capability shim can introspect the static type of its argument (type-directed canary, S6).
+		vm.push(vm.invokeHost(calleeVal as (...a: unknown[]) => unknown, frame.thisArg, args, node, false));
 	} else {
 		// phase 4: guest call has left its return value on the stack.
 		vm.frames.pop();
@@ -1373,7 +1400,7 @@ on(K.NewExpression, (vm, frame) => {
 			return;
 		}
 		vm.frames.pop();
-		vm.push(Reflect.construct(ctor as new (...a: unknown[]) => unknown, args));
+		vm.push(vm.invokeHost(ctor as (...a: unknown[]) => unknown, undefined, args, node, true));
 	} else {
 		vm.frames.pop(); // phase 3: guest construction left the instance on the stack
 	}
@@ -1671,13 +1698,13 @@ function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: unknown
 		for (const element of target.elements) {
 			if (element.dotDotDotToken) {
 				const rest: Record<string, unknown> = {};
-				for (const key in value as object) if (!used.has(key)) rest[key] = (value as Record<string, unknown>)[key];
+				for (const key in value as object) if (!used.has(key)) rest[key] = vm.fromHost((value as Record<string, unknown>)[key]);
 				bindTarget(vm, scope, element.name, rest, kind);
 				continue;
 			}
 			const key = element.propertyName ? bindingKey(vm, scope, element.propertyName) : (element.name as ts.Identifier).text;
 			used.add(key);
-			let v = (value as Record<PropertyKey, unknown>)?.[key];
+			let v = vm.fromHost((value as Record<PropertyKey, unknown>)?.[key]);
 			if (v === undefined && element.initializer) v = vm.evalNodeSync(element.initializer, scope);
 			bindTarget(vm, scope, element.name, v, kind);
 		}

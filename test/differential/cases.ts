@@ -71,6 +71,20 @@ export const STARTER_CASES: string[] = [
 	`null.x`,
 	`undefinedIdentifier`,
 
+	// `this` — module/strict semantics (a deliberate decision; the oracle runs strict to match)
+	`typeof this`,
+	`function o() { function i() { return this; } return i(); } typeof o()`,
+	`const obj = { v: 3, m() { return this.v; } }; obj.m()`,
+	`const obj = { v: 3, m() { return this.v; } }; const f = obj.m; (() => { try { return typeof f(); } catch (e) { return e.constructor.name; } })()`,
+	`const arrow = () => this; typeof arrow()`,
+
+	// `var` hoisting out of nested blocks (a plain read before the declaration)
+	`function f() { const r = y; if (true) { var y = 1; } return r; } f()`,
+	`function f() { const r = typeof z; for (let i = 0; i < 1; i++) { var z = 2; } return r + z; } f()`,
+	`function f() { try { var t = 1; } catch (e) {} return t; } f()`,
+	`function f() { switch (1) { case 1: var s = "s"; } return s; } f()`,
+	`function f() { { var [a, { b }] = [1, { b: 2 }]; } return a + b; } f()`,
+
 	// typeof / void
 	`typeof 42`,
 	`typeof "s"`,

@@ -33,10 +33,11 @@ export function runNode(code: string): RunResult {
 	const logs: unknown[][] = [];
 	const console = makeConsole(logs);
 	// Direct eval inside this function sees the local `console` (shadows global) and returns the
-	// completion value of the last statement.
-	const runner = new Function("console", "code", "return eval(code);");
+	// completion value of the last statement. Strict mode + an undefined receiver so `this` semantics
+	// match a TypeScript module (tsval's deliberate choice): top-level and plain-call `this` are undefined.
+	const runner = new Function("console", "code", '"use strict"; return eval(code);');
 	try {
-		const value = runner(console, js);
+		const value = runner.call(undefined, console, js);
 		return { value, logs, threw: false };
 	} catch (error) {
 		return { value: undefined, logs, threw: true, error };
@@ -77,6 +78,33 @@ export async function assertDifferentialAsync(code: string): Promise<void> {
 	if (oracle.threw) return;
 	assert.deepStrictEqual(actual.value, oracle.value, `resolved value mismatch for:\n${code}`);
 	assert.deepStrictEqual(actual.logs, oracle.logs, `console output mismatch for:\n${code}`);
+}
+
+export type DifferentialOutcome =
+	| { kind: "match" }
+	| { kind: "both-threw"; node: string; tsval: string } // vacuous agreement: both sides failed
+	| { kind: "mismatch"; detail: string };
+
+/**
+ * Classify rather than assert (for corpus runs). Awaits thenable completion values on both sides so
+ * async programs compare their settled value. "both-threw" is reported separately from "match": two
+ * failures agreeing is weaker evidence than two values agreeing.
+ */
+export async function classifyDifferential(code: string): Promise<DifferentialOutcome> {
+	const oracle = await settle(runNode(code));
+	const actual = await settle(runTsval(code));
+	const msg = (e: unknown): string => (e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+	if (oracle.threw !== actual.threw) {
+		return { kind: "mismatch", detail: oracle.threw ? `node threw (${msg(oracle.error)}) but tsval returned ${JSON.stringify(actual.value)}` : `tsval threw (${msg(actual.error)}) but node returned ${JSON.stringify(oracle.value)}` };
+	}
+	if (oracle.threw) return { kind: "both-threw", node: msg(oracle.error), tsval: msg(actual.error) };
+	try {
+		assert.deepStrictEqual(actual.value, oracle.value);
+		assert.deepStrictEqual(actual.logs, oracle.logs);
+		return { kind: "match" };
+	} catch (error) {
+		return { kind: "mismatch", detail: (error as Error).message.split("\n").slice(0, 6).join("\n") };
+	}
 }
 
 /** Assert that tsval and Node agree on all observable effects for `code`. */

@@ -49,6 +49,27 @@ export interface VMOptions {
 	resolveModule?: (specifier: string) => unknown;
 	/** Optional `TypeChecker` for type-aware evaluation / a type-directed canary (ASSIGNMENT S6). */
 	typeChecker?: ts.TypeChecker;
+	/** Guard at the host↔guest boundary: sanitize values entering guest land and vet host callables.
+	 *  This is how a sandbox stays closed — real intrinsics leak the real `Function` via
+	 *  `.constructor.constructor`, and only the interpreter sees every read and every call. */
+	hostGuard?: HostGuard;
+	/** Notified with the Promise of every async guest function invoked, so a driver can track
+	 *  outstanding async work (the canary awaits/fails on it instead of losing late reaches). */
+	onAsyncFiber?: (promise: Promise<unknown>) => void;
+}
+
+/**
+ * The host-boundary guard (see `VMOptions.hostGuard`). Both hooks default to identity.
+ * - `sanitize(value)`: applied to every value that crosses from host land into guest land — property/
+ *   element reads, host call & construct results, imported bindings, destructured host properties.
+ *   Return a replacement (e.g. a shim for the real `Function`) or the value unchanged.
+ * - `beforeCall(callee, thisArg, isConstruct)`: applied before the interpreter invokes a host callable;
+ *   return the callable to actually invoke. `thisArg` lets it vet `Function.prototype.call/apply/bind`
+ *   applied to a forbidden target.
+ */
+export interface HostGuard {
+	sanitize?(value: unknown): unknown;
+	beforeCall?(callee: (...a: unknown[]) => unknown, thisArg: unknown, isConstruct: boolean): (...a: unknown[]) => unknown;
 }
 
 /**
@@ -81,9 +102,12 @@ export class VM {
 	resolveModule: ((specifier: string) => unknown) | undefined;
 	/** Optional `TypeChecker` — present in type-aware runs (ASSIGNMENT S6). */
 	typeChecker: ts.TypeChecker | undefined;
-	/** The CallExpression currently invoking a host function — lets a shim introspect its callsite
-	 *  (e.g. the static type of its argument) via `typeChecker`. Set only around a host `apply`. */
-	callSite: ts.CallExpression | undefined;
+	/** The call/new expression currently invoking a host callable — lets a shim introspect its
+	 *  callsite (e.g. the static type of its argument) via `typeChecker`. Set only around the host
+	 *  `apply`/`construct`. */
+	callSite: ts.CallExpression | ts.NewExpression | undefined;
+	hostGuard: HostGuard | undefined;
+	onAsyncFiber: ((promise: Promise<unknown>) => void) | undefined;
 
 	constructor(options: VMOptions = {}) {
 		this.rootScope = new Scope(undefined, true);
@@ -93,6 +117,27 @@ export class VM {
 		this.rootScope.realGlobals = options.realGlobals ?? true;
 		this.resolveModule = options.resolveModule;
 		this.typeChecker = options.typeChecker;
+		this.hostGuard = options.hostGuard;
+		this.onAsyncFiber = options.onAsyncFiber;
+	}
+
+	/** A value crossing from host land into guest land, passed through the guard (identity if none). */
+	fromHost(value: unknown): unknown {
+		const sanitize = this.hostGuard?.sanitize;
+		return sanitize === undefined ? value : sanitize(value);
+	}
+
+	/** Invoke a host callable from guest code, through the guard and with `callSite` exposed. */
+	invokeHost(callee: (...a: unknown[]) => unknown, thisArg: unknown, args: unknown[], site: ts.CallExpression | ts.NewExpression, isConstruct: boolean): unknown {
+		const target = this.hostGuard?.beforeCall === undefined ? callee : this.hostGuard.beforeCall(callee, thisArg, isConstruct);
+		const previousSite = this.callSite;
+		this.callSite = site;
+		try {
+			const result = isConstruct ? Reflect.construct(target as unknown as new (...a: unknown[]) => unknown, args) : target.apply(thisArg, args);
+			return this.fromHost(result);
+		} finally {
+			this.callSite = previousSite;
+		}
 	}
 
 	/** Resolve a module namespace, or throw a guest-catchable error if unresolved. */
@@ -378,6 +423,8 @@ export class VM {
 	 */
 	fork(): VM {
 		const seen = new Map<unknown, unknown>();
+		// The fork is created first so cloned closures can be rebound to *it* (not to this source VM).
+		const forked: VM = Object.create(VM.prototype);
 
 		const cloneScope = (s: Scope): Scope => {
 			const parent = s.parent ? (clone(s.parent) as Scope) : undefined;
@@ -401,8 +448,8 @@ export class VM {
 			if (typeof v === "function") {
 				if (isGuestFunction(v)) {
 					const meta = v.__tsval;
-					// Rebind to *this* forked VM; break the closure cycle via pre-registration.
-					const fn = createGuestFunction(this, meta.node, meta.closure, meta.homeObject);
+					// Rebind to the forked VM; break the closure cycle via pre-registration.
+					const fn = createGuestFunction(forked, meta.node, meta.closure, meta.homeObject);
 					fn.__tsval.isGenerator = meta.isGenerator;
 					fn.__tsval.isAsync = meta.isAsync;
 					seen.set(v, fn);
@@ -413,6 +460,10 @@ export class VM {
 			}
 			if (v instanceof Scope) return cloneScope(v);
 			if ((v as Record<PropertyKey, unknown>)[FIBER_BRAND] === true) return v; // live fiber — shared
+			// A guest class prototype (its `constructor` is a branded guest class) is behavior, not data:
+			// share it, consistently with `cloneScope`'s `homeObject` — so a mid-construction fork keeps
+			// `ClassMeta.proto === ctor.prototype`.
+			if (isGuestClassPrototype(v)) return v;
 
 			if (Array.isArray(v)) {
 				const out: unknown[] = [];
@@ -444,6 +495,9 @@ export class VM {
 			for (const key of Reflect.ownKeys(v)) {
 				const desc = Object.getOwnPropertyDescriptor(v, key)!;
 				if ("value" in desc) desc.value = clone(desc.value);
+				// Accessors are closures too: rebind them like any other guest function.
+				if (desc.get !== undefined) desc.get = clone(desc.get) as () => unknown;
+				if (desc.set !== undefined) desc.set = clone(desc.set) as (v: unknown) => void;
 				Object.defineProperty(out, key, desc);
 			}
 			return out;
@@ -463,10 +517,14 @@ export class VM {
 			return nf;
 		};
 
-		const forked: VM = Object.create(VM.prototype);
 		(forked as { rootScope: Scope }).rootScope = clone(this.rootScope) as Scope;
 		(forked as { breakpoints: Set<number> }).breakpoints = new Set(this.breakpoints);
 		forked.sourceFile = this.sourceFile;
+		forked.resolveModule = this.resolveModule;
+		forked.typeChecker = this.typeChecker;
+		forked.hostGuard = this.hostGuard;
+		forked.onAsyncFiber = this.onAsyncFiber;
+		forked.callSite = undefined;
 		forked.values = this.values.map(clone);
 		forked.frames = this.frames.map(cloneFrame);
 		forked.signal = this.signal ? ({ ...this.signal, value: clone((this.signal as { value?: unknown }).value) } as Signal) : null;
@@ -505,7 +563,13 @@ export class VM {
 		this.paused = false;
 		seed();
 		try {
-			while (!this.finished) this.step();
+			while (!this.finished) {
+				this.step();
+				// A synchronous sub-run has no driver to resume it: a `yield`/`await` here (a computed key,
+				// default value, or destructuring default containing one) cannot be honored. Fail loud
+				// rather than silently resuming with `undefined`.
+				if (this.paused) throw new TsvalInternalError("yield/await inside a synchronously evaluated sub-expression (default value / computed key) is not supported");
+			}
 			return this.values.pop();
 		} finally {
 			this.restoreContext(ctx);
@@ -620,7 +684,7 @@ export class VM {
 	/** Invoke a guest async function: returns a real Promise, driven by `await` suspensions. */
 	callAsync(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): Promise<unknown> {
 		const fiber = this.seedFiber(meta, thisArg, args);
-		return new Promise((resolve, reject) => {
+		const promise = new Promise((resolve, reject) => {
 			const drive = (input: FiberInput): void => {
 				let result: { paused: boolean; value: unknown };
 				try {
@@ -638,11 +702,20 @@ export class VM {
 				// Suspended on `await result.value`; resume when it settles.
 				Promise.resolve(result.value).then(
 					(v) => drive({ kind: "next", value: v }),
-					(e) => drive({ kind: "throw", value: e }),
+					(e) => {
+						// An uncatchable error (interpreter bug, canary abort) that rejected an awaited promise
+						// must not be injected as a guest `throw` — guest try/catch could swallow it.
+						if (isUncatchable(e)) {
+							fiber.done = true;
+							reject(e);
+						} else drive({ kind: "throw", value: e });
+					},
 				);
 			};
 			drive({ kind: "next", value: undefined });
 		});
+		this.onAsyncFiber?.(promise);
+		return promise;
 	}
 
 	/** Push a synthetic call frame for a guest function. */
@@ -664,6 +737,12 @@ export class VM {
 
 function isStatement(node: ts.Node): boolean {
 	return node.kind >= ts.SyntaxKind.FirstStatement && node.kind <= ts.SyntaxKind.LastStatement;
+}
+
+/** True for the `prototype` object of a guest class (its own `constructor` is a branded guest class). */
+function isGuestClassPrototype(v: object): boolean {
+	const ctor = Object.getOwnPropertyDescriptor(v, "constructor")?.value as (((...a: unknown[]) => unknown) & { __tsvalClass?: unknown; prototype?: unknown }) | undefined;
+	return typeof ctor === "function" && ctor.__tsvalClass != null && ctor.prototype === v;
 }
 
 /** A full snapshot of the machine's mutable execution state, for nested sub-runs and fibers. */
