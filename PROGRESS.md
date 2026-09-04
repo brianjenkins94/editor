@@ -5,6 +5,76 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## test262 wired in ✅ (2026-09-04) — 97.3% of the eligible language suite
+
+**Status:** `npm test` → 1056 tests: 1053 pass, 0 fail, 3 known-gap todos. Full pinned corpus
+(`npm run test262:report`): **23,726 language tests walked in 75 s — 15,328 pass, 425 fail, 32
+inconclusive (Node fails too), 7,941 skipped by policy → 97.3% pass on eligible.** Started the day
+at 5,609 pass / 2,931 fail on the first realm-isolated run.
+
+### Harness (`test/differential/test262-*.ts`, `scripts/test262-*.ts`)
+- `vendor/test262-sample/` (checked in, ~3 MB): a deterministic 1-in-25 sample of the policy-eligible
+  `test/language` tests (653) + harness + LICENSE, run by `npm test`. `vendor/test262/` (gitignored):
+  the full checkout, pinned to `419d3e0a`, via `npm run test262:fetch`; `npm run test262:sample`
+  regenerates the sample.
+- The supported-surface policy is a **metadata filter** (`policySkip`): flags `noStrict`/`module`/
+  `raw`, dirs `module-code`/`import`/`eval-code`/`global-code`, parse-phase negatives, host-level
+  features (Temporal, Atomics, decorators, …), `$262` users, and `eval`/`Function` users are skipped
+  with reasons. Async tests: `$DONE`/`print` are routed to the program's completion promise.
+- **Per-test fresh realms on both sides** (`node:vm`). test262 mutates builtins on purpose; the first
+  run's 513 identical failures were one test poisoning `Array.prototype[Symbol.iterator]` for every
+  later test *and the runner itself*. Node control runs the raw JS strict in a fresh context; tsval
+  gets that realm's `globalThis` as its global object (`VMOptions.globalObject`) and creates guest
+  values from the realm's intrinsics (`VM.realm`), re-creating its own thrown errors in the guest
+  realm (`guestErrors`) so `assert.throws(TypeError, …)` sees the guest's constructor.
+- Outcomes are pass / fail / control-failed (inconclusive) / skipped; gaps live in
+  `test262-gaps.ts` by id prefix and run as `todo`. The report script buckets failures by
+  directory and by normalized reason.
+
+### Interpreter fixes the corpus drove (all differentially verified)
+- **A real VM bug:** `step()` silently dropped a pending `throw` when no frame remained (a handler
+  that pops itself *before* throwing, e.g. Identifier, inside a sub-evaluation) — every "expected
+  ReferenceError from a destructuring default" case.
+- Generator/async parameters bound at **call** time (FunctionDeclarationInstantiation), not at the
+  first `.next()`; an async *function*'s parameter error rejects its promise instead.
+- `.return()`/`.throw()` on a suspended-start generator complete it without running the body.
+- **Async generator requests run synchronously** up to the first suspension (a side effect in the
+  body is visible right after `.next()`), queued behind an executing request.
+- **`yield*` per spec**: forwards `throw`/`return` to the inner iterator (GetMethod semantics; missing
+  `throw` → IteratorClose + TypeError; missing `return` → the outer generator returns), object checks,
+  awaited inner results in async generators, sync inner results yielded *as-is*. The fiber driver
+  routes injected `throw`/`return` to a delegating frame instead of unwinding.
+- Destructuring: `null`/`undefined` → TypeError; **IteratorClose** on non-exhaustion and abrupt
+  completion (also for `for-of` on break/throw/return, with a non-callable `return` → TypeError);
+  assignment targets' *references* evaluated before IteratorStep; ToPropertyKey for computed keys.
+- **NamedEvaluation**: anonymous functions/classes take the binding/property/field name (identifier
+  and assignment targets, defaults, logical assignment, object literals, class fields, symbols).
+- **Private names** (`#x`): per-class-evaluation unique names in a side table (invisible to
+  reflection), brand checks on every access, `#x in obj`, private methods/accessors/statics,
+  shadowing in nested classes, fork-aware. Previously `#x` was a *public* property named "#x".
+- Parameter TDZ (`f(a = a)`), a separate var environment for bodies with non-simple parameters,
+  the inner immutable binding of a named function expression, class constructors refuse plain calls,
+  a host superclass *creates* `this` (`class E extends RangeError` keeps own `message`), `static`
+  methods defined before static initializers run, static private methods/fields.
+- `delete`, tagged templates (per-site cached template objects), array holes, `__proto__:` in
+  literals (and CreateDataProperty semantics — a computed `["__proto__"]` no longer sets the
+  prototype), optional chains short-circuit the *whole* chain (no index/argument evaluation past a
+  nullish `?.`), compound assignment evaluates the LHS reference/GetValue before the RHS and logical
+  assignments don't evaluate the RHS when decided, `new.target`, `Function.length`/`.name`/
+  `.prototype` shapes (arrows/methods have none; foreign-realm function objects), error messages that
+  never invoke user `toString`, `arguments`/rest copied by index (never through an overridable
+  iterator).
+
+### Remaining full-corpus buckets (425), for the next round
+- 59 `yield`/`await` inside a synchronously-evaluated sub-expression (computed key / default /
+  destructuring target) — a known structural limitation of `evalNodeSync`.
+- 38 `super[expr]` / `super.x = v` (SuperKeyword as a bare expression) — implementable.
+- ~52 "expected ReferenceError/TypeError not thrown" and ~30 SameValue/ordering minutiae (property
+  attribute shapes via `verifyProperty`, observable get-order in async iteration), 18 tests whose
+  `async` flag my frontmatter parser may be missing (`asyncTest called without async flag`), 9 hangs.
+
+---
+
 ## Post-S6 review: fixes + the ts-evaluator corpus ✅ (2026-09-04)
 
 An independent review (adversarial probes against the oracle, not the summaries) found seven

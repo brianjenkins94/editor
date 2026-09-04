@@ -59,6 +59,24 @@ is written in, and the surface Node's own type-stripping accepts. Anything outsi
 
 The differential oracle runs Node in strict mode with an undefined receiver to match.
 
+## Conformance: test262
+
+The official ECMAScript conformance suite ([tc39/test262](https://github.com/tc39/test262), BSD-3)
+is wired in as an oracle, with Node as the control. The supported-surface policy is applied as a
+*filter* on its metadata: `noStrict`, `module` and `raw` tests, parse-phase negatives, and host-level
+features are skipped by policy; everything else must pass, be inconclusive (Node fails it too), or be
+a listed known gap (run as `todo`).
+
+- `vendor/test262-sample/` is checked in: a deterministic 1-in-25 sample of the eligible
+  `test/language` tests (~650), run by `npm test` as an always-on regression corpus.
+- `npm run test262:fetch` pulls the full pinned checkout (98 MB, gitignored) into `vendor/test262/`;
+  `npm run test262:report` runs all ~16k eligible tests and prints failures bucketed by directory and
+  reason — the dev loop for finding the next bug.
+
+Each side of each test runs in a **fresh realm** (`node:vm` context): test262 mutates builtins on
+purpose, and tsval creates guest values with the guest realm's intrinsics so `[] instanceof Array`
+and `Object.getPrototypeOf({})` agree with the guest's own `Array`/`Object`.
+
 ## Layout
 
 - `src/` — the VM (`vm.ts`), per-SyntaxKind handlers (`handlers.ts`), scope (`scope.ts`), front-end

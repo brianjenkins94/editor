@@ -43,6 +43,9 @@ export class Scope {
 	/** the guest function this (function) scope belongs to — its flags tell `yield*`/`for await`
 	 *  whether they're inside an async generator. */
 	functionMeta?: unknown;
+	/** the private names (`#x`) declared by the class whose body this scope is; resolved lexically,
+	 *  nearest class first (so an inner class's `#x` shadows an outer one's). */
+	privateNames?: Map<string, object>;
 
 	constructor(parent?: Scope, isolated = false) {
 		this.parent = parent;

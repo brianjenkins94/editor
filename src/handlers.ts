@@ -81,21 +81,65 @@ export function createGuestFunction(vm: VM, node: GuestFunctionNode, closure: Sc
 	const meta: GuestFunctionMeta = {
 		node,
 		closure,
-		name: node.name != null && ts.isIdentifier(node.name) ? node.name.text : "",
+		name: node.name != null && (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name)) ? node.name.text : "",
 		isArrow: node.kind === K.ArrowFunction,
 		isGenerator: (node as ts.FunctionLikeDeclaration).asteriskToken != null,
 		isAsync: (modifierFlags & ts.ModifierFlags.Async) !== 0,
 		homeObject,
 	};
-	const fn = function (this: unknown, ...args: unknown[]): unknown {
-		// Host-invoked path (array callbacks, shims, host-mediated `new`): run a nested loop to
-		// completion. `new.target` is forwarded so the body can observe construction.
+	// The host-invoked wrapper (array callbacks, shims, host-mediated `new`) runs a nested loop to
+	// completion. Its *shape* mirrors the guest function's: an arrow (no `this`, no `prototype`, not
+	// constructible), a concise method (has `this`, no `prototype`, not constructible), or a plain
+	// function (constructible; `new.target` forwarded so the body can observe construction).
+	const isMethodLike = ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) || ts.isConstructorDeclaration(node);
+	const fn = makeWrapper(vm, meta, isMethodLike);
+	fn.__tsval = meta;
+	// Realm fidelity: the function object belongs to the guest realm's Function.prototype, and a
+	// constructible function's `.prototype` is a guest-realm object.
+	Object.setPrototypeOf(fn, vm.realm.Function.prototype);
+	if (!meta.isArrow && !isMethodLike && !meta.isGenerator && !meta.isAsync) {
+		const proto = new vm.realm.Object();
+		Object.defineProperty(proto, "constructor", { value: fn, writable: true, configurable: true });
+		Object.defineProperty(fn, "prototype", { value: proto, writable: true });
+	}
+	Object.defineProperty(fn, "length", { value: functionLength(node.parameters), configurable: true });
+	Object.defineProperty(fn, "name", { value: meta.name, configurable: true });
+	// A named function *expression* binds its own name inside itself, immutably (assigning to it is a
+	// TypeError in strict code).
+	if (ts.isFunctionExpression(node) && node.name !== undefined) {
+		const inner = new Scope(closure, false);
+		inner.declareLexical(node.name.text, "const");
+		inner.initialize(node.name.text, fn);
+		meta.closure = inner;
+	}
+	return fn;
+}
+
+// Fixed wrapper templates (NOT guest code) for creating a function object *inside another realm*: a
+// function's realm decides fallbacks like `new F()` with a non-object `F.prototype`, and whether
+// `F instanceof Function` holds for the guest's `Function`.
+const FOREIGN_WRAPPERS = {
+	arrow: "return (...args) => vm.callGuestFromHost(meta, undefined, args);",
+	method: "return { m(...args) { return vm.callGuestFromHost(meta, this, args); } }.m;",
+	plain: "return function (...args) { return vm.callGuestFromHost(meta, this, args, new.target); };",
+};
+
+function makeWrapper(vm: VM, meta: GuestFunctionMeta, isMethodLike: boolean): GuestFunction {
+	if (vm.realm.Function !== Function) {
+		const template = meta.isArrow ? FOREIGN_WRAPPERS.arrow : isMethodLike ? FOREIGN_WRAPPERS.method : FOREIGN_WRAPPERS.plain;
+		return (vm.realm.Function("vm", "meta", template) as (vm: VM, meta: GuestFunctionMeta) => GuestFunction)(vm, meta);
+	}
+	if (meta.isArrow) return ((...args: unknown[]) => vm.callGuestFromHost(meta, undefined, args)) as GuestFunction;
+	if (isMethodLike) {
+		return {
+			m(this: unknown, ...args: unknown[]) {
+				return vm.callGuestFromHost(meta, this, args);
+			},
+		}.m as GuestFunction;
+	}
+	return function (this: unknown, ...args: unknown[]): unknown {
 		return vm.callGuestFromHost(meta, this, args, new.target);
 	} as GuestFunction;
-	fn.__tsval = meta;
-	Object.defineProperty(fn, "length", { value: functionLength(node.parameters), configurable: true });
-	if (meta.name) Object.defineProperty(fn, "name", { value: meta.name, configurable: true });
-	return fn;
 }
 
 // ============================================================================
@@ -170,12 +214,13 @@ on(K.VariableDeclarationList, (vm, frame) => {
 			vm.pushNode(decl.initializer, frame.scope);
 			frame.phase++; // -> bind
 		} else {
-			// no initializer: `let x;` leaves the TDZ as undefined; `var x;` already undefined.
-			bindTarget(vm, frame.scope, decl.name, undefined, kind);
+			// no initializer: `let x;` leaves the TDZ as undefined. `var x;` is a runtime no-op — it must
+			// not overwrite a hoisted `function x` (or an earlier assignment) with undefined.
+			if (kind !== "var") bindTarget(vm, frame.scope, decl.name, undefined, kind);
 			frame.phase += 2; // -> next decl
 		}
 	} else {
-		bindTarget(vm, frame.scope, decl.name, vm.pop(), kind);
+		bindTarget(vm, frame.scope, decl.name, namedIf(vm.pop(), decl.name, decl.initializer), kind);
 		frame.phase++; // -> next decl (now even)
 	}
 });
@@ -411,16 +456,17 @@ on(K.ForOfStatement, (vm, frame) => {
 	if (frame.phase === 0) {
 		frame.isLoop = true;
 		frame.continuePhase = 2;
-		vm.pushNode(node.expression, frame.scope);
+		vm.pushNode(node.expression, headTdzScope(frame.scope, node.initializer));
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
-		const iterable = vm.pop();
-		const iterator = (iterable as Iterable<unknown>)[Symbol.iterator]();
-		frame.iterator = iterator;
+		frame.iterator = getIterator(vm.pop());
 		frame.phase = 2;
 	} else if (frame.phase === 2) {
 		const result = (frame.iterator as Iterator<unknown>).next();
-		if (result.done) return void vm.frames.pop();
+		if (result.done) {
+			frame.iteratorDone = true;
+			return void vm.frames.pop();
+		}
 		bindForTarget(vm, frame, node.initializer, vm.fromHost(result.value));
 		frame.phase = 3;
 	} else {
@@ -435,7 +481,7 @@ function forAwaitOf(vm: VM, frame: Frame, node: ts.ForOfStatement): void {
 	if (frame.phase === 0) {
 		frame.isLoop = true;
 		frame.continuePhase = 2;
-		vm.pushNode(node.expression, frame.scope);
+		vm.pushNode(node.expression, headTdzScope(frame.scope, node.initializer));
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
 		const { iterator, sync } = getAsyncOrSyncIterator(vm.pop());
@@ -446,7 +492,10 @@ function forAwaitOf(vm: VM, frame: Frame, node: ts.ForOfStatement): void {
 		const step = (frame.iterator as Iterator<unknown>).next();
 		if (frame.syncIterator) {
 			const result = step as IteratorResult<unknown>;
-			if (result.done) return void vm.frames.pop();
+			if (result.done) {
+				frame.iteratorDone = true;
+				return void vm.frames.pop();
+			}
 			suspend(vm, frame, "await", result.value, 3); // await the element itself
 		} else {
 			suspend(vm, frame, "await", step, 4); // await the result object
@@ -456,7 +505,10 @@ function forAwaitOf(vm: VM, frame: Frame, node: ts.ForOfStatement): void {
 		frame.phase = 5;
 	} else if (frame.phase === 4) {
 		const result = resumed(vm) as IteratorResult<unknown>;
-		if (result.done) return void vm.frames.pop();
+		if (result.done) {
+			frame.iteratorDone = true;
+			return void vm.frames.pop();
+		}
 		bindForTarget(vm, frame, node.initializer, vm.fromHost(result.value));
 		frame.phase = 5;
 	} else {
@@ -469,7 +521,7 @@ on(K.ForInStatement, (vm, frame) => {
 	if (frame.phase === 0) {
 		frame.isLoop = true;
 		frame.continuePhase = 2;
-		vm.pushNode(node.expression, frame.scope);
+		vm.pushNode(node.expression, headTdzScope(frame.scope, node.initializer));
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
 		const obj = vm.pop();
@@ -500,10 +552,9 @@ function bindForTarget(vm: VM, frame: Frame, initializer: ts.ForInitializer, val
 		const isConst = (initializer.flags & ts.NodeFlags.Const) !== 0;
 		const isLet = (initializer.flags & ts.NodeFlags.Let) !== 0;
 		bindTarget(vm, bodyScope, decl.name, value, isConst ? "const" : isLet ? "let" : "var");
-	} else if (ts.isIdentifier(initializer)) {
-		frame.scope.set(initializer.text, value);
 	} else {
-		unimplemented(`for-of/in assignment target ${ts.SyntaxKind[initializer.kind]}`);
+		// An assignment target: identifier, member, or a destructuring pattern (`for ([a, b] of …)`).
+		assignPattern(vm, frame.scope, initializer as ts.Expression, value);
 	}
 	vm.pushNode(node.statement, bodyScope);
 }
@@ -661,7 +712,7 @@ on(K.RegularExpressionLiteral, (vm, frame) => {
 	const node = frame.node as ts.RegularExpressionLiteral;
 	vm.frames.pop();
 	const lastSlash = node.text.lastIndexOf("/");
-	vm.push(new RegExp(node.text.slice(1, lastSlash), node.text.slice(lastSlash + 1)));
+	vm.push(new vm.realm.RegExp(node.text.slice(1, lastSlash), node.text.slice(lastSlash + 1)));
 });
 
 on(K.Identifier, (vm, frame) => {
@@ -728,27 +779,21 @@ on(K.ArrayLiteralExpression, (vm, frame) => {
 	const node = frame.node as ts.ArrayLiteralExpression;
 	if (frame.phase === 0) {
 		frame.base = vm.values.length;
-		const spreadMask: boolean[] = [];
+		// Elisions (`[1, , 3]`) are OmittedExpressions: they produce no operand and leave a hole.
 		for (let i = node.elements.length - 1; i >= 0; i--) {
 			const el = node.elements[i];
-			if (ts.isSpreadElement(el)) {
-				vm.pushNode(el.expression, frame.scope);
-				spreadMask[i] = true;
-			} else {
-				// Elisions (holes) in `[1, , 3]` parse as OmittedExpression; treat as undefined for S2.
-				vm.pushNode(el, frame.scope);
-				spreadMask[i] = false;
-			}
+			if (ts.isOmittedExpression(el)) continue;
+			vm.pushNode(ts.isSpreadElement(el) ? el.expression : el, frame.scope);
 		}
-		frame.spreadMask = spreadMask;
 		frame.phase = 1;
 	} else {
 		const raw = vm.values.splice(frame.base as number);
-		const spreadMask = frame.spreadMask as boolean[];
-		const out: unknown[] = [];
-		for (let i = 0; i < raw.length; i++) {
-			if (spreadMask[i]) out.push(...(raw[i] as Iterable<unknown>));
-			else out.push(raw[i]);
+		const out = new vm.realm.Array() as unknown[];
+		let cursor = 0;
+		for (const el of node.elements) {
+			if (ts.isOmittedExpression(el)) out.length++;
+			else if (ts.isSpreadElement(el)) out.push(...(raw[cursor++] as Iterable<unknown>));
+			else out.push(raw[cursor++]);
 		}
 		vm.frames.pop();
 		vm.push(out);
@@ -773,13 +818,20 @@ on(K.ObjectLiteralExpression, (vm, frame) => {
 		frame.phase = 1;
 	} else {
 		const values = vm.values.splice(frame.base as number);
-		const obj: Record<PropertyKey, unknown> = {};
+		const obj = new vm.realm.Object() as Record<PropertyKey, unknown>;
 		let cursor = 0; // advances only for value-producing properties, in source order
 		for (const prop of node.properties) {
 			if (ts.isPropertyAssignment(prop)) {
-				obj[memberKey(vm, prop.name, frame.scope)] = values[cursor++];
+				const value = values[cursor++];
+				// `__proto__: v` (non-computed) sets the prototype instead of defining a property.
+				if (!ts.isComputedPropertyName(prop.name) && propertyName(prop.name) === "__proto__") {
+					if ((typeof value === "object" && value !== null) || typeof value === "function") Object.setPrototypeOf(obj, value);
+					continue;
+				}
+				const key = memberKey(vm, prop.name, frame.scope);
+				defineData(obj, key, nameAnonymous(value, key, prop.initializer));
 			} else if (ts.isShorthandPropertyAssignment(prop)) {
-				obj[prop.name.text] = values[cursor++];
+				defineData(obj, prop.name.text, values[cursor++]);
 			} else if (ts.isSpreadAssignment(prop)) {
 				spreadInto(vm, obj, values[cursor++]); // own enumerable props, each through the guard
 			} else if (ts.isMethodDeclaration(prop)) {
@@ -798,12 +850,18 @@ on(K.ObjectLiteralExpression, (vm, frame) => {
 	}
 });
 
+/** CreateDataProperty — an object literal *defines* properties; assignment would run inherited
+ *  setters (notably `__proto__`, which a computed `["__proto__"]` key must not trigger). */
+function defineData(obj: object, key: PropertyKey, value: unknown): void {
+	Object.defineProperty(obj, key, { value, writable: true, enumerable: true, configurable: true });
+}
+
 /** `{ ...source }`: copy own enumerable props (string + symbol keys), each value through the guard. */
 function spreadInto(vm: VM, target: Record<PropertyKey, unknown>, source: unknown): void {
 	if (source == null) return;
 	const src = Object(source) as Record<PropertyKey, unknown>;
 	for (const key of Reflect.ownKeys(src)) {
-		if (Object.getOwnPropertyDescriptor(src, key)?.enumerable) target[key] = vm.fromHost(src[key]);
+		if (Object.getOwnPropertyDescriptor(src, key)?.enumerable) defineData(target, key, vm.fromHost(src[key]));
 	}
 }
 
@@ -816,6 +874,26 @@ function propertyName(name: ts.PropertyName | ts.Identifier): string {
 // ============================================================================
 // Member access
 // ============================================================================
+
+// --- optional chains --------------------------------------------------------------------------------
+// When a `?.` link finds a nullish base, the *entire chain* is undefined and the remaining links —
+// including their index expressions and call arguments — are not evaluated. Links propagate a
+// marker; the outermost link of the chain turns it into `undefined`. (A parenthesized sub-chain
+// `(a?.b).c` is its own chain: `.c` on undefined throws, as it should.)
+const CHAIN_BREAK: unique symbol = Symbol("tsval.optional-chain-short-circuit");
+
+function chainShort(node: ts.Node): unknown {
+	const parent = node.parent;
+	const continues = parent !== undefined && ts.isOptionalChain(parent) && (parent as { expression?: ts.Node }).expression === node;
+	return continues ? CHAIN_BREAK : undefined;
+}
+
+/** Describe a property key for an error message without invoking user code (`toString` may throw). */
+function keyText(key: unknown): string {
+	if (typeof key === "symbol") return key.description ?? "Symbol()";
+	if (typeof key === "string" || typeof key === "number" || typeof key === "boolean" || key == null) return String(key);
+	return "<computed key>";
+}
 
 on(K.PropertyAccessExpression, (vm, frame) => {
 	const node = frame.node as ts.PropertyAccessExpression;
@@ -832,10 +910,9 @@ on(K.PropertyAccessExpression, (vm, frame) => {
 	} else {
 		const obj = vm.pop();
 		vm.frames.pop();
-		if (obj == null) {
-			if (node.questionDotToken) return vm.push(undefined);
-			throw new TypeError(`Cannot read properties of ${obj} (reading '${node.name.text}')`);
-		}
+		if (obj === CHAIN_BREAK || (obj == null && node.questionDotToken)) return vm.push(chainShort(node));
+		if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${node.name.text}')`);
+		if (ts.isPrivateIdentifier(node.name)) return vm.push(privateGet(obj, lookupPrivate(frame.scope, node.name.text)));
 		// Every property read is a host→guest crossing (e.g. `[].constructor.constructor` is the real
 		// `Function`): route it through the guard.
 		vm.push(vm.fromHost((obj as Record<string, unknown>)[node.name.text]));
@@ -848,16 +925,20 @@ on(K.ElementAccessExpression, (vm, frame) => {
 		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
+		const obj = vm.values[vm.values.length - 1];
+		if (obj === CHAIN_BREAK || (obj == null && node.questionDotToken)) {
+			// short-circuit before the index expression is evaluated
+			vm.pop();
+			vm.frames.pop();
+			return vm.push(chainShort(node));
+		}
 		vm.pushNode(node.argumentExpression, frame.scope);
 		frame.phase = 2;
 	} else {
 		const index = vm.pop();
 		const obj = vm.pop();
 		vm.frames.pop();
-		if (obj == null) {
-			if (node.questionDotToken) return vm.push(undefined);
-			throw new TypeError(`Cannot read properties of ${obj} (reading '${String(index)}')`);
-		}
+		if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${keyText(index)}')`);
 		vm.push(vm.fromHost((obj as Record<PropertyKey, unknown>)[index as PropertyKey]));
 	}
 });
@@ -918,8 +999,10 @@ function updateExpression(vm: VM, frame: Frame, operand: ts.Expression, operator
 		} else {
 			const key = isElem ? (vm.pop() as PropertyKey) : (operand as ts.PropertyAccessExpression).name.text;
 			const obj = vm.pop() as Record<PropertyKey, unknown>;
-			const old = Number(obj[key]);
-			obj[key] = old + delta;
+			const pn = !isElem && ts.isPrivateIdentifier((operand as ts.PropertyAccessExpression).name) ? lookupPrivate(frame.scope, key as string) : undefined;
+			const old = Number(pn !== undefined ? privateGet(obj, pn) : obj[key]);
+			if (pn !== undefined) privateSet(obj, pn, old + delta);
+			else obj[key] = old + delta;
 			vm.frames.pop();
 			vm.push(prefix ? old + delta : old);
 		}
@@ -942,6 +1025,103 @@ on(K.TypeOfExpression, (vm, frame) => {
 		const v = vm.pop();
 		vm.frames.pop();
 		vm.push(typeof v);
+	}
+});
+
+// `delete obj.p` / `delete obj[k]` (strict: a non-configurable property throws, via the host). Any
+// other operand is evaluated for effect and yields true. `delete identifier` is a strict-mode
+// SyntaxError (parser).
+on(K.DeleteExpression, (vm, frame) => {
+	const node = frame.node as ts.DeleteExpression;
+	const target = node.expression;
+	const isProp = ts.isPropertyAccessExpression(target);
+	const isElem = ts.isElementAccessExpression(target);
+	if (frame.phase === 0) {
+		vm.pushNode(isProp || isElem ? (target as ts.PropertyAccessExpression | ts.ElementAccessExpression).expression : target, frame.scope);
+		frame.phase = 1;
+	} else if (frame.phase === 1) {
+		if (isElem) {
+			vm.pushNode((target as ts.ElementAccessExpression).argumentExpression, frame.scope);
+			frame.phase = 2;
+			return;
+		}
+		const obj = vm.pop();
+		vm.frames.pop();
+		if (!isProp) return vm.push(true);
+		if (obj == null) {
+			if ((target as ts.PropertyAccessExpression).questionDotToken) return vm.push(true);
+			throw new TypeError(`Cannot convert undefined or null to object`);
+		}
+		vm.push(delete (obj as Record<string, unknown>)[(target as ts.PropertyAccessExpression).name.text]);
+	} else {
+		const key = vm.pop() as PropertyKey;
+		const obj = vm.pop();
+		vm.frames.pop();
+		if (obj == null) {
+			if ((target as ts.ElementAccessExpression).questionDotToken) return vm.push(true);
+			throw new TypeError(`Cannot convert undefined or null to object`);
+		}
+		vm.push(delete (obj as Record<PropertyKey, unknown>)[key]);
+	}
+});
+
+// Tagged templates: `tag\`a${x}b\`` → tag(strings, x) where `strings` is the cooked-strings array with
+// a frozen `.raw`, cached per callsite (the spec's template object registry).
+const templateObjects = new WeakMap<ts.Node, readonly string[]>();
+function templateObject(vm: VM, node: ts.TaggedTemplateExpression): readonly string[] {
+	let strings = templateObjects.get(node);
+	if (strings === undefined) {
+		const cooked = new vm.realm.Array() as string[];
+		const raw = new vm.realm.Array() as string[];
+		const add = (lit: ts.TemplateLiteralLikeNode): void => {
+			cooked.push(lit.text);
+			raw.push(lit.rawText ?? lit.text);
+		};
+		if (ts.isNoSubstitutionTemplateLiteral(node.template)) add(node.template);
+		else {
+			add(node.template.head);
+			for (const span of node.template.templateSpans) add(span.literal);
+		}
+		const arr = Object.assign(cooked, { raw: Object.freeze(raw) });
+		strings = Object.freeze(arr);
+		templateObjects.set(node, strings);
+	}
+	return strings;
+}
+
+on(K.TaggedTemplateExpression, (vm, frame) => {
+	const node = frame.node as ts.TaggedTemplateExpression;
+	const tag = node.tag;
+	const isProp = ts.isPropertyAccessExpression(tag);
+	const spans = ts.isTemplateExpression(node.template) ? node.template.templateSpans : [];
+	if (frame.phase === 0) {
+		vm.pushNode(isProp ? (tag as ts.PropertyAccessExpression).expression : tag, frame.scope);
+		frame.phase = 1;
+	} else if (frame.phase === 1) {
+		if (isProp) {
+			const obj = vm.pop();
+			frame.thisArg = obj;
+			if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${(tag as ts.PropertyAccessExpression).name.text}')`);
+			vm.push(vm.fromHost((obj as Record<string, unknown>)[(tag as ts.PropertyAccessExpression).name.text]));
+		} else {
+			frame.thisArg = undefined;
+		}
+		for (let i = spans.length - 1; i >= 0; i--) vm.pushNode(spans[i].expression, frame.scope);
+		frame.phase = 2;
+	} else if (frame.phase === 2) {
+		const substitutions = vm.values.splice(vm.values.length - spans.length);
+		const calleeVal = vm.pop();
+		const args = [templateObject(vm, node), ...substitutions];
+		if (isGuestFunction(calleeVal)) {
+			vm.pushCall(calleeVal.__tsval, args, frame.thisArg);
+			frame.phase = 3;
+			return;
+		}
+		vm.frames.pop();
+		if (typeof calleeVal !== "function") throw new TypeError(`${describe(tag)} is not a function`);
+		vm.push(vm.invokeHost(calleeVal as (...a: unknown[]) => unknown, frame.thisArg, args, node as unknown as ts.CallExpression, false));
+	} else {
+		vm.frames.pop();
 	}
 });
 
@@ -986,9 +1166,10 @@ on(K.YieldExpression, (vm, frame) => {
 });
 
 /** Park the current frame at `resumePhase` and suspend the fiber with a payload of the given kind. */
-function suspend(vm: VM, frame: Frame, kind: "yield" | "await", value: unknown, resumePhase: number): void {
+function suspend(vm: VM, frame: Frame, kind: "yield" | "await", value: unknown, resumePhase: number, raw = false): void {
 	vm.pauseValue = value;
 	vm.pauseKind = kind;
+	vm.pauseRaw = raw;
 	vm.paused = true;
 	frame.phase = resumePhase;
 }
@@ -1006,48 +1187,125 @@ function enclosingFunctionMeta(scope: Scope): GuestFunctionMeta | undefined {
 	return undefined;
 }
 
-/** An async iterator for `iterable` (`Symbol.asyncIterator`, else its sync iterator), and which it is. */
+/** GetIterator(async): `@@asyncIterator` via GetMethod (present-but-not-callable is a TypeError, not a
+ *  fallback), else the sync iterator — and either result must be an object. */
 function getAsyncOrSyncIterator(iterable: unknown): { iterator: Iterator<unknown> | AsyncIterator<unknown>; sync: boolean } {
-	const asyncFactory = (iterable as { [Symbol.asyncIterator]?: () => AsyncIterator<unknown> })?.[Symbol.asyncIterator];
-	if (typeof asyncFactory === "function") return { iterator: asyncFactory.call(iterable), sync: false };
-	return { iterator: (iterable as Iterable<unknown>)[Symbol.iterator](), sync: true };
+	if (iterable == null) throw new TypeError(`${String(iterable)} is not async iterable`);
+	const asyncFactory = (iterable as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator];
+	if (asyncFactory != null) {
+		if (typeof asyncFactory !== "function") throw new TypeError("Symbol.asyncIterator is not a function");
+		const iterator = (asyncFactory as () => unknown).call(iterable);
+		if (!isObjectLike(iterator)) throw new TypeError("Result of the Symbol.asyncIterator method is not an object");
+		return { iterator: iterator as AsyncIterator<unknown>, sync: false };
+	}
+	return { iterator: getIterator(iterable), sync: true };
 }
 
-// `yield* iterable`: drive the inner iterator, re-yielding each value; the `yield*` expression's own
-// value is the inner iterator's completion (`return`) value. Inside an `async function*` the inner
-// iterator is async (or a sync one adapted): each `.next()` result is awaited before it is re-yielded.
+/** GetMethod: undefined/null → absent; otherwise must be callable. */
+function getMethod(obj: unknown, name: string): ((...a: unknown[]) => unknown) | undefined {
+	const fn = (obj as Record<string, unknown>)[name];
+	if (fn == null) return undefined;
+	if (typeof fn !== "function") throw new TypeError(`${name} is not a function`);
+	return fn as (...a: unknown[]) => unknown;
+}
+
+type Received = { kind: "next" | "throw" | "return"; value: unknown };
+
+/**
+ * `yield* iterable` — the spec's delegation loop (14.4.14 / AsyncGeneratorYield):
+ * - each resumption of the outer generator is forwarded to the inner iterator: `next(v)`, or
+ *   `throw(e)` / `return(v)` (via GetMethod: a missing `throw` closes the iterator and throws a
+ *   TypeError; a missing `return` returns from the *outer* generator);
+ * - every inner result must be an object; `done` and `value` are read (their getters may throw);
+ * - a sync generator yields the inner result object *as-is*; an async generator awaits inner results
+ *   (a sync inner iterator is adapted), then awaits the value before yielding it;
+ * - the expression's own value is the inner iterator's completion value.
+ * The fiber driver routes `throw`/`return` to this frame (`frame.delegating`) instead of unwinding.
+ */
 function yieldStar(vm: VM, frame: Frame, node: ts.YieldExpression): void {
 	const meta = enclosingFunctionMeta(frame.scope);
 	const asyncGen = meta?.isAsync === true && meta.isGenerator;
-	if (frame.phase === 0) {
-		vm.pushNode(node.expression as ts.Expression, frame.scope);
-		frame.phase = 1;
-	} else if (frame.phase === 1) {
-		frame.iterator = asyncGen ? getAsyncOrSyncIterator(vm.pop()).iterator : (vm.pop() as Iterable<unknown>)[Symbol.iterator]();
-		frame.sent = undefined;
-		frame.phase = 2;
-	} else if (frame.phase === 2) {
-		const step = (frame.iterator as Iterator<unknown>).next(frame.sent);
-		if (asyncGen) return suspend(vm, frame, "await", step, 5); // result object arrives on resume
-		settleDelegate(vm, frame, step as IteratorResult<unknown>);
-	} else if (frame.phase === 5) {
-		settleDelegate(vm, frame, resumed(vm) as IteratorResult<unknown>);
-	} else if (frame.phase === 3) {
-		frame.sent = resumed(vm);
-		frame.phase = 2;
-	} else {
-		vm.frames.pop();
-		vm.push(frame.result);
+	switch (frame.phase) {
+		case 0:
+			vm.pushNode(node.expression as ts.Expression, frame.scope);
+			frame.phase = 1;
+			return;
+		case 1: {
+			const iterable = vm.pop();
+			frame.iterator = asyncGen ? getAsyncOrSyncIterator(iterable).iterator : getIterator(iterable);
+			frame.received = { kind: "next", value: undefined } satisfies Received;
+			frame.phase = 2;
+			return;
+		}
+		case 2: {
+			// Dispatch the received completion to the inner iterator.
+			const it = frame.iterator as Record<string, unknown>;
+			const received = frame.received as Received;
+			let innerResult: unknown;
+			if (received.kind === "next") {
+				const next = it.next;
+				if (typeof next !== "function") throw new TypeError("iterator.next is not a function");
+				innerResult = (next as (...a: unknown[]) => unknown).call(it, received.value);
+			} else if (received.kind === "throw") {
+				const throwMethod = getMethod(it, "throw");
+				if (throwMethod === undefined) {
+					closeIterator(it as unknown as Iterator<unknown>, false, false);
+					throw new TypeError("The iterator does not provide a 'throw' method");
+				}
+				innerResult = throwMethod.call(it, received.value);
+			} else {
+				const returnMethod = getMethod(it, "return");
+				if (returnMethod === undefined) {
+					vm.frames.pop();
+					return void vm.raise({ type: "return", value: received.value }); // the outer generator returns
+				}
+				innerResult = returnMethod.call(it, received.value);
+				frame.returning = true;
+			}
+			if (asyncGen) return suspend(vm, frame, "await", innerResult, 3);
+			return delegateResult(vm, frame, innerResult, false);
+		}
+		case 3:
+			return delegateResult(vm, frame, resumed(vm), true); // the awaited inner result (async)
+		case 6:
+			// async: the inner value has been awaited (AsyncGeneratorYield) — now yield it
+			frame.delegating = true;
+			return suspend(vm, frame, "yield", resumed(vm), 4);
+		case 4: {
+			// Resumed after a yield: either a forwarded throw/return (routed by the driver) or next(v).
+			frame.delegating = false;
+			const injected = frame.received as Received | undefined;
+			frame.received = injected !== undefined && injected.kind !== "next" ? injected : ({ kind: "next", value: resumed(vm) } satisfies Received);
+			frame.phase = 2;
+			return;
+		}
+		case 5:
+			vm.frames.pop();
+			vm.push(frame.result);
+			return;
 	}
 }
 
-function settleDelegate(vm: VM, frame: Frame, result: IteratorResult<unknown>): void {
+function delegateResult(vm: VM, frame: Frame, innerResult: unknown, asyncGen: boolean): void {
+	if (!isObjectLike(innerResult)) throw new TypeError("Iterator result is not an object");
+	const returning = frame.returning === true;
+	frame.returning = false;
+	const result = innerResult as { done?: unknown; value?: unknown };
 	if (result.done) {
-		frame.result = vm.fromHost(result.value);
-		frame.phase = 4;
+		const value = result.value; // (getter may throw)
+		if (returning) {
+			vm.frames.pop();
+			return void vm.raise({ type: "return", value }); // inner returned → the outer generator returns
+		}
+		frame.result = vm.fromHost(value);
+		frame.phase = 5;
 		return;
 	}
-	suspend(vm, frame, "yield", vm.fromHost(result.value), 3);
+	if (asyncGen) return suspend(vm, frame, "await", result.value, 6);
+	// sync: yield the inner result object itself (GeneratorYield(innerResult)), never re-wrapped.
+	frame.received = undefined;
+	frame.delegating = true;
+	suspend(vm, frame, "yield", innerResult, 4, /* raw */ true);
 }
 
 on(K.AwaitExpression, (vm, frame) => {
@@ -1092,6 +1350,18 @@ on(K.BinaryExpression, (vm, frame) => {
 	const node = frame.node as ts.BinaryExpression;
 	const op = node.operatorToken.kind;
 
+	// `#x in obj` — a brand check (the left side is a private name, not an expression).
+	if (op === K.InKeyword && ts.isPrivateIdentifier(node.left)) {
+		if (frame.phase === 0) {
+			vm.pushNode(node.right, frame.scope);
+			frame.phase = 1;
+		} else {
+			const obj = vm.pop();
+			vm.frames.pop();
+			vm.push(privateHas(obj, lookupPrivate(frame.scope, node.left.text)));
+		}
+		return;
+	}
 	if (op === K.EqualsToken) return assignmentExpression(vm, frame, node);
 	if (ASSIGN.has(op)) return compoundAssignment(vm, frame, node, op);
 	if (LOGICAL.has(op)) return logicalExpression(vm, frame, node, op);
@@ -1139,7 +1409,7 @@ function assignmentExpression(vm: VM, frame: Frame, node: ts.BinaryExpression): 
 			vm.pushNode(node.right, frame.scope);
 			frame.phase = 1;
 		} else {
-			const value = vm.pop();
+			const value = nameAnonymous(vm.pop(), (node.left as ts.Identifier).text, node.right);
 			frame.scope.set((node.left as ts.Identifier).text, value);
 			vm.frames.pop();
 			vm.push(value);
@@ -1180,37 +1450,60 @@ function assignPattern(vm: VM, scope: Scope, target: ts.Expression, value: unkno
 		return;
 	}
 	if (ts.isArrayLiteralExpression(target)) {
-		const iterator = (value as Iterable<unknown>)[Symbol.iterator]();
-		for (const element of target.elements) {
-			if (ts.isOmittedExpression(element)) {
-				iterator.next();
-			} else if (ts.isSpreadElement(element)) {
-				const rest: unknown[] = [];
-				for (let r = iterator.next(); !r.done; r = iterator.next()) rest.push(r.value);
-				assignPattern(vm, scope, element.expression, rest);
-			} else {
-				const r = iterator.next();
-				assignPatternElement(vm, scope, element, r.done ? undefined : r.value);
+		const iterator = getIterator(value);
+		let done = false;
+		try {
+			for (const element of target.elements) {
+				if (ts.isOmittedExpression(element)) {
+					if (!done) done = Boolean(iterator.next().done);
+				} else if (ts.isSpreadElement(element)) {
+					const prepared = prepareAssignTarget(vm, scope, element.expression); // reference first
+					const rest = new vm.realm.Array() as unknown[];
+					while (!done) {
+						const r = iterator.next();
+						if (r.done) done = true;
+						else rest.push(r.value);
+					}
+					storePrepared(vm, scope, prepared, rest);
+				} else {
+					// Spec order: evaluate the target *reference* (a member's object/key), then IteratorStep,
+					// then a default if the value is undefined, then PutValue.
+					const prepared = prepareAssignTarget(vm, scope, element);
+					let v: unknown = undefined;
+					if (!done) {
+						const r = iterator.next();
+						if (r.done) done = true;
+						else v = r.value;
+					}
+					storePrepared(vm, scope, prepared, v);
+				}
 			}
+		} catch (error) {
+			closeIterator(iterator, done, true);
+			throw error;
 		}
+		closeIterator(iterator, done, false);
 		return;
 	}
 	if (ts.isObjectLiteralExpression(target)) {
+		if (value == null) throw new TypeError(`Cannot destructure '${String(value)}' as it is ${String(value)}.`);
 		const used = new Set<PropertyKey>();
 		for (const prop of target.properties) {
 			if (ts.isSpreadAssignment(prop)) {
-				const rest: Record<string, unknown> = {};
-				for (const k in value as object) if (!used.has(k)) rest[k] = (value as Record<string, unknown>)[k];
-				assignPattern(vm, scope, prop.expression, rest);
+				const prepared = prepareAssignTarget(vm, scope, prop.expression);
+				const rest = new vm.realm.Object() as Record<string, unknown>;
+				for (const k in value as object) if (!used.has(k)) rest[k] = vm.fromHost((value as Record<string, unknown>)[k]);
+				storePrepared(vm, scope, prepared, rest);
 			} else if (ts.isPropertyAssignment(prop)) {
 				const key = memberKey(vm, prop.name, scope);
 				used.add(key);
-				assignPatternElement(vm, scope, prop.initializer, vm.fromHost((value as Record<PropertyKey, unknown>)[key]));
+				const prepared = prepareAssignTarget(vm, scope, prop.initializer); // reference before GetV
+				storePrepared(vm, scope, prepared, vm.fromHost((value as Record<PropertyKey, unknown>)[key]));
 			} else if (ts.isShorthandPropertyAssignment(prop)) {
 				const key = prop.name.text;
 				used.add(key);
 				let v = vm.fromHost((value as Record<string, unknown>)[key]);
-				if (v === undefined && prop.objectAssignmentInitializer) v = vm.evalNodeSync(prop.objectAssignmentInitializer, scope);
+				if (v === undefined && prop.objectAssignmentInitializer) v = nameAnonymous(vm.evalNodeSync(prop.objectAssignmentInitializer, scope), key, prop.objectAssignmentInitializer);
 				scope.set(key, v);
 			} else {
 				unimplemented(`assignment pattern property ${ts.SyntaxKind[prop.kind]}`);
@@ -1221,13 +1514,49 @@ function assignPattern(vm: VM, scope: Scope, target: ts.Expression, value: unkno
 	unimplemented(`assignment pattern target ${ts.SyntaxKind[target.kind]}`);
 }
 
-// A target that may carry a default (`a = 1` inside a pattern parses as a BinaryExpression with `=`).
-function assignPatternElement(vm: VM, scope: Scope, element: ts.Expression, value: unknown): void {
+// An assignment-pattern element: a target (identifier / member / nested pattern) possibly with a
+// default (`a = 1` inside a pattern parses as a BinaryExpression with `=`). The target *reference* is
+// evaluated before the value is fetched (spec), so member targets are resolved eagerly here.
+interface PreparedTarget {
+	kind: "id" | "member" | "pattern";
+	target: ts.Expression;
+	init?: ts.Expression;
+	name?: string;
+	obj?: object;
+	key?: PropertyKey;
+	pn?: PrivateName;
+}
+
+function prepareAssignTarget(vm: VM, scope: Scope, element: ts.Expression): PreparedTarget {
+	let target = element;
+	let init: ts.Expression | undefined;
 	if (ts.isBinaryExpression(element) && element.operatorToken.kind === K.EqualsToken) {
-		const v = value === undefined ? vm.evalNodeSync(element.right, scope) : value;
-		return assignPattern(vm, scope, element.left, v);
+		target = element.left;
+		init = element.right;
 	}
-	assignPattern(vm, scope, element, value);
+	if (ts.isIdentifier(target)) return { kind: "id", target, init, name: target.text };
+	if (ts.isPropertyAccessExpression(target)) {
+		const obj = vm.evalNodeSync(target.expression, scope);
+		if (obj == null) throw new TypeError(`Cannot set properties of ${obj} (setting '${target.name.text}')`);
+		const pn = ts.isPrivateIdentifier(target.name) ? lookupPrivate(scope, target.name.text) : undefined;
+		return { kind: "member", target, init, obj: obj as object, key: target.name.text, pn };
+	}
+	if (ts.isElementAccessExpression(target)) {
+		const obj = vm.evalNodeSync(target.expression, scope);
+		const key = toPropertyKey(vm.evalNodeSync(target.argumentExpression, scope));
+		if (obj == null) throw new TypeError(`Cannot set properties of ${obj} (setting '${keyText(key)}')`);
+		return { kind: "member", target, init, obj: obj as object, key };
+	}
+	return { kind: "pattern", target, init };
+}
+
+function storePrepared(vm: VM, scope: Scope, t: PreparedTarget, value: unknown): void {
+	if (value === undefined && t.init !== undefined) value = namedIf(vm.evalNodeSync(t.init, scope), t.target, t.init);
+	if (t.kind === "id") scope.set(t.name as string, value);
+	else if (t.kind === "member") {
+		if (t.pn !== undefined) privateSet(t.obj, t.pn, value);
+		else (t.obj as Record<PropertyKey, unknown>)[t.key as PropertyKey] = value;
+	} else assignPattern(vm, scope, t.target, value);
 }
 
 function memberAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression): void {
@@ -1246,22 +1575,40 @@ function memberAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression): void
 		const value = vm.pop();
 		const key = isElement ? (vm.pop() as PropertyKey) : (target as ts.PropertyAccessExpression).name.text;
 		const obj = vm.pop() as Record<PropertyKey, unknown>;
-		frame.scope; // (obj mutated in place)
-		obj[key] = value;
+		if (!isElement && ts.isPrivateIdentifier((target as ts.PropertyAccessExpression).name)) privateSet(obj, lookupPrivate(frame.scope, key as string), value);
+		else obj[key] = value;
 		vm.frames.pop();
 		vm.push(value);
 	}
 }
 
+/** For `&&=` / `||=` / `??=`: does the current value already decide the result (RHS not evaluated)? */
+function logicalShortCircuits(op: number, current: unknown): boolean {
+	if (op === K.AmpersandAmpersandEqualsToken) return !current;
+	if (op === K.BarBarEqualsToken) return Boolean(current);
+	if (op === K.QuestionQuestionEqualsToken) return current != null;
+	return false;
+}
+
+// Spec order for `lhs op= rhs`: the LHS *reference* is evaluated, then GetValue (a TDZ or null-base
+// error surfaces here, before the RHS runs), then the RHS — and a logical assignment doesn't run the
+// RHS at all when the current value decides.
 function compoundAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression, op: number): void {
 	if (ts.isIdentifier(node.left)) {
 		const name = node.left.text;
 		if (frame.phase === 0) {
+			const current = frame.scope.get(name); // GetValue before the RHS
+			if (logicalShortCircuits(op, current)) {
+				vm.frames.pop();
+				return vm.push(current);
+			}
+			frame.current = current;
 			vm.pushNode(node.right, frame.scope);
 			frame.phase = 1;
 		} else {
-			const right = vm.pop() as never;
-			const result = applyCompound(op, frame.scope.get(name) as never, right);
+			// (a logical assignment `x ??= () => {}` names the function `x`; harmless for arithmetic ops)
+			const right = nameAnonymous(vm.pop(), name, node.right) as never;
+			const result = applyCompound(op, frame.current as never, right);
 			frame.scope.set(name, result);
 			vm.frames.pop();
 			vm.push(result);
@@ -1278,6 +1625,7 @@ function compoundAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression, op:
 function memberCompoundAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression, op: number): void {
 	const target = node.left as ts.PropertyAccessExpression | ts.ElementAccessExpression;
 	const isElem = ts.isElementAccessExpression(target);
+	const privateNameOf = (): PrivateName | undefined => (!isElem && ts.isPrivateIdentifier((target as ts.PropertyAccessExpression).name) ? lookupPrivate(frame.scope, (target as ts.PropertyAccessExpression).name.text) : undefined);
 	if (frame.phase === 0) {
 		vm.pushNode(target.expression, frame.scope);
 		frame.phase = 1;
@@ -1285,14 +1633,29 @@ function memberCompoundAssignment(vm: VM, frame: Frame, node: ts.BinaryExpressio
 		vm.pushNode((target as ts.ElementAccessExpression).argumentExpression, frame.scope);
 		frame.phase = 2;
 	} else if (frame.phase === 1 || frame.phase === 2) {
+		// GetValue before the RHS (the object and key stay on the stack for the store).
+		const n = vm.values.length;
+		const key = isElem ? (vm.values[n - 1] as PropertyKey) : (target as ts.PropertyAccessExpression).name.text;
+		const obj = vm.values[isElem ? n - 2 : n - 1];
+		if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${keyText(key)}')`);
+		const pn = privateNameOf();
+		const current = pn !== undefined ? privateGet(obj, pn) : vm.fromHost((obj as Record<PropertyKey, unknown>)[key]);
+		if (logicalShortCircuits(op, current)) {
+			vm.values.length = isElem ? n - 2 : n - 1;
+			vm.frames.pop();
+			return vm.push(current);
+		}
+		frame.current = current;
 		vm.pushNode(node.right, frame.scope);
 		frame.phase = 3;
 	} else {
 		const right = vm.pop() as never;
 		const key = isElem ? (vm.pop() as PropertyKey) : (target as ts.PropertyAccessExpression).name.text;
 		const obj = vm.pop() as Record<PropertyKey, unknown>;
-		const result = applyCompound(op, obj[key] as never, right);
-		obj[key] = result;
+		const pn = privateNameOf();
+		const result = applyCompound(op, frame.current as never, right);
+		if (pn !== undefined) privateSet(obj, pn, result);
+		else obj[key] = result;
 		vm.frames.pop();
 		vm.push(result);
 	}
@@ -1362,7 +1725,13 @@ on(K.CallExpression, (vm, frame) => {
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
 		if (isElem) {
-			// obj is on the stack; evaluate the index, resolve the callee in phase 2.
+			// obj is on the stack; a nullish base under `?.` short-circuits before the index is evaluated.
+			const obj = vm.values[vm.values.length - 1];
+			if (obj === CHAIN_BREAK || (obj == null && (callee as ts.ElementAccessExpression).questionDotToken)) {
+				vm.pop();
+				vm.frames.pop();
+				return vm.push(chainShort(node));
+			}
 			vm.pushNode((callee as ts.ElementAccessExpression).argumentExpression, frame.scope);
 			frame.phase = 2;
 			return;
@@ -1370,25 +1739,27 @@ on(K.CallExpression, (vm, frame) => {
 		if (isProp) {
 			const obj = vm.pop();
 			frame.thisArg = obj;
-			if (obj == null) {
-				if (node.questionDotToken) return void (vm.frames.pop(), vm.push(undefined));
-				throw new TypeError(`Cannot read properties of ${obj} (reading '${(callee as ts.PropertyAccessExpression).name.text}')`);
-			}
-			vm.push((obj as Record<string, unknown>)[(callee as ts.PropertyAccessExpression).name.text]);
+			const name = (callee as ts.PropertyAccessExpression).name;
+			if (obj === CHAIN_BREAK || (obj == null && (callee as ts.PropertyAccessExpression).questionDotToken)) return void (vm.frames.pop(), vm.push(chainShort(node)));
+			if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${name.text}')`);
+			if (ts.isPrivateIdentifier(name)) vm.push(privateGet(obj, lookupPrivate(frame.scope, name.text)));
+			else vm.push((obj as Record<string, unknown>)[name.text]);
 		} else {
 			frame.thisArg = undefined;
 		}
+		// `f?.()` on a nullish callee (or a broken chain) short-circuits before the arguments run.
+		const calleeValue = vm.values[vm.values.length - 1];
+		if (calleeValue === CHAIN_BREAK || (calleeValue == null && node.questionDotToken)) return void (vm.pop(), vm.frames.pop(), vm.push(chainShort(node)));
 		pushCallArguments(vm, frame, node.arguments);
 		frame.phase = 3;
 	} else if (frame.phase === 2) {
 		const index = vm.pop();
 		const obj = vm.pop();
 		frame.thisArg = obj;
-		if (obj == null) {
-			if (node.questionDotToken) return void (vm.frames.pop(), vm.push(undefined));
-			throw new TypeError(`Cannot read properties of ${obj} (reading '${String(index)}')`);
-		}
+		if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${keyText(index)}')`);
 		vm.push((obj as Record<PropertyKey, unknown>)[index as PropertyKey]);
+		const calleeValue = vm.values[vm.values.length - 1];
+		if (calleeValue === CHAIN_BREAK || (calleeValue == null && node.questionDotToken)) return void (vm.pop(), vm.frames.pop(), vm.push(chainShort(node)));
 		pushCallArguments(vm, frame, node.arguments);
 		frame.phase = 3;
 	} else if (frame.phase === 3) {
@@ -1495,7 +1866,97 @@ interface ClassMeta {
 	superClass: unknown;
 	proto: object;
 	ctorNode?: ts.ConstructorDeclaration;
-	instanceFields: { name: PropertyKey; initializer?: ts.Expression }[];
+	/** public (`name`) or private (`privateName`) instance fields, in source order. */
+	instanceFields: { name?: PropertyKey; privateName?: PrivateName; initializer?: ts.Expression }[];
+	/** private methods/accessors installed on each instance before its fields initialize. */
+	instancePrivateMethods: PrivateName[];
+}
+
+// ============================================================================
+// Private names (#x)
+// ============================================================================
+//
+// A private name is created fresh per class *evaluation* (a unique symbol) and resolved lexically —
+// nearest enclosing class that declares it. Private elements live in a side table keyed by object
+// (never as properties: they're invisible to reflection), and every access is a brand check: an
+// object the class didn't initialize throws a TypeError.
+
+export interface PrivateName {
+	key: symbol;
+	/** `#x`, as written (for messages and `Function.name`). */
+	description: string;
+	kind: "field" | "method" | "accessor";
+	isStatic: boolean;
+	method?: unknown;
+	get?: unknown;
+	set?: unknown;
+}
+
+interface PrivateEntry {
+	pn: PrivateName;
+	value?: unknown;
+}
+
+const privateElements = new WeakMap<object, Map<symbol, PrivateEntry>>();
+
+function isObjectLike(v: unknown): v is object {
+	return (typeof v === "object" && v !== null) || typeof v === "function";
+}
+
+function lookupPrivate(scope: Scope, name: string): PrivateName {
+	for (let s: Scope | undefined = scope; s; s = s.parent) {
+		const pn = s.privateNames?.get(name);
+		if (pn !== undefined) return pn as PrivateName;
+	}
+	return unimplemented(`unbound private name ${name} (a parse-time error in valid code)`);
+}
+
+function privateEntry(obj: unknown, pn: PrivateName, verb: string): PrivateEntry {
+	if (!isObjectLike(obj)) throw new TypeError(`Cannot ${verb} private member ${pn.description} from a non-object`);
+	const entry = privateElements.get(obj)?.get(pn.key);
+	if (entry === undefined) throw new TypeError(`Cannot ${verb} private member ${pn.description} from an object whose class did not declare it`);
+	return entry;
+}
+
+function privateGet(obj: unknown, pn: PrivateName): unknown {
+	const entry = privateEntry(obj, pn, "read");
+	if (pn.kind === "field") return entry.value;
+	if (pn.kind === "method") return pn.method;
+	if (typeof pn.get !== "function") throw new TypeError(`'${pn.description}' was defined without a getter`);
+	return (pn.get as (this: unknown) => unknown).call(obj);
+}
+
+function privateSet(obj: unknown, pn: PrivateName, value: unknown): void {
+	const entry = privateEntry(obj, pn, "write");
+	if (pn.kind === "field") {
+		entry.value = value;
+		return;
+	}
+	if (pn.kind === "method") throw new TypeError(`Private method '${pn.description}' is not writable`);
+	if (typeof pn.set !== "function") throw new TypeError(`'${pn.description}' was defined without a setter`);
+	(pn.set as (this: unknown, v: unknown) => void).call(obj, value);
+}
+
+function privateHas(obj: unknown, pn: PrivateName): boolean {
+	if (!isObjectLike(obj)) throw new TypeError("Cannot use 'in' operator to search for a private field in a non-object");
+	return privateElements.get(obj)?.has(pn.key) === true;
+}
+
+/** PrivateFieldAdd / PrivateMethodOrAccessorAdd: brand the object with this private name. */
+function privateAdd(obj: object, pn: PrivateName, value?: unknown): void {
+	let map = privateElements.get(obj);
+	if (map === undefined) privateElements.set(obj, (map = new Map()));
+	if (map.has(pn.key)) throw new TypeError(`Cannot initialize ${pn.description} twice on the same object`);
+	map.set(pn.key, { pn, value });
+}
+
+/** Fork support: a cloned object keeps its private state (values cloned, names shared). */
+export function clonePrivateElements(from: object, to: object, cloneValue: (v: unknown) => unknown): void {
+	const map = privateElements.get(from);
+	if (map === undefined) return;
+	const copy = new Map<symbol, PrivateEntry>();
+	for (const [key, entry] of map) copy.set(key, { pn: entry.pn, value: cloneValue(entry.value) });
+	privateElements.set(to, copy);
 }
 
 interface GuestClass {
@@ -1515,7 +1976,7 @@ function hasStatic(member: ts.ClassElement): boolean {
 
 function memberKey(vm: VM, name: ts.PropertyName | undefined, scope: Scope): PropertyKey {
 	if (name === undefined) return "";
-	if (ts.isComputedPropertyName(name)) return vm.evalNodeSync(name.expression, scope) as PropertyKey;
+	if (ts.isComputedPropertyName(name)) return toPropertyKey(vm.evalNodeSync(name.expression, scope));
 	return propertyName(name);
 }
 
@@ -1523,21 +1984,37 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 	assertSupportedClassSurface(node);
 	const heritage = node.heritageClauses?.find((h) => h.token === K.ExtendsKeyword);
 	const superClass = heritage ? vm.evalNodeSync(heritage.types[0].expression, outerScope) : undefined;
-	const proto = superClass != null ? Object.create((superClass as GuestClass).prototype) : {};
+	const proto = superClass != null ? Object.create((superClass as GuestClass).prototype) : new vm.realm.Object();
 	// The class body sees an inner, immutable binding of its own name (so static initializers,
 	// `static {}` blocks and methods can refer to it — also for a *named class expression*, whose name
 	// is visible only inside). Bound once the constructor exists, below.
 	const scope = new Scope(outerScope, false);
-	const meta: ClassMeta = { node, closure: scope, superClass, proto, instanceFields: [] };
+	const meta: ClassMeta = { node, closure: scope, superClass, proto, instanceFields: [], instancePrivateMethods: [] };
+	// Private names are created up front (fresh per evaluation) so every member — including
+	// initializers and methods that run later — resolves them lexically through `scope`.
+	const privateNames = new Map<string, object>();
+	scope.privateNames = privateNames;
+	for (const member of node.members) {
+		const name = (member as { name?: ts.Node }).name;
+		if (name === undefined || !ts.isPrivateIdentifier(name)) continue;
+		if (privateNames.has(name.text)) continue; // a get/set pair shares one name
+		const kind: PrivateName["kind"] = ts.isPropertyDeclaration(member) ? "field" : ts.isMethodDeclaration(member) ? "method" : "accessor";
+		privateNames.set(name.text, { key: Symbol(name.text), description: name.text, kind, isStatic: hasStatic(member) } satisfies PrivateName);
+	}
+	const privateOf = (member: ts.ClassElement): PrivateName | undefined => {
+		const name = (member as { name?: ts.Node }).name;
+		return name !== undefined && ts.isPrivateIdentifier(name) ? (privateNames.get(name.text) as PrivateName) : undefined;
+	};
 
 	const Ctor = function (this: unknown, ...args: unknown[]): unknown {
 		// Host-initiated construction (rare); guest `new` uses the explicit construct frame.
+		if (new.target === undefined) throw new TypeError(`Class constructor ${node.name?.text ?? ""} cannot be invoked without 'new'`);
 		return vm.constructGuestSync(Ctor as unknown as GuestClass, args);
 	} as unknown as GuestClass;
 	(Ctor as { __tsvalClass: ClassMeta }).__tsvalClass = meta;
 	Ctor.prototype = proto;
 	Object.defineProperty(proto, "constructor", { value: Ctor, enumerable: false, writable: true, configurable: true });
-	if (superClass != null) Object.setPrototypeOf(Ctor, superClass);
+	Object.setPrototypeOf(Ctor, superClass != null ? superClass : vm.realm.Function.prototype);
 	// Always set: an anonymous class expression is `""`, and V8 would otherwise infer the host
 	// variable's name ("Ctor") — observable via `.name`.
 	Object.defineProperty(Ctor, "name", { value: node.name?.text ?? "", configurable: true });
@@ -1546,36 +2023,63 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 		scope.initialize(node.name.text, Ctor);
 	}
 
+	// Pass 1 — methods and accessors (public and private, instance and static), and the constructor.
+	// Spec order: all methods exist before any static field initializer or static block runs.
+	const staticPrivateInstalled = new Set<symbol>();
 	for (const member of node.members) {
 		const target = hasStatic(member) ? (Ctor as unknown as object) : proto;
+		const pn = privateOf(member);
 		if (ts.isConstructorDeclaration(member)) {
 			if (member.body) meta.ctorNode = member;
 		} else if (ts.isMethodDeclaration(member)) {
 			const fn = createGuestFunction(vm, member, scope, target);
-			Object.defineProperty(target, memberKey(vm, member.name, scope), { value: fn, enumerable: false, writable: true, configurable: true });
-		} else if (ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
-			const key = memberKey(vm, member.name, scope);
-			const fn = createGuestFunction(vm, member, scope, target);
-			const desc: PropertyDescriptor = { ...(Object.getOwnPropertyDescriptor(target, key) ?? {}), enumerable: false, configurable: true };
-			delete desc.value;
-			delete desc.writable;
-			if (ts.isGetAccessorDeclaration(member)) desc.get = fn as () => unknown;
-			else desc.set = fn as (v: unknown) => void;
-			Object.defineProperty(target, key, desc);
-		} else if (ts.isPropertyDeclaration(member)) {
-			const key = memberKey(vm, member.name, scope);
-			if (hasStatic(member)) {
-				(Ctor as unknown as Record<PropertyKey, unknown>)[key] = member.initializer ? vm.evalNodeSync(member.initializer, fieldScope(meta, Ctor, Ctor as object)) : undefined;
+			if (pn !== undefined) {
+				pn.method = fn;
+				if (pn.isStatic) privateAdd(Ctor as unknown as object, pn);
+				else meta.instancePrivateMethods.push(pn);
 			} else {
-				meta.instanceFields.push({ name: key, initializer: member.initializer });
+				Object.defineProperty(target, memberKey(vm, member.name, scope), { value: fn, enumerable: false, writable: true, configurable: true });
+			}
+		} else if (ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
+			const fn = createGuestFunction(vm, member, scope, target);
+			if (pn !== undefined) {
+				if (ts.isGetAccessorDeclaration(member)) pn.get = fn;
+				else pn.set = fn;
+				if (pn.isStatic) {
+					if (!staticPrivateInstalled.has(pn.key)) privateAdd(Ctor as unknown as object, pn);
+				} else if (!meta.instancePrivateMethods.includes(pn)) meta.instancePrivateMethods.push(pn);
+				staticPrivateInstalled.add(pn.key);
+			} else {
+				const key = memberKey(vm, member.name, scope);
+				const desc: PropertyDescriptor = { ...(Object.getOwnPropertyDescriptor(target, key) ?? {}), enumerable: false, configurable: true };
+				delete desc.value;
+				delete desc.writable;
+				if (ts.isGetAccessorDeclaration(member)) desc.get = fn as () => unknown;
+				else desc.set = fn as (v: unknown) => void;
+				Object.defineProperty(target, key, desc);
+			}
+		} else if (!ts.isPropertyDeclaration(member) && !ts.isClassStaticBlockDeclaration(member) && !ts.isSemicolonClassElement(member)) {
+			unimplemented(`class member ${ts.SyntaxKind[member.kind]}`);
+		}
+	}
+	// Pass 2 — fields and static blocks, in source order (static ones run now; instance ones are
+	// recorded to run per construction).
+	for (const member of node.members) {
+		if (ts.isPropertyDeclaration(member)) {
+			const pn = privateOf(member);
+			if (hasStatic(member)) {
+				const key: PropertyKey = pn?.description ?? memberKey(vm, member.name, scope);
+				const value = member.initializer ? nameAnonymous(vm.evalNodeSync(member.initializer, fieldScope(meta, Ctor, Ctor as object)), key, member.initializer) : undefined;
+				if (pn !== undefined) privateAdd(Ctor as unknown as object, pn, value);
+				else (Ctor as unknown as Record<PropertyKey, unknown>)[key] = value;
+			} else if (pn !== undefined) {
+				meta.instanceFields.push({ privateName: pn, initializer: member.initializer });
+			} else {
+				meta.instanceFields.push({ name: memberKey(vm, member.name, scope), initializer: member.initializer });
 			}
 		} else if (ts.isClassStaticBlockDeclaration(member)) {
 			// `static { … }` runs at definition time, in source order with static fields, `this` = the class.
 			vm.evalNodeSync(member.body, fieldScope(meta, Ctor, Ctor as object));
-		} else if (ts.isSemicolonClassElement(member)) {
-			// ignore stray `;`
-		} else {
-			unimplemented(`class member ${ts.SyntaxKind[member.kind]}`);
 		}
 	}
 	return Ctor;
@@ -1613,19 +2117,46 @@ function fieldScope(meta: ClassMeta, thisVal: unknown, homeObject: object): Scop
 }
 
 function initInstanceFields(vm: VM, meta: ClassMeta, instance: object): void {
+	// Private methods/accessors brand the instance first (so field initializers may call them).
+	for (const pn of meta.instancePrivateMethods) privateAdd(instance, pn);
 	for (const field of meta.instanceFields) {
-		const value = field.initializer ? vm.evalNodeSync(field.initializer, fieldScope(meta, instance, meta.proto)) : undefined;
-		(instance as Record<PropertyKey, unknown>)[field.name] = value;
+		const key: PropertyKey = field.privateName?.description ?? (field.name as PropertyKey);
+		const value = field.initializer ? nameAnonymous(vm.evalNodeSync(field.initializer, fieldScope(meta, instance, meta.proto)), key, field.initializer) : undefined;
+		if (field.privateName !== undefined) privateAdd(instance, field.privateName, value);
+		else (instance as Record<PropertyKey, unknown>)[key] = value;
 	}
 }
 
-function pushParentConstruct(vm: VM, superClass: unknown, args: unknown[], instance: object): void {
+/**
+ * Run the parent's construction for a derived class. A guest parent runs as a `construct` frame on
+ * the explicit stack (nothing returned). A **host** parent (`extends Error`, `extends Array`) must
+ * *create* `this` itself, with the derived class as `new.target` so the prototype is right — the
+ * spec's "`this` is uninitialized until `super()` returns" model — so the created object is returned
+ * and the caller rebinds `this` to it.
+ */
+function pushParentConstruct(vm: VM, superClass: unknown, args: unknown[], instance: object, newTarget: unknown): object | undefined {
 	if (isGuestClass(superClass)) {
-		vm.pushFrame({ kind: "construct", node: null, phase: 0, scope: vm.rootScope, valuesBase: vm.values.length, ctor: superClass, args, instance, isNew: false });
-	} else if (typeof superClass === "function") {
-		// Host superclass (e.g. `extends Error`): best-effort — copy own props of a fresh instance.
-		const parent = Reflect.construct(superClass as new (...a: unknown[]) => object, args, (instance as { constructor: new (...a: unknown[]) => unknown }).constructor);
-		Object.assign(instance, parent);
+		vm.pushFrame({ kind: "construct", node: null, phase: 0, scope: vm.rootScope, valuesBase: vm.values.length, ctor: superClass, args, instance, isNew: false, newTarget });
+		return undefined;
+	}
+	if (typeof superClass === "function") return Reflect.construct(superClass as new (...a: unknown[]) => object, args, newTarget as new (...a: unknown[]) => unknown);
+	throw new TypeError("Class extends value is not a constructor or null");
+}
+
+/** After a host parent created `this`, point the constructor's `this` and the pending construct frame at it. */
+function rebindThis(vm: VM, scope: Scope, replacement: object): void {
+	for (let s: Scope | undefined = scope; s; s = s.parent) {
+		if (s.hasThis) {
+			s.thisVal = replacement;
+			break;
+		}
+	}
+	for (let i = vm.frames.length - 1; i >= 0; i--) {
+		const f = vm.frames[i];
+		if (f.kind === "construct") {
+			f.instance = replacement;
+			break;
+		}
 	}
 }
 
@@ -1639,9 +2170,16 @@ function superCall(vm: VM, frame: Frame, node: ts.CallExpression): void {
 		const args = collectCallArguments(vm, frame);
 		const meta = frame.scope.getClassMeta() as ClassMeta;
 		const instance = frame.scope.getThis() as object;
-		// initfields runs after the parent construct frame completes (it's pushed first, below it).
-		vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance });
-		pushParentConstruct(vm, meta.superClass, args, instance);
+		const newTarget = frame.scope.getNewTarget();
+		if (isGuestClass(meta.superClass)) {
+			// initfields runs after the parent construct frame completes (it's pushed first, below it).
+			vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance });
+			pushParentConstruct(vm, meta.superClass, args, instance, newTarget);
+		} else {
+			const created = pushParentConstruct(vm, meta.superClass, args, instance, newTarget) as object;
+			rebindThis(vm, frame.scope, created);
+			vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance: created });
+		}
 		frame.phase = 2;
 	} else {
 		vm.frames.pop();
@@ -1676,7 +2214,7 @@ on(K.EnumDeclaration, (vm, frame) => {
 	const node = frame.node as ts.EnumDeclaration;
 	vm.frames.pop();
 	const name = node.name.text;
-	const enumObject: Record<string, string | number> = {};
+	const enumObject = new vm.realm.Object() as Record<string, string | number>;
 	frame.scope.declareLexical(name, "const");
 	frame.scope.initialize(name, enumObject); // bound first so `E.member` resolves inside initializers
 	const memberScope = new Scope(frame.scope, false);
@@ -1719,8 +2257,15 @@ syntheticHandlers.construct = (vm, frame) => {
 			body.reuseScope = true;
 		} else if (meta.superClass != null) {
 			// Implicit derived constructor: super(...args), then this class's fields.
-			vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance });
-			pushParentConstruct(vm, meta.superClass, frame.args as unknown[], instance);
+			const newTarget = frame.newTarget ?? ctor;
+			if (isGuestClass(meta.superClass)) {
+				vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance });
+				pushParentConstruct(vm, meta.superClass, frame.args as unknown[], instance, newTarget);
+			} else {
+				const created = pushParentConstruct(vm, meta.superClass, frame.args as unknown[], instance, newTarget) as object;
+				frame.instance = created;
+				vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance: created });
+			}
 		} else {
 			initInstanceFields(vm, meta, instance);
 		}
@@ -1748,21 +2293,24 @@ syntheticHandlers.call = (vm, frame) => {
 			if (meta.homeObject !== undefined) fnScope.homeObject = meta.homeObject;
 			if (frame.newTarget !== undefined) fnScope.newTarget = frame.newTarget;
 			fnScope.declareLexical("arguments", "var");
-			fnScope.initialize("arguments", frame.args as unknown[]);
+			fnScope.initialize("arguments", realmArray(vm, frame.args as unknown[]));
 		}
 		bindParameters(vm, fnScope, node.parameters, frame.args as unknown[]);
 		fnScope.functionMeta = meta;
 		frame.scope = fnScope;
+		// With non-simple parameters (defaults, patterns, rest) the body gets its own var environment:
+		// a closure in a default sees the *parameter*, not a same-named `var` declared in the body.
+		const bodyScope = node.parameters.some((p) => p.initializer !== undefined || p.dotDotDotToken !== undefined || !ts.isIdentifier(p.name)) ? new Scope(fnScope, true) : fnScope;
 
 		if (ts.isBlock(node.body!)) {
-			hoist(vm, fnScope, node.body.statements);
-			// Reuse the function scope for the body block (params + body vars share it).
-			const bodyFrame = vm.pushNode(node.body, fnScope);
+			hoist(vm, bodyScope, node.body.statements);
+			// Reuse the body scope for the body block (body vars live there directly).
+			const bodyFrame = vm.pushNode(node.body, bodyScope);
 			bodyFrame.reuseScope = true;
 			frame.phase = 1;
 		} else {
 			// Arrow with an expression body: value is the return value.
-			vm.pushNode(node.body!, fnScope);
+			vm.pushNode(node.body!, bodyScope);
 			frame.phase = 2;
 		}
 	} else if (frame.phase === 1) {
@@ -1797,17 +2345,44 @@ function functionLength(params: readonly ts.ParameterDeclaration[]): number {
 
 function bindParameters(vm: VM, scope: Scope, allParams: readonly ts.ParameterDeclaration[], args: unknown[]): void {
 	const params = allParams.filter((p) => !isThisParameter(p));
+	// All parameter names start in the TDZ, so a default referring to itself or a later parameter
+	// (`function f(a = b, b) {}`) is a ReferenceError; each binding leaves the TDZ as it's bound.
+	for (const param of params) for (const name of bindingNames(param.name)) scope.declareLexical(name, "let");
 	for (let i = 0; i < params.length; i++) {
 		const param = params[i];
 		if (param.dotDotDotToken) {
 			// Rest parameter — binds the remaining args (which may themselves be destructured).
-			bindTarget(vm, scope, param.name, args.slice(i), "param");
+			bindTarget(vm, scope, param.name, realmArray(vm, Array.prototype.slice.call(args, i)), "param");
 			return;
 		}
 		let value = args[i];
-		if (value === undefined && param.initializer) value = vm.evalNodeSync(param.initializer, scope);
+		if (value === undefined && param.initializer) value = namedIf(vm.evalNodeSync(param.initializer, scope), param.name, param.initializer);
 		bindTarget(vm, scope, param.name, value, "param");
 	}
+}
+
+// --- NamedEvaluation: an anonymous function/class takes the name it's bound or assigned to --------
+
+/** `function () {}`, `() => {}`, `class {}` — possibly parenthesized (the cover grammar). */
+function isAnonymousFunctionDefinition(node: ts.Node): boolean {
+	while (ts.isParenthesizedExpression(node)) node = node.expression;
+	return (ts.isFunctionExpression(node) && node.name === undefined) || ts.isArrowFunction(node) || (ts.isClassExpression(node) && node.name === undefined);
+}
+
+/** Give `value` the name `name` iff it came from an anonymous function definition `from` and has none. */
+function nameAnonymous(value: unknown, name: PropertyKey, from: ts.Node | undefined): unknown {
+	if (from === undefined || !isAnonymousFunctionDefinition(from)) return value;
+	if (!(isGuestFunction(value) || isGuestClass(value))) return value;
+	if ((value as { name?: string }).name !== "") return value;
+	const text = typeof name === "symbol" ? (name.description === undefined ? "" : `[${name.description}]`) : String(name);
+	Object.defineProperty(value, "name", { value: text, configurable: true });
+	if (isGuestFunction(value)) value.__tsval.name = text;
+	return value;
+}
+
+/** NamedEvaluation for a binding target: only a plain identifier names the value. */
+function namedIf(value: unknown, target: ts.BindingName | ts.Expression, from: ts.Node | undefined): unknown {
+	return ts.isIdentifier(target) ? nameAnonymous(value, target.text, from) : value;
 }
 
 /**
@@ -1815,7 +2390,7 @@ function bindParameters(vm: VM, scope: Scope, allParams: readonly ts.ParameterDe
  * into `scope`. The leaf sub-expressions of a pattern — default values and computed keys — are
  * evaluated synchronously (`vm.evalNodeSync`); the destructuring itself is pure.
  */
-function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: unknown, kind: BindingKind): void {
+export function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: unknown, kind: BindingKind): void {
 	if (ts.isIdentifier(target)) {
 		if (kind === "var") {
 			scope.declareVar(target.text);
@@ -1827,10 +2402,11 @@ function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: unknown
 		return;
 	}
 	if (ts.isObjectBindingPattern(target)) {
+		if (value == null) throw new TypeError(`Cannot destructure '${String(value)}' as it is ${String(value)}.`);
 		const used = new Set<PropertyKey>();
 		for (const element of target.elements) {
 			if (element.dotDotDotToken) {
-				const rest: Record<string, unknown> = {};
+				const rest = new vm.realm.Object() as Record<string, unknown>;
 				for (const key in value as object) if (!used.has(key)) rest[key] = vm.fromHost((value as Record<string, unknown>)[key]);
 				bindTarget(vm, scope, element.name, rest, kind);
 				continue;
@@ -1838,36 +2414,99 @@ function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: unknown
 			const key = element.propertyName ? bindingKey(vm, scope, element.propertyName) : (element.name as ts.Identifier).text;
 			used.add(key);
 			let v = vm.fromHost((value as Record<PropertyKey, unknown>)?.[key]);
-			if (v === undefined && element.initializer) v = vm.evalNodeSync(element.initializer, scope);
+			if (v === undefined && element.initializer) v = namedIf(vm.evalNodeSync(element.initializer, scope), element.name, element.initializer);
 			bindTarget(vm, scope, element.name, v, kind);
 		}
 		return;
 	}
 	if (ts.isArrayBindingPattern(target)) {
-		const iterator = (value as Iterable<unknown>)[Symbol.iterator]();
-		for (const element of target.elements) {
-			if (ts.isOmittedExpression(element)) {
-				iterator.next();
-				continue;
+		const iterator = getIterator(value);
+		let done = false;
+		try {
+			for (const element of target.elements) {
+				if (ts.isOmittedExpression(element)) {
+					if (!done) done = Boolean(iterator.next().done);
+					continue;
+				}
+				if (element.dotDotDotToken) {
+					const rest = new vm.realm.Array() as unknown[];
+					while (!done) {
+						const r = iterator.next();
+						if (r.done) done = true;
+						else rest.push(r.value);
+					}
+					bindTarget(vm, scope, element.name, rest, kind);
+					continue;
+				}
+				let v: unknown = undefined;
+				if (!done) {
+					const r = iterator.next();
+					if (r.done) done = true;
+					else v = r.value;
+				}
+				if (v === undefined && element.initializer) v = namedIf(vm.evalNodeSync(element.initializer, scope), element.name, element.initializer);
+				bindTarget(vm, scope, element.name, v, kind);
 			}
-			if (element.dotDotDotToken) {
-				const rest: unknown[] = [];
-				for (let r = iterator.next(); !r.done; r = iterator.next()) rest.push(r.value);
-				bindTarget(vm, scope, element.name, rest, kind);
-				continue;
-			}
-			const r = iterator.next();
-			let v = r.done ? undefined : r.value;
-			if (v === undefined && element.initializer) v = vm.evalNodeSync(element.initializer, scope);
-			bindTarget(vm, scope, element.name, v, kind);
+		} catch (error) {
+			closeIterator(iterator, done, true);
+			throw error;
 		}
+		closeIterator(iterator, done, false);
 		return;
 	}
 	unimplemented(`binding target ${ts.SyntaxKind[(target as ts.Node).kind]}`);
 }
 
+/** A guest-realm array holding `list`'s elements, copied by index — never through the iteration
+ *  protocol, which guest code may have overridden (`Array.prototype[Symbol.iterator] = …`). */
+function realmArray(vm: VM, list: ArrayLike<unknown>): unknown[] {
+	const out = new vm.realm.Array(list.length) as unknown[];
+	for (let i = 0; i < list.length; i++) out[i] = list[i];
+	return out;
+}
+
+/** GetIterator: a TypeError (not a property-of-null error) when the value isn't iterable. */
+function getIterator(value: unknown): Iterator<unknown> {
+	const factory = value == null ? undefined : (value as { [Symbol.iterator]?: () => Iterator<unknown> })[Symbol.iterator];
+	if (typeof factory !== "function") throw new TypeError(`${value === null ? "null" : typeof value === "object" ? "object" : String(value)} is not iterable`);
+	const iterator = factory.call(value);
+	if (typeof iterator !== "object" || iterator === null) throw new TypeError("Result of the Symbol.iterator method is not an object");
+	return iterator;
+}
+
+/** IteratorClose: call `return()` on an iterator a pattern didn't exhaust. On an abrupt completion the
+ *  original error wins over anything `return()` throws; on a normal one, `return()`'s errors surface. */
+export function closeIterator(iterator: Iterator<unknown>, done: boolean, abrupt: boolean): void {
+	if (done) return;
+	const ret = (iterator as { return?: unknown }).return;
+	if (ret == null) return;
+	if (abrupt) {
+		try {
+			if (typeof ret === "function") (ret as () => unknown).call(iterator);
+		} catch {
+			/* the original error wins */
+		}
+		return;
+	}
+	if (typeof ret !== "function") throw new TypeError("iterator.return is not a function");
+	const result = (ret as () => unknown).call(iterator);
+	if (typeof result !== "object" || result === null) throw new TypeError("iterator.return() did not return an object");
+}
+
+/** The loop head's `let`/`const` names are in the TDZ while the iterable expression evaluates
+ *  (`for (const x of x)` is a ReferenceError). */
+function headTdzScope(scope: Scope, initializer: ts.ForInitializer): Scope {
+	if (!ts.isVariableDeclarationList(initializer) || (initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0) return scope;
+	const tdz = new Scope(scope, false);
+	for (const decl of initializer.declarations) for (const name of bindingNames(decl.name)) tdz.declareLexical(name, "let");
+	return tdz;
+}
+
+/** ToPropertyKey: a symbol stays a symbol; anything else is its string form (`{[["a"]]: 1}` → "a"). */
+const toPropertyKey = (v: unknown): PropertyKey => (typeof v === "symbol" ? v : String(v));
+
 function bindingKey(vm: VM, scope: Scope, name: ts.PropertyName): PropertyKey {
-	if (ts.isComputedPropertyName(name)) return vm.evalNodeSync(name.expression, scope) as PropertyKey;
+	if (ts.isComputedPropertyName(name)) return toPropertyKey(vm.evalNodeSync(name.expression, scope));
 	return propertyName(name);
 }
 

@@ -11,6 +11,10 @@
     "test": "node --test --test-isolation=none \"test/**/*.test.ts\"",
     "test:diff": "node --test --test-isolation=none \"test/differential/**/*.test.ts\"",
     "test:corpus": "node --test --test-isolation=none test/differential/ts-evaluator.test.ts",
+    "test:test262": "node --test --test-isolation=none test/differential/test262.test.ts",
+    "test262:fetch": "bash scripts/test262-fetch.sh",
+    "test262:sample": "node scripts/test262-sample.ts",
+    "test262:report": "node scripts/test262-report.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

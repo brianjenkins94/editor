@@ -3,7 +3,7 @@ import { Scope } from "./scope.ts";
 import { syntaxKindName } from "./frontend.ts";
 import type { GuestFunctionMeta } from "./values.ts";
 import { isGuestFunction } from "./values.ts";
-import { nodeHandlers, syntheticHandlers, createGuestFunction } from "./handlers.ts";
+import { nodeHandlers, syntheticHandlers, createGuestFunction, bindTarget, closeIterator, clonePrivateElements } from "./handlers.ts";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
 
 /** Brand marking a live generator/async fiber object as non-cloneable (shared across forks). */
@@ -41,6 +41,9 @@ export type Handler = (vm: VM, frame: Frame) => void;
 export interface VMOptions {
 	/** Injected globals / capability shims (checked before real globals). */
 	globals?: Record<string, unknown>;
+	/** Use this object *as* the global object (not copied — a fresh realm's `globalThis`, whose
+	 *  builtins are non-enumerable, or a shared shim table). `globals` are then layered on top of it. */
+	globalObject?: Record<string, unknown>;
 	/** Fall back to the host's real `globalThis` for unresolved names. Default true (max differential
 	 *  parity). The canary stage (S5) sets this false for a controlled environment. */
 	realGlobals?: boolean;
@@ -97,6 +100,9 @@ export class VM {
 	pauseKind: "yield" | "await" | undefined = undefined;
 	/** the value carried out of a suspension point: the yielded value, or the awaited operand. */
 	pauseValue: unknown = undefined;
+	/** a sync `yield*` yields the inner iterator's *result object* as-is (spec GeneratorYield(innerResult));
+	 *  the driver must not re-wrap it. */
+	pauseRaw = false;
 	/** the value fed back in on resume (the `.next(v)` argument / the resolved awaited value). */
 	sentValue: unknown = undefined;
 
@@ -111,9 +117,36 @@ export class VM {
 	hostGuard: HostGuard | undefined;
 	onAsyncFiber: ((promise: Promise<unknown>) => void) | undefined;
 
+	/** The guest realm's Error constructors, so errors tsval itself throws (ReferenceError on an
+	 *  unbound name, TypeError on a bad call, …) are instances of the *guest's* classes. Resolved
+	 *  from the global object; falls back to this realm's. */
+	readonly guestErrors: Record<string, new (message?: string) => Error>;
+	/** The guest realm's constructors used to *create* guest values (literals, rest arrays, class
+	 *  prototypes, function prototypes), so `[] instanceof Array` and `Object.getPrototypeOf({})`
+	 *  agree with the guest's own intrinsics when the global object is another realm's. */
+	readonly realm: { Array: ArrayConstructor; Object: ObjectConstructor; RegExp: RegExpConstructor; Function: FunctionConstructor; Promise: PromiseConstructor };
+
 	constructor(options: VMOptions = {}) {
 		this.rootScope = new Scope(undefined, true);
-		this.rootScope.globalObject = { undefined, NaN, Infinity, ...(options.globals ?? {}) };
+		if (options.globalObject !== undefined) {
+			const base = options.globalObject;
+			for (const [name, value] of Object.entries(options.globals ?? {})) base[name] = value;
+			this.rootScope.globalObject = base;
+		} else {
+			this.rootScope.globalObject = { undefined, NaN, Infinity, ...(options.globals ?? {}) };
+		}
+		const g = this.rootScope.globalObject as Record<string, unknown>;
+		this.guestErrors = {};
+		for (const name of ["Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError"]) {
+			const ctor = (g[name] ?? (globalThis as Record<string, unknown>)[name]) as new (message?: string) => Error;
+			if (typeof ctor === "function") this.guestErrors[name] = ctor;
+		}
+		const pick = <T>(name: string): T => (typeof g[name] === "function" ? g[name] : (globalThis as Record<string, unknown>)[name]) as T;
+		const realmObject = pick<ObjectConstructor>("Object");
+		// The realm's *intrinsic* Function is reached through Object (a global named `Function` may be
+		// a shim — the canary's eval guard); it's what guest function objects are created from.
+		const realmFunction = (realmObject as unknown as { constructor: FunctionConstructor }).constructor;
+		this.realm = { Array: pick("Array"), Object: realmObject, RegExp: pick("RegExp"), Function: typeof realmFunction === "function" ? realmFunction : Function, Promise: pick("Promise") };
 		this.rootScope.hasThis = true;
 		this.rootScope.thisVal = undefined;
 		this.rootScope.realGlobals = options.realGlobals ?? true;
@@ -196,7 +229,13 @@ export class VM {
 		if (this.finished) return;
 		const frame = this.top;
 		if (frame === undefined) {
+			// No frame left — but a signal may still be pending (a handler that pops itself *before*
+			// throwing, e.g. an Identifier read in a sub-evaluation). It must escape, not be dropped.
+			const signal = this.signal;
+			this.signal = null;
 			this.finished = true;
+			if (signal?.type === "throw") throw signal.value;
+			if (signal?.type === "return") this.completion = signal.value;
 			return;
 		}
 		this.steps++;
@@ -219,8 +258,23 @@ export class VM {
 			// loud and propagate to the host uncaught (ASSIGNMENT working style; the canary tripwire must
 			// not be swallowable by guest try/catch).
 			if (isUncatchable(error)) throw error;
-			this.signal = { type: "throw", value: error };
+			this.signal = { type: "throw", value: this.toGuestError(error) };
 		}
+	}
+
+	/**
+	 * An error created by tsval's own host code (this realm's `TypeError` etc.) becomes the guest
+	 * realm's equivalent, so guest `instanceof`/`constructor` checks see the classes the guest knows.
+	 * Errors already from another realm, or non-Error values, pass through.
+	 */
+	private toGuestError(error: unknown): unknown {
+		if (!(error instanceof Error)) return error;
+		const name = error.constructor.name;
+		const guestCtor = this.guestErrors[name];
+		if (guestCtor === undefined || guestCtor === (globalThis as Record<string, unknown>)[name]) return error;
+		const converted = new guestCtor(error.message);
+		if (error.stack !== undefined) converted.stack = error.stack;
+		return converted;
 	}
 
 	/**
@@ -254,11 +308,15 @@ export class VM {
 			if (signal.label == null || signal.label === frame.label) {
 				this.values.length = frame.valuesBase;
 				this.signal = null;
-				if (signal.type === "break") this.frames.pop();
-				else frame.phase = frame.continuePhase as number;
+				if (signal.type === "break") {
+					this.frames.pop();
+					this.closeLoopIterator(frame, false); // IteratorClose on `break` (its errors surface)
+				} else frame.phase = frame.continuePhase as number;
 				return;
 			}
 		}
+		// A for-of left by any other abrupt completion (return/throw/outer break) closes its iterator.
+		if (frame.isLoop === true) this.closeLoopIterator(frame, true);
 
 		// switch / labeled-block frames catch break targeting them.
 		if ((frame.isSwitch === true || frame.isLabel === true) && signal.type === "break") {
@@ -288,6 +346,20 @@ export class VM {
 		}
 	}
 
+	/** IteratorClose for a for-of frame whose iterator isn't exhausted (`frame.iteratorDone`). */
+	private closeLoopIterator(frame: Frame, abrupt: boolean): void {
+		const iterator = frame.iterator as Iterator<unknown> | undefined;
+		if (iterator === undefined || frame.iteratorDone === true) return;
+		frame.iteratorDone = true;
+		try {
+			closeIterator(iterator, false, abrupt);
+		} catch (error) {
+			// Thrown while unwinding (outside a handler's try/catch): becomes the propagating signal.
+			if (isUncatchable(error)) throw error;
+			this.signal = { type: "throw", value: this.toGuestError(error) };
+		}
+	}
+
 	/**
 	 * Try/catch/finally unwinding. `frame.state` records where we were: in the `try` block, the
 	 * `catch` block, or a `finally`. A `throw` in `try` with a catch clause routes to `catch`; any
@@ -312,10 +384,17 @@ export class VM {
 				const clause = node.catchClause;
 				const catchScope = new Scope(frame.scope, false);
 				const varDecl = clause.variableDeclaration;
-				if (varDecl != null && varDecl.name.kind === ts.SyntaxKind.Identifier) {
-					const name = (varDecl.name as ts.Identifier).text;
-					catchScope.declareLexical(name, "let");
-					catchScope.initialize(name, signal.value);
+				// The catch parameter may be a destructuring pattern (`catch ([x, y = d])`).
+				if (varDecl != null) {
+					try {
+						bindTarget(this, catchScope, varDecl.name, signal.value, "let");
+					} catch (error) {
+						// A throw while binding the catch parameter replaces the caught error.
+						if (isUncatchable(error)) throw error;
+						this.signal = { type: "throw", value: this.toGuestError(error) };
+						frame.state = "catch"; // past the try block; a finally (if any) still runs
+						return;
+					}
 				}
 				frame.state = "catch";
 				frame.phase = 3;
@@ -447,8 +526,11 @@ export class VM {
 	 */
 	fork(): VM {
 		const seen = new Map<unknown, unknown>();
-		// The fork is created first so cloned closures can be rebound to *it* (not to this source VM).
+		// The fork is created first so cloned closures can be rebound to *it* (not to this source VM),
+		// and it needs its realm/intrinsics *before* any closure is cloned (function creation uses them).
 		const forked: VM = Object.create(VM.prototype);
+		(forked as { realm: VM["realm"] }).realm = this.realm; // same guest realm (intrinsics are shared)
+		(forked as { guestErrors: VM["guestErrors"] }).guestErrors = this.guestErrors;
 
 		const cloneScope = (s: Scope): Scope => {
 			const parent = s.parent ? (clone(s.parent) as Scope) : undefined;
@@ -461,6 +543,7 @@ export class VM {
 			ns.classMeta = s.classMeta; // shared
 			ns.newTarget = s.newTarget; // constructor — shared
 			ns.functionMeta = s.functionMeta; // shared (AST + flags)
+			ns.privateNames = s.privateNames; // shared: the same class evaluation's private names
 			if (s.parent === undefined) ns.globalObject = s.globalObject; // share injected/host globals
 			for (const [name, b] of s.bindings) ns.bindings.set(name, { value: clone(b.value), kind: b.kind, initialized: b.initialized });
 			return ns;
@@ -525,6 +608,7 @@ export class VM {
 				if (desc.set !== undefined) desc.set = clone(desc.set) as (v: unknown) => void;
 				Object.defineProperty(out, key, desc);
 			}
+			clonePrivateElements(v, out, clone); // private (`#x`) state lives in a side table
 			return out;
 		};
 
@@ -566,7 +650,7 @@ export class VM {
 	// --- execution contexts (nested sub-runs & fibers) ------------------------
 
 	private saveContext(): ExecContext {
-		return { frames: this.frames, values: this.values, signal: this.signal, finished: this.finished, paused: this.paused, pauseKind: this.pauseKind, pauseValue: this.pauseValue, sentValue: this.sentValue };
+		return { frames: this.frames, values: this.values, signal: this.signal, finished: this.finished, paused: this.paused, pauseKind: this.pauseKind, pauseValue: this.pauseValue, pauseRaw: this.pauseRaw, sentValue: this.sentValue };
 	}
 
 	private restoreContext(ctx: ExecContext): void {
@@ -577,6 +661,7 @@ export class VM {
 		this.paused = ctx.paused;
 		this.pauseKind = ctx.pauseKind;
 		this.pauseValue = ctx.pauseValue;
+		this.pauseRaw = ctx.pauseRaw;
 		this.sentValue = ctx.sentValue;
 	}
 
@@ -645,7 +730,17 @@ export class VM {
 		this.finished = false;
 		this.paused = false;
 		this.pushCall(meta, args, thisArg);
-		const fiber: Fiber = { frames: this.frames, values: this.values, signal: this.signal, done: false, started: false };
+		// FunctionDeclarationInstantiation — parameter binding (defaults, destructuring) and hoisting —
+		// happens at CALL time, before the generator object / promise exists (spec). Run exactly the call
+		// frame's phase 0 now; a throw there must surface at the call site, not on the first `.next()`.
+		this.step();
+		const signal = this.signal as Signal | null; // (asserted: TS keeps the pre-step `null` narrowing)
+		if (signal !== null) {
+			this.restoreContext(ctx);
+			if (signal.type === "throw") throw signal.value;
+			throw new TsvalInternalError(`unexpected ${signal.type} while binding parameters`);
+		}
+		const fiber: Fiber = { frames: this.frames, values: this.values, signal: null, done: false, started: false };
 		this.restoreContext(ctx);
 		return fiber;
 	}
@@ -656,7 +751,7 @@ export class VM {
 	 * `throw` inject that signal at the suspension point. Returns `{ paused, value }` — `value` is the
 	 * pause payload when paused, or the fiber's completion value when done.
 	 */
-	private stepFiber(fiber: Fiber, input: FiberInput): { paused: boolean; kind?: "yield" | "await"; value: unknown } {
+	private stepFiber(fiber: Fiber, input: FiberInput): { paused: boolean; kind?: "yield" | "await"; value: unknown; raw?: boolean } {
 		const ctx = this.saveContext();
 		this.frames = fiber.frames;
 		this.values = fiber.values;
@@ -664,17 +759,24 @@ export class VM {
 		this.finished = false;
 		this.paused = false;
 		this.pauseKind = undefined;
+		this.pauseRaw = false;
 		this.sentValue = undefined;
 
 		if (fiber.started) {
 			if (input.kind === "next") this.sentValue = input.value;
-			else this.signal = { type: input.kind, value: input.value };
+			else {
+				// A `yield*` suspended on its inner iterator intercepts `throw`/`return` to forward them
+				// (spec delegation); anything else is injected as a signal at the suspension point.
+				const top = this.top;
+				if (top !== undefined && top.delegating === true) top.received = { kind: input.kind, value: input.value };
+				else this.signal = { type: input.kind, value: input.value };
+			}
 		}
 		fiber.started = true;
 
 		try {
 			while (!this.finished && !this.paused) this.step();
-			if (this.paused) return { paused: true, kind: this.pauseKind, value: this.pauseValue };
+			if (this.paused) return { paused: true, kind: this.pauseKind, value: this.pauseValue, raw: this.pauseRaw };
 			return { paused: false, value: this.values.pop() };
 		} finally {
 			fiber.frames = this.frames;
@@ -693,10 +795,16 @@ export class VM {
 				if (input.kind === "throw") throw input.value;
 				return { value: input.kind === "return" ? input.value : undefined, done: true };
 			}
-			const { paused, kind, value } = vm.stepFiber(fiber, input);
+			// `return`/`throw` on a suspended-start generator completes it without running the body.
+			if (!fiber.started && input.kind !== "next") {
+				fiber.done = true;
+				if (input.kind === "throw") throw input.value;
+				return { value: input.value, done: true };
+			}
+			const { paused, kind, value, raw } = vm.stepFiber(fiber, input);
 			if (paused) {
 				if (kind !== "yield") throw new TsvalInternalError("await inside a (non-async) generator");
-				return { value, done: false };
+				return raw === true ? (value as IteratorResult<unknown>) : { value, done: false };
 			}
 			fiber.done = true;
 			return { value, done: true };
@@ -715,24 +823,35 @@ export class VM {
 
 	/** Invoke a guest async function: returns a real Promise, driven by `await` suspensions. */
 	callAsync(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): Promise<unknown> {
-		const fiber = this.seedFiber(meta, thisArg, args);
-		const promise = new Promise((resolve, reject) => {
+		// An abrupt completion while binding an async function's parameters rejects the returned
+		// promise (spec) — unlike generators, whose call throws synchronously.
+		let fiber: Fiber | undefined;
+		let seedError: unknown;
+		try {
+			fiber = this.seedFiber(meta, thisArg, args);
+		} catch (error) {
+			if (isUncatchable(error)) throw error;
+			seedError = error;
+		}
+		const promise = new this.realm.Promise<unknown>((resolve, reject) => {
+			if (fiber === undefined) return void reject(seedError);
 			const drive = (input: FiberInput): void => {
+				const f = fiber as Fiber;
 				let result: { paused: boolean; kind?: "yield" | "await"; value: unknown };
 				try {
-					result = this.stepFiber(fiber, input);
+					result = this.stepFiber(f, input);
 				} catch (error) {
-					fiber.done = true;
+					f.done = true;
 					reject(error);
 					return;
 				}
 				if (!result.paused) {
-					fiber.done = true;
+					f.done = true;
 					resolve(result.value);
 					return;
 				}
 				if (result.kind !== "await") {
-					fiber.done = true;
+					f.done = true;
 					reject(new TsvalInternalError("yield inside an async (non-generator) function"));
 					return;
 				}
@@ -743,7 +862,7 @@ export class VM {
 						// An uncatchable error (interpreter bug, canary abort) that rejected an awaited promise
 						// must not be injected as a guest `throw` — guest try/catch could swallow it.
 						if (isUncatchable(e)) {
-							fiber.done = true;
+							f.done = true;
 							reject(e);
 						} else drive({ kind: "throw", value: e });
 					},
@@ -768,6 +887,10 @@ export class VM {
 				if (input.kind === "throw") return Promise.reject(input.value);
 				return Promise.resolve({ value: input.kind === "return" ? input.value : undefined, done: true });
 			}
+			if (!fiber.started && input.kind !== "next") {
+				fiber.done = true; // suspended-start: complete without running the body
+				return input.kind === "throw" ? Promise.reject(input.value) : Promise.resolve({ value: input.value, done: true });
+			}
 			let result: { paused: boolean; kind?: "yield" | "await"; value: unknown };
 			try {
 				result = this.stepFiber(fiber, input);
@@ -791,15 +914,40 @@ export class VM {
 					},
 				);
 			}
-			return Promise.resolve(result.value).then((v) => ({ value: v, done: false }));
-		};
-		let chain: Promise<unknown> = Promise.resolve();
-		const enqueue = (input: FiberInput): Promise<IteratorResult<unknown>> => {
-			const request = chain.then(() => drive(input));
-			chain = request.then(
-				() => undefined,
-				() => undefined,
+			// `yield v` in an async generator awaits v; a rejection is a *throw at the yield*, which the
+			// body may catch — not a rejection of the pending `next()`.
+			return Promise.resolve(result.value).then(
+				(v) => ({ value: v, done: false }),
+				(e) => drive({ kind: "throw", value: e }),
 			);
+		};
+		// AsyncGeneratorResumeNext: a request against a *suspended* generator runs the body synchronously
+		// up to its next suspension (observable: a side effect in the body is visible right after
+		// `.next()` returns); requests arriving while it's executing queue behind, in order.
+		const queue: { input: FiberInput; resolve: (r: IteratorResult<unknown>) => void; reject: (e: unknown) => void }[] = [];
+		let busy = false;
+		const pump = (): void => {
+			if (busy || queue.length === 0) return;
+			busy = true;
+			const request = queue.shift()!;
+			drive(request.input).then(
+				(result) => {
+					busy = false;
+					request.resolve(result);
+					pump();
+				},
+				(error) => {
+					busy = false;
+					request.reject(error);
+					pump();
+				},
+			);
+		};
+		const enqueue = (input: FiberInput): Promise<IteratorResult<unknown>> => {
+			const request = new this.realm.Promise<IteratorResult<unknown>>((resolve, reject) => {
+				queue.push({ input, resolve, reject });
+				pump();
+			});
 			this.onAsyncFiber?.(request);
 			return request;
 		};
@@ -852,6 +1000,7 @@ interface ExecContext {
 	paused: boolean;
 	pauseKind: "yield" | "await" | undefined;
 	pauseValue: unknown;
+	pauseRaw: boolean;
 	sentValue: unknown;
 }
 
