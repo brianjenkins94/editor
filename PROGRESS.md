@@ -5,6 +5,46 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## S4 — Snapshot / fork ✅ (2026-09-04)
+
+**Status: green.** `npm test` → 179/179. Typecheck clean. `VM.fork()` returns an independent copy of
+the machine at its current point — the capability that lets the canary (S5) explore more than one path
+from a single run.
+
+### `VM.fork()` (`src/vm.ts`)
+- Deep-copies the whole mutable state — value stack, control stack (frames), scope graph, `signal`,
+  `completion`, pause/fiber scalars — through one recursive `clone` with a shared `seen` map (so
+  reference identity and cycles are preserved *within* the fork), then assigns it onto a fresh VM.
+- **The guest/host split (ASSIGNMENT §3):** clone program-created state, share host state.
+  - **Cloned:** plain objects, arrays, `Scope`s (bindings copied; parent chain rebuilt), guest
+    closures (rebound to the forked VM, closure remapped to the cloned scope), guest class *instances*
+    (own data copied, prototype shared), and value-like builtins `Date`/`RegExp`/`Map`/`Set`.
+  - **Shared:** host functions & injected shims, the root `globalObject`, AST nodes, guest **class
+    constructors** and prototypes (behavior, not data), `Promise`/`Error`/other host instances, and
+    live generator/async fibers (branded `FIBER_BRAND`).
+- Verified (differential-style in `test/vm/fork.test.ts`): guest object/array mutation stays local;
+  shim identity preserved; a **mid-`while`-loop fork** resumes independently (control stack cloned) —
+  original → 45, tampered fork → 20; closures keep their own captured variable; `instanceof` + methods
+  survive a fork with independent instance data; step budget diverges.
+
+### Known fork limitations
+- Forking across a **live generator/async suspension** shares the fiber (branded non-cloneable) — the
+  two forks would drive the same suspended machine. Cloning a suspended fiber (its own frames/values)
+  is possible later but not needed for statement-boundary forks.
+- Host-returned collections that carry host identity are cloned as plain data (fine for arrays/objects;
+  a genuine host resource wrapped in a plain object is the edge).
+
+### Also closed here
+Object-literal **method & accessor shorthand** (`{ m() {} }`, `{ get x() {} }`) — previously an S2
+gap — now implemented (with computed keys).
+
+### Next: S5
+Capability shims + canary: inject recording/deny shims (reuse `lib/util/silo/callsites.ts` matcher
+config for what to shim), run with `realGlobals:false`, and trip on `runtime-caps ⊄ static-caps`.
+Fork enables exploring multiple paths per run.
+
+---
+
 ## S3 — Stepping API + async/generators ✅ (2026-09-04)
 
 **Status: green.** `npm test` → 170/170 (165 differential incl. 12 generator + 11 awaited-async, +

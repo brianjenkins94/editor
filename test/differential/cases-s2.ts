@@ -80,4 +80,9 @@ export const S2_CASES: string[] = [
 	// --- member compound assignment & member update ---
 	`const o = { n: 5 }; o.n += 10; o.n *= 2; o.n`,
 	`const a = [1]; a[0]++; ++a[0]; a[0]`,
+
+	// --- object-literal methods & accessors ---
+	`const o = { x: 3, double() { return this.x * 2; } }; o.double()`,
+	`const o = { _v: 0, get v() { return this._v; }, set v(n) { this._v = n * 10; } }; o.v = 4; o.v`,
+	`const o = { greet(name) { return "hi " + name; } }; o.greet("world")`,
 ];

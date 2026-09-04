@@ -635,30 +635,38 @@ on(K.ObjectLiteralExpression, (vm, frame) => {
 	const node = frame.node as ts.ObjectLiteralExpression;
 	if (frame.phase === 0) {
 		frame.base = vm.values.length;
-		// Evaluate each property's value expression in reverse (methods/get/set: later).
+		// Evaluate value-producing properties (in reverse). Methods/accessors produce no operand —
+		// their functions are created in the build phase.
 		for (let i = node.properties.length - 1; i >= 0; i--) {
 			const prop = node.properties[i];
-			if (ts.isPropertyAssignment(prop)) {
-				vm.pushNode(prop.initializer, frame.scope);
-			} else if (ts.isShorthandPropertyAssignment(prop)) {
-				vm.pushNode(prop.name, frame.scope);
-			} else if (ts.isSpreadAssignment(prop)) {
-				vm.pushNode(prop.expression, frame.scope);
-			} else {
-				// Methods / accessors in object literals: later (with classes).
-				unimplemented(`${ts.SyntaxKind[prop.kind]} in ObjectLiteral`);
+			if (ts.isPropertyAssignment(prop)) vm.pushNode(prop.initializer, frame.scope);
+			else if (ts.isShorthandPropertyAssignment(prop)) vm.pushNode(prop.name, frame.scope);
+			else if (ts.isSpreadAssignment(prop)) vm.pushNode(prop.expression, frame.scope);
+			else if (!ts.isMethodDeclaration(prop) && !ts.isGetAccessorDeclaration(prop) && !ts.isSetAccessorDeclaration(prop)) {
+				unimplemented(`${ts.SyntaxKind[(prop as ts.Node).kind]} in ObjectLiteral`);
 			}
 		}
 		frame.phase = 1;
 	} else {
 		const values = vm.values.splice(frame.base as number);
-		const obj: Record<string, unknown> = {};
-		for (let i = 0; i < node.properties.length; i++) {
-			const prop = node.properties[i];
-			if (ts.isSpreadAssignment(prop)) {
-				Object.assign(obj, values[i]);
-			} else {
-				obj[propertyName((prop as ts.PropertyAssignment).name)] = values[i];
+		const obj: Record<PropertyKey, unknown> = {};
+		let cursor = 0; // advances only for value-producing properties, in source order
+		for (const prop of node.properties) {
+			if (ts.isPropertyAssignment(prop)) {
+				obj[memberKey(vm, prop.name, frame.scope)] = values[cursor++];
+			} else if (ts.isShorthandPropertyAssignment(prop)) {
+				obj[prop.name.text] = values[cursor++];
+			} else if (ts.isSpreadAssignment(prop)) {
+				Object.assign(obj, values[cursor++]);
+			} else if (ts.isMethodDeclaration(prop)) {
+				Object.defineProperty(obj, memberKey(vm, prop.name, frame.scope), { value: createGuestFunction(vm, prop, frame.scope, obj), writable: true, enumerable: true, configurable: true });
+			} else if (ts.isGetAccessorDeclaration(prop) || ts.isSetAccessorDeclaration(prop)) {
+				const key = memberKey(vm, prop.name, frame.scope);
+				const fn = createGuestFunction(vm, prop, frame.scope, obj);
+				const desc: PropertyDescriptor = { ...(Object.getOwnPropertyDescriptor(obj, key) ?? {}), enumerable: true, configurable: true };
+				if (ts.isGetAccessorDeclaration(prop)) desc.get = fn as () => unknown;
+				else desc.set = fn as (v: unknown) => void;
+				Object.defineProperty(obj, key, desc);
 			}
 		}
 		vm.frames.pop();

@@ -2,8 +2,12 @@ import ts from "typescript";
 import { Scope } from "./scope.ts";
 import { syntaxKindName } from "./frontend.ts";
 import type { GuestFunctionMeta } from "./values.ts";
-import { nodeHandlers, syntheticHandlers } from "./handlers.ts";
+import { isGuestFunction } from "./values.ts";
+import { nodeHandlers, syntheticHandlers, createGuestFunction } from "./handlers.ts";
 import { TsvalInternalError } from "./errors.ts";
+
+/** Brand marking a live generator/async fiber object as non-cloneable (shared across forks). */
+export const FIBER_BRAND = Symbol("tsval.fiber");
 
 /**
  * A control-stack frame — the reified recursion (ASSIGNMENT §3).
@@ -334,6 +338,124 @@ export class VM {
 		this.runUntil((vm) => vm.atBreakpoint());
 	}
 
+	// --- snapshot / fork (ASSIGNMENT §3, S4) ----------------------------------
+
+	/**
+	 * Produce an independent copy of the machine at its current point — a fork.
+	 *
+	 * The whole state (value stack, control stack, scope graph, signal, completion) is deep-copied so
+	 * the two machines can diverge without interfering. The crucial subtlety (ASSIGNMENT §3): **guest
+	 * state is cloned, host state is shared**. Injected shims, host built-ins, the root globals, AST
+	 * nodes, class constructors, and live generator/async fibers keep their identity (cloning them would
+	 * break `instanceof`, capability recording, or be impossible); only program-created objects, arrays,
+	 * closures, scopes, and value-like host builtins (Date/RegExp/Map/Set) are copied. A shared `seen`
+	 * map preserves reference identity and cycles *within* the fork.
+	 *
+	 * This is what lets the canary (S5) explore more than one path from a single run.
+	 */
+	fork(): VM {
+		const seen = new Map<unknown, unknown>();
+
+		const cloneScope = (s: Scope): Scope => {
+			const parent = s.parent ? (clone(s.parent) as Scope) : undefined;
+			const ns = new Scope(parent, s.isolated);
+			seen.set(s, ns);
+			ns.realGlobals = s.realGlobals;
+			ns.hasThis = s.hasThis;
+			ns.thisVal = clone(s.thisVal);
+			ns.homeObject = s.homeObject; // guest prototype — shared (behavior, not data)
+			ns.classMeta = s.classMeta; // shared
+			ns.newTarget = s.newTarget; // constructor — shared
+			if (s.parent === undefined) ns.globalObject = s.globalObject; // share injected/host globals
+			for (const [name, b] of s.bindings) ns.bindings.set(name, { value: clone(b.value), kind: b.kind, initialized: b.initialized });
+			return ns;
+		};
+
+		const clone = (v: unknown): unknown => {
+			if (v === null || (typeof v !== "object" && typeof v !== "function")) return v;
+			if (seen.has(v)) return seen.get(v);
+
+			if (typeof v === "function") {
+				if (isGuestFunction(v)) {
+					const meta = v.__tsval;
+					// Rebind to *this* forked VM; break the closure cycle via pre-registration.
+					const fn = createGuestFunction(this, meta.node, meta.closure, meta.homeObject);
+					fn.__tsval.isGenerator = meta.isGenerator;
+					fn.__tsval.isAsync = meta.isAsync;
+					seen.set(v, fn);
+					fn.__tsval.closure = clone(meta.closure) as Scope;
+					return fn;
+				}
+				return v; // host functions & guest class constructors — shared
+			}
+			if (v instanceof Scope) return cloneScope(v);
+			if ((v as Record<PropertyKey, unknown>)[FIBER_BRAND] === true) return v; // live fiber — shared
+
+			if (Array.isArray(v)) {
+				const out: unknown[] = [];
+				seen.set(v, out);
+				for (let i = 0; i < v.length; i++) out[i] = clone(v[i]);
+				return out;
+			}
+			if (v instanceof Date) return register(v, new Date(v.getTime()));
+			if (v instanceof RegExp) return register(v, new RegExp(v.source, v.flags));
+			if (v instanceof Map) {
+				const out = new Map();
+				seen.set(v, out);
+				for (const [k, val] of v) out.set(clone(k), clone(val));
+				return out;
+			}
+			if (v instanceof Set) {
+				const out = new Set();
+				seen.set(v, out);
+				for (const val of v) out.add(clone(val));
+				return out;
+			}
+
+			const proto = Object.getPrototypeOf(v);
+			const isGuestObject = proto === Object.prototype || proto === null || (proto?.constructor as { __tsvalClass?: unknown } | undefined)?.__tsvalClass != null;
+			if (!isGuestObject) return v; // host instance (Promise, Error, DOM, host class, …) — shared
+
+			const out = Object.create(proto); // share the (guest) prototype; copy own data
+			seen.set(v, out);
+			for (const key of Reflect.ownKeys(v)) {
+				const desc = Object.getOwnPropertyDescriptor(v, key)!;
+				if ("value" in desc) desc.value = clone(desc.value);
+				Object.defineProperty(out, key, desc);
+			}
+			return out;
+		};
+
+		const register = <T>(from: unknown, to: T): T => {
+			seen.set(from, to);
+			return to;
+		};
+
+		const cloneFrame = (f: Frame): Frame => {
+			const nf: Frame = { node: f.node, phase: f.phase, scope: clone(f.scope) as Scope, valuesBase: f.valuesBase };
+			for (const key of Object.keys(f)) {
+				if (key === "node" || key === "phase" || key === "scope" || key === "valuesBase") continue;
+				nf[key] = clone((f as Record<string, unknown>)[key]);
+			}
+			return nf;
+		};
+
+		const forked: VM = Object.create(VM.prototype);
+		(forked as { rootScope: Scope }).rootScope = clone(this.rootScope) as Scope;
+		(forked as { breakpoints: Set<number> }).breakpoints = new Set(this.breakpoints);
+		forked.sourceFile = this.sourceFile;
+		forked.values = this.values.map(clone);
+		forked.frames = this.frames.map(cloneFrame);
+		forked.signal = this.signal ? ({ ...this.signal, value: clone((this.signal as { value?: unknown }).value) } as Signal) : null;
+		forked.completion = clone(this.completion);
+		forked.finished = this.finished;
+		forked.steps = this.steps;
+		forked.paused = this.paused;
+		forked.pauseValue = clone(this.pauseValue);
+		forked.sentValue = clone(this.sentValue);
+		return forked;
+	}
+
 	// --- execution contexts (nested sub-runs & fibers) ------------------------
 
 	private saveContext(): ExecContext {
@@ -468,6 +590,7 @@ export class VM {
 				return this;
 			},
 		};
+		Object.defineProperty(gen, FIBER_BRAND, { value: true }); // non-cloneable: forks share the fiber
 		return gen;
 	}
 
