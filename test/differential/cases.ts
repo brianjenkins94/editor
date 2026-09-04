@@ -78,6 +78,15 @@ export const STARTER_CASES: string[] = [
 	`const obj = { v: 3, m() { return this.v; } }; const f = obj.m; (() => { try { return typeof f(); } catch (e) { return e.constructor.name; } })()`,
 	`const arrow = () => this; typeof arrow()`,
 
+	// strict-mode semantics (the supported surface): no implicit globals, block-scoped function
+	// declarations, read-only `undefined`/`NaN`/`Infinity`
+	`(() => { try { undeclaredName = 1; return "created"; } catch (e) { return e.constructor.name; } })()`,
+	`(() => { { function inBlock() { return 1; } } try { return typeof inBlock; } catch (e) { return e.constructor.name; } })()`,
+	`(() => { { function inBlock() { return 2; } return inBlock(); } })()`,
+	`(() => { try { undefined = 1; return "assigned"; } catch (e) { return e.constructor.name; } })()`,
+	`(() => { try { NaN = 1; return "assigned"; } catch (e) { return e.constructor.name; } })()`,
+	`function f() { "use strict"; return typeof this; } f()`,
+
 	// `var` hoisting out of nested blocks (a plain read before the declaration)
 	`function f() { const r = y; if (true) { var y = 1; } return r; } f()`,
 	`function f() { const r = typeof z; for (let i = 0; i < 1; i++) { var z = 2; } return r + z; } f()`,

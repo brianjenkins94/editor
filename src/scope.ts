@@ -102,10 +102,11 @@ export class Scope {
 		}
 	}
 
-	/** Declare a hoisted `function` binding in the function scope. */
+	/** Declare a hoisted `function` binding. Strict-mode semantics: hoisted to the top of the scope it
+	 *  appears in — a declaration inside a block is block-scoped, not lifted to the function (that
+	 *  lifting is sloppy-mode web-compat behavior, out of scope). */
 	declareFunction(name: string, value: unknown): void {
-		const fs = this.functionScope();
-		fs.bindings.set(name, { value, kind: "function", initialized: true });
+		this.bindings.set(name, { value, kind: "function", initialized: true });
 	}
 
 	/** Declare a block-scoped `let`/`const`/`param`; enters the TDZ until `initialize`. */
@@ -152,7 +153,11 @@ export class Scope {
 		throw new ReferenceError(`${name} is not defined`);
 	}
 
-	/** Assignment to an existing binding (or an implicit global). */
+	/**
+	 * Assignment to an existing binding or an existing global. Strict-mode semantics: assigning to an
+	 * undeclared name is a ReferenceError (sloppy mode's implicit-global creation is out of scope), and
+	 * the non-writable globals `undefined`/`NaN`/`Infinity` throw a TypeError.
+	 */
 	set(name: string, value: unknown): void {
 		const b = this.lookup(name);
 		if (b) {
@@ -161,9 +166,16 @@ export class Scope {
 			b.value = value;
 			return;
 		}
-		const g = this.root().globalObject;
-		if (g != null) {
+		if (name === "undefined" || name === "NaN" || name === "Infinity") throw new TypeError(`Cannot assign to read only property '${name}'`);
+		const root = this.root();
+		const g = root.globalObject;
+		if (g != null && name in g) {
 			g[name] = value;
+			return;
+		}
+		if (root.realGlobals && name in globalThis) {
+			// An existing host global (e.g. a `var` the host defined): keep the write in the sandbox.
+			(g ?? (root.globalObject = {}))[name] = value;
 			return;
 		}
 		throw new ReferenceError(`${name} is not defined`);

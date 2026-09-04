@@ -42,10 +42,9 @@ const blockedRequire = (spec: string): never => { throw new Error(`oracle: requi
 /** The oracle: type-strip with tsc, then evaluate in Node, capturing completion value + console. */
 export function runNode(code: string): RunResult {
 	const js = ts.transpileModule(code, {
-		// ES2022 (not ESNext) so tsc *downlevels* decorators — Node has no native decorators. Legacy
-		// (`experimentalDecorators`) semantics: that is what the corpus uses (parameter decorators only
-		// exist there) and what tsval implements (`applyLegacyDecorators`).
-		compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None, experimentalDecorators: true },
+		// ES2022 (not ESNext) so tsc downlevels anything Node lacks natively. Standard TS emit only —
+		// no `experimentalDecorators`: legacy decorators are out of tsval's supported surface.
+		compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
 	}).outputText;
 	const logs: unknown[][] = [];
 	const console = makeConsole(logs);

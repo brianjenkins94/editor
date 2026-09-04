@@ -42,6 +42,23 @@ while (!vm.finished) {
 vm.completion; // => 30
 ```
 
+## Supported surface
+
+tsval runs **strict-mode ECMAScript plus erasable TypeScript** — the language a TypeScript *module*
+is written in, and the surface Node's own type-stripping accepts. Anything outside that is refused
+**loudly** (a `TsvalInternalError` naming the construct), never silently mis-run:
+
+- Strict-mode semantics throughout: top-level and plain-call `this` are `undefined`; assigning to an
+  undeclared name is a `ReferenceError` (no implicit globals); a function declaration in a block is
+  block-scoped; `undefined`/`NaN`/`Infinity` are read-only.
+- Out of scope by policy: sloppy-mode-only behavior (`with`, implicit globals, function-in-block
+  lifting), legacy `experimentalDecorators` (non-standard; standard TC39 decorators are not modeled
+  either, and sharing their syntax is exactly why neither is half-implemented), parameter properties,
+  `namespace`, `import =`.
+- Retained non-erasable construct: `enum` (runtime-emit, differentially verified against `tsc`).
+
+The differential oracle runs Node in strict mode with an undefined receiver to match.
+
 ## Layout
 
 - `src/` — the VM (`vm.ts`), per-SyntaxKind handlers (`handlers.ts`), scope (`scope.ts`), front-end

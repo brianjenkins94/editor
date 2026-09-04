@@ -81,8 +81,25 @@ arg of `fn.call(obj, …)`), `Function.length` ignored defaults/rest, `new.targe
   their resource (Axis-2 across paths); nested branches fork recursively with full decision trails;
   a forced path that throws is contained. Synchronous paths only; loop conditions are not forced.
 
+### Supported-surface policy (decided 2026-09-04): strict ECMAScript + erasable TypeScript
+User direction: cut loose anything not generally accepted as standard, and sloppy-mode-only behavior.
+Applied as: **strict-mode ECMAScript + erasable TypeScript**, `enum` retained (verified; drop on
+request). Out-of-scope constructs are **refused loudly** (`TsvalInternalError`), never silently
+mis-run — the failure mode a canary must never have. See README "Supported surface".
+- Removed the legacy-decorator implementation added earlier in the day: legacy and standard decorators
+  share syntax with different semantics, so running one as the other is a correctness hazard; both
+  are now refused (`assertSupportedClassSurface`). Parameter properties (`constructor(public x)`) were
+  being *silently ignored* — now refused. `namespace`/`import =` stay unimplemented (loud).
+- Strict semantics enforced where tsval was still sloppy: assignment to an undeclared name is a
+  `ReferenceError` (was: implicit global in the sandbox); a function declaration in a block is
+  block-scoped (was: lifted to the function scope, web-compat behavior); `undefined`/`NaN`/`Infinity`
+  are read-only. Differential cases added for each; the oracle already ran strict.
+- Corpus: a separate **OUT_OF_SCOPE** category (skipped with reason, and each such program is
+  asserted to fail *loudly* in tsval) distinct from KNOWN_GAPS (todo): 7 legacy-decorator programs
+  + 1 parameter-property program.
+
 ### Still open
-- `for await`, async generators, top-level await, `static {}`; standard (TC39) decorators.
+- `for await`, async generators, top-level await, `static {}`.
 - Sensitive-type matching is by type name; the checker's `isTypeAssignableTo` is the refinement.
 - Exploration drains no async work per path and forces only `if`/`?:`; a smarter explorer would
   dedupe paths by (branch point, decision) and prioritize paths that reach new capabilities.

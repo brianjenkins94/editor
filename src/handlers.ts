@@ -1451,6 +1451,7 @@ function memberKey(vm: VM, name: ts.PropertyName | undefined, scope: Scope): Pro
 }
 
 export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, scope: Scope): GuestClass {
+	assertSupportedClassSurface(node);
 	const heritage = node.heritageClauses?.find((h) => h.token === K.ExtendsKeyword);
 	const superClass = heritage ? vm.evalNodeSync(heritage.types[0].expression, scope) : undefined;
 	const proto = superClass != null ? Object.create((superClass as GuestClass).prototype) : {};
@@ -1497,50 +1498,28 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, scope: S
 			unimplemented(`class member ${ts.SyntaxKind[member.kind]}`);
 		}
 	}
-	return applyLegacyDecorators(vm, node, Ctor, proto, scope);
+	return Ctor;
 }
 
 /**
- * Legacy (`experimentalDecorators`) decorator semantics — exactly tsc's emitted `__decorate` /
- * `__param` helpers, which is what the oracle runs (runtime-emit, ASSIGNMENT §4):
- * - per member, decorators run right-to-left; a method/accessor decorator gets `(target, key,
- *   descriptor)` and may return a replacement descriptor; a property decorator gets `(target, key,
- *   undefined)`; parameter decorators (`__param`) get `(target, key, index)`, run before the member's
- *   own decorators, last parameter first;
- * - class decorators run last, right-to-left, and may replace the constructor.
- * Standard (TC39) decorators have different semantics and aren't modeled.
+ * Supported-surface policy: strict-mode ECMAScript + erasable TypeScript. Decorators are refused
+ * loudly rather than half-modeled: legacy `experimentalDecorators` are non-standard, and standard
+ * (TC39) decorators share the syntax with different semantics — silently running one as the other
+ * would be worse than an error. Parameter properties are non-erasable TS (Node's own type-stripping
+ * rejects them) and would otherwise be silently ignored, which is wrong.
  */
-function applyLegacyDecorators(vm: VM, node: ts.ClassLikeDeclaration, Ctor: GuestClass, proto: object, scope: Scope): GuestClass {
-	const decoratorsOf = (n: ts.HasDecorators): unknown[] => (ts.getDecorators(n) ?? []).map((d) => vm.evalNodeSync(d.expression, scope));
-	const invoke = (decorator: unknown, args: unknown[]): unknown => {
-		if (typeof decorator !== "function") throw new TypeError("decorator is not a function");
-		return (decorator as (...a: unknown[]) => unknown)(...args);
-	};
-
+function assertSupportedClassSurface(node: ts.ClassLikeDeclaration): void {
+	const refuse = (what: string): never => unimplemented(`${what} (out of scope: not standard / not erasable TypeScript)`);
+	if ((ts.getDecorators(node) ?? []).length > 0) refuse("class decorators");
 	for (const member of node.members) {
-		if (ts.isConstructorDeclaration(member)) {
-			member.parameters.forEach((param, index) => {
-				for (const d of decoratorsOf(param).reverse()) invoke(d, [Ctor, undefined, index]);
-			});
-			continue;
+		if (ts.canHaveDecorators(member) && (ts.getDecorators(member) ?? []).length > 0) refuse("member decorators");
+		if (ts.isConstructorDeclaration(member) || ts.isMethodDeclaration(member)) {
+			for (const param of member.parameters) {
+				if ((ts.getDecorators(param) ?? []).length > 0) refuse("parameter decorators");
+				if (ts.isConstructorDeclaration(member) && ts.isParameterPropertyDeclaration(param, member)) refuse("parameter properties");
+			}
 		}
-		if (!ts.isMethodDeclaration(member) && !ts.isPropertyDeclaration(member) && !ts.isGetAccessorDeclaration(member) && !ts.isSetAccessorDeclaration(member)) continue;
-		const own = decoratorsOf(member);
-		const params = ts.isMethodDeclaration(member) ? member.parameters.flatMap((param, index) => decoratorsOf(param).map((d) => [d, index] as const)) : [];
-		if (own.length === 0 && params.length === 0) continue;
-
-		const target = hasStatic(member) ? (Ctor as unknown as object) : proto;
-		const key = memberKey(vm, member.name, scope);
-		for (const [d, index] of [...params].reverse()) invoke(d, [target, key, index]);
-		let descriptor: PropertyDescriptor | undefined = ts.isPropertyDeclaration(member) ? undefined : Object.getOwnPropertyDescriptor(target, key);
-		for (let i = own.length - 1; i >= 0; i--) descriptor = (invoke(own[i], [target, key, descriptor]) as PropertyDescriptor | undefined) ?? descriptor;
-		if (descriptor != null) Object.defineProperty(target, key, descriptor);
 	}
-
-	let result: unknown = Ctor;
-	const classDecorators = decoratorsOf(node);
-	for (let i = classDecorators.length - 1; i >= 0; i--) result = invoke(classDecorators[i], [result]) ?? result;
-	return result as GuestClass;
 }
 
 // A scope for evaluating a field/static initializer, with `this` and [[HomeObject]] bound.
