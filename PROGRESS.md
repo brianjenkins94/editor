@@ -64,10 +64,28 @@ arg of `fn.call(obj, …)`), `Function.length` ignored defaults/rest, `new.targe
 - Runner quirk: `node --test`'s per-file subprocess mode stops after an eval'd `setTimeout`; the npm
   scripts use `--test-isolation=none` (in-process). `npm run test:corpus` runs just the corpus.
 
+### Then: decorators + fork-based path exploration ✅
+- **Legacy decorators** (`applyLegacyDecorators`): exactly tsc's `__decorate`/`__param` semantics —
+  per-member decorators right-to-left with descriptor chaining; parameter decorators first (last
+  param first); class decorators last, may replace the constructor. The oracle transpiles with
+  `experimentalDecorators` (the corpus uses parameter decorators, which only exist there). Closed all
+  7 corpus todos → **the ts-evaluator corpus is fully green: 125 value-match, 23 both-threw, 0 todo.**
+  Standard (TC39) decorators have different semantics and are not modeled.
+- **`exploreCanary`** — the canary's answer to one-run-one-path (ASSIGNMENT §3): run stepwise and, at
+  every `if`/`?:` whose condition was just evaluated (frame phase 1, value on the operand stack),
+  `fork()` and steer the fork down the other branch by negating that value. Paths run BFS under the
+  same shims; each reach is stamped with its `path`; the recorder keeps a first divergence per path.
+  Bounded by `maxPaths` (reports `truncated`) and a per-path step budget. A fork skips the one branch
+  point it was born at (otherwise it re-forks forever). Verified: a `fetch` behind `if (mode ===
+  "danger")` that a plain run never reaches is found on the forced path; both arms of a `?:` yield
+  their resource (Axis-2 across paths); nested branches fork recursively with full decision trails;
+  a forced path that throws is contained. Synchronous paths only; loop conditions are not forced.
+
 ### Still open
-- Decorators (7 corpus todos). `for await`, async generators, top-level await, `static {}`.
+- `for await`, async generators, top-level await, `static {}`; standard (TC39) decorators.
 - Sensitive-type matching is by type name; the checker's `isTypeAssignableTo` is the refinement.
-- Fork-based multi-path exploration is still not wired into the canary.
+- Exploration drains no async work per path and forces only `if`/`?:`; a smarter explorer would
+  dedupe paths by (branch point, decision) and prioritize paths that reach new capabilities.
 
 ---
 

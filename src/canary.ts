@@ -17,6 +17,7 @@
  * runtime) — reported in `observed`.
  */
 
+import ts from "typescript";
 import { UNCATCHABLE, isUncatchable } from "./errors.ts";
 import { createVM, createTypedVM } from "./interpret.ts";
 import type { InterpretOptions } from "./interpret.ts";
@@ -36,6 +37,8 @@ export interface CanaryEvent {
 	valueType?: string;
 	/** the resource argument's type is assignable to (name-matches) a configured sensitive type. */
 	sensitive?: boolean;
+	/** which exploration path reached it (`exploreCanary`); 0 for a plain run. */
+	path?: number;
 }
 
 export interface CanaryReport {
@@ -108,6 +111,10 @@ class Recorder {
 	readonly events: CanaryEvent[] = [];
 	/** set the moment a divergence fires — wherever it fires (sync run, fiber, timer). */
 	divergence: CanaryEvent | undefined;
+	/** the exploration path currently executing (0 for a plain run); stamped onto each event. */
+	currentPath = 0;
+	/** first divergence per exploration path. */
+	readonly divergences = new Map<number, CanaryEvent>();
 	private readonly predicted: Set<string>;
 	private readonly annotate: (event: CanaryEvent) => void;
 	constructor(predicted: Set<string>, annotate: (event: CanaryEvent) => void) {
@@ -117,9 +124,11 @@ class Recorder {
 
 	record(event: CanaryEvent): void {
 		this.annotate(event);
+		event.path = this.currentPath;
 		this.events.push(event);
 		if (!covers(this.predicted, event.capability)) {
 			this.divergence ??= event;
+			if (!this.divergences.has(this.currentPath)) this.divergences.set(this.currentPath, event);
 			throw new CanaryDivergenceError(event);
 		}
 	}
@@ -448,8 +457,14 @@ interface CanaryRun {
 	report: CanaryReport;
 }
 
-/** Shared by the sync and async runners: build the environment, run the synchronous part. */
-function startCanary(code: string, options: CanaryOptions): CanaryRun {
+interface PreparedCanary extends CanaryRun {
+	vm: VM;
+	/** point the type-annotation context at the VM currently executing (forks, during exploration). */
+	setCurrentVM(vm: VM): void;
+}
+
+/** Build the environment and a VM seated on `code`, without running it. */
+function prepareCanary(code: string, options: CanaryOptions): PreparedCanary {
 	const predicted = new Set(options.predicted);
 	const useTypes = options.useTypes === true || (options.sensitiveTypes?.length ?? 0) > 0;
 	const sensitive = new Set(options.sensitiveTypes ?? []);
@@ -470,15 +485,20 @@ function startCanary(code: string, options: CanaryOptions): CanaryRun {
 	const { globals, resolveModule, hostGuard, pending } = capabilityEnvironment(recorder, options);
 	const vmOptions: InterpretOptions = { globals, resolveModule, hostGuard, realGlobals: false, fileName: options.fileName, onAsyncFiber: (p) => pending.trackFiber(p) };
 	const report: CanaryReport = { ok: true, aborted: false, predicted: [...predicted].sort(), observed: recorder.events, observedCaps: [], sensitiveFlows: [], pendingAsync: 0 };
+	const vm = useTypes ? createTypedVM(code, vmOptions) : createVM(code, vmOptions);
+	context.vm = vm;
+	return { vm, recorder, pending, report, setCurrentVM: (v) => void (context.vm = v) };
+}
 
+/** Shared by the sync and async runners: build the environment, run the synchronous part. */
+function startCanary(code: string, options: CanaryOptions): CanaryRun {
+	const prepared = prepareCanary(code, options);
 	try {
-		const vm = useTypes ? createTypedVM(code, vmOptions) : createVM(code, vmOptions);
-		context.vm = vm;
-		report.completion = vm.run();
+		prepared.report.completion = prepared.vm.run();
 	} catch (error) {
-		if (!(error instanceof CanaryDivergenceError)) report.error = error; // a normal guest error, or an interpreter bug
+		if (!(error instanceof CanaryDivergenceError)) prepared.report.error = error; // a normal guest error, or an interpreter bug
 	}
-	return { recorder, pending, report };
+	return prepared;
 }
 
 function finishReport({ recorder, pending, report }: CanaryRun): CanaryReport {
@@ -513,6 +533,136 @@ export function runCanary(code: string, options: CanaryOptions): CanaryReport {
 		report.error ??= new Error(`canary: ${report.pendingAsync} async task(s) outstanding — reaches after an await/timer would be lost; use runCanaryAsync`);
 	}
 	return report;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Multi-path exploration (ASSIGNMENT §3 "Fork beats the canary's one-run-one-path limit")
+// ---------------------------------------------------------------------------------------------------
+
+/** One decision an explored path took at a branch point. */
+export interface PathDecision {
+	/** 0-based source line of the `if` / `?:`. */
+	line: number;
+	pos: number;
+	/** the branch's real condition value on this path (before any forcing). */
+	observed: boolean;
+	/** true if this path was forked here and forced down the *other* branch. */
+	forced: boolean;
+}
+
+export interface PathReport {
+	id: number;
+	/** the path this one was forked from, and the branch point where — root has neither. */
+	parent?: number;
+	decisions: PathDecision[];
+	aborted: boolean;
+	divergence?: CanaryEvent;
+	completion?: unknown;
+	error?: unknown;
+	steps: number;
+}
+
+export interface ExplorationReport {
+	/** true iff no explored path diverged. */
+	ok: boolean;
+	predicted: string[];
+	paths: PathReport[];
+	/** every reach across all paths, each stamped with its `path`. */
+	observed: CanaryEvent[];
+	observedCaps: string[];
+	/** true if the path budget (`maxPaths`) cut exploration short. */
+	truncated: boolean;
+}
+
+export interface ExploreOptions extends CanaryOptions {
+	/** how many paths to explore at most (each branch point forks one more). Default 16. */
+	maxPaths?: number;
+	/** per-path step budget, so a forced branch that loops forever can't hang the explorer. */
+	maxStepsPerPath?: number;
+}
+
+/** `if` / `?:` — the branch points exploration forks at (loop conditions are deliberately not). */
+const isConditionalNode = (node: ts.Node): boolean => node.kind === ts.SyntaxKind.IfStatement || node.kind === ts.SyntaxKind.ConditionalExpression;
+
+/**
+ * Explore more than one path through `code`: run it stepwise and, at every `if` / `?:` whose
+ * condition has just been evaluated, **fork** the machine and force the fork down the other branch.
+ * Each path runs to completion (or abort) under the same shims; reaches are stamped with their path.
+ * This finds a capability that a single run's data never steers into — e.g. a `fetch` behind
+ * `if (mode === "danger")` — without needing to guess the input that would.
+ *
+ * Synchronous paths only (async work started on a path is not drained here); loop conditions are not
+ * forced (forcing them is how you manufacture infinite loops), only `if` and `?:`.
+ */
+export function exploreCanary(code: string, options: ExploreOptions): ExplorationReport {
+	const maxPaths = options.maxPaths ?? 16;
+	const maxSteps = options.maxStepsPerPath ?? 200_000;
+	const prepared = prepareCanary(code, options);
+	const { recorder } = prepared;
+
+	interface Path {
+		id: number;
+		vm: VM;
+		parent?: number;
+		decisions: PathDecision[];
+		/** a fork starts *at* the branch point it was created from; it must not fork there again. */
+		bornAtBranch: boolean;
+	}
+	const queue: Path[] = [{ id: 0, vm: prepared.vm, decisions: [], bornAtBranch: false }];
+	const reports: PathReport[] = [];
+	let nextId = 1;
+	let truncated = false;
+
+	while (queue.length > 0) {
+		const path = queue.shift()!;
+		const { vm } = path;
+		prepared.setCurrentVM(vm);
+		recorder.currentPath = path.id;
+		const report: PathReport = { id: path.id, parent: path.parent, decisions: path.decisions, aborted: false, steps: 0 };
+		const startSteps = vm.steps;
+		try {
+			while (!vm.finished) {
+				if (vm.steps - startSteps > maxSteps) throw new Error(`exploration: path ${path.id} exceeded ${maxSteps} steps`);
+				const top = vm.top;
+				if (top !== undefined && top.kind === undefined && top.node !== null && top.phase === 1 && isConditionalNode(top.node)) {
+					if (path.bornAtBranch) {
+						path.bornAtBranch = false; // this is the branch we were forked at; its decision is already recorded
+					} else {
+						// The condition value sits on top of the operand stack, about to be consumed.
+						const observed = Boolean(vm.values[vm.values.length - 1]);
+						const loc = vm.location(top.node);
+						const decision: PathDecision = { line: loc?.line ?? -1, pos: loc?.pos ?? top.node.pos, observed, forced: false };
+						path.decisions.push(decision);
+						if (nextId < maxPaths) {
+							const fork = vm.fork();
+							fork.values[fork.values.length - 1] = !observed; // steer the fork down the other branch
+							queue.push({ id: nextId++, vm: fork, parent: path.id, decisions: [...path.decisions.slice(0, -1), { ...decision, forced: true }], bornAtBranch: true });
+						} else {
+							truncated = true;
+						}
+					}
+				}
+				vm.step();
+			}
+			report.completion = vm.completion;
+		} catch (error) {
+			if (error instanceof CanaryDivergenceError) report.aborted = true;
+			else report.error = error;
+		}
+		report.divergence = recorder.divergences.get(path.id);
+		if (report.divergence !== undefined) report.aborted = true;
+		report.steps = vm.steps - startSteps;
+		reports.push(report);
+	}
+
+	return {
+		ok: recorder.divergences.size === 0,
+		predicted: [...new Set(options.predicted)].sort(),
+		paths: reports,
+		observed: recorder.events,
+		observedCaps: [...new Set(recorder.events.map((e) => e.capability))].sort(),
+		truncated,
+	};
 }
 
 /**
