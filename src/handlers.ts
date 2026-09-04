@@ -29,7 +29,9 @@ function on(kind: number, handler: Handler): void {
  */
 function hoist(vm: VM, scope: Scope, statements: readonly ts.Statement[]): void {
 	for (const statement of statements) {
-		if (ts.isImportDeclaration(statement)) {
+		if (isAmbient(statement)) {
+			continue;
+		} else if (ts.isImportDeclaration(statement)) {
 			bindImport(vm, scope, statement);
 		} else if (ts.isFunctionDeclaration(statement) && statement.name) {
 			scope.declareFunction(statement.name.text, createGuestFunction(vm, statement, scope));
@@ -105,7 +107,7 @@ on(K.Block, (vm, frame) => {
 
 function pushStatementsReverse(vm: VM, statements: readonly ts.Statement[], scope: Scope): void {
 	for (let i = statements.length - 1; i >= 0; i--) {
-		vm.pushNode(statements[i], scope);
+		if (!isAmbient(statements[i])) vm.pushNode(statements[i], scope);
 	}
 }
 
@@ -210,6 +212,18 @@ on(K.ThrowStatement, (vm, frame) => {
 on(K.FunctionDeclaration, (vm) => {
 	vm.frames.pop();
 });
+
+// Type-only / erased declarations — no runtime effect (the checker uses them; the VM skips them).
+const noop: Handler = (vm) => vm.frames.pop();
+on(K.TypeAliasDeclaration, noop);
+on(K.InterfaceDeclaration, noop);
+on(K.ExportDeclaration, noop); // `export { ... }` — module output isn't modeled
+on(K.ImportEqualsDeclaration, noop);
+
+/** Ambient (`declare ...`) statements describe host shapes for the checker; they never execute. */
+function isAmbient(node: ts.Node): boolean {
+	return ts.canHaveModifiers(node) && (ts.getModifiers(node) ?? []).some((m) => m.kind === K.DeclareKeyword);
+}
 
 // ============================================================================
 // Modules (import / require / dynamic import) — the shim-injection seam (S5)
@@ -1294,7 +1308,15 @@ on(K.CallExpression, (vm, frame) => {
 			if (node.questionDotToken && calleeVal == null) return vm.push(undefined);
 			throw new TypeError(`${describe(node.expression)} is not a function`);
 		}
-		vm.push((calleeVal as (...a: unknown[]) => unknown).apply(frame.thisArg, args));
+		// Expose the callsite while the host function runs, so a capability shim can introspect the
+		// static type of its argument (type-directed canary, S6). Restored immediately after.
+		const previousSite = vm.callSite;
+		vm.callSite = node;
+		try {
+			vm.push((calleeVal as (...a: unknown[]) => unknown).apply(frame.thisArg, args));
+		} finally {
+			vm.callSite = previousSite;
+		}
 	} else {
 		// phase 4: guest call has left its return value on the stack.
 		vm.frames.pop();
@@ -1500,6 +1522,36 @@ on(K.ClassExpression, (vm, frame) => {
 	const node = frame.node as ts.ClassExpression;
 	vm.frames.pop();
 	vm.push(createGuestClass(vm, node, frame.scope));
+});
+
+// ============================================================================
+// enum (runtime-emit, ASSIGNMENT §4)
+// ============================================================================
+//
+// Numeric members auto-increment from the previous numeric value and get a reverse mapping
+// (E[0] === "A"); string members don't. Member initializers may reference earlier members by bare
+// name or `E.member`, so they're evaluated in a scope layering the members declared so far.
+on(K.EnumDeclaration, (vm, frame) => {
+	const node = frame.node as ts.EnumDeclaration;
+	vm.frames.pop();
+	const name = node.name.text;
+	const enumObject: Record<string, string | number> = {};
+	frame.scope.declareLexical(name, "const");
+	frame.scope.initialize(name, enumObject); // bound first so `E.member` resolves inside initializers
+	const memberScope = new Scope(frame.scope, false);
+
+	let auto = 0;
+	for (const member of node.members) {
+		const key = ts.isComputedPropertyName(member.name) ? String(vm.evalNodeSync(member.name.expression, memberScope)) : propertyName(member.name);
+		const value = member.initializer !== undefined ? (vm.evalNodeSync(member.initializer, memberScope) as string | number) : auto;
+		enumObject[key] = value;
+		if (typeof value === "number") {
+			enumObject[value] = key; // reverse mapping (numeric enums only)
+			auto = value + 1;
+		}
+		memberScope.declareLexical(key, "const");
+		memberScope.initialize(key, value);
+	}
 });
 
 // Synthetic construct frame: build one class level's instance on the explicit stack.

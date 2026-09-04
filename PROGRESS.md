@@ -5,6 +5,44 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## S6 — Type-aware ✅ (2026-09-04)
+
+**Status: green.** `npm test` → 203/203. Typecheck clean. The final staged item — S0→S6 all done.
+
+### TypeChecker front-end (`src/program.ts`)
+- `createTypedProgram(code)` builds an in-memory `Program` + `TypeChecker` over one virtual file,
+  delegating lib.d.ts reads to the host FS (a browser build supplies libs via a virtual FS — same
+  seam). `lib.es2022 + lib.dom` so `fetch`/`URL`/`WebSocket` type as capability sinks. Returns the
+  Program's own `sourceFile` so node identities line up with checker queries. `typeOfNode(checker,
+  node)` → the static type string. Parse-only stays the default; you pay for this only when asked.
+- `createTypedVM(code)` (interpret.ts) seats the VM on the typed SourceFile with the checker attached.
+- The parser stays a swappable seam (open decision #3): `createVM` uses `ts.createSourceFile`;
+  `createTypedVM` uses the Program.
+
+### VM type access (`src/vm.ts`)
+- `VMOptions.typeChecker` → `VM.typeChecker`. `VM.callSite` exposes the CallExpression currently
+  invoking a host function (set only around the host `apply`), so a shim can introspect the static
+  type of its argument via the checker — the hook the type-directed canary uses.
+
+### enum runtime-emit (`handlers.ts`, ASSIGNMENT §4)
+- Numeric auto-increment + reverse mapping (`E[0] === "A"`); string members; flag enums (`A | B`);
+  members referencing earlier members (bare or `E.x`) via a layered member scope. Verified against
+  Node's tsc-emitted enum objects through the differential oracle.
+- Also added no-ops for erased declarations (`type`, `interface`, `export {}`, `import =`) and skip
+  **ambient (`declare`)** statements in hoist + execution (they describe host shapes for the checker).
+
+### Type-directed canary (`src/canary.ts`)
+- `runCanary(code, { useTypes })` annotates each reach with `valueType` — the **static type of the
+  resource argument** at the callsite (e.g. `fetch(u)` where `u: URL` → `"URL"`).
+- `sensitiveTypes: [...]` flags reaches whose resource argument's type matches a sensitive type — "a
+  value assignable to X flowed into a sink" (ASSIGNMENT S6). Verified: a `Secret`-typed URL into
+  `fetch` is flagged; a `"..." + (secret as string)` concatenation launders the brand to `string` and
+  is **not** flagged (no false positive). Type-aware runs still catch capability divergence.
+- Assignability is a type-name match on `typeToString` for now (documented heuristic); the checker's
+  proper `isTypeAssignableTo` is a refinement, as is the TS 7.1 native backend.
+
+---
+
 ## S5 — Capability shims + canary ✅ (2026-09-04)
 
 **Status: green.** `npm test` → 189/189. Typecheck clean. This is the *purpose* the interpreter serves

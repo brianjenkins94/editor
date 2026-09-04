@@ -47,6 +47,8 @@ export interface VMOptions {
 	/** Resolve a module specifier to its namespace object (for `import` / dynamic `import()`). This is
 	 *  the injection seam for capability shims (ASSIGNMENT §5): return shimmed built-ins here. */
 	resolveModule?: (specifier: string) => unknown;
+	/** Optional `TypeChecker` for type-aware evaluation / a type-directed canary (ASSIGNMENT S6). */
+	typeChecker?: ts.TypeChecker;
 }
 
 /**
@@ -77,6 +79,11 @@ export class VM {
 
 	/** Module resolver for `import` / dynamic `import()` (the shim-injection seam, ASSIGNMENT §5). */
 	resolveModule: ((specifier: string) => unknown) | undefined;
+	/** Optional `TypeChecker` — present in type-aware runs (ASSIGNMENT S6). */
+	typeChecker: ts.TypeChecker | undefined;
+	/** The CallExpression currently invoking a host function — lets a shim introspect its callsite
+	 *  (e.g. the static type of its argument) via `typeChecker`. Set only around a host `apply`. */
+	callSite: ts.CallExpression | undefined;
 
 	constructor(options: VMOptions = {}) {
 		this.rootScope = new Scope(undefined, true);
@@ -85,6 +92,7 @@ export class VM {
 		this.rootScope.thisVal = undefined;
 		this.rootScope.realGlobals = options.realGlobals ?? true;
 		this.resolveModule = options.resolveModule;
+		this.typeChecker = options.typeChecker;
 	}
 
 	/** Resolve a module namespace, or throw a guest-catchable error if unresolved. */

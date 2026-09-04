@@ -18,8 +18,10 @@
  */
 
 import { UNCATCHABLE } from "./errors.ts";
-import { createVM } from "./interpret.ts";
+import { createVM, createTypedVM } from "./interpret.ts";
 import type { InterpretOptions } from "./interpret.ts";
+import { typeOfNode } from "./program.ts";
+import type { VM } from "./vm.ts";
 
 /** One capability the guest reached at runtime, shaped like silo's `Reach`. */
 export interface CanaryEvent {
@@ -30,6 +32,10 @@ export interface CanaryEvent {
 	callee: string;
 	/** read (net GET / fs:read / env read) vs mutation, where meaningful. */
 	safe?: boolean;
+	/** static type of the resource argument at the callsite (type-aware runs, ASSIGNMENT S6). */
+	valueType?: string;
+	/** the resource argument's type is assignable to (name-matches) a configured sensitive type. */
+	sensitive?: boolean;
 }
 
 export interface CanaryReport {
@@ -49,6 +55,8 @@ export interface CanaryReport {
 	completion?: unknown;
 	/** a non-divergence guest error that escaped the run, if any. */
 	error?: unknown;
+	/** reaches whose resource argument had a sensitive static type (type-directed, S6). */
+	sensitiveFlows: CanaryEvent[];
 }
 
 export interface CanaryOptions {
@@ -60,6 +68,10 @@ export interface CanaryOptions {
 	globals?: Record<string, unknown>;
 	/** extra module namespaces by specifier (merged over the built-in shims). */
 	modules?: Record<string, unknown>;
+	/** build a `TypeChecker` and annotate each reach with its resource argument's static type. */
+	useTypes?: boolean;
+	/** type names to flag when a value of that type flows into a sink (implies `useTypes`). */
+	sensitiveTypes?: string[];
 	fileName?: string;
 }
 
@@ -88,15 +100,18 @@ export function covers(predicted: Iterable<string>, capability: string): boolean
 	return false;
 }
 
-/** Collects reaches and trips the tripwire on any capability outside the predicted set. */
+/** Collects reaches, annotates them (types), and trips the tripwire on any unpredicted capability. */
 class Recorder {
 	readonly events: CanaryEvent[] = [];
 	private readonly predicted: Set<string>;
-	constructor(predicted: Set<string>) {
+	private readonly annotate: (event: CanaryEvent) => void;
+	constructor(predicted: Set<string>, annotate: (event: CanaryEvent) => void) {
 		this.predicted = predicted;
+		this.annotate = annotate;
 	}
 
 	record(event: CanaryEvent): void {
+		this.annotate(event);
 		this.events.push(event);
 		if (!covers(this.predicted, event.capability)) throw new CanaryDivergenceError(event);
 	}
@@ -244,14 +259,30 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): { gl
  */
 export function runCanary(code: string, options: CanaryOptions): CanaryReport {
 	const predicted = new Set(options.predicted);
-	const recorder = new Recorder(predicted);
-	const { globals, resolveModule } = capabilityEnvironment(recorder, options);
+	const useTypes = options.useTypes === true || (options.sensitiveTypes?.length ?? 0) > 0;
+	const sensitive = new Set(options.sensitiveTypes ?? []);
+	const context: { vm: VM | undefined } = { vm: undefined };
 
+	// Annotate a reach with the static type of its resource argument, read from the live callsite.
+	const annotate = (event: CanaryEvent): void => {
+		const site = context.vm?.callSite;
+		const checker = context.vm?.typeChecker;
+		if (site === undefined || checker === undefined) return;
+		const valueType = typeOfNode(checker, site.arguments[0]);
+		if (valueType === undefined) return;
+		event.valueType = valueType;
+		if ([...sensitive].some((name) => valueType === name || valueType.includes(name))) event.sensitive = true;
+	};
+
+	const recorder = new Recorder(predicted, annotate);
+	const { globals, resolveModule } = capabilityEnvironment(recorder, options);
 	const vmOptions: InterpretOptions = { globals, resolveModule, realGlobals: false, fileName: options.fileName };
-	const report: CanaryReport = { ok: true, aborted: false, predicted: [...predicted].sort(), observed: recorder.events, observedCaps: [] };
+	const report: CanaryReport = { ok: true, aborted: false, predicted: [...predicted].sort(), observed: recorder.events, observedCaps: [], sensitiveFlows: [] };
 
 	try {
-		report.completion = createVM(code, vmOptions).run();
+		const vm = useTypes ? createTypedVM(code, vmOptions) : createVM(code, vmOptions);
+		context.vm = vm;
+		report.completion = vm.run();
 	} catch (error) {
 		if (error instanceof CanaryDivergenceError) {
 			report.ok = false;
@@ -263,5 +294,6 @@ export function runCanary(code: string, options: CanaryOptions): CanaryReport {
 	}
 
 	report.observedCaps = [...new Set(recorder.events.map((e) => e.capability))].sort();
+	report.sensitiveFlows = recorder.events.filter((e) => e.sensitive === true);
 	return report;
 }
