@@ -1,0 +1,21 @@
+{
+  "name": "@brianjenkins94/tsval",
+  "version": "0.0.0",
+  "description": "A stepped, stack-based, TypeScript-AST interpreter (Path B / ts.SyntaxKind) with single-stepping, pause/resume, and snapshot/fork.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "test:diff": "node --test \"test/differential/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "typescript": "^5.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3"
+  }
+}

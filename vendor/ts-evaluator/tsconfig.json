@@ -1,0 +1,8 @@
+{
+	"extends": "./node_modules/@wessberg/ts-config/tsconfig.json",
+	"include": ["src/**/*.*", "test/**/*.*", "loader.cjs", "sandhog.config.js"],
+	"exclude": ["dist/*.*"],
+	"compilerOptions": {
+		"importHelpers": false
+	}
+}

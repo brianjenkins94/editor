@@ -1,0 +1,10 @@
+export { VM } from "./vm.ts";
+export type { Frame, Signal, VMOptions, Handler } from "./vm.ts";
+export { Scope } from "./scope.ts";
+export type { Binding, BindingKind } from "./scope.ts";
+export { parse, syntaxKindName, ts } from "./frontend.ts";
+export { createVM, interpret } from "./interpret.ts";
+export type { InterpretOptions } from "./interpret.ts";
+export { isGuestFunction } from "./values.ts";
+export type { GuestFunction, GuestFunctionMeta } from "./values.ts";
+export { nodeHandlers, syntheticHandlers, createGuestFunction } from "./handlers.ts";
