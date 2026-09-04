@@ -66,11 +66,16 @@ operands. When a parent pushes sibling frames at once they share that base, so a
 earlier siblings' results too — flattening nested arrays (`[[1,2],[3,4]]` → `[[1,2],3,4]`). Fixed by
 capturing `frame.base` at the *start* of phase 0 (after earlier siblings are already on the stack).
 
-### Still open for S2
-- **Classes / super** (next), `new` for guest classes, object-literal methods/accessors.
-- Assignment destructuring targets (`[a,b] = x`; declaration destructuring is done).
-- Recursive `var` hoisting into nested blocks/loops (hoist is still shallow).
-- Then S3 (stepping API + async/generators), S4 (snapshot/fork), S5 (shims + canary), S6 (types).
+### Still open after S2
+- Object-literal method/accessor shorthand (`{ m() {} }`, `{ get x() {} }`) → still `throw`.
+- `static { ... }` blocks; `extends` a host built-in is best-effort (see class gaps above).
+- Recursive `var` hoisting into nested blocks/loops (hoist is still shallow) — matters once code relies
+  on a `var` inside a block being visible/`undefined` earlier in the function.
+- **Next: S3** — stepping API polish (breakpoints by node `pos`) + async/await & generators as machine
+  suspension. Then S4 (snapshot/fork), S5 (shims + canary), S6 (types).
+
+_Assignment destructuring (`[a,b] = x`, `({x} = o)`, nested/rest/defaults/member targets) landed with
+the class work (`assignPattern` in handlers.ts); 142/142 green._
 
 ---
 

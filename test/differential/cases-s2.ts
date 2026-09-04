@@ -66,4 +66,18 @@ export const S2_CASES: string[] = [
 	`const o = null; o?.x ?? "safe"`,
 	`const fns = [() => "zero", () => "one"]; fns[1]()`,
 	`const o = { m: () => 3 }; o["m"]()`,
+
+	// --- assignment destructuring ---
+	`let a, b; [a, b] = [1, 2]; a * 10 + b`,
+	`let a, b; ({ a, b } = { a: 5, b: 6 }); a * 10 + b`,
+	`let x = 1, y = 2; [x, y] = [y, x]; "" + x + y`,
+	`let a, rest; [a, ...rest] = [1, 2, 3, 4]; a + rest.length`,
+	`const o = {}; [o.x, o.y] = [7, 8]; o.x + o.y`,
+	`let a = 0; [a = 5] = []; a`,
+	`let a, b; ({ a = 1, b = 2 } = { a: 9 }); a + b`,
+	`let a, c; [a, [, c]] = [1, [2, 3]]; a + c`,
+
+	// --- member compound assignment & member update ---
+	`const o = { n: 5 }; o.n += 10; o.n *= 2; o.n`,
+	`const a = [1]; a[0]++; ++a[0]; a[0]`,
 ];

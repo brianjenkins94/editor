@@ -896,7 +896,85 @@ function assignmentExpression(vm: VM, frame: Frame, node: ts.BinaryExpression): 
 	if (ts.isPropertyAccessExpression(node.left) || ts.isElementAccessExpression(node.left)) {
 		return memberAssignment(vm, frame, node);
 	}
+	// Destructuring assignment: `[a, b] = x`, `({ x } = o)`. Evaluate the RHS (stepped), then assign
+	// into the (possibly nested) targets synchronously.
+	if (ts.isArrayLiteralExpression(node.left) || ts.isObjectLiteralExpression(node.left)) {
+		if (frame.phase === 0) {
+			vm.pushNode(node.right, frame.scope);
+			frame.phase = 1;
+		} else {
+			const value = vm.pop();
+			assignPattern(vm, frame.scope, node.left, value);
+			vm.frames.pop();
+			vm.push(value);
+		}
+		return;
+	}
 	unimplemented(`assignment target ${ts.SyntaxKind[node.left.kind]}`);
+}
+
+/** Assign `value` into an assignment target expression (existing lvalues, possibly a pattern). */
+function assignPattern(vm: VM, scope: Scope, target: ts.Expression, value: unknown): void {
+	if (ts.isIdentifier(target)) return scope.set(target.text, value);
+	if (ts.isPropertyAccessExpression(target)) {
+		const obj = vm.evalNodeSync(target.expression, scope) as Record<string, unknown>;
+		obj[target.name.text] = value;
+		return;
+	}
+	if (ts.isElementAccessExpression(target)) {
+		const obj = vm.evalNodeSync(target.expression, scope) as Record<PropertyKey, unknown>;
+		obj[vm.evalNodeSync(target.argumentExpression, scope) as PropertyKey] = value;
+		return;
+	}
+	if (ts.isArrayLiteralExpression(target)) {
+		const iterator = (value as Iterable<unknown>)[Symbol.iterator]();
+		for (const element of target.elements) {
+			if (ts.isOmittedExpression(element)) {
+				iterator.next();
+			} else if (ts.isSpreadElement(element)) {
+				const rest: unknown[] = [];
+				for (let r = iterator.next(); !r.done; r = iterator.next()) rest.push(r.value);
+				assignPattern(vm, scope, element.expression, rest);
+			} else {
+				const r = iterator.next();
+				assignPatternElement(vm, scope, element, r.done ? undefined : r.value);
+			}
+		}
+		return;
+	}
+	if (ts.isObjectLiteralExpression(target)) {
+		const used = new Set<PropertyKey>();
+		for (const prop of target.properties) {
+			if (ts.isSpreadAssignment(prop)) {
+				const rest: Record<string, unknown> = {};
+				for (const k in value as object) if (!used.has(k)) rest[k] = (value as Record<string, unknown>)[k];
+				assignPattern(vm, scope, prop.expression, rest);
+			} else if (ts.isPropertyAssignment(prop)) {
+				const key = memberKey(vm, prop.name, scope);
+				used.add(key);
+				assignPatternElement(vm, scope, prop.initializer, (value as Record<PropertyKey, unknown>)[key]);
+			} else if (ts.isShorthandPropertyAssignment(prop)) {
+				const key = prop.name.text;
+				used.add(key);
+				let v = (value as Record<string, unknown>)[key];
+				if (v === undefined && prop.objectAssignmentInitializer) v = vm.evalNodeSync(prop.objectAssignmentInitializer, scope);
+				scope.set(key, v);
+			} else {
+				unimplemented(`assignment pattern property ${ts.SyntaxKind[prop.kind]}`);
+			}
+		}
+		return;
+	}
+	unimplemented(`assignment pattern target ${ts.SyntaxKind[target.kind]}`);
+}
+
+// A target that may carry a default (`a = 1` inside a pattern parses as a BinaryExpression with `=`).
+function assignPatternElement(vm: VM, scope: Scope, element: ts.Expression, value: unknown): void {
+	if (ts.isBinaryExpression(element) && element.operatorToken.kind === K.EqualsToken) {
+		const v = value === undefined ? vm.evalNodeSync(element.right, scope) : value;
+		return assignPattern(vm, scope, element.left, v);
+	}
+	assignPattern(vm, scope, element, value);
 }
 
 function memberAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression): void {
