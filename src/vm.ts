@@ -581,10 +581,10 @@ export class VM {
 	 * completion on a private stack; host↔guest crossings use the host stack (documented tradeoff),
 	 * while guest→guest calls stay on the explicit stack. (ASSIGNMENT §3, "Calls".)
 	 */
-	callGuestFromHost(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): unknown {
+	callGuestFromHost(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[], newTarget?: unknown): unknown {
 		if (meta.isGenerator) return this.createGenerator(meta, thisArg, args);
 		if (meta.isAsync) return this.callAsync(meta, thisArg, args);
-		return this.runSub(() => this.pushCall(meta, args, thisArg));
+		return this.runSub(() => this.pushCall(meta, args, thisArg, newTarget));
 	}
 
 	/**
@@ -719,7 +719,7 @@ export class VM {
 	}
 
 	/** Push a synthetic call frame for a guest function. */
-	pushCall(meta: GuestFunctionMeta, args: unknown[], thisArg: unknown): Frame {
+	pushCall(meta: GuestFunctionMeta, args: unknown[], thisArg: unknown, newTarget?: unknown): Frame {
 		const frame: Frame = {
 			kind: "call",
 			node: meta.node,
@@ -729,6 +729,7 @@ export class VM {
 			meta,
 			args,
 			thisArg,
+			newTarget,
 		};
 		this.frames.push(frame);
 		return frame;

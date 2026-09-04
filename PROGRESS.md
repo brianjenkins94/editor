@@ -5,6 +5,72 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## Post-S6 review: fixes + the ts-evaluator corpus ✅ (2026-09-04)
+
+An independent review (adversarial probes against the oracle, not the summaries) found seven
+issues; all are fixed with regression tests (`test/canary/review-regressions.test.ts`), and the
+vendored ts-evaluator corpus — planned in S0 but never run — is now part of `npm test`.
+
+### Fixes
+1. **Sandbox escape (HIGH).** `[].constructor.constructor("return fetch")()` reached the *real*
+   `Function` and real `fetch` inside the "sanitized" canary. Fix: a **host guard at the interpreter
+   boundary** (`VMOptions.hostGuard`): every property/element read, host call/construct result,
+   import binding, destructured host prop, iterator value and resume value passes `sanitize()`; every
+   host callable passes `beforeCall()` (which also vets `Function.prototype.call/apply/bind` aimed at a
+   forbidden target). The canary maps the real `Function`/`AsyncFunction`/`GeneratorFunction`/
+   `AsyncGeneratorFunction`/`eval` to the eval shim wherever they surface, wraps `Reflect.apply/
+   construct`, and treats string timer callbacks as `eval`. Principle: only the interpreter sees
+   every read and every call, so that is where a sandbox must be closed — not by global name.
+2. **Async reaches were invisible (HIGH).** A reach after an `await`, in a `.then`, or in a timer
+   happened after the synchronous `runCanary` returned `ok:true`, then surfaced as an
+   unhandledRejection. Fix: `runCanaryAsync` awaits completion and **drains tracked work** — async
+   fibers (`VMOptions.onAsyncFiber`), timers/microtasks (wrapped), and promise reactions (`then/catch/
+   finally` wrapped via the guard, counted until the source settles); a divergence inside any of them
+   is recorded, never uncaught. The sync `runCanary` now **fails loud** (`ok:false`, `pendingAsync`)
+   when guest async work is outstanding. An uncatchable error rejecting an awaited promise is no
+   longer injected as a guest `throw` (it was swallowable).
+3. `fork()` rebound cloned closures to the *source* VM (the comment claimed otherwise). Fixed.
+4. `yield`/`await` inside a synchronous sub-evaluation (computed key, default value) silently resumed
+   with `undefined`; now a `TsvalInternalError`.
+5. `this` semantics were never tested and the oracle ran sloppy. Decision recorded: **module/strict
+   semantics** (top-level and plain-call `this` are `undefined`); the oracle now evals strict with an
+   undefined receiver; `this` cases added.
+6. `var` hoisting was shallow (a plain read before a block-buried `var` threw). Now a recursive
+   collector (blocks/loops/try/switch, destructured names; not into nested functions/classes).
+7. Fork policy: guest class prototypes are shared consistently (a mid-construction fork kept a cloned
+   `ClassMeta.proto ≠ ctor.prototype`); accessor closures are rebound; `callSite` is also set for
+   host `new` (WebSocket annotation).
+
+Also from the corpus: TS `this:` pseudo-parameters were bound as positional params (shifted every
+arg of `fn.call(obj, …)`), `Function.length` ignored defaults/rest, `new.target` was unimplemented
+(now threaded through host-mediated construction), and an anonymous class expression reported
+`.name === "Ctor"` (V8 name inference from the host variable).
+
+### The ts-evaluator corpus (`test/differential/ts-evaluator*.ts`)
+- `loadCorpus()` extracts the program from every `executeProgram(<literal>, …)` in the 42 vendored
+  test files: **148 programs** (the other 11 calls pass file arrays). Node is the oracle; ts-evaluator's
+  own expectations are not used (ASSIGNMENT §5 S0 framing).
+- `classifyDifferential` compares **structurally** (`structural()`): functions/classes → `{name,
+  length, static props}`, instances → constructor name + own data, Map/Set/Date/Error by content —
+  because values from two engines can't be reference-equal. It tallies **value-match** separately
+  from **both-threw** (agreement on failure is weaker evidence).
+- Result: **118 value-match, 23 both-threw** (each with the same error class+message on both sides,
+  or an `import`/`require` program neither side can run in this harness), **7 known gaps** listed in
+  `ts-evaluator-gaps.ts` with reasons and run as `todo` — all seven are **decorators** (runtime-emit,
+  unimplemented; they'd become visible the moment they pass).
+- Oracle hardening: the Node side runs real code, so `process`/`require` are shadowed with inert stubs
+  on *both* sides (a corpus program's `process.exit` was silently killing the runner), and tsc targets
+  ES2022 so standard decorators are downleveled for Node.
+- Runner quirk: `node --test`'s per-file subprocess mode stops after an eval'd `setTimeout`; the npm
+  scripts use `--test-isolation=none` (in-process). `npm run test:corpus` runs just the corpus.
+
+### Still open
+- Decorators (7 corpus todos). `for await`, async generators, top-level await, `static {}`.
+- Sensitive-type matching is by type name; the checker's `isTypeAssignableTo` is the refinement.
+- Fork-based multi-path exploration is still not wired into the canary.
+
+---
+
 ## S6 — Type-aware ✅ (2026-09-04)
 
 **Status: green.** `npm test` → 203/203. Typecheck clean. The final staged item — S0→S6 all done.

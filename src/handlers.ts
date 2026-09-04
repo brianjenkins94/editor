@@ -88,11 +88,12 @@ export function createGuestFunction(vm: VM, node: GuestFunctionNode, closure: Sc
 		homeObject,
 	};
 	const fn = function (this: unknown, ...args: unknown[]): unknown {
-		// Host-invoked path (array callbacks, shims): run a nested loop to completion.
-		return vm.callGuestFromHost(meta, this, args);
+		// Host-invoked path (array callbacks, shims, host-mediated `new`): run a nested loop to
+		// completion. `new.target` is forwarded so the body can observe construction.
+		return vm.callGuestFromHost(meta, this, args, new.target);
 	} as GuestFunction;
 	fn.__tsval = meta;
-	Object.defineProperty(fn, "length", { value: node.parameters.length, configurable: true });
+	Object.defineProperty(fn, "length", { value: functionLength(node.parameters), configurable: true });
 	if (meta.name) Object.defineProperty(fn, "name", { value: meta.name, configurable: true });
 	return fn;
 }
@@ -637,6 +638,15 @@ on(K.Identifier, (vm, frame) => {
 on(K.ThisKeyword, (vm, frame) => {
 	vm.frames.pop();
 	vm.push(frame.scope.getThis());
+});
+
+// `new.target` (undefined in a plain call, the constructor under `new`); `import.meta` is a module
+// concept this program-runner doesn't model.
+on(K.MetaProperty, (vm, frame) => {
+	const node = frame.node as ts.MetaProperty;
+	if (node.keywordToken !== K.NewKeyword || node.name.text !== "target") unimplemented(`${ts.SyntaxKind[node.keywordToken]}.${node.name.text}`);
+	vm.frames.pop();
+	vm.push(frame.scope.getNewTarget());
 });
 
 // Type-only wrappers: evaluate the inner expression, ignore the type.
@@ -1454,7 +1464,9 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, scope: S
 	Ctor.prototype = proto;
 	Object.defineProperty(proto, "constructor", { value: Ctor, enumerable: false, writable: true, configurable: true });
 	if (superClass != null) Object.setPrototypeOf(Ctor, superClass);
-	if (node.name) Object.defineProperty(Ctor, "name", { value: node.name.text, configurable: true });
+	// Always set: an anonymous class expression is `""`, and V8 would otherwise infer the host
+	// variable's name ("Ctor") — observable via `.name`.
+	Object.defineProperty(Ctor, "name", { value: node.name?.text ?? "", configurable: true });
 
 	for (const member of node.members) {
 		const target = hasStatic(member) ? (Ctor as unknown as object) : proto;
@@ -1632,6 +1644,7 @@ syntheticHandlers.call = (vm, frame) => {
 			fnScope.hasThis = true;
 			fnScope.thisVal = frame.thisArg;
 			if (meta.homeObject !== undefined) fnScope.homeObject = meta.homeObject;
+			if (frame.newTarget !== undefined) fnScope.newTarget = frame.newTarget;
 			fnScope.declareLexical("arguments", "var");
 			fnScope.initialize("arguments", frame.args as unknown[]);
 		}
@@ -1663,7 +1676,24 @@ syntheticHandlers.call = (vm, frame) => {
 	}
 };
 
-function bindParameters(vm: VM, scope: Scope, params: readonly ts.ParameterDeclaration[], args: unknown[]): void {
+/** A TypeScript `this:` pseudo-parameter — types the receiver, binds nothing, takes no argument. */
+function isThisParameter(param: ts.ParameterDeclaration): boolean {
+	return ts.isIdentifier(param.name) && param.name.text === "this";
+}
+
+/** JS `Function.length`: params before the first default/rest, excluding a `this:` pseudo-param. */
+function functionLength(params: readonly ts.ParameterDeclaration[]): number {
+	let n = 0;
+	for (const param of params) {
+		if (isThisParameter(param)) continue;
+		if (param.initializer !== undefined || param.dotDotDotToken !== undefined) break;
+		n++;
+	}
+	return n;
+}
+
+function bindParameters(vm: VM, scope: Scope, allParams: readonly ts.ParameterDeclaration[], args: unknown[]): void {
+	const params = allParams.filter((p) => !isThisParameter(p));
 	for (let i = 0; i < params.length; i++) {
 		const param = params[i];
 		if (param.dotDotDotToken) {

@@ -25,19 +25,38 @@ function makeConsole(logs: unknown[][]): Console {
 	return { log: record, error: record, warn: record, info: record, debug: record } as unknown as Console;
 }
 
+// Inert stand-ins for the entry points a real-code oracle must not have. Both sides of the
+// differential get the SAME stubs (parity), so a program touching them agrees on failing.
+const blockedProcess = new Proxy(
+	{},
+	{
+		get: (_t, key) => {
+			if (key === "exit") return () => { throw new Error("oracle: process.exit is blocked"); };
+			if (key === "env") return {};
+			return undefined;
+		},
+	},
+);
+const blockedRequire = (spec: string): never => { throw new Error(`oracle: require('${spec}') is blocked`); };
+
 /** The oracle: type-strip with tsc, then evaluate in Node, capturing completion value + console. */
 export function runNode(code: string): RunResult {
 	const js = ts.transpileModule(code, {
-		compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.None },
+		// ES2022 (not ESNext) so tsc *downlevels* standard decorators — Node has no native decorators.
+		compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
 	}).outputText;
 	const logs: unknown[][] = [];
 	const console = makeConsole(logs);
 	// Direct eval inside this function sees the local `console` (shadows global) and returns the
 	// completion value of the last statement. Strict mode + an undefined receiver so `this` semantics
 	// match a TypeScript module (tsval's deliberate choice): top-level and plain-call `this` are undefined.
-	const runner = new Function("console", "code", '"use strict"; return eval(code);');
+	//
+	// The oracle runs REAL code: corpus programs may call `process.exit` (which would silently kill the
+	// test process), `require`, or touch fs/net. Shadow the dangerous entry points with inert stand-ins
+	// so the oracle can only compute. (tsval's side is sandboxed by construction.)
+	const runner = new Function("console", "process", "require", "code", '"use strict"; return eval(code);');
 	try {
-		const value = runner.call(undefined, console, js);
+		const value = runner.call(undefined, console, blockedProcess, blockedRequire, js);
 		return { value, logs, threw: false };
 	} catch (error) {
 		return { value: undefined, logs, threw: true, error };
@@ -49,7 +68,7 @@ export function runTsval(code: string): RunResult {
 	const logs: unknown[][] = [];
 	const console = makeConsole(logs);
 	try {
-		const value = interpret(code, { globals: { console }, realGlobals: true });
+		const value = interpret(code, { globals: { console, process: blockedProcess, require: blockedRequire }, realGlobals: true });
 		return { value, logs, threw: false };
 	} catch (error) {
 		return { value: undefined, logs, threw: true, error };
@@ -99,12 +118,47 @@ export async function classifyDifferential(code: string): Promise<DifferentialOu
 	}
 	if (oracle.threw) return { kind: "both-threw", node: msg(oracle.error), tsval: msg(actual.error) };
 	try {
-		assert.deepStrictEqual(actual.value, oracle.value);
-		assert.deepStrictEqual(actual.logs, oracle.logs);
+		assert.deepStrictEqual(structural(actual.value), structural(oracle.value));
+		assert.deepStrictEqual(structural(actual.logs), structural(oracle.logs));
 		return { kind: "match" };
 	} catch (error) {
 		return { kind: "mismatch", detail: (error as Error).message.split("\n").slice(0, 6).join("\n") };
 	}
+}
+
+/**
+ * A comparable shape for a value produced by *two different engines*. Functions and classes can never
+ * be reference-equal across engines, and a guest class instance's prototype is a guest object, so
+ * `deepStrictEqual` alone would reject every program whose result contains one. Reduce to structure:
+ * functions → `{name, length, static own props}`, other objects → constructor name + own enumerable
+ * data (Map/Set/Date/Error by content), recursing with a cycle guard.
+ */
+export function structural(value: unknown, seen = new Map<object, unknown>()): unknown {
+	if (value === null || (typeof value !== "object" && typeof value !== "function")) return value;
+	if (seen.has(value)) return "[circular]";
+	if (typeof value === "function") {
+		const out: Record<string, unknown> = { "[function]": value.name, length: value.length };
+		seen.set(value, out);
+		for (const key of Object.keys(value)) if (!key.startsWith("__tsval")) out[key] = structural((value as unknown as Record<string, unknown>)[key], seen);
+		return out;
+	}
+	if (Array.isArray(value)) {
+		const out: unknown[] = [];
+		seen.set(value, out);
+		for (const v of value) out.push(structural(v, seen));
+		return out;
+	}
+	if (value instanceof Date) return { "[Date]": value.getTime() };
+	if (value instanceof RegExp) return { "[RegExp]": String(value) };
+	if (value instanceof Error) return { "[Error]": value.name, message: value.message };
+	if (value instanceof Map) return { "[Map]": [...value].map(([k, v]) => [structural(k, seen), structural(v, seen)]) };
+	if (value instanceof Set) return { "[Set]": [...value].map((v) => structural(v, seen)) };
+	if (typeof (value as { then?: unknown }).then === "function") return "[thenable]";
+	const ctorName = (Object.getPrototypeOf(value) as { constructor?: { name?: string } } | null)?.constructor?.name ?? "null";
+	const out: Record<string, unknown> = ctorName === "Object" ? {} : { "[instanceof]": ctorName };
+	seen.set(value, out);
+	for (const key of Object.keys(value)) out[key] = structural((value as Record<string, unknown>)[key], seen);
+	return out;
 }
 
 /** Assert that tsval and Node agree on all observable effects for `code`. */

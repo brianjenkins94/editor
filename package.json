@@ -8,8 +8,9 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.ts\"",
-    "test:diff": "node --test \"test/differential/**/*.test.ts\"",
+    "test": "node --test --test-isolation=none \"test/**/*.test.ts\"",
+    "test:diff": "node --test --test-isolation=none \"test/differential/**/*.test.ts\"",
+    "test:corpus": "node --test --test-isolation=none test/differential/ts-evaluator.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
