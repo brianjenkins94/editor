@@ -34,6 +34,12 @@ export class Scope {
 	/** `this` binding for this scope (function scopes and the module root; not arrow functions). */
 	thisVal: unknown = undefined;
 	hasThis = false;
+	/** [[HomeObject]] of the current method (for `super.x`); set on a method's function scope. */
+	homeObject?: object;
+	/** metadata of the class whose constructor this scope belongs to (for `super(...)`). */
+	classMeta?: unknown;
+	/** `new.target` for the current function scope. */
+	newTarget?: unknown;
 
 	constructor(parent?: Scope, isolated = false) {
 		this.parent = parent;
@@ -64,6 +70,28 @@ export class Scope {
 			s = s.parent;
 		}
 		return undefined;
+	}
+
+	/** Walk to the nearest scope that carries the given class/method field (arrows are transparent). */
+	private findUp<K extends "homeObject" | "classMeta" | "newTarget">(key: K): Scope[K] {
+		// eslint-disable-next-line @typescript-eslint/no-this-alias
+		let s: Scope | undefined = this;
+		while (s) {
+			if (s[key] !== undefined) return s[key];
+			if (s.hasThis) return s[key]; // stop at the owning function scope
+			s = s.parent;
+		}
+		return undefined;
+	}
+
+	getHomeObject(): object | undefined {
+		return this.findUp("homeObject") as object | undefined;
+	}
+	getClassMeta(): unknown {
+		return this.findUp("classMeta");
+	}
+	getNewTarget(): unknown {
+		return this.findUp("newTarget");
 	}
 
 	/** Declare a `var`: hoisted to the function scope, defined but initialized to `undefined`. */

@@ -321,6 +321,29 @@ export class VM {
 		}
 	}
 
+	/**
+	 * Construct a guest class from host code (e.g. `new` reached through a host callback). Runs a
+	 * construct frame to completion on a private stack; guest `new` uses the explicit construct frame
+	 * directly (steppable). The `frame.kind === "construct"` handler lives in handlers.ts.
+	 */
+	constructGuestSync(ctor: unknown, args: unknown[]): unknown {
+		const saved = { frames: this.frames, values: this.values, signal: this.signal, finished: this.finished };
+		this.frames = [];
+		this.values = [];
+		this.signal = null;
+		this.finished = false;
+		this.frames.push({ kind: "construct", node: null, phase: 0, scope: this.rootScope, valuesBase: 0, ctor, args, isNew: true, newTarget: ctor });
+		try {
+			while (!this.finished) this.step();
+			return this.values.pop();
+		} finally {
+			this.frames = saved.frames;
+			this.values = saved.values;
+			this.signal = saved.signal;
+			this.finished = saved.finished;
+		}
+	}
+
 	/** Push a synthetic call frame for a guest function. */
 	pushCall(meta: GuestFunctionMeta, args: unknown[], thisArg: unknown): Frame {
 		const frame: Frame = {

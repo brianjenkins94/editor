@@ -5,6 +5,34 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## S2 (part 2) — Classes ✅ (2026-09-04)
+
+**Status: green.** `npm test` → 132/132 (127 differential + 5 VM/stepping). Typecheck clean.
+
+### Added (`src/handlers.ts` "Classes" section)
+- **ClassDeclaration / ClassExpression** → a real host constructor function branded `__tsvalClass`,
+  with methods on `prototype`/the constructor as guest functions (so method calls run on the explicit
+  stack). Instance & static **fields**, **methods**, **get/set accessors**, **private (`#`) fields**,
+  computed member names.
+- **Inheritance**: `extends` (guest or host superclass), prototype + static chain wired via
+  `Object.create`/`setPrototypeOf`. **`super(...)`** in derived constructors and **`super.method()` /
+  `super.x`** via a per-method `[[HomeObject]]` bound on the method's function scope.
+- **Construction on the explicit stack** via a synthetic `construct` frame (steppable; `super()` chains
+  by pushing a parent `construct` frame + an `initfields` frame in spec order — parent ctor, then this
+  class's field initializers). `VM.constructGuestSync` handles host-initiated `new`.
+- Member **compound assignment** (`obj.p += x`, `o[k] *= y`) and member **`++`/`--`** (`this.n++`).
+- Field/static initializers and computed keys evaluate via `VM.evalNodeSync`.
+
+### Known class gaps
+- `extends` a **host** built-in (Error/Array/Map): best-effort (`Object.assign` of a freshly
+  Reflect-constructed parent) — fine for plain cases, not exotic ones. `new B() instanceof A` and
+  `extends Array` (basic) do pass.
+- `static { ... }` initialization blocks; object-literal method/accessor shorthand → still `throw`.
+- Construction crosses the host stack only when reached *from* host code (`constructGuestSync`); guest
+  `new` is fully on the explicit stack.
+
+---
+
 ## S2 (part 1) — Control flow, destructuring, spread ✅ (2026-09-04)
 
 **Status: green.** `npm test` → 110/110 (105 differential + 5 VM/stepping). `npm run typecheck` clean.

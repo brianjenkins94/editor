@@ -11,12 +11,24 @@ import type { Scope } from "./scope.ts";
  * CallExpression checks for the brand: branded → push a call frame (explicit stack, steppable, no
  * host-stack overflow); unbranded → it's a host function, call it directly.
  */
+/** Any node with `parameters` + a body that the VM can invoke as a function. */
+export type GuestFunctionNode =
+	| ts.FunctionDeclaration
+	| ts.FunctionExpression
+	| ts.ArrowFunction
+	| ts.MethodDeclaration
+	| ts.ConstructorDeclaration
+	| ts.GetAccessorDeclaration
+	| ts.SetAccessorDeclaration;
+
 export interface GuestFunctionMeta {
-	node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction;
+	node: GuestFunctionNode;
 	closure: Scope;
 	name: string;
 	/** Arrow functions capture `this` lexically; they have no own `this`/`arguments`. */
 	isArrow: boolean;
+	/** [[HomeObject]] — the object the method lives on, used to resolve `super.x` (class methods). */
+	homeObject?: object;
 }
 
 export interface GuestFunction {
