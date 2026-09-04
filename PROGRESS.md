@@ -5,6 +5,56 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## S5 — Capability shims + canary ✅ (2026-09-04)
+
+**Status: green.** `npm test` → 189/189. Typecheck clean. This is the *purpose* the interpreter serves
+(ASSIGNMENT §1, §5): run code with instrumented capability shims and hard-abort on any runtime
+divergence from the static prediction.
+
+### Static kernel, verified from source
+`lib/util/silo/callsites.ts` was renamed to **`reach.ts`** (the brief was stale). Read both:
+- `detect.ts` → `detect(code): string[]` — coarse capability set. Vocabulary: **net, fs:read,
+  fs:write, fs (coarse), exec, env, eval**.
+- `reach.ts` → `findReach(code): Reach[]` = `{capability, value, callee, safe, line, column}` — the
+  resource axis (the literal URL/path/command/env-key). Matcher config is data (`CALL_DETECTORS`).
+
+The canary is the *dynamic complement*: the **predicted set is silo's static output**, passed in as
+`predicted`. tsval does not re-implement the static analysis (and stays free of oxc / the `lib` dep).
+
+### Module system (prerequisite — shims arrive via `import`/`require`), `handlers.ts`/`vm.ts`
+- `VMOptions.resolveModule(specifier) → namespace` is the injection seam. `import` (default/named/
+  namespace/side-effect, ESM-hoisted in `hoist`), `require(spec)` (a host global), and dynamic
+  `import(spec)` (→ `Promise` of the namespace) all resolve through it. `import type` elided.
+
+### The canary (`src/canary.ts`)
+- **Sanitized environment** (`realGlobals: false`): `safeGlobals()` exposes only pure intrinsics +
+  formatting/timing/console — no capability surfaces. `globalThis`/`self` self-reference the shimmed
+  globals so **reflection-based access is caught, not silently denied**.
+- **Recording shims** for every capability, keyed to silo's vocabulary and name lists: `fetch`/
+  `WebSocket`/`http|https|net`.get/request → net; `fs`/`fs/promises` read+write fns → fs:read/fs:write;
+  `child_process` spawn/exec/… → exec; `process.env` (a Proxy) → env; `eval`/`Function` → eval. Each
+  records `{capability, value, callee, safe}` (silo `Reach` shape) — the **Axis-2 resolver** captures
+  the *concrete* resource at runtime, including dynamically-built values static analysis can't resolve.
+- **Divergence tripwire:** on a recorded reach whose capability `!covers(predicted, …)` (coarse `fs`
+  covers `fs:*`), throw `CanaryDivergenceError` — **uncatchable** (branded `UNCATCHABLE`; the step loop
+  rethrows it to the host so guest `try/catch` can't swallow the tripwire). `runCanary` catches it at
+  the boundary → `{ok:false, aborted:true, divergence}`.
+- Verified (`test/canary/canary.test.ts`): declared caps pass; undeclared net/fs:write/exec/env
+  hard-abort; **sneaky constructions caught** — aliasing (`const f = fetch`), string-concat
+  (`globalThis["fe"+"tch"]`), `self.fetch`, `Reflect.get(globalThis,"fetch")`; guest `try/catch`
+  cannot swallow the abort; coarse `fs` covers granular; Axis-2 resolves `https://internal-service.
+  corp/api` from `"https://" + host + ".corp/api"`; multiple reaches recorded in order.
+
+### Open / follow-ups
+- **Fork-based multi-path exploration**: `VM.fork()` (S4) is available but not yet wired into
+  `runCanary` (would explore both branches of a data-dependent conditional to beat one-run-one-path).
+- Wiring to silo `guard`/`review`/`runs` for full integration; passthrough mode performs real calls.
+- Whole-`process.env` (no key) / destructured env; `eval` argument execution (shim records, doesn't run).
+- **Next: S6** — type-aware (add `TypeChecker`; type-directed canary: "a value assignable to
+  `RequestInfo` flowed into a sink").
+
+---
+
 ## S4 — Snapshot / fork ✅ (2026-09-04)
 
 **Status: green.** `npm test` → 179/179. Typecheck clean. `VM.fork()` returns an independent copy of

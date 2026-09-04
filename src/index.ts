@@ -8,4 +8,6 @@ export type { InterpretOptions } from "./interpret.ts";
 export { isGuestFunction } from "./values.ts";
 export type { GuestFunction, GuestFunctionMeta } from "./values.ts";
 export { nodeHandlers, syntheticHandlers, createGuestFunction } from "./handlers.ts";
-export { TsvalInternalError, unimplemented } from "./errors.ts";
+export { TsvalInternalError, unimplemented, isUncatchable, UNCATCHABLE } from "./errors.ts";
+export { runCanary, safeGlobals, covers, CanaryDivergenceError } from "./canary.ts";
+export type { CanaryEvent, CanaryReport, CanaryOptions } from "./canary.ts";

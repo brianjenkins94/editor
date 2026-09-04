@@ -29,7 +29,9 @@ function on(kind: number, handler: Handler): void {
  */
 function hoist(vm: VM, scope: Scope, statements: readonly ts.Statement[]): void {
 	for (const statement of statements) {
-		if (ts.isFunctionDeclaration(statement) && statement.name) {
+		if (ts.isImportDeclaration(statement)) {
+			bindImport(vm, scope, statement);
+		} else if (ts.isFunctionDeclaration(statement) && statement.name) {
 			scope.declareFunction(statement.name.text, createGuestFunction(vm, statement, scope));
 		} else if (ts.isVariableStatement(statement)) {
 			const flags = statement.declarationList.flags;
@@ -206,6 +208,46 @@ on(K.ThrowStatement, (vm, frame) => {
 
 // A hoisted function declaration is a no-op at execution time (created during hoist).
 on(K.FunctionDeclaration, (vm) => {
+	vm.frames.pop();
+});
+
+// ============================================================================
+// Modules (import / require / dynamic import) — the shim-injection seam (S5)
+// ============================================================================
+
+/**
+ * Bind an ImportDeclaration's names from the resolved module namespace. ESM-hoisted: run during the
+ * `hoist` pass so imports are live before the first statement. Type-only imports resolve to nothing
+ * useful but never run at runtime; `import type` is elided by the parser's `importClause.isTypeOnly`.
+ */
+function bindImport(vm: VM, scope: Scope, node: ts.ImportDeclaration): void {
+	const specifier = (node.moduleSpecifier as ts.StringLiteral).text;
+	const clause = node.importClause;
+	if (clause === undefined) {
+		vm.importModule(specifier); // side-effect import
+		return;
+	}
+	if (clause.isTypeOnly) return;
+	const ns = vm.importModule(specifier) as Record<string, unknown>;
+	const bind = (name: string, value: unknown): void => {
+		scope.declareLexical(name, "const");
+		scope.initialize(name, value);
+	};
+	if (clause.name) bind(clause.name.text, (ns as { default?: unknown }).default ?? ns); // default import
+	const bindings = clause.namedBindings;
+	if (bindings && ts.isNamespaceImport(bindings)) {
+		bind(bindings.name.text, ns);
+	} else if (bindings && ts.isNamedImports(bindings)) {
+		for (const element of bindings.elements) {
+			if (element.isTypeOnly) continue;
+			bind(element.name.text, ns[(element.propertyName ?? element.name).text]);
+		}
+	}
+}
+
+// Imports are bound during hoisting; the statement itself is a no-op. `import =` / `export` (module
+// output) aren't modeled — this interpreter runs a program, it doesn't emit one.
+on(K.ImportDeclaration, (vm) => {
 	vm.frames.pop();
 });
 
@@ -1168,6 +1210,18 @@ on(K.CallExpression, (vm, frame) => {
 	const node = frame.node as ts.CallExpression;
 	const callee = node.expression;
 	if (callee.kind === K.SuperKeyword) return superCall(vm, frame, node);
+	if (callee.kind === K.ImportKeyword) {
+		// dynamic import(specifier) → Promise of the module namespace.
+		if (frame.phase === 0) {
+			vm.pushNode(node.arguments[0], frame.scope);
+			frame.phase = 1;
+		} else {
+			const specifier = vm.pop();
+			vm.frames.pop();
+			vm.push(Promise.resolve(vm.importModule(String(specifier))));
+		}
+		return;
+	}
 	const isProp = ts.isPropertyAccessExpression(callee);
 	const isElem = ts.isElementAccessExpression(callee);
 	// `super.method()` — call the super-prototype method with the current `this`.

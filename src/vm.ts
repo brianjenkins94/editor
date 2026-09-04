@@ -4,7 +4,7 @@ import { syntaxKindName } from "./frontend.ts";
 import type { GuestFunctionMeta } from "./values.ts";
 import { isGuestFunction } from "./values.ts";
 import { nodeHandlers, syntheticHandlers, createGuestFunction } from "./handlers.ts";
-import { TsvalInternalError } from "./errors.ts";
+import { isUncatchable, TsvalInternalError } from "./errors.ts";
 
 /** Brand marking a live generator/async fiber object as non-cloneable (shared across forks). */
 export const FIBER_BRAND = Symbol("tsval.fiber");
@@ -44,6 +44,9 @@ export interface VMOptions {
 	/** Fall back to the host's real `globalThis` for unresolved names. Default true (max differential
 	 *  parity). The canary stage (S5) sets this false for a controlled environment. */
 	realGlobals?: boolean;
+	/** Resolve a module specifier to its namespace object (for `import` / dynamic `import()`). This is
+	 *  the injection seam for capability shims (ASSIGNMENT §5): return shimmed built-ins here. */
+	resolveModule?: (specifier: string) => unknown;
 }
 
 /**
@@ -72,12 +75,23 @@ export class VM {
 	/** the value fed back in on resume (the `.next(v)` argument / the resolved awaited value). */
 	sentValue: unknown = undefined;
 
+	/** Module resolver for `import` / dynamic `import()` (the shim-injection seam, ASSIGNMENT §5). */
+	resolveModule: ((specifier: string) => unknown) | undefined;
+
 	constructor(options: VMOptions = {}) {
 		this.rootScope = new Scope(undefined, true);
 		this.rootScope.globalObject = { undefined, NaN, Infinity, ...(options.globals ?? {}) };
 		this.rootScope.hasThis = true;
 		this.rootScope.thisVal = undefined;
 		this.rootScope.realGlobals = options.realGlobals ?? true;
+		this.resolveModule = options.resolveModule;
+	}
+
+	/** Resolve a module namespace, or throw a guest-catchable error if unresolved. */
+	importModule(specifier: string): unknown {
+		const ns = this.resolveModule?.(specifier);
+		if (ns === undefined) throw new Error(`Cannot find module '${specifier}'`);
+		return ns;
 	}
 
 	/** The loaded program, kept for source-position lookups (breakpoints, `location`). */
@@ -146,9 +160,10 @@ export class VM {
 			handler(this, frame);
 		} catch (error) {
 			// A guest-observable runtime error (host built-in threw, bad member access, `instanceof` on a
-			// non-object, …) becomes a catchable `throw` signal. Interpreter bugs (unimplemented node,
-			// invariant violation) stay loud and propagate to the host (ASSIGNMENT working style).
-			if (error instanceof TsvalInternalError) throw error;
+			// non-object, …) becomes a catchable `throw` signal. Interpreter bugs and canary aborts stay
+			// loud and propagate to the host uncaught (ASSIGNMENT working style; the canary tripwire must
+			// not be swallowable by guest try/catch).
+			if (isUncatchable(error)) throw error;
 			this.signal = { type: "throw", value: error };
 		}
 	}
