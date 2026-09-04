@@ -3,6 +3,7 @@ import { Scope } from "./scope.ts";
 import { syntaxKindName } from "./frontend.ts";
 import type { GuestFunctionMeta } from "./values.ts";
 import { nodeHandlers, syntheticHandlers } from "./handlers.ts";
+import { TsvalInternalError } from "./errors.ts";
 
 /**
  * A control-stack frame — the reified recursion (ASSIGNMENT §3).
@@ -123,24 +124,68 @@ export class VM {
 		const handler = frame.kind !== undefined ? syntheticHandlers[frame.kind] : nodeHandlers[(frame.node as ts.Node).kind];
 		if (handler === undefined) {
 			const node = frame.node as ts.Node;
-			throw new Error(`unimplemented: ${frame.kind ?? syntaxKindName(node.kind)}` + (frame.kind ? "" : ` (SyntaxKind ${node.kind})`));
+			throw new TsvalInternalError(`unimplemented: ${frame.kind ?? syntaxKindName(node.kind)}` + (frame.kind ? "" : ` (SyntaxKind ${node.kind})`));
 		}
-		handler(this, frame);
+		try {
+			handler(this, frame);
+		} catch (error) {
+			// A guest-observable runtime error (host built-in threw, bad member access, `instanceof` on a
+			// non-object, …) becomes a catchable `throw` signal. Interpreter bugs (unimplemented node,
+			// invariant violation) stay loud and propagate to the host (ASSIGNMENT working style).
+			if (error instanceof TsvalInternalError) throw error;
+			this.signal = { type: "throw", value: error };
+		}
 	}
 
 	/**
-	 * Unwind one frame for a propagating signal. `call` frames catch `return`; `try` frames (S2) catch
-	 * `throw` and run finalizers. Everything else is discarded, its operands truncated away. If the
-	 * signal escapes the program, a `throw` is rethrown to the host and a top-level `return` becomes
-	 * the completion value.
+	 * Unwind one frame for a propagating signal (ASSIGNMENT §3: "control flow = unwinding").
+	 *
+	 * - `call` frames catch `return`.
+	 * - loop frames catch matching `break`/`continue` (break ends the loop; continue resumes it at
+	 *   its `continuePhase`).
+	 * - `switch` and labeled-block frames catch matching `break`.
+	 * - `try` frames route `throw` to `catch` and run `finally` on the way out, re-raising any pending
+	 *   signal afterward.
+	 * - everything else is discarded, its operands truncated away.
+	 *
+	 * If the signal escapes the program, a `throw` is rethrown to the host and a top-level `return`
+	 * becomes the completion value.
 	 */
 	private unwind(frame: Frame, signal: Signal): void {
-		// Let a synthetic/loop/try frame catch it first.
 		if (frame.kind === "call" && signal.type === "return") {
 			this.frames.pop();
 			this.values.length = frame.valuesBase;
 			this.values.push(signal.value);
 			this.signal = null;
+			return;
+		}
+
+		const node = frame.node;
+		const kind = frame.kind === undefined && node !== null ? node.kind : -1;
+
+		// Loop frames catch break/continue targeting them (unlabeled, or matching label).
+		if (frame.isLoop === true && (signal.type === "break" || signal.type === "continue")) {
+			if (signal.label == null || signal.label === frame.label) {
+				this.values.length = frame.valuesBase;
+				this.signal = null;
+				if (signal.type === "break") this.frames.pop();
+				else frame.phase = frame.continuePhase as number;
+				return;
+			}
+		}
+
+		// switch / labeled-block frames catch break targeting them.
+		if ((frame.isSwitch === true || frame.isLabel === true) && signal.type === "break") {
+			if (signal.label == null ? frame.isSwitch === true : signal.label === frame.label) {
+				this.values.length = frame.valuesBase;
+				this.signal = null;
+				this.frames.pop();
+				return;
+			}
+		}
+
+		if (kind === ts.SyntaxKind.TryStatement) {
+			this.unwindTry(frame, signal);
 			return;
 		}
 
@@ -154,6 +199,56 @@ export class VM {
 			if (signal.type === "throw") throw signal.value;
 			if (signal.type === "return") this.completion = signal.value;
 			// stray break/continue at top level would be a SyntaxError; parse-time concern.
+		}
+	}
+
+	/**
+	 * Try/catch/finally unwinding. `frame.state` records where we were: in the `try` block, the
+	 * `catch` block, or a `finally`. A `throw` in `try` with a catch clause routes to `catch`; any
+	 * other escaping signal (or a throw with no catch) runs `finally` then re-raises. The phases here
+	 * pair with `handleTry` in handlers.ts.
+	 */
+	private unwindTry(frame: Frame, signal: Signal): void {
+		const node = frame.node as ts.TryStatement;
+		const runFinallyThenReraise = () => {
+			this.values.length = frame.valuesBase;
+			frame.pendingSignal = signal;
+			this.signal = null;
+			frame.state = "finally";
+			frame.phase = 5;
+			this.pushNode(node.finallyBlock as ts.Block, frame.scope);
+		};
+
+		if (frame.state === "try") {
+			if (signal.type === "throw" && node.catchClause != null) {
+				this.values.length = frame.valuesBase;
+				this.signal = null;
+				const clause = node.catchClause;
+				const catchScope = new Scope(frame.scope, false);
+				const varDecl = clause.variableDeclaration;
+				if (varDecl != null && varDecl.name.kind === ts.SyntaxKind.Identifier) {
+					const name = (varDecl.name as ts.Identifier).text;
+					catchScope.declareLexical(name, "let");
+					catchScope.initialize(name, signal.value);
+				}
+				frame.state = "catch";
+				frame.phase = 3;
+				this.pushNode(clause.block, catchScope);
+				return;
+			}
+			if (node.finallyBlock != null) return runFinallyThenReraise();
+		} else if (frame.state === "catch") {
+			if (node.finallyBlock != null) return runFinallyThenReraise();
+		}
+		// state === "finally": a signal from inside finally overrides any pending one → propagate.
+
+		this.frames.pop();
+		this.values.length = Math.min(this.values.length, frame.valuesBase);
+		if (this.frames.length === 0) {
+			this.signal = null;
+			this.finished = true;
+			if (signal.type === "throw") throw signal.value;
+			if (signal.type === "return") this.completion = signal.value;
 		}
 	}
 
@@ -191,6 +286,30 @@ export class VM {
 		this.signal = null;
 		this.finished = false;
 		this.pushCall(meta, args, thisArg);
+		try {
+			while (!this.finished) this.step();
+			return this.values.pop();
+		} finally {
+			this.frames = saved.frames;
+			this.values = saved.values;
+			this.signal = saved.signal;
+			this.finished = saved.finished;
+		}
+	}
+
+	/**
+	 * Evaluate a single expression node to a value on a private stack, synchronously. Used for the
+	 * "leaf" sub-expressions of binding forms — default parameter/element values and computed
+	 * destructuring keys — where a full stepped integration would be disproportionate. Nested guest
+	 * calls it makes still run on the explicit (sub-)stack; only the entry uses the host stack.
+	 */
+	evalNodeSync(node: ts.Node, scope: Scope): unknown {
+		const saved = { frames: this.frames, values: this.values, signal: this.signal, finished: this.finished };
+		this.frames = [];
+		this.values = [];
+		this.signal = null;
+		this.finished = false;
+		this.pushNode(node, scope);
 		try {
 			while (!this.finished) this.step();
 			return this.values.pop();

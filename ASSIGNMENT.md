@@ -10,7 +10,7 @@
 chosen deliberately.
 
 Driving purpose (larger project in `../lib`): a **capability analysis system**. A static kernel
-(`lib/util/silo/callsites.ts` + `detect.ts`, oxc-based) predicts which capabilities a file reaches and
+(`lib/util/silo/reach.ts` + `detect.ts`, oxc-based) predicts which capabilities a file reaches and
 against what resources (URLs, paths, commands). tsval is the **dynamic complement**:
 
 - **Canary / divergence tripwire** (primary role): run the code with instrumented capability shims; if
@@ -151,7 +151,7 @@ Everything we want falls out of this one loop:
   machine suspension.
 - **S4 — Snapshot / fork.** `clone()` with the host-object-sharing strategy.
 - **S5 — Capability shims + canary.** Inject recording/deny shims (net first; reuse
-  `lib/util/silo/callsites.ts` matcher config to know what to shim). Divergence predicate
+  `lib/util/silo/reach.ts` matcher config to know what to shim). Divergence predicate
   `runtime-caps ⊆ static-caps` → hard abort + review. Wire to silo `guard`/`review`/`runs` if
   integrating.
 - **S6 — Type-aware.** Add `TypeChecker` (typescript now, TS 7.1 later); type-directed canary

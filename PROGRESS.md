@@ -5,6 +5,47 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## S2 (part 1) — Control flow, destructuring, spread ✅ (2026-09-04)
+
+**Status: green.** `npm test` → 110/110 (105 differential + 5 VM/stepping). `npm run typecheck` clean.
+The unwinding machinery the VM was designed around (ASSIGNMENT §3) is now fully exercised.
+
+### Added
+- **Loops**: `for`, `for-of`, `for-in`, `while`, `do-while`. Loop frames set `frame.isLoop` +
+  `continuePhase`; `unwind()` catches matching `break`/`continue`. `for` does per-iteration `let`/
+  `const` binding (`copyPerIteration`, spec `CreatePerIterationEnvironment` — closures in a loop
+  capture their own binding). for-of/for-in bind a fresh scope per iteration; host iterables only.
+- **break/continue**, including **labeled** (`LabeledStatement` sets the label on the child loop/switch
+  frame; a labeled block is caught by the label frame itself).
+- **switch**: lazy `case` test evaluation (side effects preserved), fall-through, `default`, one shared
+  block scope; `break` caught by the switch frame.
+- **try/catch/finally**: `unwindTry` routes `throw`→`catch`, runs `finally` on any escaping signal and
+  re-raises it; `catch` binding (identifier), optional binding (`catch {}`).
+- **Host-error → guest-throw**: `step()` wraps handler dispatch; a host runtime error (e.g.
+  `JSON.parse` throwing) becomes a catchable guest `throw`. Interpreter-internal errors
+  (`TsvalInternalError` from `unimplemented()` / invariants, in `src/errors.ts`) stay loud.
+- **Destructuring** (`bindTarget`): array + object patterns, nested, holes, rest, defaults, computed
+  keys, renamed props — for `var`/`let`/`const`, parameters, and for-of/in targets. Leaf
+  sub-expressions (defaults, computed keys) use `VM.evalNodeSync` (a synchronous single-expression
+  sub-run; host-stack at the entry only).
+- **Default & rest parameters**; **spread** in array literals, object literals (`{...o}`), and call/new
+  arguments; **element-access callee** (`fns[0]()`, `o["m"]()`).
+- `VariableStatement` now routes through a `VariableDeclarationList` handler (shared with `for`-init).
+
+### Bug fixed (found via nested-literal differential intent)
+Array/Object/Template combine phases used `frame.valuesBase` (captured at *push* time) to splice
+operands. When a parent pushes sibling frames at once they share that base, so a later sibling spliced
+earlier siblings' results too — flattening nested arrays (`[[1,2],[3,4]]` → `[[1,2],3,4]`). Fixed by
+capturing `frame.base` at the *start* of phase 0 (after earlier siblings are already on the stack).
+
+### Still open for S2
+- **Classes / super** (next), `new` for guest classes, object-literal methods/accessors.
+- Assignment destructuring targets (`[a,b] = x`; declaration destructuring is done).
+- Recursive `var` hoisting into nested blocks/loops (hoist is still shallow).
+- Then S3 (stepping API + async/generators), S4 (snapshot/fork), S5 (shims + canary), S6 (types).
+
+---
+
 ## S0 + S1 — Scaffold, differential oracle, skeleton stepped VM ✅ (2026-09-04)
 
 **Status: complete and green.** `npm test` → 60/60 pass (55 differential + 5 VM/stepping). `npm run

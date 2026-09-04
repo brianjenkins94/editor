@@ -17,7 +17,7 @@ recursion), and supports **single-stepping, pause/resume, and snapshot/fork** of
 ## Why it exists (context, not your first task)
 
 It's the dynamic half of a capability-analysis system. A static kernel in `../lib`
-(`util/silo/callsites.ts` + `util/silo/detect.ts`) predicts which capabilities a file reaches and
+(`util/silo/reach.ts` + `util/silo/detect.ts`) predicts which capabilities a file reaches and
 against what resources. tsval's distinctive powers — stepping, snapshot/fork, and injectable
 capability shims — will later power a **"canary"** that runs code and hard-aborts on any runtime
 divergence from the static prediction (a construction static analysis missed). **That canary is a LATER
@@ -56,7 +56,7 @@ Then proceed through ASSIGNMENT's stages: **S2** coverage → **S3** stepping AP
 ## Surroundings (verify each from source — don't trust summaries, including this one)
 
 - `./ASSIGNMENT.md`, `./SVAL-NOTES.md` — the briefs.
-- `../lib/util/silo/callsites.ts`, `detect.ts` — the static kernel (read for the predicted-set shape;
+- `../lib/util/silo/reach.ts`, `detect.ts` — the static kernel (read for the predicted-set shape;
   needed at S5, not now).
 - ts-evaluator (`git clone https://github.com/wessberg/ts-evaluator`) — reference + oracle.
 - sval (https://github.com/Siubaak/sval), DumbLang

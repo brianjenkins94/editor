@@ -8,3 +8,4 @@ export type { InterpretOptions } from "./interpret.ts";
 export { isGuestFunction } from "./values.ts";
 export type { GuestFunction, GuestFunctionMeta } from "./values.ts";
 export { nodeHandlers, syntheticHandlers, createGuestFunction } from "./handlers.ts";
+export { TsvalInternalError, unimplemented } from "./errors.ts";

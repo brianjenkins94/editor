@@ -11,6 +11,8 @@
  * scope-restoration bug (ASSIGNMENT §6).
  */
 
+import { TsvalInternalError } from "./errors.ts";
+
 export type BindingKind = "var" | "let" | "const" | "param" | "function";
 
 export interface Binding {
@@ -86,7 +88,7 @@ export class Scope {
 	/** Provide the value for a previously-declared binding, leaving the TDZ. */
 	initialize(name: string, value: unknown): void {
 		const b = this.bindings.get(name);
-		if (!b) throw new Error(`tsval invariant: initialize of undeclared '${name}'`);
+		if (!b) throw new TsvalInternalError(`invariant: initialize of undeclared '${name}'`);
 		b.value = value;
 		b.initialized = true;
 	}

@@ -1,8 +1,9 @@
 import ts from "typescript";
-import { Scope } from "./scope.ts";
-import type { Frame, Handler, VM } from "./vm.ts";
+import { Scope, type BindingKind } from "./scope.ts";
+import type { Frame, Handler, Signal, VM } from "./vm.ts";
 import type { GuestFunction, GuestFunctionMeta } from "./values.ts";
 import { isGuestFunction } from "./values.ts";
+import { unimplemented } from "./errors.ts";
 
 const K = ts.SyntaxKind;
 
@@ -112,14 +113,23 @@ on(K.EmptyStatement, (vm) => {
 
 on(K.VariableStatement, (vm, frame) => {
 	const node = frame.node as ts.VariableStatement;
-	execDeclarationList(vm, frame, node.declarationList);
+	if (frame.phase === 0) {
+		vm.pushNode(node.declarationList, frame.scope);
+		frame.phase = 1;
+	} else {
+		vm.frames.pop();
+	}
 });
 
-// Shared driver for a VariableDeclarationList: evaluate each initializer in order, bind the name.
-function execDeclarationList(vm: VM, frame: Frame, list: ts.VariableDeclarationList): void {
+// Shared driver for a VariableDeclarationList: declare each name (defensively — `hoist` may already
+// have, e.g. for TDZ in a block, but a `for`-init has no hoist pass), evaluate initializers in order,
+// then bind. Runs in `frame.scope` (the scope the list was pushed with).
+on(K.VariableDeclarationList, (vm, frame) => {
+	const list = frame.node as ts.VariableDeclarationList;
 	const decls = list.declarations;
-	const flags = list.flags;
-	const isLexical = (flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) !== 0;
+	const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
+	const isLet = (list.flags & ts.NodeFlags.Let) !== 0;
+	const kind: BindingKind = isConst ? "const" : isLet ? "let" : "var";
 
 	// phase encodes "which declaration are we on": phase 2*i => start decl i; phase 2*i+1 => bind decl i.
 	const i = frame.phase >> 1;
@@ -128,25 +138,21 @@ function execDeclarationList(vm: VM, frame: Frame, list: ts.VariableDeclarationL
 		return;
 	}
 	const decl = decls[i];
-	const name = ts.isIdentifier(decl.name) ? decl.name.text : undefined;
-	if (name === undefined) throw new Error(`unimplemented: destructuring binding in VariableDeclaration`);
 
 	if ((frame.phase & 1) === 0) {
 		if (decl.initializer) {
 			vm.pushNode(decl.initializer, frame.scope);
 			frame.phase++; // -> bind
 		} else {
-			// no initializer: `let x;` stays undefined but leaves the TDZ; `var x;` already undefined.
-			if (isLexical) frame.scope.initialize(name, undefined);
+			// no initializer: `let x;` leaves the TDZ as undefined; `var x;` already undefined.
+			bindTarget(vm, frame.scope, decl.name, undefined, kind);
 			frame.phase += 2; // -> next decl
 		}
 	} else {
-		const value = vm.pop();
-		if (isLexical) frame.scope.initialize(name, value);
-		else frame.scope.set(name, value);
+		bindTarget(vm, frame.scope, decl.name, vm.pop(), kind);
 		frame.phase++; // -> next decl (now even)
 	}
-}
+});
 
 on(K.ExpressionStatement, (vm, frame) => {
 	const node = frame.node as ts.ExpressionStatement;
@@ -201,6 +207,304 @@ on(K.ThrowStatement, (vm, frame) => {
 // A hoisted function declaration is a no-op at execution time (created during hoist).
 on(K.FunctionDeclaration, (vm) => {
 	vm.frames.pop();
+});
+
+on(K.BreakStatement, (vm, frame) => {
+	const node = frame.node as ts.BreakStatement;
+	vm.frames.pop();
+	vm.raise({ type: "break", label: node.label?.text });
+});
+
+on(K.ContinueStatement, (vm, frame) => {
+	const node = frame.node as ts.ContinueStatement;
+	vm.frames.pop();
+	vm.raise({ type: "continue", label: node.label?.text });
+});
+
+// ============================================================================
+// Loops
+// ============================================================================
+//
+// Loop frames set `frame.isLoop = true` (so `unwind` catches break/continue) and `frame.continuePhase`
+// (the phase to resume at on `continue`). A labeled loop's `frame.label` is set by LabeledStatement
+// before the loop's phase 0 runs.
+
+on(K.WhileStatement, (vm, frame) => {
+	const node = frame.node as ts.WhileStatement;
+	if (frame.phase === 0) {
+		frame.isLoop = true;
+		frame.continuePhase = 0;
+		vm.pushNode(node.expression, frame.scope);
+		frame.phase = 1;
+	} else if (frame.phase === 1) {
+		if (!vm.pop()) return void vm.frames.pop();
+		vm.pushNode(node.statement, frame.scope);
+		frame.phase = 2;
+	} else {
+		frame.phase = 0; // next iteration: re-evaluate the condition
+	}
+});
+
+on(K.DoStatement, (vm, frame) => {
+	const node = frame.node as ts.DoStatement;
+	if (frame.phase === 0) {
+		frame.isLoop = true;
+		frame.continuePhase = 1; // `continue` in a do-while proceeds to the condition test
+		vm.pushNode(node.statement, frame.scope);
+		frame.phase = 1;
+	} else if (frame.phase === 1) {
+		vm.pushNode(node.expression, frame.scope);
+		frame.phase = 2;
+	} else {
+		if (vm.pop()) frame.phase = 0;
+		else vm.frames.pop();
+	}
+});
+
+on(K.ForStatement, (vm, frame) => {
+	const node = frame.node as ts.ForStatement;
+	if (frame.phase === 0) {
+		frame.isLoop = true;
+		frame.continuePhase = 4; // `continue` runs the incrementor, then re-checks the condition
+		const loopScope = new Scope(frame.scope, false);
+		frame.iterScope = loopScope;
+		// For per-iteration `let`/`const` binding (fresh binding each turn — correct closure capture).
+		frame.lexicalNames =
+			node.initializer != null && ts.isVariableDeclarationList(node.initializer) && (node.initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) !== 0
+				? node.initializer.declarations.map((d) => (ts.isIdentifier(d.name) ? d.name.text : null)).filter((n): n is string => n !== null)
+				: null;
+
+		if (node.initializer) {
+			vm.pushNode(node.initializer, loopScope);
+			frame.initIsExpr = !ts.isVariableDeclarationList(node.initializer);
+			frame.phase = 1;
+		} else {
+			frame.phase = 2;
+		}
+	} else if (frame.phase === 1) {
+		if (frame.initIsExpr) vm.pop();
+		copyPerIteration(frame);
+		frame.phase = 2;
+	} else if (frame.phase === 2) {
+		const scope = frame.iterScope as Scope;
+		if (node.condition) {
+			vm.pushNode(node.condition, scope);
+			frame.phase = 3;
+		} else {
+			vm.pushNode(node.statement, scope);
+			frame.phase = 4;
+		}
+	} else if (frame.phase === 3) {
+		if (!vm.pop()) return void vm.frames.pop();
+		vm.pushNode(node.statement, frame.iterScope as Scope);
+		frame.phase = 4;
+	} else if (frame.phase === 4) {
+		// After the body: snapshot bindings into a fresh scope (so the body's closures keep their
+		// values), THEN run the incrementor in that fresh scope. (spec CreatePerIterationEnvironment.)
+		copyPerIteration(frame);
+		if (node.incrementor) {
+			vm.pushNode(node.incrementor, frame.iterScope as Scope);
+			frame.phase = 5;
+		} else {
+			frame.phase = 2;
+		}
+	} else {
+		vm.pop(); // discard incrementor value
+		frame.phase = 2;
+	}
+});
+
+// Snapshot the loop variables into a fresh scope so each iteration captures its own binding.
+function copyPerIteration(frame: Frame): void {
+	const names = frame.lexicalNames as string[] | null;
+	if (names == null || names.length === 0) return;
+	const prev = frame.iterScope as Scope;
+	const next = new Scope(frame.scope, false);
+	for (const name of names) {
+		next.declareLexical(name, "let");
+		next.initialize(name, prev.get(name));
+	}
+	frame.iterScope = next;
+}
+
+on(K.ForOfStatement, (vm, frame) => {
+	const node = frame.node as ts.ForOfStatement;
+	if (node.awaitModifier) unimplemented(`for-await-of`);
+	if (frame.phase === 0) {
+		frame.isLoop = true;
+		frame.continuePhase = 2;
+		vm.pushNode(node.expression, frame.scope);
+		frame.phase = 1;
+	} else if (frame.phase === 1) {
+		const iterable = vm.pop();
+		const iterator = (iterable as Iterable<unknown>)[Symbol.iterator]();
+		frame.iterator = iterator;
+		frame.phase = 2;
+	} else if (frame.phase === 2) {
+		const result = (frame.iterator as Iterator<unknown>).next();
+		if (result.done) return void vm.frames.pop();
+		bindForTarget(vm, frame, node.initializer, result.value);
+		frame.phase = 3;
+	} else {
+		frame.phase = 2;
+	}
+});
+
+on(K.ForInStatement, (vm, frame) => {
+	const node = frame.node as ts.ForInStatement;
+	if (frame.phase === 0) {
+		frame.isLoop = true;
+		frame.continuePhase = 2;
+		vm.pushNode(node.expression, frame.scope);
+		frame.phase = 1;
+	} else if (frame.phase === 1) {
+		const obj = vm.pop();
+		const keys: string[] = [];
+		if (obj != null) for (const key in obj as object) keys.push(key);
+		frame.keys = keys;
+		frame.index = 0;
+		frame.phase = 2;
+	} else if (frame.phase === 2) {
+		const keys = frame.keys as string[];
+		const index = frame.index as number;
+		if (index >= keys.length) return void vm.frames.pop();
+		frame.index = index + 1;
+		bindForTarget(vm, frame, node.initializer, keys[index]);
+		frame.phase = 3;
+	} else {
+		frame.phase = 2;
+	}
+});
+
+// Bind the current for-of/for-in element to the loop target in a fresh per-iteration scope, then
+// push the body. Destructuring targets: S2 (later).
+function bindForTarget(vm: VM, frame: Frame, initializer: ts.ForInitializer, value: unknown): void {
+	const node = frame.node as ts.ForOfStatement | ts.ForInStatement;
+	const bodyScope = new Scope(frame.scope, false);
+	if (ts.isVariableDeclarationList(initializer)) {
+		const decl = initializer.declarations[0];
+		const isConst = (initializer.flags & ts.NodeFlags.Const) !== 0;
+		const isLet = (initializer.flags & ts.NodeFlags.Let) !== 0;
+		bindTarget(vm, bodyScope, decl.name, value, isConst ? "const" : isLet ? "let" : "var");
+	} else if (ts.isIdentifier(initializer)) {
+		frame.scope.set(initializer.text, value);
+	} else {
+		unimplemented(`for-of/in assignment target ${ts.SyntaxKind[initializer.kind]}`);
+	}
+	vm.pushNode(node.statement, bodyScope);
+}
+
+// ============================================================================
+// switch
+// ============================================================================
+
+on(K.SwitchStatement, (vm, frame) => {
+	const node = frame.node as ts.SwitchStatement;
+	const clauses = node.caseBlock.clauses;
+	if (frame.phase === 0) {
+		frame.isSwitch = true;
+		vm.pushNode(node.expression, frame.scope);
+		frame.phase = 1;
+	} else if (frame.phase === 1) {
+		frame.disc = vm.pop();
+		frame.caseIndex = 0;
+		frame.defaultIndex = clauses.findIndex((c) => c.kind === K.DefaultClause);
+		frame.switchScope = new Scope(frame.scope, false);
+		frame.phase = 2;
+	} else if (frame.phase === 2) {
+		// Scan forward for the next `case` test to evaluate (skip `default` while matching).
+		let i = frame.caseIndex as number;
+		while (i < clauses.length && clauses[i].kind === K.DefaultClause) i++;
+		if (i >= clauses.length) {
+			const def = frame.defaultIndex as number;
+			frame.execIndex = def >= 0 ? def : clauses.length;
+			frame.phase = 4;
+			return;
+		}
+		frame.pendingCase = i;
+		vm.pushNode((clauses[i] as ts.CaseClause).expression, frame.switchScope as Scope);
+		frame.phase = 3;
+	} else if (frame.phase === 3) {
+		const testValue = vm.pop();
+		if (testValue === frame.disc) {
+			frame.execIndex = frame.pendingCase;
+			frame.phase = 4;
+		} else {
+			frame.caseIndex = (frame.pendingCase as number) + 1;
+			frame.phase = 2;
+		}
+	} else if (frame.phase === 4) {
+		// Execute statements from the matched clause to the end (fall-through), sharing one block scope.
+		const start = frame.execIndex as number;
+		if (start >= clauses.length) return void vm.frames.pop();
+		const statements: ts.Statement[] = [];
+		for (let c = start; c < clauses.length; c++) for (const s of clauses[c].statements) statements.push(s);
+		const switchScope = frame.switchScope as Scope;
+		hoist(vm, switchScope, statements);
+		for (let s = statements.length - 1; s >= 0; s--) vm.pushNode(statements[s], switchScope);
+		frame.phase = 5;
+	} else {
+		vm.frames.pop();
+	}
+});
+
+// ============================================================================
+// Labeled statements
+// ============================================================================
+
+on(K.LabeledStatement, (vm, frame) => {
+	const node = frame.node as ts.LabeledStatement;
+	if (frame.phase === 0) {
+		frame.isLabel = true; // catches `break <label>` for a labeled block
+		frame.label = node.label.text;
+		const child = vm.pushNode(node.statement, frame.scope);
+		child.label = node.label.text; // a labeled loop/switch catches break/continue <label> itself
+		frame.phase = 1;
+	} else {
+		vm.frames.pop();
+	}
+});
+
+// ============================================================================
+// try / catch / finally
+// ============================================================================
+//
+// The phases here pair with `unwindTry` in vm.ts: unwind sets phase 3 (catch) or 5 (pending-finally)
+// and pushes the appropriate block; these phases run after a block completes normally.
+
+on(K.TryStatement, (vm, frame) => {
+	const node = frame.node as ts.TryStatement;
+	if (frame.phase === 0) {
+		frame.state = "try";
+		vm.pushNode(node.tryBlock, frame.scope);
+		frame.phase = 1;
+	} else if (frame.phase === 1) {
+		// try block completed normally
+		if (node.finallyBlock) {
+			frame.state = "finally";
+			vm.pushNode(node.finallyBlock, frame.scope);
+			frame.phase = 2;
+		} else {
+			vm.frames.pop();
+		}
+	} else if (frame.phase === 2) {
+		vm.frames.pop(); // finally (after normal try) done
+	} else if (frame.phase === 3) {
+		// catch block completed normally
+		if (node.finallyBlock) {
+			frame.state = "finally";
+			vm.pushNode(node.finallyBlock, frame.scope);
+			frame.phase = 4;
+		} else {
+			vm.frames.pop();
+		}
+	} else if (frame.phase === 4) {
+		vm.frames.pop(); // finally (after catch) done
+	} else {
+		// phase 5: pending-finally done → re-raise the signal that was escaping.
+		vm.frames.pop();
+		vm.raise(frame.pendingSignal as Signal);
+	}
 });
 
 // ============================================================================
@@ -280,12 +584,13 @@ on(K.SatisfiesExpression, passThroughExpr);
 on(K.TemplateExpression, (vm, frame) => {
 	const node = frame.node as ts.TemplateExpression;
 	if (frame.phase === 0) {
+		frame.base = vm.values.length; // depth *now* — earlier siblings are already on the stack
 		for (let i = node.templateSpans.length - 1; i >= 0; i--) {
 			vm.pushNode(node.templateSpans[i].expression, frame.scope);
 		}
 		frame.phase = 1;
 	} else {
-		const values = vm.values.splice(frame.valuesBase);
+		const values = vm.values.splice(frame.base as number);
 		let out = node.head.text;
 		for (let i = 0; i < node.templateSpans.length; i++) {
 			out += String(values[i]) + node.templateSpans[i].literal.text;
@@ -298,41 +603,63 @@ on(K.TemplateExpression, (vm, frame) => {
 on(K.ArrayLiteralExpression, (vm, frame) => {
 	const node = frame.node as ts.ArrayLiteralExpression;
 	if (frame.phase === 0) {
+		frame.base = vm.values.length;
+		const spreadMask: boolean[] = [];
 		for (let i = node.elements.length - 1; i >= 0; i--) {
 			const el = node.elements[i];
-			if (ts.isSpreadElement(el)) throw new Error(`unimplemented: spread element in ArrayLiteral`);
-			vm.pushNode(el, frame.scope);
+			if (ts.isSpreadElement(el)) {
+				vm.pushNode(el.expression, frame.scope);
+				spreadMask[i] = true;
+			} else {
+				// Elisions (holes) in `[1, , 3]` parse as OmittedExpression; treat as undefined for S2.
+				vm.pushNode(el, frame.scope);
+				spreadMask[i] = false;
+			}
 		}
+		frame.spreadMask = spreadMask;
 		frame.phase = 1;
 	} else {
-		const values = vm.values.splice(frame.valuesBase);
+		const raw = vm.values.splice(frame.base as number);
+		const spreadMask = frame.spreadMask as boolean[];
+		const out: unknown[] = [];
+		for (let i = 0; i < raw.length; i++) {
+			if (spreadMask[i]) out.push(...(raw[i] as Iterable<unknown>));
+			else out.push(raw[i]);
+		}
 		vm.frames.pop();
-		vm.push(values);
+		vm.push(out);
 	}
 });
 
 on(K.ObjectLiteralExpression, (vm, frame) => {
 	const node = frame.node as ts.ObjectLiteralExpression;
 	if (frame.phase === 0) {
-		// Evaluate property value expressions in reverse; shorthand resolves to an identifier read.
+		frame.base = vm.values.length;
+		// Evaluate each property's value expression in reverse (methods/get/set: later).
 		for (let i = node.properties.length - 1; i >= 0; i--) {
 			const prop = node.properties[i];
 			if (ts.isPropertyAssignment(prop)) {
 				vm.pushNode(prop.initializer, frame.scope);
 			} else if (ts.isShorthandPropertyAssignment(prop)) {
 				vm.pushNode(prop.name, frame.scope);
+			} else if (ts.isSpreadAssignment(prop)) {
+				vm.pushNode(prop.expression, frame.scope);
 			} else {
-				throw new Error(`unimplemented: ${ts.SyntaxKind[prop.kind]} in ObjectLiteral`);
+				// Methods / accessors in object literals: later (with classes).
+				unimplemented(`${ts.SyntaxKind[prop.kind]} in ObjectLiteral`);
 			}
 		}
 		frame.phase = 1;
 	} else {
-		const values = vm.values.splice(frame.valuesBase);
+		const values = vm.values.splice(frame.base as number);
 		const obj: Record<string, unknown> = {};
 		for (let i = 0; i < node.properties.length; i++) {
-			const prop = node.properties[i] as ts.PropertyAssignment | ts.ShorthandPropertyAssignment;
-			const key = propertyName(prop.name);
-			obj[key] = values[i];
+			const prop = node.properties[i];
+			if (ts.isSpreadAssignment(prop)) {
+				Object.assign(obj, values[i]);
+			} else {
+				obj[propertyName((prop as ts.PropertyAssignment).name)] = values[i];
+			}
 		}
 		vm.frames.pop();
 		vm.push(obj);
@@ -341,7 +668,8 @@ on(K.ObjectLiteralExpression, (vm, frame) => {
 
 function propertyName(name: ts.PropertyName | ts.Identifier): string {
 	if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
-	throw new Error(`unimplemented: computed/other property name (${ts.SyntaxKind[name.kind]})`);
+	if (ts.isPrivateIdentifier(name)) return name.text;
+	unimplemented(`computed/other property name (${ts.SyntaxKind[name.kind]})`);
 }
 
 // ============================================================================
@@ -411,7 +739,7 @@ on(K.PrefixUnaryExpression, (vm, frame) => {
 		case K.ExclamationToken:
 			return vm.push(!v);
 		default:
-			throw new Error(`unimplemented: prefix operator ${ts.SyntaxKind[node.operator]}`);
+			unimplemented(`prefix operator ${ts.SyntaxKind[node.operator]}`);
 	}
 });
 
@@ -422,7 +750,7 @@ on(K.PostfixUnaryExpression, (vm, frame) => {
 
 // ++/-- on a simple identifier lvalue (member lvalues: S2).
 function updateExpression(vm: VM, frame: Frame, operand: ts.Expression, operator: ts.SyntaxKind, prefix: boolean): void {
-	if (!ts.isIdentifier(operand)) throw new Error(`unimplemented: ++/-- on non-identifier`);
+	if (!ts.isIdentifier(operand)) unimplemented(`++/-- on non-identifier`);
 	vm.frames.pop();
 	const name = operand.text;
 	const old = Number(frame.scope.get(name));
@@ -545,7 +873,7 @@ function assignmentExpression(vm: VM, frame: Frame, node: ts.BinaryExpression): 
 	if (ts.isPropertyAccessExpression(node.left) || ts.isElementAccessExpression(node.left)) {
 		return memberAssignment(vm, frame, node);
 	}
-	throw new Error(`unimplemented: assignment target ${ts.SyntaxKind[node.left.kind]}`);
+	unimplemented(`assignment target ${ts.SyntaxKind[node.left.kind]}`);
 }
 
 function memberAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression): void {
@@ -573,7 +901,7 @@ function memberAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression): void
 
 function compoundAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression, op: number): void {
 	// Identifier lvalue only for S1 (member compound assignment: S2).
-	if (!ts.isIdentifier(node.left)) throw new Error(`unimplemented: compound assignment to ${ts.SyntaxKind[node.left.kind]}`);
+	if (!ts.isIdentifier(node.left)) unimplemented(`compound assignment to ${ts.SyntaxKind[node.left.kind]}`);
 	const name = node.left.text;
 	if (frame.phase === 0) {
 		vm.pushNode(node.right, frame.scope);
@@ -621,43 +949,51 @@ on(K.ArrowFunction, makeFunction);
 on(K.CallExpression, (vm, frame) => {
 	const node = frame.node as ts.CallExpression;
 	const callee = node.expression;
-	const isMember = ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee);
+	const isProp = ts.isPropertyAccessExpression(callee);
+	const isElem = ts.isElementAccessExpression(callee);
 
 	if (frame.phase === 0) {
 		// Evaluate the callee (its object first, for method calls, to capture `this`).
-		vm.pushNode(isMember ? (callee as ts.PropertyAccessExpression).expression : callee, frame.scope);
+		vm.pushNode(isProp || isElem ? (callee as ts.PropertyAccessExpression | ts.ElementAccessExpression).expression : callee, frame.scope);
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
-		if (isMember) {
+		if (isElem) {
+			// obj is on the stack; evaluate the index, resolve the callee in phase 2.
+			vm.pushNode((callee as ts.ElementAccessExpression).argumentExpression, frame.scope);
+			frame.phase = 2;
+			return;
+		}
+		if (isProp) {
 			const obj = vm.pop();
 			frame.thisArg = obj;
-			if (obj == null && node.questionDotToken) {
-				vm.frames.pop();
-				return vm.push(undefined);
+			if (obj == null) {
+				if (node.questionDotToken) return void (vm.frames.pop(), vm.push(undefined));
+				throw new TypeError(`Cannot read properties of ${obj} (reading '${(callee as ts.PropertyAccessExpression).name.text}')`);
 			}
-			const key = ts.isPropertyAccessExpression(callee) ? callee.name.text : undefined;
-			// ElementAccess callee needs its index evaluated; defer to S2 unless it's a property access.
-			if (key === undefined) throw new Error(`unimplemented: computed method call target`);
-			vm.push((obj as Record<string, unknown>)[key]);
+			vm.push((obj as Record<string, unknown>)[(callee as ts.PropertyAccessExpression).name.text]);
 		} else {
 			frame.thisArg = undefined;
 		}
-		// Evaluate arguments left-to-right (pushed in reverse), keeping callee value beneath them.
-		for (let i = node.arguments.length - 1; i >= 0; i--) {
-			const arg = node.arguments[i];
-			if (ts.isSpreadElement(arg)) throw new Error(`unimplemented: spread argument`);
-			vm.pushNode(arg, frame.scope);
-		}
-		frame.argCount = node.arguments.length;
-		frame.phase = 2;
+		pushCallArguments(vm, frame, node.arguments);
+		frame.phase = 3;
 	} else if (frame.phase === 2) {
-		const argCount = frame.argCount as number;
-		const args = vm.values.splice(vm.values.length - argCount);
+		const index = vm.pop();
+		const obj = vm.pop();
+		frame.thisArg = obj;
+		if (obj == null) {
+			if (node.questionDotToken) return void (vm.frames.pop(), vm.push(undefined));
+			throw new TypeError(`Cannot read properties of ${obj} (reading '${String(index)}')`);
+		}
+		vm.push((obj as Record<PropertyKey, unknown>)[index as PropertyKey]);
+		pushCallArguments(vm, frame, node.arguments);
+		frame.phase = 3;
+	} else if (frame.phase === 3) {
+		const args = collectCallArguments(vm, frame);
 		const calleeVal = vm.pop();
 
 		if (isGuestFunction(calleeVal)) {
 			vm.pushCall(calleeVal.__tsval, args, frame.thisArg);
-			frame.phase = 3; // resume after the call returns its value
+			frame.phase = 4; // resume after the call returns its value
 			return;
 		}
 		vm.frames.pop();
@@ -667,10 +1003,40 @@ on(K.CallExpression, (vm, frame) => {
 		}
 		vm.push((calleeVal as (...a: unknown[]) => unknown).apply(frame.thisArg, args));
 	} else {
-		// phase 3: guest call has left its return value on the stack.
+		// phase 4: guest call has left its return value on the stack.
 		vm.frames.pop();
 	}
 });
+
+// Evaluate call/new arguments left-to-right (pushed in reverse). A spread argument's operand is
+// evaluated like any other; `spreadMask` records which operands to flatten when collecting.
+function pushCallArguments(vm: VM, frame: Frame, args: readonly ts.Expression[]): void {
+	const spreadMask: boolean[] = [];
+	for (let i = args.length - 1; i >= 0; i--) {
+		const arg = args[i];
+		if (ts.isSpreadElement(arg)) {
+			vm.pushNode(arg.expression, frame.scope);
+			spreadMask[i] = true;
+		} else {
+			vm.pushNode(arg, frame.scope);
+			spreadMask[i] = false;
+		}
+	}
+	frame.argCount = args.length;
+	frame.spreadMask = spreadMask;
+}
+
+function collectCallArguments(vm: VM, frame: Frame): unknown[] {
+	const argCount = frame.argCount as number;
+	const raw = vm.values.splice(vm.values.length - argCount);
+	const spreadMask = frame.spreadMask as boolean[];
+	const args: unknown[] = [];
+	for (let i = 0; i < argCount; i++) {
+		if (spreadMask[i]) args.push(...(raw[i] as Iterable<unknown>));
+		else args.push(raw[i]);
+	}
+	return args;
+}
 
 // NewExpression: construct with evaluated args.
 on(K.NewExpression, (vm, frame) => {
@@ -679,20 +1045,14 @@ on(K.NewExpression, (vm, frame) => {
 		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
-		const args = node.arguments ?? [];
-		for (let i = args.length - 1; i >= 0; i--) {
-			if (ts.isSpreadElement(args[i])) throw new Error(`unimplemented: spread argument in new`);
-			vm.pushNode(args[i], frame.scope);
-		}
-		frame.argCount = args.length;
+		pushCallArguments(vm, frame, node.arguments ?? []);
 		frame.phase = 2;
 	} else {
-		const argCount = frame.argCount as number;
-		const args = vm.values.splice(vm.values.length - argCount);
+		const args = collectCallArguments(vm, frame);
 		const ctor = vm.pop();
 		vm.frames.pop();
 		if (typeof ctor !== "function") throw new TypeError(`${describe(node.expression)} is not a constructor`);
-		// Guest classes: S2. Host constructors work directly.
+		// Guest classes: S2 (later). Host constructors work directly.
 		vm.push(Reflect.construct(ctor as new (...a: unknown[]) => unknown, args));
 	}
 });
@@ -709,7 +1069,7 @@ syntheticHandlers.call = (vm, frame) => {
 			fnScope.declareLexical("arguments", "var");
 			fnScope.initialize("arguments", frame.args as unknown[]);
 		}
-		bindParameters(fnScope, node.parameters, frame.args as unknown[]);
+		bindParameters(vm, fnScope, node.parameters, frame.args as unknown[]);
 		frame.scope = fnScope;
 
 		if (ts.isBlock(node.body!)) {
@@ -737,25 +1097,79 @@ syntheticHandlers.call = (vm, frame) => {
 	}
 };
 
-function bindParameters(scope: Scope, params: readonly ts.ParameterDeclaration[], args: unknown[]): void {
+function bindParameters(vm: VM, scope: Scope, params: readonly ts.ParameterDeclaration[], args: unknown[]): void {
 	for (let i = 0; i < params.length; i++) {
 		const param = params[i];
 		if (param.dotDotDotToken) {
-			if (!ts.isIdentifier(param.name)) throw new Error(`unimplemented: rest param destructuring`);
-			scope.declareLexical(param.name.text, "param");
-			scope.initialize(param.name.text, args.slice(i));
+			// Rest parameter — binds the remaining args (which may themselves be destructured).
+			bindTarget(vm, scope, param.name, args.slice(i), "param");
 			return;
 		}
-		if (!ts.isIdentifier(param.name)) throw new Error(`unimplemented: destructuring parameter`);
-		scope.declareLexical(param.name.text, "param");
-		// Default parameter values (param.initializer) are evaluated eagerly here as a host-side
-		// fallback for `undefined`; full stepped default-init is S2.
 		let value = args[i];
-		if (value === undefined && param.initializer) {
-			throw new Error(`unimplemented: default parameter value`);
-		}
-		scope.initialize(param.name.text, value);
+		if (value === undefined && param.initializer) value = vm.evalNodeSync(param.initializer, scope);
+		bindTarget(vm, scope, param.name, value, "param");
 	}
+}
+
+/**
+ * Bind a declaration target (identifier or binding pattern) to an already-computed value, declaring
+ * into `scope`. The leaf sub-expressions of a pattern — default values and computed keys — are
+ * evaluated synchronously (`vm.evalNodeSync`); the destructuring itself is pure.
+ */
+function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: unknown, kind: BindingKind): void {
+	if (ts.isIdentifier(target)) {
+		if (kind === "var") {
+			scope.declareVar(target.text);
+			scope.set(target.text, value);
+		} else {
+			scope.declareLexical(target.text, kind);
+			scope.initialize(target.text, value);
+		}
+		return;
+	}
+	if (ts.isObjectBindingPattern(target)) {
+		const used = new Set<PropertyKey>();
+		for (const element of target.elements) {
+			if (element.dotDotDotToken) {
+				const rest: Record<string, unknown> = {};
+				for (const key in value as object) if (!used.has(key)) rest[key] = (value as Record<string, unknown>)[key];
+				bindTarget(vm, scope, element.name, rest, kind);
+				continue;
+			}
+			const key = element.propertyName ? bindingKey(vm, scope, element.propertyName) : (element.name as ts.Identifier).text;
+			used.add(key);
+			let v = (value as Record<PropertyKey, unknown>)?.[key];
+			if (v === undefined && element.initializer) v = vm.evalNodeSync(element.initializer, scope);
+			bindTarget(vm, scope, element.name, v, kind);
+		}
+		return;
+	}
+	if (ts.isArrayBindingPattern(target)) {
+		const iterator = (value as Iterable<unknown>)[Symbol.iterator]();
+		for (const element of target.elements) {
+			if (ts.isOmittedExpression(element)) {
+				iterator.next();
+				continue;
+			}
+			if (element.dotDotDotToken) {
+				const rest: unknown[] = [];
+				for (let r = iterator.next(); !r.done; r = iterator.next()) rest.push(r.value);
+				bindTarget(vm, scope, element.name, rest, kind);
+				continue;
+			}
+			const r = iterator.next();
+			let v = r.done ? undefined : r.value;
+			if (v === undefined && element.initializer) v = vm.evalNodeSync(element.initializer, scope);
+			bindTarget(vm, scope, element.name, v, kind);
+		}
+		return;
+	}
+	unimplemented(`binding target ${ts.SyntaxKind[(target as ts.Node).kind]}`);
+}
+
+function bindingKey(vm: VM, scope: Scope, name: ts.PropertyName): PropertyKey {
+	if (ts.isComputedPropertyName(name)) return vm.evalNodeSync(name.expression, scope) as PropertyKey;
+	return propertyName(name);
 }
 
 // ============================================================================
@@ -813,7 +1227,7 @@ function applyBinary(op: number, left: never, right: never): unknown {
 		case K.CommaToken:
 			return right;
 		default:
-			throw new Error(`unimplemented: binary operator ${ts.SyntaxKind[op]}`);
+			unimplemented(`binary operator ${ts.SyntaxKind[op]}`);
 	}
 }
 
@@ -850,7 +1264,7 @@ function applyCompound(op: number, left: never, right: never): unknown {
 		case K.QuestionQuestionEqualsToken:
 			return left ?? right;
 		default:
-			throw new Error(`unimplemented: compound operator ${ts.SyntaxKind[op]}`);
+			unimplemented(`compound operator ${ts.SyntaxKind[op]}`);
 	}
 }
 
