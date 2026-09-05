@@ -17,6 +17,29 @@ function on(kind: number, handler: NodeHandler): void {
 	nodeHandlers[kind] = handler;
 }
 
+/**
+ * The common handler shape — "evaluate these children, in order, then combine": phase 0 pushes the
+ * child frames (reversed, so the first evaluates first) and records the operand depth; phase 1
+ * collects their values (one per child, in order) and hands them to `combine`, which pushes the
+ * result or raises a signal. The numeric-phase form is reserved for handlers whose control flow
+ * depends on intermediate values (branches, loops, try, calls, references, suspension points).
+ */
+function evaluating<N extends ts.Node>(children: (node: N) => readonly ts.Node[], combine: (vm: VM, frame: NodeFrame, node: N, values: unknown[]) => void): NodeHandler {
+	return (vm, frame) => {
+		const node = frame.node as N;
+		if (frame.phase === 0) {
+			frame.base = vm.values.length; // depth *now* — earlier siblings are already on the stack
+			const nodes = children(node);
+			for (let i = nodes.length - 1; i >= 0; i--) vm.pushNode(nodes[i], frame.scope);
+			frame.phase = 1;
+			return;
+		}
+		const values = vm.values.splice(frame.base as number);
+		vm.frames.pop();
+		combine(vm, frame, node, values);
+	};
+}
+
 // ============================================================================
 // Hoisting
 // ============================================================================
@@ -192,15 +215,10 @@ on(K.EmptyStatement, (vm) => {
 	vm.frames.pop();
 });
 
-on(K.VariableStatement, (vm, frame) => {
-	const node = frame.node as ts.VariableStatement;
-	if (frame.phase === 0) {
-		vm.pushNode(node.declarationList, frame.scope);
-		frame.phase = 1;
-	} else {
-		vm.frames.pop();
-	}
-});
+on(
+	K.VariableStatement,
+	evaluating<ts.VariableStatement>((node) => [node.declarationList], () => {}),
+);
 
 // Shared driver for a VariableDeclarationList: declare each name (defensively — `hoist` may already
 // have, e.g. for TDZ in a block, but a `for`-init has no hoist pass), evaluate initializers in order,
@@ -238,16 +256,13 @@ on(K.VariableDeclarationList, (vm, frame) => {
 	}
 });
 
-on(K.ExpressionStatement, (vm, frame) => {
-	const node = frame.node as ts.ExpressionStatement;
-	if (frame.phase === 0) {
-		vm.pushNode(node.expression, frame.scope);
-		frame.phase = 1;
-	} else {
-		vm.completion = vm.pop(); // REPL/eval completion value
-		vm.frames.pop();
-	}
-});
+on(
+	K.ExpressionStatement,
+	evaluating<ts.ExpressionStatement>(
+		(node) => [node.expression],
+		(vm, _frame, _node, [value]) => void (vm.completion = value), // REPL/eval completion value
+	),
+);
 
 on(K.IfStatement, (vm, frame) => {
 	const node = frame.node as ts.IfStatement;
@@ -264,29 +279,18 @@ on(K.IfStatement, (vm, frame) => {
 	}
 });
 
-on(K.ReturnStatement, (vm, frame) => {
-	const node = frame.node as ts.ReturnStatement;
-	if (frame.phase === 0 && node.expression) {
-		vm.pushNode(node.expression, frame.scope);
-		frame.phase = 1;
-	} else {
-		const value = node.expression ? vm.pop() : undefined;
-		vm.frames.pop();
-		vm.raise({ type: "return", value });
-	}
-});
+on(
+	K.ReturnStatement,
+	evaluating<ts.ReturnStatement>(
+		(node) => (node.expression ? [node.expression] : []),
+		(vm, _frame, node, [value]) => vm.raise({ type: "return", value: node.expression ? value : undefined }),
+	),
+);
 
-on(K.ThrowStatement, (vm, frame) => {
-	const node = frame.node as ts.ThrowStatement;
-	if (frame.phase === 0) {
-		vm.pushNode(node.expression, frame.scope);
-		frame.phase = 1;
-	} else {
-		const value = vm.pop();
-		vm.frames.pop();
-		vm.raise({ type: "throw", value });
-	}
-});
+on(
+	K.ThrowStatement,
+	evaluating<ts.ThrowStatement>((node) => [node.expression], (vm, _frame, _node, [value]) => vm.raise({ type: "throw", value })),
+);
 
 // A hoisted function declaration is a no-op at execution time (created during hoist).
 on(K.FunctionDeclaration, (vm) => {
@@ -830,74 +834,62 @@ on(K.SatisfiesExpression, passThroughExpr);
 // Templates, arrays, objects
 // ============================================================================
 
-on(K.TemplateExpression, (vm, frame) => {
-	const node = frame.node as ts.TemplateExpression;
-	if (frame.phase === 0) {
-		frame.base = vm.values.length; // depth *now* — earlier siblings are already on the stack
-		for (let i = node.templateSpans.length - 1; i >= 0; i--) {
-			vm.pushNode(node.templateSpans[i].expression, frame.scope);
-		}
-		frame.phase = 1;
-	} else {
-		const values = vm.values.splice(frame.base as number);
-		let out = node.head.text;
-		for (let i = 0; i < node.templateSpans.length; i++) {
-			out += String(values[i]) + node.templateSpans[i].literal.text;
-		}
-		vm.frames.pop();
-		vm.push(out);
-	}
-});
+on(
+	K.TemplateExpression,
+	evaluating<ts.TemplateExpression>(
+		(node) => node.templateSpans.map((span) => span.expression),
+		(vm, _frame, node, values) => {
+			let out = node.head.text;
+			for (let i = 0; i < node.templateSpans.length; i++) out += String(values[i]) + node.templateSpans[i].literal.text;
+			vm.push(out);
+		},
+	),
+);
 
-on(K.ArrayLiteralExpression, (vm, frame) => {
-	const node = frame.node as ts.ArrayLiteralExpression;
-	if (frame.phase === 0) {
-		frame.base = vm.values.length;
+on(
+	K.ArrayLiteralExpression,
+	evaluating<ts.ArrayLiteralExpression>(
 		// Elisions (`[1, , 3]`) are OmittedExpressions: they produce no operand and leave a hole.
-		for (let i = node.elements.length - 1; i >= 0; i--) {
-			const el = node.elements[i];
-			if (ts.isOmittedExpression(el)) continue;
-			vm.pushNode(ts.isSpreadElement(el) ? el.expression : el, frame.scope);
-		}
-		frame.phase = 1;
-	} else {
-		const raw = vm.values.splice(frame.base as number);
-		const out = new vm.realm.Array() as unknown[];
-		let cursor = 0;
-		let index = 0; // elements are *defined* (CreateDataProperty): an inherited setter on an index never runs
-		for (const el of node.elements) {
-			if (ts.isOmittedExpression(el)) index++;
-			else if (ts.isSpreadElement(el)) for (const v of raw[cursor++] as Iterable<unknown>) defineData(out, index++, v);
-			else defineData(out, index++, raw[cursor++]);
-		}
-		out.length = index;
-		vm.frames.pop();
-		vm.push(out);
-	}
-});
+		(node) => node.elements.filter((el) => !ts.isOmittedExpression(el)).map((el) => (ts.isSpreadElement(el) ? el.expression : el)),
+		(vm, _frame, node, raw) => {
+			const out = new vm.realm.Array() as unknown[];
+			let cursor = 0;
+			let index = 0; // elements are *defined* (CreateDataProperty): an inherited setter on an index never runs
+			for (const el of node.elements) {
+				if (ts.isOmittedExpression(el)) index++;
+				else if (ts.isSpreadElement(el)) for (const v of raw[cursor++] as Iterable<unknown>) defineData(out, index++, v);
+				else defineData(out, index++, raw[cursor++]);
+			}
+			out.length = index;
+			vm.push(out);
+		},
+	),
+);
 
 on(K.ObjectLiteralExpression, (vm, frame) => {
 	const node = frame.node as ts.ObjectLiteralExpression;
-	if (frame.phase === 0) {
-		frame.base = vm.values.length;
-		// Evaluate value-producing properties (in reverse). Methods/accessors produce no operand —
-		// their functions are created in the build phase.
-		// Source order per property: its computed key (if any), then its value. Pushed in reverse, the
-		// key expression goes on top of its own value expression.
-		for (let i = node.properties.length - 1; i >= 0; i--) {
-			const prop = node.properties[i];
-			if (ts.isPropertyAssignment(prop)) vm.pushNode(prop.initializer, frame.scope);
-			else if (ts.isShorthandPropertyAssignment(prop)) vm.pushNode(prop.name, frame.scope);
-			else if (ts.isSpreadAssignment(prop)) vm.pushNode(prop.expression, frame.scope);
-			else if (!ts.isMethodDeclaration(prop) && !ts.isGetAccessorDeclaration(prop) && !ts.isSetAccessorDeclaration(prop)) {
-				unimplemented(`${ts.SyntaxKind[(prop as ts.Node).kind]} in ObjectLiteral`);
-			}
-			const name = (prop as { name?: ts.PropertyName }).name;
-			if (name !== undefined && ts.isComputedPropertyName(name)) vm.pushNode(name.expression, frame.scope);
+	objectLiteral(vm, frame);
+});
+
+/** The value-producing nodes of an object literal, in source order: a computed key before its
+ *  value. Methods/accessors produce no operand — their functions are created in the build step. */
+function objectLiteralOperands(node: ts.ObjectLiteralExpression): ts.Node[] {
+	const out: ts.Node[] = [];
+	for (const prop of node.properties) {
+		const name = (prop as { name?: ts.PropertyName }).name;
+		if (name !== undefined && ts.isComputedPropertyName(name)) out.push(name.expression);
+		if (ts.isPropertyAssignment(prop)) out.push(prop.initializer);
+		else if (ts.isShorthandPropertyAssignment(prop)) out.push(prop.name);
+		else if (ts.isSpreadAssignment(prop)) out.push(prop.expression);
+		else if (!ts.isMethodDeclaration(prop) && !ts.isGetAccessorDeclaration(prop) && !ts.isSetAccessorDeclaration(prop)) {
+			unimplemented(`${ts.SyntaxKind[(prop as ts.Node).kind]} in ObjectLiteral`);
 		}
-		frame.phase = 1;
-	} else {
-		const values = vm.values.splice(frame.base as number);
+	}
+	return out;
+}
+
+const objectLiteral = evaluating<ts.ObjectLiteralExpression>(objectLiteralOperands, (vm, frame, node, values) => {
+	{
 		const obj = new vm.realm.Object() as Record<PropertyKey, unknown>;
 		let cursor = 0; // advances over the evaluated keys and values, in source order
 		const keyOf = (name: ts.PropertyName): PropertyKey => (ts.isComputedPropertyName(name) ? toPropertyKey(values[cursor++]) : propertyName(name));
@@ -934,7 +926,6 @@ on(K.ObjectLiteralExpression, (vm, frame) => {
 				Object.defineProperty(obj, key, desc);
 			}
 		}
-		vm.frames.pop();
 		vm.push(obj);
 	}
 });
@@ -1191,26 +1182,27 @@ on(K.PrefixUnaryExpression, (vm, frame) => {
 	if (node.operator === K.PlusPlusToken || node.operator === K.MinusMinusToken) {
 		return updateExpression(vm, frame, node.operand, node.operator, /* prefix */ true);
 	}
-	if (frame.phase === 0) {
-		vm.pushNode(node.operand, frame.scope);
-		frame.phase = 1;
-		return;
-	}
-	const v = vm.pop() as never;
-	vm.frames.pop();
-	switch (node.operator) {
-		case K.PlusToken:
-			return vm.push(+v);
-		case K.MinusToken:
-			return vm.push(-v);
-		case K.TildeToken:
-			return vm.push(~v);
-		case K.ExclamationToken:
-			return vm.push(!v);
-		default:
-			unimplemented(`prefix operator ${ts.SyntaxKind[node.operator]}`);
-	}
+	unaryOperator(vm, frame);
 });
+
+const unaryOperator = evaluating<ts.PrefixUnaryExpression>(
+	(node) => [node.operand],
+	(vm, _frame, node, [value]) => {
+		const v = value as never;
+		switch (node.operator) {
+			case K.PlusToken:
+				return vm.push(+v);
+			case K.MinusToken:
+				return vm.push(-v);
+			case K.TildeToken:
+				return vm.push(~v);
+			case K.ExclamationToken:
+				return vm.push(!v);
+			default:
+				unimplemented(`prefix operator ${ts.SyntaxKind[node.operator]}`);
+		}
+	},
+);
 
 on(K.PostfixUnaryExpression, (vm, frame) => {
 	const node = frame.node as ts.PostfixUnaryExpression;
@@ -1318,17 +1310,10 @@ on(K.TaggedTemplateExpression, (vm, frame) => {
 	}
 });
 
-on(K.VoidExpression, (vm, frame) => {
-	const node = frame.node as ts.VoidExpression;
-	if (frame.phase === 0) {
-		vm.pushNode(node.expression, frame.scope);
-		frame.phase = 1;
-	} else {
-		vm.pop();
-		vm.frames.pop();
-		vm.push(undefined);
-	}
-});
+on(
+	K.VoidExpression,
+	evaluating<ts.VoidExpression>((node) => [node.expression], (vm) => vm.push(undefined)),
+);
 
 // ============================================================================
 // Suspension: yield / await (machine suspension, ASSIGNMENT §3)
@@ -1544,35 +1529,22 @@ on(K.BinaryExpression, (vm, frame) => {
 	const op = node.operatorToken.kind;
 
 	// `#x in obj` — a brand check (the left side is a private name, not an expression).
-	if (op === K.InKeyword && ts.isPrivateIdentifier(node.left)) {
-		if (frame.phase === 0) {
-			vm.pushNode(node.right, frame.scope);
-			frame.phase = 1;
-		} else {
-			const obj = vm.pop();
-			vm.frames.pop();
-			vm.push(privateHas(obj, lookupPrivate(frame.scope, node.left.text)));
-		}
-		return;
-	}
+	if (op === K.InKeyword && ts.isPrivateIdentifier(node.left)) return privateIn(vm, frame);
 	if (op === K.EqualsToken) return assignmentExpression(vm, frame, node);
 	if (ASSIGN.has(op)) return compoundAssignment(vm, frame, node, op);
 	if (LOGICAL.has(op)) return logicalExpression(vm, frame, node, op);
-
-	// Plain binary: evaluate both operands, then combine.
-	if (frame.phase === 0) {
-		vm.pushNode(node.left, frame.scope);
-		frame.phase = 1;
-	} else if (frame.phase === 1) {
-		vm.pushNode(node.right, frame.scope);
-		frame.phase = 2;
-	} else {
-		const right = vm.pop() as never;
-		const left = vm.pop() as never;
-		vm.frames.pop();
-		vm.push(applyBinary(op, left, right));
-	}
+	plainBinary(vm, frame);
 });
+
+const privateIn = evaluating<ts.BinaryExpression>(
+	(node) => [node.right],
+	(vm, frame, node, [obj]) => vm.push(privateHas(obj, lookupPrivate(frame.scope, (node.left as ts.PrivateIdentifier).text))),
+);
+/** Plain binary: both operands, then the operator. */
+const plainBinary = evaluating<ts.BinaryExpression>(
+	(node) => [node.left, node.right],
+	(vm, _frame, node, [left, right]) => vm.push(applyBinary(node.operatorToken.kind, left as never, right as never)),
+);
 
 function logicalExpression(vm: VM, frame: NodeFrame, node: ts.BinaryExpression, op: number): void {
 	if (frame.phase === 0) {
