@@ -4,7 +4,7 @@ import { syntaxKindName } from "./frontend.ts";
 import type { GuestFunctionMeta } from "./values.ts";
 import type { Frame, NodeFrame, CallFrame, PatternFrame, SyntheticFrame, SyntheticKind } from "./frame.ts";
 import { isGuestFunction } from "./values.ts";
-import { nodeHandlers, syntheticHandlers, createGuestFunction, bindTarget, closeIterator, clonePrivateElements, isGuestClass, type GuestClass } from "./handlers.ts";
+import { nodeHandlers, syntheticHandlers, createGuestFunction, bindIdentifier, bindingProgram, pushPattern, closeIterator, clonePrivateElements, isGuestClass, type GuestClass } from "./handlers.ts";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
 
 /** Brand marking a live generator/async fiber object as non-cloneable (shared across forks). */
@@ -484,21 +484,16 @@ export class VM {
 				const clause = node.catchClause;
 				const catchScope = new Scope(frame.scope, false);
 				const varDecl = clause.variableDeclaration;
-				// The catch parameter may be a destructuring pattern (`catch ([x, y = d])`).
-				if (varDecl != null) {
-					try {
-						bindTarget(this, catchScope, varDecl.name, signal.value, "let");
-					} catch (error) {
-						// A throw while binding the catch parameter replaces the caught error.
-						if (isUncatchable(error)) throw error;
-						this.signal = { type: "throw", value: this.toGuestError(error) };
-						frame.state = "catch"; // past the try block; a finally (if any) still runs
-						return;
-					}
-				}
 				frame.state = "catch";
 				frame.phase = 3;
 				this.pushNode(clause.block, catchScope);
+				// A destructuring catch parameter (`catch ([x, y = d])`) binds through a pattern frame above
+				// the block (its defaults may even suspend); a throw while binding replaces the caught error
+				// and unwinds through this frame's `catch` state, so a finally still runs.
+				if (varDecl != null) {
+					if (ts.isIdentifier(varDecl.name)) bindIdentifier(catchScope, varDecl.name.text, signal.value, "let");
+					else pushPattern(this, catchScope, bindingProgram(varDecl.name, "let"), signal.value);
+				}
 				return;
 			}
 			if (node.finallyBlock != null) return runFinallyThenReraise();
@@ -833,9 +828,14 @@ export class VM {
 		this.paused = false;
 		this.pushCall(meta, args, thisArg);
 		// FunctionDeclarationInstantiation — parameter binding (defaults, destructuring) and hoisting —
-		// happens at CALL time, before the generator object / promise exists (spec). Run exactly the call
-		// frame's phase 0 now; a throw there must surface at the call site, not on the first `.next()`.
+		// happens at CALL time, before the generator object / promise exists (spec). Run the call frame's
+		// phase 0 and the parameter frame it pushes above the body to completion now (it cannot suspend:
+		// a `yield`/`await` in a parameter is an early error); a throw there surfaces at the call site.
 		this.step();
+		// Step until the parameter frame is gone: on completion, or by a throw unwinding it (a `return`
+		// inside a default's nested function is consumed by that function's own call frame on the way).
+		const bodyDepth = this.frames.length - (this.top?.kind === "pattern" ? 1 : 0);
+		while (this.frames.length > bodyDepth) this.step();
 		const signal = this.signal as Signal | null; // (asserted: TS keeps the pre-step `null` narrowing)
 		if (signal !== null) {
 			this.restoreContext(ctx);

@@ -101,11 +101,10 @@ Current standing on the full pinned corpus: **99.7 % of eligible tests pass**; t
 failures are listed by reason in `PROGRESS.md` (promise-tick ordering, a few evaluation-order
 details, script-goal leftovers).
 
-Destructuring patterns whose defaults, computed keys or targets can suspend (`const [a = yield] =
-it`, `[o[await k]] = v`) are compiled to a small list of plain-data ops run by a synthetic
-`pattern` frame, so the suspension — and a fork taken in the middle of it — is ordinary frame
-state. `TSVAL_STEPPED_PATTERNS=1` forces every pattern through that path (the corpus gives identical
-results in both modes).
+Every destructuring pattern, parameter list and catch parameter is compiled once to a small list
+of plain-data ops run by a synthetic `pattern` frame; defaults, computed keys and member targets
+are ordinary node frames above it, so `const [a = yield] = it` or `[o[await k]] = v` suspend like
+anything else, and a fork taken in the middle of a pattern is ordinary frame state.
 
 ## Layout
 

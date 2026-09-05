@@ -116,9 +116,9 @@ test("#4 await inside a class computed key is modeled (keys evaluate on the step
 	assert.deepStrictEqual(await p, ["constructor", "k"]);
 });
 
-test("#4 await inside a catch-clause pattern (bound while unwinding) is still an internal error, not a silent undefined", async () => {
+test("#4 await inside a catch-clause pattern is modeled too (bound by a frame above the catch block)", async () => {
 	const p = interpret(`(async () => { try { throw []; } catch ([a = await Promise.resolve(1)]) { return a; } })()`) as Promise<unknown>;
-	await assert.rejects(p, (e: unknown) => e instanceof TsvalInternalError);
+	assert.strictEqual(await p, 1);
 });
 
 // --- #7: fork policy — accessors rebind, class prototypes are shared consistently ---

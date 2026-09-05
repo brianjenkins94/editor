@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { assertDifferential, assertDifferentialAsync } from "../differential/harness.ts";
 import { createVM } from "../../src/index.ts";
-import { patternSettings } from "../../src/handlers.ts";
 
 const sync = [
 	// defaults
@@ -47,9 +46,7 @@ for (const code of sync) test(`stepped pattern: ${code.slice(0, 70)}`, () => ass
 for (const code of asyncCases) test(`stepped pattern (async): ${code.slice(0, 70)}`, () => assertDifferentialAsync(code));
 
 test("fork taken while a pattern frame is waiting on a default value is independent", () => {
-	const prev = patternSettings.forceStepped;
-	patternSettings.forceStepped = true;
-	try {
+	{
 		const vm = createVM(`const [a = 1 + 1, b] = [undefined, 5]; const r = a + b; r`);
 		// While the default `1 + 1` evaluates, its node frame sits above the waiting pattern frame.
 		const waiting = (): number => vm.frames.findIndex((f) => f.kind === "pattern" && f.awaiting === true);
@@ -65,7 +62,19 @@ test("fork taken while a pattern frame is waiting on a default value is independ
 		fork.run();
 		assert.equal(vm.completion, 7);
 		assert.equal(fork.completion, 7);
-	} finally {
-		patternSettings.forceStepped = prev;
 	}
 });
+
+// Parameters and catch clauses bind through the same program.
+const parameterCases = [
+	`function f([a, b] = [1, 2], { c } = { c: 3 }, ...[d]) { return a + b + c + (d ?? 0); } [f(), f(undefined, undefined, 4), f([10, 20], { c: 30 }, 40)]`,
+	`function g(a = b, b) {} try { g(); } catch (e) { e.constructor.name }`,
+	`function h(a, b = a * 2, c = b + 1) { return [a, b, c]; } h(1)`,
+	`const f = (x = (() => { throw new RangeError("d"); })()) => x; try { f(); } catch (e) { e.constructor.name }`,
+	`class A { f = 1; constructor(x = this.f) { this.x = x; } } new A().x`,
+	`try { throw [1, 2]; } catch ([x, y = 10]) { x + y }`,
+	`let r; try { try { throw { a: 1 }; } catch ({ a, b = (() => { throw new Error("in default"); })() }) { r = "unreached"; } finally { r = (r ?? "") + " finally"; } } catch (e) { r += " " + e.message; } r`,
+	`function f(a, b) { arguments[0] = 9; return [a, b, arguments.length]; } f(1, 2)`,
+];
+for (const code of parameterCases) test(`parameter/catch pattern: ${code.slice(0, 70)}`, () => assertDifferential(code));
+test("catch pattern (async): a default may await", () => assertDifferentialAsync(`(async () => { try { throw []; } catch ([a = await Promise.resolve(1)]) { return a; } })()`));

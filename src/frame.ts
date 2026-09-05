@@ -156,6 +156,8 @@ export interface PatternFrame extends FrameBase {
 	objs: PatternSource[];
 	keys: PropertyKey[];
 	awaiting?: boolean;
+	/** a parameter program's argument vector. */
+	args?: unknown[];
 }
 
 export type SyntheticFrame = CallFrame | ConstructFrame | InitFieldsFrame | PatternFrame;

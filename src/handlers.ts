@@ -227,14 +227,13 @@ on(K.VariableDeclarationList, (vm, frame) => {
 		} else {
 			// no initializer: `let x;` leaves the TDZ as undefined. `var x;` is a runtime no-op — it must
 			// not overwrite a hoisted `function x` (or an earlier assignment) with undefined.
-			if (kind !== "var") bindTarget(vm, frame.scope, decl.name, undefined, kind);
+			if (kind !== "var") bindIdentifier(frame.scope, (decl.name as ts.Identifier).text, undefined, kind); // (a pattern needs an initializer)
 			frame.phase += 2; // -> next decl
 		}
 	} else {
 		const value = namedIf(vm.pop(), decl.name, decl.initializer);
-		// A pattern whose sub-expressions may suspend runs as a frame above this one.
-		if (bindingNeedsStepping(decl.name)) pushPattern(vm, frame.scope, bindingProgram(decl.name, kind), value);
-		else bindTarget(vm, frame.scope, decl.name, value, kind);
+		if (ts.isIdentifier(decl.name)) bindIdentifier(frame.scope, decl.name.text, value, kind);
+		else pushPattern(vm, frame.scope, bindingProgram(decl.name, kind), value); // a frame above this one
 		frame.phase++; // -> next decl (now even)
 	}
 });
@@ -593,20 +592,20 @@ on(K.ForInStatement, (vm, frame) => {
 function bindForTarget(vm: VM, frame: NodeFrame, initializer: ts.ForInitializer, value: unknown): void {
 	const node = frame.node as ts.ForOfStatement | ts.ForInStatement;
 	const bodyScope = new Scope(frame.scope, false);
-	// A pattern that may suspend is bound by a frame pushed ABOVE the body (so it runs first).
+	// A plain identifier binds directly; anything else (a pattern, a member target) is bound by a
+	// pattern frame pushed ABOVE the body, so it runs first.
 	let stepped: { scope: Scope; program: PatternProgram } | undefined;
 	if (ts.isVariableDeclarationList(initializer)) {
 		const decl = initializer.declarations[0];
 		const isConst = (initializer.flags & ts.NodeFlags.Const) !== 0;
 		const isLet = (initializer.flags & ts.NodeFlags.Let) !== 0;
 		const kind: BindingKind = isConst ? "const" : isLet ? "let" : "var";
-		if (bindingNeedsStepping(decl.name)) stepped = { scope: bodyScope, program: bindingProgram(decl.name, kind) };
-		else bindTarget(vm, bodyScope, decl.name, value, kind);
-	} else if (assignNeedsStepping(initializer as ts.Expression)) {
-		stepped = { scope: frame.scope, program: assignProgram(initializer as ts.Expression) };
+		if (ts.isIdentifier(decl.name)) bindIdentifier(bodyScope, decl.name.text, value, kind);
+		else stepped = { scope: bodyScope, program: bindingProgram(decl.name, kind) };
 	} else {
-		// An assignment target: identifier, member, or a destructuring pattern (`for ([a, b] of …)`).
-		assignPattern(vm, frame.scope, initializer as ts.Expression, value);
+		const target = unwrapParens(initializer as ts.Expression);
+		if (ts.isIdentifier(target)) frame.scope.set(target.text, value);
+		else stepped = { scope: frame.scope, program: assignProgram(target) };
 	}
 	vm.pushNode(node.statement, bodyScope);
 	if (stepped !== undefined) pushPattern(vm, stepped.scope, stepped.program, value);
@@ -1633,24 +1632,18 @@ function assignmentExpression(vm: VM, frame: NodeFrame, node: ts.BinaryExpressio
 			node.right,
 		);
 	}
-	// Destructuring assignment: `[a, b] = x`, `({ x } = o)`. Evaluate the RHS (stepped), then assign
-	// into the (possibly nested) targets synchronously.
+	// Destructuring assignment: `[a, b] = x`, `({ x } = o)`. Evaluate the RHS, then bind through a
+	// pattern frame.
 	if (ts.isArrayLiteralExpression(left) || ts.isObjectLiteralExpression(left)) {
 		if (frame.phase === 0) {
 			vm.pushNode(node.right, frame.scope);
 			frame.phase = 1;
 		} else if (frame.phase === 1) {
+			// The pattern frame runs above; the expression's value (the RHS) is already in place.
 			const value = vm.pop();
-			if (assignNeedsStepping(left)) {
-				// The pattern frame runs above; the expression's value (the RHS) is already in place.
-				vm.push(value);
-				frame.phase = 2;
-				pushPattern(vm, frame.scope, assignProgram(left), value);
-				return;
-			}
-			assignPattern(vm, frame.scope, left, value);
-			vm.frames.pop();
 			vm.push(value);
+			frame.phase = 2;
+			pushPattern(vm, frame.scope, assignProgram(left), value);
 		} else {
 			vm.frames.pop();
 		}
@@ -1658,121 +1651,6 @@ function assignmentExpression(vm: VM, frame: NodeFrame, node: ts.BinaryExpressio
 	}
 }
 
-/** Assign `value` into an assignment target expression (existing lvalues, possibly a pattern). */
-function assignPattern(vm: VM, scope: Scope, target: ts.Expression, value: unknown): void {
-	target = unwrapParens(target);
-	if (ts.isIdentifier(target)) return scope.set(target.text, value);
-	if (ts.isPropertyAccessExpression(target)) {
-		const obj = vm.evalNodeSync(target.expression, scope);
-		if (ts.isPrivateIdentifier(target.name)) return privateSet(obj, lookupPrivate(scope, target.name.text), value);
-		if (obj == null) throw new TypeError(`Cannot set properties of ${String(obj)} (setting '${target.name.text}')`);
-		(obj as Record<string, unknown>)[target.name.text] = value;
-		return;
-	}
-	if (ts.isElementAccessExpression(target)) {
-		const obj = vm.evalNodeSync(target.expression, scope) as Record<PropertyKey, unknown>;
-		obj[vm.evalNodeSync(target.argumentExpression, scope) as PropertyKey] = value;
-		return;
-	}
-	if (ts.isArrayLiteralExpression(target)) {
-		const steps = iterationSteps(getIterator(vm, value));
-		try {
-			for (const element of target.elements) {
-				if (ts.isOmittedExpression(element)) {
-					steps.step();
-				} else if (ts.isSpreadElement(element)) {
-					const prepared = prepareAssignTarget(vm, scope, element.expression); // reference first
-					const rest = new vm.realm.Array() as unknown[];
-					for (let r = steps.step(); !r.done; r = steps.step()) defineData(rest, rest.length, r.value);
-					storePrepared(vm, scope, prepared, rest);
-				} else {
-					// Spec order: evaluate the target *reference* (a member's object/key), then IteratorStep,
-					// then a default if the value is undefined, then PutValue.
-					const prepared = prepareAssignTarget(vm, scope, element);
-					storePrepared(vm, scope, prepared, steps.step().value);
-				}
-			}
-		} catch (error) {
-			steps.close(true);
-			throw error;
-		}
-		steps.close(false);
-		return;
-	}
-	if (ts.isObjectLiteralExpression(target)) {
-		if (value == null) throw new TypeError(`Cannot destructure '${String(value)}' as it is ${String(value)}.`);
-		const used = new Set<PropertyKey>();
-		for (const prop of target.properties) {
-			if (ts.isSpreadAssignment(prop)) {
-				const prepared = prepareAssignTarget(vm, scope, prop.expression);
-				const rest = new vm.realm.Object();
-				copyRestProperties(vm, rest, value, used);
-				storePrepared(vm, scope, prepared, rest);
-			} else if (ts.isPropertyAssignment(prop)) {
-				const key = memberKey(vm, prop.name, scope);
-				used.add(key);
-				const prepared = prepareAssignTarget(vm, scope, prop.initializer); // reference before GetV
-				storePrepared(vm, scope, prepared, vm.fromHost((value as Record<PropertyKey, unknown>)[key]));
-			} else if (ts.isShorthandPropertyAssignment(prop)) {
-				const key = prop.name.text;
-				used.add(key);
-				let v = vm.fromHost((value as Record<string, unknown>)[key]);
-				if (v === undefined && prop.objectAssignmentInitializer) v = nameAnonymous(vm.evalNodeSync(prop.objectAssignmentInitializer, scope), key, prop.objectAssignmentInitializer);
-				scope.set(key, v);
-			} else {
-				unimplemented(`assignment pattern property ${ts.SyntaxKind[prop.kind]}`);
-			}
-		}
-		return;
-	}
-	unimplemented(`assignment pattern target ${ts.SyntaxKind[target.kind]}`);
-}
-
-// An assignment-pattern element: a target (identifier / member / nested pattern) possibly with a
-// default (`a = 1` inside a pattern parses as a BinaryExpression with `=`). The target *reference* is
-// evaluated before the value is fetched (spec), so member targets are resolved eagerly here.
-interface PreparedTarget {
-	kind: "id" | "member" | "pattern";
-	target: ts.Expression;
-	init?: ts.Expression;
-	name?: string;
-	obj?: object;
-	key?: PropertyKey;
-	pn?: PrivateName;
-}
-
-function prepareAssignTarget(vm: VM, scope: Scope, element: ts.Expression): PreparedTarget {
-	let target = element;
-	let init: ts.Expression | undefined;
-	if (ts.isBinaryExpression(element) && element.operatorToken.kind === K.EqualsToken) {
-		target = element.left;
-		init = element.right;
-	}
-	target = unwrapParens(target);
-	if (ts.isIdentifier(target)) return { kind: "id", target, init, name: target.text };
-	if (ts.isPropertyAccessExpression(target)) {
-		const obj = vm.evalNodeSync(target.expression, scope);
-		if (obj == null) throw new TypeError(`Cannot set properties of ${obj} (setting '${target.name.text}')`);
-		const pn = ts.isPrivateIdentifier(target.name) ? lookupPrivate(scope, target.name.text) : undefined;
-		return { kind: "member", target, init, obj: obj as object, key: target.name.text, pn };
-	}
-	if (ts.isElementAccessExpression(target)) {
-		const obj = vm.evalNodeSync(target.expression, scope);
-		const key = toPropertyKey(vm.evalNodeSync(target.argumentExpression, scope));
-		if (obj == null) throw new TypeError(`Cannot set properties of ${obj} (setting '${keyText(key)}')`);
-		return { kind: "member", target, init, obj: obj as object, key };
-	}
-	return { kind: "pattern", target, init };
-}
-
-function storePrepared(vm: VM, scope: Scope, t: PreparedTarget, value: unknown): void {
-	if (value === undefined && t.init !== undefined) value = namedIf(vm.evalNodeSync(t.init, scope), t.target, t.init);
-	if (t.kind === "id") scope.set(t.name as string, value);
-	else if (t.kind === "member") {
-		if (t.pn !== undefined) privateSet(t.obj, t.pn, value);
-		else (t.obj as Record<PropertyKey, unknown>)[t.key as PropertyKey] = value;
-	} else assignPattern(vm, scope, t.target, value);
-}
 
 /** For `&&=` / `||=` / `??=`: does the current value already decide the result (RHS not evaluated)? */
 function logicalShortCircuits(op: number, current: unknown): boolean {
@@ -2463,12 +2341,13 @@ syntheticHandlers.construct = (vm, frame) => {
 			fnScope.newTarget = frame.newTarget ?? ctor;
 			fnScope.declareLexical("arguments", "var");
 			fnScope.initialize("arguments", createArgumentsObject(vm, frame.args));
-			bindParameters(vm, fnScope, meta.ctorNode.parameters, frame.args);
-			// Base class: fields init before the body. Derived: after super() (handled in the super call).
+			// Base class: fields initialize before the parameters bind and the body runs ([[Construct]]:
+			// InitializeInstanceElements precedes OrdinaryCallEvaluateBody). Derived: after super().
 			if (meta.superClass === undefined) initInstanceFields(vm, meta, instance);
 			hoist(vm, fnScope, (meta.ctorNode.body as ts.Block).statements);
 			const body = vm.pushNode(meta.ctorNode.body as ts.Block, fnScope);
 			body.reuseScope = true;
+			bindParameters(vm, fnScope, meta.ctorNode, frame.args); // (above the body: runs first)
 		} else if (meta.superClass !== undefined) {
 			// Implicit derived constructor: super(...args), then this class's fields.
 			const newTarget = frame.newTarget ?? ctor;
@@ -2531,7 +2410,6 @@ syntheticHandlers.call = (vm, frame) => {
 			fnScope.declareLexical("arguments", "var");
 			fnScope.initialize("arguments", createArgumentsObject(vm, frame.args));
 		}
-		bindParameters(vm, fnScope, node.parameters, frame.args);
 		fnScope.functionMeta = meta;
 		frame.scope = fnScope;
 		// With non-simple parameters (defaults, patterns, rest) the body gets its own var environment:
@@ -2549,6 +2427,7 @@ syntheticHandlers.call = (vm, frame) => {
 			vm.pushNode(node.body!, bodyScope);
 			frame.phase = 2;
 		}
+		bindParameters(vm, fnScope, node, frame.args); // (the parameter frame runs before the body)
 	} else if (frame.phase === 1) {
 		// Body completed with no explicit return.
 		vm.frames.pop();
@@ -2579,22 +2458,20 @@ function functionLength(params: readonly ts.ParameterDeclaration[]): number {
 	return n;
 }
 
-function bindParameters(vm: VM, scope: Scope, allParams: readonly ts.ParameterDeclaration[], args: unknown[]): void {
-	const params = allParams.filter((p) => !isThisParameter(p));
-	// All parameter names start in the TDZ, so a default referring to itself or a later parameter
-	// (`function f(a = b, b) {}`) is a ReferenceError; each binding leaves the TDZ as it's bound.
-	for (const param of params) for (const name of bindingNames(param.name)) scope.declareLexical(name, "let");
-	for (let i = 0; i < params.length; i++) {
-		const param = params[i];
-		if (param.dotDotDotToken) {
-			// Rest parameter — binds the remaining args (which may themselves be destructured).
-			bindTarget(vm, scope, param.name, realmArray(vm, Array.prototype.slice.call(args, i)), "param");
-			return;
-		}
-		let value = args[i];
-		if (value === undefined && param.initializer) value = namedIf(vm.evalNodeSync(param.initializer, scope), param.name, param.initializer);
-		bindTarget(vm, scope, param.name, value, "param");
+/**
+ * FunctionDeclarationInstantiation's parameter part. Every parameter name starts in the TDZ (a
+ * default referring to itself or a later parameter — `function f(a = b, b) {}` — is a
+ * ReferenceError); the parameter program then binds them in order, as a pattern frame pushed ABOVE
+ * the body's (call AFTER pushing the body). Defaults are ordinary guest expressions on the stack.
+ */
+function bindParameters(vm: VM, scope: Scope, node: ts.SignatureDeclaration, args: unknown[]): void {
+	let any = false;
+	for (const param of node.parameters) {
+		if (isThisParameter(param)) continue;
+		any = true;
+		for (const name of bindingNames(param.name)) scope.declareLexical(name, "let");
 	}
+	if (any) pushPattern(vm, scope, parameterProgram(node), undefined, args);
 }
 
 // --- NamedEvaluation: an anonymous function/class takes the name it's bound or assigned to --------
@@ -2639,7 +2516,7 @@ function namedIf(value: unknown, target: ts.BindingName | ts.Expression, from: t
  * into `scope`. The leaf sub-expressions of a pattern — default values and computed keys — are
  * evaluated synchronously (`vm.evalNodeSync`); the destructuring itself is pure.
  */
-function bindIdentifier(scope: Scope, name: string, value: unknown, kind: BindingKind): void {
+export function bindIdentifier(scope: Scope, name: string, value: unknown, kind: BindingKind): void {
 	if (kind === "var") {
 		scope.declareVar(name);
 		scope.set(name, value);
@@ -2649,68 +2526,21 @@ function bindIdentifier(scope: Scope, name: string, value: unknown, kind: Bindin
 	}
 }
 
-export function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: unknown, kind: BindingKind): void {
-	if (ts.isIdentifier(target)) return bindIdentifier(scope, target.text, value, kind);
-	if (ts.isObjectBindingPattern(target)) {
-		if (value == null) throw new TypeError(`Cannot destructure '${String(value)}' as it is ${String(value)}.`);
-		const used = new Set<PropertyKey>();
-		for (const element of target.elements) {
-			if (element.dotDotDotToken) {
-				const rest = new vm.realm.Object();
-				copyRestProperties(vm, rest, value, used);
-				bindTarget(vm, scope, element.name, rest, kind);
-				continue;
-			}
-			const key = element.propertyName ? bindingKey(vm, scope, element.propertyName) : (element.name as ts.Identifier).text;
-			used.add(key);
-			let v = vm.fromHost((value as Record<PropertyKey, unknown>)?.[key]);
-			if (v === undefined && element.initializer) v = namedIf(vm.evalNodeSync(element.initializer, scope), element.name, element.initializer);
-			bindTarget(vm, scope, element.name, v, kind);
-		}
-		return;
-	}
-	if (ts.isArrayBindingPattern(target)) {
-		const steps = iterationSteps(getIterator(vm, value));
-		try {
-			for (const element of target.elements) {
-				if (ts.isOmittedExpression(element)) {
-					steps.step();
-					continue;
-				}
-				if (element.dotDotDotToken) {
-					const rest = new vm.realm.Array() as unknown[];
-					for (let r = steps.step(); !r.done; r = steps.step()) defineData(rest, rest.length, r.value);
-					bindTarget(vm, scope, element.name, rest, kind);
-					continue;
-				}
-				let v: unknown = steps.step().value;
-				if (v === undefined && element.initializer) v = namedIf(vm.evalNodeSync(element.initializer, scope), element.name, element.initializer);
-				bindTarget(vm, scope, element.name, v, kind);
-			}
-		} catch (error) {
-			steps.close(true);
-			throw error;
-		}
-		steps.close(false);
-		return;
-	}
-	unimplemented(`binding target ${ts.SyntaxKind[(target as ts.Node).kind]}`);
-}
 
 // ============================================================================
-// Stepped destructuring
+// Destructuring (binding patterns, assignment patterns, parameter lists)
 // ============================================================================
-// `bindTarget`/`assignPattern` above evaluate a pattern's defaults, computed keys and member targets
-// synchronously (`evalNodeSync`), which cannot suspend: `const [a = yield] = it` or
-// `[o[await k]] = v` need those sub-expressions on the stepped stack. Such patterns (detected
-// syntactically; or ALL patterns under `TSVAL_STEPPED_PATTERNS=1`, the parity-testing switch) are
-// compiled once into a flat list of plain-data ops, run by a synthetic `pattern` frame whose state —
-// pc, a temp stack, open iterator records, open source objects — lives in frame fields, so a fork
-// or a snapshot mid-pattern is an ordinary frame clone. The compiled program is a class instance
-// (shared by forks, never mutated). Semantics mirror the synchronous path op for op.
+// A pattern is compiled once into a flat list of plain-data ops, run by a synthetic `pattern` frame
+// whose state — pc, a temp stack, open iterator records, open source objects — lives in frame
+// fields, so a fork or a snapshot mid-pattern is an ordinary frame clone. Defaults, computed keys and
+// member targets are pushed as ordinary node frames, so `const [a = yield] = it` or `[o[await k]] =
+// v` suspend like anything else. The compiled program is a class instance (shared by forks, never
+// mutated). Parameter lists compile to the same ops (`arg` / `rest-args` read the argument vector).
 
 type PatOp =
 	| { op: "eval"; node: ts.Expression } // push a node frame; its value lands on temps on resume
+	| { op: "arg"; index: number } // a parameter's argument → temps.push (undefined when absent)
+	| { op: "rest-args"; from: number } // the remaining arguments as a guest array → temps.push
 	| { op: "iter-open" } // temps.pop() → GetIterator → iters.push
 	| { op: "iter-step" } // IteratorStep+IteratorValue → temps.push (undefined once done)
 	| { op: "iter-skip" } // an elision
@@ -2726,7 +2556,8 @@ type PatOp =
 	| { op: "bind"; name: string; kind: BindingKind } // temps.pop() → declare/initialize
 	| { op: "assign-id"; name: string } // temps.pop() → PutValue
 	| { op: "member-ref"; hasKey: boolean; text: string; privateName?: string } // (key), base → reference record
-	| { op: "member-store" }; // value, reference → PutValue
+	| { op: "member-store" } // value, reference → PutValue
+	| { op: "swap" }; // exchange the two top temps (a member target bound to a value already obtained)
 
 export class PatternProgram {
 	readonly ops: readonly PatOp[];
@@ -2735,32 +2566,6 @@ export class PatternProgram {
 	}
 }
 
-
-/** Test switch: run EVERY pattern through the stepped machine (parity with the synchronous path). */
-export const patternSettings = { forceStepped: process.env.TSVAL_STEPPED_PATTERNS === "1" };
-
-const suspensionCache = new WeakMap<ts.Node, boolean>();
-/** Does a pattern contain `yield`/`await` outside nested functions/classes? */
-function containsSuspension(node: ts.Node): boolean {
-	let known = suspensionCache.get(node);
-	if (known === undefined) {
-		const walk = (n: ts.Node): boolean => {
-			if (ts.isYieldExpression(n) || ts.isAwaitExpression(n)) return true;
-			if (ts.isFunctionLike(n) || ts.isClassLike(n)) return false;
-			return ts.forEachChild(n, walk) === true;
-		};
-		known = walk(node);
-		suspensionCache.set(node, known);
-	}
-	return known;
-}
-
-export function bindingNeedsStepping(target: ts.BindingName): boolean {
-	return !ts.isIdentifier(target) && (patternSettings.forceStepped || containsSuspension(target));
-}
-export function assignNeedsStepping(target: ts.Expression): boolean {
-	return (ts.isArrayLiteralExpression(target) || ts.isObjectLiteralExpression(target)) && (patternSettings.forceStepped || containsSuspension(target));
-}
 
 const patternPrograms = new WeakMap<ts.Node, Map<string, PatternProgram>>();
 function cachedProgram(node: ts.Node, variant: string, compile: (ops: PatOp[]) => void): PatternProgram {
@@ -2776,10 +2581,27 @@ function cachedProgram(node: ts.Node, variant: string, compile: (ops: PatOp[]) =
 }
 export const bindingProgram = (target: ts.BindingName, kind: BindingKind): PatternProgram => cachedProgram(target, `bind:${kind}`, (ops) => compileBinding(target, kind, ops));
 export const assignProgram = (target: ts.Expression): PatternProgram => cachedProgram(target, "assign", (ops) => compileAssign(target, ops));
+/** A parameter list: each parameter reads its argument (or the rest), applies its default, binds. */
+const parameterProgram = (node: ts.SignatureDeclaration): PatternProgram =>
+	cachedProgram(node, "params", (ops) => {
+		const params = node.parameters.filter((p) => !isThisParameter(p));
+		for (let i = 0; i < params.length; i++) {
+			const param = params[i];
+			if (param.dotDotDotToken) {
+				ops.push({ op: "rest-args", from: i });
+				compileBinding(param.name, "param", ops);
+				break;
+			}
+			ops.push({ op: "arg", index: i });
+			compileDefault(param.initializer, param.name, ops);
+			compileBinding(param.name, "param", ops);
+		}
+	});
 
-/** Start binding `value` through `program` in `scope`: the frame runs above the caller's. */
-export function pushPattern(vm: VM, scope: Scope, program: PatternProgram, value: unknown): void {
-	vm.pushFrame({ kind: "pattern", node: null, phase: 0, scope, valuesBase: vm.values.length, program, pc: 0, temps: [value], iters: [], objs: [], keys: [] });
+/** Start binding through `program` in `scope`: the frame runs above the caller's. `value` seeds the
+ *  temp stack (the destructured value); a parameter program reads `args` instead. */
+export function pushPattern(vm: VM, scope: Scope, program: PatternProgram, value: unknown, args?: unknown[]): void {
+	vm.pushFrame({ kind: "pattern", node: null, phase: 0, scope, valuesBase: vm.values.length, program, pc: 0, temps: args === undefined ? [value] : [], iters: [], objs: [], keys: [], args });
 }
 
 // --- compilation (each compiled pattern consumes temps.top) ---
@@ -2848,6 +2670,9 @@ function compileAssignElement(elementTarget: ts.Expression, init: ts.Expression 
 function compileAssign(elementTarget: ts.Expression, ops: PatOp[]): void {
 	const target = unwrapParens(elementTarget);
 	if (ts.isIdentifier(target)) return void ops.push({ op: "assign-id", name: target.text });
+	// A bare member target (`for (o.x of xs)`): the value is on the temps first (spec: the next value,
+	// THEN the reference), so the reference is evaluated above it and swapped under before the store.
+	if (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) return compileAssignElement(target, undefined, () => ops.push({ op: "swap" }), ops);
 	if (ts.isArrayLiteralExpression(target)) {
 		ops.push({ op: "iter-open" });
 		for (const element of target.elements) {
@@ -2926,6 +2751,12 @@ syntheticHandlers.pattern = (vm, frame) => {
 				frame.awaiting = true;
 				vm.pushNode(op.node, scope);
 				return;
+			case "arg":
+				temps.push((frame.args as unknown[])[op.index]);
+				break;
+			case "rest-args":
+				temps.push(realmArray(vm, Array.prototype.slice.call(frame.args as unknown[], op.from)));
+				break;
 			case "iter-open":
 				iters.push({ record: getIterator(vm, temps.pop()), done: false });
 				break;
@@ -2999,6 +2830,12 @@ syntheticHandlers.pattern = (vm, frame) => {
 			case "member-store": {
 				const value = temps.pop();
 				putValue(vm, scope, temps.pop() as Ref, value);
+				break;
+			}
+			case "swap": {
+				const top = temps.pop();
+				const below = temps.pop();
+				temps.push(top, below);
 				break;
 			}
 		}
@@ -3085,35 +2922,6 @@ function iterNext(record: IterRecord, ...args: unknown[]): IteratorResult<unknow
 	const result = (record.next as (...a: unknown[]) => unknown).apply(record.iterator, args);
 	if (typeof result !== "object" || result === null) throw new TypeError("Iterator result is not an object");
 	return result as IteratorResult<unknown>;
-}
-
-/**
- * Destructuring's view of an iterator: `step()` is IteratorStep + IteratorValue with the record's
- * [[Done]] tracked — an exhausted iterator keeps answering `done` (no further `next` calls), and an
- * iterator whose `next`/`done`/`value` throws is marked done so IteratorClose is NOT attempted
- * on it (spec: the error is the iterator's own). `close(abrupt)` is IteratorClose unless done.
- */
-function iterationSteps(record: IterRecord): { step(): { done: boolean; value: unknown }; close(abrupt: boolean): void } {
-	let done = false;
-	return {
-		step() {
-			if (done) return { done: true, value: undefined };
-			try {
-				const r = iterNext(record);
-				if (r.done) {
-					done = true;
-					return { done: true, value: undefined };
-				}
-				return { done: false, value: r.value };
-			} catch (error) {
-				done = true;
-				throw error;
-			}
-		},
-		close(abrupt) {
-			closeIterator(record.iterator, done, abrupt);
-		},
-	};
 }
 
 /** CopyDataProperties for an object rest: own enumerable string and symbol keys not already bound. */
