@@ -12,3 +12,4 @@ export type { GuestFunction, GuestFunctionMeta } from "./values.ts";
 export { nodeHandlers, syntheticHandlers, createGuestFunction } from "./handlers.ts";
 export { TsvalInternalError, unimplemented, isUncatchable, UNCATCHABLE } from "./errors.ts";
 export type { HostGuard } from "./vm.ts";
+export { standardGlobals } from "./globals.ts";

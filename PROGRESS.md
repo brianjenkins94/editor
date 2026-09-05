@@ -5,6 +5,21 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## `realGlobals` defaults to false ✅ (2026-09-05) — a program sees only what it is given
+
+The one option where the safe and the convenient settings disagreed now defaults to safe. Without
+`globalObject`, the global object is `standardGlobals()` (`src/globals.ts`): ECMAScript's standard
+namespace taken from the host realm by allowlist — no `process`/`require`/`fetch`/timers/`console`,
+and no `eval` (direct eval cannot be modeled by a non-host interpreter; a host may supply one). The
+guest's `globalThis` is that table, so writes to it never reach the host's. `realGlobals: true`
+restores the fallthrough to the host's real `globalThis`; the differential oracle uses it (parity
+with Node), the corpus runners pass fresh `node:vm` realms as `globalObject` as before. The values
+are the host realm's intrinsics (results are ordinary host values, and `deepStrictEqual` in tests
+keeps working); prototype mutation by the guest therefore reaches the host's intrinsics — a host
+needing that wall passes a fresh realm and/or a `hostGuard`. `test/vm/globals.test.ts`.
+
+---
+
 ## Canary moved out ✅ (2026-09-05) — this repository is the interpreter only
 
 Separation of concerns: the capability canary (`src/canary.ts`: recording shims, the divergence

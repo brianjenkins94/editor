@@ -6,6 +6,7 @@ import type { Frame, NodeFrame, CallFrame, SyntheticFrame, SyntheticKind, Iterat
 import { isGuestFunction } from "./values.ts";
 import { nodeHandlers, syntheticHandlers, createGuestFunction, bindIdentifier, bindingProgram, pushPattern, closeIteration, clonePrivateElements, isGuestClass, type GuestClass } from "./handlers.ts";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
+import { standardGlobals } from "./globals.ts";
 
 /** Statements whose completion is UpdateEmpty(body, undefined): they yield `undefined` when their body produced nothing. */
 const COMPLETION_STATEMENTS = new Set<number>([ts.SyntaxKind.IfStatement, ts.SyntaxKind.ForStatement, ts.SyntaxKind.ForInStatement, ts.SyntaxKind.ForOfStatement, ts.SyntaxKind.WhileStatement, ts.SyntaxKind.DoStatement, ts.SyntaxKind.TryStatement, ts.SyntaxKind.SwitchStatement]);
@@ -106,13 +107,15 @@ export type NodeHandler = (vm: VM, frame: NodeFrame) => void;
 export type SyntheticHandlers = { [Kind in SyntheticKind]: (vm: VM, frame: Extract<SyntheticFrame, { kind: Kind }>) => void };
 
 export interface VMOptions {
-	/** Injected globals — a host's replacements for built-ins (checked before real globals). */
+	/** Injected globals — what a host adds to (or replaces in) the global object. */
 	globals?: Record<string, unknown>;
 	/** Use this object *as* the global object (not copied — a fresh realm's `globalThis`, whose
-	 *  builtins are non-enumerable, or a host's own global table). `globals` are then layered on top of it. */
+	 *  builtins are non-enumerable, or a host's own global table). `globals` are then layered on top of
+	 *  it. Default: a fresh table of ECMAScript's standard built-ins and nothing of the host's
+	 *  (`standardGlobals()`). */
 	globalObject?: Record<string, unknown>;
-	/** Fall back to the host's real `globalThis` for unresolved names. Default true (max differential
-	 *  parity). A sandboxing host sets this false for a controlled environment. */
+	/** Fall back to the host's real `globalThis` for names the global object lacks. Default FALSE: a
+	 *  program sees only what it was given. The differential oracle sets it true for parity with Node. */
 	realGlobals?: boolean;
 	/** Resolve a module specifier to its namespace object (for `import` / dynamic `import()`). This is
 	 *  the seam through which a host supplies (or replaces) modules. */
@@ -207,7 +210,7 @@ export class VM {
 			for (const [name, value] of Object.entries(options.globals ?? {})) base[name] = value;
 			this.rootScope.globalObject = base;
 		} else {
-			this.rootScope.globalObject = { undefined, NaN, Infinity, ...(options.globals ?? {}) };
+			this.rootScope.globalObject = Object.assign(options.realGlobals === true ? { undefined, NaN, Infinity } : standardGlobals(), options.globals ?? {});
 		}
 		const g = this.rootScope.globalObject as Record<string, unknown>;
 		this.guestErrors = {};
@@ -223,7 +226,7 @@ export class VM {
 		this.realm = makeRealm({ Array: pick("Array"), Object: realmObject, RegExp: pick("RegExp"), Function: typeof realmFunction === "function" ? realmFunction : Function, Promise: pick("Promise") });
 		this.rootScope.hasThis = true;
 		this.rootScope.thisVal = options.thisValue;
-		this.rootScope.realGlobals = options.realGlobals ?? true;
+		this.rootScope.realGlobals = options.realGlobals ?? false;
 		this.resolveModule = options.resolveModule;
 		this.typeChecker = options.typeChecker;
 		this.hostGuard = options.hostGuard;

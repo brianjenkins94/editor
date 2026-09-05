@@ -29,9 +29,9 @@ import { interpret, createVM } from "./src/index.ts";
 // Run to completion (returns the last expression's value).
 interpret(`const a = 1; const b = 2; a + b`); // => 3
 
-// Inject a capability shim and observe what it receives.
+// The guest sees only the standard built-ins unless a host adds more.
 const seen = [];
-interpret(`fetch("https://x")`, { globals: { fetch: (u) => seen.push(u) } });
+interpret(`fetch("https://x")`, { globals: { fetch: (u) => seen.push(u) } }); // without `globals`: ReferenceError
 
 // Single-step and inspect the machine between steps.
 const vm = createVM(`const n = 1 + 2; n * 10`);
@@ -56,6 +56,11 @@ is written in, and the surface Node's own type-stripping accepts. Anything outsi
   either, and sharing their syntax is exactly why neither is half-implemented), parameter properties,
   `namespace`, `import =`.
 - Retained non-erasable construct: `enum` (runtime-emit, differentially verified against `tsc`).
+- **A program sees only what it is given.** The default global object is ECMAScript's standard
+  namespace (`standardGlobals()`: `Object`, `Math`, `JSON`, `Promise`, `Intl`, …) and none of the
+  host's — no `process`, `require`, `fetch`, timers or `console`, and no `eval`. A host adds what it
+  wants through `globals`, supplies a whole realm through `globalObject`, or asks for the host's
+  real `globalThis` with `realGlobals: true` (what the differential oracle does, for parity with Node).
 
 The differential oracle runs Node in strict mode with an undefined receiver to match.
 
