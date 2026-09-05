@@ -119,8 +119,10 @@ anything else, and a fork taken in the middle of a pattern is ordinary frame sta
 
 ## Layout
 
-- `src/` — the VM (`vm.ts`), per-SyntaxKind handlers (`handlers.ts`), scope (`scope.ts`), front-end
-  (`frontend.ts`).
+- `src/` — the VM (`vm.ts`), the frame types (`frame.ts`), scope (`scope.ts`), front-end
+  (`frontend.ts`); the per-SyntaxKind handlers live under `src/handlers/` by concern (registry,
+  realm boundary, hoisting, iteration, references, operators, literals, functions, calls,
+  generators, statements, classes, patterns) — `src/handlers.ts` registers them all.
 - `test/differential/` — the differential oracle: tsval output vs Node output on the same program.
 - `vendor/ts-evaluator/` — [ts-evaluator](https://github.com/wessberg/ts-evaluator) (MIT), used as the
   per-node **semantics spec** and a test **oracle**, not shipped as a dependency.

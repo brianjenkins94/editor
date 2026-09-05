@@ -5,6 +5,20 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## `handlers.ts` split by concern ✅ (2026-09-05)
+
+`src/handlers.ts` (3,100 lines) is now `src/handlers/*.ts`, thirteen modules by concern — registry,
+realm boundary (`realm.ts` owns boxing, CreateDataProperty, guest arrays/`arguments`, ToPrimitive/
+ToPropertyKey, message helpers), hoist, iteration, references, operators, literals, functions,
+calls, generators, statements, classes, patterns (largest: statements 553, classes 546) — with
+`src/handlers.ts` as the aggregator that imports them (registration happens at load) and re-exports
+the surface the VM/frames/API use. Load-order rule for the import cycle: the registry imports no
+handler module (so it evaluates first), every declaration shared across modules at registration
+time is a hoisted `function` (the trivial handlers `noop`/`pushText`/`passThroughExpr` were consts),
+and no module reads another's `const` at top level. Suite and test262 identical after the move.
+
+---
+
 ## TypeScript's own test cases as differential inputs ✅ (2026-09-05) — 99.9% agreement
 
 ASSIGNMENT §5 S0 item 2: `tests/cases/{compiler,conformance}` from microsoft/TypeScript at tag
