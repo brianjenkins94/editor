@@ -5,6 +5,22 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## API cleanup ✅ (2026-09-05) — host surface vs machine, index trim, typed Scope slots
+
+Three commits, in the order of value:
+1. `VM` is an interface — the host surface: stepping/running, breakpoints, `fork`, `callSite`, and
+   read-only inspection of the stacks — and the value `VM` a constructor typed to hand it out.
+   `Machine` (the class) is the implementation and the full surface the handlers program against
+   (push/pop/pushNode/raise, realm, host seams, fiber drivers). Nothing outside `src` used the
+   machine side except one regression test that spies on `callGuestFromHost` on purpose.
+2. The index exports the host surface only: gone are `nodeHandlers`, `syntheticHandlers`,
+   `createGuestFunction`, `NodeHandler`, `SyntheticHandlers`, `unimplemented`, the per-kind frame
+   types; `Scope`/`Binding` are type-only. `Frame`/`Signal` stay for fork inspection.
+3. `Scope.classMeta` / `functionMeta` / `construction` carry their real types (type-only imports,
+   no runtime cycle); the consumers' casts are gone. `newTarget` stays `unknown` (any value).
+
+---
+
 ## The typed layer is opt-in and on top ✅ (2026-09-05) — the interpreter knows no TypeChecker
 
 `src/typed.ts`, exported as `@brianjenkins94/tsval/typed`, is now the only place a checker exists.

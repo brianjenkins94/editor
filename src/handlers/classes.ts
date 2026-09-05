@@ -403,9 +403,9 @@ export function superCall(vm: Machine, frame: NodeFrame, node: ts.CallExpression
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
 		const args = collectCallArguments(vm, frame);
-		const meta = frame.scope.getClassMeta() as ClassMeta;
-		const construction = frame.scope.getConstruction() as Construction | undefined;
-		if (construction === undefined) throw new SyntaxError("'super' keyword unexpected here");
+		const meta = frame.scope.getClassMeta();
+		const construction = frame.scope.getConstruction();
+		if (meta === undefined || construction === undefined) throw new SyntaxError("'super' keyword unexpected here");
 		const parent = superConstructorOf(construction);
 		const newTarget = frame.scope.getNewTarget();
 		// Spec order: the parent constructs FIRST; binding `this` a second time is the ReferenceError

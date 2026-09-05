@@ -55,7 +55,7 @@ export function resumed(vm: Machine): unknown {
 
 /** The guest function whose body `scope` belongs to (arrows are transparent), if any. */
 export function enclosingFunctionMeta(scope: Scope): GuestFunctionMeta | undefined {
-	for (let s: Scope | undefined = scope; s; s = s.parent) if (s.functionMeta !== undefined) return s.functionMeta as GuestFunctionMeta;
+	for (let s: Scope | undefined = scope; s; s = s.parent) if (s.functionMeta !== undefined) return s.functionMeta;
 	return undefined;
 }
 

@@ -12,6 +12,9 @@
  */
 
 import { TsvalInternalError } from "./errors.ts";
+// (type-only: erased, so no runtime cycle with the handlers)
+import type { ClassMeta, Construction } from "./handlers/classes.ts";
+import type { GuestFunctionMeta } from "./values.ts";
 
 export type BindingKind = "var" | "let" | "const" | "param" | "function";
 
@@ -37,12 +40,12 @@ export class Scope {
 	/** [[HomeObject]] of the current method (for `super.x`); set on a method's function scope. */
 	homeObject?: object;
 	/** metadata of the class whose constructor this scope belongs to (for `super(...)`). */
-	classMeta?: unknown;
+	classMeta?: ClassMeta;
 	/** `new.target` for the current function scope. */
 	newTarget?: unknown;
 	/** the guest function this (function) scope belongs to — its flags tell `yield*`/`for await`
 	 *  whether they're inside an async generator. */
-	functionMeta?: unknown;
+	functionMeta?: GuestFunctionMeta;
 	/** the private names (`#x`) declared by the class whose body this scope is; resolved lexically,
 	 *  nearest class first (so an inner class's `#x` shadows an outer one's). */
 	privateNames?: Map<string, object>;
@@ -80,7 +83,7 @@ export class Scope {
 
 	/** Walk to the nearest scope that carries the given class/method field (arrows are transparent). */
 	/** The construction in progress for the nearest constructor scope (see handlers/classes.ts). */
-	construction?: unknown;
+	construction?: Construction;
 
 	private findUp<K extends "homeObject" | "classMeta" | "newTarget" | "construction">(key: K): Scope[K] {
 		// eslint-disable-next-line @typescript-eslint/no-this-alias
@@ -96,10 +99,10 @@ export class Scope {
 	getHomeObject(): object | undefined {
 		return this.findUp("homeObject") as object | undefined;
 	}
-	getClassMeta(): unknown {
+	getClassMeta(): ClassMeta | undefined {
 		return this.findUp("classMeta");
 	}
-	getConstruction(): unknown {
+	getConstruction(): Construction | undefined {
 		return this.findUp("construction");
 	}
 	getNewTarget(): unknown {
