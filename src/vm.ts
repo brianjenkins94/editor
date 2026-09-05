@@ -24,6 +24,11 @@ export interface Realm {
 	AsyncGeneratorPrototype: object;
 	/** %AsyncFunction.prototype% — [[Prototype]] of every `async function`. */
 	AsyncFunctionPrototype: object;
+	/** `Array.prototype.values` (= `@@iterator`), %ArrayIteratorPrototype% and its pristine `next`: an
+	 *  array whose iteration is untouched is iterated through a cloneable record (see getIterator). */
+	arrayValues: unknown;
+	arrayIteratorPrototype: { next?: unknown };
+	arrayIteratorNext: unknown;
 }
 
 /**
@@ -33,13 +38,16 @@ export interface Realm {
  * (%IteratorPrototype% IS reachable, through an array iterator).
  */
 function makeRealm(base: Pick<Realm, "Array" | "Object" | "RegExp" | "Function" | "Promise">): Realm {
+	const arrayValues = base.Array.prototype.values;
+	const arrayIteratorPrototype = Object.getPrototypeOf(arrayValues.call(new base.Array())) as { next?: unknown };
+	const arrays = { arrayValues, arrayIteratorPrototype, arrayIteratorNext: arrayIteratorPrototype.next };
 	if (base.Function === Function) {
 		const genFnProto = Object.getPrototypeOf(function* () {}) as { prototype: object };
 		const asyncGenFnProto = Object.getPrototypeOf(async function* () {}) as { prototype: object };
-		return { ...base, GeneratorFunctionPrototype: genFnProto, GeneratorPrototype: genFnProto.prototype, AsyncGeneratorFunctionPrototype: asyncGenFnProto, AsyncGeneratorPrototype: asyncGenFnProto.prototype, AsyncFunctionPrototype: Object.getPrototypeOf(async function () {}) as object };
+		return { ...base, ...arrays, GeneratorFunctionPrototype: genFnProto, GeneratorPrototype: genFnProto.prototype, AsyncGeneratorFunctionPrototype: asyncGenFnProto, AsyncGeneratorPrototype: asyncGenFnProto.prototype, AsyncFunctionPrototype: Object.getPrototypeOf(async function () {}) as object };
 	}
 	const O = base.Object;
-	const iteratorPrototype = Object.getPrototypeOf(Object.getPrototypeOf(base.Array.prototype.values.call(new base.Array()))) as object;
+	const iteratorPrototype = Object.getPrototypeOf(arrayIteratorPrototype) as object;
 	const asyncIteratorPrototype = O.create(O.prototype) as object;
 	Object.defineProperty(asyncIteratorPrototype, Symbol.asyncIterator, {
 		value: function (this: unknown) {
@@ -61,7 +69,7 @@ function makeRealm(base: Pick<Realm, "Array" | "Object" | "RegExp" | "Function" 
 	const asyncGen = family("AsyncGeneratorFunction", asyncIteratorPrototype, "AsyncGenerator");
 	const asyncFnProto = O.create(base.Function.prototype) as object;
 	Object.defineProperty(asyncFnProto, Symbol.toStringTag, { value: "AsyncFunction", configurable: true });
-	return { ...base, GeneratorFunctionPrototype: gen.fnProto, GeneratorPrototype: gen.proto, AsyncGeneratorFunctionPrototype: asyncGen.fnProto, AsyncGeneratorPrototype: asyncGen.proto, AsyncFunctionPrototype: asyncFnProto };
+	return { ...base, ...arrays, GeneratorFunctionPrototype: gen.fnProto, GeneratorPrototype: gen.proto, AsyncGeneratorFunctionPrototype: asyncGen.fnProto, AsyncGeneratorPrototype: asyncGen.proto, AsyncFunctionPrototype: asyncFnProto };
 }
 
 /** A generator object: inherits from `proto` (the function's `.prototype`), with its resumption
@@ -396,6 +404,7 @@ export class VM {
 		}
 		// A for-of left by any other abrupt completion (return/throw/outer break) closes its iterator.
 		if (frame.isLoop === true) this.closeLoopIterator(frame, true);
+		if (frame.kind === "pattern") this.closePatternIterators(frame, signal);
 
 		// switch / labeled-block frames catch break targeting them.
 		if ((frame.isSwitch === true || frame.isLabel === true) && signal.type === "break") {
@@ -422,6 +431,25 @@ export class VM {
 			if (signal.type === "throw") throw signal.value;
 			if (signal.type === "return") this.completion = signal.value;
 			// stray break/continue at top level would be a SyntaxError; parse-time concern.
+		}
+	}
+
+	/** IteratorClose for every iterator a stepped destructuring frame still has open (innermost first)
+	 *  when a signal unwinds through it. A `throw` wins over anything `return()` throws; for a
+	 *  `return` (a generator's `.return()` at a `yield` inside a default) `return()`'s error surfaces. */
+	private closePatternIterators(frame: Frame, signal: Signal): void {
+		const iters = frame.iters as { record: { iterator: object }; done: boolean }[] | undefined;
+		if (iters === undefined) return;
+		while (iters.length > 0) {
+			const it = iters.pop() as { record: { iterator: object }; done: boolean };
+			if (it.done) continue;
+			it.done = true;
+			try {
+				closeIterator(it.record.iterator, false, signal.type === "throw");
+			} catch (error) {
+				if (isUncatchable(error)) throw error;
+				this.signal = { type: "throw", value: this.toGuestError(error) };
+			}
 		}
 	}
 

@@ -230,7 +230,10 @@ on(K.VariableDeclarationList, (vm, frame) => {
 			frame.phase += 2; // -> next decl
 		}
 	} else {
-		bindTarget(vm, frame.scope, decl.name, namedIf(vm.pop(), decl.name, decl.initializer), kind);
+		const value = namedIf(vm.pop(), decl.name, decl.initializer);
+		// A pattern whose sub-expressions may suspend runs as a frame above this one.
+		if (bindingNeedsStepping(decl.name)) pushPattern(vm, frame.scope, bindingProgram(decl.name, kind), value);
+		else bindTarget(vm, frame.scope, decl.name, value, kind);
 		frame.phase++; // -> next decl (now even)
 	}
 });
@@ -472,7 +475,7 @@ on(K.ForOfStatement, (vm, frame) => {
 		vm.pushNode(node.expression, headTdzScope(frame.scope, node.initializer));
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
-		const record = getIterator(vm.pop());
+		const record = getIterator(vm, vm.pop());
 		frame.iterRecord = record;
 		frame.iterator = record.iterator; // for IteratorClose on abrupt exit (vm.closeLoopIterator)
 		frame.phase = 2;
@@ -514,7 +517,7 @@ function forAwaitOf(vm: VM, frame: Frame, node: ts.ForOfStatement): void {
 		vm.pushNode(node.expression, headTdzScope(frame.scope, node.initializer));
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
-		const { record, sync } = getAsyncOrSyncIterator(vm.pop());
+		const { record, sync } = getAsyncOrSyncIterator(vm, vm.pop());
 		frame.iterRecord = record;
 		frame.iterator = record.iterator;
 		frame.syncIterator = sync;
@@ -589,16 +592,23 @@ on(K.ForInStatement, (vm, frame) => {
 function bindForTarget(vm: VM, frame: Frame, initializer: ts.ForInitializer, value: unknown): void {
 	const node = frame.node as ts.ForOfStatement | ts.ForInStatement;
 	const bodyScope = new Scope(frame.scope, false);
+	// A pattern that may suspend is bound by a frame pushed ABOVE the body (so it runs first).
+	let stepped: { scope: Scope; program: PatternProgram } | undefined;
 	if (ts.isVariableDeclarationList(initializer)) {
 		const decl = initializer.declarations[0];
 		const isConst = (initializer.flags & ts.NodeFlags.Const) !== 0;
 		const isLet = (initializer.flags & ts.NodeFlags.Let) !== 0;
-		bindTarget(vm, bodyScope, decl.name, value, isConst ? "const" : isLet ? "let" : "var");
+		const kind: BindingKind = isConst ? "const" : isLet ? "let" : "var";
+		if (bindingNeedsStepping(decl.name)) stepped = { scope: bodyScope, program: bindingProgram(decl.name, kind) };
+		else bindTarget(vm, bodyScope, decl.name, value, kind);
+	} else if (assignNeedsStepping(initializer as ts.Expression)) {
+		stepped = { scope: frame.scope, program: assignProgram(initializer as ts.Expression) };
 	} else {
 		// An assignment target: identifier, member, or a destructuring pattern (`for ([a, b] of …)`).
 		assignPattern(vm, frame.scope, initializer as ts.Expression, value);
 	}
 	vm.pushNode(node.statement, bodyScope);
+	if (stepped !== undefined) pushPattern(vm, stepped.scope, stepped.program, value);
 }
 
 // ============================================================================
@@ -1366,7 +1376,7 @@ function enclosingFunctionMeta(scope: Scope): GuestFunctionMeta | undefined {
 
 /** GetIterator(async): `@@asyncIterator` via GetMethod (present-but-not-callable is a TypeError, not a
  *  fallback), else the sync iterator — and either result must be an object. */
-function getAsyncOrSyncIterator(iterable: unknown): { record: IterRecord; sync: boolean } {
+function getAsyncOrSyncIterator(vm: VM, iterable: unknown): { record: IterRecord; sync: boolean } {
 	if (iterable == null) throw new TypeError(`${String(iterable)} is not async iterable`);
 	const asyncFactory = (iterable as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator];
 	if (asyncFactory != null) {
@@ -1375,7 +1385,7 @@ function getAsyncOrSyncIterator(iterable: unknown): { record: IterRecord; sync: 
 		if (!isObjectLike(iterator)) throw new TypeError("Result of the Symbol.asyncIterator method is not an object");
 		return { record: { iterator: iterator as object, next: (iterator as { next?: unknown }).next }, sync: false };
 	}
-	return { record: getIterator(iterable), sync: true };
+	return { record: getIterator(vm, iterable), sync: true };
 }
 
 /** GetMethod: undefined/null → absent; otherwise must be callable. */
@@ -1409,7 +1419,7 @@ function yieldStar(vm: VM, frame: Frame, node: ts.YieldExpression): void {
 			return;
 		case 1: {
 			const iterable = vm.pop();
-			const record = asyncGen ? getAsyncOrSyncIterator(iterable).record : getIterator(iterable);
+			const record = asyncGen ? getAsyncOrSyncIterator(vm, iterable).record : getIterator(vm, iterable);
 			frame.iterRecord = record;
 			frame.iterator = record.iterator;
 			frame.received = { kind: "next", value: undefined } satisfies Received;
@@ -1607,11 +1617,20 @@ function assignmentExpression(vm: VM, frame: Frame, node: ts.BinaryExpression): 
 		if (frame.phase === 0) {
 			vm.pushNode(node.right, frame.scope);
 			frame.phase = 1;
-		} else {
+		} else if (frame.phase === 1) {
 			const value = vm.pop();
+			if (assignNeedsStepping(left)) {
+				// The pattern frame runs above; the expression's value (the RHS) is already in place.
+				vm.push(value);
+				frame.phase = 2;
+				pushPattern(vm, frame.scope, assignProgram(left), value);
+				return;
+			}
 			assignPattern(vm, frame.scope, left, value);
 			vm.frames.pop();
 			vm.push(value);
+		} else {
+			vm.frames.pop();
 		}
 		return;
 	}
@@ -1635,7 +1654,7 @@ function assignPattern(vm: VM, scope: Scope, target: ts.Expression, value: unkno
 		return;
 	}
 	if (ts.isArrayLiteralExpression(target)) {
-		const steps = iterationSteps(getIterator(value));
+		const steps = iterationSteps(getIterator(vm, value));
 		try {
 			for (const element of target.elements) {
 				if (ts.isOmittedExpression(element)) {
@@ -2195,16 +2214,41 @@ function memberKey(vm: VM, name: ts.PropertyName | undefined, scope: Scope): Pro
 	return propertyName(name);
 }
 
-export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerScope: Scope): GuestClass {
+/** Private names are created up front (fresh per class evaluation, BEFORE the heritage and computed
+ *  keys evaluate — they may mention them) so every member, including initializers and methods that
+ *  run later, resolves them lexically through the class scope. Idempotent per scope. */
+function declarePrivateNames(node: ts.ClassLikeDeclaration, scope: Scope): Map<string, object> {
+	if (scope.privateNames !== undefined) return scope.privateNames;
+	const privateNames = new Map<string, object>();
+	scope.privateNames = privateNames;
+	for (const member of node.members) {
+		const name = (member as { name?: ts.Node }).name;
+		if (name === undefined || !ts.isPrivateIdentifier(name)) continue;
+		if (privateNames.has(name.text)) continue; // a get/set pair shares one name
+		const kind: PrivateName["kind"] = ts.isPropertyDeclaration(member) ? "field" : ts.isMethodDeclaration(member) ? "method" : "accessor";
+		privateNames.set(name.text, { key: Symbol(name.text), description: name.text, kind, isStatic: hasStatic(member) } satisfies PrivateName);
+	}
+	return privateNames;
+}
+
+/** What the stepped class handler evaluated up front: the class scope, the `extends` value and the
+ *  raw computed key values (source order). Without it (host-initiated builds) they are evaluated here. */
+interface PreEvaluatedClass {
+	scope: Scope;
+	superClass: unknown;
+	keys: unknown[];
+}
+
+export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerScope: Scope, pre?: PreEvaluatedClass): GuestClass {
 	assertSupportedClassSurface(node);
 	// The class body sees an inner, immutable binding of its own name (so static initializers,
 	// `static {}` blocks and methods can refer to it — also for a *named class expression*, whose name
 	// is visible only inside). It is in the TDZ while the `extends` expression evaluates and is
 	// initialized once the constructor exists.
-	const scope = new Scope(outerScope, false);
-	if (node.name) scope.declareLexical(node.name.text, "const");
+	const scope = pre?.scope ?? new Scope(outerScope, false);
+	if (pre === undefined && node.name) scope.declareLexical(node.name.text, "const");
 	const heritage = node.heritageClauses?.find((h) => h.token === K.ExtendsKeyword);
-	const superClass = heritage ? vm.evalNodeSync(heritage.types[0].expression, scope) : undefined;
+	const superClass = pre !== undefined ? pre.superClass : heritage ? vm.evalNodeSync(heritage.types[0].expression, scope) : undefined;
 	if (heritage && superClass !== null && typeof superClass !== "function") throw new TypeError(`Class extends value ${String(superClass)} is not a constructor or null`);
 	if (typeof superClass === "function") {
 		// IsConstructor first (an arrow / async / generator / bound-arrow parent is a TypeError before its
@@ -2215,17 +2259,7 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 	}
 	const proto = superClass === null ? Object.create(null) : superClass !== undefined ? Object.create((superClass as GuestClass).prototype) : new vm.realm.Object();
 	const meta: ClassMeta = { node, closure: scope, superClass, proto, instanceFields: [], instancePrivateMethods: [] };
-	// Private names are created up front (fresh per evaluation) so every member — including
-	// initializers and methods that run later — resolves them lexically through `scope`.
-	const privateNames = new Map<string, object>();
-	scope.privateNames = privateNames;
-	for (const member of node.members) {
-		const name = (member as { name?: ts.Node }).name;
-		if (name === undefined || !ts.isPrivateIdentifier(name)) continue;
-		if (privateNames.has(name.text)) continue; // a get/set pair shares one name
-		const kind: PrivateName["kind"] = ts.isPropertyDeclaration(member) ? "field" : ts.isMethodDeclaration(member) ? "method" : "accessor";
-		privateNames.set(name.text, { key: Symbol(name.text), description: name.text, kind, isStatic: hasStatic(member) } satisfies PrivateName);
-	}
+	const privateNames = declarePrivateNames(node, scope);
 	const privateOf = (member: ts.ClassElement): PrivateName | undefined => {
 		const name = (member as { name?: ts.Node }).name;
 		return name !== undefined && ts.isPrivateIdentifier(name) ? (privateNames.get(name.text) as PrivateName) : undefined;
@@ -2236,10 +2270,14 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 	// ConstructorDeclaration is TypeScript's parse of `static constructor() {}` — a static method.
 	const memberKeys = new Map<ts.ClassElement, PropertyKey>();
 	const isStaticCtorMethod = (member: ts.ClassElement): member is ts.ConstructorDeclaration => ts.isConstructorDeclaration(member) && hasStatic(member);
+	let computedIndex = 0; // walks `pre.keys` (the same source order as computedKeyNodes)
 	for (const member of node.members) {
 		if (privateOf(member) !== undefined) continue;
 		if (isStaticCtorMethod(member)) memberKeys.set(member, "constructor");
-		else if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member) || ts.isPropertyDeclaration(member)) memberKeys.set(member, memberKey(vm, member.name, scope));
+		else if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member) || ts.isPropertyDeclaration(member)) {
+			const key = pre !== undefined && ts.isComputedPropertyName(member.name) ? toPropertyKey(pre.keys[computedIndex++]) : memberKey(vm, member.name, scope);
+			memberKeys.set(member, key);
+		}
 	}
 	const keyOf = (member: ts.ClassElement): PropertyKey => memberKeys.get(member) as PropertyKey;
 
@@ -2438,10 +2476,47 @@ function assertThisUnbound(scope: Scope): void {
 	if (scope.getThis() !== THIS_TDZ) throw new ReferenceError("Super constructor may only be called once");
 }
 
+/** The computed member keys of a class, in source order (the order they are evaluated in). */
+function computedKeyNodes(node: ts.ClassLikeDeclaration): ts.Expression[] {
+	const out: ts.Expression[] = [];
+	for (const member of node.members) {
+		const name = (member as { name?: ts.PropertyName }).name;
+		if (name !== undefined && ts.isComputedPropertyName(name)) out.push(name.expression);
+	}
+	return out;
+}
+
+/**
+ * ClassDefinitionEvaluation in two phases: the `extends` expression and every computed member key
+ * are evaluated on the stepped stack — in the class scope, with the class name in its TDZ — so a
+ * `yield`/`await` inside them suspends like anywhere else; then the class is built from those values.
+ * Returns the constructor once built (undefined while the sub-expressions are still evaluating).
+ */
+function classDefinition(vm: VM, frame: Frame, node: ts.ClassLikeDeclaration): GuestClass | undefined {
+	const heritage = node.heritageClauses?.find((h) => h.token === K.ExtendsKeyword);
+	if (frame.phase === 0) {
+		assertSupportedClassSurface(node);
+		const scope = new Scope(frame.scope, false);
+		if (node.name) scope.declareLexical(node.name.text, "const");
+		declarePrivateNames(node, scope);
+		frame.classScope = scope;
+		frame.base = vm.values.length;
+		const keys = computedKeyNodes(node);
+		for (let i = keys.length - 1; i >= 0; i--) vm.pushNode(keys[i], scope);
+		if (heritage) vm.pushNode(heritage.types[0].expression, scope); // on top: evaluates first
+		frame.phase = 1;
+		return undefined;
+	}
+	const values = vm.values.splice(frame.base as number);
+	const superClass = heritage ? values.shift() : undefined;
+	return createGuestClass(vm, node, frame.scope, { scope: frame.classScope as Scope, superClass, keys: values });
+}
+
 on(K.ClassDeclaration, (vm, frame) => {
 	const node = frame.node as ts.ClassDeclaration;
+	const Ctor = classDefinition(vm, frame, node);
+	if (Ctor === undefined) return;
 	vm.frames.pop();
-	const Ctor = createGuestClass(vm, node, frame.scope);
 	if (node.name) {
 		frame.scope.declareLexical(node.name.text, "let");
 		frame.scope.initialize(node.name.text, Ctor);
@@ -2449,9 +2524,10 @@ on(K.ClassDeclaration, (vm, frame) => {
 });
 
 on(K.ClassExpression, (vm, frame) => {
-	const node = frame.node as ts.ClassExpression;
+	const Ctor = classDefinition(vm, frame, frame.node as ts.ClassExpression);
+	if (Ctor === undefined) return;
 	vm.frames.pop();
-	vm.push(createGuestClass(vm, node, frame.scope));
+	vm.push(Ctor);
 });
 
 // ============================================================================
@@ -2679,17 +2755,18 @@ function namedIf(value: unknown, target: ts.BindingName | ts.Expression, from: t
  * into `scope`. The leaf sub-expressions of a pattern — default values and computed keys — are
  * evaluated synchronously (`vm.evalNodeSync`); the destructuring itself is pure.
  */
-export function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: unknown, kind: BindingKind): void {
-	if (ts.isIdentifier(target)) {
-		if (kind === "var") {
-			scope.declareVar(target.text);
-			scope.set(target.text, value);
-		} else {
-			scope.declareLexical(target.text, kind);
-			scope.initialize(target.text, value);
-		}
-		return;
+function bindIdentifier(scope: Scope, name: string, value: unknown, kind: BindingKind): void {
+	if (kind === "var") {
+		scope.declareVar(name);
+		scope.set(name, value);
+	} else {
+		scope.declareLexical(name, kind);
+		scope.initialize(name, value);
 	}
+}
+
+export function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: unknown, kind: BindingKind): void {
+	if (ts.isIdentifier(target)) return bindIdentifier(scope, target.text, value, kind);
 	if (ts.isObjectBindingPattern(target)) {
 		if (value == null) throw new TypeError(`Cannot destructure '${String(value)}' as it is ${String(value)}.`);
 		const used = new Set<PropertyKey>();
@@ -2709,7 +2786,7 @@ export function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: 
 		return;
 	}
 	if (ts.isArrayBindingPattern(target)) {
-		const steps = iterationSteps(getIterator(value));
+		const steps = iterationSteps(getIterator(vm, value));
 		try {
 			for (const element of target.elements) {
 				if (ts.isOmittedExpression(element)) {
@@ -2735,6 +2812,331 @@ export function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: 
 	}
 	unimplemented(`binding target ${ts.SyntaxKind[(target as ts.Node).kind]}`);
 }
+
+// ============================================================================
+// Stepped destructuring
+// ============================================================================
+// `bindTarget`/`assignPattern` above evaluate a pattern's defaults, computed keys and member targets
+// synchronously (`evalNodeSync`), which cannot suspend: `const [a = yield] = it` or
+// `[o[await k]] = v` need those sub-expressions on the stepped stack. Such patterns (detected
+// syntactically; or ALL patterns under `TSVAL_STEPPED_PATTERNS=1`, the parity-testing switch) are
+// compiled once into a flat list of plain-data ops, run by a synthetic `pattern` frame whose state —
+// pc, a temp stack, open iterator records, open source objects — lives in frame fields, so a fork
+// or a snapshot mid-pattern is an ordinary frame clone. The compiled program is a class instance
+// (shared by forks, never mutated). Semantics mirror the synchronous path op for op.
+
+type PatOp =
+	| { op: "eval"; node: ts.Expression } // push a node frame; its value lands on temps on resume
+	| { op: "iter-open" } // temps.pop() → GetIterator → iters.push
+	| { op: "iter-step" } // IteratorStep+IteratorValue → temps.push (undefined once done)
+	| { op: "iter-skip" } // an elision
+	| { op: "iter-rest" } // drain → temps.push(array)
+	| { op: "iter-close" } // IteratorClose (normal completion) → iters.pop
+	| { op: "obj-open" } // temps.pop() → RequireObjectCoercible → objs.push
+	| { op: "to-key" } // temps.pop() → ToPropertyKey → keys.push
+	| { op: "obj-get"; key?: PropertyKey } // GetV(source, key ?? keys.pop()) → temps.push; remembers the key for rest
+	| { op: "obj-rest" } // CopyDataProperties minus the used keys → temps.push
+	| { op: "obj-close" }
+	| { op: "jump-if-defined"; offset: number } // default: keep a defined value and skip its initializer ops
+	| { op: "name"; name: string; from: ts.Node } // NamedEvaluation of a default onto an identifier target
+	| { op: "bind"; name: string; kind: BindingKind } // temps.pop() → declare/initialize
+	| { op: "assign-id"; name: string } // temps.pop() → PutValue
+	| { op: "member-ref"; hasKey: boolean; text: string; privateName?: string } // (key), base → reference record
+	| { op: "member-store" }; // value, reference → PutValue
+
+class PatternProgram {
+	readonly ops: readonly PatOp[];
+	constructor(ops: readonly PatOp[]) {
+		this.ops = ops; // (an explicit field: Node's strip-only TS has no parameter properties)
+	}
+}
+
+interface PatternIterator {
+	record: IterRecord;
+	done: boolean;
+}
+interface PatternSource {
+	value: unknown;
+	used: PropertyKey[];
+}
+interface MemberRef {
+	obj: object;
+	key: PropertyKey;
+	pn?: PrivateName;
+}
+
+/** Test switch: run EVERY pattern through the stepped machine (parity with the synchronous path). */
+export const patternSettings = { forceStepped: process.env.TSVAL_STEPPED_PATTERNS === "1" };
+
+const suspensionCache = new WeakMap<ts.Node, boolean>();
+/** Does a pattern contain `yield`/`await` outside nested functions/classes? */
+function containsSuspension(node: ts.Node): boolean {
+	let known = suspensionCache.get(node);
+	if (known === undefined) {
+		const walk = (n: ts.Node): boolean => {
+			if (ts.isYieldExpression(n) || ts.isAwaitExpression(n)) return true;
+			if (ts.isFunctionLike(n) || ts.isClassLike(n)) return false;
+			return ts.forEachChild(n, walk) === true;
+		};
+		known = walk(node);
+		suspensionCache.set(node, known);
+	}
+	return known;
+}
+
+export function bindingNeedsStepping(target: ts.BindingName): boolean {
+	return !ts.isIdentifier(target) && (patternSettings.forceStepped || containsSuspension(target));
+}
+export function assignNeedsStepping(target: ts.Expression): boolean {
+	return (ts.isArrayLiteralExpression(target) || ts.isObjectLiteralExpression(target)) && (patternSettings.forceStepped || containsSuspension(target));
+}
+
+const patternPrograms = new WeakMap<ts.Node, Map<string, PatternProgram>>();
+function cachedProgram(node: ts.Node, variant: string, compile: (ops: PatOp[]) => void): PatternProgram {
+	let byVariant = patternPrograms.get(node);
+	if (byVariant === undefined) patternPrograms.set(node, (byVariant = new Map()));
+	let program = byVariant.get(variant);
+	if (program === undefined) {
+		const ops: PatOp[] = [];
+		compile(ops);
+		byVariant.set(variant, (program = new PatternProgram(ops)));
+	}
+	return program;
+}
+export const bindingProgram = (target: ts.BindingName, kind: BindingKind): PatternProgram => cachedProgram(target, `bind:${kind}`, (ops) => compileBinding(target, kind, ops));
+export const assignProgram = (target: ts.Expression): PatternProgram => cachedProgram(target, "assign", (ops) => compileAssign(target, ops));
+
+/** Start binding `value` through `program` in `scope`: the frame runs above the caller's. */
+export function pushPattern(vm: VM, scope: Scope, program: PatternProgram, value: unknown): void {
+	vm.pushFrame({ kind: "pattern", node: null, phase: 0, scope, valuesBase: vm.values.length, program, pc: 0, temps: [value], iters: [], objs: [], keys: [] });
+}
+
+// --- compilation (each compiled pattern consumes temps.top) ---
+
+function compileDefault(init: ts.Expression | undefined, nameTarget: ts.Node, ops: PatOp[]): void {
+	if (init === undefined) return;
+	const naming: PatOp[] = ts.isIdentifier(nameTarget) ? [{ op: "name", name: nameTarget.text, from: init }] : [];
+	ops.push({ op: "jump-if-defined", offset: 1 + naming.length }, { op: "eval", node: init }, ...naming);
+}
+
+function compileKey(name: ts.PropertyName, ops: PatOp[]): void {
+	if (ts.isComputedPropertyName(name)) ops.push({ op: "eval", node: name.expression }, { op: "to-key" }, { op: "obj-get" });
+	else ops.push({ op: "obj-get", key: propertyName(name) });
+}
+
+function compileBinding(target: ts.BindingName, kind: BindingKind, ops: PatOp[]): void {
+	if (ts.isIdentifier(target)) return void ops.push({ op: "bind", name: target.text, kind });
+	if (ts.isArrayBindingPattern(target)) {
+		ops.push({ op: "iter-open" });
+		for (const element of target.elements) {
+			if (ts.isOmittedExpression(element)) {
+				ops.push({ op: "iter-skip" });
+			} else if (element.dotDotDotToken) {
+				ops.push({ op: "iter-rest" });
+				compileBinding(element.name, kind, ops);
+			} else {
+				ops.push({ op: "iter-step" });
+				compileDefault(element.initializer, element.name, ops);
+				compileBinding(element.name, kind, ops);
+			}
+		}
+		ops.push({ op: "iter-close" });
+		return;
+	}
+	ops.push({ op: "obj-open" });
+	for (const element of target.elements) {
+		if (element.dotDotDotToken) {
+			ops.push({ op: "obj-rest" });
+			compileBinding(element.name, kind, ops);
+			continue;
+		}
+		compileKey(element.propertyName ?? (element.name as ts.Identifier), ops);
+		compileDefault(element.initializer, element.name, ops);
+		compileBinding(element.name, kind, ops);
+	}
+	ops.push({ op: "obj-close" });
+}
+
+/** One assignment-pattern element: the target *reference* is evaluated before the value is obtained
+ *  (`emitSource`), then the default, then PutValue — the spec's order. */
+function compileAssignElement(elementTarget: ts.Expression, init: ts.Expression | undefined, emitSource: () => void, ops: PatOp[]): void {
+	const target = unwrapParens(elementTarget);
+	if (isSuperRef(target)) unimplemented("a super reference as a destructuring target");
+	const isMember = ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target);
+	if (isMember) {
+		ops.push({ op: "eval", node: target.expression });
+		if (ts.isElementAccessExpression(target)) ops.push({ op: "eval", node: target.argumentExpression }, { op: "member-ref", hasKey: true, text: "" });
+		else ops.push({ op: "member-ref", hasKey: false, text: target.name.text, privateName: ts.isPrivateIdentifier(target.name) ? target.name.text : undefined });
+	}
+	emitSource();
+	compileDefault(init, target, ops);
+	if (isMember) ops.push({ op: "member-store" });
+	else compileAssign(target, ops);
+}
+
+function compileAssign(elementTarget: ts.Expression, ops: PatOp[]): void {
+	const target = unwrapParens(elementTarget);
+	if (ts.isIdentifier(target)) return void ops.push({ op: "assign-id", name: target.text });
+	if (ts.isArrayLiteralExpression(target)) {
+		ops.push({ op: "iter-open" });
+		for (const element of target.elements) {
+			if (ts.isOmittedExpression(element)) ops.push({ op: "iter-skip" });
+			else if (ts.isSpreadElement(element)) compileAssignElement(element.expression, undefined, () => ops.push({ op: "iter-rest" }), ops);
+			else {
+				const withDefault = ts.isBinaryExpression(element) && element.operatorToken.kind === K.EqualsToken;
+				compileAssignElement(withDefault ? element.left : element, withDefault ? element.right : undefined, () => ops.push({ op: "iter-step" }), ops);
+			}
+		}
+		ops.push({ op: "iter-close" });
+		return;
+	}
+	if (ts.isObjectLiteralExpression(target)) {
+		ops.push({ op: "obj-open" });
+		for (const prop of target.properties) {
+			if (ts.isSpreadAssignment(prop)) {
+				compileAssignElement(prop.expression, undefined, () => ops.push({ op: "obj-rest" }), ops);
+			} else if (ts.isPropertyAssignment(prop)) {
+				// Key (with ToPropertyKey) first, then the target reference, then GetV.
+				let source: PatOp;
+				if (ts.isComputedPropertyName(prop.name)) {
+					ops.push({ op: "eval", node: prop.name.expression }, { op: "to-key" });
+					source = { op: "obj-get" };
+				} else source = { op: "obj-get", key: propertyName(prop.name) };
+				const withDefault = ts.isBinaryExpression(prop.initializer) && prop.initializer.operatorToken.kind === K.EqualsToken;
+				compileAssignElement(withDefault ? prop.initializer.left : prop.initializer, withDefault ? prop.initializer.right : undefined, () => ops.push(source), ops);
+			} else if (ts.isShorthandPropertyAssignment(prop)) {
+				ops.push({ op: "obj-get", key: prop.name.text });
+				compileDefault(prop.objectAssignmentInitializer, prop.name, ops);
+				ops.push({ op: "assign-id", name: prop.name.text });
+			} else unimplemented(`assignment pattern property ${ts.SyntaxKind[prop.kind]}`);
+		}
+		ops.push({ op: "obj-close" });
+		return;
+	}
+	unimplemented(`assignment pattern target ${ts.SyntaxKind[target.kind]}`);
+}
+
+// --- execution ---
+
+/** IteratorStep + IteratorValue on an open record; a throwing iterator is marked done (no IteratorClose). */
+function patternIterStep(it: PatternIterator): unknown {
+	if (it.done) return undefined;
+	try {
+		const r = iterNext(it.record);
+		if (r.done) {
+			it.done = true;
+			return undefined;
+		}
+		return r.value;
+	} catch (error) {
+		it.done = true;
+		throw error;
+	}
+}
+
+syntheticHandlers.pattern = (vm, frame) => {
+	const program = frame.program as PatternProgram;
+	const temps = frame.temps as unknown[];
+	const iters = frame.iters as PatternIterator[];
+	const objs = frame.objs as PatternSource[];
+	const keys = frame.keys as PropertyKey[];
+	const scope = frame.scope;
+	if (frame.awaiting === true) {
+		frame.awaiting = false;
+		temps.push(vm.pop());
+	}
+	for (;;) {
+		const pc = frame.pc as number;
+		if (pc >= program.ops.length) return void vm.frames.pop();
+		const op = program.ops[pc];
+		frame.pc = pc + 1;
+		switch (op.op) {
+			case "eval":
+				frame.awaiting = true;
+				vm.pushNode(op.node, scope);
+				return;
+			case "iter-open":
+				iters.push({ record: getIterator(vm, temps.pop()), done: false });
+				break;
+			case "iter-step":
+				temps.push(patternIterStep(iters[iters.length - 1]));
+				break;
+			case "iter-skip":
+				patternIterStep(iters[iters.length - 1]);
+				break;
+			case "iter-rest": {
+				const it = iters[iters.length - 1];
+				const rest = new vm.realm.Array() as unknown[];
+				for (;;) {
+					const v = patternIterStep(it);
+					if (it.done) break;
+					defineData(rest, rest.length, v);
+				}
+				temps.push(rest);
+				break;
+			}
+			case "iter-close": {
+				const it = iters.pop() as PatternIterator;
+				closeIterator(it.record.iterator, it.done, false);
+				break;
+			}
+			case "obj-open": {
+				const value = temps.pop();
+				if (value == null) throw new TypeError(`Cannot destructure '${String(value)}' as it is ${String(value)}.`);
+				objs.push({ value, used: [] });
+				break;
+			}
+			case "to-key":
+				keys.push(toPropertyKey(temps.pop()));
+				break;
+			case "obj-get": {
+				const source = objs[objs.length - 1];
+				const key = op.key ?? (keys.pop() as PropertyKey);
+				source.used.push(key);
+				temps.push(vm.fromHost(getProperty(vm, source.value, key)));
+				break;
+			}
+			case "obj-rest": {
+				const source = objs[objs.length - 1];
+				const rest = new vm.realm.Object();
+				copyRestProperties(vm, rest, source.value, new Set(source.used));
+				temps.push(rest);
+				break;
+			}
+			case "obj-close":
+				objs.pop();
+				break;
+			case "jump-if-defined":
+				if (temps[temps.length - 1] !== undefined) frame.pc = (frame.pc as number) + op.offset;
+				else temps.pop();
+				break;
+			case "name":
+				temps.push(nameAnonymous(temps.pop(), op.name, op.from));
+				break;
+			case "bind":
+				bindIdentifier(scope, op.name, temps.pop(), op.kind);
+				break;
+			case "assign-id":
+				scope.set(op.name, temps.pop());
+				break;
+			case "member-ref": {
+				const key = op.hasKey ? toPropertyKey(temps.pop()) : op.text;
+				const obj = temps.pop();
+				if (obj == null) throw new TypeError(`Cannot set properties of ${String(obj)} (setting '${keyText(key)}')`);
+				const pn = op.privateName !== undefined ? lookupPrivate(scope, op.privateName) : undefined;
+				temps.push({ obj, key, pn } satisfies MemberRef);
+				break;
+			}
+			case "member-store": {
+				const value = temps.pop();
+				const ref = temps.pop() as MemberRef;
+				if (ref.pn !== undefined) privateSet(ref.obj, ref.pn, value);
+				else setProperty(vm, ref.obj, ref.key, value);
+				break;
+			}
+		}
+	}
+};
 
 /** A strict-mode `arguments` object: an array-like with the arguments as own indexed properties, a
  *  non-enumerable `length` and `@@iterator`, and a `callee` accessor that throws (strict). Unmapped —
@@ -2766,10 +3168,45 @@ export interface IterRecord {
 	next: unknown;
 }
 
+/**
+ * Iteration state for an array whose iteration is pristine (see getIterator): a PLAIN object, so a
+ * fork mid-iteration clones it — a host ArrayIterator would be shared, and one fork's steps would
+ * starve the other's (`exploreCanary` forks inside `for…of` bodies). Observably the same as the
+ * intrinsic: each step reads `length` then the index (through any getter or Proxy trap); once
+ * exhausted it stays done without reading again; results are guest-realm objects.
+ */
+interface ArrayIteration {
+	array: ArrayLike<unknown>;
+	index: number;
+	done: boolean;
+	Obj: ObjectConstructor;
+}
+const arrayIterationNext = function (this: ArrayIteration): IteratorResult<unknown> {
+	const result = new this.Obj() as unknown as { value: unknown; done: boolean };
+	if (!this.done) {
+		const i = this.index;
+		if (i < this.array.length) {
+			this.index = i + 1;
+			result.value = this.array[i];
+			result.done = false;
+			return result;
+		}
+		this.done = true;
+	}
+	result.value = undefined;
+	result.done = true;
+	return result;
+};
+
 /** GetIterator: a TypeError (not a property-of-null error) when the value isn't iterable. */
-function getIterator(value: unknown): IterRecord {
+function getIterator(vm: VM, value: unknown): IterRecord {
 	const factory = value == null ? undefined : (value as { [Symbol.iterator]?: () => Iterator<unknown> })[Symbol.iterator];
 	if (typeof factory !== "function") throw new TypeError(`${value === null ? "null" : typeof value === "object" ? "object" : String(value)} is not iterable`);
+	const realm = vm.realm;
+	if (Array.isArray(value) && factory === realm.arrayValues && realm.arrayIteratorPrototype.next === realm.arrayIteratorNext) {
+		const iteration: ArrayIteration = { array: value, index: 0, done: false, Obj: realm.Object };
+		return { iterator: iteration, next: arrayIterationNext };
+	}
 	const iterator = factory.call(value);
 	if (typeof iterator !== "object" || iterator === null) throw new TypeError("Result of the Symbol.iterator method is not an object");
 	return { iterator, next: (iterator as { next?: unknown }).next };

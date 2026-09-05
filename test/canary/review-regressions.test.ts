@@ -106,8 +106,18 @@ test("#4 await inside a computed object-literal key is modeled (the key is evalu
 	assert.strictEqual(await p, "k");
 });
 
-test("#4 await inside a default value is an internal error, not a silent undefined", async () => {
+test("#4 await inside a destructuring default is modeled (stepped pattern frame), never a silent undefined", async () => {
 	const p = interpret(`(async () => { const [x = await Promise.resolve(1)] = []; return x; })()`) as Promise<unknown>;
+	assert.strictEqual(await p, 1);
+});
+
+test("#4 await inside a class computed key is modeled (keys evaluate on the stepped stack)", async () => {
+	const p = interpret(`(async () => { class C { [await Promise.resolve("k")]() {} } return Object.getOwnPropertyNames(C.prototype); })()`) as Promise<unknown>;
+	assert.deepStrictEqual(await p, ["constructor", "k"]);
+});
+
+test("#4 await inside a catch-clause pattern (bound while unwinding) is still an internal error, not a silent undefined", async () => {
+	const p = interpret(`(async () => { try { throw []; } catch ([a = await Promise.resolve(1)]) { return a; } })()`) as Promise<unknown>;
 	await assert.rejects(p, (e: unknown) => e instanceof TsvalInternalError);
 });
 

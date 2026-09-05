@@ -5,6 +5,55 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## Stepped destructuring + class keys ✅ (2026-09-04) — 99.7%, the structural limitation is gone
+
+**Status:** `npm test` → 1078 tests, all pass, **no known-gap todos left**. Full pinned corpus:
+**15,692 pass, 45 fail, 32 inconclusive, 7,957 skipped → 99.7% on eligible** (was 15,619 / 118),
+and the run takes 37 s (was 79 s: the timeouts are gone). The 45 are all singletons/pairs.
+
+### The limitation, removed
+`yield`/`await` inside a destructuring default, computed key or member target (and a class's
+`extends` expression / computed member keys) were evaluated synchronously via `evalNodeSync` and
+refused loudly. Now:
+- **Patterns compile to a flat list of plain-data ops** (`PatOp`: `eval`, `iter-open/step/skip/
+  rest/close`, `obj-open/get/rest/close`, `to-key`, `jump-if-defined`, `name`, `bind`, `assign-id`,
+  `member-ref`, `member-store`), compiled once per pattern node (a `PatternProgram` class instance,
+  shared by forks) and run by a synthetic **`pattern` frame** whose state — pc, a temp stack, open
+  iterator records (with their [[Done]]), open source objects (with used keys) — lives in frame
+  fields. A fork/snapshot mid-pattern is an ordinary frame clone (`cloneFrame` deep-clones the plain
+  fields). Sub-expressions are pushed as node frames, so a suspension inside them is just a
+  suspension. `unwind` closes the frame's open iterators (innermost first) on any signal — a
+  generator's `.return()` at a `yield` inside a default IteratorCloses, per spec.
+- Used **only for patterns that syntactically contain `yield`/`await`** (outside nested functions);
+  the synchronous path stays for everything else. `TSVAL_STEPPED_PATTERNS=1` forces every pattern
+  through the stepped machine: **the full corpus gives identical results in both modes** (parity
+  check, run for both; `npm test` too). Parameters never need it (a suspension in a parameter
+  default is an early error).
+- **Class definitions are two-phase**: the `extends` expression and every computed member key
+  evaluate on the stepped stack in the class scope (name in TDZ, private names already declared —
+  `class C { #f; [this.#f] }` is legal), then the class is built from those values.
+- Still synchronous and loudly refused: a catch-clause pattern with a suspension (bound while
+  unwinding) — a regression test pins that.
+
+### A fork-isolation bug the new test found
+An array iterator inside a frame (for-of, `yield*`, patterns) was a host `ArrayIterator`, which
+`fork()` shares — so a fork mid-iteration *starved the original* (each fork's `next()` consumed the
+same iterator). `exploreCanary` forks inside `for…of` bodies, so this was real. Now an array whose
+iteration is pristine (intrinsic `@@iterator`, untouched `%ArrayIteratorPrototype%.next`) iterates
+through a plain cloneable record that reads `length` then the index each step exactly like the
+intrinsic (through getters/Proxy traps), with guest-realm result objects. Custom iterators and
+generators remain shared (fibers are shared by design).
+
+### Remaining full-corpus failures (45)
+Promise-tick interleaving/ordering (9), destructuring/assignment evaluation-order minutiae (4),
+`super[super()]`/`new.target` through a plain-function parent/`call-proto-not-ctor` (4), script-goal
+leftovers (`var` as a global property, `await` as an identifier: 3), template cooked/raw edge cases
+(3), `Cannot destructure` in `for await ([x = 'x' in {}] of …)` (3: TS parses the `in` in a
+for-await head differently), class-name inference for static initializers (1), `Subclass.length`
+via `arguments` (1), plus a dozen other singletons listed by the report.
+
+---
+
 ## test262 round 2 ✅ (2026-09-04) — 99.3% of the eligible language suite
 
 **Status:** `npm test` → 1057 tests: 1054 pass, 0 fail, 3 known-gap todos (sample: 625 pass, 2

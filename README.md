@@ -81,9 +81,15 @@ guest's own `Array`/`Object`/`String`/`%GeneratorFunction%`.
 test262's language tests are *scripts*, so the runner passes the realm's global object as the
 top-level `this` (`VMOptions.thisValue`) and installs `$DONE` as a global property; tsval's default
 remains module semantics (top-level `this` is `undefined`, top-level bindings are not globals).
-Current standing on the full pinned corpus: **99.2 % of eligible tests pass**; the remaining
-failures are listed by reason in `PROGRESS.md`, the bulk being one structural limitation (`yield`/
-`await` inside a destructuring default or target).
+Current standing on the full pinned corpus: **99.7 % of eligible tests pass**; the remaining 45
+failures are listed by reason in `PROGRESS.md` (promise-tick ordering, a few evaluation-order
+details, script-goal leftovers).
+
+Destructuring patterns whose defaults, computed keys or targets can suspend (`const [a = yield] =
+it`, `[o[await k]] = v`) are compiled to a small list of plain-data ops run by a synthetic
+`pattern` frame, so the suspension — and a fork taken in the middle of it — is ordinary frame
+state. `TSVAL_STEPPED_PATTERNS=1` forces every pattern through that path (the corpus gives identical
+results in both modes).
 
 ## Layout
 
