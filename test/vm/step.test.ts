@@ -11,7 +11,7 @@ test("acceptance: runs the snippet end to end, shim receives the values", () => 
 		received.push(args);
 		return args;
 	};
-	const vm = createVM(ACCEPTANCE, { globals: { id } });
+	const { vm } = createVM(ACCEPTANCE, { globals: { id } });
 	const result = vm.run();
 
 	assert.deepStrictEqual(received, [["https://x", 3]], "injected shim received the runtime values");
@@ -19,7 +19,7 @@ test("acceptance: runs the snippet end to end, shim receives the values", () => 
 });
 
 test("acceptance: single-steps through the snippet, stacks observable between steps", () => {
-	const vm = createVM(ACCEPTANCE, { globals: { id: (...a: unknown[]) => a } });
+	const { vm } = createVM(ACCEPTANCE, { globals: { id: (...a: unknown[]) => a } });
 
 	// stepStatement() advances statement-by-statement; the control stack is inspectable each time.
 	const boundaries: string[] = [];
@@ -43,7 +43,7 @@ test("acceptance: single-steps through the snippet, stacks observable between st
 });
 
 test("fine-grained step() fills the value stack for `1 + 2`", () => {
-	const vm = createVM(`1 + 2`);
+	const { vm } = createVM(`1 + 2`);
 	const depths: number[] = [];
 	while (!vm.finished) {
 		depths.push(vm.values.length);
@@ -55,12 +55,12 @@ test("fine-grained step() fills the value stack for `1 + 2`", () => {
 });
 
 test("deep guest recursion runs on the explicit stack (no host-stack overflow)", () => {
-	const vm = createVM(`function down(n) { return n === 0 ? 0 : down(n - 1); } down(20000)`);
+	const { vm } = createVM(`function down(n) { return n === 0 ? 0 : down(n - 1); } down(20000)`);
 	assert.strictEqual(vm.run(), 0);
 });
 
 test("runUntil stops on a predicate", () => {
-	const vm = createVM(`const a = 1; const b = 2; a + b`);
+	const { vm } = createVM(`const a = 1; const b = 2; a + b`);
 	vm.runUntil((m) => m.completion === undefined && m.values.length > 0);
 	assert.ok(!vm.finished, "stopped before completion");
 	vm.run();

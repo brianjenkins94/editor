@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { VM, type HostCallSite, type HostGuard } from "./vm.ts";
-import type { InterpretOptions } from "./interpret.ts";
+import type { InterpretOptions, LoadedVM } from "./interpret.ts";
 
 /**
  * The type-aware layer — OPT-IN, layered on top of the interpreter, which knows no TypeChecker.
@@ -127,9 +127,7 @@ export interface TypedVMOptions extends Omit<InterpretOptions, "hostGuard"> {
 }
 
 /** A VM seated on a typed program, with the program's checker beside it (the VM itself holds no checker). */
-export interface TypedVM extends TypedProgram {
-	vm: VM;
-}
+export interface TypedVM extends LoadedVM, TypedProgram {}
 
 /**
  * Like `createVM`, but over a `Program` + `TypeChecker`: the VM runs the Program's own SourceFile, and

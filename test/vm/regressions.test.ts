@@ -12,7 +12,7 @@ import type { Machine } from "../../src/vm.ts";
 
 test("#3 fork: a host-invoked closure from the fork runs on the fork", () => {
 	// (spies on the implementation's guest-call entry point — a `Machine` concern, not the host API)
-	const vm = createVM("function mk(){ let c = 0; return { inc: () => ++c }; } const o = mk(); o;") as Machine;
+	const vm = createVM("function mk(){ let c = 0; return { inc: () => ++c }; } const o = mk(); o;").vm as Machine;
 	vm.run();
 	const fork = vm.fork();
 	let originalHits = 0;
@@ -50,7 +50,7 @@ test("#4 await inside a catch-clause pattern is modeled too (bound by a frame ab
 // --- #7: fork policy — accessors rebind, class prototypes are shared consistently ---
 
 test("#7 fork: object-literal accessors keep independent captured state", () => {
-	const vm = createVM("function mk(){ let n = 1; return { get v(){ return n; }, set v(x){ n = x; } }; } const o = mk(); o;");
+	const { vm } = createVM("function mk(){ let n = 1; return { get v(){ return n; }, set v(x){ n = x; } }; } const o = mk(); o;");
 	vm.run();
 	const fork = vm.fork();
 	(vm.rootScope.get("o") as { v: number }).v = 99;
@@ -58,7 +58,7 @@ test("#7 fork: object-literal accessors keep independent captured state", () => 
 });
 
 test("#7 fork: a class prototype is shared, so a forked instance's proto is its constructor's prototype", () => {
-	const vm = createVM("class A { m(){ return 1; } } const a = new A(); a;");
+	const { vm } = createVM("class A { m(){ return 1; } } const a = new A(); a;");
 	vm.run();
 	const fork = vm.fork();
 	const A = fork.rootScope.get("A") as { prototype: object };

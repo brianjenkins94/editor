@@ -34,7 +34,7 @@ const seen = [];
 interpret(`fetch("https://x")`, { globals: { fetch: (u) => seen.push(u) } }); // without `globals`: ReferenceError
 
 // Single-step and inspect the machine between steps.
-const vm = createVM(`const n = 1 + 2; n * 10`);
+const { vm } = createVM(`const n = 1 + 2; n * 10`);
 while (!vm.finished) {
   vm.stepStatement();          // or vm.step() for one unit of work
   console.log(vm.values, vm.frames.length);
@@ -79,7 +79,7 @@ interpret(code, {
   onAsyncFiber: (promise) => {},                // every async function / async-generator invocation
 });
 
-const vm = createVM(code);
+const { vm } = createVM(code);                  // { vm, sourceFile } — the typed layer returns the same shape plus the checker
 vm.runUntil((m) => m.steps > 1_000);           // step budgets, breakpoints (vm.location, vm.breakpoints)
 const fork = vm.fork();                        // an independent copy of the machine state, mid-expression if need be
 

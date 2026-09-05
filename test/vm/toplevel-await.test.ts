@@ -17,7 +17,7 @@ test("a rejected top-level await is a catchable throw at the await", async () =>
 });
 
 test("the synchronous run() refuses a top-level await loudly instead of resuming with undefined", () => {
-	const vm = createVM(`const v = await Promise.resolve(1); v`);
+	const { vm } = createVM(`const v = await Promise.resolve(1); v`);
 	assert.throws(() => vm.run(), (e: unknown) => e instanceof TsvalInternalError && /runAsync/.test((e as Error).message));
 });
 

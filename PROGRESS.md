@@ -5,6 +5,15 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## `createVM` returns a record ✅ (2026-09-05) — the same shape on both sides of the typed line
+
+`createVM(code, options): LoadedVM = { vm, sourceFile }`, and `TypedVM extends LoadedVM, TypedProgram`
+adds `program` and `checker`. Both constructors now read the same at a call site (`const { vm } =
+createVM(...)`), which was the one asymmetry left by the typed-layer split. `interpret` /
+`interpretAsync` are unchanged. Every call site (tests, README, lib's canary) destructures.
+
+---
+
 ## API cleanup ✅ (2026-09-05) — host surface vs machine, index trim, typed Scope slots
 
 Three commits, in the order of value:

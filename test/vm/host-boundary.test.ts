@@ -47,7 +47,7 @@ test("guest→guest calls never pass through beforeCall (only host callables do)
 
 test("onAsyncFiber is told about every async function and async-generator invocation", async () => {
 	const fibers: Promise<unknown>[] = [];
-	const vm = createVM(`async function f() { await 0; return 1; } async function* g() { yield 1; } f(); f(); g().next(); "done"`, { onAsyncFiber: (p) => void fibers.push(p) });
+	const { vm } = createVM(`async function f() { await 0; return 1; } async function* g() { yield 1; } f(); f(); g().next(); "done"`, { onAsyncFiber: (p) => void fibers.push(p) });
 	vm.run();
 	assert.equal(fibers.length, 3);
 	assert.deepEqual(await Promise.all(fibers), [1, 1, { value: 1, done: false }]);
@@ -74,7 +74,7 @@ test("beforeCall receives the callsite: node, evaluated arguments, construct fla
 
 test("vm.callSite is already set while beforeCall runs", () => {
 	let seen: unknown;
-	const vm = createVM(`host()`, { globals: { host: () => 1 }, hostGuard: { beforeCall: (callee) => ((seen = vm.callSite), callee) } });
+	const { vm } = createVM(`host()`, { globals: { host: () => 1 }, hostGuard: { beforeCall: (callee) => ((seen = vm.callSite), callee) } });
 	vm.run();
 	assert.ok(seen !== undefined && ts.isCallExpression(seen as ts.Node));
 });
@@ -121,7 +121,7 @@ test("a host Proxy that answers every property (an auto-stub) is a host callable
 	// it tries to run the stub's (nonexistent) AST.
 	const stub = (): unknown => new Proxy(function stub() {}, { get: (_t, key) => (typeof key === "symbol" || key === "then" ? undefined : stub()), apply: () => stub(), construct: () => stub() as object });
 	const seen: string[] = [];
-	const vm = createVM(`db().query("x").rows[0]`, { globals: { db: stub() }, hostGuard: { beforeCall: (callee) => (seen.push(typeof callee), callee) } });
+	const { vm } = createVM(`db().query("x").rows[0]`, { globals: { db: stub() }, hostGuard: { beforeCall: (callee) => (seen.push(typeof callee), callee) } });
 	assert.strictEqual(typeof vm.run(), "function");
 	assert.deepStrictEqual(seen, ["function", "function"]); // `db()` and `.query("x")` both crossed the seam
 });
