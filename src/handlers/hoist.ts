@@ -9,13 +9,6 @@ import { describe } from "./realm.ts";
 
 const K = ts.SyntaxKind;
 
-/**
- * Shallow hoist pass for a block/function/source scope: install `function` declarations (fully, with
- * value) and put `let`/`const` names into the TDZ. `var` names hoist to the function scope.
- *
- * NOTE (S1): `var` hoisting only scans the immediate statement list. Vars buried in nested blocks/
- * loops still need a recursive collector — added with loops in S2. Tracked in PROGRESS.md.
- */
 export function hoist(vm: VM, scope: Scope, statements: readonly ts.Statement[]): void {
 	for (const statement of statements) {
 		if (isAmbient(statement)) {
@@ -107,4 +100,9 @@ export function bindImport(vm: VM, scope: Scope, node: ts.ImportDeclaration): vo
 			bind(element.name.text, vm.fromHost(ns[(element.propertyName ?? element.name).text]));
 		}
 	}
+}
+
+
+/** No handlers to register: this module only provides helpers. */
+export function register(): void {
 }

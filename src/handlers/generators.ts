@@ -18,7 +18,7 @@ const K = ts.SyntaxKind;
 // and on resume feeds a value back via `vm.sentValue` (or injects a return/throw signal). Left as a
 // frame at phase 2, the suspension point resumes exactly where it left off.
 
-on(K.YieldExpression, (vm, frame) => {
+function yieldExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.YieldExpression;
 	if (node.asteriskToken) return yieldStar(vm, frame, node);
 	if (frame.phase === 0) {
@@ -35,7 +35,7 @@ on(K.YieldExpression, (vm, frame) => {
 		vm.push(vm.fromHost(vm.sentValue)); // `.next(v)` comes from the host caller
 		vm.sentValue = undefined;
 	}
-});
+}
 
 /** Park the current frame at `resumePhase` and suspend the fiber with a payload of the given kind. */
 export function suspend(vm: VM, frame: NodeFrame, kind: "yield" | "await", value: unknown, resumePhase: number, raw = false): void {
@@ -158,7 +158,7 @@ export function delegateResult(vm: VM, frame: NodeFrame, innerResult: unknown, a
 	suspend(vm, frame, "yield", innerResult, 4, /* raw */ true);
 }
 
-on(K.AwaitExpression, (vm, frame) => {
+function awaitExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.AwaitExpression;
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);
@@ -170,4 +170,11 @@ on(K.AwaitExpression, (vm, frame) => {
 		vm.push(vm.fromHost(vm.sentValue)); // the resolved value of a (host) promise enters guest land
 		vm.sentValue = undefined;
 	}
-});
+}
+
+
+/** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
+export function register(): void {
+	on(K.YieldExpression, yieldExpression);
+	on(K.AwaitExpression, awaitExpression);
+}

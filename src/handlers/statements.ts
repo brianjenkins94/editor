@@ -18,7 +18,7 @@ import { evaluating, noop, on } from "./registry.ts";
 
 const K = ts.SyntaxKind;
 
-on(K.SourceFile, (vm, frame) => {
+function sourceFile(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.SourceFile;
 	if (frame.phase === 0) {
 		hoist(vm, frame.scope, node.statements);
@@ -27,9 +27,9 @@ on(K.SourceFile, (vm, frame) => {
 	} else {
 		vm.frames.pop();
 	}
-});
+}
 
-on(K.Block, (vm, frame) => {
+function block(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.Block;
 	if (frame.phase === 0) {
 		// A function-body Block runs directly in the function scope (params + body share it); a plain
@@ -41,7 +41,7 @@ on(K.Block, (vm, frame) => {
 	} else {
 		vm.frames.pop();
 	}
-});
+}
 
 export function pushStatementsReverse(vm: VM, statements: readonly ts.Statement[], scope: Scope): void {
 	for (let i = statements.length - 1; i >= 0; i--) {
@@ -49,19 +49,16 @@ export function pushStatementsReverse(vm: VM, statements: readonly ts.Statement[
 	}
 }
 
-on(K.EmptyStatement, (vm) => {
+function emptyStatement(vm: VM): void {
 	vm.frames.pop();
-});
+}
 
-on(
-	K.VariableStatement,
-	evaluating<ts.VariableStatement>((node) => [node.declarationList], () => {}),
-);
+const variableStatement = evaluating<ts.VariableStatement>((node) => [node.declarationList], () => {});
 
 // Shared driver for a VariableDeclarationList: declare each name (defensively — `hoist` may already
 // have, e.g. for TDZ in a block, but a `for`-init has no hoist pass), evaluate initializers in order,
 // then bind. Runs in `frame.scope` (the scope the list was pushed with).
-on(K.VariableDeclarationList, (vm, frame) => {
+function variableDeclarationList(vm: VM, frame: NodeFrame): void {
 	const list = frame.node as ts.VariableDeclarationList;
 	const decls = list.declarations;
 	if ((list.flags & ts.NodeFlags.Using) !== 0) unimplemented("`using` / `await using` declarations (explicit resource management: disposal is not modeled)");
@@ -93,21 +90,18 @@ on(K.VariableDeclarationList, (vm, frame) => {
 		else pushPattern(vm, frame.scope, bindingProgram(decl.name, kind), value); // a frame above this one
 		frame.phase++; // -> next decl (now even)
 	}
-});
+}
 
-on(
-	K.ExpressionStatement,
-	evaluating<ts.ExpressionStatement>(
-		(node) => [node.expression],
-		(vm, frame, _node, [value]) => {
-			// The program's completion value (eval/script semantics): the last value-producing statement
-			// of the PROGRAM — statements inside function bodies do not count.
-			if (!vm.insideFunction(frame.scope)) vm.setCompletion(value);
-		},
-	),
+const expressionStatement = evaluating<ts.ExpressionStatement>(
+	(node) => [node.expression],
+	(vm, frame, _node, [value]) => {
+		// The program's completion value (eval/script semantics): the last value-producing statement
+		// of the PROGRAM — statements inside function bodies do not count.
+		if (!vm.insideFunction(frame.scope)) vm.setCompletion(value);
+	},
 );
 
-on(K.IfStatement, (vm, frame) => {
+function ifStatement(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.IfStatement;
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);
@@ -120,58 +114,46 @@ on(K.IfStatement, (vm, frame) => {
 	} else {
 		vm.frames.pop();
 	}
-});
+}
 
-on(
-	K.ReturnStatement,
-	evaluating<ts.ReturnStatement>(
-		(node) => (node.expression ? [node.expression] : []),
-		(vm, _frame, node, [value]) => vm.raise({ type: "return", value: node.expression ? value : undefined }),
-	),
+const returnStatement = evaluating<ts.ReturnStatement>(
+	(node) => (node.expression ? [node.expression] : []),
+	(vm, _frame, node, [value]) => vm.raise({ type: "return", value: node.expression ? value : undefined }),
 );
 
-on(
-	K.ThrowStatement,
-	evaluating<ts.ThrowStatement>((node) => [node.expression], (vm, _frame, _node, [value]) => vm.raise({ type: "throw", value })),
-);
+const throwStatement = evaluating<ts.ThrowStatement>((node) => [node.expression], (vm, _frame, _node, [value]) => vm.raise({ type: "throw", value }));
 
 // A hoisted function declaration is a no-op at execution time (created during hoist).
-on(K.FunctionDeclaration, (vm) => void vm.frames.pop()); // hoisted (an overload signature is erased)
 
-on(K.DebuggerStatement, (vm) => void vm.frames.pop());
 
-on(K.TypeAliasDeclaration, noop);
 
-on(K.InterfaceDeclaration, noop);
 
-on(K.ExportDeclaration, noop); // `export { ... }` — module output isn't modeled
 
-on(K.ImportEqualsDeclaration, noop);
 
 // Imports are bound during hoisting; the statement itself is a no-op. `import =` / `export` (module
 // output) aren't modeled — this interpreter runs a program, it doesn't emit one.
-on(K.ImportDeclaration, (vm) => {
+function importDeclaration(vm: VM): void {
 	vm.frames.pop();
-});
+}
 
-on(K.BreakStatement, (vm, frame) => {
+function breakStatement(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.BreakStatement;
 	vm.frames.pop();
 	vm.raise({ type: "break", label: node.label?.text });
-});
+}
 
-on(K.ContinueStatement, (vm, frame) => {
+function continueStatement(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.ContinueStatement;
 	vm.frames.pop();
 	vm.raise({ type: "continue", label: node.label?.text });
-});
+}
 
 //
 // Loop frames set `frame.isLoop = true` (so `unwind` catches break/continue) and `frame.continuePhase`
 // (the phase to resume at on `continue`). A labeled loop's `frame.label` is set by LabeledStatement
 // before the loop's phase 0 runs.
 
-on(K.WhileStatement, (vm, frame) => {
+function whileStatement(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.WhileStatement;
 	if (frame.phase === 0) {
 		frame.isLoop = true;
@@ -185,9 +167,9 @@ on(K.WhileStatement, (vm, frame) => {
 	} else {
 		frame.phase = 0; // next iteration: re-evaluate the condition
 	}
-});
+}
 
-on(K.DoStatement, (vm, frame) => {
+function doStatement(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.DoStatement;
 	if (frame.phase === 0) {
 		frame.isLoop = true;
@@ -201,9 +183,9 @@ on(K.DoStatement, (vm, frame) => {
 		if (vm.pop()) frame.phase = 0;
 		else vm.frames.pop();
 	}
-});
+}
 
-on(K.ForStatement, (vm, frame) => {
+function forStatement(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.ForStatement;
 	if (frame.phase === 0) {
 		frame.isLoop = true;
@@ -256,7 +238,7 @@ on(K.ForStatement, (vm, frame) => {
 		vm.pop(); // discard incrementor value
 		frame.phase = 2;
 	}
-});
+}
 
 // Snapshot the loop variables into a fresh scope so each iteration captures its own binding.
 export function copyPerIteration(frame: NodeFrame): void {
@@ -272,7 +254,7 @@ export function copyPerIteration(frame: NodeFrame): void {
 	frame.iterScope = next;
 }
 
-on(K.ForOfStatement, (vm, frame) => {
+function forOfStatement(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.ForOfStatement;
 	if (node.awaitModifier) return forAwaitOf(vm, frame, node);
 	if (frame.phase === 0) {
@@ -292,7 +274,7 @@ on(K.ForOfStatement, (vm, frame) => {
 	} else {
 		frame.phase = 2;
 	}
-});
+}
 
 // `for await (x of iterable)`: an async iterator's `.next()` results are awaited; a sync iterable's
 // *values* are awaited (the spec's async-from-sync adaptation). Each await suspends the enclosing
@@ -349,7 +331,7 @@ export function forAwaitOf(vm: VM, frame: NodeFrame, node: ts.ForOfStatement): v
 	}
 }
 
-on(K.ForInStatement, (vm, frame) => {
+function forInStatement(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.ForInStatement;
 	if (frame.phase === 0) {
 		frame.isLoop = true;
@@ -373,7 +355,7 @@ on(K.ForInStatement, (vm, frame) => {
 	} else {
 		frame.phase = 2;
 	}
-});
+}
 
 // Bind the current for-of/for-in element to the loop target in a fresh per-iteration scope, then
 // push the body. Destructuring targets: S2 (later).
@@ -399,7 +381,7 @@ export function bindForTarget(vm: VM, frame: NodeFrame, initializer: ts.ForIniti
 	if (stepped !== undefined) pushPattern(vm, stepped.scope, stepped.program, value);
 }
 
-on(K.SwitchStatement, (vm, frame) => {
+function switchStatement(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.SwitchStatement;
 	const clauses = node.caseBlock.clauses;
 	if (frame.phase === 0) {
@@ -447,9 +429,9 @@ on(K.SwitchStatement, (vm, frame) => {
 	} else {
 		vm.frames.pop();
 	}
-});
+}
 
-on(K.LabeledStatement, (vm, frame) => {
+function labeledStatement(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.LabeledStatement;
 	if (frame.phase === 0) {
 		frame.isLabel = true; // catches `break <label>` for a labeled block
@@ -460,13 +442,13 @@ on(K.LabeledStatement, (vm, frame) => {
 	} else {
 		vm.frames.pop();
 	}
-});
+}
 
 //
 // The phases here pair with `unwindTry` in vm.ts: unwind sets phase 3 (catch) or 5 (pending-finally)
 // and pushes the appropriate block; these phases run after a block completes normally.
 
-on(K.TryStatement, (vm, frame) => {
+function tryStatement(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.TryStatement;
 	if (frame.phase === 0) {
 		frame.state = "try";
@@ -494,13 +476,13 @@ on(K.TryStatement, (vm, frame) => {
 		vm.frames.pop();
 		vm.raise(frame.pendingSignal as Signal);
 	}
-});
+}
 
 //
 // Numeric members auto-increment from the previous numeric value and get a reverse mapping
 // (E[0] === "A"); string members don't. Member initializers may reference earlier members by bare
 // name or `E.member`, so they're evaluated in a scope layering the members declared so far.
-on(K.EnumDeclaration, (vm, frame) => {
+function enumDeclaration(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.EnumDeclaration;
 	vm.frames.pop();
 	const name = node.name.text;
@@ -508,7 +490,7 @@ on(K.EnumDeclaration, (vm, frame) => {
 	frame.scope.set(name, buildEnum(vm, frame.scope, node, typeof existing === "object" && existing !== null ? (existing as Record<string, string | number>) : undefined));
 	// The emitted form is an expression statement (an IIFE call): the program's completion becomes undefined.
 	if (!vm.insideFunction(frame.scope)) vm.setCompletion(undefined);
-});
+}
 
 /** Build (or extend — declarations merge) an enum object: members with auto-increment and reverse
  *  mappings for numeric values; each member is also a constant visible to later initializers. */
@@ -550,4 +532,36 @@ export function headTdzScope(scope: Scope, initializer: ts.ForInitializer): Scop
 	const tdz = new Scope(scope, false);
 	for (const decl of initializer.declarations) for (const name of bindingNames(decl.name)) tdz.declareLexical(name, "let");
 	return tdz;
+}
+
+
+/** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
+export function register(): void {
+	on(K.SourceFile, sourceFile);
+	on(K.Block, block);
+	on(K.EmptyStatement, emptyStatement);
+	on(K.VariableStatement, variableStatement);
+	on(K.VariableDeclarationList, variableDeclarationList);
+	on(K.ExpressionStatement, expressionStatement);
+	on(K.IfStatement, ifStatement);
+	on(K.ReturnStatement, returnStatement);
+	on(K.ThrowStatement, throwStatement);
+	on(K.FunctionDeclaration, noop); // hoisted (an overload signature is erased)
+	on(K.DebuggerStatement, noop);
+	on(K.TypeAliasDeclaration, noop);
+	on(K.InterfaceDeclaration, noop);
+	on(K.ExportDeclaration, noop); // `export { ... }` — module output isn't modeled
+	on(K.ImportEqualsDeclaration, noop);
+	on(K.ImportDeclaration, importDeclaration);
+	on(K.BreakStatement, breakStatement);
+	on(K.ContinueStatement, continueStatement);
+	on(K.WhileStatement, whileStatement);
+	on(K.DoStatement, doStatement);
+	on(K.ForStatement, forStatement);
+	on(K.ForOfStatement, forOfStatement);
+	on(K.ForInStatement, forInStatement);
+	on(K.SwitchStatement, switchStatement);
+	on(K.LabeledStatement, labeledStatement);
+	on(K.TryStatement, tryStatement);
+	on(K.EnumDeclaration, enumDeclaration);
 }

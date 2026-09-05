@@ -118,3 +118,8 @@ export function describe(node: ts.Node): string {
 	if (ts.isPropertyAccessExpression(node)) return `${describe(node.expression)}.${node.name.text}`;
 	return ts.SyntaxKind[node.kind];
 }
+
+
+/** No handlers to register: this module only provides helpers. */
+export function register(): void {
+}

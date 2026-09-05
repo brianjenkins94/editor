@@ -12,10 +12,12 @@ realm boundary (`realm.ts` owns boxing, CreateDataProperty, guest arrays/`argume
 ToPropertyKey, message helpers), hoist, iteration, references, operators, literals, functions,
 calls, generators, statements, classes, patterns (largest: statements 553, classes 546) — with
 `src/handlers.ts` as the aggregator that imports them (registration happens at load) and re-exports
-the surface the VM/frames/API use. Load-order rule for the import cycle: the registry imports no
-handler module (so it evaluates first), every declaration shared across modules at registration
-time is a hoisted `function` (the trivial handlers `noop`/`pushText`/`passThroughExpr` were consts),
-and no module reads another's `const` at top level. Suite and test262 identical after the move.
+the surface the VM/frames/API use. **No load-order dependence:** every handler is a named
+top-level function (or an `evaluating(...)` constant) and each module ends with a `register()`
+table the aggregator calls once every module has loaded — nothing reads another module at
+evaluation time, so the import cycles among the modules cannot matter. Enforced by
+`test/vm/handler-modules.test.ts`: each module imported alone in a fresh process, and all of them
+in reverse order. Suite and test262 identical after the move.
 
 ---
 

@@ -32,7 +32,7 @@ export const ASSIGN = new Set<number>([
 	K.QuestionQuestionEqualsToken,
 ]);
 
-on(K.BinaryExpression, (vm, frame) => {
+function binaryExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.BinaryExpression;
 	const op = node.operatorToken.kind;
 
@@ -42,7 +42,7 @@ on(K.BinaryExpression, (vm, frame) => {
 	if (ASSIGN.has(op)) return compoundAssignment(vm, frame, node, op);
 	if (LOGICAL.has(op)) return logicalExpression(vm, frame, node, op);
 	plainBinary(vm, frame);
-});
+}
 
 export const privateIn = evaluating<ts.BinaryExpression>(
 	(node) => [node.right],
@@ -76,7 +76,7 @@ export function logicalExpression(vm: VM, frame: NodeFrame, node: ts.BinaryExpre
 	}
 }
 
-on(K.ConditionalExpression, (vm, frame) => {
+function conditionalExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.ConditionalExpression;
 	if (frame.phase === 0) {
 		vm.pushNode(node.condition, frame.scope);
@@ -88,7 +88,7 @@ on(K.ConditionalExpression, (vm, frame) => {
 	} else {
 		vm.frames.pop(); // branch value already on the stack
 	}
-});
+}
 
 export function applyBinary(op: number, left: never, right: never): unknown {
 	switch (op) {
@@ -180,4 +180,11 @@ export function applyCompound(op: number, left: never, right: never): unknown {
 		default:
 			unimplemented(`compound operator ${ts.SyntaxKind[op]}`);
 	}
+}
+
+
+/** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
+export function register(): void {
+	on(K.BinaryExpression, binaryExpression);
+	on(K.ConditionalExpression, conditionalExpression);
 }

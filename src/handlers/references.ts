@@ -24,10 +24,10 @@ export function thisValue(scope: Scope): unknown {
 	return value;
 }
 
-on(K.ThisKeyword, (vm, frame) => {
+function thisKeyword(vm: VM, frame: NodeFrame): void {
 	vm.frames.pop();
 	vm.push(thisValue(frame.scope));
-});
+}
 
 // --- super references ------------------------------------------------------------------------------
 // `super.x` / `super[k]` read from [[HomeObject]].[[Prototype]] with the current `this` as receiver
@@ -250,18 +250,16 @@ export const memberRead: NodeHandler = (vm, frame) => {
 	vm.push(ref.kind === "short" ? chainShort(node) : getValue(vm, frame.scope, ref));
 };
 
-on(K.PropertyAccessExpression, memberRead);
 
-on(K.ElementAccessExpression, memberRead);
 
-on(K.PrefixUnaryExpression, (vm, frame) => {
+function prefixUnaryExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.PrefixUnaryExpression;
 	// ++/-- need an lvalue, handled without a normal operand eval.
 	if (node.operator === K.PlusPlusToken || node.operator === K.MinusMinusToken) {
 		return updateExpression(vm, frame, node.operand, node.operator, /* prefix */ true);
 	}
 	unaryOperator(vm, frame);
-});
+}
 
 export const unaryOperator = evaluating<ts.PrefixUnaryExpression>(
 	(node) => [node.operand],
@@ -282,10 +280,10 @@ export const unaryOperator = evaluating<ts.PrefixUnaryExpression>(
 	},
 );
 
-on(K.PostfixUnaryExpression, (vm, frame) => {
+function postfixUnaryExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.PostfixUnaryExpression;
 	return updateExpression(vm, frame, node.operand, node.operator, /* prefix */ false);
-});
+}
 
 /** `++x` / `x--` on any reference (identifier, member, private, super). */
 export function updateExpression(vm: VM, frame: NodeFrame, operand: ts.Expression, operator: ts.SyntaxKind, prefix: boolean): void {
@@ -296,7 +294,7 @@ export function updateExpression(vm: VM, frame: NodeFrame, operand: ts.Expressio
 	});
 }
 
-on(K.TypeOfExpression, (vm, frame) => {
+function typeOfExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.TypeOfExpression;
 	if (frame.phase === 0) {
 		// `typeof undeclaredVar` (also parenthesized) must not throw; guard identifier reads.
@@ -312,12 +310,12 @@ on(K.TypeOfExpression, (vm, frame) => {
 		vm.frames.pop();
 		vm.push(typeof v);
 	}
-});
+}
 
 // `delete obj.p` / `delete obj[k]` (strict: a non-configurable property throws, via the host). Any
 // other operand is evaluated for effect and yields true. `delete identifier` is a strict-mode
 // SyntaxError (parser).
-on(K.DeleteExpression, (vm, frame) => {
+function deleteExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.DeleteExpression;
 	const target = unwrapParens(node.expression);
 	if (isSuperRef(target)) {
@@ -334,7 +332,7 @@ on(K.DeleteExpression, (vm, frame) => {
 	}
 	if (ref.kind === "short" || ref.kind === "value") return vm.push(true); // `delete a?.b` on nullish `a`; a non-reference operand
 	unimplemented(`delete of a ${ref.kind} reference (a strict-mode SyntaxError)`);
-});
+}
 
 export function assignmentExpression(vm: VM, frame: NodeFrame, node: ts.BinaryExpression): void {
 	// A parenthesized target `(x) = v` / `(o.p) = v` is still a Reference (but not an IdentifierRef:
@@ -401,4 +399,16 @@ export function compoundAssignment(vm: VM, frame: NodeFrame, node: ts.BinaryExpr
 		},
 		node.right,
 	);
+}
+
+
+/** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
+export function register(): void {
+	on(K.ThisKeyword, thisKeyword);
+	on(K.PropertyAccessExpression, memberRead);
+	on(K.ElementAccessExpression, memberRead);
+	on(K.PrefixUnaryExpression, prefixUnaryExpression);
+	on(K.PostfixUnaryExpression, postfixUnaryExpression);
+	on(K.TypeOfExpression, typeOfExpression);
+	on(K.DeleteExpression, deleteExpression);
 }

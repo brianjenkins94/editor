@@ -3,7 +3,7 @@
  */
 import ts from "typescript";
 import { unimplemented } from "../errors.ts";
-import type { Iteration } from "../frame.ts";
+import type { Iteration, PatternFrame } from "../frame.ts";
 import { Scope } from "../scope.ts";
 import type { BindingKind } from "../scope.ts";
 import type { VM } from "../vm.ts";
@@ -220,7 +220,7 @@ export function compileAssign(elementTarget: ts.Expression, ops: PatOp[]): void 
 
 // --- execution ---
 
-syntheticHandlers.pattern = (vm, frame) => {
+function patternFrame(vm: VM, frame: PatternFrame): void {
 	const program = frame.program;
 	const temps = frame.temps;
 	const iters = frame.iters;
@@ -328,4 +328,10 @@ syntheticHandlers.pattern = (vm, frame) => {
 			}
 		}
 	}
-};
+}
+
+
+/** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
+export function register(): void {
+	syntheticHandlers.pattern = patternFrame;
+}

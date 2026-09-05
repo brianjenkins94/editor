@@ -37,7 +37,7 @@ export function templateObject(vm: VM, node: ts.TaggedTemplateExpression): reado
 	return strings;
 }
 
-on(K.TaggedTemplateExpression, (vm, frame) => {
+function taggedTemplateExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.TaggedTemplateExpression;
 	const tag = node.tag;
 	const spans = ts.isTemplateExpression(node.template) ? node.template.templateSpans : [];
@@ -63,9 +63,9 @@ on(K.TaggedTemplateExpression, (vm, frame) => {
 	} else {
 		vm.frames.pop();
 	}
-});
+}
 
-on(K.CallExpression, (vm, frame) => {
+function callExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.CallExpression;
 	// A parenthesized member callee `(a.b)()` is still a Reference: `this` is preserved.
 	let callee: ts.Expression = node.expression;
@@ -131,7 +131,7 @@ on(K.CallExpression, (vm, frame) => {
 		// the guest call has left its return value on the stack.
 		vm.frames.pop();
 	}
-});
+}
 
 // Evaluate call/new arguments left-to-right (pushed in reverse). A spread argument's operand is
 // evaluated like any other; `spreadMask` records which operands to flatten when collecting.
@@ -164,7 +164,7 @@ export function collectCallArguments(vm: VM, frame: NodeFrame): unknown[] {
 }
 
 // NewExpression: construct with evaluated args.
-on(K.NewExpression, (vm, frame) => {
+function newExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.NewExpression;
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);
@@ -187,4 +187,12 @@ on(K.NewExpression, (vm, frame) => {
 	} else {
 		vm.frames.pop(); // phase 3: guest construction left the instance on the stack
 	}
-});
+}
+
+
+/** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
+export function register(): void {
+	on(K.TaggedTemplateExpression, taggedTemplateExpression);
+	on(K.CallExpression, callExpression);
+	on(K.NewExpression, newExpression);
+}

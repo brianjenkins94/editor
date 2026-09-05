@@ -2,6 +2,7 @@
  * Guest functions: creation (wrappers per realm, `.prototype`/`length`/`name` shapes), the synthetic `call` frame, parameter binding, NamedEvaluation helpers.
  */
 import ts from "typescript";
+import type { CallFrame } from "../frame.ts";
 import { Scope } from "../scope.ts";
 import { isGuestFunction } from "../values.ts";
 import type { GuestFunction, GuestFunctionMeta, GuestFunctionNode } from "../values.ts";
@@ -96,12 +97,10 @@ export const makeFunction: NodeHandler = (vm, frame) => {
 	vm.push(createGuestFunction(vm, node, frame.scope));
 };
 
-on(K.FunctionExpression, makeFunction);
 
-on(K.ArrowFunction, makeFunction);
 
 // Synthetic call frame: run a guest function on the explicit stack.
-syntheticHandlers.call = (vm, frame) => {
+function callFrame(vm: VM, frame: CallFrame): void {
 	const meta = frame.meta;
 	const node = meta.node;
 	if (frame.phase === 0) {
@@ -144,7 +143,7 @@ syntheticHandlers.call = (vm, frame) => {
 		vm.values.length = frame.valuesBase;
 		vm.push(value);
 	}
-};
+}
 
 /** A TypeScript `this:` pseudo-parameter — types the receiver, binds nothing, takes no argument. */
 export function isThisParameter(param: ts.ParameterDeclaration): boolean {
@@ -213,4 +212,12 @@ export function nameAnonymous(value: unknown, name: PropertyKey, from: ts.Node |
 /** NamedEvaluation for a binding target: only a plain identifier names the value. */
 export function namedIf(value: unknown, target: ts.BindingName | ts.Expression, from: ts.Node | undefined): unknown {
 	return ts.isIdentifier(target) ? nameAnonymous(value, target.text, from) : value;
+}
+
+
+/** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
+export function register(): void {
+	on(K.FunctionExpression, makeFunction);
+	on(K.ArrowFunction, makeFunction);
+	syntheticHandlers.call = callFrame;
 }

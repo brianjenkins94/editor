@@ -3,6 +3,7 @@
  */
 import ts from "typescript";
 import { unimplemented } from "../errors.ts";
+import type { NodeFrame } from "../frame.ts";
 import type { VM } from "../vm.ts";
 import { createGuestFunction, nameAnonymous, setFunctionName } from "./functions.ts";
 import { defineData, toPropertyKey } from "./realm.ts";
@@ -10,108 +11,94 @@ import { evaluating, on, passThroughExpr, pushText } from "./registry.ts";
 
 const K = ts.SyntaxKind;
 
-on(K.NumericLiteral, (vm, frame) => {
+function numericLiteral(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.NumericLiteral;
 	vm.frames.pop();
 	vm.push(Number(node.text.replace(/_/g, "")));
-});
+}
 
-on(K.BigIntLiteral, (vm, frame) => {
+function bigIntLiteral(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.BigIntLiteral;
 	vm.frames.pop();
 	vm.push(BigInt(node.text.replace(/_/g, "").replace(/n$/, "")));
-});
+}
 
-on(K.StringLiteral, pushText);
 
-on(K.NoSubstitutionTemplateLiteral, pushText);
 
-on(K.TrueKeyword, (vm) => {
+function trueKeyword(vm: VM): void {
 	vm.frames.pop();
 	vm.push(true);
-});
+}
 
-on(K.FalseKeyword, (vm) => {
+function falseKeyword(vm: VM): void {
 	vm.frames.pop();
 	vm.push(false);
-});
+}
 
-on(K.NullKeyword, (vm) => {
+function nullKeyword(vm: VM): void {
 	vm.frames.pop();
 	vm.push(null);
-});
+}
 
-on(K.RegularExpressionLiteral, (vm, frame) => {
+function regularExpressionLiteral(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.RegularExpressionLiteral;
 	vm.frames.pop();
 	const lastSlash = node.text.lastIndexOf("/");
 	vm.push(new vm.realm.RegExp(node.text.slice(1, lastSlash), node.text.slice(lastSlash + 1)));
-});
+}
 
-on(K.Identifier, (vm, frame) => {
+function identifier(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.Identifier;
 	vm.frames.pop();
 	// Globals are host values; guest bindings pass through the guard unchanged (identity by default).
 	vm.push(vm.fromHost(frame.scope.get(node.text)));
-});
+}
 
 // `new.target` (undefined in a plain call, the constructor under `new`); `import.meta` is a module
 // concept this program-runner doesn't model.
-on(K.MetaProperty, (vm, frame) => {
+function metaProperty(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.MetaProperty;
 	if (node.keywordToken !== K.NewKeyword || node.name.text !== "target") unimplemented(`${ts.SyntaxKind[node.keywordToken]}.${node.name.text}`);
 	vm.frames.pop();
 	vm.push(frame.scope.getNewTarget());
-});
+}
 
-on(K.ParenthesizedExpression, passThroughExpr);
 
-on(K.ExpressionWithTypeArguments, passThroughExpr); // an instantiation expression `f<T>` is `f`
 
-on(K.AsExpression, passThroughExpr);
 
-on(K.TypeAssertionExpression, passThroughExpr);
 
-on(K.NonNullExpression, passThroughExpr);
 
-on(K.SatisfiesExpression, passThroughExpr);
 
-on(
-	K.TemplateExpression,
-	evaluating<ts.TemplateExpression>(
-		(node) => node.templateSpans.map((span) => span.expression),
-		(vm, _frame, node, values) => {
-			let out = node.head.text;
-			for (let i = 0; i < node.templateSpans.length; i++) out += String(values[i]) + node.templateSpans[i].literal.text;
-			vm.push(out);
-		},
-	),
+const templateExpression = evaluating<ts.TemplateExpression>(
+	(node) => node.templateSpans.map((span) => span.expression),
+	(vm, _frame, node, values) => {
+		let out = node.head.text;
+		for (let i = 0; i < node.templateSpans.length; i++) out += String(values[i]) + node.templateSpans[i].literal.text;
+		vm.push(out);
+	},
 );
 
-on(
-	K.ArrayLiteralExpression,
-	evaluating<ts.ArrayLiteralExpression>(
-		// Elisions (`[1, , 3]`) are OmittedExpressions: they produce no operand and leave a hole.
-		(node) => node.elements.filter((el) => !ts.isOmittedExpression(el)).map((el) => (ts.isSpreadElement(el) ? el.expression : el)),
-		(vm, _frame, node, raw) => {
-			const out = new vm.realm.Array() as unknown[];
-			let cursor = 0;
-			let index = 0; // elements are *defined* (CreateDataProperty): an inherited setter on an index never runs
-			for (const el of node.elements) {
-				if (ts.isOmittedExpression(el)) index++;
-				else if (ts.isSpreadElement(el)) for (const v of raw[cursor++] as Iterable<unknown>) defineData(out, index++, v);
-				else defineData(out, index++, raw[cursor++]);
-			}
-			out.length = index;
-			vm.push(out);
-		},
-	),
+const arrayLiteralExpression = evaluating<ts.ArrayLiteralExpression>(
+	// Elisions (`[1, , 3]`) are OmittedExpressions: they produce no operand and leave a hole.
+	(node) => node.elements.filter((el) => !ts.isOmittedExpression(el)).map((el) => (ts.isSpreadElement(el) ? el.expression : el)),
+	(vm, _frame, node, raw) => {
+		const out = new vm.realm.Array() as unknown[];
+		let cursor = 0;
+		let index = 0; // elements are *defined* (CreateDataProperty): an inherited setter on an index never runs
+		for (const el of node.elements) {
+			if (ts.isOmittedExpression(el)) index++;
+			else if (ts.isSpreadElement(el)) for (const v of raw[cursor++] as Iterable<unknown>) defineData(out, index++, v);
+			else defineData(out, index++, raw[cursor++]);
+		}
+		out.length = index;
+		vm.push(out);
+	},
 );
 
-on(K.ObjectLiteralExpression, (vm, frame) => {
+function objectLiteralExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.ObjectLiteralExpression;
 	objectLiteral(vm, frame);
-});
+}
 
 /** The value-producing nodes of an object literal, in source order: a computed key before its
  *  value. Methods/accessors produce no operand — their functions are created in the build step. */
@@ -188,7 +175,29 @@ export function propertyName(name: ts.PropertyName | ts.Identifier): string {
 	unimplemented(`computed/other property name (${ts.SyntaxKind[name.kind]})`);
 }
 
-on(
-	K.VoidExpression,
-	evaluating<ts.VoidExpression>((node) => [node.expression], (vm) => vm.push(undefined)),
-);
+const voidExpression = evaluating<ts.VoidExpression>((node) => [node.expression], (vm) => vm.push(undefined));
+
+
+/** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
+export function register(): void {
+	on(K.NumericLiteral, numericLiteral);
+	on(K.BigIntLiteral, bigIntLiteral);
+	on(K.StringLiteral, pushText);
+	on(K.NoSubstitutionTemplateLiteral, pushText);
+	on(K.TrueKeyword, trueKeyword);
+	on(K.FalseKeyword, falseKeyword);
+	on(K.NullKeyword, nullKeyword);
+	on(K.RegularExpressionLiteral, regularExpressionLiteral);
+	on(K.Identifier, identifier);
+	on(K.MetaProperty, metaProperty);
+	on(K.ParenthesizedExpression, passThroughExpr);
+	on(K.ExpressionWithTypeArguments, passThroughExpr); // an instantiation expression `f<T>` is `f`
+	on(K.AsExpression, passThroughExpr);
+	on(K.TypeAssertionExpression, passThroughExpr);
+	on(K.NonNullExpression, passThroughExpr);
+	on(K.SatisfiesExpression, passThroughExpr);
+	on(K.TemplateExpression, templateExpression);
+	on(K.ArrayLiteralExpression, arrayLiteralExpression);
+	on(K.ObjectLiteralExpression, objectLiteralExpression);
+	on(K.VoidExpression, voidExpression);
+}

@@ -7,8 +7,6 @@ import type { VM } from "../vm.ts";
 import { isObjectLike } from "./realm.ts";
 import { on } from "./registry.ts";
 
-/** GetIterator(async): `@@asyncIterator` via GetMethod (present-but-not-callable is a TypeError, not a
- *  fallback), else the sync iterator — and either result must be an object. */
 export function getAsyncOrSyncIterator(vm: VM, iterable: unknown): { record: IterRecord; sync: boolean } {
 	if (iterable == null) throw new TypeError(`${String(iterable)} is not async iterable`);
 	const asyncFactory = (iterable as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator];
@@ -134,4 +132,9 @@ export function closeIterator(iterator: object, done: boolean, abrupt: boolean):
 	if (typeof ret !== "function") throw new TypeError("iterator.return is not a function");
 	const result = (ret as () => unknown).call(iterator);
 	if (typeof result !== "object" || result === null) throw new TypeError("iterator.return() did not return an object");
+}
+
+
+/** No handlers to register: this module only provides helpers. */
+export function register(): void {
 }

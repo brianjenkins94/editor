@@ -3,7 +3,7 @@
  */
 import ts from "typescript";
 import { unimplemented } from "../errors.ts";
-import type { NodeFrame } from "../frame.ts";
+import type { ConstructFrame, InitFieldsFrame, NodeFrame } from "../frame.ts";
 import { Scope } from "../scope.ts";
 import type { VM } from "../vm.ts";
 import { collectCallArguments, pushCallArguments } from "./calls.ts";
@@ -453,7 +453,7 @@ export function classDefinition(vm: VM, frame: NodeFrame, node: ts.ClassLikeDecl
 	return createGuestClass(vm, node, frame.scope, { scope: frame.classScope as Scope, superClass, keys: values });
 }
 
-on(K.ClassDeclaration, (vm, frame) => {
+function classDeclaration(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.ClassDeclaration;
 	const Ctor = classDefinition(vm, frame, node);
 	if (Ctor === undefined) return;
@@ -462,17 +462,17 @@ on(K.ClassDeclaration, (vm, frame) => {
 		frame.scope.declareLexical(node.name.text, "let");
 		frame.scope.initialize(node.name.text, Ctor);
 	}
-});
+}
 
-on(K.ClassExpression, (vm, frame) => {
+function classExpression(vm: VM, frame: NodeFrame): void {
 	const Ctor = classDefinition(vm, frame, frame.node as ts.ClassExpression);
 	if (Ctor === undefined) return;
 	vm.frames.pop();
 	vm.push(Ctor);
-});
+}
 
 // Synthetic construct frame: build one class level's instance on the explicit stack.
-syntheticHandlers.construct = (vm, frame) => {
+function constructFrame(vm: VM, frame: ConstructFrame): void {
 	const ctor = frame.ctor;
 	const meta = classMetaOf(ctor);
 	if (frame.phase === 0) {
@@ -519,11 +519,11 @@ syntheticHandlers.construct = (vm, frame) => {
 		vm.frames.pop();
 		if (frame.isNew || frame.forSuper === true) vm.push(frame.instance);
 	}
-};
+}
 
 // After `super()` returns: adopt the parent's final instance (`fromStack`: left by its construct
 // frame), bind `this` (leaving its TDZ), then run this class's field initializers on it.
-syntheticHandlers.initfields = (vm, frame) => {
+function initfieldsFrame(vm: VM, frame: InitFieldsFrame): void {
 	let instance = frame.instance as object;
 	if (frame.fromStack === true) instance = vm.pop() as object;
 	if (frame.thisScope !== undefined) {
@@ -532,7 +532,7 @@ syntheticHandlers.initfields = (vm, frame) => {
 	} else if (frame.fromStack === true) setConstructInstance(vm, instance);
 	initInstanceFields(vm, frame.meta, instance);
 	vm.frames.pop();
-};
+}
 
 /** Point the nearest pending construct frame at `instance` (what its `new` will yield). */
 export function setConstructInstance(vm: VM, instance: object): void {
@@ -543,4 +543,13 @@ export function setConstructInstance(vm: VM, instance: object): void {
 			return;
 		}
 	}
+}
+
+
+/** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
+export function register(): void {
+	on(K.ClassDeclaration, classDeclaration);
+	on(K.ClassExpression, classExpression);
+	syntheticHandlers.construct = constructFrame;
+	syntheticHandlers.initfields = initfieldsFrame;
 }
