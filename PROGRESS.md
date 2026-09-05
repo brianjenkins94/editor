@@ -5,6 +5,39 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## The static→dynamic loop, against the real static kernel ✅ (2026-09-04)
+
+The reason tsval exists (ASSIGNMENT §1): silo predicts capabilities statically, tsval's canary
+checks `runtime-caps ⊆ static-caps` dynamically. Until now the canary had only been exercised with
+hand-written predicted sets. Now it runs against **silo itself** (`../lib/util/silo/detect.ts` +
+`reach.ts`, oxc-based, loaded through `lib`'s `tsx` because silo uses extensionless TS imports;
+`test/integration/silo.ts`). tsval keeps zero dependency on `lib`: the integration tests skip when
+`../lib` isn't checked out alongside.
+
+- `test/integration/silo-loop.test.ts` (7 tests, in `npm test`): agreement on literal code (same
+  capability, same resource value, same callee on both sides); **static under-prediction caught
+  dynamically** — `globalThis["fe"+"tch"]`, `Reflect.get(globalThis, ["fetch"].join(""))`, a
+  destructured alias, a computed `fs[op]` — silo sees nothing, the tripwire trips; the **dynamic
+  side resolves what static could not** (`fetch(base + "/" + path)` → the full URL, no static reach);
+  over-prediction is fine (a predicted-but-dead branch: `runtime ⊆ static` holds); fs granularity
+  agrees (`fs:read`; coarse `fs` honestly covers a computed write); exploration covers every branch
+  against the prediction; the two sides share one vocabulary (`CALL_DETECTORS` keys + net/env/eval).
+- `npm run silo:loop -- file.ts [--explore] [--json]`: static predicted + reaches vs runtime reaches
+  with resolved resources, "resolved only at runtime" diff, verdict, exit 1 on divergence (a
+  pipeline gate). Sample, on `const f = globalThis["fe"+"tch"]; f(base + "/" + path); process.env.HOME`:
+  ```
+  static predicted : env
+  runtime reached  : net
+    net       fetch → https://api.example.com/users/42
+  resolved only at runtime:
+    net       fetch → https://api.example.com/users/42
+  verdict: DIVERGENCE — net (fetch → https://api.example.com/users/42) is outside the predicted set
+  ```
+- Not done: wiring into silo's `guard`/`review`/`runs` orchestration (that lives in `lib`; the
+  script is the seam — its JSON output is what an orchestrator would consume).
+
+---
+
 ## Stepped destructuring + class keys ✅ (2026-09-04) — 99.7%, the structural limitation is gone
 
 **Status:** `npm test` → 1078 tests, all pass, **no known-gap todos left**. Full pinned corpus:

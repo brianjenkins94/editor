@@ -59,6 +59,22 @@ is written in, and the surface Node's own type-stripping accepts. Anything outsi
 
 The differential oracle runs Node in strict mode with an undefined receiver to match.
 
+## The static→dynamic loop
+
+tsval is the dynamic half of a capability analysis: silo (`../lib/util/silo`) predicts which
+capabilities a file reaches statically; the canary runs the program with recording shims and
+hard-aborts the instant runtime reaches a capability outside that prediction. With `../lib`
+checked out next to this repo:
+
+```bash
+npm run silo:loop -- path/to/program.ts --explore
+```
+
+prints the static prediction and reaches, the runtime reaches with their *resolved* resources
+(a concatenated URL, a computed member name — things the static side cannot see), and the verdict
+of `runtime-caps ⊆ static-caps` (exit code 1 on a divergence). `test/integration/silo-loop.test.ts`
+runs that loop against the real kernel in `npm test` (skipped without `../lib`).
+
 ## Conformance: test262
 
 The official ECMAScript conformance suite ([tc39/test262](https://github.com/tc39/test262), BSD-3)

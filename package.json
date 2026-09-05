@@ -15,6 +15,7 @@
     "test262:fetch": "bash scripts/test262-fetch.sh",
     "test262:sample": "node scripts/test262-sample.ts",
     "test262:report": "node scripts/test262-report.ts",
+    "silo:loop": "node scripts/silo-loop.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
