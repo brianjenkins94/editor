@@ -4,7 +4,8 @@
   "description": "A stepped, stack-based, TypeScript-AST interpreter (Path B / ts.SyntaxKind) with single-stepping, pause/resume, and snapshot/fork.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./typed": "./src/typed.ts"
   },
   "license": "MIT",
   "engines": {

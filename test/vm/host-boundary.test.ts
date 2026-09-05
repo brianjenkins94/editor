@@ -7,7 +7,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import ts from "typescript";
-import { interpret, interpretAsync, createVM, createTypedVM } from "../../src/index.ts";
+import { interpret, interpretAsync, createVM } from "../../src/index.ts";
+import { createTypedVM, type TypedHostCallSite } from "../../src/typed.ts";
 
 test("hostGuard.sanitize sees every property read that crosses from the host, including intrinsic reflection", () => {
 	const seen: unknown[] = [];
@@ -63,7 +64,7 @@ test("resolveModule is the import seam: a host decides what `import` and `import
 test("beforeCall receives the callsite: node, evaluated arguments, construct flag", () => {
 	const sites: string[] = [];
 	const beforeCall = (callee: (...a: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: import("../../src/index.ts").HostCallSite) => {
-		sites.push(`${ts.SyntaxKind[site.node.kind]}:${JSON.stringify(site.args)}:${site.isConstruct}:${site.checker === undefined ? "untyped" : "typed"}`);
+		sites.push(`${ts.SyntaxKind[site.node.kind]}:${JSON.stringify(site.args)}:${site.isConstruct}:${"checker" in site ? "typed" : "untyped"}`);
 		return callee;
 	};
 	const globals = { f: (...a: unknown[]) => a.length, K: class {} };
@@ -78,15 +79,15 @@ test("vm.callSite is already set while beforeCall runs", () => {
 	assert.ok(seen !== undefined && ts.isCallExpression(seen as ts.Node));
 });
 
-test("type-aware VM: a guard can answer with a stand-in shaped like the call's declared result type", () => {
+test("typed layer: a guard can answer with a stand-in shaped like the call's declared result type", () => {
 	// A host `load` that must not run: the guard synthesizes a value from the static return type.
 	const load = () => {
 		throw new Error("the real load must not run");
 	};
-	const beforeCall = (callee: (...a: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: import("../../src/index.ts").HostCallSite) => {
+	const beforeCall = (callee: (...a: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: TypedHostCallSite) => {
 		const type = site.returnType();
 		const checker = site.checker;
-		if (type === undefined || checker === undefined) return callee;
+		if (type === undefined) return callee;
 		const shaped: Record<string, unknown> = {};
 		for (const prop of type.getProperties()) {
 			const t = checker.typeToString(checker.getTypeOfSymbolAtLocation(prop, site.node));
@@ -95,20 +96,20 @@ test("type-aware VM: a guard can answer with a stand-in shaped like the call's d
 		return () => shaped;
 	};
 	const code = `declare function load(id: number): { id: number; name: string; active: boolean }; const u = load(7); [u.id, u.name, u.active, typeof u]`;
-	const vm = createTypedVM(code, { globals: { load }, hostGuard: { beforeCall } });
+	const { vm } = createTypedVM(code, { globals: { load }, hostGuard: { beforeCall } });
 	vm.run();
 	assert.deepEqual(vm.completion, [0, "", false, "object"]);
 });
 
-test("type-aware VM: signature() and argumentType() expose the declared parameter and argument types", () => {
+test("typed layer: signature() and argumentType() expose the declared parameter and argument types", () => {
 	const seen: string[] = [];
-	const beforeCall = (callee: (...a: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: import("../../src/index.ts").HostCallSite) => {
-		const checker = site.checker as ts.TypeChecker;
+	const beforeCall = (callee: (...a: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: TypedHostCallSite) => {
+		const checker = site.checker;
 		const sig = site.signature();
 		seen.push(`params=${sig?.getParameters().map((p) => p.name).join(",")} ret=${checker.typeToString(sig!.getReturnType())} arg0=${checker.typeToString(site.argumentType(0) as ts.Type)}`);
 		return callee;
 	};
-	const vm = createTypedVM(`declare function send(url: URL, body: string): Promise<number>; send(new URL("https://x"), "hi")`, { globals: { send: () => 1, URL }, hostGuard: { beforeCall } });
+	const { vm } = createTypedVM(`declare function send(url: URL, body: string): Promise<number>; send(new URL("https://x"), "hi")`, { globals: { send: () => 1, URL }, hostGuard: { beforeCall } });
 	vm.run();
 	// (the `new URL(...)` construction is a host call the guard sees too — its own site, its own signature)
 	assert.deepEqual(seen, ['params=url,base ret=URL arg0="https://x"', "params=url,body ret=Promise<number> arg0=URL"]);

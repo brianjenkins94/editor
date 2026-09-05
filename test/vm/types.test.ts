@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { interpret, createTypedProgram, typeOfNode } from "../../src/index.ts";
+import { interpret } from "../../src/index.ts";
+import { createTypedProgram, typeOfNode } from "../../src/typed.ts";
 import ts from "typescript";
 
 test("enum: numeric members auto-increment with a reverse mapping", () => {

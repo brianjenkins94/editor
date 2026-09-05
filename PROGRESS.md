@@ -5,6 +5,23 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## The typed layer is opt-in and on top ✅ (2026-09-05) — the interpreter knows no TypeChecker
+
+`src/typed.ts`, exported as `@brianjenkins94/tsval/typed`, is now the only place a checker exists.
+The core (`.`) lost `VMOptions.typeChecker`, `vm.typeChecker`, `createTypedVM`, the `program.ts`
+import in `vm.ts`, and the type-flavored members of `HostCallSite` (now just `node`, `args`,
+`isConstruct`). Importing `.` never loads a Program or lib.d.ts.
+- `createTypedVM(code, options): TypedVM` returns `{ vm, program, checker, sourceFile }` — the checker
+  beside the VM, not inside it. A guard passed here is a `TypedHostGuard`: `typedGuard(checker, guard)`
+  wraps it so its `site` is a `TypedHostCallSite` (`checker`, `returnType()`, `signature()`,
+  `argumentType(i)`); `typedCallSite(checker, site)` is the enrichment on its own, for hosts that
+  compose their own VM. A plain `HostGuard` is accepted unchanged.
+- `typeAtNode` / `typeOfNode` / `signatureAt` require a checker (the layer always has one).
+- lib: `silo/stub.ts` and `silo/canary.ts` import the typed API from `@brianjenkins94/tsval/typed`
+  (tsconfig alias added); `canary` reads the checker from the typed record.
+
+---
+
 ## Types read for what they say ✅ (2026-09-05) — strict null checks, call/apply, an own brand
 
 Driven by reviewing lib's `silo/stub.ts` (type-directed synthesis on the callsite seam) and turning

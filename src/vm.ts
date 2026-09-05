@@ -7,7 +7,6 @@ import { isGuestFunction } from "./values.ts";
 import { nodeHandlers, syntheticHandlers, createGuestFunction, bindIdentifier, bindingProgram, pushPattern, closeIteration, clonePrivateElements, isGuestClass, type GuestClass } from "./handlers.ts";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
 import { standardGlobals } from "./globals.ts";
-import { signatureAt, typeAtNode } from "./program.ts";
 
 /** Statements whose completion is UpdateEmpty(body, undefined): they yield `undefined` when their body produced nothing. */
 const COMPLETION_STATEMENTS = new Set<number>([ts.SyntaxKind.IfStatement, ts.SyntaxKind.ForStatement, ts.SyntaxKind.ForInStatement, ts.SyntaxKind.ForOfStatement, ts.SyntaxKind.WhileStatement, ts.SyntaxKind.DoStatement, ts.SyntaxKind.TryStatement, ts.SyntaxKind.SwitchStatement]);
@@ -121,8 +120,6 @@ export interface VMOptions {
 	/** Resolve a module specifier to its namespace object (for `import` / dynamic `import()`). This is
 	 *  the seam through which a host supplies (or replaces) modules. */
 	resolveModule?: (specifier: string) => unknown;
-	/** Optional `TypeChecker` for type-aware evaluation (a host can ask for the static type at a node). */
-	typeChecker?: ts.TypeChecker;
 	/** Top-level `this`. Default `undefined` (module semantics — the supported surface); a *script*
 	 *  runner (test262) passes the global object. */
 	thisValue?: unknown;
@@ -143,8 +140,8 @@ export interface VMOptions {
  * - `beforeCall(callee, thisArg, isConstruct, site)`: applied before the interpreter invokes a host
  *   callable; return the callable to actually invoke. `thisArg` lets it vet `Function.prototype.call/
  *   apply/bind` applied to a forbidden target; `site` says where and how the call was made — the
- *   callsite node, the evaluated arguments, and (in a type-aware VM) the static types, so a guard can
- *   answer with a stand-in shaped like the call's declared result.
+ *   callsite node and the evaluated arguments. (The static types at the site are the typed layer's
+ *   business — `./typed` wraps a guard and enriches the site; the VM itself knows no checker.)
  */
 export interface HostGuard {
 	sanitize?(value: unknown): unknown;
@@ -158,14 +155,6 @@ export interface HostCallSite {
 	/** the arguments as evaluated (after spread), in order. */
 	args: readonly unknown[];
 	isConstruct: boolean;
-	/** the program's TypeChecker when the VM is type-aware (`createTypedVM`), else undefined. */
-	checker: ts.TypeChecker | undefined;
-	/** the static type of the call's result (a `ts.Type`), when type-aware. */
-	returnType(): ts.Type | undefined;
-	/** the signature the call resolved to (declared parameter/return types), when type-aware. */
-	signature(): ts.Signature | undefined;
-	/** the static type of the i-th argument expression, when type-aware. */
-	argumentType(index: number): ts.Type | undefined;
 }
 
 /**
@@ -205,10 +194,8 @@ export class VM {
 
 	/** Module resolver for `import` / dynamic `import()` (the host's module seam). */
 	resolveModule: ((specifier: string) => unknown) | undefined;
-	/** Optional `TypeChecker` — present in type-aware runs (ASSIGNMENT S6). */
-	typeChecker: ts.TypeChecker | undefined;
 	/** The call/new expression currently invoking a host callable — lets a host function introspect its
-	 *  callsite (e.g. the static type of its argument) via `typeChecker`. Set only around the host
+	 *  callsite (with `./typed`, the static type of its argument). Set only around the host
 	 *  `apply`/`construct`. */
 	callSite: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression | undefined;
 	hostGuard: HostGuard | undefined;
@@ -248,7 +235,6 @@ export class VM {
 		this.rootScope.thisVal = options.thisValue;
 		this.rootScope.realGlobals = options.realGlobals ?? false;
 		this.resolveModule = options.resolveModule;
-		this.typeChecker = options.typeChecker;
 		this.hostGuard = options.hostGuard;
 		this.onAsyncFiber = options.onAsyncFiber;
 	}
@@ -264,25 +250,12 @@ export class VM {
 		const previousSite = this.callSite;
 		this.callSite = site; // (set BEFORE the guard runs: a guard may read it, or the `site` argument)
 		try {
-			const target = this.hostGuard?.beforeCall === undefined ? callee : this.hostGuard.beforeCall(callee, thisArg, isConstruct, this.describeCallSite(site, args, isConstruct));
+			const target = this.hostGuard?.beforeCall === undefined ? callee : this.hostGuard.beforeCall(callee, thisArg, isConstruct, { node: site, args, isConstruct });
 			const result = isConstruct ? Reflect.construct(target as unknown as new (...a: unknown[]) => unknown, args) : target.apply(thisArg, args);
 			return this.fromHost(result);
 		} finally {
 			this.callSite = previousSite;
 		}
-	}
-
-	private describeCallSite(node: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression, args: unknown[], isConstruct: boolean): HostCallSite {
-		const checker = this.typeChecker;
-		return {
-			node,
-			args,
-			isConstruct,
-			checker,
-			returnType: () => typeAtNode(checker, node),
-			signature: () => signatureAt(checker, node),
-			argumentType: (index) => (ts.isTaggedTemplateExpression(node) ? undefined : typeAtNode(checker, node.arguments?.[index])),
-		};
 	}
 
 	/** Resolve a module namespace, or throw a guest-catchable error if unresolved. */
@@ -781,7 +754,6 @@ export class VM {
 		(forked as { breakpoints: Set<number> }).breakpoints = new Set(this.breakpoints);
 		forked.sourceFile = this.sourceFile;
 		forked.resolveModule = this.resolveModule;
-		forked.typeChecker = this.typeChecker;
 		forked.hostGuard = this.hostGuard;
 		forked.onAsyncFiber = this.onAsyncFiber;
 		forked.callSite = undefined;

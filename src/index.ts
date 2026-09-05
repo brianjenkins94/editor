@@ -3,10 +3,9 @@ export type { Frame, NodeFrame, CallFrame, ConstructFrame, InitFieldsFrame, Patt
 export { Scope } from "./scope.ts";
 export type { Binding, BindingKind } from "./scope.ts";
 export { parse, syntaxKindName, ts } from "./frontend.ts";
-export { createVM, createTypedVM, interpret, interpretAsync } from "./interpret.ts";
+export { createVM, interpret, interpretAsync } from "./interpret.ts";
 export type { InterpretOptions } from "./interpret.ts";
-export { createTypedProgram, typeOfNode, typeAtNode, signatureAt } from "./program.ts";
-export type { TypedProgram } from "./program.ts";
+// The interpreter knows no TypeChecker. Type-awareness is a separate, opt-in layer: `@brianjenkins94/tsval/typed`.
 export { isGuestFunction } from "./values.ts";
 export type { GuestFunction, GuestFunctionMeta } from "./values.ts";
 export { nodeHandlers, syntheticHandlers, createGuestFunction } from "./handlers.ts";
