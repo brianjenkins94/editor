@@ -10,8 +10,11 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 Separation of concerns: the capability canary (`src/canary.ts`: recording shims, the divergence
 tripwire, `runCanary`/`runCanaryAsync`/`exploreCanary`, the type-directed sensitive-flow check,
 `safeGlobals`), its tests, the silo integration (`test/integration/silo*.ts`) and the
-`npm run silo:loop` script now live in their own repository. Their last state here is commit
-`b7881a4`. What stays is the interpreter and the seams a host builds on — `hostGuard`
+`npm run silo:loop` script now live in `lib/util/silo/canary.ts` — silo's dynamic layer, next to
+its static kernel (the "fold into `lib/util/silo/`" option of ASSIGNMENT §7.4). Their last state
+here is commit `b7881a4`. `lib` imports `@brianjenkins94/tsval` (this package's name; resolved by a
+`tsconfig` path mapping to `../tsval/src/index.ts`, and by the `exports` field for a real package
+dependency); the relocated canary loads and runs against the trimmed exports. What stays is the interpreter and the seams a host builds on — `hostGuard`
 (`sanitize`/`beforeCall`), `resolveModule`, `onAsyncFiber`, `fork`, breakpoints/step budgets, the
 optional `TypeChecker` — now covered by direct interpreter tests (`test/vm/host-boundary.test.ts`)
 instead of through the canary. The review-regression tests that were interpreter findings (fork
