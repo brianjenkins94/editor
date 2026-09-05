@@ -1,7 +1,7 @@
 # tsval — a stepped, stack-based, TypeScript-AST interpreter
 
 > Assignment brief for a session picking this up cold. Self-contained on purpose.
-> Companion: [`SVAL-NOTES.md`](./SVAL-NOTES.md) — sval internals (now **reference material**, see §2).
+> (The former companion `SVAL-NOTES.md`, field notes on sval internals, was removed once the design settled; sval is prior art only — see §2.)
 
 ## 1. What we're building and why
 

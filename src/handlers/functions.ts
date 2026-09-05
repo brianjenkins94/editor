@@ -26,7 +26,7 @@ export function createGuestFunction(vm: VM, node: GuestFunctionNode, closure: Sc
 		isAsync: (modifierFlags & ts.ModifierFlags.Async) !== 0,
 		homeObject,
 	};
-	// The host-invoked wrapper (array callbacks, shims, host-mediated `new`) runs a nested loop to
+	// The host-invoked wrapper (array callbacks, host-supplied functions, host-mediated `new`) runs a nested loop to
 	// completion. Its *shape* mirrors the guest function's: an arrow (no `this`, no `prototype`, not
 	// constructible), a concise method (has `this`, no `prototype`, not constructible), or a plain
 	// function (constructible; `new.target` forwarded so the body can observe construction).

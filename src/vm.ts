@@ -106,16 +106,16 @@ export type NodeHandler = (vm: VM, frame: NodeFrame) => void;
 export type SyntheticHandlers = { [Kind in SyntheticKind]: (vm: VM, frame: Extract<SyntheticFrame, { kind: Kind }>) => void };
 
 export interface VMOptions {
-	/** Injected globals / capability shims (checked before real globals). */
+	/** Injected globals — a host's replacements for built-ins (checked before real globals). */
 	globals?: Record<string, unknown>;
 	/** Use this object *as* the global object (not copied — a fresh realm's `globalThis`, whose
-	 *  builtins are non-enumerable, or a shared shim table). `globals` are then layered on top of it. */
+	 *  builtins are non-enumerable, or a host's own global table). `globals` are then layered on top of it. */
 	globalObject?: Record<string, unknown>;
 	/** Fall back to the host's real `globalThis` for unresolved names. Default true (max differential
 	 *  parity). A sandboxing host sets this false for a controlled environment. */
 	realGlobals?: boolean;
 	/** Resolve a module specifier to its namespace object (for `import` / dynamic `import()`). This is
-	 *  the injection seam for capability shims (ASSIGNMENT §5): return shimmed built-ins here. */
+	 *  the seam through which a host supplies (or replaces) modules. */
 	resolveModule?: (specifier: string) => unknown;
 	/** Optional `TypeChecker` for type-aware evaluation (a host can ask for the static type at a node). */
 	typeChecker?: ts.TypeChecker;
@@ -135,7 +135,7 @@ export interface VMOptions {
  * The host-boundary guard (see `VMOptions.hostGuard`). Both hooks default to identity.
  * - `sanitize(value)`: applied to every value that crosses from host land into guest land — property/
  *   element reads, host call & construct results, imported bindings, destructured host properties.
- *   Return a replacement (e.g. a shim for the real `Function`) or the value unchanged.
+ *   Return a replacement (e.g. a stand-in for the real `Function`) or the value unchanged.
  * - `beforeCall(callee, thisArg, isConstruct)`: applied before the interpreter invokes a host callable;
  *   return the callable to actually invoke. `thisArg` lets it vet `Function.prototype.call/apply/bind`
  *   applied to a forbidden target.
@@ -180,11 +180,11 @@ export class VM {
 	/** the value fed back in on resume (the `.next(v)` argument / the resolved awaited value). */
 	sentValue: unknown = undefined;
 
-	/** Module resolver for `import` / dynamic `import()` (the shim-injection seam, ASSIGNMENT §5). */
+	/** Module resolver for `import` / dynamic `import()` (the host's module seam). */
 	resolveModule: ((specifier: string) => unknown) | undefined;
 	/** Optional `TypeChecker` — present in type-aware runs (ASSIGNMENT S6). */
 	typeChecker: ts.TypeChecker | undefined;
-	/** The call/new expression currently invoking a host callable — lets a shim introspect its
+	/** The call/new expression currently invoking a host callable — lets a host function introspect its
 	 *  callsite (e.g. the static type of its argument) via `typeChecker`. Set only around the host
 	 *  `apply`/`construct`. */
 	callSite: ts.CallExpression | ts.NewExpression | undefined;
@@ -218,7 +218,7 @@ export class VM {
 		const pick = <T>(name: string): T => (typeof g[name] === "function" ? g[name] : (globalThis as Record<string, unknown>)[name]) as T;
 		const realmObject = pick<ObjectConstructor>("Object");
 		// The realm's *intrinsic* Function is reached through Object (a global named `Function` may be
-		// a shim — a host's eval guard); it's what guest function objects are created from.
+		// a host's stand-in, e.g. an eval guard); it's what guest function objects are created from.
 		const realmFunction = (realmObject as unknown as { constructor: FunctionConstructor }).constructor;
 		this.realm = makeRealm({ Array: pick("Array"), Object: realmObject, RegExp: pick("RegExp"), Function: typeof realmFunction === "function" ? realmFunction : Function, Promise: pick("Promise") });
 		this.rootScope.hasThis = true;
@@ -354,7 +354,7 @@ export class VM {
 		} catch (error) {
 			// A guest-observable runtime error (host built-in threw, bad member access, `instanceof` on a
 			// non-object, …) becomes a catchable `throw` signal. Interpreter bugs and a host's uncatchable
-			// aborts stay loud and propagate to the host uncaught (ASSIGNMENT working style; a host tripwire must
+			// aborts stay loud and propagate to the host uncaught (ASSIGNMENT working style; a host's abort must
 			// not be swallowable by guest try/catch).
 			if (isUncatchable(error)) throw error;
 			this.signal = { type: "throw", value: this.toGuestError(error) };
@@ -629,9 +629,9 @@ export class VM {
 	 *
 	 * The whole state (value stack, control stack, scope graph, signal, completion) is deep-copied so
 	 * the two machines can diverge without interfering. The crucial subtlety (ASSIGNMENT §3): **guest
-	 * state is cloned, host state is shared**. Injected shims, host built-ins, the root globals, AST
+	 * state is cloned, host state is shared**. Injected globals, host built-ins, the root globals, AST
 	 * nodes, class constructors, and live generator/async fibers keep their identity (cloning them would
-	 * break `instanceof`, capability recording, or be impossible); only program-created objects, arrays,
+	 * break `instanceof`, a host's own bookkeeping, or be impossible); only program-created objects, arrays,
 	 * closures, scopes, and value-like host builtins (Date/RegExp/Map/Set) are copied. A shared `seen`
 	 * map preserves reference identity and cycles *within* the fork.
 	 *
@@ -804,7 +804,7 @@ export class VM {
 	}
 
 	/**
-	 * Invoke a guest function from host code (array callbacks, shims). Runs a nested loop to
+	 * Invoke a guest function from host code (array callbacks, host-supplied functions). Runs a nested loop to
 	 * completion on a private stack; host↔guest crossings use the host stack (documented tradeoff),
 	 * while guest→guest calls stay on the explicit stack. (ASSIGNMENT §3, "Calls".)
 	 */

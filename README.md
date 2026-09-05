@@ -130,8 +130,8 @@ anything else, and a fork taken in the middle of a pattern is ordinary frame sta
   realm boundary, hoisting, iteration, references, operators, literals, functions, calls,
   generators, statements, classes, patterns) — `src/handlers.ts` registers them all.
 - `test/differential/` — the differential oracle: tsval output vs Node output on the same program.
-- `vendor/ts-evaluator/` — [ts-evaluator](https://github.com/wessberg/ts-evaluator) (MIT), used as the
-  per-node **semantics spec** and a test **oracle**, not shipped as a dependency.
+- `vendor/ts-evaluator/` — the test corpus of [ts-evaluator](https://github.com/wessberg/ts-evaluator) (MIT),
+  differential-oracle input; nothing of it is shipped or imported.
 
 ## License
 

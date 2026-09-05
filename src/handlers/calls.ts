@@ -125,7 +125,7 @@ function callExpression(vm: VM, frame: NodeFrame): void {
 			throw new TypeError(`${describe(node.expression)} is not a function`);
 		}
 		// Through the host guard (vets the callable, sanitizes the result) with the callsite exposed so a
-		// host shim can introspect the static type of its argument (type-aware hosts).
+		// host function can introspect its arguments' static types (type-aware hosts).
 		vm.push(vm.invokeHost(calleeVal as (...a: unknown[]) => unknown, frame.thisArg, args, node, false));
 	} else {
 		// the guest call has left its return value on the stack.

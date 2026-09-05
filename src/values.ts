@@ -5,7 +5,7 @@ import type { Scope } from "./scope.ts";
  * A guest function (declared inside the interpreted program).
  *
  * It is represented as a real JS function so it can be stored, passed around, and — eventually —
- * invoked by host code (array callbacks, shims). The `__tsval` brand carries the AST + closure scope
+ * invoked by host code (array callbacks, host-supplied functions). The `__tsval` brand carries the AST + closure scope
  * the VM needs to run it on its own explicit stack instead of the host stack (ASSIGNMENT §3, "Calls").
  *
  * CallExpression checks for the brand: branded → push a call frame (explicit stack, steppable, no

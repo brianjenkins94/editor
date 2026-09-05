@@ -36,7 +36,6 @@ const started = Date.now();
 
 for (const t of loadTsCases(FULL_ROOT, (id) => dir === undefined || id.startsWith(dir))) {
 	if (n++ >= limit) break;
-	if (process.env.TS_CASES_TRACE !== undefined) console.error(`> ${t.id}`);
 	const outcome: TsCaseOutcome = await runner.run(FULL_ROOT, t.id);
 	counts[outcome.kind]++;
 	if (outcome.kind === "mismatch") mismatches.push({ id: t.id, reason: outcome.reason, gap: knownGap(t.id) });

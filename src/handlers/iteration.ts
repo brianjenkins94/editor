@@ -37,7 +37,7 @@ export interface IterRecord {
 /**
  * Iteration state for an array whose iteration is pristine (see getIterator): a PLAIN object, so a
  * fork mid-iteration clones it — a host ArrayIterator would be shared, and one fork's steps would
- * starve the other's (`exploreCanary` forks inside `for…of` bodies). Observably the same as the
+ * starve the other's (a host may fork inside a `for…of` body). Observably the same as the
  * intrinsic: each step reads `length` then the index (through any getter or Proxy trap); once
  * exhausted it stays done without reading again; results are guest-realm objects.
  */
