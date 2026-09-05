@@ -59,7 +59,7 @@ function taggedTemplateExpression(vm: VM, frame: NodeFrame): void {
 		}
 		vm.frames.pop();
 		if (typeof calleeVal !== "function") throw new TypeError(`${describe(tag)} is not a function`);
-		vm.push(vm.invokeHost(calleeVal as (...a: unknown[]) => unknown, frame.thisArg, args, node as unknown as ts.CallExpression, false));
+		vm.push(vm.invokeHost(calleeVal as (...a: unknown[]) => unknown, frame.thisArg, args, node, false));
 	} else {
 		vm.frames.pop();
 	}

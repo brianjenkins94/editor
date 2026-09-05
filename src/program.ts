@@ -45,11 +45,28 @@ export function createTypedProgram(code: string, fileName = "entry.ts"): TypedPr
 	return { program, checker: program.getTypeChecker(), sourceFile: program.getSourceFile(full)! };
 }
 
-/** The static type of a node as a string (e.g. `"string"`, `"URL"`), or undefined without a checker. */
-export function typeOfNode(checker: ts.TypeChecker | undefined, node: ts.Node | undefined): string | undefined {
+/** The static type at a node, structured (a `ts.Type` to walk: properties, unions, call signatures), or
+ *  undefined without a checker. For a call or `new` expression this is the call's result type. */
+export function typeAtNode(checker: ts.TypeChecker | undefined, node: ts.Node | undefined): ts.Type | undefined {
 	if (checker === undefined || node === undefined) return undefined;
 	try {
-		return checker.typeToString(checker.getTypeAtLocation(node));
+		return checker.getTypeAtLocation(node);
+	} catch {
+		return undefined;
+	}
+}
+
+/** The static type of a node as a string (e.g. `"string"`, `"URL"`), or undefined without a checker. */
+export function typeOfNode(checker: ts.TypeChecker | undefined, node: ts.Node | undefined): string | undefined {
+	const type = typeAtNode(checker, node);
+	return type === undefined ? undefined : checker!.typeToString(type);
+}
+
+/** The signature a call/new expression resolved to (parameter and return types as declared), or undefined. */
+export function signatureAt(checker: ts.TypeChecker | undefined, node: ts.CallLikeExpression | undefined): ts.Signature | undefined {
+	if (checker === undefined || node === undefined) return undefined;
+	try {
+		return checker.getResolvedSignature(node);
 	} catch {
 		return undefined;
 	}

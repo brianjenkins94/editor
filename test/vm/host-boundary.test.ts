@@ -6,7 +6,8 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { interpret, interpretAsync, createVM } from "../../src/index.ts";
+import ts from "typescript";
+import { interpret, interpretAsync, createVM, createTypedVM } from "../../src/index.ts";
 
 test("hostGuard.sanitize sees every property read that crosses from the host, including intrinsic reflection", () => {
 	const seen: unknown[] = [];
@@ -57,4 +58,58 @@ test("resolveModule is the import seam: a host decides what `import` and `import
 	assert.equal(interpret(`import fs from "node:fs"; import { named } from "x"; fs.read() + named`, { resolveModule }), "read:node:fs7");
 	assert.deepEqual(requested, ["node:fs", "x"]);
 	assert.equal(await interpretAsync(`import("y").then((m) => m.named)`, { resolveModule }), 7);
+});
+
+test("beforeCall receives the callsite: node, evaluated arguments, construct flag", () => {
+	const sites: string[] = [];
+	const beforeCall = (callee: (...a: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: import("../../src/index.ts").HostCallSite) => {
+		sites.push(`${ts.SyntaxKind[site.node.kind]}:${JSON.stringify(site.args)}:${site.isConstruct}:${site.checker === undefined ? "untyped" : "typed"}`);
+		return callee;
+	};
+	const globals = { f: (...a: unknown[]) => a.length, K: class {} };
+	interpret("const xs = [2, 3]; f(1, ...xs); new K(\"k\"); f`t${1}`", { globals, hostGuard: { beforeCall } });
+	assert.deepEqual(sites, ['CallExpression:[1,2,3]:false:untyped', 'NewExpression:["k"]:true:untyped', 'TaggedTemplateExpression:[["t",""],1]:false:untyped']);
+});
+
+test("vm.callSite is already set while beforeCall runs", () => {
+	let seen: unknown;
+	const vm = createVM(`host()`, { globals: { host: () => 1 }, hostGuard: { beforeCall: (callee) => ((seen = vm.callSite), callee) } });
+	vm.run();
+	assert.ok(seen !== undefined && ts.isCallExpression(seen as ts.Node));
+});
+
+test("type-aware VM: a guard can answer with a stand-in shaped like the call's declared result type", () => {
+	// A host `load` that must not run: the guard synthesizes a value from the static return type.
+	const load = () => {
+		throw new Error("the real load must not run");
+	};
+	const beforeCall = (callee: (...a: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: import("../../src/index.ts").HostCallSite) => {
+		const type = site.returnType();
+		const checker = site.checker;
+		if (type === undefined || checker === undefined) return callee;
+		const shaped: Record<string, unknown> = {};
+		for (const prop of type.getProperties()) {
+			const t = checker.typeToString(checker.getTypeOfSymbolAtLocation(prop, site.node));
+			shaped[prop.name] = t === "number" ? 0 : t === "string" ? "" : t === "boolean" ? false : null;
+		}
+		return () => shaped;
+	};
+	const code = `declare function load(id: number): { id: number; name: string; active: boolean }; const u = load(7); [u.id, u.name, u.active, typeof u]`;
+	const vm = createTypedVM(code, { globals: { load }, hostGuard: { beforeCall } });
+	vm.run();
+	assert.deepEqual(vm.completion, [0, "", false, "object"]);
+});
+
+test("type-aware VM: signature() and argumentType() expose the declared parameter and argument types", () => {
+	const seen: string[] = [];
+	const beforeCall = (callee: (...a: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: import("../../src/index.ts").HostCallSite) => {
+		const checker = site.checker as ts.TypeChecker;
+		const sig = site.signature();
+		seen.push(`params=${sig?.getParameters().map((p) => p.name).join(",")} ret=${checker.typeToString(sig!.getReturnType())} arg0=${checker.typeToString(site.argumentType(0) as ts.Type)}`);
+		return callee;
+	};
+	const vm = createTypedVM(`declare function send(url: URL, body: string): Promise<number>; send(new URL("https://x"), "hi")`, { globals: { send: () => 1, URL }, hostGuard: { beforeCall } });
+	vm.run();
+	// (the `new URL(...)` construction is a host call the guard sees too — its own site, its own signature)
+	assert.deepEqual(seen, ['params=url,base ret=URL arg0="https://x"', "params=url,body ret=Promise<number> arg0=URL"]);
 });

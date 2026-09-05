@@ -5,6 +5,25 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## Callsite-aware host guard + structured types ✅ (2026-09-05) — the seam for type→fixture
+
+Requested by the canary (now in lib) for rung 3 of its response ladder — a host call answered with a
+stand-in shaped like the call's declared result — which the old seam could not express: `beforeCall`
+did not carry the callsite, `vm.callSite` was set only AFTER the guard ran, and `typeOfNode` returned
+a string.
+- `HostGuard.beforeCall(callee, thisArg, isConstruct, site)`: `site: HostCallSite` = the call/`new`/
+  tagged-template node, the evaluated arguments (after spread), the construct flag, the checker when
+  the VM is type-aware, and `returnType()` / `signature()` / `argumentType(i)` returning structured
+  `ts.Type` / `ts.Signature`. Existing three-argument guards are unaffected (lib's canary loads and
+  runs unchanged). `vm.callSite` is set before the guard runs.
+- `typeAtNode(checker, node): ts.Type` and `signatureAt(checker, call): ts.Signature` alongside the
+  string-returning `typeOfNode`.
+- `test/vm/host-boundary.test.ts`: a guard synthesizing `{ id: 0, name: "", active: false }` from
+  `declare function load(): { id: number; name: string; active: boolean }` without the real `load`
+  ever running — the rung, end to end.
+
+---
+
 ## `realGlobals` defaults to false ✅ (2026-09-05) — a program sees only what it is given
 
 The one option where the safe and the convenient settings disagreed now defaults to safe. Without

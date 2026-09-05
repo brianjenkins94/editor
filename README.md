@@ -72,7 +72,9 @@ import { interpret, createVM } from "./src/index.ts";
 interpret(code, {
   hostGuard: {
     sanitize: (value) => value,                 // every host→guest value crossing (property reads, returns, awaited values)
-    beforeCall: (callee, thisArg, isNew) => callee, // every host callable the guest invokes (replace, wrap, or refuse)
+    beforeCall: (callee, thisArg, isNew, site) => callee, // every host callable the guest invokes: replace, wrap, or refuse;
+                                                    // `site` = the callsite node, the evaluated args, and (type-aware) the
+                                                    // static types — returnType(), signature(), argumentType(i)
   },
   resolveModule: (specifier) => namespace,      // what `import` / `import()` resolve to
   onAsyncFiber: (promise) => {},                // every async function / async-generator invocation
@@ -81,6 +83,10 @@ interpret(code, {
 const vm = createVM(code);
 vm.runUntil((m) => m.steps > 1_000);           // step budgets, breakpoints (vm.location, vm.breakpoints)
 const fork = vm.fork();                        // an independent copy of the machine state, mid-expression if need be
+
+// Type-aware: a TypeChecker over the program; a guard can answer a host call with a stand-in shaped
+// like the call's DECLARED result type (typeAtNode / signatureAt give structured ts.Type / ts.Signature).
+const typed = createTypedVM(code, { hostGuard: { beforeCall: (callee, _t, _n, site) => (site.returnType() ? () => shapeFrom(site) : callee) } });
 ```
 
 Guest→guest calls never touch the host stack, so a guard cannot be bypassed from inside the guest;
