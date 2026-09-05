@@ -22,8 +22,10 @@ for (const t of loadTest262(SAMPLE_ROOT)) {
 		const outcome = await runTest262(SAMPLE_ROOT, t);
 		if (outcome.kind === "skipped") tally.skipped++;
 		else if (outcome.kind === "control-failed") tally.inconclusive++;
-		else if (outcome.kind === "fail") assert.fail(`${outcome.reason}\n--- ${t.id} ---\n${t.meta.description ?? ""}`);
-		else if (gap !== undefined) tally.todo++;
+		else if (gap !== undefined) {
+			tally.todo++; // counted whether or not it (still) fails — node:test reports a passing todo
+			if (outcome.kind === "fail") assert.fail(`${outcome.reason}\n--- ${t.id} ---\n${t.meta.description ?? ""}`);
+		} else if (outcome.kind === "fail") assert.fail(`${outcome.reason}\n--- ${t.id} ---\n${t.meta.description ?? ""}`);
 		else tally.pass++;
 	});
 }

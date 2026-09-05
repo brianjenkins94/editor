@@ -10,6 +10,17 @@ export const TEST262_KNOWN_GAPS: Record<string, string> = {
 	"statements/class/accessor-name-static-computed-yield-expr.js": YIELD_IN_SUBEXPRESSION,
 	"statements/for-of/dstr/array-elem-nested-array-yield-expr.js": YIELD_IN_SUBEXPRESSION,
 	"statements/for-of/dstr/array-rest-iter-rtrn-close.js": YIELD_IN_SUBEXPRESSION,
+	// `for await` destructuring targets containing `yield` — same limitation; the refusal surfaces as a
+	// rejected `next()` the test never observes, so these time out rather than fail fast.
+	"statements/for-await-of/async-gen-decl-dstr-array-elem-target-yield-expr.js": YIELD_IN_SUBEXPRESSION,
+	"statements/for-await-of/async-gen-decl-dstr-array-rest-nested-array-yield-expr.js": YIELD_IN_SUBEXPRESSION,
+	"statements/for-await-of/async-gen-decl-dstr-array-rest-nested-obj-yield-expr.js": YIELD_IN_SUBEXPRESSION,
+	"statements/for-await-of/async-gen-decl-dstr-array-rest-yield-expr.js": YIELD_IN_SUBEXPRESSION,
+	"statements/for-await-of/async-gen-decl-dstr-obj-id-init-yield-expr.js": YIELD_IN_SUBEXPRESSION,
+	"statements/for-await-of/async-gen-decl-dstr-obj-prop-elem-init-yield-expr.js": YIELD_IN_SUBEXPRESSION,
+	"statements/for-await-of/async-gen-decl-dstr-obj-prop-elem-target-yield-expr.js": YIELD_IN_SUBEXPRESSION,
+	"statements/for-await-of/async-gen-decl-dstr-obj-prop-nested-array-yield-expr.js": YIELD_IN_SUBEXPRESSION,
+	"statements/for-await-of/async-gen-decl-dstr-obj-prop-nested-obj-yield-expr.js": YIELD_IN_SUBEXPRESSION,
 };
 
 /** Find the gap entry covering an id (longest matching prefix wins). */

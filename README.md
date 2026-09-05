@@ -74,8 +74,16 @@ a listed known gap (run as `todo`).
   reason — the dev loop for finding the next bug.
 
 Each side of each test runs in a **fresh realm** (`node:vm` context): test262 mutates builtins on
-purpose, and tsval creates guest values with the guest realm's intrinsics so `[] instanceof Array`
-and `Object.getPrototypeOf({})` agree with the guest's own `Array`/`Object`.
+purpose, and tsval creates guest values with the guest realm's intrinsics so `[] instanceof Array`,
+`Object.getPrototypeOf({})`, `"".constructor` and a generator's prototype chain agree with the
+guest's own `Array`/`Object`/`String`/`%GeneratorFunction%`.
+
+test262's language tests are *scripts*, so the runner passes the realm's global object as the
+top-level `this` (`VMOptions.thisValue`) and installs `$DONE` as a global property; tsval's default
+remains module semantics (top-level `this` is `undefined`, top-level bindings are not globals).
+Current standing on the full pinned corpus: **99.2 % of eligible tests pass**; the remaining
+failures are listed by reason in `PROGRESS.md`, the bulk being one structural limitation (`yield`/
+`await` inside a destructuring default or target).
 
 ## Layout
 

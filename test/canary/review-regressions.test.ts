@@ -101,8 +101,13 @@ test("#3 fork: a host-invoked closure from the fork runs on the fork", () => {
 
 // --- #4: await/yield inside a synchronous sub-evaluation must fail loud, not yield undefined ---
 
-test("#4 await inside a computed key / default value is an internal error, not a silent undefined", async () => {
+test("#4 await inside a computed object-literal key is modeled (the key is evaluated on the stepped stack)", async () => {
 	const p = interpret(`(async () => { const o = { [await Promise.resolve("k")]: 1 }; return Object.keys(o)[0]; })()`) as Promise<unknown>;
+	assert.strictEqual(await p, "k");
+});
+
+test("#4 await inside a default value is an internal error, not a silent undefined", async () => {
+	const p = interpret(`(async () => { const [x = await Promise.resolve(1)] = []; return x; })()`) as Promise<unknown>;
 	await assert.rejects(p, (e: unknown) => e instanceof TsvalInternalError);
 });
 

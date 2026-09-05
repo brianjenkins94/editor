@@ -94,14 +94,20 @@ export function createGuestFunction(vm: VM, node: GuestFunctionNode, closure: Sc
 	const isMethodLike = ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) || ts.isConstructorDeclaration(node);
 	const fn = makeWrapper(vm, meta, isMethodLike);
 	fn.__tsval = meta;
-	// Realm fidelity: the function object belongs to the guest realm's Function.prototype, and a
-	// constructible function's `.prototype` is a guest-realm object.
-	Object.setPrototypeOf(fn, vm.realm.Function.prototype);
-	if (!meta.isArrow && !isMethodLike && !meta.isGenerator && !meta.isAsync) {
-		const proto = new vm.realm.Object();
+	// Realm fidelity: the function object belongs to the guest realm's Function.prototype (or the
+	// %GeneratorFunction.prototype% / %AsyncFunction.prototype% family), and a constructible
+	// function's `.prototype` is a guest-realm object. A generator function's `.prototype` is the
+	// prototype of the generator objects it creates (and is not a constructor).
+	const realm = vm.realm;
+	Object.setPrototypeOf(fn, meta.isGenerator ? (meta.isAsync ? realm.AsyncGeneratorFunctionPrototype : realm.GeneratorFunctionPrototype) : meta.isAsync ? realm.AsyncFunctionPrototype : realm.Function.prototype);
+	if (meta.isGenerator) {
+		Object.defineProperty(fn, "prototype", { value: Object.create(meta.isAsync ? realm.AsyncGeneratorPrototype : realm.GeneratorPrototype), writable: true, enumerable: false, configurable: false });
+	} else if (!meta.isArrow && !isMethodLike && !meta.isAsync) {
+		const proto = new realm.Object();
 		Object.defineProperty(proto, "constructor", { value: fn, writable: true, configurable: true });
 		Object.defineProperty(fn, "prototype", { value: proto, writable: true });
 	}
+	meta.self = fn;
 	Object.defineProperty(fn, "length", { value: functionLength(node.parameters), configurable: true });
 	Object.defineProperty(fn, "name", { value: meta.name, configurable: true });
 	// A named function *expression* binds its own name inside itself, immutably (assigning to it is a
@@ -118,13 +124,17 @@ export function createGuestFunction(vm: VM, node: GuestFunctionNode, closure: Sc
 // Fixed wrapper templates (NOT guest code) for creating a function object *inside another realm*: a
 // function's realm decides fallbacks like `new F()` with a non-object `F.prototype`, and whether
 // `F instanceof Function` holds for the guest's `Function`.
+// Strict, like the in-realm wrappers (an ESM module): a host caller's `undefined` receiver must
+// reach the guest as `undefined`, not the realm's global object.
 const FOREIGN_WRAPPERS = {
-	arrow: "return (...args) => vm.callGuestFromHost(meta, undefined, args);",
-	method: "return { m(...args) { return vm.callGuestFromHost(meta, this, args); } }.m;",
-	plain: "return function (...args) { return vm.callGuestFromHost(meta, this, args, new.target); };",
+	arrow: '"use strict"; return (...args) => vm.callGuestFromHost(meta, undefined, args);',
+	method: '"use strict"; return { m(...args) { return vm.callGuestFromHost(meta, this, args); } }.m;',
+	plain: '"use strict"; return function (...args) { return vm.callGuestFromHost(meta, this, args, new.target); };',
 };
 
-function makeWrapper(vm: VM, meta: GuestFunctionMeta, isMethodLike: boolean): GuestFunction {
+function makeWrapper(vm: VM, meta: GuestFunctionMeta, methodLike: boolean): GuestFunction {
+	// Generator and async functions are not constructors either (`new gen()` is a TypeError).
+	const isMethodLike = methodLike || meta.isGenerator || meta.isAsync;
 	if (vm.realm.Function !== Function) {
 		const template = meta.isArrow ? FOREIGN_WRAPPERS.arrow : isMethodLike ? FOREIGN_WRAPPERS.method : FOREIGN_WRAPPERS.plain;
 		return (vm.realm.Function("vm", "meta", template) as (vm: VM, meta: GuestFunctionMeta) => GuestFunction)(vm, meta);
@@ -396,6 +406,8 @@ on(K.ForStatement, (vm, frame) => {
 			node.initializer != null && ts.isVariableDeclarationList(node.initializer) && (node.initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) !== 0
 				? node.initializer.declarations.map((d) => (ts.isIdentifier(d.name) ? d.name.text : null)).filter((n): n is string => n !== null)
 				: null;
+		// The copies keep the declaration's kind: `for (const x = 0; ; x++)` is a TypeError, not a loop.
+		frame.lexicalKind = node.initializer != null && (node.initializer.flags & ts.NodeFlags.Const) !== 0 ? "const" : "let";
 
 		if (node.initializer) {
 			vm.pushNode(node.initializer, loopScope);
@@ -443,8 +455,9 @@ function copyPerIteration(frame: Frame): void {
 	if (names == null || names.length === 0) return;
 	const prev = frame.iterScope as Scope;
 	const next = new Scope(frame.scope, false);
+	const kind = (frame.lexicalKind as "let" | "const" | undefined) ?? "let";
 	for (const name of names) {
-		next.declareLexical(name, "let");
+		next.declareLexical(name, kind);
 		next.initialize(name, prev.get(name));
 	}
 	frame.iterScope = next;
@@ -459,20 +472,37 @@ on(K.ForOfStatement, (vm, frame) => {
 		vm.pushNode(node.expression, headTdzScope(frame.scope, node.initializer));
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
-		frame.iterator = getIterator(vm.pop());
+		const record = getIterator(vm.pop());
+		frame.iterRecord = record;
+		frame.iterator = record.iterator; // for IteratorClose on abrupt exit (vm.closeLoopIterator)
 		frame.phase = 2;
 	} else if (frame.phase === 2) {
-		const result = (frame.iterator as Iterator<unknown>).next();
-		if (result.done) {
-			frame.iteratorDone = true;
-			return void vm.frames.pop();
-		}
-		bindForTarget(vm, frame, node.initializer, vm.fromHost(result.value));
+		const value = loopStep(frame);
+		if (value === LOOP_DONE) return void vm.frames.pop();
+		bindForTarget(vm, frame, node.initializer, vm.fromHost(value));
 		frame.phase = 3;
 	} else {
 		frame.phase = 2;
 	}
 });
+
+const LOOP_DONE: unique symbol = Symbol("tsval.loop-done");
+
+/** IteratorStep + IteratorValue for a loop frame. An iterator whose `next`/`done`/`value` throws is
+ *  marked done first, so the loop's abrupt exit does NOT IteratorClose it (spec). */
+function loopStep(frame: Frame): unknown {
+	try {
+		const result = iterNext(frame.iterRecord as IterRecord);
+		if (result.done) {
+			frame.iteratorDone = true;
+			return LOOP_DONE;
+		}
+		return result.value;
+	} catch (error) {
+		frame.iteratorDone = true;
+		throw error;
+	}
+}
 
 // `for await (x of iterable)`: an async iterator's `.next()` results are awaited; a sync iterable's
 // *values* are awaited (the spec's async-from-sync adaptation). Each await suspends the enclosing
@@ -484,32 +514,44 @@ function forAwaitOf(vm: VM, frame: Frame, node: ts.ForOfStatement): void {
 		vm.pushNode(node.expression, headTdzScope(frame.scope, node.initializer));
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
-		const { iterator, sync } = getAsyncOrSyncIterator(vm.pop());
-		frame.iterator = iterator;
+		const { record, sync } = getAsyncOrSyncIterator(vm.pop());
+		frame.iterRecord = record;
+		frame.iterator = record.iterator;
 		frame.syncIterator = sync;
 		frame.phase = 2;
 	} else if (frame.phase === 2) {
-		const step = (frame.iterator as Iterator<unknown>).next();
 		if (frame.syncIterator) {
-			const result = step as IteratorResult<unknown>;
-			if (result.done) {
-				frame.iteratorDone = true;
-				return void vm.frames.pop();
-			}
-			suspend(vm, frame, "await", result.value, 3); // await the element itself
+			const value = loopStep(frame);
+			if (value === LOOP_DONE) return void vm.frames.pop();
+			suspend(vm, frame, "await", value, 3); // await the element itself
 		} else {
+			let step: unknown;
+			try {
+				step = iterNext(frame.iterRecord as IterRecord);
+			} catch (error) {
+				frame.iteratorDone = true;
+				throw error;
+			}
 			suspend(vm, frame, "await", step, 4); // await the result object
 		}
 	} else if (frame.phase === 3) {
 		bindForTarget(vm, frame, node.initializer, resumed(vm));
 		frame.phase = 5;
 	} else if (frame.phase === 4) {
-		const result = resumed(vm) as IteratorResult<unknown>;
-		if (result.done) {
+		const result = resumed(vm);
+		if (typeof result !== "object" || result === null) throw new TypeError("Iterator result is not an object");
+		let value: unknown;
+		try {
+			if ((result as IteratorResult<unknown>).done) {
+				frame.iteratorDone = true;
+				return void vm.frames.pop();
+			}
+			value = (result as IteratorResult<unknown>).value;
+		} catch (error) {
 			frame.iteratorDone = true;
-			return void vm.frames.pop();
+			throw error;
 		}
-		bindForTarget(vm, frame, node.initializer, vm.fromHost(result.value));
+		bindForTarget(vm, frame, node.initializer, vm.fromHost(value));
 		frame.phase = 5;
 	} else {
 		frame.phase = 2;
@@ -722,10 +764,91 @@ on(K.Identifier, (vm, frame) => {
 	vm.push(vm.fromHost(frame.scope.get(node.text)));
 });
 
+/** `this` in a derived constructor is uninitialized until `super()` returns (a ReferenceError). */
+const THIS_TDZ: unique symbol = Symbol("tsval.this-uninitialized");
+
+function thisValue(scope: Scope): unknown {
+	const value = scope.getThis();
+	if (value === THIS_TDZ) throw new ReferenceError("Must call super constructor in derived class before accessing 'this' or returning from derived constructor");
+	return value;
+}
+
 on(K.ThisKeyword, (vm, frame) => {
 	vm.frames.pop();
-	vm.push(frame.scope.getThis());
+	vm.push(thisValue(frame.scope));
 });
+
+// --- super references ------------------------------------------------------------------------------
+// `super.x` / `super[k]` read from [[HomeObject]].[[Prototype]] with the current `this` as receiver
+// (so inherited getters see the instance); `super.x = v` sets with that receiver (an inherited setter
+// runs, otherwise the property lands on `this`).
+
+function superBase(scope: Scope): object {
+	const home = scope.getHomeObject();
+	if (home == null) throw new SyntaxError("'super' keyword unexpected here");
+	const base = Object.getPrototypeOf(home);
+	if (base == null) throw new TypeError("Cannot read properties of null (super)");
+	return base;
+}
+
+function superGet(scope: Scope, key: PropertyKey): unknown {
+	const receiver = thisValue(scope); // the `this` binding is resolved first (spec order)
+	return Reflect.get(superBase(scope), key, receiver);
+}
+
+function superSet(scope: Scope, key: PropertyKey, value: unknown): void {
+	const receiver = thisValue(scope);
+	if (!Reflect.set(superBase(scope), key, value, receiver)) throw new TypeError(`Cannot assign to read only property '${keyText(key)}'`);
+}
+
+const isSuperRef = (node: ts.Node): node is ts.PropertyAccessExpression | ts.ElementAccessExpression =>
+	(ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && node.expression.kind === K.SuperKeyword;
+
+/** One step of a read-modify-write on a super reference (see superReadModifyWrite). */
+type RmwStep = { kind: "need-rhs" } | { kind: "done"; result: unknown } | { kind: "store"; value: unknown; result: unknown };
+
+/**
+ * `super.x = v` / `super[k] op= v` / `super.x++`: the `this` binding is checked before the key
+ * expression; the current value is read (when `readFirst`) before any RHS; the RHS is evaluated
+ * only when `compute` asks for it; the store goes through superSet (an inherited setter runs).
+ */
+function superReadModifyWrite(vm: VM, frame: Frame, target: ts.PropertyAccessExpression | ts.ElementAccessExpression, readFirst: boolean, compute: (current: unknown, rhs: { value: unknown } | undefined) => RmwStep, rhs?: ts.Expression): void {
+	const isElem = ts.isElementAccessExpression(target);
+	if (frame.phase === 0) {
+		thisValue(frame.scope);
+		if (isElem) {
+			vm.pushNode(target.argumentExpression, frame.scope);
+			frame.phase = 1;
+			return;
+		}
+		frame.key = target.name.text;
+		frame.phase = 2;
+	} else if (frame.phase === 1) {
+		frame.key = toPropertyKey(vm.pop());
+		frame.phase = 2;
+	}
+	if (frame.phase === 2) {
+		if (readFirst) frame.current = superGet(frame.scope, frame.key as PropertyKey);
+		const step = compute(frame.current, undefined);
+		if (step.kind === "need-rhs") {
+			vm.pushNode(rhs as ts.Expression, frame.scope);
+			frame.phase = 3;
+			return;
+		}
+		vm.frames.pop();
+		if (step.kind === "store") superSet(frame.scope, frame.key as PropertyKey, step.value);
+		return vm.push(step.result);
+	}
+	const step = compute(frame.current, { value: vm.pop() });
+	vm.frames.pop();
+	if (step.kind === "store") superSet(frame.scope, frame.key as PropertyKey, step.value);
+	vm.push(step.kind === "need-rhs" ? undefined : step.result);
+}
+
+const unwrapParens = (e: ts.Expression): ts.Expression => {
+	while (ts.isParenthesizedExpression(e)) e = e.expression;
+	return e;
+};
 
 // `new.target` (undefined in a plain call, the constructor under `new`); `import.meta` is a module
 // concept this program-runner doesn't model.
@@ -790,11 +913,13 @@ on(K.ArrayLiteralExpression, (vm, frame) => {
 		const raw = vm.values.splice(frame.base as number);
 		const out = new vm.realm.Array() as unknown[];
 		let cursor = 0;
+		let index = 0; // elements are *defined* (CreateDataProperty): an inherited setter on an index never runs
 		for (const el of node.elements) {
-			if (ts.isOmittedExpression(el)) out.length++;
-			else if (ts.isSpreadElement(el)) out.push(...(raw[cursor++] as Iterable<unknown>));
-			else out.push(raw[cursor++]);
+			if (ts.isOmittedExpression(el)) index++;
+			else if (ts.isSpreadElement(el)) for (const v of raw[cursor++] as Iterable<unknown>) defineData(out, index++, v);
+			else defineData(out, index++, raw[cursor++]);
 		}
+		out.length = index;
 		vm.frames.pop();
 		vm.push(out);
 	}
@@ -806,6 +931,8 @@ on(K.ObjectLiteralExpression, (vm, frame) => {
 		frame.base = vm.values.length;
 		// Evaluate value-producing properties (in reverse). Methods/accessors produce no operand —
 		// their functions are created in the build phase.
+		// Source order per property: its computed key (if any), then its value. Pushed in reverse, the
+		// key expression goes on top of its own value expression.
 		for (let i = node.properties.length - 1; i >= 0; i--) {
 			const prop = node.properties[i];
 			if (ts.isPropertyAssignment(prop)) vm.pushNode(prop.initializer, frame.scope);
@@ -814,32 +941,43 @@ on(K.ObjectLiteralExpression, (vm, frame) => {
 			else if (!ts.isMethodDeclaration(prop) && !ts.isGetAccessorDeclaration(prop) && !ts.isSetAccessorDeclaration(prop)) {
 				unimplemented(`${ts.SyntaxKind[(prop as ts.Node).kind]} in ObjectLiteral`);
 			}
+			const name = (prop as { name?: ts.PropertyName }).name;
+			if (name !== undefined && ts.isComputedPropertyName(name)) vm.pushNode(name.expression, frame.scope);
 		}
 		frame.phase = 1;
 	} else {
 		const values = vm.values.splice(frame.base as number);
 		const obj = new vm.realm.Object() as Record<PropertyKey, unknown>;
-		let cursor = 0; // advances only for value-producing properties, in source order
+		let cursor = 0; // advances over the evaluated keys and values, in source order
+		const keyOf = (name: ts.PropertyName): PropertyKey => (ts.isComputedPropertyName(name) ? toPropertyKey(values[cursor++]) : propertyName(name));
 		for (const prop of node.properties) {
 			if (ts.isPropertyAssignment(prop)) {
-				const value = values[cursor++];
 				// `__proto__: v` (non-computed) sets the prototype instead of defining a property.
 				if (!ts.isComputedPropertyName(prop.name) && propertyName(prop.name) === "__proto__") {
-					if ((typeof value === "object" && value !== null) || typeof value === "function") Object.setPrototypeOf(obj, value);
+					const value = values[cursor++];
+					if (value === null || typeof value === "object" || typeof value === "function") Object.setPrototypeOf(obj, value);
 					continue;
 				}
-				const key = memberKey(vm, prop.name, frame.scope);
+				const key = keyOf(prop.name);
+				const value = values[cursor++];
 				defineData(obj, key, nameAnonymous(value, key, prop.initializer));
 			} else if (ts.isShorthandPropertyAssignment(prop)) {
 				defineData(obj, prop.name.text, values[cursor++]);
 			} else if (ts.isSpreadAssignment(prop)) {
 				spreadInto(vm, obj, values[cursor++]); // own enumerable props, each through the guard
 			} else if (ts.isMethodDeclaration(prop)) {
-				Object.defineProperty(obj, memberKey(vm, prop.name, frame.scope), { value: createGuestFunction(vm, prop, frame.scope, obj), writable: true, enumerable: true, configurable: true });
-			} else if (ts.isGetAccessorDeclaration(prop) || ts.isSetAccessorDeclaration(prop)) {
-				const key = memberKey(vm, prop.name, frame.scope);
+				const key = keyOf(prop.name);
 				const fn = createGuestFunction(vm, prop, frame.scope, obj);
+				setFunctionName(fn, key);
+				Object.defineProperty(obj, key, { value: fn, writable: true, enumerable: true, configurable: true });
+			} else if (ts.isGetAccessorDeclaration(prop) || ts.isSetAccessorDeclaration(prop)) {
+				const key = keyOf(prop.name);
+				const fn = createGuestFunction(vm, prop, frame.scope, obj);
+				setFunctionName(fn, key, ts.isGetAccessorDeclaration(prop) ? "get" : "set");
+				// An accessor replaces an earlier data property of the same name (and vice versa).
 				const desc: PropertyDescriptor = { ...(Object.getOwnPropertyDescriptor(obj, key) ?? {}), enumerable: true, configurable: true };
+				delete desc.value;
+				delete desc.writable;
 				if (ts.isGetAccessorDeclaration(prop)) desc.get = fn as () => unknown;
 				else desc.set = fn as (v: unknown) => void;
 				Object.defineProperty(obj, key, desc);
@@ -849,6 +987,23 @@ on(K.ObjectLiteralExpression, (vm, frame) => {
 		vm.push(obj);
 	}
 });
+
+/** GetValue on a member reference. A primitive base is boxed in the GUEST realm (its
+ *  `String.prototype`, not the host's — `"".constructor === String` must hold for the guest's
+ *  `String`), with the primitive itself as the receiver for getters. Same-realm: a plain read. */
+function getProperty(vm: VM, obj: unknown, key: PropertyKey): unknown {
+	if (vm.realm.Object !== Object && typeof obj !== "object" && typeof obj !== "function") return Reflect.get(vm.realm.Object(obj) as object, key, obj);
+	return (obj as Record<PropertyKey, unknown>)[key];
+}
+
+/** PutValue on a member reference (strict): a primitive base finds a guest-realm setter or throws. */
+function setProperty(vm: VM, obj: unknown, key: PropertyKey, value: unknown): void {
+	if (vm.realm.Object !== Object && typeof obj !== "object" && typeof obj !== "function") {
+		if (!Reflect.set(vm.realm.Object(obj) as object, key, value, obj)) throw new TypeError(`Cannot create property '${keyText(key)}' on ${typeof obj} '${String(obj)}'`);
+		return;
+	}
+	(obj as Record<PropertyKey, unknown>)[key] = value;
+}
 
 /** CreateDataProperty — an object literal *defines* properties; assignment would run inherited
  *  setters (notably `__proto__`, which a computed `["__proto__"]` key must not trigger). */
@@ -867,6 +1022,7 @@ function spreadInto(vm: VM, target: Record<PropertyKey, unknown>, source: unknow
 
 function propertyName(name: ts.PropertyName | ts.Identifier): string {
 	if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
+	if (ts.isBigIntLiteral(name)) return String(BigInt(name.text.slice(0, -1))); // `{ 1n: v }` → "1"
 	if (ts.isPrivateIdentifier(name)) return name.text;
 	unimplemented(`computed/other property name (${ts.SyntaxKind[name.kind]})`);
 }
@@ -898,11 +1054,8 @@ function keyText(key: unknown): string {
 on(K.PropertyAccessExpression, (vm, frame) => {
 	const node = frame.node as ts.PropertyAccessExpression;
 	if (node.expression.kind === K.SuperKeyword) {
-		// `super.x` — read from the [[HomeObject]]'s prototype (bound `this` handled by the caller).
-		const home = frame.scope.getHomeObject();
-		const proto = home != null ? Object.getPrototypeOf(home) : undefined;
 		vm.frames.pop();
-		return void vm.push(vm.fromHost((proto as Record<string, unknown>)?.[node.name.text]));
+		return void vm.push(vm.fromHost(superGet(frame.scope, node.name.text)));
 	}
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);
@@ -915,12 +1068,23 @@ on(K.PropertyAccessExpression, (vm, frame) => {
 		if (ts.isPrivateIdentifier(node.name)) return vm.push(privateGet(obj, lookupPrivate(frame.scope, node.name.text)));
 		// Every property read is a host→guest crossing (e.g. `[].constructor.constructor` is the real
 		// `Function`): route it through the guard.
-		vm.push(vm.fromHost((obj as Record<string, unknown>)[node.name.text]));
+		vm.push(vm.fromHost(getProperty(vm, obj, node.name.text)));
 	}
 });
 
 on(K.ElementAccessExpression, (vm, frame) => {
 	const node = frame.node as ts.ElementAccessExpression;
+	if (node.expression.kind === K.SuperKeyword) {
+		if (frame.phase === 0) {
+			vm.pushNode(node.argumentExpression, frame.scope);
+			frame.phase = 1;
+		} else {
+			const key = toPropertyKey(vm.pop());
+			vm.frames.pop();
+			vm.push(vm.fromHost(superGet(frame.scope, key)));
+		}
+		return;
+	}
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 1;
@@ -939,7 +1103,7 @@ on(K.ElementAccessExpression, (vm, frame) => {
 		const obj = vm.pop();
 		vm.frames.pop();
 		if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${keyText(index)}')`);
-		vm.push(vm.fromHost((obj as Record<PropertyKey, unknown>)[index as PropertyKey]));
+		vm.push(vm.fromHost(getProperty(vm, obj, index as PropertyKey)));
 	}
 });
 
@@ -982,11 +1146,18 @@ on(K.PostfixUnaryExpression, (vm, frame) => {
 // ++/-- on a simple identifier lvalue (member lvalues: S2).
 function updateExpression(vm: VM, frame: Frame, operand: ts.Expression, operator: ts.SyntaxKind, prefix: boolean): void {
 	const delta = operator === K.PlusPlusToken ? 1 : -1;
+	operand = unwrapParens(operand);
+	if (isSuperRef(operand)) {
+		return superReadModifyWrite(vm, frame, operand, true, (current) => {
+			const old = toNumeric(current);
+			return { kind: "store", value: stepBy(old, delta), result: prefix ? stepBy(old, delta) : old };
+		});
+	}
 	if (ts.isIdentifier(operand)) {
 		vm.frames.pop();
-		const old = Number(frame.scope.get(operand.text));
-		frame.scope.set(operand.text, old + delta);
-		return void vm.push(prefix ? old + delta : old);
+		const old = toNumeric(frame.scope.get(operand.text));
+		frame.scope.set(operand.text, stepBy(old, delta));
+		return void vm.push(prefix ? stepBy(old, delta) : old);
 	}
 	if (ts.isPropertyAccessExpression(operand) || ts.isElementAccessExpression(operand)) {
 		const isElem = ts.isElementAccessExpression(operand);
@@ -1000,11 +1171,11 @@ function updateExpression(vm: VM, frame: Frame, operand: ts.Expression, operator
 			const key = isElem ? (vm.pop() as PropertyKey) : (operand as ts.PropertyAccessExpression).name.text;
 			const obj = vm.pop() as Record<PropertyKey, unknown>;
 			const pn = !isElem && ts.isPrivateIdentifier((operand as ts.PropertyAccessExpression).name) ? lookupPrivate(frame.scope, key as string) : undefined;
-			const old = Number(pn !== undefined ? privateGet(obj, pn) : obj[key]);
-			if (pn !== undefined) privateSet(obj, pn, old + delta);
-			else obj[key] = old + delta;
+			const old = toNumeric(pn !== undefined ? privateGet(obj, pn) : obj[key]);
+			if (pn !== undefined) privateSet(obj, pn, stepBy(old, delta));
+			else obj[key] = stepBy(old, delta);
 			vm.frames.pop();
-			vm.push(prefix ? old + delta : old);
+			vm.push(prefix ? stepBy(old, delta) : old);
 		}
 		return;
 	}
@@ -1014,8 +1185,9 @@ function updateExpression(vm: VM, frame: Frame, operand: ts.Expression, operator
 on(K.TypeOfExpression, (vm, frame) => {
 	const node = frame.node as ts.TypeOfExpression;
 	if (frame.phase === 0) {
-		// `typeof undeclaredVar` must not throw; guard identifier reads.
-		if (ts.isIdentifier(node.expression) && !frame.scope.has(node.expression.text)) {
+		// `typeof undeclaredVar` (also parenthesized) must not throw; guard identifier reads.
+		const inner = unwrapParens(node.expression);
+		if (ts.isIdentifier(inner) && !frame.scope.has(inner.text)) {
 			vm.frames.pop();
 			return vm.push("undefined");
 		}
@@ -1036,6 +1208,11 @@ on(K.DeleteExpression, (vm, frame) => {
 	const target = node.expression;
 	const isProp = ts.isPropertyAccessExpression(target);
 	const isElem = ts.isElementAccessExpression(target);
+	if (isSuperRef(target)) {
+		// `delete super.x` is a ReferenceError (after evaluating a computed key, which we skip).
+		vm.frames.pop();
+		throw new ReferenceError("Unsupported reference to 'super'");
+	}
 	if (frame.phase === 0) {
 		vm.pushNode(isProp || isElem ? (target as ts.PropertyAccessExpression | ts.ElementAccessExpression).expression : target, frame.scope);
 		frame.phase = 1;
@@ -1082,8 +1259,8 @@ function templateObject(vm: VM, node: ts.TaggedTemplateExpression): readonly str
 			add(node.template.head);
 			for (const span of node.template.templateSpans) add(span.literal);
 		}
-		const arr = Object.assign(cooked, { raw: Object.freeze(raw) });
-		strings = Object.freeze(arr);
+		Object.defineProperty(cooked, "raw", { value: Object.freeze(raw), enumerable: false }); // GetTemplateObject: non-enumerable
+		strings = Object.freeze(cooked);
 		templateObjects.set(node, strings);
 	}
 	return strings;
@@ -1189,16 +1366,16 @@ function enclosingFunctionMeta(scope: Scope): GuestFunctionMeta | undefined {
 
 /** GetIterator(async): `@@asyncIterator` via GetMethod (present-but-not-callable is a TypeError, not a
  *  fallback), else the sync iterator — and either result must be an object. */
-function getAsyncOrSyncIterator(iterable: unknown): { iterator: Iterator<unknown> | AsyncIterator<unknown>; sync: boolean } {
+function getAsyncOrSyncIterator(iterable: unknown): { record: IterRecord; sync: boolean } {
 	if (iterable == null) throw new TypeError(`${String(iterable)} is not async iterable`);
 	const asyncFactory = (iterable as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator];
 	if (asyncFactory != null) {
 		if (typeof asyncFactory !== "function") throw new TypeError("Symbol.asyncIterator is not a function");
 		const iterator = (asyncFactory as () => unknown).call(iterable);
 		if (!isObjectLike(iterator)) throw new TypeError("Result of the Symbol.asyncIterator method is not an object");
-		return { iterator: iterator as AsyncIterator<unknown>, sync: false };
+		return { record: { iterator: iterator as object, next: (iterator as { next?: unknown }).next }, sync: false };
 	}
-	return { iterator: getIterator(iterable), sync: true };
+	return { record: getIterator(iterable), sync: true };
 }
 
 /** GetMethod: undefined/null → absent; otherwise must be callable. */
@@ -1232,7 +1409,9 @@ function yieldStar(vm: VM, frame: Frame, node: ts.YieldExpression): void {
 			return;
 		case 1: {
 			const iterable = vm.pop();
-			frame.iterator = asyncGen ? getAsyncOrSyncIterator(iterable).iterator : getIterator(iterable);
+			const record = asyncGen ? getAsyncOrSyncIterator(iterable).record : getIterator(iterable);
+			frame.iterRecord = record;
+			frame.iterator = record.iterator;
 			frame.received = { kind: "next", value: undefined } satisfies Received;
 			frame.phase = 2;
 			return;
@@ -1243,9 +1422,7 @@ function yieldStar(vm: VM, frame: Frame, node: ts.YieldExpression): void {
 			const received = frame.received as Received;
 			let innerResult: unknown;
 			if (received.kind === "next") {
-				const next = it.next;
-				if (typeof next !== "function") throw new TypeError("iterator.next is not a function");
-				innerResult = (next as (...a: unknown[]) => unknown).call(it, received.value);
+				innerResult = iterNext(frame.iterRecord as IterRecord, received.value);
 			} else if (received.kind === "throw") {
 				const throwMethod = getMethod(it, "throw");
 				if (throwMethod === undefined) {
@@ -1403,45 +1580,53 @@ function logicalExpression(vm: VM, frame: Frame, node: ts.BinaryExpression, op: 
 }
 
 function assignmentExpression(vm: VM, frame: Frame, node: ts.BinaryExpression): void {
-	// Simple identifier / member lvalues (destructuring assignment targets: S2).
-	if (ts.isIdentifier(node.left)) {
+	// A parenthesized target `(x) = v` / `(o.p) = v` is still a Reference (but not an IdentifierRef:
+	// no NamedEvaluation through parentheses).
+	const left = unwrapParens(node.left);
+	if (ts.isIdentifier(left)) {
 		if (frame.phase === 0) {
 			vm.pushNode(node.right, frame.scope);
 			frame.phase = 1;
 		} else {
-			const value = nameAnonymous(vm.pop(), (node.left as ts.Identifier).text, node.right);
-			frame.scope.set((node.left as ts.Identifier).text, value);
+			const value = left === node.left ? nameAnonymous(vm.pop(), left.text, node.right) : vm.pop();
+			frame.scope.set(left.text, value);
 			vm.frames.pop();
 			vm.push(value);
 		}
 		return;
 	}
-	if (ts.isPropertyAccessExpression(node.left) || ts.isElementAccessExpression(node.left)) {
-		return memberAssignment(vm, frame, node);
+	if (isSuperRef(left)) {
+		return superReadModifyWrite(vm, frame, left, false, (_current, rhs) => (rhs === undefined ? { kind: "need-rhs" } : { kind: "store", value: rhs.value, result: rhs.value }), node.right);
+	}
+	if (ts.isPropertyAccessExpression(left) || ts.isElementAccessExpression(left)) {
+		return memberAssignment(vm, frame, left, node.right);
 	}
 	// Destructuring assignment: `[a, b] = x`, `({ x } = o)`. Evaluate the RHS (stepped), then assign
 	// into the (possibly nested) targets synchronously.
-	if (ts.isArrayLiteralExpression(node.left) || ts.isObjectLiteralExpression(node.left)) {
+	if (ts.isArrayLiteralExpression(left) || ts.isObjectLiteralExpression(left)) {
 		if (frame.phase === 0) {
 			vm.pushNode(node.right, frame.scope);
 			frame.phase = 1;
 		} else {
 			const value = vm.pop();
-			assignPattern(vm, frame.scope, node.left, value);
+			assignPattern(vm, frame.scope, left, value);
 			vm.frames.pop();
 			vm.push(value);
 		}
 		return;
 	}
-	unimplemented(`assignment target ${ts.SyntaxKind[node.left.kind]}`);
+	unimplemented(`assignment target ${ts.SyntaxKind[left.kind]}`);
 }
 
 /** Assign `value` into an assignment target expression (existing lvalues, possibly a pattern). */
 function assignPattern(vm: VM, scope: Scope, target: ts.Expression, value: unknown): void {
+	target = unwrapParens(target);
 	if (ts.isIdentifier(target)) return scope.set(target.text, value);
 	if (ts.isPropertyAccessExpression(target)) {
-		const obj = vm.evalNodeSync(target.expression, scope) as Record<string, unknown>;
-		obj[target.name.text] = value;
+		const obj = vm.evalNodeSync(target.expression, scope);
+		if (ts.isPrivateIdentifier(target.name)) return privateSet(obj, lookupPrivate(scope, target.name.text), value);
+		if (obj == null) throw new TypeError(`Cannot set properties of ${String(obj)} (setting '${target.name.text}')`);
+		(obj as Record<string, unknown>)[target.name.text] = value;
 		return;
 	}
 	if (ts.isElementAccessExpression(target)) {
@@ -1450,39 +1635,28 @@ function assignPattern(vm: VM, scope: Scope, target: ts.Expression, value: unkno
 		return;
 	}
 	if (ts.isArrayLiteralExpression(target)) {
-		const iterator = getIterator(value);
-		let done = false;
+		const steps = iterationSteps(getIterator(value));
 		try {
 			for (const element of target.elements) {
 				if (ts.isOmittedExpression(element)) {
-					if (!done) done = Boolean(iterator.next().done);
+					steps.step();
 				} else if (ts.isSpreadElement(element)) {
 					const prepared = prepareAssignTarget(vm, scope, element.expression); // reference first
 					const rest = new vm.realm.Array() as unknown[];
-					while (!done) {
-						const r = iterator.next();
-						if (r.done) done = true;
-						else rest.push(r.value);
-					}
+					for (let r = steps.step(); !r.done; r = steps.step()) defineData(rest, rest.length, r.value);
 					storePrepared(vm, scope, prepared, rest);
 				} else {
 					// Spec order: evaluate the target *reference* (a member's object/key), then IteratorStep,
 					// then a default if the value is undefined, then PutValue.
 					const prepared = prepareAssignTarget(vm, scope, element);
-					let v: unknown = undefined;
-					if (!done) {
-						const r = iterator.next();
-						if (r.done) done = true;
-						else v = r.value;
-					}
-					storePrepared(vm, scope, prepared, v);
+					storePrepared(vm, scope, prepared, steps.step().value);
 				}
 			}
 		} catch (error) {
-			closeIterator(iterator, done, true);
+			steps.close(true);
 			throw error;
 		}
-		closeIterator(iterator, done, false);
+		steps.close(false);
 		return;
 	}
 	if (ts.isObjectLiteralExpression(target)) {
@@ -1491,8 +1665,8 @@ function assignPattern(vm: VM, scope: Scope, target: ts.Expression, value: unkno
 		for (const prop of target.properties) {
 			if (ts.isSpreadAssignment(prop)) {
 				const prepared = prepareAssignTarget(vm, scope, prop.expression);
-				const rest = new vm.realm.Object() as Record<string, unknown>;
-				for (const k in value as object) if (!used.has(k)) rest[k] = vm.fromHost((value as Record<string, unknown>)[k]);
+				const rest = new vm.realm.Object();
+				copyRestProperties(vm, rest, value, used);
 				storePrepared(vm, scope, prepared, rest);
 			} else if (ts.isPropertyAssignment(prop)) {
 				const key = memberKey(vm, prop.name, scope);
@@ -1534,6 +1708,7 @@ function prepareAssignTarget(vm: VM, scope: Scope, element: ts.Expression): Prep
 		target = element.left;
 		init = element.right;
 	}
+	target = unwrapParens(target);
 	if (ts.isIdentifier(target)) return { kind: "id", target, init, name: target.text };
 	if (ts.isPropertyAccessExpression(target)) {
 		const obj = vm.evalNodeSync(target.expression, scope);
@@ -1559,8 +1734,7 @@ function storePrepared(vm: VM, scope: Scope, t: PreparedTarget, value: unknown):
 	} else assignPattern(vm, scope, t.target, value);
 }
 
-function memberAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression): void {
-	const target = node.left as ts.PropertyAccessExpression | ts.ElementAccessExpression;
+function memberAssignment(vm: VM, frame: Frame, target: ts.PropertyAccessExpression | ts.ElementAccessExpression, right: ts.Expression): void {
 	const isElement = ts.isElementAccessExpression(target);
 	if (frame.phase === 0) {
 		vm.pushNode(target.expression, frame.scope);
@@ -1569,14 +1743,14 @@ function memberAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression): void
 		vm.pushNode((target as ts.ElementAccessExpression).argumentExpression, frame.scope);
 		frame.phase = 2;
 	} else if (frame.phase === 1 || frame.phase === 2) {
-		vm.pushNode(node.right, frame.scope);
+		vm.pushNode(right, frame.scope);
 		frame.phase = 3;
 	} else {
 		const value = vm.pop();
 		const key = isElement ? (vm.pop() as PropertyKey) : (target as ts.PropertyAccessExpression).name.text;
 		const obj = vm.pop() as Record<PropertyKey, unknown>;
 		if (!isElement && ts.isPrivateIdentifier((target as ts.PropertyAccessExpression).name)) privateSet(obj, lookupPrivate(frame.scope, key as string), value);
-		else obj[key] = value;
+		else setProperty(vm, obj, key, value);
 		vm.frames.pop();
 		vm.push(value);
 	}
@@ -1594,8 +1768,9 @@ function logicalShortCircuits(op: number, current: unknown): boolean {
 // error surfaces here, before the RHS runs), then the RHS — and a logical assignment doesn't run the
 // RHS at all when the current value decides.
 function compoundAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression, op: number): void {
-	if (ts.isIdentifier(node.left)) {
-		const name = node.left.text;
+	const left = unwrapParens(node.left);
+	if (ts.isIdentifier(left)) {
+		const name = left.text;
 		if (frame.phase === 0) {
 			const current = frame.scope.get(name); // GetValue before the RHS
 			if (logicalShortCircuits(op, current)) {
@@ -1615,15 +1790,28 @@ function compoundAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression, op:
 		}
 		return;
 	}
-	if (ts.isPropertyAccessExpression(node.left) || ts.isElementAccessExpression(node.left)) {
-		return memberCompoundAssignment(vm, frame, node, op);
+	if (isSuperRef(left)) {
+		return superReadModifyWrite(
+			vm,
+			frame,
+			left,
+			true,
+			(current, rhs) => {
+				if (rhs === undefined) return logicalShortCircuits(op, current) ? { kind: "done", result: current } : { kind: "need-rhs" };
+				const result = applyCompound(op, current as never, rhs.value as never);
+				return { kind: "store", value: result, result };
+			},
+			node.right,
+		);
 	}
-	unimplemented(`compound assignment to ${ts.SyntaxKind[node.left.kind]}`);
+	if (ts.isPropertyAccessExpression(left) || ts.isElementAccessExpression(left)) {
+		return memberCompoundAssignment(vm, frame, left, node.right, op);
+	}
+	unimplemented(`compound assignment to ${ts.SyntaxKind[left.kind]}`);
 }
 
 // `obj.p op= rhs` / `obj[k] op= rhs`: the object (and key) reference is evaluated once.
-function memberCompoundAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression, op: number): void {
-	const target = node.left as ts.PropertyAccessExpression | ts.ElementAccessExpression;
+function memberCompoundAssignment(vm: VM, frame: Frame, target: ts.PropertyAccessExpression | ts.ElementAccessExpression, right: ts.Expression, op: number): void {
 	const isElem = ts.isElementAccessExpression(target);
 	const privateNameOf = (): PrivateName | undefined => (!isElem && ts.isPrivateIdentifier((target as ts.PropertyAccessExpression).name) ? lookupPrivate(frame.scope, (target as ts.PropertyAccessExpression).name.text) : undefined);
 	if (frame.phase === 0) {
@@ -1646,7 +1834,7 @@ function memberCompoundAssignment(vm: VM, frame: Frame, node: ts.BinaryExpressio
 			return vm.push(current);
 		}
 		frame.current = current;
-		vm.pushNode(node.right, frame.scope);
+		vm.pushNode(right, frame.scope);
 		frame.phase = 3;
 	} else {
 		const right = vm.pop() as never;
@@ -1693,7 +1881,9 @@ on(K.ArrowFunction, makeFunction);
 
 on(K.CallExpression, (vm, frame) => {
 	const node = frame.node as ts.CallExpression;
-	const callee = node.expression;
+	// A parenthesized member callee `(a.b)()` is still a Reference: `this` is preserved.
+	let callee: ts.Expression = node.expression;
+	while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
 	if (callee.kind === K.SuperKeyword) return superCall(vm, frame, node);
 	if (callee.kind === K.ImportKeyword) {
 		// dynamic import(specifier) → Promise of the module namespace.
@@ -1709,14 +1899,22 @@ on(K.CallExpression, (vm, frame) => {
 	}
 	const isProp = ts.isPropertyAccessExpression(callee);
 	const isElem = ts.isElementAccessExpression(callee);
-	// `super.method()` — call the super-prototype method with the current `this`.
+	// `super.method()` / `super[k]()` — call the super-prototype method with the current `this`.
 	const isSuperProp = isProp && (callee as ts.PropertyAccessExpression).expression.kind === K.SuperKeyword;
+	const isSuperElem = isElem && (callee as ts.ElementAccessExpression).expression.kind === K.SuperKeyword;
 
 	if (frame.phase === 0 && isSuperProp) {
-		const home = frame.scope.getHomeObject();
-		const proto = home != null ? Object.getPrototypeOf(home) : undefined;
-		frame.thisArg = frame.scope.getThis();
-		vm.push((proto as Record<string, unknown>)?.[(callee as ts.PropertyAccessExpression).name.text]);
+		frame.thisArg = thisValue(frame.scope);
+		vm.push(superGet(frame.scope, (callee as ts.PropertyAccessExpression).name.text));
+		pushCallArguments(vm, frame, node.arguments);
+		frame.phase = 3;
+	} else if (frame.phase === 0 && isSuperElem) {
+		vm.pushNode((callee as ts.ElementAccessExpression).argumentExpression, frame.scope);
+		frame.phase = 5;
+	} else if (frame.phase === 5) {
+		const key = toPropertyKey(vm.pop());
+		frame.thisArg = thisValue(frame.scope);
+		vm.push(superGet(frame.scope, key));
 		pushCallArguments(vm, frame, node.arguments);
 		frame.phase = 3;
 	} else if (frame.phase === 0) {
@@ -1743,7 +1941,7 @@ on(K.CallExpression, (vm, frame) => {
 			if (obj === CHAIN_BREAK || (obj == null && (callee as ts.PropertyAccessExpression).questionDotToken)) return void (vm.frames.pop(), vm.push(chainShort(node)));
 			if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${name.text}')`);
 			if (ts.isPrivateIdentifier(name)) vm.push(privateGet(obj, lookupPrivate(frame.scope, name.text)));
-			else vm.push((obj as Record<string, unknown>)[name.text]);
+			else vm.push(getProperty(vm, obj, name.text));
 		} else {
 			frame.thisArg = undefined;
 		}
@@ -1757,7 +1955,7 @@ on(K.CallExpression, (vm, frame) => {
 		const obj = vm.pop();
 		frame.thisArg = obj;
 		if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${keyText(index)}')`);
-		vm.push((obj as Record<PropertyKey, unknown>)[index as PropertyKey]);
+		vm.push(getProperty(vm, obj, index as PropertyKey));
 		const calleeValue = vm.values[vm.values.length - 1];
 		if (calleeValue === CHAIN_BREAK || (calleeValue == null && node.questionDotToken)) return void (vm.pop(), vm.frames.pop(), vm.push(chainShort(node)));
 		pushCallArguments(vm, frame, node.arguments);
@@ -1962,11 +2160,28 @@ export function clonePrivateElements(from: object, to: object, cloneValue: (v: u
 interface GuestClass {
 	new (...args: unknown[]): unknown;
 	prototype: object;
-	__tsvalClass: ClassMeta;
 }
 
-function isGuestClass(value: unknown): value is GuestClass {
-	return typeof value === "function" && (value as Partial<GuestClass>).__tsvalClass != null;
+/** IsConstructor, without calling anything: `Reflect.construct` validates its newTarget up front. */
+function isConstructor(value: unknown): boolean {
+	if (typeof value !== "function") return false;
+	try {
+		Reflect.construct(String, [], value as new () => unknown);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** The brand for guest classes — a side table, never a property (own-property lists are observable). */
+const CLASS_META = new WeakMap<object, ClassMeta>();
+
+export function isGuestClass(value: unknown): value is GuestClass {
+	return typeof value === "function" && CLASS_META.has(value);
+}
+
+function classMetaOf(ctor: GuestClass): ClassMeta {
+	return CLASS_META.get(ctor) as ClassMeta;
 }
 
 function hasStatic(member: ts.ClassElement): boolean {
@@ -1982,13 +2197,23 @@ function memberKey(vm: VM, name: ts.PropertyName | undefined, scope: Scope): Pro
 
 export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerScope: Scope): GuestClass {
 	assertSupportedClassSurface(node);
-	const heritage = node.heritageClauses?.find((h) => h.token === K.ExtendsKeyword);
-	const superClass = heritage ? vm.evalNodeSync(heritage.types[0].expression, outerScope) : undefined;
-	const proto = superClass != null ? Object.create((superClass as GuestClass).prototype) : new vm.realm.Object();
 	// The class body sees an inner, immutable binding of its own name (so static initializers,
 	// `static {}` blocks and methods can refer to it — also for a *named class expression*, whose name
-	// is visible only inside). Bound once the constructor exists, below.
+	// is visible only inside). It is in the TDZ while the `extends` expression evaluates and is
+	// initialized once the constructor exists.
 	const scope = new Scope(outerScope, false);
+	if (node.name) scope.declareLexical(node.name.text, "const");
+	const heritage = node.heritageClauses?.find((h) => h.token === K.ExtendsKeyword);
+	const superClass = heritage ? vm.evalNodeSync(heritage.types[0].expression, scope) : undefined;
+	if (heritage && superClass !== null && typeof superClass !== "function") throw new TypeError(`Class extends value ${String(superClass)} is not a constructor or null`);
+	if (typeof superClass === "function") {
+		// IsConstructor first (an arrow / async / generator / bound-arrow parent is a TypeError before its
+		// `prototype` is ever read), then the prototype must be an object (a function counts) or null.
+		if (!isConstructor(superClass)) throw new TypeError("Class extends value is not a constructor or null");
+		const parentProto = (superClass as { prototype?: unknown }).prototype;
+		if (parentProto !== null && typeof parentProto !== "object" && typeof parentProto !== "function") throw new TypeError(`Class extends value does not have valid prototype property ${String(parentProto)}`);
+	}
+	const proto = superClass === null ? Object.create(null) : superClass !== undefined ? Object.create((superClass as GuestClass).prototype) : new vm.realm.Object();
 	const meta: ClassMeta = { node, closure: scope, superClass, proto, instanceFields: [], instancePrivateMethods: [] };
 	// Private names are created up front (fresh per evaluation) so every member — including
 	// initializers and methods that run later — resolves them lexically through `scope`.
@@ -2005,23 +2230,32 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 		const name = (member as { name?: ts.Node }).name;
 		return name !== undefined && ts.isPrivateIdentifier(name) ? (privateNames.get(name.text) as PrivateName) : undefined;
 	};
+	// Every (public) member key is evaluated exactly once, in source order, before any member is
+	// defined and while the class name is still in its TDZ (ClassDefinitionEvaluation evaluates the
+	// element keys first; a computed instance-field key is NOT re-evaluated per instance). A *static*
+	// ConstructorDeclaration is TypeScript's parse of `static constructor() {}` — a static method.
+	const memberKeys = new Map<ts.ClassElement, PropertyKey>();
+	const isStaticCtorMethod = (member: ts.ClassElement): member is ts.ConstructorDeclaration => ts.isConstructorDeclaration(member) && hasStatic(member);
+	for (const member of node.members) {
+		if (privateOf(member) !== undefined) continue;
+		if (isStaticCtorMethod(member)) memberKeys.set(member, "constructor");
+		else if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member) || ts.isPropertyDeclaration(member)) memberKeys.set(member, memberKey(vm, member.name, scope));
+	}
+	const keyOf = (member: ts.ClassElement): PropertyKey => memberKeys.get(member) as PropertyKey;
 
 	const Ctor = function (this: unknown, ...args: unknown[]): unknown {
 		// Host-initiated construction (rare); guest `new` uses the explicit construct frame.
 		if (new.target === undefined) throw new TypeError(`Class constructor ${node.name?.text ?? ""} cannot be invoked without 'new'`);
 		return vm.constructGuestSync(Ctor as unknown as GuestClass, args);
 	} as unknown as GuestClass;
-	(Ctor as { __tsvalClass: ClassMeta }).__tsvalClass = meta;
+	CLASS_META.set(Ctor, meta);
 	Ctor.prototype = proto;
 	Object.defineProperty(proto, "constructor", { value: Ctor, enumerable: false, writable: true, configurable: true });
-	Object.setPrototypeOf(Ctor, superClass != null ? superClass : vm.realm.Function.prototype);
+	Object.setPrototypeOf(Ctor, typeof superClass === "function" ? superClass : vm.realm.Function.prototype);
 	// Always set: an anonymous class expression is `""`, and V8 would otherwise infer the host
 	// variable's name ("Ctor") — observable via `.name`.
 	Object.defineProperty(Ctor, "name", { value: node.name?.text ?? "", configurable: true });
-	if (node.name) {
-		scope.declareLexical(node.name.text, "const");
-		scope.initialize(node.name.text, Ctor);
-	}
+	if (node.name) scope.initialize(node.name.text, Ctor); // leaves the TDZ
 
 	// Pass 1 — methods and accessors (public and private, instance and static), and the constructor.
 	// Spec order: all methods exist before any static field initializer or static block runs.
@@ -2029,17 +2263,19 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 	for (const member of node.members) {
 		const target = hasStatic(member) ? (Ctor as unknown as object) : proto;
 		const pn = privateOf(member);
-		if (ts.isConstructorDeclaration(member)) {
-			if (member.body) meta.ctorNode = member;
-		} else if (ts.isMethodDeclaration(member)) {
+		if (isStaticCtorMethod(member) || ts.isMethodDeclaration(member)) {
 			const fn = createGuestFunction(vm, member, scope, target);
 			if (pn !== undefined) {
 				pn.method = fn;
 				if (pn.isStatic) privateAdd(Ctor as unknown as object, pn);
 				else meta.instancePrivateMethods.push(pn);
 			} else {
-				Object.defineProperty(target, memberKey(vm, member.name, scope), { value: fn, enumerable: false, writable: true, configurable: true });
+				const key = keyOf(member);
+				setFunctionName(fn, key);
+				Object.defineProperty(target, key, { value: fn, enumerable: false, writable: true, configurable: true });
 			}
+		} else if (ts.isConstructorDeclaration(member)) {
+			if (member.body) meta.ctorNode = member;
 		} else if (ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
 			const fn = createGuestFunction(vm, member, scope, target);
 			if (pn !== undefined) {
@@ -2050,7 +2286,8 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 				} else if (!meta.instancePrivateMethods.includes(pn)) meta.instancePrivateMethods.push(pn);
 				staticPrivateInstalled.add(pn.key);
 			} else {
-				const key = memberKey(vm, member.name, scope);
+				const key = keyOf(member);
+				setFunctionName(fn, key, ts.isGetAccessorDeclaration(member) ? "get" : "set");
 				const desc: PropertyDescriptor = { ...(Object.getOwnPropertyDescriptor(target, key) ?? {}), enumerable: false, configurable: true };
 				delete desc.value;
 				delete desc.writable;
@@ -2068,14 +2305,15 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 		if (ts.isPropertyDeclaration(member)) {
 			const pn = privateOf(member);
 			if (hasStatic(member)) {
-				const key: PropertyKey = pn?.description ?? memberKey(vm, member.name, scope);
+				const key: PropertyKey = pn?.description ?? keyOf(member);
+				if (pn === undefined && key === "prototype") throw new TypeError("Classes may not have a static property named 'prototype'");
 				const value = member.initializer ? nameAnonymous(vm.evalNodeSync(member.initializer, fieldScope(meta, Ctor, Ctor as object)), key, member.initializer) : undefined;
 				if (pn !== undefined) privateAdd(Ctor as unknown as object, pn, value);
-				else (Ctor as unknown as Record<PropertyKey, unknown>)[key] = value;
+				else defineData(Ctor, key, value);
 			} else if (pn !== undefined) {
 				meta.instanceFields.push({ privateName: pn, initializer: member.initializer });
 			} else {
-				meta.instanceFields.push({ name: memberKey(vm, member.name, scope), initializer: member.initializer });
+				meta.instanceFields.push({ name: keyOf(member), initializer: member.initializer });
 			}
 		} else if (ts.isClassStaticBlockDeclaration(member)) {
 			// `static { … }` runs at definition time, in source order with static fields, `this` = the class.
@@ -2123,7 +2361,7 @@ function initInstanceFields(vm: VM, meta: ClassMeta, instance: object): void {
 		const key: PropertyKey = field.privateName?.description ?? (field.name as PropertyKey);
 		const value = field.initializer ? nameAnonymous(vm.evalNodeSync(field.initializer, fieldScope(meta, instance, meta.proto)), key, field.initializer) : undefined;
 		if (field.privateName !== undefined) privateAdd(instance, field.privateName, value);
-		else (instance as Record<PropertyKey, unknown>)[key] = value;
+		else defineData(instance, key, value); // DefineField: CreateDataProperty, never an inherited setter
 	}
 }
 
@@ -2136,14 +2374,25 @@ function initInstanceFields(vm: VM, meta: ClassMeta, instance: object): void {
  */
 function pushParentConstruct(vm: VM, superClass: unknown, args: unknown[], instance: object, newTarget: unknown): object | undefined {
 	if (isGuestClass(superClass)) {
-		vm.pushFrame({ kind: "construct", node: null, phase: 0, scope: vm.rootScope, valuesBase: vm.values.length, ctor: superClass, args, instance, isNew: false, newTarget });
+		// `forSuper`: the frame leaves its final instance on the value stack — a parent constructor may
+		// `return` a different object (a Proxy, say), and that is what `super()` yields as `this`.
+		vm.pushFrame({ kind: "construct", node: null, phase: 0, scope: vm.rootScope, valuesBase: vm.values.length, ctor: superClass, args, instance, isNew: false, forSuper: true, newTarget });
 		return undefined;
 	}
 	if (typeof superClass === "function") return Reflect.construct(superClass as new (...a: unknown[]) => object, args, newTarget as new (...a: unknown[]) => unknown);
 	throw new TypeError("Class extends value is not a constructor or null");
 }
 
-/** After a host parent created `this`, point the constructor's `this` and the pending construct frame at it. */
+/** The instance under construction (the nearest `construct` frame's). */
+function currentConstructInstance(vm: VM): object {
+	for (let i = vm.frames.length - 1; i >= 0; i--) {
+		const f = vm.frames[i];
+		if (f.kind === "construct") return f.instance as object;
+	}
+	throw new SyntaxError("'super' keyword unexpected here");
+}
+
+/** After a parent created/initialized `this`, point the constructor's `this` and the pending construct frame at it. */
 function rebindThis(vm: VM, scope: Scope, replacement: object): void {
 	for (let s: Scope | undefined = scope; s; s = s.parent) {
 		if (s.hasThis) {
@@ -2151,13 +2400,7 @@ function rebindThis(vm: VM, scope: Scope, replacement: object): void {
 			break;
 		}
 	}
-	for (let i = vm.frames.length - 1; i >= 0; i--) {
-		const f = vm.frames[i];
-		if (f.kind === "construct") {
-			f.instance = replacement;
-			break;
-		}
-	}
+	setConstructInstance(vm, replacement);
 }
 
 // `super(...)` inside a derived constructor: construct the parent on the current instance, then
@@ -2169,22 +2412,30 @@ function superCall(vm: VM, frame: Frame, node: ts.CallExpression): void {
 	} else if (frame.phase === 1) {
 		const args = collectCallArguments(vm, frame);
 		const meta = frame.scope.getClassMeta() as ClassMeta;
-		const instance = frame.scope.getThis() as object;
+		const instance = currentConstructInstance(vm);
 		const newTarget = frame.scope.getNewTarget();
+		// Spec order: the parent constructs FIRST; binding `this` a second time is the ReferenceError
+		// (so a double `super()` runs the parent twice and initializes fields once).
 		if (isGuestClass(meta.superClass)) {
-			// initfields runs after the parent construct frame completes (it's pushed first, below it).
-			vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance });
+			// initfields runs after the parent construct frame completes (it's pushed first, below it);
+			// it also binds `this` — the parent's construction is what initializes it.
+			vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance, thisScope: frame.scope, fromStack: true });
 			pushParentConstruct(vm, meta.superClass, args, instance, newTarget);
 		} else {
 			const created = pushParentConstruct(vm, meta.superClass, args, instance, newTarget) as object;
+			assertThisUnbound(frame.scope);
 			rebindThis(vm, frame.scope, created);
 			vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance: created });
 		}
 		frame.phase = 2;
 	} else {
 		vm.frames.pop();
-		vm.push(undefined);
+		vm.push(thisValue(frame.scope)); // `super()` evaluates to the now-bound `this`
 	}
+}
+
+function assertThisUnbound(scope: Scope): void {
+	if (scope.getThis() !== THIS_TDZ) throw new ReferenceError("Super constructor may only be called once");
 }
 
 on(K.ClassDeclaration, (vm, frame) => {
@@ -2236,30 +2487,33 @@ on(K.EnumDeclaration, (vm, frame) => {
 // Synthetic construct frame: build one class level's instance on the explicit stack.
 syntheticHandlers.construct = (vm, frame) => {
 	const ctor = frame.ctor as GuestClass;
-	const meta = ctor.__tsvalClass;
+	const meta = classMetaOf(ctor);
 	if (frame.phase === 0) {
 		const instance = (frame.instance as object) ?? Object.create(ctor.prototype);
 		frame.instance = instance;
+		frame.derived = meta.superClass !== undefined; // (a constructor's `return` is judged in VM.unwind)
 		if (meta.ctorNode) {
 			const fnScope = new Scope(meta.closure, true);
 			fnScope.hasThis = true;
-			fnScope.thisVal = instance;
+			// Derived: `this` is uninitialized until `super()` returns (ReferenceError before that).
+			fnScope.thisVal = meta.superClass !== undefined ? THIS_TDZ : instance;
+			frame.ctorScope = fnScope;
 			fnScope.homeObject = meta.proto;
 			fnScope.classMeta = meta;
 			fnScope.newTarget = frame.newTarget ?? ctor;
 			fnScope.declareLexical("arguments", "var");
-			fnScope.initialize("arguments", frame.args as unknown[]);
+			fnScope.initialize("arguments", createArgumentsObject(vm, frame.args as unknown[]));
 			bindParameters(vm, fnScope, meta.ctorNode.parameters, frame.args as unknown[]);
 			// Base class: fields init before the body. Derived: after super() (handled in the super call).
-			if (meta.superClass == null) initInstanceFields(vm, meta, instance);
+			if (meta.superClass === undefined) initInstanceFields(vm, meta, instance);
 			hoist(vm, fnScope, (meta.ctorNode.body as ts.Block).statements);
 			const body = vm.pushNode(meta.ctorNode.body as ts.Block, fnScope);
 			body.reuseScope = true;
-		} else if (meta.superClass != null) {
+		} else if (meta.superClass !== undefined) {
 			// Implicit derived constructor: super(...args), then this class's fields.
 			const newTarget = frame.newTarget ?? ctor;
 			if (isGuestClass(meta.superClass)) {
-				vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance });
+				vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance, fromStack: true });
 				pushParentConstruct(vm, meta.superClass, frame.args as unknown[], instance, newTarget);
 			} else {
 				const created = pushParentConstruct(vm, meta.superClass, frame.args as unknown[], instance, newTarget) as object;
@@ -2271,15 +2525,37 @@ syntheticHandlers.construct = (vm, frame) => {
 		}
 		frame.phase = 1;
 	} else {
+		// A derived constructor that never called super() leaves `this` uninitialized: ReferenceError.
+		const ctorScope = frame.ctorScope as Scope | undefined;
+		if (ctorScope !== undefined && frame.overridden !== true && ctorScope.thisVal === THIS_TDZ) throw new ReferenceError("Must call super constructor in derived class before accessing 'this' or returning from derived constructor");
 		vm.frames.pop();
-		if (frame.isNew) vm.push(frame.instance);
+		if (frame.isNew || frame.forSuper === true) vm.push(frame.instance);
 	}
 };
 
+// After `super()` returns: adopt the parent's final instance (`fromStack`: left by its construct
+// frame), bind `this` (leaving its TDZ), then run this class's field initializers on it.
 syntheticHandlers.initfields = (vm, frame) => {
-	initInstanceFields(vm, frame.meta as ClassMeta, frame.instance as object);
+	let instance = frame.instance as object;
+	if (frame.fromStack === true) instance = vm.pop() as object;
+	if (frame.thisScope !== undefined) {
+		assertThisUnbound(frame.thisScope as Scope);
+		rebindThis(vm, frame.thisScope as Scope, instance);
+	} else if (frame.fromStack === true) setConstructInstance(vm, instance);
+	initInstanceFields(vm, frame.meta as ClassMeta, instance);
 	vm.frames.pop();
 };
+
+/** Point the nearest pending construct frame at `instance` (what its `new` will yield). */
+function setConstructInstance(vm: VM, instance: object): void {
+	for (let i = vm.frames.length - 1; i >= 0; i--) {
+		const f = vm.frames[i];
+		if (f.kind === "construct") {
+			f.instance = instance;
+			return;
+		}
+	}
+}
 
 // Synthetic call frame: run a guest function on the explicit stack.
 syntheticHandlers.call = (vm, frame) => {
@@ -2293,7 +2569,7 @@ syntheticHandlers.call = (vm, frame) => {
 			if (meta.homeObject !== undefined) fnScope.homeObject = meta.homeObject;
 			if (frame.newTarget !== undefined) fnScope.newTarget = frame.newTarget;
 			fnScope.declareLexical("arguments", "var");
-			fnScope.initialize("arguments", realmArray(vm, frame.args as unknown[]));
+			fnScope.initialize("arguments", createArgumentsObject(vm, frame.args as unknown[]));
 		}
 		bindParameters(vm, fnScope, node.parameters, frame.args as unknown[]);
 		fnScope.functionMeta = meta;
@@ -2369,12 +2645,25 @@ function isAnonymousFunctionDefinition(node: ts.Node): boolean {
 	return (ts.isFunctionExpression(node) && node.name === undefined) || ts.isArrowFunction(node) || (ts.isClassExpression(node) && node.name === undefined);
 }
 
+/** SetFunctionName's text for a property key: a symbol's description in brackets, an optional `get`/`set` prefix. */
+function functionNameText(key: PropertyKey, prefix = ""): string {
+	const base = typeof key === "symbol" ? (key.description === undefined ? "" : `[${key.description}]`) : String(key);
+	return prefix === "" ? base : `${prefix} ${base}`;
+}
+
+/** SetFunctionName for a method/accessor defined under `key`. */
+function setFunctionName(fn: GuestFunction, key: PropertyKey, prefix = ""): void {
+	const text = functionNameText(key, prefix);
+	Object.defineProperty(fn, "name", { value: text, configurable: true });
+	fn.__tsval.name = text;
+}
+
 /** Give `value` the name `name` iff it came from an anonymous function definition `from` and has none. */
 function nameAnonymous(value: unknown, name: PropertyKey, from: ts.Node | undefined): unknown {
 	if (from === undefined || !isAnonymousFunctionDefinition(from)) return value;
 	if (!(isGuestFunction(value) || isGuestClass(value))) return value;
 	if ((value as { name?: string }).name !== "") return value;
-	const text = typeof name === "symbol" ? (name.description === undefined ? "" : `[${name.description}]`) : String(name);
+	const text = functionNameText(name);
 	Object.defineProperty(value, "name", { value: text, configurable: true });
 	if (isGuestFunction(value)) value.__tsval.name = text;
 	return value;
@@ -2406,8 +2695,8 @@ export function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: 
 		const used = new Set<PropertyKey>();
 		for (const element of target.elements) {
 			if (element.dotDotDotToken) {
-				const rest = new vm.realm.Object() as Record<string, unknown>;
-				for (const key in value as object) if (!used.has(key)) rest[key] = vm.fromHost((value as Record<string, unknown>)[key]);
+				const rest = new vm.realm.Object();
+				copyRestProperties(vm, rest, value, used);
 				bindTarget(vm, scope, element.name, rest, kind);
 				continue;
 			}
@@ -2420,63 +2709,121 @@ export function bindTarget(vm: VM, scope: Scope, target: ts.BindingName, value: 
 		return;
 	}
 	if (ts.isArrayBindingPattern(target)) {
-		const iterator = getIterator(value);
-		let done = false;
+		const steps = iterationSteps(getIterator(value));
 		try {
 			for (const element of target.elements) {
 				if (ts.isOmittedExpression(element)) {
-					if (!done) done = Boolean(iterator.next().done);
+					steps.step();
 					continue;
 				}
 				if (element.dotDotDotToken) {
 					const rest = new vm.realm.Array() as unknown[];
-					while (!done) {
-						const r = iterator.next();
-						if (r.done) done = true;
-						else rest.push(r.value);
-					}
+					for (let r = steps.step(); !r.done; r = steps.step()) defineData(rest, rest.length, r.value);
 					bindTarget(vm, scope, element.name, rest, kind);
 					continue;
 				}
-				let v: unknown = undefined;
-				if (!done) {
-					const r = iterator.next();
-					if (r.done) done = true;
-					else v = r.value;
-				}
+				let v: unknown = steps.step().value;
 				if (v === undefined && element.initializer) v = namedIf(vm.evalNodeSync(element.initializer, scope), element.name, element.initializer);
 				bindTarget(vm, scope, element.name, v, kind);
 			}
 		} catch (error) {
-			closeIterator(iterator, done, true);
+			steps.close(true);
 			throw error;
 		}
-		closeIterator(iterator, done, false);
+		steps.close(false);
 		return;
 	}
 	unimplemented(`binding target ${ts.SyntaxKind[(target as ts.Node).kind]}`);
+}
+
+/** A strict-mode `arguments` object: an array-like with the arguments as own indexed properties, a
+ *  non-enumerable `length` and `@@iterator`, and a `callee` accessor that throws (strict). Unmapped —
+ *  sloppy-mode parameter aliasing is out of scope. */
+function createArgumentsObject(vm: VM, args: unknown[]): object {
+	const obj = new vm.realm.Object() as Record<PropertyKey, unknown>;
+	for (let i = 0; i < args.length; i++) defineData(obj, i, args[i]); // CreateDataProperty (no inherited setters)
+	Object.defineProperty(obj, "length", { value: args.length, writable: true, enumerable: false, configurable: true });
+	Object.defineProperty(obj, Symbol.iterator, { value: vm.realm.Array.prototype.values, writable: true, enumerable: false, configurable: true });
+	const thrower = (): never => {
+		throw new TypeError("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
+	};
+	Object.defineProperty(obj, "callee", { get: thrower, set: thrower, enumerable: false, configurable: false });
+	return obj;
 }
 
 /** A guest-realm array holding `list`'s elements, copied by index — never through the iteration
  *  protocol, which guest code may have overridden (`Array.prototype[Symbol.iterator] = …`). */
 function realmArray(vm: VM, list: ArrayLike<unknown>): unknown[] {
 	const out = new vm.realm.Array(list.length) as unknown[];
-	for (let i = 0; i < list.length; i++) out[i] = list[i];
+	for (let i = 0; i < list.length; i++) defineData(out, i, list[i]);
 	return out;
 }
 
+/** The spec's Iterator Record: the iterator plus its `next` method, read ONCE at GetIterator time
+ *  (observable: a `next` getter fires once, and a later reassignment of `next` is not seen). */
+export interface IterRecord {
+	iterator: object;
+	next: unknown;
+}
+
 /** GetIterator: a TypeError (not a property-of-null error) when the value isn't iterable. */
-function getIterator(value: unknown): Iterator<unknown> {
+function getIterator(value: unknown): IterRecord {
 	const factory = value == null ? undefined : (value as { [Symbol.iterator]?: () => Iterator<unknown> })[Symbol.iterator];
 	if (typeof factory !== "function") throw new TypeError(`${value === null ? "null" : typeof value === "object" ? "object" : String(value)} is not iterable`);
 	const iterator = factory.call(value);
 	if (typeof iterator !== "object" || iterator === null) throw new TypeError("Result of the Symbol.iterator method is not an object");
-	return iterator;
+	return { iterator, next: (iterator as { next?: unknown }).next };
+}
+
+/** IteratorNext: call the cached `next` (must be callable); the result must be an object. */
+function iterNext(record: IterRecord, ...args: unknown[]): IteratorResult<unknown> {
+	if (typeof record.next !== "function") throw new TypeError("iterator.next is not a function");
+	const result = (record.next as (...a: unknown[]) => unknown).apply(record.iterator, args);
+	if (typeof result !== "object" || result === null) throw new TypeError("Iterator result is not an object");
+	return result as IteratorResult<unknown>;
+}
+
+/**
+ * Destructuring's view of an iterator: `step()` is IteratorStep + IteratorValue with the record's
+ * [[Done]] tracked — an exhausted iterator keeps answering `done` (no further `next` calls), and an
+ * iterator whose `next`/`done`/`value` throws is marked done so IteratorClose is NOT attempted
+ * on it (spec: the error is the iterator's own). `close(abrupt)` is IteratorClose unless done.
+ */
+function iterationSteps(record: IterRecord): { step(): { done: boolean; value: unknown }; close(abrupt: boolean): void } {
+	let done = false;
+	return {
+		step() {
+			if (done) return { done: true, value: undefined };
+			try {
+				const r = iterNext(record);
+				if (r.done) {
+					done = true;
+					return { done: true, value: undefined };
+				}
+				return { done: false, value: r.value };
+			} catch (error) {
+				done = true;
+				throw error;
+			}
+		},
+		close(abrupt) {
+			closeIterator(record.iterator, done, abrupt);
+		},
+	};
+}
+
+/** CopyDataProperties for an object rest: own enumerable string and symbol keys not already bound. */
+function copyRestProperties(vm: VM, target: object, source: unknown, excluded: Set<PropertyKey>): void {
+	const src = Object(source) as Record<PropertyKey, unknown>;
+	for (const key of Reflect.ownKeys(src)) {
+		if (excluded.has(key)) continue;
+		if (Object.getOwnPropertyDescriptor(src, key)?.enumerable) defineData(target, key, vm.fromHost(src[key]));
+	}
 }
 
 /** IteratorClose: call `return()` on an iterator a pattern didn't exhaust. On an abrupt completion the
  *  original error wins over anything `return()` throws; on a normal one, `return()`'s errors surface. */
-export function closeIterator(iterator: Iterator<unknown>, done: boolean, abrupt: boolean): void {
+export function closeIterator(iterator: object, done: boolean, abrupt: boolean): void {
 	if (done) return;
 	const ret = (iterator as { return?: unknown }).return;
 	if (ret == null) return;
@@ -2503,7 +2850,39 @@ function headTdzScope(scope: Scope, initializer: ts.ForInitializer): Scope {
 }
 
 /** ToPropertyKey: a symbol stays a symbol; anything else is its string form (`{[["a"]]: 1}` → "a"). */
-const toPropertyKey = (v: unknown): PropertyKey => (typeof v === "symbol" ? v : String(v));
+/** ToPrimitive: `@@toPrimitive` (must return a primitive), else OrdinaryToPrimitive by hint. */
+function toPrimitive(v: unknown, hint: "string" | "number" | "default"): unknown {
+	if (v === null || (typeof v !== "object" && typeof v !== "function")) return v;
+	const exotic = (v as { [Symbol.toPrimitive]?: unknown })[Symbol.toPrimitive];
+	if (exotic != null) {
+		if (typeof exotic !== "function") throw new TypeError("Symbol.toPrimitive is not a function");
+		const result = (exotic as (h: string) => unknown).call(v, hint);
+		if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
+		throw new TypeError("Cannot convert object to primitive value");
+	}
+	for (const name of hint === "string" ? ["toString", "valueOf"] : ["valueOf", "toString"]) {
+		const method = (v as Record<string, unknown>)[name];
+		if (typeof method !== "function") continue;
+		const result = (method as () => unknown).call(v);
+		if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
+	}
+	throw new TypeError("Cannot convert object to primitive value");
+}
+
+/** ToNumeric: a BigInt stays a BigInt, everything else becomes a Number. */
+function toNumeric(v: unknown): number | bigint {
+	const primitive = toPrimitive(v, "number");
+	return typeof primitive === "bigint" ? primitive : Number(primitive);
+}
+
+/** `++`/`--` on a Number or a BigInt. */
+const stepBy = (old: number | bigint, delta: number): number | bigint => (typeof old === "bigint" ? old + BigInt(delta) : old + delta);
+
+/** ToPropertyKey: ToPrimitive(hint string), then a symbol stays a symbol, anything else ToString. */
+const toPropertyKey = (v: unknown): PropertyKey => {
+	const primitive = toPrimitive(v, "string");
+	return typeof primitive === "symbol" ? primitive : String(primitive);
+};
 
 function bindingKey(vm: VM, scope: Scope, name: ts.PropertyName): PropertyKey {
 	if (ts.isComputedPropertyName(name)) return toPropertyKey(vm.evalNodeSync(name.expression, scope));

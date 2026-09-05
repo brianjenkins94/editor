@@ -3,11 +3,74 @@ import { Scope } from "./scope.ts";
 import { syntaxKindName } from "./frontend.ts";
 import type { GuestFunctionMeta } from "./values.ts";
 import { isGuestFunction } from "./values.ts";
-import { nodeHandlers, syntheticHandlers, createGuestFunction, bindTarget, closeIterator, clonePrivateElements } from "./handlers.ts";
+import { nodeHandlers, syntheticHandlers, createGuestFunction, bindTarget, closeIterator, clonePrivateElements, isGuestClass } from "./handlers.ts";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
 
 /** Brand marking a live generator/async fiber object as non-cloneable (shared across forks). */
 export const FIBER_BRAND = Symbol("tsval.fiber");
+
+/** The guest realm's constructors plus the function-family intrinsics guest functions are built from. */
+export interface Realm {
+	Array: ArrayConstructor;
+	Object: ObjectConstructor;
+	RegExp: RegExpConstructor;
+	Function: FunctionConstructor;
+	Promise: PromiseConstructor;
+	/** %GeneratorFunction.prototype% — [[Prototype]] of every `function*`. */
+	GeneratorFunctionPrototype: object;
+	/** %GeneratorFunction.prototype.prototype% — what a `function*`'s own `.prototype` inherits from. */
+	GeneratorPrototype: object;
+	AsyncGeneratorFunctionPrototype: object;
+	AsyncGeneratorPrototype: object;
+	/** %AsyncFunction.prototype% — [[Prototype]] of every `async function`. */
+	AsyncFunctionPrototype: object;
+}
+
+/**
+ * Complete a realm with its generator/async intrinsics. In the process realm they are the real ones.
+ * In a foreign realm (`globalObject` from `node:vm`) none of them is reachable from the globals
+ * without evaluating code there, so stand-ins are built with the right shape and parentage
+ * (%IteratorPrototype% IS reachable, through an array iterator).
+ */
+function makeRealm(base: Pick<Realm, "Array" | "Object" | "RegExp" | "Function" | "Promise">): Realm {
+	if (base.Function === Function) {
+		const genFnProto = Object.getPrototypeOf(function* () {}) as { prototype: object };
+		const asyncGenFnProto = Object.getPrototypeOf(async function* () {}) as { prototype: object };
+		return { ...base, GeneratorFunctionPrototype: genFnProto, GeneratorPrototype: genFnProto.prototype, AsyncGeneratorFunctionPrototype: asyncGenFnProto, AsyncGeneratorPrototype: asyncGenFnProto.prototype, AsyncFunctionPrototype: Object.getPrototypeOf(async function () {}) as object };
+	}
+	const O = base.Object;
+	const iteratorPrototype = Object.getPrototypeOf(Object.getPrototypeOf(base.Array.prototype.values.call(new base.Array()))) as object;
+	const asyncIteratorPrototype = O.create(O.prototype) as object;
+	Object.defineProperty(asyncIteratorPrototype, Symbol.asyncIterator, {
+		value: function (this: unknown) {
+			return this;
+		},
+		writable: true,
+		configurable: true,
+	});
+	const family = (functionTag: string, parent: object, tag: string): { fnProto: object; proto: object } => {
+		const fnProto = O.create(base.Function.prototype) as object;
+		const proto = O.create(parent) as object;
+		Object.defineProperty(fnProto, "prototype", { value: proto, configurable: true });
+		Object.defineProperty(fnProto, Symbol.toStringTag, { value: functionTag, configurable: true });
+		Object.defineProperty(proto, "constructor", { value: fnProto, configurable: true });
+		Object.defineProperty(proto, Symbol.toStringTag, { value: tag, configurable: true });
+		return { fnProto, proto };
+	};
+	const gen = family("GeneratorFunction", iteratorPrototype, "Generator");
+	const asyncGen = family("AsyncGeneratorFunction", asyncIteratorPrototype, "AsyncGenerator");
+	const asyncFnProto = O.create(base.Function.prototype) as object;
+	Object.defineProperty(asyncFnProto, Symbol.toStringTag, { value: "AsyncFunction", configurable: true });
+	return { ...base, GeneratorFunctionPrototype: gen.fnProto, GeneratorPrototype: gen.proto, AsyncGeneratorFunctionPrototype: asyncGen.fnProto, AsyncGeneratorPrototype: asyncGen.proto, AsyncFunctionPrototype: asyncFnProto };
+}
+
+/** A generator object: inherits from `proto` (the function's `.prototype`), with its resumption
+ *  methods as non-enumerable own properties (the fiber lives in their closures). */
+function generatorObject(proto: object, methods: Record<string, (...a: never[]) => unknown>): object {
+	const gen = Object.create(proto) as object;
+	for (const [name, value] of Object.entries(methods)) Object.defineProperty(gen, name, { value, writable: true, configurable: true });
+	return gen;
+}
 
 /**
  * A control-stack frame — the reified recursion (ASSIGNMENT §3).
@@ -52,6 +115,9 @@ export interface VMOptions {
 	resolveModule?: (specifier: string) => unknown;
 	/** Optional `TypeChecker` for type-aware evaluation / a type-directed canary (ASSIGNMENT S6). */
 	typeChecker?: ts.TypeChecker;
+	/** Top-level `this`. Default `undefined` (module semantics — the supported surface); a *script*
+	 *  runner (test262) passes the global object. */
+	thisValue?: unknown;
 	/** Guard at the host↔guest boundary: sanitize values entering guest land and vet host callables.
 	 *  This is how a sandbox stays closed — real intrinsics leak the real `Function` via
 	 *  `.constructor.constructor`, and only the interpreter sees every read and every call. */
@@ -124,7 +190,7 @@ export class VM {
 	/** The guest realm's constructors used to *create* guest values (literals, rest arrays, class
 	 *  prototypes, function prototypes), so `[] instanceof Array` and `Object.getPrototypeOf({})`
 	 *  agree with the guest's own intrinsics when the global object is another realm's. */
-	readonly realm: { Array: ArrayConstructor; Object: ObjectConstructor; RegExp: RegExpConstructor; Function: FunctionConstructor; Promise: PromiseConstructor };
+	readonly realm: Realm;
 
 	constructor(options: VMOptions = {}) {
 		this.rootScope = new Scope(undefined, true);
@@ -146,9 +212,9 @@ export class VM {
 		// The realm's *intrinsic* Function is reached through Object (a global named `Function` may be
 		// a shim — the canary's eval guard); it's what guest function objects are created from.
 		const realmFunction = (realmObject as unknown as { constructor: FunctionConstructor }).constructor;
-		this.realm = { Array: pick("Array"), Object: realmObject, RegExp: pick("RegExp"), Function: typeof realmFunction === "function" ? realmFunction : Function, Promise: pick("Promise") };
+		this.realm = makeRealm({ Array: pick("Array"), Object: realmObject, RegExp: pick("RegExp"), Function: typeof realmFunction === "function" ? realmFunction : Function, Promise: pick("Promise") });
 		this.rootScope.hasThis = true;
-		this.rootScope.thisVal = undefined;
+		this.rootScope.thisVal = options.thisValue;
 		this.rootScope.realGlobals = options.realGlobals ?? true;
 		this.resolveModule = options.resolveModule;
 		this.typeChecker = options.typeChecker;
@@ -297,6 +363,19 @@ export class VM {
 			this.values.length = frame.valuesBase;
 			this.values.push(signal.value);
 			this.signal = null;
+			return;
+		}
+		if (frame.kind === "construct" && signal.type === "return") {
+			// A constructor's `return`: an object replaces the instance; a derived constructor returning
+			// any other non-undefined value is a TypeError; otherwise the instance stands. The frame is
+			// kept — its completion step (this-TDZ check, pushing the instance) still runs.
+			const value = signal.value;
+			this.values.length = frame.valuesBase;
+			this.signal = null;
+			if ((typeof value === "object" && value !== null) || typeof value === "function") {
+				frame.instance = value;
+				frame.overridden = true; // (a derived constructor may then never have called super())
+			} else if (value !== undefined && frame.derived === true) this.signal = { type: "throw", value: this.toGuestError(new TypeError("Derived constructors may only return object or undefined")) };
 			return;
 		}
 
@@ -595,7 +674,7 @@ export class VM {
 			}
 
 			const proto = Object.getPrototypeOf(v);
-			const isGuestObject = proto === Object.prototype || proto === null || (proto?.constructor as { __tsvalClass?: unknown } | undefined)?.__tsvalClass != null;
+			const isGuestObject = proto === Object.prototype || proto === null || isGuestClass(proto?.constructor);
 			if (!isGuestObject) return v; // host instance (Promise, Error, DOM, host class, …) — shared
 
 			const out = Object.create(proto); // share the (guest) prototype; copy own data
@@ -809,14 +888,11 @@ export class VM {
 			fiber.done = true;
 			return { value, done: true };
 		};
-		const gen: Iterator<unknown> & Iterable<unknown> = {
+		const gen = generatorObject(this.generatorPrototype(meta, false), {
 			next: (v?: unknown) => resume({ kind: "next", value: v }),
 			return: (v?: unknown) => resume({ kind: "return", value: v }),
 			throw: (e?: unknown) => resume({ kind: "throw", value: e }),
-			[Symbol.iterator]() {
-				return this;
-			},
-		};
+		}) as Iterator<unknown> & Iterable<unknown>;
 		Object.defineProperty(gen, FIBER_BRAND, { value: true }); // non-cloneable: forks share the fiber
 		return gen;
 	}
@@ -951,16 +1027,21 @@ export class VM {
 			this.onAsyncFiber?.(request);
 			return request;
 		};
-		const gen: AsyncIterator<unknown> & AsyncIterable<unknown> = {
+		const gen = generatorObject(this.generatorPrototype(meta, true), {
 			next: (v?: unknown) => enqueue({ kind: "next", value: v }),
 			return: (v?: unknown) => enqueue({ kind: "return", value: v }),
 			throw: (e?: unknown) => enqueue({ kind: "throw", value: e }),
-			[Symbol.asyncIterator]() {
-				return this;
-			},
-		};
+		}) as AsyncIterator<unknown> & AsyncIterable<unknown>;
 		Object.defineProperty(gen, FIBER_BRAND, { value: true });
 		return gen;
+	}
+
+	/** OrdinaryCreateFromConstructor for a generator object: the function's own `.prototype` if it is an
+	 *  object, else the realm's %GeneratorPrototype% / %AsyncGeneratorPrototype%. */
+	private generatorPrototype(meta: GuestFunctionMeta, isAsync: boolean): object {
+		const declared = (meta.self as { prototype?: unknown } | undefined)?.prototype;
+		if ((typeof declared === "object" && declared !== null) || typeof declared === "function") return declared;
+		return isAsync ? this.realm.AsyncGeneratorPrototype : this.realm.GeneratorPrototype;
 	}
 
 	/** Push a synthetic call frame for a guest function. */
@@ -987,8 +1068,8 @@ function isStatement(node: ts.Node): boolean {
 
 /** True for the `prototype` object of a guest class (its own `constructor` is a branded guest class). */
 function isGuestClassPrototype(v: object): boolean {
-	const ctor = Object.getOwnPropertyDescriptor(v, "constructor")?.value as (((...a: unknown[]) => unknown) & { __tsvalClass?: unknown; prototype?: unknown }) | undefined;
-	return typeof ctor === "function" && ctor.__tsvalClass != null && ctor.prototype === v;
+	const ctor = Object.getOwnPropertyDescriptor(v, "constructor")?.value as { prototype?: unknown } | undefined;
+	return isGuestClass(ctor) && ctor.prototype === v;
 }
 
 /** A full snapshot of the machine's mutable execution state, for nested sub-runs and fibers. */

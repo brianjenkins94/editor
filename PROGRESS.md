@@ -5,6 +5,89 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## test262 round 2 ✅ (2026-09-04) — 99.3% of the eligible language suite
+
+**Status:** `npm test` → 1057 tests: 1054 pass, 0 fail, 3 known-gap todos (sample: 625 pass, 2
+inconclusive, 23 policy-skipped of 653). Full pinned corpus: **15,619 pass, 118 fail, 32
+inconclusive, 7,957 skipped → 99.3% on eligible** (was 15,328 / 425 / 97.3%). Of the 118: 73 are
+the one structural limitation below; the other 45 are singletons across 30 reasons.
+
+### Harness
+- test262 tests are *scripts*: the runner passes the realm's global object as the top-level `this`
+  (new `VMOptions.thisValue`; default stays `undefined` = module semantics) and the assembled async
+  program installs `$DONE` as a global *property* (`asyncHelpers.js` checks
+  `hasOwnProperty(globalThis, "$DONE")`; tsval's top-level bindings are not globals by policy).
+- Policy skip for `identifiers/*unicode-16/17*` (TypeScript's scanner tables); the 9 `for await`
+  destructuring-with-`yield` hangs are listed gaps (they time out rather than fail fast: the
+  refusal rejects a `next()` the test never observes).
+- The sample tally counts a known gap whether or not it still fails.
+
+### Semantics fixed this round (each differentially verified; several were real bugs, not test262 trivia)
+- **A constructor's `return` escaped the construct frame** — `return;` in a constructor returned
+  from the *enclosing function*, and a returned object became the program's completion. Now judged
+  in `unwind`: an object replaces the instance (a base constructor returning a Proxy is what
+  `super()` yields, and fields/private brands go onto *that*), a derived constructor returning a
+  primitive is a TypeError, `return` without `super()` is a ReferenceError unless an object was
+  returned.
+- **`this` TDZ in derived constructors**: `this` (and `super.x`) before `super()` → ReferenceError;
+  `super()` runs the parent *then* binds `this` (a second `super()` runs the parent again and throws
+  at bind time; fields initialize once); `super()` evaluates to `this`.
+- **`super` as a reference**: `super[k]`, `super.x = v` / `super[k] op= v` / `super.x++` (setter
+  runs with the instance as receiver, otherwise the property lands on `this`), `super[k]()`,
+  `delete super.x` → ReferenceError; the `this` binding is checked before the key expression;
+  getters on the parent see the instance (`Reflect.get` with receiver — previously `proto[name]`).
+- **Iterator Records**: `next` is read ONCE at GetIterator (for-of, `for await`, `yield*`,
+  destructuring); an iterator whose `next`/`done`/`value` throws is marked done so IteratorClose
+  is not attempted on it; every result is object-checked.
+- Class definition: all member keys evaluated once in source order before any member is defined,
+  while the class name is in its TDZ (heritage evaluates in that scope too); a computed instance
+  field key is no longer re-evaluated per instance; `static constructor(){}` (TypeScript parses it
+  as a static ConstructorDeclaration) is a static method; `extends` requires IsConstructor before
+  reading `prototype`, then an object/function/null prototype (`extends Function` works, `extends
+  (() => {})` is a TypeError); static field named `prototype` → TypeError; fields are *defined*
+  (no inherited setter). The class brand moved from an own property to a WeakMap (it showed up in
+  `getOwnPropertyNames`).
+- Generators/async: not constructors; a `function*`'s own `.prototype` (inheriting
+  %GeneratorPrototype%) is the prototype of its generator objects; `[[Prototype]]` of generator /
+  async / async-generator functions is the right intrinsic. In a foreign realm those intrinsics are
+  not reachable from the globals, so `VM.realm` builds stand-ins with the right shape and parentage
+  (`Realm` type, `makeRealm`).
+- Strict `arguments` object (array-like, non-enumerable `length`/`@@iterator`, throwing `callee`),
+  also in constructors; indices, array literals, rest arrays and `realmArray` use
+  CreateDataProperty (an inherited setter on `Object.prototype[0]` never runs).
+- Parenthesized targets `(x) = v`, `(o.p) op= v`, `(x)++`, `for ((x) of …)` (no NamedEvaluation
+  through parentheses); `(a.b)()` keeps `this`; `typeof (undeclared)`.
+- Object literals: computed keys evaluated in source order interleaved with values; `__proto__:
+  null`; an accessor after a data property (and vice versa) replaces it; BigInt literal keys;
+  SetFunctionName for methods/accessors (`[Symbol(foo)]` → `"[foo]"`, `get x`/`set x`, string/
+  numeric keys); object rest copies own enumerable symbol keys too (was `for…in`: inherited, no
+  symbols).
+- ToPropertyKey via ToPrimitive (`@@toPrimitive` returning a symbol); `++`/`--` on BigInt;
+  private-name targets in destructuring/for-of heads (`for (this.#x of …)` was writing a public
+  "#x"); foreign-realm wrapper functions are strict (a host caller's `undefined` receiver reached
+  the guest as the realm's global — `"ab".replace("b", f)` saw `this === globalThis`); property
+  reads/writes on primitives box in the *guest* realm (`"".constructor === String`); template
+  objects' `raw` is non-enumerable; `for (const x = 0; ; x++)` is a TypeError (per-iteration
+  copies kept the `let` kind).
+- Test suite: `await` inside an object literal's computed key is now modeled (it's on the stepped
+  stack); the review-regression test that asserted the loud refusal moved to a default value.
+
+### Remaining full-corpus failures (118)
+- **73 — `yield`/`await` inside a synchronously-evaluated sub-expression** (destructuring defaults
+  and targets, class computed keys; `evalNodeSync`). Structural; the fix is to evaluate patterns on
+  the stepped stack. Everything else is a singleton or a pair:
+- Promise-tick fidelity (8): `await` interleaving counts, async-generator return/yield* tick
+  ordering, `yield*` not unwrapping promises, async-from-sync `constructor` gets.
+- Script-goal leftovers (3): `var` at top level as a global property, `await` as an identifier.
+- Ordering minutiae: destructuring target-reference vs source-key order (2), ToPropertyKey before a
+  computed key's *value* is evaluated (1), `super[k] = v` deferring ToPropertyKey past the RHS (1),
+  `super[super()]` (2), a class expression's inferred name visible to its static initializers (1).
+- Template cooked/raw edge cases (3: illegal escapes → `undefined`, CR/CRLF normalization),
+  `class extends GeneratorFunction` via code-from-string (1), `new.target` through a plain-function
+  parent (1), a few `verifyProperty` attribute shapes.
+
+---
+
 ## test262 wired in ✅ (2026-09-04) — 97.3% of the eligible language suite
 
 **Status:** `npm test` → 1056 tests: 1053 pass, 0 fail, 3 known-gap todos. Full pinned corpus

@@ -33,6 +33,8 @@ export interface GuestFunctionMeta {
 	isAsync: boolean;
 	/** [[HomeObject]] — the object the method lives on, used to resolve `super.x` (class methods). */
 	homeObject?: object;
+	/** The function object itself (a generator's `.prototype` is read from it at each invocation). */
+	self?: GuestFunction;
 }
 
 export interface GuestFunction {

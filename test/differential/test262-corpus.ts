@@ -112,8 +112,12 @@ export function harnessFile(root: string, name: string): string {
 	return text;
 }
 
-/** Async tests report via `$DONE` → `print`. We make the printed line the program's completion value. */
+/** Async tests report via `$DONE` → `print`. We make the printed line the program's completion value.
+ *  test262 is a *script* suite: `asyncHelpers.js` checks `$DONE` is an own property of globalThis
+ *  (a script's top-level function declarations are), so the epilogue installs it there explicitly —
+ *  tsval's own top-level bindings are module-scoped by policy. */
 const ASYNC_PRELUDE = `let __t262_done; const __t262_result = new Promise((r) => { __t262_done = r; }); function print(s) { __t262_done(String(s)); }\n`;
+const ASYNC_BRIDGE = `\n;if (typeof $DONE === "function") globalThis.$DONE = $DONE;\n`;
 const ASYNC_EPILOGUE = `\n;__t262_result;`;
 
 /** Assemble the runnable program: harness + includes + test (and the async plumbing when flagged). */
@@ -121,5 +125,5 @@ export function assembleProgram(root: string, test: Test262Test): string {
 	const isAsync = test.meta.flags.includes("async");
 	const includes = ["assert.js", "sta.js", ...(isAsync ? ["doneprintHandle.js"] : []), ...test.meta.includes];
 	const harness = [...new Set(includes)].map((name) => harnessFile(root, name)).join("\n");
-	return `${isAsync ? ASYNC_PRELUDE : ""}${harness}\n${test.source}${isAsync ? ASYNC_EPILOGUE : ""}`;
+	return `${isAsync ? ASYNC_PRELUDE : ""}${harness}${isAsync ? ASYNC_BRIDGE : ""}\n${test.source}${isAsync ? ASYNC_EPILOGUE : ""}`;
 }

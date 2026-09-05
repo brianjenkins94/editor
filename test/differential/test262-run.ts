@@ -51,6 +51,7 @@ export function policySkip(test: Test262Test): string | undefined {
 	for (const flag of test.meta.flags) if (flag in SKIP_FLAGS) return SKIP_FLAGS[flag];
 	for (const feature of test.meta.features) if (feature in SKIP_FEATURES) return `feature ${feature}: ${SKIP_FEATURES[feature]}`;
 	if (test.meta.negative !== undefined && test.meta.negative.phase !== "runtime") return `negative ${test.meta.negative.phase}-phase test (tests the parser, not the interpreter)`;
+	if (/^identifiers\/.*unicode-1[6-9]\.\d/.test(test.id)) return "identifier characters newer than the TypeScript scanner's Unicode tables (parser)";
 	if (/\$262\b/.test(test.source)) return "uses the $262 host object";
 	if (/\beval\s*\(|\bnew\s+Function\s*\(|\bFunction\s*\(/.test(test.source)) return "uses eval/Function (direct-eval and code-from-string semantics are a capability shim, not modeled)";
 	return undefined;
@@ -139,7 +140,9 @@ async function runControl(test: Test262Test, program: string): Promise<Verdict> 
 async function runSubject(test: Test262Test, program: string): Promise<Verdict> {
 	let value: unknown;
 	try {
-		const vm = new VM({ globalObject: freshRealm(), realGlobals: false });
+		// test262 language tests are *scripts*: their top-level `this` is the global object.
+		const realm = freshRealm();
+		const vm = new VM({ globalObject: realm, realGlobals: false, thisValue: realm });
 		vm.load(parse(program));
 		vm.runUntil((m) => m.steps > STEP_BUDGET);
 		if (!vm.finished && !vm.paused) return { ok: false, reason: `step budget (${STEP_BUDGET}) exhausted` };
