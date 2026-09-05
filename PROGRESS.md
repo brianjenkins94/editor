@@ -5,6 +5,93 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## TypeScript's own test cases as differential inputs ✅ (2026-09-05) — 99.9% agreement
+
+ASSIGNMENT §5 S0 item 2: `tests/cases/{compiler,conformance}` from microsoft/TypeScript at tag
+`v5.9.3` (the version tsval depends on; Apache-2.0 + third-party notice travel with the copies).
+They test the *compiler*, so they assert nothing at runtime; the verdict is tsc-emit-in-Node vs
+tsval on the TypeScript source (fresh realms, timeouts, structural comparison of completion value,
+console output and thrown-error type).
+
+**Standing:** 12,374 cases → 5,321 eligible; **4,542 match, 775 agree on a failure, 4 mismatches
+(all listed gaps), 90 inconclusive, 6,963 skipped by policy → 99.9% agreement (85% by value).**
+Started at 183 mismatches. `npm test` runs the checked-in 1-in-10 sample (584 cases, 2.4 MB) —
+1678 tests, all green; `npm run ts-cases:fetch` + `npm run ts-cases:report` for the full corpus.
+
+### Harness (`test/differential/ts-cases-*.ts`, `scripts/ts-cases-*`)
+- `// @option:` headers and `@filename` blocks parsed; policy filter: single-file, non-module
+  (also nested `import()`), no JSX / JSDoc-JS / `.d.ts`, syntactically clean (TypeScript's own
+  parser), no decorators / namespaces / parameter properties / `using` / auto-accessors, no
+  `eval`/`Function`, deterministic (no `Math.random`/`Date`), no ambient host bindings
+  (`declare var` — the oracle can't provide them), no top-level `var` re-declaring a builtin global
+  (script semantics vs tsval's module scope), and Node must accept the emit (a strict-mode early
+  error TypeScript's parser does not flag, e.g. `arguments = 1`, is a skip, not a finding).
+- The control runs tsc's ES2022 emit as a strict SCRIPT (`"use strict"; void 0;` — the directive
+  is an expression statement and would otherwise be the completion value), tsval gets the realm's
+  global as top-level `this`. Node's `vm` has a quirk (assigning a builtin function to an undeclared
+  identifier in a sandbox does not throw) that only ambient-binding cases hit — hence their skip.
+- **Cases run in a child process** (`CaseRunner`): one case spreads an infinite iterator into an
+  array literal, which grows an array past V8's maximum — a fatal abort no heap limit or worker
+  thread contains. Memory bombs and hangs are `inconclusive` and the child is replaced.
+
+### Interpreter fixes the corpus drove (each a real deviation, differentially verified)
+- **The program's completion value** followed "last ExpressionStatement anywhere": statements in
+  function bodies counted, and `if`/loops/`try`/`switch` never produced `undefined`. Now spec
+  (V8-verified): only program-level statements contribute, a compound statement whose body produced
+  nothing yields `undefined` (UpdateEmpty), a normal `finally` doesn't change it, an enum
+  declaration (an IIFE in tsc's emit) yields `undefined`. `VM.completionSerial` + a per-frame mark
+  taken when the statement STARTS.
+- `declare var` was hoisted as a real `var` (the recursive collector ignored the ambient flag).
+- Body-less overload signatures (functions, methods, accessors, constructors) were bound / their
+  computed keys evaluated; class index signatures were refused. All type-only now.
+- Enums: `var`-hoisted like tsc's emit (usable-before-definition is `undefined`, not a TDZ),
+  declarations MERGE, initializers see every member name (a forward reference reads `undefined`,
+  as tsc's `E.name` does), a const enum is an ordinary enum (single-file transpilation cannot inline),
+  an enum as a bare `if` branch is hoisted too.
+- A class's `length` is its constructor's parameter count (was the wrapper's 0) — also fixed a
+  test262 test.
+- `for (let [a, b] = …; …)`: pattern names were not copied per iteration (ReferenceError in the body).
+- Assignment targets through erased wrappers: `(x as any) = v`, `x! = v`, `x satisfies T`,
+  `obj.fn<T> = v` (instantiation expressions; also `f<T>` as a value).
+- `debugger` is a no-op; a 10k-term expression no longer overflows the host stack in the `var`
+  collector; `using` declarations and `accessor` fields are refused loudly.
+
+### Known gaps (`ts-cases-gaps.ts`)
+- `Function.prototype.toString` of a guest function/class returns the host wrapper's source, not
+  the guest source text (3 cases).
+- One case where the ORACLE deviates from native semantics: tsc rewrites class-name references in
+  static elements to a temp assigned after the class (TypeScript #54607); tsval follows the spec.
+
+---
+
+## Refactor round ✅ (2026-09-05) — five commits, corpus-identical at each step
+
+From the review of emerged patterns, in the agreed order (3, 1, 2→4 swapped, 5):
+1. **Typed frames** (`src/frame.ts`): a discriminated union (`NodeFrame` with typed scratch
+   registers, `CallFrame`, `ConstructFrame`, `InitFieldsFrame`, `PatternFrame`) replaces the
+   `[extra: string]: unknown` bag; handlers are typed per frame kind; `unwind` narrows on `kind`.
+2. **Reference records** (`Ref` + `evaluateReference` / `getValue` / `putValue` / `thisOf` /
+   `assignThrough`): member reads (one handler), call callees, `=`, `op=`, `++`/`--`, `delete`,
+   tagged-template tags and the pattern ops share one stepped evaluate/get/put path; the per-family
+   private-name and null-base branches are gone. Spec order improved: `super[k]` checks `this`
+   before the key; `o[k] = rhs` evaluates `rhs` before the nullish base throws and converts the key
+   once at PutValue.
+3. **One destructuring implementation**: the synchronous `bindTarget`/`assignPattern` path is
+   deleted; the compiled pattern program binds patterns, parameter lists (`arg`/`rest-args` ops; the
+   parameter frame runs above the body, `seedFiber` runs it at call time), for-in/of heads (member
+   heads via a `swap` op) and catch parameters (a frame above the catch block — `catch ([a = await
+   x])` works). Base-class fields now initialize before parameters bind ([[Construct]] order). The
+   parity switch went with the second implementation.
+4. **One iteration state** (`Iteration` = `{record, done}`) for loops, `yield*` and patterns;
+   `iterationStep` / `closeIteration`; `unwind` closes open iterations through one routine with one
+   rule (a `throw` wins over `return()`'s error; any other completion is replaced by it).
+5. **`evaluating(children, combine)`**: the declarative shape for handlers whose control flow does
+   not depend on intermediate values; numeric phases remain only where they mean something.
+
+test262: 15,692 → 15,698 pass / 39 fail (99.8%) across the round; `npm test` never red at a commit.
+
+---
+
 ## The static→dynamic loop, against the real static kernel ✅ (2026-09-04)
 
 The reason tsval exists (ASSIGNMENT §1): silo predicts capabilities statically, tsval's canary

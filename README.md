@@ -75,6 +75,17 @@ prints the static prediction and reaches, the runtime reaches with their *resolv
 of `runtime-caps ⊆ static-caps` (exit code 1 on a divergence). `test/integration/silo-loop.test.ts`
 runs that loop against the real kernel in `npm test` (skipped without `../lib`).
 
+## TypeScript's own test cases
+
+The TypeScript repository's `tests/cases/{compiler,conformance}` (Apache-2.0, ~12k programs, pinned
+to the `typescript` version tsval uses) are wired in as differential *inputs*: they test the
+compiler and assert nothing at runtime, so tsc's emit running in Node is the oracle and tsval on the
+TypeScript source is the subject. Single-file, non-module, syntactically clean programs within the
+supported surface are eligible (~5.3k); the agreement is 99.9%, with the remaining cases listed by
+reason in `test/differential/ts-cases-gaps.ts`. Cases run in a child process, because some of them
+were never meant to run (one spreads an infinite iterator). A 1-in-10 sample is checked in and runs
+in `npm test`; `npm run ts-cases:fetch` and `npm run ts-cases:report` run the full corpus.
+
 ## Conformance: test262
 
 The official ECMAScript conformance suite ([tc39/test262](https://github.com/tc39/test262), BSD-3)
@@ -97,7 +108,7 @@ guest's own `Array`/`Object`/`String`/`%GeneratorFunction%`.
 test262's language tests are *scripts*, so the runner passes the realm's global object as the
 top-level `this` (`VMOptions.thisValue`) and installs `$DONE` as a global property; tsval's default
 remains module semantics (top-level `this` is `undefined`, top-level bindings are not globals).
-Current standing on the full pinned corpus: **99.7 % of eligible tests pass**; the remaining 45
+Current standing on the full pinned corpus: **99.8 % of eligible tests pass**; the remaining 39
 failures are listed by reason in `PROGRESS.md` (promise-tick ordering, a few evaluation-order
 details, script-goal leftovers).
 

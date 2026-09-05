@@ -135,6 +135,7 @@ export async function classifyDifferential(code: string): Promise<DifferentialOu
  * data (Map/Set/Date/Error by content), recursing with a cycle guard.
  */
 export function structural(value: unknown, seen = new Map<object, unknown>()): unknown {
+	if (typeof value === "symbol") return { "[Symbol]": value.description }; // two engines' symbols are never identical
 	if (value === null || (typeof value !== "object" && typeof value !== "function")) return value;
 	if (seen.has(value)) return "[circular]";
 	if (typeof value === "function") {

@@ -58,7 +58,13 @@ function hoist(vm: VM, scope: Scope, statements: readonly ts.Statement[]): void 
 		} else if (ts.isImportDeclaration(statement)) {
 			bindImport(vm, scope, statement);
 		} else if (ts.isFunctionDeclaration(statement) && statement.name) {
-			scope.declareFunction(statement.name.text, createGuestFunction(vm, statement, scope));
+			if (statement.body !== undefined) scope.declareFunction(statement.name.text, createGuestFunction(vm, statement, scope)); // (an overload signature is erased)
+		} else if (ts.isEnumDeclaration(statement)) {
+			// tsc emits an enum as `var E; (function (E) {…})(E || (E = {}))`: the name is var-hoisted
+			// (undefined before the declaration runs; declarations merge). A `const enum` is the same at
+			// runtime — single-file transpilation (tsc's transpileModule, Node's type stripping) cannot
+			// inline its members.
+			scope.declareVar(statement.name.text);
 		} else if (ts.isVariableStatement(statement)) {
 			const flags = statement.declarationList.flags;
 			const isLet = (flags & ts.NodeFlags.Let) !== 0;
@@ -85,14 +91,21 @@ function bindingNames(name: ts.BindingName, out: string[] = []): string[] {
 
 /** Names of every `var` declared anywhere in `statements`, excluding nested function/class bodies. */
 function collectVarNames(statements: readonly ts.Node[], out: string[] = []): string[] {
-	const visit = (node: ts.Node): void => {
-		if (ts.isFunctionLike(node) || ts.isClassLike(node)) return; // own var scope
-		if (ts.isVariableDeclarationList(node) && (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0) {
+	// An explicit work list, not recursion: a pathological expression (a 10k-term `a + a + …`) is
+	// thousands of AST levels deep, which the host stack would not survive.
+	const pending: ts.Node[] = [...statements].reverse();
+	while (pending.length > 0) {
+		const node = pending.pop() as ts.Node;
+		if (ts.isFunctionLike(node) || ts.isClassLike(node)) continue; // own var scope
+		if (isAmbient(node)) continue; // `declare var x` describes a host binding; it never creates one
+		if (ts.isVariableDeclarationList(node) && (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const | ts.NodeFlags.Using)) === 0) {
 			for (const decl of node.declarations) bindingNames(decl.name, out);
 		}
-		ts.forEachChild(node, visit);
-	};
-	for (const statement of statements) visit(statement);
+		if (ts.isEnumDeclaration(node) && !isAmbient(node)) out.push(node.name.text); // tsc emits `var E` (also as a bare `if` branch)
+		const children: ts.Node[] = [];
+		ts.forEachChild(node, (child) => void children.push(child));
+		for (let i = children.length - 1; i >= 0; i--) pending.push(children[i]);
+	}
 	return out;
 }
 
@@ -226,6 +239,7 @@ on(
 on(K.VariableDeclarationList, (vm, frame) => {
 	const list = frame.node as ts.VariableDeclarationList;
 	const decls = list.declarations;
+	if ((list.flags & ts.NodeFlags.Using) !== 0) unimplemented("`using` / `await using` declarations (explicit resource management: disposal is not modeled)");
 	const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
 	const isLet = (list.flags & ts.NodeFlags.Let) !== 0;
 	const kind: BindingKind = isConst ? "const" : isLet ? "let" : "var";
@@ -260,7 +274,11 @@ on(
 	K.ExpressionStatement,
 	evaluating<ts.ExpressionStatement>(
 		(node) => [node.expression],
-		(vm, _frame, _node, [value]) => void (vm.completion = value), // REPL/eval completion value
+		(vm, frame, _node, [value]) => {
+			// The program's completion value (eval/script semantics): the last value-producing statement
+			// of the PROGRAM — statements inside function bodies do not count.
+			if (!vm.insideFunction(frame.scope)) vm.setCompletion(value);
+		},
 	),
 );
 
@@ -293,9 +311,8 @@ on(
 );
 
 // A hoisted function declaration is a no-op at execution time (created during hoist).
-on(K.FunctionDeclaration, (vm) => {
-	vm.frames.pop();
-});
+on(K.FunctionDeclaration, (vm) => void vm.frames.pop()); // hoisted (an overload signature is erased)
+on(K.DebuggerStatement, (vm) => void vm.frames.pop());
 
 // Type-only / erased declarations — no runtime effect (the checker uses them; the VM skips them).
 const noop: NodeHandler = (vm) => vm.frames.pop();
@@ -411,7 +428,7 @@ on(K.ForStatement, (vm, frame) => {
 		// For per-iteration `let`/`const` binding (fresh binding each turn — correct closure capture).
 		frame.lexicalNames =
 			node.initializer != null && ts.isVariableDeclarationList(node.initializer) && (node.initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) !== 0
-				? node.initializer.declarations.map((d) => (ts.isIdentifier(d.name) ? d.name.text : null)).filter((n): n is string => n !== null)
+				? node.initializer.declarations.flatMap((d) => bindingNames(d.name))
 				: null;
 		// The copies keep the declaration's kind: `for (const x = 0; ; x++)` is a TypeError, not a loop.
 		frame.lexicalKind = node.initializer != null && (node.initializer.flags & ts.NodeFlags.Const) !== 0 ? "const" : "let";
@@ -681,28 +698,23 @@ on(K.TryStatement, (vm, frame) => {
 		frame.state = "try";
 		vm.pushNode(node.tryBlock, frame.scope);
 		frame.phase = 1;
-	} else if (frame.phase === 1) {
-		// try block completed normally
+	} else if (frame.phase === 1 || frame.phase === 3) {
+		// try block (1) / catch block (3) completed normally
 		if (node.finallyBlock) {
 			frame.state = "finally";
+			// A normal `finally` contributes nothing to the statement's completion value (the spec's
+			// UpdateEmpty(B, …) keeps the try/catch block's): remember it and restore afterwards.
+			frame.completionSave = { value: vm.completion, serial: vm.completionSerial };
 			vm.pushNode(node.finallyBlock, frame.scope);
-			frame.phase = 2;
+			frame.phase = frame.phase === 1 ? 2 : 4;
 		} else {
 			vm.frames.pop();
 		}
-	} else if (frame.phase === 2) {
-		vm.frames.pop(); // finally (after normal try) done
-	} else if (frame.phase === 3) {
-		// catch block completed normally
-		if (node.finallyBlock) {
-			frame.state = "finally";
-			vm.pushNode(node.finallyBlock, frame.scope);
-			frame.phase = 4;
-		} else {
-			vm.frames.pop();
-		}
-	} else if (frame.phase === 4) {
-		vm.frames.pop(); // finally (after catch) done
+	} else if (frame.phase === 2 || frame.phase === 4) {
+		vm.frames.pop(); // finally done (after a normal try / catch)
+		const saved = frame.completionSave as { value: unknown; serial: number };
+		vm.completion = saved.value;
+		vm.completionSerial = saved.serial;
 	} else {
 		// phase 5: pending-finally done → re-raise the signal that was escaping.
 		vm.frames.pop();
@@ -800,8 +812,9 @@ function superSet(scope: Scope, key: PropertyKey, value: unknown): void {
 const isSuperRef = (node: ts.Node): node is ts.PropertyAccessExpression | ts.ElementAccessExpression =>
 	(ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && node.expression.kind === K.SuperKeyword;
 
+/** Through parentheses and the erased type wrappers (`(x as T) = v`, `x! = v`, `x satisfies T`). */
 const unwrapParens = (e: ts.Expression): ts.Expression => {
-	while (ts.isParenthesizedExpression(e)) e = e.expression;
+	while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isTypeAssertionExpression(e) || ts.isNonNullExpression(e) || ts.isSatisfiesExpression(e) || ts.isExpressionWithTypeArguments(e)) e = e.expression;
 	return e;
 };
 
@@ -825,6 +838,7 @@ const passThroughExpr: NodeHandler = (vm, frame) => {
 	}
 };
 on(K.ParenthesizedExpression, passThroughExpr);
+on(K.ExpressionWithTypeArguments, passThroughExpr); // an instantiation expression `f<T>` is `f`
 on(K.AsExpression, passThroughExpr);
 on(K.TypeAssertionExpression, passThroughExpr);
 on(K.NonNullExpression, passThroughExpr);
@@ -1988,7 +2002,7 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 	const isStaticCtorMethod = (member: ts.ClassElement): member is ts.ConstructorDeclaration => ts.isConstructorDeclaration(member) && hasStatic(member);
 	let computedIndex = 0; // walks `pre.keys` (the same source order as computedKeyNodes)
 	for (const member of node.members) {
-		if (privateOf(member) !== undefined) continue;
+		if (privateOf(member) !== undefined || isSignatureOnly(member)) continue;
 		if (isStaticCtorMethod(member)) memberKeys.set(member, "constructor");
 		else if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member) || ts.isPropertyDeclaration(member)) {
 			const key = pre !== undefined && ts.isComputedPropertyName(member.name) ? toPropertyKey(pre.keys[computedIndex++]) : memberKey(vm, member.name, scope);
@@ -2009,6 +2023,9 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 	// Always set: an anonymous class expression is `""`, and V8 would otherwise infer the host
 	// variable's name ("Ctor") — observable via `.name`.
 	Object.defineProperty(Ctor, "name", { value: node.name?.text ?? "", configurable: true });
+	// A class's `length` is its constructor's expected argument count (0 without an explicit one).
+	const ctorDecl = node.members.find((m): m is ts.ConstructorDeclaration => ts.isConstructorDeclaration(m) && m.body !== undefined && !hasStatic(m));
+	Object.defineProperty(Ctor, "length", { value: ctorDecl === undefined ? 0 : functionLength(ctorDecl.parameters), configurable: true });
 	if (node.name) scope.initialize(node.name.text, Ctor); // leaves the TDZ
 
 	// Pass 1 — methods and accessors (public and private, instance and static), and the constructor.
@@ -2017,6 +2034,7 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 	for (const member of node.members) {
 		const target = hasStatic(member) ? (Ctor as unknown as object) : proto;
 		const pn = privateOf(member);
+		if (isSignatureOnly(member) || ts.isIndexSignatureDeclaration(member)) continue; // type-only
 		if (isStaticCtorMethod(member) || ts.isMethodDeclaration(member)) {
 			const fn = createGuestFunction(vm, member, scope, target);
 			if (pn !== undefined) {
@@ -2089,6 +2107,7 @@ function assertSupportedClassSurface(node: ts.ClassLikeDeclaration): void {
 	if ((ts.getDecorators(node) ?? []).length > 0) refuse("class decorators");
 	for (const member of node.members) {
 		if (ts.canHaveDecorators(member) && (ts.getDecorators(member) ?? []).length > 0) refuse("member decorators");
+		if (ts.isPropertyDeclaration(member) && (ts.getCombinedModifierFlags(member) & ts.ModifierFlags.Accessor) !== 0) refuse("auto-accessor fields (`accessor x`)");
 		if (ts.isConstructorDeclaration(member) || ts.isMethodDeclaration(member)) {
 			for (const param of member.parameters) {
 				if ((ts.getDecorators(param) ?? []).length > 0) refuse("parameter decorators");
@@ -2192,10 +2211,14 @@ function assertThisUnbound(scope: Scope): void {
 	if (scope.getThis() !== THIS_TDZ) throw new ReferenceError("Super constructor may only be called once");
 }
 
+/** A method/accessor/constructor without a body is an overload signature: erased, its key never evaluated. */
+const isSignatureOnly = (member: ts.ClassElement): boolean => (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member) || ts.isConstructorDeclaration(member)) && member.body === undefined;
+
 /** The computed member keys of a class, in source order (the order they are evaluated in). */
 function computedKeyNodes(node: ts.ClassLikeDeclaration): ts.Expression[] {
 	const out: ts.Expression[] = [];
 	for (const member of node.members) {
+		if (isSignatureOnly(member)) continue;
 		const name = (member as { name?: ts.PropertyName }).name;
 		if (name !== undefined && ts.isComputedPropertyName(name)) out.push(name.expression);
 	}
@@ -2257,11 +2280,31 @@ on(K.EnumDeclaration, (vm, frame) => {
 	const node = frame.node as ts.EnumDeclaration;
 	vm.frames.pop();
 	const name = node.name.text;
-	const enumObject = new vm.realm.Object() as Record<string, string | number>;
-	frame.scope.declareLexical(name, "const");
-	frame.scope.initialize(name, enumObject); // bound first so `E.member` resolves inside initializers
-	const memberScope = new Scope(frame.scope, false);
+	const existing = frame.scope.has(name) ? frame.scope.get(name) : undefined;
+	frame.scope.set(name, buildEnum(vm, frame.scope, node, typeof existing === "object" && existing !== null ? (existing as Record<string, string | number>) : undefined));
+	// The emitted form is an expression statement (an IIFE call): the program's completion becomes undefined.
+	if (!vm.insideFunction(frame.scope)) vm.setCompletion(undefined);
+});
 
+/** Build (or extend — declarations merge) an enum object: members with auto-increment and reverse
+ *  mappings for numeric values; each member is also a constant visible to later initializers. */
+function buildEnum(vm: VM, scope: Scope, node: ts.EnumDeclaration, into: Record<string, string | number> | undefined): Record<string, string | number> {
+	const enumObject = into ?? (new vm.realm.Object() as Record<string, string | number>);
+	// Inside initializers a bare member name reads the enum's property (tsc emits `E.name`): members of
+	// earlier declarations have their values; this declaration's are undefined until defined.
+	const memberScope = new Scope(scope, false);
+	memberScope.declareLexical(node.name.text, "const");
+	memberScope.initialize(node.name.text, enumObject);
+	const declared = new Set<string>();
+	const declareMember = (key: string, value: unknown): void => {
+		if (!declared.has(key)) {
+			declared.add(key);
+			memberScope.declareLexical(key, "let");
+			memberScope.initialize(key, value);
+		} else memberScope.set(key, value);
+	};
+	for (const key of Object.keys(enumObject)) if (Number.isNaN(Number(key))) declareMember(key, enumObject[key]);
+	for (const member of node.members) if (!ts.isComputedPropertyName(member.name)) declareMember(propertyName(member.name), enumObject[propertyName(member.name)]);
 	let auto = 0;
 	for (const member of node.members) {
 		const key = ts.isComputedPropertyName(member.name) ? String(vm.evalNodeSync(member.name.expression, memberScope)) : propertyName(member.name);
@@ -2271,10 +2314,10 @@ on(K.EnumDeclaration, (vm, frame) => {
 			enumObject[value] = key; // reverse mapping (numeric enums only)
 			auto = value + 1;
 		}
-		memberScope.declareLexical(key, "const");
-		memberScope.initialize(key, value);
+		declareMember(key, value);
 	}
-});
+	return enumObject;
+}
 
 // Synthetic construct frame: build one class level's instance on the explicit stack.
 syntheticHandlers.construct = (vm, frame) => {

@@ -77,6 +77,8 @@ export interface NodeFrame extends FrameBase {
 	// --- try/catch/finally (paired with VM.unwindTry) ---
 	state?: "try" | "catch" | "finally";
 	pendingSignal?: Signal | null;
+	/** the completion value (and serial) before a normal `finally` ran, restored after it. */
+	completionSave?: { value: unknown; serial: number };
 
 	// --- references: member access, calls, assignment, `super` ---
 	/** the resolved Reference Record (evaluateReference caches it here). */
@@ -100,6 +102,8 @@ export interface NodeFrame extends FrameBase {
 
 	/** a sub-expression frame is on the stack and its value is expected on resume. */
 	awaiting?: boolean;
+	/** compound statements: the completion serial at entry (see VM.finishStatement). */
+	completionMark?: number;
 }
 
 /** A guest function invocation (guest→guest calls never use the host stack). */

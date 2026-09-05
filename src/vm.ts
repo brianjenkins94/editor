@@ -7,6 +7,9 @@ import { isGuestFunction } from "./values.ts";
 import { nodeHandlers, syntheticHandlers, createGuestFunction, bindIdentifier, bindingProgram, pushPattern, closeIteration, clonePrivateElements, isGuestClass, type GuestClass } from "./handlers.ts";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
 
+/** Statements whose completion is UpdateEmpty(body, undefined): they yield `undefined` when their body produced nothing. */
+const COMPLETION_STATEMENTS = new Set<number>([ts.SyntaxKind.IfStatement, ts.SyntaxKind.ForStatement, ts.SyntaxKind.ForInStatement, ts.SyntaxKind.ForOfStatement, ts.SyntaxKind.WhileStatement, ts.SyntaxKind.DoStatement, ts.SyntaxKind.TryStatement, ts.SyntaxKind.SwitchStatement]);
+
 /** Brand marking a live generator/async fiber object as non-cloneable (shared across forks). */
 export const FIBER_BRAND = Symbol("tsval.fiber");
 
@@ -156,8 +159,12 @@ export class VM {
 	rootScope: Scope;
 	/** a propagating non-local control transfer (return/throw/break/continue) being unwound. */
 	signal: Signal | null = null;
-	/** completion value: the value of the last evaluated ExpressionStatement (REPL/`eval` semantics). */
+	/** The program's completion value (script/`eval` semantics): the last value-producing statement's
+	 *  value, where a compound statement (`if`, a loop, `try`, `switch`) that produced none yields
+	 *  `undefined` (the spec's UpdateEmpty). Statements inside functions never contribute. */
 	completion: unknown = undefined;
+	/** bumped on every completion-value write; a compound statement compares it to know whether its body produced one. */
+	completionSerial = 0;
 	finished = false;
 	/** monotonic count of `step()` calls — a free step budget (ASSIGNMENT §3). */
 	steps = 0;
@@ -268,6 +275,26 @@ export class VM {
 		return frame;
 	}
 
+	/** Statements inside a function (a call, a constructor, a field initializer / static block) never
+	 *  contribute to the program's completion value. */
+	insideFunction(scope: Scope): boolean {
+		for (let s: Scope | undefined = scope; s !== undefined; s = s.parent) if (s.isolated && s !== this.rootScope) return true;
+		return false;
+	}
+
+	/** Record a completion value (ExpressionStatement). */
+	setCompletion(value: unknown): void {
+		this.completion = value;
+		this.completionSerial++;
+	}
+
+	/** A compound statement finished (normally or by a caught break) without its body producing a
+	 *  completion value: the program's completion becomes undefined — unless it ran inside a function. */
+	private finishStatement(frame: NodeFrame): void {
+		if (frame.completionMark !== this.completionSerial || this.insideFunction(frame.scope)) return;
+		this.completion = undefined;
+	}
+
 	pushFrame(frame: SyntheticFrame): void {
 		this.frames.push(frame);
 	}
@@ -319,7 +346,11 @@ export class VM {
 			throw new TsvalInternalError(`unimplemented: ${syntaxKindName(frame.node.kind)} (SyntaxKind ${frame.node.kind})`);
 		}
 		try {
+			// A compound statement takes its completion mark when it STARTS (a block pushes all its
+			// statements up front; earlier siblings run in between).
+			if (frame.kind === undefined && frame.phase === 0 && frame.completionMark === undefined && COMPLETION_STATEMENTS.has(frame.node.kind)) frame.completionMark = this.completionSerial;
 			handler(this, frame);
+			if (frame.kind === undefined && frame.completionMark !== undefined && this.frames[this.frames.length - 1] !== frame && !this.frames.includes(frame)) this.finishStatement(frame);
 		} catch (error) {
 			// A guest-observable runtime error (host built-in threw, bad member access, `instanceof` on a
 			// non-object, …) becomes a catchable `throw` signal. Interpreter bugs and canary aborts stay
@@ -392,6 +423,7 @@ export class VM {
 					if (signal.type === "break") {
 						this.frames.pop();
 						if (frame.iteration !== undefined) this.closeIterations([frame.iteration], signal);
+						if (frame.completionMark !== undefined) this.finishStatement(frame);
 					} else frame.phase = frame.continuePhase as number;
 					return;
 				}
@@ -405,6 +437,7 @@ export class VM {
 					this.values.length = frame.valuesBase;
 					this.signal = null;
 					this.frames.pop();
+					if (frame.completionMark !== undefined) this.finishStatement(frame);
 					return;
 				}
 			}
