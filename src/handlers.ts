@@ -4,7 +4,7 @@ import type { Signal, VM, NodeHandler, SyntheticHandlers } from "./vm.ts";
 import type { NodeFrame, Received, PatternIterator, PatternSource } from "./frame.ts";
 import type { GuestFunction, GuestFunctionMeta, GuestFunctionNode } from "./values.ts";
 import { isGuestFunction } from "./values.ts";
-import { unimplemented } from "./errors.ts";
+import { unimplemented, TsvalInternalError } from "./errors.ts";
 
 const K = ts.SyntaxKind;
 
@@ -815,47 +815,6 @@ function superSet(scope: Scope, key: PropertyKey, value: unknown): void {
 const isSuperRef = (node: ts.Node): node is ts.PropertyAccessExpression | ts.ElementAccessExpression =>
 	(ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && node.expression.kind === K.SuperKeyword;
 
-/** One step of a read-modify-write on a super reference (see superReadModifyWrite). */
-type RmwStep = { kind: "need-rhs" } | { kind: "done"; result: unknown } | { kind: "store"; value: unknown; result: unknown };
-
-/**
- * `super.x = v` / `super[k] op= v` / `super.x++`: the `this` binding is checked before the key
- * expression; the current value is read (when `readFirst`) before any RHS; the RHS is evaluated
- * only when `compute` asks for it; the store goes through superSet (an inherited setter runs).
- */
-function superReadModifyWrite(vm: VM, frame: NodeFrame, target: ts.PropertyAccessExpression | ts.ElementAccessExpression, readFirst: boolean, compute: (current: unknown, rhs: { value: unknown } | undefined) => RmwStep, rhs?: ts.Expression): void {
-	const isElem = ts.isElementAccessExpression(target);
-	if (frame.phase === 0) {
-		thisValue(frame.scope);
-		if (isElem) {
-			vm.pushNode(target.argumentExpression, frame.scope);
-			frame.phase = 1;
-			return;
-		}
-		frame.key = target.name.text;
-		frame.phase = 2;
-	} else if (frame.phase === 1) {
-		frame.key = toPropertyKey(vm.pop());
-		frame.phase = 2;
-	}
-	if (frame.phase === 2) {
-		if (readFirst) frame.current = superGet(frame.scope, frame.key as PropertyKey);
-		const step = compute(frame.current, undefined);
-		if (step.kind === "need-rhs") {
-			vm.pushNode(rhs as ts.Expression, frame.scope);
-			frame.phase = 3;
-			return;
-		}
-		vm.frames.pop();
-		if (step.kind === "store") superSet(frame.scope, frame.key as PropertyKey, step.value);
-		return vm.push(step.result);
-	}
-	const step = compute(frame.current, { value: vm.pop() });
-	vm.frames.pop();
-	if (step.kind === "store") superSet(frame.scope, frame.key as PropertyKey, step.value);
-	vm.push(step.kind === "need-rhs" ? undefined : step.result);
-}
-
 const unwrapParens = (e: ts.Expression): ts.Expression => {
 	while (ts.isParenthesizedExpression(e)) e = e.expression;
 	return e;
@@ -1062,61 +1021,184 @@ function keyText(key: unknown): string {
 	return "<computed key>";
 }
 
-on(K.PropertyAccessExpression, (vm, frame) => {
-	const node = frame.node as ts.PropertyAccessExpression;
-	if (node.expression.kind === K.SuperKeyword) {
-		vm.frames.pop();
-		return void vm.push(vm.fromHost(superGet(frame.scope, node.name.text)));
-	}
-	if (frame.phase === 0) {
-		vm.pushNode(node.expression, frame.scope);
-		frame.phase = 1;
-	} else {
-		const obj = vm.pop();
-		vm.frames.pop();
-		if (obj === CHAIN_BREAK || (obj == null && node.questionDotToken)) return vm.push(chainShort(node));
-		if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${node.name.text}')`);
-		if (ts.isPrivateIdentifier(node.name)) return vm.push(privateGet(obj, lookupPrivate(frame.scope, node.name.text)));
-		// Every property read is a host→guest crossing (e.g. `[].constructor.constructor` is the real
-		// `Function`): route it through the guard.
-		vm.push(vm.fromHost(getProperty(vm, obj, node.name.text)));
-	}
-});
+// --- references -------------------------------------------------------------------------------------
+// The spec's Reference Record (§6.2.5) as plain data on the frame that evaluated it. Every construct
+// that names a *place* — a member read, a call's callee (for `this`), an assignment target, `++`/`--`,
+// `delete`, a tagged template's tag — resolves it through `evaluateReference` (the base expression,
+// then a computed key, then the record) and reads/writes through getValue/putValue. An optional chain
+// that short-circuits during evaluation yields `short`; a non-reference expression yields `value`.
 
-on(K.ElementAccessExpression, (vm, frame) => {
-	const node = frame.node as ts.ElementAccessExpression;
-	if (node.expression.kind === K.SuperKeyword) {
+export type Ref =
+	| { kind: "id"; name: string }
+	/** `key` is the RAW key value until first use: ToPropertyKey happens once, at GetValue/PutValue,
+	 *  after a nullish base has thrown (so `null[k] = rhs()` evaluates `rhs` first, then throws). */
+	| { kind: "member"; obj: unknown; key: unknown }
+	| { kind: "private"; obj: unknown; name: string }
+	| { kind: "super"; key: PropertyKey }
+	| { kind: "value"; value: unknown }
+	| { kind: "short" };
+
+/** The phase a handler continues at once its reference is resolved (lower phases belong to evaluateReference). */
+const AFTER_REF = 10;
+
+const nullBase = (obj: unknown, key: string, forWrite: boolean): TypeError =>
+	new TypeError(forWrite ? `Cannot set properties of ${obj} (setting '${key}')` : `Cannot read properties of ${obj} (reading '${key}')`);
+
+/**
+ * Evaluate `target` as a reference, over as many steps as its sub-expressions need. Returns the
+ * record once resolved (cached on the frame; `frame.phase` is then AFTER_REF), undefined while a
+ * sub-expression frame is pending. Spec order: for `super[k]` the `this` binding is checked before
+ * the key and the key is converted eagerly; for `o[k]` nothing is checked or converted here — a
+ * nullish base throws at GetValue/PutValue, then ToPropertyKey runs (once).
+ */
+function evaluateReference(vm: VM, frame: NodeFrame, target: ts.Expression, forWrite = false): Ref | undefined {
+	if (frame.ref !== undefined) return frame.ref;
+	const done = (ref: Ref): Ref => {
+		frame.ref = ref;
+		frame.phase = AFTER_REF;
+		return ref;
+	};
+	target = unwrapParens(target);
+	if (ts.isIdentifier(target)) return done({ kind: "id", name: target.text });
+	if (!ts.isPropertyAccessExpression(target) && !ts.isElementAccessExpression(target)) {
 		if (frame.phase === 0) {
-			vm.pushNode(node.argumentExpression, frame.scope);
+			vm.pushNode(target, frame.scope);
 			frame.phase = 1;
-		} else {
-			const key = toPropertyKey(vm.pop());
-			vm.frames.pop();
-			vm.push(vm.fromHost(superGet(frame.scope, key)));
+			return undefined;
 		}
-		return;
+		return done({ kind: "value", value: vm.pop() });
 	}
+	const member = target;
+	const isSuper = member.expression.kind === K.SuperKeyword;
 	if (frame.phase === 0) {
-		vm.pushNode(node.expression, frame.scope);
-		frame.phase = 1;
-	} else if (frame.phase === 1) {
-		const obj = vm.values[vm.values.length - 1];
-		if (obj === CHAIN_BREAK || (obj == null && node.questionDotToken)) {
-			// short-circuit before the index expression is evaluated
-			vm.pop();
-			vm.frames.pop();
-			return vm.push(chainShort(node));
+		if (isSuper) {
+			thisValue(frame.scope);
+			if (ts.isPropertyAccessExpression(member)) return done({ kind: "super", key: member.name.text });
+			vm.pushNode(member.argumentExpression, frame.scope);
+			frame.phase = 2;
+			return undefined;
 		}
-		vm.pushNode(node.argumentExpression, frame.scope);
-		frame.phase = 2;
-	} else {
-		const index = vm.pop();
-		const obj = vm.pop();
-		vm.frames.pop();
-		if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${keyText(index)}')`);
-		vm.push(vm.fromHost(getProperty(vm, obj, index as PropertyKey)));
+		vm.pushNode(member.expression, frame.scope);
+		frame.phase = 1;
+		return undefined;
 	}
-});
+	if (frame.phase === 1) {
+		const obj = vm.values[vm.values.length - 1];
+		if (obj === CHAIN_BREAK || (obj == null && member.questionDotToken)) {
+			vm.pop();
+			return done({ kind: "short" });
+		}
+		if (!ts.isPropertyAccessExpression(member)) {
+			vm.pushNode(member.argumentExpression, frame.scope);
+			frame.phase = 2;
+			return undefined;
+		}
+		vm.pop();
+		if (ts.isPrivateIdentifier(member.name)) return done({ kind: "private", obj, name: member.name.text });
+		return done({ kind: "member", obj, key: member.name.text });
+	}
+	const rawKey = vm.pop();
+	if (isSuper) return done({ kind: "super", key: toPropertyKey(rawKey) });
+	return done({ kind: "member", obj: vm.pop(), key: rawKey });
+}
+
+/** A member reference's base and key at use: the nullish check, then ToPropertyKey (memoized on the record). */
+function memberOf(ref: Extract<Ref, { kind: "member" | "private" }>, forWrite: boolean): { obj: object; key: PropertyKey } {
+	if (ref.obj == null) throw nullBase(ref.obj, ref.kind === "private" ? ref.name : keyText(ref.key), forWrite);
+	if (ref.kind === "private") return { obj: ref.obj as object, key: ref.name };
+	if (typeof ref.key !== "string" && typeof ref.key !== "symbol") ref.key = toPropertyKey(ref.key);
+	return { obj: ref.obj as object, key: ref.key as PropertyKey };
+}
+
+/** GetValue. A member read is a host→guest crossing (`[].constructor.constructor` is the real
+ *  `Function`), routed through the guard unless the caller vets the value itself (a callee). */
+function getValue(vm: VM, scope: Scope, ref: Ref, crossing = true): unknown {
+	switch (ref.kind) {
+		case "id":
+			return scope.get(ref.name);
+		case "member": {
+			const { obj, key } = memberOf(ref, false);
+			const value = getProperty(vm, obj, key);
+			return crossing ? vm.fromHost(value) : value;
+		}
+		case "private":
+			return privateGet(memberOf(ref, false).obj, lookupPrivate(scope, ref.name));
+		case "super": {
+			const value = superGet(scope, ref.key);
+			return crossing ? vm.fromHost(value) : value;
+		}
+		case "value":
+			return ref.value;
+		case "short":
+			throw new TsvalInternalError("GetValue on a short-circuited optional chain");
+	}
+}
+
+/** PutValue (strict). */
+function putValue(vm: VM, scope: Scope, ref: Ref, value: unknown): void {
+	switch (ref.kind) {
+		case "id":
+			return scope.set(ref.name, value);
+		case "member": {
+			const { obj, key } = memberOf(ref, true);
+			return setProperty(vm, obj, key, value);
+		}
+		case "private":
+			return privateSet(memberOf(ref, true).obj, lookupPrivate(scope, ref.name), value);
+		case "super":
+			return superSet(scope, ref.key, value);
+		default:
+			throw new SyntaxError("Invalid left-hand side in assignment");
+	}
+}
+
+/** The receiver a call through the reference gets. */
+function thisOf(scope: Scope, ref: Ref): unknown {
+	if (ref.kind === "member" || ref.kind === "private") return ref.obj;
+	if (ref.kind === "super") return thisValue(scope);
+	return undefined;
+}
+
+/** One step of a read-modify-write (see assignThrough). */
+type RmwStep = { kind: "need-rhs" } | { kind: "done"; result: unknown } | { kind: "store"; value: unknown; result: unknown };
+
+/**
+ * Assignment through a reference — `=`, `op=`, `++`/`--` — in spec order: the reference, then (when
+ * `readFirst`) GetValue before any RHS, the RHS only when `compute` asks for it (a logical assignment
+ * may be decided already), PutValue, and the expression's result.
+ */
+function assignThrough(vm: VM, frame: NodeFrame, target: ts.Expression, readFirst: boolean, compute: (current: unknown, rhs: { value: unknown } | undefined) => RmwStep, rhs?: ts.Expression): void {
+	const ref = evaluateReference(vm, frame, target, true);
+	if (ref === undefined) return;
+	if (frame.phase === AFTER_REF) {
+		if (readFirst) frame.current = getValue(vm, frame.scope, ref);
+		const step = compute(frame.current, undefined);
+		if (step.kind === "need-rhs") {
+			vm.pushNode(rhs as ts.Expression, frame.scope);
+			frame.phase = AFTER_REF + 1;
+			return;
+		}
+		vm.frames.pop();
+		if (step.kind === "store") putValue(vm, frame.scope, ref, step.value);
+		return vm.push(step.result);
+	}
+	const step = compute(frame.current, { value: vm.pop() });
+	vm.frames.pop();
+	if (step.kind === "store") putValue(vm, frame.scope, ref, step.value);
+	vm.push(step.kind === "need-rhs" ? undefined : step.result);
+}
+
+/** `o.p` / `o[k]` / `super.x` / `this.#x` reads (one handler for both member kinds). */
+const memberRead: NodeHandler = (vm, frame) => {
+	const node = frame.node as ts.PropertyAccessExpression | ts.ElementAccessExpression;
+	const ref = evaluateReference(vm, frame, node);
+	if (ref === undefined) return;
+	vm.frames.pop();
+	vm.push(ref.kind === "short" ? chainShort(node) : getValue(vm, frame.scope, ref));
+};
+on(K.PropertyAccessExpression, memberRead);
+on(K.ElementAccessExpression, memberRead);
+
 
 // ============================================================================
 // Unary
@@ -1154,43 +1236,13 @@ on(K.PostfixUnaryExpression, (vm, frame) => {
 	return updateExpression(vm, frame, node.operand, node.operator, /* prefix */ false);
 });
 
-// ++/-- on a simple identifier lvalue (member lvalues: S2).
+/** `++x` / `x--` on any reference (identifier, member, private, super). */
 function updateExpression(vm: VM, frame: NodeFrame, operand: ts.Expression, operator: ts.SyntaxKind, prefix: boolean): void {
 	const delta = operator === K.PlusPlusToken ? 1 : -1;
-	operand = unwrapParens(operand);
-	if (isSuperRef(operand)) {
-		return superReadModifyWrite(vm, frame, operand, true, (current) => {
-			const old = toNumeric(current);
-			return { kind: "store", value: stepBy(old, delta), result: prefix ? stepBy(old, delta) : old };
-		});
-	}
-	if (ts.isIdentifier(operand)) {
-		vm.frames.pop();
-		const old = toNumeric(frame.scope.get(operand.text));
-		frame.scope.set(operand.text, stepBy(old, delta));
-		return void vm.push(prefix ? stepBy(old, delta) : old);
-	}
-	if (ts.isPropertyAccessExpression(operand) || ts.isElementAccessExpression(operand)) {
-		const isElem = ts.isElementAccessExpression(operand);
-		if (frame.phase === 0) {
-			vm.pushNode(operand.expression, frame.scope);
-			frame.phase = 1;
-		} else if (frame.phase === 1 && isElem) {
-			vm.pushNode((operand as ts.ElementAccessExpression).argumentExpression, frame.scope);
-			frame.phase = 2;
-		} else {
-			const key = isElem ? (vm.pop() as PropertyKey) : (operand as ts.PropertyAccessExpression).name.text;
-			const obj = vm.pop() as Record<PropertyKey, unknown>;
-			const pn = !isElem && ts.isPrivateIdentifier((operand as ts.PropertyAccessExpression).name) ? lookupPrivate(frame.scope, key as string) : undefined;
-			const old = toNumeric(pn !== undefined ? privateGet(obj, pn) : obj[key]);
-			if (pn !== undefined) privateSet(obj, pn, stepBy(old, delta));
-			else obj[key] = stepBy(old, delta);
-			vm.frames.pop();
-			vm.push(prefix ? stepBy(old, delta) : old);
-		}
-		return;
-	}
-	unimplemented(`++/-- on ${ts.SyntaxKind[operand.kind]}`);
+	assignThrough(vm, frame, operand, true, (current) => {
+		const old = toNumeric(current);
+		return { kind: "store", value: stepBy(old, delta), result: prefix ? stepBy(old, delta) : old };
+	});
 }
 
 on(K.TypeOfExpression, (vm, frame) => {
@@ -1216,41 +1268,21 @@ on(K.TypeOfExpression, (vm, frame) => {
 // SyntaxError (parser).
 on(K.DeleteExpression, (vm, frame) => {
 	const node = frame.node as ts.DeleteExpression;
-	const target = node.expression;
-	const isProp = ts.isPropertyAccessExpression(target);
-	const isElem = ts.isElementAccessExpression(target);
+	const target = unwrapParens(node.expression);
 	if (isSuperRef(target)) {
 		// `delete super.x` is a ReferenceError (after evaluating a computed key, which we skip).
 		vm.frames.pop();
 		throw new ReferenceError("Unsupported reference to 'super'");
 	}
-	if (frame.phase === 0) {
-		vm.pushNode(isProp || isElem ? (target as ts.PropertyAccessExpression | ts.ElementAccessExpression).expression : target, frame.scope);
-		frame.phase = 1;
-	} else if (frame.phase === 1) {
-		if (isElem) {
-			vm.pushNode((target as ts.ElementAccessExpression).argumentExpression, frame.scope);
-			frame.phase = 2;
-			return;
-		}
-		const obj = vm.pop();
-		vm.frames.pop();
-		if (!isProp) return vm.push(true);
-		if (obj == null) {
-			if ((target as ts.PropertyAccessExpression).questionDotToken) return vm.push(true);
-			throw new TypeError(`Cannot convert undefined or null to object`);
-		}
-		vm.push(delete (obj as Record<string, unknown>)[(target as ts.PropertyAccessExpression).name.text]);
-	} else {
-		const key = vm.pop() as PropertyKey;
-		const obj = vm.pop();
-		vm.frames.pop();
-		if (obj == null) {
-			if ((target as ts.ElementAccessExpression).questionDotToken) return vm.push(true);
-			throw new TypeError(`Cannot convert undefined or null to object`);
-		}
-		vm.push(delete (obj as Record<PropertyKey, unknown>)[key]);
+	const ref = evaluateReference(vm, frame, target);
+	if (ref === undefined) return;
+	vm.frames.pop();
+	if (ref.kind === "member") {
+		const { obj, key } = memberOf(ref, false);
+		return vm.push(delete (obj as Record<PropertyKey, unknown>)[key]); // strict: a non-configurable property throws
 	}
+	if (ref.kind === "short" || ref.kind === "value") return vm.push(true); // `delete a?.b` on nullish `a`; a non-reference operand
+	unimplemented(`delete of a ${ref.kind} reference (a strict-mode SyntaxError)`);
 });
 
 // Tagged templates: `tag\`a${x}b\`` → tag(strings, x) where `strings` is the cooked-strings array with
@@ -1280,29 +1312,21 @@ function templateObject(vm: VM, node: ts.TaggedTemplateExpression): readonly str
 on(K.TaggedTemplateExpression, (vm, frame) => {
 	const node = frame.node as ts.TaggedTemplateExpression;
 	const tag = node.tag;
-	const isProp = ts.isPropertyAccessExpression(tag);
 	const spans = ts.isTemplateExpression(node.template) ? node.template.templateSpans : [];
-	if (frame.phase === 0) {
-		vm.pushNode(isProp ? (tag as ts.PropertyAccessExpression).expression : tag, frame.scope);
-		frame.phase = 1;
-	} else if (frame.phase === 1) {
-		if (isProp) {
-			const obj = vm.pop();
-			frame.thisArg = obj;
-			if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${(tag as ts.PropertyAccessExpression).name.text}')`);
-			vm.push(vm.fromHost((obj as Record<string, unknown>)[(tag as ts.PropertyAccessExpression).name.text]));
-		} else {
-			frame.thisArg = undefined;
-		}
+	if (frame.phase < AFTER_REF) {
+		const ref = evaluateReference(vm, frame, tag);
+		if (ref === undefined) return;
+		frame.thisArg = thisOf(frame.scope, ref);
+		vm.push(ref.kind === "short" ? undefined : getValue(vm, frame.scope, ref));
 		for (let i = spans.length - 1; i >= 0; i--) vm.pushNode(spans[i].expression, frame.scope);
-		frame.phase = 2;
-	} else if (frame.phase === 2) {
+		frame.phase = AFTER_REF + 1;
+	} else if (frame.phase === AFTER_REF + 1) {
 		const substitutions = vm.values.splice(vm.values.length - spans.length);
 		const calleeVal = vm.pop();
 		const args = [templateObject(vm, node), ...substitutions];
 		if (isGuestFunction(calleeVal)) {
 			vm.pushCall(calleeVal.__tsval, args, frame.thisArg);
-			frame.phase = 3;
+			frame.phase = AFTER_REF + 2;
 			return;
 		}
 		vm.frames.pop();
@@ -1594,23 +1618,20 @@ function assignmentExpression(vm: VM, frame: NodeFrame, node: ts.BinaryExpressio
 	// A parenthesized target `(x) = v` / `(o.p) = v` is still a Reference (but not an IdentifierRef:
 	// no NamedEvaluation through parentheses).
 	const left = unwrapParens(node.left);
-	if (ts.isIdentifier(left)) {
-		if (frame.phase === 0) {
-			vm.pushNode(node.right, frame.scope);
-			frame.phase = 1;
-		} else {
-			const value = left === node.left ? nameAnonymous(vm.pop(), left.text, node.right) : vm.pop();
-			frame.scope.set(left.text, value);
-			vm.frames.pop();
-			vm.push(value);
-		}
-		return;
-	}
-	if (isSuperRef(left)) {
-		return superReadModifyWrite(vm, frame, left, false, (_current, rhs) => (rhs === undefined ? { kind: "need-rhs" } : { kind: "store", value: rhs.value, result: rhs.value }), node.right);
-	}
-	if (ts.isPropertyAccessExpression(left) || ts.isElementAccessExpression(left)) {
-		return memberAssignment(vm, frame, left, node.right);
+	if (!ts.isArrayLiteralExpression(left) && !ts.isObjectLiteralExpression(left)) {
+		const names = left === node.left && ts.isIdentifier(left); // NamedEvaluation: a bare identifier target only
+		return assignThrough(
+			vm,
+			frame,
+			left,
+			false,
+			(_current, rhs) => {
+				if (rhs === undefined) return { kind: "need-rhs" };
+				const value = names ? nameAnonymous(rhs.value, (left as ts.Identifier).text, node.right) : rhs.value;
+				return { kind: "store", value, result: value };
+			},
+			node.right,
+		);
 	}
 	// Destructuring assignment: `[a, b] = x`, `({ x } = o)`. Evaluate the RHS (stepped), then assign
 	// into the (possibly nested) targets synchronously.
@@ -1635,7 +1656,6 @@ function assignmentExpression(vm: VM, frame: NodeFrame, node: ts.BinaryExpressio
 		}
 		return;
 	}
-	unimplemented(`assignment target ${ts.SyntaxKind[left.kind]}`);
 }
 
 /** Assign `value` into an assignment target expression (existing lvalues, possibly a pattern). */
@@ -1754,28 +1774,6 @@ function storePrepared(vm: VM, scope: Scope, t: PreparedTarget, value: unknown):
 	} else assignPattern(vm, scope, t.target, value);
 }
 
-function memberAssignment(vm: VM, frame: NodeFrame, target: ts.PropertyAccessExpression | ts.ElementAccessExpression, right: ts.Expression): void {
-	const isElement = ts.isElementAccessExpression(target);
-	if (frame.phase === 0) {
-		vm.pushNode(target.expression, frame.scope);
-		frame.phase = 1;
-	} else if (frame.phase === 1 && isElement) {
-		vm.pushNode((target as ts.ElementAccessExpression).argumentExpression, frame.scope);
-		frame.phase = 2;
-	} else if (frame.phase === 1 || frame.phase === 2) {
-		vm.pushNode(right, frame.scope);
-		frame.phase = 3;
-	} else {
-		const value = vm.pop();
-		const key = isElement ? (vm.pop() as PropertyKey) : (target as ts.PropertyAccessExpression).name.text;
-		const obj = vm.pop() as Record<PropertyKey, unknown>;
-		if (!isElement && ts.isPrivateIdentifier((target as ts.PropertyAccessExpression).name)) privateSet(obj, lookupPrivate(frame.scope, key as string), value);
-		else setProperty(vm, obj, key, value);
-		vm.frames.pop();
-		vm.push(value);
-	}
-}
-
 /** For `&&=` / `||=` / `??=`: does the current value already decide the result (RHS not evaluated)? */
 function logicalShortCircuits(op: number, current: unknown): boolean {
 	if (op === K.AmpersandAmpersandEqualsToken) return !current;
@@ -1789,84 +1787,20 @@ function logicalShortCircuits(op: number, current: unknown): boolean {
 // RHS at all when the current value decides.
 function compoundAssignment(vm: VM, frame: NodeFrame, node: ts.BinaryExpression, op: number): void {
 	const left = unwrapParens(node.left);
-	if (ts.isIdentifier(left)) {
-		const name = left.text;
-		if (frame.phase === 0) {
-			const current = frame.scope.get(name); // GetValue before the RHS
-			if (logicalShortCircuits(op, current)) {
-				vm.frames.pop();
-				return vm.push(current);
-			}
-			frame.current = current;
-			vm.pushNode(node.right, frame.scope);
-			frame.phase = 1;
-		} else {
-			// (a logical assignment `x ??= () => {}` names the function `x`; harmless for arithmetic ops)
-			const right = nameAnonymous(vm.pop(), name, node.right) as never;
-			const result = applyCompound(op, frame.current as never, right);
-			frame.scope.set(name, result);
-			vm.frames.pop();
-			vm.push(result);
-		}
-		return;
-	}
-	if (isSuperRef(left)) {
-		return superReadModifyWrite(
-			vm,
-			frame,
-			left,
-			true,
-			(current, rhs) => {
-				if (rhs === undefined) return logicalShortCircuits(op, current) ? { kind: "done", result: current } : { kind: "need-rhs" };
-				const result = applyCompound(op, current as never, rhs.value as never);
-				return { kind: "store", value: result, result };
-			},
-			node.right,
-		);
-	}
-	if (ts.isPropertyAccessExpression(left) || ts.isElementAccessExpression(left)) {
-		return memberCompoundAssignment(vm, frame, left, node.right, op);
-	}
-	unimplemented(`compound assignment to ${ts.SyntaxKind[left.kind]}`);
-}
-
-// `obj.p op= rhs` / `obj[k] op= rhs`: the object (and key) reference is evaluated once.
-function memberCompoundAssignment(vm: VM, frame: NodeFrame, target: ts.PropertyAccessExpression | ts.ElementAccessExpression, right: ts.Expression, op: number): void {
-	const isElem = ts.isElementAccessExpression(target);
-	const privateNameOf = (): PrivateName | undefined => (!isElem && ts.isPrivateIdentifier((target as ts.PropertyAccessExpression).name) ? lookupPrivate(frame.scope, (target as ts.PropertyAccessExpression).name.text) : undefined);
-	if (frame.phase === 0) {
-		vm.pushNode(target.expression, frame.scope);
-		frame.phase = 1;
-	} else if (frame.phase === 1 && isElem) {
-		vm.pushNode((target as ts.ElementAccessExpression).argumentExpression, frame.scope);
-		frame.phase = 2;
-	} else if (frame.phase === 1 || frame.phase === 2) {
-		// GetValue before the RHS (the object and key stay on the stack for the store).
-		const n = vm.values.length;
-		const key = isElem ? (vm.values[n - 1] as PropertyKey) : (target as ts.PropertyAccessExpression).name.text;
-		const obj = vm.values[isElem ? n - 2 : n - 1];
-		if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${keyText(key)}')`);
-		const pn = privateNameOf();
-		const current = pn !== undefined ? privateGet(obj, pn) : vm.fromHost((obj as Record<PropertyKey, unknown>)[key]);
-		if (logicalShortCircuits(op, current)) {
-			vm.values.length = isElem ? n - 2 : n - 1;
-			vm.frames.pop();
-			return vm.push(current);
-		}
-		frame.current = current;
-		vm.pushNode(right, frame.scope);
-		frame.phase = 3;
-	} else {
-		const right = vm.pop() as never;
-		const key = isElem ? (vm.pop() as PropertyKey) : (target as ts.PropertyAccessExpression).name.text;
-		const obj = vm.pop() as Record<PropertyKey, unknown>;
-		const pn = privateNameOf();
-		const result = applyCompound(op, frame.current as never, right);
-		if (pn !== undefined) privateSet(obj, pn, result);
-		else obj[key] = result;
-		vm.frames.pop();
-		vm.push(result);
-	}
+	const names = left === node.left && ts.isIdentifier(left); // (`x ??= () => {}` names the function `x`)
+	assignThrough(
+		vm,
+		frame,
+		left,
+		true,
+		(current, rhs) => {
+			if (rhs === undefined) return logicalShortCircuits(op, current) ? { kind: "done", result: current } : { kind: "need-rhs" };
+			const right = names ? nameAnonymous(rhs.value, (left as ts.Identifier).text, node.right) : rhs.value;
+			const result = applyCompound(op, current as never, right as never);
+			return { kind: "store", value: result, result };
+		},
+		node.right,
+	);
 }
 
 on(K.ConditionalExpression, (vm, frame) => {
@@ -1917,70 +1851,19 @@ on(K.CallExpression, (vm, frame) => {
 		}
 		return;
 	}
-	const isProp = ts.isPropertyAccessExpression(callee);
-	const isElem = ts.isElementAccessExpression(callee);
-	// `super.method()` / `super[k]()` — call the super-prototype method with the current `this`.
-	const isSuperProp = isProp && (callee as ts.PropertyAccessExpression).expression.kind === K.SuperKeyword;
-	const isSuperElem = isElem && (callee as ts.ElementAccessExpression).expression.kind === K.SuperKeyword;
-
-	if (frame.phase === 0 && isSuperProp) {
-		frame.thisArg = thisValue(frame.scope);
-		vm.push(superGet(frame.scope, (callee as ts.PropertyAccessExpression).name.text));
-		pushCallArguments(vm, frame, node.arguments);
-		frame.phase = 3;
-	} else if (frame.phase === 0 && isSuperElem) {
-		vm.pushNode((callee as ts.ElementAccessExpression).argumentExpression, frame.scope);
-		frame.phase = 5;
-	} else if (frame.phase === 5) {
-		const key = toPropertyKey(vm.pop());
-		frame.thisArg = thisValue(frame.scope);
-		vm.push(superGet(frame.scope, key));
-		pushCallArguments(vm, frame, node.arguments);
-		frame.phase = 3;
-	} else if (frame.phase === 0) {
-		// Evaluate the callee (its object first, for method calls, to capture `this`).
-		vm.pushNode(isProp || isElem ? (callee as ts.PropertyAccessExpression | ts.ElementAccessExpression).expression : callee, frame.scope);
-		frame.phase = 1;
-	} else if (frame.phase === 1) {
-		if (isElem) {
-			// obj is on the stack; a nullish base under `?.` short-circuits before the index is evaluated.
-			const obj = vm.values[vm.values.length - 1];
-			if (obj === CHAIN_BREAK || (obj == null && (callee as ts.ElementAccessExpression).questionDotToken)) {
-				vm.pop();
-				vm.frames.pop();
-				return vm.push(chainShort(node));
-			}
-			vm.pushNode((callee as ts.ElementAccessExpression).argumentExpression, frame.scope);
-			frame.phase = 2;
-			return;
-		}
-		if (isProp) {
-			const obj = vm.pop();
-			frame.thisArg = obj;
-			const name = (callee as ts.PropertyAccessExpression).name;
-			if (obj === CHAIN_BREAK || (obj == null && (callee as ts.PropertyAccessExpression).questionDotToken)) return void (vm.frames.pop(), vm.push(chainShort(node)));
-			if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${name.text}')`);
-			if (ts.isPrivateIdentifier(name)) vm.push(privateGet(obj, lookupPrivate(frame.scope, name.text)));
-			else vm.push(getProperty(vm, obj, name.text));
-		} else {
-			frame.thisArg = undefined;
-		}
+	if (frame.phase < AFTER_REF) {
+		// The callee as a reference: a member callee's base is the receiver; `super.m()` gets `this`.
+		const ref = evaluateReference(vm, frame, callee);
+		if (ref === undefined) return;
+		if (ref.kind === "short") return void (vm.frames.pop(), vm.push(chainShort(node)));
+		frame.thisArg = thisOf(frame.scope, ref);
+		const calleeValue = getValue(vm, frame.scope, ref, false); // vetted by invokeHost instead
 		// `f?.()` on a nullish callee (or a broken chain) short-circuits before the arguments run.
-		const calleeValue = vm.values[vm.values.length - 1];
-		if (calleeValue === CHAIN_BREAK || (calleeValue == null && node.questionDotToken)) return void (vm.pop(), vm.frames.pop(), vm.push(chainShort(node)));
+		if (calleeValue === CHAIN_BREAK || (calleeValue == null && node.questionDotToken)) return void (vm.frames.pop(), vm.push(chainShort(node)));
+		vm.push(calleeValue);
 		pushCallArguments(vm, frame, node.arguments);
-		frame.phase = 3;
-	} else if (frame.phase === 2) {
-		const index = vm.pop();
-		const obj = vm.pop();
-		frame.thisArg = obj;
-		if (obj == null) throw new TypeError(`Cannot read properties of ${obj} (reading '${keyText(index)}')`);
-		vm.push(getProperty(vm, obj, index as PropertyKey));
-		const calleeValue = vm.values[vm.values.length - 1];
-		if (calleeValue === CHAIN_BREAK || (calleeValue == null && node.questionDotToken)) return void (vm.pop(), vm.frames.pop(), vm.push(chainShort(node)));
-		pushCallArguments(vm, frame, node.arguments);
-		frame.phase = 3;
-	} else if (frame.phase === 3) {
+		frame.phase = AFTER_REF + 1;
+	} else if (frame.phase === AFTER_REF + 1) {
 		const args = collectCallArguments(vm, frame);
 		const calleeVal = vm.pop();
 
@@ -2001,7 +1884,7 @@ on(K.CallExpression, (vm, frame) => {
 				return vm.push(vm.callAsync(meta, frame.thisArg, args));
 			}
 			vm.pushCall(meta, args, frame.thisArg);
-			frame.phase = 4; // resume after the call returns its value
+			frame.phase = AFTER_REF + 2; // resume after the call returns its value
 			return;
 		}
 		vm.frames.pop();
@@ -2013,7 +1896,7 @@ on(K.CallExpression, (vm, frame) => {
 		// capability shim can introspect the static type of its argument (type-directed canary, S6).
 		vm.push(vm.invokeHost(calleeVal as (...a: unknown[]) => unknown, frame.thisArg, args, node, false));
 	} else {
-		// phase 4: guest call has left its return value on the stack.
+		// the guest call has left its return value on the stack.
 		vm.frames.pop();
 	}
 });
@@ -2852,11 +2735,6 @@ export class PatternProgram {
 	}
 }
 
-interface MemberRef {
-	obj: object;
-	key: PropertyKey;
-	pn?: PrivateName;
-}
 
 /** Test switch: run EVERY pattern through the stepped machine (parity with the synchronous path). */
 export const patternSettings = { forceStepped: process.env.TSVAL_STEPPED_PATTERNS === "1" };
@@ -3110,21 +2988,17 @@ syntheticHandlers.pattern = (vm, frame) => {
 				bindIdentifier(scope, op.name, temps.pop(), op.kind);
 				break;
 			case "assign-id":
-				scope.set(op.name, temps.pop());
+				putValue(vm, scope, { kind: "id", name: op.name }, temps.pop());
 				break;
 			case "member-ref": {
-				const key = op.hasKey ? toPropertyKey(temps.pop()) : op.text;
+				const key: unknown = op.hasKey ? temps.pop() : op.text;
 				const obj = temps.pop();
-				if (obj == null) throw new TypeError(`Cannot set properties of ${String(obj)} (setting '${keyText(key)}')`);
-				const pn = op.privateName !== undefined ? lookupPrivate(scope, op.privateName) : undefined;
-				temps.push({ obj, key, pn } satisfies MemberRef);
+				temps.push(op.privateName !== undefined ? ({ kind: "private", obj, name: op.privateName } satisfies Ref) : ({ kind: "member", obj, key } satisfies Ref));
 				break;
 			}
 			case "member-store": {
 				const value = temps.pop();
-				const ref = temps.pop() as MemberRef;
-				if (ref.pn !== undefined) privateSet(ref.obj, ref.pn, value);
-				else setProperty(vm, ref.obj, ref.key, value);
+				putValue(vm, scope, temps.pop() as Ref, value);
 				break;
 			}
 		}

@@ -11,7 +11,7 @@
 import type ts from "typescript";
 import type { Scope, BindingKind } from "./scope.ts";
 import type { GuestFunctionMeta, GuestFunctionNode } from "./values.ts";
-import type { ClassMeta, GuestClass, IterRecord, PatternProgram } from "./handlers.ts";
+import type { ClassMeta, GuestClass, IterRecord, PatternProgram, Ref } from "./handlers.ts";
 import type { Signal } from "./vm.ts";
 
 interface FrameBase {
@@ -80,11 +80,12 @@ export interface NodeFrame extends FrameBase {
 	state?: "try" | "catch" | "finally";
 	pendingSignal?: Signal | null;
 
-	// --- member access, calls, assignment, `super` ---
-	/** the receiver for a member call. */
+	// --- references: member access, calls, assignment, `super` ---
+	/** the resolved Reference Record (evaluateReference caches it here). */
+	ref?: Ref;
+	/** the receiver for a call through a member reference. */
 	thisArg?: unknown;
-	/** a resolved property key / the current value of a read-modify-write. */
-	key?: PropertyKey;
+	/** the current value of a read-modify-write (GetValue before the RHS). */
 	current?: unknown;
 	/** call arguments: how many operands and which were spreads. */
 	argCount?: number;
