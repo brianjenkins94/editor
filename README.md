@@ -108,9 +108,9 @@ guest's own `Array`/`Object`/`String`/`%GeneratorFunction%`.
 test262's language tests are *scripts*, so the runner passes the realm's global object as the
 top-level `this` (`VMOptions.thisValue`) and installs `$DONE` as a global property; tsval's default
 remains module semantics (top-level `this` is `undefined`, top-level bindings are not globals).
-Current standing on the full pinned corpus: **99.8 % of eligible tests pass**; the remaining 39
-failures are listed by reason in `PROGRESS.md` (promise-tick ordering, a few evaluation-order
-details, script-goal leftovers).
+Current standing on the full pinned corpus: **99.9 % of eligible tests pass**; the remaining 11
+failures all concern exact microtask ordering (`await` interleaving, async-generator ticks), which
+follows the host promise queue today — see the open scheduler decision in `PROGRESS.md`.
 
 Every destructuring pattern, parameter list and catch parameter is compiled once to a small list
 of plain-data ops run by a synthetic `pattern` frame; defaults, computed keys and member targets

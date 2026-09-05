@@ -76,7 +76,8 @@ function variableDeclarationList(vm: VM, frame: NodeFrame): void {
 
 	if ((frame.phase & 1) === 0) {
 		if (decl.initializer) {
-			vm.pushNode(decl.initializer, frame.scope);
+			const init = vm.pushNode(decl.initializer, frame.scope);
+			if (ts.isIdentifier(decl.name) && ts.isClassExpression(unwrapParens(decl.initializer))) init.nameHint = decl.name.text; // (see classDefinition)
 			frame.phase++; // -> bind
 		} else {
 			// no initializer: `let x;` leaves the TDZ as undefined. `var x;` is a runtime no-op — it must
@@ -343,11 +344,14 @@ function forInStatement(vm: VM, frame: NodeFrame): void {
 		const keys: string[] = [];
 		if (obj != null) for (const key in obj as object) keys.push(key);
 		frame.keys = keys;
+		frame.enumerated = obj == null ? undefined : (Object(obj) as object);
 		frame.index = 0;
 		frame.phase = 2;
 	} else if (frame.phase === 2) {
 		const keys = frame.keys as string[];
-		const index = frame.index as number;
+		let index = frame.index as number;
+		// A property deleted before its turn is not visited (EnumerateObjectProperties).
+		while (index < keys.length && !((keys[index] as string) in (frame.enumerated as object))) index++;
 		if (index >= keys.length) return void vm.frames.pop();
 		frame.index = index + 1;
 		bindForTarget(vm, frame, node.initializer, keys[index]);

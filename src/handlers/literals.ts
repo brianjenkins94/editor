@@ -6,7 +6,7 @@ import { unimplemented } from "../errors.ts";
 import type { NodeFrame } from "../frame.ts";
 import type { VM } from "../vm.ts";
 import { createGuestFunction, nameAnonymous, setFunctionName } from "./functions.ts";
-import { defineData, toPropertyKey } from "./realm.ts";
+import { cookedTemplateText, defineData, toPropertyKey } from "./realm.ts";
 import { evaluating, on, passThroughExpr, pushText } from "./registry.ts";
 
 const K = ts.SyntaxKind;
@@ -72,8 +72,8 @@ function metaProperty(vm: VM, frame: NodeFrame): void {
 const templateExpression = evaluating<ts.TemplateExpression>(
 	(node) => node.templateSpans.map((span) => span.expression),
 	(vm, _frame, node, values) => {
-		let out = node.head.text;
-		for (let i = 0; i < node.templateSpans.length; i++) out += String(values[i]) + node.templateSpans[i].literal.text;
+		let out = cookedTemplateText(node.head) as string;
+		for (let i = 0; i < node.templateSpans.length; i++) out += String(values[i]) + (cookedTemplateText(node.templateSpans[i].literal) as string);
 		vm.push(out);
 	},
 );
@@ -95,21 +95,40 @@ const arrayLiteralExpression = evaluating<ts.ArrayLiteralExpression>(
 	},
 );
 
+/** Operands evaluate one at a time, in source order, and a computed key is converted (ToPropertyKey)
+ *  the moment it finishes — before its value is evaluated (observable through `@@toPrimitive`). */
 function objectLiteralExpression(vm: VM, frame: NodeFrame): void {
 	const node = frame.node as ts.ObjectLiteralExpression;
-	objectLiteral(vm, frame);
+	const operands = objectLiteralOperands(node);
+	if (frame.phase === 0) {
+		frame.values = [];
+		frame.index = 0;
+		frame.phase = 1;
+	} else {
+		const index = frame.index as number;
+		const value = vm.pop();
+		(frame.values as unknown[]).push(operands[index - 1].isKey ? toPropertyKey(value) : value);
+	}
+	const next = frame.index as number;
+	if (next < operands.length) {
+		vm.pushNode(operands[next].node, frame.scope);
+		frame.index = next + 1;
+		return;
+	}
+	vm.frames.pop();
+	buildObjectLiteral(vm, frame, node, frame.values as unknown[]);
 }
 
 /** The value-producing nodes of an object literal, in source order: a computed key before its
  *  value. Methods/accessors produce no operand — their functions are created in the build step. */
-export function objectLiteralOperands(node: ts.ObjectLiteralExpression): ts.Node[] {
-	const out: ts.Node[] = [];
+export function objectLiteralOperands(node: ts.ObjectLiteralExpression): { node: ts.Node; isKey: boolean }[] {
+	const out: { node: ts.Node; isKey: boolean }[] = [];
 	for (const prop of node.properties) {
 		const name = (prop as { name?: ts.PropertyName }).name;
-		if (name !== undefined && ts.isComputedPropertyName(name)) out.push(name.expression);
-		if (ts.isPropertyAssignment(prop)) out.push(prop.initializer);
-		else if (ts.isShorthandPropertyAssignment(prop)) out.push(prop.name);
-		else if (ts.isSpreadAssignment(prop)) out.push(prop.expression);
+		if (name !== undefined && ts.isComputedPropertyName(name)) out.push({ node: name.expression, isKey: true });
+		if (ts.isPropertyAssignment(prop)) out.push({ node: prop.initializer, isKey: false });
+		else if (ts.isShorthandPropertyAssignment(prop)) out.push({ node: prop.name, isKey: false });
+		else if (ts.isSpreadAssignment(prop)) out.push({ node: prop.expression, isKey: false });
 		else if (!ts.isMethodDeclaration(prop) && !ts.isGetAccessorDeclaration(prop) && !ts.isSetAccessorDeclaration(prop)) {
 			unimplemented(`${ts.SyntaxKind[(prop as ts.Node).kind]} in ObjectLiteral`);
 		}
@@ -117,11 +136,11 @@ export function objectLiteralOperands(node: ts.ObjectLiteralExpression): ts.Node
 	return out;
 }
 
-export const objectLiteral = evaluating<ts.ObjectLiteralExpression>(objectLiteralOperands, (vm, frame, node, values) => {
+export function buildObjectLiteral(vm: VM, frame: NodeFrame, node: ts.ObjectLiteralExpression, values: unknown[]): void {
 	{
 		const obj = new vm.realm.Object() as Record<PropertyKey, unknown>;
-		let cursor = 0; // advances over the evaluated keys and values, in source order
-		const keyOf = (name: ts.PropertyName): PropertyKey => (ts.isComputedPropertyName(name) ? toPropertyKey(values[cursor++]) : propertyName(name));
+		let cursor = 0; // advances over the evaluated keys (already property keys) and values, in source order
+		const keyOf = (name: ts.PropertyName): PropertyKey => (ts.isComputedPropertyName(name) ? (values[cursor++] as PropertyKey) : propertyName(name));
 		for (const prop of node.properties) {
 			if (ts.isPropertyAssignment(prop)) {
 				// `__proto__: v` (non-computed) sets the prototype instead of defining a property.
@@ -157,7 +176,7 @@ export const objectLiteral = evaluating<ts.ObjectLiteralExpression>(objectLitera
 		}
 		vm.push(obj);
 	}
-});
+}
 
 /** `{ ...source }`: copy own enumerable props (string + symbol keys), each value through the guard. */
 export function spreadInto(vm: VM, target: Record<PropertyKey, unknown>, source: unknown): void {

@@ -6,7 +6,7 @@ import type { NodeFrame } from "../frame.ts";
 import { isGuestFunction } from "../values.ts";
 import type { VM } from "../vm.ts";
 import { isGuestClass, superCall } from "./classes.ts";
-import { describe } from "./realm.ts";
+import { cookedTemplateText, describe, normalizeTemplateLineTerminators } from "./realm.ts";
 import { AFTER_REF, CHAIN_BREAK, chainShort, evaluateReference, getValue, thisOf } from "./references.ts";
 import { on } from "./registry.ts";
 
@@ -22,8 +22,8 @@ export function templateObject(vm: VM, node: ts.TaggedTemplateExpression): reado
 		const cooked = new vm.realm.Array() as string[];
 		const raw = new vm.realm.Array() as string[];
 		const add = (lit: ts.TemplateLiteralLikeNode): void => {
-			cooked.push(lit.text);
-			raw.push(lit.rawText ?? lit.text);
+			cooked.push(cookedTemplateText(lit) as string); // (undefined for an illegal escape — allowed in a TAGGED template)
+			raw.push(normalizeTemplateLineTerminators(lit.rawText ?? lit.text));
 		};
 		if (ts.isNoSubstitutionTemplateLiteral(node.template)) add(node.template);
 		else {

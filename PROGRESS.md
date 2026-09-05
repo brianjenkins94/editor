@@ -5,6 +5,51 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## test262 round 3 ✅ (2026-09-05) — 39 → 11 failures, all in async scheduling
+
+**Standing:** 15,713 pass, 11 fail, 35 inconclusive, 7,967 skipped → 99.9% on eligible. The 11
+remaining all depend on exact microtask ordering (`await` interleaving, async-generator return/
+`yield*` tick counts, `yield*` not unwrapping promises from hand-written async iterators,
+async-from-sync iterator continuation). They share one cause: tsval delegates every `await` and
+async-generator continuation to the HOST promise queue (`Promise.resolve(v).then(…)`), so the
+interleaving is V8's, not the spec's. A VM-owned job queue is the fix and is a design decision (see
+"Open: a VM-owned scheduler" below).
+
+### Fixed this round (each differentially verified)
+- **`super()` from anywhere**: a `Construction` record `{instance, ctor}` shared by the construct
+  frame and the constructor's scope replaces the frame walk, so `super()` works from an arrow, from
+  a callback the host invokes (IteratorClose's `return()` during a `for…of` in the constructor —
+  those run on a private stack), and after the constructor returned (the parent runs, then binding
+  `this` again is the ReferenceError). GetSuperConstructor is dynamic: `Object.setPrototypeOf(C,
+  parseInt)` makes `super()` a catchable TypeError after the arguments are evaluated.
+- `Reflect.construct(Child, args, newTarget)` from the host passes `new.target` through; a class's
+  `prototype` is non-writable and its parent's `prototype` is read exactly once (a getter is
+  observable — including by the `IsConstructor` probe, which now constructs a Proxy target).
+- IteratorClose on an abrupt completion swallows a throwing `return` GETTER too (the original error
+  wins); GetIterator boxes primitives in the guest realm (`Boolean.prototype[Symbol.iterator]`
+  patched there is seen); `super[k] = v` converts its key after the RHS, like `o[k]`.
+- `for…in` skips a property deleted before its turn; an object literal converts each computed key
+  the moment it finishes evaluating (before its value — `@@toPrimitive` is observable).
+- Templates: a literal <CR>/<CR><LF> in a template is <LF> (an escaped `\r` stays one — the cooked
+  text is re-derived from the normalized raw text only when the raw contains one); an illegal escape
+  in a TAGGED template cooks to `undefined`.
+- NamedEvaluation: `var C = class { static x = C.name }` — the class has its name while static
+  initializers run (`nameHint` on the class-expression frame).
+- Policy: script-goal programs (top-level bindings as global properties, `await` as an identifier:
+  4 ids), the GeneratorFunction-constructor tests and the `wellKnownIntrinsicObjects.js` include
+  (both compile code from strings) are skips; a failing test whose source TypeScript's parser
+  cannot parse cleanly (`[x = 'x' in {}]` in a for-of head) is inconclusive, not a finding.
+
+### Open: a VM-owned scheduler
+The 11 remaining failures are the symptom; the substance is control. Today guest promises are host
+`Promise`s and `await` resumes through a host `.then`, so ordering is V8's and a fork mid-`await`
+cannot replay the queue. Owning the job queue (guest promise reactions and `await` continuations as
+VM jobs the VM drains; host promises adopted at the boundary) would give spec-exact ordering, a
+deterministic and steppable microtask queue, forkable pending jobs, and interleaving exploration
+for the canary. It is an architectural addition, not a fix — recorded here for the decision.
+
+---
+
 ## `handlers.ts` split by concern ✅ (2026-09-05)
 
 `src/handlers.ts` (3,100 lines) is now `src/handlers/*.ts`, thirteen modules by concern — registry,

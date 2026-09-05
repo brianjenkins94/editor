@@ -30,6 +30,55 @@ export function defineData(obj: object, key: PropertyKey, value: unknown): void 
 	Object.defineProperty(obj, key, { value, writable: true, enumerable: true, configurable: true });
 }
 
+/** The TV of a template literal part: line terminators normalized (<CR><LF> and <CR> are <LF>);
+ *  `undefined` when the part contains an illegal escape (legal only in tagged templates). */
+export function cookedTemplateText(lit: ts.TemplateLiteralLikeNode): string | undefined {
+	const flags = (lit as { templateFlags?: number }).templateFlags ?? 0;
+	const CONTAINS_INVALID_ESCAPE = 2048; // ts.TokenFlags.ContainsInvalidEscape (internal, not in the public enum)
+	if ((flags & CONTAINS_INVALID_ESCAPE) !== 0) return undefined;
+	const raw = lit.rawText ?? lit.text;
+	// Only a LITERAL carriage return in the source is normalized (an escaped `\r` stays one), so a
+	// source with one is re-cooked from its normalized raw text.
+	return raw.includes("\r") ? decodeTemplateEscapes(normalizeTemplateLineTerminators(raw)) : lit.text;
+}
+export const normalizeTemplateLineTerminators = (text: string): string => text.replace(/\r\n?/g, "\n");
+
+/** The TV of a (legal, normalized) template raw text: escape sequences decoded, line continuations dropped. */
+function decodeTemplateEscapes(raw: string): string {
+	let out = "";
+	for (let i = 0; i < raw.length; i++) {
+		const c = raw[i];
+		if (c !== "\\") {
+			out += c;
+			continue;
+		}
+		const n = raw[++i];
+		switch (n) {
+			case "n": out += "\n"; break;
+			case "t": out += "\t"; break;
+			case "r": out += "\r"; break;
+			case "b": out += "\b"; break;
+			case "f": out += "\f"; break;
+			case "v": out += "\v"; break;
+			case "0": out += "\0"; break;
+			case "\n": case "\u2028": case "\u2029": break; // LineContinuation
+			case "x": out += String.fromCharCode(parseInt(raw.slice(i + 1, i + 3), 16)); i += 2; break;
+			case "u":
+				if (raw[i + 1] === "{") {
+					const end = raw.indexOf("}", i);
+					out += String.fromCodePoint(parseInt(raw.slice(i + 2, end), 16));
+					i = end;
+				} else {
+					out += String.fromCharCode(parseInt(raw.slice(i + 1, i + 5), 16));
+					i += 4;
+				}
+				break;
+			default: out += n;
+		}
+	}
+	return out;
+}
+
 /** Describe a property key for an error message without invoking user code (`toString` may throw). */
 export function keyText(key: unknown): string {
 	if (typeof key === "symbol") return key.description ?? "Symbol()";

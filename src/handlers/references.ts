@@ -87,7 +87,8 @@ export type Ref =
 	 *  after a nullish base has thrown (so `null[k] = rhs()` evaluates `rhs` first, then throws). */
 	| { kind: "member"; obj: unknown; key: unknown }
 	| { kind: "private"; obj: unknown; name: string }
-	| { kind: "super"; key: PropertyKey }
+	/** `key` raw until first use, like a member reference (ToPropertyKey after the RHS of `super[k] = v`). */
+	| { kind: "super"; key: unknown }
 	| { kind: "value"; value: unknown }
 	| { kind: "short" };
 
@@ -151,8 +152,14 @@ export function evaluateReference(vm: VM, frame: NodeFrame, target: ts.Expressio
 		return done({ kind: "member", obj, key: member.name.text });
 	}
 	const rawKey = vm.pop();
-	if (isSuper) return done({ kind: "super", key: toPropertyKey(rawKey) });
+	if (isSuper) return done({ kind: "super", key: rawKey });
 	return done({ kind: "member", obj: vm.pop(), key: rawKey });
+}
+
+/** A super reference's key at use: ToPropertyKey once, memoized on the record. */
+function superKeyOf(ref: Extract<Ref, { kind: "super" }>): PropertyKey {
+	if (typeof ref.key !== "string" && typeof ref.key !== "symbol") ref.key = toPropertyKey(ref.key);
+	return ref.key as PropertyKey;
 }
 
 /** A member reference's base and key at use: the nullish check, then ToPropertyKey (memoized on the record). */
@@ -177,7 +184,7 @@ export function getValue(vm: VM, scope: Scope, ref: Ref, crossing = true): unkno
 		case "private":
 			return privateGet(memberOf(ref, false).obj, lookupPrivate(scope, ref.name));
 		case "super": {
-			const value = superGet(scope, ref.key);
+			const value = superGet(scope, superKeyOf(ref));
 			return crossing ? vm.fromHost(value) : value;
 		}
 		case "value":
@@ -199,7 +206,7 @@ export function putValue(vm: VM, scope: Scope, ref: Ref, value: unknown): void {
 		case "private":
 			return privateSet(memberOf(ref, true).obj, lookupPrivate(scope, ref.name), value);
 		case "super":
-			return superSet(scope, ref.key, value);
+			return superSet(scope, superKeyOf(ref), value);
 		default:
 			throw new SyntaxError("Invalid left-hand side in assignment");
 	}

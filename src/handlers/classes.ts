@@ -117,11 +117,25 @@ export interface GuestClass {
 export function isConstructor(value: unknown): boolean {
 	if (typeof value !== "function") return false;
 	try {
-		Reflect.construct(String, [], value as new () => unknown);
+		// The target's construct trap answers without touching `value.prototype` (a getter there is
+		// observable — `class C extends Base` must read it exactly once).
+		Reflect.construct(CONSTRUCT_PROBE, [], value as new () => unknown);
 		return true;
 	} catch {
 		return false;
 	}
+}
+const CONSTRUCT_PROBE = new Proxy(function () {}, { construct: () => ({}) });
+
+/** A construction in progress: the instance as it stands (a parent constructor's `return`, or a host
+ *  parent, may replace it) and the class being constructed — GetSuperConstructor is DYNAMIC
+ *  (`Object.setPrototypeOf(C, …)` after definition changes what `super()` calls). Shared by the
+ *  construct frame and the constructor's scope, so `super()` finds it from an arrow, from a callback
+ *  invoked by the host, or after the constructor has returned (then: the parent runs, and binding
+ *  `this` again is the ReferenceError). */
+export interface Construction {
+	instance: object;
+	ctor: GuestClass;
 }
 
 /** The brand for guest classes — a side table, never a property (own-property lists are observable). */
@@ -169,6 +183,8 @@ export interface PreEvaluatedClass {
 	scope: Scope;
 	superClass: unknown;
 	keys: unknown[];
+	/** the name an anonymous class expression takes (NamedEvaluation), if any. */
+	name?: string;
 }
 
 export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerScope: Scope, pre?: PreEvaluatedClass): GuestClass {
@@ -182,14 +198,15 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 	const heritage = node.heritageClauses?.find((h) => h.token === K.ExtendsKeyword);
 	const superClass = pre !== undefined ? pre.superClass : heritage ? vm.evalNodeSync(heritage.types[0].expression, scope) : undefined;
 	if (heritage && superClass !== null && typeof superClass !== "function") throw new TypeError(`Class extends value ${String(superClass)} is not a constructor or null`);
+	let parentProto: unknown;
 	if (typeof superClass === "function") {
 		// IsConstructor first (an arrow / async / generator / bound-arrow parent is a TypeError before its
 		// `prototype` is ever read), then the prototype must be an object (a function counts) or null.
 		if (!isConstructor(superClass)) throw new TypeError("Class extends value is not a constructor or null");
-		const parentProto = (superClass as { prototype?: unknown }).prototype;
+		parentProto = (superClass as { prototype?: unknown }).prototype; // read ONCE (a getter is observable)
 		if (parentProto !== null && typeof parentProto !== "object" && typeof parentProto !== "function") throw new TypeError(`Class extends value does not have valid prototype property ${String(parentProto)}`);
 	}
-	const proto = superClass === null ? Object.create(null) : superClass !== undefined ? Object.create((superClass as GuestClass).prototype) : new vm.realm.Object();
+	const proto = superClass === null ? Object.create(null) : superClass !== undefined ? Object.create(parentProto as object | null) : new vm.realm.Object();
 	const meta: ClassMeta = { node, closure: scope, superClass, proto, instanceFields: [], instancePrivateMethods: [] };
 	const privateNames = declarePrivateNames(node, scope);
 	const privateOf = (member: ts.ClassElement): PrivateName | undefined => {
@@ -216,15 +233,17 @@ export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerSco
 	const Ctor = function (this: unknown, ...args: unknown[]): unknown {
 		// Host-initiated construction (rare); guest `new` uses the explicit construct frame.
 		if (new.target === undefined) throw new TypeError(`Class constructor ${node.name?.text ?? ""} cannot be invoked without 'new'`);
-		return vm.constructGuestSync(Ctor as unknown as GuestClass, args);
+		return vm.constructGuestSync(Ctor as unknown as GuestClass, args, new.target);
 	} as unknown as GuestClass;
 	CLASS_META.set(Ctor, meta);
-	Ctor.prototype = proto;
+	Object.defineProperty(Ctor, "prototype", { value: proto, writable: false, enumerable: false, configurable: false }); // a class's prototype is immutable
 	Object.defineProperty(proto, "constructor", { value: Ctor, enumerable: false, writable: true, configurable: true });
 	Object.setPrototypeOf(Ctor, typeof superClass === "function" ? superClass : vm.realm.Function.prototype);
 	// Always set: an anonymous class expression is `""`, and V8 would otherwise infer the host
 	// variable's name ("Ctor") — observable via `.name`.
-	Object.defineProperty(Ctor, "name", { value: node.name?.text ?? "", configurable: true });
+	// NamedEvaluation: an anonymous class expression bound to a name has that name ALREADY while its
+	// static initializers run (`var C = class { static x = C.name }`).
+	Object.defineProperty(Ctor, "name", { value: node.name?.text ?? pre?.name ?? "", configurable: true });
 	// A class's `length` is its constructor's expected argument count (0 without an explicit one).
 	const ctorDecl = node.members.find((m): m is ts.ConstructorDeclaration => ts.isConstructorDeclaration(m) && m.body !== undefined && !hasStatic(m));
 	Object.defineProperty(Ctor, "length", { value: ctorDecl === undefined ? 0 : functionLength(ctorDecl.parameters), configurable: true });
@@ -358,24 +377,22 @@ export function pushParentConstruct(vm: VM, superClass: unknown, args: unknown[]
 	throw new TypeError("Class extends value is not a constructor or null");
 }
 
-/** The instance under construction (the nearest `construct` frame's). */
-export function currentConstructInstance(vm: VM): object {
-	for (let i = vm.frames.length - 1; i >= 0; i--) {
-		const f = vm.frames[i];
-		if (f.kind === "construct") return f.instance as object;
-	}
-	throw new SyntaxError("'super' keyword unexpected here");
+/** GetSuperConstructor: the class's CURRENT [[Prototype]], which must be a constructor. */
+export function superConstructorOf(construction: Construction): unknown {
+	const parent = Object.getPrototypeOf(construction.ctor) as unknown;
+	if (!isConstructor(parent)) throw new TypeError("Super constructor is not a constructor");
+	return parent;
 }
 
-/** After a parent created/initialized `this`, point the constructor's `this` and the pending construct frame at it. */
-export function rebindThis(vm: VM, scope: Scope, replacement: object): void {
+/** After a parent created/initialized `this`: the constructor's `this` and the construction record point at it. */
+export function rebindThis(scope: Scope, construction: Construction, replacement: object): void {
 	for (let s: Scope | undefined = scope; s; s = s.parent) {
 		if (s.hasThis) {
 			s.thisVal = replacement;
 			break;
 		}
 	}
-	setConstructInstance(vm, replacement);
+	construction.instance = replacement;
 }
 
 // `super(...)` inside a derived constructor: construct the parent on the current instance, then
@@ -387,22 +404,37 @@ export function superCall(vm: VM, frame: NodeFrame, node: ts.CallExpression): vo
 	} else if (frame.phase === 1) {
 		const args = collectCallArguments(vm, frame);
 		const meta = frame.scope.getClassMeta() as ClassMeta;
-		const instance = currentConstructInstance(vm);
+		const construction = frame.scope.getConstruction() as Construction | undefined;
+		if (construction === undefined) throw new SyntaxError("'super' keyword unexpected here");
+		const parent = superConstructorOf(construction);
 		const newTarget = frame.scope.getNewTarget();
 		// Spec order: the parent constructs FIRST; binding `this` a second time is the ReferenceError
-		// (so a double `super()` runs the parent twice and initializes fields once).
-		if (isGuestClass(meta.superClass)) {
+		// (so a double `super()` — or one from an arrow after the constructor returned — runs the
+		// parent again and then throws; fields initialize once).
+		if (frame.scope.getThis() !== THIS_TDZ) {
+			if (isGuestClass(parent)) {
+				pushParentConstruct(vm, parent, args, Object.create(parent.prototype), newTarget);
+				frame.phase = 3; // → discard the parent's instance, then the ReferenceError
+				return;
+			}
+			pushParentConstruct(vm, parent, args, construction.instance, newTarget);
+			assertThisUnbound(frame.scope);
+		}
+		if (isGuestClass(parent)) {
 			// initfields runs after the parent construct frame completes (it's pushed first, below it);
 			// it also binds `this` — the parent's construction is what initializes it.
-			vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance, thisScope: frame.scope, fromStack: true });
-			pushParentConstruct(vm, meta.superClass, args, instance, newTarget);
+			vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance: construction.instance, construction, thisScope: frame.scope, fromStack: true });
+			pushParentConstruct(vm, parent, args, construction.instance, newTarget);
 		} else {
-			const created = pushParentConstruct(vm, meta.superClass, args, instance, newTarget) as object;
-			assertThisUnbound(frame.scope);
-			rebindThis(vm, frame.scope, created);
-			vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance: created });
+			const created = pushParentConstruct(vm, parent, args, construction.instance, newTarget) as object;
+			rebindThis(frame.scope, construction, created);
+			vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance: created, construction });
 		}
 		frame.phase = 2;
+	} else if (frame.phase === 3) {
+		vm.pop(); // the re-run parent's instance
+		vm.frames.pop();
+		assertThisUnbound(frame.scope);
 	} else {
 		vm.frames.pop();
 		vm.push(thisValue(frame.scope)); // `super()` evaluates to the now-bound `this`
@@ -450,7 +482,7 @@ export function classDefinition(vm: VM, frame: NodeFrame, node: ts.ClassLikeDecl
 	}
 	const values = vm.values.splice(frame.base as number);
 	const superClass = heritage ? values.shift() : undefined;
-	return createGuestClass(vm, node, frame.scope, { scope: frame.classScope as Scope, superClass, keys: values });
+	return createGuestClass(vm, node, frame.scope, { scope: frame.classScope as Scope, superClass, keys: values, name: frame.nameHint });
 }
 
 function classDeclaration(vm: VM, frame: NodeFrame): void {
@@ -477,13 +509,15 @@ function constructFrame(vm: VM, frame: ConstructFrame): void {
 	const meta = classMetaOf(ctor);
 	if (frame.phase === 0) {
 		const instance = (frame.instance as object) ?? Object.create(ctor.prototype);
-		frame.instance = instance;
+		const construction: Construction = { instance, ctor };
+		frame.construction = construction;
 		frame.derived = meta.superClass !== undefined; // (a constructor's `return` is judged in VM.unwind)
 		if (meta.ctorNode) {
 			const fnScope = new Scope(meta.closure, true);
 			fnScope.hasThis = true;
 			// Derived: `this` is uninitialized until `super()` returns (ReferenceError before that).
 			fnScope.thisVal = meta.superClass !== undefined ? THIS_TDZ : instance;
+			fnScope.construction = construction;
 			frame.ctorScope = fnScope;
 			fnScope.homeObject = meta.proto;
 			fnScope.classMeta = meta;
@@ -500,13 +534,14 @@ function constructFrame(vm: VM, frame: ConstructFrame): void {
 		} else if (meta.superClass !== undefined) {
 			// Implicit derived constructor: super(...args), then this class's fields.
 			const newTarget = frame.newTarget ?? ctor;
-			if (isGuestClass(meta.superClass)) {
-				vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance, fromStack: true });
-				pushParentConstruct(vm, meta.superClass, frame.args, instance, newTarget);
+			const parent = superConstructorOf(construction);
+			if (isGuestClass(parent)) {
+				vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance, construction, fromStack: true });
+				pushParentConstruct(vm, parent, frame.args, instance, newTarget);
 			} else {
-				const created = pushParentConstruct(vm, meta.superClass, frame.args, instance, newTarget) as object;
-				frame.instance = created;
-				vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance: created });
+				const created = pushParentConstruct(vm, parent, frame.args, instance, newTarget) as object;
+				construction.instance = created;
+				vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance: created, construction });
 			}
 		} else {
 			initInstanceFields(vm, meta, instance);
@@ -517,7 +552,7 @@ function constructFrame(vm: VM, frame: ConstructFrame): void {
 		const ctorScope = frame.ctorScope as Scope | undefined;
 		if (ctorScope !== undefined && frame.overridden !== true && ctorScope.thisVal === THIS_TDZ) throw new ReferenceError("Must call super constructor in derived class before accessing 'this' or returning from derived constructor");
 		vm.frames.pop();
-		if (frame.isNew || frame.forSuper === true) vm.push(frame.instance);
+		if (frame.isNew || frame.forSuper === true) vm.push((frame.construction as Construction).instance);
 	}
 }
 
@@ -528,22 +563,12 @@ function initfieldsFrame(vm: VM, frame: InitFieldsFrame): void {
 	if (frame.fromStack === true) instance = vm.pop() as object;
 	if (frame.thisScope !== undefined) {
 		assertThisUnbound(frame.thisScope);
-		rebindThis(vm, frame.thisScope, instance);
-	} else if (frame.fromStack === true) setConstructInstance(vm, instance);
+		rebindThis(frame.thisScope, frame.construction as Construction, instance);
+	} else if (frame.construction !== undefined) frame.construction.instance = instance;
 	initInstanceFields(vm, frame.meta, instance);
 	vm.frames.pop();
 }
 
-/** Point the nearest pending construct frame at `instance` (what its `new` will yield). */
-export function setConstructInstance(vm: VM, instance: object): void {
-	for (let i = vm.frames.length - 1; i >= 0; i--) {
-		const f = vm.frames[i];
-		if (f.kind === "construct") {
-			f.instance = instance;
-			return;
-		}
-	}
-}
 
 
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */

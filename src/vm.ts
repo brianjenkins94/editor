@@ -406,7 +406,7 @@ export class VM {
 			this.values.length = frame.valuesBase;
 			this.signal = null;
 			if ((typeof value === "object" && value !== null) || typeof value === "function") {
-				frame.instance = value;
+				(frame.construction as { instance: unknown }).instance = value;
 				frame.overridden = true; // (a derived constructor may then never have called super())
 			} else if (value !== undefined && frame.derived === true) this.signal = { type: "throw", value: this.toGuestError(new TypeError("Derived constructors may only return object or undefined")) };
 			return;
@@ -830,8 +830,8 @@ export class VM {
 	 * construct frame to completion on a private stack; guest `new` uses the explicit construct frame
 	 * directly (steppable). The `frame.kind === "construct"` handler lives in handlers.ts.
 	 */
-	constructGuestSync(ctor: GuestClass, args: unknown[]): unknown {
-		return this.runSub(() => this.frames.push({ kind: "construct", node: null, phase: 0, scope: this.rootScope, valuesBase: 0, ctor, args, isNew: true, newTarget: ctor }));
+	constructGuestSync(ctor: GuestClass, args: unknown[], newTarget: unknown = ctor): unknown {
+		return this.runSub(() => this.frames.push({ kind: "construct", node: null, phase: 0, scope: this.rootScope, valuesBase: 0, ctor, args, isNew: true, newTarget }));
 	}
 
 	// --- fibers: generators & async (machine suspension, ASSIGNMENT §3) -------

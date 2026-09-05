@@ -4,12 +4,12 @@
 import ts from "typescript";
 import type { Iteration } from "../frame.ts";
 import type { VM } from "../vm.ts";
-import { isObjectLike } from "./realm.ts";
+import { getProperty, isObjectLike } from "./realm.ts";
 import { on } from "./registry.ts";
 
 export function getAsyncOrSyncIterator(vm: VM, iterable: unknown): { record: IterRecord; sync: boolean } {
 	if (iterable == null) throw new TypeError(`${String(iterable)} is not async iterable`);
-	const asyncFactory = (iterable as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator];
+	const asyncFactory = getProperty(vm, iterable, Symbol.asyncIterator);
 	if (asyncFactory != null) {
 		if (typeof asyncFactory !== "function") throw new TypeError("Symbol.asyncIterator is not a function");
 		const iterator = (asyncFactory as () => unknown).call(iterable);
@@ -67,7 +67,8 @@ export const arrayIterationNext = function (this: ArrayIteration): IteratorResul
 
 /** GetIterator: a TypeError (not a property-of-null error) when the value isn't iterable. */
 export function getIterator(vm: VM, value: unknown): IterRecord {
-	const factory = value == null ? undefined : (value as { [Symbol.iterator]?: () => Iterator<unknown> })[Symbol.iterator];
+	// (a primitive boxes in the GUEST realm: `Boolean.prototype[Symbol.iterator]` patched there is seen)
+	const factory = value == null ? undefined : (getProperty(vm, value, Symbol.iterator) as (() => Iterator<unknown>) | undefined);
 	if (typeof factory !== "function") throw new TypeError(`${value === null ? "null" : typeof value === "object" ? "object" : String(value)} is not iterable`);
 	const realm = vm.realm;
 	if (Array.isArray(value) && factory === realm.arrayValues && realm.arrayIteratorPrototype.next === realm.arrayIteratorNext) {
@@ -119,16 +120,18 @@ export function closeIteration(it: Iteration, abrupt: boolean): void {
  *  original error wins over anything `return()` throws; on a normal one, `return()`'s errors surface. */
 export function closeIterator(iterator: object, done: boolean, abrupt: boolean): void {
 	if (done) return;
-	const ret = (iterator as { return?: unknown }).return;
-	if (ret == null) return;
 	if (abrupt) {
+		// The original error wins over anything here — including a throwing `return` GETTER.
 		try {
+			const ret = (iterator as { return?: unknown }).return;
 			if (typeof ret === "function") (ret as () => unknown).call(iterator);
 		} catch {
 			/* the original error wins */
 		}
 		return;
 	}
+	const ret = (iterator as { return?: unknown }).return;
+	if (ret == null) return;
 	if (typeof ret !== "function") throw new TypeError("iterator.return is not a function");
 	const result = (ret as () => unknown).call(iterator);
 	if (typeof result !== "object" || result === null) throw new TypeError("iterator.return() did not return an object");

@@ -33,7 +33,7 @@ registerPatterns();
 
 export { nodeHandlers, syntheticHandlers } from "./handlers/registry.ts";
 export { createGuestFunction } from "./handlers/functions.ts";
-export { createGuestClass, clonePrivateElements, isGuestClass, type GuestClass, type ClassMeta } from "./handlers/classes.ts";
+export { createGuestClass, clonePrivateElements, isGuestClass, type GuestClass, type ClassMeta, type Construction } from "./handlers/classes.ts";
 export { bindIdentifier, bindingProgram, assignProgram, pushPattern, PatternProgram } from "./handlers/patterns.ts";
 export { closeIteration, closeIterator, getIterator, type IterRecord } from "./handlers/iteration.ts";
 export type { Ref } from "./handlers/references.ts";

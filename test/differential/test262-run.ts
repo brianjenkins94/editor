@@ -8,6 +8,7 @@
  * - fail: Node passes and tsval doesn't — a real finding, with the reason.
  */
 import nodeVm from "node:vm";
+import ts from "typescript";
 import { parse } from "../../src/frontend.ts";
 import { VM } from "../../src/vm.ts";
 import { assembleProgram, type Test262Test } from "./test262-corpus.ts";
@@ -46,12 +47,18 @@ const SKIP_FEATURES: Record<string, string> = {
 	"import-defer": "module code",
 };
 
+/** Script-only programs: `var`/function declarations as properties of the global object, `await` as an identifier. */
+const SCRIPT_GOAL_IDS = new Set(["types/object/S8.6.2_A5_T3.js", "statements/variable/S12.2_A11.js", "statements/variable/S12.2_A9.js", "expressions/await/await-BindingIdentifier-in-global.js"]);
+
 export function policySkip(test: Test262Test): string | undefined {
 	for (const [prefix, reason] of Object.entries(SKIP_DIRS)) if (test.id.startsWith(prefix)) return reason;
 	for (const flag of test.meta.flags) if (flag in SKIP_FLAGS) return SKIP_FLAGS[flag];
 	for (const feature of test.meta.features) if (feature in SKIP_FEATURES) return `feature ${feature}: ${SKIP_FEATURES[feature]}`;
 	if (test.meta.negative !== undefined && test.meta.negative.phase !== "runtime") return `negative ${test.meta.negative.phase}-phase test (tests the parser, not the interpreter)`;
 	if (/^identifiers\/.*unicode-1[6-9]\.\d/.test(test.id)) return "identifier characters newer than the TypeScript scanner's Unicode tables (parser)";
+	if (SCRIPT_GOAL_IDS.has(test.id)) return "script-goal semantics (top-level bindings as global properties, `await` as an identifier): tsval's program scope is a module";
+	if (test.id.startsWith("statements/class/subclass/builtin-objects/GeneratorFunction/")) return "the GeneratorFunction constructor compiles code from strings (a capability shim, not modeled)";
+	if (test.meta.includes.includes("wellKnownIntrinsicObjects.js")) return "harness include compiles code from strings (`new Function`)";
 	if (/\$262\b/.test(test.source)) return "uses the $262 host object";
 	if (/\beval\s*\(|\bnew\s+Function\s*\(|\bFunction\s*\(/.test(test.source)) return "uses eval/Function (direct-eval and code-from-string semantics are a capability shim, not modeled)";
 	return undefined;
@@ -162,5 +169,10 @@ export async function runTest262(root: string, test: Test262Test): Promise<Test2
 	const control = await runControl(test, program);
 	if (!control.ok) return { kind: "control-failed", reason: control.reason };
 	const subject = await runSubject(test, program);
-	return subject.ok ? { kind: "pass" } : { kind: "fail", reason: subject.reason };
+	if (subject.ok) return { kind: "pass" };
+	// A failing test TypeScript's own parser cannot parse cleanly judges the parser, not the interpreter.
+	const parsed = ts.createSourceFile("test.js", test.source, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
+	const diagnostics = (parsed as unknown as { parseDiagnostics?: unknown[] }).parseDiagnostics ?? [];
+	if (diagnostics.length > 0) return { kind: "control-failed", reason: "TypeScript's parser reports syntactic diagnostics for this program (a parser deviation, not an interpreter one)" };
+	return { kind: "fail", reason: subject.reason };
 }

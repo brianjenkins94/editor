@@ -11,7 +11,7 @@
 import type ts from "typescript";
 import type { Scope, BindingKind } from "./scope.ts";
 import type { GuestFunctionMeta, GuestFunctionNode } from "./values.ts";
-import type { ClassMeta, GuestClass, IterRecord, PatternProgram, Ref } from "./handlers.ts";
+import type { ClassMeta, Construction, GuestClass, IterRecord, PatternProgram, Ref } from "./handlers.ts";
 import type { Signal } from "./vm.ts";
 
 interface FrameBase {
@@ -104,6 +104,12 @@ export interface NodeFrame extends FrameBase {
 	awaiting?: boolean;
 	/** compound statements: the completion serial at entry (see VM.finishStatement). */
 	completionMark?: number;
+	/** `for…in`: the object being enumerated (a key deleted before its turn is skipped). */
+	enumerated?: object;
+	/** operands accumulated one at a time (object literals: keys converted as they arrive). */
+	values?: unknown[];
+	/** NamedEvaluation: the name an anonymous class expression takes BEFORE its static initializers run. */
+	nameHint?: string;
 }
 
 /** A guest function invocation (guest→guest calls never use the host stack). */
@@ -122,8 +128,11 @@ export interface ConstructFrame extends FrameBase {
 	node: null;
 	ctor: GuestClass;
 	args: unknown[];
-	/** the object under construction (created at phase 0 when absent). */
+	/** the object to construct on (created at phase 0 when absent). */
 	instance?: object;
+	/** the construction record (phase 0 on): the instance as it stands — a parent's `return` or a host
+	 *  parent replaces it — shared with the constructor's scope so `super()` reaches it from anywhere. */
+	construction?: Construction;
 	/** `new`: push the instance as the expression's value; `forSuper`: leave it for the initfields frame. */
 	isNew: boolean;
 	forSuper?: boolean;
@@ -141,6 +150,8 @@ export interface InitFieldsFrame extends FrameBase {
 	node: null;
 	meta: ClassMeta;
 	instance: object;
+	/** the construction record to update with the parent's final instance. */
+	construction?: Construction;
 	/** the constructor scope whose `this` leaves its TDZ. */
 	thisScope?: Scope;
 	/** the parent's construct frame left its final instance on the value stack. */

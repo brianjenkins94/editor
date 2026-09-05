@@ -79,7 +79,10 @@ export class Scope {
 	}
 
 	/** Walk to the nearest scope that carries the given class/method field (arrows are transparent). */
-	private findUp<K extends "homeObject" | "classMeta" | "newTarget">(key: K): Scope[K] {
+	/** The construction in progress for the nearest constructor scope (see handlers/classes.ts). */
+	construction?: unknown;
+
+	private findUp<K extends "homeObject" | "classMeta" | "newTarget" | "construction">(key: K): Scope[K] {
 		// eslint-disable-next-line @typescript-eslint/no-this-alias
 		let s: Scope | undefined = this;
 		while (s) {
@@ -95,6 +98,9 @@ export class Scope {
 	}
 	getClassMeta(): unknown {
 		return this.findUp("classMeta");
+	}
+	getConstruction(): unknown {
+		return this.findUp("construction");
 	}
 	getNewTarget(): unknown {
 		return this.findUp("newTarget");
