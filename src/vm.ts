@@ -112,12 +112,12 @@ export interface VMOptions {
 	 *  builtins are non-enumerable, or a shared shim table). `globals` are then layered on top of it. */
 	globalObject?: Record<string, unknown>;
 	/** Fall back to the host's real `globalThis` for unresolved names. Default true (max differential
-	 *  parity). The canary stage (S5) sets this false for a controlled environment. */
+	 *  parity). A sandboxing host sets this false for a controlled environment. */
 	realGlobals?: boolean;
 	/** Resolve a module specifier to its namespace object (for `import` / dynamic `import()`). This is
 	 *  the injection seam for capability shims (ASSIGNMENT §5): return shimmed built-ins here. */
 	resolveModule?: (specifier: string) => unknown;
-	/** Optional `TypeChecker` for type-aware evaluation / a type-directed canary (ASSIGNMENT S6). */
+	/** Optional `TypeChecker` for type-aware evaluation (a host can ask for the static type at a node). */
 	typeChecker?: ts.TypeChecker;
 	/** Top-level `this`. Default `undefined` (module semantics — the supported surface); a *script*
 	 *  runner (test262) passes the global object. */
@@ -127,7 +127,7 @@ export interface VMOptions {
 	 *  `.constructor.constructor`, and only the interpreter sees every read and every call. */
 	hostGuard?: HostGuard;
 	/** Notified with the Promise of every async guest function invoked, so a driver can track
-	 *  outstanding async work (the canary awaits/fails on it instead of losing late reaches). */
+	 *  outstanding async work (a host that must observe every effect awaits it). */
 	onAsyncFiber?: (promise: Promise<unknown>) => void;
 }
 
@@ -218,7 +218,7 @@ export class VM {
 		const pick = <T>(name: string): T => (typeof g[name] === "function" ? g[name] : (globalThis as Record<string, unknown>)[name]) as T;
 		const realmObject = pick<ObjectConstructor>("Object");
 		// The realm's *intrinsic* Function is reached through Object (a global named `Function` may be
-		// a shim — the canary's eval guard); it's what guest function objects are created from.
+		// a shim — a host's eval guard); it's what guest function objects are created from.
 		const realmFunction = (realmObject as unknown as { constructor: FunctionConstructor }).constructor;
 		this.realm = makeRealm({ Array: pick("Array"), Object: realmObject, RegExp: pick("RegExp"), Function: typeof realmFunction === "function" ? realmFunction : Function, Promise: pick("Promise") });
 		this.rootScope.hasThis = true;
@@ -353,8 +353,8 @@ export class VM {
 			if (frame.kind === undefined && frame.completionMark !== undefined && this.frames[this.frames.length - 1] !== frame && !this.frames.includes(frame)) this.finishStatement(frame);
 		} catch (error) {
 			// A guest-observable runtime error (host built-in threw, bad member access, `instanceof` on a
-			// non-object, …) becomes a catchable `throw` signal. Interpreter bugs and canary aborts stay
-			// loud and propagate to the host uncaught (ASSIGNMENT working style; the canary tripwire must
+			// non-object, …) becomes a catchable `throw` signal. Interpreter bugs and a host's uncatchable
+			// aborts stay loud and propagate to the host uncaught (ASSIGNMENT working style; a host tripwire must
 			// not be swallowable by guest try/catch).
 			if (isUncatchable(error)) throw error;
 			this.signal = { type: "throw", value: this.toGuestError(error) };
@@ -635,7 +635,7 @@ export class VM {
 	 * closures, scopes, and value-like host builtins (Date/RegExp/Map/Set) are copied. A shared `seen`
 	 * map preserves reference identity and cycles *within* the fork.
 	 *
-	 * This is what lets the canary (S5) explore more than one path from a single run.
+	 * This is what lets a host explore more than one path from a single run.
 	 */
 	fork(): VM {
 		const seen = new Map<unknown, unknown>();
@@ -976,7 +976,7 @@ export class VM {
 				Promise.resolve(result.value).then(
 					(v) => drive({ kind: "next", value: v }),
 					(e) => {
-						// An uncatchable error (interpreter bug, canary abort) that rejected an awaited promise
+						// An uncatchable error (interpreter bug, a host's abort) that rejected an awaited promise
 						// must not be injected as a guest `throw` — guest try/catch could swallow it.
 						if (isUncatchable(e)) {
 							f.done = true;

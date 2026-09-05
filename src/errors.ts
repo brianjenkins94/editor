@@ -1,6 +1,6 @@
 /**
  * Marker for errors that must propagate to the host uncaught — never converted into a catchable guest
- * `throw` by the step loop. Used for interpreter-internal failures and for canary aborts (so guest
+ * `throw` by the step loop. Used for interpreter-internal failures and for a host's aborts (so guest
  * code can't swallow the tripwire with its own try/catch).
  */
 export const UNCATCHABLE: unique symbol = Symbol("tsval.uncatchable");

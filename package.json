@@ -19,7 +19,6 @@
     "ts-cases:fetch": "bash scripts/ts-cases-fetch.sh",
     "ts-cases:sample": "node scripts/ts-cases-sample.ts",
     "ts-cases:report": "node scripts/ts-cases-report.ts",
-    "silo:loop": "node scripts/silo-loop.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

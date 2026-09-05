@@ -11,7 +11,4 @@ export { isGuestFunction } from "./values.ts";
 export type { GuestFunction, GuestFunctionMeta } from "./values.ts";
 export { nodeHandlers, syntheticHandlers, createGuestFunction } from "./handlers.ts";
 export { TsvalInternalError, unimplemented, isUncatchable, UNCATCHABLE } from "./errors.ts";
-export { runCanary, runCanaryAsync, exploreCanary, safeGlobals, covers, CanaryDivergenceError } from "./canary.ts";
-export type { ExploreOptions, ExplorationReport, PathReport, PathDecision } from "./canary.ts";
 export type { HostGuard } from "./vm.ts";
-export type { CanaryEvent, CanaryReport, CanaryOptions } from "./canary.ts";

@@ -5,6 +5,21 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## Canary moved out ✅ (2026-09-05) — this repository is the interpreter only
+
+Separation of concerns: the capability canary (`src/canary.ts`: recording shims, the divergence
+tripwire, `runCanary`/`runCanaryAsync`/`exploreCanary`, the type-directed sensitive-flow check,
+`safeGlobals`), its tests, the silo integration (`test/integration/silo*.ts`) and the
+`npm run silo:loop` script now live in their own repository. Their last state here is commit
+`b7881a4`. What stays is the interpreter and the seams a host builds on — `hostGuard`
+(`sanitize`/`beforeCall`), `resolveModule`, `onAsyncFiber`, `fork`, breakpoints/step budgets, the
+optional `TypeChecker` — now covered by direct interpreter tests (`test/vm/host-boundary.test.ts`)
+instead of through the canary. The review-regression tests that were interpreter findings (fork
+rebinding, suspension inside sub-expressions, fork policy) moved to `test/vm/regressions.test.ts`.
+Comments no longer describe a canary; they describe a host. `npm test`: 1664 tests, all green.
+
+---
+
 ## test262 round 3 ✅ (2026-09-05) — 39 → 11 failures, all in async scheduling
 
 **Standing:** 15,713 pass, 11 fail, 35 inconclusive, 7,967 skipped → 99.9% on eligible. The 11

@@ -2,14 +2,14 @@
 
 A **stepped, stack-based, TypeScript-AST interpreter**. It walks the native TypeScript compiler AST
 (`ts.SyntaxKind`, "Path B") and executes it on an explicit continuation-stack VM — not host recursion
-— so it can single-step, pause/resume, and (planned) snapshot/fork execution state.
+— so it can single-step, pause/resume, and snapshot/fork execution state.
 
-It is the dynamic half of a capability-analysis system: a static kernel predicts which capabilities a
-file reaches; tsval will later run the code with injectable capability shims and hard-abort on any
-runtime divergence from that prediction (the "canary"). Stepping and snapshot/fork are what make that
-possible — which is why tsval is a fresh stack VM rather than a reuse of an existing one-shot
-tree-walker. See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the full design and [`PROGRESS.md`](./PROGRESS.md)
-for current status.
+This repository is the interpreter only. It exposes the seams a host builds on — a host-boundary
+guard that sees every value and every callable crossing from the host, an `import` resolver, an
+async-invocation hook, fork, breakpoints, an optional TypeChecker — and takes no position on what a
+host does with them. (The capability canary that originally motivated those seams lives in its own
+repository.) See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the original design brief and
+[`PROGRESS.md`](./PROGRESS.md) for current status.
 
 ## Requirements
 
@@ -59,21 +59,27 @@ is written in, and the surface Node's own type-stripping accepts. Anything outsi
 
 The differential oracle runs Node in strict mode with an undefined receiver to match.
 
-## The static→dynamic loop
+## Host seams
 
-tsval is the dynamic half of a capability analysis: silo (`../lib/util/silo`) predicts which
-capabilities a file reaches statically; the canary runs the program with recording shims and
-hard-aborts the instant runtime reaches a capability outside that prediction. With `../lib`
-checked out next to this repo:
+```ts
+import { interpret, createVM } from "./src/index.ts";
 
-```bash
-npm run silo:loop -- path/to/program.ts --explore
+interpret(code, {
+  hostGuard: {
+    sanitize: (value) => value,                 // every host→guest value crossing (property reads, returns, awaited values)
+    beforeCall: (callee, thisArg, isNew) => callee, // every host callable the guest invokes (replace, wrap, or refuse)
+  },
+  resolveModule: (specifier) => namespace,      // what `import` / `import()` resolve to
+  onAsyncFiber: (promise) => {},                // every async function / async-generator invocation
+});
+
+const vm = createVM(code);
+vm.runUntil((m) => m.steps > 1_000);           // step budgets, breakpoints (vm.location, vm.breakpoints)
+const fork = vm.fork();                        // an independent copy of the machine state, mid-expression if need be
 ```
 
-prints the static prediction and reaches, the runtime reaches with their *resolved* resources
-(a concatenated URL, a computed member name — things the static side cannot see), and the verdict
-of `runtime-caps ⊆ static-caps` (exit code 1 on a divergence). `test/integration/silo-loop.test.ts`
-runs that loop against the real kernel in `npm test` (skipped without `../lib`).
+Guest→guest calls never touch the host stack, so a guard cannot be bypassed from inside the guest;
+`[].constructor.constructor` reaches the guard like any other read.
 
 ## TypeScript's own test cases
 
