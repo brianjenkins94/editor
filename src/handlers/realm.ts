@@ -3,20 +3,20 @@
  */
 import ts from "typescript";
 import { Scope } from "../scope.ts";
-import type { VM } from "../vm.ts";
+import type { Machine } from "../vm.ts";
 import { propertyName } from "./literals.ts";
 import { on } from "./registry.ts";
 
 /** GetValue on a member reference. A primitive base is boxed in the GUEST realm (its
  *  `String.prototype`, not the host's — `"".constructor === String` must hold for the guest's
  *  `String`), with the primitive itself as the receiver for getters. Same-realm: a plain read. */
-export function getProperty(vm: VM, obj: unknown, key: PropertyKey): unknown {
+export function getProperty(vm: Machine, obj: unknown, key: PropertyKey): unknown {
 	if (vm.realm.Object !== Object && typeof obj !== "object" && typeof obj !== "function") return Reflect.get(vm.realm.Object(obj) as object, key, obj);
 	return (obj as Record<PropertyKey, unknown>)[key];
 }
 
 /** PutValue on a member reference (strict): a primitive base finds a guest-realm setter or throws. */
-export function setProperty(vm: VM, obj: unknown, key: PropertyKey, value: unknown): void {
+export function setProperty(vm: Machine, obj: unknown, key: PropertyKey, value: unknown): void {
 	if (vm.realm.Object !== Object && typeof obj !== "object" && typeof obj !== "function") {
 		if (!Reflect.set(vm.realm.Object(obj) as object, key, value, obj)) throw new TypeError(`Cannot create property '${keyText(key)}' on ${typeof obj} '${String(obj)}'`);
 		return;
@@ -93,7 +93,7 @@ export function isObjectLike(v: unknown): v is object {
 /** A strict-mode `arguments` object: an array-like with the arguments as own indexed properties, a
  *  non-enumerable `length` and `@@iterator`, and a `callee` accessor that throws (strict). Unmapped —
  *  sloppy-mode parameter aliasing is out of scope. */
-export function createArgumentsObject(vm: VM, args: unknown[]): object {
+export function createArgumentsObject(vm: Machine, args: unknown[]): object {
 	const obj = new vm.realm.Object() as Record<PropertyKey, unknown>;
 	for (let i = 0; i < args.length; i++) defineData(obj, i, args[i]); // CreateDataProperty (no inherited setters)
 	Object.defineProperty(obj, "length", { value: args.length, writable: true, enumerable: false, configurable: true });
@@ -107,14 +107,14 @@ export function createArgumentsObject(vm: VM, args: unknown[]): object {
 
 /** A guest-realm array holding `list`'s elements, copied by index — never through the iteration
  *  protocol, which guest code may have overridden (`Array.prototype[Symbol.iterator] = …`). */
-export function realmArray(vm: VM, list: ArrayLike<unknown>): unknown[] {
+export function realmArray(vm: Machine, list: ArrayLike<unknown>): unknown[] {
 	const out = new vm.realm.Array(list.length) as unknown[];
 	for (let i = 0; i < list.length; i++) defineData(out, i, list[i]);
 	return out;
 }
 
 /** CopyDataProperties for an object rest: own enumerable string and symbol keys not already bound. */
-export function copyRestProperties(vm: VM, target: object, source: unknown, excluded: Set<PropertyKey>): void {
+export function copyRestProperties(vm: Machine, target: object, source: unknown, excluded: Set<PropertyKey>): void {
 	const src = Object(source) as Record<PropertyKey, unknown>;
 	for (const key of Reflect.ownKeys(src)) {
 		if (excluded.has(key)) continue;
@@ -157,7 +157,7 @@ export const toPropertyKey = (v: unknown): PropertyKey => {
 	return typeof primitive === "symbol" ? primitive : String(primitive);
 };
 
-export function bindingKey(vm: VM, scope: Scope, name: ts.PropertyName): PropertyKey {
+export function bindingKey(vm: Machine, scope: Scope, name: ts.PropertyName): PropertyKey {
 	if (ts.isComputedPropertyName(name)) return toPropertyKey(vm.evalNodeSync(name.expression, scope));
 	return propertyName(name);
 }

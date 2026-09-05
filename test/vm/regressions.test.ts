@@ -6,11 +6,13 @@
 import { test } from "node:test";
 import assert from "node:assert";
 import { createVM, interpret } from "../../src/interpret.ts";
+import type { Machine } from "../../src/vm.ts";
 
 // --- #3: fork must rebind cloned closures to the forked VM ---
 
 test("#3 fork: a host-invoked closure from the fork runs on the fork", () => {
-	const vm = createVM("function mk(){ let c = 0; return { inc: () => ++c }; } const o = mk(); o;");
+	// (spies on the implementation's guest-call entry point — a `Machine` concern, not the host API)
+	const vm = createVM("function mk(){ let c = 0; return { inc: () => ++c }; } const o = mk(); o;") as Machine;
 	vm.run();
 	const fork = vm.fork();
 	let originalHits = 0;

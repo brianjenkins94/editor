@@ -3,7 +3,7 @@
  */
 import ts from "typescript";
 import type { NodeFrame } from "../frame.ts";
-import type { NodeHandler, SyntheticHandlers, VM } from "../vm.ts";
+import type { NodeHandler, SyntheticHandlers, Machine } from "../vm.ts";
 
 /** Per-SyntaxKind frame handlers. */
 export const nodeHandlers: Record<number, NodeHandler> = {};
@@ -22,7 +22,7 @@ export function on(kind: number, handler: NodeHandler): void {
  * result or raises a signal. The numeric-phase form is reserved for handlers whose control flow
  * depends on intermediate values (branches, loops, try, calls, references, suspension points).
  */
-export function evaluating<N extends ts.Node>(children: (node: N) => readonly ts.Node[], combine: (vm: VM, frame: NodeFrame, node: N, values: unknown[]) => void): NodeHandler {
+export function evaluating<N extends ts.Node>(children: (node: N) => readonly ts.Node[], combine: (vm: Machine, frame: NodeFrame, node: N, values: unknown[]) => void): NodeHandler {
 	return (vm, frame) => {
 		const node = frame.node as N;
 		if (frame.phase === 0) {
@@ -39,17 +39,17 @@ export function evaluating<N extends ts.Node>(children: (node: N) => readonly ts
 }
 
 // Type-only / erased declarations — no runtime effect (the checker uses them; the VM skips them).
-export function noop(vm: VM): void {
+export function noop(vm: Machine): void {
 	vm.frames.pop();
 }
 
-export function pushText(vm: VM, frame: NodeFrame): void {
+export function pushText(vm: Machine, frame: NodeFrame): void {
 	vm.frames.pop();
 	vm.push((frame.node as ts.LiteralLikeNode).text);
 }
 
 // Type-only wrappers: evaluate the inner expression, ignore the type.
-export function passThroughExpr(vm: VM, frame: NodeFrame): void {
+export function passThroughExpr(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.ParenthesizedExpression | ts.AsExpression | ts.TypeAssertion | ts.NonNullExpression | ts.SatisfiesExpression;
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);

@@ -6,7 +6,7 @@ import { unimplemented } from "../errors.ts";
 import type { Iteration, PatternFrame } from "../frame.ts";
 import { Scope } from "../scope.ts";
 import type { BindingKind } from "../scope.ts";
-import type { VM } from "../vm.ts";
+import type { Machine } from "../vm.ts";
 import { isThisParameter, nameAnonymous } from "./functions.ts";
 import { suspend } from "./generators.ts";
 import { closeIteration, getIterator, iterationStep } from "./iteration.ts";
@@ -106,7 +106,7 @@ export const parameterProgram = (node: ts.SignatureDeclaration): PatternProgram 
 
 /** Start binding through `program` in `scope`: the frame runs above the caller's. `value` seeds the
  *  temp stack (the destructured value); a parameter program reads `args` instead. */
-export function pushPattern(vm: VM, scope: Scope, program: PatternProgram, value: unknown, args?: unknown[]): void {
+export function pushPattern(vm: Machine, scope: Scope, program: PatternProgram, value: unknown, args?: unknown[]): void {
 	vm.pushFrame({ kind: "pattern", node: null, phase: 0, scope, valuesBase: vm.values.length, program, pc: 0, temps: args === undefined ? [value] : [], iters: [], objs: [], keys: [], args });
 }
 
@@ -220,7 +220,7 @@ export function compileAssign(elementTarget: ts.Expression, ops: PatOp[]): void 
 
 // --- execution ---
 
-function patternFrame(vm: VM, frame: PatternFrame): void {
+function patternFrame(vm: Machine, frame: PatternFrame): void {
 	const program = frame.program;
 	const temps = frame.temps;
 	const iters = frame.iters;

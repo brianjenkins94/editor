@@ -4,7 +4,7 @@
 import ts from "typescript";
 import { unimplemented } from "../errors.ts";
 import type { NodeFrame } from "../frame.ts";
-import type { VM } from "../vm.ts";
+import type { Machine } from "../vm.ts";
 import { lookupPrivate, privateHas } from "./classes.ts";
 import { assignmentExpression, compoundAssignment } from "./references.ts";
 import { evaluating, on } from "./registry.ts";
@@ -32,7 +32,7 @@ export const ASSIGN = new Set<number>([
 	K.QuestionQuestionEqualsToken,
 ]);
 
-function binaryExpression(vm: VM, frame: NodeFrame): void {
+function binaryExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.BinaryExpression;
 	const op = node.operatorToken.kind;
 
@@ -55,7 +55,7 @@ export const plainBinary = evaluating<ts.BinaryExpression>(
 	(vm, _frame, node, [left, right]) => vm.push(applyBinary(node.operatorToken.kind, left as never, right as never)),
 );
 
-export function logicalExpression(vm: VM, frame: NodeFrame, node: ts.BinaryExpression, op: number): void {
+export function logicalExpression(vm: Machine, frame: NodeFrame, node: ts.BinaryExpression, op: number): void {
 	if (frame.phase === 0) {
 		vm.pushNode(node.left, frame.scope);
 		frame.phase = 1;
@@ -76,7 +76,7 @@ export function logicalExpression(vm: VM, frame: NodeFrame, node: ts.BinaryExpre
 	}
 }
 
-function conditionalExpression(vm: VM, frame: NodeFrame): void {
+function conditionalExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.ConditionalExpression;
 	if (frame.phase === 0) {
 		vm.pushNode(node.condition, frame.scope);

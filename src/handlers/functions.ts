@@ -6,7 +6,7 @@ import type { CallFrame } from "../frame.ts";
 import { Scope } from "../scope.ts";
 import { isGuestFunction } from "../values.ts";
 import type { GuestFunction, GuestFunctionMeta, GuestFunctionNode } from "../values.ts";
-import type { NodeHandler, VM } from "../vm.ts";
+import type { NodeHandler, Machine } from "../vm.ts";
 import { isGuestClass } from "./classes.ts";
 import { bindingNames, hoist } from "./hoist.ts";
 import { parameterProgram, pushPattern } from "./patterns.ts";
@@ -15,7 +15,7 @@ import { on, syntheticHandlers } from "./registry.ts";
 
 const K = ts.SyntaxKind;
 
-export function createGuestFunction(vm: VM, node: GuestFunctionNode, closure: Scope, homeObject?: object): GuestFunction {
+export function createGuestFunction(vm: Machine, node: GuestFunctionNode, closure: Scope, homeObject?: object): GuestFunction {
 	const modifierFlags = ts.getCombinedModifierFlags(node as ts.Declaration);
 	const meta: GuestFunctionMeta = {
 		node,
@@ -71,12 +71,12 @@ export const FOREIGN_WRAPPERS = {
 	plain: '"use strict"; return function (...args) { return vm.callGuestFromHost(meta, this, args, new.target); };',
 };
 
-export function makeWrapper(vm: VM, meta: GuestFunctionMeta, methodLike: boolean): GuestFunction {
+export function makeWrapper(vm: Machine, meta: GuestFunctionMeta, methodLike: boolean): GuestFunction {
 	// Generator and async functions are not constructors either (`new gen()` is a TypeError).
 	const isMethodLike = methodLike || meta.isGenerator || meta.isAsync;
 	if (vm.realm.Function !== Function) {
 		const template = meta.isArrow ? FOREIGN_WRAPPERS.arrow : isMethodLike ? FOREIGN_WRAPPERS.method : FOREIGN_WRAPPERS.plain;
-		return (vm.realm.Function("vm", "meta", template) as (vm: VM, meta: GuestFunctionMeta) => GuestFunction)(vm, meta);
+		return (vm.realm.Function("vm", "meta", template) as (vm: Machine, meta: GuestFunctionMeta) => GuestFunction)(vm, meta);
 	}
 	if (meta.isArrow) return ((...args: unknown[]) => vm.callGuestFromHost(meta, undefined, args)) as GuestFunction;
 	if (isMethodLike) {
@@ -100,7 +100,7 @@ export const makeFunction: NodeHandler = (vm, frame) => {
 
 
 // Synthetic call frame: run a guest function on the explicit stack.
-function callFrame(vm: VM, frame: CallFrame): void {
+function callFrame(vm: Machine, frame: CallFrame): void {
 	const meta = frame.meta;
 	const node = meta.node;
 	if (frame.phase === 0) {
@@ -167,7 +167,7 @@ export function functionLength(params: readonly ts.ParameterDeclaration[]): numb
  * ReferenceError); the parameter program then binds them in order, as a pattern frame pushed ABOVE
  * the body's (call AFTER pushing the body). Defaults are ordinary guest expressions on the stack.
  */
-export function bindParameters(vm: VM, scope: Scope, node: ts.SignatureDeclaration, args: unknown[]): void {
+export function bindParameters(vm: Machine, scope: Scope, node: ts.SignatureDeclaration, args: unknown[]): void {
 	let any = false;
 	for (const param of node.parameters) {
 		if (isThisParameter(param)) continue;

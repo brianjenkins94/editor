@@ -6,7 +6,7 @@ import { unimplemented } from "../errors.ts";
 import type { Iteration, NodeFrame } from "../frame.ts";
 import { Scope } from "../scope.ts";
 import type { BindingKind } from "../scope.ts";
-import type { Signal, VM } from "../vm.ts";
+import type { Signal, Machine } from "../vm.ts";
 import { namedIf } from "./functions.ts";
 import { resumed, suspend } from "./generators.ts";
 import { bindingNames, hoist, isAmbient } from "./hoist.ts";
@@ -18,7 +18,7 @@ import { evaluating, noop, on } from "./registry.ts";
 
 const K = ts.SyntaxKind;
 
-function sourceFile(vm: VM, frame: NodeFrame): void {
+function sourceFile(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.SourceFile;
 	if (frame.phase === 0) {
 		hoist(vm, frame.scope, node.statements);
@@ -29,7 +29,7 @@ function sourceFile(vm: VM, frame: NodeFrame): void {
 	}
 }
 
-function block(vm: VM, frame: NodeFrame): void {
+function block(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.Block;
 	if (frame.phase === 0) {
 		// A function-body Block runs directly in the function scope (params + body share it); a plain
@@ -43,13 +43,13 @@ function block(vm: VM, frame: NodeFrame): void {
 	}
 }
 
-export function pushStatementsReverse(vm: VM, statements: readonly ts.Statement[], scope: Scope): void {
+export function pushStatementsReverse(vm: Machine, statements: readonly ts.Statement[], scope: Scope): void {
 	for (let i = statements.length - 1; i >= 0; i--) {
 		if (!isAmbient(statements[i])) vm.pushNode(statements[i], scope);
 	}
 }
 
-function emptyStatement(vm: VM): void {
+function emptyStatement(vm: Machine): void {
 	vm.frames.pop();
 }
 
@@ -58,7 +58,7 @@ const variableStatement = evaluating<ts.VariableStatement>((node) => [node.decla
 // Shared driver for a VariableDeclarationList: declare each name (defensively — `hoist` may already
 // have, e.g. for TDZ in a block, but a `for`-init has no hoist pass), evaluate initializers in order,
 // then bind. Runs in `frame.scope` (the scope the list was pushed with).
-function variableDeclarationList(vm: VM, frame: NodeFrame): void {
+function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 	const list = frame.node as ts.VariableDeclarationList;
 	const decls = list.declarations;
 	if ((list.flags & ts.NodeFlags.Using) !== 0) unimplemented("`using` / `await using` declarations (explicit resource management: disposal is not modeled)");
@@ -102,7 +102,7 @@ const expressionStatement = evaluating<ts.ExpressionStatement>(
 	},
 );
 
-function ifStatement(vm: VM, frame: NodeFrame): void {
+function ifStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.IfStatement;
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);
@@ -133,17 +133,17 @@ const throwStatement = evaluating<ts.ThrowStatement>((node) => [node.expression]
 
 // Imports are bound during hoisting; the statement itself is a no-op. `import =` / `export` (module
 // output) aren't modeled — this interpreter runs a program, it doesn't emit one.
-function importDeclaration(vm: VM): void {
+function importDeclaration(vm: Machine): void {
 	vm.frames.pop();
 }
 
-function breakStatement(vm: VM, frame: NodeFrame): void {
+function breakStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.BreakStatement;
 	vm.frames.pop();
 	vm.raise({ type: "break", label: node.label?.text });
 }
 
-function continueStatement(vm: VM, frame: NodeFrame): void {
+function continueStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.ContinueStatement;
 	vm.frames.pop();
 	vm.raise({ type: "continue", label: node.label?.text });
@@ -154,7 +154,7 @@ function continueStatement(vm: VM, frame: NodeFrame): void {
 // (the phase to resume at on `continue`). A labeled loop's `frame.label` is set by LabeledStatement
 // before the loop's phase 0 runs.
 
-function whileStatement(vm: VM, frame: NodeFrame): void {
+function whileStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.WhileStatement;
 	if (frame.phase === 0) {
 		frame.isLoop = true;
@@ -170,7 +170,7 @@ function whileStatement(vm: VM, frame: NodeFrame): void {
 	}
 }
 
-function doStatement(vm: VM, frame: NodeFrame): void {
+function doStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.DoStatement;
 	if (frame.phase === 0) {
 		frame.isLoop = true;
@@ -186,7 +186,7 @@ function doStatement(vm: VM, frame: NodeFrame): void {
 	}
 }
 
-function forStatement(vm: VM, frame: NodeFrame): void {
+function forStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.ForStatement;
 	if (frame.phase === 0) {
 		frame.isLoop = true;
@@ -255,7 +255,7 @@ export function copyPerIteration(frame: NodeFrame): void {
 	frame.iterScope = next;
 }
 
-function forOfStatement(vm: VM, frame: NodeFrame): void {
+function forOfStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.ForOfStatement;
 	if (node.awaitModifier) return forAwaitOf(vm, frame, node);
 	if (frame.phase === 0) {
@@ -280,7 +280,7 @@ function forOfStatement(vm: VM, frame: NodeFrame): void {
 // `for await (x of iterable)`: an async iterator's `.next()` results are awaited; a sync iterable's
 // *values* are awaited (the spec's async-from-sync adaptation). Each await suspends the enclosing
 // fiber, which is what makes the loop steppable/forkable like any other.
-export function forAwaitOf(vm: VM, frame: NodeFrame, node: ts.ForOfStatement): void {
+export function forAwaitOf(vm: Machine, frame: NodeFrame, node: ts.ForOfStatement): void {
 	if (frame.phase === 0) {
 		frame.isLoop = true;
 		frame.continuePhase = 2;
@@ -332,7 +332,7 @@ export function forAwaitOf(vm: VM, frame: NodeFrame, node: ts.ForOfStatement): v
 	}
 }
 
-function forInStatement(vm: VM, frame: NodeFrame): void {
+function forInStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.ForInStatement;
 	if (frame.phase === 0) {
 		frame.isLoop = true;
@@ -363,7 +363,7 @@ function forInStatement(vm: VM, frame: NodeFrame): void {
 
 // Bind the current for-of/for-in element to the loop target in a fresh per-iteration scope, then
 // push the body. Destructuring targets: S2 (later).
-export function bindForTarget(vm: VM, frame: NodeFrame, initializer: ts.ForInitializer, value: unknown): void {
+export function bindForTarget(vm: Machine, frame: NodeFrame, initializer: ts.ForInitializer, value: unknown): void {
 	const node = frame.node as ts.ForOfStatement | ts.ForInStatement;
 	const bodyScope = new Scope(frame.scope, false);
 	// A plain identifier binds directly; anything else (a pattern, a member target) is bound by a
@@ -385,7 +385,7 @@ export function bindForTarget(vm: VM, frame: NodeFrame, initializer: ts.ForIniti
 	if (stepped !== undefined) pushPattern(vm, stepped.scope, stepped.program, value);
 }
 
-function switchStatement(vm: VM, frame: NodeFrame): void {
+function switchStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.SwitchStatement;
 	const clauses = node.caseBlock.clauses;
 	if (frame.phase === 0) {
@@ -435,7 +435,7 @@ function switchStatement(vm: VM, frame: NodeFrame): void {
 	}
 }
 
-function labeledStatement(vm: VM, frame: NodeFrame): void {
+function labeledStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.LabeledStatement;
 	if (frame.phase === 0) {
 		frame.isLabel = true; // catches `break <label>` for a labeled block
@@ -452,7 +452,7 @@ function labeledStatement(vm: VM, frame: NodeFrame): void {
 // The phases here pair with `unwindTry` in vm.ts: unwind sets phase 3 (catch) or 5 (pending-finally)
 // and pushes the appropriate block; these phases run after a block completes normally.
 
-function tryStatement(vm: VM, frame: NodeFrame): void {
+function tryStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.TryStatement;
 	if (frame.phase === 0) {
 		frame.state = "try";
@@ -486,7 +486,7 @@ function tryStatement(vm: VM, frame: NodeFrame): void {
 // Numeric members auto-increment from the previous numeric value and get a reverse mapping
 // (E[0] === "A"); string members don't. Member initializers may reference earlier members by bare
 // name or `E.member`, so they're evaluated in a scope layering the members declared so far.
-function enumDeclaration(vm: VM, frame: NodeFrame): void {
+function enumDeclaration(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.EnumDeclaration;
 	vm.frames.pop();
 	const name = node.name.text;
@@ -498,7 +498,7 @@ function enumDeclaration(vm: VM, frame: NodeFrame): void {
 
 /** Build (or extend — declarations merge) an enum object: members with auto-increment and reverse
  *  mappings for numeric values; each member is also a constant visible to later initializers. */
-export function buildEnum(vm: VM, scope: Scope, node: ts.EnumDeclaration, into: Record<string, string | number> | undefined): Record<string, string | number> {
+export function buildEnum(vm: Machine, scope: Scope, node: ts.EnumDeclaration, into: Record<string, string | number> | undefined): Record<string, string | number> {
 	const enumObject = into ?? (new vm.realm.Object() as Record<string, string | number>);
 	// Inside initializers a bare member name reads the enum's property (tsc emits `E.name`): members of
 	// earlier declarations have their values; this declaration's are undefined until defined.

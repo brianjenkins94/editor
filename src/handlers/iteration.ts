@@ -3,11 +3,11 @@
  */
 import ts from "typescript";
 import type { Iteration } from "../frame.ts";
-import type { VM } from "../vm.ts";
+import type { Machine } from "../vm.ts";
 import { getProperty, isObjectLike } from "./realm.ts";
 import { on } from "./registry.ts";
 
-export function getAsyncOrSyncIterator(vm: VM, iterable: unknown): { record: IterRecord; sync: boolean } {
+export function getAsyncOrSyncIterator(vm: Machine, iterable: unknown): { record: IterRecord; sync: boolean } {
 	if (iterable == null) throw new TypeError(`${String(iterable)} is not async iterable`);
 	const asyncFactory = getProperty(vm, iterable, Symbol.asyncIterator);
 	if (asyncFactory != null) {
@@ -66,7 +66,7 @@ export const arrayIterationNext = function (this: ArrayIteration): IteratorResul
 };
 
 /** GetIterator: a TypeError (not a property-of-null error) when the value isn't iterable. */
-export function getIterator(vm: VM, value: unknown): IterRecord {
+export function getIterator(vm: Machine, value: unknown): IterRecord {
 	// (a primitive boxes in the GUEST realm: `Boolean.prototype[Symbol.iterator]` patched there is seen)
 	const factory = value == null ? undefined : (getProperty(vm, value, Symbol.iterator) as (() => Iterator<unknown>) | undefined);
 	if (typeof factory !== "function") throw new TypeError(`${value === null ? "null" : typeof value === "object" ? "object" : String(value)} is not iterable`);

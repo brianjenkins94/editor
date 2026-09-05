@@ -3,13 +3,13 @@
  */
 import ts from "typescript";
 import { Scope } from "../scope.ts";
-import type { VM } from "../vm.ts";
+import type { Machine } from "../vm.ts";
 import { createGuestFunction } from "./functions.ts";
 import { describe } from "./realm.ts";
 
 const K = ts.SyntaxKind;
 
-export function hoist(vm: VM, scope: Scope, statements: readonly ts.Statement[]): void {
+export function hoist(vm: Machine, scope: Scope, statements: readonly ts.Statement[]): void {
 	for (const statement of statements) {
 		if (isAmbient(statement)) {
 			continue;
@@ -77,7 +77,7 @@ export function isAmbient(node: ts.Node): boolean {
  * `hoist` pass so imports are live before the first statement. Type-only imports resolve to nothing
  * useful but never run at runtime; `import type` is elided by the parser's `importClause.isTypeOnly`.
  */
-export function bindImport(vm: VM, scope: Scope, node: ts.ImportDeclaration): void {
+export function bindImport(vm: Machine, scope: Scope, node: ts.ImportDeclaration): void {
 	const specifier = (node.moduleSpecifier as ts.StringLiteral).text;
 	const clause = node.importClause;
 	if (clause === undefined) {

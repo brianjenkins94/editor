@@ -5,7 +5,7 @@ import ts from "typescript";
 import { unimplemented } from "../errors.ts";
 import type { ConstructFrame, InitFieldsFrame, NodeFrame } from "../frame.ts";
 import { Scope } from "../scope.ts";
-import type { VM } from "../vm.ts";
+import type { Machine } from "../vm.ts";
 import { collectCallArguments, pushCallArguments } from "./calls.ts";
 import { bindParameters, createGuestFunction, functionLength, nameAnonymous, setFunctionName } from "./functions.ts";
 import { hoist } from "./hoist.ts";
@@ -154,7 +154,7 @@ export function hasStatic(member: ts.ClassElement): boolean {
 	return (modifiers ?? []).some((m) => m.kind === K.StaticKeyword);
 }
 
-export function memberKey(vm: VM, name: ts.PropertyName | undefined, scope: Scope): PropertyKey {
+export function memberKey(vm: Machine, name: ts.PropertyName | undefined, scope: Scope): PropertyKey {
 	if (name === undefined) return "";
 	if (ts.isComputedPropertyName(name)) return toPropertyKey(vm.evalNodeSync(name.expression, scope));
 	return propertyName(name);
@@ -187,7 +187,7 @@ export interface PreEvaluatedClass {
 	name?: string;
 }
 
-export function createGuestClass(vm: VM, node: ts.ClassLikeDeclaration, outerScope: Scope, pre?: PreEvaluatedClass): GuestClass {
+export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, outerScope: Scope, pre?: PreEvaluatedClass): GuestClass {
 	assertSupportedClassSurface(node);
 	// The class body sees an inner, immutable binding of its own name (so static initializers,
 	// `static {}` blocks and methods can refer to it — also for a *named class expression*, whose name
@@ -348,7 +348,7 @@ export function fieldScope(meta: ClassMeta, thisVal: unknown, homeObject: object
 	return s;
 }
 
-export function initInstanceFields(vm: VM, meta: ClassMeta, instance: object): void {
+export function initInstanceFields(vm: Machine, meta: ClassMeta, instance: object): void {
 	// Private methods/accessors brand the instance first (so field initializers may call them).
 	for (const pn of meta.instancePrivateMethods) privateAdd(instance, pn);
 	for (const field of meta.instanceFields) {
@@ -366,7 +366,7 @@ export function initInstanceFields(vm: VM, meta: ClassMeta, instance: object): v
  * spec's "`this` is uninitialized until `super()` returns" model — so the created object is returned
  * and the caller rebinds `this` to it.
  */
-export function pushParentConstruct(vm: VM, superClass: unknown, args: unknown[], instance: object, newTarget: unknown): object | undefined {
+export function pushParentConstruct(vm: Machine, superClass: unknown, args: unknown[], instance: object, newTarget: unknown): object | undefined {
 	if (isGuestClass(superClass)) {
 		// `forSuper`: the frame leaves its final instance on the value stack — a parent constructor may
 		// `return` a different object (a Proxy, say), and that is what `super()` yields as `this`.
@@ -397,7 +397,7 @@ export function rebindThis(scope: Scope, construction: Construction, replacement
 
 // `super(...)` inside a derived constructor: construct the parent on the current instance, then
 // initialize this class's own instance fields (spec order), then the call yields undefined.
-export function superCall(vm: VM, frame: NodeFrame, node: ts.CallExpression): void {
+export function superCall(vm: Machine, frame: NodeFrame, node: ts.CallExpression): void {
 	if (frame.phase === 0) {
 		pushCallArguments(vm, frame, node.arguments);
 		frame.phase = 1;
@@ -465,7 +465,7 @@ export function computedKeyNodes(node: ts.ClassLikeDeclaration): ts.Expression[]
  * `yield`/`await` inside them suspends like anywhere else; then the class is built from those values.
  * Returns the constructor once built (undefined while the sub-expressions are still evaluating).
  */
-export function classDefinition(vm: VM, frame: NodeFrame, node: ts.ClassLikeDeclaration): GuestClass | undefined {
+export function classDefinition(vm: Machine, frame: NodeFrame, node: ts.ClassLikeDeclaration): GuestClass | undefined {
 	const heritage = node.heritageClauses?.find((h) => h.token === K.ExtendsKeyword);
 	if (frame.phase === 0) {
 		assertSupportedClassSurface(node);
@@ -485,7 +485,7 @@ export function classDefinition(vm: VM, frame: NodeFrame, node: ts.ClassLikeDecl
 	return createGuestClass(vm, node, frame.scope, { scope: frame.classScope as Scope, superClass, keys: values, name: frame.nameHint });
 }
 
-function classDeclaration(vm: VM, frame: NodeFrame): void {
+function classDeclaration(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.ClassDeclaration;
 	const Ctor = classDefinition(vm, frame, node);
 	if (Ctor === undefined) return;
@@ -496,7 +496,7 @@ function classDeclaration(vm: VM, frame: NodeFrame): void {
 	}
 }
 
-function classExpression(vm: VM, frame: NodeFrame): void {
+function classExpression(vm: Machine, frame: NodeFrame): void {
 	const Ctor = classDefinition(vm, frame, frame.node as ts.ClassExpression);
 	if (Ctor === undefined) return;
 	vm.frames.pop();
@@ -504,7 +504,7 @@ function classExpression(vm: VM, frame: NodeFrame): void {
 }
 
 // Synthetic construct frame: build one class level's instance on the explicit stack.
-function constructFrame(vm: VM, frame: ConstructFrame): void {
+function constructFrame(vm: Machine, frame: ConstructFrame): void {
 	const ctor = frame.ctor;
 	const meta = classMetaOf(ctor);
 	if (frame.phase === 0) {
@@ -558,7 +558,7 @@ function constructFrame(vm: VM, frame: ConstructFrame): void {
 
 // After `super()` returns: adopt the parent's final instance (`fromStack`: left by its construct
 // frame), bind `this` (leaving its TDZ), then run this class's field initializers on it.
-function initfieldsFrame(vm: VM, frame: InitFieldsFrame): void {
+function initfieldsFrame(vm: Machine, frame: InitFieldsFrame): void {
 	let instance = frame.instance as object;
 	if (frame.fromStack === true) instance = vm.pop() as object;
 	if (frame.thisScope !== undefined) {

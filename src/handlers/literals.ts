@@ -4,20 +4,20 @@
 import ts from "typescript";
 import { unimplemented } from "../errors.ts";
 import type { NodeFrame } from "../frame.ts";
-import type { VM } from "../vm.ts";
+import type { Machine } from "../vm.ts";
 import { createGuestFunction, nameAnonymous, setFunctionName } from "./functions.ts";
 import { cookedTemplateText, defineData, toPropertyKey } from "./realm.ts";
 import { evaluating, on, passThroughExpr, pushText } from "./registry.ts";
 
 const K = ts.SyntaxKind;
 
-function numericLiteral(vm: VM, frame: NodeFrame): void {
+function numericLiteral(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.NumericLiteral;
 	vm.frames.pop();
 	vm.push(Number(node.text.replace(/_/g, "")));
 }
 
-function bigIntLiteral(vm: VM, frame: NodeFrame): void {
+function bigIntLiteral(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.BigIntLiteral;
 	vm.frames.pop();
 	vm.push(BigInt(node.text.replace(/_/g, "").replace(/n$/, "")));
@@ -25,29 +25,29 @@ function bigIntLiteral(vm: VM, frame: NodeFrame): void {
 
 
 
-function trueKeyword(vm: VM): void {
+function trueKeyword(vm: Machine): void {
 	vm.frames.pop();
 	vm.push(true);
 }
 
-function falseKeyword(vm: VM): void {
+function falseKeyword(vm: Machine): void {
 	vm.frames.pop();
 	vm.push(false);
 }
 
-function nullKeyword(vm: VM): void {
+function nullKeyword(vm: Machine): void {
 	vm.frames.pop();
 	vm.push(null);
 }
 
-function regularExpressionLiteral(vm: VM, frame: NodeFrame): void {
+function regularExpressionLiteral(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.RegularExpressionLiteral;
 	vm.frames.pop();
 	const lastSlash = node.text.lastIndexOf("/");
 	vm.push(new vm.realm.RegExp(node.text.slice(1, lastSlash), node.text.slice(lastSlash + 1)));
 }
 
-function identifier(vm: VM, frame: NodeFrame): void {
+function identifier(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.Identifier;
 	vm.frames.pop();
 	// Globals are host values; guest bindings pass through the guard unchanged (identity by default).
@@ -56,7 +56,7 @@ function identifier(vm: VM, frame: NodeFrame): void {
 
 // `new.target` (undefined in a plain call, the constructor under `new`); `import.meta` is a module
 // concept this program-runner doesn't model.
-function metaProperty(vm: VM, frame: NodeFrame): void {
+function metaProperty(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.MetaProperty;
 	if (node.keywordToken !== K.NewKeyword || node.name.text !== "target") unimplemented(`${ts.SyntaxKind[node.keywordToken]}.${node.name.text}`);
 	vm.frames.pop();
@@ -97,7 +97,7 @@ const arrayLiteralExpression = evaluating<ts.ArrayLiteralExpression>(
 
 /** Operands evaluate one at a time, in source order, and a computed key is converted (ToPropertyKey)
  *  the moment it finishes — before its value is evaluated (observable through `@@toPrimitive`). */
-function objectLiteralExpression(vm: VM, frame: NodeFrame): void {
+function objectLiteralExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.ObjectLiteralExpression;
 	const operands = objectLiteralOperands(node);
 	if (frame.phase === 0) {
@@ -136,7 +136,7 @@ export function objectLiteralOperands(node: ts.ObjectLiteralExpression): { node:
 	return out;
 }
 
-export function buildObjectLiteral(vm: VM, frame: NodeFrame, node: ts.ObjectLiteralExpression, values: unknown[]): void {
+export function buildObjectLiteral(vm: Machine, frame: NodeFrame, node: ts.ObjectLiteralExpression, values: unknown[]): void {
 	{
 		const obj = new vm.realm.Object() as Record<PropertyKey, unknown>;
 		let cursor = 0; // advances over the evaluated keys (already property keys) and values, in source order
@@ -179,7 +179,7 @@ export function buildObjectLiteral(vm: VM, frame: NodeFrame, node: ts.ObjectLite
 }
 
 /** `{ ...source }`: copy own enumerable props (string + symbol keys), each value through the guard. */
-export function spreadInto(vm: VM, target: Record<PropertyKey, unknown>, source: unknown): void {
+export function spreadInto(vm: Machine, target: Record<PropertyKey, unknown>, source: unknown): void {
 	if (source == null) return;
 	const src = Object(source) as Record<PropertyKey, unknown>;
 	for (const key of Reflect.ownKeys(src)) {

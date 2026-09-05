@@ -5,7 +5,7 @@ import ts from "typescript";
 import { TsvalInternalError, unimplemented } from "../errors.ts";
 import type { NodeFrame } from "../frame.ts";
 import { Scope } from "../scope.ts";
-import type { NodeHandler, VM } from "../vm.ts";
+import type { NodeHandler, Machine } from "../vm.ts";
 import { lookupPrivate, privateGet, privateSet } from "./classes.ts";
 import { nameAnonymous } from "./functions.ts";
 import { applyCompound } from "./operators.ts";
@@ -24,7 +24,7 @@ export function thisValue(scope: Scope): unknown {
 	return value;
 }
 
-function thisKeyword(vm: VM, frame: NodeFrame): void {
+function thisKeyword(vm: Machine, frame: NodeFrame): void {
 	vm.frames.pop();
 	vm.push(thisValue(frame.scope));
 }
@@ -105,7 +105,7 @@ export const nullBase = (obj: unknown, key: string, forWrite: boolean): TypeErro
  * the key and the key is converted eagerly; for `o[k]` nothing is checked or converted here — a
  * nullish base throws at GetValue/PutValue, then ToPropertyKey runs (once).
  */
-export function evaluateReference(vm: VM, frame: NodeFrame, target: ts.Expression, forWrite = false): Ref | undefined {
+export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expression, forWrite = false): Ref | undefined {
 	if (frame.ref !== undefined) return frame.ref;
 	const done = (ref: Ref): Ref => {
 		frame.ref = ref;
@@ -172,7 +172,7 @@ export function memberOf(ref: Extract<Ref, { kind: "member" | "private" }>, forW
 
 /** GetValue. A member read is a host→guest crossing (`[].constructor.constructor` is the real
  *  `Function`), routed through the guard unless the caller vets the value itself (a callee). */
-export function getValue(vm: VM, scope: Scope, ref: Ref, crossing = true): unknown {
+export function getValue(vm: Machine, scope: Scope, ref: Ref, crossing = true): unknown {
 	switch (ref.kind) {
 		case "id":
 			return scope.get(ref.name);
@@ -195,7 +195,7 @@ export function getValue(vm: VM, scope: Scope, ref: Ref, crossing = true): unkno
 }
 
 /** PutValue (strict). */
-export function putValue(vm: VM, scope: Scope, ref: Ref, value: unknown): void {
+export function putValue(vm: Machine, scope: Scope, ref: Ref, value: unknown): void {
 	switch (ref.kind) {
 		case "id":
 			return scope.set(ref.name, value);
@@ -227,7 +227,7 @@ export type RmwStep = { kind: "need-rhs" } | { kind: "done"; result: unknown } |
  * `readFirst`) GetValue before any RHS, the RHS only when `compute` asks for it (a logical assignment
  * may be decided already), PutValue, and the expression's result.
  */
-export function assignThrough(vm: VM, frame: NodeFrame, target: ts.Expression, readFirst: boolean, compute: (current: unknown, rhs: { value: unknown } | undefined) => RmwStep, rhs?: ts.Expression): void {
+export function assignThrough(vm: Machine, frame: NodeFrame, target: ts.Expression, readFirst: boolean, compute: (current: unknown, rhs: { value: unknown } | undefined) => RmwStep, rhs?: ts.Expression): void {
 	const ref = evaluateReference(vm, frame, target, true);
 	if (ref === undefined) return;
 	if (frame.phase === AFTER_REF) {
@@ -259,7 +259,7 @@ export const memberRead: NodeHandler = (vm, frame) => {
 
 
 
-function prefixUnaryExpression(vm: VM, frame: NodeFrame): void {
+function prefixUnaryExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.PrefixUnaryExpression;
 	// ++/-- need an lvalue, handled without a normal operand eval.
 	if (node.operator === K.PlusPlusToken || node.operator === K.MinusMinusToken) {
@@ -287,13 +287,13 @@ export const unaryOperator = evaluating<ts.PrefixUnaryExpression>(
 	},
 );
 
-function postfixUnaryExpression(vm: VM, frame: NodeFrame): void {
+function postfixUnaryExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.PostfixUnaryExpression;
 	return updateExpression(vm, frame, node.operand, node.operator, /* prefix */ false);
 }
 
 /** `++x` / `x--` on any reference (identifier, member, private, super). */
-export function updateExpression(vm: VM, frame: NodeFrame, operand: ts.Expression, operator: ts.SyntaxKind, prefix: boolean): void {
+export function updateExpression(vm: Machine, frame: NodeFrame, operand: ts.Expression, operator: ts.SyntaxKind, prefix: boolean): void {
 	const delta = operator === K.PlusPlusToken ? 1 : -1;
 	assignThrough(vm, frame, operand, true, (current) => {
 		const old = toNumeric(current);
@@ -301,7 +301,7 @@ export function updateExpression(vm: VM, frame: NodeFrame, operand: ts.Expressio
 	});
 }
 
-function typeOfExpression(vm: VM, frame: NodeFrame): void {
+function typeOfExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.TypeOfExpression;
 	if (frame.phase === 0) {
 		// `typeof undeclaredVar` (also parenthesized) must not throw; guard identifier reads.
@@ -322,7 +322,7 @@ function typeOfExpression(vm: VM, frame: NodeFrame): void {
 // `delete obj.p` / `delete obj[k]` (strict: a non-configurable property throws, via the host). Any
 // other operand is evaluated for effect and yields true. `delete identifier` is a strict-mode
 // SyntaxError (parser).
-function deleteExpression(vm: VM, frame: NodeFrame): void {
+function deleteExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.DeleteExpression;
 	const target = unwrapParens(node.expression);
 	if (isSuperRef(target)) {
@@ -341,7 +341,7 @@ function deleteExpression(vm: VM, frame: NodeFrame): void {
 	unimplemented(`delete of a ${ref.kind} reference (a strict-mode SyntaxError)`);
 }
 
-export function assignmentExpression(vm: VM, frame: NodeFrame, node: ts.BinaryExpression): void {
+export function assignmentExpression(vm: Machine, frame: NodeFrame, node: ts.BinaryExpression): void {
 	// A parenthesized target `(x) = v` / `(o.p) = v` is still a Reference (but not an IdentifierRef:
 	// no NamedEvaluation through parentheses).
 	const left = unwrapParens(node.left);
@@ -390,7 +390,7 @@ export function logicalShortCircuits(op: number, current: unknown): boolean {
 // Spec order for `lhs op= rhs`: the LHS *reference* is evaluated, then GetValue (a TDZ or null-base
 // error surfaces here, before the RHS runs), then the RHS — and a logical assignment doesn't run the
 // RHS at all when the current value decides.
-export function compoundAssignment(vm: VM, frame: NodeFrame, node: ts.BinaryExpression, op: number): void {
+export function compoundAssignment(vm: Machine, frame: NodeFrame, node: ts.BinaryExpression, op: number): void {
 	const left = unwrapParens(node.left);
 	const names = left === node.left && ts.isIdentifier(left); // (`x ??= () => {}` names the function `x`)
 	assignThrough(

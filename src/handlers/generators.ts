@@ -5,7 +5,7 @@ import ts from "typescript";
 import type { Iteration, NodeFrame, Received } from "../frame.ts";
 import { Scope } from "../scope.ts";
 import type { GuestFunctionMeta } from "../values.ts";
-import type { VM } from "../vm.ts";
+import type { Machine } from "../vm.ts";
 import { closeIteration, getAsyncOrSyncIterator, getIterator, getMethod, iterNext } from "./iteration.ts";
 import { isObjectLike } from "./realm.ts";
 import { on } from "./registry.ts";
@@ -18,7 +18,7 @@ const K = ts.SyntaxKind;
 // and on resume feeds a value back via `vm.sentValue` (or injects a return/throw signal). Left as a
 // frame at phase 2, the suspension point resumes exactly where it left off.
 
-function yieldExpression(vm: VM, frame: NodeFrame): void {
+function yieldExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.YieldExpression;
 	if (node.asteriskToken) return yieldStar(vm, frame, node);
 	if (frame.phase === 0) {
@@ -38,7 +38,7 @@ function yieldExpression(vm: VM, frame: NodeFrame): void {
 }
 
 /** Park the current frame at `resumePhase` and suspend the fiber with a payload of the given kind. */
-export function suspend(vm: VM, frame: NodeFrame, kind: "yield" | "await", value: unknown, resumePhase: number, raw = false): void {
+export function suspend(vm: Machine, frame: NodeFrame, kind: "yield" | "await", value: unknown, resumePhase: number, raw = false): void {
 	vm.pauseValue = value;
 	vm.pauseKind = kind;
 	vm.pauseRaw = raw;
@@ -47,7 +47,7 @@ export function suspend(vm: VM, frame: NodeFrame, kind: "yield" | "await", value
 }
 
 /** Take the value fed back in on resume (the `.next(v)` argument / the settled awaited value). */
-export function resumed(vm: VM): unknown {
+export function resumed(vm: Machine): unknown {
 	const value = vm.fromHost(vm.sentValue);
 	vm.sentValue = undefined;
 	return value;
@@ -72,7 +72,7 @@ export function enclosingFunctionMeta(scope: Scope): GuestFunctionMeta | undefin
  * - the expression's own value is the inner iterator's completion value.
  * The fiber driver routes `throw`/`return` to this frame (`frame.delegating`) instead of unwinding.
  */
-export function yieldStar(vm: VM, frame: NodeFrame, node: ts.YieldExpression): void {
+export function yieldStar(vm: Machine, frame: NodeFrame, node: ts.YieldExpression): void {
 	const meta = enclosingFunctionMeta(frame.scope);
 	const asyncGen = meta?.isAsync === true && meta.isGenerator;
 	switch (frame.phase) {
@@ -136,7 +136,7 @@ export function yieldStar(vm: VM, frame: NodeFrame, node: ts.YieldExpression): v
 	}
 }
 
-export function delegateResult(vm: VM, frame: NodeFrame, innerResult: unknown, asyncGen: boolean): void {
+export function delegateResult(vm: Machine, frame: NodeFrame, innerResult: unknown, asyncGen: boolean): void {
 	if (!isObjectLike(innerResult)) throw new TypeError("Iterator result is not an object");
 	const returning = frame.returning === true;
 	frame.returning = false;
@@ -158,7 +158,7 @@ export function delegateResult(vm: VM, frame: NodeFrame, innerResult: unknown, a
 	suspend(vm, frame, "yield", innerResult, 4, /* raw */ true);
 }
 
-function awaitExpression(vm: VM, frame: NodeFrame): void {
+function awaitExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.AwaitExpression;
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);

@@ -4,7 +4,7 @@
 import ts from "typescript";
 import type { NodeFrame } from "../frame.ts";
 import { isGuestFunction } from "../values.ts";
-import type { VM } from "../vm.ts";
+import type { Machine } from "../vm.ts";
 import { isGuestClass, superCall } from "./classes.ts";
 import { cookedTemplateText, describe, normalizeTemplateLineTerminators } from "./realm.ts";
 import { AFTER_REF, CHAIN_BREAK, chainShort, evaluateReference, getValue, thisOf } from "./references.ts";
@@ -16,7 +16,7 @@ const K = ts.SyntaxKind;
 // a frozen `.raw`, cached per callsite (the spec's template object registry).
 export const templateObjects = new WeakMap<ts.Node, readonly string[]>();
 
-export function templateObject(vm: VM, node: ts.TaggedTemplateExpression): readonly string[] {
+export function templateObject(vm: Machine, node: ts.TaggedTemplateExpression): readonly string[] {
 	let strings = templateObjects.get(node);
 	if (strings === undefined) {
 		const cooked = new vm.realm.Array() as string[];
@@ -37,7 +37,7 @@ export function templateObject(vm: VM, node: ts.TaggedTemplateExpression): reado
 	return strings;
 }
 
-function taggedTemplateExpression(vm: VM, frame: NodeFrame): void {
+function taggedTemplateExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.TaggedTemplateExpression;
 	const tag = node.tag;
 	const spans = ts.isTemplateExpression(node.template) ? node.template.templateSpans : [];
@@ -65,7 +65,7 @@ function taggedTemplateExpression(vm: VM, frame: NodeFrame): void {
 	}
 }
 
-function callExpression(vm: VM, frame: NodeFrame): void {
+function callExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.CallExpression;
 	// A parenthesized member callee `(a.b)()` is still a Reference: `this` is preserved.
 	let callee: ts.Expression = node.expression;
@@ -135,7 +135,7 @@ function callExpression(vm: VM, frame: NodeFrame): void {
 
 // Evaluate call/new arguments left-to-right (pushed in reverse). A spread argument's operand is
 // evaluated like any other; `spreadMask` records which operands to flatten when collecting.
-export function pushCallArguments(vm: VM, frame: NodeFrame, args: readonly ts.Expression[]): void {
+export function pushCallArguments(vm: Machine, frame: NodeFrame, args: readonly ts.Expression[]): void {
 	const spreadMask: boolean[] = [];
 	for (let i = args.length - 1; i >= 0; i--) {
 		const arg = args[i];
@@ -151,7 +151,7 @@ export function pushCallArguments(vm: VM, frame: NodeFrame, args: readonly ts.Ex
 	frame.spreadMask = spreadMask;
 }
 
-export function collectCallArguments(vm: VM, frame: NodeFrame): unknown[] {
+export function collectCallArguments(vm: Machine, frame: NodeFrame): unknown[] {
 	const argCount = frame.argCount as number;
 	const raw = vm.values.splice(vm.values.length - argCount);
 	const spreadMask = frame.spreadMask as boolean[];
@@ -164,7 +164,7 @@ export function collectCallArguments(vm: VM, frame: NodeFrame): unknown[] {
 }
 
 // NewExpression: construct with evaluated args.
-function newExpression(vm: VM, frame: NodeFrame): void {
+function newExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.NewExpression;
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);

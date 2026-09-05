@@ -102,9 +102,9 @@ export type Signal =
 	| { type: "break"; label?: string }
 	| { type: "continue"; label?: string };
 
-export type NodeHandler = (vm: VM, frame: NodeFrame) => void;
+export type NodeHandler = (vm: Machine, frame: NodeFrame) => void;
 /** One handler per synthetic frame kind, each receiving its own frame type. */
-export type SyntheticHandlers = { [Kind in SyntheticKind]: (vm: VM, frame: Extract<SyntheticFrame, { kind: Kind }>) => void };
+export type SyntheticHandlers = { [Kind in SyntheticKind]: (vm: Machine, frame: Extract<SyntheticFrame, { kind: Kind }>) => void };
 
 export interface VMOptions {
 	/** Injected globals — what a host adds to (or replaces in) the global object. */
@@ -158,12 +158,71 @@ export interface HostCallSite {
 }
 
 /**
- * The stepped, stack-based VM (a CEK/CESK-style explicit-continuation-stack walker).
+ * The host-facing VM: what `createVM` / `createTypedVM` / `new VM()` hand out — stepping, running,
+ * breakpoints, forking, the host seams, and read access to the machine state. Everything the
+ * handlers need beyond this lives on `Machine` (the implementation) and is not part of the API.
+ */
+export interface VM {
+	/** The loaded program (kept for source-position lookups: `location`, breakpoints). */
+	readonly sourceFile: ts.SourceFile | undefined;
+	load(sourceFile: ts.SourceFile): void;
+
+	// --- running ---
+	/** Exactly one unit of work on the top frame — the primitive everything else is built on. */
+	step(): void;
+	/** Run to completion; returns the program's completion value. */
+	run(): unknown;
+	/** Run, driving top-level `await` (the main body is itself a suspendable fiber). */
+	runAsync(): Promise<unknown>;
+	/** Step until the predicate holds (checked at every step), or the program finishes/pauses. */
+	runUntil(predicate: (vm: VM) => boolean): void;
+	/** Run to the next statement boundary. */
+	stepStatement(): void;
+	atStatementBoundary(): boolean;
+	/** The completion value so far (script semantics: the last value-producing statement's value). */
+	readonly completion: unknown;
+	readonly finished: boolean;
+	/** Suspended at a `yield`/`await` (resume with `runAsync`). */
+	readonly paused: boolean;
+	/** Monotonic count of `step()` calls — a free step budget. */
+	readonly steps: number;
+
+	// --- position, breakpoints ---
+	readonly currentNode: ts.Node | null;
+	location(node?: ts.Node | null): { line: number; character: number; pos: number } | null;
+	readonly breakpoints: Set<number>;
+	addBreakpoint(pos: number): void;
+	addBreakpointsByLine(...lines: number[]): void;
+	atBreakpoint(): boolean;
+	runToBreakpoint(): void;
+
+	/** An independent copy of the machine state (mid-expression if need be); host objects are shared. */
+	fork(): VM;
+
+	/** The call/`new`/tagged-template expression currently invoking a host callable — set only around
+	 *  the host `apply`/`construct`, so a host function can introspect its own callsite. */
+	readonly callSite: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression | undefined;
+
+	// --- inspection (plain data; read, don't mutate) ---
+	/** control stack: frames, top at the end. */
+	readonly frames: readonly Frame[];
+	/** operand stack: sub-expression results. */
+	readonly values: readonly unknown[];
+	/** a propagating non-local control transfer (return/throw/break/continue) being unwound. */
+	readonly signal: Signal | null;
+	readonly top: Frame | undefined;
+	readonly rootScope: Scope;
+}
+
+/**
+ * The stepped, stack-based machine (a CEK/CESK-style explicit-continuation-stack walker) — the
+ * implementation behind `VM`, and the full surface the handlers program against: the operand and
+ * control stacks, frame/signal pushing, the realm, the host seams, fiber drivers.
  *
  * `step()` does exactly one unit of work on the top frame. Everything else — `run`, `stepStatement`,
  * `runUntil`, control flow, calls — is built on that single primitive (ASSIGNMENT §3).
  */
-export class VM {
+export class Machine implements VM {
 	/** operand stack: sub-expression results. */
 	values: unknown[] = [];
 	/** control stack: frames, top at the end. */
@@ -349,7 +408,7 @@ export class VM {
 		}
 
 		// (each synthetic handler is typed for its own frame; the union is dispatched on `kind` here)
-		const handler = (frame.kind !== undefined ? syntheticHandlers[frame.kind] : nodeHandlers[frame.node.kind]) as ((vm: VM, frame: Frame) => void) | undefined;
+		const handler = (frame.kind !== undefined ? syntheticHandlers[frame.kind] : nodeHandlers[frame.node.kind]) as ((vm: Machine, frame: Frame) => void) | undefined;
 		if (handler === undefined) {
 			if (frame.kind !== undefined) throw new TsvalInternalError(`unimplemented: ${frame.kind}`);
 			throw new TsvalInternalError(`unimplemented: ${syntaxKindName(frame.node.kind)} (SyntaxKind ${frame.node.kind})`);
@@ -568,7 +627,7 @@ export class VM {
 	}
 
 	/** Step until the given predicate holds, the machine suspends (`paused`), or it finishes. */
-	runUntil(predicate: (vm: VM) => boolean): void {
+	runUntil(predicate: (vm: Machine) => boolean): void {
 		while (!this.finished && !this.paused && !predicate(this)) this.step();
 	}
 
@@ -646,13 +705,13 @@ export class VM {
 	 *
 	 * This is what lets a host explore more than one path from a single run.
 	 */
-	fork(): VM {
+	fork(): Machine {
 		const seen = new Map<unknown, unknown>();
 		// The fork is created first so cloned closures can be rebound to *it* (not to this source VM),
 		// and it needs its realm/intrinsics *before* any closure is cloned (function creation uses them).
-		const forked: VM = Object.create(VM.prototype);
-		(forked as { realm: VM["realm"] }).realm = this.realm; // same guest realm (intrinsics are shared)
-		(forked as { guestErrors: VM["guestErrors"] }).guestErrors = this.guestErrors;
+		const forked: Machine = Object.create(Machine.prototype);
+		(forked as { realm: Machine["realm"] }).realm = this.realm; // same guest realm (intrinsics are shared)
+		(forked as { guestErrors: Machine["guestErrors"] }).guestErrors = this.guestErrors;
 
 		const cloneScope = (s: Scope): Scope => {
 			const parent = s.parent ? (clone(s.parent) as Scope) : undefined;
@@ -1145,3 +1204,6 @@ interface Fiber {
 
 /** How a fiber is resumed: with a value, or by injecting a return/throw at the suspension point. */
 type FiberInput = { kind: "next"; value: unknown } | { kind: "return"; value: unknown } | { kind: "throw"; value: unknown };
+
+/** The constructor hosts use; its instances are typed as the host-facing `VM`. */
+export const VM: new (options?: VMOptions) => VM = Machine;
