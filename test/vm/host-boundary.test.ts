@@ -113,3 +113,14 @@ test("type-aware VM: signature() and argumentType() expose the declared paramete
 	// (the `new URL(...)` construction is a host call the guard sees too — its own site, its own signature)
 	assert.deepEqual(seen, ['params=url,base ret=URL arg0="https://x"', "params=url,body ret=Promise<number> arg0=URL"]);
 });
+
+test("a host Proxy that answers every property (an auto-stub) is a host callable, not guest code", () => {
+	// A stub answers `__tsval` like any other key; only an OWN brand marks a guest function. Without
+	// the own-property check the VM takes the stub for guest code — it never reaches the guard, and
+	// it tries to run the stub's (nonexistent) AST.
+	const stub = (): unknown => new Proxy(function stub() {}, { get: (_t, key) => (typeof key === "symbol" || key === "then" ? undefined : stub()), apply: () => stub(), construct: () => stub() as object });
+	const seen: string[] = [];
+	const vm = createVM(`db().query("x").rows[0]`, { globals: { db: stub() }, hostGuard: { beforeCall: (callee) => (seen.push(typeof callee), callee) } });
+	assert.strictEqual(typeof vm.run(), "function");
+	assert.deepStrictEqual(seen, ["function", "function"]); // `db()` and `.query("x")` both crossed the seam
+});

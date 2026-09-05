@@ -42,6 +42,7 @@ export interface GuestFunction {
 	__tsval: GuestFunctionMeta;
 }
 
+/** An OWN brand: a host Proxy that answers every key (an auto-stub) must not pass as guest code. */
 export function isGuestFunction(value: unknown): value is GuestFunction {
-	return typeof value === "function" && (value as Partial<GuestFunction>).__tsval != null;
+	return typeof value === "function" && Object.hasOwn(value, "__tsval") && (value as Partial<GuestFunction>).__tsval != null;
 }

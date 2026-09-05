@@ -25,6 +25,11 @@ export function createTypedProgram(code: string, fileName = "entry.ts"): TypedPr
 		target: ts.ScriptTarget.ES2022,
 		lib: ["lib.es2022.d.ts", "lib.dom.d.ts"], // DOM too, so web-platform values (fetch, URL, WebSocket) have their types
 		types: [],
+		// Types are read for what they say (synthesis from a return type, TypeBox schemas), so keep `null` and
+		// `undefined` in them (without this `T | null` and `x?: T` erase to `T`) and type `f.call(…)` /
+		// `f.apply(…)` by `f`'s signature rather than as `any`.
+		strictNullChecks: true,
+		strictBindCallApply: true,
 		skipLibCheck: true,
 		noResolve: false,
 		allowJs: true,

@@ -5,6 +5,24 @@ See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the mission and staged plan; this fil
 
 ---
 
+## Types read for what they say ✅ (2026-09-05) — strict null checks, call/apply, an own brand
+
+Driven by reviewing lib's `silo/stub.ts` (type-directed synthesis on the callsite seam) and turning
+its probe into lib tests (`lib/test/util/silo-stub.ts`). Three things surfaced on tsval's side:
+- The typed program now sets `strictNullChecks` and `strictBindCallApply`. Anything reading a
+  `ts.Type` for its shape (synthesis, TypeBox) needs `T | null` and `x?: T` to keep their nullish
+  members, and `f.call(…)` / `f.apply(…)` typed by `f`'s signature rather than `any`. Diagnostics
+  are never reported, so guest behavior is unchanged; `test/vm/types.test.ts` pins both.
+- `isGuestFunction` requires an OWN `__tsval`. A host Proxy that answers every key (lib's
+  `autostub`) answered the brand too, and the VM tried to run it as guest code
+  (`node.parameters is not iterable`). `test/vm/host-boundary.test.ts`.
+- Noted, not changed: the typed program includes `lib.dom.d.ts`, and a program is a script for
+  the checker, so a top-level `type Node = …` collides with the DOM's `Node` (silently: the
+  members vanish). The lib test avoids the name; a program-as-module (or no DOM lib) is the fix
+  if it bites.
+
+---
+
 ## Callsite-aware host guard + structured types ✅ (2026-09-05) — the seam for type→fixture
 
 Requested by the canary (now in lib) for rung 3 of its response ladder — a host call answered with a
