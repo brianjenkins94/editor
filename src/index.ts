@@ -1,5 +1,5 @@
 export { VM } from "./vm.ts";
-export type { Frame, Signal, VMOptions, Handler } from "./vm.ts";
+export type { Frame, NodeFrame, CallFrame, ConstructFrame, InitFieldsFrame, PatternFrame, SyntheticFrame, Signal, VMOptions, NodeHandler, SyntheticHandlers } from "./vm.ts";
 export { Scope } from "./scope.ts";
 export type { Binding, BindingKind } from "./scope.ts";
 export { parse, syntaxKindName, ts } from "./frontend.ts";

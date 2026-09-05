@@ -2,8 +2,9 @@ import ts from "typescript";
 import { Scope } from "./scope.ts";
 import { syntaxKindName } from "./frontend.ts";
 import type { GuestFunctionMeta } from "./values.ts";
+import type { Frame, NodeFrame, CallFrame, PatternFrame, SyntheticFrame, SyntheticKind } from "./frame.ts";
 import { isGuestFunction } from "./values.ts";
-import { nodeHandlers, syntheticHandlers, createGuestFunction, bindTarget, closeIterator, clonePrivateElements, isGuestClass } from "./handlers.ts";
+import { nodeHandlers, syntheticHandlers, createGuestFunction, bindTarget, closeIterator, clonePrivateElements, isGuestClass, type GuestClass } from "./handlers.ts";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
 
 /** Brand marking a live generator/async fiber object as non-cloneable (shared across forks). */
@@ -89,17 +90,7 @@ function generatorObject(proto: object, methods: Record<string, (...a: never[]) 
  *
  * Frames are plain data (no closures) so the whole machine state is cloneable for snapshot/fork (S4).
  */
-export interface Frame {
-	node: ts.Node | null;
-	phase: number;
-	scope: Scope;
-	/** value-stack depth when this frame was pushed; used to unwind operands cleanly on throw. */
-	valuesBase: number;
-	/** synthetic-frame discriminator (e.g. "call"); absent for plain node frames. */
-	kind?: string;
-	// frame-local scratch (args, this-binding, captured metadata, ...). Kept plain for cloneability.
-	[extra: string]: unknown;
-}
+export type { Frame, NodeFrame, CallFrame, ConstructFrame, InitFieldsFrame, PatternFrame, SyntheticFrame } from "./frame.ts";
 
 export type Signal =
 	| { type: "return"; value: unknown }
@@ -107,7 +98,9 @@ export type Signal =
 	| { type: "break"; label?: string }
 	| { type: "continue"; label?: string };
 
-export type Handler = (vm: VM, frame: Frame) => void;
+export type NodeHandler = (vm: VM, frame: NodeFrame) => void;
+/** One handler per synthetic frame kind, each receiving its own frame type. */
+export type SyntheticHandlers = { [Kind in SyntheticKind]: (vm: VM, frame: Extract<SyntheticFrame, { kind: Kind }>) => void };
 
 export interface VMOptions {
 	/** Injected globals / capability shims (checked before real globals). */
@@ -269,13 +262,13 @@ export class VM {
 
 	// --- frame / value helpers ------------------------------------------------
 
-	pushNode(node: ts.Node, scope: Scope): Frame {
-		const frame: Frame = { node, phase: 0, scope, valuesBase: this.values.length };
+	pushNode(node: ts.Node, scope: Scope): NodeFrame {
+		const frame: NodeFrame = { node, phase: 0, scope, valuesBase: this.values.length };
 		this.frames.push(frame);
 		return frame;
 	}
 
-	pushFrame(frame: Frame): void {
+	pushFrame(frame: SyntheticFrame): void {
 		this.frames.push(frame);
 	}
 
@@ -319,10 +312,11 @@ export class VM {
 			return;
 		}
 
-		const handler = frame.kind !== undefined ? syntheticHandlers[frame.kind] : nodeHandlers[(frame.node as ts.Node).kind];
+		// (each synthetic handler is typed for its own frame; the union is dispatched on `kind` here)
+		const handler = (frame.kind !== undefined ? syntheticHandlers[frame.kind] : nodeHandlers[frame.node.kind]) as ((vm: VM, frame: Frame) => void) | undefined;
 		if (handler === undefined) {
-			const node = frame.node as ts.Node;
-			throw new TsvalInternalError(`unimplemented: ${frame.kind ?? syntaxKindName(node.kind)}` + (frame.kind ? "" : ` (SyntaxKind ${node.kind})`));
+			if (frame.kind !== undefined) throw new TsvalInternalError(`unimplemented: ${frame.kind}`);
+			throw new TsvalInternalError(`unimplemented: ${syntaxKindName(frame.node.kind)} (SyntaxKind ${frame.node.kind})`);
 		}
 		try {
 			handler(this, frame);
@@ -387,38 +381,38 @@ export class VM {
 			return;
 		}
 
-		const node = frame.node;
-		const kind = frame.kind === undefined && node !== null ? node.kind : -1;
-
-		// Loop frames catch break/continue targeting them (unlabeled, or matching label).
-		if (frame.isLoop === true && (signal.type === "break" || signal.type === "continue")) {
-			if (signal.label == null || signal.label === frame.label) {
-				this.values.length = frame.valuesBase;
-				this.signal = null;
-				if (signal.type === "break") {
-					this.frames.pop();
-					this.closeLoopIterator(frame, false); // IteratorClose on `break` (its errors surface)
-				} else frame.phase = frame.continuePhase as number;
-				return;
-			}
-		}
-		// A for-of left by any other abrupt completion (return/throw/outer break) closes its iterator.
-		if (frame.isLoop === true) this.closeLoopIterator(frame, true);
 		if (frame.kind === "pattern") this.closePatternIterators(frame, signal);
 
-		// switch / labeled-block frames catch break targeting them.
-		if ((frame.isSwitch === true || frame.isLabel === true) && signal.type === "break") {
-			if (signal.label == null ? frame.isSwitch === true : signal.label === frame.label) {
-				this.values.length = frame.valuesBase;
-				this.signal = null;
-				this.frames.pop();
+		if (frame.kind === undefined) {
+			// Loop frames catch break/continue targeting them (unlabeled, or matching label).
+			if (frame.isLoop === true && (signal.type === "break" || signal.type === "continue")) {
+				if (signal.label == null || signal.label === frame.label) {
+					this.values.length = frame.valuesBase;
+					this.signal = null;
+					if (signal.type === "break") {
+						this.frames.pop();
+						this.closeLoopIterator(frame, false); // IteratorClose on `break` (its errors surface)
+					} else frame.phase = frame.continuePhase as number;
+					return;
+				}
+			}
+			// A for-of left by any other abrupt completion (return/throw/outer break) closes its iterator.
+			if (frame.isLoop === true) this.closeLoopIterator(frame, true);
+
+			// switch / labeled-block frames catch break targeting them.
+			if ((frame.isSwitch === true || frame.isLabel === true) && signal.type === "break") {
+				if (signal.label == null ? frame.isSwitch === true : signal.label === frame.label) {
+					this.values.length = frame.valuesBase;
+					this.signal = null;
+					this.frames.pop();
+					return;
+				}
+			}
+
+			if (frame.node.kind === ts.SyntaxKind.TryStatement) {
+				this.unwindTry(frame, signal);
 				return;
 			}
-		}
-
-		if (kind === ts.SyntaxKind.TryStatement) {
-			this.unwindTry(frame, signal);
-			return;
 		}
 
 		// Not handled here: discard this frame and keep unwinding.
@@ -437,11 +431,10 @@ export class VM {
 	/** IteratorClose for every iterator a stepped destructuring frame still has open (innermost first)
 	 *  when a signal unwinds through it. A `throw` wins over anything `return()` throws; for a
 	 *  `return` (a generator's `.return()` at a `yield` inside a default) `return()`'s error surfaces. */
-	private closePatternIterators(frame: Frame, signal: Signal): void {
-		const iters = frame.iters as { record: { iterator: object }; done: boolean }[] | undefined;
-		if (iters === undefined) return;
+	private closePatternIterators(frame: PatternFrame, signal: Signal): void {
+		const iters = frame.iters;
 		while (iters.length > 0) {
-			const it = iters.pop() as { record: { iterator: object }; done: boolean };
+			const it = iters.pop() as PatternFrame["iters"][number];
 			if (it.done) continue;
 			it.done = true;
 			try {
@@ -454,8 +447,8 @@ export class VM {
 	}
 
 	/** IteratorClose for a for-of frame whose iterator isn't exhausted (`frame.iteratorDone`). */
-	private closeLoopIterator(frame: Frame, abrupt: boolean): void {
-		const iterator = frame.iterator as Iterator<unknown> | undefined;
+	private closeLoopIterator(frame: NodeFrame, abrupt: boolean): void {
+		const iterator = frame.iterator;
 		if (iterator === undefined || frame.iteratorDone === true) return;
 		frame.iteratorDone = true;
 		try {
@@ -473,7 +466,7 @@ export class VM {
 	 * other escaping signal (or a throw with no catch) runs `finally` then re-raises. The phases here
 	 * pair with `handleTry` in handlers.ts.
 	 */
-	private unwindTry(frame: Frame, signal: Signal): void {
+	private unwindTry(frame: NodeFrame, signal: Signal): void {
 		const node = frame.node as ts.TryStatement;
 		const runFinallyThenReraise = () => {
 			this.values.length = frame.valuesBase;
@@ -725,12 +718,14 @@ export class VM {
 		};
 
 		const cloneFrame = (f: Frame): Frame => {
-			const nf: Frame = { node: f.node, phase: f.phase, scope: clone(f.scope) as Scope, valuesBase: f.valuesBase };
+			// Field by field: every frame is plain data (frame.ts); a compiled PatternProgram is a shared
+			// class instance and `clone` passes it through.
+			const nf = { node: f.node, phase: f.phase, scope: clone(f.scope) as Scope, valuesBase: f.valuesBase } as Record<string, unknown>;
 			for (const key of Object.keys(f)) {
 				if (key === "node" || key === "phase" || key === "scope" || key === "valuesBase") continue;
-				nf[key] = clone((f as Record<string, unknown>)[key]);
+				nf[key] = clone((f as unknown as Record<string, unknown>)[key]);
 			}
-			return nf;
+			return nf as unknown as Frame;
 		};
 
 		(forked as { rootScope: Scope }).rootScope = clone(this.rootScope) as Scope;
@@ -822,7 +817,7 @@ export class VM {
 	 * construct frame to completion on a private stack; guest `new` uses the explicit construct frame
 	 * directly (steppable). The `frame.kind === "construct"` handler lives in handlers.ts.
 	 */
-	constructGuestSync(ctor: unknown, args: unknown[]): unknown {
+	constructGuestSync(ctor: GuestClass, args: unknown[]): unknown {
 		return this.runSub(() => this.frames.push({ kind: "construct", node: null, phase: 0, scope: this.rootScope, valuesBase: 0, ctor, args, isNew: true, newTarget: ctor }));
 	}
 
@@ -875,7 +870,7 @@ export class VM {
 				// A `yield*` suspended on its inner iterator intercepts `throw`/`return` to forward them
 				// (spec delegation); anything else is injected as a signal at the suspension point.
 				const top = this.top;
-				if (top !== undefined && top.delegating === true) top.received = { kind: input.kind, value: input.value };
+				if (top !== undefined && top.kind === undefined && top.delegating === true) top.received = { kind: input.kind, value: input.value };
 				else this.signal = { type: input.kind, value: input.value };
 			}
 		}
@@ -1073,8 +1068,8 @@ export class VM {
 	}
 
 	/** Push a synthetic call frame for a guest function. */
-	pushCall(meta: GuestFunctionMeta, args: unknown[], thisArg: unknown, newTarget?: unknown): Frame {
-		const frame: Frame = {
+	pushCall(meta: GuestFunctionMeta, args: unknown[], thisArg: unknown, newTarget?: unknown): CallFrame {
+		const frame: CallFrame = {
 			kind: "call",
 			node: meta.node,
 			phase: 0,

@@ -57,8 +57,10 @@ test("fork taken while a pattern frame is waiting on a default value is independ
 		const at = waiting();
 		assert.ok(at >= 0, "stopped while a pattern frame waits on its default");
 		const fork = vm.fork();
-		assert.equal(fork.frames[at]?.kind, "pattern");
-		assert.notStrictEqual(fork.frames[at]?.temps, vm.frames[at]?.temps);
+		const forkFrame = fork.frames[at];
+		const original = vm.frames[at];
+		assert.ok(forkFrame?.kind === "pattern" && original?.kind === "pattern");
+		assert.notStrictEqual(forkFrame.temps, original.temps);
 		vm.run();
 		fork.run();
 		assert.equal(vm.completion, 7);

@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { Scope, type BindingKind } from "./scope.ts";
-import type { Frame, Handler, Signal, VM } from "./vm.ts";
+import type { Signal, VM, NodeHandler, SyntheticHandlers } from "./vm.ts";
+import type { NodeFrame, Received, PatternIterator, PatternSource } from "./frame.ts";
 import type { GuestFunction, GuestFunctionMeta, GuestFunctionNode } from "./values.ts";
 import { isGuestFunction } from "./values.ts";
 import { unimplemented } from "./errors.ts";
@@ -8,11 +9,11 @@ import { unimplemented } from "./errors.ts";
 const K = ts.SyntaxKind;
 
 /** Per-SyntaxKind frame handlers. */
-export const nodeHandlers: Record<number, Handler> = {};
+export const nodeHandlers: Record<number, NodeHandler> = {};
 /** Synthetic-frame handlers (frames with a `kind` tag rather than a 1:1 node). */
-export const syntheticHandlers: Record<string, Handler> = {};
+export const syntheticHandlers = {} as SyntheticHandlers;
 
-function on(kind: number, handler: Handler): void {
+function on(kind: number, handler: NodeHandler): void {
 	nodeHandlers[kind] = handler;
 }
 
@@ -294,7 +295,7 @@ on(K.FunctionDeclaration, (vm) => {
 });
 
 // Type-only / erased declarations — no runtime effect (the checker uses them; the VM skips them).
-const noop: Handler = (vm) => vm.frames.pop();
+const noop: NodeHandler = (vm) => vm.frames.pop();
 on(K.TypeAliasDeclaration, noop);
 on(K.InterfaceDeclaration, noop);
 on(K.ExportDeclaration, noop); // `export { ... }` — module output isn't modeled
@@ -453,7 +454,7 @@ on(K.ForStatement, (vm, frame) => {
 });
 
 // Snapshot the loop variables into a fresh scope so each iteration captures its own binding.
-function copyPerIteration(frame: Frame): void {
+function copyPerIteration(frame: NodeFrame): void {
 	const names = frame.lexicalNames as string[] | null;
 	if (names == null || names.length === 0) return;
 	const prev = frame.iterScope as Scope;
@@ -493,7 +494,7 @@ const LOOP_DONE: unique symbol = Symbol("tsval.loop-done");
 
 /** IteratorStep + IteratorValue for a loop frame. An iterator whose `next`/`done`/`value` throws is
  *  marked done first, so the loop's abrupt exit does NOT IteratorClose it (spec). */
-function loopStep(frame: Frame): unknown {
+function loopStep(frame: NodeFrame): unknown {
 	try {
 		const result = iterNext(frame.iterRecord as IterRecord);
 		if (result.done) {
@@ -510,7 +511,7 @@ function loopStep(frame: Frame): unknown {
 // `for await (x of iterable)`: an async iterator's `.next()` results are awaited; a sync iterable's
 // *values* are awaited (the spec's async-from-sync adaptation). Each await suspends the enclosing
 // fiber, which is what makes the loop steppable/forkable like any other.
-function forAwaitOf(vm: VM, frame: Frame, node: ts.ForOfStatement): void {
+function forAwaitOf(vm: VM, frame: NodeFrame, node: ts.ForOfStatement): void {
 	if (frame.phase === 0) {
 		frame.isLoop = true;
 		frame.continuePhase = 2;
@@ -589,7 +590,7 @@ on(K.ForInStatement, (vm, frame) => {
 
 // Bind the current for-of/for-in element to the loop target in a fresh per-iteration scope, then
 // push the body. Destructuring targets: S2 (later).
-function bindForTarget(vm: VM, frame: Frame, initializer: ts.ForInitializer, value: unknown): void {
+function bindForTarget(vm: VM, frame: NodeFrame, initializer: ts.ForInitializer, value: unknown): void {
 	const node = frame.node as ts.ForOfStatement | ts.ForInStatement;
 	const bodyScope = new Scope(frame.scope, false);
 	// A pattern that may suspend is bound by a frame pushed ABOVE the body (so it runs first).
@@ -740,7 +741,7 @@ on(K.BigIntLiteral, (vm, frame) => {
 	vm.push(BigInt(node.text.replace(/_/g, "").replace(/n$/, "")));
 });
 
-const pushText: Handler = (vm, frame) => {
+const pushText: NodeHandler = (vm, frame) => {
 	vm.frames.pop();
 	vm.push((frame.node as ts.LiteralLikeNode).text);
 };
@@ -822,7 +823,7 @@ type RmwStep = { kind: "need-rhs" } | { kind: "done"; result: unknown } | { kind
  * expression; the current value is read (when `readFirst`) before any RHS; the RHS is evaluated
  * only when `compute` asks for it; the store goes through superSet (an inherited setter runs).
  */
-function superReadModifyWrite(vm: VM, frame: Frame, target: ts.PropertyAccessExpression | ts.ElementAccessExpression, readFirst: boolean, compute: (current: unknown, rhs: { value: unknown } | undefined) => RmwStep, rhs?: ts.Expression): void {
+function superReadModifyWrite(vm: VM, frame: NodeFrame, target: ts.PropertyAccessExpression | ts.ElementAccessExpression, readFirst: boolean, compute: (current: unknown, rhs: { value: unknown } | undefined) => RmwStep, rhs?: ts.Expression): void {
 	const isElem = ts.isElementAccessExpression(target);
 	if (frame.phase === 0) {
 		thisValue(frame.scope);
@@ -870,7 +871,7 @@ on(K.MetaProperty, (vm, frame) => {
 });
 
 // Type-only wrappers: evaluate the inner expression, ignore the type.
-const passThroughExpr: Handler = (vm, frame) => {
+const passThroughExpr: NodeHandler = (vm, frame) => {
 	const node = frame.node as ts.ParenthesizedExpression | ts.AsExpression | ts.TypeAssertion | ts.NonNullExpression | ts.SatisfiesExpression;
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);
@@ -1154,7 +1155,7 @@ on(K.PostfixUnaryExpression, (vm, frame) => {
 });
 
 // ++/-- on a simple identifier lvalue (member lvalues: S2).
-function updateExpression(vm: VM, frame: Frame, operand: ts.Expression, operator: ts.SyntaxKind, prefix: boolean): void {
+function updateExpression(vm: VM, frame: NodeFrame, operand: ts.Expression, operator: ts.SyntaxKind, prefix: boolean): void {
 	const delta = operator === K.PlusPlusToken ? 1 : -1;
 	operand = unwrapParens(operand);
 	if (isSuperRef(operand)) {
@@ -1353,7 +1354,7 @@ on(K.YieldExpression, (vm, frame) => {
 });
 
 /** Park the current frame at `resumePhase` and suspend the fiber with a payload of the given kind. */
-function suspend(vm: VM, frame: Frame, kind: "yield" | "await", value: unknown, resumePhase: number, raw = false): void {
+function suspend(vm: VM, frame: NodeFrame, kind: "yield" | "await", value: unknown, resumePhase: number, raw = false): void {
 	vm.pauseValue = value;
 	vm.pauseKind = kind;
 	vm.pauseRaw = raw;
@@ -1396,7 +1397,7 @@ function getMethod(obj: unknown, name: string): ((...a: unknown[]) => unknown) |
 	return fn as (...a: unknown[]) => unknown;
 }
 
-type Received = { kind: "next" | "throw" | "return"; value: unknown };
+// (`Received` — what a yield* frame received — lives in frame.ts with the frame shapes)
 
 /**
  * `yield* iterable` — the spec's delegation loop (14.4.14 / AsyncGeneratorYield):
@@ -1409,7 +1410,7 @@ type Received = { kind: "next" | "throw" | "return"; value: unknown };
  * - the expression's own value is the inner iterator's completion value.
  * The fiber driver routes `throw`/`return` to this frame (`frame.delegating`) instead of unwinding.
  */
-function yieldStar(vm: VM, frame: Frame, node: ts.YieldExpression): void {
+function yieldStar(vm: VM, frame: NodeFrame, node: ts.YieldExpression): void {
 	const meta = enclosingFunctionMeta(frame.scope);
 	const asyncGen = meta?.isAsync === true && meta.isGenerator;
 	switch (frame.phase) {
@@ -1473,7 +1474,7 @@ function yieldStar(vm: VM, frame: Frame, node: ts.YieldExpression): void {
 	}
 }
 
-function delegateResult(vm: VM, frame: Frame, innerResult: unknown, asyncGen: boolean): void {
+function delegateResult(vm: VM, frame: NodeFrame, innerResult: unknown, asyncGen: boolean): void {
 	if (!isObjectLike(innerResult)) throw new TypeError("Iterator result is not an object");
 	const returning = frame.returning === true;
 	frame.returning = false;
@@ -1568,7 +1569,7 @@ on(K.BinaryExpression, (vm, frame) => {
 	}
 });
 
-function logicalExpression(vm: VM, frame: Frame, node: ts.BinaryExpression, op: number): void {
+function logicalExpression(vm: VM, frame: NodeFrame, node: ts.BinaryExpression, op: number): void {
 	if (frame.phase === 0) {
 		vm.pushNode(node.left, frame.scope);
 		frame.phase = 1;
@@ -1589,7 +1590,7 @@ function logicalExpression(vm: VM, frame: Frame, node: ts.BinaryExpression, op: 
 	}
 }
 
-function assignmentExpression(vm: VM, frame: Frame, node: ts.BinaryExpression): void {
+function assignmentExpression(vm: VM, frame: NodeFrame, node: ts.BinaryExpression): void {
 	// A parenthesized target `(x) = v` / `(o.p) = v` is still a Reference (but not an IdentifierRef:
 	// no NamedEvaluation through parentheses).
 	const left = unwrapParens(node.left);
@@ -1753,7 +1754,7 @@ function storePrepared(vm: VM, scope: Scope, t: PreparedTarget, value: unknown):
 	} else assignPattern(vm, scope, t.target, value);
 }
 
-function memberAssignment(vm: VM, frame: Frame, target: ts.PropertyAccessExpression | ts.ElementAccessExpression, right: ts.Expression): void {
+function memberAssignment(vm: VM, frame: NodeFrame, target: ts.PropertyAccessExpression | ts.ElementAccessExpression, right: ts.Expression): void {
 	const isElement = ts.isElementAccessExpression(target);
 	if (frame.phase === 0) {
 		vm.pushNode(target.expression, frame.scope);
@@ -1786,7 +1787,7 @@ function logicalShortCircuits(op: number, current: unknown): boolean {
 // Spec order for `lhs op= rhs`: the LHS *reference* is evaluated, then GetValue (a TDZ or null-base
 // error surfaces here, before the RHS runs), then the RHS — and a logical assignment doesn't run the
 // RHS at all when the current value decides.
-function compoundAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression, op: number): void {
+function compoundAssignment(vm: VM, frame: NodeFrame, node: ts.BinaryExpression, op: number): void {
 	const left = unwrapParens(node.left);
 	if (ts.isIdentifier(left)) {
 		const name = left.text;
@@ -1830,7 +1831,7 @@ function compoundAssignment(vm: VM, frame: Frame, node: ts.BinaryExpression, op:
 }
 
 // `obj.p op= rhs` / `obj[k] op= rhs`: the object (and key) reference is evaluated once.
-function memberCompoundAssignment(vm: VM, frame: Frame, target: ts.PropertyAccessExpression | ts.ElementAccessExpression, right: ts.Expression, op: number): void {
+function memberCompoundAssignment(vm: VM, frame: NodeFrame, target: ts.PropertyAccessExpression | ts.ElementAccessExpression, right: ts.Expression, op: number): void {
 	const isElem = ts.isElementAccessExpression(target);
 	const privateNameOf = (): PrivateName | undefined => (!isElem && ts.isPrivateIdentifier((target as ts.PropertyAccessExpression).name) ? lookupPrivate(frame.scope, (target as ts.PropertyAccessExpression).name.text) : undefined);
 	if (frame.phase === 0) {
@@ -1886,7 +1887,7 @@ on(K.ConditionalExpression, (vm, frame) => {
 // Function expressions
 // ============================================================================
 
-const makeFunction: Handler = (vm, frame) => {
+const makeFunction: NodeHandler = (vm, frame) => {
 	const node = frame.node as ts.FunctionExpression | ts.ArrowFunction;
 	vm.frames.pop();
 	vm.push(createGuestFunction(vm, node, frame.scope));
@@ -2019,7 +2020,7 @@ on(K.CallExpression, (vm, frame) => {
 
 // Evaluate call/new arguments left-to-right (pushed in reverse). A spread argument's operand is
 // evaluated like any other; `spreadMask` records which operands to flatten when collecting.
-function pushCallArguments(vm: VM, frame: Frame, args: readonly ts.Expression[]): void {
+function pushCallArguments(vm: VM, frame: NodeFrame, args: readonly ts.Expression[]): void {
 	const spreadMask: boolean[] = [];
 	for (let i = args.length - 1; i >= 0; i--) {
 		const arg = args[i];
@@ -2035,7 +2036,7 @@ function pushCallArguments(vm: VM, frame: Frame, args: readonly ts.Expression[])
 	frame.spreadMask = spreadMask;
 }
 
-function collectCallArguments(vm: VM, frame: Frame): unknown[] {
+function collectCallArguments(vm: VM, frame: NodeFrame): unknown[] {
 	const argCount = frame.argCount as number;
 	const raw = vm.values.splice(vm.values.length - argCount);
 	const spreadMask = frame.spreadMask as boolean[];
@@ -2077,7 +2078,7 @@ on(K.NewExpression, (vm, frame) => {
 // Classes
 // ============================================================================
 
-interface ClassMeta {
+export interface ClassMeta {
 	node: ts.ClassLikeDeclaration;
 	closure: Scope;
 	superClass: unknown;
@@ -2176,7 +2177,7 @@ export function clonePrivateElements(from: object, to: object, cloneValue: (v: u
 	privateElements.set(to, copy);
 }
 
-interface GuestClass {
+export interface GuestClass {
 	new (...args: unknown[]): unknown;
 	prototype: object;
 }
@@ -2443,7 +2444,7 @@ function rebindThis(vm: VM, scope: Scope, replacement: object): void {
 
 // `super(...)` inside a derived constructor: construct the parent on the current instance, then
 // initialize this class's own instance fields (spec order), then the call yields undefined.
-function superCall(vm: VM, frame: Frame, node: ts.CallExpression): void {
+function superCall(vm: VM, frame: NodeFrame, node: ts.CallExpression): void {
 	if (frame.phase === 0) {
 		pushCallArguments(vm, frame, node.arguments);
 		frame.phase = 1;
@@ -2492,7 +2493,7 @@ function computedKeyNodes(node: ts.ClassLikeDeclaration): ts.Expression[] {
  * `yield`/`await` inside them suspends like anywhere else; then the class is built from those values.
  * Returns the constructor once built (undefined while the sub-expressions are still evaluating).
  */
-function classDefinition(vm: VM, frame: Frame, node: ts.ClassLikeDeclaration): GuestClass | undefined {
+function classDefinition(vm: VM, frame: NodeFrame, node: ts.ClassLikeDeclaration): GuestClass | undefined {
 	const heritage = node.heritageClauses?.find((h) => h.token === K.ExtendsKeyword);
 	if (frame.phase === 0) {
 		assertSupportedClassSurface(node);
@@ -2562,7 +2563,7 @@ on(K.EnumDeclaration, (vm, frame) => {
 
 // Synthetic construct frame: build one class level's instance on the explicit stack.
 syntheticHandlers.construct = (vm, frame) => {
-	const ctor = frame.ctor as GuestClass;
+	const ctor = frame.ctor;
 	const meta = classMetaOf(ctor);
 	if (frame.phase === 0) {
 		const instance = (frame.instance as object) ?? Object.create(ctor.prototype);
@@ -2578,8 +2579,8 @@ syntheticHandlers.construct = (vm, frame) => {
 			fnScope.classMeta = meta;
 			fnScope.newTarget = frame.newTarget ?? ctor;
 			fnScope.declareLexical("arguments", "var");
-			fnScope.initialize("arguments", createArgumentsObject(vm, frame.args as unknown[]));
-			bindParameters(vm, fnScope, meta.ctorNode.parameters, frame.args as unknown[]);
+			fnScope.initialize("arguments", createArgumentsObject(vm, frame.args));
+			bindParameters(vm, fnScope, meta.ctorNode.parameters, frame.args);
 			// Base class: fields init before the body. Derived: after super() (handled in the super call).
 			if (meta.superClass === undefined) initInstanceFields(vm, meta, instance);
 			hoist(vm, fnScope, (meta.ctorNode.body as ts.Block).statements);
@@ -2590,9 +2591,9 @@ syntheticHandlers.construct = (vm, frame) => {
 			const newTarget = frame.newTarget ?? ctor;
 			if (isGuestClass(meta.superClass)) {
 				vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance, fromStack: true });
-				pushParentConstruct(vm, meta.superClass, frame.args as unknown[], instance, newTarget);
+				pushParentConstruct(vm, meta.superClass, frame.args, instance, newTarget);
 			} else {
-				const created = pushParentConstruct(vm, meta.superClass, frame.args as unknown[], instance, newTarget) as object;
+				const created = pushParentConstruct(vm, meta.superClass, frame.args, instance, newTarget) as object;
 				frame.instance = created;
 				vm.pushFrame({ kind: "initfields", node: null, phase: 0, scope: meta.closure, valuesBase: vm.values.length, meta, instance: created });
 			}
@@ -2615,10 +2616,10 @@ syntheticHandlers.initfields = (vm, frame) => {
 	let instance = frame.instance as object;
 	if (frame.fromStack === true) instance = vm.pop() as object;
 	if (frame.thisScope !== undefined) {
-		assertThisUnbound(frame.thisScope as Scope);
-		rebindThis(vm, frame.thisScope as Scope, instance);
+		assertThisUnbound(frame.thisScope);
+		rebindThis(vm, frame.thisScope, instance);
 	} else if (frame.fromStack === true) setConstructInstance(vm, instance);
-	initInstanceFields(vm, frame.meta as ClassMeta, instance);
+	initInstanceFields(vm, frame.meta, instance);
 	vm.frames.pop();
 };
 
@@ -2635,7 +2636,7 @@ function setConstructInstance(vm: VM, instance: object): void {
 
 // Synthetic call frame: run a guest function on the explicit stack.
 syntheticHandlers.call = (vm, frame) => {
-	const meta = frame.meta as GuestFunctionMeta;
+	const meta = frame.meta;
 	const node = meta.node;
 	if (frame.phase === 0) {
 		const fnScope = new Scope(meta.closure, /* isolated */ true);
@@ -2645,9 +2646,9 @@ syntheticHandlers.call = (vm, frame) => {
 			if (meta.homeObject !== undefined) fnScope.homeObject = meta.homeObject;
 			if (frame.newTarget !== undefined) fnScope.newTarget = frame.newTarget;
 			fnScope.declareLexical("arguments", "var");
-			fnScope.initialize("arguments", createArgumentsObject(vm, frame.args as unknown[]));
+			fnScope.initialize("arguments", createArgumentsObject(vm, frame.args));
 		}
-		bindParameters(vm, fnScope, node.parameters, frame.args as unknown[]);
+		bindParameters(vm, fnScope, node.parameters, frame.args);
 		fnScope.functionMeta = meta;
 		frame.scope = fnScope;
 		// With non-simple parameters (defaults, patterns, rest) the body gets its own var environment:
@@ -2844,21 +2845,13 @@ type PatOp =
 	| { op: "member-ref"; hasKey: boolean; text: string; privateName?: string } // (key), base → reference record
 	| { op: "member-store" }; // value, reference → PutValue
 
-class PatternProgram {
+export class PatternProgram {
 	readonly ops: readonly PatOp[];
 	constructor(ops: readonly PatOp[]) {
 		this.ops = ops; // (an explicit field: Node's strip-only TS has no parameter properties)
 	}
 }
 
-interface PatternIterator {
-	record: IterRecord;
-	done: boolean;
-}
-interface PatternSource {
-	value: unknown;
-	used: PropertyKey[];
-}
 interface MemberRef {
 	obj: object;
 	key: PropertyKey;
@@ -3035,10 +3028,10 @@ function patternIterStep(it: PatternIterator): unknown {
 }
 
 syntheticHandlers.pattern = (vm, frame) => {
-	const program = frame.program as PatternProgram;
-	const temps = frame.temps as unknown[];
-	const iters = frame.iters as PatternIterator[];
-	const objs = frame.objs as PatternSource[];
+	const program = frame.program;
+	const temps = frame.temps;
+	const iters = frame.iters;
+	const objs = frame.objs;
 	const keys = frame.keys as PropertyKey[];
 	const scope = frame.scope;
 	if (frame.awaiting === true) {
@@ -3046,7 +3039,7 @@ syntheticHandlers.pattern = (vm, frame) => {
 		temps.push(vm.pop());
 	}
 	for (;;) {
-		const pc = frame.pc as number;
+		const pc = frame.pc;
 		if (pc >= program.ops.length) return void vm.frames.pop();
 		const op = program.ops[pc];
 		frame.pc = pc + 1;
@@ -3107,7 +3100,7 @@ syntheticHandlers.pattern = (vm, frame) => {
 				objs.pop();
 				break;
 			case "jump-if-defined":
-				if (temps[temps.length - 1] !== undefined) frame.pc = (frame.pc as number) + op.offset;
+				if (temps[temps.length - 1] !== undefined) frame.pc = frame.pc + op.offset;
 				else temps.pop();
 				break;
 			case "name":
