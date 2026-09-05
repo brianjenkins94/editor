@@ -1,7 +1,7 @@
 import ts from "typescript";
 import { Scope, type BindingKind } from "./scope.ts";
 import type { Signal, VM, NodeHandler, SyntheticHandlers } from "./vm.ts";
-import type { NodeFrame, Received, PatternIterator, PatternSource } from "./frame.ts";
+import type { NodeFrame, Received, Iteration, PatternSource } from "./frame.ts";
 import type { GuestFunction, GuestFunctionMeta, GuestFunctionNode } from "./values.ts";
 import { isGuestFunction } from "./values.ts";
 import { unimplemented, TsvalInternalError } from "./errors.ts";
@@ -475,37 +475,18 @@ on(K.ForOfStatement, (vm, frame) => {
 		vm.pushNode(node.expression, headTdzScope(frame.scope, node.initializer));
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
-		const record = getIterator(vm, vm.pop());
-		frame.iterRecord = record;
-		frame.iterator = record.iterator; // for IteratorClose on abrupt exit (vm.closeLoopIterator)
+		frame.iteration = { record: getIterator(vm, vm.pop()), done: false }; // (VM.unwind IteratorCloses it on abrupt exit)
 		frame.phase = 2;
 	} else if (frame.phase === 2) {
-		const value = loopStep(frame);
-		if (value === LOOP_DONE) return void vm.frames.pop();
+		const it = frame.iteration as Iteration;
+		const value = iterationStep(it);
+		if (it.done) return void vm.frames.pop();
 		bindForTarget(vm, frame, node.initializer, vm.fromHost(value));
 		frame.phase = 3;
 	} else {
 		frame.phase = 2;
 	}
 });
-
-const LOOP_DONE: unique symbol = Symbol("tsval.loop-done");
-
-/** IteratorStep + IteratorValue for a loop frame. An iterator whose `next`/`done`/`value` throws is
- *  marked done first, so the loop's abrupt exit does NOT IteratorClose it (spec). */
-function loopStep(frame: NodeFrame): unknown {
-	try {
-		const result = iterNext(frame.iterRecord as IterRecord);
-		if (result.done) {
-			frame.iteratorDone = true;
-			return LOOP_DONE;
-		}
-		return result.value;
-	} catch (error) {
-		frame.iteratorDone = true;
-		throw error;
-	}
-}
 
 // `for await (x of iterable)`: an async iterator's `.next()` results are awaited; a sync iterable's
 // *values* are awaited (the spec's async-from-sync adaptation). Each await suspends the enclosing
@@ -518,21 +499,21 @@ function forAwaitOf(vm: VM, frame: NodeFrame, node: ts.ForOfStatement): void {
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
 		const { record, sync } = getAsyncOrSyncIterator(vm, vm.pop());
-		frame.iterRecord = record;
-		frame.iterator = record.iterator;
+		frame.iteration = { record, done: false };
 		frame.syncIterator = sync;
 		frame.phase = 2;
 	} else if (frame.phase === 2) {
+		const it = frame.iteration as Iteration;
 		if (frame.syncIterator) {
-			const value = loopStep(frame);
-			if (value === LOOP_DONE) return void vm.frames.pop();
+			const value = iterationStep(it);
+			if (it.done) return void vm.frames.pop();
 			suspend(vm, frame, "await", value, 3); // await the element itself
 		} else {
 			let step: unknown;
 			try {
-				step = iterNext(frame.iterRecord as IterRecord);
+				step = iterNext(it.record);
 			} catch (error) {
-				frame.iteratorDone = true;
+				it.done = true; // a throwing iterator is not closed
 				throw error;
 			}
 			suspend(vm, frame, "await", step, 4); // await the result object
@@ -542,16 +523,17 @@ function forAwaitOf(vm: VM, frame: NodeFrame, node: ts.ForOfStatement): void {
 		frame.phase = 5;
 	} else if (frame.phase === 4) {
 		const result = resumed(vm);
+		const it = frame.iteration as Iteration;
 		if (typeof result !== "object" || result === null) throw new TypeError("Iterator result is not an object");
 		let value: unknown;
 		try {
 			if ((result as IteratorResult<unknown>).done) {
-				frame.iteratorDone = true;
+				it.done = true;
 				return void vm.frames.pop();
 			}
 			value = (result as IteratorResult<unknown>).value;
 		} catch (error) {
-			frame.iteratorDone = true;
+			it.done = true;
 			throw error;
 		}
 		bindForTarget(vm, frame, node.initializer, vm.fromHost(value));
@@ -1444,23 +1426,23 @@ function yieldStar(vm: VM, frame: NodeFrame, node: ts.YieldExpression): void {
 		case 1: {
 			const iterable = vm.pop();
 			const record = asyncGen ? getAsyncOrSyncIterator(vm, iterable).record : getIterator(vm, iterable);
-			frame.iterRecord = record;
-			frame.iterator = record.iterator;
+			frame.iteration = { record, done: false };
 			frame.received = { kind: "next", value: undefined } satisfies Received;
 			frame.phase = 2;
 			return;
 		}
 		case 2: {
 			// Dispatch the received completion to the inner iterator.
-			const it = frame.iterator as Record<string, unknown>;
+			const iteration = frame.iteration as Iteration;
+			const it = iteration.record.iterator as Record<string, unknown>;
 			const received = frame.received as Received;
 			let innerResult: unknown;
 			if (received.kind === "next") {
-				innerResult = iterNext(frame.iterRecord as IterRecord, received.value);
+				innerResult = iterNext(iteration.record, received.value);
 			} else if (received.kind === "throw") {
 				const throwMethod = getMethod(it, "throw");
 				if (throwMethod === undefined) {
-					closeIterator(it as unknown as Iterator<unknown>, false, false);
+					closeIteration(iteration, false);
 					throw new TypeError("The iterator does not provide a 'throw' method");
 				}
 				innerResult = throwMethod.call(it, received.value);
@@ -2714,22 +2696,6 @@ function compileAssign(elementTarget: ts.Expression, ops: PatOp[]): void {
 
 // --- execution ---
 
-/** IteratorStep + IteratorValue on an open record; a throwing iterator is marked done (no IteratorClose). */
-function patternIterStep(it: PatternIterator): unknown {
-	if (it.done) return undefined;
-	try {
-		const r = iterNext(it.record);
-		if (r.done) {
-			it.done = true;
-			return undefined;
-		}
-		return r.value;
-	} catch (error) {
-		it.done = true;
-		throw error;
-	}
-}
-
 syntheticHandlers.pattern = (vm, frame) => {
 	const program = frame.program;
 	const temps = frame.temps;
@@ -2761,27 +2727,25 @@ syntheticHandlers.pattern = (vm, frame) => {
 				iters.push({ record: getIterator(vm, temps.pop()), done: false });
 				break;
 			case "iter-step":
-				temps.push(patternIterStep(iters[iters.length - 1]));
+				temps.push(iterationStep(iters[iters.length - 1]));
 				break;
 			case "iter-skip":
-				patternIterStep(iters[iters.length - 1]);
+				iterationStep(iters[iters.length - 1]);
 				break;
 			case "iter-rest": {
 				const it = iters[iters.length - 1];
 				const rest = new vm.realm.Array() as unknown[];
 				for (;;) {
-					const v = patternIterStep(it);
+					const v = iterationStep(it);
 					if (it.done) break;
 					defineData(rest, rest.length, v);
 				}
 				temps.push(rest);
 				break;
 			}
-			case "iter-close": {
-				const it = iters.pop() as PatternIterator;
-				closeIterator(it.record.iterator, it.done, false);
+			case "iter-close":
+				closeIteration(iters.pop() as Iteration, false);
 				break;
-			}
 			case "obj-open": {
 				const value = temps.pop();
 				if (value == null) throw new TypeError(`Cannot destructure '${String(value)}' as it is ${String(value)}.`);
@@ -2922,6 +2886,34 @@ function iterNext(record: IterRecord, ...args: unknown[]): IteratorResult<unknow
 	const result = (record.next as (...a: unknown[]) => unknown).apply(record.iterator, args);
 	if (typeof result !== "object" || result === null) throw new TypeError("Iterator result is not an object");
 	return result as IteratorResult<unknown>;
+}
+
+/**
+ * IteratorStep + IteratorValue on an open iteration (a loop frame's, a pattern frame's): the value,
+ * or undefined once exhausted (`it.done`, which stays set — no further `next` calls). An iterator
+ * whose `next`/`done`/`value` throws is marked done first: the error is the iterator's own, so no
+ * IteratorClose is attempted on it (spec).
+ */
+export function iterationStep(it: Iteration): unknown {
+	if (it.done) return undefined;
+	try {
+		const r = iterNext(it.record);
+		if (r.done) {
+			it.done = true;
+			return undefined;
+		}
+		return r.value;
+	} catch (error) {
+		it.done = true;
+		throw error;
+	}
+}
+
+/** IteratorClose on an iteration unless it is exhausted; marks it done either way. */
+export function closeIteration(it: Iteration, abrupt: boolean): void {
+	if (it.done) return;
+	it.done = true;
+	closeIterator(it.record.iterator, false, abrupt);
 }
 
 /** CopyDataProperties for an object rest: own enumerable string and symbol keys not already bound. */

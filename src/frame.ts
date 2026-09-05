@@ -28,8 +28,8 @@ export interface Received {
 	value: unknown;
 }
 
-/** One open iterator of a stepped destructuring frame, with the record's [[Done]]. */
-export interface PatternIterator {
+/** An open iteration — a loop frame's, `yield*`'s, or one of a pattern frame's — with the record's [[Done]]. */
+export interface Iteration {
 	record: IterRecord;
 	done: boolean;
 }
@@ -60,10 +60,8 @@ export interface NodeFrame extends FrameBase {
 	lexicalNames?: string[] | null;
 	lexicalKind?: BindingKind;
 	initIsExpr?: boolean;
-	/** `for…of` / `for await` / `yield*`: the iterator record; the iterator itself for IteratorClose; [[Done]]. */
-	iterRecord?: IterRecord;
-	iterator?: object;
-	iteratorDone?: boolean;
+	/** `for…of` / `for await` / `yield*`: the open iteration (VM.unwind IteratorCloses a loop's on abrupt exit). */
+	iteration?: Iteration;
 	syncIterator?: boolean;
 	/** `for…in`: the enumerated keys and the cursor. */
 	keys?: PropertyKey[];
@@ -152,7 +150,7 @@ export interface PatternFrame extends FrameBase {
 	program: PatternProgram;
 	pc: number;
 	temps: unknown[];
-	iters: PatternIterator[];
+	iters: Iteration[];
 	objs: PatternSource[];
 	keys: PropertyKey[];
 	awaiting?: boolean;

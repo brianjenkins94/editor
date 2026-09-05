@@ -2,9 +2,9 @@ import ts from "typescript";
 import { Scope } from "./scope.ts";
 import { syntaxKindName } from "./frontend.ts";
 import type { GuestFunctionMeta } from "./values.ts";
-import type { Frame, NodeFrame, CallFrame, PatternFrame, SyntheticFrame, SyntheticKind } from "./frame.ts";
+import type { Frame, NodeFrame, CallFrame, SyntheticFrame, SyntheticKind, Iteration } from "./frame.ts";
 import { isGuestFunction } from "./values.ts";
-import { nodeHandlers, syntheticHandlers, createGuestFunction, bindIdentifier, bindingProgram, pushPattern, closeIterator, clonePrivateElements, isGuestClass, type GuestClass } from "./handlers.ts";
+import { nodeHandlers, syntheticHandlers, createGuestFunction, bindIdentifier, bindingProgram, pushPattern, closeIteration, clonePrivateElements, isGuestClass, type GuestClass } from "./handlers.ts";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
 
 /** Brand marking a live generator/async fiber object as non-cloneable (shared across forks). */
@@ -381,7 +381,7 @@ export class VM {
 			return;
 		}
 
-		if (frame.kind === "pattern") this.closePatternIterators(frame, signal);
+		if (frame.kind === "pattern") this.closeIterations(frame.iters.splice(0).reverse(), signal); // innermost first
 
 		if (frame.kind === undefined) {
 			// Loop frames catch break/continue targeting them (unlabeled, or matching label).
@@ -391,13 +391,13 @@ export class VM {
 					this.signal = null;
 					if (signal.type === "break") {
 						this.frames.pop();
-						this.closeLoopIterator(frame, false); // IteratorClose on `break` (its errors surface)
+						if (frame.iteration !== undefined) this.closeIterations([frame.iteration], signal);
 					} else frame.phase = frame.continuePhase as number;
 					return;
 				}
 			}
 			// A for-of left by any other abrupt completion (return/throw/outer break) closes its iterator.
-			if (frame.isLoop === true) this.closeLoopIterator(frame, true);
+			if (frame.isLoop === true && frame.iteration !== undefined) this.closeIterations([frame.iteration], signal);
 
 			// switch / labeled-block frames catch break targeting them.
 			if ((frame.isSwitch === true || frame.isLabel === true) && signal.type === "break") {
@@ -428,35 +428,20 @@ export class VM {
 		}
 	}
 
-	/** IteratorClose for every iterator a stepped destructuring frame still has open (innermost first)
-	 *  when a signal unwinds through it. A `throw` wins over anything `return()` throws; for a
-	 *  `return` (a generator's `.return()` at a `yield` inside a default) `return()`'s error surfaces. */
-	private closePatternIterators(frame: PatternFrame, signal: Signal): void {
-		const iters = frame.iters;
-		while (iters.length > 0) {
-			const it = iters.pop() as PatternFrame["iters"][number];
-			if (it.done) continue;
-			it.done = true;
+	/**
+	 * IteratorClose for iterations a frame still has open when a signal unwinds through it (a loop's,
+	 * or a pattern frame's, innermost first). A `throw` wins over anything `return()` throws; for any
+	 * other completion (`break`, `return`, `continue` past the loop) an error from `return()` replaces
+	 * it — thrown while unwinding, it becomes the propagating signal.
+	 */
+	private closeIterations(iterations: Iteration[], signal: Signal): void {
+		for (const it of iterations) {
 			try {
-				closeIterator(it.record.iterator, false, signal.type === "throw");
+				closeIteration(it, signal.type === "throw");
 			} catch (error) {
 				if (isUncatchable(error)) throw error;
 				this.signal = { type: "throw", value: this.toGuestError(error) };
 			}
-		}
-	}
-
-	/** IteratorClose for a for-of frame whose iterator isn't exhausted (`frame.iteratorDone`). */
-	private closeLoopIterator(frame: NodeFrame, abrupt: boolean): void {
-		const iterator = frame.iterator;
-		if (iterator === undefined || frame.iteratorDone === true) return;
-		frame.iteratorDone = true;
-		try {
-			closeIterator(iterator, false, abrupt);
-		} catch (error) {
-			// Thrown while unwinding (outside a handler's try/catch): becomes the propagating signal.
-			if (isUncatchable(error)) throw error;
-			this.signal = { type: "throw", value: this.toGuestError(error) };
 		}
 	}
 
