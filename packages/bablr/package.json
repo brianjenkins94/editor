@@ -1,0 +1,13 @@
+{
+  "name": "@brianjenkins94/bablr",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@brianjenkins94/bablr-language-ts": "*"
+  }
+}
