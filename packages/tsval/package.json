@@ -1,0 +1,34 @@
+{
+  "name": "@brianjenkins94/tsval",
+  "version": "0.0.0",
+  "description": "A stepped, stack-based, TypeScript-AST interpreter (Path B / ts.SyntaxKind) with single-stepping, pause/resume, and snapshot/fork.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./typed": "./src/typed.ts"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --test-isolation=none \"test/**/*.test.ts\"",
+    "test:diff": "node --test --test-isolation=none \"test/differential/**/*.test.ts\"",
+    "test:corpus": "node --test --test-isolation=none test/differential/ts-evaluator.test.ts",
+    "test:test262": "node --test --test-isolation=none test/differential/test262.test.ts",
+    "test262:fetch": "bash scripts/test262-fetch.sh",
+    "test262:sample": "node scripts/test262-sample.ts",
+    "test262:report": "node scripts/test262-report.ts",
+    "test:ts-cases": "node --test --test-isolation=none test/differential/ts-cases.test.ts",
+    "ts-cases:fetch": "bash scripts/ts-cases-fetch.sh",
+    "ts-cases:sample": "node scripts/ts-cases-sample.ts",
+    "ts-cases:report": "node scripts/ts-cases-report.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "typescript": "^5.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3"
+  }
+}

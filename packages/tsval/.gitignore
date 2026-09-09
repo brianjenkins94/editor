@@ -1,0 +1,9 @@
+node_modules/
+# full pinned test262 checkout (98 MB) — fetched on demand; the sample is checked in
+vendor/test262/
+*.log
+.DS_Store
+scratchpad/
+# full pinned TypeScript tests/cases checkout (51 MB) — fetched on demand; the sample is checked in
+vendor/typescript-cases/
+scratch/
