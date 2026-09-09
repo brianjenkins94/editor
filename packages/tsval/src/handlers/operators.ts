@@ -1,10 +1,10 @@
 /**
  * Operators: binary/logical/conditional expressions and the operator semantics tables.
  */
-import ts from "typescript";
-import { unimplemented } from "../errors.ts";
 import type { NodeFrame } from "../frame.ts";
 import type { Machine } from "../vm.ts";
+import ts from "typescript";
+import { unimplemented } from "../errors.ts";
 import { lookupPrivate, privateHas } from "./classes.ts";
 import { assignmentExpression, compoundAssignment } from "./references.ts";
 import { evaluating, on } from "./registry.ts";
@@ -29,7 +29,7 @@ export const ASSIGN = new Set<number>([
 	K.GreaterThanGreaterThanGreaterThanEqualsToken,
 	K.AmpersandAmpersandEqualsToken,
 	K.BarBarEqualsToken,
-	K.QuestionQuestionEqualsToken,
+	K.QuestionQuestionEqualsToken
 ]);
 
 function binaryExpression(vm: Machine, frame: NodeFrame): void {
@@ -37,22 +37,42 @@ function binaryExpression(vm: Machine, frame: NodeFrame): void {
 	const op = node.operatorToken.kind;
 
 	// `#x in obj` — a brand check (the left side is a private name, not an expression).
-	if (op === K.InKeyword && ts.isPrivateIdentifier(node.left)) return privateIn(vm, frame);
-	if (op === K.EqualsToken) return assignmentExpression(vm, frame, node);
-	if (ASSIGN.has(op)) return compoundAssignment(vm, frame, node, op);
-	if (LOGICAL.has(op)) return logicalExpression(vm, frame, node, op);
+	if (op === K.InKeyword && ts.isPrivateIdentifier(node.left)) {
+		privateIn(vm, frame);
+
+		return;
+	}
+
+	if (op === K.EqualsToken) {
+		assignmentExpression(vm, frame, node);
+
+		return;
+	}
+
+	if (ASSIGN.has(op)) {
+		compoundAssignment(vm, frame, node, op);
+
+		return;
+	}
+
+	if (LOGICAL.has(op)) {
+		logicalExpression(vm, frame, node, op);
+
+		return;
+	}
+
 	plainBinary(vm, frame);
 }
 
 export const privateIn = evaluating<ts.BinaryExpression>(
 	(node) => [node.right],
-	(vm, frame, node, [obj]) => vm.push(privateHas(obj, lookupPrivate(frame.scope, (node.left as ts.PrivateIdentifier).text))),
+	(vm, frame, node, [obj]) => { vm.push(privateHas(obj, lookupPrivate(frame.scope, (node.left as ts.PrivateIdentifier).text))); }
 );
 
 /** Plain binary: both operands, then the operator. */
 export const plainBinary = evaluating<ts.BinaryExpression>(
 	(node) => [node.left, node.right],
-	(vm, _frame, node, [left, right]) => vm.push(applyBinary(node.operatorToken.kind, left as never, right as never)),
+	(vm, _frame, node, [left, right]) => { vm.push(applyBinary(node.operatorToken.kind, left as never, right as never)); }
 );
 
 export function logicalExpression(vm: Machine, frame: NodeFrame, node: ts.BinaryExpression, op: number): void {
@@ -62,6 +82,7 @@ export function logicalExpression(vm: Machine, frame: NodeFrame, node: ts.Binary
 	} else if (frame.phase === 1) {
 		const left = vm.pop();
 		const takeRight = op === K.AmpersandAmpersandToken ? Boolean(left) : op === K.BarBarToken ? !left : left == null;
+
 		if (takeRight) {
 			vm.pushNode(node.right, frame.scope);
 			frame.phase = 2;
@@ -71,6 +92,7 @@ export function logicalExpression(vm: Machine, frame: NodeFrame, node: ts.Binary
 		}
 	} else {
 		const right = vm.pop();
+
 		vm.frames.pop();
 		vm.push(right);
 	}
@@ -78,11 +100,13 @@ export function logicalExpression(vm: Machine, frame: NodeFrame, node: ts.Binary
 
 function conditionalExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.ConditionalExpression;
+
 	if (frame.phase === 0) {
 		vm.pushNode(node.condition, frame.scope);
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
 		const cond = vm.pop();
+
 		vm.pushNode(cond ? node.whenTrue : node.whenFalse, frame.scope);
 		frame.phase = 2;
 	} else {
@@ -181,7 +205,6 @@ export function applyCompound(op: number, left: never, right: never): unknown {
 			unimplemented(`compound operator ${ts.SyntaxKind[op]}`);
 	}
 }
-
 
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
 export function register(): void {

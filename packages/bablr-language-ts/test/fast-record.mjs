@@ -9,26 +9,30 @@
 const { freeze, isFrozen, getPrototypeOf, setPrototypeOf, getOwnPropertyNames, getOwnPropertySymbols } = Object;
 const { isArray } = Array;
 const cache = new WeakSet();
-const isObjecty = (v) => (typeof v === 'object' || typeof v === 'function') && v !== null;
+const isObjecty = (v) => (typeof v === "object" || typeof v === "function") && v !== null;
 
-export const freezeRecord = (obj) => {
-  if (getPrototypeOf(obj) !== null) setPrototypeOf(obj, null);
-  if (!isFrozen(obj)) freeze(obj);
-  return obj;
-};
-export const deepFreezeRecord = (obj) => {
-  if (!isObjecty(obj) || cache.has(obj)) return obj;
-  freezeRecord(obj);
-  cache.add(obj);
-  for (const name of getOwnPropertyNames(obj)) deepFreezeRecord(obj[name]);
-  for (const name of getOwnPropertySymbols(obj)) deepFreezeRecord(obj[name]);
-  return obj;
-};
+export function freezeRecord(obj) {
+	if (getPrototypeOf(obj) !== null) { setPrototypeOf(obj, null); }
+	if (!isFrozen(obj)) { freeze(obj); }
+
+	return obj;
+}
+
+export function deepFreezeRecord(obj) {
+	if (!isObjecty(obj) || cache.has(obj)) { return obj; }
+	freezeRecord(obj);
+	cache.add(obj);
+	for (const name of getOwnPropertyNames(obj)) { deepFreezeRecord(obj[name]); }
+	for (const name of getOwnPropertySymbols(obj)) { deepFreezeRecord(obj[name]); }
+
+	return obj;
+}
+
 export const isRecord = () => true;
 export const isDeepRecord = () => true;
-export function* recordKeys(obj) { if (isArray(obj)) { for (let i = 0; i < obj.length; i++) yield i; } else { for (const k in obj) yield k; } }
-export function* recordValues(obj) { if (isArray(obj)) { for (let i = 0; i < obj.length; i++) yield obj[i]; } else { for (const k in obj) yield obj[k]; } }
-export function* recordEntries(obj) { if (isArray(obj)) { for (let i = 0; i < obj.length; i++) yield [i, obj[i]]; } else { for (const k in obj) yield [k, obj[k]]; } }
-export function* arrayKeys(obj) { for (let i = 0; i < obj.length; i++) yield i; }
-export function* arrayValues(obj) { for (let i = 0; i < obj.length; i++) yield obj[i]; }
-export function* arrayEntries(obj) { for (let i = 0; i < obj.length; i++) yield [i, obj[i]]; }
+export function *recordKeys(obj) { if (isArray(obj)) { for (let i = 0; i < obj.length; i++) { yield i; } } else { for (const k in obj) { yield k; } } }
+export function *recordValues(obj) { if (isArray(obj)) { for (let i = 0; i < obj.length; i++) { yield obj[i]; } } else { for (const k in obj) { yield obj[k]; } } }
+export function *recordEntries(obj) { if (isArray(obj)) { for (let i = 0; i < obj.length; i++) { yield [i, obj[i]]; } } else { for (const k in obj) { yield [k, obj[k]]; } } }
+export function *arrayKeys(obj) { for (let i = 0; i < obj.length; i++) { yield i; } }
+export function *arrayValues(obj) { for (let i = 0; i < obj.length; i++) { yield obj[i]; } }
+export function *arrayEntries(obj) { for (let i = 0; i < obj.length; i++) { yield [i, obj[i]]; } }

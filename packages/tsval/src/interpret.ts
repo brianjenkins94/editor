@@ -1,23 +1,26 @@
 import type ts from "typescript";
+import type { VMOptions } from "./vm.ts";
 import { parse } from "./frontend.ts";
-import { VM, type VMOptions } from "./vm.ts";
+import { VM } from "./vm.ts";
 
 export interface InterpretOptions extends VMOptions {
-	fileName?: string;
+	"fileName"?: string;
 }
 
 /** A VM seated on a parsed program. (`createTypedVM` in `./typed` returns this shape plus the checker.) */
 export interface LoadedVM {
-	vm: VM;
-	sourceFile: ts.SourceFile;
+	"vm": VM;
+	"sourceFile": ts.SourceFile;
 }
 
 /** Parse `code` and build a VM seated at its SourceFile, ready to `step()`/`run()`. */
 export function createVM(code: string, options: InterpretOptions = {}): LoadedVM {
 	const sourceFile = parse(code, options.fileName);
 	const vm = new VM(options);
+
 	vm.load(sourceFile);
-	return { vm, sourceFile };
+
+	return { "vm": vm, "sourceFile": sourceFile };
 }
 
 /** Parse and run `code` to completion; returns the completion value (last ExpressionStatement). */

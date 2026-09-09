@@ -22,24 +22,24 @@ export type GuestFunctionNode =
 	| ts.SetAccessorDeclaration;
 
 export interface GuestFunctionMeta {
-	node: GuestFunctionNode;
-	closure: Scope;
-	name: string;
+	"node": GuestFunctionNode;
+	"closure": Scope;
+	"name": string;
 	/** Arrow functions capture `this` lexically; they have no own `this`/`arguments`. */
-	isArrow: boolean;
+	"isArrow": boolean;
 	/** `function*` / `async function*` — invocation returns a generator (runs lazily). */
-	isGenerator: boolean;
+	"isGenerator": boolean;
 	/** `async` — invocation returns a Promise, driven by `await` suspensions. */
-	isAsync: boolean;
+	"isAsync": boolean;
 	/** [[HomeObject]] — the object the method lives on, used to resolve `super.x` (class methods). */
-	homeObject?: object;
+	"homeObject"?: object;
 	/** The function object itself (a generator's `.prototype` is read from it at each invocation). */
-	self?: GuestFunction;
+	"self"?: GuestFunction;
 }
 
 export interface GuestFunction {
 	(...args: unknown[]): unknown;
-	__tsval: GuestFunctionMeta;
+	"__tsval": GuestFunctionMeta;
 }
 
 /** An OWN brand: a host Proxy that answers every key (an auto-stub) must not pass as guest code. */

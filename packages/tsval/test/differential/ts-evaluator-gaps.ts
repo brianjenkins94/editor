@@ -19,5 +19,5 @@ export const OUT_OF_SCOPE: Record<string, string> = {
 	"decorator/decorator.test.ts#4": LEGACY_DECORATORS,
 	"decorator/decorator.test.ts#5": LEGACY_DECORATORS,
 	"decorator/decorator.test.ts#6": LEGACY_DECORATORS,
-	"class-declaration/class-declaration.test.ts#10": PARAMETER_PROPERTIES,
+	"class-declaration/class-declaration.test.ts#10": PARAMETER_PROPERTIES
 };

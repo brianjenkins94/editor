@@ -98,5 +98,5 @@ export const STARTER_CASES: string[] = [
 	`typeof 42`,
 	`typeof "s"`,
 	`typeof undefinedThing`,
-	`void 0`,
+	`void 0`
 ];

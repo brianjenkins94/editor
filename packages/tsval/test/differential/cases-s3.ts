@@ -15,7 +15,7 @@ export const GENERATOR_CASES: string[] = [
 	`function* fib() { let [a, b] = [0, 1]; while (true) { yield a; [a, b] = [b, a + b]; } } const it = fib(); const out = []; for (let i = 0; i < 8; i++) out.push(it.next().value); out`,
 	`function* g() { yield 1; yield 2; yield 3; } let s = 0; for (const x of g()) s += x; s`,
 	`function* g() { yield 1; yield 2; } const [a, b] = g(); a * 10 + b`,
-	`function* range(a, b) { for (let i = a; i < b; i++) yield i; } Math.max(...range(3, 7))`,
+	`function* range(a, b) { for (let i = a; i < b; i++) yield i; } Math.max(...range(3, 7))`
 ];
 
 /** Async programs whose completion value is a Promise (compared after awaiting). */
@@ -42,5 +42,5 @@ export const ASYNC_CASES: string[] = [
 	`(async () => { async function* g() { let i = 0; while (true) yield i++; } const out = []; for await (const v of g()) { out.push(v); if (v >= 3) break; } return out; })()`,
 	`(async () => { async function* g() { try { yield 1; throw new Error("in-gen"); } catch (e) { yield "caught:" + e.message; } } const out = []; for await (const v of g()) out.push(v); return out; })()`,
 	`(async () => { async function* g() { const x = yield 1; yield x * 2; } const it = g(); await it.next(); const r = await it.next(21); return r.value; })()`,
-	`(async () => { let s = 0; for await (const v of [1, 2, 3, 4]) { if (v % 2) continue; s += v; } return s; })()`,
+	`(async () => { let s = 0; for await (const v of [1, 2, 3, 4]) { if (v % 2) continue; s += v; } return s; })()`
 ];

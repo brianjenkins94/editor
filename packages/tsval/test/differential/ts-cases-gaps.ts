@@ -7,17 +7,19 @@ const FUNCTION_SOURCE_TEXT = "Function.prototype.toString of a guest class/funct
 export const TS_CASES_KNOWN_GAPS: Record<string, string> = {
 	"compiler/concatClassAndString.ts": FUNCTION_SOURCE_TEXT,
 	"conformance/es6/templates/templateStringsWithTypeErrorInFunctionExpressionsInSubstitutionExpression": FUNCTION_SOURCE_TEXT,
-	"compiler/classNameReferencesInStaticElements.ts": "the ORACLE deviates: tsc's emit rewrites class-name references inside static elements to a temp assigned after the class (TypeScript #54607), so Node sees `undefined` in a static block where native semantics (and tsval) see the class",
+	"compiler/classNameReferencesInStaticElements.ts": "the ORACLE deviates: tsc's emit rewrites class-name references inside static elements to a temp assigned after the class (TypeScript #54607), so Node sees `undefined` in a static block where native semantics (and tsval) see the class"
 };
 
 export function knownGap(id: string): string | undefined {
 	let best: string | undefined;
 	let bestLen = -1;
+
 	for (const [prefix, reason] of Object.entries(TS_CASES_KNOWN_GAPS)) {
 		if (id.startsWith(prefix) && prefix.length > bestLen) {
 			best = reason;
 			bestLen = prefix.length;
 		}
 	}
+
 	return best;
 }

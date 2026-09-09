@@ -1,9 +1,9 @@
 /**
  * The handler registry: the per-SyntaxKind and synthetic-frame tables, `on()`, the declarative `evaluating` shape, and the shared trivial handlers. Imports nothing from the other handler modules, so it is always evaluated first (they register into it at load).
  */
-import ts from "typescript";
+import type ts from "typescript";
 import type { NodeFrame } from "../frame.ts";
-import type { NodeHandler, SyntheticHandlers, Machine } from "../vm.ts";
+import type { Machine, NodeHandler, SyntheticHandlers } from "../vm.ts";
 
 /** Per-SyntaxKind frame handlers. */
 export const nodeHandlers: Record<number, NodeHandler> = {};
@@ -25,14 +25,19 @@ export function on(kind: number, handler: NodeHandler): void {
 export function evaluating<N extends ts.Node>(children: (node: N) => readonly ts.Node[], combine: (vm: Machine, frame: NodeFrame, node: N, values: unknown[]) => void): NodeHandler {
 	return (vm, frame) => {
 		const node = frame.node as N;
+
 		if (frame.phase === 0) {
 			frame.base = vm.values.length; // depth *now* — earlier siblings are already on the stack
 			const nodes = children(node);
-			for (let i = nodes.length - 1; i >= 0; i--) vm.pushNode(nodes[i], frame.scope);
+
+			for (let i = nodes.length - 1; i >= 0; i--) { vm.pushNode(nodes[i], frame.scope); }
 			frame.phase = 1;
+
 			return;
 		}
-		const values = vm.values.splice(frame.base as number);
+
+		const values = vm.values.splice(frame.base!);
+
 		vm.frames.pop();
 		combine(vm, frame, node, values);
 	};
@@ -51,6 +56,7 @@ export function pushText(vm: Machine, frame: NodeFrame): void {
 // Type-only wrappers: evaluate the inner expression, ignore the type.
 export function passThroughExpr(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.ParenthesizedExpression | ts.AsExpression | ts.TypeAssertion | ts.NonNullExpression | ts.SatisfiesExpression;
+
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 1;

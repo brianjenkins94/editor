@@ -11,11 +11,13 @@ export const TEST262_KNOWN_GAPS: Record<string, string> = {
 export function knownGap(id: string): string | undefined {
 	let best: string | undefined;
 	let bestLen = -1;
+
 	for (const [prefix, reason] of Object.entries(TEST262_KNOWN_GAPS)) {
 		if (id.startsWith(prefix) && prefix.length > bestLen) {
 			best = reason;
 			bestLen = prefix.length;
 		}
 	}
+
 	return best;
 }

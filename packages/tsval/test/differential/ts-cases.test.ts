@@ -5,31 +5,29 @@
  */
 import assert from "node:assert";
 import { after, test } from "node:test";
-import { SAMPLE_ROOT, loadTsCases } from "./ts-cases-corpus.ts";
-import { CaseRunner } from "./ts-cases-runner.ts";
+import { loadTsCases, SAMPLE_ROOT } from "./ts-cases-corpus.ts";
 import { knownGap } from "./ts-cases-gaps.ts";
+import { CaseRunner } from "./ts-cases-runner.ts";
 
-const tally = { match: 0, bothThrew: 0, todo: 0, skipped: 0, inconclusive: 0, total: 0 };
+const tally = { "match": 0, "bothThrew": 0, "todo": 0, "skipped": 0, "inconclusive": 0, "total": 0 };
 const runner = new CaseRunner();
 
 for (const t of loadTsCases(SAMPLE_ROOT)) {
 	tally.total++;
 	const gap = knownGap(t.id);
-	test(`ts-case ${t.id}`, gap === undefined ? {} : { todo: gap }, async () => {
+
+	test(`ts-case ${t.id}`, gap === undefined ? {} : { "todo": gap }, async () => {
 		const outcome = await runner.run(SAMPLE_ROOT, t.id);
-		if (outcome.kind === "skipped") tally.skipped++;
-		else if (outcome.kind === "inconclusive") tally.inconclusive++;
-		else if (gap !== undefined) {
+
+		if (outcome.kind === "skipped") { tally.skipped++; } else if (outcome.kind === "inconclusive") { tally.inconclusive++; } else if (gap !== undefined) {
 			tally.todo++;
-			if (outcome.kind === "mismatch") assert.fail(`${outcome.reason}\n--- ${t.id} ---`);
-		} else if (outcome.kind === "mismatch") assert.fail(`${outcome.reason}\n--- ${t.id} ---`);
-		else if (outcome.kind === "both-threw") tally.bothThrew++;
-		else tally.match++;
+			if (outcome.kind === "mismatch") { assert.fail(`${outcome.reason}\n--- ${t.id} ---`); }
+		} else if (outcome.kind === "mismatch") { assert.fail(`${outcome.reason}\n--- ${t.id} ---`); } else if (outcome.kind === "both-threw") { tally.bothThrew++; } else { tally.match++; }
 	});
 }
 
 after(async () => {
 	await runner.close();
-	if (tally.total === 0) return;
+	if (tally.total === 0) { return; }
 	console.log(`TypeScript cases sample: ${tally.total} cases — ${tally.match} match, ${tally.bothThrew} agree on a failure, ${tally.todo} known gaps (todo), ${tally.inconclusive} inconclusive, ${tally.skipped} skipped by policy`);
 });

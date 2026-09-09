@@ -13,27 +13,84 @@
  */
 const STANDARD_GLOBAL_NAMES = [
 	// values
-	"globalThis", "Infinity", "NaN", "undefined",
+	"globalThis",
+	"Infinity",
+	"NaN",
+	"undefined",
 	// functions
-	"isFinite", "isNaN", "parseFloat", "parseInt", "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent", "escape", "unescape",
+	"isFinite",
+	"isNaN",
+	"parseFloat",
+	"parseInt",
+	"decodeURI",
+	"decodeURIComponent",
+	"encodeURI",
+	"encodeURIComponent",
+	"escape",
+	"unescape",
 	// fundamental objects
-	"Object", "Function", "Boolean", "Symbol", "Error", "AggregateError", "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError",
+	"Object",
+	"Function",
+	"Boolean",
+	"Symbol",
+	"Error",
+	"AggregateError",
+	"EvalError",
+	"RangeError",
+	"ReferenceError",
+	"SyntaxError",
+	"TypeError",
+	"URIError",
 	// numbers, text, dates
-	"Number", "BigInt", "Math", "Date", "String", "RegExp",
+	"Number",
+	"BigInt",
+	"Math",
+	"Date",
+	"String",
+	"RegExp",
 	// collections
-	"Array", "Map", "Set", "WeakMap", "WeakSet", "WeakRef", "FinalizationRegistry", "Iterator",
+	"Array",
+	"Map",
+	"Set",
+	"WeakMap",
+	"WeakSet",
+	"WeakRef",
+	"FinalizationRegistry",
+	"Iterator",
 	// typed arrays and buffers
-	"ArrayBuffer", "SharedArrayBuffer", "DataView", "Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array", "Atomics",
+	"ArrayBuffer",
+	"SharedArrayBuffer",
+	"DataView",
+	"Int8Array",
+	"Uint8Array",
+	"Uint8ClampedArray",
+	"Int16Array",
+	"Uint16Array",
+	"Int32Array",
+	"Uint32Array",
+	"Float32Array",
+	"Float64Array",
+	"BigInt64Array",
+	"BigUint64Array",
+	"Atomics",
 	// control abstraction and reflection
-	"Promise", "Proxy", "Reflect", "JSON",
+	"Promise",
+	"Proxy",
+	"Reflect",
+	"JSON",
 	// ECMA-402
-	"Intl",
+	"Intl"
 ];
 
 /** A fresh global object holding the standard built-ins (a new table each call: hosts may add to it). */
 export function standardGlobals(): Record<string, unknown> {
 	const table: Record<string, unknown> = {};
-	for (const name of STANDARD_GLOBAL_NAMES) if (name in globalThis) table[name] = (globalThis as Record<string, unknown>)[name];
+
+	for (const name of STANDARD_GLOBAL_NAMES) {
+		if (name in globalThis) { table[name] = (globalThis as Record<string, unknown>)[name]; }
+	}
+
 	table.globalThis = table; // the guest's `globalThis` is its own global object, not the host's
+
 	return table;
 }

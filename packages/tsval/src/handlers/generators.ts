@@ -1,11 +1,11 @@
 /**
  * Machine suspension: `yield`, `yield*` (delegation per spec), `await`.
  */
-import ts from "typescript";
-import type { Iteration, NodeFrame, Received } from "../frame.ts";
-import { Scope } from "../scope.ts";
+import type { NodeFrame, Received } from "../frame.ts";
+import type { Scope } from "../scope.ts";
 import type { GuestFunctionMeta } from "../values.ts";
 import type { Machine } from "../vm.ts";
+import ts from "typescript";
 import { closeIteration, getAsyncOrSyncIterator, getIterator, getMethod, iterNext } from "./iteration.ts";
 import { isObjectLike } from "./realm.ts";
 import { on } from "./registry.ts";
@@ -20,7 +20,13 @@ const K = ts.SyntaxKind;
 
 function yieldExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.YieldExpression;
-	if (node.asteriskToken) return yieldStar(vm, frame, node);
+
+	if (node.asteriskToken) {
+		yieldStar(vm, frame, node);
+
+		return;
+	}
+
 	if (frame.phase === 0) {
 		if (node.expression) {
 			vm.pushNode(node.expression, frame.scope);
@@ -49,13 +55,18 @@ export function suspend(vm: Machine, frame: NodeFrame, kind: "yield" | "await", 
 /** Take the value fed back in on resume (the `.next(v)` argument / the settled awaited value). */
 export function resumed(vm: Machine): unknown {
 	const value = vm.fromHost(vm.sentValue);
+
 	vm.sentValue = undefined;
+
 	return value;
 }
 
 /** The guest function whose body `scope` belongs to (arrows are transparent), if any. */
 export function enclosingFunctionMeta(scope: Scope): GuestFunctionMeta | undefined {
-	for (let s: Scope | undefined = scope; s; s = s.parent) if (s.functionMeta !== undefined) return s.functionMeta;
+	for (let s: Scope | undefined = scope; s; s = s.parent) {
+		if (s.functionMeta !== undefined) { return s.functionMeta; }
+	}
+
 	return undefined;
 }
 
@@ -75,83 +86,128 @@ export function enclosingFunctionMeta(scope: Scope): GuestFunctionMeta | undefin
 export function yieldStar(vm: Machine, frame: NodeFrame, node: ts.YieldExpression): void {
 	const meta = enclosingFunctionMeta(frame.scope);
 	const asyncGen = meta?.isAsync === true && meta.isGenerator;
+
 	switch (frame.phase) {
 		case 0:
-			vm.pushNode(node.expression as ts.Expression, frame.scope);
+			vm.pushNode(node.expression!, frame.scope);
 			frame.phase = 1;
+
 			return;
 		case 1: {
 			const iterable = vm.pop();
 			const record = asyncGen ? getAsyncOrSyncIterator(vm, iterable).record : getIterator(vm, iterable);
-			frame.iteration = { record, done: false };
-			frame.received = { kind: "next", value: undefined } satisfies Received;
+
+			frame.iteration = { "record": record, "done": false };
+			frame.received = { "kind": "next", "value": undefined } satisfies Received;
 			frame.phase = 2;
+
 			return;
 		}
+
 		case 2: {
 			// Dispatch the received completion to the inner iterator.
-			const iteration = frame.iteration as Iteration;
+			const iteration = frame.iteration!;
 			const it = iteration.record.iterator as Record<string, unknown>;
-			const received = frame.received as Received;
+			const received = frame.received!;
 			let innerResult: unknown;
+
 			if (received.kind === "next") {
 				innerResult = iterNext(iteration.record, received.value);
 			} else if (received.kind === "throw") {
 				const throwMethod = getMethod(it, "throw");
+
 				if (throwMethod === undefined) {
 					closeIteration(iteration, false);
 					throw new TypeError("The iterator does not provide a 'throw' method");
 				}
+
 				innerResult = throwMethod.call(it, received.value);
 			} else {
 				const returnMethod = getMethod(it, "return");
+
 				if (returnMethod === undefined) {
 					vm.frames.pop();
-					return void vm.raise({ type: "return", value: received.value }); // the outer generator returns
+
+					vm.raise({ "type": "return", "value": received.value });
+
+					return; // the outer generator returns
 				}
+
 				innerResult = returnMethod.call(it, received.value);
 				frame.returning = true;
 			}
-			if (asyncGen) return suspend(vm, frame, "await", innerResult, 3);
-			return delegateResult(vm, frame, innerResult, false);
+
+			if (asyncGen) {
+				suspend(vm, frame, "await", innerResult, 3);
+
+				return;
+			}
+
+			delegateResult(vm, frame, innerResult, false);
+
+			return;
 		}
+
 		case 3:
-			return delegateResult(vm, frame, resumed(vm), true); // the awaited inner result (async)
+		{ delegateResult(vm, frame, resumed(vm), true);
+
+			return; } // the awaited inner result (async)
+
 		case 6:
 			// async: the inner value has been awaited (AsyncGeneratorYield) — now yield it
 			frame.delegating = true;
-			return suspend(vm, frame, "yield", resumed(vm), 4);
+
+			{ suspend(vm, frame, "yield", resumed(vm), 4);
+
+				return; }
+
 		case 4: {
 			// Resumed after a yield: either a forwarded throw/return (routed by the driver) or next(v).
 			frame.delegating = false;
-			const injected = frame.received as Received | undefined;
-			frame.received = injected !== undefined && injected.kind !== "next" ? injected : ({ kind: "next", value: resumed(vm) } satisfies Received);
+			const injected = frame.received;
+
+			frame.received = injected !== undefined && injected.kind !== "next" ? injected : ({ "kind": "next", "value": resumed(vm) } satisfies Received);
 			frame.phase = 2;
+
 			return;
 		}
+
 		case 5:
 			vm.frames.pop();
 			vm.push(frame.result);
-			return;
 	}
 }
 
 export function delegateResult(vm: Machine, frame: NodeFrame, innerResult: unknown, asyncGen: boolean): void {
-	if (!isObjectLike(innerResult)) throw new TypeError("Iterator result is not an object");
+	if (!isObjectLike(innerResult)) { throw new TypeError("Iterator result is not an object"); }
 	const returning = frame.returning === true;
+
 	frame.returning = false;
-	const result = innerResult as { done?: unknown; value?: unknown };
+	const result = innerResult as { "done"?: unknown; "value"?: unknown };
+
 	if (result.done) {
-		const value = result.value; // (getter may throw)
+		const { value } = result; // (getter may throw)
+
 		if (returning) {
 			vm.frames.pop();
-			return void vm.raise({ type: "return", value }); // inner returned → the outer generator returns
+
+			vm.raise({ "type": "return", "value": value });
+
+			return; // inner returned → the outer generator returns
 		}
+
 		frame.result = vm.fromHost(value);
 		frame.phase = 5;
+
 		return;
 	}
-	if (asyncGen) return suspend(vm, frame, "await", result.value, 6);
+
+	if (asyncGen) {
+		suspend(vm, frame, "await", result.value, 6);
+
+		return;
+	}
+
 	// sync: yield the inner result object itself (GeneratorYield(innerResult)), never re-wrapped.
 	frame.received = undefined;
 	frame.delegating = true;
@@ -160,6 +216,7 @@ export function delegateResult(vm: Machine, frame: NodeFrame, innerResult: unkno
 
 function awaitExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.AwaitExpression;
+
 	if (frame.phase === 0) {
 		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 1;
@@ -171,7 +228,6 @@ function awaitExpression(vm: Machine, frame: NodeFrame): void {
 		vm.sentValue = undefined;
 	}
 }
-
 
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
 export function register(): void {

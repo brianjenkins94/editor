@@ -3,9 +3,10 @@
  * timeout bound each case; a case that kills the child (memory, a V8 fatal abort) or never finishes
  * is reported as inconclusive and the child is replaced. Cases run sequentially; the child is reused.
  */
-import { fork, type ChildProcess } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import type { ChildProcess } from "node:child_process";
 import type { TsCaseOutcome } from "./ts-cases-run.ts";
+import { fork } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const HEAP_MB = 768;
 const WALL_CLOCK_MS = 15_000;
@@ -18,12 +19,13 @@ export class CaseRunner {
 	lateRejections = 0;
 
 	private spawn(): ChildProcess {
-		return fork(ENTRY, [], { execArgv: [`--max-old-space-size=${HEAP_MB}`], stdio: ["ignore", "ignore", "ignore", "ipc"] });
+		return fork(ENTRY, [], { "execArgv": [`--max-old-space-size=${HEAP_MB}`], "stdio": ["ignore", "ignore", "ignore", "ipc"] });
 	}
 
 	run(root: string, id: string): Promise<TsCaseOutcome> {
 		const child = (this.child ??= this.spawn());
 		const seq = ++this.seq;
+
 		return new Promise((resolve) => {
 			const finish = (outcome: TsCaseOutcome, replace: boolean): void => {
 				clearTimeout(timer);
@@ -34,29 +36,34 @@ export class CaseRunner {
 					child.kill("SIGKILL");
 					this.child = undefined;
 				}
+
 				resolve(outcome);
 			};
-			const timer = setTimeout(() => finish({ kind: "inconclusive", reason: `runner killed: a side did not finish within ${WALL_CLOCK_MS / 1000}s` }, true), WALL_CLOCK_MS);
-			const onMessage = (m: { seq: number; outcome: TsCaseOutcome; lateRejections: number }): void => {
-				if (m.seq !== seq) return;
+
+			const timer = setTimeout(finish, WALL_CLOCK_MS, { "kind": "inconclusive", "reason": `runner killed: a side did not finish within ${WALL_CLOCK_MS / 1000}s` }, true);
+			const onMessage = (m: { "seq": number; "outcome": TsCaseOutcome; "lateRejections": number }): void => {
+				if (m.seq !== seq) { return; }
 				this.lateRejections = m.lateRejections;
 				finish(m.outcome, false);
 			};
-			const onExit = (code: number | null, signal: string | null): void => finish({ kind: "inconclusive", reason: `runner died (${signal ?? `exit ${code}`}): the case exhausted memory or aborted the engine` }, true);
-			const onError = (error: unknown): void => finish({ kind: "inconclusive", reason: `runner died: ${String((error as Error)?.message ?? error).slice(0, 100)}` }, true);
+
+			const onExit = (code: number | null, signal: string | null): void => { finish({ "kind": "inconclusive", "reason": `runner died (${signal ?? `exit ${code}`}): the case exhausted memory or aborted the engine` }, true); };
+			const onError = (error: unknown): void => { finish({ "kind": "inconclusive", "reason": `runner died: ${String((error as Error)?.message ?? error).slice(0, 100)}` }, true); };
+
 			child.on("message", onMessage);
 			child.on("exit", onExit);
 			child.on("error", onError);
-			child.send({ seq, root, id });
+			child.send({ "seq": seq, "root": root, "id": id });
 		});
 	}
 
 	async close(): Promise<void> {
-		const child = this.child;
+		const { child } = this;
+
 		this.child = undefined;
-		if (child === undefined) return;
+		if (child === undefined) { return; }
 		await new Promise<void>((resolve) => {
-			child.once("exit", () => resolve());
+			child.once("exit", () => { resolve(); });
 			child.kill("SIGKILL");
 		});
 	}

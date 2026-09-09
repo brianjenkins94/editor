@@ -5,8 +5,8 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertDifferential, assertDifferentialAsync } from "../differential/harness.ts";
 import { createVM } from "../../src/index.ts";
+import { assertDifferential, assertDifferentialAsync } from "../differential/harness.ts";
 
 const sync = [
 	// defaults
@@ -32,30 +32,33 @@ const sync = [
 	// NamedEvaluation of a default through the stepped path
 	`function* g() { const [f = (yield, function () {})] = []; return f.name; } const it = g(); it.next(); it.next().value`,
 	// errors from the pattern surface in the generator
-	`function* g() { try { const [a = yield] = null; } catch (e) { return e.constructor.name; } } g().next().value`,
+	`function* g() { try { const [a = yield] = null; } catch (e) { return e.constructor.name; } } g().next().value`
 ];
 
 const asyncCases = [
 	`(async () => { const { a = await Promise.resolve(5), b: [c] = [await 7] } = {}; return a + c; })()`,
 	`(async () => { const o = {}; [o[await Promise.resolve("k")] = await 3] = []; return o; })()`,
 	`(async () => { const out = []; for await (const [x = await Promise.resolve("d")] of [[], [1]]) out.push(x); return out; })()`,
-	`(async () => { const it = { [Symbol.iterator]() { return { next() { return { value: undefined, done: false }; }, return() { throw new Error("close failed"); } }; } }; try { const [a = await Promise.reject(new Error("default failed"))] = it; } catch (e) { return e.message; } })()`,
+	`(async () => { const it = { [Symbol.iterator]() { return { next() { return { value: undefined, done: false }; }, return() { throw new Error("close failed"); } }; } }; try { const [a = await Promise.reject(new Error("default failed"))] = it; } catch (e) { return e.message; } })()`
 ];
 
-for (const code of sync) test(`stepped pattern: ${code.slice(0, 70)}`, () => assertDifferential(code));
-for (const code of asyncCases) test(`stepped pattern (async): ${code.slice(0, 70)}`, () => assertDifferentialAsync(code));
+for (const code of sync) { test(`stepped pattern: ${code.slice(0, 70)}`, () => { assertDifferential(code); }); }
+for (const code of asyncCases) { test(`stepped pattern (async): ${code.slice(0, 70)}`, () => assertDifferentialAsync(code)); }
 
 test("fork taken while a pattern frame is waiting on a default value is independent", () => {
 	{
 		const { vm } = createVM(`const [a = 1 + 1, b] = [undefined, 5]; const r = a + b; r`);
 		// While the default `1 + 1` evaluates, its node frame sits above the waiting pattern frame.
 		const waiting = (): number => vm.frames.findIndex((f) => f.kind === "pattern" && f.awaiting === true);
+
 		vm.runUntil(() => waiting() >= 0);
 		const at = waiting();
+
 		assert.ok(at >= 0, "stopped while a pattern frame waits on its default");
 		const fork = vm.fork();
 		const forkFrame = fork.frames[at];
 		const original = vm.frames[at];
+
 		assert.ok(forkFrame?.kind === "pattern" && original?.kind === "pattern");
 		assert.notStrictEqual(forkFrame.temps, original.temps);
 		vm.run();
@@ -74,7 +77,8 @@ const parameterCases = [
 	`class A { f = 1; constructor(x = this.f) { this.x = x; } } new A().x`,
 	`try { throw [1, 2]; } catch ([x, y = 10]) { x + y }`,
 	`let r; try { try { throw { a: 1 }; } catch ({ a, b = (() => { throw new Error("in default"); })() }) { r = "unreached"; } finally { r = (r ?? "") + " finally"; } } catch (e) { r += " " + e.message; } r`,
-	`function f(a, b) { arguments[0] = 9; return [a, b, arguments.length]; } f(1, 2)`,
+	`function f(a, b) { arguments[0] = 9; return [a, b, arguments.length]; } f(1, 2)`
 ];
-for (const code of parameterCases) test(`parameter/catch pattern: ${code.slice(0, 70)}`, () => assertDifferential(code));
+
+for (const code of parameterCases) { test(`parameter/catch pattern: ${code.slice(0, 70)}`, () => { assertDifferential(code); }); }
 test("catch pattern (async): a default may await", () => assertDifferentialAsync(`(async () => { try { throw []; } catch ([a = await Promise.resolve(1)]) { return a; } })()`));

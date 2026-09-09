@@ -97,5 +97,5 @@ export const S2_CASES: string[] = [
 	`enum E { A = 1, B, C = 10, D } "" + E.B + E.D`,
 	`enum Color { Red = "r", Green = "g", Blue = "b" } Color.Green + Color.Blue`,
 	`enum Flags { None = 0, A = 1, B = 2, AB = A | B } Flags.AB`,
-	`enum E { A = 1, B = A * 10, C = B + 5 } E.C`,
+	`enum E { A = 1, B = A * 10, C = B + 5 } E.C`
 ];

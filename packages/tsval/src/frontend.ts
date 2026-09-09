@@ -15,7 +15,7 @@ export function parse(code: string, fileName = "tsval.ts"): ts.SourceFile {
 		code,
 		ts.ScriptTarget.Latest,
 		/* setParentNodes */ true, // handlers need node.parent for scope/name resolution
-		ts.ScriptKind.TS,
+		ts.ScriptKind.TS
 	);
 }
 
@@ -27,11 +27,13 @@ export function parse(code: string, fileName = "tsval.ts"): ts.SourceFile {
  */
 const kindNames: Record<number, string> = (() => {
 	const out: Record<number, string> = {};
+
 	for (const [name, value] of Object.entries(ts.SyntaxKind)) {
 		if (typeof value === "number" && out[value] === undefined) {
 			out[value] = name;
 		}
 	}
+
 	return out;
 })();
 

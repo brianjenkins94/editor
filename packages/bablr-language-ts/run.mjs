@@ -6,28 +6,31 @@
 //   node run.mjs Statement 'const x = "https://a"'
 //   echo 'const x = 1' | node run.mjs           # production defaults to the grammar's defaultMatcher
 //
-import { spawnSync } from 'node:child_process';
-import { pathToFileURL, fileURLToPath } from 'node:url';
-import { resolve, dirname, join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const grammarUrl = pathToFileURL(resolve(here, 'lib/grammar.js')).href;
-const bablrBin = join(here, 'node_modules', '@bablr', 'cli', 'bin', 'index.js');
+const grammarUrl = pathToFileURL(resolve(here, "lib/grammar.js")).href;
+const bablrBin = join(here, "node_modules", "@bablr", "cli", "bin", "index.js");
 
 const maybeProduction = process.argv[2];
-const looksLikeProduction = maybeProduction && /^[A-Za-z][A-Za-z0-9]*$/.test(maybeProduction);
+const looksLikeProduction = maybeProduction && /^[A-Z][A-Z0-9]*$/i.test(maybeProduction);
 const production = looksLikeProduction ? maybeProduction : null;
-const input = (production ? process.argv[3] : process.argv[2]) ?? readFileSync(0, 'utf8');
+const input = (production ? process.argv[3] : process.argv[2]) ?? readFileSync(0, "utf8");
 
-const args = [bablrBin, '-l', grammarUrl, '--color', 'never'];
-if (production) args.push('-p', production);
+const args = [bablrBin, "-l", grammarUrl, "--color", "never"];
 
-const result = spawnSync(process.execPath, args, { input, encoding: 'utf8' });
+if (production) { args.push("-p", production); }
 
-const tree = (result.stdout || '').replace(/\x1b\[[0-9;]*m/g, '');
+const result = spawnSync(process.execPath, args, { "input": input, "encoding": "utf8" });
+
+const tree = (result.stdout || "").replace(/\x1B\[[0-9;]*m/g, "");
+
 process.stdout.write(tree);
 
-const benign = result.stderr && result.stderr.includes('Parser failed to consume input');
-if (result.stderr && !benign) process.stderr.write(result.stderr);
+const benign = result.stderr && result.stderr.includes("Parser failed to consume input");
+
+if (result.stderr && !benign) { process.stderr.write(result.stderr); }
 process.exit(benign ? 0 : result.status ?? 0);
