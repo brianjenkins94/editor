@@ -1,0 +1,33 @@
+{
+  "name": "ci",
+  "on": {
+    "pull_request": {
+      "branches": ["main"]
+    },
+    "push": {
+      "branches": ["main"]
+    },
+    "workflow_call": {}
+  },
+  "concurrency": {
+    "group": "${{ github.workflow }}-${{ github.ref }}",
+    "cancel-in-progress": true
+  },
+  "jobs": {
+    "build-lint": {
+      "runs-on": "ubuntu-latest",
+      "strategy": {
+        "matrix": {
+          "script": ["build", "lint"]
+        }
+      },
+      "steps": [
+        { "uses": "actions/checkout@v4" },
+        # lib's published composite action: setup-node + pnpm + store cache + allowBuilds + cooldown install.
+        { "uses": "brianjenkins94/lib/.github/actions/setup@main" },
+        { "run": "pnpm run --if-present ${{ matrix.script }}" }
+      ],
+      "timeout-minutes": 15
+    }
+  }
+}

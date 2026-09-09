@@ -1,0 +1,43 @@
+{
+  "name": "cd",
+  "on": {
+    "release": {
+      "types": ["published"]
+    }
+  },
+  # pages + id-token for the Pages deploy; id-token also carries npm provenance.
+  "permissions": {
+    "contents": "read",
+    "pages": "write",
+    "id-token": "write"
+  },
+  "jobs": {
+    "publish": {
+      "runs-on": "ubuntu-latest",
+      "environment": {
+        "name": "github-pages",
+        "url": "${{ steps.deploy.outputs.page_url }}"
+      },
+      "steps": [
+        { "uses": "actions/checkout@v4" },
+        # lib's published setup action (pnpm + cooldown install), then its published pages-deploy action.
+        { "uses": "brianjenkins94/lib/.github/actions/setup@main" },
+        # util-publish builds each non-private package from source (vite), writes docs/*.tgz, and publishes to
+        # npm (provenance) when NPM_TOKEN is present.
+        {
+          "run": "npx util-publish",
+          "env": {
+            "NPM_TOKEN": "${{ secrets.NPM_TOKEN }}",
+            "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}"
+          }
+        },
+        {
+          "id": "deploy",
+          "uses": "brianjenkins94/lib/.github/actions/pages-deploy@main",
+          "with": { "path": "docs" }
+        }
+      ],
+      "timeout-minutes": 15
+    }
+  }
+}
