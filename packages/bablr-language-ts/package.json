@@ -15,8 +15,7 @@
     "test": "for f in test/cases-*.txt; do node test/probe-all.mjs $f | tail -1; done",
     "test:roundtrip": "node test/roundtrip.mjs --fast",
     "test:roundtrip:full": "node test/roundtrip.mjs --fast --full",
-    "test:failures": "node test/failures.mjs",
-    "postinstall": "patch-package"
+    "test:failures": "node test/failures.mjs"
   },
   "dependencies": {
     "@bablr/agast-helpers": "0.11.4",
@@ -32,7 +31,6 @@
     "@bablr/language-en-es5": "0.4.1",
     "@bablr/language-en-es6": "^0.4.1",
     "@bablr/language-en-json": "0.14.1",
-    "patch-package": "^8.0.1",
     "typescript": "^5.9.3"
   }
 }
