@@ -1,0 +1,48 @@
+{
+  "name": "Release",
+  "on": {
+    "release": {
+      "types": ["published"]
+    }
+  },
+  "permissions": {
+    "contents": "read",
+    # npm provenance
+    "id-token": "write"
+  },
+  "jobs": {
+    "publish": {
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        { "uses": "actions/checkout@v4" },
+        {
+          "uses": "actions/setup-node@v4",
+          "with": {
+            "node-version": 22,
+            "registry-url": "https://registry.npmjs.org"
+          }
+        },
+        {
+          "uses": "pnpm/action-setup@v4",
+          "with": {
+            "version": "latest",
+            "run_install": false
+          }
+        },
+        # Installs @brianjenkins94/util (→ the util-publish bin) + every non-private workspace's deps; the
+        # release-age floor is applied by util-postinstall.
+        { "run": "npm install --no-audit --no-fund" },
+        # util-publish builds each non-private package from source (vite), derives exports/files/bins, and
+        # publishes to npm (provenance) + GitHub Pages when NPM_TOKEN is present.
+        {
+          "run": "npx util-publish",
+          "env": {
+            "NPM_TOKEN": "${{ secrets.NPM_TOKEN }}",
+            "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}"
+          }
+        }
+      ],
+      "timeout-minutes": 15
+    }
+  }
+}
