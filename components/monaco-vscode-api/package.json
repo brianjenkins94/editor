@@ -4,7 +4,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "npx tsx ../../util/vite/build.ts",
+    "build": "vite build",
     "preinstall": "chmod 755 ./install.sh && ./install.sh"
   },
   "devDependencies": {

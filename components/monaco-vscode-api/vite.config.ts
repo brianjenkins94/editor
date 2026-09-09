@@ -1,5 +1,5 @@
 import { mergeConfig } from 'vite'
-import { defaults } from '../../util/vite/defaults'
+import { defaults } from '@brianjenkins94/util/vite/defaults'
 
 // Inherits the repo's shared build defaults (esnext, [name].js, cleaned outDir) and bundles
 // main.ts (the customized workbench) + all of its monaco-vscode-api dependencies into a
