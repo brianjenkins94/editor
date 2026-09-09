@@ -1,0 +1,17 @@
+var arguments = 1, eval = 2
+let ünïcödé = 1; let abc = 2; let x\u{62} = 3
+class A { ünï = 1; #ünï = 2 }
+function* g() { yield; yield 1; yield* x; const y = yield }
+[a, b] = [1, 2]; ({ a, b } = obj); [...rest] = arr
+let n = 0xFF + 0o17 + 0b101 + 1_000_000 + .5 + 1. + 1e5 + 1.5e-3 + 2n + 0xFFn
+const f = x => x + 1
+const g = async x => x
+const h = async (x, y) => x
+const i = async <T>(x: T) => x
+const j = async function () {}
+const k = async(1)
+foo.filter(x => x.name).map(_ => 1)
+let o = { async *gen() {}, async m() {} }
+const a = b ? c : d
+async x => x; async (x, y) => x; async <T>(x: T) => x; async = 1; async; async(1)
+var 𑈿 = 1; let 𐐷x = 2; class 𝑨 { 𝒜 = 1; #𝒜 = 2 } o.𝒜 = 3

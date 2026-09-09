@@ -1,0 +1,28 @@
+class A { x: number; y = 1; z?: string; w!: number; static s: T = 1; private p: number; public readonly q = 2 }
+class A { #x = 1; #m() { return this.#x } static #s; get #g() { return 1 } m() { return #x in this } }
+class A { async *gen() {} static async m() {} *g() {} get x() { return 1 } set x(v) {} static get y() { return 2 } }
+class A { m(): void; m(x?: string): void {} }
+class A { m() {}; n() {} ; }
+class A<T> extends B<T> implements C, D.E<T> { constructor(x: number) { super() } }
+abstract class A { abstract m(): void; protected abstract x: number }
+class A { [key: string]: any; static [k: number]: string }
+class A { 'str'() {} 1() {} [Symbol.iterator]() {} constructor() {} delete() {} static() {} async() {} get() {} }
+class A { static { x = 1 } }
+class A { declare x: number; override m() {} }
+const C = class<T> extends B { }
+interface I { a: string; b?(x: number): void; readonly c: T[]; [k: string]: any; (x: T): U; new (): I }
+interface I<T> extends A, B<T> { }
+interface Empty {}
+type T = string | number
+type Fn<T, U = T> = (a: T) => U
+type Obj = { a: string; b: { c: number } }
+enum E { A, B = 1, C = A | B, 'd' = 2, }
+const enum CE { X = 1 << 0 }
+declare const x: number;
+declare function f(a: string): void;
+declare class D { m(): void; x: number }
+function over(a: string): void;
+function over(a: any) {}
+let a: [T[]]
+let t: [string, number?, ...boolean[]]
+let x = obj.#priv

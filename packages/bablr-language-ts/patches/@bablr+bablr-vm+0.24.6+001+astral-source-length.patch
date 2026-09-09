@@ -1,0 +1,13 @@
+diff --git a/node_modules/@bablr/bablr-vm/lib/evaluate.js b/node_modules/@bablr/bablr-vm/lib/evaluate.js
+index 916f416..30afbfc 100644
+--- a/node_modules/@bablr/bablr-vm/lib/evaluate.js
++++ b/node_modules/@bablr/bablr-vm/lib/evaluate.js
+@@ -105,7 +105,7 @@ const getSourceLength = (tags) => {
+   for (const tag of tags) {
+     let tagType = parseTagType(tag);
+     if (tagType === LiteralTag) {
+-      i += parseLiteralTag(tag).value.length;
++      for (const _cp of parseLiteralTag(tag).value) i++; // count code points: the unit Source iterates by
+     } else if (tagType === GapTag) {
+       i += 1;
+     }

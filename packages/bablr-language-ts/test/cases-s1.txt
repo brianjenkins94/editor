@@ -1,0 +1,35 @@
+const x = 1
+const f = (x) => x + 1
+function g([a] = [], {b} = {}) { return a }
+const x: string = 1
+let y: Foo.Bar.Baz = q
+let u: string | number & Foo = 1
+let arr: Array<string>[] = []
+let m: Map<string, Foo<Bar>>
+let t: [string, number?, ...boolean[]]
+let n: [name: string, age?: number]
+let p: (a: string, b?: number) => void
+let c: new (x: T) => Foo
+let par: (A | B)[]
+let lit: 'a' | "b" | 1 | -2 | true
+let ko: keyof T
+let tq: typeof foo.bar
+let ia: T[K]
+let ro: readonly string[]
+let ob: { a: string; b?: number, c(x: T): U; [k: string]: V; readonly d: T; (): T; new (): T }
+let empty: {}
+function f(a: string, b?: number, ...rest: string[]): void {}
+function h<T extends object = {}, U>(x: T): T { return x }
+const af = (a: number, b: string): boolean => true
+const ag = <T,>(x: T): T => x
+const cond = (a) ? b : c
+const cond2 = a ? (b) : c
+const mth = { m(a: string): void {}, async n<T>(x: T) {} }
+class C { m<T>(a: T): T { return a } constructor(x: number) {} }
+var v: number, w: string = "s";
+let fn: Function = function (this: Window, ev: Event): any {}
+const o = { get x() { return 1 }, set x(v) {}, get: 1, set() {} }
+const o = { m<T>(a: T): T { return a } }
+let t: [T[]]
+let x: { <T>(a: T): T; m<T>(): void }
+const g = async <T>(x: T) => x

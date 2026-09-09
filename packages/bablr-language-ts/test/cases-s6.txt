@@ -1,0 +1,20 @@
+const {a, ...b} = {}; function f({a, ...b}: T) {} try {} catch ({ a, ...b }) {}
+type IsArray<T> = T extends unknown[] ? true : false;
+type Args<F> = F extends (...args: infer A) => void ? A : never;
+type Tail<T extends any[]> = ((...args: T) => any) extends ((head: any, ...tail: infer U) => any) ? U : never;
+type T0<T> = ({[K in keyof T]}) extends ({[key in K]: T[K]}) ? number : never;
+type K<T> = { [P in keyof T]: P }; type M<T> = { readonly [P in keyof T]?: T[P] }; type N<T> = { -readonly [P in keyof T]-?: T[P] }; type R<T> = { [P in keyof T as N]: T[P] }
+class A<T> { unmeasurableUsage!: {[K in keyof T]-?: T[K]}; }
+type Disjoint = | { readonly value: string } | { readonly err: string }
+let obj: { fn?: <T>() => T } = {}; var o: <T>(x: T) => T = null; interface I<S> { f: <T extends S>(x: T) => void }
+var x3: Array<new () => string>; var prop11: X< <Tany>() => Tany >; var prop12: X<(<Tany>() => Tany)>;
+function Mixin<T extends abstract new (...args: any) => any>(baseClass: T): T {}
+function f1(a: string): a is string { return true; } function g(v: unknown): asserts v is string {} function h(v): asserts v {} function i(this: A): this is B {}
+function kindIs(kind: Kind, is: "A"): kind is "A";
+tc1.method<{ x: V }>(); bound2<{}>(); var r5 = map<any, any>([1, ""], (x) => x.toString());
+type Something<T> = { test: string } & (T extends object ? { arg: T } : { arg?: undefined });
+async function fn(a: number, b: Promise<number>, e: Promise<() => void>, f: Promise<() => void> | (() => void), g: Promise<{ new(): any }>) {}
+let x: A | B extends C ? D : E; let y: keyof T extends U ? 1 : 2
+let x!: number
+let y!: string
+f<A | B>(x); f<A extends B ? C : D>(x); g<U, V>(1); a < b > (c); x = a < b && c > d; y = a<b>c; z = a < b >> c; for (let i = 0; i < n; i++) f(i)

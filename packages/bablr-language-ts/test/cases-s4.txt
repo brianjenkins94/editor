@@ -1,0 +1,14 @@
+let e = 1 << 0, f = 1 >> 2, g = 1 >>> 3, h = a ** b ** c, i = a ?? b, j = a || b && c
+a <<= 1; a >>= 1; a >>>= 1; a **= 2; a &&= b; a ||= b; a ??= b; a |= 1
+x = /a/g; y = / /; z = /\//gi; w = /(a)|b{1,2}/u; v = /[/]]/; u = a / b / c
+x = y as string; x = y as const; x = y satisfies Foo<T>; x = <any>y; x = y!; x = y!.z; x = (y as any).z
+f<string>(x); new C<T>(x); new C; new C<T>; f(...a, b, ...c); a?.b; a?.[0]; a?.(1); a?.b<T>(c)
+function f() { return new.target }
+class A { m() { return this.#x! } }
+let k = a < b, l = a < b && c > d, mm = f(a < b, c > d)
+let t = (a as T) < (b as T)
+for (const k in o) {} for (let i = 0; i < n; i++) {}
+x = a ? b : c ? d : e; x = (a, b, c)
+x = -a ** 2; x = (-a) ** 2; x = typeof a === 'b'; x = a in b instanceof c
+class B { #p = 1; static m(o) { return #p in o } }
+let big = 1n << 2n

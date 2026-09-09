@@ -1,0 +1,77 @@
+diff --git a/node_modules/@bablr/record/lib/index.js b/node_modules/@bablr/record/lib/index.js
+index ec2ead0..447aa4b 100644
+--- a/node_modules/@bablr/record/lib/index.js
++++ b/node_modules/@bablr/record/lib/index.js
+@@ -16,6 +16,11 @@ let cache = new WeakSet();
+ 
+ let preimplemented = deepFreezeRecord_ && isDeepRecord_;
+ 
++// Validation (the recursive `validate` walk plus a shallow check on every recordKeys/Values/Entries call) is a
++// development aid that costs ~30% of a parse. It is off unless `globalThis[Symbol.for('@bablr/record:strict')]`
++// is truthy at load time; the fast path still null-prototypes and freezes every record it is handed.
++let strict = !!globalThis[Symbol.for('@bablr/record:strict')];
++
+ let isObjecty = (value) => {
+   switch (typeof value) {
+     case 'object':
+@@ -64,14 +69,31 @@ let validate = preimplemented
+       return status;
+     };
+ 
++let fastFreezeRecord = (obj) => {
++  if (getPrototypeOf(obj) !== null) setPrototypeOf(obj, null);
++  if (!isFrozen(obj)) freeze(obj);
++  return obj;
++};
++
++let fastDeepFreezeRecord = (obj) => {
++  if (!isObjecty(obj) || cache.has(obj)) return obj;
++  fastFreezeRecord(obj);
++  cache.add(obj);
++  for (let name of getOwnPropertyNames(obj)) fastDeepFreezeRecord(obj[name]);
++  for (let name of getOwnPropertySymbols(obj)) fastDeepFreezeRecord(obj[name]);
++  return obj;
++};
++
+ let deepFreezeRecord = preimplemented
+   ? deepFreezeRecord_
++  : !strict
++  ? fastDeepFreezeRecord
+   : (obj) => {
+       let result = validate(obj, true);
+       if (result < 3) throw new Error();
+       return obj;
+     };
+-let isDeepRecord = preimplemented ? isDeepRecord_ : (obj) => validate(obj) >= 3;
++let isDeepRecord = preimplemented ? isDeepRecord_ : !strict ? () => true : (obj) => validate(obj) >= 3;
+ 
+ if (!isSealed(Object) && !preimplemented) {
+   Object.deepFreezeRecord = deepFreezeRecord_
+@@ -83,15 +105,19 @@ if (!isSealed(Object) && !preimplemented) {
+     : isDeepRecord;
+ }
+ 
+-let isRecord = (obj) => {
+-  return validate(obj, false, true) >= 1;
+-};
++let isRecord = !strict
++  ? () => true
++  : (obj) => {
++      return validate(obj, false, true) >= 1;
++    };
+ 
+-let freezeRecord = (obj) => {
+-  let result = validate(obj, true, true);
+-  if (result < 1) throw new Error();
+-  return obj;
+-};
++let freezeRecord = !strict
++  ? fastFreezeRecord
++  : (obj) => {
++      let result = validate(obj, true, true);
++      if (result < 1) throw new Error();
++      return obj;
++    };
+ 
+ function* recordKeys(obj) {
+   if (!isRecord(obj)) throw new Error();

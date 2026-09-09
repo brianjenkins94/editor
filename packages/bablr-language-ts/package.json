@@ -1,0 +1,38 @@
+{
+  "name": "@brianjenkins94/bablr-language-ts",
+  "version": "0.0.0",
+  "description": "Our own BABLR grammar for the modern-TypeScript subset tsval interprets \u2014 a lossless CSTML substrate for the capability IDE.",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./lib/grammar.js",
+    "./spans": "./lib/spans.js"
+  },
+  "scripts": {
+    "parse": "node run.mjs",
+    "probe": "node test/probe.mjs",
+    "probe:all": "node test/probe-all.mjs",
+    "test": "for f in test/cases-*.txt; do node test/probe-all.mjs $f | tail -1; done",
+    "test:roundtrip": "node test/roundtrip.mjs --fast",
+    "test:roundtrip:full": "node test/roundtrip.mjs --fast --full",
+    "test:failures": "node test/failures.mjs",
+    "postinstall": "patch-package"
+  },
+  "dependencies": {
+    "@bablr/agast-helpers": "0.11.4",
+    "@bablr/agast-vm-helpers": "0.11.4",
+    "@bablr/cli": "0.12.5",
+    "@bablr/helpers": "0.26.5",
+    "@bablr/language-en-blank-space": "0.11.2",
+    "@bablr/language-en-esnext": "0.4.1",
+    "bablr": "0.12.6"
+  },
+  "devDependencies": {
+    "@bablr/language-en-c-comments": "^0.11.2",
+    "@bablr/language-en-es5": "0.4.1",
+    "@bablr/language-en-es6": "^0.4.1",
+    "@bablr/language-en-json": "0.14.1",
+    "patch-package": "^8.0.1",
+    "typescript": "^5.9.3"
+  }
+}

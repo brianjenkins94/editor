@@ -1,0 +1,24 @@
+for (var index = 0; index < 1; index++) {}
+for (const info of list) {}
+for (var p: Point; ;) {}
+for await (const x of y) {}
+function f() { return 1;; }
+f();;
+while (true);
+if (a) b; else c;
+if (a) { b } else if (c) d; else e
+x = { 1.0: 0, 0x10: 1, .5: 2, 'a': 3 }
+class C { get .1() { return 1 } set 0o10(v) {} }
+var x = "\u{0}" + "\u{DDDDD}" + "\x19" + "\d" + `\x00${1}\u{10FFFF}`
+x = [,,1,,]; x = [,]; f([,]); [a, , b] = c
+const x = async => async
+var v = [...a, ...b]; x = { ...a, b: 1 }; const {...b,} = {}; f(...a, b)
+class C { get [delete id]() { } set [[0, 1]](v) { } static get [<String>""]() {} }
+var await = 1; function f(await) {}
+try {} catch { } try {} catch (e: any) {} try {} catch ([a, ...b]) {} try {} catch ({ a }) {}
+for ({ arrow = () => {} } of [{}]) {}
+function f() { return \u{6F} }
+class A { m() { return this.#\u{6F} } }
+var C = class { m() { return 42; } #$ = 1; #_ = 1; #\u{6F} = 1; #℘ = 1; #ZW_‌_NJ = 1; $(value) { this.#$ = value; } }
+class C { ;;;; ;;;;;;static #$(value) { return value; } static #\u{6F}(value) { return value; } }
+f(x => { count++; return x(); })
