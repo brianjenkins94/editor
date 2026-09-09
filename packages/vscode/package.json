@@ -1,0 +1,31 @@
+{
+  "name": "vscode",
+  "type": "module",
+  "scripts": {
+    "build:entry": "vite build -c entry.config.ts",
+    "build": "vite build -c entry.config.ts && vite build",
+    "dev": "vite build -c entry.config.ts && vite",
+    "lint": "util-lint"
+  },
+  "dependencies": {
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
+    "@stitches/core": "latest",
+    "lucide": "latest",
+    "preact": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "tsx": "latest",
+    "vite": "latest"
+  },
+  "exports": {
+    ".": {
+      "types": "./vscode.tsx",
+      "default": "./vscode.tsx"
+    },
+    "./vite": {
+      "types": "./vite.ts",
+      "default": "./vite.ts"
+    }
+  }
+}
