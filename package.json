@@ -1,0 +1,16 @@
+{
+  "name": "editor",
+  "type": "module",
+  "scripts": {
+    "build": "util-build",
+    "lint": "util-lint",
+    "postinstall": "util-postinstall",
+    "publish": "util-publish"
+  },
+  "dependencies": {
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz"
+  },
+  "devDependencies": {
+    "@tsconfig/node-lts": "latest"
+  }
+}
