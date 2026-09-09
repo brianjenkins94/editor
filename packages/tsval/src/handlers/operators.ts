@@ -75,13 +75,13 @@ export const plainBinary = evaluating<ts.BinaryExpression>(
 	(vm, _frame, node, [left, right]) => { vm.push(applyBinary(node.operatorToken.kind, left as never, right as never)); }
 );
 
-export function logicalExpression(vm: Machine, frame: NodeFrame, node: ts.BinaryExpression, op: number): void {
+export function logicalExpression(vm: Machine, frame: NodeFrame, node: ts.BinaryExpression, op: ts.SyntaxKind): void {
 	if (frame.phase === 0) {
 		vm.pushNode(node.left, frame.scope);
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
 		const left = vm.pop();
-		const takeRight = (op as ts.SyntaxKind) === K.AmpersandAmpersandToken ? Boolean(left) : (op as ts.SyntaxKind) === K.BarBarToken ? !left : (left === null || left === undefined);
+		const takeRight = op === K.AmpersandAmpersandToken ? Boolean(left) : op === K.BarBarToken ? !left : (left === null || left === undefined);
 
 		if (takeRight) {
 			vm.pushNode(node.right, frame.scope);
@@ -114,8 +114,8 @@ function conditionalExpression(vm: Machine, frame: NodeFrame): void {
 	}
 }
 
-export function applyBinary(op: number, left: never, right: never): unknown {
-	switch (op as ts.SyntaxKind) {
+export function applyBinary(op: ts.SyntaxKind, left: never, right: never): unknown {
+	switch (op) {
 		case K.PlusToken:
 			return (left as number) + (right as number);
 		case K.MinusToken:
@@ -169,8 +169,8 @@ export function applyBinary(op: number, left: never, right: never): unknown {
 	}
 }
 
-export function applyCompound(op: number, left: never, right: never): unknown {
-	switch (op as ts.SyntaxKind) {
+export function applyCompound(op: ts.SyntaxKind, left: never, right: never): unknown {
+	switch (op) {
 		case K.PlusEqualsToken:
 			return (left as number) + (right as number);
 		case K.MinusEqualsToken:

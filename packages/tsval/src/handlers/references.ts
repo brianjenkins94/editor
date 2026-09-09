@@ -483,10 +483,10 @@ export function assignmentExpression(vm: Machine, frame: NodeFrame, node: ts.Bin
 }
 
 /** For `&&=` / `||=` / `??=`: does the current value already decide the result (RHS not evaluated)? */
-export function logicalShortCircuits(op: number, current: unknown): boolean {
-	if ((op as ts.SyntaxKind) === K.AmpersandAmpersandEqualsToken) { return !current; }
-	if ((op as ts.SyntaxKind) === K.BarBarEqualsToken) { return Boolean(current); }
-	if ((op as ts.SyntaxKind) === K.QuestionQuestionEqualsToken) { return current !== null && current !== undefined; }
+export function logicalShortCircuits(op: ts.SyntaxKind, current: unknown): boolean {
+	if (op === K.AmpersandAmpersandEqualsToken) { return !current; }
+	if (op === K.BarBarEqualsToken) { return Boolean(current); }
+	if (op === K.QuestionQuestionEqualsToken) { return current !== null && current !== undefined; }
 
 	return false;
 }
@@ -494,7 +494,7 @@ export function logicalShortCircuits(op: number, current: unknown): boolean {
 // Spec order for `lhs op= rhs`: the LHS *reference* is evaluated, then GetValue (a TDZ or null-base
 // error surfaces here, before the RHS runs), then the RHS — and a logical assignment doesn't run the
 // RHS at all when the current value decides.
-export function compoundAssignment(vm: Machine, frame: NodeFrame, node: ts.BinaryExpression, op: number): void {
+export function compoundAssignment(vm: Machine, frame: NodeFrame, node: ts.BinaryExpression, op: ts.SyntaxKind): void {
 	const left = unwrapParens(node.left);
 	const names = left === node.left && ts.isIdentifier(left); // (`x ??= () => {}` names the function `x`)
 
