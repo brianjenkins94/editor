@@ -19,7 +19,7 @@ process.on("message", async (message: { "seq": number; "root": string; "id": str
 	let outcome;
 
 	try {
-		outcome = await runTsCase(parseCase(message.id, fs.readFileSync(file, "utf8")));
+		outcome = await runTsCase(parseCase(message.id, await fs.readFile(file)));
 	} catch (error) {
 		outcome = { "kind": "mismatch" as const, "reason": `runner error: ${String((error as Error)?.message ?? error).slice(0, 120)}` };
 	}
