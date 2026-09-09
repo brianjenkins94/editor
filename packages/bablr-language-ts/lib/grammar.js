@@ -49,7 +49,7 @@
 import * as BListKeyed from '@bablr/agast-helpers/b-map';
 import { arrayValues } from '@bablr/agast-helpers/iterable';
 import { freezeClass, freezeRecord } from '@bablr/agast-helpers/object';
-import { get as getPath, getRoot as getPathRoot } from '@bablr/agast-helpers/path';
+import { getRoot as getPathRoot } from '@bablr/agast-helpers/path';
 import { TreeNode } from '@bablr/agast-helpers/symbols';
 import { getRoot, parseObject, printSource, printString, printTag } from '@bablr/agast-helpers/tree';
 import { get } from '@bablr/agast-helpers/tree';
@@ -167,8 +167,8 @@ const BT = ch(0x60);
 const typeSigilMatcher = mRaw(`/[(\\[{'"\\d<|&${BT}-]|(?:typeof|keyof|readonly|unique|new|abstract|infer|true|false)\\b/`);
 const templateOpenMatcher = mRaw(`openToken*: <* '${BT}' />`);
 const templateCloseMatcher = mRaw(`closeToken*: <* '${BT}' />`);
-const typeInterpolationMatcher = mRaw("interpolations[]$: <TypeInterpolation '" + "$" + "{' />");
-const typeInterpolationOpenMatcher = mRaw("openToken*: <* '" + "$" + "{' />");
+const typeInterpolationMatcher = mRaw(`interpolations[]$: <TypeInterpolation '\${' />`);
+const typeInterpolationOpenMatcher = mRaw(`openToken*: <* '\${' />`);
 const mappedTypeLookahead = m`/\{[ \t\r\n]*(?:[+-]?readonly[ \t]+)?\[[a-zA-Z_$][a-zA-Z\d_$]*[ \t]+in\b/`;
 const typePredicateLookahead = m`/(?:asserts[ \t]+)?(?:this|[a-zA-Z_$][a-zA-Z\d_$]*)[ \t]+is[ \t]|asserts[ \t]+(?:this\b|[a-zA-Z_$])/`;
 
@@ -594,10 +594,10 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
   // es3's StatementList, plus empty statements (`;;`, `while (x);`) as real `EmptyStatement` nodes.
 	*StatementList({ getState, ctx, matcher }) {
 		let { getGapNode } = ctx;
-		let chr, gap, sep, stmt, trivia;
+		let chr, sep, stmt, trivia;
 		let ran = false;
 
-		while ((chr = yield match(m`/[^\g]/s`)) || (gap = yield match(m`/\g/`))) {
+		while ((chr = yield match(m`/[^\g]/s`)) || (yield match(m`/\g/`))) {
 			ran = true;
 			let isEmpty = chr && printSource(chr) === ";";
 
@@ -989,6 +989,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 				case "[":
 					yield eat(m`<ArrayPattern />`);
 					break;
+				// no default
 			}
 		} else if (yield match(m`/this\b/`)) {
 			yield eat(m`<*Keyword 'this' />`);
@@ -1188,6 +1189,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 			case ",":
 				if (power_ >= 16) {yield eat(m`<SequenceExpression />`, o({ power: power_ }));}
 				return;
+			// no default
 		}
 
     // `f<T>(x)`: type arguments, tried before `<` as a comparison — only when the text looks like `<…>(`
@@ -1387,6 +1389,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 				if (power < typePowers.union) {yield fail();}
 				yield eat(m`<UnionType />`);
 				break;
+			// no default
 		}
 	}
 
@@ -1560,9 +1563,8 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 	*TemplateLiteralType() {
 		yield eat(templateOpenMatcher);
 		yield startSpan("String:Template", BT);
-		let interp;
 
-		while ((yield eat(m`quasis[]*: <*StringContent />`)) && (interp = yield eatMatch(typeInterpolationMatcher))){;}
+		while ((yield eat(m`quasis[]*: <*StringContent />`)) && (yield eatMatch(typeInterpolationMatcher))){;}
 		yield eat(templateCloseMatcher);
 		yield endSpan();
 	}

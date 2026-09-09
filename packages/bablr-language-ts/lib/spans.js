@@ -54,7 +54,7 @@ export function cstSpans(src, production = "Program") {
 			const value = parseTag(tag).value;
       // trivia is what the trivia hook emits under an UNNAMED `#` reference; a named `#` reference such as
       // `#separatorTokens` is a code token the grammar keeps unbound
-			const trivia = triviaDepth > 0 || (pendingRef?.type === "#" && pendingRef.name == null);
+			const trivia = triviaDepth > 0 || (pendingRef?.type === "#" && (pendingRef.name === null || pendingRef.name === undefined));
 			const entry = {
 				"type": value.name?.description ?? null,
 				"field": pendingRef?.name ?? null,
@@ -65,13 +65,13 @@ export function cstSpans(src, production = "Program") {
 			};
 
 			pendingRef = null;
-			if (value.literalValue != null) {
+			if (value.literalValue !== null && value.literalValue !== undefined) {
         // self-closing token: its text is inline
 				offset += value.literalValue.length;
 				spans.push({ ...entry, "end": offset });
 			} else {
 				stack.push(entry);
-				if (trivia) { triviaDepth++; }
+				if (trivia) { triviaDepth += 1; }
 			}
 		} else if (kind === LiteralTag) {
 			offset += parseTag(tag).value.length;
@@ -82,7 +82,7 @@ export function cstSpans(src, production = "Program") {
 			const span = { ...entry, "end": offset };
 
 			spans.push(span);
-			if (entry.trivia) { triviaDepth--; } else { lastClosed = span; }
+			if (entry.trivia) { triviaDepth -= 1; } else { lastClosed = span; }
 		}
 	}
 
