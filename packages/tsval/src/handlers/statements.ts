@@ -87,7 +87,7 @@ function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 			const init = vm.pushNode(decl.initializer, frame.scope);
 
 			if (ts.isIdentifier(decl.name) && ts.isClassExpression(unwrapParens(decl.initializer))) { init.nameHint = decl.name.text; } // (see classDefinition)
-			frame.phase++; // -> bind
+			frame.phase += 1; // -> bind
 		} else {
 			// no initializer: `let x;` leaves the TDZ as undefined. `var x;` is a runtime no-op — it must
 			// not overwrite a hoisted `function x` (or an earlier assignment) with undefined.
@@ -99,7 +99,7 @@ function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 
 		if (ts.isIdentifier(decl.name)) { bindIdentifier(frame.scope, decl.name.text, value, kind); } else { pushPattern(vm, frame.scope, bindingProgram(decl.name, kind), value); } // a frame above this one
 
-		frame.phase++; // -> next decl (now even)
+		frame.phase += 1; // -> next decl (now even)
 	}
 }
 
@@ -205,11 +205,11 @@ function forStatement(vm: Machine, frame: NodeFrame): void {
 		frame.iterScope = loopScope;
 		// For per-iteration `let`/`const` binding (fresh binding each turn — correct closure capture).
 		frame.lexicalNames =
-			node.initializer != null && ts.isVariableDeclarationList(node.initializer) && (node.initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) !== 0
+			node.initializer !== null && node.initializer !== undefined && ts.isVariableDeclarationList(node.initializer) && (node.initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) !== 0
 				? node.initializer.declarations.flatMap((d) => bindingNames(d.name))
 				: null;
 		// The copies keep the declaration's kind: `for (const x = 0; ; x++)` is a TypeError, not a loop.
-		frame.lexicalKind = node.initializer != null && (node.initializer.flags & ts.NodeFlags.Const) !== 0 ? "const" : "let";
+		frame.lexicalKind = node.initializer !== null && node.initializer !== undefined && (node.initializer.flags & ts.NodeFlags.Const) !== 0 ? "const" : "let";
 
 		if (node.initializer) {
 			vm.pushNode(node.initializer, loopScope);
@@ -256,7 +256,7 @@ function forStatement(vm: Machine, frame: NodeFrame): void {
 export function copyPerIteration(frame: NodeFrame): void {
 	const names = frame.lexicalNames as string[] | null;
 
-	if (names == null || names.length === 0) { return; }
+	if (names === null || names === undefined || names.length === 0) { return; }
 	const prev = frame.iterScope!;
 	const next = new Scope(frame.scope, false);
 	const kind = (frame.lexicalKind as "let" | "const" | undefined) ?? "let";
@@ -375,12 +375,12 @@ function forInStatement(vm: Machine, frame: NodeFrame): void {
 		const obj = vm.pop();
 		const keys: string[] = [];
 
-		if (obj != null) {
+		if (obj !== null && obj !== undefined) {
 			for (const key in obj) { keys.push(key); }
 		}
 
 		frame.keys = keys;
-		frame.enumerated = obj == null ? undefined : (new Object(obj));
+		frame.enumerated = obj === null || obj === undefined ? undefined : (new Object(obj));
 		frame.index = 0;
 		frame.phase = 2;
 	} else if (frame.phase === 2) {
@@ -388,7 +388,7 @@ function forInStatement(vm: Machine, frame: NodeFrame): void {
 		let index = frame.index!;
 
 		// A property deleted before its turn is not visited (EnumerateObjectProperties).
-		while (index < keys.length && !((keys[index]) in (frame.enumerated!))) { index++; }
+		while (index < keys.length && !((keys[index]) in (frame.enumerated!))) { index += 1; }
 		if (index >= keys.length) { return void vm.frames.pop(); }
 		frame.index = index + 1;
 		bindForTarget(vm, frame, node.initializer, keys[index]);
@@ -442,7 +442,7 @@ function switchStatement(vm: Machine, frame: NodeFrame): void {
 		// Scan forward for the next `case` test to evaluate (skip `default` while matching).
 		let i = frame.caseIndex!;
 
-		while (i < clauses.length && clauses[i].kind === K.DefaultClause) { i++; }
+		while (i < clauses.length && clauses[i].kind === K.DefaultClause) { i += 1; }
 		if (i >= clauses.length) {
 			const def = frame.defaultIndex!;
 

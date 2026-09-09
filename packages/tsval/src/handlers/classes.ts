@@ -251,7 +251,14 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 	for (const member of node.members) {
 		if (privateOf(member) !== undefined || isSignatureOnly(member)) { continue; }
 		if (isStaticCtorMethod(member)) { memberKeys.set(member, "constructor"); } else if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member) || ts.isPropertyDeclaration(member)) {
-			const key = pre !== undefined && ts.isComputedPropertyName(member.name) ? toPropertyKey(pre.keys[computedIndex++]) : memberKey(vm, member.name, scope);
+			let key: PropertyKey;
+
+			if (pre !== undefined && ts.isComputedPropertyName(member.name)) {
+				key = toPropertyKey(pre.keys[computedIndex]);
+				computedIndex += 1;
+			} else {
+				key = memberKey(vm, member.name, scope);
+			}
 
 			memberKeys.set(member, key);
 		}
@@ -578,7 +585,7 @@ function constructFrame(vm: Machine, frame: ConstructFrame): void {
 	const meta = classMetaOf(ctor);
 
 	if (frame.phase === 0) {
-		const instance = (frame.instance!) ?? Object.create(ctor.prototype);
+		const instance = frame.instance ?? Object.create(ctor.prototype);
 		const construction: Construction = { "instance": instance, "ctor": ctor };
 
 		frame.construction = construction;

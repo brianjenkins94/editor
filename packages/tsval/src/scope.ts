@@ -57,8 +57,8 @@ export class Scope {
 
 	/** The nearest enclosing function (isolated) scope — the target for `var` hoisting. */
 	functionScope(): Scope {
-		// eslint-disable-next-line @typescript-eslint/no-this-alias
-		let s: Scope = this;
+		if (this.isolated || !this.parent) { return this; }
+		let s: Scope = this.parent;
 
 		while (!s.isolated && s.parent) { s = s.parent; }
 
@@ -66,8 +66,8 @@ export class Scope {
 	}
 
 	root(): Scope {
-		// eslint-disable-next-line @typescript-eslint/no-this-alias
-		let s: Scope = this;
+		if (!this.parent) { return this; }
+		let s: Scope = this.parent;
 
 		while (s.parent) { s = s.parent; }
 
@@ -76,8 +76,8 @@ export class Scope {
 
 	/** Resolve `this`: nearest enclosing scope that owns a `this` binding (arrows are transparent). */
 	getThis(): unknown {
-		// eslint-disable-next-line @typescript-eslint/no-this-alias
-		let s: Scope | undefined = this;
+		if (this.hasThis) { return this.thisVal; }
+		let s: Scope | undefined = this.parent;
 
 		while (s) {
 			if (s.hasThis) { return s.thisVal; }
@@ -92,8 +92,9 @@ export class Scope {
 	construction?: Construction;
 
 	private findUp<K extends "homeObject" | "classMeta" | "newTarget" | "construction">(key: K): Scope[K] {
-		// eslint-disable-next-line @typescript-eslint/no-this-alias
-		let s: Scope | undefined = this;
+		if (this[key] !== undefined) { return this[key]; }
+		if (this.hasThis) { return this[key]; } // stop at the owning function scope
+		let s: Scope | undefined = this.parent;
 
 		while (s) {
 			if (s[key] !== undefined) { return s[key]; }
@@ -151,8 +152,10 @@ export class Scope {
 	}
 
 	private lookup(name: string): Binding | undefined {
-		// eslint-disable-next-line @typescript-eslint/no-this-alias
-		let s: Scope | undefined = this;
+		const own = this.bindings.get(name);
+
+		if (own) { return own; }
+		let s: Scope | undefined = this.parent;
 
 		while (s) {
 			const b = s.bindings.get(name);
@@ -168,7 +171,7 @@ export class Scope {
 		if (this.lookup(name)) { return true; }
 		const root = this.root();
 
-		if (root.globalObject != null && name in root.globalObject) { return true; }
+		if (root.globalObject !== null && root.globalObject !== undefined && name in root.globalObject) { return true; }
 
 		return root.realGlobals && name in globalThis;
 	}
@@ -185,7 +188,7 @@ export class Scope {
 		const root = this.root();
 		const g = root.globalObject;
 
-		if (g != null && name in g) { return g[name]; }
+		if (g !== null && g !== undefined && name in g) { return g[name]; }
 		if (root.realGlobals && name in globalThis) { return (globalThis as Record<string, unknown>)[name]; }
 		throw new ReferenceError(`${name} is not defined`);
 	}
@@ -210,7 +213,7 @@ export class Scope {
 		const root = this.root();
 		const g = root.globalObject;
 
-		if (g != null && name in g) {
+		if (g !== null && g !== undefined && name in g) {
 			g[name] = value;
 
 			return;

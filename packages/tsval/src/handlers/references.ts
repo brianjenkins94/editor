@@ -39,10 +39,10 @@ function thisKeyword(vm: Machine, frame: NodeFrame): void {
 export function superBase(scope: Scope): object {
 	const home = scope.getHomeObject();
 
-	if (home == null) { throw new SyntaxError("'super' keyword unexpected here"); }
+	if (home === null || home === undefined) { throw new SyntaxError("'super' keyword unexpected here"); }
 	const base = Object.getPrototypeOf(home);
 
-	if (base == null) { throw new TypeError("Cannot read properties of null (super)"); }
+	if (base === null || base === undefined) { throw new TypeError("Cannot read properties of null (super)"); }
 
 	return base;
 }
@@ -160,7 +160,7 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 	if (frame.phase === 1) {
 		const obj = vm.values[vm.values.length - 1];
 
-		if (obj === CHAIN_BREAK || (obj == null && member.questionDotToken)) {
+		if (obj === CHAIN_BREAK || ((obj === null || obj === undefined) && member.questionDotToken)) {
 			vm.pop();
 
 			return done({ "kind": "short" });
@@ -195,7 +195,7 @@ function superKeyOf(ref: Extract<Ref, { "kind": "super" }>): PropertyKey {
 
 /** A member reference's base and key at use: the nullish check, then ToPropertyKey (memoized on the record). */
 export function memberOf(ref: Extract<Ref, { "kind": "member" | "private" }>, forWrite: boolean): { "obj": object; "key": PropertyKey } {
-	if (ref.obj == null) { throw nullBase(ref.obj, ref.kind === "private" ? ref.name : keyText(ref.key), forWrite); }
+	if (ref.obj === null || ref.obj === undefined) { throw nullBase(ref.obj, ref.kind === "private" ? ref.name : keyText(ref.key), forWrite); }
 	if (ref.kind === "private") { return { "obj": ref.obj, "key": ref.name }; }
 	if (typeof ref.key !== "string" && typeof ref.key !== "symbol") { ref.key = toPropertyKey(ref.key); }
 
@@ -227,6 +227,7 @@ export function getValue(vm: Machine, scope: Scope, ref: Ref, crossing = true): 
 			return ref.value;
 		case "short":
 			throw new TsvalInternalError("GetValue on a short-circuited optional chain");
+		// no default
 	}
 }
 
@@ -483,9 +484,9 @@ export function assignmentExpression(vm: Machine, frame: NodeFrame, node: ts.Bin
 
 /** For `&&=` / `||=` / `??=`: does the current value already decide the result (RHS not evaluated)? */
 export function logicalShortCircuits(op: number, current: unknown): boolean {
-	if (op === K.AmpersandAmpersandEqualsToken) { return !current; }
-	if (op === K.BarBarEqualsToken) { return Boolean(current); }
-	if (op === K.QuestionQuestionEqualsToken) { return current != null; }
+	if ((op as ts.SyntaxKind) === K.AmpersandAmpersandEqualsToken) { return !current; }
+	if ((op as ts.SyntaxKind) === K.BarBarEqualsToken) { return Boolean(current); }
+	if ((op as ts.SyntaxKind) === K.QuestionQuestionEqualsToken) { return current !== null && current !== undefined; }
 
 	return false;
 }

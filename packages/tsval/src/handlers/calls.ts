@@ -110,7 +110,7 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 		const calleeValue = getValue(vm, frame.scope, ref, false); // vetted by invokeHost instead
 
 		// `f?.()` on a nullish callee (or a broken chain) short-circuits before the arguments run.
-		if (calleeValue === CHAIN_BREAK || (calleeValue == null && node.questionDotToken)) { return (vm.frames.pop(), vm.push(chainShort(node))); }
+		if (calleeValue === CHAIN_BREAK || ((calleeValue === null || calleeValue === undefined) && node.questionDotToken)) { return (vm.frames.pop(), vm.push(chainShort(node))); }
 		vm.push(calleeValue);
 		pushCallArguments(vm, frame, node.arguments);
 		frame.phase = AFTER_REF + 1;
@@ -155,7 +155,7 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 
 		vm.frames.pop();
 		if (typeof calleeVal !== "function") {
-			if (node.questionDotToken && calleeVal == null) {
+			if (node.questionDotToken && (calleeVal === null || calleeVal === undefined)) {
 				vm.push(undefined);
 
 				return;

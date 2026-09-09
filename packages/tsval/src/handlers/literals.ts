@@ -86,9 +86,16 @@ const arrayLiteralExpression = evaluating<ts.ArrayLiteralExpression>(
 		let index = 0; // elements are *defined* (CreateDataProperty): an inherited setter on an index never runs
 
 		for (const el of node.elements) {
-			if (ts.isOmittedExpression(el)) { index++; } else if (ts.isSpreadElement(el)) {
-				for (const v of raw[cursor++] as Iterable<unknown>) { defineData(out, index++, v); }
-			} else { defineData(out, index++, raw[cursor++]); }
+			if (ts.isOmittedExpression(el)) { index += 1; } else if (ts.isSpreadElement(el)) {
+				const iterable = raw[cursor] as Iterable<unknown>;
+
+				cursor += 1;
+				for (const v of iterable) { defineData(out, index, v); index += 1; }
+			} else {
+				defineData(out, index, raw[cursor]);
+				index += 1;
+				cursor += 1;
+			}
 		}
 
 		out.length = index;
@@ -144,58 +151,70 @@ export function objectLiteralOperands(node: ts.ObjectLiteralExpression): { "node
 }
 
 export function buildObjectLiteral(vm: Machine, frame: NodeFrame, node: ts.ObjectLiteralExpression, values: unknown[]): void {
-	{
-		const obj = new vm.realm.Object() as Record<PropertyKey, unknown>;
-		let cursor = 0; // advances over the evaluated keys (already property keys) and values, in source order
-		const keyOf = (name: ts.PropertyName): PropertyKey => (ts.isComputedPropertyName(name) ? (values[cursor++] as PropertyKey) : propertyName(name));
+	const obj = new vm.realm.Object() as Record<PropertyKey, unknown>;
+	let cursor = 0; // advances over the evaluated keys (already property keys) and values, in source order
+	const keyOf = (name: ts.PropertyName): PropertyKey => {
+		if (ts.isComputedPropertyName(name)) {
+			const computed = values[cursor] as PropertyKey;
 
-		for (const prop of node.properties) {
-			if (ts.isPropertyAssignment(prop)) {
-				// `__proto__: v` (non-computed) sets the prototype instead of defining a property.
-				if (!ts.isComputedPropertyName(prop.name) && propertyName(prop.name) === "__proto__") {
-					const value = values[cursor++];
+			cursor += 1;
 
-					if (value === null || typeof value === "object" || typeof value === "function") { Object.setPrototypeOf(obj, value); }
-					continue;
-				}
-
-				const key = keyOf(prop.name);
-				const value = values[cursor++];
-
-				defineData(obj, key, nameAnonymous(value, key, prop.initializer));
-			} else if (ts.isShorthandPropertyAssignment(prop)) {
-				defineData(obj, prop.name.text, values[cursor++]);
-			} else if (ts.isSpreadAssignment(prop)) {
-				spreadInto(vm, obj, values[cursor++]); // own enumerable props, each through the guard
-			} else if (ts.isMethodDeclaration(prop)) {
-				const key = keyOf(prop.name);
-				const fn = createGuestFunction(vm, prop, frame.scope, obj);
-
-				setFunctionName(fn, key);
-				Object.defineProperty(obj, key, { "value": fn, "writable": true, "enumerable": true, "configurable": true });
-			} else if (ts.isGetAccessorDeclaration(prop) || ts.isSetAccessorDeclaration(prop)) {
-				const key = keyOf(prop.name);
-				const fn = createGuestFunction(vm, prop, frame.scope, obj);
-
-				setFunctionName(fn, key, ts.isGetAccessorDeclaration(prop) ? "get" : "set");
-				// An accessor replaces an earlier data property of the same name (and vice versa).
-				const desc: PropertyDescriptor = { ...(Object.getOwnPropertyDescriptor(obj, key) ?? {}), "enumerable": true, "configurable": true };
-
-				delete desc.value;
-				delete desc.writable;
-				if (ts.isGetAccessorDeclaration(prop)) { desc.get = fn as () => unknown; } else { desc.set = fn as (v: unknown) => void; }
-
-				Object.defineProperty(obj, key, desc);
-			}
+			return computed;
 		}
 
-		vm.push(obj);
+		return propertyName(name);
+	};
+
+	for (const prop of node.properties) {
+		if (ts.isPropertyAssignment(prop)) {
+			// `__proto__: v` (non-computed) sets the prototype instead of defining a property.
+			if (!ts.isComputedPropertyName(prop.name) && propertyName(prop.name) === "__proto__") {
+				const value = values[cursor];
+
+				cursor += 1;
+				if (value === null || typeof value === "object" || typeof value === "function") { Object.setPrototypeOf(obj, value); }
+				continue;
+			}
+
+			const key = keyOf(prop.name);
+			const value = values[cursor];
+
+			cursor += 1;
+			defineData(obj, key, nameAnonymous(value, key, prop.initializer));
+		} else if (ts.isShorthandPropertyAssignment(prop)) {
+			defineData(obj, prop.name.text, values[cursor]);
+			cursor += 1;
+		} else if (ts.isSpreadAssignment(prop)) {
+			spreadInto(vm, obj, values[cursor]); // own enumerable props, each through the guard
+			cursor += 1;
+		} else if (ts.isMethodDeclaration(prop)) {
+			const key = keyOf(prop.name);
+			const fn = createGuestFunction(vm, prop, frame.scope, obj);
+
+			setFunctionName(fn, key);
+			Object.defineProperty(obj, key, { "value": fn, "writable": true, "enumerable": true, "configurable": true });
+		} else if (ts.isGetAccessorDeclaration(prop) || ts.isSetAccessorDeclaration(prop)) {
+			const key = keyOf(prop.name);
+			const fn = createGuestFunction(vm, prop, frame.scope, obj);
+
+			setFunctionName(fn, key, ts.isGetAccessorDeclaration(prop) ? "get" : "set");
+			// An accessor replaces an earlier data property of the same name (and vice versa).
+			const desc: PropertyDescriptor = { ...(Object.getOwnPropertyDescriptor(obj, key) ?? {}), "enumerable": true, "configurable": true };
+
+			delete desc.value;
+			delete desc.writable;
+			if (ts.isGetAccessorDeclaration(prop)) { desc.get = fn as () => unknown; } else { desc.set = fn as (v: unknown) => void; }
+
+			Object.defineProperty(obj, key, desc);
+		}
 	}
+
+	vm.push(obj);
 }
 
 /** `{ ...source }`: copy own enumerable props (string + symbol keys), each value through the guard. */
 export function spreadInto(vm: Machine, target: Record<PropertyKey, unknown>, source: unknown): void {
-	if (source == null) { return; }
+	if (source === null || source === undefined) { return; }
 	const src = new Object(source) as Record<PropertyKey, unknown>;
 
 	for (const key of Reflect.ownKeys(src)) {

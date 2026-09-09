@@ -156,10 +156,9 @@ export function yieldStar(vm: Machine, frame: NodeFrame, node: ts.YieldExpressio
 		case 6:
 			// async: the inner value has been awaited (AsyncGeneratorYield) — now yield it
 			frame.delegating = true;
+			suspend(vm, frame, "yield", resumed(vm), 4);
 
-			{ suspend(vm, frame, "yield", resumed(vm), 4);
-
-				return; }
+			return;
 
 		case 4: {
 			// Resumed after a yield: either a forwarded throw/return (routed by the driver) or next(v).
@@ -175,6 +174,7 @@ export function yieldStar(vm: Machine, frame: NodeFrame, node: ts.YieldExpressio
 		case 5:
 			vm.frames.pop();
 			vm.push(frame.result);
+		// no default
 	}
 }
 

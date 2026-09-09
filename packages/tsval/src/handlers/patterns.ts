@@ -308,7 +308,7 @@ function patternFrame(vm: Machine, frame: PatternFrame): void {
 			case "obj-open": {
 				const value = temps.pop();
 
-				if (value == null) { throw new TypeError(`Cannot destructure '${String(value)}' as it is ${String(value)}.`); }
+				if (value === null || value === undefined) { throw new TypeError(`Cannot destructure '${String(value)}' as it is ${String(value)}.`); }
 				objs.push({ "value": value, "used": [] });
 				break;
 			}
@@ -372,6 +372,7 @@ function patternFrame(vm: Machine, frame: PatternFrame): void {
 				temps.push(top, below);
 				break;
 			}
+			// no default
 		}
 	}
 }

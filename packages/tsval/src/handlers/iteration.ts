@@ -6,10 +6,10 @@ import type { Machine } from "../vm.ts";
 import { getProperty, isObjectLike } from "./realm.ts";
 
 export function getAsyncOrSyncIterator(vm: Machine, iterable: unknown): { "record": IterRecord; "sync": boolean } {
-	if (iterable == null) { throw new TypeError(`${String(iterable)} is not async iterable`); }
+	if (iterable === null || iterable === undefined) { throw new TypeError(`${String(iterable)} is not async iterable`); }
 	const asyncFactory = getProperty(vm, iterable, Symbol.asyncIterator);
 
-	if (asyncFactory != null) {
+	if (asyncFactory !== null && asyncFactory !== undefined) {
 		if (typeof asyncFactory !== "function") { throw new TypeError("Symbol.asyncIterator is not a function"); }
 		const iterator = (asyncFactory as () => unknown).call(iterable);
 
@@ -25,7 +25,7 @@ export function getAsyncOrSyncIterator(vm: Machine, iterable: unknown): { "recor
 export function getMethod(obj: unknown, name: string): ((...a: unknown[]) => unknown) | undefined {
 	const fn = (obj as Record<string, unknown>)[name];
 
-	if (fn == null) { return undefined; }
+	if (fn === null || fn === undefined) { return undefined; }
 	if (typeof fn !== "function") { throw new TypeError(`${name} is not a function`); }
 
 	return fn as (...a: unknown[]) => unknown;
@@ -78,7 +78,7 @@ export function arrayIterationNext(this: ArrayIteration): IteratorResult<unknown
 /** GetIterator: a TypeError (not a property-of-null error) when the value isn't iterable. */
 export function getIterator(vm: Machine, value: unknown): IterRecord {
 	// (a primitive boxes in the GUEST realm: `Boolean.prototype[Symbol.iterator]` patched there is seen)
-	const factory = value == null ? undefined : (getProperty(vm, value, Symbol.iterator) as (() => Iterator<unknown>) | undefined);
+	const factory = value === null || value === undefined ? undefined : (getProperty(vm, value, Symbol.iterator) as (() => Iterator<unknown>) | undefined);
 
 	if (typeof factory !== "function") { throw new TypeError(`${value === null ? "null" : typeof value === "object" ? "object" : String(value)} is not iterable`); }
 	const { realm } = vm;
@@ -156,7 +156,7 @@ export function closeIterator(iterator: object, done: boolean, abrupt: boolean):
 
 	const ret = (iterator as { "return"?: unknown }).return;
 
-	if (ret == null) { return; }
+	if (ret === null || ret === undefined) { return; }
 	if (typeof ret !== "function") { throw new TypeError("iterator.return is not a function"); }
 	const result = (ret as () => unknown).call(iterator);
 

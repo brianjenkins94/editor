@@ -60,7 +60,8 @@ function decodeTemplateEscapes(raw: string): string {
 			continue;
 		}
 
-		const n = raw[++i];
+		i += 1;
+		const n = raw[i];
 
 		switch (n) {
 			case "n": out += "\n"; break;
@@ -94,7 +95,7 @@ function decodeTemplateEscapes(raw: string): string {
 /** Describe a property key for an error message without invoking user code (`toString` may throw). */
 export function keyText(key: unknown): string {
 	if (typeof key === "symbol") { return key.description ?? "Symbol()"; }
-	if (typeof key === "string" || typeof key === "number" || typeof key === "boolean" || key == null) { return String(key); }
+	if (typeof key === "string" || typeof key === "number" || typeof key === "boolean" || key === null || key === undefined) { return String(key); }
 
 	return "<computed key>";
 }
@@ -147,7 +148,7 @@ export function toPrimitive(v: unknown, hint: "string" | "number" | "default"): 
 	if (v === null || (typeof v !== "object" && typeof v !== "function")) { return v; }
 	const exotic = (v as { [Symbol.toPrimitive]?: unknown })[Symbol.toPrimitive];
 
-	if (exotic != null) {
+	if (exotic !== null && exotic !== undefined) {
 		if (typeof exotic !== "function") { throw new TypeError("Symbol.toPrimitive is not a function"); }
 		const result = (exotic as (h: string) => unknown).call(v, hint);
 

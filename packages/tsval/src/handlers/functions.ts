@@ -20,9 +20,9 @@ export function createGuestFunction(vm: Machine, node: GuestFunctionNode, closur
 	const meta: GuestFunctionMeta = {
 		"node": node,
 		"closure": closure,
-		"name": node.name != null && (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name)) ? node.name.text : "",
+		"name": node.name !== null && node.name !== undefined && (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name)) ? node.name.text : "",
 		"isArrow": node.kind === K.ArrowFunction,
-		"isGenerator": (node).asteriskToken != null,
+		"isGenerator": (node).asteriskToken !== null && (node).asteriskToken !== undefined,
 		"isAsync": (modifierFlags & ts.ModifierFlags.Async) !== 0,
 		"homeObject": homeObject
 	};
@@ -172,7 +172,7 @@ export function functionLength(params: readonly ts.ParameterDeclaration[]): numb
 	for (const param of params) {
 		if (isThisParameter(param)) { continue; }
 		if (param.initializer !== undefined || param.dotDotDotToken !== undefined) { break; }
-		n++;
+		n += 1;
 	}
 
 	return n;
