@@ -26,7 +26,7 @@ for (const program of corpus) {
 			const run = runTsval(program.code);
 
 			assert.ok(run.threw && run.error instanceof TsvalInternalError, "an out-of-scope construct must be refused loudly, not silently mis-run");
-			tally.outOfScope++;
+			tally.outOfScope += 1;
 		});
 		continue;
 	}
@@ -37,7 +37,7 @@ for (const program of corpus) {
 		const outcome = await classifyDifferential(program.code);
 
 		if (outcome.kind === "mismatch") { assert.fail(`${outcome.detail}\n--- program ---\n${program.code.trim()}`); }
-		if (gap !== undefined) { tally.todo++; } else if (outcome.kind === "both-threw") { tally.bothThrew++; } else { tally.match++; }
+		if (gap !== undefined) { tally.todo += 1; } else if (outcome.kind === "both-threw") { tally.bothThrew += 1; } else { tally.match += 1; }
 	});
 }
 

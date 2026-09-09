@@ -6,11 +6,11 @@
 import type { ChildProcess } from "node:child_process";
 import type { TsCaseOutcome } from "./ts-cases-run.ts";
 import { fork } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import * as url from "node:url";
 
 const HEAP_MB = 768;
 const WALL_CLOCK_MS = 15_000;
-const ENTRY = fileURLToPath(new URL("./ts-cases-worker.ts", import.meta.url));
+const ENTRY = url.fileURLToPath(new URL("./ts-cases-worker.ts", import.meta.url));
 
 export class CaseRunner {
 	private child: ChildProcess | undefined;
@@ -23,8 +23,11 @@ export class CaseRunner {
 	}
 
 	run(root: string, id: string): Promise<TsCaseOutcome> {
-		const child = (this.child ??= this.spawn());
-		const seq = ++this.seq;
+		this.child ??= this.spawn();
+		const child = this.child;
+
+		this.seq += 1;
+		const seq = this.seq;
 
 		return new Promise((resolve) => {
 			const finish = (outcome: TsCaseOutcome, replace: boolean): void => {

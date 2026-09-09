@@ -7,8 +7,9 @@
  * oracle proving the recursive→stack rewrite preserved behavior, and it was written by someone else —
  * its blind spots are not correlated with ours.
  */
+// eslint-disable-next-line ts/no-restricted-imports -- sync fs.readdirSync/readFileSync (a lazy generator walk) has no equivalent in the async-only util/fs wrapper
 import fs from "node:fs";
-import path from "node:path";
+import * as path from "node:path";
 import ts from "typescript";
 
 export interface CorpusProgram {
@@ -59,7 +60,7 @@ export function loadCorpus(): CorpusProgram[] {
 					out.push({ "id": `${rel}#${index}`, "name": enclosingTestName(node), "code": arg.text });
 				}
 
-				index++;
+				index += 1;
 			}
 
 			ts.forEachChild(node, visit);

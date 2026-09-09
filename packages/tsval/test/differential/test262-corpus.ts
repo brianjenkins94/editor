@@ -13,8 +13,9 @@
  * `npm test`); `vendor/test262/` is the full pinned checkout (`npm run test262:fetch`, gitignored)
  * for `npm run test262:report`.
  */
+// eslint-disable-next-line ts/no-restricted-imports -- sync fs.readdirSync (a lazy generator walk) has no equivalent in the async-only util/fs wrapper
 import fs from "node:fs";
-import path from "node:path";
+import * as path from "node:path";
 
 export const TEST262_PIN = "419d3e0a";
 export const FULL_ROOT = path.resolve(import.meta.dirname, "../../vendor/test262");
@@ -96,13 +97,13 @@ export function hasCorpus(root: string): boolean {
 /** Every test under `<root>/test/language/` (fixtures excluded), in stable sorted order, lazily read. */
 export function *loadTest262(root: string, filter?: (id: string) => boolean): Generator<Test262Test> {
 	const language = path.join(root, "test/language");
-	const walk = function *(dir: string): Generator<string> {
+	function *walk(dir: string): Generator<string> {
 		for (const entry of fs.readdirSync(dir, { "withFileTypes": true }).sort((a, b) => a.name.localeCompare(b.name))) {
 			const full = path.join(dir, entry.name);
 
 			if (entry.isDirectory()) { yield* walk(full); } else if (entry.name.endsWith(".js") && !entry.name.endsWith("_FIXTURE.js")) { yield full; }
 		}
-	};
+	}
 
 	if (!hasCorpus(root)) { return; }
 	for (const file of walk(language)) {

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { createVM } from "../../src/interpret.ts";
 
 // Reading guest values back out of a scope is inherently untyped; keep the tests terse.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line ts/no-explicit-any -- reading guest values back out of a scope is inherently untyped
 const get = (m: VM, name: string): any => m.rootScope.get(name);
 
 test("fork: guest objects and arrays are cloned (mutation stays local)", () => {

@@ -5,14 +5,14 @@
  * limit or worker thread can contain; Node's and tsval's sides alike). Such a case must take down a
  * child, not the report.
  */
-import fs from "node:fs";
-import path from "node:path";
+import * as fs from "@brianjenkins94/util/fs";
+import * as path from "node:path";
 import { parseCase } from "./ts-cases-corpus.ts";
 import { runTsCase } from "./ts-cases-run.ts";
 
 let lateRejections = 0;
 
-process.on("unhandledRejection", () => void lateRejections++); // guest async work that fails after its case ended
+process.on("unhandledRejection", () => { lateRejections += 1; }); // guest async work that fails after its case ended
 
 process.on("message", async (message: { "seq": number; "root": string; "id": string }) => {
 	const file = path.join(message.root, "tests/cases", message.id);

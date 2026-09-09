@@ -27,7 +27,8 @@ test("acceptance: single-steps through the snippet, stacks observable between st
 	const boundaries: string[] = [];
 	let guard = 0;
 
-	while (!vm.finished && guard++ < 100) {
+	while (!vm.finished && guard < 100) {
+		guard += 1;
 		const { top } = vm;
 
 		if (top) {

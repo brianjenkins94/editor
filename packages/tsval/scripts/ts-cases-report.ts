@@ -5,7 +5,7 @@
  *   node scripts/ts-cases-report.ts [--dir conformance/classes] [--limit N] [--json out.json]
  */
 import type { TsCaseOutcome } from "../test/differential/ts-cases-run.ts";
-import fs from "node:fs";
+import * as fs from "@brianjenkins94/util/fs";
 import { FULL_ROOT, hasCorpus, loadTsCases } from "../test/differential/ts-cases-corpus.ts";
 import { knownGap } from "../test/differential/ts-cases-gaps.ts";
 import { CaseRunner } from "../test/differential/ts-cases-runner.ts";
@@ -38,10 +38,13 @@ let n = 0;
 const started = Date.now();
 
 for (const t of loadTsCases(FULL_ROOT, (id) => dir === undefined || id.startsWith(dir))) {
-	if (n++ >= limit) { break; }
+	const idx = n;
+
+	n += 1;
+	if (idx >= limit) { break; }
 	const outcome: TsCaseOutcome = await runner.run(FULL_ROOT, t.id);
 
-	counts[outcome.kind]++;
+	counts[outcome.kind] += 1;
 	if (outcome.kind === "mismatch") { mismatches.push({ "id": t.id, "reason": outcome.reason, "gap": knownGap(t.id) }); }
 	if (outcome.kind === "both-threw") { bothThrew.set(outcome.node.replace(/'[^']*'/g, "'…'").slice(0, 60), (bothThrew.get(outcome.node.replace(/'[^']*'/g, "'…'").slice(0, 60)) ?? 0) + 1); }
 	if (outcome.kind === "skipped") { skipReasons.set(outcome.reason, (skipReasons.get(outcome.reason) ?? 0) + 1); }

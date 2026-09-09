@@ -48,7 +48,11 @@ test("hostGuard.beforeCall vets every host callable, with the receiver and call/
 
 test("guest→guest calls never pass through beforeCall (only host callables do)", () => {
 	let hostCalls = 0;
-	const beforeCall = (callee: (...a: unknown[]) => unknown) => (hostCalls++, callee);
+	const beforeCall = (callee: (...a: unknown[]) => unknown) => {
+		hostCalls += 1;
+
+		return callee;
+	};
 
 	assert.equal(interpret(`function f() { return 1; } class C { m() { return 2; } } f() + new C().m()`, { "hostGuard": { "beforeCall": beforeCall } }), 3);
 	assert.equal(hostCalls, 0);
@@ -65,7 +69,11 @@ test("onAsyncFiber is told about every async function and async-generator invoca
 
 test("resolveModule is the import seam: a host decides what `import` and `import()` resolve to", async () => {
 	const requested: string[] = [];
-	const resolveModule = (spec: string) => (requested.push(spec), { "default": { "read": () => `read:${spec}` }, "named": 7 });
+	const resolveModule = (spec: string) => {
+		requested.push(spec);
+
+		return { "default": { "read": () => `read:${spec}` }, "named": 7 };
+	};
 
 	assert.equal(interpret(`import fs from "node:fs"; import { named } from "x"; fs.read() + named`, { "resolveModule": resolveModule }), "read:node:fs7");
 	assert.deepEqual(requested, ["node:fs", "x"]);
@@ -82,13 +90,17 @@ test("beforeCall receives the callsite: node, evaluated arguments, construct fla
 
 	const globals = { "f": (...a: unknown[]) => a.length, "K": class {} };
 
-	interpret("const xs = [2, 3]; f(1, ...xs); new K(\"k\"); f`t${1}`", { "globals": globals, "hostGuard": { "beforeCall": beforeCall } });
+	interpret(`const xs = [2, 3]; f(1, ...xs); new K("k"); f\`t\${1}\``, { "globals": globals, "hostGuard": { "beforeCall": beforeCall } });
 	assert.deepEqual(sites, ["CallExpression:[1,2,3]:false:untyped", "NewExpression:[\"k\"]:true:untyped", "TaggedTemplateExpression:[[\"t\",\"\"],1]:false:untyped"]);
 });
 
 test("vm.callSite is already set while beforeCall runs", () => {
 	let seen: unknown;
-	const { vm } = createVM(`host()`, { "globals": { "host": () => 1 }, "hostGuard": { "beforeCall": (callee) => ((seen = vm.callSite), callee) } });
+	const { vm } = createVM(`host()`, { "globals": { "host": () => 1 }, "hostGuard": { "beforeCall": (callee) => {
+		seen = vm.callSite;
+
+		return callee;
+	} } });
 
 	vm.run();
 	assert.ok(seen !== undefined && ts.isCallExpression(seen as ts.Node));
@@ -147,7 +159,11 @@ test("a host Proxy that answers every property (an auto-stub) is a host callable
 	// it tries to run the stub's (nonexistent) AST.
 	const stub = (): unknown => new Proxy(function stub() {}, { "get": (_t, key) => (typeof key === "symbol" || key === "then" ? undefined : stub()), "apply": () => stub(), "construct": () => stub() as object });
 	const seen: string[] = [];
-	const { vm } = createVM(`db().query("x").rows[0]`, { "globals": { "db": stub() }, "hostGuard": { "beforeCall": (callee) => (seen.push(typeof callee), callee) } });
+	const { vm } = createVM(`db().query("x").rows[0]`, { "globals": { "db": stub() }, "hostGuard": { "beforeCall": (callee) => {
+		seen.push(typeof callee);
+
+		return callee;
+	} } });
 
 	assert.strictEqual(typeof vm.run(), "function");
 	assert.deepStrictEqual(seen, ["function", "function"]); // `db()` and `.query("x")` both crossed the seam

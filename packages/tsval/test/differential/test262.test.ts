@@ -16,16 +16,16 @@ if (!hasCorpus(SAMPLE_ROOT)) {
 }
 
 for (const t of loadTest262(SAMPLE_ROOT)) {
-	tally.total++;
+	tally.total += 1;
 	const gap = knownGap(t.id);
 
 	test(`test262 ${t.id}`, gap === undefined ? {} : { "todo": gap }, async () => {
 		const outcome = await runTest262(SAMPLE_ROOT, t);
 
-		if (outcome.kind === "skipped") { tally.skipped++; } else if (outcome.kind === "control-failed") { tally.inconclusive++; } else if (gap !== undefined) {
-			tally.todo++; // counted whether or not it (still) fails — node:test reports a passing todo
+		if (outcome.kind === "skipped") { tally.skipped += 1; } else if (outcome.kind === "control-failed") { tally.inconclusive += 1; } else if (gap !== undefined) {
+			tally.todo += 1; // counted whether or not it (still) fails — node:test reports a passing todo
 			if (outcome.kind === "fail") { assert.fail(`${outcome.reason}\n--- ${t.id} ---\n${t.meta.description ?? ""}`); }
-		} else if (outcome.kind === "fail") { assert.fail(`${outcome.reason}\n--- ${t.id} ---\n${t.meta.description ?? ""}`); } else { tally.pass++; }
+		} else if (outcome.kind === "fail") { assert.fail(`${outcome.reason}\n--- ${t.id} ---\n${t.meta.description ?? ""}`); } else { tally.pass += 1; }
 	});
 }
 

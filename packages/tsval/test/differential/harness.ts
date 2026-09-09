@@ -58,10 +58,11 @@ export function runNode(code: string): RunResult {
 	// The oracle runs REAL code: corpus programs may call `process.exit` (which would silently kill the
 	// test process), `require`, or touch fs/net. Shadow the dangerous entry points with inert stand-ins
 	// so the oracle can only compute. (tsval's side is sandboxed by construction.)
+	// eslint-disable-next-line no-new-func, ts/no-implied-eval -- the differential oracle's whole job is to run reference programs; the Function constructor IS the oracle (dangerous globals are shadowed with inert stand-ins above)
 	const runner = new Function("console", "process", "require", "code", "\"use strict\"; return eval(code);");
 
 	try {
-		const value = runner.call(undefined, console, blockedProcess, blockedRequire, js);
+		const value = runner(console, blockedProcess, blockedRequire, js);
 
 		return { "value": value, "logs": logs, "threw": false };
 	} catch (error) {

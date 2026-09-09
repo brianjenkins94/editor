@@ -59,8 +59,8 @@ export const STARTER_CASES: string[] = [
 	`const shorthand = 5; const obj = { shorthand }; obj.shorthand`,
 
 	// templates
-	"`x = ${1 + 1}`",
-	"const name = 'world'; `hello ${name}!`",
+	`\`x = \${1 + 1}\``,
+	`const name = 'world'; \`hello \${name}!\``,
 
 	// console (observable side effect)
 	`console.log("a", 1, true); 0`,

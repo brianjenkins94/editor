@@ -2,8 +2,9 @@
  * Build vendor/typescript-cases-sample from the full pinned checkout: LICENSE.txt, the third-party
  * notice, and every 10th policy-eligible case in stable sorted order (deterministic, small).
  */
+// eslint-disable-next-line ts/no-restricted-imports -- sync fs (rmSync/mkdirSync/copyFileSync) has no equivalent in the async-only util/fs wrapper
 import fs from "node:fs";
-import path from "node:path";
+import * as path from "node:path";
 import { FULL_ROOT, hasCorpus, loadTsCases, policySkip, SAMPLE_ROOT, TS_CASES_PIN } from "../test/differential/ts-cases-corpus.ts";
 
 const EVERY = 10;
@@ -24,12 +25,15 @@ let copied = 0;
 
 for (const t of loadTsCases(FULL_ROOT)) {
 	if (policySkip(t) !== undefined) { continue; }
-	if (eligible++ % EVERY !== 0) { continue; }
+	const idx = eligible;
+
+	eligible += 1;
+	if (idx % EVERY !== 0) { continue; }
 	const dest = path.join(SAMPLE_ROOT, "tests/cases", t.id);
 
 	fs.mkdirSync(path.dirname(dest), { "recursive": true });
 	fs.writeFileSync(dest, t.source);
-	copied++;
+	copied += 1;
 }
 
 fs.writeFileSync(

@@ -13,16 +13,16 @@ const tally = { "match": 0, "bothThrew": 0, "todo": 0, "skipped": 0, "inconclusi
 const runner = new CaseRunner();
 
 for (const t of loadTsCases(SAMPLE_ROOT)) {
-	tally.total++;
+	tally.total += 1;
 	const gap = knownGap(t.id);
 
 	test(`ts-case ${t.id}`, gap === undefined ? {} : { "todo": gap }, async () => {
 		const outcome = await runner.run(SAMPLE_ROOT, t.id);
 
-		if (outcome.kind === "skipped") { tally.skipped++; } else if (outcome.kind === "inconclusive") { tally.inconclusive++; } else if (gap !== undefined) {
-			tally.todo++;
+		if (outcome.kind === "skipped") { tally.skipped += 1; } else if (outcome.kind === "inconclusive") { tally.inconclusive += 1; } else if (gap !== undefined) {
+			tally.todo += 1;
 			if (outcome.kind === "mismatch") { assert.fail(`${outcome.reason}\n--- ${t.id} ---`); }
-		} else if (outcome.kind === "mismatch") { assert.fail(`${outcome.reason}\n--- ${t.id} ---`); } else if (outcome.kind === "both-threw") { tally.bothThrew++; } else { tally.match++; }
+		} else if (outcome.kind === "mismatch") { assert.fail(`${outcome.reason}\n--- ${t.id} ---`); } else if (outcome.kind === "both-threw") { tally.bothThrew += 1; } else { tally.match += 1; }
 	});
 }
 

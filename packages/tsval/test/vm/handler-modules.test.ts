@@ -6,10 +6,11 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+// eslint-disable-next-line ts/no-restricted-imports -- sync fs.readdirSync (listing handler modules on disk) has no equivalent in the async-only util/fs wrapper
 import fs from "node:fs";
-import path from "node:path";
+import * as path from "node:path";
 import { test } from "node:test";
-import { pathToFileURL } from "node:url";
+import * as url from "node:url";
 
 const dir = path.resolve(import.meta.dirname, "../../src/handlers");
 const modules = fs.readdirSync(dir).filter((f) => f.endsWith(".ts")).sort();
@@ -20,12 +21,12 @@ function importIn(specifiers: string[]): string {
 
 for (const file of modules) {
 	test(`handler module loads alone: ${file}`, () => {
-		assert.equal(importIn([pathToFileURL(path.join(dir, file)).href]), "ok");
+		assert.equal(importIn([url.pathToFileURL(path.join(dir, file)).href]), "ok");
 	});
 }
 
 test("handler modules load in reverse order, then the aggregator registers them all", () => {
-	const reversed = [...modules].reverse().map((f) => pathToFileURL(path.join(dir, f)).href);
+	const reversed = [...modules].reverse().map((f) => url.pathToFileURL(path.join(dir, f)).href);
 
-	assert.equal(importIn([...reversed, pathToFileURL(path.resolve(dir, "../handlers.ts")).href]), "ok");
+	assert.equal(importIn([...reversed, url.pathToFileURL(path.resolve(dir, "../handlers.ts")).href]), "ok");
 });

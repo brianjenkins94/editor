@@ -10,8 +10,9 @@
  * cases, run by `npm test`) and `vendor/typescript-cases/` (the full pinned checkout, gitignored,
  * `npm run ts-cases:fetch`) for `npm run ts-cases:report`.
  */
+// eslint-disable-next-line ts/no-restricted-imports -- sync fs.readdirSync (a lazy generator walk) has no equivalent in the async-only util/fs wrapper
 import fs from "node:fs";
-import path from "node:path";
+import * as path from "node:path";
 import ts from "typescript";
 
 export const TS_CASES_PIN = "v5.9.3";
@@ -77,14 +78,14 @@ export function hasCorpus(root: string): boolean {
 export function *loadTsCases(root: string, filter?: (id: string) => boolean): Generator<TsCase> {
 	if (!hasCorpus(root)) { return; }
 	const base = path.join(root, "tests/cases");
-	const walk = function *(dir: string): Generator<string> {
+	function *walk(dir: string): Generator<string> {
 		if (!fs.existsSync(dir)) { return; }
 		for (const entry of fs.readdirSync(dir, { "withFileTypes": true }).sort((a, b) => a.name.localeCompare(b.name))) {
 			const full = path.join(dir, entry.name);
 
 			if (entry.isDirectory()) { yield* walk(full); } else if (/\.tsx?$/.test(entry.name)) { yield full; }
 		}
-	};
+	}
 
 	for (const sub of ["compiler", "conformance"]) {
 		for (const file of walk(path.join(base, sub))) {

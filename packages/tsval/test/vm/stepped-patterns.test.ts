@@ -46,26 +46,24 @@ for (const code of sync) { test(`stepped pattern: ${code.slice(0, 70)}`, () => {
 for (const code of asyncCases) { test(`stepped pattern (async): ${code.slice(0, 70)}`, () => assertDifferentialAsync(code)); }
 
 test("fork taken while a pattern frame is waiting on a default value is independent", () => {
-	{
-		const { vm } = createVM(`const [a = 1 + 1, b] = [undefined, 5]; const r = a + b; r`);
-		// While the default `1 + 1` evaluates, its node frame sits above the waiting pattern frame.
-		const waiting = (): number => vm.frames.findIndex((f) => f.kind === "pattern" && f.awaiting === true);
+	const { vm } = createVM(`const [a = 1 + 1, b] = [undefined, 5]; const r = a + b; r`);
+	// While the default `1 + 1` evaluates, its node frame sits above the waiting pattern frame.
+	const waiting = (): number => vm.frames.findIndex((f) => f.kind === "pattern" && f.awaiting === true);
 
-		vm.runUntil(() => waiting() >= 0);
-		const at = waiting();
+	vm.runUntil(() => waiting() >= 0);
+	const at = waiting();
 
-		assert.ok(at >= 0, "stopped while a pattern frame waits on its default");
-		const fork = vm.fork();
-		const forkFrame = fork.frames[at];
-		const original = vm.frames[at];
+	assert.ok(at >= 0, "stopped while a pattern frame waits on its default");
+	const fork = vm.fork();
+	const forkFrame = fork.frames[at];
+	const original = vm.frames[at];
 
-		assert.ok(forkFrame?.kind === "pattern" && original?.kind === "pattern");
-		assert.notStrictEqual(forkFrame.temps, original.temps);
-		vm.run();
-		fork.run();
-		assert.equal(vm.completion, 7);
-		assert.equal(fork.completion, 7);
-	}
+	assert.ok(forkFrame?.kind === "pattern" && original?.kind === "pattern");
+	assert.notStrictEqual(forkFrame.temps, original.temps);
+	vm.run();
+	fork.run();
+	assert.equal(vm.completion, 7);
+	assert.equal(fork.completion, 7);
 });
 
 // Parameters and catch clauses bind through the same program.

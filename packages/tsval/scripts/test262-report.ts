@@ -4,7 +4,7 @@
  *
  *   node scripts/test262-report.ts [--dir statements/class] [--limit N] [--json out.json]
  */
-import fs from "node:fs";
+import * as fs from "@brianjenkins94/util/fs";
 import { FULL_ROOT, hasCorpus, loadTest262 } from "../test/differential/test262-corpus.ts";
 import { knownGap } from "../test/differential/test262-gaps.ts";
 import { runTest262 } from "../test/differential/test262-run.ts";
@@ -30,7 +30,7 @@ if (!hasCorpus(FULL_ROOT)) {
 // it (node:test shields the sample run). Count it instead of crashing a 16k-test run.
 let lateRejections = 0;
 
-process.on("unhandledRejection", () => void lateRejections++);
+process.on("unhandledRejection", () => { lateRejections += 1; });
 
 const counts = { "pass": 0, "fail": 0, "control-failed": 0, "skipped": 0 };
 const failures: { "id": string; "reason": string; "gap"?: string }[] = [];
@@ -40,7 +40,10 @@ let n = 0;
 const started = Date.now();
 
 for (const t of loadTest262(FULL_ROOT, (id) => dir === undefined || id.startsWith(dir))) {
-	if (n++ >= limit) { break; }
+	const idx = n;
+
+	n += 1;
+	if (idx >= limit) { break; }
 	let outcome: Awaited<ReturnType<typeof runTest262>>;
 
 	try {
@@ -49,7 +52,7 @@ for (const t of loadTest262(FULL_ROOT, (id) => dir === undefined || id.startsWit
 		outcome = { "kind": "fail", "reason": `runner error: ${String((error as Error)?.message ?? error).slice(0, 120)}` };
 	}
 
-	counts[outcome.kind]++;
+	counts[outcome.kind] += 1;
 	if (outcome.kind === "fail") { failures.push({ "id": t.id, "reason": outcome.reason, "gap": knownGap(t.id) }); }
 	if (outcome.kind === "skipped") { skipReasons.set(outcome.reason, (skipReasons.get(outcome.reason) ?? 0) + 1); }
 	if (outcome.kind === "control-failed") { controlReasons.set(outcome.reason.slice(0, 80), (controlReasons.get(outcome.reason.slice(0, 80)) ?? 0) + 1); }

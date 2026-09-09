@@ -21,8 +21,16 @@ test("#3 fork: a host-invoked closure from the fork runs on the fork", () => {
 	const original = vm.callGuestFromHost.bind(vm);
 	const forked = fork.callGuestFromHost.bind(fork);
 
-	vm.callGuestFromHost = (...a) => (originalHits++, original(...a));
-	fork.callGuestFromHost = (...a) => (forkHits++, forked(...a));
+	vm.callGuestFromHost = (...a) => {
+		originalHits += 1;
+
+		return original(...a);
+	};
+	fork.callGuestFromHost = (...a) => {
+		forkHits += 1;
+
+		return forked(...a);
+	};
 	(fork.rootScope.get("o") as { "inc": () => number }).inc();
 	assert.deepStrictEqual({ "originalHits": originalHits, "forkHits": forkHits }, { "originalHits": 0, "forkHits": 1 });
 });

@@ -3,8 +3,9 @@
  * policy-eligible language test in stable sorted order (deterministic, so the sample is reproducible
  * and the checked-in corpus stays small).
  */
+// eslint-disable-next-line ts/no-restricted-imports -- sync fs (rmSync/mkdirSync/readdirSync/copyFileSync) has no equivalent in the async-only util/fs wrapper
 import fs from "node:fs";
-import path from "node:path";
+import * as path from "node:path";
 import { FULL_ROOT, hasCorpus, loadTest262, SAMPLE_ROOT, TEST262_PIN } from "../test/differential/test262-corpus.ts";
 import { policySkip } from "../test/differential/test262-run.ts";
 
@@ -28,12 +29,15 @@ let copied = 0;
 
 for (const t of loadTest262(FULL_ROOT)) {
 	if (policySkip(t) !== undefined) { continue; }
-	if (eligible++ % EVERY !== 0) { continue; }
+	const idx = eligible;
+
+	eligible += 1;
+	if (idx % EVERY !== 0) { continue; }
 	const dest = path.join(SAMPLE_ROOT, "test/language", t.id);
 
 	fs.mkdirSync(path.dirname(dest), { "recursive": true });
 	fs.copyFileSync(path.join(FULL_ROOT, "test/language", t.id), dest);
-	copied++;
+	copied += 1;
 }
 
 fs.writeFileSync(
