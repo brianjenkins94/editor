@@ -8,14 +8,14 @@
 //
 // `sample` roots are what tsval checks in; `full` roots are its fetched pinned checkouts (gitignored there).
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import * as path from "node:path";
+import * as url from "node:url";
 
-const here = dirname(fileURLToPath(import.meta.url));
+const here = path.dirname(url.fileURLToPath(import.meta.url));
 
-export const defaultTsvalRoot = () => process.env.TSVAL_ROOT ?? resolve(here, "../../tsval");
+export const defaultTsvalRoot = () => process.env.TSVAL_ROOT ?? path.resolve(here, "../../tsval");
 
-const importTsval = (root, rel) => import(pathToFileURL(join(root, rel)).href);
+const importTsval = (root, rel) => import(url.pathToFileURL(path.join(root, rel)).href);
 
 /** Yields `{ corpus, id, name, source, skip }` for every case; `skip` is tsval's policy reason (undefined = eligible). */
 export async function *loadCorpus({ corpora, size = "sample", tsvalRoot = defaultTsvalRoot() }) {
@@ -45,13 +45,12 @@ export async function *loadCorpus({ corpora, size = "sample", tsvalRoot = defaul
 			yield { "corpus": "test262", "id": t.id, "name": "test.js", "source": t.source, "skip": skip };
 		}
 
-		if (corpora.includes("test262-harness") || true) {
-			const harnessDir = join(root, "harness");
+		// the harness corpus is always emitted (previously gated on `… || true`, i.e. unconditional)
+		const harnessDir = path.join(root, "harness");
 
-			for (const name of readdirSync(harnessDir).sort()) {
-				if (!name.endsWith(".js")) { continue; }
-				yield { "corpus": "test262-harness", "id": name, "name": name, "source": readFileSync(join(harnessDir, name), "utf8"), "skip": undefined };
-			}
+		for (const name of readdirSync(harnessDir).sort()) {
+			if (!name.endsWith(".js")) { continue; }
+			yield { "corpus": "test262-harness", "id": name, "name": name, "source": readFileSync(path.join(harnessDir, name), "utf8"), "skip": undefined };
 		}
 	}
 }

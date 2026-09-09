@@ -30,8 +30,6 @@ run("W1 control: token without guard char", function *() { yield startSpan("X", 
 run("W2 guard /\\bof\\b/, token /\\w+/ on typeof", function *() { yield startSpan("X", mRaw("/\\bof\\b/")); yield eat(W); yield endSpan(); }, mRaw("/\\w+/"), "typeof");
 run("W2 control: same on \"type\"", function *() { yield startSpan("X", mRaw("/\\bof\\b/")); yield eat(W); yield endSpan(); }, mRaw("/\\w+/"), "type");
 run("W2 control: same on \"typeof\" with JS RegExp semantics", function *() {
-	const ok = /\w+/y.exec("typeof")[0] === "typeof" && !/\bof\b/y.test("typeof".slice(4));
-
 	yield eat(W);
 }, mRaw("/\\w+/"), "typeof");
 

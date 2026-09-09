@@ -369,6 +369,7 @@ function featuresUnsafe(root, sf) {
 			case K.ContinueStatement: add(node.label ? "Continue:label" : "Continue"); break;
 			case K.ImportDeclaration: case K.ExportDeclaration: case K.ExportAssignment: add("Module"); break;
 			case K.SemicolonClassElement: add("Class:semicolonMember"); break;
+			// no default
 		}
 
     // TypeScript-only parts, tagged by site

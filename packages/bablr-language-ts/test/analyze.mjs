@@ -43,8 +43,8 @@ export function analyze(cases, results, { size, started, top = 40 } = {}) {
 		const key = `${row.corpus} ${row.usesTs ? "TS" : "JS"}`;
 		const t = tally.get(key) ?? { "cases": 0, "pass": 0, "mismatch": 0, "error": 0, "timeout": 0 };
 
-		t.cases++;
-		t[row.status]++;
+		t.cases += 1;
+		t[row.status] += 1;
 		tally.set(key, t);
 	}
 
@@ -100,7 +100,7 @@ export function analyze(cases, results, { size, started, top = 40 } = {}) {
 		const key = `${row.usesTs ? "TS" : "JS"} | ${row.bucket}`;
 		const b = buckets.get(key) ?? { "count": 0, "examples": [] };
 
-		b.count++;
+		b.count += 1;
 		if (b.examples.length < 2) { b.examples.push({ "id": `${row.corpus}/${row.id}`, "line": row.at?.line, "excerpt": row.at?.excerpt }); }
 		buckets.set(key, b);
 	}
@@ -121,7 +121,7 @@ export function analyze(cases, results, { size, started, top = 40 } = {}) {
 
 	for (const r of rows) {
 		if (!r.usesTs) { continue; }
-		tsCases++;
+		tsCases += 1;
 		for (const f of r.fileFeatures) {
 			if (f.startsWith("TS:")) { tsCount.set(f, (tsCount.get(f) ?? 0) + 1); }
 		}

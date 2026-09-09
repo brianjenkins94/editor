@@ -18,8 +18,6 @@ function run(label, Cls, input) {
 	} catch (e) { console.log(label.padEnd(62), JSON.stringify(input).padEnd(6), "FAIL", e.message.split("\n")[0]); }
 }
 
-const Word = { "Word": function *() { yield eat(m`/[a-z]+/`); } };
-
 run("control: eatMatch(A) fails on its FIRST token, then B", class extends TypeScriptAtrivial {
 	*Program() { yield eatMatch(m`a$: <A />`); yield eat(m`b$: <B />`); }
 	*A() { yield eat(m`open*: <* '{' />`); }

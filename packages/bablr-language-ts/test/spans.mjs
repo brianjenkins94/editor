@@ -41,15 +41,13 @@ const find = (spans, type) => spans.filter((s) => s.type === type).map((s) => [s
 }
 
 // offsets are UTF-16 units (tsc's unit) and always add up
-{
-	for (const src of ["x = \"😀\"; g()", "let 𑈿 = 1 // 😀", "x = `a${b}c` + \"\\n\"", ""]) {
-		const { spans, length } = cstSpans(src);
+for (const src of ["x = \"😀\"; g()", "let 𑈿 = 1 // 😀", `x = \`a\${b}c\` + "\\n"`, ""]) {
+	const { spans, length } = cstSpans(src);
 
-		assert.equal(length, src.length, src);
-		assert.ok(spans.every((s) => s.start <= s.end && s.end <= src.length));
-	}
-
-	assert.deepEqual(find(cstSpans("x = \"😀\"; g()").spans, "CallExpression"), [[10, 13]]);
+	assert.equal(length, src.length, src);
+	assert.ok(spans.every((s) => s.start <= s.end && s.end <= src.length));
 }
+
+assert.deepEqual(find(cstSpans("x = \"😀\"; g()").spans, "CallExpression"), [[10, 13]]);
 
 console.log("spans: ok");

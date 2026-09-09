@@ -8,12 +8,12 @@
 //
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import * as path from "node:path";
+import * as url from "node:url";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const grammarUrl = pathToFileURL(resolve(here, "lib/grammar.js")).href;
-const bablrBin = join(here, "node_modules", "@bablr", "cli", "bin", "index.js");
+const here = path.dirname(url.fileURLToPath(import.meta.url));
+const grammarUrl = url.pathToFileURL(path.resolve(here, "lib/grammar.js")).href;
+const bablrBin = path.join(here, "node_modules", "@bablr", "cli", "bin", "index.js");
 
 const maybeProduction = process.argv[2];
 const looksLikeProduction = maybeProduction && /^[A-Z][A-Z0-9]*$/i.test(maybeProduction);

@@ -10,13 +10,13 @@
 // esnext's, TS failures are the layer we're building), then the failure buckets by construct.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import * as path from "node:path";
+import * as url from "node:url";
 import { Worker } from "node:worker_threads";
 import { analyze } from "./analyze.mjs";
 import { loadCorpus } from "./corpus.mjs";
 
-const here = dirname(fileURLToPath(import.meta.url));
+const here = path.dirname(url.fileURLToPath(import.meta.url));
 
 const argv = process.argv.slice(2);
 
@@ -36,7 +36,7 @@ const limit = Number(opt("limit", Infinity));
 const jobs = Number(opt("jobs", Math.max(1, availableParallelism() - 1)));
 const timeoutMs = Number(opt("timeout", 120_000));
 const restartEvery = Number(opt("restart-every", 100));
-const out = opt("out", resolve(here, "reports", `${size}-${corpora.join("+")}.json`));
+const out = opt("out", path.resolve(here, "reports", `${size}-${corpora.join("+")}.json`));
 const verbose = flag("verbose");
 const fast = flag("fast"); // run workers with the validation/freeze shims (test/fast-record*.mjs, test/nofreeze.mjs)
 
@@ -46,7 +46,7 @@ let skipped = 0;
 
 for await (const c of loadCorpus({ "corpora": corpora, "size": size })) {
 	if (c.skip !== undefined) {
-		skipped++;
+		skipped += 1;
 		continue;
 	}
 
@@ -64,7 +64,7 @@ let next = 0;
 let done = 0;
 const started = performance.now();
 
-const fastArgv = ["--import", fileURLToPath(new URL("./fast-record-register.mjs", import.meta.url)), "--import", fileURLToPath(new URL("./nofreeze.mjs", import.meta.url))];
+const fastArgv = ["--import", url.fileURLToPath(new URL("./fast-record-register.mjs", import.meta.url)), "--import", url.fileURLToPath(new URL("./nofreeze.mjs", import.meta.url))];
 const spawn = () => new Worker(workerUrl, { "execArgv": fast ? fastArgv : [] });
 
 function runOn(worker, served) {
@@ -82,7 +82,9 @@ function runOn(worker, served) {
 				return resolveSlot(runOn(spawn(), 0));
 			}
 
-			const seq = next++;
+			const seq = next;
+
+			next += 1;
 			const c = cases[seq];
 			let settled = false;
 			const timer = setTimeout(() => {
@@ -93,6 +95,15 @@ function runOn(worker, served) {
 				finish(seq);
 				resolveSlot(runOn(spawn(), 0));
 			}, timeoutMs);
+			const onError = (err) => {
+				if (settled) { return; }
+				settled = true;
+				clearTimeout(timer);
+				results[seq] = { "status": "error", "message": `worker crashed: ${err?.message ?? err}`, "pos": null };
+				finish(seq);
+				resolveSlot(runOn(spawn(), 0));
+			};
+
 			const onMessage = (msg) => {
 				if (settled || msg.seq !== seq) { return; }
 				settled = true;
@@ -101,17 +112,8 @@ function runOn(worker, served) {
 				worker.off("error", onError);
 				results[seq] = msg;
 				finish(seq);
-				served++;
+				served += 1;
 				loop();
-			};
-
-			const onError = (err) => {
-				if (settled) { return; }
-				settled = true;
-				clearTimeout(timer);
-				results[seq] = { "status": "error", "message": `worker crashed: ${err?.message ?? err}`, "pos": null };
-				finish(seq);
-				resolveSlot(runOn(spawn(), 0));
 			};
 
 			worker.on("message", onMessage);
@@ -124,7 +126,7 @@ function runOn(worker, served) {
 }
 
 function finish(seq) {
-	done++;
+	done += 1;
 	const r = results[seq];
 
 	if (verbose || r.status !== "pass") {
@@ -139,7 +141,7 @@ await Promise.all(Array.from({ "length": Math.min(jobs, cases.length) }, () => r
 // ── analyze + report ───────────────────────────────────────────────────────────────────────────────────────────
 const stripped = results.map((r, i) => ({ "corpus": cases[i].corpus, "id": cases[i].id, ...r }));
 
-mkdirSync(dirname(out), { "recursive": true });
+mkdirSync(path.dirname(out), { "recursive": true });
 const meta = { "size": size, "corpora": corpora, "fast": fast, "grammar": process.env.GRAMMAR ?? "lib/grammar.js", "ran": new Date().toISOString() };
 
 writeFileSync(out, JSON.stringify({ ...meta, "results": stripped }, null, 1)); // raw results first: analysis may fail
