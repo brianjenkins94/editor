@@ -3,7 +3,6 @@
   "version": "0.0.0",
   "description": "Our own BABLR grammar for the modern-TypeScript subset tsval interprets \u2014 a lossless CSTML substrate for the capability IDE.",
   "type": "module",
-  "private": true,
   "exports": {
     ".": "./lib/grammar.js",
     "./spans": "./lib/spans.js"
