@@ -301,13 +301,13 @@ export class Machine implements VM {
 			if (typeof ctor === "function") { this.guestErrors[name] = ctor; }
 		}
 
-		const pick = <T>(name: string): T => (typeof g[name] === "function" ? g[name] : (globalThis as Record<string, unknown>)[name]) as T;
-		const realmObject = pick<ObjectConstructor>("Object");
+		const pick = (name: string): unknown => (typeof g[name] === "function" ? g[name] : (globalThis as Record<string, unknown>)[name]);
+		const realmObject = pick("Object") as ObjectConstructor;
 		// The realm's *intrinsic* Function is reached through Object (a global named `Function` may be
 		// a host's stand-in, e.g. an eval guard); it's what guest function objects are created from.
 		const realmFunction = (realmObject as unknown as { "constructor": FunctionConstructor }).constructor;
 
-		this.realm = makeRealm({ "Array": pick("Array"), "Object": realmObject, "RegExp": pick("RegExp"), "Function": typeof realmFunction === "function" ? realmFunction : Function, "Promise": pick("Promise") });
+		this.realm = makeRealm({ "Array": pick("Array") as ArrayConstructor, "Object": realmObject, "RegExp": pick("RegExp") as RegExpConstructor, "Function": typeof realmFunction === "function" ? realmFunction : Function, "Promise": pick("Promise") as PromiseConstructor });
 		this.rootScope.hasThis = true;
 		this.rootScope.thisVal = options.thisValue;
 		this.rootScope.realGlobals = options.realGlobals ?? false;
@@ -381,7 +381,7 @@ export class Machine implements VM {
 	/** Record a completion value (ExpressionStatement). */
 	setCompletion(value: unknown): void {
 		this.completion = value;
-		this.completionSerial++;
+		this.completionSerial += 1;
 	}
 
 	/** A compound statement finished (normally or by a caught break) without its body producing a
@@ -432,7 +432,7 @@ export class Machine implements VM {
 			return;
 		}
 
-		this.steps++;
+		this.steps += 1;
 
 		if (this.signal !== null) {
 			this.unwind(frame, this.signal);
@@ -472,10 +472,10 @@ export class Machine implements VM {
 	private toGuestError(error: unknown): unknown {
 		if (!(error instanceof Error)) { return error; }
 		const { name } = error.constructor;
-		const guestCtor = this.guestErrors[name];
+		const GuestCtor = this.guestErrors[name];
 
-		if (guestCtor === undefined || guestCtor === (globalThis as Record<string, unknown>)[name]) { return error; }
-		const converted = new guestCtor(error.message);
+		if (GuestCtor === undefined || GuestCtor === (globalThis as Record<string, unknown>)[name]) { return error; }
+		const converted = new GuestCtor(error.message);
 
 		if (error.stack !== undefined) { converted.stack = error.stack; }
 
@@ -527,7 +527,7 @@ export class Machine implements VM {
 		if (frame.kind === undefined) {
 			// Loop frames catch break/continue targeting them (unlabeled, or matching label).
 			if (frame.isLoop === true && (signal.type === "break" || signal.type === "continue")) {
-				if (signal.label == null || signal.label === frame.label) {
+				if (signal.label === null || signal.label === undefined || signal.label === frame.label) {
 					this.values.length = frame.valuesBase;
 					this.signal = null;
 					if (signal.type === "break") {
@@ -545,7 +545,7 @@ export class Machine implements VM {
 
 			// switch / labeled-block frames catch break targeting them.
 			if ((frame.isSwitch === true || frame.isLabel === true) && signal.type === "break") {
-				if (signal.label == null ? frame.isSwitch === true : signal.label === frame.label) {
+				if (signal.label === null || signal.label === undefined ? frame.isSwitch === true : signal.label === frame.label) {
 					this.values.length = frame.valuesBase;
 					this.signal = null;
 					this.frames.pop();
@@ -610,7 +610,7 @@ export class Machine implements VM {
 		};
 
 		if (frame.state === "try") {
-			if (signal.type === "throw" && node.catchClause != null) {
+			if (signal.type === "throw" && node.catchClause !== null && node.catchClause !== undefined) {
 				this.values.length = frame.valuesBase;
 				this.signal = null;
 				const clause = node.catchClause;
@@ -623,20 +623,20 @@ export class Machine implements VM {
 				// A destructuring catch parameter (`catch ([x, y = d])`) binds through a pattern frame above
 				// the block (its defaults may even suspend); a throw while binding replaces the caught error
 				// and unwinds through this frame's `catch` state, so a finally still runs.
-				if (varDecl != null) {
+				if (varDecl !== null && varDecl !== undefined) {
 					if (ts.isIdentifier(varDecl.name)) { bindIdentifier(catchScope, varDecl.name.text, signal.value, "let"); } else { pushPattern(this, catchScope, bindingProgram(varDecl.name, "let"), signal.value); }
 				}
 
 				return;
 			}
 
-			if (node.finallyBlock != null) {
+			if (node.finallyBlock !== null && node.finallyBlock !== undefined) {
 				runFinallyThenReraise();
 
 				return;
 			}
 		} else if (frame.state === "catch") {
-			if (node.finallyBlock != null) {
+			if (node.finallyBlock !== null && node.finallyBlock !== undefined) {
 				runFinallyThenReraise();
 
 				return;
@@ -710,7 +710,7 @@ export class Machine implements VM {
 
 	/** The 0-based line/character (and raw position) of a node, for debugger UIs. */
 	location(node: ts.Node | null = this.currentNode): { "line": number; "character": number; "pos": number } | null {
-		if (node == null || this.sourceFile == null) { return null; }
+		if (node === null || node === undefined || this.sourceFile === null || this.sourceFile === undefined) { return null; }
 		const pos = node.getStart(this.sourceFile);
 		const { line, character } = this.sourceFile.getLineAndCharacterOfPosition(pos);
 
@@ -724,7 +724,7 @@ export class Machine implements VM {
 
 	/** Add breakpoints by 1-based source line: breaks at the first statement starting on each line. */
 	addBreakpointsByLine(...lines: number[]): void {
-		if (this.sourceFile == null) { return; }
+		if (this.sourceFile === null || this.sourceFile === undefined) { return; }
 		const wanted = new Set(lines);
 		const visit = (node: ts.Node): void => {
 			if (isStatement(node)) {
@@ -1076,7 +1076,6 @@ export class Machine implements VM {
 	/** Create a guest generator object (lazy: the body runs on `.next()`). */
 	createGenerator(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): Iterator<unknown> & Iterable<unknown> {
 		const fiber = this.seedFiber(meta, thisArg, args);
-		const vm = this;
 		const resume = (input: FiberInput): IteratorResult<unknown> => {
 			if (fiber.done) {
 				if (input.kind === "throw") { throw input.value; }
@@ -1092,7 +1091,7 @@ export class Machine implements VM {
 				return { "value": input.value, "done": true };
 			}
 
-			const { paused, kind, value, raw } = vm.stepFiber(fiber, input);
+			const { paused, kind, value, raw } = this.stepFiber(fiber, input);
 
 			if (paused) {
 				if (kind !== "yield") { throw new TsvalInternalError("await inside a (non-async) generator"); }
@@ -1167,7 +1166,7 @@ export class Machine implements VM {
 				// Suspended on `await result.value`; resume when it settles.
 				Promise.resolve(result.value).then(
 					(v) => { drive({ "kind": "next", "value": v }); },
-					(e) => {
+					(e: unknown) => {
 						// An uncatchable error (interpreter bug, a host's abort) that rejected an awaited promise
 						// must not be injected as a guest `throw` — guest try/catch could swallow it.
 						if (isUncatchable(e)) {
@@ -1226,7 +1225,7 @@ export class Machine implements VM {
 			if (result.kind === "await") {
 				return Promise.resolve(result.value).then(
 					(v) => drive({ "kind": "next", "value": v }),
-					(e) => {
+					(e: unknown) => {
 						if (isUncatchable(e)) {
 							fiber.done = true;
 
@@ -1242,7 +1241,7 @@ export class Machine implements VM {
 			// body may catch — not a rejection of the pending `next()`.
 			return Promise.resolve(result.value).then(
 				(v) => ({ "value": v, "done": false }),
-				(e) => drive({ "kind": "throw", "value": e })
+				(e: unknown) => drive({ "kind": "throw", "value": e })
 			);
 		};
 
@@ -1262,7 +1261,7 @@ export class Machine implements VM {
 					request.resolve(result);
 					pump();
 				},
-				(error) => {
+				(error: unknown) => {
 					busy = false;
 					request.reject(error);
 					pump();
@@ -1359,4 +1358,6 @@ interface Fiber {
 type FiberInput = { "kind": "next"; "value": unknown } | { "kind": "return"; "value": unknown } | { "kind": "throw"; "value": unknown };
 
 /** The constructor hosts use; its instances are typed as the host-facing `VM`. */
-export const VM: new (options?: VMOptions) => VM = Machine;
+const VMConstructor: new (options?: VMOptions) => VM = Machine;
+
+export { VMConstructor as VM };
