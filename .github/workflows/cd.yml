@@ -32,12 +32,11 @@
         { "uses": "actions/checkout@v4" },
         # lib's published setup action (pnpm + cooldown install), then its published pages-deploy action.
         { "uses": "brianjenkins94/lib/.github/actions/setup@main" },
-        # Build first: util-build runs every workspace's build, so the workbench app (packages/vscode) emits the
-        # docs/ site that gets deployed. (private ≠ don't build — util-build builds it; util-publish skips it.)
-        { "run": "pnpm run build" },
-        # Then publish: util-publish builds each NON-private package from source (vite), writes docs/*.tgz, and
-        # publishes to npm (provenance) when NPM_TOKEN is present. Runs per successful CI; only packages with a
-        # GitHub release actually publish (others just build), so this is safe on every push.
+        # util-publish FIRST builds every workspace (util-build internally) — so the workbench app
+        # (packages/vscode) emits the docs/ site — THEN writes docs/*.tgz for each publishable package and
+        # publishes to npm (provenance) when NPM_TOKEN is present. Only packages with a GitHub release actually
+        # publish (others just build), so this is safe on every push. No separate `pnpm run build` step: that
+        # double-builds, and monaco's clone-and-generate build is not idempotent on a second run.
         {
           "run": "npx util-publish",
           "env": {
