@@ -16,19 +16,9 @@ export default mergeConfig(defaults, {
 		"minify": true,
 		"rollupOptions": {
 			"input": { "main": "main.ts" },
-			// Bundle everything; nothing is externalized.
-			"preserveEntrySignatures": "strict",
-			"output": {
-				// Content-hashed chunk/asset names so the build is DETERMINISTIC: identical content always gets
-				// the same name regardless of build order. Without a hash, the many colliding names bundled from
-				// @codingame (multiple `extension.js` / `package.json`) get order-dependent numeric suffixes
-				// (`extension2.js`, `package3.json`, …) that shuffle between builds and cascade into chunk import
-				// refs — so every build produced a byte-different dist and the publisher republished endlessly.
-				// The `main` entry stays unhashed (it's the `./main` export consumers import).
-				"entryFileNames": "[name].js",
-				"chunkFileNames": "[name]-[hash].js",
-				"assetFileNames": "[name]-[hash][extname]"
-			}
+			// Bundle everything; nothing is externalized. Output naming (deterministic content-hashed chunks +
+			// assets, readable `main` entry) comes from the shared @brianjenkins94/util/vite/defaults.
+			"preserveEntrySignatures": "strict"
 		}
 	},
 	"plugins": [

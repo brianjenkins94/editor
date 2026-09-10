@@ -3,14 +3,11 @@ import config from "@brianjenkins94/util/eslint";
 export default [
 	...config,
 	{
-		// CI fails only on ERRORS (util-lint counts errorCount); warnings never fail it. So most of what used to
-		// be ignored is now LINTED — bablr-language-ts/lib/{grammar,spans}.ts included (0 errors; grammar just
-		// carries DSL-structural warnings). Ignore only what genuinely can't pass or is pure noise:
+		// CI fails only on ERRORS (util-lint counts errorCount); warnings never fail it. Almost everything is
+		// LINTED, including the vendored monaco `main.ts` and the vendored `@bablr/record` shim — their few
+		// error-level violations were fixed in place (they still carry non-failing style warnings). Only truly
+		// un-lintable / non-source paths are ignored:
 		//   • build output (dist) and monaco's regenerated demo (vendored CodinGame source)
-		//   • components/monaco-vscode-api/main.ts — synced upstream fork; 0 errors but ~490 auto-fixable style
-		//     warnings we don't want as noise (would pass CI if linted; restyling just drifts on re-sync)
-		//   • packages/bablr/shims/** — the vendored @bablr/record shim; carries real ERRORS (mutable exports,
-		//     no-undef, error-message) that are vendored code, not ours to fix
 		//   • tsval's vendored differential corpora, generated test reports, and markdown (no tsconfig for typed rules)
 		"ignores": ["**/dist/**", "**/demo/**", "packages/tsval/vendor/**", "packages/*/test/reports/**", "**/*.md"]
 	},
