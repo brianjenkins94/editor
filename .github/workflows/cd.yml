@@ -32,8 +32,12 @@
         { "uses": "actions/checkout@v4" },
         # lib's published setup action (pnpm + cooldown install), then its published pages-deploy action.
         { "uses": "brianjenkins94/lib/.github/actions/setup@main" },
-        # util-publish builds each non-private package from source (vite), writes docs/*.tgz, and publishes to
-        # npm (provenance) when NPM_TOKEN is present.
+        # Build first: util-build runs every workspace's build, so the workbench app (packages/vscode) emits the
+        # docs/ site that gets deployed. (private ≠ don't build — util-build builds it; util-publish skips it.)
+        { "run": "pnpm run build" },
+        # Then publish: util-publish builds each NON-private package from source (vite), writes docs/*.tgz, and
+        # publishes to npm (provenance) when NPM_TOKEN is present. Runs per successful CI; only packages with a
+        # GitHub release actually publish (others just build), so this is safe on every push.
         {
           "run": "npx util-publish",
           "env": {
