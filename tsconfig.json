@@ -6,8 +6,8 @@
       "@brianjenkins94/tsval/typed": ["./packages/tsval/src/typed.ts"],
       "@brianjenkins94/bablr": ["./packages/bablr/src/index.js"],
       "@brianjenkins94/monaco-vscode-api/main": ["./components/monaco-vscode-api/main.ts"],
-      "@brianjenkins94/bablr-language-ts": ["./packages/bablr-language-ts/lib/grammar.js"],
-      "@brianjenkins94/bablr-language-ts/spans": ["./packages/bablr-language-ts/lib/spans.js"],
+      "@brianjenkins94/bablr-language-ts": ["./packages/bablr-language-ts/lib/grammar.ts"],
+      "@brianjenkins94/bablr-language-ts/spans": ["./packages/bablr-language-ts/lib/spans.ts"],
       "@components/*": ["./components/*"]
     },
     "alwaysStrict": true,

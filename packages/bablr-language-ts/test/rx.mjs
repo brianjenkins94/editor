@@ -3,7 +3,7 @@ import { freezeClass } from "@bablr/agast-helpers/object";
 import { printSource } from "@bablr/agast-helpers/tree";
 import { eat, m } from "@bablr/helpers/grammar";
 import { treeParse } from "bablr";
-import { enhance, mRaw, TypeScriptAtrivial } from "../lib/grammar.js";
+import { enhance, mRaw, TypeScriptAtrivial } from "../lib/grammar";
 
 const args = process.argv.slice(2);
 

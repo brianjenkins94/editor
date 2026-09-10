@@ -6,7 +6,7 @@ import { freezeClass } from "@bablr/agast-helpers/object";
 import { printSource } from "@bablr/agast-helpers/tree";
 import { eat, endSpan, m, match, startSpan } from "@bablr/helpers/grammar";
 import { treeParse } from "bablr";
-import { enhance, mRaw, TypeScriptAtrivial } from "../lib/grammar.js";
+import { enhance, mRaw, TypeScriptAtrivial } from "../lib/grammar";
 
 function run(label, program, word, input) {
 	const Cls = class extends TypeScriptAtrivial { *Program() { yield* program(); } *Word() { yield eat(word); } *Punctuator() { yield eat(m`']'`); } *Rest() { yield eat(m`/.*/s`); } };

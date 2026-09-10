@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { printSource } from "@bablr/agast-helpers/tree";
 import { m } from "@bablr/helpers/grammar";
 import { treeParse } from "bablr";
-import TypeScript from "../lib/grammar.js";
+import TypeScript from "../lib/grammar";
 
 const lines = readFileSync(process.argv[2], "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
 let pass = 0;

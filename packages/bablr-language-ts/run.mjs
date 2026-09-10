@@ -12,7 +12,7 @@ import * as path from "node:path";
 import * as url from "node:url";
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
-const grammarUrl = url.pathToFileURL(path.resolve(here, "lib/grammar.js")).href;
+const grammarUrl = url.pathToFileURL(path.resolve(here, "lib/grammar.ts")).href;
 const bablrBin = path.join(here, "node_modules", "@bablr", "cli", "bin", "index.js");
 
 const maybeProduction = process.argv[2];

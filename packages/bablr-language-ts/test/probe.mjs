@@ -6,7 +6,7 @@ import { parseTag, parseTagType, printPrettyCSTML, printSource } from "@bablr/ag
 import { m } from "@bablr/helpers/grammar";
 import { streamParse, treeParse } from "bablr";
 
-const { "default": TypeScript } = await import(new URL(process.env.GRAMMAR ?? "../lib/grammar.js", import.meta.url).href);
+const { "default": TypeScript } = await import(new URL(process.env.GRAMMAR ?? "../lib/grammar.ts", import.meta.url).href);
 
 let src = process.argv[2] ?? "const x = 1";
 

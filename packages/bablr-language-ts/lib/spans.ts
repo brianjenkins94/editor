@@ -12,7 +12,7 @@ import { CloseNodeTag, GapTag, LiteralTag, OpenNodeTag, ReferenceTag, ShiftTag }
 import { parseTag, parseTagType } from "@bablr/agast-helpers/tree";
 import { m } from "@bablr/helpers/grammar";
 import { streamParse } from "bablr";
-import TypeScript from "./grammar.js";
+import TypeScript from "./grammar";
 
 const COVER = Symbol.for("_");
 

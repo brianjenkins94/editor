@@ -7,7 +7,7 @@ import { freezeClass } from "@bablr/agast-helpers/object";
 import { printSource } from "@bablr/agast-helpers/tree";
 import { eat, eatMatch, endSpan, m, match, startSpan } from "@bablr/helpers/grammar";
 import { treeParse } from "bablr";
-import { enhance, TypeScriptAtrivial } from "../lib/grammar.js";
+import { enhance, TypeScriptAtrivial } from "../lib/grammar";
 
 function run(label, Cls, input) {
 	freezeClass(Cls);

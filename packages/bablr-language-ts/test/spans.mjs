@@ -1,6 +1,6 @@
-// Assertions for lib/spans.js.   node test/spans.mjs
+// Assertions for lib/spans.ts.   node test/spans.mjs
 import * as assert from "node:assert/strict";
-import { cstSpans } from "../lib/spans.js";
+import { cstSpans } from "../lib/spans";
 
 const find = (spans, type) => spans.filter((s) => s.type === type).map((s) => [s.start, s.end]);
 

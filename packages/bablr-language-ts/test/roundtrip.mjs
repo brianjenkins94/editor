@@ -142,7 +142,7 @@ await Promise.all(Array.from({ "length": Math.min(jobs, cases.length) }, () => r
 const stripped = results.map((r, i) => ({ "corpus": cases[i].corpus, "id": cases[i].id, ...r }));
 
 mkdirSync(path.dirname(out), { "recursive": true });
-const meta = { "size": size, "corpora": corpora, "fast": fast, "grammar": process.env.GRAMMAR ?? "lib/grammar.js", "ran": new Date().toISOString() };
+const meta = { "size": size, "corpora": corpora, "fast": fast, "grammar": process.env.GRAMMAR ?? "lib/grammar.ts", "ran": new Date().toISOString() };
 
 writeFileSync(out, JSON.stringify({ ...meta, "results": stripped }, null, 1)); // raw results first: analysis may fail
 const analysis = analyze(cases, results, { "size": size, "started": started });

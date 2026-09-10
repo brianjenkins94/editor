@@ -3,4 +3,4 @@
 //
 // Input is assumed pre-validated: astral/empty edge cases are the caller's responsibility (rejected before
 // they reach bablr), which is why we no longer carry the astral/empty-root patches.
-export { cstSpans } from "../../bablr-language-ts/lib/spans.js";
+export { cstSpans } from "../../bablr-language-ts/lib/spans";

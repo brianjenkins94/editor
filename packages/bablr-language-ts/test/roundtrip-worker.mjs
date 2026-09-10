@@ -8,7 +8,7 @@ import { m } from "@bablr/helpers/grammar";
 import { streamParse, treeParse } from "bablr";
 
 // GRAMMAR=<path> (relative to this file) swaps the grammar under test, e.g. a frozen snapshot for A/B runs.
-const { "default": TypeScript } = await import(new URL(process.env.GRAMMAR ?? "../lib/grammar.js", import.meta.url).href);
+const { "default": TypeScript } = await import(new URL(process.env.GRAMMAR ?? "../lib/grammar.ts", import.meta.url).href);
 
 const matcher = m`<Program />`;
 
