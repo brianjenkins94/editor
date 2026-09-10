@@ -12,6 +12,7 @@
     "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "@tsconfig/node-lts": "latest"
+    "@tsconfig/node-lts": "latest",
+    "@types/node": "^24.13.3"
   }
 }
