@@ -27,11 +27,11 @@ const shell = css({
 	// `::-webkit-resizer` stretched 100× by the region's `scale`) is made transparent (see injectControls) so
 	// the handle above can be transparent instead of an opaque mask. The region sits under the panels, so only
 	// this exposed track is hittable — hence 5px, not 1px. Console spans full width.
-	// The resizable tracks (sidebar/auxbar columns, console row) are `max-content`, so a control's
-	// hidden `.region` drives them: the region fills its area (`min-width/height:100%`, so its native
-	// resize grip sits ON the handle strip — not buried under the part) and dragging it past the
-	// part's size grows the `max-content` track. Editors column + main row are `1fr` and absorb the
-	// slack. Resize is GROW-only: dragging inward clamps at 100% and the part floors the track.
+	// The resizable tracks (sidebar/auxbar columns, console row) are `max-content`, so a control's hidden
+	// `.region` drives them: the region carries an initial size (the panel's DEFAULT) and its native resize
+	// grip sits ON the handle strip; dragging it grows or shrinks the `max-content` track. Editors column +
+	// main row are `1fr` and absorb the slack. Resize is two-way, floored by the region's `min-width/height`
+	// (the part's own content size) so it can't shrink past the point where the grip would leave the strip.
 	"gridTemplate": `
 		"header       header         header         header         header"         min-content
 		"sidebar      sidebar-handle editors        auxbar-handle  auxbar"         1fr
@@ -145,9 +145,16 @@ const injectControls = globalCss({
 
 	// Regions keep the default stacking (region()'s z-index 1 for the parts; these regions sit below them so
 	// the parts stay clickable, with only the region's resize grip exposed on the handle strip).
-	".wb-shell .sidebar-control > .region": { "gridArea": "sidebar / sidebar / sidebar-handle / sidebar-handle", "minWidth": "100%", "overflow": "hidden", "resize": "horizontal", "transformOrigin": "bottom right", "scale": "1 100" },
-	".wb-shell .console-control > .region": { "gridArea": "console-handle / console-handle / console / console", "minHeight": "100%", "maxHeight": "80vh", "overflow": "hidden", "resize": "vertical", "transformOrigin": "bottom right", "scale": "-100 -1", "translate": "-100% -100%" },
-	".wb-shell .auxbar-control > .region": { "gridArea": "auxbar-handle / auxbar-handle / auxbar / auxbar", "minWidth": "100%", "overflow": "hidden", "resize": "horizontal", "transformOrigin": "bottom left", "scale": "-1 100", "translate": "100% 0" }
+	//
+	// Two-way resize with a real default: each region gets an initial `width`/`height` — the size the panel
+	// OPENS at — instead of being pinned to `100%` of the part (which only ever GREW). `min-width`/`min-height`
+	// is the natural floor (the part's own content size + the 5px handle), so dragging inward stops there with
+	// the grip still on the strip, and dragging outward grows freely. Native resize writes an inline size on
+	// drag, overriding these, so the user's dragged size sticks; the CSS values are just the starting point.
+	// Sidebar opens ~260 (floor ~167), aux ~240 (floor ~76), console ~220 tall (floor ~35 — just the tab bar).
+	".wb-shell .sidebar-control > .region": { "gridArea": "sidebar / sidebar / sidebar-handle / sidebar-handle", "width": 265, "minWidth": 172, "overflow": "hidden", "resize": "horizontal", "transformOrigin": "bottom right", "scale": "1 100" },
+	".wb-shell .console-control > .region": { "gridArea": "console-handle / console-handle / console / console", "height": 225, "minHeight": 40, "maxHeight": "80vh", "overflow": "hidden", "resize": "vertical", "transformOrigin": "bottom right", "scale": "-100 -1", "translate": "-100% -100%" },
+	".wb-shell .auxbar-control > .region": { "gridArea": "auxbar-handle / auxbar-handle / auxbar / auxbar", "width": 245, "minWidth": 81, "overflow": "hidden", "resize": "horizontal", "transformOrigin": "bottom left", "scale": "-1 100", "translate": "100% 0" }
 });
 
 const cx = (base: string, extra?: string) => (extra ? `${base} ${extra}` : base);
