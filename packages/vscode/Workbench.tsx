@@ -70,7 +70,10 @@ const activityItemCss = css({
 const sidebarPartCss = css({ "flex": "1 1 auto", "minWidth": 0, "position": "relative" });
 const editorsCss = region("editors");
 const consoleCss = region("console");
-const auxbarCss = region("auxbar", { "display": "block !important" });
+// Visibility is monaco's to control (via inline display none/block, like the other parts), so the auxiliary
+// bar starts hidden — VS Code's default — and opens only when toggled or a view activates there. When hidden
+// it fully collapses (see the close-collapse rules in injectControls).
+const auxbarCss = region("auxbar");
 const footerCss = region("footer");
 
 // Monaco injects its parts *inside* the containers below; make them fill their region.
@@ -154,7 +157,18 @@ const injectControls = globalCss({
 	// Sidebar opens ~260 (floor ~167), aux ~240 (floor ~76), console ~220 tall (floor ~35 — just the tab bar).
 	".wb-shell .sidebar-control > .region": { "gridArea": "sidebar / sidebar / sidebar-handle / sidebar-handle", "width": 265, "minWidth": 172, "overflow": "hidden", "resize": "horizontal", "transformOrigin": "bottom right", "scale": "1 100" },
 	".wb-shell .console-control > .region": { "gridArea": "console-handle / console-handle / console / console", "height": 225, "minHeight": 40, "maxHeight": "80vh", "overflow": "hidden", "resize": "vertical", "transformOrigin": "bottom right", "scale": "-100 -1", "translate": "-100% -100%" },
-	".wb-shell .auxbar-control > .region": { "gridArea": "auxbar-handle / auxbar-handle / auxbar / auxbar", "width": 245, "minWidth": 81, "overflow": "hidden", "resize": "horizontal", "transformOrigin": "bottom left", "scale": "-1 100", "translate": "100% 0" }
+	".wb-shell .auxbar-control > .region": { "gridArea": "auxbar-handle / auxbar-handle / auxbar / auxbar", "width": 245, "minWidth": 81, "overflow": "hidden", "resize": "horizontal", "transformOrigin": "bottom left", "scale": "-1 100", "translate": "100% 0" },
+
+	// Close-collapse: when monaco hides a part it sets `display:none` on that part's container (the console
+	// `<section>` / auxbar `<aside>`). Match that inline style to (1) hide the part's resize control so no sash
+	// strip is left floating, and (2) collapse the part's own track AND its 5px handle track to 0 via `:has()`
+	// on the shell — so a closed terminal or aux bar fully disappears with no residual gap, and the editor
+	// reclaims the space. (When the part is shown again monaco writes `display:block`, these stop matching, and
+	// the tracks return to their normal sizes.)
+	".wb-shell section[style*=\"display: none\"] + .console-control": { "display": "none !important" },
+	".wb-shell aside[style*=\"display: none\"] + .auxbar-control": { "display": "none !important" },
+	".wb-shell:has(> section[style*=\"display: none\"] + .console-control)": { "gridTemplateRows": "min-content 1fr 0px 0px min-content !important" },
+	".wb-shell:has(> aside[style*=\"display: none\"] + .auxbar-control)": { "gridTemplateColumns": "max-content 5px 1fr 0px 0px !important" }
 });
 
 const cx = (base: string, extra?: string) => (extra ? `${base} ${extra}` : base);
