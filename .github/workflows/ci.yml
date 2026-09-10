@@ -24,7 +24,9 @@
       "steps": [
         { "uses": "actions/checkout@v4" },
         # lib's published composite action: setup-node + pnpm + store cache + allowBuilds + cooldown install.
-        { "uses": "brianjenkins94/lib/.github/actions/setup@main" },
+        # workspace-packages makes CI an ephemeral pnpm workspace (editor uses npm locally, no committed
+        # pnpm-workspace.yaml) so sibling packages link — a `"*"` dep on a sibling resolves locally, not 404.
+        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*" } },
         { "run": "pnpm run --if-present ${{ matrix.script }}" }
       ],
       "timeout-minutes": 15

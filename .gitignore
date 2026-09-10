@@ -575,5 +575,8 @@ package-lock.json
 # pnpm lockfile
 pnpm-lock.yaml
 
+# ephemeral pnpm workspace written by lib's setup action in CI (workspace-packages); never committed
+pnpm-workspace.yaml
+
 # GitHub Pages
 /docs/

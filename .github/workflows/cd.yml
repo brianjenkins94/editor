@@ -31,7 +31,9 @@
       "steps": [
         { "uses": "actions/checkout@v4" },
         # lib's published setup action (pnpm + cooldown install), then its published pages-deploy action.
-        { "uses": "brianjenkins94/lib/.github/actions/setup@main" },
+        # workspace-packages makes CI an ephemeral pnpm workspace so sibling packages link (bablr → its
+        # bablr-language-ts sibling); without it a `"*"` sibling dep 404s on the registry and the build fails.
+        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*" } },
         # util-publish FIRST builds every workspace (util-build internally) — so the workbench app
         # (packages/vscode) emits the docs/ site — THEN writes docs/*.tgz for each publishable package and
         # publishes to npm (provenance) when NPM_TOKEN is present. Only packages with a GitHub release actually
