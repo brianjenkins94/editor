@@ -10,9 +10,10 @@
  * A browse snapshot (this file) plus a dependency type surface (editorTypesPlugin, below) so the
  * in-browser TS language service resolves the demo's imports and reports no phantom errors.
  */
+// eslint-disable-next-line ts/no-restricted-imports -- the snapshot is built synchronously at vite config-load time; the @brianjenkins94/util/fs wrapper is async-only
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import * as url from "node:url";
 import type { Plugin } from "vite";
 
 const VIRTUAL = "editor:workspace";
@@ -29,7 +30,7 @@ export interface SnapshotFile { "path": string; "contents": string; "readonly"?:
 
 /** This file's directory. */
 function here(): string {
-	return path.dirname(fileURLToPath(import.meta.url));
+	return path.dirname(url.fileURLToPath(import.meta.url));
 }
 
 /** The bundled demo workspace directory. */

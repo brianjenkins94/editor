@@ -102,7 +102,7 @@ function maybeBoot(): void {
 			// Tell the host the workbench is up (readiness gating).
 			host.postMessage({ "source": "vscode", "type": "online" }, "*");
 		})
-		.catch((error) => {
+		.catch((error: unknown) => {
 			console.error("[vscode] workbench boot failed", error);
 		});
 }

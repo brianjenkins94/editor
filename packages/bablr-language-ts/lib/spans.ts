@@ -17,21 +17,30 @@ import TypeScript from "./grammar";
 const COVER = Symbol.for("_");
 
 function matcherFor(production) {
-	return production === "Expression" ? m`<Expression />` : production === "Statement" ? m`<Statement />` : m`<Program />`;
+	if (production === "Expression") {
+		return m`<Expression />`;
+	}
+
+	if (production === "Statement") {
+		return m`<Statement />`;
+	}
+
+	return m`<Program />`;
 }
 
 /**
  * @typedef {object} CstSpan
  * @property {string | null} type   production name (`CallExpression`, `Identifier`, …); null for an anonymous token
  * @property {string | null} field  the reference the node was emitted under (`callee`, `openArgumentsToken`, …)
- * @property {number} start
- * @property {number} end
+ * @property {number} start  source offset where the node begins (inclusive)
+ * @property {number} end    source offset where the node ends (exclusive)
  * @property {boolean} token   a token node (its text is a literal)
  * @property {boolean} cover   a cover node (`<_Expression>` …) — shares its span with the node it wraps
  * @property {boolean} trivia  whitespace/comment (anything under an unnamed `#` reference; `#separatorTokens` are code)
  */
 
 /** @returns {{ spans: CstSpan[], length: number }} spans in close order (children before parents) */
+// eslint-disable-next-line complexity -- an inherently branchy dispatch over the CST tag stream; splitting it would obscure the single running-offset invariant it maintains
 export function cstSpans(src, production = "Program") {
 	const spans = [];
 	const stack = [];
@@ -51,38 +60,47 @@ export function cstSpans(src, production = "Program") {
 		} else if (kind === GapTag) {
 			shiftStart = null;
 		} else if (kind === OpenNodeTag) {
-			const value = parseTag(tag).value;
-      // trivia is what the trivia hook emits under an UNNAMED `#` reference; a named `#` reference such as
-      // `#separatorTokens` is a code token the grammar keeps unbound
+			const { value } = parseTag(tag);
+			// trivia is what the trivia hook emits under an UNNAMED `#` reference; a named `#` reference such as
+			// `#separatorTokens` is a code token the grammar keeps unbound
 			const trivia = triviaDepth > 0 || (pendingRef?.type === "#" && (pendingRef.name === null || pendingRef.name === undefined));
 			const entry = {
 				"type": value.name?.description ?? null,
 				"field": pendingRef?.name ?? null,
 				"start": shiftStart ?? offset,
-				"token": Boolean(value.flags && value.flags.token),
+				"token": Boolean(value.flags?.token),
 				"cover": value.type === COVER,
 				"trivia": trivia
 			};
 
 			pendingRef = null;
 			if (value.literalValue !== null && value.literalValue !== undefined) {
-        // self-closing token: its text is inline
+				// self-closing token: its text is inline
 				offset += value.literalValue.length;
 				spans.push({ ...entry, "end": offset });
 			} else {
 				stack.push(entry);
-				if (trivia) { triviaDepth += 1; }
+
+				if (trivia) {
+					triviaDepth += 1;
+				}
 			}
 		} else if (kind === LiteralTag) {
 			offset += parseTag(tag).value.length;
 		} else if (kind === CloseNodeTag) {
 			const entry = stack.pop();
 
-			if (!entry) { continue; }
-			const span = { ...entry, "end": offset };
+			if (entry !== undefined) {
+				const span = { ...entry, "end": offset };
 
-			spans.push(span);
-			if (entry.trivia) { triviaDepth -= 1; } else { lastClosed = span; }
+				spans.push(span);
+
+				if (entry.trivia) {
+					triviaDepth -= 1;
+				} else {
+					lastClosed = span;
+				}
+			}
 		}
 	}
 

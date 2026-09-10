@@ -9,10 +9,10 @@
  * Registered by coi.ts, which reloads once so the worker controls the page. Pattern adapted from
  * github.com/gzuidhof/coi-serviceworker (MIT). Plain JS (served from public/ untouched by vite).
  */
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+globalThis.addEventListener("install", () => globalThis.skipWaiting());
+globalThis.addEventListener("activate", (event) => event.waitUntil(globalThis.clients.claim()));
 
-self.addEventListener("fetch", (event) => {
+globalThis.addEventListener("fetch", (event) => {
 	const request = event.request;
 
 	// A range/only-if-cached cross-origin request can't be re-fetched here — leave it to the browser.

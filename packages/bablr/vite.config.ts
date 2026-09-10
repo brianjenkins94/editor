@@ -1,4 +1,4 @@
-import { fileURLToPath } from "node:url";
+import * as url from "node:url";
 import { mergeConfig } from "vite";
 import { defaults } from "@brianjenkins94/util/vite/defaults";
 
@@ -10,12 +10,12 @@ export default mergeConfig(defaults, {
 	"define": { "__BABLR_RECORD_STRICT__": "false" },
 	"resolve": {
 		"alias": [
-			{ "find": /^@bablr\/record(?:\/.*)?$/, "replacement": fileURLToPath(new URL("./shims/record.js", import.meta.url)) }
+			{ "find": /^@bablr\/record(?:\/.*)?$/, "replacement": url.fileURLToPath(new URL("./shims/record.js", import.meta.url)) }
 		]
 	},
 	"build": {
 		"lib": {
-			"entry": fileURLToPath(new URL("./src/index.js", import.meta.url)),
+			"entry": url.fileURLToPath(new URL("./src/index.js", import.meta.url)),
 			"formats": ["es"],
 			"fileName": "index"
 		}

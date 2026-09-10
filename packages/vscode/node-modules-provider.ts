@@ -52,14 +52,14 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 
 	const toRel = relUnder(prefix);
 
-	const base = (pkg: string): string => `https://unpkg.com/${pkg}${versions[pkg] != null ? "@" + versions[pkg] : ""}`;
+	const base = (pkg: string): string => `https://unpkg.com/${pkg}${versions[pkg] !== undefined ? "@" + versions[pkg] : ""}`;
 
 	// Only packages with a pinned version are served. unpkg 302-redirects every *unversioned* request
 	// (e.g. `unpkg.com/preact` → `…/preact@10.x`) and the redirect response carries no
 	// `Access-Control-Allow-Origin`, so the cross-origin fetch fails CORS — noisily logged by the
 	// browser even though we catch the rejection. We can't pin a version synchronously, so we simply
 	// don't fetch unpinned packages (type-checking uses the synchronous snapshot, not this provider).
-	const served = (rel: string): boolean => versions[splitPackage(rel).pkg] != null;
+	const served = (rel: string): boolean => versions[splitPackage(rel).pkg] !== undefined;
 
 	// Promise-memoized by URL (meta and file requests differ by the `?meta` suffix). Cache 404s (real
 	// misses) and successes; let transient failures (network/5xx/429) retry.

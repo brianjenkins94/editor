@@ -16,7 +16,7 @@ import type { Plugin } from "vite";
 // eslint-disable-next-line ts/no-restricted-imports -- the dev-server middleware answers synchronously, so mapping a request to a file must stat synchronously
 import { statSync } from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import * as url from "node:url";
 import { find } from "@brianjenkins94/util/find";
 import * as fs from "@brianjenkins94/util/fs";
 
@@ -53,12 +53,12 @@ const CONTENT_TYPES: Record<string, string> = {
 
 /** The local monaco-vscode-api component's built bundle dir (main.js + chunks + wasm/fonts). */
 function componentDistDirectory(): string {
-	return fileURLToPath(new URL("../../components/monaco-vscode-api/dist", import.meta.url));
+	return url.fileURLToPath(new URL("../../components/monaco-vscode-api/dist", import.meta.url));
 }
 
 export function vscodePlugin(): Plugin {
 	const componentDist = componentDistDirectory();
-	const workbenchDist = fileURLToPath(new URL("./dist", import.meta.url));
+	const workbenchDist = url.fileURLToPath(new URL("./dist", import.meta.url));
 	// Workbench entry first (host/workbench), then the component bundle (main.js + assets).
 	const roots = [workbenchDist, componentDist];
 
