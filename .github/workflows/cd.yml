@@ -3,7 +3,7 @@
   "on": {
     "workflow_dispatch": null,
     # Fire automatically when CI finishes on main. workflow_run runs on the built-in GITHUB_TOKEN — no
-    # PAT/dispatch hand-off needed. The publish job gates on CI success (workflow_run fires on failure too).
+    # PAT/dispatch hand-off needed; the job below gates on CI success (workflow_run fires on failure too).
     "workflow_run": {
       "workflows": ["ci"],
       "types": ["completed"],
@@ -13,46 +13,28 @@
   "concurrency": {
     "group": "${{ github.workflow }}-${{ github.ref }}"
   },
-  # pages + id-token for the Pages deploy; id-token also carries npm provenance.
+  # Must grant at least what the reusable deploy workflow needs (its token is the intersection).
   "permissions": {
     "contents": "read",
     "pages": "write",
     "id-token": "write"
   },
   "jobs": {
-    "publish": {
+    "cd": {
       # Only after a manual dispatch or a successful CI run on main.
       "if": "${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}",
-      "runs-on": "ubuntu-latest",
-      "environment": {
-        "name": "github-pages",
-        "url": "${{ steps.deploy.outputs.page_url }}"
+      # lib's reusable app-deploy workflow: setup → run → pages-deploy(docs). workspace-packages makes CI an
+      # ephemeral pnpm workspace so sibling packages link (bablr → its bablr-language-ts sibling). util-publish
+      # builds every workspace (the private workbench app → docs/) then publishes tarballs for packages with a
+      # GitHub release (others just build), so it's safe on every push.
+      "uses": "brianjenkins94/lib/.github/workflows/deploy.yml@main",
+      "with": {
+        "run": "npx util-publish",
+        "workspace-packages": "packages/*,components/*"
       },
-      "steps": [
-        { "uses": "actions/checkout@v4" },
-        # lib's published setup action (pnpm + cooldown install), then its published pages-deploy action.
-        # workspace-packages makes CI an ephemeral pnpm workspace so sibling packages link (bablr → its
-        # bablr-language-ts sibling); without it a `"*"` sibling dep 404s on the registry and the build fails.
-        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*" } },
-        # util-publish FIRST builds every workspace (util-build internally) — so the workbench app
-        # (packages/vscode) emits the docs/ site — THEN writes docs/*.tgz for each publishable package and
-        # publishes to npm (provenance) when NPM_TOKEN is present. Only packages with a GitHub release actually
-        # publish (others just build), so this is safe on every push. No separate `pnpm run build` step: that
-        # double-builds, and monaco's clone-and-generate build is not idempotent on a second run.
-        {
-          "run": "npx util-publish",
-          "env": {
-            "NPM_TOKEN": "${{ secrets.NPM_TOKEN }}",
-            "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}"
-          }
-        },
-        {
-          "id": "deploy",
-          "uses": "brianjenkins94/lib/.github/actions/pages-deploy@main",
-          "with": { "path": "docs" }
-        }
-      ],
-      "timeout-minutes": 15
+      "secrets": {
+        "NPM_TOKEN": "${{ secrets.NPM_TOKEN }}"
+      }
     }
   }
 }
