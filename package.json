@@ -8,7 +8,8 @@
     "publish": "util-publish"
   },
   "dependencies": {
-    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz"
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
+    "typescript": "^5.9.3"
   },
   "devDependencies": {
     "@tsconfig/node-lts": "latest"
