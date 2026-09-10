@@ -10,7 +10,7 @@ import { closeIteration, getAsyncOrSyncIterator, getIterator, getMethod, iterNex
 import { isObjectLike } from "./realm.ts";
 import { on } from "./registry.ts";
 
-const K = ts.SyntaxKind;
+const Kind = ts.SyntaxKind;
 
 //
 // `yield` and `await` suspend the current fiber by setting `vm.paused` and stashing the pause payload
@@ -63,8 +63,10 @@ export function resumed(vm: Machine): unknown {
 
 /** The guest function whose body `scope` belongs to (arrows are transparent), if any. */
 export function enclosingFunctionMeta(scope: Scope): GuestFunctionMeta | undefined {
-	for (let s: Scope | undefined = scope; s; s = s.parent) {
-		if (s.functionMeta !== undefined) { return s.functionMeta; }
+	for (let current: Scope | undefined = scope; current; current = current.parent) {
+		if (current.functionMeta !== undefined) {
+			return current.functionMeta;
+		}
 	}
 
 	return undefined;
@@ -179,7 +181,10 @@ export function yieldStar(vm: Machine, frame: NodeFrame, node: ts.YieldExpressio
 }
 
 export function delegateResult(vm: Machine, frame: NodeFrame, innerResult: unknown, asyncGen: boolean): void {
-	if (!isObjectLike(innerResult)) { throw new TypeError("Iterator result is not an object"); }
+	if (!isObjectLike(innerResult)) {
+		throw new TypeError("Iterator result is not an object");
+	}
+
 	const returning = frame.returning === true;
 
 	frame.returning = false;
@@ -231,6 +236,6 @@ function awaitExpression(vm: Machine, frame: NodeFrame): void {
 
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
 export function register(): void {
-	on(K.YieldExpression, yieldExpression);
-	on(K.AwaitExpression, awaitExpression);
+	on(Kind.YieldExpression, yieldExpression);
+	on(Kind.AwaitExpression, awaitExpression);
 }

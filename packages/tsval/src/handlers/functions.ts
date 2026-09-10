@@ -13,7 +13,7 @@ import { parameterProgram, pushPattern } from "./patterns.ts";
 import { createArgumentsObject } from "./realm.ts";
 import { on, syntheticHandlers } from "./registry.ts";
 
-const K = ts.SyntaxKind;
+const Kind = ts.SyntaxKind;
 
 export function createGuestFunction(vm: Machine, node: GuestFunctionNode, closure: Scope, homeObject?: object): GuestFunction {
 	const modifierFlags = ts.getCombinedModifierFlags(node);
@@ -21,7 +21,7 @@ export function createGuestFunction(vm: Machine, node: GuestFunctionNode, closur
 		"node": node,
 		"closure": closure,
 		"name": node.name !== null && node.name !== undefined && (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name)) ? node.name.text : "",
-		"isArrow": node.kind === K.ArrowFunction,
+		"isArrow": node.kind === Kind.ArrowFunction,
 		"isGenerator": (node).asteriskToken !== null && (node).asteriskToken !== undefined,
 		"isAsync": (modifierFlags & ts.ModifierFlags.Async) !== 0,
 		"homeObject": homeObject
@@ -40,7 +40,17 @@ export function createGuestFunction(vm: Machine, node: GuestFunctionNode, closur
 	// prototype of the generator objects it creates (and is not a constructor).
 	const { realm } = vm;
 
-	Object.setPrototypeOf(fn, meta.isGenerator ? (meta.isAsync ? realm.AsyncGeneratorFunctionPrototype : realm.GeneratorFunctionPrototype) : meta.isAsync ? realm.AsyncFunctionPrototype : realm.Function.prototype);
+	let functionProto;
+
+	if (meta.isGenerator) {
+		functionProto = meta.isAsync ? realm.AsyncGeneratorFunctionPrototype : realm.GeneratorFunctionPrototype;
+	} else if (meta.isAsync) {
+		functionProto = realm.AsyncFunctionPrototype;
+	} else {
+		functionProto = realm.Function.prototype;
+	}
+
+	Object.setPrototypeOf(fn, functionProto);
 	if (meta.isGenerator) {
 		Object.defineProperty(fn, "prototype", { "value": Object.create(meta.isAsync ? realm.AsyncGeneratorPrototype : realm.GeneratorPrototype), "writable": true, "enumerable": false, "configurable": false });
 	} else if (!meta.isArrow && !isMethodLike && !meta.isAsync) {
@@ -82,12 +92,23 @@ export function makeWrapper(vm: Machine, meta: GuestFunctionMeta, methodLike: bo
 	const isMethodLike = methodLike || meta.isGenerator || meta.isAsync;
 
 	if (vm.realm.Function !== Function) {
-		const template = meta.isArrow ? FOREIGN_WRAPPERS.arrow : isMethodLike ? FOREIGN_WRAPPERS.method : FOREIGN_WRAPPERS.plain;
+		let template;
+
+		if (meta.isArrow) {
+			template = FOREIGN_WRAPPERS.arrow;
+		} else if (isMethodLike) {
+			template = FOREIGN_WRAPPERS.method;
+		} else {
+			template = FOREIGN_WRAPPERS.plain;
+		}
 
 		return (vm.realm.Function("vm", "meta", template) as (vm: Machine, meta: GuestFunctionMeta) => GuestFunction)(vm, meta);
 	}
 
-	if (meta.isArrow) { return ((...args: unknown[]) => vm.callGuestFromHost(meta, undefined, args)) as GuestFunction; }
+	if (meta.isArrow) {
+		return ((...args: unknown[]) => vm.callGuestFromHost(meta, undefined, args)) as GuestFunction;
+	}
+
 	if (isMethodLike) {
 		return {
 			"m": function(this: unknown, ...args: unknown[]) {
@@ -119,8 +140,14 @@ function callFrame(vm: Machine, frame: CallFrame): void {
 		if (!meta.isArrow) {
 			fnScope.hasThis = true;
 			fnScope.thisVal = frame.thisArg;
-			if (meta.homeObject !== undefined) { fnScope.homeObject = meta.homeObject; }
-			if (frame.newTarget !== undefined) { fnScope.newTarget = frame.newTarget; }
+			if (meta.homeObject !== undefined) {
+				fnScope.homeObject = meta.homeObject;
+			}
+
+			if (frame.newTarget !== undefined) {
+				fnScope.newTarget = frame.newTarget;
+			}
+
 			fnScope.declareLexical("arguments", "var");
 			fnScope.initialize("arguments", createArgumentsObject(vm, frame.args));
 		}
@@ -129,7 +156,7 @@ function callFrame(vm: Machine, frame: CallFrame): void {
 		frame.scope = fnScope;
 		// With non-simple parameters (defaults, patterns, rest) the body gets its own var environment:
 		// a closure in a default sees the *parameter*, not a same-named `var` declared in the body.
-		const bodyScope = node.parameters.some((p) => p.initializer !== undefined || p.dotDotDotToken !== undefined || !ts.isIdentifier(p.name)) ? new Scope(fnScope, true) : fnScope;
+		const bodyScope = node.parameters.some((param) => param.initializer !== undefined || param.dotDotDotToken !== undefined || !ts.isIdentifier(param.name)) ? new Scope(fnScope, true) : fnScope;
 
 		if (ts.isBlock(node.body!)) {
 			hoist(vm, bodyScope, node.body.statements);
@@ -167,15 +194,19 @@ export function isThisParameter(param: ts.ParameterDeclaration): boolean {
 
 /** JS `Function.length`: params before the first default/rest, excluding a `this:` pseudo-param. */
 export function functionLength(params: readonly ts.ParameterDeclaration[]): number {
-	let n = 0;
+	let count = 0;
 
 	for (const param of params) {
-		if (isThisParameter(param)) { continue; }
-		if (param.initializer !== undefined || param.dotDotDotToken !== undefined) { break; }
-		n += 1;
+		if (!isThisParameter(param)) {
+			if (param.initializer !== undefined || param.dotDotDotToken !== undefined) {
+				break;
+			}
+
+			count += 1;
+		}
 	}
 
-	return n;
+	return count;
 }
 
 /**
@@ -188,26 +219,39 @@ export function bindParameters(vm: Machine, scope: Scope, node: ts.SignatureDecl
 	let any = false;
 
 	for (const param of node.parameters) {
-		if (isThisParameter(param)) { continue; }
-		any = true;
-		for (const name of bindingNames(param.name)) { scope.declareLexical(name, "let"); }
+		if (!isThisParameter(param)) {
+			any = true;
+			for (const name of bindingNames(param.name)) {
+				scope.declareLexical(name, "let");
+			}
+		}
 	}
 
-	if (any) { pushPattern(vm, scope, parameterProgram(node), undefined, args); }
+	if (any) {
+		pushPattern(vm, scope, parameterProgram(node), undefined, args);
+	}
 }
 
 // --- NamedEvaluation: an anonymous function/class takes the name it's bound or assigned to --------
 
 /** `function () {}`, `() => {}`, `class {}` — possibly parenthesized (the cover grammar). */
 export function isAnonymousFunctionDefinition(node: ts.Node): boolean {
-	while (ts.isParenthesizedExpression(node)) { node = node.expression; }
+	while (ts.isParenthesizedExpression(node)) {
+		node = node.expression;
+	}
 
 	return (ts.isFunctionExpression(node) && node.name === undefined) || ts.isArrowFunction(node) || (ts.isClassExpression(node) && node.name === undefined);
 }
 
 /** SetFunctionName's text for a property key: a symbol's description in brackets, an optional `get`/`set` prefix. */
 export function functionNameText(key: PropertyKey, prefix = ""): string {
-	const base = typeof key === "symbol" ? (key.description === undefined ? "" : `[${key.description}]`) : String(key);
+	let base;
+
+	if (typeof key === "symbol") {
+		base = key.description === undefined ? "" : `[${key.description}]`;
+	} else {
+		base = String(key);
+	}
 
 	return prefix === "" ? base : `${prefix} ${base}`;
 }
@@ -222,13 +266,24 @@ export function setFunctionName(fn: GuestFunction, key: PropertyKey, prefix = ""
 
 /** Give `value` the name `name` iff it came from an anonymous function definition `from` and has none. */
 export function nameAnonymous(value: unknown, name: PropertyKey, from: ts.Node | undefined): unknown {
-	if (from === undefined || !isAnonymousFunctionDefinition(from)) { return value; }
-	if (!(isGuestFunction(value) || isGuestClass(value))) { return value; }
-	if ((value as { "name"?: string }).name !== "") { return value; }
+	if (from === undefined || !isAnonymousFunctionDefinition(from)) {
+		return value;
+	}
+
+	if (!(isGuestFunction(value) || isGuestClass(value))) {
+		return value;
+	}
+
+	if ((value as { "name"?: string }).name !== "") {
+		return value;
+	}
+
 	const text = functionNameText(name);
 
 	Object.defineProperty(value, "name", { "value": text, "configurable": true });
-	if (isGuestFunction(value)) { value.__tsval.name = text; }
+	if (isGuestFunction(value)) {
+		value.__tsval.name = text;
+	}
 
 	return value;
 }
@@ -240,7 +295,7 @@ export function namedIf(value: unknown, target: ts.BindingName | ts.Expression, 
 
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
 export function register(): void {
-	on(K.FunctionExpression, makeFunction);
-	on(K.ArrowFunction, makeFunction);
+	on(Kind.FunctionExpression, makeFunction);
+	on(Kind.ArrowFunction, makeFunction);
 	syntheticHandlers.call = callFrame;
 }

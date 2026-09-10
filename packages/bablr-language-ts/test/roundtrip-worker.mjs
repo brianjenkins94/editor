@@ -12,14 +12,16 @@ const { "default": TypeScript } = await import(new URL(process.env.GRAMMAR ?? ".
 
 const matcher = m`<Program />`;
 
-function firstDiff(a, b) {
-	const n = Math.min(a.length, b.length);
+function firstDiff(left, right) {
+	const minLength = Math.min(left.length, right.length);
 
-	for (let i = 0; i < n; i++) {
-		if (a[i] !== b[i]) { return i; }
+	for (let index = 0; index < minLength; index++) {
+		if (left[index] !== right[index]) {
+			return index;
+		}
 	}
 
-	return n;
+	return minLength;
 }
 
 function consumedPrefix(source) {
@@ -29,10 +31,14 @@ function consumedPrefix(source) {
 		for (const tag of streamParse(TypeScript, matcher, source)) {
 			const type = parseTagType(tag);
 
-			if (type === LiteralTag) { text += parseTag(tag).value; } else if (type === OpenNodeTag) {
+			if (type === LiteralTag) {
+				text += parseTag(tag).value;
+			} else if (type === OpenNodeTag) {
 				const { literalValue } = parseTag(tag).value;
 
-				if (literalValue) { text += literalValue; }
+				if (literalValue) {
+					text += literalValue;
+				}
 			}
 		}
 	} catch {
@@ -51,12 +57,12 @@ parentPort.on("message", ({ seq, source }) => {
 		const out = printSource(tree);
 
 		result = out === source ? { "status": "pass" } : { "status": "mismatch", "pos": firstDiff(source, out), "outLength": out.length };
-	} catch (e) {
+	} catch (error) {
 		const prefix = consumedPrefix(source);
 
 		result = {
 			"status": "error",
-			"message": String(e?.message ?? e).split("\n")[0],
+			"message": String(error?.message ?? error).split("\n")[0],
 			"pos": source.startsWith(prefix) ? prefix.length : null,
 			"prefixDiverged": !source.startsWith(prefix)
 		};

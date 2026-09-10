@@ -79,7 +79,7 @@ export function vscodePlugin(): Plugin {
 
 		"configureServer": function(server) {
 			server.middlewares.use((req, res, next) => {
-				const url = (req.url ?? "").split("?")[0];
+				const [url] = (req.url ?? "").split("?");
 				const index = url.indexOf(MOUNT); // tolerate any base prefix (e.g. /editor/)
 
 				if (index === -1) {
@@ -126,7 +126,10 @@ export function vscodePlugin(): Plugin {
 				await find(root).type("f").exec(async (absolute) => {
 					const relative = path.relative(root, absolute).split(path.sep).join("/");
 
-					if (emitted.has(relative)) { return; } // workbench entry wins over component on conflict
+					if (emitted.has(relative)) {
+						return; // workbench entry wins over component on conflict
+					}
+
 					emitted.add(relative);
 					this.emitFile({
 						"type": "asset",

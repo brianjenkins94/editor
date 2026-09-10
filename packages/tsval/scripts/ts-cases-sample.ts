@@ -17,23 +17,27 @@ if (!hasCorpus(FULL_ROOT)) {
 fs.rmSync(SAMPLE_ROOT, { "recursive": true, "force": true });
 fs.mkdirSync(SAMPLE_ROOT, { "recursive": true });
 for (const name of ["LICENSE.txt", "ThirdPartyNoticeText.txt"]) {
-	if (fs.existsSync(path.join(FULL_ROOT, name))) { fs.copyFileSync(path.join(FULL_ROOT, name), path.join(SAMPLE_ROOT, name)); }
+	if (fs.existsSync(path.join(FULL_ROOT, name))) {
+		fs.copyFileSync(path.join(FULL_ROOT, name), path.join(SAMPLE_ROOT, name));
+	}
 }
 
 let eligible = 0;
 let copied = 0;
 
-for (const t of loadTsCases(FULL_ROOT)) {
-	if (policySkip(t) !== undefined) { continue; }
-	const idx = eligible;
+for (const testCase of loadTsCases(FULL_ROOT)) {
+	if (policySkip(testCase) === undefined) {
+		const idx = eligible;
 
-	eligible += 1;
-	if (idx % EVERY !== 0) { continue; }
-	const dest = path.join(SAMPLE_ROOT, "tests/cases", t.id);
+		eligible += 1;
+		if (idx % EVERY === 0) {
+			const dest = path.join(SAMPLE_ROOT, "tests/cases", testCase.id);
 
-	fs.mkdirSync(path.dirname(dest), { "recursive": true });
-	fs.writeFileSync(dest, t.source);
-	copied += 1;
+			fs.mkdirSync(path.dirname(dest), { "recursive": true });
+			fs.writeFileSync(dest, testCase.source);
+			copied += 1;
+		}
+	}
 }
 
 fs.writeFileSync(

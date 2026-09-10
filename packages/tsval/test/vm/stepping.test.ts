@@ -12,7 +12,10 @@ test("breakpoint by line: pause before the marked statement and inspect state", 
 
 	while (!vm.finished) {
 		vm.runToBreakpoint();
-		if (vm.finished) { break; }
+		if (vm.finished) {
+			break;
+		}
+
 		// We are paused at the top of `total += i;` — the loop variable is observable.
 		const loc = vm.location();
 
@@ -38,7 +41,7 @@ test("location + currentNode track the top frame", () => {
 test("runUntil can pause on an operand-stack condition, then resume", () => {
 	const { vm } = createVM(`const x = 6 * 7; x;`);
 
-	vm.runUntil((m) => m.values.includes(42));
+	vm.runUntil((machine) => machine.values.includes(42));
 	assert.ok(!vm.finished, "stopped as soon as 42 was computed");
 	assert.strictEqual(vm.run(), 42);
 });

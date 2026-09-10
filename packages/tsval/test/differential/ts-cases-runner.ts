@@ -13,16 +13,12 @@ const WALL_CLOCK_MS = 15_000;
 const ENTRY = url.fileURLToPath(new URL("./ts-cases-worker.ts", import.meta.url));
 
 export class CaseRunner {
+	/** unhandled rejections seen inside the child (guest async work failing after its case). */
+	public lateRejections = 0;
 	private child: ChildProcess | undefined;
 	private seq = 0;
-	/** unhandled rejections seen inside the child (guest async work failing after its case). */
-	lateRejections = 0;
 
-	private spawn(): ChildProcess {
-		return fork(ENTRY, [], { "execArgv": [`--max-old-space-size=${HEAP_MB}`], "stdio": ["ignore", "ignore", "ignore", "ipc"] });
-	}
-
-	run(root: string, id: string): Promise<TsCaseOutcome> {
+	public run(root: string, id: string): Promise<TsCaseOutcome> {
 		this.child ??= this.spawn();
 		const { child } = this;
 
@@ -44,14 +40,22 @@ export class CaseRunner {
 			};
 
 			const timer = setTimeout(finish, WALL_CLOCK_MS, { "kind": "inconclusive", "reason": `runner killed: a side did not finish within ${WALL_CLOCK_MS / 1000}s` }, true);
-			const onMessage = (m: { "seq": number; "outcome": TsCaseOutcome; "lateRejections": number }): void => {
-				if (m.seq !== seq) { return; }
-				this.lateRejections = m.lateRejections;
-				finish(m.outcome, false);
+			const onMessage = (message: { "seq": number; "outcome": TsCaseOutcome; "lateRejections": number }): void => {
+				if (message.seq !== seq) {
+					return;
+				}
+
+				this.lateRejections = message.lateRejections;
+				finish(message.outcome, false);
 			};
 
-			const onExit = (code: number | null, signal: string | null): void => { finish({ "kind": "inconclusive", "reason": `runner died (${signal ?? `exit ${code}`}): the case exhausted memory or aborted the engine` }, true); };
-			const onError = (error: unknown): void => { finish({ "kind": "inconclusive", "reason": `runner died: ${String((error as Error)?.message ?? error).slice(0, 100)}` }, true); };
+			const onExit = (code: number | null, signal: string | null): void => {
+				finish({ "kind": "inconclusive", "reason": `runner died (${signal ?? `exit ${code}`}): the case exhausted memory or aborted the engine` }, true);
+			};
+
+			const onError = (error: unknown): void => {
+				finish({ "kind": "inconclusive", "reason": `runner died: ${String((error as Error)?.message ?? error).slice(0, 100)}` }, true);
+			};
 
 			child.on("message", onMessage);
 			child.on("exit", onExit);
@@ -60,14 +64,23 @@ export class CaseRunner {
 		});
 	}
 
-	async close(): Promise<void> {
+	public async close(): Promise<void> {
 		const { child } = this;
 
 		this.child = undefined;
-		if (child === undefined) { return; }
+		if (child === undefined) {
+			return;
+		}
+
 		await new Promise<void>((resolve) => {
-			child.once("exit", () => { resolve(); });
+			child.once("exit", () => {
+				resolve();
+			});
 			child.kill("SIGKILL");
 		});
+	}
+
+	private spawn(): ChildProcess {
+		return fork(ENTRY, [], { "execArgv": [`--max-old-space-size=${HEAP_MB}`], "stdio": ["ignore", "ignore", "ignore", "ipc"] });
 	}
 }

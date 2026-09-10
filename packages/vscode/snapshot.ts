@@ -43,11 +43,35 @@ function nodeModulesRoot(): string | undefined {
 	let dir = here();
 
 	for (;;) {
-		if (existsSync(path.join(dir, "node_modules"))) { return dir; }
+		if (existsSync(path.join(dir, "node_modules"))) {
+			return dir;
+		}
+
 		const parent = path.dirname(dir);
 
-		if (parent === dir) { return undefined; }
+		if (parent === dir) {
+			return undefined;
+		}
+
 		dir = parent;
+	}
+}
+
+/** `readFileSync` as UTF-8, or undefined when the file can't be read. */
+function readText(abs: string): string | undefined {
+	try {
+		return readFileSync(abs, "utf8");
+	} catch {
+		return undefined;
+	}
+}
+
+/** `statSync`, or undefined when the path can't be stat'd. */
+function statOf(abs: string): ReturnType<typeof statSync> | undefined {
+	try {
+		return statSync(abs);
+	} catch {
+		return undefined;
 	}
 }
 
@@ -55,16 +79,27 @@ function nodeModulesRoot(): string | undefined {
 function walk(dir: string): string[] {
 	const out: string[] = [];
 
-	const visit = (d: string): void => {
+	const visit = (current: string): void => {
 		let entries;
 
-		try { entries = readdirSync(d, { "withFileTypes": true }); } catch { return; }
+		try {
+			entries = readdirSync(current, { "withFileTypes": true });
+		} catch {
+			return;
+		}
 
 		for (const entry of entries) {
-			if (entry.name === "node_modules" || (entry.name.startsWith(".") && entry.isDirectory())) { continue; }
-			const abs = path.join(d, entry.name);
+			const skip = entry.name === "node_modules" || (entry.name.startsWith(".") && entry.isDirectory());
 
-			if (entry.isDirectory()) { visit(abs); } else if (entry.isFile()) { out.push(abs); }
+			if (!skip) {
+				const abs = path.join(current, entry.name);
+
+				if (entry.isDirectory()) {
+					visit(abs);
+				} else if (entry.isFile()) {
+					out.push(abs);
+				}
+			}
 		}
 	};
 
@@ -76,7 +111,9 @@ function walk(dir: string): string[] {
 function snapshot(): SnapshotFile[] {
 	const demo = demoDir();
 
-	if (!existsSync(demo)) { return []; }   // no demo yet → the workbench opens on an empty folder
+	if (!existsSync(demo)) {
+		return [];   // no demo yet → the workbench opens on an empty folder
+	}
 
 	const files: SnapshotFile[] = [];
 
@@ -85,17 +122,16 @@ function snapshot(): SnapshotFile[] {
 		const base = rel.slice(rel.lastIndexOf("/") + 1);
 		const ext = rel.slice(rel.lastIndexOf(".") + 1).toLowerCase();
 
-		if (!TEXT.has(ext) && !base.startsWith(".")) { continue; }
+		if (TEXT.has(ext) || base.startsWith(".")) {
+			const stat = statOf(abs);
 
-		let stat;
-
-		try { stat = statSync(abs); } catch { continue; }
-		if (!stat.isFile() || stat.size > MAX_BYTES) { continue; }
-
-		files.push({ "path": `${FOLDER}/${rel}`, "contents": readFileSync(abs, "utf8") });
+			if (stat !== undefined && stat.isFile() && stat.size <= MAX_BYTES) {
+				files.push({ "path": `${FOLDER}/${rel}`, "contents": readFileSync(abs, "utf8") });
+			}
+		}
 	}
 
-	return files.sort((a, b) => a.path.localeCompare(b.path));
+	return files.sort((first, second) => first.path.localeCompare(second.path));
 }
 
 export function editorWorkspacePlugin(): Plugin {
@@ -136,20 +172,24 @@ function importedPackages(): string[] {
 	const roots = new Set<string>();
 
 	for (const abs of walk(demoDir())) {
-		if (!/\.(?:ts|tsx|mjs|cjs|js|jsx)$/u.test(abs)) { continue; }
+		const src = /\.(?:ts|tsx|mjs|cjs|js|jsx)$/u.test(abs) ? readText(abs) : undefined;
 
-		let src: string;
+		if (src !== undefined) {
+			for (const match of src.matchAll(/(?:from|import)\s*(?:\(\s*)?["']([^"']+)["']/gu)) {
+				const [, spec] = match;
+				const external = !(spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("node:") || spec.startsWith("editor:"));
 
-		try { src = readFileSync(abs, "utf8"); } catch { continue; }
+				if (external) {
+					const parts = spec.split("/");
+					const pkg = spec.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
 
-		for (const match of src.matchAll(/(?:from|import)\s*(?:\(\s*)?["']([^"']+)["']/gu)) {
-			const spec = match[1];
-
-			if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("node:") || spec.startsWith("editor:")) { continue; }
-			const parts = spec.split("/");
-			const pkg = spec.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
-
-			if (pkg !== "" && !pkg.startsWith("@")) { roots.add(pkg); } else if (pkg.startsWith("@") && parts.length >= 2 && parts[1] !== "") { roots.add(pkg); }
+					if (pkg !== "" && !pkg.startsWith("@")) {
+						roots.add(pkg);
+					} else if (pkg.startsWith("@") && parts.length >= 2 && parts[1] !== "") {
+						roots.add(pkg);
+					}
+				}
+			}
 		}
 	}
 
@@ -160,15 +200,23 @@ function importedPackages(): string[] {
 function declFiles(dir: string): string[] {
 	const out: string[] = [];
 
-	const visit = (d: string): void => {
+	const visit = (current: string): void => {
 		let entries;
 
-		try { entries = readdirSync(d, { "withFileTypes": true }); } catch { return; }
+		try {
+			entries = readdirSync(current, { "withFileTypes": true });
+		} catch {
+			return;
+		}
 
 		for (const entry of entries) {
-			const abs = path.join(d, entry.name);
+			const abs = path.join(current, entry.name);
 
-			if (entry.isDirectory()) { visit(abs); } else if (entry.name === "package.json" || entry.name === "tsconfig.json" || DECL_SUFFIX.some((s) => entry.name.endsWith(s))) { out.push(abs); }
+			if (entry.isDirectory()) {
+				visit(abs);
+			} else if (entry.name === "package.json" || entry.name === "tsconfig.json" || DECL_SUFFIX.some((suffix) => entry.name.endsWith(suffix))) {
+				out.push(abs);
+			}
 		}
 	};
 
@@ -177,11 +225,38 @@ function declFiles(dir: string): string[] {
 	return out;
 }
 
+/** Seed one package's .d.ts files into `files`, returning the bytes seeded — or undefined when the
+ *  package should be shimmed instead (ships no types, or too heavy to bake). */
+function seedDecls(root: string, pkg: string, dir: string, files: SnapshotFile[]): number | undefined {
+	const decls = declFiles(dir);
+	const declBytes = decls.filter((file) => !file.endsWith(".json")).reduce((total, file) => total + Number(statOf(file)?.size ?? 0), 0);
+
+	// ships no types → ambient any; too heavy to bake → CDN + any
+	if (declBytes === 0 || (declBytes > PKG_DECL_CAP && !ALWAYS_REAL.has(pkg))) {
+		return undefined;
+	}
+
+	let realBytes = 0;
+
+	for (const abs of decls) {
+		const contents = readText(abs);
+
+		if (contents !== undefined) {
+			files.push({ "path": `${FOLDER}/` + path.relative(root, abs).split(path.sep).join("/"), "contents": contents, "readonly": true });
+			realBytes += contents.length;
+		}
+	}
+
+	return realBytes;
+}
+
 /** Seed files (package.json + *.d.ts) for the imported packages, plus one ambient-shim module for the rest. */
 function typeSurface(): SnapshotFile[] {
 	const root = nodeModulesRoot();
 
-	if (root === undefined) { return []; }
+	if (root === undefined) {
+		return [];
+	}
 
 	const nm = path.join(root, "node_modules");
 	const packages = [...new Set([...importedPackages(), ...ALWAYS_REAL])].sort();
@@ -191,27 +266,21 @@ function typeSurface(): SnapshotFile[] {
 	let realBytes = 0;
 
 	for (const pkg of packages) {
-		if (ALWAYS_SHIM.has(pkg)) { shims.push(pkg); continue; }
-
 		const dir = path.join(nm, pkg);
 
-		if (!existsSync(dir)) { continue; }   // not installed (or a bogus match) — nothing to seed, TS falls to CDN/any
+		if (ALWAYS_SHIM.has(pkg)) {
+			shims.push(pkg);
+		} else if (existsSync(dir)) {
+			const seeded = seedDecls(root, pkg, dir, files);
 
-		const decls = declFiles(dir);
-		const declBytes = decls.filter((f) => !f.endsWith(".json")).reduce((n, f) => { try { return n + statSync(f).size; } catch { return n; } }, 0);
-
-		if (declBytes === 0) { shims.push(pkg); continue; }                              // ships no types → ambient any
-		if (declBytes > PKG_DECL_CAP && !ALWAYS_REAL.has(pkg)) { shims.push(pkg); continue; }   // too heavy to bake → CDN + any
-
-		for (const abs of decls) {
-			let contents: string;
-
-			try { contents = readFileSync(abs, "utf8"); } catch { continue; }
-			files.push({ "path": `${FOLDER}/` + path.relative(root, abs).split(path.sep).join("/"), "contents": contents, "readonly": true });
-			realBytes += contents.length;
+			if (seeded === undefined) {
+				shims.push(pkg);
+			} else {
+				realBytes += seeded;
+				realPkgs += 1;
+			}
 		}
-
-		realPkgs += 1;
+		// else: a missing dir means not installed (or a bogus match) — nothing to seed, TS falls to CDN/any
 	}
 
 	// The tsconfig `extends` base(s): seed the whole (tiny) @tsconfig scope so the extends chain resolves.
@@ -222,7 +291,9 @@ function typeSurface(): SnapshotFile[] {
 			for (const file of ["package.json", "tsconfig.json"]) {
 				const abs = path.join(tsconfigDir, name, file);
 
-				if (existsSync(abs)) { files.push({ "path": `${FOLDER}/node_modules/@tsconfig/${name}/${file}`, "contents": readFileSync(abs, "utf8"), "readonly": true }); }
+				if (existsSync(abs)) {
+					files.push({ "path": `${FOLDER}/node_modules/@tsconfig/${name}/${file}`, "contents": readFileSync(abs, "utf8"), "readonly": true });
+				}
 			}
 		}
 	}
@@ -234,15 +305,17 @@ function typeSurface(): SnapshotFile[] {
 	// shimmed packages to `any`.
 	const nodeIndex = path.join(nm, "@types", "node", "index.d.ts");
 	const nodeRef = existsSync(nodeIndex) ? `/// <reference path="./node_modules/@types/node/index.d.ts" />\n` : "";
-	const body = shims.sort().map((p) => `declare module "${p}";\ndeclare module "${p}/*";`).join("\n");
+	const body = shims.sort().map((pkg) => `declare module "${pkg}";\ndeclare module "${pkg}/*";`).join("\n");
 
-	files.push({ "path": AMBIENT_FILE,
-"readonly": true,
-"contents":
-		"// Auto-generated by editorTypesPlugin (snapshot.ts). The in-browser TS server doesn't scan typeRoots\n"
-		+ "// for @types/*, so Node's global types are force-referenced by path, and packages that ship no types\n"
-		+ "// (or are deliberately shimmed) get ambient `any` declarations. A project file, NOT an @types package.\n"
-		+ nodeRef + body + "\n" });
+	files.push({
+		"path": AMBIENT_FILE,
+		"readonly": true,
+		"contents":
+			"// Auto-generated by editorTypesPlugin (snapshot.ts). The in-browser TS server doesn't scan typeRoots\n"
+			+ "// for @types/*, so Node's global types are force-referenced by path, and packages that ship no types\n"
+			+ "// (or are deliberately shimmed) get ambient `any` declarations. A project file, NOT an @types package.\n"
+			+ nodeRef + body + "\n"
+	});
 
 	console.log(`[editor:types] seeded ${realPkgs} packages (${Math.round(realBytes / 1024)} KB of .d.ts), shimmed ${shims.length}: ${shims.join(", ")}`);
 
@@ -253,19 +326,26 @@ function typeSurface(): SnapshotFile[] {
 function moduleVersions(): Record<string, string> {
 	const root = nodeModulesRoot();
 
-	if (root === undefined) { return {}; }
+	if (root === undefined) {
+		return {};
+	}
 
 	const nm = path.join(root, "node_modules");
 	const versions: Record<string, string> = {};
 
 	for (const pkg of importedPackages()) {
-		if (pkg.startsWith("@brianjenkins94/") || ALWAYS_SHIM.has(pkg)) { continue; }   // not on unpkg / shimmed to any
+		// Skip packages not on unpkg (@brianjenkins94/*) or shimmed to any.
+		if (!pkg.startsWith("@brianjenkins94/") && !ALWAYS_SHIM.has(pkg)) {
+			try {
+				const meta = JSON.parse(readFileSync(path.join(nm, pkg, "package.json"), "utf8")) as { "version"?: string };
 
-		try {
-			const meta = JSON.parse(readFileSync(path.join(nm, pkg, "package.json"), "utf8")) as { "version"?: string };
-
-			if (typeof meta.version === "string" && /^\d/u.test(meta.version)) { versions[pkg] = meta.version; }
-		} catch { /* not installed — skip */ }
+				if (typeof meta.version === "string" && /^\d/u.test(meta.version)) {
+					versions[pkg] = meta.version;
+				}
+			} catch {
+				// not installed — skip
+			}
+		}
 	}
 
 	return versions;

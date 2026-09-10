@@ -19,7 +19,9 @@ if (!hasCorpus(FULL_ROOT)) {
 fs.rmSync(SAMPLE_ROOT, { "recursive": true, "force": true });
 fs.mkdirSync(path.join(SAMPLE_ROOT, "harness"), { "recursive": true });
 for (const name of fs.readdirSync(path.join(FULL_ROOT, "harness"))) {
-	if (name.endsWith(".js")) { fs.copyFileSync(path.join(FULL_ROOT, "harness", name), path.join(SAMPLE_ROOT, "harness", name)); }
+	if (name.endsWith(".js")) {
+		fs.copyFileSync(path.join(FULL_ROOT, "harness", name), path.join(SAMPLE_ROOT, "harness", name));
+	}
 }
 
 fs.copyFileSync(path.join(FULL_ROOT, "LICENSE"), path.join(SAMPLE_ROOT, "LICENSE"));
@@ -27,17 +29,19 @@ fs.copyFileSync(path.join(FULL_ROOT, "LICENSE"), path.join(SAMPLE_ROOT, "LICENSE
 let eligible = 0;
 let copied = 0;
 
-for (const t of loadTest262(FULL_ROOT)) {
-	if (policySkip(t) !== undefined) { continue; }
-	const idx = eligible;
+for (const testCase of loadTest262(FULL_ROOT)) {
+	if (policySkip(testCase) === undefined) {
+		const idx = eligible;
 
-	eligible += 1;
-	if (idx % EVERY !== 0) { continue; }
-	const dest = path.join(SAMPLE_ROOT, "test/language", t.id);
+		eligible += 1;
+		if (idx % EVERY === 0) {
+			const dest = path.join(SAMPLE_ROOT, "test/language", testCase.id);
 
-	fs.mkdirSync(path.dirname(dest), { "recursive": true });
-	fs.copyFileSync(path.join(FULL_ROOT, "test/language", t.id), dest);
-	copied += 1;
+			fs.mkdirSync(path.dirname(dest), { "recursive": true });
+			fs.copyFileSync(path.join(FULL_ROOT, "test/language", testCase.id), dest);
+			copied += 1;
+		}
+	}
 }
 
 fs.writeFileSync(

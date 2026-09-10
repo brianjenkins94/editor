@@ -29,50 +29,78 @@ interface SideResult {
 	"logs": unknown[][];
 }
 
-function safeString(v: unknown): string {
+function safeString(value: unknown): string {
 	try {
-		return String(v);
+		return String(value);
 	} catch {
-		return Object.prototype.toString.call(v);
+		return Object.prototype.toString.call(value);
 	}
 }
 
-function errorName(e: unknown): string {
-	if (typeof e === "object" && e !== null) {
-		const ctor = (e as { "constructor"?: { "name"?: string } }).constructor;
+function errorName(error: unknown): string {
+	if (typeof error === "object" && error !== null) {
+		const ctor = (error as { "constructor"?: { "name"?: string } }).constructor;
 
-		if (typeof ctor?.name === "string" && ctor.name !== "") { return ctor.name; }
+		if (typeof ctor?.name === "string" && ctor.name !== "") {
+			return ctor.name;
+		}
 	}
 
-	return safeString(e);
+	return safeString(error);
 }
 
-const describe = (e: unknown): string => (typeof e === "object" && e !== null && "message" in e ? `${errorName(e)}: ${safeString((e).message)}` : safeString(e));
+const describe = (error: unknown): string => (typeof error === "object" && error !== null && "message" in error ? `${errorName(error)}: ${safeString((error).message)}` : safeString(error));
 
 // Inert stand-ins for what a real-code oracle must not have (both sides get the same ones).
-const blockedProcess = new Proxy({}, { "get": (_t, key) => (key === "exit" ? () => { throw new Error("oracle: process.exit is blocked"); } : key === "env" ? {} : undefined) });
+const blockedProcess = new Proxy({}, {
+	"get": (_t, key) => {
+		if (key === "exit") {
+			return () => {
+				throw new Error("oracle: process.exit is blocked");
+			};
+		}
 
-function blockedRequire(spec: string): never { throw new Error(`oracle: require('${spec}') is blocked`); }
+		if (key === "env") {
+			return {};
+		}
+
+		return undefined;
+	}
+});
+
+function blockedRequire(spec: string): never {
+	throw new Error(`oracle: require('${spec}') is blocked`);
+}
+
 function makeConsole(logs: unknown[][]): Console {
-	const record = (...args: unknown[]) => void logs.push(args);
+	const record = (...args: unknown[]) => {
+		logs.push(args);
+	};
 
 	return { "log": record, "error": record, "warn": record, "info": record, "debug": record } as unknown as Console;
 }
 
 async function settle(value: unknown): Promise<{ "threw": boolean; "error"?: unknown; "value": unknown }> {
-	if (typeof (value as { "then"?: unknown })?.then !== "function") { return { "threw": false, "value": value }; }
+	if (typeof (value as { "then"?: unknown })?.then !== "function") {
+		return { "threw": false, "value": value };
+	}
+
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
 	try {
 		const timeout = new Promise((_, reject) => {
-			timer = setTimeout(() => { reject(new Error(`did not settle within ${TIMEOUT_MS}ms`)); }, TIMEOUT_MS);
+			timer = setTimeout(() => {
+				reject(new Error(`did not settle within ${TIMEOUT_MS}ms`));
+			}, TIMEOUT_MS);
 		});
 
 		return { "threw": false, "value": await Promise.race([value, timeout]) };
 	} catch (error) {
 		return { "threw": true, "error": error, "value": undefined };
 	} finally {
-		if (timer !== undefined) { clearTimeout(timer); }
+		if (timer !== undefined) {
+			clearTimeout(timer);
+		}
 	}
 }
 
@@ -119,8 +147,11 @@ async function runSubject(code: string): Promise<SideResult> {
 		const vm = new VM({ "globalObject": realm, "realGlobals": false, "thisValue": realm, "globals": { "console": makeConsole(logs), "process": blockedProcess, "require": blockedRequire } });
 
 		vm.load(parse(code));
-		vm.runUntil((m) => m.steps > STEP_BUDGET);
-		if (!vm.finished && !vm.paused) { return { "threw": true, "error": new Error(`step budget (${STEP_BUDGET}) exhausted`), "value": undefined, "logs": logs }; }
+		vm.runUntil((metrics) => metrics.steps > STEP_BUDGET);
+		if (!vm.finished && !vm.paused) {
+			return { "threw": true, "error": new Error(`step budget (${STEP_BUDGET}) exhausted`), "value": undefined, "logs": logs };
+		}
+
 		value = vm.paused ? await vm.runAsync() : vm.completion;
 	} catch (error) {
 		return { "threw": true, "error": error, "value": undefined, "logs": logs };
@@ -131,32 +162,49 @@ async function runSubject(code: string): Promise<SideResult> {
 	return { ...settled, "logs": logs };
 }
 
-const isTimeout = (e: unknown): boolean => /timed out|did not settle|step budget/.test(safeString((e as { "message"?: unknown })?.message ?? e)) || (e as { "code"?: string })?.code === "ERR_SCRIPT_EXECUTION_TIMEOUT";
+const isTimeout = (error: unknown): boolean => /timed out|did not settle|step budget/.test(safeString((error as { "message"?: unknown })?.message ?? error)) || (error as { "code"?: string })?.code === "ERR_SCRIPT_EXECUTION_TIMEOUT";
 
 export async function runTsCase(test: TsCase): Promise<TsCaseOutcome> {
 	const skip = policySkip(test);
 
-	if (skip !== undefined) { return { "kind": "skipped", "reason": skip }; }
+	if (skip !== undefined) {
+		return { "kind": "skipped", "reason": skip };
+	}
+
 	const code = caseSource(test);
 	const script = compileControl(code);
 
-	if (script === undefined) { return { "kind": "skipped", "reason": "not valid strict-mode code (a Node early error TypeScript's parser does not flag)" }; }
+	if (script === undefined) {
+		return { "kind": "skipped", "reason": "not valid strict-mode code (a Node early error TypeScript's parser does not flag)" };
+	}
+
 	const control = await runControl(script);
 
-	if (control.threw && isTimeout(control.error)) { return { "kind": "inconclusive", "reason": "node timed out" }; }
+	if (control.threw && isTimeout(control.error)) {
+		return { "kind": "inconclusive", "reason": "node timed out" };
+	}
+
 	const subject = await runSubject(code);
 
-	if (subject.threw && subject.error instanceof TsvalInternalError) { return { "kind": "mismatch", "reason": `tsval internal: ${subject.error.message.slice(0, 120)}` }; }
-	if (subject.threw && isTimeout(subject.error)) { return { "kind": "inconclusive", "reason": "tsval ran out of steps" }; }
+	if (subject.threw && subject.error instanceof TsvalInternalError) {
+		return { "kind": "mismatch", "reason": `tsval internal: ${subject.error.message.slice(0, 120)}` };
+	}
+
+	if (subject.threw && isTimeout(subject.error)) {
+		return { "kind": "inconclusive", "reason": "tsval ran out of steps" };
+	}
+
 	if (control.threw !== subject.threw) {
 		return { "kind": "mismatch", "reason": control.threw ? `node threw ${describe(control.error).slice(0, 100)}, tsval completed` : `tsval threw ${describe(subject.error).slice(0, 100)}, node completed` };
 	}
 
 	if (control.threw) {
-		const a = errorName(control.error);
-		const b = errorName(subject.error);
+		const controlName = errorName(control.error);
+		const subjectName = errorName(subject.error);
 
-		if (a !== b) { return { "kind": "mismatch", "reason": `different errors: node ${a}, tsval ${b}` }; }
+		if (controlName !== subjectName) {
+			return { "kind": "mismatch", "reason": `different errors: node ${controlName}, tsval ${subjectName}` };
+		}
 
 		return { "kind": "both-threw", "node": describe(control.error), "tsval": describe(subject.error) };
 	}

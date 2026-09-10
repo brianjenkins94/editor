@@ -60,7 +60,7 @@ export interface AnchorReport {
 function tokensIn(spans: Span[], src: string, start: number, end: number): string {
 	return spans
 		.filter((span) => span.token && !span.trivia && span.start >= start && span.end <= end)
-		.sort((a, b) => a.start - b.start)
+		.sort((left, right) => left.start - right.start)
 		.map((span) => src.slice(span.start, span.end))
 		.join(" ");
 }
@@ -103,7 +103,7 @@ export function anchor(src: string, fileName = "entry.ts"): AnchorReport {
 		// Match a runtime event to a static anchor by callee, or (since both now carry spans) by the event's
 		// callsite falling within the anchor's node — reach and the canary render callees differently
 		// (`writeFile` vs `fs.writeFile`), so span containment is the reliable join.
-		const index = anchored.findIndex((finding, i) => !enriched.has(i) && finding.capability === event.capability
+		const index = anchored.findIndex((finding, position) => !enriched.has(position) && finding.capability === event.capability
 			&& (finding.callee === event.callee
 				|| (event.start !== undefined && event.end !== undefined && event.start >= finding.cst.start && event.end <= finding.cst.end)));
 
@@ -152,27 +152,29 @@ export function reanchor(findings: AnchoredFinding[], newSrc: string): Reanchore
 	const byKey = new Map<string, CstNode[]>();
 	const seen = new Set<string>();
 
-	for (const span of [...newSpans].sort((a, b) => a.start - b.start || b.end - a.end)) {
-		if (span.cover || span.trivia || span.type === null) { continue; }
-
+	for (const span of [...newSpans].sort((left, right) => left.start - right.start || right.end - left.end)) {
 		const where = `${span.start}-${span.end}`;
 
-		if (seen.has(where)) { continue; }
+		if (!span.cover && !span.trivia && span.type !== null && !seen.has(where)) {
+			seen.add(where);
 
-		seen.add(where);
+			const node: CstNode = { "type": span.type, "start": span.start, "end": span.end };
+			const key = keyOf(span.type, tokensIn(newSpans, newSrc, span.start, span.end));
+			const list = byKey.get(key);
 
-		const node: CstNode = { "type": span.type, "start": span.start, "end": span.end };
-		const key = keyOf(span.type, tokensIn(newSpans, newSrc, span.start, span.end));
-		const list = byKey.get(key);
-
-		if (list === undefined) { byKey.set(key, [node]); } else { list.push(node); }
+			if (list === undefined) {
+				byKey.set(key, [node]);
+			} else {
+				list.push(node);
+			}
+		}
 	}
 
 	// Consume candidates in the ORIGINAL findings' document order, so the n-th identical finding takes the n-th
 	// identical node; results go back in the caller's order.
-	const order = findings.map((finding, index) => ({ "finding": finding, "index": index })).sort((a, b) => a.finding.cst.start - b.finding.cst.start);
+	const order = findings.map((finding, index) => ({ "finding": finding, "index": index })).sort((left, right) => left.finding.cst.start - right.finding.cst.start);
 	const consumed = new Map<string, number>();
-	const results: Reanchored[] = new Array<Reanchored>(findings.length);
+	const results: Reanchored[] = Array.from<Reanchored>({ "length": findings.length });
 
 	for (const { finding, index } of order) {
 		const key = finding.fingerprint === undefined ? undefined : keyOf(finding.cst.type, finding.fingerprint);
@@ -181,11 +183,10 @@ export function reanchor(findings: AnchoredFinding[], newSrc: string): Reanchore
 
 		if (key === undefined || candidates === undefined || ordinal >= candidates.length) {
 			results[index] = { "finding": finding, "status": "stale" };
-			continue;
+		} else {
+			consumed.set(key, ordinal + 1);
+			results[index] = { "finding": finding, "status": "anchored", "cst": candidates[ordinal] };
 		}
-
-		consumed.set(key, ordinal + 1);
-		results[index] = { "finding": finding, "status": "anchored", "cst": candidates[ordinal] };
 	}
 
 	return results;
@@ -202,11 +203,15 @@ export function reanchor(findings: AnchoredFinding[], newSrc: string): Reanchore
 export function reanchorEdits(findings: AnchoredFinding[], snapshotSrc: string, edits: Edit[]): Reanchored[] {
 	const bridge = openDrift(snapshotSrc);
 
-	for (const edit of edits) { bridge.push(edit); }
+	for (const edit of edits) {
+		bridge.push(edit);
+	}
 
 	const transported = findings.map((finding) => ({ "finding": finding, ...bridge.transportSpan(finding.cst) }));
 
-	if (transported.some((entry) => entry.touched)) { bridge.reparse(); }
+	if (transported.some((entry) => entry.touched)) {
+		bridge.reparse();
+	}
 
 	const spans = bridge.spans();
 	const src = bridge.src();
@@ -218,7 +223,7 @@ export function reanchorEdits(findings: AnchoredFinding[], snapshotSrc: string, 
 
 		const node = cstNodeAtSpan(spans, span.start, span.end);
 
-		return node !== undefined && node.type === finding.cst.type && tokensIn(spans, src, node.start, node.end) === finding.fingerprint
+		return node?.type === finding.cst.type && tokensIn(spans, src, node.start, node.end) === finding.fingerprint
 			? { "finding": finding, "status": "anchored", "cst": node }
 			: { "finding": finding, "status": "stale" };
 	});

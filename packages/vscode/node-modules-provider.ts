@@ -45,9 +45,14 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 	const announce = (resource: { "toString": () => string }, change: IFileChange): void => {
 		const key = resource.toString();
 
-		if (announced.has(key)) { return; } // once per resource — enough to make TS re-resolve
+		if (announced.has(key)) {
+			return; // once per resource — enough to make TS re-resolve
+		}
+
 		announced.add(key);
-		for (const listener of [...listeners]) { listener([change]); }
+		for (const listener of [...listeners]) {
+			listener([change]);
+		}
 	};
 
 	const toRel = relUnder(prefix);
@@ -65,15 +70,24 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 	// misses) and successes; let transient failures (network/5xx/429) retry.
 	const cache = new Map<string, Promise<unknown>>();
 	const memoFetch = <T>(rel: string, query: string, parse: (res: Response) => Promise<T>): Promise<T | undefined> => {
-		if (!served(rel)) { return Promise.resolve(undefined); }
+		if (!served(rel)) {
+			return Promise.resolve(undefined);
+		}
+
 		const { pkg, sub } = splitPackage(rel);
 		const url = `${base(pkg)}/${sub}${query}`;
 
 		if (!cache.has(url)) {
 			cache.set(url, fetch(url)
 				.then(async (res) => {
-					if (res.ok) { return parse(res); }
-					if (res.status === 404) { return undefined; }
+					if (res.ok) {
+						return parse(res);
+					}
+
+					if (res.status === 404) {
+						return undefined;
+					}
+
 					cache.delete(url);
 
 					return undefined;
@@ -96,18 +110,31 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			FileSystemProviderCapabilities.FileReadWrite
 			| FileSystemProviderCapabilities.PathCaseSensitive
 			| FileSystemProviderCapabilities.Readonly,
-		"onDidChangeCapabilities": (() => ({ "dispose": function() {} })) as never,
+		"onDidChangeCapabilities": (() => ({ "dispose": function() {
+			// capabilities never change — nothing to dispose
+		} })) as never,
 		"onDidChangeFile": onDidChangeFile,
-		"watch": () => ({ "dispose": function() {} }),
+		"watch": () => ({ "dispose": function() {
+			// nothing is watched — nothing to dispose
+		} }),
 
 		"stat": async function(resource): Promise<IStat> {
 			const rel = toRel(resource.path);
 
-			if (rel === undefined) { throw notFound(); }
-			if (rel === "") { return { "type": FileType.Directory, "ctime": 0, "mtime": 0, "size": 0 }; }
+			if (rel === undefined) {
+				throw notFound();
+			}
+
+			if (rel === "") {
+				return { "type": FileType.Directory, "ctime": 0, "mtime": 0, "size": 0 };
+			}
+
 			const meta = await fetchMeta(rel);
 
-			if (meta === undefined) { throw notFound(); }
+			if (meta === undefined) {
+				throw notFound();
+			}
+
 			announce(resource, { "resource": resource, "type": FileChangeType.ADDED });
 
 			return {
@@ -121,10 +148,16 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		"readFile": async function(resource): Promise<Uint8Array> {
 			const rel = toRel(resource.path);
 
-			if (rel === undefined || rel === "") { throw notFound(); }
+			if (rel === undefined || rel === "") {
+				throw notFound();
+			}
+
 			const data = await fetchFile(rel);
 
-			if (data === undefined) { throw notFound(); }
+			if (data === undefined) {
+				throw notFound();
+			}
+
 			announce(resource, { "resource": resource, "type": FileChangeType.UPDATED });
 
 			return data;
@@ -133,11 +166,19 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		"readdir": async function(resource): Promise<[string, FileType][]> {
 			const rel = toRel(resource.path);
 
-			if (rel === undefined) { throw notFound(); }
-			if (rel === "") { return []; }
+			if (rel === undefined) {
+				throw notFound();
+			}
+
+			if (rel === "") {
+				return [];
+			}
+
 			const meta = await fetchMeta(rel);
 
-			if (meta === undefined || meta.type !== "directory") { throw notFound(); }
+			if (meta?.type !== "directory") {
+				throw notFound();
+			}
 
 			return (meta.files ?? []).map((entry) => [
 				entry.path.split("/").filter(Boolean).pop() ?? "",
@@ -145,9 +186,9 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			]);
 		},
 
-		"writeFile": async () => { throw readOnly(); },
-		"mkdir": async () => { throw readOnly(); },
-		"delete": async () => { throw readOnly(); },
-		"rename": async () => { throw readOnly(); }
+		"writeFile": () => Promise.reject(readOnly()),
+		"mkdir": () => Promise.reject(readOnly()),
+		"delete": () => Promise.reject(readOnly()),
+		"rename": () => Promise.reject(readOnly())
 	};
 }

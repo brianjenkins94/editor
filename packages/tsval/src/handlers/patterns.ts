@@ -14,7 +14,7 @@ import { copyRestProperties, defineData, getProperty, realmArray, toPropertyKey 
 import { isSuperRef, putValue, unwrapParens } from "./references.ts";
 import { syntheticHandlers } from "./registry.ts";
 
-const K = ts.SyntaxKind;
+const Kind = ts.SyntaxKind;
 
 /**
  * Bind a declaration target (identifier or binding pattern) to an already-computed value, declaring
@@ -61,8 +61,8 @@ export type PatOp =
 	| { "op": "swap" }; // exchange the two top temps (a member target bound to a value already obtained)
 
 export class PatternProgram {
-	readonly ops: readonly PatOp[];
-	constructor(ops: readonly PatOp[]) {
+	public readonly ops: readonly PatOp[];
+	public constructor(ops: readonly PatOp[]) {
 		this.ops = ops; // (an explicit field: Node's strip-only TS has no parameter properties)
 	}
 }
@@ -72,7 +72,10 @@ export const patternPrograms = new WeakMap<ts.Node, Map<string, PatternProgram>>
 export function cachedProgram(node: ts.Node, variant: string, compile: (ops: PatOp[]) => void): PatternProgram {
 	let byVariant = patternPrograms.get(node);
 
-	if (byVariant === undefined) { patternPrograms.set(node, (byVariant = new Map())); }
+	if (byVariant === undefined) {
+		patternPrograms.set(node, (byVariant = new Map()));
+	}
+
 	let program = byVariant.get(variant);
 
 	if (program === undefined) {
@@ -85,25 +88,33 @@ export function cachedProgram(node: ts.Node, variant: string, compile: (ops: Pat
 	return program;
 }
 
-export const bindingProgram = (target: ts.BindingName, kind: BindingKind): PatternProgram => cachedProgram(target, `bind:${kind}`, (ops) => { compileBinding(target, kind, ops); });
+export function bindingProgram(target: ts.BindingName, kind: BindingKind): PatternProgram {
+	return cachedProgram(target, `bind:${kind}`, (ops) => {
+		compileBinding(target, kind, ops);
+	});
+}
 
-export const assignProgram = (target: ts.Expression): PatternProgram => cachedProgram(target, "assign", (ops) => { compileAssign(target, ops); });
+export function assignProgram(target: ts.Expression): PatternProgram {
+	return cachedProgram(target, "assign", (ops) => {
+		compileAssign(target, ops);
+	});
+}
 
 /** A parameter list: each parameter reads its argument (or the rest), applies its default, binds. */
 export function parameterProgram(node: ts.SignatureDeclaration): PatternProgram {
 	return cachedProgram(node, "params", (ops) => {
-		const params = node.parameters.filter((p) => !isThisParameter(p));
+		const params = node.parameters.filter((parameter) => !isThisParameter(parameter));
 
-		for (let i = 0; i < params.length; i++) {
-			const param = params[i];
+		for (let index = 0; index < params.length; index++) {
+			const param = params[index];
 
 			if (param.dotDotDotToken) {
-				ops.push({ "op": "rest-args", "from": i });
+				ops.push({ "op": "rest-args", "from": index });
 				compileBinding(param.name, "param", ops);
 				break;
 			}
 
-			ops.push({ "op": "arg", "index": i });
+			ops.push({ "op": "arg", "index": index });
 			compileDefault(param.initializer, param.name, ops);
 			compileBinding(param.name, "param", ops);
 		}
@@ -119,18 +130,30 @@ export function pushPattern(vm: Machine, scope: Scope, program: PatternProgram, 
 // --- compilation (each compiled pattern consumes temps.top) ---
 
 export function compileDefault(init: ts.Expression | undefined, nameTarget: ts.Node, ops: PatOp[]): void {
-	if (init === undefined) { return; }
+	if (init === undefined) {
+		return;
+	}
+
 	const naming: PatOp[] = ts.isIdentifier(nameTarget) ? [{ "op": "name", "name": nameTarget.text, "from": init }] : [];
 
 	ops.push({ "op": "jump-if-defined", "offset": 1 + naming.length }, { "op": "eval", "node": init }, ...naming);
 }
 
 export function compileKey(name: ts.PropertyName, ops: PatOp[]): void {
-	if (ts.isComputedPropertyName(name)) { ops.push({ "op": "eval", "node": name.expression }, { "op": "to-key" }, { "op": "obj-get" }); } else { ops.push({ "op": "obj-get", "key": propertyName(name) }); }
+	if (ts.isComputedPropertyName(name)) {
+		ops.push({ "op": "eval", "node": name.expression }, { "op": "to-key" }, { "op": "obj-get" });
+	} else {
+		ops.push({ "op": "obj-get", "key": propertyName(name) });
+	}
 }
 
 export function compileBinding(target: ts.BindingName, kind: BindingKind, ops: PatOp[]): void {
-	if (ts.isIdentifier(target)) { return void ops.push({ "op": "bind", "name": target.text, "kind": kind }); }
+	if (ts.isIdentifier(target)) {
+		ops.push({ "op": "bind", "name": target.text, "kind": kind });
+
+		return;
+	}
+
 	if (ts.isArrayBindingPattern(target)) {
 		ops.push({ "op": "iter-open" });
 		for (const element of target.elements) {
@@ -156,12 +179,11 @@ export function compileBinding(target: ts.BindingName, kind: BindingKind, ops: P
 		if (element.dotDotDotToken) {
 			ops.push({ "op": "obj-rest" });
 			compileBinding(element.name, kind, ops);
-			continue;
+		} else {
+			compileKey(element.propertyName ?? (element.name as ts.Identifier), ops);
+			compileDefault(element.initializer, element.name, ops);
+			compileBinding(element.name, kind, ops);
 		}
-
-		compileKey(element.propertyName ?? (element.name as ts.Identifier), ops);
-		compileDefault(element.initializer, element.name, ops);
-		compileBinding(element.name, kind, ops);
 	}
 
 	ops.push({ "op": "obj-close" });
@@ -172,23 +194,39 @@ export function compileBinding(target: ts.BindingName, kind: BindingKind, ops: P
 export function compileAssignElement(elementTarget: ts.Expression, init: ts.Expression | undefined, emitSource: () => void, ops: PatOp[]): void {
 	const target = unwrapParens(elementTarget);
 
-	if (isSuperRef(target)) { unimplemented("a super reference as a destructuring target"); }
+	if (isSuperRef(target)) {
+		unimplemented("a super reference as a destructuring target");
+	}
+
 	const isMember = ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target);
 
 	if (isMember) {
 		ops.push({ "op": "eval", "node": target.expression });
-		if (ts.isElementAccessExpression(target)) { ops.push({ "op": "eval", "node": target.argumentExpression }, { "op": "member-ref", "hasKey": true, "text": "" }); } else { ops.push({ "op": "member-ref", "hasKey": false, "text": target.name.text, "privateName": ts.isPrivateIdentifier(target.name) ? target.name.text : undefined }); }
+		if (ts.isElementAccessExpression(target)) {
+			ops.push({ "op": "eval", "node": target.argumentExpression }, { "op": "member-ref", "hasKey": true, "text": "" });
+		} else {
+			ops.push({ "op": "member-ref", "hasKey": false, "text": target.name.text, "privateName": ts.isPrivateIdentifier(target.name) ? target.name.text : undefined });
+		}
 	}
 
 	emitSource();
 	compileDefault(init, target, ops);
-	if (isMember) { ops.push({ "op": "member-store" }); } else { compileAssign(target, ops); }
+	if (isMember) {
+		ops.push({ "op": "member-store" });
+	} else {
+		compileAssign(target, ops);
+	}
 }
 
 export function compileAssign(elementTarget: ts.Expression, ops: PatOp[]): void {
 	const target = unwrapParens(elementTarget);
 
-	if (ts.isIdentifier(target)) { return void ops.push({ "op": "assign-id", "name": target.text }); }
+	if (ts.isIdentifier(target)) {
+		ops.push({ "op": "assign-id", "name": target.text });
+
+		return;
+	}
+
 	// A bare member target (`for (o.x of xs)`): the value is on the temps first (spec: the next value,
 	// THEN the reference), so the reference is evaluated above it and swapped under before the store.
 	if (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) {
@@ -200,8 +238,12 @@ export function compileAssign(elementTarget: ts.Expression, ops: PatOp[]): void 
 	if (ts.isArrayLiteralExpression(target)) {
 		ops.push({ "op": "iter-open" });
 		for (const element of target.elements) {
-			if (ts.isOmittedExpression(element)) { ops.push({ "op": "iter-skip" }); } else if (ts.isSpreadElement(element)) { compileAssignElement(element.expression, undefined, () => ops.push({ "op": "iter-rest" }), ops); } else {
-				const withDefault = ts.isBinaryExpression(element) && element.operatorToken.kind === K.EqualsToken;
+			if (ts.isOmittedExpression(element)) {
+				ops.push({ "op": "iter-skip" });
+			} else if (ts.isSpreadElement(element)) {
+				compileAssignElement(element.expression, undefined, () => ops.push({ "op": "iter-rest" }), ops);
+			} else {
+				const withDefault = ts.isBinaryExpression(element) && element.operatorToken.kind === Kind.EqualsToken;
 
 				compileAssignElement(withDefault ? element.left : element, withDefault ? element.right : undefined, () => ops.push({ "op": "iter-step" }), ops);
 			}
@@ -226,7 +268,7 @@ export function compileAssign(elementTarget: ts.Expression, ops: PatOp[]): void 
 					source = { "op": "obj-get" };
 				} else { source = { "op": "obj-get", "key": propertyName(prop.name) }; }
 
-				const withDefault = ts.isBinaryExpression(prop.initializer) && prop.initializer.operatorToken.kind === K.EqualsToken;
+				const withDefault = ts.isBinaryExpression(prop.initializer) && prop.initializer.operatorToken.kind === Kind.EqualsToken;
 
 				compileAssignElement(withDefault ? prop.initializer.left : prop.initializer, withDefault ? prop.initializer.right : undefined, () => ops.push(source), ops);
 			} else if (ts.isShorthandPropertyAssignment(prop)) {
@@ -262,7 +304,12 @@ function patternFrame(vm: Machine, frame: PatternFrame): void {
 	for (;;) {
 		const { pc } = frame;
 
-		if (pc >= program.ops.length) { return void vm.frames.pop(); }
+		if (pc >= program.ops.length) {
+			vm.frames.pop();
+
+			return;
+		}
+
 		const op = program.ops[pc];
 
 		frame.pc = pc + 1;
@@ -292,10 +339,13 @@ function patternFrame(vm: Machine, frame: PatternFrame): void {
 				const rest = new vm.realm.Array() as unknown[];
 
 				for (;;) {
-					const v = iterationStep(it);
+					const value = iterationStep(it);
 
-					if (it.done) { break; }
-					defineData(rest, rest.length, v);
+					if (it.done) {
+						break;
+					}
+
+					defineData(rest, rest.length, value);
 				}
 
 				temps.push(rest);
@@ -308,7 +358,10 @@ function patternFrame(vm: Machine, frame: PatternFrame): void {
 			case "obj-open": {
 				const value = temps.pop();
 
-				if (value === null || value === undefined) { throw new TypeError(`Cannot destructure '${String(value)}' as it is ${String(value)}.`); }
+				if (value === null || value === undefined) {
+					throw new TypeError(`Cannot destructure '${String(value)}' as it is ${String(value)}.`);
+				}
+
 				objs.push({ "value": value, "used": [] });
 				break;
 			}
@@ -338,7 +391,11 @@ function patternFrame(vm: Machine, frame: PatternFrame): void {
 				objs.pop();
 				break;
 			case "jump-if-defined":
-				if (temps[temps.length - 1] !== undefined) { frame.pc += op.offset; } else { temps.pop(); }
+				if (temps[temps.length - 1] !== undefined) {
+					frame.pc += op.offset;
+				} else {
+					temps.pop();
+				}
 
 				break;
 			case "name":

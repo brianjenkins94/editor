@@ -76,11 +76,17 @@ export function icon(node: IconNode, { size = 16, stroke = 2, "class": cls }: Ic
 		"class": cls ? `lucide ${cls}` : "lucide"
 	};
 
-	for (const [k, v] of Object.entries(attrs)) { svg.setAttribute(k, String(v)); }
+	for (const [key, value] of Object.entries(attrs)) {
+		svg.setAttribute(key, String(value));
+	}
+
 	for (const [tag, childAttrs] of node) {
 		const child = document.createElementNS(SVG_NS, tag);
 
-		for (const [k, v] of Object.entries(childAttrs)) { child.setAttribute(k, String(v)); }
+		for (const [key, value] of Object.entries(childAttrs)) {
+			child.setAttribute(key, String(value));
+		}
+
 		svg.appendChild(child);
 	}
 

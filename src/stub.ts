@@ -25,9 +25,17 @@ export function autostub(): unknown {
 		"get": (_target, key) => {
 			// Not a tsval guest function either: the interpreter brands its own functions with `__tsval` and would
 			// otherwise try to run the stub as guest code.
-			if (key === "then" || key === "toJSON" || key === "__tsval") { return undefined; }
-			if (key === Symbol.toPrimitive || key === "valueOf" || key === "toString") { return () => "[stub]"; }
-			if (typeof key === "symbol") { return undefined; }
+			if (key === "then" || key === "toJSON" || key === "__tsval") {
+				return undefined;
+			}
+
+			if (key === Symbol.toPrimitive || key === "valueOf" || key === "toString") {
+				return () => "[stub]";
+			}
+
+			if (typeof key === "symbol") {
+				return undefined;
+			}
 
 			return autostub();
 		},
@@ -36,7 +44,7 @@ export function autostub(): unknown {
 	};
 
 	// A callable target, so both `res()` and `res.x` (and `new res()`) are trapped.
-	return new Proxy(function stub() {}, handler);
+	return new Proxy(function stub() { /* inert proxy target: all traps route through `handler`, never this body */ }, handler);
 }
 
 /** Usable stand-ins for the builtins a synthesized value may contain (a stub in their place would fail on
@@ -54,24 +62,55 @@ const BUILTIN_STANDINS: Record<string, () => unknown> = {
 /** Build a plausible value shaped like `type` (the call's resolved return type). Unknowns fall back to an
  *  `autostub`; recursion is depth- and cycle-guarded so a self-referential type (a linked list) terminates. */
 function synthesizeFromType(type: ts.Type | undefined, checker: ts.TypeChecker | undefined, node: ts.Node, depth = 0, seen = new Set<ts.Type>()): unknown {
-	if (type === undefined || checker === undefined || depth > 6 || seen.has(type)) { return autostub(); }
+	if (type === undefined || checker === undefined || depth > 6 || seen.has(type)) {
+		return autostub();
+	}
 
-	const F = ts.TypeFlags;
+	const typeFlags = ts.TypeFlags;
 
-	if (type.isStringLiteral()) { return type.value; }
-	if (type.isNumberLiteral()) { return type.value; }
-	if (type.flags & F.BooleanLiteral) { return checker.typeToString(type) === "true"; }
-	if (type.flags & F.String) { return "string"; }
-	if (type.flags & F.Number) { return 0; }
-	if (type.flags & F.Boolean) { return false; }
-	if (type.flags & F.BigInt) { return 0n; }
-	if (type.flags & (F.Void | F.Undefined)) { return undefined; }
-	if (type.flags & F.Null) { return null; }
-	if (type.flags & (F.Any | F.Unknown)) { return autostub(); }
+	if (type.isStringLiteral()) {
+		return type.value;
+	}
+
+	if (type.isNumberLiteral()) {
+		return type.value;
+	}
+
+	if (type.flags & typeFlags.BooleanLiteral) {
+		return checker.typeToString(type) === "true";
+	}
+
+	if (type.flags & typeFlags.String) {
+		return "string";
+	}
+
+	if (type.flags & typeFlags.Number) {
+		return 0;
+	}
+
+	if (type.flags & typeFlags.Boolean) {
+		return false;
+	}
+
+	if (type.flags & typeFlags.BigInt) {
+		return 0n;
+	}
+
+	if (type.flags & (typeFlags.Void | typeFlags.Undefined)) {
+		return undefined;
+	}
+
+	if (type.flags & typeFlags.Null) {
+		return null;
+	}
+
+	if (type.flags & (typeFlags.Any | typeFlags.Unknown)) {
+		return autostub();
+	}
 
 	if (type.isUnion()) {
-		const nullish = type.types.find((member) => member.flags & (F.Null | F.Undefined | F.Void));
-		const pick = type.types.find((member) => !(member.flags & (F.Null | F.Undefined | F.Void))) ?? type.types[0];
+		const nullish = type.types.find((member) => member.flags & (typeFlags.Null | typeFlags.Undefined | typeFlags.Void));
+		const pick = type.types.find((member) => !(member.flags & (typeFlags.Null | typeFlags.Undefined | typeFlags.Void))) ?? type.types[0];
 
 		// A self-reference that the type lets be nullish ends there (a one-element linked list) — real data,
 		// rather than a stub where the cycle is cut.
@@ -81,13 +120,27 @@ function synthesizeFromType(type: ts.Type | undefined, checker: ts.TypeChecker |
 	const name = (type.aliasSymbol ?? type.getSymbol())?.getName();
 
 	// A promised result stays a promise: the code after it says `.then(…)` as often as `await`.
-	if (name === "Promise") { return Promise.resolve(synthesizeFromType(checker.getTypeArguments(type as ts.TypeReference)[0], checker, node, depth, seen)); }
-	if (name === "Array" || name === "ReadonlyArray") { return [synthesizeFromType(checker.getTypeArguments(type as ts.TypeReference)[0], checker, node, depth + 1, seen)]; }
-	if (checker.isTupleType(type)) { return checker.getTypeArguments(type as ts.TypeReference).map((element) => synthesizeFromType(element, checker, node, depth + 1, seen)); }
-	if (name !== undefined && name in BUILTIN_STANDINS) { return BUILTIN_STANDINS[name](); }
-	if (type.getCallSignatures().length > 0) { return () => undefined; }
+	if (name === "Promise") {
+		return Promise.resolve(synthesizeFromType(checker.getTypeArguments(type as ts.TypeReference)[0], checker, node, depth, seen));
+	}
 
-	if (type.flags & F.Object) {
+	if (name === "Array" || name === "ReadonlyArray") {
+		return [synthesizeFromType(checker.getTypeArguments(type as ts.TypeReference)[0], checker, node, depth + 1, seen)];
+	}
+
+	if (checker.isTupleType(type)) {
+		return checker.getTypeArguments(type as ts.TypeReference).map((element) => synthesizeFromType(element, checker, node, depth + 1, seen));
+	}
+
+	if (name !== undefined && name in BUILTIN_STANDINS) {
+		return BUILTIN_STANDINS[name]();
+	}
+
+	if (type.getCallSignatures().length > 0) {
+		return () => undefined;
+	}
+
+	if (type.flags & typeFlags.Object) {
 		seen.add(type);
 		const result: Record<string, unknown> = {};
 
@@ -135,9 +188,10 @@ export function respondFirst(code: string, options: RespondFirstOptions = {}): {
 	}
 
 	for (const name of autostubs) {
-		if (name in injected) { continue; }
-		injected[name] = () => autostub();
-		stubbed.push(name);
+		if (!(name in injected)) {
+			injected[name] = () => autostub();
+			stubbed.push(name);
+		}
 	}
 
 	// Placeholders for the type-synthesized sources: the name must resolve for the call to happen, and the
@@ -145,12 +199,13 @@ export function respondFirst(code: string, options: RespondFirstOptions = {}): {
 	const synthTargets = new Set<unknown>();
 
 	for (const name of synthesize) {
-		if (name in injected) { continue; }
-		const placeholder = (): undefined => undefined;
+		if (!(name in injected)) {
+			const placeholder = (): undefined => undefined;
 
-		injected[name] = placeholder;
-		synthTargets.add(placeholder);
-		stubbed.push(name);
+			injected[name] = placeholder;
+			synthTargets.add(placeholder);
+			stubbed.push(name);
+		}
 	}
 
 	if (synthTargets.size === 0) {

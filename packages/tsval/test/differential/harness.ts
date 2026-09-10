@@ -32,15 +32,24 @@ const blockedProcess = new Proxy(
 	{},
 	{
 		"get": (_t, key) => {
-			if (key === "exit") { return () => { throw new Error("oracle: process.exit is blocked"); }; }
-			if (key === "env") { return {}; }
+			if (key === "exit") {
+				return () => {
+					throw new Error("oracle: process.exit is blocked");
+				};
+			}
+
+			if (key === "env") {
+				return {};
+			}
 
 			return undefined;
 		}
 	}
 );
 
-function blockedRequire(spec: string): never { throw new Error(`oracle: require('${spec}') is blocked`); }
+function blockedRequire(spec: string): never {
+	throw new Error(`oracle: require('${spec}') is blocked`);
+}
 
 /** The oracle: type-strip with tsc, then evaluate in Node, capturing completion value + console. */
 export function runNode(code: string): RunResult {
@@ -86,7 +95,10 @@ export function runTsval(code: string): RunResult {
 
 /** Await a (possibly-thenable) run result, folding a rejection into `threw`. */
 async function settle(run: RunResult): Promise<RunResult> {
-	if (run.threw) { return run; }
+	if (run.threw) {
+		return run;
+	}
+
 	try {
 		return { ...run, "value": await run.value };
 	} catch (error) {
@@ -103,7 +115,10 @@ export async function assertDifferentialAsync(code: string): Promise<void> {
 	const actual = await settle(runTsval(code));
 
 	assert.strictEqual(actual.threw, oracle.threw, `throw mismatch for:\n${code}` + (oracle.threw ? `\n  node error: ${(oracle.error as Error)?.message}` : "") + (actual.threw ? `\n  tsval error: ${(actual.error as Error)?.message}` : ""));
-	if (oracle.threw) { return; }
+	if (oracle.threw) {
+		return;
+	}
+
 	assert.deepStrictEqual(actual.value, oracle.value, `resolved value mismatch for:\n${code}`);
 	assert.deepStrictEqual(actual.logs, oracle.logs, `console output mismatch for:\n${code}`);
 }
@@ -121,13 +136,16 @@ export type DifferentialOutcome =
 export async function classifyDifferential(code: string): Promise<DifferentialOutcome> {
 	const oracle = await settle(runNode(code));
 	const actual = await settle(runTsval(code));
-	const msg = (e: unknown): string => (e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+	const msg = (error: unknown): string => (error instanceof Error ? `${error.name}: ${error.message}` : String(error));
 
 	if (oracle.threw !== actual.threw) {
 		return { "kind": "mismatch", "detail": oracle.threw ? `node threw (${msg(oracle.error)}) but tsval returned ${JSON.stringify(actual.value)}` : `tsval threw (${msg(actual.error)}) but node returned ${JSON.stringify(oracle.value)}` };
 	}
 
-	if (oracle.threw) { return { "kind": "both-threw", "node": msg(oracle.error), "tsval": msg(actual.error) }; }
+	if (oracle.threw) {
+		return { "kind": "both-threw", "node": msg(oracle.error), "tsval": msg(actual.error) };
+	}
+
 	try {
 		assert.deepStrictEqual(structural(actual.value), structural(oracle.value));
 		assert.deepStrictEqual(structural(actual.logs), structural(oracle.logs));
@@ -146,15 +164,26 @@ export async function classifyDifferential(code: string): Promise<DifferentialOu
  * data (Map/Set/Date/Error by content), recursing with a cycle guard.
  */
 export function structural(value: unknown, seen = new Map<object, unknown>()): unknown {
-	if (typeof value === "symbol") { return { "[Symbol]": value.description }; } // two engines' symbols are never identical
-	if (value === null || (typeof value !== "object" && typeof value !== "function")) { return value; }
-	if (seen.has(value)) { return "[circular]"; }
+	if (typeof value === "symbol") {
+		return { "[Symbol]": value.description }; // two engines' symbols are never identical
+	}
+
+	if (value === null || (typeof value !== "object" && typeof value !== "function")) {
+		return value;
+	}
+
+	if (seen.has(value)) {
+		return "[circular]";
+	}
+
 	if (typeof value === "function") {
 		const out: Record<string, unknown> = { "[function]": value.name, "length": value.length };
 
 		seen.set(value, out);
 		for (const key of Object.keys(value)) {
-			if (!key.startsWith("__tsval")) { out[key] = structural((value as unknown as Record<string, unknown>)[key], seen); }
+			if (!key.startsWith("__tsval")) {
+				out[key] = structural((value as unknown as Record<string, unknown>)[key], seen);
+			}
 		}
 
 		return out;
@@ -164,22 +193,44 @@ export function structural(value: unknown, seen = new Map<object, unknown>()): u
 		const out: unknown[] = [];
 
 		seen.set(value, out);
-		for (const v of value) { out.push(structural(v, seen)); }
+		for (const item of value) {
+			out.push(structural(item, seen));
+		}
 
 		return out;
 	}
 
-	if (value instanceof Date) { return { "[Date]": value.getTime() }; }
-	if (value instanceof RegExp) { return { "[RegExp]": String(value) }; }
-	if (value instanceof Error) { return { "[Error]": value.name, "message": value.message }; }
-	if (value instanceof Map) { return { "[Map]": [...value].map(([k, v]) => [structural(k, seen), structural(v, seen)]) }; }
-	if (value instanceof Set) { return { "[Set]": [...value].map((v) => structural(v, seen)) }; }
-	if (typeof (value as { "then"?: unknown }).then === "function") { return "[thenable]"; }
+	if (value instanceof Date) {
+		return { "[Date]": value.getTime() };
+	}
+
+	if (value instanceof RegExp) {
+		return { "[RegExp]": String(value) };
+	}
+
+	if (value instanceof Error) {
+		return { "[Error]": value.name, "message": value.message };
+	}
+
+	if (value instanceof Map) {
+		return { "[Map]": [...value].map(([key, val]) => [structural(key, seen), structural(val, seen)]) };
+	}
+
+	if (value instanceof Set) {
+		return { "[Set]": [...value].map((item) => structural(item, seen)) };
+	}
+
+	if (typeof (value as { "then"?: unknown }).then === "function") {
+		return "[thenable]";
+	}
+
 	const ctorName = (Object.getPrototypeOf(value) as { "constructor"?: { "name"?: string } } | null)?.constructor?.name ?? "null";
 	const out: Record<string, unknown> = ctorName === "Object" ? {} : { "[instanceof]": ctorName };
 
 	seen.set(value, out);
-	for (const key of Object.keys(value)) { out[key] = structural((value as Record<string, unknown>)[key], seen); }
+	for (const key of Object.keys(value)) {
+		out[key] = structural((value as Record<string, unknown>)[key], seen);
+	}
 
 	return out;
 }
@@ -196,7 +247,9 @@ export function assertDifferential(code: string): void {
 		+ `\n  tsval ${actual.threw ? "threw" : "returned"}${actual.threw ? ` (${(actual.error as Error)?.message})` : ""}`
 	);
 
-	if (oracle.threw) { return; } // both threw — good enough for the oracle (message text is engine-specific)
+	if (oracle.threw) {
+		return; // both threw — good enough for the oracle (message text is engine-specific)
+	}
 
 	assert.deepStrictEqual(actual.value, oracle.value, `completion value mismatch for:\n${code}`);
 	assert.deepStrictEqual(actual.logs, oracle.logs, `console output mismatch for:\n${code}`);

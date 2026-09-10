@@ -87,7 +87,9 @@ export function standardGlobals(): Record<string, unknown> {
 	const table: Record<string, unknown> = {};
 
 	for (const name of STANDARD_GLOBAL_NAMES) {
-		if (name in globalThis) { table[name] = (globalThis as Record<string, unknown>)[name]; }
+		if (name in globalThis) {
+			table[name] = (globalThis as Record<string, unknown>)[name];
+		}
 	}
 
 	table.globalThis = table; // the guest's `globalThis` is its own global object, not the host's

@@ -43,14 +43,19 @@ export interface VscodeWindowHandle {
 let booted = false;
 
 export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWindowHandle {
-	if (booted) { return { "whenReady": Promise.resolve() }; }
+	if (booted) {
+		return { "whenReady": Promise.resolve() };
+	}
+
 	booted = true;
 
 	let markReady: () => void;
-	const whenReady = new Promise<void>((resolve) => { markReady = resolve; });
+	const whenReady = new Promise<void>((resolve) => {
+		markReady = resolve;
+	});
 
 	const { files = [], openEditors = [], workspaceFolder, moduleVersions, onSave, mountInto = document.body } = options;
-	const base = (import.meta as unknown as { "env"?: { "BASE_URL"?: string } }).env?.BASE_URL ?? "/";
+	const base = (import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/";
 
 	const iframe = document.createElement("iframe");
 
@@ -75,7 +80,10 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 	window.addEventListener("message", (event) => {
 		const data = event.data as { "source"?: string; "type"?: string; "path"?: string; "contents"?: string } | null;
 
-		if (data?.source !== "vscode") { return; }
+		if (data?.source !== "vscode") {
+			return;
+		}
+
 		const target = event.source as Window;
 
 		if (data.type === "ready") {

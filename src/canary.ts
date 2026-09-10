@@ -90,10 +90,10 @@ export interface CanaryOptions {
 
 /** A divergence tripwire — thrown from a shim, uncatchable by guest `try/catch`, caught by `runCanary`. */
 export class CanaryDivergenceError extends Error {
-	override name = "CanaryDivergenceError";
-	readonly [UNCATCHABLE] = true;
-	readonly event: CanaryEvent;
-	constructor(event: CanaryEvent) {
+	public override name = "CanaryDivergenceError";
+	public readonly [UNCATCHABLE] = true;
+	public readonly event: CanaryEvent;
+	public constructor(event: CanaryEvent) {
 		super(`canary divergence: runtime reached '${event.capability}' (${event.callee} → ${JSON.stringify(event.value)}) outside the predicted set`);
 		this.event = event;
 	}
@@ -109,35 +109,43 @@ const EXEC = ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSyn
 export function covers(predicted: Iterable<string>, capability: string): boolean {
 	const set = predicted instanceof Set ? predicted : new Set(predicted);
 
-	if (set.has(capability)) { return true; }
-	if (capability.startsWith("fs:") && set.has("fs")) { return true; }
+	if (set.has(capability)) {
+		return true;
+	}
+
+	if (capability.startsWith("fs:") && set.has("fs")) {
+		return true;
+	}
 
 	return false;
 }
 
 /** Collects reaches, annotates them (types), and trips the tripwire on any unpredicted capability. */
 class Recorder {
-	readonly events: CanaryEvent[] = [];
+	public readonly events: CanaryEvent[] = [];
 	/** set the moment a divergence fires — wherever it fires (sync run, fiber, timer). */
-	divergence: CanaryEvent | undefined;
+	public divergence: CanaryEvent | undefined;
 	/** the exploration path currently executing (0 for a plain run); stamped onto each event. */
-	currentPath = 0;
+	public currentPath = 0;
 	/** first divergence per exploration path. */
-	readonly divergences = new Map<number, CanaryEvent>();
+	public readonly divergences = new Map<number, CanaryEvent>();
 	private readonly predicted: Set<string>;
 	private readonly annotate: (event: CanaryEvent) => void;
-	constructor(predicted: Set<string>, annotate: (event: CanaryEvent) => void) {
+	public constructor(predicted: Set<string>, annotate: (event: CanaryEvent) => void) {
 		this.predicted = predicted;
 		this.annotate = annotate;
 	}
 
-	record(event: CanaryEvent): void {
+	public record(event: CanaryEvent): void {
 		this.annotate(event);
 		event.path = this.currentPath;
 		this.events.push(event);
 		if (!covers(this.predicted, event.capability)) {
 			this.divergence ??= event;
-			if (!this.divergences.has(this.currentPath)) { this.divergences.set(this.currentPath, event); }
+			if (!this.divergences.has(this.currentPath)) {
+				this.divergences.set(this.currentPath, event);
+			}
+
 			throw new CanaryDivergenceError(event);
 		}
 	}
@@ -149,11 +157,11 @@ class PendingWork {
 	private timers = 0;
 	private settleWaiters: (() => void)[] = [];
 
-	get count(): number {
+	public get count(): number {
 		return this.fibers.size + this.timers;
 	}
 
-	trackFiber(promise: Promise<unknown>): void {
+	public trackFiber(promise: Promise<unknown>): void {
 		this.fibers.add(promise);
 		// Observe settlement without turning a divergence into an unhandled rejection: it's already
 		// recorded in the Recorder; the async runner reads it from there.
@@ -163,13 +171,25 @@ class PendingWork {
 		);
 	}
 
-	timerStarted(): void {
+	public timerStarted(): void {
 		this.timers += 1;
 	}
 
-	timerFinished(): void {
+	public timerFinished(): void {
 		this.timers -= 1;
 		this.notify();
+	}
+
+	/** Resolve once no work is outstanding (or `maxMs` elapses — e.g. a never-cleared interval). */
+	public async drain(maxMs: number): Promise<void> {
+		const deadline = Date.now() + maxMs;
+
+		while (this.count > 0 && Date.now() < deadline) {
+			await new Promise<void>((resolve) => {
+				this.settleWaiters.push(resolve);
+				setTimeout(resolve, Math.min(20, Math.max(1, deadline - Date.now())));
+			});
+		}
 	}
 
 	private done(promise: Promise<unknown>): void {
@@ -181,18 +201,8 @@ class PendingWork {
 		const waiters = this.settleWaiters;
 
 		this.settleWaiters = [];
-		for (const w of waiters) { w(); }
-	}
-
-	/** Resolve once no work is outstanding (or `maxMs` elapses — e.g. a never-cleared interval). */
-	async drain(maxMs: number): Promise<void> {
-		const deadline = Date.now() + maxMs;
-
-		while (this.count > 0 && Date.now() < deadline) {
-			await new Promise<void>((resolve) => {
-				this.settleWaiters.push(resolve);
-				setTimeout(resolve, Math.min(20, Math.max(1, deadline - Date.now())));
-			});
+		for (const waiter of waiters) {
+			waiter();
 		}
 	}
 }
@@ -273,16 +283,29 @@ export function safeGlobals(): Record<string, unknown> {
 	const source = globalThis as Record<string, unknown>;
 
 	for (const name of SAFE_GLOBAL_NAMES) {
-		if (name in source) { out[name] = source[name]; }
+		if (name in source) {
+			out[name] = source[name];
+		}
 	}
 
 	return out;
 }
 
-function httpVerbSafe(method: unknown): boolean {
-	const m = String(method ?? "GET").toUpperCase();
+function httpVerbSafe(method: string | undefined): boolean {
+	const verb = (method ?? "GET").toUpperCase();
 
-	return m === "GET" || m === "HEAD" || m === "OPTIONS";
+	return verb === "GET" || verb === "HEAD" || verb === "OPTIONS";
+}
+
+/** `String(value)` for a recorded resource argument of statically-unknown shape (a URL, a path, a command, a
+ *  Buffer, …). The cast only tells the type-checker the value stringifies to a string — which every resource we
+ *  record does — so at runtime this is exactly `String(value)` and the recorded diagnostic value is unchanged. */
+function asResourceString(value: unknown): string {
+	// Bind through an assertion so the checker knows the value stringifies to a string — true of every resource we
+	// record — then `String` produces exactly `String(value)` at runtime, unchanged.
+	const stringable = value as { "toString": () => string };
+
+	return String(stringable);
 }
 
 // The real code-from-string constructors. Every real intrinsic leaks them (`[].constructor.constructor`
@@ -291,9 +314,9 @@ function httpVerbSafe(method: unknown): boolean {
 const REAL_EVAL = globalThis.eval;
 const CODE_CONSTRUCTORS = new Set<unknown>([
 	Function,
-	Object.getPrototypeOf(async function() {}).constructor,
-	Object.getPrototypeOf(function *() {}).constructor,
-	Object.getPrototypeOf(async function *() {}).constructor
+	Object.getPrototypeOf(async function() { /* probe: only its constructor (AsyncFunction) is read */ }).constructor,
+	Object.getPrototypeOf(function *() { /* probe: only its constructor (GeneratorFunction) is read */ }).constructor,
+	Object.getPrototypeOf(async function *() { /* probe: only its constructor (AsyncGeneratorFunction) is read */ }).constructor
 ]);
 const { "call": FN_CALL, "apply": FN_APPLY, "bind": FN_BIND } = Function.prototype;
 const { "then": PROMISE_THEN, "catch": PROMISE_CATCH, "finally": PROMISE_FINALLY } = Promise.prototype;
@@ -307,23 +330,23 @@ interface Environment {
 
 /** Build the shimmed capability environment (globals + module resolver + host guard) bound to a recorder. */
 function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Environment {
-	const stubResponse = () => ({ "ok": true, "status": 200, "statusText": "OK", "headers": {}, "text": async () => "", "json": async () => ({}), "arrayBuffer": async () => new ArrayBuffer(0) });
+	const stubResponse = () => ({ "ok": true, "status": 200, "statusText": "OK", "headers": {}, "text": () => Promise.resolve(""), "json": () => Promise.resolve({}), "arrayBuffer": () => Promise.resolve(new ArrayBuffer(0)) });
 	const pending = new PendingWork();
 
 	// --- net ---
 	const fetchShim = (input: unknown, init?: { "method"?: string }) => {
-		recorder.record({ "capability": "net", "value": typeof input === "string" ? input : String((input as { "url"?: string })?.url ?? input), "callee": "fetch", "safe": httpVerbSafe(init?.method) });
+		recorder.record({ "capability": "net", "value": typeof input === "string" ? input : asResourceString((input as { "url"?: string })?.url ?? input), "callee": "fetch", "safe": httpVerbSafe(init?.method) });
 
 		return Promise.resolve(stubResponse());
 	};
 
 	class WebSocketShim {
-		constructor(url: unknown) {
-			recorder.record({ "capability": "net", "value": String(url), "callee": "WebSocket", "safe": false });
+		public constructor(url: unknown) {
+			recorder.record({ "capability": "net", "value": asResourceString(url), "callee": "WebSocket", "safe": false });
 		}
 	}
 	const httpGet = (name: string) => (url: unknown) => {
-		recorder.record({ "capability": "net", "value": typeof url === "string" ? url : String((url as { "href"?: string })?.href ?? url), "callee": name, "safe": name.endsWith("get") });
+		recorder.record({ "capability": "net", "value": typeof url === "string" ? url : asResourceString((url as { "href"?: string })?.href ?? url), "callee": name, "safe": name.endsWith("get") });
 
 		return { "on": () => undefined, "end": () => undefined, "write": () => undefined };
 	};
@@ -332,7 +355,7 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 
 	// --- fs ---
 	const fsCall = (name: string, capability: string) => (path: unknown, ...rest: unknown[]) => {
-		recorder.record({ "capability": capability, "value": String(path), "callee": `fs.${name}`, "safe": capability === "fs:read" });
+		recorder.record({ "capability": capability, "value": asResourceString(path), "callee": `fs.${name}`, "safe": capability === "fs:read" });
 		const cb = rest[rest.length - 1];
 
 		if (typeof cb === "function") {
@@ -349,11 +372,16 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 		const wrap = (name: string, capability: string) => {
 			const fn = fsCall(name, capability);
 
-			mod[name] = promises && !name.endsWith("Sync") ? (...a: unknown[]) => Promise.resolve((fn as (...x: unknown[]) => unknown)(...a)) : fn;
+			mod[name] = promises && !name.endsWith("Sync") ? (...args: unknown[]) => Promise.resolve((fn as (...callArgs: unknown[]) => unknown)(...args)) : fn;
 		};
 
-		for (const name of FS_READ) { wrap(name, "fs:read"); }
-		for (const name of FS_WRITE) { wrap(name, "fs:write"); }
+		for (const name of FS_READ) {
+			wrap(name, "fs:read");
+		}
+
+		for (const name of FS_WRITE) {
+			wrap(name, "fs:write");
+		}
 
 		return mod;
 	};
@@ -365,14 +393,17 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 
 	// --- exec ---
 	const execCall = (name: string) => (command: unknown) => {
-		recorder.record({ "capability": "exec", "value": String(command), "callee": name, "safe": false });
+		recorder.record({ "capability": "exec", "value": asResourceString(command), "callee": name, "safe": false });
 
 		return { "on": () => undefined, "stdout": { "on": () => undefined }, "stderr": { "on": () => undefined }, "kill": () => undefined, "status": 0, "stdout_": "" };
 	};
 
 	const childProcess: Record<string, unknown> = {};
 
-	for (const name of EXEC) { childProcess[name] = execCall(name); }
+	for (const name of EXEC) {
+		childProcess[name] = execCall(name);
+	}
+
 	(childProcess as { "default"?: unknown }).default = childProcess;
 
 	// --- env ---
@@ -380,7 +411,9 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 		{},
 		{
 			"get": (_t, key) => {
-				if (typeof key === "string") { recorder.record({ "capability": "env", "value": key, "callee": "process.env", "safe": true }); }
+				if (typeof key === "string") {
+					recorder.record({ "capability": "env", "value": key, "callee": "process.env", "safe": true });
+				}
 
 				return "";
 			},
@@ -397,36 +430,43 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 	};
 
 	function FunctionShim(...args: unknown[]) {
-		recorder.record({ "capability": "eval", "value": String(args[args.length - 1] ?? ""), "callee": "Function", "safe": false });
+		recorder.record({ "capability": "eval", "value": asResourceString(args[args.length - 1] ?? ""), "callee": "Function", "safe": false });
 
 		return () => undefined;
 	}
 
-	const isCodeConstructor = (v: unknown): boolean => CODE_CONSTRUCTORS.has(v) || v === REAL_EVAL;
-	const shimFor = (v: unknown): unknown => (v === REAL_EVAL ? evalShim : FunctionShim);
+	const isCodeConstructor = (value: unknown): boolean => CODE_CONSTRUCTORS.has(value) || value === REAL_EVAL;
+	const shimFor = (value: unknown): unknown => (value === REAL_EVAL ? evalShim : FunctionShim);
 
 	// Promise reactions run from host land as microtasks. Wrap the callbacks so (a) a divergence inside
 	// one is swallowed — it's already recorded, and letting it reject the derived promise would only
 	// surface as an unhandled rejection — and (b) the reaction counts as pending work until the source
 	// promise settles, so `runCanaryAsync` waits for it.
-	const wrapReaction = (method: (...a: unknown[]) => unknown) => function(this: Promise<unknown>, ...callbacks: unknown[]): unknown {
+	const wrapReaction = (method: (...args: unknown[]) => unknown) => function(this: Promise<unknown>, ...callbacks: unknown[]): unknown {
 		let open = true;
 
 		pending.timerStarted();
 		const finish = (): void => {
-			if (!open) { return; }
+			if (!open) {
+				return;
+			}
+
 			open = false;
 			pending.timerFinished();
 		};
 
-		PROMISE_THEN.call(this, finish, finish); // settle-based, whichever reaction path runs
+		// settle-based, whichever reaction path runs; the no-op catch handles the never-rejecting derived promise
+		PROMISE_THEN.call(this, finish, finish).catch(() => undefined);
 		const wrapped = callbacks.map((cb) => (typeof cb !== "function"
 			? cb
-			: (...a: unknown[]) => {
+			: (...args: unknown[]) => {
 					try {
-						return (cb as (...x: unknown[]) => unknown)(...a);
+						return (cb as (...callArgs: unknown[]) => unknown)(...args);
 					} catch (error) {
-						if (error instanceof CanaryDivergenceError) { return undefined; }
+						if (error instanceof CanaryDivergenceError) {
+							return undefined;
+						}
+
 						throw error;
 					}
 				}));
@@ -434,10 +474,10 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 		return method.apply(this, wrapped);
 	};
 
-	const guardedReactions = new Map<unknown, (...a: unknown[]) => unknown>([
-		[PROMISE_THEN, wrapReaction(PROMISE_THEN as (...a: unknown[]) => unknown)],
-		[PROMISE_CATCH, wrapReaction(PROMISE_CATCH as (...a: unknown[]) => unknown)],
-		[PROMISE_FINALLY, wrapReaction(PROMISE_FINALLY as (...a: unknown[]) => unknown)]
+	const guardedReactions = new Map<unknown, (...args: unknown[]) => unknown>([
+		[PROMISE_THEN, wrapReaction(PROMISE_THEN as (...args: unknown[]) => unknown)],
+		[PROMISE_CATCH, wrapReaction(PROMISE_CATCH as (...args: unknown[]) => unknown)],
+		[PROMISE_FINALLY, wrapReaction(PROMISE_FINALLY as (...args: unknown[]) => unknown)]
 	]);
 
 	// --- the host guard: keeps the sandbox closed at the interpreter's host boundary ---
@@ -446,13 +486,18 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 		"sanitize": (value) => (isCodeConstructor(value) ? shimFor(value) : value),
 		// Vet callables at invocation, including `Function.prototype.call/apply/bind` aimed at one.
 		"beforeCall": (callee, thisArg) => {
-			if (isCodeConstructor(callee)) { return shimFor(callee) as (...a: unknown[]) => unknown; }
+			if (isCodeConstructor(callee)) {
+				return shimFor(callee) as (...args: unknown[]) => unknown;
+			}
+
 			if ((callee === FN_CALL || callee === FN_APPLY || callee === FN_BIND) && isCodeConstructor(thisArg)) {
-				const shim = shimFor(thisArg) as (...a: unknown[]) => unknown;
+				const shim = shimFor(thisArg) as (...args: unknown[]) => unknown;
 
-				if (callee === FN_BIND) { return () => shim; }
+				if (callee === FN_BIND) {
+					return () => shim;
+				}
 
-				return (...a: unknown[]) => (callee === FN_APPLY ? shim(...((a[1] as unknown[]) ?? [])) : shim(...a.slice(1)));
+				return (...args: unknown[]) => (callee === FN_APPLY ? shim(...((args[1] as unknown[]) ?? [])) : shim(...args.slice(1)));
 			}
 
 			return guardedReactions.get(callee) ?? callee;
@@ -463,18 +508,18 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 	// (Reflect's methods are non-enumerable, so copy by name rather than spread.)
 	const guardedReflect = Object.fromEntries(Object.getOwnPropertyNames(Reflect).map((name) => [name, (Reflect as unknown as Record<string, unknown>)[name]])) as Record<string, unknown>;
 
-	guardedReflect.apply = (target: unknown, thisArg: unknown, args: ArrayLike<unknown>) => Reflect.apply(hostGuard.beforeCall(target as (...a: unknown[]) => unknown, thisArg, false), thisArg, Array.from(args));
+	guardedReflect.apply = (target: unknown, thisArg: unknown, args: ArrayLike<unknown>) => Reflect.apply(hostGuard.beforeCall(target as (...callArgs: unknown[]) => unknown, thisArg, false), thisArg, Array.from(args));
 	guardedReflect.construct = (target: unknown, args: ArrayLike<unknown>, newTarget?: unknown) => {
-		const vetted = hostGuard.beforeCall(target as (...a: unknown[]) => unknown, undefined, true) as unknown as new (...a: unknown[]) => unknown;
+		const vetted = hostGuard.beforeCall(target as (...callArgs: unknown[]) => unknown, undefined, true) as unknown as new (...callArgs: unknown[]) => unknown;
 
-		return Reflect.construct(vetted, Array.from(args), (newTarget ?? vetted) as new (...a: unknown[]) => unknown);
+		return Reflect.construct(vetted, Array.from(args), (newTarget ?? vetted) as new (...callArgs: unknown[]) => unknown);
 	};
 
 	// Timers: a string callback is `eval`; a function callback is tracked as pending async work, and a
 	// divergence inside it is recorded (already in the Recorder) rather than escaping as uncaught.
 	const runLater = (cb: unknown, args: unknown[], name: string): (() => void) | undefined => {
 		if (typeof cb !== "function") {
-			recorder.record({ "capability": "eval", "value": String(cb), "callee": name, "safe": false });
+			recorder.record({ "capability": "eval", "value": asResourceString(cb), "callee": name, "safe": false });
 
 			return undefined;
 		}
@@ -483,10 +528,15 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 
 		return () => {
 			try {
-				(cb as (...a: unknown[]) => unknown)(...args);
+				(cb as (...callArgs: unknown[]) => unknown)(...args);
 			} catch (error) {
-				if (!isUncatchable(error)) { throw error; }
-				if (!(error instanceof CanaryDivergenceError)) { throw error; } // an interpreter bug stays loud
+				if (!isUncatchable(error)) {
+					throw error;
+				}
+
+				if (!(error instanceof CanaryDivergenceError)) {
+					throw error; // an interpreter bug stays loud
+				}
 			} finally {
 				pending.timerFinished();
 			}
@@ -500,14 +550,21 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 	};
 
 	const setIntervalShim = (cb: unknown, ms?: number, ...args: unknown[]) => {
-		if (typeof cb !== "function") { return void runLater(cb, args, "setInterval"); }
+		if (typeof cb !== "function") {
+			runLater(cb, args, "setInterval");
+
+			return undefined;
+		}
+
 		pending.timerStarted();
 
 		return setInterval(() => {
 			try {
-				(cb as (...a: unknown[]) => unknown)(...args);
+				(cb as (...callArgs: unknown[]) => unknown)(...args);
 			} catch (error) {
-				if (!(error instanceof CanaryDivergenceError)) { throw error; }
+				if (!(error instanceof CanaryDivergenceError)) {
+					throw error;
+				}
 			}
 		}, ms);
 	};
@@ -520,7 +577,9 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 	const queueMicrotaskShim = (cb: unknown) => {
 		const task = runLater(cb, [], "queueMicrotask");
 
-		if (task !== undefined) { queueMicrotask(task); }
+		if (task !== undefined) {
+			queueMicrotask(task);
+		}
 	};
 
 	const globals: Record<string, unknown> = {
@@ -564,7 +623,7 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 	// `require` is a plain host global returning a module namespace.
 	globals.require = (spec: string) => builtinModules[spec];
 
-	const resolveModule = (spec: string): unknown => builtinModules[spec] ?? (options.modules ?? {})[spec];
+	const resolveModule = (spec: string): unknown => builtinModules[spec] ?? options.modules?.[spec];
 
 	return { "globals": globals, "resolveModule": resolveModule, "hostGuard": hostGuard, "pending": pending };
 }
@@ -604,17 +663,25 @@ function prepareCanary(code: string, options: CanaryOptions): PreparedCanary {
 
 		const { checker } = context;
 
-		if (site === undefined || checker === undefined) { return; }
+		if (site === undefined || checker === undefined) {
+			return;
+		}
+
 		const valueType = typeOfNode(checker, site.arguments?.[0]);
 
-		if (valueType === undefined) { return; }
+		if (valueType === undefined) {
+			return;
+		}
+
 		event.valueType = valueType;
-		if ([...sensitive].some((name) => valueType === name || valueType.includes(name))) { event.sensitive = true; }
+		if ([...sensitive].some((name) => valueType === name || valueType.includes(name))) {
+			event.sensitive = true;
+		}
 	};
 
 	const recorder = new Recorder(predicted, annotate);
 	const { globals, resolveModule, hostGuard, pending } = capabilityEnvironment(recorder, options);
-	const vmOptions: InterpretOptions = { "globals": globals, "resolveModule": resolveModule, "hostGuard": hostGuard, "realGlobals": false, "fileName": options.fileName, "onAsyncFiber": (p) => { pending.trackFiber(p); } };
+	const vmOptions: InterpretOptions = { "globals": globals, "resolveModule": resolveModule, "hostGuard": hostGuard, "realGlobals": false, "fileName": options.fileName, "onAsyncFiber": pending.trackFiber.bind(pending) };
 	const report: CanaryReport = { "ok": true, "aborted": false, "predicted": [...predicted].sort(), "observed": recorder.events, "observedCaps": [], "sensitiveFlows": [], "pendingAsync": 0 };
 	const typed = useTypes ? createTypedVM(code, vmOptions) : undefined;
 	const vm = typed?.vm ?? createVM(code, vmOptions).vm;
@@ -622,7 +689,11 @@ function prepareCanary(code: string, options: CanaryOptions): PreparedCanary {
 	context.vm = vm;
 	context.checker = typed?.checker;
 
-	return { "vm": vm, "recorder": recorder, "pending": pending, "report": report, "setCurrentVM": (v) => void (context.vm = v) };
+	const setCurrentVM = (value: VM): void => {
+		context.vm = value;
+	};
+
+	return { "vm": vm, "recorder": recorder, "pending": pending, "report": report, "setCurrentVM": setCurrentVM };
 }
 
 /** Shared by the sync and async runners: build the environment, run the synchronous part. */
@@ -632,7 +703,9 @@ function startCanary(code: string, options: CanaryOptions): CanaryRun {
 	try {
 		prepared.report.completion = prepared.vm.run();
 	} catch (error) {
-		if (!(error instanceof CanaryDivergenceError)) { prepared.report.error = error; } // a normal guest error, or an interpreter bug
+		if (!(error instanceof CanaryDivergenceError)) {
+			prepared.report.error = error; // a normal guest error, or an interpreter bug
+		}
 	}
 
 	return prepared;
@@ -646,13 +719,13 @@ function finishReport({ recorder, pending, report }: CanaryRun): CanaryReport {
 	}
 
 	report.pendingAsync = pending.count;
-	report.observedCaps = [...new Set(recorder.events.map((e) => e.capability))].sort();
-	report.sensitiveFlows = recorder.events.filter((e) => e.sensitive === true);
+	report.observedCaps = [...new Set(recorder.events.map((event) => event.capability))].sort();
+	report.sensitiveFlows = recorder.events.filter((event) => event.sensitive === true);
 
 	return report;
 }
 
-const isThenable = (v: unknown): v is PromiseLike<unknown> => typeof (v as { "then"?: unknown })?.then === "function";
+const isThenable = (value: unknown): value is PromiseLike<unknown> => typeof (value as { "then"?: unknown })?.then === "function";
 
 /**
  * Run `code` under the canary, **synchronously**. Returns a report; when runtime reaches a capability
@@ -765,7 +838,10 @@ export function exploreCanary(code: string, options: ExploreOptions): Exploratio
 
 		try {
 			while (!vm.finished) {
-				if (vm.steps - startSteps > maxSteps) { throw new Error(`exploration: path ${path.id} exceeded ${maxSteps} steps`); }
+				if (vm.steps - startSteps > maxSteps) {
+					throw new Error(`exploration: path ${path.id} exceeded ${maxSteps} steps`);
+				}
+
 				const { top } = vm;
 
 				if (top !== undefined && top.kind === undefined && top.node !== null && top.phase === 1 && isConditionalNode(top.node)) {
@@ -793,16 +869,25 @@ export function exploreCanary(code: string, options: ExploreOptions): Exploratio
 				}
 
 				vm.step();
-				if (vm.paused) { throw new Error("exploration: top-level await is not supported (synchronous paths only)"); }
+				if (vm.paused) {
+					throw new Error("exploration: top-level await is not supported (synchronous paths only)");
+				}
 			}
 
 			report.completion = vm.completion;
 		} catch (error) {
-			if (error instanceof CanaryDivergenceError) { report.aborted = true; } else { report.error = error; }
+			if (error instanceof CanaryDivergenceError) {
+				report.aborted = true;
+			} else {
+				report.error = error;
+			}
 		}
 
 		report.divergence = recorder.divergences.get(path.id);
-		if (report.divergence !== undefined) { report.aborted = true; }
+		if (report.divergence !== undefined) {
+			report.aborted = true;
+		}
+
 		report.steps = vm.steps - startSteps;
 		reports.push(report);
 	}
@@ -812,7 +897,7 @@ export function exploreCanary(code: string, options: ExploreOptions): Exploratio
 		"predicted": [...new Set(options.predicted)].sort(),
 		"paths": reports,
 		"observed": recorder.events,
-		"observedCaps": [...new Set(recorder.events.map((e) => e.capability))].sort(),
+		"observedCaps": [...new Set(recorder.events.map((event) => event.capability))].sort(),
 		"truncated": truncated
 	};
 }
@@ -827,9 +912,13 @@ export async function runCanaryAsync(code: string, options: CanaryOptions & { "m
 
 	try {
 		run.report.completion = await run.vm.runAsync(); // drives top-level await
-		if (isThenable(run.report.completion)) { run.report.completion = await run.report.completion; }
+		if (isThenable(run.report.completion)) {
+			run.report.completion = await run.report.completion;
+		}
 	} catch (error) {
-		if (!(error instanceof CanaryDivergenceError)) { run.report.error = error; }
+		if (!(error instanceof CanaryDivergenceError)) {
+			run.report.error = error;
+		}
 	}
 
 	await run.pending.drain(options.maxDrainMs ?? 2000);

@@ -6,30 +6,35 @@ import type { Machine } from "../vm.ts";
 import ts from "typescript";
 import { createGuestFunction } from "./functions.ts";
 
-const K = ts.SyntaxKind;
+const Kind = ts.SyntaxKind;
 
 export function hoist(vm: Machine, scope: Scope, statements: readonly ts.Statement[]): void {
 	for (const statement of statements) {
-		if (isAmbient(statement)) {
-			continue;
-		} else if (ts.isImportDeclaration(statement)) {
-			bindImport(vm, scope, statement);
-		} else if (ts.isFunctionDeclaration(statement) && statement.name) {
-			if (statement.body !== undefined) { scope.declareFunction(statement.name.text, createGuestFunction(vm, statement, scope)); } // (an overload signature is erased)
-		} else if (ts.isEnumDeclaration(statement)) {
-			// tsc emits an enum as `var E; (function (E) {…})(E || (E = {}))`: the name is var-hoisted
-			// (undefined before the declaration runs; declarations merge). A `const enum` is the same at
-			// runtime — single-file transpilation (tsc's transpileModule, Node's type stripping) cannot
-			// inline its members.
-			scope.declareVar(statement.name.text);
-		} else if (ts.isVariableStatement(statement)) {
-			const { flags } = statement.declarationList;
-			const isLet = (flags & ts.NodeFlags.Let) !== 0;
-			const isConst = (flags & ts.NodeFlags.Const) !== 0;
+		// Ambient (`declare`) statements never execute, so they hoist nothing.
+		if (!isAmbient(statement)) {
+			if (ts.isImportDeclaration(statement)) {
+				bindImport(vm, scope, statement);
+			} else if (ts.isFunctionDeclaration(statement) && statement.name) {
+				if (statement.body !== undefined) {
+					scope.declareFunction(statement.name.text, createGuestFunction(vm, statement, scope)); // (an overload signature is erased)
+				}
+			} else if (ts.isEnumDeclaration(statement)) {
+				// tsc emits an enum as `var E; (function (E) {…})(E || (E = {}))`: the name is var-hoisted
+				// (undefined before the declaration runs; declarations merge). A `const enum` is the same at
+				// runtime — single-file transpilation (tsc's transpileModule, Node's type stripping) cannot
+				// inline its members.
+				scope.declareVar(statement.name.text);
+			} else if (ts.isVariableStatement(statement)) {
+				const { flags } = statement.declarationList;
+				const isLet = (flags & ts.NodeFlags.Let) !== 0;
+				const isConst = (flags & ts.NodeFlags.Const) !== 0;
 
-			if (isLet || isConst) {
-				for (const decl of statement.declarationList.declarations) {
-					for (const name of bindingNames(decl.name)) { scope.declareLexical(name, isConst ? "const" : "let"); }
+				if (isLet || isConst) {
+					const names = statement.declarationList.declarations.flatMap((decl) => bindingNames(decl.name));
+
+					for (const name of names) {
+						scope.declareLexical(name, isConst ? "const" : "let");
+					}
 				}
 			}
 		}
@@ -38,14 +43,20 @@ export function hoist(vm: Machine, scope: Scope, statements: readonly ts.Stateme
 	// `var` is function-scoped no matter how deeply nested in blocks/loops/try/switch: collect
 	// recursively (not into nested functions/classes, which are their own var scope). Idempotent, so
 	// re-running at each block entry is harmless.
-	for (const name of collectVarNames(statements)) { scope.declareVar(name); }
+	for (const name of collectVarNames(statements)) {
+		scope.declareVar(name);
+	}
 }
 
 /** All identifiers bound by a (possibly destructuring) binding name. */
 export function bindingNames(name: ts.BindingName, out: string[] = []): string[] {
-	if (ts.isIdentifier(name)) { out.push(name.text); } else {
+	if (ts.isIdentifier(name)) {
+		out.push(name.text);
+	} else {
 		for (const element of name.elements) {
-			if (!ts.isOmittedExpression(element)) { bindingNames(element.name, out); }
+			if (!ts.isOmittedExpression(element)) {
+				bindingNames(element.name, out);
+			}
 		}
 	}
 
@@ -61,17 +72,28 @@ export function collectVarNames(statements: readonly ts.Node[], out: string[] = 
 	while (pending.length > 0) {
 		const node = pending.pop()!;
 
-		if (ts.isFunctionLike(node) || ts.isClassLike(node)) { continue; } // own var scope
-		if (isAmbient(node)) { continue; } // `declare var x` describes a host binding; it never creates one
-		if (ts.isVariableDeclarationList(node) && (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const | ts.NodeFlags.Using)) === 0) {
-			for (const decl of node.declarations) { bindingNames(decl.name, out); }
+		// A function/class is its own var scope; an ambient `declare var x` describes a host binding and
+		// never creates one — either way, skip the node and don't descend into it.
+		if (!(ts.isFunctionLike(node) || ts.isClassLike(node) || isAmbient(node))) {
+			if (ts.isVariableDeclarationList(node) && (node.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const | ts.NodeFlags.Using)) === 0) {
+				for (const decl of node.declarations) {
+					bindingNames(decl.name, out);
+				}
+			}
+
+			if (ts.isEnumDeclaration(node) && !isAmbient(node)) {
+				out.push(node.name.text); // tsc emits `var E` (also as a bare `if` branch)
+			}
+
+			const children: ts.Node[] = [];
+
+			ts.forEachChild(node, (child) => {
+				children.push(child);
+			});
+			for (let index = children.length - 1; index >= 0; index--) {
+				pending.push(children[index]);
+			}
 		}
-
-		if (ts.isEnumDeclaration(node) && !isAmbient(node)) { out.push(node.name.text); } // tsc emits `var E` (also as a bare `if` branch)
-		const children: ts.Node[] = [];
-
-		ts.forEachChild(node, (child) => void children.push(child));
-		for (let i = children.length - 1; i >= 0; i--) { pending.push(children[i]); }
 	}
 
 	return out;
@@ -79,7 +101,7 @@ export function collectVarNames(statements: readonly ts.Node[], out: string[] = 
 
 /** Ambient (`declare ...`) statements describe host shapes for the checker; they never execute. */
 export function isAmbient(node: ts.Node): boolean {
-	return ts.canHaveModifiers(node) && (ts.getModifiers(node) ?? []).some((m) => m.kind === K.DeclareKeyword);
+	return ts.canHaveModifiers(node) && (ts.getModifiers(node) ?? []).some((modifier) => modifier.kind === Kind.DeclareKeyword);
 }
 
 /**
@@ -97,26 +119,34 @@ export function bindImport(vm: Machine, scope: Scope, node: ts.ImportDeclaration
 		return;
 	}
 
-	if (clause.isTypeOnly) { return; }
+	if (clause.isTypeOnly) {
+		return;
+	}
+
 	const ns = vm.importModule(specifier) as Record<string, unknown>;
 	const bind = (name: string, value: unknown): void => {
 		scope.declareLexical(name, "const");
 		scope.initialize(name, value);
 	};
 
-	if (clause.name) { bind(clause.name.text, vm.fromHost((ns as { "default"?: unknown }).default ?? ns)); } // default import
+	if (clause.name) {
+		bind(clause.name.text, vm.fromHost((ns as { "default"?: unknown }).default ?? ns)); // default import
+	}
+
 	const bindings = clause.namedBindings;
 
 	if (bindings && ts.isNamespaceImport(bindings)) {
 		bind(bindings.name.text, ns);
 	} else if (bindings && ts.isNamedImports(bindings)) {
 		for (const element of bindings.elements) {
-			if (element.isTypeOnly) { continue; }
-			bind(element.name.text, vm.fromHost(ns[(element.propertyName ?? element.name).text]));
+			if (!element.isTypeOnly) {
+				bind(element.name.text, vm.fromHost(ns[(element.propertyName ?? element.name).text]));
+			}
 		}
 	}
 }
 
 /** No handlers to register: this module only provides helpers. */
 export function register(): void {
+	// intentionally empty — this module exports helpers only, with nothing to install into the registry
 }

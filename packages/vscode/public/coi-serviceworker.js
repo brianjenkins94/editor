@@ -16,11 +16,15 @@ globalThis.addEventListener("fetch", (event) => {
 	const request = event.request;
 
 	// A range/only-if-cached cross-origin request can't be re-fetched here — leave it to the browser.
-	if (request.cache === "only-if-cached" && request.mode !== "same-origin") { return; }
+	if (request.cache === "only-if-cached" && request.mode !== "same-origin") {
+		return;
+	}
 
 	event.respondWith(fetch(request).then((response) => {
 		// Opaque responses (status 0, no-cors) can't have headers added — pass them through untouched.
-		if (response.status === 0) { return response; }
+		if (response.status === 0) {
+			return response;
+		}
 
 		const headers = new Headers(response.headers);
 

@@ -14,7 +14,7 @@ import { createArgumentsObject, defineData, isObjectLike, toPropertyKey } from "
 import { THIS_TDZ, thisValue } from "./references.ts";
 import { on, syntheticHandlers } from "./registry.ts";
 
-const K = ts.SyntaxKind;
+const Kind = ts.SyntaxKind;
 
 export interface ClassMeta {
 	"node": ts.ClassLikeDeclaration;
@@ -53,20 +53,27 @@ export interface PrivateEntry {
 export const privateElements = new WeakMap<object, Map<symbol, PrivateEntry>>();
 
 export function lookupPrivate(scope: Scope, name: string): PrivateName {
-	for (let s: Scope | undefined = scope; s; s = s.parent) {
-		const pn = s.privateNames?.get(name);
+	for (let current: Scope | undefined = scope; current; current = current.parent) {
+		const pn = current.privateNames?.get(name);
 
-		if (pn !== undefined) { return pn as PrivateName; }
+		if (pn !== undefined) {
+			return pn as PrivateName;
+		}
 	}
 
 	return unimplemented(`unbound private name ${name} (a parse-time error in valid code)`);
 }
 
 export function privateEntry(obj: unknown, pn: PrivateName, verb: string): PrivateEntry {
-	if (!isObjectLike(obj)) { throw new TypeError(`Cannot ${verb} private member ${pn.description} from a non-object`); }
+	if (!isObjectLike(obj)) {
+		throw new TypeError(`Cannot ${verb} private member ${pn.description} from a non-object`);
+	}
+
 	const entry = privateElements.get(obj)?.get(pn.key);
 
-	if (entry === undefined) { throw new TypeError(`Cannot ${verb} private member ${pn.description} from an object whose class did not declare it`); }
+	if (entry === undefined) {
+		throw new TypeError(`Cannot ${verb} private member ${pn.description} from an object whose class did not declare it`);
+	}
 
 	return entry;
 }
@@ -74,9 +81,17 @@ export function privateEntry(obj: unknown, pn: PrivateName, verb: string): Priva
 export function privateGet(obj: unknown, pn: PrivateName): unknown {
 	const entry = privateEntry(obj, pn, "read");
 
-	if (pn.kind === "field") { return entry.value; }
-	if (pn.kind === "method") { return pn.method; }
-	if (typeof pn.get !== "function") { throw new TypeError(`'${pn.description}' was defined without a getter`); }
+	if (pn.kind === "field") {
+		return entry.value;
+	}
+
+	if (pn.kind === "method") {
+		return pn.method;
+	}
+
+	if (typeof pn.get !== "function") {
+		throw new TypeError(`'${pn.description}' was defined without a getter`);
+	}
 
 	return (pn.get as (this: unknown) => unknown).call(obj);
 }
@@ -90,13 +105,21 @@ export function privateSet(obj: unknown, pn: PrivateName, value: unknown): void 
 		return;
 	}
 
-	if (pn.kind === "method") { throw new TypeError(`Private method '${pn.description}' is not writable`); }
-	if (typeof pn.set !== "function") { throw new TypeError(`'${pn.description}' was defined without a setter`); }
+	if (pn.kind === "method") {
+		throw new TypeError(`Private method '${pn.description}' is not writable`);
+	}
+
+	if (typeof pn.set !== "function") {
+		throw new TypeError(`'${pn.description}' was defined without a setter`);
+	}
+
 	(pn.set as (this: unknown, v: unknown) => void).call(obj, value);
 }
 
 export function privateHas(obj: unknown, pn: PrivateName): boolean {
-	if (!isObjectLike(obj)) { throw new TypeError("Cannot use 'in' operator to search for a private field in a non-object"); }
+	if (!isObjectLike(obj)) {
+		throw new TypeError("Cannot use 'in' operator to search for a private field in a non-object");
+	}
 
 	return privateElements.get(obj)?.has(pn.key) === true;
 }
@@ -105,8 +128,14 @@ export function privateHas(obj: unknown, pn: PrivateName): boolean {
 export function privateAdd(obj: object, pn: PrivateName, value?: unknown): void {
 	let map = privateElements.get(obj);
 
-	if (map === undefined) { privateElements.set(obj, (map = new Map())); }
-	if (map.has(pn.key)) { throw new TypeError(`Cannot initialize ${pn.description} twice on the same object`); }
+	if (map === undefined) {
+		privateElements.set(obj, (map = new Map()));
+	}
+
+	if (map.has(pn.key)) {
+		throw new TypeError(`Cannot initialize ${pn.description} twice on the same object`);
+	}
+
 	map.set(pn.key, { "pn": pn, "value": value });
 }
 
@@ -114,21 +143,34 @@ export function privateAdd(obj: object, pn: PrivateName, value?: unknown): void 
 export function clonePrivateElements(from: object, to: object, cloneValue: (v: unknown) => unknown): void {
 	const map = privateElements.get(from);
 
-	if (map === undefined) { return; }
+	if (map === undefined) {
+		return;
+	}
+
 	const copy = new Map<symbol, PrivateEntry>();
 
-	for (const [key, entry] of map) { copy.set(key, { "pn": entry.pn, "value": cloneValue(entry.value) }); }
+	for (const [key, entry] of map) {
+		copy.set(key, { "pn": entry.pn, "value": cloneValue(entry.value) });
+	}
+
 	privateElements.set(to, copy);
 }
 
 export interface GuestClass {
-	new (...args: unknown[]): unknown;
 	"prototype": object;
+	new (...args: unknown[]): unknown;
 }
+
+const CONSTRUCT_PROBE = new Proxy(function() {
+	// Never invoked: the Proxy's `construct` trap answers [[Construct]] on this target.
+}, { "construct": () => ({}) });
 
 /** IsConstructor, without calling anything: `Reflect.construct` validates its newTarget up front. */
 export function isConstructor(value: unknown): boolean {
-	if (typeof value !== "function") { return false; }
+	if (typeof value !== "function") {
+		return false;
+	}
+
 	try {
 		// The target's construct trap answers without touching `value.prototype` (a getter there is
 		// observable — `class C extends Base` must read it exactly once).
@@ -139,8 +181,6 @@ export function isConstructor(value: unknown): boolean {
 		return false;
 	}
 }
-
-const CONSTRUCT_PROBE = new Proxy(function() {}, { "construct": () => ({}) });
 
 /** A construction in progress: the instance as it stands (a parent constructor's `return`, or a host
  *  parent, may replace it) and the class being constructed — GetSuperConstructor is DYNAMIC
@@ -167,12 +207,17 @@ export function classMetaOf(ctor: GuestClass): ClassMeta {
 export function hasStatic(member: ts.ClassElement): boolean {
 	const modifiers = ts.canHaveModifiers(member) ? ts.getModifiers(member) : undefined;
 
-	return (modifiers ?? []).some((m) => m.kind === K.StaticKeyword);
+	return (modifiers ?? []).some((modifier) => modifier.kind === Kind.StaticKeyword);
 }
 
 export function memberKey(vm: Machine, name: ts.PropertyName | undefined, scope: Scope): PropertyKey {
-	if (name === undefined) { return ""; }
-	if (ts.isComputedPropertyName(name)) { return toPropertyKey(vm.evalNodeSync(name.expression, scope)); }
+	if (name === undefined) {
+		return "";
+	}
+
+	if (ts.isComputedPropertyName(name)) {
+		return toPropertyKey(vm.evalNodeSync(name.expression, scope));
+	}
 
 	return propertyName(name);
 }
@@ -181,18 +226,30 @@ export function memberKey(vm: Machine, name: ts.PropertyName | undefined, scope:
  *  keys evaluate — they may mention them) so every member, including initializers and methods that
  *  run later, resolves them lexically through the class scope. Idempotent per scope. */
 export function declarePrivateNames(node: ts.ClassLikeDeclaration, scope: Scope): Map<string, object> {
-	if (scope.privateNames !== undefined) { return scope.privateNames; }
+	if (scope.privateNames !== undefined) {
+		return scope.privateNames;
+	}
+
 	const privateNames = new Map<string, object>();
 
 	scope.privateNames = privateNames;
 	for (const member of node.members) {
 		const { name } = member as { "name"?: ts.Node };
 
-		if (name === undefined || !ts.isPrivateIdentifier(name)) { continue; }
-		if (privateNames.has(name.text)) { continue; } // a get/set pair shares one name
-		const kind: PrivateName["kind"] = ts.isPropertyDeclaration(member) ? "field" : ts.isMethodDeclaration(member) ? "method" : "accessor";
+		// a get/set pair shares one name (skipped when already present)
+		if (name !== undefined && ts.isPrivateIdentifier(name) && !privateNames.has(name.text)) {
+			let kind: PrivateName["kind"];
 
-		privateNames.set(name.text, { "key": Symbol(name.text), "description": name.text, "kind": kind, "isStatic": hasStatic(member) } satisfies PrivateName);
+			if (ts.isPropertyDeclaration(member)) {
+				kind = "field";
+			} else if (ts.isMethodDeclaration(member)) {
+				kind = "method";
+			} else {
+				kind = "accessor";
+			}
+
+			privateNames.set(name.text, { "key": Symbol(name.text), "description": name.text, "kind": kind, "isStatic": hasStatic(member) } satisfies PrivateName);
+		}
 	}
 
 	return privateNames;
@@ -208,6 +265,9 @@ export interface PreEvaluatedClass {
 	"name"?: string;
 }
 
+/** A method/accessor/constructor without a body is an overload signature: erased, its key never evaluated. */
+export const isSignatureOnly = (member: ts.ClassElement): boolean => (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member) || ts.isConstructorDeclaration(member)) && member.body === undefined;
+
 export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, outerScope: Scope, pre?: PreEvaluatedClass): GuestClass {
 	assertSupportedClassSurface(node);
 	// The class body sees an inner, immutable binding of its own name (so static initializers,
@@ -216,22 +276,50 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 	// initialized once the constructor exists.
 	const scope = pre?.scope ?? new Scope(outerScope, false);
 
-	if (pre === undefined && node.name) { scope.declareLexical(node.name.text, "const"); }
-	const heritage = node.heritageClauses?.find((h) => h.token === K.ExtendsKeyword);
-	const superClass = pre !== undefined ? pre.superClass : heritage ? vm.evalNodeSync(heritage.types[0].expression, scope) : undefined;
+	if (pre === undefined && node.name) {
+		scope.declareLexical(node.name.text, "const");
+	}
 
-	if (heritage && superClass !== null && typeof superClass !== "function") { throw new TypeError(`Class extends value ${String(superClass)} is not a constructor or null`); }
+	const heritage = node.heritageClauses?.find((clause) => clause.token === Kind.ExtendsKeyword);
+	let superClass: unknown;
+
+	if (pre !== undefined) {
+		({ superClass } = pre);
+	} else if (heritage) {
+		superClass = vm.evalNodeSync(heritage.types[0].expression, scope);
+	} else {
+		superClass = undefined;
+	}
+
+	if (heritage && superClass !== null && typeof superClass !== "function") {
+		throw new TypeError(`Class extends value ${String(superClass)} is not a constructor or null`);
+	}
+
 	let parentProto: unknown;
 
 	if (typeof superClass === "function") {
 		// IsConstructor first (an arrow / async / generator / bound-arrow parent is a TypeError before its
 		// `prototype` is ever read), then the prototype must be an object (a function counts) or null.
-		if (!isConstructor(superClass)) { throw new TypeError("Class extends value is not a constructor or null"); }
+		if (!isConstructor(superClass)) {
+			throw new TypeError("Class extends value is not a constructor or null");
+		}
+
 		parentProto = (superClass as { "prototype"?: unknown }).prototype; // read ONCE (a getter is observable)
-		if (parentProto !== null && typeof parentProto !== "object" && typeof parentProto !== "function") { throw new TypeError(`Class extends value does not have valid prototype property ${String(parentProto)}`); }
+		if (parentProto !== null && typeof parentProto !== "object" && typeof parentProto !== "function") {
+			throw new TypeError(`Class extends value does not have valid prototype property ${String(parentProto)}`);
+		}
 	}
 
-	const proto = superClass === null ? Object.create(null) : superClass !== undefined ? Object.create(parentProto as object | null) : new vm.realm.Object();
+	let proto: object;
+
+	if (superClass === null) {
+		proto = Object.create(null);
+	} else if (superClass !== undefined) {
+		proto = Object.create(parentProto as object | null);
+	} else {
+		proto = new vm.realm.Object();
+	}
+
 	const meta: ClassMeta = { "node": node, "closure": scope, "superClass": superClass, "proto": proto, "instanceFields": [], "instancePrivateMethods": [] };
 	const privateNames = declarePrivateNames(node, scope);
 	const privateOf = (member: ts.ClassElement): PrivateName | undefined => {
@@ -249,8 +337,11 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 	let computedIndex = 0; // walks `pre.keys` (the same source order as computedKeyNodes)
 
 	for (const member of node.members) {
-		if (privateOf(member) !== undefined || isSignatureOnly(member)) { continue; }
-		if (isStaticCtorMethod(member)) { memberKeys.set(member, "constructor"); } else if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member) || ts.isPropertyDeclaration(member)) {
+		if (privateOf(member) !== undefined || isSignatureOnly(member)) {
+			// private members and type-only signatures get no public member key
+		} else if (isStaticCtorMethod(member)) {
+			memberKeys.set(member, "constructor");
+		} else if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member) || ts.isPropertyDeclaration(member)) {
 			let key: PropertyKey;
 
 			if (pre !== undefined && ts.isComputedPropertyName(member.name)) {
@@ -268,7 +359,9 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 
 	const Ctor = function(this: unknown, ...args: unknown[]): unknown {
 		// Host-initiated construction (rare); guest `new` uses the explicit construct frame.
-		if (new.target === undefined) { throw new TypeError(`Class constructor ${node.name?.text ?? ""} cannot be invoked without 'new'`); }
+		if (new.target === undefined) {
+			throw new TypeError(`Class constructor ${node.name?.text ?? ""} cannot be invoked without 'new'`);
+		}
 
 		return vm.constructGuestSync(Ctor, args, new.target);
 	} as unknown as GuestClass;
@@ -283,10 +376,12 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 	// static initializers run (`var C = class { static x = C.name }`).
 	Object.defineProperty(Ctor, "name", { "value": node.name?.text ?? pre?.name ?? "", "configurable": true });
 	// A class's `length` is its constructor's expected argument count (0 without an explicit one).
-	const ctorDecl = node.members.find((m): m is ts.ConstructorDeclaration => ts.isConstructorDeclaration(m) && m.body !== undefined && !hasStatic(m));
+	const ctorDecl = node.members.find((member): member is ts.ConstructorDeclaration => ts.isConstructorDeclaration(member) && member.body !== undefined && !hasStatic(member));
 
 	Object.defineProperty(Ctor, "length", { "value": ctorDecl === undefined ? 0 : functionLength(ctorDecl.parameters), "configurable": true });
-	if (node.name) { scope.initialize(node.name.text, Ctor); } // leaves the TDZ
+	if (node.name) {
+		scope.initialize(node.name.text, Ctor); // leaves the TDZ
+	}
 
 	// Pass 1 — methods and accessors (public and private, instance and static), and the constructor.
 	// Spec order: all methods exist before any static field initializer or static block runs.
@@ -296,13 +391,18 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 		const target = hasStatic(member) ? (Ctor as unknown as object) : proto;
 		const pn = privateOf(member);
 
-		if (isSignatureOnly(member) || ts.isIndexSignatureDeclaration(member)) { continue; } // type-only
-		if (isStaticCtorMethod(member) || ts.isMethodDeclaration(member)) {
+		if (isSignatureOnly(member) || ts.isIndexSignatureDeclaration(member)) {
+			// type-only: overload signatures and index signatures contribute no runtime member
+		} else if (isStaticCtorMethod(member) || ts.isMethodDeclaration(member)) {
 			const fn = createGuestFunction(vm, member, scope, target);
 
 			if (pn !== undefined) {
 				pn.method = fn;
-				if (pn.isStatic) { privateAdd(Ctor, pn); } else { meta.instancePrivateMethods.push(pn); }
+				if (pn.isStatic) {
+					privateAdd(Ctor, pn);
+				} else {
+					meta.instancePrivateMethods.push(pn);
+				}
 			} else {
 				const key = keyOf(member);
 
@@ -310,16 +410,26 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 				Object.defineProperty(target, key, { "value": fn, "enumerable": false, "writable": true, "configurable": true });
 			}
 		} else if (ts.isConstructorDeclaration(member)) {
-			if (member.body) { meta.ctorNode = member; }
+			if (member.body) {
+				meta.ctorNode = member;
+			}
 		} else if (ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
 			const fn = createGuestFunction(vm, member, scope, target);
 
 			if (pn !== undefined) {
-				if (ts.isGetAccessorDeclaration(member)) { pn.get = fn; } else { pn.set = fn; }
+				if (ts.isGetAccessorDeclaration(member)) {
+					pn.get = fn;
+				} else {
+					pn.set = fn;
+				}
 
 				if (pn.isStatic) {
-					if (!staticPrivateInstalled.has(pn.key)) { privateAdd(Ctor, pn); }
-				} else if (!meta.instancePrivateMethods.includes(pn)) { meta.instancePrivateMethods.push(pn); }
+					if (!staticPrivateInstalled.has(pn.key)) {
+						privateAdd(Ctor, pn);
+					}
+				} else if (!meta.instancePrivateMethods.includes(pn)) {
+					meta.instancePrivateMethods.push(pn);
+				}
 
 				staticPrivateInstalled.add(pn.key);
 			} else {
@@ -330,7 +440,11 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 
 				delete desc.value;
 				delete desc.writable;
-				if (ts.isGetAccessorDeclaration(member)) { desc.get = fn as () => unknown; } else { desc.set = fn as (v: unknown) => void; }
+				if (ts.isGetAccessorDeclaration(member)) {
+					desc.get = fn as () => unknown;
+				} else {
+					desc.set = fn as (v: unknown) => void;
+				}
 
 				Object.defineProperty(target, key, desc);
 			}
@@ -348,10 +462,17 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 			if (hasStatic(member)) {
 				const key: PropertyKey = pn?.description ?? keyOf(member);
 
-				if (pn === undefined && key === "prototype") { throw new TypeError("Classes may not have a static property named 'prototype'"); }
+				if (pn === undefined && key === "prototype") {
+					throw new TypeError("Classes may not have a static property named 'prototype'");
+				}
+
 				const value = member.initializer ? nameAnonymous(vm.evalNodeSync(member.initializer, fieldScope(meta, Ctor, Ctor)), key, member.initializer) : undefined;
 
-				if (pn !== undefined) { privateAdd(Ctor, pn, value); } else { defineData(Ctor, key, value); }
+				if (pn !== undefined) {
+					privateAdd(Ctor, pn, value);
+				} else {
+					defineData(Ctor, key, value);
+				}
 			} else if (pn !== undefined) {
 				meta.instanceFields.push({ "privateName": pn, "initializer": member.initializer });
 			} else {
@@ -376,14 +497,28 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 export function assertSupportedClassSurface(node: ts.ClassLikeDeclaration): void {
 	const refuse = (what: string): never => unimplemented(`${what} (out of scope: not standard / not erasable TypeScript)`);
 
-	if ((ts.getDecorators(node) ?? []).length > 0) { refuse("class decorators"); }
+	if ((ts.getDecorators(node) ?? []).length > 0) {
+		refuse("class decorators");
+	}
+
 	for (const member of node.members) {
-		if (ts.canHaveDecorators(member) && (ts.getDecorators(member) ?? []).length > 0) { refuse("member decorators"); }
-		if (ts.isPropertyDeclaration(member) && (ts.getCombinedModifierFlags(member) & ts.ModifierFlags.Accessor) !== 0) { refuse("auto-accessor fields (`accessor x`)"); }
+		if (ts.canHaveDecorators(member) && (ts.getDecorators(member) ?? []).length > 0) {
+			refuse("member decorators");
+		}
+
+		if (ts.isPropertyDeclaration(member) && (ts.getCombinedModifierFlags(member) & ts.ModifierFlags.Accessor) !== 0) {
+			refuse("auto-accessor fields (`accessor x`)");
+		}
+
 		if (ts.isConstructorDeclaration(member) || ts.isMethodDeclaration(member)) {
 			for (const param of member.parameters) {
-				if ((ts.getDecorators(param) ?? []).length > 0) { refuse("parameter decorators"); }
-				if (ts.isConstructorDeclaration(member) && ts.isParameterPropertyDeclaration(param, member)) { refuse("parameter properties"); }
+				if ((ts.getDecorators(param) ?? []).length > 0) {
+					refuse("parameter decorators");
+				}
+
+				if (ts.isConstructorDeclaration(member) && ts.isParameterPropertyDeclaration(param, member)) {
+					refuse("parameter properties");
+				}
 			}
 		}
 	}
@@ -391,24 +526,32 @@ export function assertSupportedClassSurface(node: ts.ClassLikeDeclaration): void
 
 // A scope for evaluating a field/static initializer, with `this` and [[HomeObject]] bound.
 export function fieldScope(meta: ClassMeta, thisVal: unknown, homeObject: object): Scope {
-	const s = new Scope(meta.closure, true);
+	const scope = new Scope(meta.closure, true);
 
-	s.hasThis = true;
-	s.thisVal = thisVal;
-	s.homeObject = homeObject;
-	s.classMeta = meta;
+	scope.hasThis = true;
+	scope.thisVal = thisVal;
+	scope.homeObject = homeObject;
+	scope.classMeta = meta;
 
-	return s;
+	return scope;
 }
 
 export function initInstanceFields(vm: Machine, meta: ClassMeta, instance: object): void {
 	// Private methods/accessors brand the instance first (so field initializers may call them).
-	for (const pn of meta.instancePrivateMethods) { privateAdd(instance, pn); }
+	for (const pn of meta.instancePrivateMethods) {
+		privateAdd(instance, pn);
+	}
+
 	for (const field of meta.instanceFields) {
 		const key: PropertyKey = field.privateName?.description ?? (field.name!);
 		const value = field.initializer ? nameAnonymous(vm.evalNodeSync(field.initializer, fieldScope(meta, instance, meta.proto)), key, field.initializer) : undefined;
 
-		if (field.privateName !== undefined) { privateAdd(instance, field.privateName, value); } else { defineData(instance, key, value); } // DefineField: CreateDataProperty, never an inherited setter
+		// DefineField: CreateDataProperty, never an inherited setter
+		if (field.privateName !== undefined) {
+			privateAdd(instance, field.privateName, value);
+		} else {
+			defineData(instance, key, value);
+		}
 	}
 }
 
@@ -428,7 +571,10 @@ export function pushParentConstruct(vm: Machine, superClass: unknown, args: unkn
 		return undefined;
 	}
 
-	if (typeof superClass === "function") { return Reflect.construct(superClass as new (...a: unknown[]) => object, args, newTarget as new (...a: unknown[]) => unknown); }
+	if (typeof superClass === "function") {
+		return Reflect.construct(superClass as new (...args: unknown[]) => object, args, newTarget as new (...args: unknown[]) => unknown);
+	}
+
 	throw new TypeError("Class extends value is not a constructor or null");
 }
 
@@ -436,16 +582,18 @@ export function pushParentConstruct(vm: Machine, superClass: unknown, args: unkn
 export function superConstructorOf(construction: Construction): unknown {
 	const parent = Object.getPrototypeOf(construction.ctor) as unknown;
 
-	if (!isConstructor(parent)) { throw new TypeError("Super constructor is not a constructor"); }
+	if (!isConstructor(parent)) {
+		throw new TypeError("Super constructor is not a constructor");
+	}
 
 	return parent;
 }
 
 /** After a parent created/initialized `this`: the constructor's `this` and the construction record point at it. */
 export function rebindThis(scope: Scope, construction: Construction, replacement: object): void {
-	for (let s: Scope | undefined = scope; s; s = s.parent) {
-		if (s.hasThis) {
-			s.thisVal = replacement;
+	for (let current: Scope | undefined = scope; current; current = current.parent) {
+		if (current.hasThis) {
+			current.thisVal = replacement;
 			break;
 		}
 	}
@@ -464,7 +612,10 @@ export function superCall(vm: Machine, frame: NodeFrame, node: ts.CallExpression
 		const meta = frame.scope.getClassMeta();
 		const construction = frame.scope.getConstruction();
 
-		if (meta === undefined || construction === undefined) { throw new SyntaxError("'super' keyword unexpected here"); }
+		if (meta === undefined || construction === undefined) {
+			throw new SyntaxError("'super' keyword unexpected here");
+		}
+
 		const parent = superConstructorOf(construction);
 		const newTarget = frame.scope.getNewTarget();
 
@@ -507,21 +658,23 @@ export function superCall(vm: Machine, frame: NodeFrame, node: ts.CallExpression
 }
 
 export function assertThisUnbound(scope: Scope): void {
-	if (scope.getThis() !== THIS_TDZ) { throw new ReferenceError("Super constructor may only be called once"); }
+	if (scope.getThis() !== THIS_TDZ) {
+		throw new ReferenceError("Super constructor may only be called once");
+	}
 }
-
-/** A method/accessor/constructor without a body is an overload signature: erased, its key never evaluated. */
-export const isSignatureOnly = (member: ts.ClassElement): boolean => (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member) || ts.isConstructorDeclaration(member)) && member.body === undefined;
 
 /** The computed member keys of a class, in source order (the order they are evaluated in). */
 export function computedKeyNodes(node: ts.ClassLikeDeclaration): ts.Expression[] {
 	const out: ts.Expression[] = [];
 
 	for (const member of node.members) {
-		if (isSignatureOnly(member)) { continue; }
-		const { name } = member as { "name"?: ts.PropertyName };
+		if (!isSignatureOnly(member)) {
+			const { name } = member as { "name"?: ts.PropertyName };
 
-		if (name !== undefined && ts.isComputedPropertyName(name)) { out.push(name.expression); }
+			if (name !== undefined && ts.isComputedPropertyName(name)) {
+				out.push(name.expression);
+			}
+		}
 	}
 
 	return out;
@@ -534,20 +687,29 @@ export function computedKeyNodes(node: ts.ClassLikeDeclaration): ts.Expression[]
  * Returns the constructor once built (undefined while the sub-expressions are still evaluating).
  */
 export function classDefinition(vm: Machine, frame: NodeFrame, node: ts.ClassLikeDeclaration): GuestClass | undefined {
-	const heritage = node.heritageClauses?.find((h) => h.token === K.ExtendsKeyword);
+	const heritage = node.heritageClauses?.find((clause) => clause.token === Kind.ExtendsKeyword);
 
 	if (frame.phase === 0) {
 		assertSupportedClassSurface(node);
 		const scope = new Scope(frame.scope, false);
 
-		if (node.name) { scope.declareLexical(node.name.text, "const"); }
+		if (node.name) {
+			scope.declareLexical(node.name.text, "const");
+		}
+
 		declarePrivateNames(node, scope);
 		frame.classScope = scope;
 		frame.base = vm.values.length;
 		const keys = computedKeyNodes(node);
 
-		for (let i = keys.length - 1; i >= 0; i--) { vm.pushNode(keys[i], scope); }
-		if (heritage) { vm.pushNode(heritage.types[0].expression, scope); } // on top: evaluates first
+		for (let index = keys.length - 1; index >= 0; index--) {
+			vm.pushNode(keys[index], scope);
+		}
+
+		if (heritage) {
+			vm.pushNode(heritage.types[0].expression, scope); // on top: evaluates first
+		}
+
 		frame.phase = 1;
 
 		return undefined;
@@ -563,7 +725,10 @@ function classDeclaration(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.ClassDeclaration;
 	const Ctor = classDefinition(vm, frame, node);
 
-	if (Ctor === undefined) { return; }
+	if (Ctor === undefined) {
+		return;
+	}
+
 	vm.frames.pop();
 	if (node.name) {
 		frame.scope.declareLexical(node.name.text, "let");
@@ -574,7 +739,10 @@ function classDeclaration(vm: Machine, frame: NodeFrame): void {
 function classExpression(vm: Machine, frame: NodeFrame): void {
 	const Ctor = classDefinition(vm, frame, frame.node as ts.ClassExpression);
 
-	if (Ctor === undefined) { return; }
+	if (Ctor === undefined) {
+		return;
+	}
+
 	vm.frames.pop();
 	vm.push(Ctor);
 }
@@ -605,7 +773,10 @@ function constructFrame(vm: Machine, frame: ConstructFrame): void {
 			fnScope.initialize("arguments", createArgumentsObject(vm, frame.args));
 			// Base class: fields initialize before the parameters bind and the body runs ([[Construct]]:
 			// InitializeInstanceElements precedes OrdinaryCallEvaluateBody). Derived: after super().
-			if (meta.superClass === undefined) { initInstanceFields(vm, meta, instance); }
+			if (meta.superClass === undefined) {
+				initInstanceFields(vm, meta, instance);
+			}
+
 			hoist(vm, fnScope, (meta.ctorNode.body!).statements);
 			const body = vm.pushNode(meta.ctorNode.body!, fnScope);
 
@@ -634,9 +805,14 @@ function constructFrame(vm: Machine, frame: ConstructFrame): void {
 		// A derived constructor that never called super() leaves `this` uninitialized: ReferenceError.
 		const { ctorScope } = frame;
 
-		if (ctorScope !== undefined && frame.overridden !== true && ctorScope.thisVal === THIS_TDZ) { throw new ReferenceError("Must call super constructor in derived class before accessing 'this' or returning from derived constructor"); }
+		if (ctorScope !== undefined && frame.overridden !== true && ctorScope.thisVal === THIS_TDZ) {
+			throw new ReferenceError("Must call super constructor in derived class before accessing 'this' or returning from derived constructor");
+		}
+
 		vm.frames.pop();
-		if (frame.isNew || frame.forSuper === true) { vm.push((frame.construction!).instance); }
+		if (frame.isNew || frame.forSuper === true) {
+			vm.push((frame.construction!).instance);
+		}
 	}
 }
 
@@ -645,11 +821,16 @@ function constructFrame(vm: Machine, frame: ConstructFrame): void {
 function initfieldsFrame(vm: Machine, frame: InitFieldsFrame): void {
 	let { instance } = frame;
 
-	if (frame.fromStack === true) { instance = vm.pop() as object; }
+	if (frame.fromStack === true) {
+		instance = vm.pop() as object;
+	}
+
 	if (frame.thisScope !== undefined) {
 		assertThisUnbound(frame.thisScope);
 		rebindThis(frame.thisScope, frame.construction!, instance);
-	} else if (frame.construction !== undefined) { frame.construction.instance = instance; }
+	} else if (frame.construction !== undefined) {
+		frame.construction.instance = instance;
+	}
 
 	initInstanceFields(vm, frame.meta, instance);
 	vm.frames.pop();
@@ -657,8 +838,8 @@ function initfieldsFrame(vm: Machine, frame: InitFieldsFrame): void {
 
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
 export function register(): void {
-	on(K.ClassDeclaration, classDeclaration);
-	on(K.ClassExpression, classExpression);
+	on(Kind.ClassDeclaration, classDeclaration);
+	on(Kind.ClassExpression, classExpression);
 	syntheticHandlers.construct = constructFrame;
 	syntheticHandlers.initfields = initfieldsFrame;
 }

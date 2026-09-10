@@ -38,11 +38,15 @@ function isObjecty(value) {
 const validate = preimplemented
 	? null
 	: (value, transfer = false, shallow = false) => {
-			if (!isObjecty(value) || cache.has(value)) { return 3; }
+			if (!isObjecty(value) || cache.has(value)) {
+				return 3;
+			}
 
 			const obj = value;
 
-			if (!transfer && (getPrototypeOf(obj) !== null || !isFrozen(obj))) { return 0; }
+			if (!transfer && (getPrototypeOf(obj) !== null || !isFrozen(obj))) {
+				return 0;
+			}
 
 			let status = 3;
 
@@ -65,7 +69,10 @@ const validate = preimplemented
 					setPrototypeOf(obj, null);
 				}
 
-				if (!isFrozen(obj)) { freeze(obj); }
+				if (!isFrozen(obj)) {
+					freeze(obj);
+				}
+
 				if (!shallow || status === 3) {
 					cache.add(obj);
 				}
@@ -75,35 +82,66 @@ const validate = preimplemented
 		};
 
 function fastFreezeRecord(obj) {
-	if (getPrototypeOf(obj) !== null) { setPrototypeOf(obj, null); }
-	if (!isFrozen(obj)) { freeze(obj); }
+	if (getPrototypeOf(obj) !== null) {
+		setPrototypeOf(obj, null);
+	}
+
+	if (!isFrozen(obj)) {
+		freeze(obj);
+	}
 
 	return obj;
 }
 
 function fastDeepFreezeRecord(obj) {
-	if (!isObjecty(obj) || cache.has(obj)) { return obj; }
+	if (!isObjecty(obj) || cache.has(obj)) {
+		return obj;
+	}
+
 	fastFreezeRecord(obj);
 	cache.add(obj);
-	for (const name of getOwnPropertyNames(obj)) { fastDeepFreezeRecord(obj[name]); }
-	for (const name of getOwnPropertySymbols(obj)) { fastDeepFreezeRecord(obj[name]); }
+	for (const name of getOwnPropertyNames(obj)) {
+		fastDeepFreezeRecord(obj[name]);
+	}
+
+	for (const name of getOwnPropertySymbols(obj)) {
+		fastDeepFreezeRecord(obj[name]);
+	}
 
 	return obj;
 }
 
-const deepFreezeRecord = preimplemented
-	? deepFreezeRecord_
-	: !strict
-			? fastDeepFreezeRecord
-			: (obj) => {
-					const result = validate(obj, true);
+const deepFreezeRecord = (() => {
+	if (preimplemented) {
+		return deepFreezeRecord_;
+	}
 
-					if (result < 3) { throw new Error("@bablr/record: value is not a deep record"); }
+	if (!strict) {
+		return fastDeepFreezeRecord;
+	}
 
-					return obj;
-				};
+	return (obj) => {
+		const result = validate(obj, true);
 
-const isDeepRecord = preimplemented ? isDeepRecord_ : !strict ? () => true : (obj) => validate(obj) >= 3;
+		if (result < 3) {
+			throw new Error("@bablr/record: value is not a deep record");
+		}
+
+		return obj;
+	};
+})();
+
+const isDeepRecord = (() => {
+	if (preimplemented) {
+		return isDeepRecord_;
+	}
+
+	if (!strict) {
+		return () => true;
+	}
+
+	return (obj) => validate(obj) >= 3;
+})();
 
 if (!isSealed(Object) && !preimplemented) {
 	Object.deepFreezeRecord = deepFreezeRecord_
@@ -130,63 +168,89 @@ const freezeRecord = !strict
 	: (obj) => {
 			const result = validate(obj, true, true);
 
-			if (result < 1) { throw new Error("@bablr/record: value is not a record"); }
+			if (result < 1) {
+				throw new Error("@bablr/record: value is not a record");
+			}
 
 			return obj;
 		};
 
 function *recordKeys(obj) {
-	if (!isRecord(obj)) { throw new Error("@bablr/record: value is not a record"); }
+	if (!isRecord(obj)) {
+		throw new Error("@bablr/record: value is not a record");
+	}
 
 	if (isArray(obj)) {
 		const { length } = obj;
 
-		for (let i = 0; i < length; i++) { yield i; }
+		for (let index = 0; index < length; index++) {
+			yield index;
+		}
 	} else {
-		for (const key in obj) { yield key; }
+		for (const key in obj) {
+			yield key;
+		}
 	}
 }
 
 function *recordValues(obj) {
-	if (!isRecord(obj)) { throw new Error("@bablr/record: value is not a record"); }
+	if (!isRecord(obj)) {
+		throw new Error("@bablr/record: value is not a record");
+	}
 
 	if (isArray(obj)) {
 		const { length } = obj;
 
-		for (let i = 0; i < length; i++) { yield obj[i]; }
+		for (let index = 0; index < length; index++) {
+			yield obj[index];
+		}
 	} else {
-		for (const key in obj) { yield obj[key]; }
+		for (const key in obj) {
+			yield obj[key];
+		}
 	}
 }
 
 function *recordEntries(obj) {
-	if (!isRecord(obj)) { throw new Error("@bablr/record: value is not a record"); }
+	if (!isRecord(obj)) {
+		throw new Error("@bablr/record: value is not a record");
+	}
 
 	if (isArray(obj)) {
 		const { length } = obj;
 
-		for (let i = 0; i < length; i++) { yield [i, obj[i]]; }
+		for (let index = 0; index < length; index++) {
+			yield [index, obj[index]];
+		}
 	} else {
-		for (const key in obj) { yield [key, obj[key]]; }
+		for (const key in obj) {
+			yield [key, obj[key]];
+		}
 	}
 }
 
 function *arrayKeys(obj) {
 	const { length } = obj;
 
-	for (let i = 0; i < length; i++) { yield i; }
+	for (let index = 0; index < length; index++) {
+		yield index;
+	}
 }
 
 function *arrayValues(obj) {
 	const { length } = obj;
 
-	for (let i = 0; i < length; i++) { yield obj[i]; }
+	for (let index = 0; index < length; index++) {
+		yield obj[index];
+	}
 }
 
 function *arrayEntries(obj) {
 	const { length } = obj;
 
-	for (let i = 0; i < length; i++) { yield [i, obj[i]]; }
+	for (let index = 0; index < length; index++) {
+		yield [index, obj[index]];
+	}
 }
 
 export {

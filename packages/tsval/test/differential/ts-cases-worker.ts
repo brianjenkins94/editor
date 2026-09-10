@@ -12,7 +12,9 @@ import { runTsCase } from "./ts-cases-run.ts";
 
 let lateRejections = 0;
 
-process.on("unhandledRejection", () => { lateRejections += 1; }); // guest async work that fails after its case ended
+process.on("unhandledRejection", () => {
+	lateRejections += 1; // guest async work that fails after its case ended
+});
 
 process.on("message", async (message: { "seq": number; "root": string; "id": string }) => {
 	const file = path.join(message.root, "tests/cases", message.id);

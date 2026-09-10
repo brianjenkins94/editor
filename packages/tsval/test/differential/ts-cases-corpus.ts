@@ -39,11 +39,11 @@ export function parseCase(id: string, source: string): TsCase {
 	let current: { "name": string; "text": string } | undefined;
 
 	for (const line of source.split("\n")) {
-		const m = HEADER.exec(line);
+		const match = HEADER.exec(line);
 
-		if (m !== null) {
-			const key = m[1].toLowerCase();
-			const value = m[2].trim();
+		if (match !== null) {
+			const key = match[1].toLowerCase();
+			const value = match[2].trim();
 
 			if (key === "filename") {
 				current = { "name": value, "text": "" };
@@ -51,13 +51,20 @@ export function parseCase(id: string, source: string): TsCase {
 				continue;
 			}
 
-			if (current === undefined) { options[key] = value; } else { current.text += line + "\n"; } // an option inside a file block belongs to that file's text
+			if (current === undefined) {
+				options[key] = value;
+			} else {
+				current.text += line + "\n"; // an option inside a file block belongs to that file's text
+			}
 
 			continue;
 		}
 
 		if (current === undefined) {
-			if (line.trim() === "") { continue; } // leading blank lines before the first block
+			if (line.trim() === "") {
+				continue; // leading blank lines before the first block
+			}
+
 			current = { "name": "", "text": "" };
 			files.push(current);
 		}
@@ -65,7 +72,9 @@ export function parseCase(id: string, source: string): TsCase {
 		current.text += line + "\n";
 	}
 
-	if (files.length === 0) { files.push({ "name": "", "text": "" }); }
+	if (files.length === 0) {
+		files.push({ "name": "", "text": "" });
+	}
 
 	return { "id": id, "options": options, "files": files, "source": source };
 }
@@ -76,15 +85,25 @@ export function hasCorpus(root: string): boolean {
 
 /** Every case under `<root>/tests/cases/{compiler,conformance}`, in stable sorted order. */
 export function *loadTsCases(root: string, filter?: (id: string) => boolean): Generator<TsCase> {
-	if (!hasCorpus(root)) { return; }
+	if (!hasCorpus(root)) {
+		return;
+	}
+
 	const base = path.join(root, "tests/cases");
 
 	function *walk(dir: string): Generator<string> {
-		if (!fs.existsSync(dir)) { return; }
-		for (const entry of fs.readdirSync(dir, { "withFileTypes": true }).sort((a, b) => a.name.localeCompare(b.name))) {
+		if (!fs.existsSync(dir)) {
+			return;
+		}
+
+		for (const entry of fs.readdirSync(dir, { "withFileTypes": true }).sort((left, right) => left.name.localeCompare(right.name))) {
 			const full = path.join(dir, entry.name);
 
-			if (entry.isDirectory()) { yield* walk(full); } else if (/\.tsx?$/.test(entry.name)) { yield full; }
+			if (entry.isDirectory()) {
+				yield* walk(full);
+			} else if (/\.tsx?$/.test(entry.name)) {
+				yield full;
+			}
 		}
 	}
 
@@ -92,7 +111,10 @@ export function *loadTsCases(root: string, filter?: (id: string) => boolean): Ge
 		for (const file of walk(path.join(base, sub))) {
 			const id = path.relative(base, file).split(path.sep).join("/");
 
-			if (filter !== undefined && !filter(id)) { continue; }
+			if (filter !== undefined && !filter(id)) {
+				continue;
+			}
+
 			yield parseCase(id, fs.readFileSync(file, "utf8"));
 		}
 	}
@@ -108,30 +130,59 @@ const GLOBAL_NAMES = new Set(Object.getOwnPropertyNames(globalThis));
 
 /** Why a case is outside what tsval runs (undefined when it is eligible). */
 export function policySkip(test: TsCase): string | undefined {
-	if (test.files.length > 1) { return "multi-file test (a module graph)"; }
-	const { name } = test.files[0];
+	if (test.files.length > 1) {
+		return "multi-file test (a module graph)";
+	}
 
-	if (/\.tsx$/i.test(test.id) || /\.tsx$/i.test(name) || "jsx" in test.options) { return "JSX"; }
-	if (/\.d\.ts$/i.test(name)) { return "declaration file (no runtime)"; }
-	if (/\.jsx?$/i.test(name) || "allowjs" in test.options || "checkjs" in test.options) { return "JavaScript-with-JSDoc test (type-level)"; }
+	const [{ name }] = test.files;
+
+	if (/\.tsx$/i.test(test.id) || /\.tsx$/i.test(name) || "jsx" in test.options) {
+		return "JSX";
+	}
+
+	if (/\.d\.ts$/i.test(name)) {
+		return "declaration file (no runtime)";
+	}
+
+	if (/\.jsx?$/i.test(name) || "allowjs" in test.options || "checkjs" in test.options) {
+		return "JavaScript-with-JSDoc test (type-level)";
+	}
+
 	const code = test.files[0].text;
 
-	if (MODULE_CODE.test(code)) { return "module code (out of scope: tsval runs a program)"; }
-	if (/\beval\s*\(|\bnew\s+Function\s*\(|\bFunction\s*\(/.test(code)) { return "uses eval/Function (code-from-string is a capability shim, not modeled)"; }
-	if (NON_DETERMINISTIC.test(code)) { return "non-deterministic (Math.random / Date): the two sides cannot agree"; }
+	if (MODULE_CODE.test(code)) {
+		return "module code (out of scope: tsval runs a program)";
+	}
+
+	if (/\beval\s*\(|\bnew\s+Function\s*\(|\bFunction\s*\(/.test(code)) {
+		return "uses eval/Function (code-from-string is a capability shim, not modeled)";
+	}
+
+	if (NON_DETERMINISTIC.test(code)) {
+		return "non-deterministic (Math.random / Date): the two sides cannot agree";
+	}
+
 	const sf = ts.createSourceFile(name || "case.ts", code, ts.ScriptTarget.Latest, true);
 	const parseDiagnostics = (sf as unknown as { "parseDiagnostics"?: unknown[] }).parseDiagnostics ?? [];
 
-	if (parseDiagnostics.length > 0) { return "parser test (syntactic errors)"; }
+	if (parseDiagnostics.length > 0) {
+		return "parser test (syntactic errors)";
+	}
+
 	let reason: string | undefined;
 
 	for (const statement of sf.statements) {
 		// Ambient declarations promise host bindings the oracle cannot provide; a case that then uses
 		// them fails on both sides for no interesting reason (or trips node:vm's own quirks).
-		if ((ts.getCombinedModifierFlags(statement as unknown as ts.Declaration) & ts.ModifierFlags.Ambient) !== 0 && !ts.isModuleDeclaration(statement) && !ts.isInterfaceDeclaration(statement) && !ts.isTypeAliasDeclaration(statement)) { return "ambient host bindings (`declare var/function/class`) the oracle cannot provide"; }
+		if ((ts.getCombinedModifierFlags(statement as unknown as ts.Declaration) & ts.ModifierFlags.Ambient) !== 0 && !ts.isModuleDeclaration(statement) && !ts.isInterfaceDeclaration(statement) && !ts.isTypeAliasDeclaration(statement)) {
+			return "ambient host bindings (`declare var/function/class`) the oracle cannot provide";
+		}
+
 		if (ts.isVariableStatement(statement) && (statement.declarationList.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0) {
 			for (const decl of statement.declarationList.declarations) {
-				if (ts.isIdentifier(decl.name) && GLOBAL_NAMES.has(decl.name.text)) { return `re-declares the global \`${decl.name.text}\` with \`var\` (script semantics; tsval's program scope is a module)`; }
+				if (ts.isIdentifier(decl.name) && GLOBAL_NAMES.has(decl.name.text)) {
+					return `re-declares the global \`${decl.name.text}\` with \`var\` (script semantics; tsval's program scope is a module)`;
+				}
 			}
 		}
 	}
@@ -142,7 +193,23 @@ export function policySkip(test: TsCase): string | undefined {
 	while (pending.length > 0 && reason === undefined) {
 		const node = pending.pop()!;
 
-		if (ts.isDecorator(node)) { reason = "decorators (out of scope by policy)"; } else if (ts.isVariableDeclarationList(node) && (node.flags & ts.NodeFlags.Using) !== 0) { reason = "`using` declarations (explicit resource management, not modeled)"; } else if (ts.isPropertyDeclaration(node) && (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Accessor) !== 0) { reason = "auto-accessor fields (decorators-adjacent, out of scope)"; } else if (ts.isModuleDeclaration(node) && !(ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Ambient)) { reason = "namespace / module blocks (runtime emit, out of scope)"; } else if (ts.isImportEqualsDeclaration(node) || ts.isExportAssignment(node)) { reason = "module code (out of scope: tsval runs a program)"; } else if (ts.isParameter(node) && ts.isConstructorDeclaration(node.parent) && ts.isParameterPropertyDeclaration(node, node.parent)) { reason = "parameter properties (non-erasable, out of scope)"; } else { ts.forEachChild(node, (child) => void pending.push(child)); }
+		if (ts.isDecorator(node)) {
+			reason = "decorators (out of scope by policy)";
+		} else if (ts.isVariableDeclarationList(node) && (node.flags & ts.NodeFlags.Using) !== 0) {
+			reason = "`using` declarations (explicit resource management, not modeled)";
+		} else if (ts.isPropertyDeclaration(node) && (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Accessor) !== 0) {
+			reason = "auto-accessor fields (decorators-adjacent, out of scope)";
+		} else if (ts.isModuleDeclaration(node) && !(ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Ambient)) {
+			reason = "namespace / module blocks (runtime emit, out of scope)";
+		} else if (ts.isImportEqualsDeclaration(node) || ts.isExportAssignment(node)) {
+			reason = "module code (out of scope: tsval runs a program)";
+		} else if (ts.isParameter(node) && ts.isConstructorDeclaration(node.parent) && ts.isParameterPropertyDeclaration(node, node.parent)) {
+			reason = "parameter properties (non-erasable, out of scope)";
+		} else {
+			ts.forEachChild(node, (child) => {
+				pending.push(child);
+			});
+		}
 	}
 
 	return reason;

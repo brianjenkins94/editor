@@ -15,17 +15,27 @@ if (!hasCorpus(SAMPLE_ROOT)) {
 	test("test262 sample is present", () => assert.fail("vendor/test262-sample is missing — run `npm run test262:fetch && npm run test262:sample`"));
 }
 
-for (const t of loadTest262(SAMPLE_ROOT)) {
+for (const testCase of loadTest262(SAMPLE_ROOT)) {
 	tally.total += 1;
-	const gap = knownGap(t.id);
+	const gap = knownGap(testCase.id);
 
-	test(`test262 ${t.id}`, gap === undefined ? {} : { "todo": gap }, async () => {
-		const outcome = await runTest262(SAMPLE_ROOT, t);
+	test(`test262 ${testCase.id}`, gap === undefined ? {} : { "todo": gap }, async () => {
+		const outcome = await runTest262(SAMPLE_ROOT, testCase);
 
-		if (outcome.kind === "skipped") { tally.skipped += 1; } else if (outcome.kind === "control-failed") { tally.inconclusive += 1; } else if (gap !== undefined) {
+		if (outcome.kind === "skipped") {
+			tally.skipped += 1;
+		} else if (outcome.kind === "control-failed") {
+			tally.inconclusive += 1;
+		} else if (gap !== undefined) {
 			tally.todo += 1; // counted whether or not it (still) fails — node:test reports a passing todo
-			if (outcome.kind === "fail") { assert.fail(`${outcome.reason}\n--- ${t.id} ---\n${t.meta.description ?? ""}`); }
-		} else if (outcome.kind === "fail") { assert.fail(`${outcome.reason}\n--- ${t.id} ---\n${t.meta.description ?? ""}`); } else { tally.pass += 1; }
+			if (outcome.kind === "fail") {
+				assert.fail(`${outcome.reason}\n--- ${testCase.id} ---\n${testCase.meta.description ?? ""}`);
+			}
+		} else if (outcome.kind === "fail") {
+			assert.fail(`${outcome.reason}\n--- ${testCase.id} ---\n${testCase.meta.description ?? ""}`);
+		} else {
+			tally.pass += 1;
+		}
 	});
 }
 

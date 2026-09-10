@@ -119,8 +119,8 @@ interface RegionProps {
 	"children"?: ComponentChildren;
 }
 
-export function Header({ "class": c, children }: Omit<RegionProps, "containerRef">) {
-	return <header class={cx(headerCss(), c)}>{children}</header>;
+export function Header({ "class": className, children }: Omit<RegionProps, "containerRef">) {
+	return <header class={cx(headerCss(), className)}>{children}</header>;
 }
 
 /** The icon buttons that switch the sidebar viewlet (Explorer / Search / Run & Debug). Clicking runs
@@ -143,7 +143,10 @@ function ActivityBar({ runCommand }: { "runCommand": (command: string) => void }
 					class={cx(activityItemCss(), active === item.id ? "active" : "")}
 					title={item.title}
 					aria-label={item.title}
-					onClick={() => { setActive(item.id); runCommand(item.command); }}
+					onClick={() => {
+						setActive(item.id);
+						runCommand(item.command);
+					}}
 					dangerouslySetInnerHTML={{ "__html": iconSvg(item.icon, { "size": 24 }) }}
 				/>
 			))}
@@ -151,9 +154,9 @@ function ActivityBar({ runCommand }: { "runCommand": (command: string) => void }
 	);
 }
 
-export function Sidebar({ containerRef, "class": c, children, runCommand }: RegionProps & { "runCommand": (command: string) => void }) {
+export function Sidebar({ containerRef, "class": className, children, runCommand }: RegionProps & { "runCommand": (command: string) => void }) {
 	return (
-		<nav class={cx(sidebarCss(), c)}>
+		<nav class={cx(sidebarCss(), className)}>
 			<ActivityBar runCommand={runCommand} />
 
 			<div class={sidebarPartCss()} ref={containerRef}>{children}</div>
@@ -161,21 +164,21 @@ export function Sidebar({ containerRef, "class": c, children, runCommand }: Regi
 	);
 }
 
-export function Editors({ containerRef, "class": c, children }: RegionProps) {
-	return <section class={cx(editorsCss(), c)} ref={containerRef}>{children}</section>;
+export function Editors({ containerRef, "class": className, children }: RegionProps) {
+	return <section class={cx(editorsCss(), className)} ref={containerRef}>{children}</section>;
 }
 
-export function Console({ containerRef, "class": c, children }: RegionProps) {
-	return <section class={cx(consoleCss(), c)} ref={containerRef}>{children}</section>;
+export function Console({ containerRef, "class": className, children }: RegionProps) {
+	return <section class={cx(consoleCss(), className)} ref={containerRef}>{children}</section>;
 }
 
-export function Auxbar({ containerRef, "class": c, children }: RegionProps) {
-	return <aside class={cx(auxbarCss(), c)} ref={containerRef}>{children}</aside>;
+export function Auxbar({ containerRef, "class": className, children }: RegionProps) {
+	return <aside class={cx(auxbarCss(), className)} ref={containerRef}>{children}</aside>;
 }
 
-export function StatusBar({ containerRef, "class": c, children }: RegionProps) {
+export function StatusBar({ containerRef, "class": className, children }: RegionProps) {
 	return (
-		<footer class={cx(footerCss(), c)}>
+		<footer class={cx(footerCss(), className)}>
 			<div ref={containerRef}>{children}</div>
 		</footer>
 	);
@@ -191,7 +194,10 @@ export function Workbench({ onReady, runCommand }: { "onReady": (parts: Workbenc
 
 	const parts: Partial<WorkbenchParts> = {};
 	const collect = (key: keyof WorkbenchParts) => (element: HTMLElement | null) => {
-		if (element === null) { return; }
+		if (element === null) {
+			return;
+		}
+
 		parts[key] = element;
 		if (parts.sidebar && parts.editors && parts.panel && parts.statusbar && parts.auxbar) {
 			onReady(parts);

@@ -22,9 +22,12 @@ test("type-only declarations are erased at runtime", () => {
 test("TypeChecker resolves the static type at a node", () => {
 	const { checker, sourceFile } = createTypedProgram(`const u = new URL("https://x"); const s = "hi";`);
 	const types: string[] = [];
-	const visit = (n: ts.Node): void => {
-		if (ts.isVariableDeclaration(n) && n.initializer) { types.push(typeOfNode(checker, n.initializer) ?? "?"); }
-		n.forEachChild(visit);
+	const visit = (node: ts.Node): void => {
+		if (ts.isVariableDeclaration(node) && node.initializer) {
+			types.push(typeOfNode(checker, node.initializer) ?? "?");
+		}
+
+		node.forEachChild(visit);
 	};
 
 	sourceFile.forEachChild(visit);
@@ -34,9 +37,12 @@ test("TypeChecker resolves the static type at a node", () => {
 test("the typed program keeps null/undefined in types and types f.call/f.apply by f's signature", () => {
 	const { checker, sourceFile } = createTypedProgram(`declare function f(): string | null; declare const o: { a?: number }; const v = f(); const w = f.call(null); const x = f.apply(null, []); const a = o.a;`);
 	const types: Record<string, string> = {};
-	const visit = (n: ts.Node): void => {
-		if (ts.isVariableDeclaration(n) && n.initializer && ts.isIdentifier(n.name)) { types[n.name.text] = typeOfNode(checker, n.initializer) ?? "?"; }
-		n.forEachChild(visit);
+	const visit = (node: ts.Node): void => {
+		if (ts.isVariableDeclaration(node) && node.initializer && ts.isIdentifier(node.name)) {
+			types[node.name.text] = typeOfNode(checker, node.initializer) ?? "?";
+		}
+
+		node.forEachChild(visit);
 	};
 
 	sourceFile.forEachChild(visit);

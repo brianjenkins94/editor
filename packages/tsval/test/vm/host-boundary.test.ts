@@ -34,13 +34,22 @@ test("hostGuard.sanitize applies to values a host function returns and to awaite
 
 test("hostGuard.beforeCall vets every host callable, with the receiver and call/construct kind", () => {
 	const calls: string[] = [];
-	const beforeCall = (callee: (...a: unknown[]) => unknown, thisArg: unknown, isConstruct: boolean) => {
+	const beforeCall = (callee: (...args: unknown[]) => unknown, thisArg: unknown, isConstruct: boolean) => {
 		calls.push(`${callee.name}:${isConstruct ? "new" : "call"}:${thisArg === undefined ? "-" : typeof thisArg}`);
 
 		return callee.name === "blocked" ? () => "replaced" : callee;
 	};
 
-	const globals = { "blocked": function blocked() { return "ran"; }, "o": { "m": function m() { return 1; } } };
+	const globals = {
+		"blocked": function blocked() {
+			return "ran";
+		},
+		"o": {
+			"m": function() {
+				return 1;
+			}
+		}
+	};
 
 	assert.deepEqual(interpret(`[blocked(), o.m(), new Date(0).getTime()]`, { "globals": globals, "hostGuard": { "beforeCall": beforeCall } }), ["replaced", 1, 0]);
 	assert.deepEqual(calls, ["blocked:call:-", "m:call:object", "Date:new:-", "getTime:call:object"]);
@@ -48,7 +57,7 @@ test("hostGuard.beforeCall vets every host callable, with the receiver and call/
 
 test("guest→guest calls never pass through beforeCall (only host callables do)", () => {
 	let hostCalls = 0;
-	const beforeCall = (callee: (...a: unknown[]) => unknown) => {
+	const beforeCall = (callee: (...args: unknown[]) => unknown) => {
 		hostCalls += 1;
 
 		return callee;
@@ -60,7 +69,9 @@ test("guest→guest calls never pass through beforeCall (only host callables do)
 
 test("onAsyncFiber is told about every async function and async-generator invocation", async () => {
 	const fibers: Promise<unknown>[] = [];
-	const { vm } = createVM(`async function f() { await 0; return 1; } async function* g() { yield 1; } f(); f(); g().next(); "done"`, { "onAsyncFiber": (p) => void fibers.push(p) });
+	const { vm } = createVM(`async function f() { await 0; return 1; } async function* g() { yield 1; } f(); f(); g().next(); "done"`, { "onAsyncFiber": (promise) => {
+		fibers.push(promise);
+	} });
 
 	vm.run();
 	assert.equal(fibers.length, 3);
@@ -82,13 +93,13 @@ test("resolveModule is the import seam: a host decides what `import` and `import
 
 test("beforeCall receives the callsite: node, evaluated arguments, construct flag", () => {
 	const sites: string[] = [];
-	const beforeCall = (callee: (...a: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: import("../../src/index.ts").HostCallSite) => {
+	const beforeCall = (callee: (...args: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: import("../../src/index.ts").HostCallSite) => {
 		sites.push(`${ts.SyntaxKind[site.node.kind]}:${JSON.stringify(site.args)}:${site.isConstruct}:${"checker" in site ? "typed" : "untyped"}`);
 
 		return callee;
 	};
 
-	const globals = { "f": (...a: unknown[]) => a.length, "K": class {} };
+	const globals = { "f": (...args: unknown[]) => args.length, "K": class {} };
 
 	interpret(`const xs = [2, 3]; f(1, ...xs); new K("k"); f\`t\${1}\``, { "globals": globals, "hostGuard": { "beforeCall": beforeCall } });
 	assert.deepEqual(sites, ["CallExpression:[1,2,3]:false:untyped", "NewExpression:[\"k\"]:true:untyped", "TaggedTemplateExpression:[[\"t\",\"\"],1]:false:untyped"]);
@@ -96,12 +107,16 @@ test("beforeCall receives the callsite: node, evaluated arguments, construct fla
 
 test("vm.callSite is already set while beforeCall runs", () => {
 	let seen: unknown;
-	const { vm } = createVM(`host()`, { "globals": { "host": () => 1 },
-"hostGuard": { "beforeCall": (callee) => {
-		seen = vm.callSite;
+	const { vm } = createVM(`host()`, {
+		"globals": { "host": () => 1 },
+		"hostGuard": {
+			"beforeCall": (callee) => {
+				seen = vm.callSite;
 
-		return callee;
-	} } });
+				return callee;
+			}
+		}
+	});
 
 	vm.run();
 	assert.ok(seen !== undefined && ts.isCallExpression(seen as ts.Node));
@@ -113,17 +128,28 @@ test("typed layer: a guard can answer with a stand-in shaped like the call's dec
 		throw new Error("the real load must not run");
 	};
 
-	const beforeCall = (callee: (...a: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: TypedHostCallSite) => {
+	const beforeCall = (callee: (...args: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: TypedHostCallSite) => {
 		const type = site.returnType();
 		const { checker } = site;
 
-		if (type === undefined) { return callee; }
+		if (type === undefined) {
+			return callee;
+		}
+
 		const shaped: Record<string, unknown> = {};
 
 		for (const prop of type.getProperties()) {
-			const t = checker.typeToString(checker.getTypeOfSymbolAtLocation(prop, site.node));
+			const typeString = checker.typeToString(checker.getTypeOfSymbolAtLocation(prop, site.node));
 
-			shaped[prop.name] = t === "number" ? 0 : t === "string" ? "" : t === "boolean" ? false : null;
+			if (typeString === "number") {
+				shaped[prop.name] = 0;
+			} else if (typeString === "string") {
+				shaped[prop.name] = "";
+			} else if (typeString === "boolean") {
+				shaped[prop.name] = false;
+			} else {
+				shaped[prop.name] = null;
+			}
 		}
 
 		return () => shaped;
@@ -138,11 +164,11 @@ test("typed layer: a guard can answer with a stand-in shaped like the call's dec
 
 test("typed layer: signature() and argumentType() expose the declared parameter and argument types", () => {
 	const seen: string[] = [];
-	const beforeCall = (callee: (...a: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: TypedHostCallSite) => {
+	const beforeCall = (callee: (...args: unknown[]) => unknown, _this: unknown, _isNew: boolean, site: TypedHostCallSite) => {
 		const { checker } = site;
 		const sig = site.signature();
 
-		seen.push(`params=${sig?.getParameters().map((p) => p.name).join(",")} ret=${checker.typeToString(sig!.getReturnType())} arg0=${checker.typeToString(site.argumentType(0)!)}`);
+		seen.push(`params=${sig?.getParameters().map((param) => param.name).join(",")} ret=${checker.typeToString(sig!.getReturnType())} arg0=${checker.typeToString(site.argumentType(0)!)}`);
 
 		return callee;
 	};
@@ -158,14 +184,18 @@ test("a host Proxy that answers every property (an auto-stub) is a host callable
 	// A stub answers `__tsval` like any other key; only an OWN brand marks a guest function. Without
 	// the own-property check the VM takes the stub for guest code — it never reaches the guard, and
 	// it tries to run the stub's (nonexistent) AST.
-	const stub = (): unknown => new Proxy(function stub() {}, { "get": (_t, key) => (typeof key === "symbol" || key === "then" ? undefined : stub()), "apply": () => stub(), "construct": () => stub() as object });
+	const stub = (): unknown => new Proxy(function stub() { /* proxy target; never invoked, all traps are handled */ }, { "get": (_t, key) => (typeof key === "symbol" || key === "then" ? undefined : stub()), "apply": () => stub(), "construct": () => stub() as object });
 	const seen: string[] = [];
-	const { vm } = createVM(`db().query("x").rows[0]`, { "globals": { "db": stub() },
-"hostGuard": { "beforeCall": (callee) => {
-		seen.push(typeof callee);
+	const { vm } = createVM(`db().query("x").rows[0]`, {
+		"globals": { "db": stub() },
+		"hostGuard": {
+			"beforeCall": (callee) => {
+				seen.push(typeof callee);
 
-		return callee;
-	} } });
+				return callee;
+			}
+		}
+	});
 
 	assert.strictEqual(typeof vm.run(), "function");
 	assert.deepStrictEqual(seen, ["function", "function"]); // `db()` and `.query("x")` both crossed the seam

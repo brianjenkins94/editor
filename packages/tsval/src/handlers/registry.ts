@@ -30,7 +30,10 @@ export function evaluating<N extends ts.Node>(children: (node: N) => readonly ts
 			frame.base = vm.values.length; // depth *now* — earlier siblings are already on the stack
 			const nodes = children(node);
 
-			for (let i = nodes.length - 1; i >= 0; i--) { vm.pushNode(nodes[i], frame.scope); }
+			for (let index = nodes.length - 1; index >= 0; index--) {
+				vm.pushNode(nodes[index], frame.scope);
+			}
+
 			frame.phase = 1;
 
 			return;

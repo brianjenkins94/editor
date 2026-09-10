@@ -10,7 +10,7 @@ import { cookedTemplateText, describe, normalizeTemplateLineTerminators } from "
 import { AFTER_REF, CHAIN_BREAK, chainShort, evaluateReference, getValue, thisOf } from "./references.ts";
 import { on } from "./registry.ts";
 
-const K = ts.SyntaxKind;
+const Kind = ts.SyntaxKind;
 
 // Tagged templates: `tag\`a${x}b\`` → tag(strings, x) where `strings` is the cooked-strings array with
 // a frozen `.raw`, cached per callsite (the spec's template object registry).
@@ -27,9 +27,13 @@ export function templateObject(vm: Machine, node: ts.TaggedTemplateExpression): 
 			raw.push(normalizeTemplateLineTerminators(lit.rawText ?? lit.text));
 		};
 
-		if (ts.isNoSubstitutionTemplateLiteral(node.template)) { add(node.template); } else {
+		if (ts.isNoSubstitutionTemplateLiteral(node.template)) {
+			add(node.template);
+		} else {
 			add(node.template.head);
-			for (const span of node.template.templateSpans) { add(span.literal); }
+			for (const span of node.template.templateSpans) {
+				add(span.literal);
+			}
 		}
 
 		Object.defineProperty(cooked, "raw", { "value": Object.freeze(raw), "enumerable": false }); // GetTemplateObject: non-enumerable
@@ -48,10 +52,16 @@ function taggedTemplateExpression(vm: Machine, frame: NodeFrame): void {
 	if (frame.phase < AFTER_REF) {
 		const ref = evaluateReference(vm, frame, tag);
 
-		if (ref === undefined) { return; }
+		if (ref === undefined) {
+			return;
+		}
+
 		frame.thisArg = thisOf(frame.scope, ref);
 		vm.push(ref.kind === "short" ? undefined : getValue(vm, frame.scope, ref));
-		for (let i = spans.length - 1; i >= 0; i--) { vm.pushNode(spans[i].expression, frame.scope); }
+		for (let index = spans.length - 1; index >= 0; index--) {
+			vm.pushNode(spans[index].expression, frame.scope);
+		}
+
 		frame.phase = AFTER_REF + 1;
 	} else if (frame.phase === AFTER_REF + 1) {
 		const substitutions = vm.values.splice(vm.values.length - spans.length);
@@ -66,8 +76,11 @@ function taggedTemplateExpression(vm: Machine, frame: NodeFrame): void {
 		}
 
 		vm.frames.pop();
-		if (typeof calleeVal !== "function") { throw new TypeError(`${describe(tag)} is not a function`); }
-		vm.push(vm.invokeHost(calleeVal as (...a: unknown[]) => unknown, frame.thisArg, args, node, false));
+		if (typeof calleeVal !== "function") {
+			throw new TypeError(`${describe(tag)} is not a function`);
+		}
+
+		vm.push(vm.invokeHost(calleeVal as (...args: unknown[]) => unknown, frame.thisArg, args, node, false));
 	} else {
 		vm.frames.pop();
 	}
@@ -78,14 +91,17 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 	// A parenthesized member callee `(a.b)()` is still a Reference: `this` is preserved.
 	let callee: ts.Expression = node.expression;
 
-	while (ts.isParenthesizedExpression(callee)) { callee = callee.expression; }
-	if (callee.kind === K.SuperKeyword) {
+	while (ts.isParenthesizedExpression(callee)) {
+		callee = callee.expression;
+	}
+
+	if (callee.kind === Kind.SuperKeyword) {
 		superCall(vm, frame, node);
 
 		return;
 	}
 
-	if (callee.kind === K.ImportKeyword) {
+	if (callee.kind === Kind.ImportKeyword) {
 		// dynamic import(specifier) → Promise of the module namespace.
 		if (frame.phase === 0) {
 			vm.pushNode(node.arguments[0], frame.scope);
@@ -104,13 +120,28 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 		// The callee as a reference: a member callee's base is the receiver; `super.m()` gets `this`.
 		const ref = evaluateReference(vm, frame, callee);
 
-		if (ref === undefined) { return; }
-		if (ref.kind === "short") { return (vm.frames.pop(), vm.push(chainShort(node))); }
+		if (ref === undefined) {
+			return;
+		}
+
+		if (ref.kind === "short") {
+			vm.frames.pop();
+			vm.push(chainShort(node));
+
+			return;
+		}
+
 		frame.thisArg = thisOf(frame.scope, ref);
 		const calleeValue = getValue(vm, frame.scope, ref, false); // vetted by invokeHost instead
 
 		// `f?.()` on a nullish callee (or a broken chain) short-circuits before the arguments run.
-		if (calleeValue === CHAIN_BREAK || ((calleeValue === null || calleeValue === undefined) && node.questionDotToken)) { return (vm.frames.pop(), vm.push(chainShort(node))); }
+		if (calleeValue === CHAIN_BREAK || ((calleeValue === null || calleeValue === undefined) && node.questionDotToken)) {
+			vm.frames.pop();
+			vm.push(chainShort(node));
+
+			return;
+		}
+
 		vm.push(calleeValue);
 		pushCallArguments(vm, frame, node.arguments);
 		frame.phase = AFTER_REF + 1;
@@ -166,7 +197,7 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 
 		// Through the host guard (vets the callable, sanitizes the result) with the callsite exposed so a
 		// host function can introspect its arguments' static types (type-aware hosts).
-		vm.push(vm.invokeHost(calleeVal as (...a: unknown[]) => unknown, frame.thisArg, args, node, false));
+		vm.push(vm.invokeHost(calleeVal as (...args: unknown[]) => unknown, frame.thisArg, args, node, false));
 	} else {
 		// the guest call has left its return value on the stack.
 		vm.frames.pop();
@@ -178,15 +209,15 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 export function pushCallArguments(vm: Machine, frame: NodeFrame, args: readonly ts.Expression[]): void {
 	const spreadMask: boolean[] = [];
 
-	for (let i = args.length - 1; i >= 0; i--) {
-		const arg = args[i];
+	for (let index = args.length - 1; index >= 0; index--) {
+		const arg = args[index];
 
 		if (ts.isSpreadElement(arg)) {
 			vm.pushNode(arg.expression, frame.scope);
-			spreadMask[i] = true;
+			spreadMask[index] = true;
 		} else {
 			vm.pushNode(arg, frame.scope);
-			spreadMask[i] = false;
+			spreadMask[index] = false;
 		}
 	}
 
@@ -200,8 +231,12 @@ export function collectCallArguments(vm: Machine, frame: NodeFrame): unknown[] {
 	const spreadMask = frame.spreadMask!;
 	const args: unknown[] = [];
 
-	for (let i = 0; i < argCount; i++) {
-		if (spreadMask[i]) { args.push(...(raw[i] as Iterable<unknown>)); } else { args.push(raw[i]); }
+	for (let index = 0; index < argCount; index++) {
+		if (spreadMask[index]) {
+			args.push(...(raw[index] as Iterable<unknown>));
+		} else {
+			args.push(raw[index]);
+		}
 	}
 
 	return args;
@@ -221,7 +256,10 @@ function newExpression(vm: Machine, frame: NodeFrame): void {
 		const args = collectCallArguments(vm, frame);
 		const ctor = vm.pop();
 
-		if (typeof ctor !== "function") { throw new TypeError(`${describe(node.expression)} is not a constructor`); }
+		if (typeof ctor !== "function") {
+			throw new TypeError(`${describe(node.expression)} is not a constructor`);
+		}
+
 		if (isGuestClass(ctor)) {
 			// Construct a guest class on the explicit stack (steppable; super() supported).
 			vm.pushFrame({ "kind": "construct", "node": null, "phase": 0, "scope": vm.rootScope, "valuesBase": vm.values.length, "ctor": ctor, "args": args, "isNew": true, "newTarget": ctor });
@@ -231,7 +269,7 @@ function newExpression(vm: Machine, frame: NodeFrame): void {
 		}
 
 		vm.frames.pop();
-		vm.push(vm.invokeHost(ctor as (...a: unknown[]) => unknown, undefined, args, node, true));
+		vm.push(vm.invokeHost(ctor as (...args: unknown[]) => unknown, undefined, args, node, true));
 	} else {
 		vm.frames.pop(); // phase 3: guest construction left the instance on the stack
 	}
@@ -239,7 +277,7 @@ function newExpression(vm: Machine, frame: NodeFrame): void {
 
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
 export function register(): void {
-	on(K.TaggedTemplateExpression, taggedTemplateExpression);
-	on(K.CallExpression, callExpression);
-	on(K.NewExpression, newExpression);
+	on(Kind.TaggedTemplateExpression, taggedTemplateExpression);
+	on(Kind.CallExpression, callExpression);
+	on(Kind.NewExpression, newExpression);
 }

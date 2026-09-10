@@ -9,41 +9,52 @@ import { lookupPrivate, privateHas } from "./classes.ts";
 import { assignmentExpression, compoundAssignment } from "./references.ts";
 import { evaluating, on } from "./registry.ts";
 
-const K = ts.SyntaxKind;
+const Kind = ts.SyntaxKind;
 
-export const LOGICAL = new Set<number>([K.AmpersandAmpersandToken, K.BarBarToken, K.QuestionQuestionToken]);
+export const LOGICAL = new Set<number>([Kind.AmpersandAmpersandToken, Kind.BarBarToken, Kind.QuestionQuestionToken]);
 
 export const ASSIGN = new Set<number>([
-	K.EqualsToken,
-	K.PlusEqualsToken,
-	K.MinusEqualsToken,
-	K.AsteriskEqualsToken,
-	K.SlashEqualsToken,
-	K.PercentEqualsToken,
-	K.AsteriskAsteriskEqualsToken,
-	K.AmpersandEqualsToken,
-	K.BarEqualsToken,
-	K.CaretEqualsToken,
-	K.LessThanLessThanEqualsToken,
-	K.GreaterThanGreaterThanEqualsToken,
-	K.GreaterThanGreaterThanGreaterThanEqualsToken,
-	K.AmpersandAmpersandEqualsToken,
-	K.BarBarEqualsToken,
-	K.QuestionQuestionEqualsToken
+	Kind.EqualsToken,
+	Kind.PlusEqualsToken,
+	Kind.MinusEqualsToken,
+	Kind.AsteriskEqualsToken,
+	Kind.SlashEqualsToken,
+	Kind.PercentEqualsToken,
+	Kind.AsteriskAsteriskEqualsToken,
+	Kind.AmpersandEqualsToken,
+	Kind.BarEqualsToken,
+	Kind.CaretEqualsToken,
+	Kind.LessThanLessThanEqualsToken,
+	Kind.GreaterThanGreaterThanEqualsToken,
+	Kind.GreaterThanGreaterThanGreaterThanEqualsToken,
+	Kind.AmpersandAmpersandEqualsToken,
+	Kind.BarBarEqualsToken,
+	Kind.QuestionQuestionEqualsToken
 ]);
+
+export const privateIn = evaluating<ts.BinaryExpression>(
+	(node) => [node.right],
+	(vm, frame, node, [obj]) => { vm.push(privateHas(obj, lookupPrivate(frame.scope, (node.left as ts.PrivateIdentifier).text))); }
+);
+
+/** Plain binary: both operands, then the operator. */
+export const plainBinary = evaluating<ts.BinaryExpression>(
+	(node) => [node.left, node.right],
+	(vm, _frame, node, [left, right]) => { vm.push(applyBinary(node.operatorToken.kind, left as never, right as never)); }
+);
 
 function binaryExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.BinaryExpression;
 	const op = node.operatorToken.kind;
 
 	// `#x in obj` — a brand check (the left side is a private name, not an expression).
-	if (op === K.InKeyword && ts.isPrivateIdentifier(node.left)) {
+	if (op === Kind.InKeyword && ts.isPrivateIdentifier(node.left)) {
 		privateIn(vm, frame);
 
 		return;
 	}
 
-	if (op === K.EqualsToken) {
+	if (op === Kind.EqualsToken) {
 		assignmentExpression(vm, frame, node);
 
 		return;
@@ -64,24 +75,21 @@ function binaryExpression(vm: Machine, frame: NodeFrame): void {
 	plainBinary(vm, frame);
 }
 
-export const privateIn = evaluating<ts.BinaryExpression>(
-	(node) => [node.right],
-	(vm, frame, node, [obj]) => { vm.push(privateHas(obj, lookupPrivate(frame.scope, (node.left as ts.PrivateIdentifier).text))); }
-);
-
-/** Plain binary: both operands, then the operator. */
-export const plainBinary = evaluating<ts.BinaryExpression>(
-	(node) => [node.left, node.right],
-	(vm, _frame, node, [left, right]) => { vm.push(applyBinary(node.operatorToken.kind, left as never, right as never)); }
-);
-
 export function logicalExpression(vm: Machine, frame: NodeFrame, node: ts.BinaryExpression, op: ts.SyntaxKind): void {
 	if (frame.phase === 0) {
 		vm.pushNode(node.left, frame.scope);
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
 		const left = vm.pop();
-		const takeRight = op === K.AmpersandAmpersandToken ? Boolean(left) : op === K.BarBarToken ? !left : (left === null || left === undefined);
+		let takeRight;
+
+		if (op === Kind.AmpersandAmpersandToken) {
+			takeRight = Boolean(left);
+		} else if (op === Kind.BarBarToken) {
+			takeRight = !left;
+		} else {
+			takeRight = left === null || left === undefined;
+		}
 
 		if (takeRight) {
 			vm.pushNode(node.right, frame.scope);
@@ -116,53 +124,53 @@ function conditionalExpression(vm: Machine, frame: NodeFrame): void {
 
 export function applyBinary(op: ts.SyntaxKind, left: never, right: never): unknown {
 	switch (op) {
-		case K.PlusToken:
+		case Kind.PlusToken:
 			return (left as number) + (right as number);
-		case K.MinusToken:
+		case Kind.MinusToken:
 			return left - right;
-		case K.AsteriskToken:
+		case Kind.AsteriskToken:
 			return left * right;
-		case K.SlashToken:
+		case Kind.SlashToken:
 			return left / right;
-		case K.PercentToken:
+		case Kind.PercentToken:
 			return left % right;
-		case K.AsteriskAsteriskToken:
+		case Kind.AsteriskAsteriskToken:
 			return left ** right;
-		case K.AmpersandToken:
+		case Kind.AmpersandToken:
 			return left & right;
-		case K.BarToken:
+		case Kind.BarToken:
 			return left | right;
-		case K.CaretToken:
+		case Kind.CaretToken:
 			return left ^ right;
-		case K.LessThanLessThanToken:
+		case Kind.LessThanLessThanToken:
 			return left << right;
-		case K.GreaterThanGreaterThanToken:
+		case Kind.GreaterThanGreaterThanToken:
 			return left >> right;
-		case K.GreaterThanGreaterThanGreaterThanToken:
+		case Kind.GreaterThanGreaterThanGreaterThanToken:
 			return left >>> right;
-		case K.EqualsEqualsToken:
+		case Kind.EqualsEqualsToken:
 			// eslint-disable-next-line eqeqeq
 			return left == right;
-		case K.ExclamationEqualsToken:
+		case Kind.ExclamationEqualsToken:
 			// eslint-disable-next-line eqeqeq
 			return left != right;
-		case K.EqualsEqualsEqualsToken:
+		case Kind.EqualsEqualsEqualsToken:
 			return left === right;
-		case K.ExclamationEqualsEqualsToken:
+		case Kind.ExclamationEqualsEqualsToken:
 			return left !== right;
-		case K.LessThanToken:
+		case Kind.LessThanToken:
 			return left < right;
-		case K.LessThanEqualsToken:
+		case Kind.LessThanEqualsToken:
 			return left <= right;
-		case K.GreaterThanToken:
+		case Kind.GreaterThanToken:
 			return left > right;
-		case K.GreaterThanEqualsToken:
+		case Kind.GreaterThanEqualsToken:
 			return left >= right;
-		case K.InstanceOfKeyword:
+		case Kind.InstanceOfKeyword:
 			return (left as object) instanceof (right as CallableFunction);
-		case K.InKeyword:
+		case Kind.InKeyword:
 			return (left as PropertyKey) in (right as object);
-		case K.CommaToken:
+		case Kind.CommaToken:
 			return right;
 		default:
 			unimplemented(`binary operator ${ts.SyntaxKind[op]}`);
@@ -171,35 +179,35 @@ export function applyBinary(op: ts.SyntaxKind, left: never, right: never): unkno
 
 export function applyCompound(op: ts.SyntaxKind, left: never, right: never): unknown {
 	switch (op) {
-		case K.PlusEqualsToken:
+		case Kind.PlusEqualsToken:
 			return (left as number) + (right as number);
-		case K.MinusEqualsToken:
+		case Kind.MinusEqualsToken:
 			return left - right;
-		case K.AsteriskEqualsToken:
+		case Kind.AsteriskEqualsToken:
 			return left * right;
-		case K.SlashEqualsToken:
+		case Kind.SlashEqualsToken:
 			return left / right;
-		case K.PercentEqualsToken:
+		case Kind.PercentEqualsToken:
 			return left % right;
-		case K.AsteriskAsteriskEqualsToken:
+		case Kind.AsteriskAsteriskEqualsToken:
 			return left ** right;
-		case K.AmpersandEqualsToken:
+		case Kind.AmpersandEqualsToken:
 			return left & right;
-		case K.BarEqualsToken:
+		case Kind.BarEqualsToken:
 			return left | right;
-		case K.CaretEqualsToken:
+		case Kind.CaretEqualsToken:
 			return left ^ right;
-		case K.LessThanLessThanEqualsToken:
+		case Kind.LessThanLessThanEqualsToken:
 			return left << right;
-		case K.GreaterThanGreaterThanEqualsToken:
+		case Kind.GreaterThanGreaterThanEqualsToken:
 			return left >> right;
-		case K.GreaterThanGreaterThanGreaterThanEqualsToken:
+		case Kind.GreaterThanGreaterThanGreaterThanEqualsToken:
 			return left >>> right;
-		case K.AmpersandAmpersandEqualsToken:
+		case Kind.AmpersandAmpersandEqualsToken:
 			return left && right;
-		case K.BarBarEqualsToken:
+		case Kind.BarBarEqualsToken:
 			return left || right;
-		case K.QuestionQuestionEqualsToken:
+		case Kind.QuestionQuestionEqualsToken:
 			return left ?? right;
 		default:
 			unimplemented(`compound operator ${ts.SyntaxKind[op]}`);
@@ -208,6 +216,6 @@ export function applyCompound(op: ts.SyntaxKind, left: never, right: never): unk
 
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
 export function register(): void {
-	on(K.BinaryExpression, binaryExpression);
-	on(K.ConditionalExpression, conditionalExpression);
+	on(Kind.BinaryExpression, binaryExpression);
+	on(Kind.ConditionalExpression, conditionalExpression);
 }

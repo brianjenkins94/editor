@@ -21,16 +21,16 @@ test("#3 fork: a host-invoked closure from the fork runs on the fork", () => {
 	const original = vm.callGuestFromHost.bind(vm);
 	const forked = fork.callGuestFromHost.bind(fork);
 
-	vm.callGuestFromHost = (...a) => {
+	vm.callGuestFromHost = (...args) => {
 		originalHits += 1;
 
-		return original(...a);
+		return original(...args);
 	};
 
-	fork.callGuestFromHost = (...a) => {
+	fork.callGuestFromHost = (...args) => {
 		forkHits += 1;
 
-		return forked(...a);
+		return forked(...args);
 	};
 
 	(fork.rootScope.get("o") as { "inc": () => number }).inc();
@@ -40,27 +40,27 @@ test("#3 fork: a host-invoked closure from the fork runs on the fork", () => {
 // --- #4: await/yield inside a synchronous sub-evaluation must fail loud, not yield undefined ---
 
 test("#4 await inside a computed object-literal key is modeled (the key is evaluated on the stepped stack)", async () => {
-	const p = interpret(`(async () => { const o = { [await Promise.resolve("k")]: 1 }; return Object.keys(o)[0]; })()`) as Promise<unknown>;
+	const promise = interpret(`(async () => { const o = { [await Promise.resolve("k")]: 1 }; return Object.keys(o)[0]; })()`) as Promise<unknown>;
 
-	assert.strictEqual(await p, "k");
+	assert.strictEqual(await promise, "k");
 });
 
 test("#4 await inside a destructuring default is modeled (stepped pattern frame), never a silent undefined", async () => {
-	const p = interpret(`(async () => { const [x = await Promise.resolve(1)] = []; return x; })()`) as Promise<unknown>;
+	const promise = interpret(`(async () => { const [x = await Promise.resolve(1)] = []; return x; })()`) as Promise<unknown>;
 
-	assert.strictEqual(await p, 1);
+	assert.strictEqual(await promise, 1);
 });
 
 test("#4 await inside a class computed key is modeled (keys evaluate on the stepped stack)", async () => {
-	const p = interpret(`(async () => { class C { [await Promise.resolve("k")]() {} } return Object.getOwnPropertyNames(C.prototype); })()`) as Promise<unknown>;
+	const promise = interpret(`(async () => { class C { [await Promise.resolve("k")]() {} } return Object.getOwnPropertyNames(C.prototype); })()`) as Promise<unknown>;
 
-	assert.deepStrictEqual(await p, ["constructor", "k"]);
+	assert.deepStrictEqual(await promise, ["constructor", "k"]);
 });
 
 test("#4 await inside a catch-clause pattern is modeled too (bound by a frame above the catch block)", async () => {
-	const p = interpret(`(async () => { try { throw []; } catch ([a = await Promise.resolve(1)]) { return a; } })()`) as Promise<unknown>;
+	const promise = interpret(`(async () => { try { throw []; } catch ([a = await Promise.resolve(1)]) { return a; } })()`) as Promise<unknown>;
 
-	assert.strictEqual(await p, 1);
+	assert.strictEqual(await promise, 1);
 });
 
 // --- #7: fork policy — accessors rebind, class prototypes are shared consistently ---
@@ -80,8 +80,8 @@ test("#7 fork: a class prototype is shared, so a forked instance's proto is its 
 
 	vm.run();
 	const fork = vm.fork();
-	const A = fork.rootScope.get("A") as { "prototype": object };
-	const a = fork.rootScope.get("a") as object;
+	const forkedClass = fork.rootScope.get("A") as { "prototype": object };
+	const forkedInstance = fork.rootScope.get("a") as object;
 
-	assert.strictEqual(Object.getPrototypeOf(a), A.prototype);
+	assert.strictEqual(Object.getPrototypeOf(forkedInstance), forkedClass.prototype);
 });

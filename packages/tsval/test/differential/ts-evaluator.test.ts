@@ -36,8 +36,17 @@ for (const program of corpus) {
 	test(title, gap === undefined ? {} : { "todo": gap }, async () => {
 		const outcome = await classifyDifferential(program.code);
 
-		if (outcome.kind === "mismatch") { assert.fail(`${outcome.detail}\n--- program ---\n${program.code.trim()}`); }
-		if (gap !== undefined) { tally.todo += 1; } else if (outcome.kind === "both-threw") { tally.bothThrew += 1; } else { tally.match += 1; }
+		if (outcome.kind === "mismatch") {
+			assert.fail(`${outcome.detail}\n--- program ---\n${program.code.trim()}`);
+		}
+
+		if (gap !== undefined) {
+			tally.todo += 1;
+		} else if (outcome.kind === "both-threw") {
+			tally.bothThrew += 1;
+		} else {
+			tally.match += 1;
+		}
 	});
 }
 

@@ -10,7 +10,7 @@ export default mergeConfig(defaults, {
 	"define": { "__BABLR_RECORD_STRICT__": "false" },
 	"resolve": {
 		"alias": [
-			{ "find": /^@bablr\/record(?:\/.*)?$/, "replacement": url.fileURLToPath(new URL("./shims/record.js", import.meta.url)) }
+			{ "find": /^@bablr\/record(?:\/.*)?$/u, "replacement": url.fileURLToPath(new URL("./shims/record.js", import.meta.url)) }
 		]
 	},
 	"build": {

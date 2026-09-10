@@ -9,20 +9,20 @@ import { createGuestFunction, nameAnonymous, setFunctionName } from "./functions
 import { cookedTemplateText, defineData, toPropertyKey } from "./realm.ts";
 import { evaluating, on, passThroughExpr, pushText } from "./registry.ts";
 
-const K = ts.SyntaxKind;
+const Kind = ts.SyntaxKind;
 
 function numericLiteral(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.NumericLiteral;
 
 	vm.frames.pop();
-	vm.push(Number(node.text.replace(/_/g, "")));
+	vm.push(Number(node.text.replace(/_/gu, "")));
 }
 
 function bigIntLiteral(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.BigIntLiteral;
 
 	vm.frames.pop();
-	vm.push(BigInt(node.text.replace(/_/g, "").replace(/n$/, "")));
+	vm.push(BigInt(node.text.replace(/_/gu, "").replace(/n$/u, "")));
 }
 
 function trueKeyword(vm: Machine): void {
@@ -62,7 +62,10 @@ function identifier(vm: Machine, frame: NodeFrame): void {
 function metaProperty(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.MetaProperty;
 
-	if (node.keywordToken !== K.NewKeyword || node.name.text !== "target") { unimplemented(`${ts.SyntaxKind[node.keywordToken]}.${node.name.text}`); }
+	if (node.keywordToken !== Kind.NewKeyword || node.name.text !== "target") {
+		unimplemented(`${ts.SyntaxKind[node.keywordToken]}.${node.name.text}`);
+	}
+
 	vm.frames.pop();
 	vm.push(frame.scope.getNewTarget());
 }
@@ -72,7 +75,10 @@ const templateExpression = evaluating<ts.TemplateExpression>(
 	(vm, _frame, node, values) => {
 		let out = cookedTemplateText(node.head)!;
 
-		for (let i = 0; i < node.templateSpans.length; i++) { out += String(values[i]) + (cookedTemplateText(node.templateSpans[i].literal)!); }
+		for (let index = 0; index < node.templateSpans.length; index++) {
+			out += String(values[index]) + (cookedTemplateText(node.templateSpans[index].literal)!);
+		}
+
 		vm.push(out);
 	}
 );
@@ -86,11 +92,16 @@ const arrayLiteralExpression = evaluating<ts.ArrayLiteralExpression>(
 		let index = 0; // elements are *defined* (CreateDataProperty): an inherited setter on an index never runs
 
 		for (const el of node.elements) {
-			if (ts.isOmittedExpression(el)) { index += 1; } else if (ts.isSpreadElement(el)) {
+			if (ts.isOmittedExpression(el)) {
+				index += 1;
+			} else if (ts.isSpreadElement(el)) {
 				const iterable = raw[cursor] as Iterable<unknown>;
 
 				cursor += 1;
-				for (const v of iterable) { defineData(out, index, v); index += 1; }
+				for (const value of iterable) {
+					defineData(out, index, value);
+					index += 1;
+				}
 			} else {
 				defineData(out, index, raw[cursor]);
 				index += 1;
@@ -141,8 +152,17 @@ export function objectLiteralOperands(node: ts.ObjectLiteralExpression): { "node
 	for (const prop of node.properties) {
 		const { name } = prop as { "name"?: ts.PropertyName };
 
-		if (name !== undefined && ts.isComputedPropertyName(name)) { out.push({ "node": name.expression, "isKey": true }); }
-		if (ts.isPropertyAssignment(prop)) { out.push({ "node": prop.initializer, "isKey": false }); } else if (ts.isShorthandPropertyAssignment(prop)) { out.push({ "node": prop.name, "isKey": false }); } else if (ts.isSpreadAssignment(prop)) { out.push({ "node": prop.expression, "isKey": false }); } else if (!ts.isMethodDeclaration(prop) && !ts.isGetAccessorDeclaration(prop) && !ts.isSetAccessorDeclaration(prop)) {
+		if (name !== undefined && ts.isComputedPropertyName(name)) {
+			out.push({ "node": name.expression, "isKey": true });
+		}
+
+		if (ts.isPropertyAssignment(prop)) {
+			out.push({ "node": prop.initializer, "isKey": false });
+		} else if (ts.isShorthandPropertyAssignment(prop)) {
+			out.push({ "node": prop.name, "isKey": false });
+		} else if (ts.isSpreadAssignment(prop)) {
+			out.push({ "node": prop.expression, "isKey": false });
+		} else if (!ts.isMethodDeclaration(prop) && !ts.isGetAccessorDeclaration(prop) && !ts.isSetAccessorDeclaration(prop)) {
 			unimplemented(`${ts.SyntaxKind[(prop as ts.Node).kind]} in ObjectLiteral`);
 		}
 	}
@@ -172,15 +192,16 @@ export function buildObjectLiteral(vm: Machine, frame: NodeFrame, node: ts.Objec
 				const value = values[cursor];
 
 				cursor += 1;
-				if (value === null || typeof value === "object" || typeof value === "function") { Object.setPrototypeOf(obj, value); }
-				continue;
+				if (value === null || typeof value === "object" || typeof value === "function") {
+					Object.setPrototypeOf(obj, value);
+				}
+			} else {
+				const key = keyOf(prop.name);
+				const value = values[cursor];
+
+				cursor += 1;
+				defineData(obj, key, nameAnonymous(value, key, prop.initializer));
 			}
-
-			const key = keyOf(prop.name);
-			const value = values[cursor];
-
-			cursor += 1;
-			defineData(obj, key, nameAnonymous(value, key, prop.initializer));
 		} else if (ts.isShorthandPropertyAssignment(prop)) {
 			defineData(obj, prop.name.text, values[cursor]);
 			cursor += 1;
@@ -203,7 +224,11 @@ export function buildObjectLiteral(vm: Machine, frame: NodeFrame, node: ts.Objec
 
 			delete desc.value;
 			delete desc.writable;
-			if (ts.isGetAccessorDeclaration(prop)) { desc.get = fn as () => unknown; } else { desc.set = fn as (v: unknown) => void; }
+			if (ts.isGetAccessorDeclaration(prop)) {
+				desc.get = fn as () => unknown;
+			} else {
+				desc.set = fn as (value: unknown) => void;
+			}
 
 			Object.defineProperty(obj, key, desc);
 		}
@@ -214,43 +239,59 @@ export function buildObjectLiteral(vm: Machine, frame: NodeFrame, node: ts.Objec
 
 /** `{ ...source }`: copy own enumerable props (string + symbol keys), each value through the guard. */
 export function spreadInto(vm: Machine, target: Record<PropertyKey, unknown>, source: unknown): void {
-	if (source === null || source === undefined) { return; }
+	if (source === null || source === undefined) {
+		return;
+	}
+
 	const src = new Object(source) as Record<PropertyKey, unknown>;
 
 	for (const key of Reflect.ownKeys(src)) {
-		if (Object.getOwnPropertyDescriptor(src, key)?.enumerable) { defineData(target, key, vm.fromHost(src[key])); }
+		if (Object.getOwnPropertyDescriptor(src, key)?.enumerable) {
+			defineData(target, key, vm.fromHost(src[key]));
+		}
 	}
 }
 
 export function propertyName(name: ts.PropertyName | ts.Identifier): string {
-	if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) { return name.text; }
-	if (ts.isBigIntLiteral(name)) { return String(BigInt(name.text.slice(0, -1))); } // `{ 1n: v }` → "1"
-	if (ts.isPrivateIdentifier(name)) { return name.text; }
+	if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
+		return name.text;
+	}
+
+	if (ts.isBigIntLiteral(name)) {
+		return String(BigInt(name.text.slice(0, -1))); // `{ 1n: v }` → "1"
+	}
+
+	if (ts.isPrivateIdentifier(name)) {
+		return name.text;
+	}
+
 	unimplemented(`computed/other property name (${ts.SyntaxKind[name.kind]})`);
 }
 
-const voidExpression = evaluating<ts.VoidExpression>((node) => [node.expression], (vm) => { vm.push(undefined); });
+const voidExpression = evaluating<ts.VoidExpression>((node) => [node.expression], (vm) => {
+	vm.push(undefined);
+});
 
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
 export function register(): void {
-	on(K.NumericLiteral, numericLiteral);
-	on(K.BigIntLiteral, bigIntLiteral);
-	on(K.StringLiteral, pushText);
-	on(K.NoSubstitutionTemplateLiteral, pushText);
-	on(K.TrueKeyword, trueKeyword);
-	on(K.FalseKeyword, falseKeyword);
-	on(K.NullKeyword, nullKeyword);
-	on(K.RegularExpressionLiteral, regularExpressionLiteral);
-	on(K.Identifier, identifier);
-	on(K.MetaProperty, metaProperty);
-	on(K.ParenthesizedExpression, passThroughExpr);
-	on(K.ExpressionWithTypeArguments, passThroughExpr); // an instantiation expression `f<T>` is `f`
-	on(K.AsExpression, passThroughExpr);
-	on(K.TypeAssertionExpression, passThroughExpr);
-	on(K.NonNullExpression, passThroughExpr);
-	on(K.SatisfiesExpression, passThroughExpr);
-	on(K.TemplateExpression, templateExpression);
-	on(K.ArrayLiteralExpression, arrayLiteralExpression);
-	on(K.ObjectLiteralExpression, objectLiteralExpression);
-	on(K.VoidExpression, voidExpression);
+	on(Kind.NumericLiteral, numericLiteral);
+	on(Kind.BigIntLiteral, bigIntLiteral);
+	on(Kind.StringLiteral, pushText);
+	on(Kind.NoSubstitutionTemplateLiteral, pushText);
+	on(Kind.TrueKeyword, trueKeyword);
+	on(Kind.FalseKeyword, falseKeyword);
+	on(Kind.NullKeyword, nullKeyword);
+	on(Kind.RegularExpressionLiteral, regularExpressionLiteral);
+	on(Kind.Identifier, identifier);
+	on(Kind.MetaProperty, metaProperty);
+	on(Kind.ParenthesizedExpression, passThroughExpr);
+	on(Kind.ExpressionWithTypeArguments, passThroughExpr); // an instantiation expression `f<T>` is `f`
+	on(Kind.AsExpression, passThroughExpr);
+	on(Kind.TypeAssertionExpression, passThroughExpr);
+	on(Kind.NonNullExpression, passThroughExpr);
+	on(Kind.SatisfiesExpression, passThroughExpr);
+	on(Kind.TemplateExpression, templateExpression);
+	on(Kind.ArrayLiteralExpression, arrayLiteralExpression);
+	on(Kind.ObjectLiteralExpression, objectLiteralExpression);
+	on(Kind.VoidExpression, voidExpression);
 }

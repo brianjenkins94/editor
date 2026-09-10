@@ -33,11 +33,11 @@ test("`globals` layer on top of the standard table; `realGlobals: true` restores
 });
 
 test("standardGlobals() is a fresh table each time (a host may add to it without affecting the next VM)", () => {
-	const a = standardGlobals();
-	const b = standardGlobals();
+	const first = standardGlobals();
+	const second = standardGlobals();
 
-	assert.notStrictEqual(a, b);
-	assert.strictEqual(a.Object, Object);
-	assert.strictEqual(a.globalThis, a);
-	assert.ok(!("eval" in a) && !("process" in a));
+	assert.notStrictEqual(first, second);
+	assert.strictEqual(first.Object, Object);
+	assert.strictEqual(first.globalThis, first);
+	assert.ok(!("eval" in first) && !("process" in first));
 });

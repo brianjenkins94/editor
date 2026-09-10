@@ -45,7 +45,9 @@ interface Positioned {
 const KIND_NAMES = new Map<number, string>();
 
 for (const [name, kind] of Object.entries(ts.SyntaxKind)) {
-	if (typeof kind === "number" && !/^(?:First|Last)[A-Z]/u.test(name) && !KIND_NAMES.has(kind)) { KIND_NAMES.set(kind, name); }
+	if (typeof kind === "number" && !/^(?:First|Last)[A-Z]/u.test(name) && !KIND_NAMES.has(kind)) {
+		KIND_NAMES.set(kind, name);
+	}
 }
 
 function kindName(kind: ts.SyntaxKind): string {
@@ -107,36 +109,47 @@ export function prepare(src: string, fileName = "entry.ts"): Bridge {
 		while (low < high) {
 			const mid = (low + high) >>> 1;
 
-			if (nodes[mid].start <= start) { low = mid + 1; } else { high = mid; }
+			if (nodes[mid].start <= start) {
+				low = mid + 1;
+			} else {
+				high = mid;
+			}
 		}
 
-		for (let i = low - 1; i >= 0; i -= 1) {
-			if (nodes[i].end >= end) { return nodes[i]; }
+		for (let index = low - 1; index >= 0; index -= 1) {
+			if (nodes[index].end >= end) {
+				return nodes[index];
+			}
 		}
 
 		return undefined;
 	};
 
 	const align = (): Alignment[] => {
-		const spans = cstSpans(src).spans.map((span, index) => ({ "span": span, "index": index })).sort((a, b) => a.span.start - b.span.start || b.span.end - a.span.end);
-		const result: Alignment[] = new Array(spans.length);
+		const spans = cstSpans(src).spans.map((span, index) => ({ "span": span, "index": index })).sort((left, right) => left.span.start - right.span.start || right.span.end - left.span.end);
+		const result: Alignment[] = Array.from<Alignment>({ "length": spans.length });
 		const stack: Positioned[] = []; // the chain of tsc nodes containing the current position
 		let next = 0;
 
 		for (const { span, index } of spans) {
 			while (next < nodes.length && nodes[next].start <= span.start) {
-				while (stack.length > 0 && stack[stack.length - 1].end <= nodes[next].start) { stack.pop(); }
+				while (stack.length > 0 && stack[stack.length - 1].end <= nodes[next].start) {
+					stack.pop();
+				}
+
 				stack.push(nodes[next]);
 				next += 1;
 			}
 
-			let k = stack.length - 1;
+			let cursor = stack.length - 1;
 
-			while (k >= 0 && stack[k].end < span.end) { k -= 1; }
+			while (cursor >= 0 && stack[cursor].end < span.end) {
+				cursor -= 1;
+			}
 
 			const cst: CstNode = { "type": String(span.type ?? "(token)"), "start": span.start, "end": span.end, "token": span.token };
 
-			result[index] = k >= 0 ? { "cst": cst, "ts": render(stack[k]) } : { "cst": cst };
+			result[index] = cursor >= 0 ? { "cst": cst, "ts": render(stack[cursor]) } : { "cst": cst };
 		}
 
 		return result;
@@ -202,10 +215,21 @@ export interface Edit {
 export function mapPos(pos: number, edit: Edit, bias: "left" | "right"): number {
 	const delta = edit.insert.length - (edit.end - edit.start);
 
-	if (pos < edit.start) { return pos; }
-	if (pos > edit.end) { return pos + delta; }
-	if (pos === edit.start && bias === "left") { return pos; }
-	if (pos === edit.end && bias === "right") { return pos + delta; }
+	if (pos < edit.start) {
+		return pos;
+	}
+
+	if (pos > edit.end) {
+		return pos + delta;
+	}
+
+	if (pos === edit.start && bias === "left") {
+		return pos;
+	}
+
+	if (pos === edit.end && bias === "right") {
+		return pos + delta;
+	}
 
 	return bias === "left" ? edit.start : edit.start + edit.insert.length;
 }
@@ -218,7 +242,10 @@ export function transport(span: { "start": number; "end": number }, edits: Edit[
 	let touched = false;
 
 	for (const edit of edits) {
-		if (edit.start < end && edit.end > start) { touched = true; }
+		if (edit.start < end && edit.end > start) {
+			touched = true;
+		}
+
 		start = mapPos(start, edit, "right");
 		end = mapPos(end, edit, "left");
 	}
@@ -233,9 +260,7 @@ export function cstNodeAtSpan(spans: Span[], start: number, end: number): CstNod
 	let bestWidth = Number.POSITIVE_INFINITY;
 
 	for (const span of spans) {
-		if (span.cover || span.trivia || span.type === null) { continue; }
-
-		if (span.start <= start && span.end >= end) {
+		if (!span.cover && !span.trivia && span.type !== null && span.start <= start && span.end >= end) {
 			const width = span.end - span.start;
 
 			if (width < bestWidth) {
@@ -294,17 +319,17 @@ export function openDrift(src: string): DriftingBridge {
 			let bestWidth = Number.POSITIVE_INFINITY;
 
 			for (const span of spans) {
-				if (span.cover || span.trivia || span.type === null) { continue; }
+				if (!span.cover && !span.trivia && span.type !== null) {
+					const carried = transport({ "start": span.start, "end": span.end }, drift);
 
-				const carried = transport({ "start": span.start, "end": span.end }, drift);
+					if (!carried.touched && carried.span.start <= pos && carried.span.end > pos) {
+						const width = carried.span.end - carried.span.start;
 
-				if (carried.touched || carried.span.start > pos || carried.span.end <= pos) { continue; }
-
-				const width = carried.span.end - carried.span.start;
-
-				if (width < bestWidth) {
-					best = { "type": span.type, "start": carried.span.start, "end": carried.span.end };
-					bestWidth = width;
+						if (width < bestWidth) {
+							best = { "type": span.type, "start": carried.span.start, "end": carried.span.end };
+							bestWidth = width;
+						}
+					}
 				}
 			}
 

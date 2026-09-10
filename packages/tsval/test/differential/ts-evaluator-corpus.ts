@@ -27,17 +27,23 @@ function *testFiles(dir: string): Generator<string> {
 		const full = path.join(dir, entry.name);
 
 		if (entry.isDirectory()) {
-			if (entry.name !== "setup") { yield* testFiles(full); }
-		} else if (entry.name.endsWith(".test.ts")) { yield full; }
+			if (entry.name !== "setup") {
+				yield* testFiles(full);
+			}
+		} else if (entry.name.endsWith(".test.ts")) {
+			yield full;
+		}
 	}
 }
 
 function enclosingTestName(node: ts.Node): string {
-	for (let n: ts.Node | undefined = node; n; n = n.parent) {
-		if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "test") {
-			const first = n.arguments[0];
+	for (let current: ts.Node | undefined = node; current; current = current.parent) {
+		if (ts.isCallExpression(current) && ts.isIdentifier(current.expression) && current.expression.text === "test") {
+			const [first] = current.arguments;
 
-			if (first && (ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first))) { return first.text; }
+			if (first && (ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first))) {
+				return first.text;
+			}
 		}
 	}
 
@@ -53,7 +59,7 @@ export function loadCorpus(): CorpusProgram[] {
 		let index = 0;
 		const visit = (node: ts.Node): void => {
 			if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "executeProgram") {
-				const arg = node.arguments[0];
+				const [arg] = node.arguments;
 
 				// Only literal programs; a template with substitutions is test-harness plumbing, not a program.
 				if (arg && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg))) {

@@ -5,7 +5,7 @@ import { createVM } from "../../src/interpret.ts";
 
 // Reading guest values back out of a scope is inherently untyped; keep the tests terse.
 // eslint-disable-next-line ts/no-explicit-any -- reading guest values back out of a scope is inherently untyped
-const get = (m: VM, name: string): any => m.rootScope.get(name);
+const get = (machine: VM, name: string): any => machine.rootScope.get(name);
 
 test("fork: guest objects and arrays are cloned (mutation stays local)", () => {
 	const { vm } = createVM("const box = { n: 1 }; const list = [10]; box.n;");
@@ -21,7 +21,7 @@ test("fork: guest objects and arrays are cloned (mutation stays local)", () => {
 });
 
 test("fork: host shims are shared, not cloned (identity preserved)", () => {
-	const shim = (...a: unknown[]) => a;
+	const shim = (...args: unknown[]) => args;
 	const { vm } = createVM("record; 0;", { "globals": { "record": shim } });
 
 	vm.run();
@@ -34,9 +34,9 @@ test("fork: host shims are shared, not cloned (identity preserved)", () => {
 test("fork: a mid-execution fork continues independently (control stack cloned)", () => {
 	const { vm } = createVM("let sum = 0; let i = 0; while (i < 10) { sum += i; i = i + 1; } sum;");
 
-	vm.runUntil((m) => {
+	vm.runUntil((machine) => {
 		try {
-			return m.rootScope.get("i") === 3;
+			return machine.rootScope.get("i") === 3;
 		} catch {
 			return false;
 		}
@@ -69,11 +69,11 @@ test("fork: class instances survive (shared prototype + constructor, cloned data
 	vm.run();
 	const fork = vm.fork();
 
-	const A = get(fork, "A");
-	const a = get(fork, "a");
+	const forkedClass = get(fork, "A");
+	const forkedInstance = get(fork, "a");
 
-	assert.ok(a instanceof A, "instanceof works across the fork");
-	assert.strictEqual(a.get2(), 10, "methods still callable");
+	assert.ok(forkedInstance instanceof forkedClass, "instanceof works across the fork");
+	assert.strictEqual(forkedInstance.get2(), 10, "methods still callable");
 
 	get(vm, "a").v = 99;
 	assert.strictEqual(get(fork, "a").v, 5, "instance data is independent");
@@ -82,9 +82,9 @@ test("fork: class instances survive (shared prototype + constructor, cloned data
 test("fork: forks do not share the step budget or completion", () => {
 	const { vm } = createVM("let x = 1; x = x + 1; x;");
 
-	vm.runUntil((m) => {
+	vm.runUntil((machine) => {
 		try {
-			return m.rootScope.get("x") === 1;
+			return machine.rootScope.get("x") === 1;
 		} catch {
 			return false;
 		}

@@ -14,26 +14,31 @@ try {
 const { autostub, respondFirst } = stub;
 
 function withTimeout(promise: Promise<unknown>, ms = 300) {
-	return Promise.race([promise, new Promise((resolve) => {
-		setTimeout(() => { resolve("TIMEOUT"); }, ms);
-	})]);
+	return Promise.race([
+		promise,
+		new Promise((resolve) => {
+			setTimeout(() => {
+				resolve("TIMEOUT");
+			}, ms);
+		})
+	]);
 }
 
 // ── autostub: undefined-safe downstream, and safe where a stub must NOT stand in ──
-const s = autostub() as any;
+const sample = autostub() as any;
 
-assert.equal(typeof s.a.b[0].c(), "function");
-assert.equal(typeof new s.Thing(), "function");
+assert.equal(typeof sample.a.b[0].c(), "function");
+assert.equal(typeof new sample.Thing(), "function");
 // Not a thenable: `await stub` yields the stub instead of hanging forever.
-assert.equal(typeof s.then, "undefined");
-assert.equal(typeof await withTimeout((async () => await s)()), "function");
+assert.equal(typeof sample.then, "undefined");
+assert.equal(typeof await withTimeout((async () => await sample)()), "function");
 // Coercion does not throw: logs and URLs built from a stubbed response keep flowing.
-assert.equal(`${s.name}`, "[stub]");
-assert.equal(s.a.b + "", "[stub]");
-assert.equal(JSON.stringify({ "v": s }), "{}");
+assert.equal(`${sample.name}`, "[stub]");
+assert.equal(sample.a.b + "", "[stub]");
+assert.equal(JSON.stringify({ "v": sample }), "{}");
 // Not iterable, and other symbols are undefined.
-assert.equal(typeof s[Symbol.iterator], "undefined");
-assert.throws(() => [...s], TypeError);
+assert.equal(typeof sample[Symbol.iterator], "undefined");
+assert.throws(() => [...sample], TypeError);
 
 // ── respondFirst: fixtures, factories, auto-stubs ──
 assert.deepEqual(respondFirst(`const r = fetch("https://x"); r.ok`, { "responses": { "fetch": { "ok": true } } }), { "completion": true, "stubbed": ["fetch"] });

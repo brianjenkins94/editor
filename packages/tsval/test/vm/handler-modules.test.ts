@@ -13,10 +13,10 @@ import { test } from "node:test";
 import * as url from "node:url";
 
 const dir = path.resolve(import.meta.dirname, "../../src/handlers");
-const modules = fs.readdirSync(dir).filter((f) => f.endsWith(".ts")).sort();
+const modules = fs.readdirSync(dir).filter((entry) => entry.endsWith(".ts")).sort();
 
 function importIn(specifiers: string[]): string {
-	return execFileSync(process.execPath, ["--input-type=module", "-e", specifiers.map((s) => `await import(${JSON.stringify(s)});`).join("\n") + "\nconsole.log('ok');"], { "encoding": "utf8", "stdio": ["ignore", "pipe", "pipe"] }).trim();
+	return execFileSync(process.execPath, ["--input-type=module", "-e", specifiers.map((specifier) => `await import(${JSON.stringify(specifier)});`).join("\n") + "\nconsole.log('ok');"], { "encoding": "utf8", "stdio": ["ignore", "pipe", "pipe"] }).trim();
 }
 
 for (const file of modules) {
@@ -26,7 +26,7 @@ for (const file of modules) {
 }
 
 test("handler modules load in reverse order, then the aggregator registers them all", () => {
-	const reversed = [...modules].reverse().map((f) => url.pathToFileURL(path.join(dir, f)).href);
+	const reversed = [...modules].reverse().map((entry) => url.pathToFileURL(path.join(dir, entry)).href);
 
 	assert.equal(importIn([...reversed, url.pathToFileURL(path.resolve(dir, "../handlers.ts")).href]), "ok");
 });

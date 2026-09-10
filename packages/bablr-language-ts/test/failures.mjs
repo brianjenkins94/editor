@@ -5,24 +5,26 @@ import { loadCorpus } from "./corpus.mjs";
 
 const report = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const filter = process.argv[3];
-const wanted = new Map(report.results.map((r) => [`${r.corpus}/${r.id}`, r]));
-const cases = []; const
-	results = [];
+const wanted = new Map(report.results.map((result) => [`${result.corpus}/${result.id}`, result]));
+const cases = [];
+const results = [];
 
-for await (const c of loadCorpus({ "corpora": report.corpora, "size": report.size })) {
-	const r = wanted.get(`${c.corpus}/${c.id}`);
+for await (const testCase of loadCorpus({ "corpora": report.corpora, "size": report.size })) {
+	const key = `${testCase.corpus}/${testCase.id}`;
+	const result = wanted.get(key);
 
-	if (!r || r.status === "pass") { continue; }
-	if (filter && !`${c.corpus}/${c.id}`.includes(filter)) { continue; }
-	cases.push(c); results.push(r);
+	if (result && result.status !== "pass" && (!filter || key.includes(filter))) {
+		cases.push(testCase);
+		results.push(result);
+	}
 }
 
 const { rows } = analyze(cases, results, { "size": report.size });
 
-for (const r of rows) {
-	const stmt = (r.failingStatement ?? "(no position)").replace(/\s+/g, " ").slice(0, 110);
+for (const row of rows) {
+	const stmt = (row.failingStatement ?? "(no position)").replace(/\s+/gu, " ").slice(0, 110);
 
-	console.log(`${r.corpus}/${r.id}  [${r.status}${r.message ? ": " + r.message.slice(0, 40) : ""}] ${r.usesTs ? "TS" : "JS"}\n    ${stmt}`);
+	console.log(`${row.corpus}/${row.id}  [${row.status}${row.message ? ": " + row.message.slice(0, 40) : ""}] ${row.usesTs ? "TS" : "JS"}\n    ${stmt}`);
 }
 
 console.log(`${rows.length} failures`);

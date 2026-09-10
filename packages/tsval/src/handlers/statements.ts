@@ -17,7 +17,7 @@ import { assignProgram, bindIdentifier, bindingProgram, pushPattern } from "./pa
 import { unwrapParens } from "./references.ts";
 import { evaluating, noop, on } from "./registry.ts";
 
-const K = ts.SyntaxKind;
+const Kind = ts.SyntaxKind;
 
 function sourceFile(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.SourceFile;
@@ -39,7 +39,10 @@ function block(vm: Machine, frame: NodeFrame): void {
 		// Block gets a fresh child scope. `frame.reuseScope` is set by the call handler.
 		const blockScope = frame.reuseScope ? frame.scope : new Scope(frame.scope, false);
 
-		if (!frame.reuseScope) { hoist(vm, blockScope, node.statements); }
+		if (!frame.reuseScope) {
+			hoist(vm, blockScope, node.statements);
+		}
+
 		pushStatementsReverse(vm, node.statements, blockScope);
 		frame.phase = 1;
 	} else {
@@ -48,8 +51,10 @@ function block(vm: Machine, frame: NodeFrame): void {
 }
 
 export function pushStatementsReverse(vm: Machine, statements: readonly ts.Statement[], scope: Scope): void {
-	for (let i = statements.length - 1; i >= 0; i--) {
-		if (!isAmbient(statements[i])) { vm.pushNode(statements[i], scope); }
+	for (let index = statements.length - 1; index >= 0; index--) {
+		if (!isAmbient(statements[index])) {
+			vm.pushNode(statements[index], scope);
+		}
 	}
 }
 
@@ -57,7 +62,9 @@ function emptyStatement(vm: Machine): void {
 	vm.frames.pop();
 }
 
-const variableStatement = evaluating<ts.VariableStatement>((node) => [node.declarationList], () => {});
+const variableStatement = evaluating<ts.VariableStatement>((node) => [node.declarationList], () => {
+	// Nothing to do after the declaration list frame: it performs the declarations and bindings itself.
+});
 
 // Shared driver for a VariableDeclarationList: declare each name (defensively — `hoist` may already
 // have, e.g. for TDZ in a block, but a `for`-init has no hoist pass), evaluate initializers in order,
@@ -66,38 +73,59 @@ function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 	const list = frame.node as ts.VariableDeclarationList;
 	const decls = list.declarations;
 
-	if ((list.flags & ts.NodeFlags.Using) !== 0) { unimplemented("`using` / `await using` declarations (explicit resource management: disposal is not modeled)"); }
+	if ((list.flags & ts.NodeFlags.Using) !== 0) {
+		unimplemented("`using` / `await using` declarations (explicit resource management: disposal is not modeled)");
+	}
+
 	const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
 	const isLet = (list.flags & ts.NodeFlags.Let) !== 0;
-	const kind: BindingKind = isConst ? "const" : isLet ? "let" : "var";
+	let kind: BindingKind;
+
+	if (isConst) {
+		kind = "const";
+	} else if (isLet) {
+		kind = "let";
+	} else {
+		kind = "var";
+	}
 
 	// phase encodes "which declaration are we on": phase 2*i => start decl i; phase 2*i+1 => bind decl i.
-	const i = frame.phase >> 1;
+	const index = frame.phase >> 1;
 
-	if (i >= decls.length) {
+	if (index >= decls.length) {
 		vm.frames.pop();
 
 		return;
 	}
 
-	const decl = decls[i];
+	const decl = decls[index];
 
 	if ((frame.phase & 1) === 0) {
 		if (decl.initializer) {
 			const init = vm.pushNode(decl.initializer, frame.scope);
 
-			if (ts.isIdentifier(decl.name) && ts.isClassExpression(unwrapParens(decl.initializer))) { init.nameHint = decl.name.text; } // (see classDefinition)
+			if (ts.isIdentifier(decl.name) && ts.isClassExpression(unwrapParens(decl.initializer))) {
+				init.nameHint = decl.name.text; // (see classDefinition)
+			}
+
 			frame.phase += 1; // -> bind
 		} else {
 			// no initializer: `let x;` leaves the TDZ as undefined. `var x;` is a runtime no-op — it must
 			// not overwrite a hoisted `function x` (or an earlier assignment) with undefined.
-			if (kind !== "var") { bindIdentifier(frame.scope, (decl.name as ts.Identifier).text, undefined, kind); } // (a pattern needs an initializer)
+			if (kind !== "var") {
+				bindIdentifier(frame.scope, (decl.name as ts.Identifier).text, undefined, kind); // (a pattern needs an initializer)
+			}
+
 			frame.phase += 2; // -> next decl
 		}
 	} else {
 		const value = namedIf(vm.pop(), decl.name, decl.initializer);
 
-		if (ts.isIdentifier(decl.name)) { bindIdentifier(frame.scope, decl.name.text, value, kind); } else { pushPattern(vm, frame.scope, bindingProgram(decl.name, kind), value); } // a frame above this one
+		if (ts.isIdentifier(decl.name)) {
+			bindIdentifier(frame.scope, decl.name.text, value, kind);
+		} else {
+			pushPattern(vm, frame.scope, bindingProgram(decl.name, kind), value); // a frame above this one
+		}
 
 		frame.phase += 1; // -> next decl (now even)
 	}
@@ -108,7 +136,9 @@ const expressionStatement = evaluating<ts.ExpressionStatement>(
 	(vm, frame, _node, [value]) => {
 		// The program's completion value (eval/script semantics): the last value-producing statement
 		// of the PROGRAM — statements inside function bodies do not count.
-		if (!vm.insideFunction(frame.scope)) { vm.setCompletion(value); }
+		if (!vm.insideFunction(frame.scope)) {
+			vm.setCompletion(value);
+		}
 	}
 );
 
@@ -121,7 +151,11 @@ function ifStatement(vm: Machine, frame: NodeFrame): void {
 	} else if (frame.phase === 1) {
 		const cond = vm.pop();
 
-		if (cond) { vm.pushNode(node.thenStatement, frame.scope); } else if (node.elseStatement) { vm.pushNode(node.elseStatement, frame.scope); }
+		if (cond) {
+			vm.pushNode(node.thenStatement, frame.scope);
+		} else if (node.elseStatement) {
+			vm.pushNode(node.elseStatement, frame.scope);
+		}
 
 		frame.phase = 2;
 	} else {
@@ -134,7 +168,10 @@ const returnStatement = evaluating<ts.ReturnStatement>(
 	(vm, _frame, node, [value]) => { vm.raise({ "type": "return", "value": node.expression ? value : undefined }); }
 );
 
-const throwStatement = evaluating<ts.ThrowStatement>((node) => [node.expression], (vm, _frame, _node, [value]) => { vm.raise({ "type": "throw", "value": value }); });
+const throwStatement = evaluating<ts.ThrowStatement>(
+	(node) => [node.expression],
+	(vm, _frame, _node, [value]) => { vm.raise({ "type": "throw", "value": value }); }
+);
 
 // A hoisted function declaration is a no-op at execution time (created during hoist).
 
@@ -172,7 +209,12 @@ function whileStatement(vm: Machine, frame: NodeFrame): void {
 		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
-		if (!vm.pop()) { return void vm.frames.pop(); }
+		if (!vm.pop()) {
+			vm.frames.pop();
+
+			return;
+		}
+
 		vm.pushNode(node.statement, frame.scope);
 		frame.phase = 2;
 	} else {
@@ -191,7 +233,11 @@ function doStatement(vm: Machine, frame: NodeFrame): void {
 	} else if (frame.phase === 1) {
 		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 2;
-	} else if (vm.pop()) { frame.phase = 0; } else { vm.frames.pop(); }
+	} else if (vm.pop()) {
+		frame.phase = 0;
+	} else {
+		vm.frames.pop();
+	}
 }
 
 function forStatement(vm: Machine, frame: NodeFrame): void {
@@ -206,7 +252,7 @@ function forStatement(vm: Machine, frame: NodeFrame): void {
 		// For per-iteration `let`/`const` binding (fresh binding each turn — correct closure capture).
 		frame.lexicalNames =
 			node.initializer !== null && node.initializer !== undefined && ts.isVariableDeclarationList(node.initializer) && (node.initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) !== 0
-				? node.initializer.declarations.flatMap((d) => bindingNames(d.name))
+				? node.initializer.declarations.flatMap((decl) => bindingNames(decl.name))
 				: null;
 		// The copies keep the declaration's kind: `for (const x = 0; ; x++)` is a TypeError, not a loop.
 		frame.lexicalKind = node.initializer !== null && node.initializer !== undefined && (node.initializer.flags & ts.NodeFlags.Const) !== 0 ? "const" : "let";
@@ -219,7 +265,10 @@ function forStatement(vm: Machine, frame: NodeFrame): void {
 			frame.phase = 2;
 		}
 	} else if (frame.phase === 1) {
-		if (frame.initIsExpr) { vm.pop(); }
+		if (frame.initIsExpr) {
+			vm.pop();
+		}
+
 		copyPerIteration(frame);
 		frame.phase = 2;
 	} else if (frame.phase === 2) {
@@ -233,7 +282,12 @@ function forStatement(vm: Machine, frame: NodeFrame): void {
 			frame.phase = 4;
 		}
 	} else if (frame.phase === 3) {
-		if (!vm.pop()) { return void vm.frames.pop(); }
+		if (!vm.pop()) {
+			vm.frames.pop();
+
+			return;
+		}
+
 		vm.pushNode(node.statement, frame.iterScope!);
 		frame.phase = 4;
 	} else if (frame.phase === 4) {
@@ -256,7 +310,10 @@ function forStatement(vm: Machine, frame: NodeFrame): void {
 export function copyPerIteration(frame: NodeFrame): void {
 	const names = frame.lexicalNames as string[] | null;
 
-	if (names === null || names === undefined || names.length === 0) { return; }
+	if (names === null || names === undefined || names.length === 0) {
+		return;
+	}
+
 	const prev = frame.iterScope!;
 	const next = new Scope(frame.scope, false);
 	const kind = (frame.lexicalKind as "let" | "const" | undefined) ?? "let";
@@ -290,7 +347,12 @@ function forOfStatement(vm: Machine, frame: NodeFrame): void {
 		const it = frame.iteration!;
 		const value = iterationStep(it);
 
-		if (it.done) { return void vm.frames.pop(); }
+		if (it.done) {
+			vm.frames.pop();
+
+			return;
+		}
+
 		bindForTarget(vm, frame, node.initializer, vm.fromHost(value));
 		frame.phase = 3;
 	} else {
@@ -319,7 +381,12 @@ export function forAwaitOf(vm: Machine, frame: NodeFrame, node: ts.ForOfStatemen
 		if (frame.syncIterator) {
 			const value = iterationStep(it);
 
-			if (it.done) { return void vm.frames.pop(); }
+			if (it.done) {
+				vm.frames.pop();
+
+				return;
+			}
+
 			suspend(vm, frame, "await", value, 3); // await the element itself
 		} else {
 			let step: unknown;
@@ -340,17 +407,21 @@ export function forAwaitOf(vm: Machine, frame: NodeFrame, node: ts.ForOfStatemen
 		const result = resumed(vm);
 		const it = frame.iteration!;
 
-		if (typeof result !== "object" || result === null) { throw new TypeError("Iterator result is not an object"); }
+		if (typeof result !== "object" || result === null) {
+			throw new TypeError("Iterator result is not an object");
+		}
+
 		let value: unknown;
 
 		try {
 			if ((result as IteratorResult<unknown>).done) {
 				it.done = true;
+				vm.frames.pop();
 
-				return void vm.frames.pop();
+				return;
 			}
 
-			value = (result as IteratorResult<unknown>).value;
+			({ value } = result as IteratorResult<unknown>);
 		} catch (error) {
 			it.done = true;
 			throw error;
@@ -376,7 +447,9 @@ function forInStatement(vm: Machine, frame: NodeFrame): void {
 		const keys: string[] = [];
 
 		if (obj !== null && obj !== undefined) {
-			for (const key in obj) { keys.push(key); }
+			for (const key in obj) {
+				keys.push(key);
+			}
 		}
 
 		frame.keys = keys;
@@ -388,8 +461,16 @@ function forInStatement(vm: Machine, frame: NodeFrame): void {
 		let index = frame.index!;
 
 		// A property deleted before its turn is not visited (EnumerateObjectProperties).
-		while (index < keys.length && !((keys[index]) in (frame.enumerated!))) { index += 1; }
-		if (index >= keys.length) { return void vm.frames.pop(); }
+		while (index < keys.length && !((keys[index]) in (frame.enumerated!))) {
+			index += 1;
+		}
+
+		if (index >= keys.length) {
+			vm.frames.pop();
+
+			return;
+		}
+
 		frame.index = index + 1;
 		bindForTarget(vm, frame, node.initializer, keys[index]);
 		frame.phase = 3;
@@ -408,20 +489,38 @@ export function bindForTarget(vm: Machine, frame: NodeFrame, initializer: ts.For
 	let stepped: { "scope": Scope; "program": PatternProgram } | undefined;
 
 	if (ts.isVariableDeclarationList(initializer)) {
-		const decl = initializer.declarations[0];
+		const [decl] = initializer.declarations;
 		const isConst = (initializer.flags & ts.NodeFlags.Const) !== 0;
 		const isLet = (initializer.flags & ts.NodeFlags.Let) !== 0;
-		const kind: BindingKind = isConst ? "const" : isLet ? "let" : "var";
+		let kind: BindingKind;
 
-		if (ts.isIdentifier(decl.name)) { bindIdentifier(bodyScope, decl.name.text, value, kind); } else { stepped = { "scope": bodyScope, "program": bindingProgram(decl.name, kind) }; }
+		if (isConst) {
+			kind = "const";
+		} else if (isLet) {
+			kind = "let";
+		} else {
+			kind = "var";
+		}
+
+		if (ts.isIdentifier(decl.name)) {
+			bindIdentifier(bodyScope, decl.name.text, value, kind);
+		} else {
+			stepped = { "scope": bodyScope, "program": bindingProgram(decl.name, kind) };
+		}
 	} else {
 		const target = unwrapParens(initializer);
 
-		if (ts.isIdentifier(target)) { frame.scope.set(target.text, value); } else { stepped = { "scope": frame.scope, "program": assignProgram(target) }; }
+		if (ts.isIdentifier(target)) {
+			frame.scope.set(target.text, value);
+		} else {
+			stepped = { "scope": frame.scope, "program": assignProgram(target) };
+		}
 	}
 
 	vm.pushNode(node.statement, bodyScope);
-	if (stepped !== undefined) { pushPattern(vm, stepped.scope, stepped.program, value); }
+	if (stepped !== undefined) {
+		pushPattern(vm, stepped.scope, stepped.program, value);
+	}
 }
 
 function switchStatement(vm: Machine, frame: NodeFrame): void {
@@ -435,15 +534,18 @@ function switchStatement(vm: Machine, frame: NodeFrame): void {
 	} else if (frame.phase === 1) {
 		frame.disc = vm.pop();
 		frame.caseIndex = 0;
-		frame.defaultIndex = clauses.findIndex((c) => c.kind === K.DefaultClause);
+		frame.defaultIndex = clauses.findIndex((clause) => clause.kind === Kind.DefaultClause);
 		frame.switchScope = new Scope(frame.scope, false);
 		frame.phase = 2;
 	} else if (frame.phase === 2) {
 		// Scan forward for the next `case` test to evaluate (skip `default` while matching).
-		let i = frame.caseIndex!;
+		let index = frame.caseIndex!;
 
-		while (i < clauses.length && clauses[i].kind === K.DefaultClause) { i += 1; }
-		if (i >= clauses.length) {
+		while (index < clauses.length && clauses[index].kind === Kind.DefaultClause) {
+			index += 1;
+		}
+
+		if (index >= clauses.length) {
 			const def = frame.defaultIndex!;
 
 			frame.execIndex = def >= 0 ? def : clauses.length;
@@ -452,8 +554,8 @@ function switchStatement(vm: Machine, frame: NodeFrame): void {
 			return;
 		}
 
-		frame.pendingCase = i;
-		vm.pushNode((clauses[i] as ts.CaseClause).expression, frame.switchScope!);
+		frame.pendingCase = index;
+		vm.pushNode((clauses[index] as ts.CaseClause).expression, frame.switchScope!);
 		frame.phase = 3;
 	} else if (frame.phase === 3) {
 		const testValue = vm.pop();
@@ -469,17 +571,27 @@ function switchStatement(vm: Machine, frame: NodeFrame): void {
 		// Execute statements from the matched clause to the end (fall-through), sharing one block scope.
 		const start = frame.execIndex!;
 
-		if (start >= clauses.length) { return void vm.frames.pop(); }
+		if (start >= clauses.length) {
+			vm.frames.pop();
+
+			return;
+		}
+
 		const statements: ts.Statement[] = [];
 
-		for (let c = start; c < clauses.length; c++) {
-			for (const s of clauses[c].statements) { statements.push(s); }
+		for (let clauseIndex = start; clauseIndex < clauses.length; clauseIndex++) {
+			for (const statement of clauses[clauseIndex].statements) {
+				statements.push(statement);
+			}
 		}
 
 		const switchScope = frame.switchScope!;
 
 		hoist(vm, switchScope, statements);
-		for (let s = statements.length - 1; s >= 0; s--) { vm.pushNode(statements[s], switchScope); }
+		for (let index = statements.length - 1; index >= 0; index--) {
+			vm.pushNode(statements[index], switchScope);
+		}
+
 		frame.phase = 5;
 	} else {
 		vm.frames.pop();
@@ -550,7 +662,9 @@ function enumDeclaration(vm: Machine, frame: NodeFrame): void {
 
 	frame.scope.set(name, buildEnum(vm, frame.scope, node, typeof existing === "object" && existing !== null ? (existing as Record<string, string | number>) : undefined));
 	// The emitted form is an expression statement (an IIFE call): the program's completion becomes undefined.
-	if (!vm.insideFunction(frame.scope)) { vm.setCompletion(undefined); }
+	if (!vm.insideFunction(frame.scope)) {
+		vm.setCompletion(undefined);
+	}
 }
 
 /** Build (or extend — declarations merge) an enum object: members with auto-increment and reverse
@@ -569,15 +683,21 @@ export function buildEnum(vm: Machine, scope: Scope, node: ts.EnumDeclaration, i
 			declared.add(key);
 			memberScope.declareLexical(key, "let");
 			memberScope.initialize(key, value);
-		} else { memberScope.set(key, value); }
+		} else {
+			memberScope.set(key, value);
+		}
 	};
 
 	for (const key of Object.keys(enumObject)) {
-		if (Number.isNaN(Number(key))) { declareMember(key, enumObject[key]); }
+		if (Number.isNaN(Number(key))) {
+			declareMember(key, enumObject[key]);
+		}
 	}
 
 	for (const member of node.members) {
-		if (!ts.isComputedPropertyName(member.name)) { declareMember(propertyName(member.name), enumObject[propertyName(member.name)]); }
+		if (!ts.isComputedPropertyName(member.name)) {
+			declareMember(propertyName(member.name), enumObject[propertyName(member.name)]);
+		}
 	}
 
 	let auto = 0;
@@ -601,11 +721,16 @@ export function buildEnum(vm: Machine, scope: Scope, node: ts.EnumDeclaration, i
 /** The loop head's `let`/`const` names are in the TDZ while the iterable expression evaluates
  *  (`for (const x of x)` is a ReferenceError). */
 export function headTdzScope(scope: Scope, initializer: ts.ForInitializer): Scope {
-	if (!ts.isVariableDeclarationList(initializer) || (initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0) { return scope; }
+	if (!ts.isVariableDeclarationList(initializer) || (initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0) {
+		return scope;
+	}
+
 	const tdz = new Scope(scope, false);
 
 	for (const decl of initializer.declarations) {
-		for (const name of bindingNames(decl.name)) { tdz.declareLexical(name, "let"); }
+		for (const name of bindingNames(decl.name)) {
+			tdz.declareLexical(name, "let");
+		}
 	}
 
 	return tdz;
@@ -613,31 +738,31 @@ export function headTdzScope(scope: Scope, initializer: ts.ForInitializer): Scop
 
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
 export function register(): void {
-	on(K.SourceFile, sourceFile);
-	on(K.Block, block);
-	on(K.EmptyStatement, emptyStatement);
-	on(K.VariableStatement, variableStatement);
-	on(K.VariableDeclarationList, variableDeclarationList);
-	on(K.ExpressionStatement, expressionStatement);
-	on(K.IfStatement, ifStatement);
-	on(K.ReturnStatement, returnStatement);
-	on(K.ThrowStatement, throwStatement);
-	on(K.FunctionDeclaration, noop); // hoisted (an overload signature is erased)
-	on(K.DebuggerStatement, noop);
-	on(K.TypeAliasDeclaration, noop);
-	on(K.InterfaceDeclaration, noop);
-	on(K.ExportDeclaration, noop); // `export { ... }` — module output isn't modeled
-	on(K.ImportEqualsDeclaration, noop);
-	on(K.ImportDeclaration, importDeclaration);
-	on(K.BreakStatement, breakStatement);
-	on(K.ContinueStatement, continueStatement);
-	on(K.WhileStatement, whileStatement);
-	on(K.DoStatement, doStatement);
-	on(K.ForStatement, forStatement);
-	on(K.ForOfStatement, forOfStatement);
-	on(K.ForInStatement, forInStatement);
-	on(K.SwitchStatement, switchStatement);
-	on(K.LabeledStatement, labeledStatement);
-	on(K.TryStatement, tryStatement);
-	on(K.EnumDeclaration, enumDeclaration);
+	on(Kind.SourceFile, sourceFile);
+	on(Kind.Block, block);
+	on(Kind.EmptyStatement, emptyStatement);
+	on(Kind.VariableStatement, variableStatement);
+	on(Kind.VariableDeclarationList, variableDeclarationList);
+	on(Kind.ExpressionStatement, expressionStatement);
+	on(Kind.IfStatement, ifStatement);
+	on(Kind.ReturnStatement, returnStatement);
+	on(Kind.ThrowStatement, throwStatement);
+	on(Kind.FunctionDeclaration, noop); // hoisted (an overload signature is erased)
+	on(Kind.DebuggerStatement, noop);
+	on(Kind.TypeAliasDeclaration, noop);
+	on(Kind.InterfaceDeclaration, noop);
+	on(Kind.ExportDeclaration, noop); // `export { ... }` — module output isn't modeled
+	on(Kind.ImportEqualsDeclaration, noop);
+	on(Kind.ImportDeclaration, importDeclaration);
+	on(Kind.BreakStatement, breakStatement);
+	on(Kind.ContinueStatement, continueStatement);
+	on(Kind.WhileStatement, whileStatement);
+	on(Kind.DoStatement, doStatement);
+	on(Kind.ForStatement, forStatement);
+	on(Kind.ForOfStatement, forOfStatement);
+	on(Kind.ForInStatement, forInStatement);
+	on(Kind.SwitchStatement, switchStatement);
+	on(Kind.LabeledStatement, labeledStatement);
+	on(Kind.TryStatement, tryStatement);
+	on(Kind.EnumDeclaration, enumDeclaration);
 }

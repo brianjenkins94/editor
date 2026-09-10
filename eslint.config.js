@@ -17,39 +17,26 @@ export default [
 		"files": ["**/*.test.*", "**/test/**"],
 		"rules": {
 			"test/no-import-node-test": "off",
-			"test/consistent-test-it": "off"
+			"test/consistent-test-it": "off",
+			// A top-level `test(...)` returns a promise that is MEANT to float: under `node --test
+			// --test-isolation=none`, `await`ing it during module evaluation deadlocks the runner (eval blocks on
+			// the test, the test can't start until eval finishes). The floating call is the node:test idiom, so
+			// no-floating-promises is a false positive on every top-level test in these files.
+			"ts/no-floating-promises": "off"
 		}
 	},
 	{
-		// The BABLR grammar is a class of parser PRODUCTIONS, not ordinary methods, and a few "everything-on"
+		// The BABLR grammar is a class of parser PRODUCTIONS, not ordinary methods, and two "everything-on"
 		// rules are semantically impossible to satisfy on it rather than merely noisy:
 		//   • naming-convention — a production's name IS its grammar symbol: `*_Type()` is what `<_Type />` calls
 		//     and `*Statement()` what `<Statement />` calls. Renaming them to camelCase would break the grammar.
 		//   • class-methods-use-this — productions are dispatched by the BABLR runtime off the class and drive the
 		//     parse through the yielded instruction API (eat/match/…); many legitimately never touch `this`. They
 		//     cannot be hoisted to free functions without losing that dispatch.
-		//   • require-unicode-regexp — the grammar's regexes run on BABLR's own regex VM, which does not implement
-		//     the `u` flag's semantics (see the UPSTREAM-WORKAROUND header in grammar.ts); adding `/u` is wrong.
 		"files": ["packages/bablr-language-ts/lib/grammar.ts"],
 		"rules": {
 			"ts/naming-convention": "off",
-			"ts/class-methods-use-this": "off",
-			"require-unicode-regexp": "off"
-		}
-	},
-	{
-		// Vendored hand-synced forks: monaco's `main.ts` tracks the upstream CodinGame demo and `record.js` is the
-		// @bablr/record shim. We keep them at minimal diff from upstream so re-syncing stays a clean apply — style
-		// conformance here would be pure drift. Their earlier error-level violations were already fixed in place.
-		"files": ["components/monaco-vscode-api/main.ts", "packages/bablr/shims/record.js"],
-		"rules": {
-			"style/no-tabs": "off",
-			"style/max-statements-per-line": "off",
-			"ts/require-await": "off",
-			"id-length": "off",
-			"guard-for-in": "off",
-			"no-nested-ternary": "off",
-			"complexity": "off"
+			"ts/class-methods-use-this": "off"
 		}
 	}
 ];

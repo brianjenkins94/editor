@@ -272,21 +272,21 @@ const commonServices: IEditorOverrideServices = {
 	...getTestingServiceOverride(),
 	// AI/chat disabled — re-enable when games configures it:
 	// ...getChatServiceOverride({
-	// 	defaultAccount: {
-	// 		entitlementsData: {
-	// 			access_type_sku: 'unused',
-	// 			assigned_date: 'unused',
-	// 			can_signup_for_limited: false,
-	// 			copilot_plan: 'enterprise',
-	// 			organization_login_list: [],
-	// 			analytics_tracking_id: 'unused',
-	// 			chat_enabled: true
-	// 		},
-	// 		accountName: 'unused',
-	// 		authenticationProvider: { id: 'unused', name: 'unused', enterprise: true },
-	// 		enterprise: true,
-	// 		sessionId: 'unused'
-	// 	}
+	//   defaultAccount: {
+	//     entitlementsData: {
+	//       access_type_sku: 'unused',
+	//       assigned_date: 'unused',
+	//       can_signup_for_limited: false,
+	//       copilot_plan: 'enterprise',
+	//       organization_login_list: [],
+	//       analytics_tracking_id: 'unused',
+	//       chat_enabled: true
+	//     },
+	//     accountName: 'unused',
+	//     authenticationProvider: { id: 'unused', name: 'unused', enterprise: true },
+	//     enterprise: true,
+	//     sessionId: 'unused'
+	//   }
 	// }),
 	...getNotebookServiceOverride(),
 	...getWelcomeServiceOverride(),
@@ -447,8 +447,8 @@ export async function boot(options: BootOptions): Promise<void> {
 		envOptions
 	);
 
-	setUnexpectedErrorHandler((e) => {
-		console.info("Unexpected error", e);
+	setUnexpectedErrorHandler((error) => {
+		console.info("Unexpected error", error);
 	});
 
 	for (const config of [

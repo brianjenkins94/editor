@@ -4,5 +4,5 @@
 // Upstream fix: a runtime build or flag without deep-freeze validation. `setPrototypeOf(null)` must stay:
 // @bablr/btree asserts null prototypes. Verified byte-identical output on all corpus cases.
 // Experiment preload: make freezing a no-op to measure its cost.  node --import ./test/nofreeze.mjs …
-Object.freeze = (o) => o;
+Object.freeze = (obj) => obj;
 Object.isFrozen = () => true;

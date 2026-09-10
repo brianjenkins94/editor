@@ -21,9 +21,9 @@ const here = path.dirname(url.fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 
 function opt(name, def) {
-	const i = argv.indexOf(`--${name}`);
+	const index = argv.indexOf(`--${name}`);
 
-	return i >= 0 ? argv[i + 1] : def;
+	return index >= 0 ? argv[index + 1] : def;
 }
 
 const flag = (name) => argv.includes(`--${name}`);
@@ -44,22 +44,22 @@ const fast = flag("fast"); // run workers with the validation/freeze shims (test
 const cases = [];
 let skipped = 0;
 
-for await (const c of loadCorpus({ "corpora": corpora, "size": size })) {
-	if (c.skip !== undefined) {
+for await (const testCase of loadCorpus({ "corpora": corpora, "size": size })) {
+	if (testCase.skip !== undefined) {
 		skipped += 1;
-		continue;
+	} else if (!filter || testCase.id.includes(filter)) {
+		cases.push(testCase);
+		if (cases.length >= limit) {
+			break;
+		}
 	}
-
-	if (filter && !c.id.includes(filter)) { continue; }
-	cases.push(c);
-	if (cases.length >= limit) { break; }
 }
 
 console.error(`${cases.length} eligible cases (${skipped} skipped by tsval's policy), ${jobs} workers, ${timeoutMs}ms timeout${fast ? ", fast shims" : ""}`);
 
 // ── run ────────────────────────────────────────────────────────────────────────────────────────────────────────
 const workerUrl = new URL("./roundtrip-worker.mjs", import.meta.url);
-const results = new Array(cases.length);
+const results = Array.from({ "length": cases.length });
 let next = 0;
 let done = 0;
 const started = performance.now();
@@ -85,10 +85,13 @@ function runOn(worker, served) {
 			const seq = next;
 
 			next += 1;
-			const c = cases[seq];
+			const testCase = cases[seq];
 			let settled = false;
 			const timer = setTimeout(() => {
-				if (settled) { return; }
+				if (settled) {
+					return;
+				}
+
 				settled = true;
 				worker.terminate();
 				results[seq] = { "status": "timeout", "ms": timeoutMs };
@@ -96,7 +99,10 @@ function runOn(worker, served) {
 				resolveSlot(runOn(spawn(), 0));
 			}, timeoutMs);
 			const onError = (err) => {
-				if (settled) { return; }
+				if (settled) {
+					return;
+				}
+
 				settled = true;
 				clearTimeout(timer);
 				results[seq] = { "status": "error", "message": `worker crashed: ${err?.message ?? err}`, "pos": null };
@@ -105,7 +111,10 @@ function runOn(worker, served) {
 			};
 
 			const onMessage = (msg) => {
-				if (settled || msg.seq !== seq) { return; }
+				if (settled || msg.seq !== seq) {
+					return;
+				}
+
 				settled = true;
 				clearTimeout(timer);
 				worker.off("message", onMessage);
@@ -118,7 +127,7 @@ function runOn(worker, served) {
 
 			worker.on("message", onMessage);
 			worker.on("error", onError);
-			worker.postMessage({ "seq": seq, "source": c.source });
+			worker.postMessage({ "seq": seq, "source": testCase.source });
 		};
 
 		loop();
@@ -127,10 +136,10 @@ function runOn(worker, served) {
 
 function finish(seq) {
 	done += 1;
-	const r = results[seq];
+	const result = results[seq];
 
-	if (verbose || r.status !== "pass") {
-		console.error(`[${done}/${cases.length}] ${r.status.padEnd(8)} ${r.ms}ms ${cases[seq].corpus}/${cases[seq].id}${r.message ? ` — ${r.message}` : ""}`);
+	if (verbose || result.status !== "pass") {
+		console.error(`[${done}/${cases.length}] ${result.status.padEnd(8)} ${result.ms}ms ${cases[seq].corpus}/${cases[seq].id}${result.message ? ` — ${result.message}` : ""}`);
 	} else if (done % 50 === 0) {
 		console.error(`[${done}/${cases.length}] … ${Math.round((performance.now() - started) / 1000)}s`);
 	}
@@ -139,7 +148,7 @@ function finish(seq) {
 await Promise.all(Array.from({ "length": Math.min(jobs, cases.length) }, () => runOn(spawn(), 0)));
 
 // ── analyze + report ───────────────────────────────────────────────────────────────────────────────────────────
-const stripped = results.map((r, i) => ({ "corpus": cases[i].corpus, "id": cases[i].id, ...r }));
+const stripped = results.map((result, index) => ({ "corpus": cases[index].corpus, "id": cases[index].id, ...result }));
 
 mkdirSync(path.dirname(out), { "recursive": true });
 const meta = { "size": size, "corpora": corpora, "fast": fast, "grammar": process.env.GRAMMAR ?? "lib/grammar.ts", "ran": new Date().toISOString() };

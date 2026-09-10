@@ -27,9 +27,15 @@ export function createChangeEvent(): { "listeners": Set<FileChangeListener>; "on
 		const bound = thisArgs === undefined || thisArgs === null ? listener : listener.bind(thisArgs);
 
 		listeners.add(bound);
-		const disposable = { "dispose": function() { listeners.delete(bound); } };
+		const disposable = {
+			"dispose": function() {
+				listeners.delete(bound);
+			}
+		};
 
-		if (Array.isArray(disposables)) { disposables.push(disposable); }
+		if (Array.isArray(disposables)) {
+			disposables.push(disposable);
+		}
 
 		return disposable;
 	}) as never;
@@ -39,5 +45,15 @@ export function createChangeEvent(): { "listeners": Set<FileChangeListener>; "on
 
 /** Path under `mount` → "" (the mount itself) | "<rel>" | undefined (not ours — lets the overlay fall through). */
 export function relUnder(mount: string): (path: string) => string | undefined {
-	return (path) => (path === mount ? "" : path.startsWith(mount + "/") ? path.slice(mount.length + 1) : undefined);
+	return (path) => {
+		if (path === mount) {
+			return "";
+		}
+
+		if (path.startsWith(mount + "/")) {
+			return path.slice(mount.length + 1);
+		}
+
+		return undefined;
+	};
 }

@@ -13,7 +13,7 @@ import { assignProgram, pushPattern } from "./patterns.ts";
 import { getProperty, keyText, setProperty, stepBy, toNumeric, toPropertyKey } from "./realm.ts";
 import { evaluating, on } from "./registry.ts";
 
-const K = ts.SyntaxKind;
+const Kind = ts.SyntaxKind;
 
 /** `this` in a derived constructor is uninitialized until `super()` returns (a ReferenceError). */
 export const THIS_TDZ: unique symbol = Symbol("tsval.this-uninitialized");
@@ -21,7 +21,9 @@ export const THIS_TDZ: unique symbol = Symbol("tsval.this-uninitialized");
 export function thisValue(scope: Scope): unknown {
 	const value = scope.getThis();
 
-	if (value === THIS_TDZ) { throw new ReferenceError("Must call super constructor in derived class before accessing 'this' or returning from derived constructor"); }
+	if (value === THIS_TDZ) {
+		throw new ReferenceError("Must call super constructor in derived class before accessing 'this' or returning from derived constructor");
+	}
 
 	return value;
 }
@@ -39,10 +41,15 @@ function thisKeyword(vm: Machine, frame: NodeFrame): void {
 export function superBase(scope: Scope): object {
 	const home = scope.getHomeObject();
 
-	if (home === null || home === undefined) { throw new SyntaxError("'super' keyword unexpected here"); }
+	if (home === null || home === undefined) {
+		throw new SyntaxError("'super' keyword unexpected here");
+	}
+
 	const base = Object.getPrototypeOf(home);
 
-	if (base === null || base === undefined) { throw new TypeError("Cannot read properties of null (super)"); }
+	if (base === null || base === undefined) {
+		throw new TypeError("Cannot read properties of null (super)");
+	}
 
 	return base;
 }
@@ -56,18 +63,22 @@ export function superGet(scope: Scope, key: PropertyKey): unknown {
 export function superSet(scope: Scope, key: PropertyKey, value: unknown): void {
 	const receiver = thisValue(scope);
 
-	if (!Reflect.set(superBase(scope), key, value, receiver)) { throw new TypeError(`Cannot assign to read only property '${keyText(key)}'`); }
+	if (!Reflect.set(superBase(scope), key, value, receiver)) {
+		throw new TypeError(`Cannot assign to read only property '${keyText(key)}'`);
+	}
 }
 
 export function isSuperRef(node: ts.Node): node is ts.PropertyAccessExpression | ts.ElementAccessExpression {
-	return (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && node.expression.kind === K.SuperKeyword;
+	return (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && node.expression.kind === Kind.SuperKeyword;
 }
 
 /** Through parentheses and the erased type wrappers (`(x as T) = v`, `x! = v`, `x satisfies T`). */
-export function unwrapParens(e: ts.Expression): ts.Expression {
-	while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isTypeAssertionExpression(e) || ts.isNonNullExpression(e) || ts.isSatisfiesExpression(e) || ts.isExpressionWithTypeArguments(e)) { e = e.expression; }
+export function unwrapParens(expr: ts.Expression): ts.Expression {
+	while (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr) || ts.isTypeAssertionExpression(expr) || ts.isNonNullExpression(expr) || ts.isSatisfiesExpression(expr) || ts.isExpressionWithTypeArguments(expr)) {
+		expr = expr.expression;
+	}
 
-	return e;
+	return expr;
 }
 
 // --- optional chains --------------------------------------------------------------------------------
@@ -105,7 +116,7 @@ export type Ref =
 /** The phase a handler continues at once its reference is resolved (lower phases belong to evaluateReference). */
 export const AFTER_REF = 10;
 
-export function nullBase(obj: unknown, key: string, forWrite: boolean): TypeError {
+export function nullBase(obj: null | undefined, key: string, forWrite: boolean): TypeError {
 	return new TypeError(forWrite ? `Cannot set properties of ${obj} (setting '${key}')` : `Cannot read properties of ${obj} (reading '${key}')`);
 }
 
@@ -117,7 +128,10 @@ export function nullBase(obj: unknown, key: string, forWrite: boolean): TypeErro
  * nullish base throws at GetValue/PutValue, then ToPropertyKey runs (once).
  */
 export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expression, forWrite = false): Ref | undefined {
-	if (frame.ref !== undefined) { return frame.ref; }
+	if (frame.ref !== undefined) {
+		return frame.ref;
+	}
+
 	const done = (ref: Ref): Ref => {
 		frame.ref = ref;
 		frame.phase = AFTER_REF;
@@ -126,7 +140,10 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 	};
 
 	target = unwrapParens(target);
-	if (ts.isIdentifier(target)) { return done({ "kind": "id", "name": target.text }); }
+	if (ts.isIdentifier(target)) {
+		return done({ "kind": "id", "name": target.text });
+	}
+
 	if (!ts.isPropertyAccessExpression(target) && !ts.isElementAccessExpression(target)) {
 		if (frame.phase === 0) {
 			vm.pushNode(target, frame.scope);
@@ -139,12 +156,15 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 	}
 
 	const member = target;
-	const isSuper = member.expression.kind === K.SuperKeyword;
+	const isSuper = member.expression.kind === Kind.SuperKeyword;
 
 	if (frame.phase === 0) {
 		if (isSuper) {
 			thisValue(frame.scope);
-			if (ts.isPropertyAccessExpression(member)) { return done({ "kind": "super", "key": member.name.text }); }
+			if (ts.isPropertyAccessExpression(member)) {
+				return done({ "kind": "super", "key": member.name.text });
+			}
+
 			vm.pushNode(member.argumentExpression, frame.scope);
 			frame.phase = 2;
 
@@ -174,30 +194,44 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 		}
 
 		vm.pop();
-		if (ts.isPrivateIdentifier(member.name)) { return done({ "kind": "private", "obj": obj, "name": member.name.text }); }
+		if (ts.isPrivateIdentifier(member.name)) {
+			return done({ "kind": "private", "obj": obj, "name": member.name.text });
+		}
 
 		return done({ "kind": "member", "obj": obj, "key": member.name.text });
 	}
 
 	const rawKey = vm.pop();
 
-	if (isSuper) { return done({ "kind": "super", "key": rawKey }); }
+	if (isSuper) {
+		return done({ "kind": "super", "key": rawKey });
+	}
 
 	return done({ "kind": "member", "obj": vm.pop(), "key": rawKey });
 }
 
 /** A super reference's key at use: ToPropertyKey once, memoized on the record. */
 function superKeyOf(ref: Extract<Ref, { "kind": "super" }>): PropertyKey {
-	if (typeof ref.key !== "string" && typeof ref.key !== "symbol") { ref.key = toPropertyKey(ref.key); }
+	if (typeof ref.key !== "string" && typeof ref.key !== "symbol") {
+		ref.key = toPropertyKey(ref.key);
+	}
 
 	return ref.key as PropertyKey;
 }
 
 /** A member reference's base and key at use: the nullish check, then ToPropertyKey (memoized on the record). */
 export function memberOf(ref: Extract<Ref, { "kind": "member" | "private" }>, forWrite: boolean): { "obj": object; "key": PropertyKey } {
-	if (ref.obj === null || ref.obj === undefined) { throw nullBase(ref.obj, ref.kind === "private" ? ref.name : keyText(ref.key), forWrite); }
-	if (ref.kind === "private") { return { "obj": ref.obj, "key": ref.name }; }
-	if (typeof ref.key !== "string" && typeof ref.key !== "symbol") { ref.key = toPropertyKey(ref.key); }
+	if (ref.obj === null || ref.obj === undefined) {
+		throw nullBase(ref.obj, ref.kind === "private" ? ref.name : keyText(ref.key), forWrite);
+	}
+
+	if (ref.kind === "private") {
+		return { "obj": ref.obj, "key": ref.name };
+	}
+
+	if (typeof ref.key !== "string" && typeof ref.key !== "symbol") {
+		ref.key = toPropertyKey(ref.key);
+	}
 
 	return { "obj": ref.obj, "key": ref.key as PropertyKey };
 }
@@ -257,6 +291,8 @@ export function putValue(vm: Machine, scope: Scope, ref: Ref, value: unknown): v
 
 			return; }
 
+		case "value":
+		case "short":
 		default:
 			throw new SyntaxError("Invalid left-hand side in assignment");
 	}
@@ -264,8 +300,13 @@ export function putValue(vm: Machine, scope: Scope, ref: Ref, value: unknown): v
 
 /** The receiver a call through the reference gets. */
 export function thisOf(scope: Scope, ref: Ref): unknown {
-	if (ref.kind === "member" || ref.kind === "private") { return ref.obj; }
-	if (ref.kind === "super") { return thisValue(scope); }
+	if (ref.kind === "member" || ref.kind === "private") {
+		return ref.obj;
+	}
+
+	if (ref.kind === "super") {
+		return thisValue(scope);
+	}
 
 	return undefined;
 }
@@ -281,9 +322,15 @@ export type RmwStep = { "kind": "need-rhs" } | { "kind": "done"; "result": unkno
 export function assignThrough(vm: Machine, frame: NodeFrame, target: ts.Expression, readFirst: boolean, compute: (current: unknown, rhs: { "value": unknown } | undefined) => RmwStep, rhs?: ts.Expression): void {
 	const ref = evaluateReference(vm, frame, target, true);
 
-	if (ref === undefined) { return; }
+	if (ref === undefined) {
+		return;
+	}
+
 	if (frame.phase === AFTER_REF) {
-		if (readFirst) { frame.current = getValue(vm, frame.scope, ref); }
+		if (readFirst) {
+			frame.current = getValue(vm, frame.scope, ref);
+		}
+
 		const step = compute(frame.current, undefined);
 
 		if (step.kind === "need-rhs") {
@@ -294,7 +341,10 @@ export function assignThrough(vm: Machine, frame: NodeFrame, target: ts.Expressi
 		}
 
 		vm.frames.pop();
-		if (step.kind === "store") { putValue(vm, frame.scope, ref, step.value); }
+		if (step.kind === "store") {
+			putValue(vm, frame.scope, ref, step.value);
+		}
+
 		vm.push(step.result);
 
 		return;
@@ -303,7 +353,10 @@ export function assignThrough(vm: Machine, frame: NodeFrame, target: ts.Expressi
 	const step = compute(frame.current, { "value": vm.pop() });
 
 	vm.frames.pop();
-	if (step.kind === "store") { putValue(vm, frame.scope, ref, step.value); }
+	if (step.kind === "store") {
+		putValue(vm, frame.scope, ref, step.value);
+	}
+
 	vm.push(step.kind === "need-rhs" ? undefined : step.result);
 }
 
@@ -312,16 +365,53 @@ export const memberRead: NodeHandler = (vm, frame) => {
 	const node = frame.node as ts.PropertyAccessExpression | ts.ElementAccessExpression;
 	const ref = evaluateReference(vm, frame, node);
 
-	if (ref === undefined) { return; }
+	if (ref === undefined) {
+		return;
+	}
+
 	vm.frames.pop();
 	vm.push(ref.kind === "short" ? chainShort(node) : getValue(vm, frame.scope, ref));
 };
+
+export const unaryOperator = evaluating<ts.PrefixUnaryExpression>(
+	(node) => [node.operand],
+	(vm, _frame, node, [value]) => {
+		const operand = value as never;
+
+		switch (node.operator) {
+			case Kind.PlusToken:
+			{ vm.push(+operand);
+
+				return; }
+
+			case Kind.MinusToken:
+			{ vm.push(-operand);
+
+				return; }
+
+			case Kind.TildeToken:
+			{ vm.push(~operand);
+
+				return; }
+
+			case Kind.ExclamationToken:
+			{ vm.push(!operand);
+
+				return; }
+
+			case Kind.PlusPlusToken:
+			case Kind.MinusMinusToken:
+			default:
+				unimplemented(`prefix operator ${ts.SyntaxKind[node.operator]}`);
+		}
+	}
+);
 
 function prefixUnaryExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.PrefixUnaryExpression;
 
 	// ++/-- need an lvalue, handled without a normal operand eval.
-	if (node.operator === K.PlusPlusToken || node.operator === K.MinusMinusToken) {
+	if (node.operator === Kind.PlusPlusToken || node.operator === Kind.MinusMinusToken) {
 		updateExpression(vm, frame, node.operand, node.operator, /* prefix */ true);
 
 		return;
@@ -329,38 +419,6 @@ function prefixUnaryExpression(vm: Machine, frame: NodeFrame): void {
 
 	unaryOperator(vm, frame);
 }
-
-export const unaryOperator = evaluating<ts.PrefixUnaryExpression>(
-	(node) => [node.operand],
-	(vm, _frame, node, [value]) => {
-		const v = value as never;
-
-		switch (node.operator) {
-			case K.PlusToken:
-			{ vm.push(+v);
-
-				return; }
-
-			case K.MinusToken:
-			{ vm.push(-v);
-
-				return; }
-
-			case K.TildeToken:
-			{ vm.push(~v);
-
-				return; }
-
-			case K.ExclamationToken:
-			{ vm.push(!v);
-
-				return; }
-
-			default:
-				unimplemented(`prefix operator ${ts.SyntaxKind[node.operator]}`);
-		}
-	}
-);
 
 function postfixUnaryExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.PostfixUnaryExpression;
@@ -370,7 +428,7 @@ function postfixUnaryExpression(vm: Machine, frame: NodeFrame): void {
 
 /** `++x` / `x--` on any reference (identifier, member, private, super). */
 export function updateExpression(vm: Machine, frame: NodeFrame, operand: ts.Expression, operator: ts.SyntaxKind, prefix: boolean): void {
-	const delta = operator === K.PlusPlusToken ? 1 : -1;
+	const delta = operator === Kind.PlusPlusToken ? 1 : -1;
 
 	assignThrough(vm, frame, operand, true, (current) => {
 		const old = toNumeric(current);
@@ -397,10 +455,10 @@ function typeOfExpression(vm: Machine, frame: NodeFrame): void {
 		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 1;
 	} else {
-		const v = vm.pop();
+		const value = vm.pop();
 
 		vm.frames.pop();
-		vm.push(typeof v);
+		vm.push(typeof value);
 	}
 }
 
@@ -419,7 +477,10 @@ function deleteExpression(vm: Machine, frame: NodeFrame): void {
 
 	const ref = evaluateReference(vm, frame, target);
 
-	if (ref === undefined) { return; }
+	if (ref === undefined) {
+		return;
+	}
+
 	vm.frames.pop();
 	if (ref.kind === "member") {
 		const { obj, key } = memberOf(ref, false);
@@ -452,7 +513,10 @@ export function assignmentExpression(vm: Machine, frame: NodeFrame, node: ts.Bin
 			left,
 			false,
 			(_current, rhs) => {
-				if (rhs === undefined) { return { "kind": "need-rhs" }; }
+				if (rhs === undefined) {
+					return { "kind": "need-rhs" };
+				}
+
 				const value = names ? nameAnonymous(rhs.value, (left).text, node.right) : rhs.value;
 
 				return { "kind": "store", "value": value, "result": value };
@@ -484,9 +548,17 @@ export function assignmentExpression(vm: Machine, frame: NodeFrame, node: ts.Bin
 
 /** For `&&=` / `||=` / `??=`: does the current value already decide the result (RHS not evaluated)? */
 export function logicalShortCircuits(op: ts.SyntaxKind, current: unknown): boolean {
-	if (op === K.AmpersandAmpersandEqualsToken) { return !current; }
-	if (op === K.BarBarEqualsToken) { return Boolean(current); }
-	if (op === K.QuestionQuestionEqualsToken) { return current !== null && current !== undefined; }
+	if (op === Kind.AmpersandAmpersandEqualsToken) {
+		return !current;
+	}
+
+	if (op === Kind.BarBarEqualsToken) {
+		return Boolean(current);
+	}
+
+	if (op === Kind.QuestionQuestionEqualsToken) {
+		return current !== null && current !== undefined;
+	}
 
 	return false;
 }
@@ -504,7 +576,10 @@ export function compoundAssignment(vm: Machine, frame: NodeFrame, node: ts.Binar
 		left,
 		true,
 		(current, rhs) => {
-			if (rhs === undefined) { return logicalShortCircuits(op, current) ? { "kind": "done", "result": current } : { "kind": "need-rhs" }; }
+			if (rhs === undefined) {
+				return logicalShortCircuits(op, current) ? { "kind": "done", "result": current } : { "kind": "need-rhs" };
+			}
+
 			const right = names ? nameAnonymous(rhs.value, (left).text, node.right) : rhs.value;
 			const result = applyCompound(op, current as never, right as never);
 
@@ -516,11 +591,11 @@ export function compoundAssignment(vm: Machine, frame: NodeFrame, node: ts.Binar
 
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
 export function register(): void {
-	on(K.ThisKeyword, thisKeyword);
-	on(K.PropertyAccessExpression, memberRead);
-	on(K.ElementAccessExpression, memberRead);
-	on(K.PrefixUnaryExpression, prefixUnaryExpression);
-	on(K.PostfixUnaryExpression, postfixUnaryExpression);
-	on(K.TypeOfExpression, typeOfExpression);
-	on(K.DeleteExpression, deleteExpression);
+	on(Kind.ThisKeyword, thisKeyword);
+	on(Kind.PropertyAccessExpression, memberRead);
+	on(Kind.ElementAccessExpression, memberRead);
+	on(Kind.PrefixUnaryExpression, prefixUnaryExpression);
+	on(Kind.PostfixUnaryExpression, postfixUnaryExpression);
+	on(Kind.TypeOfExpression, typeOfExpression);
+	on(Kind.DeleteExpression, deleteExpression);
 }

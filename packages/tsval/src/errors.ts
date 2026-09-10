@@ -11,8 +11,8 @@ export const UNCATCHABLE: unique symbol = Symbol("tsval.uncatchable");
  * host so gaps and bugs fail loud (ASSIGNMENT working style).
  */
 export class TsvalInternalError extends Error {
-	override name = "TsvalInternalError";
-	readonly [UNCATCHABLE] = true;
+	public override name = "TsvalInternalError";
+	public readonly [UNCATCHABLE] = true;
 }
 
 /** Throw an interpreter-internal "not yet implemented" error. */

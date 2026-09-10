@@ -41,9 +41,13 @@ const VOLATILE_PARAMS = new Set(["t", "_", "ts", "timestamp", "nonce", "cache", 
 export function normalizeValue(value: string): string {
 	let url: URL;
 
-	try { url = new URL(value); } catch { return value; }
+	try {
+		url = new URL(value);
+	} catch {
+		return value;
+	}
 
-	const params = [...url.searchParams].filter(([key]) => !VOLATILE_PARAMS.has(key)).sort((a, b) => a[0].localeCompare(b[0]));
+	const params = [...url.searchParams].filter(([key]) => !VOLATILE_PARAMS.has(key)).sort((left, right) => left[0].localeCompare(right[0]));
 
 	url.search = new URLSearchParams(params).toString();
 
@@ -85,36 +89,43 @@ function keyOf(entry: JournalEntry): string {
 /** Align two effect graphs by an LCS over their call identities, then within each aligned pair compare the
  *  resource: equal → `same`, different → `changed` (value drift). Unaligned entries are `added`/`removed`. */
 function diffEntries(before: JournalEntry[], after: JournalEntry[]): DriftOp[] {
-	const n = before.length;
-	const m = after.length;
-	const lcs = Array.from({ "length": n + 1 }, () => new Array<number>(m + 1).fill(0));
+	const beforeLen = before.length;
+	const afterLen = after.length;
+	const lcs: number[][] = Array.from({ "length": beforeLen + 1 }, () => Array.from({ "length": afterLen + 1 }, () => 0));
 
-	for (let i = n - 1; i >= 0; i -= 1) {
-		for (let j = m - 1; j >= 0; j -= 1) {
-			lcs[i][j] = keyOf(before[i]) === keyOf(after[j]) ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+	for (let bi = beforeLen - 1; bi >= 0; bi -= 1) {
+		for (let aj = afterLen - 1; aj >= 0; aj -= 1) {
+			lcs[bi][aj] = keyOf(before[bi]) === keyOf(after[aj]) ? lcs[bi + 1][aj + 1] + 1 : Math.max(lcs[bi + 1][aj], lcs[bi][aj + 1]);
 		}
 	}
 
 	const ops: DriftOp[] = [];
-	let i = 0;
-	let j = 0;
+	let bi = 0;
+	let aj = 0;
 
-	while (i < n && j < m) {
-		if (keyOf(before[i]) === keyOf(after[j])) {
-			ops.push({ "op": normalizeValue(before[i].value) === normalizeValue(after[j].value) ? "same" : "changed", "before": before[i], "after": after[j] });
-			i += 1;
-			j += 1;
-		} else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-			ops.push({ "op": "removed", "before": before[i] });
-			i += 1;
+	while (bi < beforeLen && aj < afterLen) {
+		if (keyOf(before[bi]) === keyOf(after[aj])) {
+			ops.push({ "op": normalizeValue(before[bi].value) === normalizeValue(after[aj].value) ? "same" : "changed", "before": before[bi], "after": after[aj] });
+			bi += 1;
+			aj += 1;
+		} else if (lcs[bi + 1][aj] >= lcs[bi][aj + 1]) {
+			ops.push({ "op": "removed", "before": before[bi] });
+			bi += 1;
 		} else {
-			ops.push({ "op": "added", "after": after[j] });
-			j += 1;
+			ops.push({ "op": "added", "after": after[aj] });
+			aj += 1;
 		}
 	}
 
-	while (i < n) { ops.push({ "op": "removed", "before": before[i] }); i += 1; }
-	while (j < m) { ops.push({ "op": "added", "after": after[j] }); j += 1; }
+	while (bi < beforeLen) {
+		ops.push({ "op": "removed", "before": before[bi] });
+		bi += 1;
+	}
+
+	while (aj < afterLen) {
+		ops.push({ "op": "added", "after": after[aj] });
+		aj += 1;
+	}
 
 	return ops;
 }
@@ -171,7 +182,11 @@ export function replay(_fileName: string, src: string, journal: Journal): { "com
 	for (const entry of journal.entries) {
 		const queue = queues.get(entry.callee);
 
-		if (queue === undefined) { queues.set(entry.callee, [entry]); } else { queue.push(entry); }
+		if (queue === undefined) {
+			queues.set(entry.callee, [entry]);
+		} else {
+			queue.push(entry);
+		}
 	}
 
 	const ops: DriftOp[] = [];
@@ -197,7 +212,9 @@ export function replay(_fileName: string, src: string, journal: Journal): { "com
 	const completion = interpret(src, { "globals": globals });
 
 	for (const queue of queues.values()) {
-		for (const entry of queue) { ops.push({ "op": "removed", "before": entry }); }
+		for (const entry of queue) {
+			ops.push({ "op": "removed", "before": entry });
+		}
 	}
 
 	return { "completion": completion, "drift": { "drifted": ops.some((op) => op.op !== "same"), "ops": ops } };
@@ -209,11 +226,12 @@ export function formatDrift(report: DriftReport, verbose = false): string {
 	const lines: string[] = [];
 
 	for (const op of report.ops) {
-		if (op.op === "same" && !verbose) { continue; }
-		const entry = op.after ?? op.before;
-		const resource = op.op === "changed" ? `${op.before?.value} → ${op.after?.value}` : entry?.value;
+		if (op.op !== "same" || verbose) {
+			const entry = op.after ?? op.before;
+			const resource = op.op === "changed" ? `${op.before?.value} → ${op.after?.value}` : entry?.value;
 
-		lines.push(`${glyph[op.op]}${entry?.capability} ${entry?.callee}  ${resource}`);
+			lines.push(`${glyph[op.op]}${entry?.capability} ${entry?.callee}  ${resource}`);
+		}
 	}
 
 	lines.push("");

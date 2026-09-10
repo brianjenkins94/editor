@@ -35,7 +35,13 @@ let booted = false;
 // eslint-disable-next-line ts/no-explicit-any
 let vscodeApi: any = null;
 
-function runCommand(command: string): void { void vscodeApi?.commands?.executeCommand(command); }
+function runCommand(command: string): void {
+	const pending = vscodeApi?.commands?.executeCommand(command) as Promise<unknown> | undefined;
+
+	pending?.catch((error: unknown) => {
+		console.error("[vscode] command failed", command, error);
+	});
+}
 
 /** Boot even with no viewport. When the workbench is mounted into a document that currently has no
  *  layout box — a closed/hidden preview pane, a background tab, a display:none host — the window,
@@ -45,13 +51,18 @@ function runCommand(command: string): void { void vscodeApi?.commands?.executeCo
  *  viewport arrives — monaco's own resize handling relayouts to the true size. A sized tab (production,
  *  and the pane-open case) never has the fallback applied, so this is a pure no-op there. */
 function bootWithFallbackViewport(root: HTMLElement): void {
-	if (root.clientWidth > 0 && root.clientHeight > 0) { return; }
+	if (root.clientWidth > 0 && root.clientHeight > 0) {
+		return;
+	}
 
 	root.style.width = "1280px";
 	root.style.height = "720px";
 
 	const restore = (): void => {
-		if (window.innerWidth === 0 || window.innerHeight === 0) { return; }
+		if (window.innerWidth === 0 || window.innerHeight === 0) {
+			return;
+		}
+
 		root.style.removeProperty("width");
 		root.style.removeProperty("height");
 		window.removeEventListener("resize", restore);
@@ -61,7 +72,10 @@ function bootWithFallbackViewport(root: HTMLElement): void {
 }
 
 function maybeBoot(): void {
-	if (booted || parts === undefined || init === undefined) { return; }
+	if (booted || parts === undefined || init === undefined) {
+		return;
+	}
+
 	booted = true;
 	const { files, openEditors, workspaceFolder, moduleVersions } = init;
 
@@ -91,7 +105,9 @@ function maybeBoot(): void {
 			// activity bar's view-switch commands work. The product extension will replace this later.
 			const ext = registerExtension({ "name": "editor", "publisher": "brianjenkins94", "version": "0.0.0", "engines": { "vscode": "*" } }, ExtensionHostKind.LocalProcess);
 
-			ext.setAsDefaultApi();
+			ext.setAsDefaultApi().catch((error: unknown) => {
+				console.error("[vscode] setAsDefaultApi failed", error);
+			});
 			ext.getApi().then((api: unknown) => {
 				vscodeApi = api;
 				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
@@ -108,7 +124,10 @@ function maybeBoot(): void {
 }
 
 window.addEventListener("message", (event) => {
-	if (event.source !== host) { return; }
+	if (event.source !== host) {
+		return;
+	}
+
 	const data = event.data as { "source"?: string; "type"?: string } & Partial<Init> | null;
 
 	if (data?.source === "vscode-host" && data.type === "init") {
@@ -117,7 +136,16 @@ window.addEventListener("message", (event) => {
 	}
 });
 
-render(<Workbench onReady={(resolved) => { parts = resolved; maybeBoot(); }} runCommand={runCommand} />, document.body);
+render(
+	<Workbench
+		onReady={(resolved) => {
+			parts = resolved;
+			maybeBoot();
+		}}
+		runCommand={runCommand}
+	/>,
+	document.body
+);
 
 // Tell the host we're ready to receive the workspace.
 host.postMessage({ "source": "vscode", "type": "ready" }, "*");

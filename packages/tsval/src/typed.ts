@@ -63,7 +63,10 @@ export function createTypedProgram(code: string, fileName = "entry.ts"): TypedPr
 /** The static type at a node, structured (a `ts.Type` to walk: properties, unions, call signatures).
  *  For a call or `new` expression this is the call's result type. */
 export function typeAtNode(checker: ts.TypeChecker, node: ts.Node | undefined): ts.Type | undefined {
-	if (node === undefined) { return undefined; }
+	if (node === undefined) {
+		return undefined;
+	}
+
 	try {
 		return checker.getTypeAtLocation(node);
 	} catch {
@@ -80,7 +83,10 @@ export function typeOfNode(checker: ts.TypeChecker, node: ts.Node | undefined): 
 
 /** The signature a call/new expression resolved to (parameter and return types as declared), or undefined. */
 export function signatureAt(checker: ts.TypeChecker, node: ts.CallLikeExpression | undefined): ts.Signature | undefined {
-	if (node === undefined) { return undefined; }
+	if (node === undefined) {
+		return undefined;
+	}
+
 	try {
 		return checker.getResolvedSignature(node);
 	} catch {
@@ -117,7 +123,7 @@ export function typedCallSite(checker: ts.TypeChecker, site: HostCallSite): Type
 /** A `HostGuard` whose `beforeCall` sees a `TypedHostCallSite`. (A plain `HostGuard` is one too.) */
 export interface TypedHostGuard {
 	"sanitize"?: (value: unknown) => unknown;
-	"beforeCall"?: (callee: (...a: unknown[]) => unknown, thisArg: unknown, isConstruct: boolean, site: TypedHostCallSite) => (...a: unknown[]) => unknown;
+	"beforeCall"?: (callee: (...args: unknown[]) => unknown, thisArg: unknown, isConstruct: boolean, site: TypedHostCallSite) => (...args: unknown[]) => unknown;
 }
 
 /** Adapt a typed guard to the interpreter's guard: the site the interpreter passes is enriched on the way through. */

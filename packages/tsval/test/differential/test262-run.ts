@@ -53,24 +53,50 @@ const SCRIPT_GOAL_IDS = new Set(["types/object/S8.6.2_A5_T3.js", "statements/var
 
 export function policySkip(test: Test262Test): string | undefined {
 	for (const [prefix, reason] of Object.entries(SKIP_DIRS)) {
-		if (test.id.startsWith(prefix)) { return reason; }
+		if (test.id.startsWith(prefix)) {
+			return reason;
+		}
 	}
 
 	for (const flag of test.meta.flags) {
-		if (flag in SKIP_FLAGS) { return SKIP_FLAGS[flag]; }
+		if (flag in SKIP_FLAGS) {
+			return SKIP_FLAGS[flag];
+		}
 	}
 
 	for (const feature of test.meta.features) {
-		if (feature in SKIP_FEATURES) { return `feature ${feature}: ${SKIP_FEATURES[feature]}`; }
+		if (feature in SKIP_FEATURES) {
+			return `feature ${feature}: ${SKIP_FEATURES[feature]}`;
+		}
 	}
 
-	if (test.meta.negative !== undefined && test.meta.negative.phase !== "runtime") { return `negative ${test.meta.negative.phase}-phase test (tests the parser, not the interpreter)`; }
-	if (/^identifiers\/.*unicode-1[6-9]\.\d/.test(test.id)) { return "identifier characters newer than the TypeScript scanner's Unicode tables (parser)"; }
-	if (SCRIPT_GOAL_IDS.has(test.id)) { return "script-goal semantics (top-level bindings as global properties, `await` as an identifier): tsval's program scope is a module"; }
-	if (test.id.startsWith("statements/class/subclass/builtin-objects/GeneratorFunction/")) { return "the GeneratorFunction constructor compiles code from strings (a capability shim, not modeled)"; }
-	if (test.meta.includes.includes("wellKnownIntrinsicObjects.js")) { return "harness include compiles code from strings (`new Function`)"; }
-	if (/\$262\b/.test(test.source)) { return "uses the $262 host object"; }
-	if (/\beval\s*\(|\bnew\s+Function\s*\(|\bFunction\s*\(/.test(test.source)) { return "uses eval/Function (direct-eval and code-from-string semantics are a capability shim, not modeled)"; }
+	if (test.meta.negative !== undefined && test.meta.negative.phase !== "runtime") {
+		return `negative ${test.meta.negative.phase}-phase test (tests the parser, not the interpreter)`;
+	}
+
+	if (/^identifiers\/.*unicode-1[6-9]\.\d/.test(test.id)) {
+		return "identifier characters newer than the TypeScript scanner's Unicode tables (parser)";
+	}
+
+	if (SCRIPT_GOAL_IDS.has(test.id)) {
+		return "script-goal semantics (top-level bindings as global properties, `await` as an identifier): tsval's program scope is a module";
+	}
+
+	if (test.id.startsWith("statements/class/subclass/builtin-objects/GeneratorFunction/")) {
+		return "the GeneratorFunction constructor compiles code from strings (a capability shim, not modeled)";
+	}
+
+	if (test.meta.includes.includes("wellKnownIntrinsicObjects.js")) {
+		return "harness include compiles code from strings (`new Function`)";
+	}
+
+	if (/\$262\b/.test(test.source)) {
+		return "uses the $262 host object";
+	}
+
+	if (/\beval\s*\(|\bnew\s+Function\s*\(|\bFunction\s*\(/.test(test.source)) {
+		return "uses eval/Function (direct-eval and code-from-string semantics are a capability shim, not modeled)";
+	}
 
 	return undefined;
 }
@@ -88,39 +114,50 @@ interface Verdict {
 
 // Thrown values can be anything — a null-prototype object, a cross-realm error, a symbol — so never
 // let describing one throw. (Cross-realm: `instanceof Error` is false; use constructor names.)
-function safeString(v: unknown): string {
+function safeString(value: unknown): string {
 	try {
-		return String(v);
+		return String(value);
 	} catch {
-		return Object.prototype.toString.call(v);
+		return Object.prototype.toString.call(value);
 	}
 }
 
-function errorName(e: unknown): string {
-	if (typeof e === "object" && e !== null) {
-		const ctor = (e as { "constructor"?: { "name"?: string } }).constructor;
+function errorName(error: unknown): string {
+	if (typeof error === "object" && error !== null) {
+		const ctor = (error as { "constructor"?: { "name"?: string } }).constructor;
 
-		if (typeof ctor?.name === "string" && ctor.name !== "") { return ctor.name; }
-		if ("name" in e) { return safeString((e).name); }
+		if (typeof ctor?.name === "string" && ctor.name !== "") {
+			return ctor.name;
+		}
+
+		if ("name" in error) {
+			return safeString((error).name);
+		}
 	}
 
-	return safeString(e);
+	return safeString(error);
 }
 
-const describe = (e: unknown): string => (typeof e === "object" && e !== null && "message" in e ? `${errorName(e)}: ${safeString((e).message)}` : safeString(e));
+const describe = (error: unknown): string => (typeof error === "object" && error !== null && "message" in error ? `${errorName(error)}: ${safeString((error).message)}` : safeString(error));
 
 /** Judge a run against the test's expectations (positive/negative, sync/async). */
 function judge(test: Test262Test, threw: boolean, error: unknown, asyncResult: unknown): Verdict {
 	const { negative } = test.meta;
 
 	if (negative !== undefined) {
-		if (!threw) { return { "ok": false, "reason": `expected ${negative.type} but completed` }; }
+		if (!threw) {
+			return { "ok": false, "reason": `expected ${negative.type} but completed` };
+		}
+
 		const name = errorName(error);
 
 		return name === negative.type ? { "ok": true, "reason": "" } : { "ok": false, "reason": `expected ${negative.type}, got ${describe(error)}` };
 	}
 
-	if (threw) { return { "ok": false, "reason": describe(error) }; }
+	if (threw) {
+		return { "ok": false, "reason": describe(error) };
+	}
+
 	if (test.meta.flags.includes("async")) {
 		return asyncResult === ASYNC_OK ? { "ok": true, "reason": "" } : { "ok": false, "reason": `async: ${String(asyncResult).slice(0, 200)}` };
 	}
@@ -129,21 +166,28 @@ function judge(test: Test262Test, threw: boolean, error: unknown, asyncResult: u
 }
 
 async function settle(value: unknown): Promise<{ "threw": boolean; "error"?: unknown; "value": unknown }> {
-	if (typeof (value as { "then"?: unknown })?.then !== "function") { return { "threw": false, "value": value }; }
+	if (typeof (value as { "then"?: unknown })?.then !== "function") {
+		return { "threw": false, "value": value };
+	}
+
 	// The timeout keeps the event loop alive: a test whose promise never settles must fail by timeout,
 	// not silently end the process ("unsettled top-level await").
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
 	try {
 		const timeout = new Promise((_, reject) => {
-			timer = setTimeout(() => { reject(new Error(`async test did not settle within ${ASYNC_TIMEOUT_MS}ms`)); }, ASYNC_TIMEOUT_MS);
+			timer = setTimeout(() => {
+				reject(new Error(`async test did not settle within ${ASYNC_TIMEOUT_MS}ms`));
+			}, ASYNC_TIMEOUT_MS);
 		});
 
 		return { "threw": false, "value": await Promise.race([value, timeout]) };
 	} catch (error) {
 		return { "threw": true, "error": error, "value": undefined };
 	} finally {
-		if (timer !== undefined) { clearTimeout(timer); }
+		if (timer !== undefined) {
+			clearTimeout(timer);
+		}
 	}
 }
 
@@ -177,9 +221,16 @@ async function runSubject(test: Test262Test, program: string): Promise<Verdict> 
 		const vm = new VM({ "globalObject": realm, "realGlobals": false, "thisValue": realm });
 
 		vm.load(parse(program));
-		vm.runUntil((m) => m.steps > STEP_BUDGET);
-		if (!vm.finished && !vm.paused) { return { "ok": false, "reason": `step budget (${STEP_BUDGET}) exhausted` }; }
-		if (vm.paused) { value = await vm.runAsync(); } else { value = vm.completion; }
+		vm.runUntil((metrics) => metrics.steps > STEP_BUDGET);
+		if (!vm.finished && !vm.paused) {
+			return { "ok": false, "reason": `step budget (${STEP_BUDGET}) exhausted` };
+		}
+
+		if (vm.paused) {
+			value = await vm.runAsync();
+		} else {
+			value = vm.completion;
+		}
 	} catch (error) {
 		return judge(test, true, error, undefined);
 	}
@@ -192,19 +243,30 @@ async function runSubject(test: Test262Test, program: string): Promise<Verdict> 
 export async function runTest262(root: string, test: Test262Test): Promise<Test262Outcome> {
 	const skip = policySkip(test);
 
-	if (skip !== undefined) { return { "kind": "skipped", "reason": skip }; }
+	if (skip !== undefined) {
+		return { "kind": "skipped", "reason": skip };
+	}
+
 	const program = assembleProgram(root, test);
 	const control = await runControl(test, program);
 
-	if (!control.ok) { return { "kind": "control-failed", "reason": control.reason }; }
+	if (!control.ok) {
+		return { "kind": "control-failed", "reason": control.reason };
+	}
+
 	const subject = await runSubject(test, program);
 
-	if (subject.ok) { return { "kind": "pass" }; }
+	if (subject.ok) {
+		return { "kind": "pass" };
+	}
+
 	// A failing test TypeScript's own parser cannot parse cleanly judges the parser, not the interpreter.
 	const parsed = ts.createSourceFile("test.js", test.source, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
 	const diagnostics = (parsed as unknown as { "parseDiagnostics"?: unknown[] }).parseDiagnostics ?? [];
 
-	if (diagnostics.length > 0) { return { "kind": "control-failed", "reason": "TypeScript's parser reports syntactic diagnostics for this program (a parser deviation, not an interpreter one)" }; }
+	if (diagnostics.length > 0) {
+		return { "kind": "control-failed", "reason": "TypeScript's parser reports syntactic diagnostics for this program (a parser deviation, not an interpreter one)" };
+	}
 
 	return { "kind": "fail", "reason": subject.reason };
 }

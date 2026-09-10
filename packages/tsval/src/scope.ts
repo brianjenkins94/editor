@@ -26,103 +26,103 @@ export interface Binding {
 }
 
 export class Scope {
-	readonly parent: Scope | undefined;
+	public readonly parent: Scope | undefined;
 	/** function scope (var target, `arguments`/`this` holder) vs. block scope. */
-	readonly isolated: boolean;
-	readonly bindings = new Map<string, Binding>();
+	public readonly isolated: boolean;
+	public readonly bindings = new Map<string, Binding>();
 	/** Only the root scope carries injected/host globals. */
-	globalObject: Record<string, unknown> | undefined;
+	public globalObject: Record<string, unknown> | undefined;
 	/** Only the root scope: fall back to the host's real `globalThis` for unresolved names. */
-	realGlobals = false;
+	public realGlobals = false;
 	/** `this` binding for this scope (function scopes and the module root; not arrow functions). */
-	thisVal: unknown = undefined;
-	hasThis = false;
+	public thisVal: unknown = undefined;
+	public hasThis = false;
 	/** [[HomeObject]] of the current method (for `super.x`); set on a method's function scope. */
-	homeObject?: object;
+	public homeObject?: object;
 	/** metadata of the class whose constructor this scope belongs to (for `super(...)`). */
-	classMeta?: ClassMeta;
+	public classMeta?: ClassMeta;
 	/** `new.target` for the current function scope. */
-	newTarget?: unknown;
+	public newTarget?: unknown;
 	/** the guest function this (function) scope belongs to — its flags tell `yield*`/`for await`
 	 *  whether they're inside an async generator. */
-	functionMeta?: GuestFunctionMeta;
+	public functionMeta?: GuestFunctionMeta;
 	/** the private names (`#x`) declared by the class whose body this scope is; resolved lexically,
 	 *  nearest class first (so an inner class's `#x` shadows an outer one's). */
-	privateNames?: Map<string, object>;
+	public privateNames?: Map<string, object>;
+	/** The construction in progress for the nearest constructor scope (see handlers/classes.ts). */
+	public construction?: Construction;
 
-	constructor(parent?: Scope, isolated = false) {
+	public constructor(parent?: Scope, isolated = false) {
 		this.parent = parent;
 		this.isolated = isolated;
 	}
 
 	/** The nearest enclosing function (isolated) scope — the target for `var` hoisting. */
-	functionScope(): Scope {
-		if (this.isolated || !this.parent) { return this; }
-		let s: Scope = this.parent;
+	public functionScope(): Scope {
+		if (this.isolated || !this.parent) {
+			return this;
+		}
 
-		while (!s.isolated && s.parent) { s = s.parent; }
+		let current: Scope = this.parent;
 
-		return s;
+		while (!current.isolated && current.parent) {
+			current = current.parent;
+		}
+
+		return current;
 	}
 
-	root(): Scope {
-		if (!this.parent) { return this; }
-		let s: Scope = this.parent;
+	public root(): Scope {
+		if (!this.parent) {
+			return this;
+		}
 
-		while (s.parent) { s = s.parent; }
+		let current: Scope = this.parent;
 
-		return s;
+		while (current.parent) {
+			current = current.parent;
+		}
+
+		return current;
 	}
 
 	/** Resolve `this`: nearest enclosing scope that owns a `this` binding (arrows are transparent). */
-	getThis(): unknown {
-		if (this.hasThis) { return this.thisVal; }
-		let s: Scope | undefined = this.parent;
+	public getThis(): unknown {
+		if (this.hasThis) {
+			return this.thisVal;
+		}
 
-		while (s) {
-			if (s.hasThis) { return s.thisVal; }
-			s = s.parent;
+		let current: Scope | undefined = this.parent;
+
+		while (current) {
+			if (current.hasThis) {
+				return current.thisVal;
+			}
+
+			current = current.parent;
 		}
 
 		return undefined;
 	}
 
-	/** Walk to the nearest scope that carries the given class/method field (arrows are transparent). */
-	/** The construction in progress for the nearest constructor scope (see handlers/classes.ts). */
-	construction?: Construction;
-
-	private findUp<K extends "homeObject" | "classMeta" | "newTarget" | "construction">(key: K): Scope[K] {
-		if (this[key] !== undefined) { return this[key]; }
-		if (this.hasThis) { return this[key]; } // stop at the owning function scope
-		let s: Scope | undefined = this.parent;
-
-		while (s) {
-			if (s[key] !== undefined) { return s[key]; }
-			if (s.hasThis) { return s[key]; } // stop at the owning function scope
-			s = s.parent;
-		}
-
-		return undefined;
-	}
-
-	getHomeObject(): object | undefined {
+	public getHomeObject(): object | undefined {
 		return this.findUp("homeObject");
 	}
 
-	getClassMeta(): ClassMeta | undefined {
+	public getClassMeta(): ClassMeta | undefined {
 		return this.findUp("classMeta");
 	}
 
-	getConstruction(): Construction | undefined {
+	public getConstruction(): Construction | undefined {
 		return this.findUp("construction");
 	}
 
-	getNewTarget(): unknown {
+	public getNewTarget(): unknown {
 		return this.findUp("newTarget");
 	}
 
 	/** Declare a `var`: hoisted to the function scope, defined but initialized to `undefined`. */
-	declareVar(name: string): void {
+	public declareVar(name: string): void {
 		const fs = this.functionScope();
 
 		if (!fs.bindings.has(name)) {
@@ -133,63 +133,63 @@ export class Scope {
 	/** Declare a hoisted `function` binding. Strict-mode semantics: hoisted to the top of the scope it
 	 *  appears in — a declaration inside a block is block-scoped, not lifted to the function (that
 	 *  lifting is sloppy-mode web-compat behavior, out of scope). */
-	declareFunction(name: string, value: unknown): void {
+	public declareFunction(name: string, value: unknown): void {
 		this.bindings.set(name, { "value": value, "kind": "function", "initialized": true });
 	}
 
 	/** Declare a block-scoped `let`/`const`/`param`; enters the TDZ until `initialize`. */
-	declareLexical(name: string, kind: BindingKind): void {
+	public declareLexical(name: string, kind: BindingKind): void {
 		this.bindings.set(name, { "value": undefined, "kind": kind, "initialized": kind === "param" });
 	}
 
 	/** Provide the value for a previously-declared binding, leaving the TDZ. */
-	initialize(name: string, value: unknown): void {
-		const b = this.bindings.get(name);
+	public initialize(name: string, value: unknown): void {
+		const binding = this.bindings.get(name);
 
-		if (!b) { throw new TsvalInternalError(`invariant: initialize of undeclared '${name}'`); }
-		b.value = value;
-		b.initialized = true;
-	}
-
-	private lookup(name: string): Binding | undefined {
-		const own = this.bindings.get(name);
-
-		if (own) { return own; }
-		let s: Scope | undefined = this.parent;
-
-		while (s) {
-			const b = s.bindings.get(name);
-
-			if (b) { return b; }
-			s = s.parent;
+		if (!binding) {
+			throw new TsvalInternalError(`invariant: initialize of undeclared '${name}'`);
 		}
 
-		return undefined;
+		binding.value = value;
+		binding.initialized = true;
 	}
 
-	has(name: string): boolean {
-		if (this.lookup(name)) { return true; }
+	public has(name: string): boolean {
+		if (this.lookup(name)) {
+			return true;
+		}
+
 		const root = this.root();
 
-		if (root.globalObject !== null && root.globalObject !== undefined && name in root.globalObject) { return true; }
+		if (root.globalObject !== null && root.globalObject !== undefined && name in root.globalObject) {
+			return true;
+		}
 
 		return root.realGlobals && name in globalThis;
 	}
 
-	get(name: string): unknown {
-		const b = this.lookup(name);
+	public get(name: string): unknown {
+		const binding = this.lookup(name);
 
-		if (b) {
-			if (!b.initialized) { throw new ReferenceError(`Cannot access '${name}' before initialization`); }
+		if (binding) {
+			if (!binding.initialized) {
+				throw new ReferenceError(`Cannot access '${name}' before initialization`);
+			}
 
-			return b.value;
+			return binding.value;
 		}
 
 		const root = this.root();
-		const g = root.globalObject;
+		const globals = root.globalObject;
 
-		if (g !== null && g !== undefined && name in g) { return g[name]; }
-		if (root.realGlobals && name in globalThis) { return (globalThis as Record<string, unknown>)[name]; }
+		if (globals !== null && globals !== undefined && name in globals) {
+			return globals[name];
+		}
+
+		if (root.realGlobals && name in globalThis) {
+			return (globalThis as Record<string, unknown>)[name];
+		}
+
 		throw new ReferenceError(`${name} is not defined`);
 	}
 
@@ -198,34 +198,92 @@ export class Scope {
 	 * undeclared name is a ReferenceError (sloppy mode's implicit-global creation is out of scope), and
 	 * the non-writable globals `undefined`/`NaN`/`Infinity` throw a TypeError.
 	 */
-	set(name: string, value: unknown): void {
-		const b = this.lookup(name);
+	public set(name: string, value: unknown): void {
+		const binding = this.lookup(name);
 
-		if (b) {
-			if (b.kind === "const" && b.initialized) { throw new TypeError(`Assignment to constant variable.`); }
-			if (!b.initialized) { throw new ReferenceError(`Cannot access '${name}' before initialization`); }
-			b.value = value;
+		if (binding) {
+			if (binding.kind === "const" && binding.initialized) {
+				throw new TypeError(`Assignment to constant variable.`);
+			}
+
+			if (!binding.initialized) {
+				throw new ReferenceError(`Cannot access '${name}' before initialization`);
+			}
+
+			binding.value = value;
 
 			return;
 		}
 
-		if (name === "undefined" || name === "NaN" || name === "Infinity") { throw new TypeError(`Cannot assign to read only property '${name}'`); }
-		const root = this.root();
-		const g = root.globalObject;
+		if (name === "undefined" || name === "NaN" || name === "Infinity") {
+			throw new TypeError(`Cannot assign to read only property '${name}'`);
+		}
 
-		if (g !== null && g !== undefined && name in g) {
-			g[name] = value;
+		const root = this.root();
+		const globals = root.globalObject;
+
+		if (globals !== null && globals !== undefined && name in globals) {
+			globals[name] = value;
 
 			return;
 		}
 
 		if (root.realGlobals && name in globalThis) {
 			// An existing host global (e.g. a `var` the host defined): keep the write in the sandbox.
-			(g ?? (root.globalObject = {}))[name] = value;
+			(globals ?? (root.globalObject = {}))[name] = value;
 
 			return;
 		}
 
 		throw new ReferenceError(`${name} is not defined`);
+	}
+
+	/** Walk to the nearest scope that carries the given class/method field (arrows are transparent). */
+	private findUp<K extends "homeObject" | "classMeta" | "newTarget" | "construction">(key: K): Scope[K] {
+		if (this[key] !== undefined) {
+			return this[key];
+		}
+
+		if (this.hasThis) {
+			return this[key];
+		} // stop at the owning function scope
+
+		let current: Scope | undefined = this.parent;
+
+		while (current) {
+			if (current[key] !== undefined) {
+				return current[key];
+			}
+
+			if (current.hasThis) {
+				return current[key];
+			} // stop at the owning function scope
+
+			current = current.parent;
+		}
+
+		return undefined;
+	}
+
+	private lookup(name: string): Binding | undefined {
+		const own = this.bindings.get(name);
+
+		if (own) {
+			return own;
+		}
+
+		let current: Scope | undefined = this.parent;
+
+		while (current) {
+			const binding = current.bindings.get(name);
+
+			if (binding) {
+				return binding;
+			}
+
+			current = current.parent;
+		}
+
+		return undefined;
 	}
 }

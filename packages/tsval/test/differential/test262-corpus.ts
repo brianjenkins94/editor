@@ -42,28 +42,54 @@ export function parseFrontmatter(source: string): Test262Meta {
 	const meta: Test262Meta = { "flags": [], "features": [], "includes": [] };
 	const match = /\/\*---([\s\S]*?)---\*\//.exec(source);
 
-	if (match === null) { return meta; }
+	if (match === null) {
+		return meta;
+	}
+
 	let currentList: string[] | undefined;
 	let inNegative = false;
-	const listOf = (key: string): string[] | undefined => (key === "flags" ? meta.flags : key === "features" ? meta.features : key === "includes" ? meta.includes : undefined);
+	const listOf = (key: string): string[] | undefined => {
+		if (key === "flags") {
+			return meta.flags;
+		}
+
+		if (key === "features") {
+			return meta.features;
+		}
+
+		if (key === "includes") {
+			return meta.includes;
+		}
+
+		return undefined;
+	};
 
 	for (const raw of match[1].split("\n")) {
 		const line = raw.replace(/\s+$/, "");
 
-		if (line.trim() === "") { continue; }
+		if (line.trim() === "") {
+			continue;
+		}
+
 		const indented = /^\s/.test(line);
 
 		if (indented && inNegative) {
 			const kv = /^\s*(\w+):\s*(.+)$/.exec(line);
 
-			if (kv && meta.negative) { (meta.negative as unknown as Record<string, string>)[kv[1]] = kv[2].trim(); }
+			if (kv && meta.negative) {
+				(meta.negative as unknown as Record<string, string>)[kv[1]] = kv[2].trim();
+			}
+
 			continue;
 		}
 
 		if (indented && currentList !== undefined) {
 			const item = /^\s*-\s*(.+)$/.exec(line);
 
-			if (item) { currentList.push(item[1].trim()); }
+			if (item) {
+				currentList.push(item[1].trim());
+			}
+
 			continue;
 		}
 
@@ -71,14 +97,21 @@ export function parseFrontmatter(source: string): Test262Meta {
 		currentList = undefined;
 		const kv = /^(\w+):\s*(.*)$/.exec(line);
 
-		if (kv === null) { continue; }
+		if (kv === null) {
+			continue;
+		}
+
 		const [, key, value] = kv;
 		const list = listOf(key);
 
 		if (list !== undefined) {
 			const inline = /^\[(.*)\]$/.exec(value.trim());
 
-			if (inline) { list.push(...inline[1].split(",").map((s) => s.trim()).filter(Boolean)); } else { currentList = list; }
+			if (inline) {
+				list.push(...inline[1].split(",").map((segment) => segment.trim()).filter(Boolean));
+			} else {
+				currentList = list;
+			}
 		} else if (key === "negative") {
 			meta.negative = { "phase": "", "type": "" };
 			inNegative = true;
@@ -99,18 +132,28 @@ export function *loadTest262(root: string, filter?: (id: string) => boolean): Ge
 	const language = path.join(root, "test/language");
 
 	function *walk(dir: string): Generator<string> {
-		for (const entry of fs.readdirSync(dir, { "withFileTypes": true }).sort((a, b) => a.name.localeCompare(b.name))) {
+		for (const entry of fs.readdirSync(dir, { "withFileTypes": true }).sort((left, right) => left.name.localeCompare(right.name))) {
 			const full = path.join(dir, entry.name);
 
-			if (entry.isDirectory()) { yield* walk(full); } else if (entry.name.endsWith(".js") && !entry.name.endsWith("_FIXTURE.js")) { yield full; }
+			if (entry.isDirectory()) {
+				yield* walk(full);
+			} else if (entry.name.endsWith(".js") && !entry.name.endsWith("_FIXTURE.js")) {
+				yield full;
+			}
 		}
 	}
 
-	if (!hasCorpus(root)) { return; }
+	if (!hasCorpus(root)) {
+		return;
+	}
+
 	for (const file of walk(language)) {
 		const id = path.relative(language, file).split(path.sep).join("/");
 
-		if (filter !== undefined && !filter(id)) { continue; }
+		if (filter !== undefined && !filter(id)) {
+			continue;
+		}
+
 		const source = fs.readFileSync(file, "utf8");
 
 		yield { "id": id, "meta": parseFrontmatter(source), "source": source };
