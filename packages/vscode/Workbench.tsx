@@ -20,23 +20,25 @@ import { css, globalCss, iconSvg } from "./theme";
 const shell = css({
 	"display": "grid",
 	"height": "100%",
-	// 5px "handle" tracks sit between sidebar/editors/auxbar and above the console (panel) — a solid
-	// divider at rest, blue on hover; the pure-CSS resize controls below drive them. The handle must be
-	// OPAQUE: it masks the region's native resize grip (a `::-webkit-resizer` stretched 100× by the
-	// region's `scale`, which is otherwise visible). The grab zone is this exposed track (the region
-	// sits under the panels, so only the gap is hittable) — hence 5px, not 1px. Console spans full width.
+	// 5px "handle" tracks sit between sidebar/editors/auxbar and above the console (panel). Like VS Code's
+	// sashes they're invisible at rest (the resting dividers are monaco's own part borders) and reveal a
+	// `sash.hoverBorder` line on hover — the pure-CSS resize controls below drive them. The 5px track is the
+	// (wide) grab zone; on hover the handle's `::before` fills it. The region's native resize grip (a
+	// `::-webkit-resizer` stretched 100× by the region's `scale`) is made transparent (see injectControls) so
+	// the handle above can be transparent instead of an opaque mask. The region sits under the panels, so only
+	// this exposed track is hittable — hence 5px, not 1px. Console spans full width.
 	// The resizable tracks (sidebar/auxbar columns, console row) are `max-content`, so a control's
 	// hidden `.region` drives them: the region fills its area (`min-width/height:100%`, so its native
 	// resize grip sits ON the handle strip — not buried under the part) and dragging it past the
 	// part's size grows the `max-content` track. Editors column + main row are `1fr` and absorb the
 	// slack. Resize is GROW-only: dragging inward clamps at 100% and the part floors the track.
 	"gridTemplate": `
-		"header  header         header         header         header"         min-content
-		"sidebar sidebar-handle editors        auxbar-handle  auxbar"         1fr
-		"sidebar sidebar-handle console-handle console-handle console-handle" 5px
-		"sidebar sidebar-handle console        console        console"        max-content
-		"footer  footer         footer         footer         footer"         min-content
-		/ max-content 5px       1fr            5px            max-content`
+		"header       header         header         header         header"         min-content
+		"sidebar      sidebar-handle editors        auxbar-handle  auxbar"         1fr
+		"sidebar      sidebar-handle console-handle console-handle console-handle" 5px
+		"sidebar      sidebar-handle console        console        console"        max-content
+		"footer       footer         footer         footer         footer"         min-content
+		/ max-content 5px            1fr            5px            max-content`
 });
 
 function region(area: string, extra: Record<string, unknown> = {}) {
@@ -88,24 +90,63 @@ const injectGlobals = globalCss({
 // Pure-CSS resize controls (faithful port of the original layout — no JS). Each divider is a thin
 // grid "handle" track; a hidden native-`resize` `.region` is transformed to overlap that strip, so
 // dragging it resizes the adjacent part. `display:contents` lets each control's region + handle act
-// as direct grid items. The handle is the visible line (pointer-events:none → the drag reaches the
-// region beneath). The region's `scale`/`translate` map the tiny native resize grip onto the whole
-// handle strip and flip it so it grips from the correct edge. Scoped under `.wb-shell`.
+// as direct grid items. The drag reaches the region beneath the handle (handle is pointer-events:none).
+// The region's `scale`/`translate` map the tiny native resize grip onto the whole handle strip and flip
+// it so it grips from the correct edge.
+//
+// The VS Code sash look: the vertical handle tracks (sidebar/auxbar) are transparent and draw NOTHING at
+// rest — the resting dividers there are monaco's own part borders (per the theme), so they're never doubled.
+// The console handle is the exception: it paints its strip like the panel and carries the panel's top border
+// itself (see below), because the 5px grab track would otherwise leave a visible gap above the panel.
+// On hover the handle's `::before` expands from a collapsed 1px to fill the full 5px track with
+// `sash.hoverBorder`, then fades back on leave — matching VS Code's hover reveal. The region's
+// `::-webkit-resizer` grip is painted transparent so the handle needn't be an opaque mask. Scoped under
+// `.wb-shell`.
 const injectControls = globalCss({
 	".wb-shell .sidebar-control": { "display": "contents" },
 	".wb-shell .console-control": { "display": "contents" },
 	".wb-shell .auxbar-control": { "display": "contents" },
 
-	".wb-shell .sidebar-control > .handle": { "gridArea": "sidebar-handle", "backgroundColor": "var(--vscode-editorGroup-border)", "zIndex": 10, "pointerEvents": "none", "transition": "background-color 0.15s ease" },
-	".wb-shell .sidebar-control:hover > .handle": { "backgroundColor": "var(--vscode-sash-hoverBorder)" },
+	// Hide the native resize grip (visual only — the region stays draggable) so transparent handles can
+	// sit over it without exposing the grip artifact.
+	".wb-shell .region::-webkit-resizer": { "backgroundColor": "transparent" },
+
+	// Handles: grab-zone tracks (transparent for the vertical sashes; the console strip is panel-painted
+	// below). The visible sash is the `::before` line on each.
+	// Vertical sashes sit at z-index 11 — one above the console handle (10) so their hover line paints OVER
+	// the panel-coloured console strip where the two cross, instead of being notched out by it.
+	".wb-shell .sidebar-control > .handle": { "gridArea": "sidebar-handle", "position": "relative", "zIndex": 11, "pointerEvents": "none" },
+	// The console handle also paints its 5px strip with the panel background and reaches 5px further left (over
+	// the sidebar-handle column). This visually pulls the panel's top edge up flush under the editor and left
+	// flush against the sidebar WITHOUT moving the panel part — so the resize region and panel clicks are
+	// untouched. Monaco's own panel-top border is hidden below (it would sit 5px lower); the flush divider is
+	// the handle's ::before instead.
+	".wb-shell .console-control > .handle": { "gridArea": "console-handle", "position": "relative", "zIndex": 10, "pointerEvents": "none", "marginLeft": -5, "backgroundColor": "var(--vscode-panel-background)" },
+	".wb-shell .auxbar-control > .handle": { "gridArea": "auxbar-handle", "position": "relative", "zIndex": 11, "pointerEvents": "none" },
+
+	// The sash line is drawn only on hover — at rest the handle is fully transparent and monaco's own part
+	// borders (side-bar / panel / editor-group, per the theme) are the dividers, so we never double them up.
+	// Vertical sashes (sidebar, auxbar): the `::before` collapses to a centered 1px at rest (invisible) and
+	// expands to fill the full 5px track with `sash.hoverBorder` on hover — matching VS Code, where the hover
+	// highlight spans the whole sash.
+	".wb-shell .sidebar-control > .handle::before": { "content": "\"\"", "position": "absolute", "top": 0, "bottom": 0, "left": "50%", "width": "1px", "transform": "translateX(-50%)", "backgroundColor": "transparent", "transition": "width 0.08s ease, background-color 0.08s ease" },
+	".wb-shell .auxbar-control > .handle::before": { "content": "\"\"", "position": "absolute", "top": 0, "bottom": 0, "left": "50%", "width": "1px", "transform": "translateX(-50%)", "backgroundColor": "transparent", "transition": "width 0.08s ease, background-color 0.08s ease" },
+	".wb-shell .sidebar-control:hover > .handle::before": { "width": "100%", "backgroundColor": "var(--vscode-sash-hoverBorder)" },
+	".wb-shell .auxbar-control:hover > .handle::before": { "width": "100%", "backgroundColor": "var(--vscode-sash-hoverBorder)" },
+
+	// Horizontal sash (console): the resting divider is a 1px `panel-border` line at the TOP of the strip
+	// (flush under the editor), not centered — since the strip is panel-coloured, this reads as the panel's
+	// own top border. On hover it fills the whole strip with `sash.hoverBorder`.
+	".wb-shell .console-control > .handle::before": { "content": "\"\"", "position": "absolute", "left": 0, "right": 0, "top": 0, "height": "1px", "backgroundColor": "var(--vscode-panel-border, transparent)", "transition": "height 0.08s ease, background-color 0.08s ease" },
+	".wb-shell .console-control:hover > .handle::before": { "height": "100%", "backgroundColor": "var(--vscode-sash-hoverBorder)" },
+
+	// Hide monaco's own panel-top border — it sits 5px below our flush divider and would read as a second line.
+	".wb-shell [id^=\"workbench.parts.panel\"] .composite.title": { "borderTopColor": "transparent !important" },
+
+	// Regions keep the default stacking (region()'s z-index 1 for the parts; these regions sit below them so
+	// the parts stay clickable, with only the region's resize grip exposed on the handle strip).
 	".wb-shell .sidebar-control > .region": { "gridArea": "sidebar / sidebar / sidebar-handle / sidebar-handle", "minWidth": "100%", "overflow": "hidden", "resize": "horizontal", "transformOrigin": "bottom right", "scale": "1 100" },
-
-	".wb-shell .console-control > .handle": { "gridArea": "console-handle", "backgroundColor": "var(--vscode-editorGroup-border)", "zIndex": 10, "pointerEvents": "none", "transition": "background-color 0.15s ease" },
-	".wb-shell .console-control:hover > .handle": { "backgroundColor": "var(--vscode-sash-hoverBorder)" },
 	".wb-shell .console-control > .region": { "gridArea": "console-handle / console-handle / console / console", "minHeight": "100%", "maxHeight": "80vh", "overflow": "hidden", "resize": "vertical", "transformOrigin": "bottom right", "scale": "-100 -1", "translate": "-100% -100%" },
-
-	".wb-shell .auxbar-control > .handle": { "gridArea": "auxbar-handle", "backgroundColor": "var(--vscode-editorGroup-border)", "zIndex": 10, "pointerEvents": "none", "transition": "background-color 0.15s ease" },
-	".wb-shell .auxbar-control:hover > .handle": { "backgroundColor": "var(--vscode-sash-hoverBorder)" },
 	".wb-shell .auxbar-control > .region": { "gridArea": "auxbar-handle / auxbar-handle / auxbar / auxbar", "minWidth": "100%", "overflow": "hidden", "resize": "horizontal", "transformOrigin": "bottom left", "scale": "-1 100", "translate": "100% 0" }
 });
 

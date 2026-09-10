@@ -1,0 +1,23 @@
+{
+  "name": "hello",
+  "displayName": "Hello World",
+  "description": "Dead-simple hello world extension for the editor workbench.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "hello.helloWorld",
+        "title": "Hello World",
+        "category": "Hello"
+      }
+    ]
+  }
+}

@@ -7,14 +7,18 @@
  * + contents back to the host. `boot`/`registerExtension`/`registerFileSystemOverlay` come from the
  * pre-built monaco-vscode-api bundle, kept external and mapped to the sibling `./main.js`.
  *
- * Foundation only: no product extension yet. A minimal, code-less default extension is registered
- * purely to obtain the `vscode` API so the activity bar can execute `workbench.view.*` commands.
- * Filesystem overlays (CDN node_modules now, real-disk FSA later) layer UNDER the seeded snapshot —
+ * The hello extension (extensions/hello) is the product extension: registered as browser CJS via a
+ * data: URL, it is also the default API context, so the activity bar can execute `workbench.view.*`
+ * commands through its `vscode` API. Filesystem overlays (CDN node_modules now, real-disk FSA later) layer UNDER the seeded snapshot —
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
 import type { WorkbenchFile, WorkbenchParts } from "@brianjenkins94/monaco-vscode-api/main";
 import { boot, ExtensionHostKind, registerExtension, registerFileSystemOverlay } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
+// The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
+// virtual module in entry.config.ts).
+import helloExtensionCode from "hello:extension";
+import helloManifest from "./extensions/hello/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
@@ -29,7 +33,7 @@ let parts: WorkbenchParts | undefined;
 let init: Init | undefined;
 let booted = false;
 
-// The per-extension VS Code API, captured once the default extension resolves. The activity bar drives
+// The per-extension VS Code API, captured once the hello extension resolves. The activity bar drives
 // the workbench through it (view-switch commands); `runCommand` reads the latest api so the bar —
 // rendered before boot — works on clicks made after boot.
 // eslint-disable-next-line ts/no-explicit-any
@@ -101,10 +105,11 @@ function maybeBoot(): void {
 				registerFileSystemOverlay(0, createNodeModulesProvider(workspaceFolder ?? "/workspace", moduleVersions));
 			}
 
-			// A minimal, code-less default extension — registered only to obtain the `vscode` API so the
-			// activity bar's view-switch commands work. The product extension will replace this later.
-			const ext = registerExtension({ "name": "editor", "publisher": "brianjenkins94", "version": "0.0.0", "engines": { "vscode": "*" } }, ExtensionHostKind.LocalProcess);
+			// The hello extension — the default API context (so getApi()/runCommand work) + the hello world
+			// command. Registered as CJS via a data: URL (the bundled code from entry.config.ts).
+			const ext = registerExtension(helloManifest, ExtensionHostKind.LocalProcess);
 
+			ext.registerFileUrl("./extension.js", "data:text/javascript;base64," + window.btoa(helloExtensionCode));
 			ext.setAsDefaultApi().catch((error: unknown) => {
 				console.error("[vscode] setAsDefaultApi failed", error);
 			});
@@ -113,7 +118,7 @@ function maybeBoot(): void {
 				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
 				// AFTER the workbench restores its last-active viewlet (which would otherwise win).
 				setTimeout(runCommand, 0, "workbench.view.explorer");
-			}).catch((error: unknown) => { console.error("[vscode] default extension setup failed", error); });
+			}).catch((error: unknown) => { console.error("[vscode] hello extension setup failed", error); });
 
 			// Tell the host the workbench is up (readiness gating).
 			host.postMessage({ "source": "vscode", "type": "online" }, "*");
