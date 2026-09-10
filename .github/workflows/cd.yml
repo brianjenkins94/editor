@@ -1,12 +1,17 @@
 {
   "name": "cd",
   "on": {
-    "push": {
+    "workflow_dispatch": null,
+    # Fire automatically when CI finishes on main. workflow_run runs on the built-in GITHUB_TOKEN — no
+    # PAT/dispatch hand-off needed. The publish job gates on CI success (workflow_run fires on failure too).
+    "workflow_run": {
+      "workflows": ["ci"],
+      "types": ["completed"],
       "branches": ["main"]
-    },
-    "release": {
-      "types": ["published"]
     }
+  },
+  "concurrency": {
+    "group": "${{ github.workflow }}-${{ github.ref }}"
   },
   # pages + id-token for the Pages deploy; id-token also carries npm provenance.
   "permissions": {
@@ -16,6 +21,8 @@
   },
   "jobs": {
     "publish": {
+      # Only after a manual dispatch or a successful CI run on main.
+      "if": "${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}",
       "runs-on": "ubuntu-latest",
       "environment": {
         "name": "github-pages",
