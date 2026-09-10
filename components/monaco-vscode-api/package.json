@@ -8,9 +8,11 @@
     "preinstall": "chmod 755 ./install.sh && ./install.sh"
   },
   "devDependencies": {
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@tsconfig/node-lts": "latest",
     "@types/node": "latest",
-    "typescript": "latest"
+    "typescript": "latest",
+    "vite": "latest"
   },
   "engines": {
     "node": ">=18.0.0",

@@ -9,5 +9,9 @@
   },
   "dependencies": {
     "@brianjenkins94/bablr-language-ts": "*"
+  },
+  "devDependencies": {
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
+    "vite": "latest"
   }
 }
