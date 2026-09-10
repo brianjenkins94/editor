@@ -97,6 +97,7 @@ export function hasCorpus(root: string): boolean {
 /** Every test under `<root>/test/language/` (fixtures excluded), in stable sorted order, lazily read. */
 export function *loadTest262(root: string, filter?: (id: string) => boolean): Generator<Test262Test> {
 	const language = path.join(root, "test/language");
+
 	function *walk(dir: string): Generator<string> {
 		for (const entry of fs.readdirSync(dir, { "withFileTypes": true }).sort((a, b) => a.name.localeCompare(b.name))) {
 			const full = path.join(dir, entry.name);

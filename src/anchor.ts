@@ -20,10 +20,11 @@
  * ../tsval and ../bablr-language-ts; kept out of the CI sweep until they publish.
  */
 
+import type { CstNode, Edit, Span } from "./bridge";
 import { cstSpans } from "@brianjenkins94/bablr";
-import { type CstNode, cstNodeAtSpan, type Edit, openDrift, prepare, type Span } from "./bridge";
-import { ALL_CAPABILITIES, runCanary } from "./canary";
 import { findReach } from "@brianjenkins94/util/silo/reach";
+import { cstNodeAtSpan, openDrift, prepare } from "./bridge";
+import { ALL_CAPABILITIES, runCanary } from "./canary";
 
 export type { CstNode, Edit, Span } from "./bridge";
 
@@ -169,7 +170,7 @@ export function reanchor(findings: AnchoredFinding[], newSrc: string): Reanchore
 
 	// Consume candidates in the ORIGINAL findings' document order, so the n-th identical finding takes the n-th
 	// identical node; results go back in the caller's order.
-	const order = findings.map((finding, index) => ({ finding, index })).sort((a, b) => a.finding.cst.start - b.finding.cst.start);
+	const order = findings.map((finding, index) => ({ "finding": finding, "index": index })).sort((a, b) => a.finding.cst.start - b.finding.cst.start);
 	const consumed = new Map<string, number>();
 	const results: Reanchored[] = new Array<Reanchored>(findings.length);
 

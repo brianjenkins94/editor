@@ -78,6 +78,7 @@ export function hasCorpus(root: string): boolean {
 export function *loadTsCases(root: string, filter?: (id: string) => boolean): Generator<TsCase> {
 	if (!hasCorpus(root)) { return; }
 	const base = path.join(root, "tests/cases");
+
 	function *walk(dir: string): Generator<string> {
 		if (!fs.existsSync(dir)) { return; }
 		for (const entry of fs.readdirSync(dir, { "withFileTypes": true }).sort((a, b) => a.name.localeCompare(b.name))) {

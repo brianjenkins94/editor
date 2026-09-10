@@ -108,7 +108,7 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			const meta = await fetchMeta(rel);
 
 			if (meta === undefined) { throw notFound(); }
-			announce(resource, { "resource": resource as never, "type": FileChangeType.ADDED });
+			announce(resource, { "resource": resource, "type": FileChangeType.ADDED });
 
 			return {
 				"type": meta.type === "directory" ? FileType.Directory : FileType.File,
@@ -125,7 +125,7 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			const data = await fetchFile(rel);
 
 			if (data === undefined) { throw notFound(); }
-			announce(resource, { "resource": resource as never, "type": FileChangeType.UPDATED });
+			announce(resource, { "resource": resource, "type": FileChangeType.UPDATED });
 
 			return data;
 		},
@@ -149,5 +149,5 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		"mkdir": async () => { throw readOnly(); },
 		"delete": async () => { throw readOnly(); },
 		"rename": async () => { throw readOnly(); }
-	} as IFileSystemProviderWithFileReadWriteCapability;
+	};
 }

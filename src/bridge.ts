@@ -10,9 +10,9 @@
  * the CI sweep until those publish.
  */
 
+import { cstSpans } from "@brianjenkins94/bablr";
 import { ts } from "@brianjenkins94/tsval";
 import { createTypedProgram, typeAtNode } from "@brianjenkins94/tsval/typed";
-import { cstSpans } from "@brianjenkins94/bablr";
 
 /** A CST node as the bridge and the anchors see it (the subset of a `cstSpans` span that survives serialization). */
 export interface CstNode {
@@ -118,9 +118,7 @@ export function prepare(src: string, fileName = "entry.ts"): Bridge {
 	};
 
 	const align = (): Alignment[] => {
-		const spans = cstSpans(src).spans
-			.map((span, index) => ({ "span": span, "index": index }))
-			.sort((a, b) => a.span.start - b.span.start || b.span.end - a.span.end);
+		const spans = cstSpans(src).spans.map((span, index) => ({ "span": span, "index": index })).sort((a, b) => a.span.start - b.span.start || b.span.end - a.span.end);
 		const result: Alignment[] = new Array(spans.length);
 		const stack: Positioned[] = []; // the chain of tsc nodes containing the current position
 		let next = 0;

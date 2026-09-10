@@ -10,9 +10,9 @@
  * means to replace (the guard sees EVERY host call, including an incidental `new URL(...)` in an argument list).
  */
 
+import type { TypedHostGuard } from "@brianjenkins94/tsval/typed";
 import { interpret, ts } from "@brianjenkins94/tsval";
 import { createTypedVM } from "@brianjenkins94/tsval/typed";
-import type { TypedHostGuard } from "@brianjenkins94/tsval/typed";
 
 /** A recursive, undefined-safe stand-in: every property / call / construct yields another auto-stub, so
  *  `res.a.b[0].c()` never throws while you explore downstream. Carries no real data — a peek shows a stub.
@@ -36,7 +36,7 @@ export function autostub(): unknown {
 	};
 
 	// A callable target, so both `res()` and `res.x` (and `new res()`) are trapped.
-	return new Proxy((function stub() {}) as (...args: unknown[]) => unknown, handler);
+	return new Proxy(function stub() {}, handler);
 }
 
 /** Usable stand-ins for the builtins a synthesized value may contain (a stub in their place would fail on

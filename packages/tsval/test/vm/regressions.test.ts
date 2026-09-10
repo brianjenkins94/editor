@@ -26,11 +26,13 @@ test("#3 fork: a host-invoked closure from the fork runs on the fork", () => {
 
 		return original(...a);
 	};
+
 	fork.callGuestFromHost = (...a) => {
 		forkHits += 1;
 
 		return forked(...a);
 	};
+
 	(fork.rootScope.get("o") as { "inc": () => number }).inc();
 	assert.deepStrictEqual({ "originalHits": originalHits, "forkHits": forkHits }, { "originalHits": 0, "forkHits": 1 });
 });

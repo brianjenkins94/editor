@@ -13,7 +13,6 @@
  */
 
 import { interpret } from "@brianjenkins94/tsval";
-import type { InterpretOptions } from "@brianjenkins94/tsval";
 import { ALL_CAPABILITIES, runCanary } from "./canary";
 
 /** One effect in program order. `value` is the resolved resource (Axis-2); `callee`+`capability` its identity. */
@@ -156,7 +155,7 @@ export function record(fileName: string, src: string, options: RecordOptions): {
 		};
 	}
 
-	const completion = interpret(src, { "globals": globals } as InterpretOptions);
+	const completion = interpret(src, { "globals": globals });
 
 	return { "journal": { "fileName": fileName, "entries": entries }, "completion": completion };
 }
@@ -195,7 +194,7 @@ export function replay(_fileName: string, src: string, journal: Journal): { "com
 		};
 	}
 
-	const completion = interpret(src, { "globals": globals } as InterpretOptions);
+	const completion = interpret(src, { "globals": globals });
 
 	for (const queue of queues.values()) {
 		for (const entry of queue) { ops.push({ "op": "removed", "before": entry }); }

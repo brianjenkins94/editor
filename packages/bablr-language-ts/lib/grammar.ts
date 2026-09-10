@@ -46,32 +46,31 @@
 // ║ U1  astral characters (regex-vm `fromCharCode` truncation + bablr-vm UTF-16 `getSourceLength`).             ║
 // ║ U2  empty input (the root cover `<_>` has no production name, so `emptyables` never applies to it).         ║
 // ╚══════════════════════════════════════════════════════════════════════════════════════════════════════════╝
-import * as BListKeyed from '@bablr/agast-helpers/b-map';
-import { arrayValues } from '@bablr/agast-helpers/iterable';
-import { freezeClass, freezeRecord } from '@bablr/agast-helpers/object';
-import { getRoot as getPathRoot } from '@bablr/agast-helpers/path';
-import { TreeNode } from '@bablr/agast-helpers/symbols';
-import { getRoot, parseObject, printSource, printString, printTag } from '@bablr/agast-helpers/tree';
-import { get } from '@bablr/agast-helpers/tree';
-import { buildEmbeddedStringMatcher } from '@bablr/agast-vm-helpers/builders';
+import * as BListKeyed from "@bablr/agast-helpers/b-map";
+import { arrayValues } from "@bablr/agast-helpers/iterable";
+import { freezeClass, freezeRecord } from "@bablr/agast-helpers/object";
+import { getRoot as getPathRoot } from "@bablr/agast-helpers/path";
+import { TreeNode } from "@bablr/agast-helpers/symbols";
+import { get, getRoot, parseObject, printSource, printString, printTag } from "@bablr/agast-helpers/tree";
+import { buildEmbeddedStringMatcher } from "@bablr/agast-vm-helpers/builders";
 import {
-  m,
-  o,
-  r,
-  eat,
-  eatMatch,
-  match,
-  shiftMatch,
-  shift,
-  fail,
-  startSpan,
-  startSubspan,
-  endSpan,
-  getInstrMatcher,
-  defineAttribute,
-} from '@bablr/helpers/grammar';
-import { triviaEnhancer } from '@bablr/helpers/trivia';
-import ESNext from '@bablr/language-en-esnext';
+	defineAttribute,
+	eat,
+	eatMatch,
+	endSpan,
+	fail,
+	getInstrMatcher,
+	m,
+	match,
+	o,
+	r,
+	shift,
+	shiftMatch,
+	startSpan,
+	startSubspan
+} from "@bablr/helpers/grammar";
+import { triviaEnhancer } from "@bablr/helpers/trivia";
+import ESNext from "@bablr/language-en-esnext";
 
 export * from "@bablr/language-en-esnext";
 
@@ -85,9 +84,9 @@ export const mRaw = (source) => m(Object.assign([source], { "raw": [source] }));
 // ── identifiers ─────────────────────────────────────────────────────────────────────────────────────────────
 // Strict-mode + module reserved words (es5's list also reserves `arguments`/`eval`, which are legal binding names).
 const reservedWords = new Set(
-	'break case catch class const continue debugger default delete do else enum export extends false finally for function if import in instanceof new null return super switch this throw true try typeof var void while with yield let static implements interface package private protected public'.split(
-		' ',
-	),
+	"break case catch class const continue debugger default delete do else enum export extends false finally for function if import in instanceof new null return super switch this throw true try typeof var void while with yield let static implements interface package private protected public".split(
+		" "
+	)
 );
 // Non-ASCII identifier characters, approximated as "everything above ASCII except Unicode whitespace". BMP ranges are
 // spelled with raw characters (the DSL regex lexer indexes patterns by UTF-16 unit, so a raw astral char cannot be
@@ -99,7 +98,7 @@ const nonAsciiIdChars = [
 	[0x200C, 0x2027],
 	[0x202A, 0x2FFF],
 	[0x3001, 0xFEFE],
-	[0xFF00, 0xFFFF],
+	[0xFF00, 0xFFFF]
 ]
 	.map(([a, b]) => ch(a) + "-" + ch(b))
 	.join("");
@@ -117,42 +116,46 @@ const bomMatcher = mRaw(`bomToken*: <* '${ch(0xFEFF)}' />`);
 // ── operators ───────────────────────────────────────────────────────────────────────────────────────────────
 // Binding powers follow es3 (comma 16 … access 0); `**` sits between `*` (5) and unary (4) and is right-associative.
 const binaryPowers = freezeRecord({
-	'??': 14,
-'||': 14,
-'&&': 13,
-'|': 12,
-'^': 11,
-'&': 10,
-	'===': 9,
-'==': 9,
-'!==': 9,
-'!=': 9,
-	'<=': 8,
-'<': 8,
-'>=': 8,
-'>': 8,
-instanceof: 8,
-in: 8,
-	'>>>': 7,
-'<<': 7,
-'>>': 7,
-'+': 6,
-'-': 6,
-'%': 5,
-'*': 5,
-'/': 5,
-'**': 4.5
+	"??": 14,
+	"||": 14,
+	"&&": 13,
+	"|": 12,
+	"^": 11,
+	"&": 10,
+	"===": 9,
+	"==": 9,
+	"!==": 9,
+	"!=": 9,
+	"<=": 8,
+	"<": 8,
+	">=": 8,
+	">": 8,
+	"instanceof": 8,
+	"in": 8,
+	">>>": 7,
+	"<<": 7,
+	">>": 7,
+	"+": 6,
+	"-": 6,
+	"%": 5,
+	"*": 5,
+	"/": 5,
+	"**": 4.5
 });
 const assignmentOperators = new Set(["=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", ">>>=", "&=", "^=", "|=", "**=", "&&=", "||=", "??="]);
 // Every infix/postfix operator, longest first (the base lists `<` before `<<`, which is why `1 << 0` fails there).
 const operatorMatcher = m`/>>>=|\*\*=|<<=|>>=|>>>|===|!==|&&=|\|\|=|\?\?=|\*\*|<<|>>|<=|>=|==|!=|&&|\|\||\?\?|\?\.|\+=|-=|\*=|\/=|%=|&=|\^=|\|=|\+\+|--|[-+*\/%&|^<>=!?,.[(]|(?:instanceof|in|as|satisfies)\b/`;
 const sigilMatchers = new Map();
-function sigilMatcher (field, op) {
-  const key = field + ' ' + op;
-  let matcher = sigilMatchers.get(key);
-  if (!matcher) sigilMatchers.set(key, (matcher = mRaw(`${field}*: <*${/^[a-z]/.test(op) ? 'Keyword' : ''} ${JSON.stringify(op)} />`)));
-  return matcher;
+
+function sigilMatcher(field, op) {
+	const key = field + " " + op;
+	let matcher = sigilMatchers.get(key);
+
+	if (!matcher) { sigilMatchers.set(key, (matcher = mRaw(`${field}*: <*${/^[a-z]/.test(op) ? "Keyword" : ""} ${JSON.stringify(op)} />`))); }
+
+	return matcher;
 }
+
 const assignableTypes = new Set(["Identifier", "MemberExpression", "Array", "Object", "NonNullExpression", "ParenthesisExpression"]);
 
 // Whitespace beyond space/tab/newline (NBSP, BOM, line/paragraph separators, ...), which the base's Space language
@@ -176,15 +179,15 @@ const typePredicateLookahead = m`/(?:asserts[ \t]+)?(?:this|[a-zA-Z_$][a-zA-Z\d_
 function *intercept(iter, { first, before = {}, after = {}, replace = {} }) {
 	let step = iter.next();
 
-	if (first && !step.done) {yield* first();}
+	if (first && !step.done) { yield* first(); }
 	while (!step.done) {
 		const instr = step.value;
 		const refName = getInstrMatcher(instr)?.reference?.value?.name;
 
-		if (refName && before[refName]) {yield* before[refName]();}
+		if (refName && before[refName]) { yield* before[refName](); }
 		const res = refName && replace[refName] ? yield* replace[refName](instr) : yield instr;
 
-		if (refName && after[refName]) {yield* after[refName]();}
+		if (refName && after[refName]) { yield* after[refName](); }
 		step = iter.next(res);
 	}
 
@@ -196,38 +199,47 @@ function *intercept(iter, { first, before = {}, after = {}, replace = {} }) {
 // assertion. The lookahead keeps a failing TypeParameters attempt (whose leaked span + source position let the
 // inherited arrow carry on from inside it) from ever starting.
 const typeParametersLookahead = mRaw(`/<[ \\t\\r\\n]*(?:(?:const|in|out)[ \\t]+)*(?:${identifierPattern})/`);
-function *typeParametersHook () {
-  if (yield match(typeParametersLookahead)) {
-    yield eatMatch(m`typeParameters$: <TypeParameters '<' />`);
-  }
+
+function *typeParametersHook() {
+	if (yield match(typeParametersLookahead)) {
+		yield eatMatch(m`typeParameters$: <TypeParameters '<' />`);
+	}
 }
-function *returnTypeHook () {
-  yield eatMatch(m`returnType$: <TypeAnnotation ':' />`);
+
+function *returnTypeHook() {
+	yield eatMatch(m`returnType$: <TypeAnnotation ':' />`);
 }
+
 const signatureHooks = freezeRecord({
-	before: freezeRecord({ "openParamsToken": typeParametersHook }),
-	after: freezeRecord({ "closeParamsToken": returnTypeHook })
+	"before": freezeRecord({ "openParamsToken": typeParametersHook }),
+	"after": freezeRecord({ "closeParamsToken": returnTypeHook })
 });
+
 // `function f(): void;` — an overload or ambient declaration has no body
-function *optionalBodyHook (instr) {
-  if (yield match(m`'{'`)) return yield instr;
-  return yield eat(m`body$: null`);
+function *optionalBodyHook(instr) {
+	if (yield match(m`'{'`)) { return yield instr; }
+
+	return yield eat(m`body$: null`);
 }
+
 const declarationHooks = freezeRecord({
-	before: signatureHooks.before,
-	after: signatureHooks.after,
-	replace: freezeRecord({ "body": optionalBodyHook })
+	"before": signatureHooks.before,
+	"after": signatureHooks.after,
+	"replace": freezeRecord({ "body": optionalBodyHook })
 });
+
 // arrows decide `(` vs bare param with their very first instruction, so type params must come before it
-function *asyncAndTypeParametersHook () {
-  if (!(yield match(m`/async[ \t]*=>/`))) {
-    yield eatMatch(m`asyncToken*: <*Keyword 'async' />`);
-  }
-  yield* typeParametersHook();
+function *asyncAndTypeParametersHook() {
+	if (!(yield match(m`/async[ \t]*=>/`))) {
+		yield eatMatch(m`asyncToken*: <*Keyword 'async' />`);
+	}
+
+	yield* typeParametersHook();
 }
+
 const arrowHooks = freezeRecord({
-	first: asyncAndTypeParametersHook,
-	after: freezeRecord({ "closeParamsToken": returnTypeHook })
+	"first": asyncAndTypeParametersHook,
+	"after": freezeRecord({ "closeParamsToken": returnTypeHook })
 });
 
 // `(a: T, b?: U, ...rest: V[])` — the parameter list of function types and signatures (types only; the runtime
@@ -273,15 +285,15 @@ export function *parameterList() {
 
 // ASI support data (es3's statement mixin): statements that need no `;` before the next one on the same line.
 const noSemiStatements = [
-	'Switch',
-'Block',
-'DoWhile',
-'EmptyStatement',
-'TryCatch',
-	'FunctionDeclaration',
-'ClassDeclaration',
-'InterfaceDeclaration',
-'EnumDeclaration',
+	"Switch",
+	"Block",
+	"DoWhile",
+	"EmptyStatement",
+	"TryCatch",
+	"FunctionDeclaration",
+	"ClassDeclaration",
+	"InterfaceDeclaration",
+	"EnumDeclaration"
 ];
 const blockSemiStatements = ["DoWhile", "While", "For", "If"];
 
@@ -345,8 +357,8 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
   // `[a, b] = x` / `({ a } = x)`: array and object literals are assignment targets too.
 	static context = freezeRecord({
 		...super.context,
-		assignables: freezeRecord([...arrayValues(super.context.assignables), "Array", "Object"])
-  });
+		"assignables": freezeRecord([...arrayValues(super.context.assignables), "Array", "Object"])
+	});
 
 	constructor() {
 		super();
@@ -358,14 +370,14 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 				BListKeyed.entry("If", { "endsWithBlock": undefined }),
 				BListKeyed.entry("For", { "endsWithBlock": undefined }),
 				BListKeyed.entry("While", { "endsWithBlock": undefined })
-      ),
+			)
 		);
 	}
 
   // ── statements: TS declarations ──────────────────────────────────────────────────────────────────────────
 
 	*Statement(args) {
-		if (yield match(m`';'`)) {return void (yield eat(m`<EmptyStatement />`));}
+		if (yield match(m`';'`)) { return void (yield eat(m`<EmptyStatement />`)); }
 		if (yield match(m`/(?:import|export|class|var|const|let|async)[a-zA-Z0-9_$]/`)) {
 			return void (yield eat(m`<ExpressionStatement />`));
 		}
@@ -376,10 +388,10 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 			return void (yield eat(m`<ExpressionStatement />`));
 		}
 
-		let res = yield match(
+		const res = yield match(
 			m`/interface\b|(?:const[ \t]+)?enum\b|abstract[ \t]+class\b|declare[ \t]+(?:const|let|var|function|class|abstract|enum|module|namespace|global|interface|type|async)\b|type[ \t]+[a-zA-Z_$][a-zA-Z\d_$]*[ \t]*[<=]/`
-    );
-		let word = res ? printSource(res).split(/[ \t]/)[0] : null;
+		);
+		const word = res ? printSource(res).split(/[ \t]/)[0] : null;
 
 		switch (word) {
 			case "interface":
@@ -526,7 +538,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 
 		yield* classMemberName();
 		yield eatMatch(m`optionalToken*: <* '?' />`);
-		if (!((yield match(m`'('`)) || (yield match(m`'<'`)))) {yield fail();}
+		if (!((yield match(m`'('`)) || (yield match(m`'<'`)))) { yield fail(); }
 		yield eatMatch(m`typeParameters$: <TypeParameters '<' />`);
 		yield* parameterList();
 		yield eatMatch(m`returnType$: <TypeAnnotation ':' />`);
@@ -551,8 +563,8 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 
   // es3's Keyword requires a delimiter after the word; TS adds `<`/`>` (`class<T>`, `extends B<T>`).
 	*Keyword({ literalValue, s }) {
-		if (!literalValue) {throw new Error('Intrinsic productions must have value');}
-		let word = printSource(literalValue);
+		if (!literalValue) { throw new Error("Intrinsic productions must have value"); }
+		const word = printSource(literalValue);
 
 		yield eat(buildEmbeddedStringMatcher(word));
 		if (s().span.name !== "Escape" && /^[a-z]/i.test(word)) {
@@ -577,15 +589,15 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
     // UPSTREAM-WORKAROUND(W1): an escape like `\u{6F}` contains `}`, and a guard cuts the match at the guard
     // character; the token gets its own span, the way strings and comments do. No measurable cost.
 		yield startSpan("Identifier");
-		let id = printSource(yield eat(identifierMatcher));
+		const id = printSource(yield eat(identifierMatcher));
 
 		yield endSpan();
-		if (scoped && reservedWords.has(id)) {yield fail();}
+		if (scoped && reservedWords.has(id)) { yield fail(); }
 	}
 
   // A leading byte-order mark is part of the document.
 	*Program() {
-		if (yield match(bomLookahead)) {yield eat(bomMatcher);}
+		if (yield match(bomLookahead)) { yield eat(bomMatcher); }
 		yield eatMatch(m`hashbangToken*: <*Hashbang '#!' />`);
 		yield eat(m`body[]$: <__StatementList />`);
 	}
@@ -593,47 +605,47 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
   // ── statements (JS fixes) ────────────────────────────────────────────────────────────────────────────────
   // es3's StatementList, plus empty statements (`;;`, `while (x);`) as real `EmptyStatement` nodes.
 	*StatementList({ getState, ctx, matcher }) {
-		let { getGapNode } = ctx;
+		const { getGapNode } = ctx;
 		let chr, sep, stmt, trivia;
 		let ran = false;
 
 		while ((chr = yield match(m`/[^\g]/s`)) || (yield match(m`/\g/`))) {
 			ran = true;
-			let isEmpty = chr && printSource(chr) === ";";
+			const isEmpty = chr && printSource(chr) === ";";
 
 			stmt = isEmpty
 				? yield eat(m`${printTag(matcher.value.reference)} <EmptyStatement />`)
 				: yield eat(m`${printTag(matcher.value.reference)} <_Statement />`);
 
-			let s = getState();
+			const s = getState();
 
-			if (s.held) {trivia = s.held;}
+			if (s.held) { trivia = s.held; }
 
 			sep = isEmpty ? null : yield eatMatch(m`#separatorTokens: <* ';' />`);
 
-			let newline = Boolean(trivia) && printSource(trivia, { getGapNode: getGapNode }).includes("\n");
-			let stmtRoot = getPathRoot(stmt.node);
-			let name = stmtRoot.type === TreeNode ? stmtRoot.value.name.description : null;
-			let allowSameLine =
+			const newline = Boolean(trivia) && printSource(trivia, { "getGapNode": getGapNode }).includes("\n");
+			const stmtRoot = getPathRoot(stmt.node);
+			const name = stmtRoot.type === TreeNode ? stmtRoot.value.name.description : null;
+			const allowSameLine =
 				isEmpty
-        || (stmtRoot.type === TreeNode
-          && (noSemiStatements.includes(name)
-            || (blockSemiStatements.includes(name) && stmtRoot.value.attributes?.endsWithBlock === true)));
+				|| (stmtRoot.type === TreeNode
+					&& (noSemiStatements.includes(name)
+						|| (blockSemiStatements.includes(name) && stmtRoot.value.attributes?.endsWithBlock === true)));
 
-			if (!allowSameLine && !(sep || newline)) {break;}
+			if (!allowSameLine && !(sep || newline)) { break; }
 		}
 
-		if (!ran) {yield eatMatch(m`#separatorTokens: <* ';' />`);}
+		if (!ran) { yield eatMatch(m`#separatorTokens: <* ';' />`); }
 	}
 
   // es3's Trivia plus Unicode whitespace.
 	*Trivia() {
 		while (
 			(yield eatMatch(m`.: :Space: <_Blank /[ \n\r\t]+/ />`))
-      || (yield eatMatch(m`.: :Comment: <_Comment /\/\/|\/\*/ />`))
-      || (yield eatMatch(unicodeSpaceMatcher))
-		) {;
-}
+			|| (yield eatMatch(m`.: :Comment: <_Comment /\/\/|\/\*/ />`))
+			|| (yield eatMatch(unicodeSpaceMatcher))
+		) {
+		}
 	}
 
 	*UnicodeSpace() {
@@ -677,7 +689,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		yield eat(m`test+$: <_Expression />`);
 		yield endSpan();
 		yield eat(m`closeHeaderToken*: <* ')' />`);
-		let endsWithBlock = Boolean(yield match(m`'{'`));
+		const endsWithBlock = Boolean(yield match(m`'{'`));
 
 		yield eat(m`body$: <_Statement />`, o({ "allowEmpty": false }));
 		yield defineAttribute("endsWithBlock", endsWithBlock);
@@ -704,7 +716,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		}
 
 		yield endSpan();
-		let source = yield eatMatch(m`inToken*: <*Keyword /in|of/ />`);
+		const source = yield eatMatch(m`inToken*: <*Keyword /in|of/ />`);
 
 		if (source) {
 			yield eatMatch(m`source+$: <_Expression />`);
@@ -719,7 +731,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 
 		yield endSpan();
 		yield eat(m`closeHeaderToken*: <* ')' />`);
-		let endsWithBlock = Boolean(yield match(m`'{'`));
+		const endsWithBlock = Boolean(yield match(m`'{'`));
 
 		yield eat(m`body*: <_Statement />`);
 		yield defineAttribute("endsWithBlock", endsWithBlock);
@@ -804,22 +816,22 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
   // String/template escapes: es3 accepts only a fixed set; JS allows `\x..`, `\u....`, `\u{...}`, line
   // continuations and identity escapes (`\d` → `d`). `cooked` is kept as an attribute like upstream.
 	*EscapeSequence({ s }) {
-		let { span } = s();
+		const { span } = s();
 
-		if (!span.name.startsWith("String")) {yield fail();}
+		if (!span.name.startsWith("String")) { yield fail(); }
 		yield startSpan("Escape");
 		yield eat(m`sigilToken*: <* '\\' />`);
 		let cooked;
 
 		if (yield match(m`/[xu]/`)) {
-			let code = yield eat(m`code*: <EscapeCode />`);
-			let value = Number.parseInt(printSource(get("value", code.node)), 16);
+			const code = yield eat(m`code*: <EscapeCode />`);
+			const value = Number.parseInt(printSource(get("value", code.node)), 16);
 
 			cooked = value <= 0x10FFFF ? String.fromCodePoint(value) : "";
 		} else if (yield eatMatch(lineContinuationMatcher)) {
 			cooked = "";
 		} else {
-			let chr = printSource(yield match(m`/[^]/`));
+			const chr = printSource(yield match(m`/[^]/`));
 
 			yield eat(mRaw(`code*: <*Keyword ${printString(chr)} />`));
 			cooked = escapables[chr] ?? chr;
@@ -906,7 +918,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 	*MemberExpression() {
 		yield eat(m`object+$: <_Expression />`, o({}), o({ "held": "eat" }));
 
-		let sigil = yield match(m`/\?\.|[[.]/`);
+		const sigil = yield match(m`/\?\.|[[.]/`);
 
 		switch (sigil ? printSource(sigil) : null) {
 			case "?.": {
@@ -1080,28 +1092,29 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 
   // Object-literal element (es6's, plus: `get`/`set` accessors and generic methods `m<T>() {}`).
 	*ObjectElement() {
-		let asyncToken = yield match(m`'async'`);
-		let starToken = yield match(m`'*'`);
-		let accessor = yield match(accessorLookahead);
-		let isMethod =
+		const asyncToken = yield match(m`'async'`);
+		const starToken = yield match(m`'*'`);
+		const accessor = yield match(accessorLookahead);
+		const isMethod =
 			starToken
-      || accessor
-      || (asyncToken && !(yield match(m`<All />`, freezeRecord([m`<* 'async' />`, m`<* /[(:]/ />`]))));
+			|| accessor
+			|| (asyncToken && !(yield match(m`<All />`, freezeRecord([m`<* 'async' />`, m`<* /[(:]/ />`]))));
 
 		if (isMethod) {
 			yield eat(m`value+: <Method />`);
 		} else if (yield eatMatch(m`value+: <SpreadElement '...' />`)) {
-      } else {
-        yield eat(m`value+: <_ObjectKey />`);
+		} else {
+			yield eat(m`value+: <_ObjectKey />`);
 
-        if (yield shiftMatch(m`<Property ':' />`)) {
-        } else if (yield shiftMatch(m`<Method '(' />`)) {
-        } else if ((yield match(m`'<'`)) && (yield shiftMatch(m`<Method />`))) {
-        } else if ((yield match(m`'='`)) && (yield shiftMatch(m`<CoverInitializedName />`))) {
-        } else {
-          yield shift(m`<Property />`);
-        }
-      }
+			if (yield shiftMatch(m`<Property ':' />`)) {
+			} else if (yield shiftMatch(m`<Method '(' />`)) {
+			} else if ((yield match(m`'<'`)) && (yield shiftMatch(m`<Method />`))) {
+			} else if ((yield match(m`'='`)) && (yield shiftMatch(m`<CoverInitializedName />`))) {
+			} else {
+				yield shift(m`<Property />`);
+			}
+		}
+
 		yield eatMatch(m`separatorToken*: <* ',' />`);
 	}
 
@@ -1142,21 +1155,21 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
   // `??`, logical assignment, optional calls, spread arguments, and the TS forms `as`/`satisfies`, `!`,
   // `f<T>()`. Reached only when shifted (an expression has just been parsed and is held).
 	*LogicExpression({ s, "props": { power, noIn = false } }) {
-		let { shifted } = s();
+		const { shifted } = s();
 
-		if (!shifted) {return;}
-		let power_ = power || 16;
+		if (!shifted) { return; }
+		const power_ = power || 16;
 
 		let op = yield match(operatorMatcher);
 
-		if (!op) {return;}
+		if (!op) { return; }
 		op = printSource(op);
 
     // an arrow function is not a LeftHandSideExpression: `() => {}` followed by `(`/`.`/`[` on the next
     // line starts a new statement (ASI), it is never a call on the arrow
 		if (
 			["(", ".", "[", "?."].includes(op)
-      && getRoot(shifted).value.name.description === "ArrowFunctionExpression"
+			&& getRoot(shifted).value.name.description === "ArrowFunctionExpression"
 		) {
 			return;
 		}
@@ -1166,28 +1179,35 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 			case "[":
 				return void (yield eat(m`<MemberExpression />`, o({ "power": power_ })));
 			case "?.":
-				if (power_ < 2) {return;}
-				if (yield match(m`/\?\.[ \t]*[(<]/`)) {return void (yield eat(m`<CallExpression />`, o({ power: power_ })));}
+				if (power_ < 2) { return; }
+				if (yield match(m`/\?\.[ \t]*[(<]/`)) { return void (yield eat(m`<CallExpression />`, o({ "power": power_ }))); }
+
 				return void (yield eat(m`<MemberExpression />`, o({ "power": power_ })));
 			case "(":
-				if (power_ >= 2) {yield eat(m`<CallExpression />`, o({ power: power_ }));}
+				if (power_ >= 2) { yield eat(m`<CallExpression />`, o({ "power": power_ })); }
+
 				return;
 			case "!":
-				if (power_ >= 3) {yield eat(m`<NonNullExpression />`);}
+				if (power_ >= 3) { yield eat(m`<NonNullExpression />`); }
+
 				return;
 			case "++":
 			case "--":
-				if (power_ >= 3) {yield eat(m`<UnaryExpression />`, o({ op, power: power_ }));}
+				if (power_ >= 3) { yield eat(m`<UnaryExpression />`, o({ "op": op, "power": power_ })); }
+
 				return;
 			case "as":
 			case "satisfies":
-				if (power_ >= 8) {yield eat(m`<AsExpression />`);}
+				if (power_ >= 8) { yield eat(m`<AsExpression />`); }
+
 				return;
 			case "?":
-				if (power_ >= 15) {yield eat(m`<TernaryExpression />`, o({ power: power_ }));}
+				if (power_ >= 15) { yield eat(m`<TernaryExpression />`, o({ "power": power_ })); }
+
 				return;
 			case ",":
-				if (power_ >= 16) {yield eat(m`<SequenceExpression />`, o({ power: power_ }));}
+				if (power_ >= 16) { yield eat(m`<SequenceExpression />`, o({ "power": power_ })); }
+
 				return;
 			// no default
 		}
@@ -1198,27 +1218,29 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
       // `f<T>(x)` vs `a < b` is decided the way tsc does it: parse type arguments speculatively and require `(`.
       // The speculative CallExpression backtracks cleanly as long as nothing INSIDE it commits (W6): its type
       // arguments are therefore eaten behind a `'<'` lookahead rather than with a node literal.
-			if (yield eatMatch(m`<CallExpression />`, o({ "power": power_ }))) {return;}
+			if (yield eatMatch(m`<CallExpression />`, o({ "power": power_ }))) { return; }
 		}
 
 		if (binaryPowers[op] !== undefined) {
-			if (power_ < binaryPowers[op]) {return;}
-			if (op === "in" && noIn) {return;}
-			return void (yield eat(m`<BinaryExpression />`, o({ op: op, "power": power_, noIn: noIn })));
+			if (power_ < binaryPowers[op]) { return; }
+			if (op === "in" && noIn) { return; }
+
+			return void (yield eat(m`<BinaryExpression />`, o({ "op": op, "power": power_, "noIn": noIn })));
 		}
 
 		if (assignmentOperators.has(op) && power_ >= 15) {
-			if (!assignableTypes.has(getRoot(shifted).value.name.description)) {return;}
-			return void (yield eat(m`<AssignmentExpression />`, o({ op: op })));
+			if (!assignableTypes.has(getRoot(shifted).value.name.description)) { return; }
+
+			return void (yield eat(m`<AssignmentExpression />`, o({ "op": op })));
 		}
 	}
 
 	*BinaryExpression({ "props": { op, noIn } }) {
 		yield eat(m`left+$: <_Expression />`, o({}), o({ "held": "eat" }));
 		yield eat(sigilMatcher("sigilToken", op));
-		let ownPower = binaryPowers[op];
+		const ownPower = binaryPowers[op];
 
-		yield eat(m`right+$: <_Expression />`, o({ "power": op === "**" ? ownPower : ownPower - 1, noIn: noIn }));
+		yield eat(m`right+$: <_Expression />`, o({ "power": op === "**" ? ownPower : ownPower - 1, "noIn": noIn }));
 	}
 
 	*AssignmentExpression({ "props": { op } }) {
@@ -1265,7 +1287,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		yield eat(m`callee+$: <_Expression />`, o({}), o({ "held": "eat" }));
 		yield eatMatch(m`optionalToken*: <* '?.' />`);
     // no node literal here: `<TypeArguments '<' />` would COMMIT (W6) and a failed `a < b` could not backtrack
-		if (yield match(m`'<'`)) {yield eat(m`typeArguments$: <TypeArguments />`);}
+		if (yield match(m`'<'`)) { yield eat(m`typeArguments$: <TypeArguments />`); }
 		yield eat(m`openArgumentsToken*: <* '(' />`);
 		yield* argumentList();
 		yield eat(m`closeArgumentsToken*: <* ')' />`);
@@ -1276,7 +1298,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		yield eat(m`sigilToken*: <*Keyword 'new' />`);
 		yield eat(m`callee+$: <_Expression />`, o({ "power": 1 }));
 		yield eatMatch(m`typeArguments$: <TypeArguments '<' />`);
-		let open = power >= 1 ? yield eatMatch(m`openArgumentsToken*: <* '(' />`) : yield eat(m`openArgumentsToken*: <* '(' />`);
+		const open = power >= 1 ? yield eatMatch(m`openArgumentsToken*: <* '(' />`) : yield eat(m`openArgumentsToken*: <* '(' />`);
 
 		if (open) {
 			yield* argumentList();
@@ -1303,7 +1325,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		if (!s().shifted) {
 			if ((res = yield eatMatch(m`<KeywordType ${keywordTypes} />`))) {
 			} else {
-				let sigil = yield match(typeSigilMatcher);
+				const sigil = yield match(typeSigilMatcher);
 
 				switch (sigil ? printSource(sigil) : null) {
 					case BT:
@@ -1356,23 +1378,23 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 				}
 			}
 		} else {
-			res = yield eat(m`<_TypeTail />`, o({ power: power }));
+			res = yield eat(m`<_TypeTail />`, o({ "power": power }));
 		}
 
 		if (res && !(yield match(m`/$/`))) {
-			return r(shiftMatch(m`<_Type />`, o({ power: power })));
+			return r(shiftMatch(m`<_Type />`, o({ "power": power })));
 		}
 	}
 
   // Cover: the postfix/infix continuation of an already-parsed type (the held node).
 	*TypeTail({ s, "props": { power = typePowers.conditional } }) {
-		if (!s().shifted) {return;}
-		let op = yield match(m`/\[\]|[[|&]|extends\b/`);
+		if (!s().shifted) { return; }
+		const op = yield match(m`/\[\]|[[|&]|extends\b/`);
 
-		if (!op) {return;}
+		if (!op) { return; }
 		switch (printSource(op)) {
 			case "extends":
-				if (power < typePowers.conditional) {yield fail();}
+				if (power < typePowers.conditional) { yield fail(); }
 				yield eat(m`<ConditionalType />`);
 				break;
 			case "[]":
@@ -1382,11 +1404,11 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 				yield eat(m`<IndexedAccessType />`);
 				break;
 			case "&":
-				if (power < typePowers.intersection) {yield fail();}
+				if (power < typePowers.intersection) { yield fail(); }
 				yield eat(m`<IntersectionType />`);
 				break;
 			case "|":
-				if (power < typePowers.union) {yield fail();}
+				if (power < typePowers.union) { yield fail(); }
 				yield eat(m`<UnionType />`);
 				break;
 			// no default
@@ -1464,7 +1486,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 	}
 
 	*TypeParameter() {
-		while (yield eatMatch(m`modifiers[]*: <*Keyword /(?:const|in|out)\b/ />`)){;}
+		while (yield eatMatch(m`modifiers[]*: <*Keyword /(?:const|in|out)\b/ />`)) { }
 		yield eat(m`name$: <*Identifier />`, o({ "scoped": false }));
 		if (yield eatMatch(m`extendsToken*: <*Keyword 'extends' />`)) {
 			yield eat(m`constraint+$: <_Type />`);
@@ -1564,7 +1586,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		yield eat(templateOpenMatcher);
 		yield startSpan("String:Template", BT);
 
-		while ((yield eat(m`quasis[]*: <*StringContent />`)) && (yield eatMatch(typeInterpolationMatcher))){;}
+		while ((yield eat(m`quasis[]*: <*StringContent />`)) && (yield eatMatch(typeInterpolationMatcher))) { }
 		yield eat(templateCloseMatcher);
 		yield endSpan();
 	}
@@ -1661,7 +1683,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 	}
 
 	*PropertySignature() {
-		while (yield eatMatch(m`modifiers[]*: <*Keyword /(?:readonly)\b/ />`)){;}
+		while (yield eatMatch(m`modifiers[]*: <*Keyword /(?:readonly)\b/ />`)) { }
 		yield eat(m`key+$: <_ObjectKey />`);
 		yield eatMatch(m`optionalToken*: <* '?' />`);
 		yield eatMatch(m`typeAnnotation$: <TypeAnnotation ':' />`);
@@ -1669,10 +1691,10 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 	}
 
 	*MethodSignature() {
-		while (yield eatMatch(m`modifiers[]*: <*Keyword /(?:readonly)\b/ />`)){;}
+		while (yield eatMatch(m`modifiers[]*: <*Keyword /(?:readonly)\b/ />`)) { }
 		yield eat(m`key+$: <_ObjectKey />`);
 		yield eatMatch(m`optionalToken*: <* '?' />`);
-		if (!((yield match(m`'('`)) || (yield match(m`'<'`)))) {yield fail();}
+		if (!((yield match(m`'('`)) || (yield match(m`'<'`)))) { yield fail(); }
 		yield eatMatch(m`typeParameters$: <TypeParameters '<' />`);
 		yield* parameterList();
 		yield eatMatch(m`typeAnnotation$: <TypeAnnotation ':' />`);
@@ -1700,34 +1722,35 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 freezeClass(TypeScriptAtrivial);
 
 // Wrap a grammar class with the trivia handling every es-layer uses (exported so layers/experiments can reuse it).
-export function enhance (Grammar) {
-  return triviaEnhancer(
-  {
-    triviaIsAllowed: (s) => s.span.name === 'Bare',
+export function enhance(Grammar) {
+	return triviaEnhancer(
+		{
+			"triviaIsAllowed": (s) => s.span.name === "Bare",
 
-    *Trivia({ s }) {
-      let span = BListKeyed.get('Trivia', s().spans);
+			"Trivia": function *({ s }) {
+				const span = BListKeyed.get("Trivia", s().spans);
 
-      let spaces = (span && parseObject(span.props).spaces) ?? Infinity;
+				const spaces = (span && parseObject(span.props).spaces) ?? Infinity;
 
-      yield startSpan('Trivia', null, span?.props);
-      let res = yield match(triviaStartMatcher);
+				yield startSpan("Trivia", null, span?.props);
+				let res = yield match(triviaStartMatcher);
 
-      if (res) {
-        res = printSource(res);
-      }
+				if (res) {
+					res = printSource(res);
+				}
 
       // the base's fast path for a single space assumed every single whitespace char is a space (a lone tab failed)
-      if (res && res[0] === ' ' && res.length === 2 && spaces > 1) {
-        yield eat(m`#: <* ' ' />`, o({}), o({ hold: true }));
-      } else {
-        yield eat(m`#: <Trivia />`, o({}), o({ hold: true }));
-      }
-      yield endSpan();
-    },
-  },
-  Grammar,
-)
+				if (res && res[0] === " " && res.length === 2 && spaces > 1) {
+					yield eat(m`#: <* ' ' />`, o({}), o({ "hold": true }));
+				} else {
+					yield eat(m`#: <Trivia />`, o({}), o({ "hold": true }));
+				}
+
+				yield endSpan();
+			}
+		},
+		Grammar
+	);
 }
 
 export default enhance(TypeScriptAtrivial);

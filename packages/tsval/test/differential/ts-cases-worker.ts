@@ -5,8 +5,8 @@
  * limit or worker thread can contain; Node's and tsval's sides alike). Such a case must take down a
  * child, not the report.
  */
-import * as fs from "@brianjenkins94/util/fs";
 import * as path from "node:path";
+import * as fs from "@brianjenkins94/util/fs";
 import { parseCase } from "./ts-cases-corpus.ts";
 import { runTsCase } from "./ts-cases-run.ts";
 

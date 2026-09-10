@@ -1,6 +1,6 @@
 import * as url from "node:url";
-import { mergeConfig } from "vite";
 import { defaults } from "@brianjenkins94/util/vite/defaults";
+import { mergeConfig } from "vite";
 
 // Bundle the bablr parse surface (`cstSpans`) with @bablr/record's validation neutralized. `@bablr/record`'s
 // recursive `validate` walk (~30% of a parse) is a dev aid; we alias the package to a vendored shim whose

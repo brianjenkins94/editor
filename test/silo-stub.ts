@@ -12,9 +12,12 @@ try {
 }
 
 const { autostub, respondFirst } = stub;
-const withTimeout = (promise: Promise<unknown>, ms = 300) => Promise.race([promise, new Promise((resolve) => {
-	setTimeout(() => resolve("TIMEOUT"), ms);
-})]);
+
+function withTimeout(promise: Promise<unknown>, ms = 300) {
+	return Promise.race([promise, new Promise((resolve) => {
+		setTimeout(() => { resolve("TIMEOUT"); }, ms);
+	})]);
+}
 
 // ── autostub: undefined-safe downstream, and safe where a stub must NOT stand in ──
 const s = autostub() as any;
@@ -48,6 +51,7 @@ assert.deepEqual(synth(`declare function load(): { id: number; name: string; act
 // A promised result stays a promise: `.then` works, and so does `await`.
 assert.equal(synth(`declare function load(): Promise<{ id: number }>; load().then((u) => u.id); "ran"`, ["load"]), "ran");
 const awaited = synth(`declare function load(): Promise<{ id: number }>; (async () => (await load()).id)()`, ["load"]) as Promise<unknown>;
+
 assert.equal(await awaited, 0);
 // Tuples are arrays; builtins are usable stand-ins, not stubs.
 assert.deepEqual(synth(`declare function f(): [string, number]; f()`, ["f"]), ["string", 0]);

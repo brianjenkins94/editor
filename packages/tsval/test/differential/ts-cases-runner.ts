@@ -24,10 +24,10 @@ export class CaseRunner {
 
 	run(root: string, id: string): Promise<TsCaseOutcome> {
 		this.child ??= this.spawn();
-		const child = this.child;
+		const { child } = this;
 
 		this.seq += 1;
-		const seq = this.seq;
+		const { seq } = this;
 
 		return new Promise((resolve) => {
 			const finish = (outcome: TsCaseOutcome, replace: boolean): void => {

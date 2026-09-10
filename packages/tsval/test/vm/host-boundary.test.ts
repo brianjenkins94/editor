@@ -96,7 +96,8 @@ test("beforeCall receives the callsite: node, evaluated arguments, construct fla
 
 test("vm.callSite is already set while beforeCall runs", () => {
 	let seen: unknown;
-	const { vm } = createVM(`host()`, { "globals": { "host": () => 1 }, "hostGuard": { "beforeCall": (callee) => {
+	const { vm } = createVM(`host()`, { "globals": { "host": () => 1 },
+"hostGuard": { "beforeCall": (callee) => {
 		seen = vm.callSite;
 
 		return callee;
@@ -159,7 +160,8 @@ test("a host Proxy that answers every property (an auto-stub) is a host callable
 	// it tries to run the stub's (nonexistent) AST.
 	const stub = (): unknown => new Proxy(function stub() {}, { "get": (_t, key) => (typeof key === "symbol" || key === "then" ? undefined : stub()), "apply": () => stub(), "construct": () => stub() as object });
 	const seen: string[] = [];
-	const { vm } = createVM(`db().query("x").rows[0]`, { "globals": { "db": stub() }, "hostGuard": { "beforeCall": (callee) => {
+	const { vm } = createVM(`db().query("x").rows[0]`, { "globals": { "db": stub() },
+"hostGuard": { "beforeCall": (callee) => {
 		seen.push(typeof callee);
 
 		return callee;
