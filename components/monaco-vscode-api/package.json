@@ -4,7 +4,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && node patch-esm-ext-host.mjs",
     "preinstall": "chmod 755 ./install.sh && ./install.sh"
   },
   "devDependencies": {
