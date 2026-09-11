@@ -5,8 +5,9 @@
   "scripts": {
     "build:entry": "vite build -c entry.config.ts",
     "build:engine": "vite build -c engine.plugin.config.ts",
-    "build": "vite build -c entry.config.ts && vite build -c engine.plugin.config.ts && vite build -c lsp.config.ts && vite build",
-    "dev": "vite build -c entry.config.ts && vite build -c engine.plugin.config.ts && vite build -c lsp.config.ts && vite",
+    "patch": "node patch-almostnode.mjs",
+    "build": "node patch-almostnode.mjs && vite build -c entry.config.ts && vite build -c engine.plugin.config.ts && vite build -c lsp.config.ts && vite build",
+    "dev": "node patch-almostnode.mjs && vite build -c entry.config.ts && vite build -c engine.plugin.config.ts && vite build -c lsp.config.ts && vite",
     "lint": "util-lint"
   },
   "dependencies": {
