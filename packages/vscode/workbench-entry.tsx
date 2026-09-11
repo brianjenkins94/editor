@@ -30,6 +30,7 @@ import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installLogRelay } from "./logging";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { connectAsPane } from "./pane-bus";
+import { vfsPutAll } from "./vfs";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 
@@ -113,6 +114,15 @@ function maybeBoot(): void {
 
 	booted = true;
 	const { files, openEditors, workspaceFolder, moduleVersions } = init;
+
+	// Mirror the workspace files into the same-origin VFS store (IndexedDB) so a service worker can serve them
+	// at their real paths for the in-browser module resolver (see vfs.ts). Fire-and-forget — independent of and
+	// non-blocking to the workbench boot, which seeds monaco's own in-memory FS from `files` as before.
+	vfsPutAll(files).then(() => {
+		paneLog.info("vfs store populated", { "files": files.length });
+	}).catch((error: unknown) => {
+		paneLog.error("vfs store populate failed", { "error": errText(error) });
+	});
 
 	// One timed span for the whole boot; its child logs (relayed to the host) read as an indented tree of
 	// what booting the workbench did and how long it took. Ended once monaco is online.
