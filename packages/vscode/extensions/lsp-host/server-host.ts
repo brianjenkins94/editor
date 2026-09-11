@@ -6,19 +6,22 @@
  * transport (`BrowserMessageReader(globalThis)`) reads/writes the worker's own message channel — which the
  * client connects to directly. So the client sees an ordinary worker server; almostnode is invisible to it.
  *
- * Before running the server we fetch the cspell dictionary (a gzipped trie, too big to bundle) and write it
- * into the VFS at the path the server reads. The dict is served next to this worker under /__vscode__/lsp/
- * (lsp.config.ts emits it), so we resolve it relative to this module's own URL.
+ * almostnode runs on a zen-fs-backed VFS (zenfs-vfs.ts) rather than its own in-memory tree — so one
+ * filesystem backs the runtime's module loads AND the server's dictionary I/O, and later the same zen-fs can
+ * be shared (SharedArrayBuffer) with the main thread and bound to a vscode FileSystemProvider. Both the
+ * server bundle and the dictionary (a gzipped trie, too big to bundle — served next to this worker under
+ * /__vscode__/lsp/, resolved relative to this module's URL) are written into zen-fs before the server runs.
  */
-import { createRuntime, VirtualFS } from "almostnode";
+import { createRuntime } from "almostnode";
 // The cspell server (with cspell-lib + the LSP lib), bundled to an ESM string by entry.config.ts; run below.
 import serverNodeCode from "lsp-host:server-node";
+import { createZenfsVFS } from "./zenfs-vfs.js";
 
 // Kept in one place, matched by server-node's DICT_PATH.
 const DICT_PATH = "/dicts/en_US.trie.gz";
 
 async function main(): Promise<void> {
-	const vfs = new VirtualFS();
+	const vfs = await createZenfsVFS();
 
 	// Resolve the dict relative to this served worker's URL. `import.meta.url` is the real worker URL here (a
 	// served module, not a data: URL like the manager extension), so a relative asset resolves correctly. Held
@@ -33,13 +36,13 @@ async function main(): Promise<void> {
 		return response.arrayBuffer();
 	});
 
+	vfs.mkdirSync("/dicts", { "recursive": true });
 	vfs.writeFileSync(DICT_PATH, new Uint8Array(trie));
+	vfs.writeFileSync("/server-node.ts", serverNodeCode);
 
 	// No `useWorker` → the in-realm Runtime (this worker IS the realm). dangerouslyAllowSameOrigin is required
 	// for same-origin execution; the code is our own bundled server, so that's intended.
 	const runtime = await createRuntime(vfs, { "dangerouslyAllowSameOrigin": true });
-
-	vfs.writeFileSync("/server-node.ts", serverNodeCode);
 
 	// almostnode runs the ESM bundle as a module (and injects `require` so cspell's CJS deps' dynamic requires
 	// resolve). This sets up the server's LSP connection on this worker's globalThis and returns; its listeners
