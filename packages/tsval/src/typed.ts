@@ -25,6 +25,59 @@ export interface TypedProgram {
 
 const VIRTUAL_DIR = "/tsval";
 
+// Lib .d.ts contents injected by environments without a host filesystem (the browser), keyed by basename
+// — `ts.createCompilerHost` reads libs through `ts.sys`, which is undefined there. Empty ⇒ no default lib
+// (types degrade to `any`, but the program still builds). See `provideLibFiles`.
+let injectedLibFiles: Record<string, string> = {};
+
+/** Supply the TypeScript lib .d.ts files (keyed by basename, e.g. `lib.es2022.d.ts`) for environments with
+ *  no host filesystem, so `createTypedProgram` can type-check in the browser. Call once before use. */
+export function provideLibFiles(files: Record<string, string>): void {
+	injectedLibFiles = files;
+}
+
+const basename = (filePath: string): string => filePath.slice(filePath.lastIndexOf("/") + 1);
+
+/** An in-memory `CompilerHost` for environments without `ts.sys` (the browser): it answers lib .d.ts reads
+ *  from the injected map by basename, so no real filesystem is touched. The single virtual source file is
+ *  layered on top by `createTypedProgram`, exactly as it is over `ts.createCompilerHost`. */
+function createBrowserCompilerHost(options: ts.CompilerOptions): ts.CompilerHost {
+	const cache = new Map<string, ts.SourceFile>();
+
+	return {
+		"getSourceFile": (name, languageVersionOrOptions) => {
+			const key = basename(name);
+			const cached = cache.get(key);
+
+			if (cached !== undefined) {
+				return cached;
+			}
+
+			const content = injectedLibFiles[key];
+
+			if (content === undefined) {
+				return undefined;
+			}
+
+			const target = typeof languageVersionOrOptions === "object" ? languageVersionOrOptions.languageVersion : languageVersionOrOptions;
+			const sourceFile = ts.createSourceFile(name, content, target ?? options.target ?? ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+
+			cache.set(key, sourceFile);
+
+			return sourceFile;
+		},
+		"getDefaultLibFileName": () => "lib.es2022.d.ts",
+		"getDefaultLibLocation": () => VIRTUAL_DIR,
+		"writeFile": () => { /* no emit */ },
+		"getCurrentDirectory": () => VIRTUAL_DIR,
+		"getCanonicalFileName": (name) => name,
+		"useCaseSensitiveFileNames": () => true,
+		"getNewLine": () => "\n",
+		"fileExists": (name) => injectedLibFiles[basename(name)] !== undefined,
+		"readFile": (name) => injectedLibFiles[basename(name)]
+	};
+}
+
 export function createTypedProgram(code: string, fileName = "entry.ts"): TypedProgram {
 	const full = `${VIRTUAL_DIR}/${fileName}`;
 	const options: ts.CompilerOptions = {
@@ -42,7 +95,9 @@ export function createTypedProgram(code: string, fileName = "entry.ts"): TypedPr
 		"noEmit": true
 	};
 
-	const host = ts.createCompilerHost(options, /* setParentNodes */ true);
+	// `ts.createCompilerHost` reads lib.d.ts through `ts.sys`; in the browser that's undefined, so fall back
+	// to an in-memory host fed by `provideLibFiles`. Node keeps the real filesystem host unchanged.
+	const host = ts.sys === undefined ? createBrowserCompilerHost(options) : ts.createCompilerHost(options, /* setParentNodes */ true);
 	const src = ts.createSourceFile(full, code, options.target ?? ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
 
 	const getSourceFile = host.getSourceFile.bind(host);

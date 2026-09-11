@@ -10,13 +10,13 @@ import { build, defineConfig, type Plugin, type RollupOutput } from "vite";
  * is the one bundler this repo depends on, so there's no extra dev dependency. `configFile: false`
  * isolates this nested build from the entry config so it doesn't recurse.
  */
-function helloExtension(): Plugin {
-	const id = "hello:extension";
+function bundledExtension(name: string): Plugin {
+	const id = name + ":extension";
 	const resolved = "\0" + id;
-	const dir = url.fileURLToPath(new URL("./extensions/hello/", import.meta.url));
+	const dir = url.fileURLToPath(new URL(`./extensions/${name}/`, import.meta.url));
 
 	return {
-		"name": "hello-extension",
+		"name": `${name}-extension`,
 		"resolveId": (source) => (source === id ? resolved : undefined),
 		"load": async (moduleId) => {
 			if (moduleId !== resolved) {
@@ -53,7 +53,7 @@ function helloExtension(): Plugin {
  * the component dist under /__vscode__/.
  */
 export default defineConfig({
-	"plugins": [helloExtension()],
+	"plugins": [bundledExtension("hello"), bundledExtension("preflight")],
 	"esbuild": {
 		"jsx": "automatic",
 		"jsxImportSource": "preact"

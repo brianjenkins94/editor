@@ -4,8 +4,9 @@
   "type": "module",
   "scripts": {
     "build:entry": "vite build -c entry.config.ts",
-    "build": "vite build -c entry.config.ts && vite build",
-    "dev": "vite build -c entry.config.ts && vite",
+    "build:engine": "vite build -c engine.plugin.config.ts",
+    "build": "vite build -c entry.config.ts && vite build -c engine.plugin.config.ts && vite build",
+    "dev": "vite build -c entry.config.ts && vite build -c engine.plugin.config.ts && vite",
     "lint": "util-lint"
   },
   "dependencies": {
@@ -15,6 +16,7 @@
     "preact": "latest"
   },
   "devDependencies": {
+    "@oxc-parser/binding-wasm32-wasi": "0.149.0",
     "@types/node": "latest",
     "@types/vscode": "latest",
     "tsx": "latest",

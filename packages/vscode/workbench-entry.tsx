@@ -18,7 +18,13 @@ import { render } from "preact";
 // The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
 // virtual module in entry.config.ts).
 import helloExtensionCode from "hello:extension";
+import preflightExtensionCode from "preflight:extension";
 import helloManifest from "./extensions/hello/package.json";
+import preflightManifest from "./extensions/preflight/package.json";
+// The preflight TS server plugin's source as a string, registered as an extension file (data: URL) so the
+// in-browser tsserver loads it (see ts-plugin.js). `?raw` keeps it real, editable code rather than an inline blob.
+import tsPluginSource from "./extensions/preflight/ts-plugin.js?raw";
+import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
@@ -85,12 +91,17 @@ function maybeBoot(): void {
 
 	bootWithFallbackViewport(document.documentElement);
 
+	// The preflight engine is served next to this entry under /__vscode__/; only the host knows its own origin,
+	// so we resolve its absolute URL here and hand it to the extension via settings. The extension derives the
+	// typescript-external plugin engine URL (engine.plugin.js) from this base and loads it inside tsserver.
+	const engineUrl = new URL("./preflight/engine.js", location.href).href;
+
 	boot({
 		"parts": parts,
 		"files": files,
 		"openEditors": openEditors,
 		"workspaceFolder": workspaceFolder,
-		"configuration": configuration,
+		"configuration": { ...configuration, "preflight.engineUrl": engineUrl },
 		"keybindings": keybindings,
 		"onSave": (path, contents) => {
 			host.postMessage({ "source": "vscode", "type": "save", "path": path, "contents": contents }, "*");
@@ -115,10 +126,31 @@ function maybeBoot(): void {
 			});
 			ext.getApi().then((api: unknown) => {
 				vscodeApi = api;
+				// Unblock the debug bridge (window.__editor.ready / .api). See debug-bridge.ts.
+				markBridgeReady();
 				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
 				// AFTER the workbench restores its last-active viewlet (which would otherwise win).
 				setTimeout(runCommand, 0, "workbench.view.explorer");
 			}).catch((error: unknown) => { console.error("[vscode] hello extension setup failed", error); });
+
+			// The capability-preflight extension — the overlay's engine. Registered in the WEB-WORKER
+			// extension host (the natural home for a web extension) as browser CJS via a data: URL. Its heavy
+			// ESM/wasm half is pulled in at runtime by a native import() of the served /__vscode__/preflight/
+			// engine.js (see extension.ts), so the host never loads ESM itself — the constraint behind
+			// CodinGame/monaco-vscode-api#818.
+			const preflightExt = registerExtension(preflightManifest, ExtensionHostKind.LocalWebWorker);
+
+			// encodeURIComponent (not btoa) so any non-Latin1 char in the bundled code can't throw and abort boot.
+			preflightExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(preflightExtensionCode));
+
+			// The preflight TS server plugin (route 3, type provider). Registered as extension files so the
+			// ext-host worker's patched fetch/importExt (monaco patch 0005) resolves its extension-file:// probe
+			// URIs via the static browser-URI map to these data: URLs — which is what loads it into the in-browser
+			// tsserver. The `typescriptServerPlugins` contribution in preflight's manifest names it.
+			const tsPluginPkg = JSON.stringify({ "name": "preflight-ts-plugin", "version": "0.0.1", "browser": "index.js" });
+
+			preflightExt.registerFileUrl("./node_modules/preflight-ts-plugin/package.json", "data:application/json," + encodeURIComponent(tsPluginPkg));
+			preflightExt.registerFileUrl("./node_modules/preflight-ts-plugin/index.js", "data:text/javascript," + encodeURIComponent(tsPluginSource));
 
 			// Tell the host the workbench is up (readiness gating).
 			host.postMessage({ "source": "vscode", "type": "online" }, "*");
@@ -140,6 +172,9 @@ window.addEventListener("message", (event) => {
 		maybeBoot();
 	}
 });
+
+// Dev-only host-page debug bridge (window.__editor). Reads the captured API lazily; no-op off localhost.
+installDebugBridge(() => vscodeApi);
 
 render(
 	<Workbench

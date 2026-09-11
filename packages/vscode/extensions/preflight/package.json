@@ -1,0 +1,45 @@
+{
+  "name": "preflight",
+  "displayName": "Capability Preflight",
+  "description": "Reads a program's capability behavior ahead of running it and shows it on the code.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguage:typescript"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "preflight.run",
+        "title": "Analyze Active File",
+        "category": "Preflight"
+      }
+    ],
+    "configuration": {
+      "title": "Preflight",
+      "properties": {
+        "preflight.engineUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute URL of the bundled preflight engine (injected by the workbench host)."
+        },
+        "preflight.pluginEngineUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute URL of the typescript-external preflight engine run inside the tsserver plugin (injected by the workbench host)."
+        }
+      }
+    },
+    "typescriptServerPlugins": [
+      {
+        "name": "preflight-ts-plugin",
+        "enableForWorkspaceTypeScriptVersions": true
+      }
+    ]
+  }
+}
