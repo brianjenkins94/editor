@@ -1,0 +1,29 @@
+{
+  "name": "almostnode",
+  "version": "0.2.14-vendored.0",
+  "description": "Vendored, trimmed fork of macaly/almostnode@0.2.14 — the same-origin, main-thread in-browser node runtime only (used to run bundled node language servers in the editor).",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "acorn": "^8.15.0",
+    "pako": "^2.1.0",
+    "resolve.exports": "^2.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/pako": "^2.0.4",
+    "typescript": "^5.9.3"
+  }
+}

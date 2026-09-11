@@ -1,15 +1,26 @@
-/*! coi-serviceworker — cross-origin isolation + same-origin module resolver for the editor.
+/*! coi-serviceworker — cross-origin isolation + same-origin module resolver + dev-server bridge for the editor.
  *
  * The workbench needs SharedArrayBuffer, which requires the page to be crossOriginIsolated
  * (Cross-Origin-Opener-Policy: same-origin + a Cross-Origin-Embedder-Policy). A dev server sets those
  * headers directly (vite.config.ts coi-headers), but a static host can't — so this worker stamps them
- * onto every response instead. COEP is `credentialless` (not require-corp) so the CDN node_modules
- * overlay's cross-origin unpkg fetches, which carry no CORP header, keep working.
+ * onto every response instead. COEP is `credentialless` (not require-corp) so the cross-origin CDN fetch
+ * below, whose response carries no CORP header, keeps working.
  *
- * It also OWNS the same-origin module resolver: it serves the workspace VFS store (vfs.ts, IndexedDB) at
- * real paths and resolves bare/builtin imports in served modules, so node-only tooling (eslint loading a
- * flat config + plugins) and the preview pane can read the workspace over ordinary fetch/import. Store +
- * resolver logic is inlined here (plain JS can't import vfs.ts) — keep the constants in sync with vfs.ts.
+ * ONE service worker owns three roles, over one path space and with no magic module namespaces:
+ *   • Module resolver — serves the workspace VFS store (vfs.ts, IndexedDB) at REAL paths under /workspace/,
+ *     rewriting bare imports in served modules to the workspace's node_modules, so node-only tooling (eslint
+ *     loading a flat config + plugins) and the preview pane read the workspace over ordinary fetch/import.
+ *     On a store MISS under /workspace/node_modules/, it fetches the package from the CDN internally and hands
+ *     it back same-origin (the fold-in that RETIRED the old `__proxy__` route — the worker's own fetch follows
+ *     the CDN's unversioned 302s and isn't bound by the document's COEP). Any other miss falls through to the
+ *     network, so the resolver only ADDS serving. Logic inlined here (plain JS can't import vfs.ts) — keep the
+ *     constants in sync with vfs.ts.
+ *   • Dev-server bridge — the preview pane runs a dev server (ViteDevServer) IN THE PAGE and hands us a
+ *     MessagePort (ServerBridge protocol; see packages/almostnode/server-bridge.ts). We relay
+ *     `/__virtual__/<port>/…` fetches to it as request/response messages, so the preview iframe reaches the
+ *     in-page server over ordinary HTTP. Merged in from almostnode's standalone __sw__.js so this ONE worker
+ *     also plays that role (rather than a second SW fighting for scope `/`).
+ *   • COI stamping — every other response is passed through with the isolation headers added.
  *
  * Registered by coi.ts (in prod to provide isolation; in dev, additionally, for the resolver). Pattern
  * adapted from github.com/gzuidhof/coi-serviceworker (MIT). Plain JS (served from public/ untouched by vite).
@@ -20,12 +31,21 @@ globalThis.addEventListener("activate", (event) => event.waitUntil(globalThis.cl
 // ── VFS store + resolver (mirror of vfs.ts constants; keep in sync) ───────────────────────────────────────
 const VFS_DB = "vfs-store";
 const VFS_STORE = "files";
-const WORKSPACE_ROOT = "/workspace/";       // store-served (workspace files, incl. its node_modules)
-const NODE_MODULES = "/workspace/node_modules/";
-const CDN_SEGMENT = "/__cdn__/";            // resolver's CDN-fallback namespace
-const NODE_SEGMENT = "/__node__/";          // resolver's node-builtin-shim namespace
-const CDN = "https://esm.sh";
-const BUILTINS = new Set(["fs", "path", "os", "util", "url", "crypto", "zlib", "stream", "events", "assert", "process", "buffer", "string_decoder", "tty", "module", "perf_hooks", "constants", "querystring", "async_hooks"]);
+const WORKSPACE_ROOT = "/workspace/";                 // store-served (workspace files + its node_modules)
+const NODE_MODULES = "/workspace/node_modules/";      // where bare specifiers resolve; CDN-fallback on a miss
+const CDN = "https://unpkg.com";                      // node_modules miss → fetched here, served same-origin
+const RELATIVE_RE = /^[./]/u;
+const SCHEME_RE = /^[a-z]+:/iu;
+const JS_RE = /\.[mc]?[jt]sx?$/u;
+const IMPORT_RE = /(\bimport\b[^'"]+?\bfrom\s*|\bimport\s*|\bexport\b[^'"]+?\bfrom\s*)(["'])([^"']+)\2/gu;
+// Dev-server bridge routes: /__virtual__/<port>/<path>, and the referer prefix used to keep a virtual app's
+// absolute-path requests inside its server.
+const VIRTUAL_RE = /^\/__virtual__\/(\d+)(\/.*)?$/u;
+const VIRTUAL_PREFIX_RE = /^\/__virtual__\/(\d+)/u;
+
+// A rewritable specifier: bare ("pkg", "@scope/pkg") or a node: builtin. Relative and other URL schemes
+// (http:, data:, blob:) are left to native ESM.
+const isBare = (spec) => !RELATIVE_RE.test(spec) && (!SCHEME_RE.test(spec) || spec.startsWith("node:"));
 
 function openDb() {
 	return new Promise((resolve, reject) => {
@@ -46,27 +66,30 @@ function idbGet(db, key) {
 	});
 }
 
-// Bare specifier → resolved same-origin path. Node builtin → shim namespace; installed pkg → the workspace's
-// node_modules (package.json exports/main); otherwise → CDN-fallback namespace.
+// Split a node_modules-relative path ("<pkg>/<sub>" or "<pkg>") into package + subpath, honouring scopes.
+function splitPackage(rel) {
+	const at = rel[0] === "@" ? rel.indexOf("/", rel.indexOf("/") + 1) : rel.indexOf("/");
+
+	return { "pkg": at === -1 ? rel : rel.slice(0, at), "sub": at === -1 ? "" : rel.slice(at + 1) };
+}
+
+// Bare specifier → a real /workspace/node_modules/ path (the store, or a network/CDN miss). package.json
+// exports/main picks the entry; a subpath is used verbatim. `node:` builtins map to node_modules too (a
+// zen-fs-backed / polyfill shim can be dropped there later — for now such a miss simply 404s).
 async function resolveBare(db, spec) {
-	const nodeName = spec.replace(/^node:/u, "");
-
-	if (BUILTINS.has(nodeName) || BUILTINS.has(nodeName.split("/")[0])) {
-		return NODE_SEGMENT + nodeName;   // node builtin → shim namespace
-	}
-
-	const at = spec[0] === "@" ? spec.indexOf("/", spec.indexOf("/") + 1) : spec.indexOf("/");
-	const pkg = at === -1 ? spec : spec.slice(0, at);
-	const sub = at === -1 ? "" : spec.slice(at + 1);
+	const { pkg, sub } = splitPackage(spec.replace(/^node:/u, ""));
 	const base = NODE_MODULES + pkg;
-	const pjRec = await idbGet(db, base + "/package.json");
 
-	if (pjRec === undefined) {
-		return CDN_SEGMENT + spec;   // not installed locally → CDN fallback
-	}
 	if (sub !== "") {
 		return base + "/" + sub;
 	}
+
+	const pjRec = await idbGet(db, base + "/package.json");
+
+	if (pjRec === undefined) {
+		return base;   // not installed → resolves to the bare dir; SW miss → network (404), same as node would error
+	}
+
 	try {
 		const pj = JSON.parse(pjRec.body);
 		const dot = pj.exports && (typeof pj.exports === "string" ? pj.exports : pj.exports["."] && (typeof pj.exports["."] === "string" ? pj.exports["."] : pj.exports["."].import || pj.exports["."].default));
@@ -77,15 +100,9 @@ async function resolveBare(db, spec) {
 	}
 }
 
-const IMPORT_RE = /(\bimport\b[^'"]+?\bfrom\s*|\bimport\s*|\bexport\b[^'"]+?\bfrom\s*)(["'])([^"']+)\2/gu;
-const RELATIVE_RE = /^[./]/u;
-const SCHEME_RE = /^[a-z]+:/iu;
-const JS_RE = /\.[mc]?[jt]sx?$/u;
-
-const isBare = (spec) => !RELATIVE_RE.test(spec) && !SCHEME_RE.test(spec);
-
-// Rewrite bare specifiers in a STORE module to resolved same-origin paths (relative/absolute left alone).
-async function rewriteStore(db, source) {
+// Rewrite bare specifiers in a served module to resolved /workspace/node_modules/ paths (relative/absolute
+// left to native ESM, which resolves them against the served URL — all under /workspace/).
+async function rewriteImports(db, source) {
 	const specs = new Set();
 
 	for (const match of source.matchAll(IMPORT_RE)) {
@@ -93,6 +110,7 @@ async function rewriteStore(db, source) {
 			specs.add(match[3]);
 		}
 	}
+
 	if (specs.size === 0) {
 		return source;
 	}
@@ -106,126 +124,9 @@ async function rewriteStore(db, source) {
 	return source.replace(IMPORT_RE, (full, pre, quote, spec) => (map[spec] !== undefined ? pre + quote + map[spec] + quote : full));
 }
 
-// Rewrite imports in a CDN module so the whole graph stays same-origin under /__cdn__/.
-function rewriteCdn(source) {
-	return source.replace(IMPORT_RE, (full, pre, quote, spec) => {
-		let out = spec;
-
-		if (spec.startsWith(CDN + "/")) {
-			out = CDN_SEGMENT + spec.slice(CDN.length + 1);
-		} else if (spec.startsWith("https://")) {
-			out = CDN_SEGMENT + spec.slice("https://".length);
-		} else if (spec.startsWith("/")) {
-			out = "/__cdn__" + spec;
-		} else if (isBare(spec)) {
-			out = CDN_SEGMENT + spec;
-		}
-
-		return pre + quote + out + quote;
-	});
-}
-
 function isJsPath(pathname, type) {
 	return (type !== undefined && type.includes("javascript")) || JS_RE.test(pathname);
 }
-
-globalThis.addEventListener("fetch", (event) => {
-	const request = event.request;
-	const requestUrl = new URL(request.url);
-	const pathname = requestUrl.pathname;
-
-	// ── Resolver: CDN-fallback namespace — fetch esm.sh internally, rewrite its graph to stay same-origin ──
-	if (pathname.startsWith(CDN_SEGMENT) || pathname.indexOf(CDN_SEGMENT) !== -1) {
-		const rest = pathname.slice(pathname.indexOf(CDN_SEGMENT) + CDN_SEGMENT.length);
-
-		event.respondWith((async () => {
-			const response = await fetch(CDN + "/" + rest + requestUrl.search, { "redirect": "follow" });
-			const type = response.headers.get("content-type") || "text/javascript";
-			const body = type.includes("javascript") ? rewriteCdn(await response.text()) : await response.text();
-
-			return new Response(body, { "status": response.status, "headers": { "content-type": type, "cross-origin-resource-policy": "same-origin", "cross-origin-embedder-policy": "credentialless" } });
-		})().catch((error) => {
-			console.error("[coi-serviceworker] cdn", rest, error);
-
-			return new Response("/* cdn error */", { "status": 502, "headers": { "content-type": "text/javascript" } });
-		}));
-
-		return;
-	}
-
-	// ── Resolver: node-builtin shims ──
-	if (pathname.indexOf(NODE_SEGMENT) !== -1) {
-		event.respondWith((async () => {
-			const record = await openDb().then((db) => idbGet(db, pathname)).catch(() => undefined);
-
-			if (record === undefined) {
-				return new Response("/* no shim: " + pathname + " */", { "status": 404, "headers": { "content-type": "text/javascript" } });
-			}
-
-			return new Response(record.body, { "headers": { "content-type": record.type, "cross-origin-resource-policy": "same-origin", "cross-origin-embedder-policy": "credentialless" } });
-		})());
-
-		return;
-	}
-
-	// ── Resolver: workspace store — serve (with import rewriting) on a HIT; on a miss fall through to the
-	//    network branch below (so this only ADDS store-serving and can't break any existing /workspace fetch). ──
-	if (pathname.startsWith(WORKSPACE_ROOT)) {
-		event.respondWith((async () => {
-			const db = await openDb().catch(() => undefined);
-			const record = db === undefined ? undefined : await idbGet(db, pathname).catch(() => undefined);
-
-			if (record !== undefined) {
-				const body = isJsPath(pathname, record.type) ? await rewriteStore(db, record.body) : record.body;
-
-				return new Response(body, { "headers": { "content-type": record.type, "cross-origin-resource-policy": "same-origin", "cross-origin-embedder-policy": "credentialless" } });
-			}
-
-			return stamp(await fetch(request)); // store miss → network, isolation-stamped (as the general branch)
-		})());
-
-		return;
-	}
-
-	// __proxy__ — same-origin CDN proxy (mirrors proxy.ts; the SW can't import it, so the segment +
-	// reconstruction are inlined — keep in sync). A same-origin request `<…>/__proxy__/<host>/<path>` is
-	// the node_modules overlay reaching a CDN. We fetch the real https URL here: a SW fetch isn't bound by
-	// the document's COEP and follows redirects internally (so unpkg's unversioned 302, which lacks CORS,
-	// still resolves), then we hand it back as a same-origin, isolation-friendly resource.
-	const proxyMarker = "/__proxy__/";
-	const proxyIndex = pathname.indexOf(proxyMarker);
-
-	if (proxyIndex !== -1) {
-		const realUrl = "https://" + pathname.slice(proxyIndex + proxyMarker.length) + requestUrl.search;
-
-		event.respondWith(fetch(realUrl).then((response) => {
-			const headers = new Headers(response.headers);
-
-			headers.set("Cross-Origin-Embedder-Policy", "credentialless");
-			headers.set("Cross-Origin-Opener-Policy", "same-origin");
-			headers.set("Cross-Origin-Resource-Policy", "cross-origin");
-
-			return new Response(response.body, { "status": response.status, "statusText": response.statusText, "headers": headers });
-		}).catch((error) => {
-			console.error("[coi-serviceworker] proxy", realUrl, error);
-
-			return new Response("proxy error", { "status": 502, "statusText": "Bad Gateway" });
-		}));
-
-		return;
-	}
-
-	// A range/only-if-cached cross-origin request can't be re-fetched here — leave it to the browser.
-	if (request.cache === "only-if-cached" && request.mode !== "same-origin") {
-		return;
-	}
-
-	event.respondWith(fetch(request).then(stamp).catch((error) => {
-		console.error("[coi-serviceworker]", error);
-
-		return Promise.reject(error);
-	}));
-});
 
 // Add cross-origin isolation headers to a response (opaque responses can't be modified — pass them through).
 function stamp(response) {
@@ -240,3 +141,299 @@ function stamp(response) {
 
 	return new Response(response.body, { "status": response.status, "statusText": response.statusText, "headers": headers });
 }
+
+// CDN fallback for a node_modules store miss (the fold-in that retired `__proxy__`). Reconstruct the CDN URL
+// from the real path + `?v=` (pinned version) + `?meta` (directory listing), fetch it here — the worker's own
+// fetch follows the CDN's unversioned 302 and isn't bound by the document's COEP — and hand it back
+// same-origin. Serves RAW source (no import rewrite): the consumer is go-to-definition, which shows real dep
+// source. Keep in sync with vite.ts nodeModulesCdnPlugin (the dev mirror).
+async function fetchCdn(pathname, requestUrl) {
+	const { pkg, sub } = splitPackage(pathname.slice(NODE_MODULES.length));
+	const version = requestUrl.searchParams.get("v");
+	const spec = pkg + (version === null ? "" : "@" + version) + (sub === "" ? "" : "/" + sub);
+	const upstream = CDN + "/" + spec + (requestUrl.searchParams.has("meta") ? "?meta" : "");
+
+	try {
+		const response = await fetch(upstream);
+		const headers = new Headers(response.headers);
+
+		headers.set("Cross-Origin-Embedder-Policy", "credentialless");
+		headers.set("Cross-Origin-Opener-Policy", "same-origin");
+		headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+
+		return new Response(response.body, { "status": response.status, "statusText": response.statusText, "headers": headers });
+	} catch (error) {
+		console.error("[coi-serviceworker] cdn", upstream, error);
+
+		return new Response("cdn error", { "status": 502, "statusText": "Bad Gateway" });
+	}
+}
+
+// Resolver: serve /workspace/ from the store (rewriting imports on a JS hit); on a miss, fall back to the CDN
+// under node_modules, else pass through to the network — so this only ADDS serving and can't break a fetch.
+async function serveWorkspace(request, requestUrl, pathname) {
+	const db = await openDb().catch(() => undefined);
+	const record = db === undefined ? undefined : await idbGet(db, pathname).catch(() => undefined);
+
+	if (record !== undefined) {
+		const body = isJsPath(pathname, record.type) ? await rewriteImports(db, record.body) : record.body;
+
+		return new Response(body, { "headers": { "content-type": record.type, "cross-origin-resource-policy": "same-origin", "cross-origin-embedder-policy": "credentialless" } });
+	}
+
+	if (pathname.startsWith(NODE_MODULES)) {
+		return fetchCdn(pathname, requestUrl);
+	}
+
+	return stamp(await fetch(request));   // store miss outside node_modules → network, isolation-stamped
+}
+
+// ── Dev-server bridge (ServerBridge protocol; mirror of almostnode's __sw__.js) ───────────────────────────
+// The in-page ServerBridge transfers us a MessagePort via a {type:"init"} message; we relay /__virtual__/
+// fetches to the in-page dev server over it as {type:"request"} and await {type:"response"} / stream frames.
+let mainPort = null;
+const pendingRequests = new Map();
+let bridgeRequestId = 0;
+
+function base64ToBytes(base64) {
+	const binary = atob(base64);
+	const bytes = new Uint8Array(binary.length);
+
+	for (let index = 0; index < binary.length; index += 1) {
+		bytes[index] = binary.charCodeAt(index);
+	}
+
+	return bytes;
+}
+
+// Responses (and stream frames) coming back from the in-page dev server, keyed by request id.
+function handleMainMessage(event) {
+	const { type, id, data, error } = event.data;
+	const pending = pendingRequests.get(id);
+
+	if (type === "response") {
+		if (pending === undefined) {
+			return;
+		}
+
+		pendingRequests.delete(id);
+
+		if (error !== undefined) {
+			pending.reject(new Error(error));
+		} else {
+			pending.resolve(data);
+		}
+	} else if (type === "stream-start") {
+		if (pending && pending.streamController) {
+			pending.resolveHeaders(data);
+		}
+	} else if (type === "stream-chunk") {
+		if (pending && pending.streamController && data.chunkBase64) {
+			try {
+				pending.streamController.enqueue(base64ToBytes(data.chunkBase64));
+			} catch (streamError) {
+				console.error("[coi-serviceworker] stream chunk", streamError);
+			}
+		}
+	} else if (type === "stream-end") {
+		if (pending && pending.streamController) {
+			try {
+				pending.streamController.close();
+			} catch (streamError) {
+				// already closed — ignore
+			}
+
+			pendingRequests.delete(id);
+		}
+	}
+}
+
+// The in-page ServerBridge sends {type:"init"} (with a transferred MessagePort), plus server-registered/
+// -unregistered and keepalive pings (ignored — receipt alone keeps the worker warm).
+globalThis.addEventListener("message", (event) => {
+	const data = event.data;
+
+	if (data && data.type === "init" && event.ports && event.ports[0]) {
+		mainPort = event.ports[0];
+		mainPort.onmessage = handleMainMessage;
+		// Re-claim so a preview page opened after activation is controlled.
+		globalThis.clients.claim();
+	}
+});
+
+// The port drops when the worker is idle-terminated or replaced; ask clients to re-init and wait briefly.
+async function ensureMainPort() {
+	if (mainPort) {
+		return;
+	}
+
+	const clients = await globalThis.clients.matchAll({ "type": "window" });
+
+	for (const client of clients) {
+		client.postMessage({ "type": "sw-needs-init" });
+	}
+
+	await new Promise((resolve) => {
+		const check = setInterval(() => {
+			if (mainPort) {
+				clearInterval(check);
+				resolve();
+			}
+		}, 50);
+
+		setTimeout(() => {
+			clearInterval(check);
+			resolve();
+		}, 5000);
+	});
+
+	if (!mainPort) {
+		throw new Error("dev-server bridge not initialized");
+	}
+}
+
+async function sendRequest(port, method, url, headers, body) {
+	await ensureMainPort();
+
+	bridgeRequestId += 1;
+	const id = bridgeRequestId;
+
+	return new Promise((resolve, reject) => {
+		pendingRequests.set(id, { "resolve": resolve, "reject": reject });
+
+		setTimeout(() => {
+			if (pendingRequests.has(id)) {
+				pendingRequests.delete(id);
+				reject(new Error("dev-server bridge request timeout"));
+			}
+		}, 30000);
+
+		mainPort.postMessage({ "type": "request", "id": id, "data": { "port": port, "method": method, "url": url, "headers": headers, "body": body } });
+	});
+}
+
+async function sendStreamingRequest(port, method, url, headers, body) {
+	await ensureMainPort();
+
+	bridgeRequestId += 1;
+	const id = bridgeRequestId;
+	let resolveHeaders;
+	const headersPromise = new Promise((resolve) => {
+		resolveHeaders = resolve;
+	});
+	const stream = new ReadableStream({
+		"start": function(controller) {
+			pendingRequests.set(id, { "resolve": () => undefined, "reject": (err) => controller.error(err), "streamController": controller, "resolveHeaders": resolveHeaders });
+			mainPort.postMessage({ "type": "request", "id": id, "data": { "port": port, "method": method, "url": url, "headers": headers, "body": body, "streaming": true } });
+		},
+		"cancel": function() { pendingRequests.delete(id); }
+	});
+
+	return { "stream": stream, "headersPromise": headersPromise };
+}
+
+// Add the isolation + iframe-embedding headers a virtual (dev-server) response needs.
+function virtualHeaders(source) {
+	const headers = new Headers(source || {});
+
+	headers.set("Cross-Origin-Embedder-Policy", "credentialless");
+	headers.set("Cross-Origin-Opener-Policy", "same-origin");
+	headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+	headers.delete("X-Frame-Options");
+
+	return headers;
+}
+
+// Relay one request to the in-page dev server on `port` and build a Response from its reply. A POST to /api/*
+// uses the streaming path (SSE / chunked API routes); everything else is a buffered request/response.
+async function handleVirtualRequest(request, port, path) {
+	try {
+		const headers = {};
+
+		request.headers.forEach((value, key) => {
+			headers[key] = value;
+		});
+
+		const body = request.method !== "GET" && request.method !== "HEAD" ? await request.arrayBuffer() : null;
+
+		if (request.method === "POST" && path.startsWith("/api/")) {
+			const { stream, headersPromise } = await sendStreamingRequest(port, request.method, path, headers, body);
+			const responseData = await headersPromise;
+
+			return new Response(stream, { "status": (responseData && responseData.statusCode) || 200, "statusText": (responseData && responseData.statusMessage) || "OK", "headers": virtualHeaders(responseData && responseData.headers) });
+		}
+
+		const response = await sendRequest(port, request.method, path, headers, body);
+		const headers2 = virtualHeaders(response.headers);
+
+		if (response.bodyBase64 && response.bodyBase64.length > 0) {
+			const blob = new Blob([base64ToBytes(response.bodyBase64)], { "type": (response.headers && response.headers["Content-Type"]) || "application/octet-stream" });
+
+			return new Response(blob, { "status": response.statusCode, "statusText": response.statusMessage, "headers": headers2 });
+		}
+
+		return new Response(null, { "status": response.statusCode, "statusText": response.statusMessage, "headers": headers2 });
+	} catch (error) {
+		console.error("[coi-serviceworker] virtual", error);
+
+		return new Response("dev-server bridge error: " + error.message, { "status": 500, "headers": { "content-type": "text/plain" } });
+	}
+}
+
+globalThis.addEventListener("fetch", (event) => {
+	const request = event.request;
+	const requestUrl = new URL(request.url);
+	const pathname = requestUrl.pathname;
+
+	// Module resolver: workspace store (+ node_modules CDN fallback).
+	if (pathname.startsWith(WORKSPACE_ROOT)) {
+		event.respondWith(serveWorkspace(request, requestUrl, pathname));
+
+		return;
+	}
+
+	// Dev-server bridge: /__virtual__/<port>/…
+	const vmatch = pathname.match(VIRTUAL_RE);
+
+	if (vmatch !== null) {
+		event.respondWith(handleVirtualRequest(request, parseInt(vmatch[1], 10), (vmatch[2] || "/") + requestUrl.search));
+
+		return;
+	}
+
+	// A SAME-ORIGIN request with no /__virtual__ prefix but a referer from a virtual page — the app used an
+	// absolute path or navigated. Keep it inside its server: redirect navigations (add the prefix), forward
+	// subresources. Origin-guarded so cross-origin CDN imports (react from esm.sh) are never hijacked.
+	if (requestUrl.origin === globalThis.location.origin && request.referrer) {
+		let refMatch;
+
+		try {
+			refMatch = new URL(request.referrer).pathname.match(VIRTUAL_PREFIX_RE);
+		} catch (refError) {
+			refMatch = null;
+		}
+
+		if (refMatch) {
+			const target = pathname + requestUrl.search;
+
+			if (request.mode === "navigate") {
+				event.respondWith(Response.redirect(requestUrl.origin + refMatch[0] + target, 302));
+			} else {
+				event.respondWith(handleVirtualRequest(request, parseInt(refMatch[1], 10), target));
+			}
+
+			return;
+		}
+	}
+
+	// A range/only-if-cached cross-origin request can't be re-fetched here — leave it to the browser.
+	if (request.cache === "only-if-cached" && request.mode !== "same-origin") {
+		return;
+	}
+
+	event.respondWith(fetch(request).then(stamp).catch((error) => {
+		console.error("[coi-serviceworker]", error);
+
+		return Promise.reject(error);
+	}));
+});

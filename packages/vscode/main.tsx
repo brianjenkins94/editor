@@ -1,10 +1,12 @@
 /** @jsxImportSource preact */
+import type { Preview } from "./preview";
 import types from "editor:types";
 import moduleVersions from "editor:versions";
 import workspace from "editor:workspace";
 import { ensureCrossOriginIsolated } from "./coi";
 import { hostLog } from "./logging";
 import { createVscodeWindow } from "./vscode";
+import { createPaneWindow } from "./window";
 
 // Gain cross-origin isolation (SharedArrayBuffer) before booting. A dev server already sends the COOP/COEP
 // headers; on a static host (GitHub Pages) the coi service worker supplies them after one reload. On the
@@ -17,12 +19,44 @@ if (ensureCrossOriginIsolated()) {
 	// overlay for go-to-definition into real dependency source. A real on-disk folder (File System Access)
 	// becomes an additional source mode later.
 	const files = [...workspace, ...types];
+	const base = (import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/";
+
+	// The live preview: runs the demo (a Vite React app) through an in-browser dev server and hot-reloads on
+	// save. Created lazily (dynamic import) so `typescript` — the preview's transpiler — stays out of the
+	// initial host bundle. Saves that arrive before it's ready are already covered by the initial seed.
+	let preview: Preview | undefined;
+
+	const previewWindow = createPaneWindow({
+		"title": "Preview",
+		"storageKey": "preview",
+		"width": Math.min(520, window.innerWidth - 80),
+		"height": Math.min(600, window.innerHeight - 120)
+	});
+	const previewFrame = document.createElement("iframe");
+
+	previewWindow.body.appendChild(previewFrame);
+	document.body.appendChild(previewWindow.element);
+
+	import("./preview").then(({ createPreview }) => createPreview({
+		"files": workspace,
+		"workspaceFolder": "/workspace",
+		"iframe": previewFrame,
+		"swUrl": base + "coi-serviceworker.js"
+	})).then((handle) => {
+		preview = handle;
+		hostLog.info("preview ready");
+	}).catch((error: unknown) => {
+		hostLog.error("preview failed", { "error": error instanceof Error ? error.message : String(error) });
+	});
 
 	createVscodeWindow({
 		"workspaceFolder": "/workspace",
 		"files": files,
 		"moduleVersions": moduleVersions,
-		"openEditors": ["/workspace/index.ts"],
-		"onSave": (path: string, contents: string) => { hostLog.info("saved", { "path": path, "bytes": contents.length }); }
+		"openEditors": ["/workspace/src/App.tsx"],
+		"onSave": (path: string, contents: string) => {
+			hostLog.info("saved", { "path": path, "bytes": contents.length });
+			preview?.update(path, contents);
+		}
 	});
 }

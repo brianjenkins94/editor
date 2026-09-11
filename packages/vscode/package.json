@@ -5,9 +5,8 @@
   "scripts": {
     "build:entry": "vite build -c entry.config.ts",
     "build:engine": "vite build -c engine.plugin.config.ts",
-    "patch": "node patch-almostnode.mjs",
-    "build": "node patch-almostnode.mjs && vite build -c entry.config.ts && vite build -c engine.plugin.config.ts && vite build -c lsp.config.ts && vite build",
-    "dev": "node patch-almostnode.mjs && vite build -c entry.config.ts && vite build -c engine.plugin.config.ts && vite build -c lsp.config.ts && vite",
+    "build": "vite build -c entry.config.ts && vite build -c engine.plugin.config.ts && vite build -c lsp.config.ts && vite build",
+    "dev": "vite build -c entry.config.ts && vite build -c engine.plugin.config.ts && vite build -c lsp.config.ts && vite",
     "lint": "util-lint"
   },
   "dependencies": {
@@ -16,7 +15,7 @@
     "@stitches/core": "latest",
     "@typescript-eslint/parser": "^8.70.0",
     "@zenfs/core": "^2.7.4",
-    "almostnode": "^0.2.14",
+    "almostnode": "file:../almostnode",
     "cspell-lib": "^10.3.0",
     "eslint": "^10.10.0",
     "lucide": "latest",

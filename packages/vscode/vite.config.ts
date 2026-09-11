@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import { editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./snapshot";
-import { proxyPlugin, vscodePlugin } from "./vite";
+import { nodeModulesCdnPlugin, vscodePlugin } from "./vite";
 
 /**
  * Host app for the editor workbench — index.html + main.tsx mount the monaco workbench
@@ -40,10 +40,10 @@ export default defineConfig({
 		editorWorkspacePlugin(),
 		editorTypesPlugin(),
 		editorVersionsPlugin(),
-		// Same-origin CDN proxy (`__proxy__`) for the node_modules overlay. Before vscodePlugin so its
-		// dev middleware sees proxy requests first (they arrive under the /__vscode__/ prefix). No
-		// generateBundle, so it doesn't affect the build ordering vscodePlugin needs.
-		proxyPlugin(),
+		// Dev mirror of the resolver's node_modules CDN fallback (the SW's job in prod) for the go-to-definition
+		// overlay — serves a `/workspace/node_modules/` store miss from the CDN, same-origin. No generateBundle,
+		// so it doesn't affect the build ordering vscodePlugin needs.
+		nodeModulesCdnPlugin(),
 		// MUST be last: its generateBundle emits the component dist's wasm/font assets, and this reads the
 		// entry build's dist/ — neither should be disturbed by earlier plugins.
 		vscodePlugin()

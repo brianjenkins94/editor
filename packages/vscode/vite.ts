@@ -19,7 +19,6 @@ import * as path from "node:path";
 import * as url from "node:url";
 import { find } from "@brianjenkins94/util/find";
 import * as fs from "@brianjenkins94/util/fs";
-import { fromProxyPath } from "./proxy";
 
 const MOUNT = "/__vscode__/";
 
@@ -57,31 +56,47 @@ function componentDistDirectory(): string {
 	return url.fileURLToPath(new URL("../../components/monaco-vscode-api/dist", import.meta.url));
 }
 
+/** The store root the resolver serves; node_modules (where the CDN fallback lives) sits under it. */
+const NODE_MODULES = "/workspace/node_modules/";
+
 /**
- * Dev-only half of the `__proxy__` convention (proxy.ts). In production the COI service worker fetches the
- * real CDN URL and re-serves it same-origin; in dev no service worker runs (the page is isolated by the
- * coi-headers middleware directly), so this middleware does the same job — match `…/__proxy__/<host>/<path>`,
- * fetch the real https URL, and pipe it back. The node_modules overlay hits this uniformly in both modes.
+ * Dev-only mirror of the resolver's node_modules CDN fallback (public/coi-serviceworker.js `fetchCdn`). In
+ * production the COI service worker answers a store miss under `/workspace/node_modules/` by fetching the
+ * package from the CDN and re-serving it same-origin; in dev no service worker runs in the in-app pane (the
+ * page is isolated by the coi-headers middleware directly), so this middleware does the same job — match a
+ * `…/workspace/node_modules/<pkg>/<sub>` request, reconstruct the CDN URL from `?v=` (pinned version) and
+ * `?meta` (directory listing), fetch it, and pipe it back. The node_modules overlay hits this uniformly in
+ * both modes; this is the fold-in that retired the old `__proxy__` route.
  */
-export function proxyPlugin(): Plugin {
+export function nodeModulesCdnPlugin(): Plugin {
 	return {
-		"name": "cdn-proxy",
+		"name": "node-modules-cdn",
 
 		"configureServer": function(server) {
 			server.middlewares.use((req, res, next) => {
-				const realUrl = fromProxyPath(req.url ?? "");
+				const [pathname, rawQuery] = (req.url ?? "").split("?");
+				const index = pathname.indexOf(NODE_MODULES);
 
-				if (realUrl === undefined) {
+				if (index === -1) {
 					next();
 
 					return;
 				}
 
-				fetch(realUrl).then(async (upstream) => {
-					const body = Buffer.from(await upstream.arrayBuffer());
-					const contentType = upstream.headers.get("content-type");
+				const rel = pathname.slice(index + NODE_MODULES.length);
+				const at = rel.startsWith("@") ? rel.indexOf("/", rel.indexOf("/") + 1) : rel.indexOf("/");
+				const pkg = at === -1 ? rel : rel.slice(0, at);
+				const sub = at === -1 ? "" : rel.slice(at + 1);
+				const params = new URLSearchParams(rawQuery ?? "");
+				const version = params.get("v");
+				const spec = pkg + (version === null ? "" : "@" + version) + (sub === "" ? "" : "/" + sub);
+				const upstream = "https://unpkg.com/" + spec + (params.has("meta") ? "?meta" : "");
 
-					res.statusCode = upstream.status;
+				fetch(upstream).then(async (response) => {
+					const body = Buffer.from(await response.arrayBuffer());
+					const contentType = response.headers.get("content-type");
+
+					res.statusCode = response.status;
 
 					if (contentType !== null) {
 						res.setHeader("content-type", contentType);
@@ -93,7 +108,7 @@ export function proxyPlugin(): Plugin {
 					res.end(body);
 				}).catch((error: unknown) => {
 					res.statusCode = 502;
-					res.end("proxy error: " + (error instanceof Error ? error.message : "unknown"));
+					res.end("cdn error: " + (error instanceof Error ? error.message : "unknown"));
 				});
 			});
 		}

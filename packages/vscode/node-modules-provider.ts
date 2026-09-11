@@ -22,7 +22,6 @@ import {
 	FileType
 } from "@brianjenkins94/monaco-vscode-api/main";
 import { createChangeEvent, notFound, readOnly, relUnder } from "./provider-base";
-import { toProxyUrl } from "./proxy";
 
 interface UnpkgMeta {
 	"type": "file" | "directory";
@@ -58,10 +57,8 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 
 	const toRel = relUnder(prefix);
 
-	const base = (pkg: string): string => `https://unpkg.com/${pkg}${versions[pkg] !== undefined ? "@" + versions[pkg] : ""}`;
-
-	// Only packages with a pinned version are served. unpkg 302-redirects every *unversioned* request
-	// (e.g. `unpkg.com/preact` → `…/preact@10.x`); the `__proxy__` server side follows that redirect
+	// Only packages with a pinned version are served. The CDN 302-redirects every *unversioned* request
+	// (e.g. `unpkg.com/preact` → `…/preact@10.x`); the resolver's CDN fallback follows that redirect
 	// internally (its fetch isn't bound by the document's COEP), but we still can't pin a version
 	// synchronously, so we simply don't fetch unpinned packages (type-checking uses the synchronous
 	// snapshot, not this provider).
@@ -75,10 +72,14 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			return Promise.resolve(undefined);
 		}
 
-		const { pkg, sub } = splitPackage(rel);
-		// Fetch same-origin through `__proxy__` (resolved against the iframe location); the SW (prod) or a
-		// vite middleware (dev) fetches the real unpkg URL and hands it back same-origin. See proxy.ts.
-		const url = toProxyUrl(`${base(pkg)}/${sub}${query}`, location);
+		// Fetch the REAL same-origin node_modules path. A store miss there is answered by the resolver's CDN
+		// fallback — the SW (prod) or vite.ts nodeModulesCdnPlugin (dev) fetches the package from the CDN and
+		// hands it back same-origin (the fold-in that retired `__proxy__`; see coi-serviceworker.js). The
+		// pinned version rides along as `?v=` so the served source matches the type-checker snapshot's version;
+		// `?meta` asks for the directory listing. `served()` above guarantees the version is defined here.
+		const version = versions[splitPackage(rel).pkg];
+		const search = query === "?meta" ? `?meta&v=${version}` : `?v=${version}`;
+		const url = new URL(`${prefix}/${rel}${search}`, location.href).href;
 
 		if (!cache.has(url)) {
 			cache.set(url, fetch(url)
