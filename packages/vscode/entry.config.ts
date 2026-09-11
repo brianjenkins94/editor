@@ -13,7 +13,7 @@ import { build, defineConfig, type Plugin, type RollupOutput } from "vite";
 /** Bundle `extensions/<name>/<file>.ts` (deps inlined) into a virtual module `<name>:<id>` exposing the
  *  built code as a default-export string. `externals` stay unbundled; `plugins` are handed to the nested
  *  build so it can resolve OTHER virtual modules (e.g. an extension that imports its worker's bundle). */
-function bundledModule(name: string, file: string, id: string, format: "cjs" | "es", externals: string[], plugins: Plugin[] = []): Plugin {
+function bundledModule(name: string, file: string, id: string, format: "cjs" | "es", externals: string[], plugins: Plugin[] = [], alias: Record<string, string> = {}): Plugin {
 	const virtual = `${name}:${id}`;
 	const resolved = "\0" + virtual;
 	const dir = url.fileURLToPath(new URL(`./extensions/${name}/`, import.meta.url));
@@ -29,6 +29,11 @@ function bundledModule(name: string, file: string, id: string, format: "cjs" | "
 			const output = await build({
 				"configFile": false,
 				"logLevel": "silent",
+				// Anchor node resolution at THIS package so a nested build can resolve deps; explicit aliases
+				// (below) are what actually resolve bare deps like almostnode — configFile:false leaves the
+				// double-nested resolver unable to walk node_modules for them on its own.
+				"root": url.fileURLToPath(new URL(".", import.meta.url)),
+				"resolve": { "alias": alias },
 				"plugins": plugins,
 				"build": {
 					"write": false,
@@ -52,10 +57,14 @@ function bundledExtension(name: string, plugins: Plugin[] = []): Plugin {
 	return bundledModule(name, "extension.ts", "extension", "cjs", ["vscode"], plugins);
 }
 
-/** An extension's `server.ts` → ESM worker string (`<name>:server`); nothing external (the worker is
- *  standalone). Fed into the extension's own nested build so `import "<name>:server"` resolves. */
-function bundledWorker(name: string): Plugin {
-	return bundledModule(name, "server.ts", "server", "es", []);
+/** An extension's `server-node.ts` → ESM string (`<name>:server-node`) with NODE BUILTINS EXTERNAL, so
+ *  `import … from "fs"`/`"path"` survive for almostnode to resolve; the LSP lib is inlined. Written to the
+ *  VFS and run by almostnode inside the worker host (server-host.ts, built separately by lsp.config.ts).
+ *  MUST be ESM: almostnode detects module type by content, so the `import`/`export` statements are what make
+ *  it run as a module (and vite has already stripped the TS types almostnode won't). Exported so that build
+ *  can resolve `<name>:server-node`. */
+export function bundledNodeServer(name: string): Plugin {
+	return bundledModule(name, "server-node.ts", "server-node", "es", ["fs", "path", "node:fs", "node:path"]);
 }
 
 /**
@@ -68,7 +77,7 @@ function bundledWorker(name: string): Plugin {
  * the component dist under /__vscode__/.
  */
 export default defineConfig({
-	"plugins": [bundledExtension("hello"), bundledExtension("preflight"), bundledExtension("lsp-host", [bundledWorker("lsp-host")])],
+	"plugins": [bundledExtension("hello"), bundledExtension("preflight"), bundledExtension("lsp-host")],
 	"esbuild": {
 		"jsx": "automatic",
 		"jsxImportSource": "preact"

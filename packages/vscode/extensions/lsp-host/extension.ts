@@ -1,29 +1,32 @@
 /**
- * LSP Host — the manager extension (runs in the extension host). It supervises language servers that run
- * in workers and connects each to the editor with a vscode-languageclient. Everything the editor needs is
- * driven from inside the extension host: the client integration (diagnostics/hover/completion) is the
- * language client's job, and the server runs off-thread in a worker.
+ * LSP Host — the manager extension (runs in the extension host, LocalProcess). It runs language servers
+ * off-thread in workers and connects each to the editor with a vscode-languageclient. The client
+ * integration (diagnostics/hover/completion) is the language client's job; the server runs in the worker.
  *
- * Spine A (this): one trivial server, bundled into the extension and spawned as a Blob-URL module worker —
- * so the server ships INSIDE the extension, nothing is served separately. Spine B swaps that worker for an
- * almostnode runtime hosting a real node language server (cspell first).
+ * The worker (server-host) runs a NODE language server under an almostnode runtime, so a server using
+ * `require("fs")` works in-browser. It's built + served separately (lsp.config.ts → /__vscode__/lsp/,
+ * with COEP) as a normal module graph — not a blob — because almostnode can't be monolithically inlined.
+ * The extension can't emit/locate that asset from its data:-URL self, so it spawns it by URL relative to
+ * the workbench origin (`location.href`), the same way the preflight engine URL is resolved.
  */
 import type * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
-// The trivial server, bundled to a string by entry.config.ts's bundledWorker plugin (deps inlined).
-import serverCode from "lsp-host:server";
 
 let client: LanguageClient | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
-	// Ship the server inside the extension: turn its bundled source into a Blob and run it as a module
-	// worker. A same-origin blob worker inherits the page's COEP, so it loads under cross-origin isolation.
-	const workerUrl = URL.createObjectURL(new Blob([serverCode], { "type": "text/javascript" }));
-	const worker = new Worker(workerUrl, { "type": "module" });
+	// The workbench iframe's origin; the LocalProcess ext host shares it. server-host.js is served next to
+	// host.html under /__vscode__/lsp/ (lsp.config.ts).
+	const serverUrl = new URL("./lsp/server-host.js", location.href);
+	const worker = new Worker(serverUrl, { "type": "module" });
+
+	worker.addEventListener("error", (event) => {
+		console.error("[lsp-host] server worker error:", event.message, "@", event.filename + ":" + event.lineno);
+	});
 
 	client = new LanguageClient(
 		"lsp-spine",
-		"LSP Spine",
+		"LSP Spine (almostnode)",
 		worker,
 		{ "documentSelector": [{ "language": "typescript" }, { "language": "plaintext" }] }
 	);

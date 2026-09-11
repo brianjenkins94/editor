@@ -16,8 +16,8 @@ declare module "lsp-host:extension" {
 	export default code;
 }
 
-/** The lsp-host worker language server bundled to an ESM string (spawned as a Blob-URL module worker). */
-declare module "lsp-host:server" {
+/** The lsp-host node language server bundled to an ESM string (imported by server-host, run by almostnode). */
+declare module "lsp-host:server-node" {
 	const code: string;
 	export default code;
 }
