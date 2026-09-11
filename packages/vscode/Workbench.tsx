@@ -86,6 +86,21 @@ const injectGlobals = globalCss({
 	".monaco-workbench.mac": { "fontFamily": "-apple-system, BlinkMacSystemFont, sans-serif" },
 	".monaco-workbench.windows": { "fontFamily": "\"Segoe WPC\", \"Segoe UI\", sans-serif" },
 	".monaco-workbench.linux": { "fontFamily": "system-ui, \"Ubuntu\", \"Droid Sans\", sans-serif" },
+	// Base body styles the reference host (monaco-vscode-api demo's style.css) sets that our minimal host.html
+	// omits. `.monaco-workbench` IS the body, and nothing sets these on it, so it inherits browser defaults —
+	// 16px, BLACK text, transparent background, subpixel-smoothed. Parts set their own, but overlays that don't
+	// (notifications, context menus, the command palette) inherit the wrong values: too big, black-on-dark
+	// (unreadable), heavier-than-VS-Code text. Pin VS Code's UI size (13px), the theme fg/bg, and the same
+	// font-rendering hints VS Code's Electron shell uses so overlays match the rest of the workbench.
+	".monaco-workbench": {
+		"fontSize": 13,
+		"color": "var(--vscode-foreground)",
+		"backgroundColor": "var(--vscode-editor-background)",
+		"WebkitFontSmoothing": "antialiased",
+		"MozOsxFontSmoothing": "grayscale",
+		"textRendering": "optimizeLegibility",
+		"fontSynthesis": "none"
+	},
 	"[id^=\"workbench.parts.\"]": { "height": "100%" },
 	"[id^=\"workbench.parts.\"] > .content": { "height": "100% !important", "width": "100% !important" }
 });
