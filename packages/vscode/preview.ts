@@ -93,7 +93,12 @@ export async function createPreview(options: PreviewOptions): Promise<Preview> {
 			server.setHMRTarget(iframe.contentWindow);
 		}
 	});
-	iframe.src = bridge.getServerUrl(PREVIEW_PORT) + "/";
+	// Serve UNDER the deploy base (e.g. /editor/__virtual__/…), not root — the SW is scoped to the base, so a
+	// root-absolute /__virtual__/ URL would fall outside its scope and never be intercepted. Base = the SW
+	// script's own directory. (bridge.getServerUrl returns a root-absolute URL, so we build it ourselves.)
+	const base = swUrl.slice(0, swUrl.lastIndexOf("/") + 1);
+
+	iframe.src = base + "__virtual__/" + PREVIEW_PORT + "/";
 
 	return {
 		"update": (path, contents) => { write(path, contents); }

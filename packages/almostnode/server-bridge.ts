@@ -178,9 +178,11 @@ export class ServerBridge extends EventEmitter {
           navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true });
         });
 
-    // Register service worker
+    // Register service worker. Scope to the script's OWN directory (the deploy base — e.g. /editor/ on GitHub
+    // Pages); a broader scope like '/' is invalid when the script lives under a subpath and throws.
+    const scope = swUrl.slice(0, swUrl.lastIndexOf('/') + 1) || '/';
     const registration = await navigator.serviceWorker.register(swUrl, {
-      scope: '/',
+      scope,
     });
 
     // Wait for service worker to be active

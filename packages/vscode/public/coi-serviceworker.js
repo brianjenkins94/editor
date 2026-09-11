@@ -38,10 +38,11 @@ const RELATIVE_RE = /^[./]/u;
 const SCHEME_RE = /^[a-z]+:/iu;
 const JS_RE = /\.[mc]?[jt]sx?$/u;
 const IMPORT_RE = /(\bimport\b[^'"]+?\bfrom\s*|\bimport\s*|\bexport\b[^'"]+?\bfrom\s*)(["'])([^"']+)\2/gu;
-// Dev-server bridge routes: /__virtual__/<port>/<path>, and the referer prefix used to keep a virtual app's
-// absolute-path requests inside its server.
-const VIRTUAL_RE = /^\/__virtual__\/(\d+)(\/.*)?$/u;
-const VIRTUAL_PREFIX_RE = /^\/__virtual__\/(\d+)/u;
+// Dev-server bridge route marker. Matched by indexOf (not anchored) so it's recognised under ANY deploy-base
+// prefix: on GitHub Pages the app is served at /editor/, the SW is scoped to /editor/, and requests arrive as
+// /editor/__virtual__/<port>/… — same reason the old __proxy__ matched by substring. /workspace/ (WORKSPACE_ROOT)
+// is matched the same way below.
+const VIRTUAL_MARKER = "/__virtual__/";
 
 // A rewritable specifier: bare ("pkg", "@scope/pkg") or a node: builtin. Relative and other URL schemes
 // (http:, data:, blob:) are left to native ESM.
@@ -380,46 +381,74 @@ async function handleVirtualRequest(request, port, path) {
 	}
 }
 
+// Parse a `/__virtual__/<port>/<rest>` path — found ANYWHERE (under any deploy-base prefix) — into its parts.
+function parseVirtual(pathname) {
+	const index = pathname.indexOf(VIRTUAL_MARKER);
+
+	if (index === -1) {
+		return null;
+	}
+
+	const after = pathname.slice(index + VIRTUAL_MARKER.length);
+	const slash = after.indexOf("/");
+	const portStr = slash === -1 ? after : after.slice(0, slash);
+	const port = parseInt(portStr, 10);
+
+	if (!Number.isFinite(port)) {
+		return null;
+	}
+
+	return {
+		"port": port,
+		"rest": slash === -1 ? "" : after.slice(slash),
+		// The URL prefix up to and including the port (base + /__virtual__/<port>), for navigation redirects.
+		"prefix": pathname.slice(0, index + VIRTUAL_MARKER.length + portStr.length)
+	};
+}
+
 globalThis.addEventListener("fetch", (event) => {
 	const request = event.request;
 	const requestUrl = new URL(request.url);
 	const pathname = requestUrl.pathname;
 
-	// Module resolver: workspace store (+ node_modules CDN fallback).
-	if (pathname.startsWith(WORKSPACE_ROOT)) {
-		event.respondWith(serveWorkspace(request, requestUrl, pathname));
+	// Dev-server bridge: <base>/__virtual__/<port>/…
+	const virtual = parseVirtual(pathname);
+
+	if (virtual !== null) {
+		event.respondWith(handleVirtualRequest(request, virtual.port, (virtual.rest || "/") + requestUrl.search));
 
 		return;
 	}
 
-	// Dev-server bridge: /__virtual__/<port>/…
-	const vmatch = pathname.match(VIRTUAL_RE);
+	// Module resolver: <base>/workspace/… (store + node_modules CDN fallback). Strip any base prefix so the
+	// logical /workspace/… path keys the store and reconstructs the CDN URL.
+	const wsIndex = pathname.indexOf(WORKSPACE_ROOT);
 
-	if (vmatch !== null) {
-		event.respondWith(handleVirtualRequest(request, parseInt(vmatch[1], 10), (vmatch[2] || "/") + requestUrl.search));
+	if (wsIndex !== -1) {
+		event.respondWith(serveWorkspace(request, requestUrl, pathname.slice(wsIndex)));
 
 		return;
 	}
 
-	// A SAME-ORIGIN request with no /__virtual__ prefix but a referer from a virtual page — the app used an
-	// absolute path or navigated. Keep it inside its server: redirect navigations (add the prefix), forward
+	// A SAME-ORIGIN request with no /__virtual__ segment but a referer from a virtual page — the app used an
+	// absolute path or navigated. Keep it inside its server: redirect navigations (re-add the prefix), forward
 	// subresources. Origin-guarded so cross-origin CDN imports (react from esm.sh) are never hijacked.
 	if (requestUrl.origin === globalThis.location.origin && request.referrer) {
-		let refMatch;
+		let refVirtual;
 
 		try {
-			refMatch = new URL(request.referrer).pathname.match(VIRTUAL_PREFIX_RE);
+			refVirtual = parseVirtual(new URL(request.referrer).pathname);
 		} catch (refError) {
-			refMatch = null;
+			refVirtual = null;
 		}
 
-		if (refMatch) {
+		if (refVirtual) {
 			const target = pathname + requestUrl.search;
 
 			if (request.mode === "navigate") {
-				event.respondWith(Response.redirect(requestUrl.origin + refMatch[0] + target, 302));
+				event.respondWith(Response.redirect(requestUrl.origin + refVirtual.prefix + target, 302));
 			} else {
-				event.respondWith(handleVirtualRequest(request, parseInt(refMatch[1], 10), target));
+				event.respondWith(handleVirtualRequest(request, refVirtual.port, target));
 			}
 
 			return;

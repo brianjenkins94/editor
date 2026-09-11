@@ -39,6 +39,11 @@ function splitPackage(rel: string): { "pkg": string; "sub": string } {
 
 export function createNodeModulesProvider(workspaceFolder: string, versions: Record<string, string>): IFileSystemProviderWithFileReadWriteCapability {
 	const prefix = workspaceFolder.replace(/\/$/u, "") + "/node_modules";
+	// The deploy base ("/editor/" on GitHub Pages, "/" locally): this provider runs in the workbench iframe at
+	// <base>/__vscode__/host.html, and the service worker is scoped to <base>, so requests must sit under <base>
+	// to be intercepted (the SW matches /workspace/ under any prefix — see coi-serviceworker.js). A root-absolute
+	// /workspace/… URL would escape the SW scope on a subpath deploy.
+	const deployBase = location.pathname.slice(0, location.pathname.indexOf("/__vscode__/") + 1) || "/";
 
 	const { listeners, onDidChangeFile } = createChangeEvent();
 	const announced = new Set<string>();
@@ -79,7 +84,7 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		// `?meta` asks for the directory listing. `served()` above guarantees the version is defined here.
 		const version = versions[splitPackage(rel).pkg];
 		const search = query === "?meta" ? `?meta&v=${version}` : `?v=${version}`;
-		const url = new URL(`${prefix}/${rel}${search}`, location.href).href;
+		const url = new URL(`${deployBase}${prefix.replace(/^\//u, "")}/${rel}${search}`, location.href).href;
 
 		if (!cache.has(url)) {
 			cache.set(url, fetch(url)
