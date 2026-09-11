@@ -70,9 +70,10 @@ function bundledExtension(name: string, plugins: Plugin[] = []): Plugin {
 /** esbuild's lib-mode bundle of a node server → one self-contained ESM string, node builtins external. Used
  *  for the eslint server: typescript (pulled in by @typescript-eslint/parser) does NOT survive rolldown's
  *  bundling here (its parser throws "n.parse is not a function" at runtime) whereas esbuild bundles it
- *  correctly. Kept UNMINIFIED — minifySyntax restructures statements almostnode's ESM transform rejects at
- *  runtime, and whitespace/identifier minification collapses to one line that breaks when rolldown embeds it
- *  as a string literal in the worker (both: "Unexpected token 'const'"). Shrinking it is a follow-up. */
+ *  correctly. minifyIdentifiers ONLY: renaming locals keeps the code multi-line and standardly-spaced, which
+ *  almostnode's (regex-based) ESM transform tolerates — whereas minifyWhitespace one-lines it and minifySyntax
+ *  restructures statements, both of which break that transform at runtime ("Unexpected token"). So this is the
+ *  safe minify level under almostnode (~15MB → ~10MB); a full shrink needs the native-ESM/SW-resolver path. */
 async function esbuildNodeServer(entry: string): Promise<string> {
 	const result = await esbuild.build({
 		"entryPoints": [entry],
@@ -83,7 +84,8 @@ async function esbuildNodeServer(entry: string): Promise<string> {
 		// browser-condition-only) resolves; node builtins stay external for almostnode either way.
 		"conditions": ["browser", "import", "default"],
 		"target": "esnext",
-		"minify": false,
+		// Identifiers only — see the note above; whitespace/syntax minification breaks almostnode's transform.
+		"minifyIdentifiers": true,
 		// jiti is eslint's config-loader's lazy `import("jiti")`; the Linter path we use never reaches it, so
 		// leave it external (unresolved) rather than pulling it in. Revisit when we load config FILES.
 		"external": [...nodeBuiltins, "jiti", "jiti/*"],
