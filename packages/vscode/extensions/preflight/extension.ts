@@ -46,6 +46,31 @@ function readPayload(uri: vscode.Uri): Payload | undefined {
 	return undefined;
 }
 
+/** Safety bucket for a row → the overlay color. `exec`/`eval` are singled out as the sharpest edge
+ *  (irreversible), consequential writes are caution, everything else (reads, env) is the safe baseline. */
+function bucketOf(row: DocRow): "safe" | "caution" | "danger" {
+	if (row.capability === "exec" || row.capability === "eval") {
+		return "danger";
+	}
+
+	return row.consequential ? "caution" : "safe";
+}
+
+/** The on-hover detail for a decorated capability call: what it resolved to, how, and the advice. */
+function hoverFor(row: DocRow): vscode.MarkdownString {
+	const markdown = new vscode.MarkdownString();
+
+	markdown.appendMarkdown(`**\`${row.callee}\`**  ·  capability \`${row.capability}\`\n\n`);
+	markdown.appendMarkdown("| | |\n|---|---|\n");
+	markdown.appendMarkdown(`| property | ${row.property} |\n`);
+	markdown.appendMarkdown(`| value | \`${row.value}\` |\n`);
+	markdown.appendMarkdown(`| type | \`${row.type ?? "—"}\` |\n`);
+	markdown.appendMarkdown(`| resolved by | ${row.resolvedBy} |\n`);
+	markdown.appendMarkdown(`| disposition | **${row.disposition}**${row.consequential ? " · consequential" : ""} |\n`);
+
+	return markdown;
+}
+
 /** Render the rows as an aligned table — the textual form of the overlay's columns 2+3. */
 function formatRows(rows: DocRow[], text: string): string {
 	if (rows.length === 0) {
@@ -67,6 +92,43 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(output);
 
+	// The overlay proper: a dotted underline on each resolved capability call, colored by safety, plus a mark
+	// in the overview ruler so the file's capability surface is visible at a glance. The resolved value /
+	// property / disposition ride along as the per-decoration hover (hoverFor).
+	const decorationType = (color: string): vscode.TextEditorDecorationType => vscode.window.createTextEditorDecorationType({
+		"borderWidth": "0 0 1px 0",
+		"borderStyle": "dashed",
+		"borderColor": new vscode.ThemeColor(color),
+		"overviewRulerColor": new vscode.ThemeColor(color),
+		"overviewRulerLane": vscode.OverviewRulerLane.Right,
+		"rangeBehavior": vscode.DecorationRangeBehavior.ClosedClosed
+	});
+	const decorations: Record<"safe" | "caution" | "danger", vscode.TextEditorDecorationType> = {
+		"safe": decorationType("charts.green"),
+		"caution": decorationType("charts.yellow"),
+		"danger": decorationType("charts.red")
+	};
+
+	context.subscriptions.push(decorations.safe, decorations.caution, decorations.danger);
+
+	const setOverlay = (editor: vscode.TextEditor, rows: DocRow[]): void => {
+		const buckets: Record<"safe" | "caution" | "danger", vscode.DecorationOptions[]> = { "safe": [], "caution": [], "danger": [] };
+
+		for (const row of rows) {
+			// Floating rows have no source span to decorate — they stay in the output table only.
+			if (row.cst !== undefined) {
+				buckets[bucketOf(row)].push({
+					"range": new vscode.Range(editor.document.positionAt(row.cst.start), editor.document.positionAt(row.cst.end)),
+					"hoverMessage": hoverFor(row)
+				});
+			}
+		}
+
+		editor.setDecorations(decorations.safe, buckets.safe);
+		editor.setDecorations(decorations.caution, buckets.caution);
+		editor.setDecorations(decorations.danger, buckets.danger);
+	};
+
 	const render = (): void => {
 		const editor = vscode.window.activeTextEditor;
 
@@ -83,11 +145,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
 		if (payload === undefined || payload.pending === true) {
 			output.appendLine("  analyzing… (tsserver plugin)");
+			setOverlay(editor, []); // clear stale decorations while a fresh analysis is in flight
 		} else if (payload.error !== undefined) {
 			output.appendLine("  engine error:");
 			output.appendLine("  " + payload.error);
+			setOverlay(editor, []);
 		} else {
 			output.appendLine(formatRows([...(payload.rows ?? []), ...(payload.floating ?? [])], document.getText()));
+			setOverlay(editor, payload.rows ?? []);
 		}
 	};
 
