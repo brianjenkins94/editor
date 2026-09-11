@@ -10,31 +10,34 @@
  *  back under the service worker's control); `false` when a reload has just been scheduled to gain
  *  isolation — the caller should not boot this load. */
 export function ensureCrossOriginIsolated(): boolean {
-	if (globalThis.crossOriginIsolated) {
-		return true;   // already isolated — dev headers, or reloaded under the SW
-	}
+	const isolated = globalThis.crossOriginIsolated;
 
-	// No secure context / no service worker → we can't isolate here; let the caller try anyway (a dev
-	// server may still be supplying the headers, and there's nothing more we can do on an old browser).
-	if (!globalThis.isSecureContext || navigator.serviceWorker === undefined) {
-		return true;
-	}
+	// Register the service worker whenever we can. In PRODUCTION it PROVIDES isolation (a static host can't
+	// set COOP/COEP headers, so the worker stamps them). In DEV the vite server already sets those headers,
+	// but we still register the worker so its same-origin module resolver (serving the VFS store; see vfs.ts)
+	// is active. Registration can fail (e.g. an embedded browser that blocks service workers) — that's
+	// harmless when headers already isolate: we just don't get the resolver on that load.
+	if (globalThis.isSecureContext && navigator.serviceWorker !== undefined) {
+		const base = (import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/";
 
-	const base = (import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/";
+		navigator.serviceWorker.register(base + "coi-serviceworker.js").then((registration) => {
+			if (isolated) {
+				return;   // headers already isolate this load; the worker just attaches for the resolver — no reload
+			}
 
-	navigator.serviceWorker.register(base + "coi-serviceworker.js").then((registration) => {
-		// A newly-installing worker → reload once it's ready so this page loads under its control.
-		registration.addEventListener("updatefound", () => {
-			location.reload();
+			// Not isolated (static host): reload once the worker controls the page so this load gains isolation.
+			registration.addEventListener("updatefound", () => {
+				location.reload();
+			});
+			if (registration.active !== null && navigator.serviceWorker.controller === null) {
+				location.reload();
+			}
+		}).catch((error: unknown) => {
+			console.error("[coi] service worker registration failed", error);
 		});
+	}
 
-		// Already active from a prior visit but not yet controlling this load → reload to gain control.
-		if (registration.active !== null && navigator.serviceWorker.controller === null) {
-			location.reload();
-		}
-	}).catch((error: unknown) => {
-		console.error("[coi] service worker registration failed", error);
-	});
-
-	return false;   // a reload is (or will be) scheduled; don't boot this load
+	// Boot now if we're already isolated (dev headers) or can't isolate at all (no SW/secure context — a dev
+	// server may still supply headers). Only a pending prod reload returns false.
+	return isolated || !globalThis.isSecureContext || navigator.serviceWorker === undefined;
 }
