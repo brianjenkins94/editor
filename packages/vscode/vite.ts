@@ -19,6 +19,7 @@ import * as path from "node:path";
 import * as url from "node:url";
 import { find } from "@brianjenkins94/util/find";
 import * as fs from "@brianjenkins94/util/fs";
+import { fromProxyPath } from "./proxy";
 
 const MOUNT = "/__vscode__/";
 
@@ -54,6 +55,49 @@ const CONTENT_TYPES: Record<string, string> = {
 /** The local monaco-vscode-api component's built bundle dir (main.js + chunks + wasm/fonts). */
 function componentDistDirectory(): string {
 	return url.fileURLToPath(new URL("../../components/monaco-vscode-api/dist", import.meta.url));
+}
+
+/**
+ * Dev-only half of the `__proxy__` convention (proxy.ts). In production the COI service worker fetches the
+ * real CDN URL and re-serves it same-origin; in dev no service worker runs (the page is isolated by the
+ * coi-headers middleware directly), so this middleware does the same job — match `…/__proxy__/<host>/<path>`,
+ * fetch the real https URL, and pipe it back. The node_modules overlay hits this uniformly in both modes.
+ */
+export function proxyPlugin(): Plugin {
+	return {
+		"name": "cdn-proxy",
+
+		"configureServer": function(server) {
+			server.middlewares.use((req, res, next) => {
+				const realUrl = fromProxyPath(req.url ?? "");
+
+				if (realUrl === undefined) {
+					next();
+
+					return;
+				}
+
+				fetch(realUrl).then(async (upstream) => {
+					const body = Buffer.from(await upstream.arrayBuffer());
+					const contentType = upstream.headers.get("content-type");
+
+					res.statusCode = upstream.status;
+
+					if (contentType !== null) {
+						res.setHeader("content-type", contentType);
+					}
+
+					res.setHeader("cache-control", "no-cache");
+					// Same-origin to the isolated iframe (no CORP strictly needed), but set it to match the prod SW.
+					res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+					res.end(body);
+				}).catch((error: unknown) => {
+					res.statusCode = 502;
+					res.end("proxy error: " + (error instanceof Error ? error.message : "unknown"));
+				});
+			});
+		}
+	};
 }
 
 export function vscodePlugin(): Plugin {

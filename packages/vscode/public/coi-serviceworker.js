@@ -15,6 +15,35 @@ globalThis.addEventListener("activate", (event) => event.waitUntil(globalThis.cl
 globalThis.addEventListener("fetch", (event) => {
 	const request = event.request;
 
+	// __proxy__ — same-origin CDN proxy (mirrors proxy.ts; the SW can't import it, so the segment +
+	// reconstruction are inlined — keep in sync). A same-origin request `<…>/__proxy__/<host>/<path>` is
+	// the node_modules overlay reaching a CDN. We fetch the real https URL here: a SW fetch isn't bound by
+	// the document's COEP and follows redirects internally (so unpkg's unversioned 302, which lacks CORS,
+	// still resolves), then we hand it back as a same-origin, isolation-friendly resource.
+	const requestUrl = new URL(request.url);
+	const proxyMarker = "/__proxy__/";
+	const proxyIndex = requestUrl.pathname.indexOf(proxyMarker);
+
+	if (proxyIndex !== -1) {
+		const realUrl = "https://" + requestUrl.pathname.slice(proxyIndex + proxyMarker.length) + requestUrl.search;
+
+		event.respondWith(fetch(realUrl).then((response) => {
+			const headers = new Headers(response.headers);
+
+			headers.set("Cross-Origin-Embedder-Policy", "credentialless");
+			headers.set("Cross-Origin-Opener-Policy", "same-origin");
+			headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+
+			return new Response(response.body, { "status": response.status, "statusText": response.statusText, "headers": headers });
+		}).catch((error) => {
+			console.error("[coi-serviceworker] proxy", realUrl, error);
+
+			return new Response("proxy error", { "status": 502, "statusText": "Bad Gateway" });
+		}));
+
+		return;
+	}
+
 	// A range/only-if-cached cross-origin request can't be re-fetched here — leave it to the browser.
 	if (request.cache === "only-if-cached" && request.mode !== "same-origin") {
 		return;

@@ -22,6 +22,7 @@ import {
 	FileType
 } from "@brianjenkins94/monaco-vscode-api/main";
 import { createChangeEvent, notFound, readOnly, relUnder } from "./provider-base";
+import { toProxyUrl } from "./proxy";
 
 interface UnpkgMeta {
 	"type": "file" | "directory";
@@ -60,10 +61,10 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 	const base = (pkg: string): string => `https://unpkg.com/${pkg}${versions[pkg] !== undefined ? "@" + versions[pkg] : ""}`;
 
 	// Only packages with a pinned version are served. unpkg 302-redirects every *unversioned* request
-	// (e.g. `unpkg.com/preact` → `…/preact@10.x`) and the redirect response carries no
-	// `Access-Control-Allow-Origin`, so the cross-origin fetch fails CORS — noisily logged by the
-	// browser even though we catch the rejection. We can't pin a version synchronously, so we simply
-	// don't fetch unpinned packages (type-checking uses the synchronous snapshot, not this provider).
+	// (e.g. `unpkg.com/preact` → `…/preact@10.x`); the `__proxy__` server side follows that redirect
+	// internally (its fetch isn't bound by the document's COEP), but we still can't pin a version
+	// synchronously, so we simply don't fetch unpinned packages (type-checking uses the synchronous
+	// snapshot, not this provider).
 	const served = (rel: string): boolean => versions[splitPackage(rel).pkg] !== undefined;
 
 	// Promise-memoized by URL (meta and file requests differ by the `?meta` suffix). Cache 404s (real
@@ -75,7 +76,9 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		}
 
 		const { pkg, sub } = splitPackage(rel);
-		const url = `${base(pkg)}/${sub}${query}`;
+		// Fetch same-origin through `__proxy__` (resolved against the iframe location); the SW (prod) or a
+		// vite middleware (dev) fetches the real unpkg URL and hands it back same-origin. See proxy.ts.
+		const url = toProxyUrl(`${base(pkg)}/${sub}${query}`, location);
 
 		if (!cache.has(url)) {
 			cache.set(url, fetch(url)
