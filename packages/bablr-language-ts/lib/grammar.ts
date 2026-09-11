@@ -277,6 +277,14 @@ function *argumentList() {
 	yield endSpan();
 }
 
+// TS parameter properties: an accessibility / readonly modifier (one or more) before a constructor
+// parameter's binding, e.g. `constructor(public readonly x: T)`. Valid only in constructors, but the CST
+// accepts them in any parameter list — semantic placement isn't the parser's concern. The lookahead
+// requires a binding-start (or another modifier) after the keyword so a param literally NAMED `readonly`
+// or `override` (both contextual, not reserved) — `f(readonly: T)` — is not mistaken for a modifier.
+const paramPropertyModifier = /(?:public|private|protected|readonly|override)\b/;
+const paramPropertyLookahead = mRaw(`/(?:public|private|protected|readonly|override)[ \\t]+(?:public|private|protected|readonly|override|this\\b|#?${identifierPattern}|[[{])/`);
+
 export function *parameterList() {
 	yield eat(m`openParamsToken*: <* '(' />`);
 	yield startSpan("Bare", ")");
@@ -285,6 +293,10 @@ export function *parameterList() {
 	while (sep && !(yield match(m`/$/`))) {
 		if (yield match(m`'...'`)) {
 			yield eat(m`params[]+$: <SpreadPattern />`);
+		} else if (yield match(paramPropertyLookahead)) {
+			// A TS parameter property (`public x: T`) — parse a Parameter directly so the modifiers attach to
+			// it; the CapturePattern cover can't start on a modifier keyword.
+			yield eat(m`params[]+$: <Parameter />`);
 		} else {
 			yield eat(m`params[]+$: <_CapturePattern />`);
 		}
@@ -1088,8 +1100,28 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		return r(shiftMatch(m`<AssignmentPattern '=' />`));
 	}
 
-	public *Parameter() {
-		yield eat(m`pattern+$: <_CapturePattern />`, o({}), o({ "held": "eat" }));
+	public *Parameter({ s }) {
+		if (s().shifted) {
+			// Reached from the CapturePattern cover: the binding is already parsed and held, adopt it.
+			yield eat(m`pattern+$: <_CapturePattern />`, o({}), o({ "held": "eat" }));
+		} else {
+			// Entered fresh from parameterList for a TS parameter property: eat its leading modifiers
+			// (`public`/`private`/`protected`/`readonly`/`override`), then the binding DIRECTLY — not via the
+			// `_CapturePattern` cover, which would shift into a nested Parameter on the `:` and steal the
+			// typeAnnotation this production means to own.
+			while (yield match(paramPropertyLookahead)) {
+				yield eat(m`modifiers[]*: <*Keyword ${paramPropertyModifier} />`);
+			}
+
+			const open = yield match(m`/[[{]/`);
+
+			if (open) {
+				yield eat(printSource(open).trim() === "{" ? m`pattern$: <ObjectPattern />` : m`pattern$: <ArrayPattern />`);
+			} else {
+				yield eat(m`pattern$: <*Identifier />`);
+			}
+		}
+
 		yield eatMatch(m`optionalToken*: <* '?' />`);
 		yield eatMatch(m`typeAnnotation$: <TypeAnnotation ':' />`);
 

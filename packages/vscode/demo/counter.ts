@@ -7,14 +7,7 @@ import type { VNode } from "preact";
 // fallback" in one line.
 
 export class Counter {
-	value: number;
-
-	// Written out rather than a `constructor(public value: number)` parameter property: the capability
-	// preflight overlay's CST parser doesn't yet handle TS parameter properties, and the demo should
-	// analyze cleanly.
-	constructor(value: number) {
-		this.value = value;
-	}
+	constructor(public value: number) {}
 
 	increment(): void { this.value += 1; }
 

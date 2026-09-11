@@ -4,6 +4,8 @@ class A { async *gen() {} static async m() {} *g() {} get x() { return 1 } set x
 class A { m(): void; m(x?: string): void {} }
 class A { m() {}; n() {} ; }
 class A<T> extends B<T> implements C, D.E<T> { constructor(x: number) { super() } }
+class A { constructor(public value: number) {} }
+class A { constructor(private readonly x: string, y: number, public z = 1) {} }
 abstract class A { abstract m(): void; protected abstract x: number }
 class A { [key: string]: any; static [k: number]: string }
 class A { 'str'() {} 1() {} [Symbol.iterator]() {} constructor() {} delete() {} static() {} async() {} get() {} }
