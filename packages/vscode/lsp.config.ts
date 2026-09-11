@@ -47,7 +47,7 @@ const resolvePath = (relative: string): string => url.fileURLToPath(new URL(rela
 
 export default defineConfig({
 	"base": "./",
-	"plugins": [bundledNodeServer("lsp-host"), cspellDict()],
+	"plugins": [bundledNodeServer("lsp-host"), bundledNodeServer("lsp-host", "server-node-eslint.ts", "server-node-eslint", "esbuild"), cspellDict()],
 	// oxc-style: if almostnode spawns a real (non-@vite-ignore'd) worker, build it as an ES module worker.
 	"worker": { "format": "es" },
 	"build": {
@@ -60,7 +60,10 @@ export default defineConfig({
 			// Worker entry: imported by URL, not a page script — keep its side effects (it sets up the LSP
 			// connection on load), so preserve the entry signature.
 			"preserveEntrySignatures": "strict",
-			"input": { "lsp/server-host": resolvePath("./extensions/lsp-host/server-host.ts") },
+			"input": {
+				"lsp/server-host": resolvePath("./extensions/lsp-host/server-host.ts"),
+				"lsp/server-host-eslint": resolvePath("./extensions/lsp-host/server-host-eslint.ts")
+			},
 			"output": {
 				"format": "es",
 				"entryFileNames": "[name].js",
