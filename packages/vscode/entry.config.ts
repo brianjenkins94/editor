@@ -10,14 +10,17 @@ import { build, defineConfig, type Plugin, type RollupOutput } from "vite";
  * is the one bundler this repo depends on, so there's no extra dev dependency. `configFile: false`
  * isolates this nested build from the entry config so it doesn't recurse.
  */
-function bundledExtension(name: string): Plugin {
-	const id = name + ":extension";
-	const resolved = "\0" + id;
+/** Bundle `extensions/<name>/<file>.ts` (deps inlined) into a virtual module `<name>:<id>` exposing the
+ *  built code as a default-export string. `externals` stay unbundled; `plugins` are handed to the nested
+ *  build so it can resolve OTHER virtual modules (e.g. an extension that imports its worker's bundle). */
+function bundledModule(name: string, file: string, id: string, format: "cjs" | "es", externals: string[], plugins: Plugin[] = []): Plugin {
+	const virtual = `${name}:${id}`;
+	const resolved = "\0" + virtual;
 	const dir = url.fileURLToPath(new URL(`./extensions/${name}/`, import.meta.url));
 
 	return {
-		"name": `${name}-extension`,
-		"resolveId": (source) => (source === id ? resolved : undefined),
+		"name": `${name}-${id}`,
+		"resolveId": (source) => (source === virtual ? resolved : undefined),
 		"load": async (moduleId) => {
 			if (moduleId !== resolved) {
 				return undefined;
@@ -26,12 +29,13 @@ function bundledExtension(name: string): Plugin {
 			const output = await build({
 				"configFile": false,
 				"logLevel": "silent",
+				"plugins": plugins,
 				"build": {
 					"write": false,
 					"minify": true,
 					"target": "esnext",
-					"lib": { "entry": dir + "extension.ts", "formats": ["cjs"], "fileName": "extension" },
-					"rollupOptions": { "external": ["vscode"] }
+					"lib": { "entry": dir + file, "formats": [format], "fileName": id },
+					"rollupOptions": { "external": externals }
 				}
 			}) as RollupOutput[];
 
@@ -41,6 +45,17 @@ function bundledExtension(name: string): Plugin {
 			return `export default ${JSON.stringify(code)};`;
 		}
 	};
+}
+
+/** An extension's `extension.ts` → browser CJS string (`<name>:extension`), `vscode` external. */
+function bundledExtension(name: string, plugins: Plugin[] = []): Plugin {
+	return bundledModule(name, "extension.ts", "extension", "cjs", ["vscode"], plugins);
+}
+
+/** An extension's `server.ts` → ESM worker string (`<name>:server`); nothing external (the worker is
+ *  standalone). Fed into the extension's own nested build so `import "<name>:server"` resolves. */
+function bundledWorker(name: string): Plugin {
+	return bundledModule(name, "server.ts", "server", "es", []);
 }
 
 /**
@@ -53,7 +68,7 @@ function bundledExtension(name: string): Plugin {
  * the component dist under /__vscode__/.
  */
 export default defineConfig({
-	"plugins": [bundledExtension("hello"), bundledExtension("preflight")],
+	"plugins": [bundledExtension("hello"), bundledExtension("preflight"), bundledExtension("lsp-host", [bundledWorker("lsp-host")])],
 	"esbuild": {
 		"jsx": "automatic",
 		"jsxImportSource": "preact"

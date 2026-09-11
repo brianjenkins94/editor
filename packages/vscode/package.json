@@ -14,7 +14,9 @@
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@stitches/core": "latest",
     "lucide": "latest",
-    "preact": "latest"
+    "preact": "latest",
+    "vscode-languageclient": "^10.1.1",
+    "vscode-languageserver": "^10.1.1"
   },
   "devDependencies": {
     "@oxc-parser/binding-wasm32-wasi": "0.149.0",

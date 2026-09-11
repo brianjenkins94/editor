@@ -18,8 +18,10 @@ import { render } from "preact";
 // The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
 // virtual module in entry.config.ts).
 import helloExtensionCode from "hello:extension";
+import lspHostExtensionCode from "lsp-host:extension";
 import preflightExtensionCode from "preflight:extension";
 import helloManifest from "./extensions/hello/package.json";
+import lspHostManifest from "./extensions/lsp-host/package.json";
 import preflightManifest from "./extensions/preflight/package.json";
 // The preflight TS server plugin's source as a string, registered as an extension file (data: URL) so the
 // in-browser tsserver loads it (see ts-plugin.js). `?raw` keeps it real, editable code rather than an inline blob.
@@ -182,7 +184,14 @@ function maybeBoot(): void {
 			preflightExt.registerFileUrl("./node_modules/preflight-ts-plugin/package.json", "data:application/json," + encodeURIComponent(tsPluginPkg));
 			preflightExt.registerFileUrl("./node_modules/preflight-ts-plugin/index.js", "data:text/javascript," + encodeURIComponent(tsPluginSource));
 
-			bootSpan.info("extensions registered", { "extensions": ["hello", "preflight"] });
+			// The LSP host — the manager extension that runs language servers in workers (LSP spine). Registered
+			// on the main-thread (LocalProcess) host so it spawns top-level, non-throttled server workers; the
+			// server ships inside its own bundle and starts as a Blob-URL module worker (see its extension.ts).
+			const lspHostExt = registerExtension(lspHostManifest, ExtensionHostKind.LocalProcess);
+
+			lspHostExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(lspHostExtensionCode));
+
+			bootSpan.info("extensions registered", { "extensions": ["hello", "preflight", "lsp-host"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			bus.post({ "type": "online" });

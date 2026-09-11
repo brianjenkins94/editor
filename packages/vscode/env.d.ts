@@ -10,6 +10,18 @@ declare module "preflight:extension" {
 	export default code;
 }
 
+/** The lsp-host extension bundled to a browser CommonJS string (see the plugin in entry.config.ts). */
+declare module "lsp-host:extension" {
+	const code: string;
+	export default code;
+}
+
+/** The lsp-host worker language server bundled to an ESM string (spawned as a Blob-URL module worker). */
+declare module "lsp-host:server" {
+	const code: string;
+	export default code;
+}
+
 /** Vite `?raw` imports — file contents as a string (used to register the TS server plugin source). */
 declare module "*?raw" {
 	const content: string;
