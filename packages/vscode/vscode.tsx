@@ -1,22 +1,32 @@
 /** @jsxImportSource preact */
 /**
- * VS Code workbench mounted full-size in an <iframe>.
+ * VS Code workbench mounted inside a WebAwesome window, in an <iframe>.
  *
- * The workbench runs inside an <iframe> (its own document) so monaco taking over `document.body`
- * never touches the host page. The iframe loads `/__vscode__/host.html`, which runs the entry
- * (workbench.js).
+ * The workbench runs inside an <iframe> (its own document) so monaco taking over `document.body` never
+ * touches the host page. The iframe loads `/__vscode__/host.html?pane=editor`, which runs the entry
+ * (workbench.js). The iframe lives in the body of a draggable/collapsible window (window.ts) — the window's
+ * definite-height body gives the iframe a laid-out box to measure at boot (what the old full-viewport
+ * `position: fixed; inset: 0` mount was for).
  *
- * Files + saves cross the iframe boundary over postMessage (same origin): the entry signals "ready"
- * → we send it the workspace `files`/`openEditors`; it posts "save" back with the edited path +
- * contents, which we hand to `onSave`. The host app must only call this once `crossOriginIsolated`
- * is true (SharedArrayBuffer).
+ * Host ⇄ pane talk goes over the pane bus (pane-bus.ts), which carries the workbench handshake as its
+ * payload: the entry signals "ready" → we send it the workspace `files`/`openEditors`; it posts "save" back
+ * with the edited path + contents (→ `onSave`) and "online" when monaco is up (→ whenReady). The bus tracks
+ * the pane's live window, so once the editor can be popped out these same messages reach the popped window
+ * with no change here. The host app must only call this once `crossOriginIsolated` is true (SharedArrayBuffer).
+ *
+ * Every pane's structured logs are funnelled back here (logging.ts) so the host console is the one place to
+ * read what the editor did — including after it's popped into its own tab.
  *
  * Singleton — monaco-vscode-api is one global workbench; subsequent calls are no-ops.
  */
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
-import { css } from "./theme";
+import { hostLog, installLogAggregator } from "./logging";
+import { createPaneBusHost } from "./pane-bus";
+import { createPaneWindow } from "./window";
+import "./webawesome";
 
-const iframeStyle = css({ "border": 0, "width": "100%", "height": "100%" });
+/** The workbench pane's stable id — travels in the iframe URL (`?pane=`) so it survives a popout reload. */
+const PANE_ID = "editor";
 
 export interface VscodeWindowOptions {
 	/** Files to seed the workbench with. */
@@ -30,7 +40,7 @@ export interface VscodeWindowOptions {
 	"moduleVersions"?: Record<string, string>;
 	/** Called in *this* document when a document is saved in the workbench. */
 	"onSave"?: (path: string, contents: string) => void;
-	/** Where to mount the workbench. Default: document.body. */
+	/** Where to mount the workbench window. Default: document.body. */
 	"mountInto"?: HTMLElement;
 }
 
@@ -40,6 +50,8 @@ export interface VscodeWindowHandle {
 	"whenReady": Promise<void>;
 }
 
+interface PaneMessage { "type"?: string; "path"?: string; "contents"?: string }
+
 let booted = false;
 
 export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWindowHandle {
@@ -48,6 +60,11 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 	}
 
 	booted = true;
+
+	// Aggregate every pane's relayed logs into this (host) console.
+	installLogAggregator();
+
+	const span = hostLog.span("editor-window");
 
 	let markReady: () => void;
 	const whenReady = new Promise<void>((resolve) => {
@@ -59,38 +76,42 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 
 	const iframe = document.createElement("iframe");
 
-	// Explicit host page (not the directory root): monaco's own dist/index.html is the webview
-	// pre-page, so the workbench host ships as host.html alongside it.
-	iframe.src = base + "__vscode__/host.html";
-	iframe.className = iframeStyle();
+	// Explicit host page (not the directory root): monaco's own dist/index.html is the webview pre-page, so
+	// the workbench host ships as host.html alongside it. `?pane` gives the entry its identity from the URL,
+	// so a popped-out reload still announces as the same pane (see pane-bus.ts).
+	iframe.src = base + "__vscode__/host.html?pane=" + PANE_ID;
 
-	// Mount the workbench iframe full-viewport. `position: fixed; inset: 0` gives it definite dimensions
-	// (resolved against the viewport) that the workbench can measure at boot — plain `height: 100%` is 0
-	// until the ancestor chain lays out, which is what tripped monaco's "figure out width and height".
-	const container = document.createElement("div");
+	// A large, centered window — the editor is the primary content, just no longer welded to the viewport.
+	const paneWindow = createPaneWindow({
+		"title": "Editor",
+		"storageKey": PANE_ID,
+		"width": Math.min(1200, window.innerWidth - 80),
+		"height": Math.min(760, window.innerHeight - 120)
+	});
 
-	container.style.position = "fixed";
-	container.style.inset = "0";
-	mountInto.appendChild(container);
-	container.appendChild(iframe);
+	paneWindow.body.appendChild(iframe);
+	mountInto.appendChild(paneWindow.element);
+	span.info("workbench window mounted", { "pane": PANE_ID });
 
-	// Bridge to the workbench entry. Kept registered (not one-shot) so a detach/reload re-handshakes.
-	// We reply to whoever handshook (`event.source`), so the same bridge serves the in-page iframe and
-	// a popped-out tab alike.
-	window.addEventListener("message", (event) => {
-		const data = event.data as { "source"?: string; "type"?: string; "path"?: string; "contents"?: string } | null;
+	// The pane bus routes to the pane's CURRENT window (iframe now, popped-out window later) and tracks it
+	// from every inbound message, so the handshake below is unchanged when the editor gains a popout.
+	const bus = createPaneBusHost();
 
-		if (data?.source !== "vscode") {
+	bus.register(PANE_ID, iframe);
+	bus.on((id, payload) => {
+		if (id !== PANE_ID) {
 			return;
 		}
 
-		const target = event.source as Window;
+		const data = payload as PaneMessage;
 
 		if (data.type === "ready") {
-			target.postMessage({ "source": "vscode-host", "type": "init", "files": files, "openEditors": openEditors, "workspaceFolder": workspaceFolder, "moduleVersions": moduleVersions }, "*");
+			bus.post(PANE_ID, { "type": "init", "files": files, "openEditors": openEditors, "workspaceFolder": workspaceFolder, "moduleVersions": moduleVersions });
+			span.info("pane ready → sent init", { "files": files.length, "openEditors": openEditors.length });
 		} else if (data.type === "save" && typeof data.path === "string" && typeof data.contents === "string") {
 			onSave?.(data.path, data.contents);
 		} else if (data.type === "online") {
+			span.end();
 			markReady();
 		}
 	});

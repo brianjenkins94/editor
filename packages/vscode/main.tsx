@@ -3,6 +3,7 @@ import types from "editor:types";
 import moduleVersions from "editor:versions";
 import workspace from "editor:workspace";
 import { ensureCrossOriginIsolated } from "./coi";
+import { hostLog } from "./logging";
 import { createVscodeWindow } from "./vscode";
 
 // Gain cross-origin isolation (SharedArrayBuffer) before booting. A dev server already sends the COOP/COEP
@@ -22,6 +23,6 @@ if (ensureCrossOriginIsolated()) {
 		"files": files,
 		"moduleVersions": moduleVersions,
 		"openEditors": ["/workspace/index.ts"],
-		"onSave": (path: string, contents: string) => { console.log("[saved]", path, contents.length + " bytes"); }
+		"onSave": (path: string, contents: string) => { hostLog.info("saved", { "path": path, "bytes": contents.length }); }
 	});
 }

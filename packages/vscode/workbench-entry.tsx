@@ -25,15 +25,38 @@ import preflightManifest from "./extensions/preflight/package.json";
 // in-browser tsserver loads it (see ts-plugin.js). `?raw` keeps it real, editable code rather than an inline blob.
 import tsPluginSource from "./extensions/preflight/ts-plugin.js?raw";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
+import { installLogRelay } from "./logging";
 import { createNodeModulesProvider } from "./node-modules-provider";
+import { connectAsPane } from "./pane-bus";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 
 interface Init { "files": WorkbenchFile[]; "openEditors": string[]; "workspaceFolder"?: string; "moduleVersions"?: Record<string, string> }
 
-// The host page we report to: our parent when nested in its iframe (in-page window), or our opener
-// when we've been popped out into our own standalone tab/window.
+// The host page we report to: our parent when nested in its iframe (in-page window), or our opener when
+// we've been popped out into our own standalone tab/window. The pane bus carries the workbench handshake;
+// the log relay funnels our structured logs to that same host (its own message channel).
 const host = window.opener ?? window.parent;
+const bus = connectAsPane("editor");
+const paneLog = installLogRelay(host, "editor");
+
+/** Readable text for a caught `unknown` — Error message when it is one, a string as-is, else JSON (avoids
+ *  the `[object Object]` a bare `String(error)` gives, and keeps relayed log attrs meaningful). */
+function errText(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+
+	if (typeof error === "string") {
+		return error;
+	}
+
+	try {
+		return JSON.stringify(error);
+	} catch {
+		return "unknown error";
+	}
+}
 
 let parts: WorkbenchParts | undefined;
 let init: Init | undefined;
@@ -89,6 +112,10 @@ function maybeBoot(): void {
 	booted = true;
 	const { files, openEditors, workspaceFolder, moduleVersions } = init;
 
+	// One timed span for the whole boot; its child logs (relayed to the host) read as an indented tree of
+	// what booting the workbench did and how long it took. Ended once monaco is online.
+	const bootSpan = paneLog.span("workbench-boot", { "files": files.length, "openEditors": openEditors.length });
+
 	bootWithFallbackViewport(document.documentElement);
 
 	// The preflight engine is served next to this entry under /__vscode__/; only the host knows its own origin,
@@ -104,10 +131,12 @@ function maybeBoot(): void {
 		"configuration": { ...configuration, "preflight.engineUrl": engineUrl },
 		"keybindings": keybindings,
 		"onSave": (path, contents) => {
-			host.postMessage({ "source": "vscode", "type": "save", "path": path, "contents": contents }, "*");
+			bus.post({ "type": "save", "path": path, "contents": contents });
+			paneLog.info("saved", { "path": path, "bytes": contents.length });
 		}
 	})
 		.then(() => {
+			bootSpan.info("monaco booted");
 			// Filesystem overlays, layered UNDER the seeded snapshot (they only answer paths the in-memory
 			// FS misses, falling through on FileNotFound). Registered after boot so the file service is up.
 			// The CDN node_modules overlay is the first; a real-disk File System Access overlay will be its
@@ -122,16 +151,17 @@ function maybeBoot(): void {
 
 			ext.registerFileUrl("./extension.js", "data:text/javascript;base64," + window.btoa(helloExtensionCode));
 			ext.setAsDefaultApi().catch((error: unknown) => {
-				console.error("[vscode] setAsDefaultApi failed", error);
+				bootSpan.error("setAsDefaultApi failed", { "error": errText(error) });
 			});
 			ext.getApi().then((api: unknown) => {
 				vscodeApi = api;
 				// Unblock the debug bridge (window.__editor.ready / .api). See debug-bridge.ts.
 				markBridgeReady();
+				bootSpan.info("hello extension api captured");
 				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
 				// AFTER the workbench restores its last-active viewlet (which would otherwise win).
 				setTimeout(runCommand, 0, "workbench.view.explorer");
-			}).catch((error: unknown) => { console.error("[vscode] hello extension setup failed", error); });
+			}).catch((error: unknown) => { bootSpan.error("hello extension setup failed", { "error": errText(error) }); });
 
 			// The capability-preflight extension — the overlay's engine. Registered in the WEB-WORKER
 			// extension host (the natural home for a web extension) as browser CJS via a data: URL. Its heavy
@@ -152,22 +182,24 @@ function maybeBoot(): void {
 			preflightExt.registerFileUrl("./node_modules/preflight-ts-plugin/package.json", "data:application/json," + encodeURIComponent(tsPluginPkg));
 			preflightExt.registerFileUrl("./node_modules/preflight-ts-plugin/index.js", "data:text/javascript," + encodeURIComponent(tsPluginSource));
 
-			// Tell the host the workbench is up (readiness gating).
-			host.postMessage({ "source": "vscode", "type": "online" }, "*");
+			bootSpan.info("extensions registered", { "extensions": ["hello", "preflight"] });
+			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
+			// is the time-to-online, relayed to the host console).
+			bus.post({ "type": "online" });
+			bootSpan.end();
 		})
 		.catch((error: unknown) => {
-			console.error("[vscode] workbench boot failed", error);
+			bootSpan.error("workbench boot failed", { "error": errText(error) });
+			bootSpan.end();
 		});
 }
 
-window.addEventListener("message", (event) => {
-	if (event.source !== host) {
-		return;
-	}
+// Workspace from the host, over the pane bus. Doubles as the pane announcing its window to the host, so a
+// popped-out reload re-pairs by re-sending "ready" (below) with no special-casing here.
+bus.on((payload) => {
+	const data = payload as { "type"?: string } & Partial<Init>;
 
-	const data = event.data as { "source"?: string; "type"?: string } & Partial<Init> | null;
-
-	if (data?.source === "vscode-host" && data.type === "init") {
+	if (data.type === "init") {
 		init = { "files": data.files ?? [], "openEditors": data.openEditors ?? [], "workspaceFolder": data.workspaceFolder, "moduleVersions": data.moduleVersions };
 		maybeBoot();
 	}
@@ -187,5 +219,6 @@ render(
 	document.body
 );
 
-// Tell the host we're ready to receive the workspace.
-host.postMessage({ "source": "vscode", "type": "ready" }, "*");
+// Tell the host we're ready to receive the workspace (also registers this window with the host bus).
+paneLog.info("pane ready", { "pane": bus.id });
+bus.post({ "type": "ready" });

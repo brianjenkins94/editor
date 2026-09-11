@@ -10,6 +10,7 @@
     "lint": "util-lint"
   },
   "dependencies": {
+    "@awesome.me/webawesome": "^3.12.0",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@stitches/core": "latest",
     "lucide": "latest",
