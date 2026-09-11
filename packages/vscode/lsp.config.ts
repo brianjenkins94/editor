@@ -1,6 +1,32 @@
+// eslint-disable-next-line ts/no-restricted-imports -- build-time vite plugin; needs sync fs to read the dict asset off disk
+import * as nodeFs from "node:fs";
+import { createRequire } from "node:module";
+import * as path from "node:path";
 import * as url from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { bundledNodeServer } from "./entry.config";
+
+/**
+ * Emits the cspell English dictionary (a gzipped trie, ~520KB) as a served asset next to the worker at
+ * dist/lsp/dicts/en_US.trie.gz — a fixed, unhashed name so server-host can fetch it by a stable URL and write
+ * it into almostnode's VFS. It's fetched at runtime rather than bundled because it's binary and large.
+ */
+function cspellDict(): Plugin {
+	return {
+		"name": "cspell-dict",
+		"generateBundle": function() {
+			// Resolve the trie from the dict package (transitive dep of cspell-lib). Its cspell-ext.json is an
+			// exported entry; the trie sits beside it.
+			const dictDir = path.dirname(createRequire(import.meta.url).resolve("@cspell/dict-en_us/cspell-ext.json"));
+
+			this.emitFile({
+				"type": "asset",
+				"fileName": "lsp/dicts/en_US.trie.gz",
+				"source": nodeFs.readFileSync(path.join(dictDir, "en_US.trie.gz"))
+			});
+		}
+	};
+}
 
 /**
  * Builds the LSP host's worker (extensions/lsp-host/server-host.ts → dist/lsp/server-host.js) — a normal
@@ -21,7 +47,7 @@ const resolvePath = (relative: string): string => url.fileURLToPath(new URL(rela
 
 export default defineConfig({
 	"base": "./",
-	"plugins": [bundledNodeServer("lsp-host")],
+	"plugins": [bundledNodeServer("lsp-host"), cspellDict()],
 	// oxc-style: if almostnode spawns a real (non-@vite-ignore'd) worker, build it as an ES module worker.
 	"worker": { "format": "es" },
 	"build": {

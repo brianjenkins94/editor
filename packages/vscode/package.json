@@ -14,6 +14,7 @@
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@stitches/core": "latest",
     "almostnode": "^0.2.14",
+    "cspell-lib": "^10.3.0",
     "lucide": "latest",
     "preact": "latest",
     "vscode-languageclient": "^10.1.1",

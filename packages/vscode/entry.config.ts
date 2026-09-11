@@ -1,5 +1,10 @@
+import { builtinModules } from "node:module";
 import * as url from "node:url";
 import { build, defineConfig, type Plugin, type RollupOutput } from "vite";
+
+// Every node builtin, in both bare (`fs`) and `node:`-prefixed (`node:fs`) forms — for keeping them external
+// so almostnode resolves them to its own shims at runtime instead of vite bundling/polyfilling them.
+const nodeBuiltins = [...builtinModules, ...builtinModules.map((name) => `node:${name}`)];
 
 /**
  * Bundles the hello extension (extensions/hello/extension.ts → browser CJS) into a string exposed as the
@@ -57,14 +62,15 @@ function bundledExtension(name: string, plugins: Plugin[] = []): Plugin {
 	return bundledModule(name, "extension.ts", "extension", "cjs", ["vscode"], plugins);
 }
 
-/** An extension's `server-node.ts` → ESM string (`<name>:server-node`) with NODE BUILTINS EXTERNAL, so
- *  `import … from "fs"`/`"path"` survive for almostnode to resolve; the LSP lib is inlined. Written to the
- *  VFS and run by almostnode inside the worker host (server-host.ts, built separately by lsp.config.ts).
- *  MUST be ESM: almostnode detects module type by content, so the `import`/`export` statements are what make
- *  it run as a module (and vite has already stripped the TS types almostnode won't). Exported so that build
- *  can resolve `<name>:server-node`. */
+/** An extension's `server-node.ts` → ESM string (`<name>:server-node`) with ALL NODE BUILTINS EXTERNAL, so
+ *  `import … from "fs"`/`"zlib"`/… survive for almostnode to resolve to its shims; cspell-lib and the LSP lib
+ *  are inlined. Written to the VFS and run by almostnode inside the worker host (server-host.ts, built
+ *  separately by lsp.config.ts). MUST be ESM: almostnode detects module type by content, so the
+ *  `import`/`export` statements are what make it run as a module (and vite has already stripped the TS types
+ *  almostnode won't; it also injects `require`, so cspell's CJS deps' dynamic requires resolve). Exported so
+ *  that build can resolve `<name>:server-node`. */
 export function bundledNodeServer(name: string): Plugin {
-	return bundledModule(name, "server-node.ts", "server-node", "es", ["fs", "path", "node:fs", "node:path"]);
+	return bundledModule(name, "server-node.ts", "server-node", "es", nodeBuiltins);
 }
 
 /**

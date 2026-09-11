@@ -1,16 +1,18 @@
 /**
- * Spine B language server — a NODE server run under almostnode as ESM. almostnode runs `.mjs` files
- * through `runFile` as real ES modules (verified: `import` works and bare builtins resolve to its shims),
- * so this uses ESM `import` and `require("fs")` becomes `import … from "fs"` → almostnode's fs shim. That's
- * the whole point: a node-only server (cspell/eslint next) working in-browser. It speaks LSP over the
- * worker's message channel (`vscode-languageserver/browser`), so to the client it's an ordinary worker server.
+ * cspell language server — a NODE server run under almostnode. It spell-checks documents with the REAL cspell
+ * engine (cspell-lib), which is a node-only tool: it reads its dictionary (a gzipped trie) off "disk" and
+ * gunzips it. Under almostnode that disk is the VFS and the gunzip is almostnode's zlib shim, so cspell runs
+ * unmodified in the browser — which is the whole point of the almostnode host: node-only language tooling with
+ * no node backend. It speaks LSP over the worker's message channel (`vscode-languageserver/browser`), so to
+ * the client it's an ordinary worker server.
  *
- * Bundled to ESM with node builtins left EXTERNAL (so `import "fs"` survives for almostnode to resolve) and
- * the LSP library inlined, then written to the VFS and run by almostnode inside server-host.ts. almostnode
- * detects ESM by content, so the bundle's `import`/`export` statements are what make it run as a module.
+ * cspell-lib and the LSP library are bundled in (see entry.config.ts). The dictionary is too big to bundle, so
+ * server-host fetches it and writes it to the VFS at DICT_PATH before this server runs.
  */
-// eslint-disable-next-line ts/no-restricted-imports, unicorn/prefer-node-protocol -- runs under almostnode (a node context); resolves to almostnode's fs shim, not the browser
-import * as fs from "fs";
+import {
+	createTextDocument,
+	spellCheckDocument
+} from "cspell-lib";
 import {
 	BrowserMessageReader,
 	BrowserMessageWriter,
@@ -19,42 +21,89 @@ import {
 	TextDocumentSyncKind
 } from "vscode-languageserver/browser";
 
+// Where server-host writes the dictionary into the VFS. cspell reads it through almostnode's fs shim.
+const DICT_PATH = "/dicts/en_US.trie.gz";
+
+// Minimal cspell settings: just the one English dictionary, resolved from the VFS. We deliberately skip
+// getDefaultSettings() (it eagerly references all ~59 bundled dicts); cspell fail-softs on the few default
+// dictionaries it still probes and checks against en_US alone.
+const settings = {
+	"version": "0.2" as const,
+	"language": "en",
+	"dictionaryDefinitions": [{ "name": "en_US", "path": DICT_PATH }],
+	"dictionaries": ["en_US"]
+};
+
 // In the worker (shared globalThis) this is the DedicatedWorkerGlobalScope the client talks to.
 const connection = createConnection(new BrowserMessageReader(globalThis as unknown as Worker), new BrowserMessageWriter(globalThis as unknown as Worker));
 
-connection.onInitialize(() => ({ "capabilities": { "textDocumentSync": TextDocumentSyncKind.Full } }));
+// cspell reports issues by absolute character offset; the editor wants line/character ranges, so convert
+// against the document text. Precomputing line starts keeps this linear over a document.
+function offsetToPosition(lineStarts: number[], offset: number): { "line": number; "character": number } {
+	let low = 0;
+	let high = lineStarts.length - 1;
 
-function publish(uri: string, text: string): void {
-	// The proof: exercise a node capability (fs) through almostnode — write the doc to the VFS and read it
-	// back — and report the round-trip in the diagnostic so success is visible in the editor.
-	const roundTrip = ((): string => {
-		try {
-			fs.writeFileSync("/tmp/lsp-doc.txt", text);
+	while (low < high) {
+		const mid = (low + high + 1) >> 1;
 
-			return `${fs.readFileSync("/tmp/lsp-doc.txt", "utf8").length}B`;
-		} catch (error) {
-			return "fs error: " + (error instanceof Error ? error.message : String(error));
+		if (lineStarts[mid] <= offset) {
+			low = mid;
+		} else {
+			high = mid - 1;
 		}
-	})();
+	}
+
+	return { "line": low, "character": offset - lineStarts[low] };
+}
+
+function computeLineStarts(text: string): number[] {
+	const starts = [0];
+
+	for (let index = 0; index < text.length; index++) {
+		if (text[index] === "\n") {
+			starts.push(index + 1);
+		}
+	}
+
+	return starts;
+}
+
+async function check(uri: string, languageId: string, text: string): Promise<void> {
+	const document = createTextDocument({ "uri": uri, "content": text, "languageId": languageId });
+	const result = await spellCheckDocument(document, { "noConfigSearch": true, "generateSuggestions": false }, settings);
+	const lineStarts = computeLineStarts(text);
 
 	connection.sendDiagnostics({
 		"uri": uri,
-		"diagnostics": [{
-			"severity": DiagnosticSeverity.Information,
-			"range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": Math.min((text.split("\n")[0] ?? "").length, 8) } },
-			"message": `LSP spine B ✓ — ESM node server on almostnode (fs round-trip: ${roundTrip}, platform: ${process.platform})`,
-			"source": "lsp-spine-b"
-		}]
+		"diagnostics": result.issues.map((issue) => {
+			const start = offsetToPosition(lineStarts, issue.offset);
+			const end = offsetToPosition(lineStarts, issue.offset + issue.text.length);
+
+			return {
+				"severity": DiagnosticSeverity.Information,
+				"range": { "start": start, "end": end },
+				"message": `Unknown word: "${issue.text}"`,
+				"source": "cspell"
+			};
+		})
 	}).catch(() => undefined);
 }
 
+connection.onInitialize(() => ({ "capabilities": { "textDocumentSync": TextDocumentSyncKind.Full } }));
+
 connection.onDidOpenTextDocument((params) => {
-	publish(params.textDocument.uri, params.textDocument.text);
+	check(params.textDocument.uri, params.textDocument.languageId, params.textDocument.text).catch(() => undefined);
 });
 connection.onDidChangeTextDocument((params) => {
 	const last = params.contentChanges.at(-1);
+	const text = last !== undefined && "text" in last ? last.text : "";
 
-	publish(params.textDocument.uri, last !== undefined && "text" in last ? last.text : "");
+	// languageId isn't sent on change; cspell only needs it to pick language settings, and "plaintext" checks
+	// prose in any file, which is the behavior we want for a spell-checker.
+	check(params.textDocument.uri, "plaintext", text).catch(() => undefined);
+});
+connection.onDidCloseTextDocument((params) => {
+	connection.sendDiagnostics({ "uri": params.textDocument.uri, "diagnostics": [] }).catch(() => undefined);
 });
 
 connection.listen();
