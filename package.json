@@ -5,8 +5,7 @@
     "build": "util-build",
     "lint": "util-lint",
     "postinstall": "util-postinstall",
-    "publish": "util-publish",
-    "test": "pnpm --recursive --if-present test"
+    "publish": "util-publish"
   },
   "dependencies": {
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
