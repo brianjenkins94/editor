@@ -12,7 +12,7 @@
 import type * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
-import { registerDebugSpike } from "./debug-adapter";
+import { registerTsvalDebug } from "./debug-adapter";
 
 interface ServerSpec {
 	"id": string;
@@ -58,8 +58,8 @@ function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-	// M0: register the tsval debug type (stub adapter) — proves the debug plumbing before the real engine.
-	registerDebugSpike(context);
+	// The tsval debug type — a worker-backed stepping debugger (debug-adapter.ts + debug-worker.ts).
+	registerTsvalDebug(context);
 
 	for (const spec of SERVERS) {
 		startServer(context, spec);

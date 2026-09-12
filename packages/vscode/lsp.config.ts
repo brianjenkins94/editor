@@ -47,6 +47,10 @@ const resolvePath = (relative: string): string => url.fileURLToPath(new URL(rela
 
 export default defineConfig({
 	"base": "./",
+	// tsval is a sibling workspace package consumed as raw TS source (its exports map points at ./src). The
+	// debug worker imports it; alias the bare specifier to that source so vite bundles it (typescript, its one
+	// heavy dep, resolves from node_modules). Harmless to the server-host entries, which don't import tsval.
+	"resolve": { "alias": { "@brianjenkins94/tsval": resolvePath("../tsval/src/index.ts") } },
 	"plugins": [bundledNodeServer("worker-pod"), bundledNodeServer("worker-pod", "server-node-eslint.ts", "server-node-eslint", "esbuild"), cspellDict()],
 	// If almostnode spawns a real (non-@vite-ignore'd) worker, build it as an ES module worker.
 	"worker": { "format": "es" },
@@ -62,7 +66,10 @@ export default defineConfig({
 			"preserveEntrySignatures": "strict",
 			"input": {
 				"lsp/server-host": resolvePath("./extensions/worker-pod/server-host.ts"),
-				"lsp/server-host-eslint": resolvePath("./extensions/worker-pod/server-host-eslint.ts")
+				"lsp/server-host-eslint": resolvePath("./extensions/worker-pod/server-host-eslint.ts"),
+				// The tsval debug worker (plain ESM module worker, not almostnode-hosted): imports tsval +
+				// typescript and drives the stepping VM for the `tsval` debug adapter (debug-adapter.ts).
+				"lsp/debug-worker": resolvePath("./extensions/worker-pod/debug-worker.ts")
 			},
 			"output": {
 				"format": "es",
