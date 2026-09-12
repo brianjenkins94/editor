@@ -1,3 +1,4 @@
+/* eslint-disable ts/no-this-alias, consistent-this -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * Virtual File System - In-memory file tree with POSIX-like operations
  */

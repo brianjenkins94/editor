@@ -470,7 +470,7 @@ export async function initialize(options?: { wasmURL?: string }): Promise<void> 
       esbuildInstance = esbuild;
     } catch (error) {
       initPromise = null;
-      throw new Error(`Failed to initialize esbuild-wasm: ${error}`);
+      throw new Error(`Failed to initialize esbuild-wasm: ${error}`, { cause: error });
     }
   })();
 

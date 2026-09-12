@@ -217,7 +217,7 @@ export function createProcess(options?: {
     cwd() {
       // Debug: Log cwd calls (limited to first 5)
       if (!proc._cwdCallCount) proc._cwdCallCount = 0;
-      proc._cwdCallCount++;
+      proc._cwdCallCount += 1;
       if (proc._cwdCallCount <= 5 || proc._cwdCallCount % 100 === 0) {
         console.log(`[process] cwd() called (${proc._cwdCallCount}x), returning:`, currentDir);
       }

@@ -1,3 +1,4 @@
+/* eslint-disable ts/prefer-for-of, ts/no-unsafe-function-type -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * Node.js assert module shim
  * Provides assertion testing utilities
@@ -571,7 +572,7 @@ assert.doesNotReject = async function doesNotReject(
  * Throws an AssertionError
  */
 assert.fail = function fail(
-  messageOrActual?: string | unknown,
+  messageOrActual?: unknown,
   expected?: unknown,
   message?: string,
   operator?: string

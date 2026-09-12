@@ -8,6 +8,9 @@ export interface IRuntimeOptions {
   cwd?: string;
   env?: Record<string, string>;
   onConsole?: (method: string, args: unknown[]) => void;
+  // Base URL the VFS is served from, used to resolve `file://` dynamic imports to a fetchable same-origin URL
+  // (e.g. "https://host/editor/" on a subpath deploy). Defaults to the page origin root when unset.
+  base?: string;
 }
 
 export interface IModule {

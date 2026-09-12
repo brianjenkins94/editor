@@ -1,9 +1,8 @@
+/* eslint-disable ts/no-explicit-any -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * Node.js EventEmitter shim
  * Basic event emitter implementation for browser environment
  */
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type EventListener = (...args: any[]) => void;
 
 // Symbol for storing events on arbitrary objects (like Express app function)

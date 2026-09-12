@@ -1,3 +1,4 @@
+/* eslint-disable import/no-mutable-exports -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * cluster shim - Clustering is not available in browser
  */

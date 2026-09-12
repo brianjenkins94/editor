@@ -1,3 +1,4 @@
+/* eslint-disable ts/no-unused-private-class-members -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * Node.js net module shim
  * Basic Socket and Server classes for virtual networking

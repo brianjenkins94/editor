@@ -1,3 +1,4 @@
+/* eslint-disable ts/class-literal-property-style -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * http2 shim - HTTP/2 is not available in browser
  */

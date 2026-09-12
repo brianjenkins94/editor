@@ -1,3 +1,4 @@
+/* eslint-disable ts/no-explicit-any -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * Node.js Stream shim
  * Basic Readable and Writable stream implementations
@@ -1096,7 +1097,6 @@ class BufferPolyfill extends Uint8Array {
 
 // Set global Buffer if not defined
 if (typeof globalThis.Buffer === 'undefined') {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).Buffer = BufferPolyfill;
 }
 

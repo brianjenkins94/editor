@@ -1,3 +1,4 @@
+/* eslint-disable ts/no-unused-private-class-members -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * perf_hooks shim - Performance measurement APIs
  * Wraps browser Performance API

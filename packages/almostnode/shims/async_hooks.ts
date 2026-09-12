@@ -1,11 +1,10 @@
+/* eslint-disable ts/no-explicit-any -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * async_hooks shim - Async tracking is not available in browser
  */
 
 export class AsyncResource {
   constructor(_type: string, _options?: object) {}
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   runInAsyncScope<T>(fn: (...args: any[]) => T, thisArg?: unknown, ...args: any[]): T {
     return fn.apply(thisArg, args);
   }
@@ -13,8 +12,6 @@ export class AsyncResource {
   emitDestroy(): this { return this; }
   asyncId(): number { return 0; }
   triggerAsyncId(): number { return 0; }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   static bind<T extends (...args: any[]) => any>(fn: T, _type?: string): T {
     return fn;
   }

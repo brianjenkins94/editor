@@ -108,7 +108,7 @@ export function relative(from: string, to: string): string {
   let commonLength = 0;
   for (let i = 0; i < Math.min(fromParts.length, toParts.length); i++) {
     if (fromParts[i] !== toParts[i]) break;
-    commonLength++;
+    commonLength += 1;
   }
 
   const upCount = fromParts.length - commonLength;

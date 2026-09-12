@@ -70,7 +70,8 @@ export class WebSocket extends EventEmitter {
   constructor(url: string, protocols?: string | string[]) {
     super();
     this.url = url;
-    this._id = `client-${++clientIdCounter}`;
+    clientIdCounter += 1;
+    this._id = `client-${clientIdCounter}`;
 
     if (protocols) {
       this.protocol = Array.isArray(protocols) ? protocols[0] : protocols;
@@ -128,13 +129,14 @@ export class WebSocket extends EventEmitter {
           if (this.onopen) this.onopen(new Event('open'));
           break;
 
-        case 'message':
+        case 'message': {
           const msgEvent = new MessageEventPolyfill('message', { data: data.payload });
           this.emit('message', msgEvent);
           if (this.onmessage) this.onmessage(msgEvent as unknown as MessageEvent);
           break;
+        }
 
-        case 'close':
+        case 'close': {
           this.readyState = WebSocket.CLOSED;
           const closeEvent = new CloseEventPolyfill('close', {
             code: data.code || 1000,
@@ -145,11 +147,16 @@ export class WebSocket extends EventEmitter {
           if (this.onclose) this.onclose(closeEvent as unknown as CloseEvent);
           channel.removeEventListener('message', handler);
           break;
+        }
 
-        case 'error':
+        case 'error': {
           const errorEvent = new Event('error');
           this.emit('error', errorEvent);
           if (this.onerror) this.onerror(errorEvent);
+          break;
+        }
+
+        default:
           break;
       }
     };

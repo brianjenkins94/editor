@@ -41,8 +41,13 @@ async function main(): Promise<void> {
 	vfs.writeFileSync("/server-node.ts", serverNodeCode);
 
 	// No `useWorker` → the in-realm Runtime (this worker IS the realm). dangerouslyAllowSameOrigin is required
-	// for same-origin execution; the code is our own bundled server, so that's intended.
-	const runtime = await createRuntime(vfs, { "dangerouslyAllowSameOrigin": true });
+	// for same-origin execution; the code is our own bundled server, so that's intended. `base` is the deploy
+	// base (this worker's served URL minus the "/__vscode__/…" tail) so any `file://` dynamic import resolves
+	// under the base-scoped service worker (see createDynamicImport in almostnode/runtime.ts).
+	const hereUrl = new URL(here);
+	const vscodeCut = hereUrl.pathname.indexOf("/__vscode__/");
+	const base = hereUrl.origin + (vscodeCut === -1 ? "/" : hereUrl.pathname.slice(0, vscodeCut + 1));
+	const runtime = await createRuntime(vfs, { "dangerouslyAllowSameOrigin": true, "base": base });
 
 	// almostnode runs the ESM bundle as a module (and injects `require` so cspell's CJS deps' dynamic requires
 	// resolve). This sets up the server's LSP connection on this worker's globalThis and returns; its listeners

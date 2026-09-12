@@ -1,3 +1,4 @@
+/* eslint-disable import/no-mutable-exports -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * Node.js domain module shim
  * The domain module is deprecated but some packages still use it

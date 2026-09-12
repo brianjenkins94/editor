@@ -1,3 +1,4 @@
+/* eslint-disable ts/no-unused-private-class-members, ts/no-this-alias, consistent-this, ts/use-unknown-in-catch-callback-variable -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * Node.js http module shim
  * Provides IncomingMessage, ServerResponse, and Server for virtual HTTP handling

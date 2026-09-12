@@ -1,3 +1,4 @@
+/* eslint-disable ts/no-explicit-any, ts/use-unknown-in-catch-callback-variable, ts/no-unsafe-function-type -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * Node.js util module shim
  * Basic utility functions
@@ -13,7 +14,7 @@ export function format(fmt: string, ...args: unknown[]): string {
     if (match === '%%') return '%';
     if (i >= args.length) return match;
 
-    const arg = args[i++];
+    const arg = args[i]; i += 1;
 
     switch (match) {
       case '%s':
@@ -149,6 +150,7 @@ export function deprecate<T extends Function>(
   code?: string
 ): T {
   let warned = false;
+  // eslint-disable-next-line func-style -- a function expression is required here: it closes over `warned` and is returned as the deprecated wrapper.
   const deprecated = function (this: unknown, ...args: unknown[]) {
     if (!warned) {
       console.warn(`DeprecationWarning: ${msg}${code ? ` (${code})` : ''}`);
@@ -158,8 +160,6 @@ export function deprecate<T extends Function>(
   };
   return deprecated as unknown as T;
 }
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function promisify<T>(fn: (...args: any[]) => void): (...args: any[]) => Promise<T> {
   return (...args: any[]) => {
     return new Promise((resolve, reject) => {
@@ -173,8 +173,6 @@ export function promisify<T>(fn: (...args: any[]) => void): (...args: any[]) => 
     });
   };
 }
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function callbackify<T>(fn: (...args: any[]) => Promise<T>): (...args: any[]) => void {
   return (...args: any[]) => {
     const callback = args.pop() as (err: Error | null, result: T) => void;

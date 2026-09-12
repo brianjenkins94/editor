@@ -9,9 +9,7 @@ export default [
 		// un-lintable / non-source paths are ignored:
 		//   • build output (dist) and monaco's regenerated demo (vendored CodinGame source)
 		//   • tsval's vendored differential corpora, generated test reports, and markdown (no tsconfig for typed rules)
-		//   • packages/almostnode — a vendored fork of macaly/almostnode (trimmed upstream node-runtime source),
-		//     kept close to upstream rather than restyled to this repo's rules (same rationale as tsval/vendor)
-		"ignores": ["**/dist/**", "**/demo/**", "packages/almostnode/**", "packages/tsval/vendor/**", "packages/*/test/reports/**", "**/*.md"]
+		"ignores": ["**/dist/**", "**/demo/**", "packages/tsval/vendor/**", "packages/*/test/reports/**", "**/*.md"]
 	},
 	{
 		// tsval's tests run on `node:test`, not vitest. @antfu's test config assumes vitest and its auto-fix

@@ -1,3 +1,4 @@
+/* eslint-disable no-eval, no-new-func, ts/no-implied-eval, ts/class-literal-property-style, ts/no-unsafe-function-type -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * vm shim - Basic VM functionality using eval
  */

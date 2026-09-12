@@ -13,12 +13,22 @@ import { createRuntime } from "almostnode";
 import serverNodeCode from "lsp-host:server-node-eslint";
 import { createZenfsVFS } from "./zenfs-vfs.js";
 
+/** The deploy base URL ("https://host/editor/" on Pages, "https://host/" locally), derived from this worker's
+ *  own served URL by stripping the "/__vscode__/…" tail. Handed to almostnode so a `file://` dynamic import
+ *  (eslint's flat-config loader) resolves UNDER the base — inside the base-scoped service worker's reach. */
+function deployBase(): string {
+	const here = new URL(import.meta.url);
+	const cut = here.pathname.indexOf("/__vscode__/");
+
+	return here.origin + (cut === -1 ? "/" : here.pathname.slice(0, cut + 1));
+}
+
 async function main(): Promise<void> {
 	const vfs = await createZenfsVFS();
 
 	vfs.writeFileSync("/server-node-eslint.ts", serverNodeCode);
 
-	const runtime = await createRuntime(vfs, { "dangerouslyAllowSameOrigin": true });
+	const runtime = await createRuntime(vfs, { "dangerouslyAllowSameOrigin": true, "base": deployBase() });
 
 	await runtime.runFile("/server-node-eslint.ts");
 }

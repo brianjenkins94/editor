@@ -1,3 +1,4 @@
+/* eslint-disable ts/use-unknown-in-catch-callback-variable, ts/prefer-for-of -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * Node.js crypto module shim
  * Provides cryptographic utilities using Web Crypto API

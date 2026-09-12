@@ -1,3 +1,4 @@
+/* eslint-disable no-useless-assignment -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * Node.js fs module shim
  * Wraps VirtualFS to provide Node.js compatible API
@@ -224,7 +225,7 @@ function trackCall(method: 'statSync' | 'readdirSync', path: string): void {
   if (count === 10 && path.includes('_generated')) {
     console.warn(`[fs] ${method} called ${count}x on ${path}`);
     // Print full stack trace at 10 calls to see the call path
-    const err = new Error();
+    const err = new Error('[fs] stack trace');
     console.log(`[fs] Stack at ${count} calls:`, err.stack?.split('\n').slice(1, 10).join('\n'));
   }
   if (count === 50) {
@@ -274,7 +275,7 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string): FsShim {
         }
       });
     },
-    stat(pathLike: string | unknown): Promise<Stats> {
+    stat(pathLike: unknown): Promise<Stats> {
       return new Promise((resolve, reject) => {
         try {
           const path = typeof pathLike === 'string' ? pathLike : resolvePath(pathLike);
@@ -535,7 +536,7 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string): FsShim {
         }
       }
 
-      const fd = nextFd++;
+      const fd = nextFd; nextFd += 1;
       fdMap.set(fd, {
         path,
         position: flagStr.includes('a') ? content.length : 0,

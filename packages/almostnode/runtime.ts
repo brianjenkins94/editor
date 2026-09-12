@@ -1,3 +1,4 @@
+/* eslint-disable ts/no-unsafe-function-type -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * Runtime - Execute user code with shimmed Node.js globals
  *
@@ -193,39 +194,42 @@ function transformEsmToCjsRegexFallback(code: string, filename: string): string 
 // import()-rewriting transform can see it (both rewrite a literal `import()`). This is the hand-off to the
 // browser's real ESM loader — and thus to the same-origin service-worker module resolver, which serves the
 // workspace at real /workspace/… paths.
+// eslint-disable-next-line no-new-func, ts/no-implied-eval, no-useless-concat -- the Function constructor + split "imp"+"ort" is the DELIBERATE native-import escape hatch (invisible to the bundler and to almostnode's own import() transform); rewriting it defeats the purpose.
 const nativeImport = new Function("url", "return imp" + "ort(url)") as (url: string) => Promise<unknown>;
 
-function createDynamicImport(moduleRequire: RequireFunction): (specifier: string) => Promise<unknown> {
+function createDynamicImport(moduleRequire: RequireFunction, base?: string): (specifier: string) => Promise<unknown> {
   return async (specifier: string): Promise<unknown> => {
     // A file:// dynamic import — e.g. eslint's flat-config loader importing `pathToFileURL(configPath).href`
     // (with a `?mtime=` cache-buster) — is handed to the browser's NATIVE ESM loader at the real same-origin
     // path, NOT re-executed through almostnode's require/VFS path. The service-worker module resolver serves
     // the workspace there (/workspace/…), so the imported module and its whole graph run as native ESM (any
     // syntax; the SW resolves its bare imports). Replaces the patch-almostnode.mjs file:// → VFS stopgap.
+    //
+    // Resolve the VFS path UNDER the served base (the `base` option) so a SUBPATH deploy still lands inside the
+    // service worker's scope: on GitHub Pages the SW is scoped to /editor/, so file:///workspace/x must become
+    // https://host/editor/workspace/x — the root https://host/workspace/x would fall outside the scope and
+    // never be intercepted. The path is made base-relative (leading slash stripped) so it resolves against the
+    // base, not the origin root. Default base = origin root when unset (or non-browser → leave as-is).
     if (typeof specifier === "string" && specifier.startsWith("file://")) {
-      const location = (globalThis as { location?: { origin: string } }).location;
-      const url = location === undefined ? specifier : new URL(specifier.slice("file://".length), location.origin).href;
+      const origin = (globalThis as { location?: { origin: string } }).location?.origin;
+      const baseUrl = base ?? (origin === undefined ? undefined : origin + "/");
+      const url = baseUrl === undefined ? specifier : new URL(specifier.slice("file://".length).replace(/^\/+/u, ""), baseUrl).href;
 
       return nativeImport(url);
     }
-    try {
-      const mod = moduleRequire(specifier);
+    const mod = moduleRequire(specifier);
 
-      // If the module has a default export or is already ESM-like, return as-is
-      if (mod && typeof mod === 'object' && ('default' in (mod as object) || '__esModule' in (mod as object))) {
-        return mod;
-      }
-
-      // For CommonJS modules, wrap in an object with default export
-      // This matches how dynamic import() handles CJS modules
-      return {
-        default: mod,
-        ...(mod && typeof mod === 'object' ? mod as object : {}),
-      };
-    } catch (error) {
-      // Re-throw as a rejected promise (which is what dynamic import does)
-      throw error;
+    // If the module has a default export or is already ESM-like, return as-is
+    if (mod && typeof mod === 'object' && ('default' in (mod as object) || '__esModule' in (mod as object))) {
+      return mod;
     }
+
+    // For CommonJS modules, wrap in an object with default export (matches how import() handles CJS). Any
+    // throw here propagates as the rejected promise dynamic import() produces — no try/catch rethrow needed.
+    return {
+      default: mod,
+      ...(mod && typeof mod === 'object' ? mod as object : {}),
+    };
   };
 }
 
@@ -244,6 +248,8 @@ export interface RuntimeOptions {
   onConsole?: (method: string, args: unknown[]) => void;
   onStdout?: (data: string) => void;
   onStderr?: (data: string) => void;
+  // Base URL the VFS is served from, for resolving `file://` dynamic imports (see createDynamicImport).
+  base?: string;
 }
 
 export interface RequireFunction {
@@ -382,6 +388,7 @@ const builtinModules: Record<string, unknown> = {
         if (opts && typeof opts === 'object' && 'write' in opts) {
           // new Console(stdout, stderr) — first arg is stdout stream
           this._stdout = opts as unknown as { write: (s: string) => void };
+          // eslint-disable-next-line prefer-rest-params -- Console's variadic (stdout, stderr) overload reads positional args; a rest param would change this shim's signature.
           this._stderr = (arguments[1] as { write: (s: string) => void }) || this._stdout;
         } else if (opts && typeof opts === 'object' && 'stdout' in opts) {
           // new Console({ stdout, stderr })
@@ -426,10 +433,10 @@ const builtinModules: Record<string, unknown> = {
   'path/win32': pathShim.win32,
   // timers subpaths
   'timers/promises': {
-    setTimeout: (ms: number) => new Promise(resolve => setTimeout(resolve, ms)),
+    setTimeout: (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms); }),
     setInterval: globalThis.setInterval,
-    setImmediate: (value?: unknown) => new Promise(resolve => setTimeout(() => resolve(value), 0)),
-    scheduler: { wait: (ms: number) => new Promise(resolve => setTimeout(resolve, ms)) },
+    setImmediate: (value?: unknown) => new Promise(resolve => { setTimeout(() => resolve(value), 0); }),
+    scheduler: { wait: (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms); }) },
   },
 };
 
@@ -790,13 +797,14 @@ ${code}
 
       let fn;
       try {
+        // eslint-disable-next-line no-eval -- executing user/module code is almostnode's whole purpose; the runtime IS an evaluator.
         fn = eval(wrappedCode);
       } catch (evalError) {
         const msg = evalError instanceof Error ? evalError.message : String(evalError);
-        throw new SyntaxError(`${msg} (in ${resolvedPath})`);
+        throw new SyntaxError(`${msg} (in ${resolvedPath})`, { cause: evalError });
       }
       // Create dynamic import function for this module context
-      const dynamicImport = createDynamicImport(moduleRequire);
+      const dynamicImport = createDynamicImport(moduleRequire, options.base);
 
       fn(
         module.exports,
@@ -1139,6 +1147,7 @@ export class Runtime {
         const line = raw.trim();
         if (!line || line.startsWith('Error') || line.startsWith('TypeError')) continue;
 
+        // eslint-disable-next-line no-useless-assignment -- defensive defaults; each format branch below fills all four before pushing a frame.
         let fn = '', file = '', lineNo = 0, colNo = 0;
 
         // Safari format: "functionName@file:line:col" or "@file:line:col"
@@ -1209,6 +1218,7 @@ export class Runtime {
     // Intercept .stack on Error.prototype so that packages using the V8 pattern
     // "Error.prepareStackTrace = fn; new Error().stack" also get CallSite objects.
     // In V8, reading .stack lazily triggers prepareStackTrace; Safari doesn't do this.
+    // eslint-disable-next-line no-extend-native -- deliberately shims Error.prototype.stack to emulate V8's lazy prepareStackTrace in the sandbox.
     Object.defineProperty(Error.prototype, 'stack', {
       get() {
         const rawStack = (this as any)[stackSymbol];
@@ -1235,7 +1245,7 @@ export class Runtime {
       // (otherwise our .stack getter would call prepareStackTrace recursively)
       const savedPrepare = (Error as any).prepareStackTrace;
       (Error as any).prepareStackTrace = undefined;
-      const err = new Error();
+      const err = new Error('stack capture');
       const rawStack = err.stack || '';
       (Error as any).prepareStackTrace = savedPrepare;
 
@@ -1329,8 +1339,9 @@ ${code}
 })`;
 
       // Create dynamic import function for this module context
-      const dynamicImport = createDynamicImport(require);
+      const dynamicImport = createDynamicImport(require, this.options.base);
 
+      // eslint-disable-next-line no-eval -- executing module code is almostnode's whole purpose; the runtime IS an evaluator.
       const fn = eval(wrappedCode);
       fn(
         module.exports,

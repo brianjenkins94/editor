@@ -1,3 +1,4 @@
+/* eslint-disable ts/no-unused-private-class-members, regexp/no-contradiction-with-assertion -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
 /**
  * ViteDevServer - Vite-compatible dev server for browser environment
  * Serves files from VirtualFS with JSX/TypeScript transformation
