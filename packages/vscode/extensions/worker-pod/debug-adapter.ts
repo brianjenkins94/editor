@@ -19,7 +19,7 @@ interface Snapshot {
 	"variables": Record<number, { "name": string; "value": string; "type": string; "variablesReference": number }[]>;
 }
 type WorkerMessage =
-	| { "type": "stopped"; "reason": string; "snapshot": Snapshot }
+	| { "type": "stopped"; "reason": string; "snapshot": Snapshot; "atomic"?: boolean }
 	| { "type": "terminated" }
 	| { "type": "output"; "text": string };
 
@@ -32,6 +32,12 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private program = "";
 	private lines: number[] = [];
 	private snapshot: Snapshot | undefined;
+
+	// Shared control word for resuming a SYNCHRONOUS in-handler pause (M3b). When a breakpoint is hit inside a
+	// host-invoked guest call the worker blocks on Atomics.wait (it can't receive messages), so we resume it by
+	// storing 1 + Atomics.notify rather than postMessage. Needs crossOriginIsolated — the editor sets COI.
+	private readonly control = new Int32Array(new SharedArrayBuffer(4));
+	private lastStopAtomic = false;
 
 	// The program runs only once BOTH the source is loaded (launch) and configuration is done — so breakpoints
 	// set between the `initialized` event and `configurationDone` are registered before the first step.
@@ -112,39 +118,43 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				break;
 
 			case "continue":
-				this.worker?.postMessage({ "type": "continue" });
+				this.resume("continue");
 				this.respond(request, { "allThreadsContinued": true });
 				break;
 
 			case "next":
-				this.worker?.postMessage({ "type": "next" });
+				this.resume("next");
 				this.respond(request);
 				break;
 
 			case "stepIn":
-				this.worker?.postMessage({ "type": "stepIn" });
+				this.resume("stepIn");
 				this.respond(request);
 				break;
 
 			case "stepOut":
-				this.worker?.postMessage({ "type": "stepOut" });
+				this.resume("stepOut");
 				this.respond(request);
 				break;
 
 			case "stepBack":
-				this.worker?.postMessage({ "type": "stepBack" });
+				this.resume("stepBack");
 				this.respond(request);
 				break;
 
 			case "reverseContinue":
-				this.worker?.postMessage({ "type": "reverseContinue" });
+				this.resume("reverseContinue");
 				this.respond(request, { "allThreadsContinued": true });
 				break;
 
 			case "disconnect":
 			case "terminate":
-				this.worker?.postMessage({ "type": "disconnect" });
+				// Hard-stop: terminate() kills the worker even while it's blocked in Atomics.wait (an in-handler
+				// pause), which a postMessage could not reach.
+				this.worker?.terminate();
+				this.worker = undefined;
 				this.respond(request);
+				this.event("terminated");
 				break;
 
 			default:
@@ -178,13 +188,25 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.worker = new Worker(workerUrl, { "type": "module" });
 		this.worker.onmessage = (event: MessageEvent<WorkerMessage>) => { this.onWorker(event.data); };
 		this.worker.onerror = (event) => { this.event("output", { "category": "stderr", "output": `[debug-worker] ${event.message}\n` }); };
-		this.worker.postMessage({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines });
+		this.worker.postMessage({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.control.buffer });
+	}
+
+	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
+	 *  stop is driven by a control message the worker's loop is awaiting. */
+	private resume(kind: string): void {
+		if (this.lastStopAtomic) {
+			Atomics.store(this.control, 0, 1);
+			Atomics.notify(this.control, 0);
+		} else {
+			this.worker?.postMessage({ "type": kind });
+		}
 	}
 
 	private onWorker(message: WorkerMessage): void {
 		switch (message.type) {
 			case "stopped":
 				this.snapshot = message.snapshot;
+				this.lastStopAtomic = message.atomic === true;
 				this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
 				break;
 

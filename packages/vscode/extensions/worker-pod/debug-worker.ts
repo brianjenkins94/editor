@@ -23,7 +23,7 @@ type Vm = LoadedVM["vm"];
 
 /** Control messages from the adapter. */
 type Incoming =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[] }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control": SharedArrayBuffer }
 	| { "type": "setBreakpoints"; "lines": number[] }
 	| { "type": "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect" };
 
@@ -46,8 +46,15 @@ let sourceFile: ts.SourceFile | undefined;
 let history: Vm[] = [];
 let index = -1;
 let done = false;
-/** Resolver for the control message the session loop is currently awaiting. */
+/** Resolver for the control message the session loop is currently awaiting (top-level, async pause). */
 let awaitAction: ((action: Action) => void) | undefined;
+/**
+ * Shared control word for the SYNCHRONOUS in-handler pause (M3b). A breakpoint reached inside a host-invoked
+ * guest call (e.g. React's onClick) can't pause by awaiting — the call is on a synchronous stack the worker
+ * loop doesn't drive — so the onBreakpoint hook blocks the whole worker on `Atomics.wait` while the main
+ * thread stays live, and the adapter resumes it via `Atomics.notify`. control[0]: 0 = waiting, 1 = go.
+ */
+let control: Int32Array | undefined;
 
 function nextAction(): Promise<Action> {
 	return new Promise((resolve) => { awaitAction = resolve; });
@@ -148,6 +155,25 @@ function emitStopped(vm: Vm, reason: string, traveled = false): void {
 	post({ "type": "stopped", "reason": reason, "snapshot": { ...snapshot(vm), "traveled": traveled } });
 }
 
+/**
+ * Pause hook for a breakpoint reached inside a synchronous host-invoked guest call (React onClick, an array
+ * callback). We can't await here — the call is running on a synchronous stack driven by tsval's runSub, not
+ * by our loop — so we send the stop (tagged `atomic` so the adapter resumes via the control word, not a
+ * message the blocked worker can't receive) and then BLOCK the worker on Atomics.wait until the adapter
+ * stores 1 + notifies. The main thread stays responsive throughout.
+ */
+function onBreakpointHook(vm: Vm): void {
+	if (control === undefined) {
+		return; // no shared control word (shouldn't happen post-launch) — resume rather than hang
+	}
+
+	// Set WAITING before posting, so an adapter that stores 1 + notifies before we reach `wait` isn't lost:
+	// Atomics.wait returns immediately when the value is no longer 0.
+	Atomics.store(control, 0, 0);
+	post({ "type": "stopped", "reason": "breakpoint", "snapshot": { ...snapshot(vm), "traveled": false }, "atomic": true });
+	Atomics.wait(control, 0, 0);
+}
+
 /** Advance `base` (a VM we own) by a forward action, then record the new stop or terminate. */
 function advanceFrom(base: Vm, action: ForwardAction): void {
 	try {
@@ -229,7 +255,8 @@ self.onmessage = (event: MessageEvent<Incoming>): void => {
 
 	switch (message.type) {
 		case "launch": {
-			const loaded = createVM(message.source, { "fileName": message.fileName });
+			control = new Int32Array(message.control);
+			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook });
 			sourceFile = loaded.sourceFile;
 			loaded.vm.addBreakpointsByLine(...message.lines);
 			history = [];
