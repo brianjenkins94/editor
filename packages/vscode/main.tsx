@@ -3,8 +3,10 @@ import type { Preview } from "./preview";
 import types from "editor:types";
 import moduleVersions from "editor:versions";
 import workspace from "editor:workspace";
+import { createHub } from "@brianjenkins94/hub";
 import { ensureCrossOriginIsolated } from "./coi";
 import { hostLog } from "./logging";
+import { consoleCollector, installHubCollector, linkServiceWorkerHub } from "./telemetry";
 import { createVscodeWindow } from "./vscode";
 import { createPaneWindow } from "./window";
 
@@ -20,6 +22,14 @@ if (ensureCrossOriginIsolated()) {
 	// becomes an additional source mode later.
 	const files = [...workspace, ...types];
 	const base = (import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/";
+
+	// The root hub — top of the composable-hub tree. A collector renders every context's spans/records off the
+	// `$sys.log.>` observability plane (the service worker now, the pod + workers next); the SW links in over a
+	// dedicated port. See telemetry.ts / @brianjenkins94/hub.
+	const rootHub = createHub({ "id": "root" });
+
+	installHubCollector(rootHub, consoleCollector);
+	linkServiceWorkerHub(rootHub);
 
 	// The live preview: runs the demo (a Vite React app) through an in-browser dev server and hot-reloads on
 	// save. Created lazily (dynamic import) so `typescript` — the preview's transpiler — stays out of the

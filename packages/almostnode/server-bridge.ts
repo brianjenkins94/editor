@@ -182,8 +182,10 @@ export class ServerBridge extends EventEmitter {
     // Register service worker. Scope to the script's OWN directory (the deploy base — e.g. /editor/ on GitHub
     // Pages); a broader scope like '/' is invalid when the script lives under a subpath and throws.
     const scope = swUrl.slice(0, swUrl.lastIndexOf('/') + 1) || '/';
+    // {type:module}: the editor's coi-serviceworker is now a bundled ES module (imports @brianjenkins94/hub).
     const registration = await navigator.serviceWorker.register(swUrl, {
       scope,
+      type: 'module',
     });
 
     // Wait for service worker to be active

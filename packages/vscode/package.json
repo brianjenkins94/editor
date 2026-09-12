@@ -4,13 +4,14 @@
   "type": "module",
   "scripts": {
     "build:entry": "vite build -c entry.config.ts",
-    "build": "vite build -c entry.config.ts && vite build -c lsp.config.ts && vite build",
-    "dev": "vite build -c entry.config.ts && vite build -c lsp.config.ts && vite",
+    "build": "vite build -c entry.config.ts && vite build -c lsp.config.ts && vite build && vite build -c sw.config.ts",
+    "dev": "vite build -c entry.config.ts && vite build -c lsp.config.ts && vite build -c sw.config.ts && vite",
     "lint": "util-lint"
   },
   "dependencies": {
     "@awesome.me/webawesome": "^3.12.0",
     "@brianjenkins94/almostnode": "file:../almostnode",
+    "@brianjenkins94/hub": "file:../hub",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@stitches/core": "latest",
     "@typescript-eslint/parser": "^8.70.0",

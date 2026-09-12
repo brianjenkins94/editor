@@ -23,8 +23,19 @@
  *   • COI stamping — every other response is passed through with the isolation headers added.
  *
  * Registered by coi.ts (in prod to provide isolation; in dev, additionally, for the resolver). Pattern
- * adapted from github.com/gzuidhof/coi-serviceworker (MIT). Plain JS (served from public/ untouched by vite).
+ * adapted from github.com/gzuidhof/coi-serviceworker (MIT). Bundled as an ES MODULE (sw.config.ts) so it can
+ * import the hub below; registered {type:module} (coi.ts / server-bridge.ts).
  */
+import { createHub, portTransport } from "@brianjenkins94/hub";
+import { relayLoggerToHub } from "./telemetry";
+
+// The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,
+// errors) is recorded through a source-scoped logger whose records — timed SPANS included — ride the hub to
+// the page's `$sys.log.>` collector. It links to the page over a DEDICATED hub port (the {type:"hub"} message
+// below), separate from the ServerBridge data port. Standalone until linked — records just drop, by design.
+const swHub = createHub({ "id": "sw" });
+const swLog = relayLoggerToHub(swHub, "sw");
+
 globalThis.addEventListener("install", () => globalThis.skipWaiting());
 globalThis.addEventListener("activate", (event) => event.waitUntil(globalThis.clients.claim()));
 
@@ -153,6 +164,8 @@ async function fetchCdn(pathname, requestUrl) {
 	const version = requestUrl.searchParams.get("v");
 	const spec = pkg + (version === null ? "" : "@" + version) + (sub === "" ? "" : "/" + sub);
 	const upstream = CDN + "/" + spec + (requestUrl.searchParams.has("meta") ? "?meta" : "");
+	// A timed span: the collector shows `→ cdn` / `← cdn (Xms)`, so a slow/failed CDN fallback is visible.
+	const span = swLog.span("cdn", { "spec": spec });
 
 	try {
 		const response = await fetch(upstream);
@@ -162,9 +175,13 @@ async function fetchCdn(pathname, requestUrl) {
 		headers.set("Cross-Origin-Opener-Policy", "same-origin");
 		headers.set("Cross-Origin-Resource-Policy", "cross-origin");
 
+		span.end({ "status": response.status });
+
 		return new Response(response.body, { "status": response.status, "statusText": response.statusText, "headers": headers });
 	} catch (error) {
 		console.error("[coi-serviceworker] cdn", upstream, error);
+		span.error("cdn failed", { "upstream": upstream, "error": String(error) });
+		span.end();
 
 		return new Response("cdn error", { "status": 502, "statusText": "Bad Gateway" });
 	}
@@ -260,6 +277,13 @@ globalThis.addEventListener("message", (event) => {
 		// Re-claim so a preview page opened after activation is controlled.
 		globalThis.clients.claim();
 	}
+
+	// Dedicated observability link: the page hands us a hub port (telemetry.ts linkServiceWorkerHub). Link our
+	// hub over it so `$sys.log.sw` records federate to the page's collector.
+	if (data && data.type === "hub" && event.ports && event.ports[0]) {
+		swHub.link(portTransport(event.ports[0]));
+		swLog.info("hub linked");
+	}
 });
 
 // The port drops when the worker is idle-terminated or replaced; ask clients to re-init and wait briefly.
@@ -348,6 +372,9 @@ function virtualHeaders(source) {
 // Relay one request to the in-page dev server on `port` and build a Response from its reply. A POST to /api/*
 // uses the streaming path (SSE / chunked API routes); everything else is a buffered request/response.
 async function handleVirtualRequest(request, port, path) {
+	// A timed span per relay — the collector shows each dev-server round-trip and its duration.
+	const span = swLog.span("bridge", { "port": port, "method": request.method, "path": path });
+
 	try {
 		const headers = {};
 
@@ -376,8 +403,11 @@ async function handleVirtualRequest(request, port, path) {
 		return new Response(null, { "status": response.statusCode, "statusText": response.statusMessage, "headers": headers2 });
 	} catch (error) {
 		console.error("[coi-serviceworker] virtual", error);
+		span.error("bridge failed", { "error": String(error) });
 
 		return new Response("dev-server bridge error: " + error.message, { "status": 500, "headers": { "content-type": "text/plain" } });
+	} finally {
+		span.end();
 	}
 }
 
