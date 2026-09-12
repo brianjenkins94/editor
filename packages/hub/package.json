@@ -1,0 +1,20 @@
+{
+  "name": "@brianjenkins94/hub",
+  "version": "0.0.0",
+  "description": "Composable message hubs — a tree of local-first, subject-routed buses that federate across window / iframe / worker boundaries, so each context (a workbench, an extension's worker pod, a preview surface, a game box) runs its own hub and only the traffic something else is subscribed to ever crosses a boundary.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3"
+  }
+}
