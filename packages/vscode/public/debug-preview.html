@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<!--
+  tsval debug preview — the render surface for the tsval React debugger.
+
+  A standalone, dependency-free page that APPLIES the M3c mutation stream (see extensions/worker-pod/debug-react.ts
+  `Mutation`) to real DOM. It is deliberately "dumb": it knows only the mutation/event protocol, has no VS Code
+  or app dependencies, and talks over a single MessagePort. That makes it location-independent — the exact same
+  page runs whether it is embedded in the workbench's dumb-iframe view OR popped out into its own window; only the
+  transport (the port it is handed) differs.
+
+  Protocol (over the MessagePort handed to us in the `init` message):
+    host → preview : { type: "mutation", mutation }   apply one Mutation
+                     { type: "rendered" }              a commit finished (currently just a repaint boundary)
+                     { type: "history", length }       time-travel history length changed
+                     { type: "reset" }                 new debug session — clear the tree
+    preview → host : { type: "event", id, event }      a DOM event on node `id` → dispatch the guest handler
+
+  Handshake: on load we post { type: "preview-ready" } to our parent (embedded) and opener (popped out). The
+  workbench glue answers with an `init` message that TRANSFERS a MessagePort; from then on all traffic is on it.
+-->
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>tsval preview</title>
+	<style>
+		html, body { margin: 0; height: 100%; }
+		body {
+			font: 13px system-ui, sans-serif;
+			color: #ccc;
+			background: #1e1e1e;
+		}
+		#root { padding: 12px; }
+		#status {
+			position: fixed;
+			right: 6px;
+			bottom: 4px;
+			font-size: 10px;
+			color: #666;
+			pointer-events: none;
+			user-select: none;
+		}
+	</style>
+</head>
+<body>
+	<div id="root"></div>
+	<div id="status">waiting…</div>
+	<script>
+		(function () {
+			"use strict";
+
+			var root = document.getElementById("root");
+			var status = document.getElementById("status");
+
+			// node id → DOM node (element or text). "root" is the #root container.
+			var nodes = new Map();
+			// node id → (event name → the DOM listener we attached) so setHandler(false) can detach it.
+			var listeners = new Map();
+			// The port to the workbench glue, set on `init`.
+			var port = null;
+
+			function node(id) {
+				return id === "root" ? root : nodes.get(id);
+			}
+
+			function send(message) {
+				if (port !== null) {
+					port.postMessage(message);
+				}
+			}
+
+			function setListener(id, event, present) {
+				var byEvent = listeners.get(id);
+				var el = nodes.get(id);
+
+				if (!present) {
+					if (byEvent !== undefined && byEvent.has(event) && el !== undefined) {
+						el.removeEventListener(event, byEvent.get(event));
+						byEvent.delete(event);
+					}
+
+					return;
+				}
+
+				if (el === undefined) {
+					return;
+				}
+
+				if (byEvent === undefined) {
+					byEvent = new Map();
+					listeners.set(id, byEvent);
+				}
+
+				if (byEvent.has(event)) {
+					return; // already attached — the guest handler lives worker-side; identity here never changes
+				}
+
+				var handler = function (domEvent) {
+					// Handlers stay in the worker (they're guest closures); we just report which node fired what.
+					// preventDefault keeps a demo <form>/<a> from navigating the preview away.
+					if (event === "submit") {
+						domEvent.preventDefault();
+					}
+
+					send({ "type": "event", "id": id, "event": event });
+				};
+
+				el.addEventListener(event, handler);
+				byEvent.set(event, handler);
+			}
+
+			// Translate one prop set. React emits raw prop names; map the couple that differ from DOM attributes
+			// and treat `style` (an object) specially. Everything else is a plain attribute, which covers the
+			// counter demo (id, type, …) and most simple guests.
+			function setProp(id, name, value) {
+				var el = nodes.get(id);
+
+				if (el === undefined || el.nodeType !== 1) {
+					return;
+				}
+
+				if (name === "style" && value !== null && typeof value === "object") {
+					el.removeAttribute("style");
+					Object.assign(el.style, value);
+
+					return;
+				}
+
+				var attr = name === "className" ? "class" : (name === "htmlFor" ? "for" : name);
+
+				if (value === false || value === null || value === undefined) {
+					el.removeAttribute(attr);
+				} else if (value === true) {
+					el.setAttribute(attr, "");
+				} else {
+					el.setAttribute(attr, String(value));
+				}
+			}
+
+			function apply(m) {
+				switch (m.op) {
+					case "createElement":
+						nodes.set(m.id, document.createElement(m.type));
+						break;
+					case "createText":
+						nodes.set(m.id, document.createTextNode(m.text));
+						break;
+					case "setProp":
+						setProp(m.id, m.name, m.value);
+						break;
+					case "removeProp":
+						setProp(m.id, m.name, false);
+						break;
+					case "setHandler":
+						setListener(m.id, m.event, m.present);
+						break;
+					case "setText": {
+						var textNode = nodes.get(m.id);
+
+						if (textNode !== undefined) {
+							textNode.textContent = m.text;
+						}
+
+						break;
+					}
+					case "appendChild": {
+						var parent = node(m.parent);
+						var child = nodes.get(m.child);
+
+						if (parent !== undefined && child !== undefined) {
+							parent.appendChild(child);
+						}
+
+						break;
+					}
+					case "insertBefore": {
+						var into = node(m.parent);
+						var moving = nodes.get(m.child);
+						var before = nodes.get(m.before);
+
+						if (into !== undefined && moving !== undefined) {
+							into.insertBefore(moving, before !== undefined ? before : null);
+						}
+
+						break;
+					}
+					case "removeChild": {
+						var from = node(m.parent);
+						var gone = nodes.get(m.child);
+
+						if (from !== undefined && gone !== undefined && gone.parentNode === from) {
+							from.removeChild(gone);
+						}
+
+						break;
+					}
+					default:
+						break;
+				}
+			}
+
+			function reset() {
+				nodes.clear();
+				listeners.clear();
+				root.textContent = "";
+			}
+
+			function onPortMessage(event) {
+				var message = event.data;
+
+				switch (message.type) {
+					case "mutation":
+						apply(message.mutation);
+						status.textContent = "";
+						break;
+					case "rendered":
+						status.textContent = "";
+						break;
+					case "history":
+						status.textContent = message.length > 0 ? ("history: " + message.length) : "";
+						break;
+					case "reset":
+						reset();
+						status.textContent = "waiting…";
+						break;
+					default:
+						break;
+				}
+			}
+
+			// The glue transfers us a MessagePort in an `init` message (works the same for parent and opener).
+			window.addEventListener("message", function (event) {
+				if (event.data && event.data.type === "init" && event.ports && event.ports[0]) {
+					port = event.ports[0];
+					port.onmessage = onPortMessage;
+					status.textContent = "connected";
+					send({ "type": "hello" });
+				}
+			});
+
+			// Announce ourselves to whichever host holds us (embedded → parent; popped out → opener).
+			function announce() {
+				var target = window.opener || (window.parent !== window ? window.parent : null);
+
+				if (target !== null) {
+					target.postMessage({ "type": "preview-ready" }, "*");
+				}
+			}
+
+			announce();
+		})();
+	</script>
+</body>
+</html>

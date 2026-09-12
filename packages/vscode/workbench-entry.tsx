@@ -22,6 +22,7 @@ import workerPodExtensionCode from "worker-pod:extension";
 import helloManifest from "./extensions/hello/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
+import { installDebugPreview } from "./debug-preview-view";
 import { installLogRelay } from "./logging";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { connectAsPane } from "./pane-bus";
@@ -159,6 +160,10 @@ function maybeBoot(): void {
 				vscodeApi = api;
 				// Unblock the debug bridge (window.__editor.ready / .api). See debug-bridge.ts.
 				markBridgeReady();
+				// The tsval debug preview: a dumb-iframe panel view + the adapter↔surface render bridge. Real DOM
+				// (not a webview), so it composites in our coi-serviceworker single-origin harness. See
+				// debug-preview-view.ts.
+				installDebugPreview(() => vscodeApi);
 				bootSpan.info("hello extension api captured");
 				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
 				// AFTER the workbench restores its last-active viewlet (which would otherwise win).
