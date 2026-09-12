@@ -19,6 +19,8 @@
     "eslint": "^10.10.0",
     "lucide": "latest",
     "preact": "latest",
+    "react": "18.2.0",
+    "react-reconciler": "0.29.0",
     "vscode-languageclient": "^10.1.1",
     "vscode-languageserver": "^10.1.1",
     "vscode-languageserver-textdocument": "^1.0.12"
