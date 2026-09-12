@@ -16,15 +16,19 @@
  * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
 import ts from "typescript";
+import React from "react";
 
 import { createVM, type LoadedVM } from "@brianjenkins94/tsval";
+
+import { createGuestRoot, type GuestRoot } from "./debug-react";
 
 type Vm = LoadedVM["vm"];
 
 /** Control messages from the adapter. */
 type Incoming =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control": SharedArrayBuffer }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control": SharedArrayBuffer; "react"?: boolean }
 	| { "type": "setBreakpoints"; "lines": number[] }
+	| { "type": "dispatch"; "id": number; "event": string }
 	| { "type": "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect" };
 
 type Action = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect";
@@ -55,6 +59,8 @@ let awaitAction: ((action: Action) => void) | undefined;
  * thread stays live, and the adapter resumes it via `Atomics.notify`. control[0]: 0 = waiting, 1 = go.
  */
 let control: Int32Array | undefined;
+/** In React mode, the reconciler root the guest app renders into (see launchReact). */
+let guestRoot: GuestRoot | undefined;
 
 function nextAction(): Promise<Action> {
 	return new Promise((resolve) => { awaitAction = resolve; });
@@ -250,12 +256,53 @@ async function session(initial: Vm): Promise<void> {
 	}
 }
 
+/**
+ * React launch (M3c): run the app under tsval with native React and a reconciler-backed ReactDOM shim as
+ * guest globals. The app's own `ReactDOM.createRoot(...).render(<App/>)` drives our reconciler, which streams
+ * mutations to the adapter. Component/handler code is guest, so a breakpoint in it pauses via onBreakpointHook
+ * (the reconciler invokes them synchronously). After mount the worker is idle, servicing `dispatch` (DOM
+ * events routed back from the iframe) — each re-renders and streams more mutations.
+ */
+function launchReact(message: Extract<Incoming, { "type": "launch" }>): void {
+	guestRoot = createGuestRoot(React, (mutation) => post({ "type": "mutation", "mutation": mutation }));
+
+	const reactDom = {
+		"createRoot": () => ({ "render": (element: unknown) => guestRoot?.render(element), "unmount": () => guestRoot?.unmount() }),
+		"render": (element: unknown) => guestRoot?.render(element)
+	};
+	// Minimal document shim so `ReactDOM.createRoot(document.getElementById("root"))` (the idiomatic entry)
+	// doesn't throw; the container arg is ignored (our root is the reconciler container).
+	const documentShim = { "getElementById": () => ({}), "createElement": () => ({}), "body": {} };
+
+	const loaded = createVM(message.source, {
+		"fileName": message.fileName,
+		"onBreakpoint": onBreakpointHook,
+		"globals": { "React": React, "ReactDOM": reactDom, "document": documentShim }
+	});
+	sourceFile = loaded.sourceFile;
+	loaded.vm.addBreakpointsByLine(...message.lines);
+
+	try {
+		loaded.vm.run(); // executes the module → guest render() → mount → mutations posted
+	} catch (error) {
+		post({ "type": "output", "text": "Uncaught " + String(error) });
+	}
+
+	post({ "type": "rendered" });
+}
+
 self.onmessage = (event: MessageEvent<Incoming>): void => {
 	const message = event.data;
 
 	switch (message.type) {
 		case "launch": {
 			control = new Int32Array(message.control);
+
+			if (message.react === true) {
+				launchReact(message);
+				break;
+			}
+
 			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook });
 			sourceFile = loaded.sourceFile;
 			loaded.vm.addBreakpointsByLine(...message.lines);
@@ -265,6 +312,10 @@ self.onmessage = (event: MessageEvent<Incoming>): void => {
 			void session(loaded.vm);
 			break;
 		}
+
+		case "dispatch":
+			guestRoot?.dispatch(message.id, message.event);
+			break;
 
 		case "setBreakpoints":
 			// Re-point breakpoints on every stored fork so time-traveled forward runs honor the new set.

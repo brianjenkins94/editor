@@ -30,7 +30,10 @@ interface Instance { "id": number; "type": string }
 interface TextInstance { "id": number }
 type Container = { "id": "root" };
 
-export interface GuestAppHandle {
+export interface GuestRoot {
+	/** Render a React element (typically `React.createElement(App)`) — mount or update. Runs the guest
+	 *  components synchronously through tsval, so a breakpoint inside one pauses (M3b). */
+	"render": (element: unknown) => void;
 	/** Invoke the guest handler registered for (nodeId, event) — a DOM event routed back from the iframe. Runs
 	 *  synchronously through tsval, so a breakpoint inside the handler pauses (M3b). */
 	"dispatch": (id: number, event: string) => void;
@@ -47,10 +50,11 @@ function isHandlerProp(name: string, value: unknown): boolean {
 }
 
 /**
- * Mount a guest React component, emitting mutations to `emit`. `React` is the SAME native React the guest is
- * given as a global (so guest `createElement`/`useState` calls reach this reconciler's active render).
+ * Create a render root that emits mutations to `emit`. `render(element)` mounts/updates a guest React tree.
+ * `React` is the SAME native React the guest is given (so guest `createElement`/`useState` reach this
+ * reconciler's active render). The guest's ReactDOM shim calls `render` from `createRoot().render(...)`.
  */
-export function mountGuestApp(React: typeof ReactNamespace, App: unknown, emit: (mutation: Mutation) => void): GuestAppHandle {
+export function createGuestRoot(React: typeof ReactNamespace, emit: (mutation: Mutation) => void): GuestRoot {
 	let nextId = 1;
 	// (nodeId → event → guest handler). Kept worker-side; never serialized.
 	const handlers = new Map<number, Map<string, (event: unknown) => void>>();
@@ -160,9 +164,8 @@ export function mountGuestApp(React: typeof ReactNamespace, App: unknown, emit: 
 	const reconciler = Reconciler(hostConfig as unknown as Reconciler.HostConfig<string, Record<string, unknown>, Container, Instance, TextInstance, never, never, Instance, unknown, unknown, number, number, number>);
 	const root = reconciler.createContainer({ "id": "root" }, 0, null, false, null, "", () => undefined, null);
 
-	reconciler.updateContainer(React.createElement(App as React.FunctionComponent), root, null, () => undefined);
-
 	return {
+		"render": (element: unknown) => reconciler.updateContainer(element as React.ReactNode, root, null, () => undefined),
 		"dispatch": (id: number, event: string) => {
 			const fn = handlers.get(id)?.get(event);
 
