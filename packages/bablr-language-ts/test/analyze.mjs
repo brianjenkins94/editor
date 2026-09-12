@@ -109,22 +109,14 @@ export function analyze(cases, results, { size, started, top = 40 } = {}) {
 	const suspects = suspectTable(rows.filter((row) => !row.usesTs), "pure-JS");
 	const tsSuspects = suspectTable(rows.filter((row) => row.usesTs), "TS-using");
 
-  // coarse position buckets
-	const buckets = new Map();
-
-	for (const row of rows) {
-		if (row.status !== "pass") {
-			const key = `${row.usesTs ? "TS" : "JS"} | ${row.bucket}`;
-			const bucket = buckets.get(key) ?? { "count": 0, "examples": [] };
-
-			bucket.count += 1;
-			if (bucket.examples.length < 2) {
-				bucket.examples.push({ "id": `${row.corpus}/${row.id}`, "line": row.at?.line, "excerpt": row.at?.excerpt });
-			}
-
-			buckets.set(key, bucket);
-		}
-	}
+  // coarse position buckets — group failing rows by JS/TS + coarse position, keep a count + first 2 examples
+	const buckets = new Map(
+		[...Map.groupBy(rows.filter((row) => row.status !== "pass"), (row) => `${row.usesTs ? "TS" : "JS"} | ${row.bucket}`)]
+			.map(([key, group]) => [key, {
+				"count": group.length,
+				"examples": group.slice(0, 2).map((row) => ({ "id": `${row.corpus}/${row.id}`, "line": row.at?.line, "excerpt": row.at?.excerpt }))
+			}])
+	);
 
 	const sorted = [...buckets].sort((first, second) => second[1].count - first[1].count);
 	const js = sorted.filter(([key]) => key.startsWith("JS |"));

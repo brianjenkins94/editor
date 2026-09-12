@@ -78,13 +78,9 @@ for (const testCase of loadTest262(FULL_ROOT, (id) => dir === undefined || id.st
 }
 
 function bucket<T>(items: T[], key: (t: T) => string): [string, number][] {
-	const tally = new Map<string, number>();
-
-	for (const it of items) {
-		tally.set(key(it), (tally.get(key(it)) ?? 0) + 1);
-	}
-
-	return [...tally].sort((left, right) => right[1] - left[1]);
+	return [...Map.groupBy(items, key)]
+		.map(([name, group]): [string, number] => [name, group.length])
+		.sort((left, right) => right[1] - left[1]);
 }
 
 const topDir = (id: string): string => id.split("/").slice(0, 2).join("/");
