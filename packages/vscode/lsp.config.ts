@@ -29,26 +29,26 @@ function cspellDict(): Plugin {
 }
 
 /**
- * Builds the LSP host's worker (extensions/lsp-host/server-host.ts → dist/lsp/server-host.js) — a normal
+ * Builds the LSP host's worker (extensions/worker-pod/server-host.ts → dist/lsp/server-host.js) — a normal
  * multi-chunk module graph, NOT a monolithic blob. server-host runs almostnode's in-realm Runtime inside
  * the worker and executes the node language server (server-node) through it; almostnode is bundled as an
  * ordinary dependency here (its lazy wasm / dynamic imports stay as separate emitted chunks — the thing a
- * single-file blob broke). bundledNodeServer supplies `lsp-host:server-node` (the node server as a CJS
+ * single-file blob broke). bundledNodeServer supplies `worker-pod:server-node` (the node server as a CJS
  * string, node builtins external) that server-host hands to almostnode.
  *
  * Served under /__vscode__/lsp/ (vscodePlugin serves this package's dist/), with COEP from that route. The
- * lsp-host EXTENSION (data:-URL, ext host) can't emit/locate this itself, so it's built + served like the
- * preflight engine and spawned by URL (new Worker(new URL("./lsp/server-host.js", location.href))).
+ * worker-pod EXTENSION (data:-URL, ext host) can't emit/locate this itself, so it's built + served here as a
+ * standalone module graph and spawned by URL (new Worker(new URL("./lsp/server-host.js", location.href))).
  *
- * Relative base (like the engine) so emitted asset URLs resolve under /__vscode__/lsp/. Runs after
+ * Relative base so emitted asset URLs resolve under /__vscode__/lsp/. Runs after
  * entry.config (which empties dist/), so emptyOutDir is FALSE.
  */
 const resolvePath = (relative: string): string => url.fileURLToPath(new URL(relative, import.meta.url));
 
 export default defineConfig({
 	"base": "./",
-	"plugins": [bundledNodeServer("lsp-host"), bundledNodeServer("lsp-host", "server-node-eslint.ts", "server-node-eslint", "esbuild"), cspellDict()],
-	// oxc-style: if almostnode spawns a real (non-@vite-ignore'd) worker, build it as an ES module worker.
+	"plugins": [bundledNodeServer("worker-pod"), bundledNodeServer("worker-pod", "server-node-eslint.ts", "server-node-eslint", "esbuild"), cspellDict()],
+	// If almostnode spawns a real (non-@vite-ignore'd) worker, build it as an ES module worker.
 	"worker": { "format": "es" },
 	"build": {
 		"target": "esnext",
@@ -61,8 +61,8 @@ export default defineConfig({
 			// connection on load), so preserve the entry signature.
 			"preserveEntrySignatures": "strict",
 			"input": {
-				"lsp/server-host": resolvePath("./extensions/lsp-host/server-host.ts"),
-				"lsp/server-host-eslint": resolvePath("./extensions/lsp-host/server-host-eslint.ts")
+				"lsp/server-host": resolvePath("./extensions/worker-pod/server-host.ts"),
+				"lsp/server-host-eslint": resolvePath("./extensions/worker-pod/server-host-eslint.ts")
 			},
 			"output": {
 				"format": "es",

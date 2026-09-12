@@ -4,9 +4,8 @@
   "type": "module",
   "scripts": {
     "build:entry": "vite build -c entry.config.ts",
-    "build:engine": "vite build -c engine.plugin.config.ts",
-    "build": "vite build -c entry.config.ts && vite build -c engine.plugin.config.ts && vite build -c lsp.config.ts && vite build",
-    "dev": "vite build -c entry.config.ts && vite build -c engine.plugin.config.ts && vite build -c lsp.config.ts && vite",
+    "build": "vite build -c entry.config.ts && vite build -c lsp.config.ts && vite build",
+    "dev": "vite build -c entry.config.ts && vite build -c lsp.config.ts && vite",
     "lint": "util-lint"
   },
   "dependencies": {
@@ -25,7 +24,6 @@
     "vscode-languageserver-textdocument": "^1.0.12"
   },
   "devDependencies": {
-    "@oxc-parser/binding-wasm32-wasi": "0.149.0",
     "@types/node": "latest",
     "@types/vscode": "latest",
     "esbuild": "^0.28.2",

@@ -1,17 +1,18 @@
 /**
- * LSP Host — the manager extension (runs in the extension host, LocalProcess). It runs language servers
- * off-thread in workers and connects each to the editor with a vscode-languageclient. The client
- * integration (diagnostics/hover/completion) is the language client's job; the server runs in the worker.
+ * Worker Pod — the manager extension (runs in the extension host, LocalProcess) that hosts a pod of workers
+ * behind one extension. Today it runs NODE language servers off-thread and connects each to the editor with
+ * a vscode-languageclient; a tsval-backed debug adapter is the next pod member (see debug-adapter.ts).
  *
- * Each worker (a server-host) runs a NODE language server under an almostnode runtime on a zen-fs VFS, so a
+ * Each language server worker (a server-host) runs under an almostnode runtime on a zen-fs VFS, so a
  * node-only server (cspell reading its dictionary; eslint parsing TS) works in-browser. Each is built +
  * served separately (lsp.config.ts → /__vscode__/lsp/, with COEP) as a normal module graph — not a blob —
  * because almostnode can't be monolithically inlined. The extension can't emit/locate those assets from its
- * data:-URL self, so it spawns them by URL relative to the workbench origin (`location.href`), the same way
- * the preflight engine URL is resolved.
+ * data:-URL self, so it spawns them by URL relative to the workbench origin (`location.href`).
  */
 import type * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
+
+import { registerDebugSpike } from "./debug-adapter";
 
 interface ServerSpec {
 	"id": string;
@@ -43,20 +44,23 @@ function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 	const worker = new Worker(new URL(spec.workerFile, location.href), { "type": "module" });
 
 	worker.addEventListener("error", (event) => {
-		console.error(`[lsp-host] ${spec.id} worker error:`, event.message, "@", event.filename + ":" + event.lineno);
+		console.error(`[worker-pod] ${spec.id} worker error:`, event.message, "@", event.filename + ":" + event.lineno);
 	});
 
 	const client = new LanguageClient(`lsp-${spec.id}`, spec.name, worker, { "documentSelector": spec.documentSelector });
 
 	clients.push(client);
 	client.start().then(() => {
-		console.log(`[lsp-host] ${spec.id} language client started`);
+		console.log(`[worker-pod] ${spec.id} language client started`);
 	}).catch((error: unknown) => {
-		console.error(`[lsp-host] ${spec.id} client start failed`, error);
+		console.error(`[worker-pod] ${spec.id} client start failed`, error);
 	});
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+	// M0: register the tsval debug type (stub adapter) — proves the debug plumbing before the real engine.
+	registerDebugSpike(context);
+
 	for (const spec of SERVERS) {
 		startServer(context, spec);
 	}

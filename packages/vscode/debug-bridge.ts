@@ -10,20 +10,16 @@
  * full `typeof vscode` namespace — so it can run commands, read/replace the active document, read diagnostics,
  * and hand back the RAW extension API for ad-hoc poking (incl. the TypeScript language features, exposed via
  * `tsExtension()`/`hoverAt()` so we can see what type access the host already offers before bundling our own).
- * It also runs the preflight engine directly for structured rows.
  *
  * Gated to localhost, so it never ships to the deployed Pages site. (The entry is always built in production
  * mode, so a hostname check is used rather than import.meta.env.DEV.)
  */
-/* eslint-disable ts/no-explicit-any, no-new-func, ts/no-implied-eval */
+/* eslint-disable ts/no-explicit-any */
 
 type Api = any;
 
 let resolveReady: () => void;
 const readyPromise = new Promise<void>((resolve) => { resolveReady = resolve; });
-
-/** Native dynamic import that the bundler can't rewrite to require (same trick the preflight extension uses). */
-const importModule = new Function("specifier", "return import(specifier);") as (specifier: string) => Promise<any>;
 
 /** Install `window.__editor`. `getApi` is read lazily so the bridge exists before the API is captured;
  *  `ready` resolves once it is (call `markBridgeReady`). No-op off localhost. */
@@ -32,7 +28,6 @@ export function installDebugBridge(getApi: () => Api): void {
 		return;
 	}
 
-	const engineUrl = new URL("./preflight/engine.js", location.href).href;
 	const requireApi = (): Api => {
 		const api = getApi();
 
@@ -45,7 +40,6 @@ export function installDebugBridge(getApi: () => Api): void {
 
 	const bridge = {
 		"ready": readyPromise,
-		"engineUrl": engineUrl,
 
 		/** The raw vscode extension API namespace, for anything not wrapped below. */
 		get "api"(): Api { return requireApi(); },
@@ -117,16 +111,6 @@ export function installDebugBridge(getApi: () => Api): void {
 			}
 
 			return api.commands.executeCommand("vscode.executeHoverProvider", uri, new api.Position(line, character));
-		},
-
-		/** Run the preflight engine directly on the host page (structured rows, no extension/output-channel). */
-		"preflight": async (text?: string, fileName?: string): Promise<any> => {
-			const api = getApi();
-			const source = text ?? api?.window.activeTextEditor?.document.getText() ?? "";
-			const name = fileName ?? api?.window.activeTextEditor?.document.fileName ?? "entry.ts";
-			const engine = await importModule(engineUrl);
-
-			return engine.runPreflight(source, name);
 		}
 	};
 

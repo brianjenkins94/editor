@@ -10,7 +10,7 @@
  */
 import { createRuntime } from "@brianjenkins94/almostnode";
 // The eslint server (eslint-lib + @typescript-eslint/parser + the LSP lib), bundled to an ESM string.
-import serverNodeCode from "lsp-host:server-node-eslint";
+import serverNodeCode from "worker-pod:server-node-eslint";
 import { createZenfsVFS } from "./zenfs-vfs.js";
 
 /** The deploy base URL ("https://host/editor/" on Pages, "https://host/" locally), derived from this worker's
@@ -34,5 +34,5 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-	console.error("[lsp-host/server-host-eslint] failed to start eslint server under almostnode", error);
+	console.error("[worker-pod/server-host-eslint] failed to start eslint server under almostnode", error);
 });

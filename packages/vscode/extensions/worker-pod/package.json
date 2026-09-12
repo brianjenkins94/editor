@@ -1,0 +1,50 @@
+{
+  "name": "worker-pod",
+  "displayName": "Worker Pod",
+  "description": "One extension hosting a pod of workers: almostnode-backed language servers (cspell, eslint) and a tsval debug adapter.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onDebug",
+    "onDebugResolve:tsval"
+  ],
+  "contributes": {
+    "breakpoints": [
+      { "language": "typescript" },
+      { "language": "typescriptreact" },
+      { "language": "javascript" },
+      { "language": "javascriptreact" }
+    ],
+    "debuggers": [
+      {
+        "type": "tsval",
+        "label": "tsval (step + time-travel)",
+        "languages": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "The source file to run under tsval.",
+                "default": "${file}"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "tsval",
+            "request": "launch",
+            "name": "Debug (tsval)",
+            "program": "${file}"
+          }
+        ]
+      }
+    ]
+  }
+}

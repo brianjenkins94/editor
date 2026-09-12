@@ -18,14 +18,9 @@ import { render } from "preact";
 // The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
 // virtual module in entry.config.ts).
 import helloExtensionCode from "hello:extension";
-import lspHostExtensionCode from "lsp-host:extension";
-import preflightExtensionCode from "preflight:extension";
+import workerPodExtensionCode from "worker-pod:extension";
 import helloManifest from "./extensions/hello/package.json";
-import lspHostManifest from "./extensions/lsp-host/package.json";
-import preflightManifest from "./extensions/preflight/package.json";
-// The preflight TS server plugin's source as a string, registered as an extension file (data: URL) so the
-// in-browser tsserver loads it (see ts-plugin.js). `?raw` keeps it real, editable code rather than an inline blob.
-import tsPluginSource from "./extensions/preflight/ts-plugin.js?raw";
+import workerPodManifest from "./extensions/worker-pod/package.json";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installLogRelay } from "./logging";
 import { createNodeModulesProvider } from "./node-modules-provider";
@@ -130,17 +125,12 @@ function maybeBoot(): void {
 
 	bootWithFallbackViewport(document.documentElement);
 
-	// The preflight engine is served next to this entry under /__vscode__/; only the host knows its own origin,
-	// so we resolve its absolute URL here and hand it to the extension via settings. The extension derives the
-	// typescript-external plugin engine URL (engine.plugin.js) from this base and loads it inside tsserver.
-	const engineUrl = new URL("./preflight/engine.js", location.href).href;
-
 	boot({
 		"parts": parts,
 		"files": files,
 		"openEditors": openEditors,
 		"workspaceFolder": workspaceFolder,
-		"configuration": { ...configuration, "preflight.engineUrl": engineUrl },
+		"configuration": configuration,
 		"keybindings": keybindings,
 		"onSave": (path, contents) => {
 			bus.post({ "type": "save", "path": path, "contents": contents });
@@ -175,33 +165,14 @@ function maybeBoot(): void {
 				setTimeout(runCommand, 0, "workbench.view.explorer");
 			}).catch((error: unknown) => { bootSpan.error("hello extension setup failed", { "error": errText(error) }); });
 
-			// The capability-preflight extension — the overlay's engine. Registered in the WEB-WORKER
-			// extension host (the natural home for a web extension) as browser CJS via a data: URL. Its heavy
-			// ESM/wasm half is pulled in at runtime by a native import() of the served /__vscode__/preflight/
-			// engine.js (see extension.ts), so the host never loads ESM itself — the constraint behind
-			// CodinGame/monaco-vscode-api#818.
-			const preflightExt = registerExtension(preflightManifest, ExtensionHostKind.LocalWebWorker);
-
-			// encodeURIComponent (not btoa) so any non-Latin1 char in the bundled code can't throw and abort boot.
-			preflightExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(preflightExtensionCode));
-
-			// The preflight TS server plugin (route 3, type provider). Registered as extension files so the
-			// ext-host worker's patched fetch/importExt (monaco patch 0005) resolves its extension-file:// probe
-			// URIs via the static browser-URI map to these data: URLs — which is what loads it into the in-browser
-			// tsserver. The `typescriptServerPlugins` contribution in preflight's manifest names it.
-			const tsPluginPkg = JSON.stringify({ "name": "preflight-ts-plugin", "version": "0.0.1", "browser": "index.js" });
-
-			preflightExt.registerFileUrl("./node_modules/preflight-ts-plugin/package.json", "data:application/json," + encodeURIComponent(tsPluginPkg));
-			preflightExt.registerFileUrl("./node_modules/preflight-ts-plugin/index.js", "data:text/javascript," + encodeURIComponent(tsPluginSource));
-
 			// The LSP host — the manager extension that runs language servers in workers (LSP spine). Registered
 			// on the main-thread (LocalProcess) host so it spawns top-level, non-throttled server workers; the
 			// server ships inside its own bundle and starts as a Blob-URL module worker (see its extension.ts).
-			const lspHostExt = registerExtension(lspHostManifest, ExtensionHostKind.LocalProcess);
+			const workerPodExt = registerExtension(workerPodManifest, ExtensionHostKind.LocalProcess);
 
-			lspHostExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(lspHostExtensionCode));
+			workerPodExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(workerPodExtensionCode));
 
-			bootSpan.info("extensions registered", { "extensions": ["hello", "preflight", "lsp-host"] });
+			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			bus.post({ "type": "online" });

@@ -14,7 +14,7 @@
  */
 import { createRuntime } from "@brianjenkins94/almostnode";
 // The cspell server (with cspell-lib + the LSP lib), bundled to an ESM string by entry.config.ts; run below.
-import serverNodeCode from "lsp-host:server-node";
+import serverNodeCode from "worker-pod:server-node";
 import { createZenfsVFS } from "./zenfs-vfs.js";
 
 // Kept in one place, matched by server-node's DICT_PATH.
@@ -56,5 +56,5 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-	console.error("[lsp-host/server-host] failed to start cspell server under almostnode", error);
+	console.error("[worker-pod/server-host] failed to start cspell server under almostnode", error);
 });
