@@ -1,0 +1,34 @@
+{
+  "name": "@brianjenkins94/dev-hub",
+  "version": "0.0.0",
+  "description": "A Node hub-tree node that collects the span/log stream a page's composable hubs federate out over a WebSocket, and serves it to an agent over MCP — query_logs / query_spans / get_tree_state / wait_for — so the live editor's rendered and errored state is queryable without screenshots.",
+  "type": "module",
+  "bin": {
+    "dev-hub": "./src/bin.ts"
+  },
+  "exports": {
+    ".": "./src/server.ts",
+    "./store": "./src/store.ts",
+    "./mcp": "./src/mcp.ts"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/bin.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@brianjenkins94/hub": "file:../hub",
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "ws": "^8.21.3",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/ws": "^8.18.1"
+  }
+}

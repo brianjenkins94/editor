@@ -6,7 +6,7 @@ import workspace from "editor:workspace";
 import { createHub } from "@brianjenkins94/hub";
 import { ensureCrossOriginIsolated } from "./coi";
 import { hostLog } from "./logging";
-import { consoleCollector, installHubCollector, linkServiceWorkerHub } from "./telemetry";
+import { consoleCollector, installHubCollector, linkDevHub, linkServiceWorkerHub } from "./telemetry";
 import { createVscodeWindow } from "./vscode";
 import { createPaneWindow } from "./window";
 
@@ -30,6 +30,7 @@ if (ensureCrossOriginIsolated()) {
 
 	installHubCollector(rootHub, consoleCollector);
 	linkServiceWorkerHub(rootHub);
+	linkDevHub(rootHub); // dev-only (localhost): federate the tree to a running @brianjenkins94/dev-hub for MCP querying
 
 	// The live preview: runs the demo (a Vite React app) through an in-browser dev server and hot-reloads on
 	// save. Created lazily (dynamic import) so `typescript` — the preview's transpiler — stays out of the

@@ -1,8 +1,8 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { Transport } from "../src/index.ts";
-import { createHub, matches } from "../src/index.ts";
+import type { Transport, WebSocketLike } from "../src/index.ts";
+import { createHub, matches, websocketTransport } from "../src/index.ts";
 
 /** A connected pair of in-memory transports — delivery is async (a macrotask) to mirror postMessage, so tests
  *  `await flush()` to let interest control and messages settle across hops. */
@@ -140,6 +140,42 @@ test("interest survives a late link on a LOSSY transport (hello handshake)", asy
 	await flush();
 
 	assert.deepEqual(atRoot, ["recovered"]);
+});
+
+test("websocketTransport federates over a JSON-framed, EventTarget-shaped socket", async () => {
+	// A connected pair of WebSocket-shaped endpoints: `send` frames to the peer's `message` listeners, delivered
+	// async (like a real socket). Verifies JSON framing round-trips and that a Buffer-ish `data` is coerced.
+	function socketPair(): [WebSocketLike, WebSocketLike] {
+		const listeners: [Set<(event: { "data": unknown }) => void>, Set<(event: { "data": unknown }) => void>] = [new Set(), new Set()];
+
+		const make = (self: 0 | 1): WebSocketLike => ({
+			"readyState": 1,
+			"send": (data) => { const peer = listeners[self === 0 ? 1 : 0]; const wire = self === 0 ? Buffer.from(data) : data; setTimeout(() => { for (const fn of peer) { fn({ "data": wire }); } }, 0); },
+			"addEventListener": (_type, handler) => { listeners[self].add(handler); },
+			"removeEventListener": (_type, handler) => { listeners[self].delete(handler); }
+		});
+
+		return [make(0), make(1)];
+	}
+
+	const [clientSocket, serverSocket] = socketPair();
+	const page = createHub({ "id": "page" });
+	const devHub = createHub({ "id": "dev-hub" });
+
+	page.link(websocketTransport(clientSocket));
+	devHub.link(websocketTransport(serverSocket));
+
+	const collected: unknown[] = [];
+	devHub.subscribe("$sys.log.>", (data) => { collected.push(data); });
+
+	await flush(); // interest crosses the socket
+
+	page.publish("$sys.log.worker", { "message": "step", "durationMs": 3 });
+	page.publish("app.local", "should-not-cross"); // dev-hub never subscribed to this
+
+	await flush();
+
+	assert.deepEqual(collected, [{ "message": "step", "durationMs": 3 }]);
 });
 
 test("unlink stops federation and withdraws interest", async () => {

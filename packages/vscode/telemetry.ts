@@ -13,8 +13,8 @@
  * intact; the collector tags each by `context.source` (span ids are per-context, so the source tag is what
  * disambiguates them across contexts until we add a context-id prefix for cross-context parent linking).
  */
-import type { Hub } from "@brianjenkins94/hub";
-import { portTransport } from "@brianjenkins94/hub";
+import type { Hub, WebSocketLike } from "@brianjenkins94/hub";
+import { portTransport, websocketTransport } from "@brianjenkins94/hub";
 import type { Logger, LogRecord } from "@brianjenkins94/util/logger";
 import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
 
@@ -85,4 +85,45 @@ export function linkServiceWorkerHub(rootHub: Hub): void {
 
 	wire();
 	navigator.serviceWorker.addEventListener("controllerchange", wire);
+}
+
+/**
+ * Dev-only: link the page's rootHub to a running `@brianjenkins94/dev-hub` over a WebSocket, so the whole tree's
+ * `$sys.log.>` stream federates out to the Node collector and becomes queryable over MCP (query_logs /
+ * query_spans / get_tree_state / wait_for) — no screenshots. No-op off localhost. It makes ONE quiet attempt: if
+ * no dev-hub is running the failed connect is left alone (no retry, no spam); once it HAS connected, a later drop
+ * reconnects with a short backoff (the hub's `hello` handshake re-advertises interest on each relink).
+ */
+export function linkDevHub(rootHub: Hub, url = "ws://localhost:7378"): void {
+	const host = location.hostname;
+
+	if (host !== "localhost" && host !== "127.0.0.1") {
+		return;
+	}
+
+	let everConnected = false;
+	let unlink: (() => void) | undefined;
+
+	const connect = (): void => {
+		const ws = new WebSocket(url);
+
+		ws.addEventListener("open", () => {
+			everConnected = true;
+			unlink = rootHub.link(websocketTransport(ws as unknown as WebSocketLike));
+		});
+
+		ws.addEventListener("close", () => {
+			unlink?.();
+			unlink = undefined;
+
+			if (everConnected) {
+				setTimeout(connect, 2000); // dev-hub restarted — rejoin
+			}
+		});
+
+		// Swallow the connect error so a missing dev-hub doesn't surface as an unhandled event; `close` follows.
+		ws.addEventListener("error", () => { /* handled by close */ });
+	};
+
+	connect();
 }
