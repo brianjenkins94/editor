@@ -55,31 +55,14 @@ import * as diagnosticsChannelShim from './shims/diagnostics_channel';
 import assertShim from './shims/assert';
 import { resolve as resolveExports, imports as resolveImports } from 'resolve.exports';
 import { transformEsmToCjsSimple } from './frameworks/esm-cjs';
-import * as acorn from 'acorn';
+import ts from 'typescript';
 
 /**
- * Walk an acorn AST recursively, calling the callback for every node.
+ * Walk a TypeScript AST recursively, calling the callback for every node.
  */
-function walkAst(node: any, callback: (node: any) => void): void {
-  if (!node || typeof node !== 'object') return;
-  if (typeof node.type === 'string') {
-    callback(node);
-  }
-  for (const key of Object.keys(node)) {
-    if (key === 'type' || key === 'start' || key === 'end' || key === 'loc' || key === 'range') continue;
-    const child = node[key];
-    if (child && typeof child === 'object') {
-      if (Array.isArray(child)) {
-        for (const item of child) {
-          if (item && typeof item === 'object' && typeof item.type === 'string') {
-            walkAst(item, callback);
-          }
-        }
-      } else if (typeof child.type === 'string') {
-        walkAst(child, callback);
-      }
-    }
-  }
+function walkAst(node: ts.Node, callback: (node: ts.Node) => void): void {
+  callback(node);
+  ts.forEachChild(node, (child) => walkAst(child, callback));
 }
 
 /**
@@ -93,7 +76,7 @@ function transformDynamicImportsRegex(code: string): string {
 /**
  * All-in-one ESM to CJS transform using AST.
  * Handles import/export declarations, import.meta, and dynamic imports in a single pass.
- * Falls back to regex-based transforms if acorn can't parse the code.
+ * Falls back to regex-based transforms if the AST walk throws.
  */
 function transformEsmToCjs(code: string, filename: string): string {
   // Quick check: does the code have any ESM-like patterns?
@@ -109,7 +92,7 @@ function transformEsmToCjs(code: string, filename: string): string {
 }
 
 /**
- * AST-based ESM to CJS transform. Parses once with acorn, then:
+ * AST-based ESM to CJS transform. Parses once with the TypeScript AST, then:
  * 1. Replaces import.meta with import_meta (the wrapper-provided variable)
  * 2. Replaces dynamic import() with __dynamicImport()
  * 3. Transforms import/export declarations to require/exports
@@ -118,26 +101,28 @@ function transformEsmToCjs(code: string, filename: string): string {
  * Step 3 re-parses the modified code via transformEsmToCjsSimple.
  */
 function transformEsmToCjsAst(code: string, filename: string): string {
-  const ast = acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'module' }) as any;
+  const sourceFile = ts.createSourceFile('module.tsx', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
   // Collect deep replacements: import.meta → import_meta, import() → __dynamicImport()
   const deepReplacements: Array<[number, number, string]> = [];
 
-  walkAst(ast, (node: any) => {
+  walkAst(sourceFile, (node) => {
     // import.meta → import_meta (variable provided by module wrapper)
-    if (node.type === 'MetaProperty' && node.meta?.name === 'import' && node.property?.name === 'meta') {
-      deepReplacements.push([node.start, node.end, 'import_meta']);
+    if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword && node.name.text === 'meta') {
+      deepReplacements.push([node.getStart(sourceFile), node.getEnd(), 'import_meta']);
     }
-    // import('x') → __dynamicImport('x')
-    if (node.type === 'ImportExpression') {
-      // Replace just the 'import' keyword, preserving the (...) part
-      deepReplacements.push([node.start, node.start + 6, '__dynamicImport']);
+    // import('x') → __dynamicImport('x') — replace just the `import` keyword, preserving the (...) part
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      deepReplacements.push([node.expression.getStart(sourceFile), node.expression.getEnd(), '__dynamicImport']);
     }
   });
 
   // Check for actual import/export declarations
-  const hasImportDecl = ast.body.some((n: any) => n.type === 'ImportDeclaration');
-  const hasExportDecl = ast.body.some((n: any) => n.type?.startsWith('Export'));
+  const hasImportDecl = sourceFile.statements.some((statement) => ts.isImportDeclaration(statement));
+  const hasExportDecl = sourceFile.statements.some((statement) =>
+    ts.isExportDeclaration(statement)
+    || ts.isExportAssignment(statement)
+    || (ts.canHaveModifiers(statement) && (ts.getModifiers(statement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false)));
 
   // Apply deep replacements from end to start (preserves earlier positions)
   let transformed = code;
@@ -159,7 +144,7 @@ function transformEsmToCjsAst(code: string, filename: string): string {
 }
 
 /**
- * Regex-based fallback for ESM to CJS transform (when acorn can't parse).
+ * Regex-based fallback for ESM to CJS transform (when the AST walk throws).
  */
 function transformEsmToCjsRegexFallback(code: string, filename: string): string {
   let transformed = code;

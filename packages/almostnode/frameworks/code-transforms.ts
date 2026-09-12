@@ -3,10 +3,11 @@
  *
  * Upstream's frameworks/code-transforms.ts also carried acorn+css-tree JSX/TS/CSS-module transforms, but the
  * editor's dev server transpiles with the browser TypeScript (`ts.transpileModule`, see vite-dev-server.ts),
- * so only React-Refresh registration is needed here. Kept dep-light: acorn only (no css-tree). CSS Modules are
- * deferred (see the preview-pane plan).
+ * so only React-Refresh registration is needed here. Kept dep-light: the component detector reuses the same
+ * `typescript` the transpiler already loads (no acorn, no css-tree). CSS Modules are deferred (see the
+ * preview-pane plan).
  */
-import * as acorn from "acorn";
+import ts from "typescript";
 
 /**
  * Add React Refresh registration to transformed code — enables state-preserving HMR for React components.
@@ -55,7 +56,7 @@ function isUppercaseStart(name: string): boolean {
 }
 
 /**
- * Detect React components: top-level functions/arrows with uppercase names. Acorn AST, regex fallback.
+ * Detect React components: top-level functions/arrows with uppercase names. TypeScript AST, regex fallback.
  */
 function detectReactComponents(code: string): string[] {
 	try {
@@ -66,49 +67,31 @@ function detectReactComponents(code: string): string[] {
 }
 
 function detectReactComponentsAst(code: string): string[] {
-	const ast = acorn.parse(code, { "ecmaVersion": "latest", "sourceType": "module" });
+	// ScriptKind.TSX parses the JS/JSX/TS superset the transpiler emits; components are top-level, so a scan of
+	// sourceFile.statements matches acorn's `ast.body` walk. An `export`ed function/class is still a
+	// Function/ClassDeclaration node here (the `export` is just a modifier), so one check covers the plain,
+	// `export`, and `export default` forms that were three separate branches under acorn's ESTree.
+	const sourceFile = ts.createSourceFile("module.tsx", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 	const components: string[] = [];
 
-	// eslint-disable-next-line ts/no-explicit-any -- acorn's Node type is loose; we read a few known fields
-	for (const node of (ast as any).body) {
-		if (node.type === "FunctionDeclaration" && node.id && isUppercaseStart(node.id.name)) {
-			if (!components.includes(node.id.name)) {
-				components.push(node.id.name);
-			}
+	const add = (name: string): void => {
+		if (isUppercaseStart(name) && !components.includes(name)) {
+			components.push(name);
+		}
+	};
+
+	for (const node of sourceFile.statements) {
+		if (ts.isFunctionDeclaration(node) && node.name !== undefined) {
+			add(node.name.text);
 		}
 
-		if (node.type === "ExportDefaultDeclaration"
-			&& node.declaration?.type === "FunctionDeclaration"
-			&& node.declaration.id && isUppercaseStart(node.declaration.id.name)) {
-			if (!components.includes(node.declaration.id.name)) {
-				components.push(node.declaration.id.name);
-			}
-		}
-
-		if (node.type === "ExportNamedDeclaration"
-			&& node.declaration?.type === "FunctionDeclaration"
-			&& node.declaration.id && isUppercaseStart(node.declaration.id.name)) {
-			if (!components.includes(node.declaration.id.name)) {
-				components.push(node.declaration.id.name);
-			}
-		}
-
-		const varDecl = node.type === "VariableDeclaration"
-			? node
-			: (node.type === "ExportNamedDeclaration" && node.declaration?.type === "VariableDeclaration")
-				? node.declaration
-				: null;
-
-		if (varDecl) {
-			for (const declarator of varDecl.declarations) {
-				if (declarator.id?.name && isUppercaseStart(declarator.id.name) && declarator.init) {
-					const initType = declarator.init.type;
-
-					if (initType === "ArrowFunctionExpression" || initType === "FunctionExpression" || initType === "CallExpression") {
-						if (!components.includes(declarator.id.name)) {
-							components.push(declarator.id.name);
-						}
-					}
+		if (ts.isVariableStatement(node)) {
+			for (const declarator of node.declarationList.declarations) {
+				if (ts.isIdentifier(declarator.name) && declarator.initializer !== undefined
+					&& (ts.isArrowFunction(declarator.initializer)
+						|| ts.isFunctionExpression(declarator.initializer)
+						|| ts.isCallExpression(declarator.initializer))) {
+					add(declarator.name.text);
 				}
 			}
 		}

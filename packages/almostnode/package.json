@@ -17,7 +17,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "acorn": "^8.15.0",
     "pako": "^2.1.0",
     "resolve.exports": "^2.0.3",
     "typescript": "^5.9.3"

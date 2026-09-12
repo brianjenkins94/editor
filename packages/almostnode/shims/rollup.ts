@@ -5,7 +5,6 @@
  * in browsers, so we need to use @rollup/browser instead.
  */
 
-import * as acorn from 'acorn';
 import { ROLLUP_BROWSER_CDN, ROLLUP_BROWSER_VERSION } from '../config/cdn';
 
 // Rollup instance loaded from CDN
@@ -69,15 +68,14 @@ export interface PluginContext {
   [key: string]: unknown;
 }
 
-// parseAst/parseAstAsync — used by Vite's module system for ESM analysis
-// Uses acorn as the parser (ESTree-compatible, like Rollup's native parser)
-export function parseAst(input: string, options?: { allowReturnOutsideFunction?: boolean; jsx?: boolean }): unknown {
-  return acorn.parse(input, {
-    ecmaVersion: 'latest',
-    sourceType: 'module',
-    allowReturnOutsideFunction: options?.allowReturnOutsideFunction ?? false,
-    locations: true,
-  });
+// parseAst/parseAstAsync — Rollup's public parser, which real Vite imports from `rollup` for its ESM
+// import-analysis. It must return an ESTree AST, which the TypeScript AST the rest of almostnode now parses
+// with is NOT — so this can't be backed by `ts`. Nothing in the editor's runtime reaches it (the preview is a
+// hand-rolled `ViteDevServer` using `ts.transpileModule`, not real Vite/Rollup; the almostnode host runs only
+// language servers), so rather than bundle acorn solely for a dead path, throw. If real Vite/Rollup-in-browser
+// is ever wanted, restore an ESTree parser here (e.g. lazy-load acorn from CDN like loadRollup does).
+export function parseAst(_input: string, _options?: { allowReturnOutsideFunction?: boolean; jsx?: boolean }): unknown {
+  throw new Error("rollup.parseAst is not supported in this runtime (no ESTree parser bundled); see shims/rollup.ts");
 }
 
 export async function parseAstAsync(input: string, options?: { allowReturnOutsideFunction?: boolean; jsx?: boolean; signal?: AbortSignal }): Promise<unknown> {
