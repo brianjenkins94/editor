@@ -52,7 +52,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private reactMode = false;
 
 	private send(message: Dap): void {
-		this.sendEmitter.fire({ ...message, "seq": this.seq++ } as vscode.DebugProtocolMessage);
+		this.sendEmitter.fire({ ...message, "seq": this.seq } as vscode.DebugProtocolMessage);
+		this.seq += 1;
 	}
 
 	private respond(request: DapRequest, body?: Dap): void {
@@ -253,6 +254,9 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			case "history":
 				this.event("tsvalHistory", { "length": message.length });
 				break;
+
+			default:
+				break;
 		}
 	}
 
@@ -271,6 +275,7 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 		vscode.debug.registerDebugConfigurationProvider("tsval", {
 			"resolveDebugConfiguration": (_folder, config) => {
 				if (config.type === undefined) {
+					// eslint-disable-next-line no-template-curly-in-string -- ${file} is a VS Code launch-config variable, not a JS template literal
 					return { "type": "tsval", "request": "launch", "name": "Debug (tsval)", "program": "${file}" };
 				}
 

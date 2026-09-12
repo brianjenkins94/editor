@@ -44,7 +44,7 @@ interface Snapshot {
 	"traveled"?: boolean;
 }
 
-const post = (message: Record<string, unknown>): void => { (self as unknown as Worker).postMessage(message); };
+const post = (message: Record<string, unknown>): void => { (globalThis as unknown as Worker).postMessage(message); };
 
 let sourceFile: ts.SourceFile | undefined;
 /** Forks, one per stop reached; `index` is the currently-displayed stop. */
@@ -189,6 +189,7 @@ function advanceFrom(base: Vm, action: ForwardAction): void {
 			case "next": base.stepStatement(); break;
 			case "stepIn": base.step(); break;
 			case "stepOut": base.stepStatement(); break; // TODO: true step-out (run to caller) in a later pass
+			default: break;
 		}
 	} catch (error) {
 		post({ "type": "output", "text": "Uncaught " + String(error) });
@@ -292,7 +293,7 @@ function launchReact(message: Extract<Incoming, { "type": "launch" }>): void {
 	post({ "type": "rendered" });
 }
 
-self.onmessage = (event: MessageEvent<Incoming>): void => {
+globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 	const message = event.data;
 
 	switch (message.type) {
@@ -343,6 +344,9 @@ self.onmessage = (event: MessageEvent<Incoming>): void => {
 				awaitAction = undefined;
 				resolve(message.type);
 			}
+			break;
+
+		default:
 			break;
 	}
 };

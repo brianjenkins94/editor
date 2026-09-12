@@ -83,7 +83,8 @@ export function createGuestRoot(React: typeof ReactNamespace, emit: (mutation: M
 		const keyRef = React.useRef<number | null>(null);
 
 		if (keyRef.current === null) {
-			keyRef.current = nextKey++;
+			keyRef.current = nextKey;
+			nextKey += 1;
 			values.set(keyRef.current, typeof initial === "function" ? (initial as () => S)() : initial);
 		}
 
@@ -129,6 +130,7 @@ export function createGuestRoot(React: typeof ReactNamespace, emit: (mutation: M
 		}
 	};
 
+	// eslint-disable-next-line ts/no-redundant-type-constituents -- react-reconciler's HostConfig resolves to an any-like type here; the Record intersection lets us add the extra host methods below
 	const hostConfig: Reconciler.HostConfig<string, Record<string, unknown>, Container, Instance, TextInstance, never, never, Instance, unknown, unknown, number, number, number> & Record<string, unknown> = {
 		"supportsMutation": true,
 		"supportsPersistence": false,
@@ -146,7 +148,8 @@ export function createGuestRoot(React: typeof ReactNamespace, emit: (mutation: M
 		"getCurrentEventPriority": () => DefaultEventPriority,
 		"shouldSetTextContent": () => false,
 		"createInstance": (type: string, props: Record<string, unknown>): Instance => {
-			const instance: Instance = { "id": nextId++, "type": type };
+			const instance: Instance = { "id": nextId, "type": type };
+			nextId += 1;
 			emit({ "op": "createElement", "id": instance.id, "type": type });
 
 			for (const name of Object.keys(props)) {
@@ -156,7 +159,8 @@ export function createGuestRoot(React: typeof ReactNamespace, emit: (mutation: M
 			return instance;
 		},
 		"createTextInstance": (text: string): TextInstance => {
-			const instance: TextInstance = { "id": nextId++ };
+			const instance: TextInstance = { "id": nextId };
+			nextId += 1;
 			emit({ "op": "createText", "id": instance.id, "text": text });
 
 			return instance;

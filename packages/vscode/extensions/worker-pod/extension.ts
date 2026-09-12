@@ -74,6 +74,6 @@ export function activate(context: vscode.ExtensionContext): void {
 	});
 }
 
-export function deactivate(): Thenable<void> | undefined {
+export function deactivate(): Promise<void> {
 	return Promise.all(clients.map((client) => client.stop())).then(() => undefined);
 }
