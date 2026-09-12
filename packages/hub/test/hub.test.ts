@@ -116,6 +116,32 @@ test("three-level tree: interest propagates up, messages route down", async () =
 	assert.deepEqual(atWorker, [42]);
 });
 
+test("interest survives a late link on a LOSSY transport (hello handshake)", async () => {
+	// A window-like transport: a message is DROPPED if the peer isn't listening at send time (no queue, unlike
+	// a MessagePort). The hub's `hello` handshake must recover from an interest advertisement lost to the race.
+	let left: ((message: unknown) => void) | undefined;
+	let right: ((message: unknown) => void) | undefined;
+	const a: Transport = { "send": (message) => { if (right !== undefined) { const to = right; setTimeout(() => to(message), 0); } }, "listen": (onMessage) => { left = onMessage; return () => { left = undefined; }; } };
+	const b: Transport = { "send": (message) => { if (left !== undefined) { const to = left; setTimeout(() => to(message), 0); } }, "listen": (onMessage) => { right = onMessage; return () => { right = undefined; }; } };
+
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+
+	const atRoot: unknown[] = [];
+	root.subscribe("cmd", (data) => { atRoot.push(data); });
+
+	root.link(a); // root advertises "cmd" — but pod isn't listening yet, so it's DROPPED
+	await flush();
+
+	pod.link(b); // pod's hello reaches root (listening) → root re-advertises → pod learns "cmd"
+	await flush();
+
+	pod.publish("cmd", "recovered");
+	await flush();
+
+	assert.deepEqual(atRoot, ["recovered"]);
+});
+
 test("unlink stops federation and withdraws interest", async () => {
 	const [a, b] = pipe();
 	const root = createHub({ "id": "root" });
