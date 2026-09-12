@@ -144,6 +144,12 @@ export interface VMOptions {
 	/** Notified with the Promise of every async guest function invoked, so a driver can track
 	 *  outstanding async work (a host that must observe every effect awaits it). */
 	"onAsyncFiber"?: (promise: Promise<unknown>) => void;
+	/** Called at each breakpoint reached DURING a synchronous host-invoked guest call (a host callback such
+	 *  as a React event handler running through `callGuestFromHost` → `runSub`). Top-level stepping is driven
+	 *  by the host through `step`/`runToBreakpoint`, but a host→guest call runs a nested loop the host can't
+	 *  drive — this hook is where a debugger regains control there (it may block, e.g. Atomics.wait, and read
+	 *  machine state before returning to resume). Fires just before the breakpointed statement executes. */
+	"onBreakpoint"?: (vm: VM) => void;
 }
 
 /**
@@ -273,6 +279,7 @@ export class Machine implements VM {
 	public callSite: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression | undefined;
 	public hostGuard: HostGuard | undefined;
 	public onAsyncFiber: ((promise: Promise<unknown>) => void) | undefined;
+	public onBreakpoint: ((vm: VM) => void) | undefined;
 
 	/** The guest realm's Error constructors, so errors tsval itself throws (ReferenceError on an
 	 *  unbound name, TypeError on a bad call, …) are instances of the *guest's* classes. Resolved
@@ -325,6 +332,7 @@ export class Machine implements VM {
 		this.resolveModule = options.resolveModule;
 		this.hostGuard = options.hostGuard;
 		this.onAsyncFiber = options.onAsyncFiber;
+		this.onBreakpoint = options.onBreakpoint;
 	}
 
 	public get top(): Frame | undefined {
@@ -806,6 +814,7 @@ export class Machine implements VM {
 		forked.resolveModule = this.resolveModule;
 		forked.hostGuard = this.hostGuard;
 		forked.onAsyncFiber = this.onAsyncFiber;
+		forked.onBreakpoint = this.onBreakpoint;
 		forked.callSite = undefined;
 		forked.values = this.values.map(clone);
 		forked.frames = this.frames.map(cloneFrame);
@@ -1386,6 +1395,13 @@ export class Machine implements VM {
 		seed();
 		try {
 			while (!this.finished) {
+				// Regain debugger control inside a host-invoked guest call: a fresh statement on a breakpoint
+				// fires the hook (which may block and inspect state) before it executes. Only meaningful for
+				// statement-bearing sub-runs (a function body); expression sub-runs never hit atBreakpoint.
+				if (this.onBreakpoint !== undefined && this.atBreakpoint()) {
+					this.onBreakpoint(this);
+				}
+
 				this.step();
 				// A synchronous sub-run has no driver to resume it: a `yield`/`await` here (a computed key,
 				// default value, or destructuring default containing one) cannot be honored. Fail loud
