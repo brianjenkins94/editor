@@ -13,12 +13,14 @@
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
 import type { WorkbenchFile, WorkbenchParts } from "@brianjenkins94/monaco-vscode-api/main";
+import { createHub, portTransport } from "@brianjenkins94/hub";
 import { boot, ExtensionHostKind, registerExtension, registerFileSystemOverlay } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
 // The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
 // virtual module in entry.config.ts).
 import helloExtensionCode from "hello:extension";
 import workerPodExtensionCode from "worker-pod:extension";
+import type { PodBridge } from "./extensions/worker-pod/extension";
 import helloManifest from "./extensions/hello/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
@@ -38,6 +40,18 @@ interface Init { "files": WorkbenchFile[]; "openEditors": string[]; "workspaceFo
 const host = window.opener ?? window.parent;
 const bus = connectAsPane("editor");
 const paneLog = installLogRelay(host, "editor");
+
+// The workbench-iframe hub — bridges the extension pod (linked in wireWorkbenchHub, once the ext host is up)
+// UP to the page's root hub over a MessagePort the host transfers here ({__hubPort}, from vscode.tsx). Created
+// eagerly so that port — which the host sends right after we announce "ready" — has somewhere to attach; a port
+// queues, so the root's interest can't be lost to a not-yet-listening race (the failure a windowTransport hit).
+const workbenchHub = createHub({ "id": "workbench" });
+
+window.addEventListener("message", (event) => {
+	if ((event.data as { "__hubPort"?: boolean } | null)?.__hubPort === true && event.ports[0] !== undefined) {
+		workbenchHub.link(portTransport(event.ports[0]));
+	}
+});
 
 /** Readable text for a caught `unknown` — Error message when it is one, a string as-is, else JSON (avoids
  *  the `[object Object]` a bare `String(error)` gives, and keeps relayed log attrs meaningful). */
@@ -73,6 +87,34 @@ function runCommand(command: string): void {
 	pending?.catch((error: unknown) => {
 		console.error("[vscode] command failed", command, error);
 	});
+}
+
+/**
+ * Uplink the extension pod's hub to the page's root hub. The ext host is an isolated `extension-file://` realm
+ * with no window path out, so the pod rides the worker-pod extension's EXPORTED bridge (a marshaled event +
+ * function, see extension.ts PodBridge). A workbench hub links that bridge to the pod and windowTransport(host)
+ * to the top page (workbench-entry HAS window access) — so pod/worker spans reach the page's $sys.log.>
+ * collector. No-op if the extension exposes no bridge (the pod then stays a standalone root).
+ */
+function wireWorkbenchHub(): void {
+	const workerPod = vscodeApi?.extensions?.getExtension("brianjenkins94.worker-pod");
+
+	if (workerPod === undefined) {
+		return;
+	}
+
+	(workerPod.activate() as Promise<PodBridge | undefined>).then((bridge) => {
+		if (bridge?.toWorkbench === undefined || bridge.fromWorkbench === undefined) {
+			return;
+		}
+
+		// pod (ext host) <-> workbench, over the extension's exported event/function bridge. (The workbench <->
+		// top-page link is the transferred MessagePort wired above.)
+		workbenchHub.link({
+			"send": (message) => { bridge.fromWorkbench(message); },
+			"listen": (onMessage) => { const subscription = bridge.toWorkbench(onMessage); return () => { subscription.dispose(); }; }
+		});
+	}).catch((error: unknown) => { paneLog.error("workbench hub uplink failed", { "error": errText(error) }); });
 }
 
 /** Boot even with no viewport. When the workbench is mounted into a document that currently has no
@@ -164,6 +206,10 @@ function maybeBoot(): void {
 				// (not a webview), so it composites in our coi-serviceworker single-origin harness. See
 				// debug-preview-view.ts.
 				installDebugPreview(() => vscodeApi);
+				// Uplink the extension pod to the page: a workbench hub bridges the pod (via the extension's
+				// exported event/function channel — the ext host has no window path) to the top page over the
+				// window. pod/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.
+				wireWorkbenchHub();
 				bootSpan.info("hello extension api captured");
 				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
 				// AFTER the workbench restores its last-active viewlet (which would otherwise win).

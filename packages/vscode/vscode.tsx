@@ -19,6 +19,8 @@
  *
  * Singleton — monaco-vscode-api is one global workbench; subsequent calls are no-ops.
  */
+import type { Hub } from "@brianjenkins94/hub";
+import { portTransport } from "@brianjenkins94/hub";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import { hostLog, installLogAggregator } from "./logging";
 import { createPaneBusHost } from "./pane-bus";
@@ -42,6 +44,10 @@ export interface VscodeWindowOptions {
 	"onSave"?: (path: string, contents: string) => void;
 	/** Where to mount the workbench window. Default: document.body. */
 	"mountInto"?: HTMLElement;
+	/** The page's root hub. When given, the workbench pane's hub (the extension pod + its workers) is linked
+	 *  into it, so pod/worker spans federate to the root collector. Re-linked to the pane's CURRENT window on
+	 *  every "ready" (so it follows a popout, exactly as the pane bus does). */
+	"rootHub"?: Hub;
 }
 
 /** Handle returned by createVscodeWindow for talking to the workbench after it's mounted. */
@@ -71,7 +77,7 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 		markReady = resolve;
 	});
 
-	const { files = [], openEditors = [], workspaceFolder, moduleVersions, onSave, mountInto = document.body } = options;
+	const { files = [], openEditors = [], workspaceFolder, moduleVersions, onSave, mountInto = document.body, rootHub } = options;
 	const base = (import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/";
 
 	const iframe = document.createElement("iframe");
@@ -98,6 +104,26 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 	const bus = createPaneBusHost();
 
 	bus.register(PANE_ID, iframe);
+
+	// Link the page's root hub to the pane over a DEDICATED MessagePort (transferred to the pane's current
+	// window), so the extension pod's spans federate to the root collector. A port (not windowTransport) so
+	// interest queues instead of racing a not-yet-listening peer — the same reason the SW link uses a port.
+	// Re-done on every "ready" (initial + popout re-announce): the pane bus has just recorded the live window,
+	// and a popped-out pane re-announces, so it gets a fresh port for free.
+	let unlinkPaneHub: (() => void) | undefined;
+	const linkPaneHub = (): void => {
+		const win = bus.windowFor(PANE_ID);
+
+		if (rootHub !== undefined && win !== undefined) {
+			unlinkPaneHub?.();
+
+			const channel = new MessageChannel();
+
+			win.postMessage({ "__hubPort": true }, "*", [channel.port2]);
+			unlinkPaneHub = rootHub.link(portTransport(channel.port1));
+		}
+	};
+
 	bus.on((id, payload) => {
 		if (id !== PANE_ID) {
 			return;
@@ -107,6 +133,7 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 
 		if (data.type === "ready") {
 			bus.post(PANE_ID, { "type": "init", "files": files, "openEditors": openEditors, "workspaceFolder": workspaceFolder, "moduleVersions": moduleVersions });
+			linkPaneHub();
 			span.info("pane ready → sent init", { "files": files.length, "openEditors": openEditors.length });
 		} else if (data.type === "save" && typeof data.path === "string" && typeof data.contents === "string") {
 			onSave?.(data.path, data.contents);

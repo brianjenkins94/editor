@@ -63,6 +63,7 @@ if (ensureCrossOriginIsolated()) {
 		"workspaceFolder": "/workspace",
 		"files": files,
 		"moduleVersions": moduleVersions,
+		"rootHub": rootHub,
 		"openEditors": ["/workspace/src/App.tsx"],
 		"onSave": (path: string, contents: string) => {
 			hostLog.info("saved", { "path": path, "bytes": contents.length });

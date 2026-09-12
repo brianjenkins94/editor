@@ -9,11 +9,19 @@
  * because almostnode can't be monolithically inlined. The extension can't emit/locate those assets from its
  * data:-URL self, so it spawns them by URL relative to the workbench origin (`location.href`).
  */
-import type * as vscode from "vscode";
+import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
+import { relayLoggerToHub } from "../../telemetry";
 import { registerTsvalDebug } from "./debug-adapter";
 import { podHub } from "./pod";
+
+/** This extension's exports — the pod->workbench half of the hub uplink (ext host is an isolated realm, so it
+ *  rides the exported API rather than a window transport). See activate + workbench-entry's bridge. */
+export interface PodBridge {
+	"toWorkbench": vscode.Event<unknown>;
+	"fromWorkbench": (message: unknown) => void;
+}
 
 interface ServerSpec {
 	"id": string;
@@ -58,11 +66,29 @@ function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 	});
 }
 
-export function activate(context: vscode.ExtensionContext): void {
-	// The pod hub is a standalone root here (no harness needed). Workers link UP to it and announce
-	// themselves on `pod.ready`; log each join so the pod's membership is observable. When a harness is
-	// present the workbench links this hub up to the page's root hub — the pod code is unchanged either way.
-	context.subscriptions.push({ "dispose": podHub.subscribe("pod.ready", (data) => { console.log("[pod] worker joined:", data); }) });
+export function activate(context: vscode.ExtensionContext): PodBridge {
+	// The pod's own logger — its spans/records ride podHub.
+	const podLog = relayLoggerToHub(podHub, "pod");
+
+	// The pod->root UPLINK. The ext host is an isolated `extension-file://` realm with no window path to the
+	// page, so podHub can't use windowTransport. Instead it rides the extension's EXPORTED API (spike-verified:
+	// ext-host EventEmitter events + functions marshal bidirectionally to the workbench): podHub links a
+	// transport whose `send` fires an event the workbench receives, and whose `listen` is fed by a function the
+	// workbench calls. workbench-entry links its own hub to `toWorkbench`/`fromWorkbench` and relays to the top
+	// page over windowTransport. Standalone (no export consumer) → podHub is just a root; the pod still works.
+	const incoming = new vscode.EventEmitter<unknown>();
+	const outgoing = new vscode.EventEmitter<unknown>();
+
+	context.subscriptions.push(incoming, outgoing, {
+		"dispose": podHub.link({
+			"send": (message) => { outgoing.fire(message); },
+			"listen": (onMessage) => { const subscription = incoming.event(onMessage); return () => subscription.dispose(); }
+		})
+	});
+
+	// Workers link UP to podHub and announce themselves on `pod.ready`; log each join so pod membership shows
+	// up in the collector (as a `[pod]` record).
+	context.subscriptions.push({ "dispose": podHub.subscribe("pod.ready", (data) => { podLog.info("worker joined", data as Record<string, unknown>); }) });
 
 	// The tsval debug type — a worker-backed stepping debugger (debug-adapter.ts + debug-worker.ts).
 	registerTsvalDebug(context);
@@ -78,6 +104,10 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		}
 	});
+
+	// The pod->workbench half of the uplink, as this extension's EXPORTS: workbench-entry links its hub to
+	// `toWorkbench` (ext host → workbench) and `fromWorkbench` (workbench → ext host).
+	return { "toWorkbench": outgoing.event, "fromWorkbench": (message: unknown) => { incoming.fire(message); } };
 }
 
 export function deactivate(): Promise<void> {
