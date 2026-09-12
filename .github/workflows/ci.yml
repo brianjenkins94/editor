@@ -18,7 +18,7 @@
       "runs-on": "ubuntu-latest",
       "strategy": {
         "matrix": {
-          "script": ["build", "lint"]
+          "script": ["build", "lint", "test"]
         }
       },
       "steps": [
