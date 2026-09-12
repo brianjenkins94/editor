@@ -21,7 +21,10 @@ interface Snapshot {
 type WorkerMessage =
 	| { "type": "stopped"; "reason": string; "snapshot": Snapshot; "atomic"?: boolean }
 	| { "type": "terminated" }
-	| { "type": "output"; "text": string };
+	| { "type": "output"; "text": string }
+	| { "type": "mutation"; "mutation": unknown }
+	| { "type": "rendered" }
+	| { "type": "history"; "length": number };
 
 class TsvalDebugSession implements vscode.DebugAdapter {
 	private readonly sendEmitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
@@ -45,6 +48,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private sourceReady = false;
 	private configDone = false;
 	private started = false;
+	/** React mode: the program renders via ReactDOM, so run it through the M3c reconciler and stream mutations. */
+	private reactMode = false;
 
 	private send(message: Dap): void {
 		this.sendEmitter.fire({ ...message, "seq": this.seq++ } as vscode.DebugProtocolMessage);
@@ -90,6 +95,18 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.respond(request);
 				this.configDone = true;
 				this.maybeStart();
+				break;
+
+			// Host→adapter custom requests (via activeDebugSession.customRequest): a DOM event routed back from
+			// the render pane, and a time-travel jump. Both drive the worker.
+			case "dispatch":
+				this.worker?.postMessage({ "type": "dispatch", "id": args["id"], "event": args["event"] });
+				this.respond(request);
+				break;
+
+			case "timeTravel":
+				this.worker?.postMessage({ "type": "timeTravel", "index": args["index"] });
+				this.respond(request);
 				break;
 
 			case "launch":
@@ -167,6 +184,9 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		try {
 			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(this.program));
 			this.source = document.getText();
+			// React mode if the program mounts via ReactDOM — then run it through the reconciler (M3c) rather
+			// than as a plain script.
+			this.reactMode = /\bReactDOM\b/u.test(this.source) || /\bReact\s*\.\s*createElement\b/u.test(this.source);
 			this.sourceReady = true;
 			this.maybeStart();
 		} catch (error) {
@@ -188,7 +208,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.worker = new Worker(workerUrl, { "type": "module" });
 		this.worker.onmessage = (event: MessageEvent<WorkerMessage>) => { this.onWorker(event.data); };
 		this.worker.onerror = (event) => { this.event("output", { "category": "stderr", "output": `[debug-worker] ${event.message}\n` }); };
-		this.worker.postMessage({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.control.buffer });
+		this.worker.postMessage({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.control.buffer, "react": this.reactMode });
 	}
 
 	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
@@ -218,6 +238,20 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 			case "output":
 				this.event("output", { "category": "stdout", "output": message.text + "\n" });
+				break;
+
+			// React mode (M3c): forward the render stream to the host page as DAP custom events. The host's
+			// debug-preview pane listens via vscode.debug.onDidReceiveDebugSessionCustomEvent and applies them.
+			case "mutation":
+				this.event("tsvalMutation", { "mutation": message.mutation });
+				break;
+
+			case "rendered":
+				this.event("tsvalRendered", {});
+				break;
+
+			case "history":
+				this.event("tsvalHistory", { "length": message.length });
 				break;
 		}
 	}
