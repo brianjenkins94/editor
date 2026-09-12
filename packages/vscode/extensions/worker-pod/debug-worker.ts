@@ -21,6 +21,7 @@ import React from "react";
 import { createHub, portTransport } from "@brianjenkins94/hub";
 import { createVM, type LoadedVM } from "@brianjenkins94/tsval";
 
+import { relayLoggerToHub } from "../../telemetry";
 import { createGuestRoot, type GuestRoot } from "./debug-react";
 
 // This worker's own hub, linked UP to the pod hub over its own channel (hub messages are `\0hub`-wrapped, so
@@ -28,6 +29,10 @@ import { createGuestRoot, type GuestRoot } from "./debug-react";
 const hub = createHub({ "id": "debug-worker" });
 
 hub.link(portTransport(globalThis as unknown as Worker));
+
+// This worker's util/logger spans/records federate UP through the pod (which links our hub) to the root
+// collector — so a step's span shows up in the top-page timeline with no worker→page window path of its own.
+const workerLog = relayLoggerToHub(hub, "debug-worker");
 
 type Vm = LoadedVM["vm"];
 
@@ -190,39 +195,45 @@ function onBreakpointHook(vm: Vm): void {
 
 /** Advance `base` (a VM we own) by a forward action, then record the new stop or terminate. */
 function advanceFrom(base: Vm, action: ForwardAction): void {
+	const span = workerLog.span("step", { "action": action }); // per-step span; its duration federates via the pod
+
 	try {
-		switch (action) {
-			case "continue": base.runToBreakpoint(); break;
-			case "next": base.stepStatement(); break;
-			case "stepIn": base.step(); break;
-			case "stepOut": base.stepStatement(); break; // TODO: true step-out (run to caller) in a later pass
-			default: break;
-		}
-	} catch (error) {
-		post({ "type": "output", "text": "Uncaught " + String(error) });
-		post({ "type": "terminated" });
-		done = true;
+		try {
+			switch (action) {
+				case "continue": base.runToBreakpoint(); break;
+				case "next": base.stepStatement(); break;
+				case "stepIn": base.step(); break;
+				case "stepOut": base.stepStatement(); break; // TODO: true step-out (run to caller) in a later pass
+				default: break;
+			}
+		} catch (error) {
+			post({ "type": "output", "text": "Uncaught " + String(error) });
+			post({ "type": "terminated" });
+			done = true;
 
-		return;
-	}
-
-	if (base.finished) {
-		if (base.completion !== undefined) {
-			post({ "type": "output", "text": "→ " + format(base.completion) });
+			return;
 		}
 
-		post({ "type": "terminated" });
-		done = true;
+		if (base.finished) {
+			if (base.completion !== undefined) {
+				post({ "type": "output", "text": "→ " + format(base.completion) });
+			}
 
-		return;
+			post({ "type": "terminated" });
+			done = true;
+
+			return;
+		}
+
+		// Branch: drop any redo tail, then record this stop. The stored fork is only ever forked from, never
+		// stepped, so it stays a pristine snapshot we can return to.
+		history = history.slice(0, index + 1);
+		history.push(base);
+		index = history.length - 1;
+		emitStopped(base, action === "continue" ? "breakpoint" : "step");
+	} finally {
+		span.end();
 	}
-
-	// Branch: drop any redo tail, then record this stop. The stored fork is only ever forked from, never
-	// stepped, so it stays a pristine snapshot we can return to.
-	history = history.slice(0, index + 1);
-	history.push(base);
-	index = history.length - 1;
-	emitStopped(base, action === "continue" ? "breakpoint" : "step");
 }
 
 function handle(action: Action): void {
@@ -309,6 +320,7 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 			// Announce membership to the pod hub. Safe here (not at module load): the pod's interest sub-control
 			// precedes `launch` on this ordered channel, so by now the pod is known to want `pod.ready`.
 			hub.publish("pod.ready", { "worker": hub.id, "react": message.react === true });
+			workerLog.info("launch", { "file": message.fileName, "react": message.react === true, "breakpoints": message.lines.length });
 
 			if (message.react === true) {
 				launchReact(message);
