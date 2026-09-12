@@ -13,6 +13,7 @@ import {
 	createTextDocument,
 	spellCheckDocument
 } from "cspell-lib";
+import { TextDocument } from "vscode-languageserver-textdocument";
 import {
 	BrowserMessageReader,
 	BrowserMessageWriter,
@@ -37,47 +38,18 @@ const settings = {
 // In the worker (shared globalThis) this is the DedicatedWorkerGlobalScope the client talks to.
 const connection = createConnection(new BrowserMessageReader(globalThis as unknown as Worker), new BrowserMessageWriter(globalThis as unknown as Worker));
 
-// cspell reports issues by absolute character offset; the editor wants line/character ranges, so convert
-// against the document text. Precomputing line starts keeps this linear over a document.
-function offsetToPosition(lineStarts: number[], offset: number): { "line": number; "character": number } {
-	let low = 0;
-	let high = lineStarts.length - 1;
-
-	while (low < high) {
-		const mid = (low + high + 1) >> 1;
-
-		if (lineStarts[mid] <= offset) {
-			low = mid;
-		} else {
-			high = mid - 1;
-		}
-	}
-
-	return { "line": low, "character": offset - lineStarts[low] };
-}
-
-function computeLineStarts(text: string): number[] {
-	const starts = [0];
-
-	for (let index = 0; index < text.length; index++) {
-		if (text[index] === "\n") {
-			starts.push(index + 1);
-		}
-	}
-
-	return starts;
-}
-
 async function check(uri: string, languageId: string, text: string): Promise<void> {
 	const document = createTextDocument({ "uri": uri, "content": text, "languageId": languageId });
 	const result = await spellCheckDocument(document, { "noConfigSearch": true, "generateSuggestions": false }, settings);
-	const lineStarts = computeLineStarts(text);
+	// cspell reports issues by absolute character offset; the editor wants line/character ranges.
+	// vscode-languageserver-textdocument's TextDocument.positionAt does exactly that conversion.
+	const textDocument = TextDocument.create(uri, languageId, 0, text);
 
 	connection.sendDiagnostics({
 		"uri": uri,
 		"diagnostics": result.issues.map((issue) => {
-			const start = offsetToPosition(lineStarts, issue.offset);
-			const end = offsetToPosition(lineStarts, issue.offset + issue.text.length);
+			const start = textDocument.positionAt(issue.offset);
+			const end = textDocument.positionAt(issue.offset + issue.text.length);
 
 			return {
 				"severity": DiagnosticSeverity.Information,

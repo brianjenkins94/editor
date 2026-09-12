@@ -21,7 +21,8 @@
     "lucide": "latest",
     "preact": "latest",
     "vscode-languageclient": "^10.1.1",
-    "vscode-languageserver": "^10.1.1"
+    "vscode-languageserver": "^10.1.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
   },
   "devDependencies": {
     "@oxc-parser/binding-wasm32-wasi": "0.149.0",

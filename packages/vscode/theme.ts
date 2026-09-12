@@ -10,6 +10,7 @@
  * with no build plugin; runtime-injects into document.head on first `css()` use.
  */
 import { createStitches } from "@stitches/core";
+import { createElement } from "lucide";
 
 /** Raw palette — the single source of truth for both faces below. */
 export const palette = {
@@ -34,9 +35,9 @@ export const { css, theme, keyframes, globalCss } = createStitches({
 
 // ── Icons (lucide) ───────────────────────────────────────────────────────────────
 //
-// Framework-agnostic: lucide ships each icon as plain data (an array of [tag, attrs] SVG children),
-// which we render to an SVG node here. So `theme` takes NO dependency on lucide or any UI framework —
-// the consumer imports the specific icons it needs from `lucide` (tree-shaken) and passes them in:
+// lucide ships each icon as plain data (an array of [tag, attrs] SVG children), rendered here via lucide's own
+// `createElement` — vanilla DOM, no UI framework — so `theme` stays framework-agnostic. The consumer imports
+// the specific icons it needs from `lucide` (tree-shaken) and passes them in:
 //
 //   import { X } from "lucide";
 //   import { icon, iconSvg } from "./theme";
@@ -46,8 +47,8 @@ export const { css, theme, keyframes, globalCss } = createStitches({
 // Icons are stroke-based with stroke:"currentColor", so they inherit the surrounding text colour (the
 // palette) for free — set `color` on a parent and the icon follows.
 
-/** lucide's per-icon shape: a flat list of SVG children as [tag, attributes] pairs. Declared locally
- *  (not imported) so `theme` stays dependency-free; lucide's own `IconNode` is structurally assignable. */
+/** lucide's per-icon shape: a flat list of SVG children as [tag, attributes] pairs (structurally lucide's own
+ *  `IconNode`). */
 export type IconNode = readonly [tag: string, attrs: Record<string, string | number>][];
 
 export interface IconOptions {
@@ -59,38 +60,15 @@ export interface IconOptions {
 	"class"?: string;
 }
 
-const SVG_NS = "http://www.w3.org/2000/svg";
-
-/** Render a lucide icon node to an `<svg>` DOM element. */
+/** Render a lucide icon node to an `<svg>` DOM element via lucide's `createElement` (merges our size/stroke/
+ *  class over lucide's default attributes — viewBox, fill:none, stroke:currentColor, round caps). */
 export function icon(node: IconNode, { size = 16, stroke = 2, "class": cls }: IconOptions = {}): SVGElement {
-	const svg = document.createElementNS(SVG_NS, "svg");
-	const attrs: Record<string, string | number> = {
-		"viewBox": "0 0 24 24",
+	return createElement(node as never, {
 		"width": size,
 		"height": size,
-		"fill": "none",
-		"stroke": "currentColor",
 		"stroke-width": stroke,
-		"stroke-linecap": "round",
-		"stroke-linejoin": "round",
 		"class": cls ? `lucide ${cls}` : "lucide"
-	};
-
-	for (const [key, value] of Object.entries(attrs)) {
-		svg.setAttribute(key, String(value));
-	}
-
-	for (const [tag, childAttrs] of node) {
-		const child = document.createElementNS(SVG_NS, tag);
-
-		for (const [key, value] of Object.entries(childAttrs)) {
-			child.setAttribute(key, String(value));
-		}
-
-		svg.appendChild(child);
-	}
-
-	return svg;
+	}) as SVGElement;
 }
 
 /** Render a lucide icon node to an SVG markup string (for innerHTML / dangerouslySetInnerHTML). */

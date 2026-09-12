@@ -3,6 +3,7 @@
 //
 //   node test/analyze.mjs test/reports/<run>.json        # re-analyze a saved run (re-reads the corpus sources)
 import { readFileSync } from "node:fs";
+import { isEntry } from "@brianjenkins94/util/env";
 import { bucketKey, features, locate, parse, statementAt, textFeatures, usesTsSyntax } from "./classify.mjs";
 import { loadCorpus } from "./corpus.mjs";
 
@@ -161,7 +162,7 @@ export function analyze(cases, results, { size, started, top = 40 } = {}) {
 	return { "rows": rows, "tally": Object.fromEntries(tally), "suspects": suspects, "tsSuspects": tsSuspects, "buckets": Object.fromEntries(sorted), "tsCensus": Object.fromEntries(tsCount), "text": lines.join("\n") };
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/.*\//u, ""))) {
+if (isEntry(import.meta)) {
 	const file = process.argv[2];
 	const report = JSON.parse(readFileSync(file, "utf8"));
 	const wanted = new Map(report.results.map((result) => [`${result.corpus}/${result.id}`, result]));

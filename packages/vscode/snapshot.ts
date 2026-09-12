@@ -15,6 +15,9 @@ import type { Plugin } from "vite";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import * as url from "node:url";
+import { closest } from "@brianjenkins94/util/fs";
+import { log } from "@brianjenkins94/util/logger";
+import { packageName } from "@brianjenkins94/util/vite/external";
 
 const VIRTUAL = "editor:workspace";
 const TYPES_VIRTUAL = "editor:types";
@@ -40,21 +43,9 @@ function demoDir(): string {
 
 /** Nearest ancestor directory that has a node_modules (editor's workspace root, for type seeding). */
 function nodeModulesRoot(): string | undefined {
-	let dir = here();
+	const nodeModules = closest(here(), "node_modules");
 
-	for (;;) {
-		if (existsSync(path.join(dir, "node_modules"))) {
-			return dir;
-		}
-
-		const parent = path.dirname(dir);
-
-		if (parent === dir) {
-			return undefined;
-		}
-
-		dir = parent;
-	}
+	return nodeModules === undefined ? undefined : path.dirname(nodeModules);
 }
 
 /** `readFileSync` as UTF-8, or undefined when the file can't be read. */
@@ -180,12 +171,10 @@ function importedPackages(): string[] {
 				const external = !(spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("node:") || spec.startsWith("editor:"));
 
 				if (external) {
-					const parts = spec.split("/");
-					const pkg = spec.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+					const pkg = packageName(spec);
 
-					if (pkg !== "" && !pkg.startsWith("@")) {
-						roots.add(pkg);
-					} else if (pkg.startsWith("@") && parts.length >= 2 && parts[1] !== "") {
+					// Skip a bare scope with no name ("@scope" alone); keep "name" and "@scope/name".
+					if (pkg !== "" && !(pkg.startsWith("@") && !pkg.includes("/"))) {
 						roots.add(pkg);
 					}
 				}
@@ -317,7 +306,7 @@ function typeSurface(): SnapshotFile[] {
 			+ nodeRef + body + "\n"
 	});
 
-	console.log(`[editor:types] seeded ${realPkgs} packages (${Math.round(realBytes / 1024)} KB of .d.ts), shimmed ${shims.length}: ${shims.join(", ")}`);
+	log.info(`[editor:types] seeded ${realPkgs} packages (${Math.round(realBytes / 1024)} KB of .d.ts), shimmed ${shims.length}: ${shims.join(", ")}`);
 
 	return files;
 }

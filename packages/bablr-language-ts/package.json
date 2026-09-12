@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@bablr/language-en-c-comments": "^0.11.2",
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@bablr/language-en-es5": "0.4.1",
     "@bablr/language-en-es6": "^0.4.1",
     "@bablr/language-en-json": "0.14.1",
