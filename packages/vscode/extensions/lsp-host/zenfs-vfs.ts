@@ -13,7 +13,7 @@
  * It's a plain object, not a class: there's no per-instance state — every method delegates to zen-fs's single
  * module-global `fs`.
  */
-import type { VirtualFS } from "almostnode";
+import type { VirtualFS } from "@brianjenkins94/almostnode";
 import { configure, fs, InMemory } from "@zenfs/core";
 
 const noopWatcher = { "close": () => undefined };

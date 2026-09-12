@@ -8,7 +8,7 @@
  * beyond the server bundle itself. (When we load the workspace's eslint.config.js, this is where we'd seed /
  * bridge the workspace files into zen-fs first — the file:// import patch + zen-fs VFS already support it.)
  */
-import { createRuntime } from "almostnode";
+import { createRuntime } from "@brianjenkins94/almostnode";
 // The eslint server (eslint-lib + @typescript-eslint/parser + the LSP lib), bundled to an ESM string.
 import serverNodeCode from "lsp-host:server-node-eslint";
 import { createZenfsVFS } from "./zenfs-vfs.js";

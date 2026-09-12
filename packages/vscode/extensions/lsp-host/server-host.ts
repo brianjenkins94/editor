@@ -12,7 +12,7 @@
  * server bundle and the dictionary (a gzipped trie, too big to bundle — served next to this worker under
  * /__vscode__/lsp/, resolved relative to this module's URL) are written into zen-fs before the server runs.
  */
-import { createRuntime } from "almostnode";
+import { createRuntime } from "@brianjenkins94/almostnode";
 // The cspell server (with cspell-lib + the LSP lib), bundled to an ESM string by entry.config.ts; run below.
 import serverNodeCode from "lsp-host:server-node";
 import { createZenfsVFS } from "./zenfs-vfs.js";

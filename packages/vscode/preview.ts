@@ -13,7 +13,7 @@
  * of the initial host bundle means that cost is paid only when the preview is actually opened. The service
  * worker can't be registered in the in-app Browser pane, so the preview only works in a real browser tab.
  */
-import { getServerBridge, VirtualFS, ViteDevServer } from "almostnode";
+import { getServerBridge, VirtualFS, ViteDevServer } from "@brianjenkins94/almostnode";
 
 /** The virtual port the dev server is registered on (any value; it only namespaces the `/__virtual__/` URL). */
 const PREVIEW_PORT = 5173;
