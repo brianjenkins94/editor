@@ -22,7 +22,7 @@
 import type { Hub } from "@brianjenkins94/hub";
 import { portTransport } from "@brianjenkins94/hub";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
-import { hostLog, installLogAggregator } from "./logging";
+import { hostLog } from "./logging";
 import { createPaneBusHost } from "./pane-bus";
 import { createPaneWindow } from "./window";
 import "./webawesome";
@@ -67,9 +67,7 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 
 	booted = true;
 
-	// Aggregate every pane's relayed logs into this (host) console.
-	installLogAggregator();
-
+	// (Pane logs now federate onto the hub → the root $sys.log.> collector; no separate window-relay aggregator.)
 	const span = hostLog.span("editor-window");
 
 	let markReady: () => void;

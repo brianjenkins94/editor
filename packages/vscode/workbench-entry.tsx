@@ -25,7 +25,7 @@ import helloManifest from "./extensions/hello/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
-import { installLogRelay } from "./logging";
+import { relayLoggerToHub } from "./telemetry";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { connectAsPane } from "./pane-bus";
 import { vfsPutAll } from "./vfs";
@@ -39,7 +39,6 @@ interface Init { "files": WorkbenchFile[]; "openEditors": string[]; "workspaceFo
 // the log relay funnels our structured logs to that same host (its own message channel).
 const host = window.opener ?? window.parent;
 const bus = connectAsPane("editor");
-const paneLog = installLogRelay(host, "editor");
 
 // The workbench-iframe hub — bridges the extension pod (linked in wireWorkbenchHub, once the ext host is up)
 // UP to the page's root hub over a MessagePort the host transfers here ({__hubPort}, from vscode.tsx). Created
@@ -52,6 +51,20 @@ window.addEventListener("message", (event) => {
 		workbenchHub.link(portTransport(event.ports[0]));
 	}
 });
+
+// The pane's logger — its spans/records now ride the workbench hub to the root collector (converging the old
+// bespoke window log relay onto the hub). Uncaught errors/rejections go through the same logger so they reach
+// the collector too. Records published before the port links simply don't federate (the boot span may be an
+// early casualty); everything after — saves, diagnostics, errors — arrives.
+const paneLog = relayLoggerToHub(workbenchHub, "workbench");
+
+window.addEventListener("error", (event) => {
+	// A benign ResizeObserver notice monaco triggers constantly — not a real fault; don't relay it as an error.
+	if (!event.message.includes("ResizeObserver loop")) {
+		paneLog.error("uncaught error", { "message": event.message, "file": event.filename, "line": event.lineno });
+	}
+});
+window.addEventListener("unhandledrejection", (event) => { paneLog.error("unhandled rejection", { "reason": String(event.reason) }); });
 
 /** Readable text for a caught `unknown` — Error message when it is one, a string as-is, else JSON (avoids
  *  the `[object Object]` a bare `String(error)` gives, and keeps relayed log attrs meaningful). */
