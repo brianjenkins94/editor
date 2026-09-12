@@ -20,10 +20,19 @@ interface ServerSpec {
 	"documentSelector": { "language": string }[];
 }
 
-// One worker + client per server. cspell spell-checks prose/identifiers; eslint lints JS/TS.
+// One worker + client per server. cspell spell-checks prose/identifiers; eslint lints JS/TS. The selectors
+// MUST include the react language ids (typescriptreact/javascriptreact) — the demo opens on App.tsx, whose
+// languageId is `typescriptreact`, not `typescript`; without them the client never forwards .tsx/.jsx docs to
+// the server and no diagnostics ever appear.
+const JS_TS_LANGUAGES = [
+	{ "language": "typescript" },
+	{ "language": "typescriptreact" },
+	{ "language": "javascript" },
+	{ "language": "javascriptreact" }
+];
 const SERVERS: ServerSpec[] = [
-	{ "id": "cspell", "name": "cspell (almostnode)", "workerFile": "./lsp/server-host.js", "documentSelector": [{ "language": "typescript" }, { "language": "plaintext" }] },
-	{ "id": "eslint", "name": "eslint (almostnode)", "workerFile": "./lsp/server-host-eslint.js", "documentSelector": [{ "language": "typescript" }, { "language": "javascript" }] }
+	{ "id": "cspell", "name": "cspell (almostnode)", "workerFile": "./lsp/server-host.js", "documentSelector": [...JS_TS_LANGUAGES, { "language": "plaintext" }, { "language": "markdown" }, { "language": "json" }] },
+	{ "id": "eslint", "name": "eslint (almostnode)", "workerFile": "./lsp/server-host-eslint.js", "documentSelector": JS_TS_LANGUAGES }
 ];
 
 const clients: LanguageClient[] = [];
