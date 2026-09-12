@@ -1,44 +1,55 @@
 /**
- * tsval debug worker (M1) — runs the target program under tsval's stepping VM in a dedicated worker, and
- * speaks a tiny control protocol to the debug adapter (see debug-adapter.ts) that the adapter maps onto DAP.
+ * tsval debug worker (M2) — runs the target program under tsval's stepping VM and adds TIME TRAVEL.
  *
- * Pausing here is ASYNC, not Atomics-blocked: the whole program is driven by THIS worker's own loop
+ * Pausing is ASYNC, not Atomics-blocked: the whole program is driven by THIS worker's own loop
  * (`runToBreakpoint`/`stepStatement`/`step`), so to "pause" the loop simply awaits the next control message.
- * Atomics.wait only becomes necessary in M3, when native React synchronously invokes guest code and we must
- * block a synchronous call stack. For a plain program the loop owns execution, so awaiting suffices.
+ * Atomics.wait only becomes necessary in M3, when native React synchronously invokes guest code.
  *
- * Before pausing, the worker sends the adapter a COMPLETE snapshot of the stop (frames + scopes + variables),
- * so the adapter can answer every stackTrace/scopes/variables request from it without a round-trip — which
- * also keeps the door open for the M3 Atomics model, where a blocked worker can't service messages at all.
+ * Time travel is tsval's `fork()` — a full, independent snapshot of the machine (frames are plain data, so
+ * the whole state clones). We keep a HISTORY of forks, one per stop: forward actions fork the current stop and
+ * advance a copy (leaving the stored fork pristine); backward actions just move the index and re-emit an
+ * earlier fork. Because the interpreter is deterministic, re-advancing after a step-back reproduces the same
+ * states. Only user (guest) state lives in the fork — native side effects would not rewind, but a plain
+ * program has none, which is exactly why time travel is clean here.
+ *
+ * On every stop the worker sends the adapter a COMPLETE snapshot (frame + Locals scope + variable values), so
+ * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
 import ts from "typescript";
 
 import { createVM, type LoadedVM } from "@brianjenkins94/tsval";
 
+type Vm = LoadedVM["vm"];
+
 /** Control messages from the adapter. */
 type Incoming =
 	| { "type": "launch"; "source": string; "fileName": string; "lines": number[] }
 	| { "type": "setBreakpoints"; "lines": number[] }
-	| { "type": "continue" | "next" | "stepIn" | "stepOut" | "disconnect" };
+	| { "type": "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect" };
 
-type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "disconnect";
+type Action = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect";
+type ForwardAction = "continue" | "next" | "stepIn" | "stepOut";
 
 interface Variable { "name": string; "value": string; "type": string; "variablesReference": number }
 interface Snapshot {
 	"frames": { "id": number; "name": string; "line": number; "column": number }[];
-	/** frameId → its scopes. */
 	"scopes": Record<number, { "name": string; "variablesReference": number; "expensive": boolean }[]>;
-	/** variablesReference → its rows. */
 	"variables": Record<number, Variable[]>;
+	/** True when this stop is an earlier point in history (a time-travel view), for the stop reason. */
+	"traveled"?: boolean;
 }
 
 const post = (message: Record<string, unknown>): void => { (self as unknown as Worker).postMessage(message); };
 
-let loaded: LoadedVM | undefined;
-/** Resolver for the control message the drive loop is currently awaiting (set only while paused). */
-let awaitAction: ((action: StepAction) => void) | undefined;
+let sourceFile: ts.SourceFile | undefined;
+/** Forks, one per stop reached; `index` is the currently-displayed stop. */
+let history: Vm[] = [];
+let index = -1;
+let done = false;
+/** Resolver for the control message the session loop is currently awaiting. */
+let awaitAction: ((action: Action) => void) | undefined;
 
-function nextAction(): Promise<StepAction> {
+function nextAction(): Promise<Action> {
 	return new Promise((resolve) => { awaitAction = resolve; });
 }
 
@@ -62,14 +73,12 @@ function typeName(value: unknown): string {
 }
 
 /**
- * Build a DAP-ready snapshot of the current stop. M1 is deliberately a SINGLE frame at the current node with
- * one "Locals" scope: the in-scope program bindings, walked from the current (top) scope up through its
- * parents (inner shadows outer). Standard globals live on the global object, not as scope bindings, so
- * including the root scope surfaces the program's top-level vars without dumping the whole global namespace.
- * Reconstructing a multi-frame call stack from the CEK continuation frames is a later refinement.
+ * Build a DAP-ready snapshot of `vm`'s current stop. M2 is a SINGLE frame at the current node with one
+ * "Locals" scope: the in-scope program bindings, walked from the current (top) scope up through its parents
+ * (inner shadows outer). Standard globals live on the global object, not as scope bindings, so including the
+ * root scope surfaces the program's top-level vars without dumping the whole global namespace.
  */
-function snapshot(): Snapshot {
-	const vm = loaded!.vm;
+function snapshot(vm: Vm): Snapshot {
 	const loc = vm.location();
 	const scope = vm.top?.scope ?? vm.rootScope;
 
@@ -101,11 +110,10 @@ function snapshot(): Snapshot {
 
 /**
  * Label for the stack frame: the INNERMOST function whose source range contains the current position. The
- * continuation frames aren't 1:1 with function calls, so we resolve this off the AST by position instead —
- * walk the SourceFile, and among the function-like nodes spanning `pos`, keep the deepest.
+ * continuation frames aren't 1:1 with function calls, so we resolve this off the AST by position instead.
  */
 function functionName(pos: number | undefined): string {
-	if (pos === undefined || loaded === undefined) {
+	if (pos === undefined || sourceFile === undefined) {
 		return "<module>";
 	}
 
@@ -115,8 +123,8 @@ function functionName(pos: number | undefined): string {
 	let bestSpan = Infinity;
 
 	const visit = (node: ts.Node): void => {
-		if (isFunctionLike(node) && node.getStart(loaded!.sourceFile) <= pos && pos < node.getEnd()) {
-			const span = node.getEnd() - node.getStart(loaded!.sourceFile);
+		if (isFunctionLike(node) && node.getStart(sourceFile!) <= pos && pos < node.getEnd()) {
+			const span = node.getEnd() - node.getStart(sourceFile!);
 
 			if (span < bestSpan) {
 				bestSpan = span;
@@ -127,7 +135,7 @@ function functionName(pos: number | undefined): string {
 		node.forEachChild(visit);
 	};
 
-	loaded.sourceFile.forEachChild(visit);
+	sourceFile.forEachChild(visit);
 
 	if (best === undefined) {
 		return "<module>";
@@ -136,39 +144,83 @@ function functionName(pos: number | undefined): string {
 	return best.name !== undefined && ts.isIdentifier(best.name) ? best.name.text : "<anonymous>";
 }
 
-/** The drive loop: perform the pending action, then either terminate or emit a stop and await the next. */
-async function drive(): Promise<void> {
-	const vm = loaded!.vm;
-	let action: StepAction = "continue"; // first run: continue to the first breakpoint (or completion)
+function emitStopped(vm: Vm, reason: string, traveled = false): void {
+	post({ "type": "stopped", "reason": reason, "snapshot": { ...snapshot(vm), "traveled": traveled } });
+}
 
-	for (;;) {
-		try {
-			switch (action) {
-				case "continue": vm.runToBreakpoint(); break;
-				case "next": vm.stepStatement(); break;
-				case "stepIn": vm.step(); break;
-				case "stepOut": vm.stepStatement(); break; // TODO: true step-out (run to caller) in a later pass
-				case "disconnect": post({ "type": "terminated" }); return;
-			}
-		} catch (error) {
-			post({ "type": "output", "text": "Uncaught " + String(error) });
-			post({ "type": "terminated" });
+/** Advance `base` (a VM we own) by a forward action, then record the new stop or terminate. */
+function advanceFrom(base: Vm, action: ForwardAction): void {
+	try {
+		switch (action) {
+			case "continue": base.runToBreakpoint(); break;
+			case "next": base.stepStatement(); break;
+			case "stepIn": base.step(); break;
+			case "stepOut": base.stepStatement(); break; // TODO: true step-out (run to caller) in a later pass
+		}
+	} catch (error) {
+		post({ "type": "output", "text": "Uncaught " + String(error) });
+		post({ "type": "terminated" });
+		done = true;
 
-			return;
+		return;
+	}
+
+	if (base.finished) {
+		if (base.completion !== undefined) {
+			post({ "type": "output", "text": "→ " + format(base.completion) });
 		}
 
-		if (vm.finished) {
-			if (vm.completion !== undefined) {
-				post({ "type": "output", "text": "→ " + format(vm.completion) });
+		post({ "type": "terminated" });
+		done = true;
+
+		return;
+	}
+
+	// Branch: drop any redo tail, then record this stop. The stored fork is only ever forked from, never
+	// stepped, so it stays a pristine snapshot we can return to.
+	history = history.slice(0, index + 1);
+	history.push(base);
+	index = history.length - 1;
+	emitStopped(base, action === "continue" ? "breakpoint" : "step");
+}
+
+function handle(action: Action): void {
+	switch (action) {
+		case "stepBack":
+			if (index > 0) {
+				index -= 1;
 			}
 
+			emitStopped(history[index], "step", true);
+			break;
+
+		case "reverseContinue":
+			// M2: nearest earlier stop. (A true reverse-to-breakpoint scan is a later refinement.)
+			if (index > 0) {
+				index -= 1;
+			}
+
+			emitStopped(history[index], "breakpoint", true);
+			break;
+
+		case "disconnect":
 			post({ "type": "terminated" });
+			done = true;
+			break;
 
-			return;
-		}
+		default:
+			// Forward: fork the current stop and advance a copy (honors the action even after a step-back).
+			advanceFrom(history[index].fork(), action);
+			break;
+	}
+}
 
-		post({ "type": "stopped", "reason": action === "continue" ? "breakpoint" : "step", "snapshot": snapshot() });
-		action = await nextAction();
+async function session(initial: Vm): Promise<void> {
+	advanceFrom(initial, "continue"); // run to the first breakpoint (or completion)
+
+	while (!done) {
+		const action = await nextAction();
+		handle(action);
 	}
 }
 
@@ -176,16 +228,22 @@ self.onmessage = (event: MessageEvent<Incoming>): void => {
 	const message = event.data;
 
 	switch (message.type) {
-		case "launch":
-			loaded = createVM(message.source, { "fileName": message.fileName });
+		case "launch": {
+			const loaded = createVM(message.source, { "fileName": message.fileName });
+			sourceFile = loaded.sourceFile;
 			loaded.vm.addBreakpointsByLine(...message.lines);
-			void drive();
+			history = [];
+			index = -1;
+			done = false;
+			void session(loaded.vm);
 			break;
+		}
 
 		case "setBreakpoints":
-			if (loaded !== undefined) {
-				loaded.vm.breakpoints.clear();
-				loaded.vm.addBreakpointsByLine(...message.lines);
+			// Re-point breakpoints on every stored fork so time-traveled forward runs honor the new set.
+			for (const vm of history) {
+				vm.breakpoints.clear();
+				vm.addBreakpointsByLine(...message.lines);
 			}
 			break;
 
@@ -193,6 +251,8 @@ self.onmessage = (event: MessageEvent<Incoming>): void => {
 		case "next":
 		case "stepIn":
 		case "stepOut":
+		case "stepBack":
+		case "reverseContinue":
 		case "disconnect":
 			if (awaitAction !== undefined) {
 				const resolve = awaitAction;

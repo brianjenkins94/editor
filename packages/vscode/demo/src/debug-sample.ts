@@ -1,17 +1,22 @@
 // A self-contained sample for the tsval debugger (no imports — runs entirely under the interpreter).
-// Set a breakpoint on a line inside `add`, then Run and Debug (tsval): execution pauses there and the
-// Variables pane shows the real locals (a, b, sum) from tsval's own scope.
+//
+// Try it: set a breakpoint on the `total += n` line, then Run and Debug (tsval). Step forward through the
+// loop and watch `total` and `i` climb — then use Step Back / Reverse (the tsval debugger supports time
+// travel) and watch them run BACKWARD. The Variables pane reflects tsval's real machine state at every point.
 
-function add(a: number, b: number): number {
-	const sum = a + b;
+function sum(numbers: number[]): number {
+	let total = 0;
 
-	return sum;
+	for (let i = 0; i < numbers.length; i++) {
+		const n = numbers[i];
+
+		total += n;
+	}
+
+	return total;
 }
 
-const x = 10;
-const y = 32;
-const result = add(x, y);
-const doubled = result * 2;
+const values = [10, 20, 30];
+const result = sum(values);
 
 result;
-doubled;

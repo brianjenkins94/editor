@@ -63,7 +63,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		switch (request.command) {
 			case "initialize":
-				this.respond(request, { "supportsConfigurationDoneRequest": true, "supportsTerminateRequest": true });
+				// supportsStepBack lights up VS Code's reverse toolbar (Step Back + Reverse) — tsval time travel.
+				this.respond(request, { "supportsConfigurationDoneRequest": true, "supportsTerminateRequest": true, "supportsStepBack": true });
 				this.event("initialized");
 				break;
 
@@ -128,6 +129,16 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			case "stepOut":
 				this.worker?.postMessage({ "type": "stepOut" });
 				this.respond(request);
+				break;
+
+			case "stepBack":
+				this.worker?.postMessage({ "type": "stepBack" });
+				this.respond(request);
+				break;
+
+			case "reverseContinue":
+				this.worker?.postMessage({ "type": "reverseContinue" });
+				this.respond(request, { "allThreadsContinued": true });
 				break;
 
 			case "disconnect":
