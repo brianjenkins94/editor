@@ -13,6 +13,7 @@ import type * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
 import { registerTsvalDebug } from "./debug-adapter";
+import { podHub } from "./pod";
 
 interface ServerSpec {
 	"id": string;
@@ -58,6 +59,11 @@ function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+	// The pod hub is a standalone root here (no harness needed). Workers link UP to it and announce
+	// themselves on `pod.ready`; log each join so the pod's membership is observable. When a harness is
+	// present the workbench links this hub up to the page's root hub — the pod code is unchanged either way.
+	context.subscriptions.push({ "dispose": podHub.subscribe("pod.ready", (data) => { console.log("[pod] worker joined:", data); }) });
+
 	// The tsval debug type — a worker-backed stepping debugger (debug-adapter.ts + debug-worker.ts).
 	registerTsvalDebug(context);
 

@@ -8,7 +8,10 @@
  * stackTrace/scopes/variables straight out of the latest snapshot. Inline is the only viable shape in-browser
  * (a DebugAdapterServer needs a socket). Time-travel (step-back) and the React/Atomics path arrive in M2/M3.
  */
+import { portTransport } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
+
+import { podHub } from "./pod";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
 type Dap = Record<string, unknown>;
@@ -32,6 +35,9 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 	private seq = 1;
 	private worker: Worker | undefined;
+	// The debug worker joins the pod hub over its OWN channel — hub messages are `\0hub`-wrapped, so they
+	// coexist with the raw {type} debug protocol on the same Worker (each ignores the other's messages).
+	private podUnlink: (() => void) | undefined;
 	private program = "";
 	private lines: number[] = [];
 	private snapshot: Snapshot | undefined;
@@ -169,6 +175,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			case "terminate":
 				// Hard-stop: terminate() kills the worker even while it's blocked in Atomics.wait (an in-handler
 				// pause), which a postMessage could not reach.
+				this.podUnlink?.();
+				this.podUnlink = undefined;
 				this.worker?.terminate();
 				this.worker = undefined;
 				this.respond(request);
@@ -209,6 +217,10 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.worker = new Worker(workerUrl, { "type": "module" });
 		this.worker.onmessage = (event: MessageEvent<WorkerMessage>) => { this.onWorker(event.data); };
 		this.worker.onerror = (event) => { this.event("output", { "category": "stderr", "output": `[debug-worker] ${event.message}\n` }); };
+		// Join the worker to the pod hub BEFORE launch: link() queues the pod's interest (sub-controls) on the
+		// worker channel first, so by the time the worker processes `launch` and publishes `pod.ready`, the pod
+		// is already known to want it (same ordered channel — no race).
+		this.podUnlink = podHub.link(portTransport(this.worker));
 		this.worker.postMessage({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.control.buffer, "react": this.reactMode });
 	}
 
@@ -233,6 +245,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 			case "terminated":
 				this.event("terminated");
+				this.podUnlink?.();
+				this.podUnlink = undefined;
 				this.worker?.terminate();
 				this.worker = undefined;
 				break;
@@ -261,6 +275,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	}
 
 	public dispose(): void {
+		this.podUnlink?.();
 		this.worker?.terminate();
 		this.sendEmitter.dispose();
 	}

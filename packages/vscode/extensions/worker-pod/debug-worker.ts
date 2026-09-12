@@ -18,9 +18,16 @@
 import ts from "typescript";
 import React from "react";
 
+import { createHub, portTransport } from "@brianjenkins94/hub";
 import { createVM, type LoadedVM } from "@brianjenkins94/tsval";
 
 import { createGuestRoot, type GuestRoot } from "./debug-react";
+
+// This worker's own hub, linked UP to the pod hub over its own channel (hub messages are `\0hub`-wrapped, so
+// they ride alongside the raw {type} debug protocol without collision). It announces `pod.ready` after launch.
+const hub = createHub({ "id": "debug-worker" });
+
+hub.link(portTransport(globalThis as unknown as Worker));
 
 type Vm = LoadedVM["vm"];
 
@@ -299,6 +306,9 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 	switch (message.type) {
 		case "launch": {
 			control = new Int32Array(message.control);
+			// Announce membership to the pod hub. Safe here (not at module load): the pod's interest sub-control
+			// precedes `launch` on this ordered channel, so by now the pod is known to want `pod.ready`.
+			hub.publish("pod.ready", { "worker": hub.id, "react": message.react === true });
 
 			if (message.react === true) {
 				launchReact(message);
