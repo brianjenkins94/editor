@@ -29,6 +29,7 @@ type Incoming =
 	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control": SharedArrayBuffer; "react"?: boolean }
 	| { "type": "setBreakpoints"; "lines": number[] }
 	| { "type": "dispatch"; "id": number; "event": string }
+	| { "type": "timeTravel"; "index": number }
 	| { "type": "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect" };
 
 type Action = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect";
@@ -315,6 +316,11 @@ self.onmessage = (event: MessageEvent<Incoming>): void => {
 
 		case "dispatch":
 			guestRoot?.dispatch(message.id, message.event);
+			post({ "type": "history", "length": guestRoot?.historyLength() ?? 0 });
+			break;
+
+		case "timeTravel":
+			guestRoot?.timeTravel(message.index);
 			break;
 
 		case "setBreakpoints":

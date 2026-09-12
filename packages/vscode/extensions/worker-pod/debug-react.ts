@@ -37,6 +37,12 @@ export interface GuestRoot {
 	/** Invoke the guest handler registered for (nodeId, event) — a DOM event routed back from the iframe. Runs
 	 *  synchronously through tsval, so a breakpoint inside the handler pauses (M3b). */
 	"dispatch": (id: number, event: string) => void;
+	/** Number of state snapshots recorded so far (initial mount + one per setState). */
+	"historyLength": () => number;
+	/** M3d time travel: restore the state store to snapshot `index` and re-render — the DOM reflects the past
+	 *  React state. Because the state values live in a forkable store (not React's fiber), this rewinds `count`,
+	 *  not just guest locals. Continuing forward from a restored point branches from it. */
+	"timeTravel": (index: number) => void;
 	"unmount": () => void;
 }
 
@@ -58,6 +64,39 @@ export function createGuestRoot(React: typeof ReactNamespace, emit: (mutation: M
 	let nextId = 1;
 	// (nodeId → event → guest handler). Kept worker-side; never serialized.
 	const handlers = new Map<number, Map<string, (event: unknown) => void>>();
+
+	// M3d — a forkable external store for component state. Each useState call gets a stable opaque key (held in
+	// React's fiber via useRef); the VALUE lives here, so snapshotting/restoring this map is time travel over
+	// React state. React just subscribes via useSyncExternalStore. `history` records the state after mount and
+	// after every setState.
+	let values = new Map<number, unknown>();
+	let nextKey = 1;
+	const subscribers = new Set<() => void>();
+	const subscribe = (callback: () => void): (() => void) => { subscribers.add(callback); return () => subscribers.delete(callback); };
+	const notify = (): void => { for (const callback of subscribers) { callback(); } };
+	const history: Map<number, unknown>[] = [];
+	const snapshot = (): void => { history.push(new Map(values)); };
+
+	// Replace React.useState with a store-backed version (it still uses React's own useRef/useSyncExternalStore,
+	// so it's a valid hook). The worker's React is per-session, so patching it is safe.
+	(React as { "useState": unknown }).useState = <S,>(initial: S | (() => S)): [S, (next: S | ((prev: S) => S)) => void] => {
+		const keyRef = React.useRef<number | null>(null);
+
+		if (keyRef.current === null) {
+			keyRef.current = nextKey++;
+			values.set(keyRef.current, typeof initial === "function" ? (initial as () => S)() : initial);
+		}
+
+		const key = keyRef.current;
+		const value = React.useSyncExternalStore(subscribe, () => values.get(key) as S);
+		const setValue = (next: S | ((prev: S) => S)): void => {
+			values.set(key, typeof next === "function" ? (next as (prev: S) => S)(values.get(key) as S) : next);
+			snapshot();
+			notify();
+		};
+
+		return [value, setValue];
+	};
 
 	const setHandler = (id: number, event: string, fn: ((event: unknown) => void) | undefined): void => {
 		let byEvent = handlers.get(id);
@@ -165,13 +204,26 @@ export function createGuestRoot(React: typeof ReactNamespace, emit: (mutation: M
 	const root = reconciler.createContainer({ "id": "root" }, 0, null, false, null, "", () => undefined, null);
 
 	return {
-		"render": (element: unknown) => reconciler.updateContainer(element as React.ReactNode, root, null, () => undefined),
+		"render": (element: unknown) => {
+			reconciler.updateContainer(element as React.ReactNode, root, null, () => undefined);
+
+			if (history.length === 0) {
+				snapshot(); // record the initial mounted state (index 0)
+			}
+		},
 		"dispatch": (id: number, event: string) => {
 			const fn = handlers.get(id)?.get(event);
 
 			if (fn !== undefined) {
 				// Synchronous → routes through tsval's callGuestFromHost; a breakpoint inside pauses (M3b).
 				fn({ "type": event });
+			}
+		},
+		"historyLength": () => history.length,
+		"timeTravel": (index: number) => {
+			if (index >= 0 && index < history.length) {
+				values = new Map(history[index]);
+				notify(); // useSyncExternalStore re-reads → React re-renders → mutations → DOM shows the past state
 			}
 		},
 		"unmount": () => reconciler.updateContainer(null, root, null, () => undefined)
