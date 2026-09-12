@@ -2,7 +2,6 @@
   "name": "@brianjenkins94/almostnode",
   "version": "0.2.14-vendored.0",
   "description": "Vendored, trimmed fork of macaly/almostnode@0.2.14 — the same-origin, main-thread in-browser node runtime only (used to run bundled node language servers in the editor).",
-  "private": true,
   "type": "module",
   "license": "MIT",
   "exports": {
