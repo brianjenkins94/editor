@@ -14,8 +14,10 @@
     "group": "${{ github.workflow }}-${{ github.ref }}"
   },
   # Must grant at least what the reusable deploy workflow needs (its token is the intersection).
+  # contents:write lets the reusable deploy's opt-in release step cut GitHub releases (util-release) — see
+  # `release: true` below; pages + id-token are for the Pages deploy.
   "permissions": {
-    "contents": "read",
+    "contents": "write",
     "pages": "write",
     "id-token": "write"
   },
@@ -30,7 +32,8 @@
       "uses": "brianjenkins94/lib/.github/workflows/deploy.yml@main",
       "with": {
         "run": "npx util-publish",
-        "workspace-packages": "packages/*,components/*"
+        "workspace-packages": "packages/*,components/*",
+        "release": true
       },
       "secrets": {
         "NPM_TOKEN": "${{ secrets.NPM_TOKEN }}"
