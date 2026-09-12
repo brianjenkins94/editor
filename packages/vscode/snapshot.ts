@@ -15,7 +15,7 @@ import type { Plugin } from "vite";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import * as url from "node:url";
-import { closest } from "@brianjenkins94/util/fs";
+import * as utilFs from "@brianjenkins94/util/fs";
 import { log } from "@brianjenkins94/util/logger";
 import { packageName } from "@brianjenkins94/util/vite/external";
 
@@ -43,7 +43,7 @@ function demoDir(): string {
 
 /** Nearest ancestor directory that has a node_modules (editor's workspace root, for type seeding). */
 function nodeModulesRoot(): string | undefined {
-	const nodeModules = closest(here(), "node_modules");
+	const nodeModules = utilFs.closest(here(), "node_modules");
 
 	return nodeModules === undefined ? undefined : path.dirname(nodeModules);
 }
