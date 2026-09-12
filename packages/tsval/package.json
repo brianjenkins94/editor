@@ -29,6 +29,7 @@
     "typescript": "^5.6.0"
   },
   "devDependencies": {
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@types/node": "^24.13.3"
   }
 }

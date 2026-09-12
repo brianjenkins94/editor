@@ -6,8 +6,8 @@
 //   node run.mjs Statement 'const x = "https://a"'
 //   echo 'const x = 1' | node run.mjs           # production defaults to the grammar's defaultMatcher
 //
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { exec } from "@brianjenkins94/util/exec";
 import * as path from "node:path";
 import * as url from "node:url";
 
@@ -26,9 +26,9 @@ if (production) {
 	args.push("-p", production);
 }
 
-const result = spawnSync(process.execPath, args, { "input": input, "encoding": "utf8" });
+const result = await exec(process.execPath, args, { "input": input });
 
-const tree = (result.stdout || "").replace(/\x1B\[[0-9;]*m/gu, "");
+const tree = result.stdout.replace(/\x1B\[[0-9;]*m/gu, "");
 
 process.stdout.write(tree);
 
@@ -38,4 +38,4 @@ if (result.stderr && !benign) {
 	process.stderr.write(result.stderr);
 }
 
-process.exit(benign ? 0 : result.status ?? 0);
+process.exit(benign ? 0 : result.exitCode);
