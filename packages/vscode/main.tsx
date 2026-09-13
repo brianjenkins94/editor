@@ -49,17 +49,47 @@ if (ensureCrossOriginIsolated()) {
 	previewWindow.body.appendChild(previewFrame);
 	document.body.appendChild(previewWindow.element);
 
-	import("./preview").then(({ createPreview }) => createPreview({
-		"files": workspace,
-		"workspaceFolder": "/workspace",
-		"iframe": previewFrame,
-		"swUrl": base + "coi-serviceworker.js"
-	})).then((handle) => {
-		preview = handle;
-		hostLog.info("preview ready");
-	}).catch((error: unknown) => {
-		hostLog.error("preview failed", { "error": error instanceof Error ? error.message : String(error) });
-	});
+	// Spinning up the preview is expensive — its own in-browser dev server plus the `typescript` transpiler, a
+	// few MB of extra JS — and it competes with the editor for the main thread and network during the critical
+	// boot. So hold it back until the editor is genuinely up and idle: our worker-pod extension publishes
+	// `editor.ready` on the hub once it has activated and its language client has connected (see
+	// extensions/worker-pod/extension.ts). We then import + create it inside an idle callback, so it never steals
+	// a frame from a still-settling editor. Idempotent, and a timeout fallback covers a missed beacon (extension
+	// failure or a hub interest race) so the preview is only ever delayed, never stranded.
+	let previewRequested = false;
+
+	function loadPreview(): void {
+		if (previewRequested) {
+			return;
+		}
+
+		previewRequested = true;
+
+		const start = (): void => {
+			import("./preview").then(({ createPreview }) => createPreview({
+				"files": workspace,
+				"workspaceFolder": "/workspace",
+				"iframe": previewFrame,
+				"swUrl": base + "coi-serviceworker.js"
+			})).then((handle) => {
+				preview = handle;
+				hostLog.info("preview ready");
+			}).catch((error: unknown) => {
+				hostLog.error("preview failed", { "error": error instanceof Error ? error.message : String(error) });
+			});
+		};
+
+		if (typeof requestIdleCallback === "function") {
+			requestIdleCallback(start, { "timeout": 2000 });
+		} else {
+			setTimeout(start, 200);
+		}
+	}
+
+	rootHub.subscribe("editor.ready", loadPreview);
+	// Fallback: if the editor never signals ready (extension failed to activate, or the beacon lost a hub race),
+	// load the preview anyway rather than leave the pane forever empty.
+	setTimeout(loadPreview, 15000);
 
 	createVscodeWindow({
 		"workspaceFolder": "/workspace",

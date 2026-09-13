@@ -59,6 +59,20 @@ const clients: LanguageClient[] = [];
 const controlPorts: MessagePort[] = [];
 let workspaceBuffer: SharedArrayBuffer | undefined;
 
+// Nudge the host page to load the (heavy) live preview now that OUR extension is up — activated, wired, and its
+// server pod spinning. The page holds the preview import back until it hears this on the hub (main.tsx →
+// rootHub.subscribe("editor.ready")), so the preview's dev server never competes with the editor's boot. We tie
+// this to activation, NOT to the LSP client finishing its handshake — that can take many seconds on a cold
+// start, far too late to be a useful "idle" cue. The workbench links this pod into the hub tree just AFTER
+// activate() returns, so an immediate publish could beat the link (fire-and-forget, no buffering); re-announce a
+// few times to clear that brief startup window. The host's handler is idempotent, and it has a timeout fallback,
+// so extra beacons are harmless and a missed one only delays the preview, never loses it.
+function announceEditorReady(): void {
+	for (const delay of [0, 300, 1200, 3000]) {
+		setTimeout(() => { podHub.publish("editor.ready"); }, delay);
+	}
+}
+
 function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 	// The workbench iframe's origin; the LocalProcess ext host shares it. The worker is served next to
 	// host.html under /__vscode__/lsp/ (lsp.config.ts).
@@ -118,6 +132,9 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	for (const spec of SERVERS) {
 		startServer(context, spec);
 	}
+
+	// Our extension is up and its pod is spinning — tell the host page it can load the deferred live preview now.
+	announceEditorReady();
 
 	context.subscriptions.push({
 		"dispose": () => {
