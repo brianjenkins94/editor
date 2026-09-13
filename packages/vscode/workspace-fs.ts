@@ -100,9 +100,13 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 
 	// Mount the shared buffer AT /workspace (a clean mount point the LSP workers mount the same buffer at in M3b),
 	// with a plain InMemory root for anything outside the workspace. Without a buffer, everything is InMemory.
-	await configure(buffer !== undefined
-		? { "mounts": { "/": InMemory, "/workspace": { "backend": SingleBuffer, "buffer": buffer } } }
-		: { "mounts": { "/": InMemory } });
+	// Two separate calls (not a ternary): the branches have different mount keys, so a single call would hand
+	// `configure` a UNION of mount shapes it can't infer one `ConfigMounts` type from — each call infers its own.
+	if (buffer !== undefined) {
+		await configure({ "mounts": { "/": InMemory, "/workspace": { "backend": SingleBuffer, "buffer": buffer } } });
+	} else {
+		await configure({ "mounts": { "/": InMemory } });
+	}
 
 	// Seed the baked snapshot (not persisted — a rebuilt demo file stays fresh), then restore persisted writes
 	// (acquired types + edits) on top, so those override the seed for any overlapping path.

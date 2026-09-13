@@ -10,14 +10,15 @@ declare module "worker-pod:extension" {
 	export default code;
 }
 
-/** The worker-pod cspell language server bundled to an ESM string (imported by server-host, run by almostnode). */
-declare module "worker-pod:server-node" {
+/** The eslint extension bundled to a browser CommonJS string (see bundledExtension("eslint") in build.ts) —
+ *  a TS server plugin that lints inside tsserver, reusing tsserver's own typescript. */
+declare module "eslint:extension" {
 	const code: string;
 	export default code;
 }
 
-/** The worker-pod eslint language server bundled to an ESM string (imported by server-host-eslint, run by almostnode). */
-declare module "worker-pod:server-node-eslint" {
+/** The worker-pod cspell language server bundled to an ESM string (imported by server-host, run by almostnode). */
+declare module "worker-pod:server-node" {
 	const code: string;
 	export default code;
 }
