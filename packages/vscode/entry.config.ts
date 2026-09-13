@@ -138,6 +138,10 @@ export default defineConfig({
 		"jsx": "automatic",
 		"jsxImportSource": "preact"
 	},
+	// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `hub: file:../hub`
+	// (declared by both vscode and observability) where npm dedupes it, breaking cross-instance objects. See the
+	// matching note in vite.config.ts.
+	"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"] },
 	"build": {
 		"target": "esnext",
 		"outDir": "dist",

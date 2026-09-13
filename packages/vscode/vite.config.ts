@@ -17,7 +17,11 @@ export default defineConfig({
 	"base": "./",
 	"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 	// One Preact instance across chunks (the lazily-imported workbench chunk shares hooks state).
-	"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime"] },
+	// Dedupe: one Preact instance across chunks; and one @brianjenkins94/hub instance — both packages/vscode and
+	// packages/observability declare `hub: file:../hub`, which npm dedupes locally but CI's pnpm workspace
+	// double-instances, so the bundle got two `hub` copies (portTransport ×2) whose objects don't cross between
+	// them → a `.with is not a function` boot crash on the deployed (CI-built) bundle only. Force one copy.
+	"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
 	"build": { "outDir": "../../docs", "emptyOutDir": false },
 	"plugins": [
 		// Cross-origin-isolate the host page so the workbench iframe can use SharedArrayBuffer (confirmed
