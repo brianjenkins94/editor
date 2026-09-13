@@ -1,0 +1,26 @@
+{
+  "name": "@brianjenkins94/observability",
+  "version": "0.0.0",
+  "description": "The observability plane: @brianjenkins94/util/logger spans/records carried over @brianjenkins94/hub. A source-scoped relay publishes each LogRecord onto its hub on $sys.log.<source>; a root collector renders the merged, span-nested, cross-context stream. The reusable middle layer between hub (routing) and a sink like dev-hub (a Node collector + MCP).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@brianjenkins94/hub": "file:../hub"
+  },
+  "peerDependencies": {
+    "@brianjenkins94/util": "*"
+  },
+  "devDependencies": {
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
+    "@types/node": "^24.13.3"
+  }
+}

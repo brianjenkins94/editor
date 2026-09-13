@@ -14,7 +14,8 @@ import type { Hub } from "@brianjenkins94/hub";
 import { RecordStore } from "./store.ts";
 import type { HubLogRecord } from "./store.ts";
 
-/** Reserved observability namespace — must match the editor's telemetry.ts `LOG_SUBJECT`. */
+/** Reserved observability namespace — must match `@brianjenkins94/observability`'s `LOG_SUBJECT` (kept as its
+ *  own constant so this Node collector doesn't pull the browser-oriented observability package). */
 const LOG_SUBJECT = "$sys.log";
 
 export interface DevHub {
