@@ -20,9 +20,14 @@ import { render } from "preact";
 // virtual module in entry.config.ts).
 import helloExtensionCode from "hello:extension";
 import workerPodExtensionCode from "worker-pod:extension";
+import eslintExtensionCode from "eslint:extension";
 import type { PodBridge } from "./extensions/worker-pod/extension";
 import helloManifest from "./extensions/hello/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
+import eslintManifest from "./extensions/eslint/package.json";
+// The eslint TS server plugin's source (real editable code, not an inline blob), registered into the
+// in-browser tsserver as an extension-file data: URL below.
+import tsPluginSource from "./extensions/eslint/ts-plugin.js?raw";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
 import { installTypeAcquisition } from "./ata";
@@ -30,7 +35,6 @@ import { installWorkspaceFs, type WorkspaceFs } from "./workspace-fs";
 import { relayLoggerToHub } from "./telemetry";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { connectAsPane } from "./pane-bus";
-import { vfsPutAll } from "./vfs";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 
@@ -123,7 +127,7 @@ function wireWorkbenchHub(workspaceBuffer?: SharedArrayBuffer): void {
 			return;
 		}
 
-		// M3b: hand the pod the shared workspace SharedArrayBuffer, so the cspell/eslint workers mount the SAME
+		// M3b: hand the pod the shared workspace SharedArrayBuffer, so the cspell worker mounts the SAME
 		// zen-fs the editor + type-checker use (at /workspace). No-op when there's no SAB (no cross-origin isolation).
 		if (workspaceBuffer !== undefined) {
 			(bridge as PodBridge & { "attachWorkspaceBuffer"?: (b: unknown) => void }).attachWorkspaceBuffer?.(workspaceBuffer);
@@ -174,15 +178,6 @@ function maybeBoot(): void {
 	booted = true;
 	const { files, openEditors, workspaceFolder, moduleVersions } = init;
 
-	// Mirror the workspace files into the same-origin VFS store (IndexedDB) so a service worker can serve them
-	// at their real paths for the in-browser module resolver (see vfs.ts). Fire-and-forget — independent of and
-	// non-blocking to the workbench boot, which seeds monaco's own in-memory FS from `files` as before.
-	vfsPutAll(files).then(() => {
-		paneLog.info("vfs store populated", { "files": files.length });
-	}).catch((error: unknown) => {
-		paneLog.error("vfs store populate failed", { "error": errText(error) });
-	});
-
 	// One timed span for the whole boot; its child logs (relayed to the host) read as an indented tree of
 	// what booting the workbench did and how long it took. Ended once monaco is online.
 	const bootSpan = paneLog.span("workbench-boot", { "files": files.length, "openEditors": openEditors.length });
@@ -190,6 +185,11 @@ function maybeBoot(): void {
 	let workspaceFs: WorkspaceFs | undefined;
 
 	bootWithFallbackViewport(document.documentElement);
+
+	// The typescript-external eslint engine, served next to host.html under /__vscode__/lsp/. Baked into the
+	// eslint TS-plugin source at registration (below) so the plugin — which runs inside tsserver and has no
+	// location.href — loads it without depending on a runtime config setting.
+	const eslintEngineUrl = new URL("./lsp/eslint-engine.js", location.href).href;
 
 	boot({
 		"parts": parts,
@@ -253,7 +253,26 @@ function maybeBoot(): void {
 
 			workerPodExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(workerPodExtensionCode));
 
-			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod"] });
+			// The eslint extension — a TS server plugin that lints inside tsserver, reusing tsserver's own `ts`
+			// (no bundled copy). Registered in the WEB-WORKER host (where tsserver runs) so the ext-host worker's
+			// patched fetch/importExt resolves the plugin's extension-file:// probe URIs to the data: URLs below —
+			// which is what loads it into the in-browser tsserver. Mirrors the retired preflight ts-plugin wiring.
+			const eslintExt = registerExtension(eslintManifest, ExtensionHostKind.LocalWebWorker);
+
+			eslintExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(eslintExtensionCode));
+
+			// The plugin files, named by the `typescriptServerPlugins` contribution in eslint's manifest. tsserver
+			// discovers `./node_modules/eslint-ts-plugin/` and imports its `browser` entry's default export.
+			const eslintPluginPkg = JSON.stringify({ "name": "eslint-ts-plugin", "version": "0.0.1", "browser": "index.js" });
+
+			eslintExt.registerFileUrl("./node_modules/eslint-ts-plugin/package.json", "data:application/json," + encodeURIComponent(eslintPluginPkg));
+			// Bake the served engine URL into the plugin source (the plugin runs inside tsserver and has no
+			// location.href of its own, and the workbench's persisted config can shadow a runtime setting).
+			const eslintPluginSource = tsPluginSource.replaceAll("__ESLINT_ENGINE_URL__", eslintEngineUrl);
+
+			eslintExt.registerFileUrl("./node_modules/eslint-ts-plugin/index.js", "data:text/javascript," + encodeURIComponent(eslintPluginSource));
+
+			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod", "eslint"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			bus.post({ "type": "online" });

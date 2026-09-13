@@ -154,11 +154,9 @@ export function editorWorkspacePlugin(): Plugin {
 
 const DECL_SUFFIX = [".d.ts", ".d.mts", ".d.cts"];
 const PKG_DECL_CAP = 600 * 1024;                     // per package: larger .d.ts surfaces get shimmed, not baked
-// Packages force-baked even when the demo doesn't import them. Empty now (unification M2): `@types/node` was the
-// only entry — 2.6 MB of Node globals the browser-only demo never uses. The bake is now just the offline PREWARM
-// of the demo's imported deps (react/react-dom); everything else, including `@types/node` for a file that
-// `/// <reference types="node">`s it, is acquired at runtime by ata.ts and persisted in the zen-fs store.
-const ALWAYS_REAL = new Set<string>();
+// The bake is just the offline PREWARM of the demo's imported deps (react/react-dom); everything else — including
+// `@types/node` for a file that `/// <reference types="node">`s it (2.6 MB of Node globals the browser-only demo
+// never uses, dropped in unification M2) — is acquired at runtime by ata.ts and persisted in the zen-fs store.
 const ALWAYS_SHIM = new Set(["vscode", "lucide"]);   // ambient host API / heavy value-less icon union
 const AMBIENT_FILE = `${FOLDER}/editor-ambient.d.ts`; // root project .d.ts (see the note where it's written)
 
@@ -231,7 +229,7 @@ function seedDecls(root: string, pkg: string, dir: string, files: SnapshotFile[]
 
 	// ships no types → ambient any; too heavy to bake → CDN + any. @types/* packages ARE the type surface, so
 	// they bake regardless of size (shimming them would defeat the point).
-	if (declBytes === 0 || (declBytes > PKG_DECL_CAP && !ALWAYS_REAL.has(pkg) && !pkg.startsWith("@types/"))) {
+	if (declBytes === 0 || (declBytes > PKG_DECL_CAP && !pkg.startsWith("@types/"))) {
 		return undefined;
 	}
 
@@ -258,7 +256,7 @@ function typeSurface(): SnapshotFile[] {
 	}
 
 	const nm = path.join(root, "node_modules");
-	const packages = [...new Set([...importedPackages(), ...ALWAYS_REAL])].sort();
+	const packages = [...new Set(importedPackages())].sort();
 	const files: SnapshotFile[] = [];
 	const shims: string[] = [];
 	const typeRefs: string[] = [];   // @types/* index.d.ts to force-reference (globals — e.g. JSX — aren't auto-included)

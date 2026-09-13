@@ -14,9 +14,9 @@ export function ensureCrossOriginIsolated(): boolean {
 
 	// Register the service worker whenever we can. In PRODUCTION it PROVIDES isolation (a static host can't
 	// set COOP/COEP headers, so the worker stamps them). In DEV the vite server already sets those headers,
-	// but we still register the worker so its same-origin module resolver (serving the VFS store; see vfs.ts)
-	// is active. Registration can fail (e.g. an embedded browser that blocks service workers) — that's
-	// harmless when headers already isolate: we just don't get the resolver on that load.
+	// but we still register the worker so its same-origin node_modules resolver (CDN fold-in for go-to-def /
+	// type acquisition; see coi-serviceworker.js) and dev-server bridge are active. Registration can fail
+	// (e.g. an embedded browser that blocks service workers) — that's harmless when headers already isolate.
 	if (globalThis.isSecureContext && navigator.serviceWorker !== undefined) {
 		const base = (import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/";
 

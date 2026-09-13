@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "build:entry": "vite build -c entry.config.ts",
-    "build": "vite build -c entry.config.ts && vite build -c lsp.config.ts && vite build && vite build -c sw.config.ts",
-    "dev": "vite build -c entry.config.ts && vite build -c lsp.config.ts && vite build -c sw.config.ts && vite",
+    "build": "vite build -c entry.config.ts && vite build -c lsp.config.ts && vite build -c eslint.engine.config.ts && vite build && vite build -c sw.config.ts",
+    "dev": "vite build -c entry.config.ts && vite build -c lsp.config.ts && vite build -c eslint.engine.config.ts && vite build -c sw.config.ts && vite",
     "lint": "util-lint"
   },
   "dependencies": {

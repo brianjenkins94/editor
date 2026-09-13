@@ -13,9 +13,11 @@
  * ATA drop its own bespoke cache and write once, here. The baked seed is NOT persisted (only post-boot writes
  * are), so a rebuilt demo file still shows through while a user edit or an acquired type overrides it on restore.
  *
- * Later milestones: make zen-fs the sole store (drop the boot seed / retire the bake), swap the backend to a
- * SharedArrayBuffer (SingleBuffer) so the LSP workers + preview share one filesystem, and let the service worker
- * serve from it. See the zenfs-vfs.ts seam and the unification design.
+ * M3 swapped the backend to a SharedArrayBuffer (SingleBuffer) so the LSP workers attach to this SAME filesystem
+ * (see the zenfs-vfs.ts seam). The service worker deliberately does NOT serve from it: the SW can't be
+ * cross-origin isolated on a static host (its own script load isn't stampable with COEP), so a SharedArrayBuffer
+ * sent to it degrades to a non-shared copy — the preview instead runs its own in-page dev server, and the SW only
+ * folds node_modules in from the CDN. See coi-serviceworker.js.
  */
 import type { IFileSystemProviderWithFileReadWriteCapability, IStat } from "@brianjenkins94/monaco-vscode-api/main";
 import { FileChangeType, FileSystemProviderCapabilities, FileType, registerFileSystemOverlay } from "@brianjenkins94/monaco-vscode-api/main";

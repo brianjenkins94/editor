@@ -4,10 +4,11 @@
  * a vscode-languageclient; a tsval-backed debug adapter is the next pod member (see debug-adapter.ts).
  *
  * Each language server worker (a server-host) runs under an almostnode runtime on a zen-fs VFS, so a
- * node-only server (cspell reading its dictionary; eslint parsing TS) works in-browser. Each is built +
- * served separately (lsp.config.ts → /__vscode__/lsp/, with COEP) as a normal module graph — not a blob —
- * because almostnode can't be monolithically inlined. The extension can't emit/locate those assets from its
- * data:-URL self, so it spawns them by URL relative to the workbench origin (`location.href`).
+ * node-only server (cspell reading its dictionary) works in-browser. It's built + served separately
+ * (lsp.config.ts → /__vscode__/lsp/, with COEP) as a normal module graph — not a blob — because almostnode
+ * can't be monolithically inlined. The extension can't emit/locate those assets from its data:-URL self, so
+ * it spawns them by URL relative to the workbench origin (`location.href`). (eslint moved OUT of this pod to a
+ * tsserver plugin — extensions/eslint — that reuses tsserver's typescript; only cspell remains here.)
  */
 import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
@@ -45,8 +46,10 @@ const JS_TS_LANGUAGES = [
 	{ "language": "javascriptreact" }
 ];
 const SERVERS: ServerSpec[] = [
-	{ "id": "cspell", "name": "cspell (almostnode)", "workerFile": "./lsp/server-host.js", "documentSelector": [...JS_TS_LANGUAGES, { "language": "plaintext" }, { "language": "markdown" }, { "language": "json" }] },
-	{ "id": "eslint", "name": "eslint (almostnode)", "workerFile": "./lsp/server-host-eslint.js", "documentSelector": JS_TS_LANGUAGES }
+	{ "id": "cspell", "name": "cspell (almostnode)", "workerFile": "./lsp/server-host.js", "documentSelector": [...JS_TS_LANGUAGES, { "language": "plaintext" }, { "language": "markdown" }, { "language": "json" }] }
+	// eslint MOVED to a TS server plugin (extensions/eslint) that runs inside tsserver and reuses tsserver's own
+	// `ts` — no almostnode host, no bundled typescript copy. The old almostnode server (server-host-eslint) is
+	// retired; see workbench-entry's eslint extension registration.
 ];
 
 const clients: LanguageClient[] = [];

@@ -7,14 +7,14 @@
  * below, whose response carries no CORP header, keeps working.
  *
  * ONE service worker owns three roles, over one path space and with no magic module namespaces:
- *   • Module resolver — serves the workspace VFS store (vfs.ts, IndexedDB) at REAL paths under /workspace/,
- *     rewriting bare imports in served modules to the workspace's node_modules, so node-only tooling (eslint
- *     loading a flat config + plugins) and the preview pane read the workspace over ordinary fetch/import.
- *     On a store MISS under /workspace/node_modules/, it fetches the package from the CDN internally and hands
- *     it back same-origin (the fold-in that RETIRED the old `__proxy__` route — the worker's own fetch follows
- *     the CDN's unversioned 302s and isn't bound by the document's COEP). Any other miss falls through to the
- *     network, so the resolver only ADDS serving. Logic inlined here (plain JS can't import vfs.ts) — keep the
- *     constants in sync with vfs.ts.
+ *   • node_modules resolver — for a request under /workspace/node_modules/, it fetches the package from the CDN
+ *     internally and hands it back same-origin (the fold-in that RETIRED the old `__proxy__` route — the worker's
+ *     own fetch follows the CDN's unversioned 302s and isn't bound by the document's COEP), so go-to-definition
+ *     and runtime type acquisition can read dep source over ordinary fetch. Any other /workspace/ request falls
+ *     through to the network, so the resolver only ADDS node_modules serving. The real workspace SOURCE is NOT
+ *     served here: the editor, type-checker and LSP workers read it through the zen-fs FileSystemProvider (and
+ *     the shared SharedArrayBuffer, see workspace-fs.ts / zenfs-vfs.ts), and the preview runs its own in-page
+ *     dev server — so the old IndexedDB "vfs store" serving path was retired.
  *   • Dev-server bridge — the preview pane runs a dev server (ViteDevServer) IN THE PAGE and hands us a
  *     MessagePort (ServerBridge protocol; see packages/almostnode/server-bridge.ts). We relay
  *     `/__virtual__/<port>/…` fetches to it as request/response messages, so the preview iframe reaches the
@@ -39,105 +39,21 @@ const swLog = relayLoggerToHub(swHub, "sw");
 globalThis.addEventListener("install", () => globalThis.skipWaiting());
 globalThis.addEventListener("activate", (event) => event.waitUntil(globalThis.clients.claim()));
 
-// ── VFS store + resolver (mirror of vfs.ts constants; keep in sync) ───────────────────────────────────────
-const VFS_DB = "vfs-store";
-const VFS_STORE = "files";
-const WORKSPACE_ROOT = "/workspace/";                 // store-served (workspace files + its node_modules)
+// ── node_modules resolver (CDN fallback) ──────────────────────────────────────────────────────────────────
+const WORKSPACE_ROOT = "/workspace/";                 // requests here resolve deps against node_modules → CDN
 const NODE_MODULES = "/workspace/node_modules/";      // where bare specifiers resolve; CDN-fallback on a miss
 const CDN = "https://unpkg.com";                      // node_modules miss → fetched here, served same-origin
-const RELATIVE_RE = /^[./]/u;
-const SCHEME_RE = /^[a-z]+:/iu;
-const JS_RE = /\.[mc]?[jt]sx?$/u;
-const IMPORT_RE = /(\bimport\b[^'"]+?\bfrom\s*|\bimport\s*|\bexport\b[^'"]+?\bfrom\s*)(["'])([^"']+)\2/gu;
 // Dev-server bridge route marker. Matched by indexOf (not anchored) so it's recognised under ANY deploy-base
 // prefix: on GitHub Pages the app is served at /editor/, the SW is scoped to /editor/, and requests arrive as
 // /editor/__virtual__/<port>/… — same reason the old __proxy__ matched by substring. /workspace/ (WORKSPACE_ROOT)
 // is matched the same way below.
 const VIRTUAL_MARKER = "/__virtual__/";
 
-// A rewritable specifier: bare ("pkg", "@scope/pkg") or a node: builtin. Relative and other URL schemes
-// (http:, data:, blob:) are left to native ESM.
-const isBare = (spec) => !RELATIVE_RE.test(spec) && (!SCHEME_RE.test(spec) || spec.startsWith("node:"));
-
-function openDb() {
-	return new Promise((resolve, reject) => {
-		const request = indexedDB.open(VFS_DB, 1);
-
-		request.onupgradeneeded = () => request.result.createObjectStore(VFS_STORE);
-		request.onsuccess = () => resolve(request.result);
-		request.onerror = () => reject(request.error);
-	});
-}
-
-function idbGet(db, key) {
-	return new Promise((resolve, reject) => {
-		const request = db.transaction(VFS_STORE, "readonly").objectStore(VFS_STORE).get(key);
-
-		request.onsuccess = () => resolve(request.result);
-		request.onerror = () => reject(request.error);
-	});
-}
-
 // Split a node_modules-relative path ("<pkg>/<sub>" or "<pkg>") into package + subpath, honouring scopes.
 function splitPackage(rel) {
 	const at = rel[0] === "@" ? rel.indexOf("/", rel.indexOf("/") + 1) : rel.indexOf("/");
 
 	return { "pkg": at === -1 ? rel : rel.slice(0, at), "sub": at === -1 ? "" : rel.slice(at + 1) };
-}
-
-// Bare specifier → a real /workspace/node_modules/ path (the store, or a network/CDN miss). package.json
-// exports/main picks the entry; a subpath is used verbatim. `node:` builtins map to node_modules too (a
-// zen-fs-backed / polyfill shim can be dropped there later — for now such a miss simply 404s).
-async function resolveBare(db, spec) {
-	const { pkg, sub } = splitPackage(spec.replace(/^node:/u, ""));
-	const base = NODE_MODULES + pkg;
-
-	if (sub !== "") {
-		return base + "/" + sub;
-	}
-
-	const pjRec = await idbGet(db, base + "/package.json");
-
-	if (pjRec === undefined) {
-		return base;   // not installed → resolves to the bare dir; SW miss → network (404), same as node would error
-	}
-
-	try {
-		const pj = JSON.parse(pjRec.body);
-		const dot = pj.exports && (typeof pj.exports === "string" ? pj.exports : pj.exports["."] && (typeof pj.exports["."] === "string" ? pj.exports["."] : pj.exports["."].import || pj.exports["."].default));
-
-		return base + "/" + (dot || pj.module || pj.main || "index.js").replace(/^\.\//u, "");
-	} catch (error) {
-		return base + "/index.js";
-	}
-}
-
-// Rewrite bare specifiers in a served module to resolved /workspace/node_modules/ paths (relative/absolute
-// left to native ESM, which resolves them against the served URL — all under /workspace/).
-async function rewriteImports(db, source) {
-	const specs = new Set();
-
-	for (const match of source.matchAll(IMPORT_RE)) {
-		if (isBare(match[3])) {
-			specs.add(match[3]);
-		}
-	}
-
-	if (specs.size === 0) {
-		return source;
-	}
-
-	const map = {};
-
-	for (const spec of specs) {
-		map[spec] = await resolveBare(db, spec);
-	}
-
-	return source.replace(IMPORT_RE, (full, pre, quote, spec) => (map[spec] !== undefined ? pre + quote + map[spec] + quote : full));
-}
-
-function isJsPath(pathname, type) {
-	return (type !== undefined && type.includes("javascript")) || JS_RE.test(pathname);
 }
 
 // Add cross-origin isolation headers to a response (opaque responses can't be modified — pass them through).
@@ -187,23 +103,17 @@ async function fetchCdn(pathname, requestUrl) {
 	}
 }
 
-// Resolver: serve /workspace/ from the store (rewriting imports on a JS hit); on a miss, fall back to the CDN
-// under node_modules, else pass through to the network — so this only ADDS serving and can't break a fetch.
+// Resolver: a request under /workspace/node_modules/ resolves the dep from the CDN (served same-origin); any
+// other /workspace/ request passes through to the network, isolation-stamped — so this only ADDS serving of
+// node_modules and can't break a fetch. (The editor + type-checker + LSP workers read the real workspace files
+// through the zen-fs FileSystemProvider / shared SharedArrayBuffer, not through the SW; the preview runs its own
+// in-page dev server. So the SW no longer serves workspace source — only the node_modules CDN fold-in remains.)
 async function serveWorkspace(request, requestUrl, pathname) {
-	const db = await openDb().catch(() => undefined);
-	const record = db === undefined ? undefined : await idbGet(db, pathname).catch(() => undefined);
-
-	if (record !== undefined) {
-		const body = isJsPath(pathname, record.type) ? await rewriteImports(db, record.body) : record.body;
-
-		return new Response(body, { "headers": { "content-type": record.type, "cross-origin-resource-policy": "same-origin", "cross-origin-embedder-policy": "credentialless" } });
-	}
-
 	if (pathname.startsWith(NODE_MODULES)) {
 		return fetchCdn(pathname, requestUrl);
 	}
 
-	return stamp(await fetch(request));   // store miss outside node_modules → network, isolation-stamped
+	return stamp(await fetch(request));   // non-node_modules /workspace/ → network, isolation-stamped
 }
 
 // ── Dev-server bridge (ServerBridge protocol; mirror of almostnode's __sw__.js) ───────────────────────────

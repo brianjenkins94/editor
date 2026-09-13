@@ -1,0 +1,11 @@
+{
+	"version": "0.0.1",
+	"configurations": [
+		{
+			"name": "docs",
+			"runtimeExecutable": "npx",
+			"runtimeArgs": ["-y", "http-server", "docs", "-p", "4185", "-c-1", "--silent"],
+			"port": 4185
+		}
+	]
+}

@@ -133,7 +133,7 @@ export function bundledNodeServer(name: string, file = "server-node.ts", id = "s
  * the component dist under /__vscode__/.
  */
 export default defineConfig({
-	"plugins": [bundledExtension("hello"), bundledExtension("worker-pod")],
+	"plugins": [bundledExtension("hello"), bundledExtension("worker-pod"), bundledExtension("eslint")],
 	"esbuild": {
 		"jsx": "automatic",
 		"jsxImportSource": "preact"
