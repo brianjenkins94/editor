@@ -59,10 +59,13 @@ const config = [{
 	}
 }] satisfies Linter.Config[];
 
-/** Lint one document's text; returns [] on any failure so a bad file never breaks the checker pass. */
+/** Lint one document's text; returns [] on any failure so a bad file never breaks the checker pass. Messages
+ *  are ordered errors-first (severity 2 before 1); the sort is stable, so source order is kept within a severity. */
 export function lintText(text: string, filename: string): LintMessage[] {
 	try {
-		return linter.verify(text, config, { "filename": filename }) as LintMessage[];
+		const messages = linter.verify(text, config, { "filename": filename }) as LintMessage[];
+
+		return messages.sort((a, b) => b.severity - a.severity);
 	} catch (error) {
 		console.error("[eslint-engine] verify failed", error);
 

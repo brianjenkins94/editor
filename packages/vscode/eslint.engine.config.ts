@@ -1,4 +1,5 @@
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
+import { createRequire } from "node:module";
 import * as url from "node:url";
 import { defineConfig } from "vite";
 
@@ -19,6 +20,11 @@ import { defineConfig } from "vite";
  */
 const resolvePath = (relative: string): string => url.fileURLToPath(new URL(relative, import.meta.url));
 
+// esquery's CJS build (its `main`, dist/esquery.min.js), resolved THROUGH eslint so it's found under any
+// node_modules layout — npm's flat local tree AND CI's pnpm workspace, where esquery (eslint's transitive dep)
+// isn't reachable from this package directly. A hardcoded ./node_modules/esquery path broke the CD build.
+const esqueryCjs = createRequire(createRequire(import.meta.url).resolve("eslint")).resolve("esquery");
+
 export default defineConfig({
 	"base": "./",
 	"resolve": {
@@ -34,7 +40,7 @@ export default defineConfig({
 			// so the ESM namespace (`{ default: fn }`) leaves `esquery.parse` undefined ("esquery.parse is not a
 			// function"). Pin it to the CJS build so `module.exports = esquery` (the fn with .parse/.matches) is
 			// what eslint's require receives.
-			{ "find": /^esquery$/u, "replacement": resolvePath("./node_modules/esquery/dist/esquery.min.js") }
+			{ "find": /^esquery$/u, "replacement": esqueryCjs }
 		],
 		// Prefer browser builds (debug → its browser variant, no process/tty).
 		"conditions": ["browser", "import", "default"]
