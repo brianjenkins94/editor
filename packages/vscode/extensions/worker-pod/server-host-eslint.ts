@@ -11,7 +11,11 @@
 import { createRuntime } from "@brianjenkins94/almostnode";
 // The eslint server (eslint-lib + @typescript-eslint/parser + the LSP lib), bundled to an ESM string.
 import serverNodeCode from "worker-pod:server-node-eslint";
-import { createZenfsVFS } from "./zenfs-vfs.js";
+import { createZenfsVFS, receiveSharedWorkspace } from "./zenfs-vfs.js";
+
+// Catch the shared workspace SAB from the ext host (M3b) BEFORE main()/the LSP reader — a dedicated port, so it
+// never collides with the LSP channel. No-op if none arrives.
+receiveSharedWorkspace();
 
 /** The deploy base URL ("https://host/editor/" on Pages, "https://host/" locally), derived from this worker's
  *  own served URL by stripping the "/__vscode__/…" tail. Handed to almostnode so a `file://` dynamic import

@@ -14,7 +14,7 @@
  * module-global `fs`.
  */
 import type { VirtualFS } from "@brianjenkins94/almostnode";
-import { configure, fs, InMemory } from "@zenfs/core";
+import { configure, fs, InMemory, resolveMountConfig, SingleBuffer } from "@zenfs/core";
 
 const noopWatcher = { "close": () => undefined };
 
@@ -43,13 +43,71 @@ const adapter = {
 	"toSnapshot": (): never => { throw new Error("[zenfs-vfs] toSnapshot is unsupported (in-realm runtime only)"); }
 };
 
+// ── Shared workspace mount (unification M3b) ────────────────────────────────────────────────────────────────
+// The workbench owns a SharedArrayBuffer-backed zen-fs mounted at /workspace; the ext host forwards that buffer
+// here over a control MessagePort. We mount the SAME buffer at /workspace, ADDITIVELY — the InMemory root
+// (tooling: the dict, the server bundle) is untouched; the worker just GAINS the real workspace files from the
+// one filesystem the editor + type-checker use. Non-breaking: if no buffer ever arrives (no COI / standalone),
+// the worker runs exactly as before.
+const WORKSPACE_MOUNT = "/workspace";
+let configured = false;
+let mounted = false;
+let pendingBuffer: SharedArrayBuffer | undefined;
+
+async function mountSharedWorkspace(buffer: SharedArrayBuffer): Promise<void> {
+	if (mounted) {
+		return;
+	}
+
+	mounted = true;
+	fs.mount(WORKSPACE_MOUNT, await resolveMountConfig({ "backend": SingleBuffer, "buffer": buffer }));
+	console.log("[zenfs-vfs] shared workspace mounted at " + WORKSPACE_MOUNT + " — this worker now reads the editor's files");
+}
+
 /**
- * Configure zen-fs (InMemory for now) and return a VirtualFS-shaped adapter over it, ready to hand to
- * almostnode's `createRuntime`. Idempotent-friendly: safe to call once per worker.
+ * Configure zen-fs (InMemory root) and return a VirtualFS-shaped adapter over it, ready to hand to almostnode's
+ * `createRuntime`. If the shared workspace buffer already arrived, mount it now. Safe to call once per worker.
  */
 export async function createZenfsVFS(): Promise<VirtualFS> {
 	await configure({ "mounts": { "/": InMemory } });
+	configured = true;
+
+	if (pendingBuffer !== undefined) {
+		await mountSharedWorkspace(pendingBuffer);
+		pendingBuffer = undefined;
+	}
 
 	// Duck-typed: almostnode only calls the public VirtualFS methods, which this delegates to zen-fs.
 	return adapter as unknown as VirtualFS;
+}
+
+/**
+ * Listen — SYNCHRONOUSLY, at module load, before the LSP reader attaches — for the ext host's control port and,
+ * over it, the workbench's workspace SharedArrayBuffer; mount it at /workspace when it arrives. Kept off the LSP
+ * JSON-RPC channel (a dedicated transferred MessagePort) so the two never collide. Call once at a host's top.
+ */
+export function receiveSharedWorkspace(): void {
+	const onControl = (event: MessageEvent): void => {
+		if ((event.data as { "type"?: string } | undefined)?.type !== "ws-control" || event.ports.length === 0) {
+			return;
+		}
+
+		globalThis.removeEventListener("message", onControl);
+		const port = event.ports[0];
+
+		port.addEventListener("message", (message: MessageEvent) => {
+			const buffer = (message.data as { "buffer"?: unknown } | undefined)?.buffer;
+
+			if (typeof SharedArrayBuffer !== "undefined" && buffer instanceof SharedArrayBuffer) {
+				if (configured) {
+					void mountSharedWorkspace(buffer);
+				} else {
+					pendingBuffer = buffer; // createZenfsVFS mounts it once configured
+				}
+			}
+		});
+		port.start();
+	};
+
+	globalThis.addEventListener("message", onControl);
 }

@@ -111,7 +111,7 @@ function runCommand(command: string): void {
  * to the top page (workbench-entry HAS window access) — so pod/worker spans reach the page's $sys.log.>
  * collector. No-op if the extension exposes no bridge (the pod then stays a standalone root).
  */
-function wireWorkbenchHub(): void {
+function wireWorkbenchHub(workspaceBuffer?: SharedArrayBuffer): void {
 	const workerPod = vscodeApi?.extensions?.getExtension("brianjenkins94.worker-pod");
 
 	if (workerPod === undefined) {
@@ -121,6 +121,12 @@ function wireWorkbenchHub(): void {
 	(workerPod.activate() as Promise<PodBridge | undefined>).then((bridge) => {
 		if (bridge?.toWorkbench === undefined || bridge.fromWorkbench === undefined) {
 			return;
+		}
+
+		// M3b: hand the pod the shared workspace SharedArrayBuffer, so the cspell/eslint workers mount the SAME
+		// zen-fs the editor + type-checker use (at /workspace). No-op when there's no SAB (no cross-origin isolation).
+		if (workspaceBuffer !== undefined) {
+			(bridge as PodBridge & { "attachWorkspaceBuffer"?: (b: unknown) => void }).attachWorkspaceBuffer?.(workspaceBuffer);
 		}
 
 		// pod (ext host) <-> workbench, over the extension's exported event/function bridge. (The workbench <->
@@ -233,7 +239,7 @@ function maybeBoot(): void {
 				// Uplink the extension pod to the page: a workbench hub bridges the pod (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the
 				// window. pod/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.
-				wireWorkbenchHub();
+				wireWorkbenchHub(workspaceFs?.buffer);
 				bootSpan.info("hello extension api captured");
 				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
 				// AFTER the workbench restores its last-active viewlet (which would otherwise win).

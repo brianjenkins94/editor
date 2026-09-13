@@ -21,6 +21,10 @@ import { podHub } from "./pod";
 export interface PodBridge {
 	"toWorkbench": vscode.Event<unknown>;
 	"fromWorkbench": (message: unknown) => void;
+	/** M3b: the workbench hands over its workspace SharedArrayBuffer (zen-fs SingleBuffer). We forward it to each
+	 *  LSP worker over its control port, so they mount the SAME filesystem at /workspace. SAB survives the exports
+	 *  marshaling (spike-verified). No-op off cross-origin isolation (buffer is undefined). */
+	"attachWorkspaceBuffer": (buffer: unknown) => void;
 }
 
 interface ServerSpec {
@@ -46,6 +50,11 @@ const SERVERS: ServerSpec[] = [
 ];
 
 const clients: LanguageClient[] = [];
+// One control port per spawned LSP worker (the workbench end of a MessageChannel), used only to hand the worker
+// the shared workspace SharedArrayBuffer (M3b) — separate from the LSP JSON-RPC channel. `workspaceBuffer` is
+// the SAB once the workbench provides it; a worker that spawns after gets it immediately.
+const controlPorts: MessagePort[] = [];
+let workspaceBuffer: SharedArrayBuffer | undefined;
 
 function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 	// The workbench iframe's origin; the LocalProcess ext host shares it. The worker is served next to
@@ -55,6 +64,16 @@ function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 	worker.addEventListener("error", (event) => {
 		console.error(`[worker-pod] ${spec.id} worker error:`, event.message, "@", event.filename + ":" + event.lineno);
 	});
+
+	// Hand the worker a dedicated control port BEFORE the LSP client attaches, so the shared-workspace SAB rides
+	// its own channel (never the LSP one). If the buffer's already here, send it now; else attachWorkspaceBuffer does.
+	const channel = new MessageChannel();
+	worker.postMessage({ "type": "ws-control" }, [channel.port2]);
+	controlPorts.push(channel.port1);
+
+	if (workspaceBuffer !== undefined) {
+		channel.port1.postMessage({ "buffer": workspaceBuffer });
+	}
 
 	const client = new LanguageClient(`lsp-${spec.id}`, spec.name, worker, { "documentSelector": spec.documentSelector });
 
@@ -107,7 +126,21 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 	// The pod->workbench half of the uplink, as this extension's EXPORTS: workbench-entry links its hub to
 	// `toWorkbench` (ext host → workbench) and `fromWorkbench` (workbench → ext host).
-	return { "toWorkbench": outgoing.event, "fromWorkbench": (message: unknown) => { incoming.fire(message); } };
+	const attachWorkspaceBuffer = (buffer: unknown): void => {
+		if (typeof SharedArrayBuffer === "undefined" || !(buffer instanceof SharedArrayBuffer)) {
+			return; // no COI / not shared — the workers keep their local InMemory FS
+		}
+
+		workspaceBuffer = buffer;
+
+		for (const port of controlPorts) {
+			port.postMessage({ "buffer": buffer }); // → the worker's receiveSharedWorkspace → mount at /workspace
+		}
+
+		podLog.info("workspace buffer shared with LSP workers", { "workers": controlPorts.length, "mb": Math.round(buffer.byteLength / 1048576) });
+	};
+
+	return { "toWorkbench": outgoing.event, "fromWorkbench": (message: unknown) => { incoming.fire(message); }, "attachWorkspaceBuffer": attachWorkspaceBuffer };
 }
 
 export function deactivate(): Promise<void> {

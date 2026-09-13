@@ -21,7 +21,7 @@ import type { IFileSystemProviderWithFileReadWriteCapability, IStat } from "@bri
 import { FileChangeType, FileSystemProviderCapabilities, FileType, registerFileSystemOverlay } from "@brianjenkins94/monaco-vscode-api/main";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { Logger } from "@brianjenkins94/util/logger";
-import { configureSingle, fs, InMemory, SingleBuffer } from "@zenfs/core";
+import { configure, fs, InMemory, SingleBuffer } from "@zenfs/core";
 
 import { createChangeEvent, notFound } from "./provider-base";
 
@@ -96,7 +96,11 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 	const shared = typeof SharedArrayBuffer !== "undefined" && globalThis.crossOriginIsolated === true;
 	const buffer = shared ? new SharedArrayBuffer(BUFFER_BYTES) : undefined;
 
-	await configureSingle(buffer !== undefined ? { "backend": SingleBuffer, "buffer": buffer } : { "backend": InMemory });
+	// Mount the shared buffer AT /workspace (a clean mount point the LSP workers mount the same buffer at in M3b),
+	// with a plain InMemory root for anything outside the workspace. Without a buffer, everything is InMemory.
+	await configure(buffer !== undefined
+		? { "mounts": { "/": InMemory, "/workspace": { "backend": SingleBuffer, "buffer": buffer } } }
+		: { "mounts": { "/": InMemory } });
 
 	// Seed the baked snapshot (not persisted — a rebuilt demo file stays fresh), then restore persisted writes
 	// (acquired types + edits) on top, so those override the seed for any overlapping path.

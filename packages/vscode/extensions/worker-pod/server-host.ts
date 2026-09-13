@@ -15,7 +15,11 @@
 import { createRuntime } from "@brianjenkins94/almostnode";
 // The cspell server (with cspell-lib + the LSP lib), bundled to an ESM string by entry.config.ts; run below.
 import serverNodeCode from "worker-pod:server-node";
-import { createZenfsVFS } from "./zenfs-vfs.js";
+import { createZenfsVFS, receiveSharedWorkspace } from "./zenfs-vfs.js";
+
+// Catch the shared workspace SAB from the ext host (M3b) BEFORE main()/the LSP reader — a dedicated port, so it
+// never collides with the LSP channel. No-op if none arrives.
+receiveSharedWorkspace();
 
 // Kept in one place, matched by server-node's DICT_PATH.
 const DICT_PATH = "/dicts/en_US.trie.gz";
