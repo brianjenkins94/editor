@@ -45,8 +45,11 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 	// Shared control word for resuming a SYNCHRONOUS in-handler pause (M3b). When a breakpoint is hit inside a
 	// host-invoked guest call the worker blocks on Atomics.wait (it can't receive messages), so we resume it by
-	// storing 1 + Atomics.notify rather than postMessage. Needs crossOriginIsolated — the editor sets COI.
-	private readonly control = new Int32Array(new SharedArrayBuffer(4));
+	// storing 1 + Atomics.notify rather than postMessage. Needs cross-origin isolation; off-COI SharedArrayBuffer
+	// is undefined, so guard here — otherwise this initializer THROWS and the whole debug session dies at
+	// construction with no message. Undefined = degrade: the worker never gets the buffer, so it can't sync-pause
+	// (top-level message-driven stepping still works), matching how every other SAB layer degrades off-COI.
+	private readonly control = typeof SharedArrayBuffer === "undefined" ? undefined : new Int32Array(new SharedArrayBuffer(4));
 	private lastStopAtomic = false;
 
 	// Each DAP action (launch/continue/next/…) opens a span here; its traceContext rides the control message so
@@ -248,7 +251,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.podUnlink = podHub.link(portTransport(this.worker));
 
 		const trace = this.startAction("launch");
-		this.worker.postMessage({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.control.buffer, "react": this.reactMode, "traceContext": trace });
+		this.worker.postMessage({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.control?.buffer, "react": this.reactMode, "traceContext": trace });
 	}
 
 	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
@@ -256,7 +259,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private resume(kind: string): void {
 		const trace = this.startAction(kind);
 
-		if (this.lastStopAtomic) {
+		if (this.lastStopAtomic && this.control !== undefined) {
 			// In-handler pause: the worker is blocked in Atomics.wait mid-step, so it can't receive a message —
 			// it resumes its EXISTING step span (already parented to the action that first hit the breakpoint).
 			Atomics.store(this.control, 0, 1);
