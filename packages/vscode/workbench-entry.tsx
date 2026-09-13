@@ -26,7 +26,7 @@ import workerPodManifest from "./extensions/worker-pod/package.json";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
 import { installTypeAcquisition } from "./ata";
-import { installWorkspaceFs } from "./workspace-fs";
+import { installWorkspaceFs, type WorkspaceFs } from "./workspace-fs";
 import { relayLoggerToHub } from "./telemetry";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { connectAsPane } from "./pane-bus";
@@ -180,6 +180,8 @@ function maybeBoot(): void {
 	// One timed span for the whole boot; its child logs (relayed to the host) read as an indented tree of
 	// what booting the workbench did and how long it took. Ended once monaco is online.
 	const bootSpan = paneLog.span("workbench-boot", { "files": files.length, "openEditors": openEditors.length });
+	// The zen-fs workspace store, mounted after boot; its `has` probe lets ATA skip already-present files.
+	let workspaceFs: WorkspaceFs | undefined;
 
 	bootWithFallbackViewport(document.documentElement);
 
@@ -200,7 +202,7 @@ function maybeBoot(): void {
 			// zen-fs unification (M0): back the workspace with a zen-fs-backed FileSystemProvider the type-checker
 			// reads through (priority 2, above the boot seed). Additive for now — proves the mechanism; later
 			// milestones make it the sole store. See workspace-fs.ts.
-			await installWorkspaceFs(files, paneLog).catch((error: unknown) => { bootSpan.error("workspace zen-fs failed", { "error": errText(error) }); });
+			workspaceFs = await installWorkspaceFs(files, paneLog).catch((error: unknown) => { bootSpan.error("workspace zen-fs failed", { "error": errText(error) }); return undefined; });
 			// Filesystem overlays, layered UNDER the seeded snapshot (they only answer paths the in-memory
 			// FS misses, falling through on FileNotFound). Registered after boot so the file service is up.
 			// The CDN node_modules overlay is the first; a real-disk File System Access overlay will be its
@@ -227,7 +229,7 @@ function maybeBoot(): void {
 				installDebugPreview(() => vscodeApi);
 				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
 				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
-				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", moduleVersions ?? {}, paneLog);
+				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", moduleVersions ?? {}, (path) => workspaceFs?.has(path) ?? false, paneLog);
 				// Uplink the extension pod to the page: a workbench hub bridges the pod (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the
 				// window. pod/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.

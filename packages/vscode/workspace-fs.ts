@@ -1,18 +1,21 @@
 /**
- * A writable, zen-fs-backed vscode FileSystemProvider for the workspace — M0 of the zen-fs unification.
+ * A writable, zen-fs-backed vscode FileSystemProvider for the workspace — the zen-fs unification.
  *
  * Why: the in-browser tsserver reads on-disk / .d.ts / dependency files by PULLING them through
  * `vscode.workspace.fs` on demand (bridged to sync by VS Code's own @vscode/sync-api SAB), NOT by having content
  * pushed to it. So the type-checker resolves against whatever FileSystemProvider answers — and it only needs that
- * provider to answer promptly, completely, and locally (which is why the async CDN overlay can't feed it, but the
- * in-memory seed can). This makes the workspace filesystem a real, editable store we own — a single zen-fs — that
+ * provider to answer promptly, completely, and locally (which is why the async CDN overlay can't feed it, but a
+ * local store can). This makes the workspace filesystem a real, editable store we own — a single zen-fs — that
  * the type-checker reads from directly.
  *
- * M0 is deliberately additive: zen-fs is seeded from the same `files` the workbench boots with and registered as
- * a HIGHER-priority overlay than boot's in-memory seed, so the type-checker reads through zen-fs (proven) with no
- * behaviour change. Later milestones make zen-fs the sole store (drop the boot seed), populate it from ATA/CDN
- * (retiring the bake), swap the backend to a SharedArrayBuffer so the LSP workers + preview share it, and persist
- * it — see the zenfs-vfs.ts seam and the unification design.
+ * M0 registered it as a higher-priority overlay than boot's seed (proving the type-checker reads through it).
+ * M1 (this): PERSIST it to IndexedDB, so acquired types (from ata.ts) and edits survive a reload — which lets
+ * ATA drop its own bespoke cache and write once, here. The baked seed is NOT persisted (only post-boot writes
+ * are), so a rebuilt demo file still shows through while a user edit or an acquired type overrides it on restore.
+ *
+ * Later milestones: make zen-fs the sole store (drop the boot seed / retire the bake), swap the backend to a
+ * SharedArrayBuffer (SingleBuffer) so the LSP workers + preview share one filesystem, and let the service worker
+ * serve from it. See the zenfs-vfs.ts seam and the unification design.
  */
 import type { IFileSystemProviderWithFileReadWriteCapability, IStat } from "@brianjenkins94/monaco-vscode-api/main";
 import { FileChangeType, FileSystemProviderCapabilities, FileType, registerFileSystemOverlay } from "@brianjenkins94/monaco-vscode-api/main";
@@ -22,11 +25,13 @@ import { configureSingle, fs, InMemory } from "@zenfs/core";
 
 import { createChangeEvent, notFound } from "./provider-base";
 
-/** M0 instrumentation: counts + an existence probe, stashed on globalThis so a verification can confirm the
- *  type-checker actually reads through zen-fs. Harmless; removed once the mechanism is trusted. */
-interface WorkspaceFsStats { "reads": number; "writes": number; "has": (path: string) => boolean }
+/** Handle returned to callers: an existence probe (so ata.ts can skip files already in the store, its
+ *  cross-reload dedup) plus M0 instrumentation counters, also stashed on `globalThis.__workspaceFs`. */
+export interface WorkspaceFs { "reads": number; "writes": number; "has": (path: string) => boolean }
 
-const encoder = new TextEncoder();
+const PERSIST_DB = "workspace-fs";
+const PERSIST_STORE = "files";
+const FLUSH_MS = 500;
 
 /** Ensure the parent directory of `path` exists in zen-fs (recursive mkdir). */
 function ensureParent(path: string): void {
@@ -46,18 +51,92 @@ function fileType(stat: { "isDirectory": () => boolean; "isSymbolicLink": () => 
 	return stat.isDirectory() ? FileType.Directory : FileType.File;
 }
 
-/**
- * Configure a fresh InMemory zen-fs for this realm, seed it with `files`, and return a FileSystemProvider bound
- * to it, registered as an overlay ABOVE the boot seed (priority 2 > boot's 1) so the workbench + type-checker
- * read through zen-fs. Returns the instrumentation handle (also stashed on `globalThis.__workspaceFs`).
- */
-export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): Promise<WorkspaceFsStats> {
+// ── IndexedDB persistence: post-boot writes (acquired types + edits), keyed by absolute path. ──
+function openPersist(): Promise<IDBDatabase | undefined> {
+	return new Promise((resolve) => {
+		try {
+			const request = indexedDB.open(PERSIST_DB, 1);
+
+			request.onupgradeneeded = () => { request.result.createObjectStore(PERSIST_STORE); };
+			request.onsuccess = () => { resolve(request.result); };
+			request.onerror = () => { resolve(undefined); };
+		} catch {
+			resolve(undefined); // private mode / blocked — the store just runs without persistence
+		}
+	});
+}
+
+/** All persisted [path, contents] pairs (for restore on boot). */
+function persistLoadAll(db: IDBDatabase): Promise<[string, Uint8Array][]> {
+	return new Promise((resolve) => {
+		try {
+			const store = db.transaction(PERSIST_STORE, "readonly").objectStore(PERSIST_STORE);
+			const keys = store.getAllKeys();
+			const values = store.getAll();
+
+			store.transaction.oncomplete = () => {
+				resolve((keys.result as string[]).map((key, index) => [key, (values.result as Uint8Array[])[index]]));
+			};
+			store.transaction.onerror = () => resolve([]);
+		} catch {
+			resolve([]);
+		}
+	});
+}
+
+export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): Promise<WorkspaceFs> {
 	await configureSingle({ "backend": InMemory });
 
+	// Seed the baked snapshot (not persisted — a rebuilt demo file stays fresh), then restore persisted writes
+	// (acquired types + edits) on top, so those override the seed for any overlapping path.
 	for (const file of files) {
 		ensureParent(file.path);
 		fs.writeFileSync(file.path, file.contents);
 	}
+
+	const db = await openPersist();
+	let restored = 0;
+
+	if (db !== undefined) {
+		for (const [path, contents] of await persistLoadAll(db)) {
+			ensureParent(path);
+			fs.writeFileSync(path, contents);
+			restored += 1;
+		}
+	}
+
+	// Debounced write-back: batch dirty paths and flush in one transaction (null = delete).
+	const pending = new Map<string, Uint8Array | null>();
+	let flushTimer: ReturnType<typeof setTimeout> | undefined;
+	const flush = (): void => {
+		flushTimer = undefined;
+
+		if (db === undefined || pending.size === 0) {
+			return;
+		}
+
+		const batch = [...pending];
+		pending.clear();
+
+		try {
+			const store = db.transaction(PERSIST_STORE, "readwrite").objectStore(PERSIST_STORE);
+
+			for (const [path, contents] of batch) {
+				if (contents === null) {
+					store.delete(path);
+				} else {
+					store.put(contents, path);
+				}
+			}
+		} catch { /* best-effort persistence */ }
+	};
+	const persist = (path: string, contents: Uint8Array | null): void => {
+		pending.set(path, contents);
+
+		if (flushTimer === undefined) {
+			flushTimer = setTimeout(flush, FLUSH_MS);
+		}
+	};
 
 	const { listeners, onDidChangeFile } = createChangeEvent();
 	const fire = (path: string, type: FileChangeType): void => {
@@ -66,7 +145,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		}
 	};
 
-	const stats: WorkspaceFsStats = { "reads": 0, "writes": 0, "has": (path) => fs.existsSync(path) };
+	const handle: WorkspaceFs = { "reads": 0, "writes": 0, "has": (path) => fs.existsSync(path) };
 
 	const provider: IFileSystemProviderWithFileReadWriteCapability = {
 		"capabilities": FileSystemProviderCapabilities.FileReadWrite | FileSystemProviderCapabilities.PathCaseSensitive,
@@ -89,10 +168,10 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 				throw notFound();
 			}
 
-			stats.reads += 1;
+			handle.reads += 1;
 			const data = fs.readFileSync(resource.path);
 
-			return typeof data === "string" ? encoder.encode(data) : data;
+			return typeof data === "string" ? new TextEncoder().encode(data) : data;
 		},
 
 		"readdir": async (resource): Promise<[string, FileType][]> => {
@@ -112,7 +191,8 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 
 			ensureParent(resource.path);
 			fs.writeFileSync(resource.path, content);
-			stats.writes += 1;
+			handle.writes += 1;
+			persist(resource.path, content);
 			fire(resource.path, existed ? FileChangeType.UPDATED : FileChangeType.ADDED);
 		},
 
@@ -122,12 +202,17 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 
 		"delete": async (resource, options): Promise<void> => {
 			fs.rmSync(resource.path, { "recursive": options.recursive, "force": true });
+			persist(resource.path, null);
 			fire(resource.path, FileChangeType.DELETED);
 		},
 
 		"rename": async (from, to): Promise<void> => {
 			ensureParent(to.path);
+			const data = fs.readFileSync(from.path);
+
 			fs.renameSync(from.path, to.path);
+			persist(from.path, null);
+			persist(to.path, typeof data === "string" ? new TextEncoder().encode(data) : data);
 			fire(from.path, FileChangeType.DELETED);
 			fire(to.path, FileChangeType.ADDED);
 		}
@@ -137,8 +222,8 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 	// holds are served here; genuine misses (a CDN dep) fall through to the lower overlays.
 	registerFileSystemOverlay(2, provider);
 
-	(globalThis as unknown as { "__workspaceFs": WorkspaceFsStats }).__workspaceFs = stats;
-	log.info("workspace zen-fs mounted", { "files": files.length });
+	(globalThis as unknown as { "__workspaceFs": WorkspaceFs }).__workspaceFs = handle;
+	log.info("workspace zen-fs mounted", { "seeded": files.length, "restored": restored });
 
-	return stats;
+	return handle;
 }

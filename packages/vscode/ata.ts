@@ -14,9 +14,10 @@
  * of the document's COEP, and no `typescript`/@typescript/ata dependency rides along.
  *
  * The crawl resolves references against the package's `?meta` FILE LISTING (so it fetches only files that exist —
- * no blind `.d.ts`/`index.d.ts` probing), pins versions from the workspace's map, reads the modern `exports`
- * types condition (not just `types`/`typings`), and memoizes every fetch in IndexedDB (so a reload rehydrates
- * from cache — fast and offline — and only genuinely new imports hit the network).
+ * no blind `.d.ts`/`index.d.ts` probing), pins versions from the workspace's map, and reads the modern `exports`
+ * types condition (not just `types`/`typings`). It writes ONCE, into the workspace filesystem (workspace-fs.ts),
+ * and skips anything already present there — which is its cross-reload dedup, since that store persists (so a
+ * reload refetches nothing and only genuinely new imports hit the network). No bespoke cache of its own.
  */
 import type * as vscode from "vscode";
 import type { Logger } from "@brianjenkins94/util/logger";
@@ -25,13 +26,10 @@ import type { Logger } from "@brianjenkins94/util/logger";
 const RELEVANT = /\.(?:tsx?|jsx?|mts|cts)$/u;
 /** Debounce edits — a re-scan only fetches genuinely new modules, so a short wait coalesces typing. */
 const DEBOUNCE_MS = 800;
-/** Cap on NETWORK fetches per run (cache hits are free), so a pathological type graph can't runaway. */
+/** Cap on NETWORK fetches per run (already-present files are free), so a pathological type graph can't runaway. */
 const MAX_NETWORK = 400;
 /** A declaration file. */
 const DECL = /\.d\.[mc]?ts$/u;
-
-const CACHE_DB = "ata-cache";
-const CACHE_STORE = "files";
 
 /** unpkg `?meta` directory node: a file, or a directory whose `files` recurse. */
 interface MetaNode { "type": "file" | "directory"; "path": string; "files"?: MetaNode[] }
@@ -164,69 +162,39 @@ function resolveInMeta(fromSub: string, ref: string, files: Set<string>): string
 	return undefined; // not a real file in this package (escaped, or JS-only) — don't chase it
 }
 
-// ── A tiny IndexedDB cache: fetched file/meta text by key, so reloads rehydrate offline. ──
-function openCache(): Promise<IDBDatabase | undefined> {
-	return new Promise((resolve) => {
-		try {
-			const request = indexedDB.open(CACHE_DB, 1);
-
-			request.onupgradeneeded = () => { request.result.createObjectStore(CACHE_STORE); };
-			request.onsuccess = () => { resolve(request.result); };
-			request.onerror = () => { resolve(undefined); };
-		} catch {
-			resolve(undefined); // private mode / blocked — acquisition just runs without a cache
-		}
-	});
-}
-
-function cacheGet(db: IDBDatabase, key: string): Promise<string | undefined> {
-	return new Promise((resolve) => {
-		try {
-			const request = db.transaction(CACHE_STORE, "readonly").objectStore(CACHE_STORE).get(key);
-
-			request.onsuccess = () => { resolve(request.result as string | undefined); };
-			request.onerror = () => { resolve(undefined); };
-		} catch {
-			resolve(undefined);
-		}
-	});
-}
-
-function cachePut(db: IDBDatabase, key: string, value: string): void {
-	try {
-		db.transaction(CACHE_STORE, "readwrite").objectStore(CACHE_STORE).put(value, key);
-	} catch { /* best-effort */ }
-}
-
 /**
  * Wire runtime type acquisition onto the workbench's vscode API. Runs on the active editor now and on every
- * active-editor change / document edit (debounced). Deduped across the session and memoized in IndexedDB, so a
- * package/file is fetched over the network at most once (and once ever, until the cache is cleared).
+ * active-editor change / document edit (debounced). `has(absPath)` probes the workspace store (workspace-fs.ts)
+ * so a file already present — from the seed, an edit, or a prior session (the store persists) — is never
+ * re-fetched. Writes go through `vscode.workspace.fs` into that same store; ATA keeps no cache of its own.
  */
-export function installTypeAcquisition(api: typeof vscode, workspaceFolder: string, versions: Record<string, string>, log: Logger): void {
+export function installTypeAcquisition(api: typeof vscode, workspaceFolder: string, versions: Record<string, string>, has: (absPath: string) => boolean, log: Logger): void {
 	const nodeModules = workspaceFolder.replace(/\/$/u, "") + "/node_modules";
 	// Same-origin base the SW intercepts; it proxies /workspace/node_modules/* to the CDN (unversioned → latest).
 	const deployBase = location.pathname.slice(0, location.pathname.indexOf("/__vscode__/") + 1) || "/";
-	const cacheReady = openCache();
 
-	const fetchedPath = new Set<string>();          // node_modules-relative paths already written this session
+	try {
+		indexedDB.deleteDatabase("ata-cache"); // retired in M1 — the workspace store persists now; drop the old cache
+	} catch { /* best-effort */ }
+
+	const fetchedPath = new Set<string>();          // node_modules-relative paths already handled this session
 	const seenPackage = new Set<string>();          // packages already acquired this session
 	const metaCache = new Map<string, Set<string>>(); // pkg → its file set (from ?meta)
 
-	// Fetch text for a node_modules-relative path (or `?meta` of a package), cache-first. Network fetches (only)
-	// consume `budget`, pin the package's version when known, and are memoized in IndexedDB.
-	const cdnText = async (rel: string, meta: boolean, budget: { "n": number }): Promise<string | undefined> => {
-		const key = meta ? "meta:" + rel : rel;
-		const db = await cacheReady;
-
-		if (db !== undefined) {
-			const cached = await cacheGet(db, key);
-
-			if (cached !== undefined) {
-				return cached; // rehydrate from cache — free, offline, doesn't touch the budget
-			}
+	/** Absolute workspace path for a node_modules-relative path. */
+	const abs = (rel: string): string => `${nodeModules}/${rel}`;
+	/** Read a file already in the workspace store as text — no network. */
+	const readLocal = async (rel: string): Promise<string | undefined> => {
+		try {
+			return new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.file(abs(rel))));
+		} catch {
+			return undefined;
 		}
+	};
 
+	// Fetch text for a node_modules-relative path (or `?meta` of a package) over the network. Consumes `budget`
+	// and pins the package's version when known. Callers skip this entirely for paths already in the store.
+	const cdnText = async (rel: string, meta: boolean, budget: { "n": number }): Promise<string | undefined> => {
 		if (budget.n <= 0) {
 			return undefined;
 		}
@@ -243,13 +211,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 				return undefined;
 			}
 
-			const text = await response.text();
-
-			if (db !== undefined) {
-				cachePut(db, key, text);
-			}
-
-			return text;
+			return await response.text();
 		} catch {
 			return undefined; // offline / CDN error — acquisition is best-effort
 		}
@@ -307,6 +269,10 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 		fetchedPath.add(rel);
 
+		if (has(abs(rel))) {
+			return true; // already in the store (seed / persisted / earlier session) — its subtree is too
+		}
+
 		const code = await cdnText(rel, false, budget);
 
 		if (code === undefined) {
@@ -343,8 +309,11 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 		seenPackage.add(pkg);
 
-		const files = await packageFiles(pkg, budget);
-		const pkgJson = await cdnText(pkg + "/package.json", false, budget);
+		const pkgJsonRel = pkg + "/package.json";
+		// Present → acquired in a prior session (the store persists): read package.json LOCALLY, no network, and
+		// its whole subtree is already stored (so acquireFile below short-circuits and no ?meta fetch is needed).
+		const present = has(abs(pkgJsonRel));
+		const pkgJson = present ? await readLocal(pkgJsonRel) : await cdnText(pkgJsonRel, false, budget);
 
 		if (pkgJson === undefined) {
 			// Not published under this name → try the DefinitelyTyped counterpart (react → @types/react).
@@ -355,8 +324,10 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			return;
 		}
 
-		fetchedPath.add(pkg + "/package.json");
-		await write(pkg + "/package.json", pkgJson);
+		if (!present) {
+			fetchedPath.add(pkgJsonRel);
+			await write(pkgJsonRel, pkgJson);
+		}
 
 		let entry: string | undefined;
 
@@ -366,7 +337,10 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 		entry = entry?.replace(/^\.\//u, "");
 
-		if (entry === undefined && files.has("index.d.ts")) {
+		// The ?meta listing is only needed to crawl FRESH fetches; a present package's subtree is already stored.
+		const files = present ? new Set<string>() : await packageFiles(pkg, budget);
+
+		if (entry === undefined && (present ? has(abs(pkg + "/index.d.ts")) : files.has("index.d.ts"))) {
 			entry = "index.d.ts"; // no declared types but a conventional index.d.ts exists
 		}
 
