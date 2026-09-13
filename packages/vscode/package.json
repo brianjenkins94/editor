@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "tsx build.ts",
+    "dev": "tsx dev.ts",
     "lint": "util-lint"
   },
   "dependencies": {
