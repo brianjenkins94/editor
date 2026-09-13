@@ -26,6 +26,7 @@ import workerPodManifest from "./extensions/worker-pod/package.json";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
 import { installTypeAcquisition } from "./ata";
+import { installWorkspaceFs } from "./workspace-fs";
 import { relayLoggerToHub } from "./telemetry";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { connectAsPane } from "./pane-bus";
@@ -194,8 +195,12 @@ function maybeBoot(): void {
 			paneLog.info("saved", { "path": path, "bytes": contents.length });
 		}
 	})
-		.then(() => {
+		.then(async () => {
 			bootSpan.info("monaco booted");
+			// zen-fs unification (M0): back the workspace with a zen-fs-backed FileSystemProvider the type-checker
+			// reads through (priority 2, above the boot seed). Additive for now — proves the mechanism; later
+			// milestones make it the sole store. See workspace-fs.ts.
+			await installWorkspaceFs(files, paneLog).catch((error: unknown) => { bootSpan.error("workspace zen-fs failed", { "error": errText(error) }); });
 			// Filesystem overlays, layered UNDER the seeded snapshot (they only answer paths the in-memory
 			// FS misses, falling through on FileNotFound). Registered after boot so the file service is up.
 			// The CDN node_modules overlay is the first; a real-disk File System Access overlay will be its
