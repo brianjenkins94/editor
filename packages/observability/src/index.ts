@@ -150,7 +150,8 @@ export function servePageTools(hub: Hub): void {
 
 	serve(hub, "page_eval", (args) => {
 		const { expression } = args as { "expression": string };
-		const indirectEval = eval; // indirect eval → runs in global scope, not this closure
+		// eslint-disable-next-line no-eval -- page_eval's whole purpose is to evaluate a caller-supplied expression in the tab; indirect eval runs it in global scope, not this closure.
+		const indirectEval = eval;
 
 		return jsonSafe(indirectEval(expression));
 	});
