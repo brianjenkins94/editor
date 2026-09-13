@@ -25,9 +25,6 @@ import type { PodBridge } from "./extensions/worker-pod/extension";
 import helloManifest from "./extensions/hello/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
 import eslintManifest from "./extensions/eslint/package.json";
-// The eslint TS server plugin's source (real editable code, not an inline blob), registered into the
-// in-browser tsserver as an extension-file data: URL below.
-import tsPluginSource from "./extensions/eslint/ts-plugin.js?raw";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
 import { installTypeAcquisition } from "./ata";
@@ -186,11 +183,6 @@ function maybeBoot(): void {
 
 	bootWithFallbackViewport(document.documentElement);
 
-	// The typescript-external eslint engine, served next to host.html under /__vscode__/lsp/. Baked into the
-	// eslint TS-plugin source at registration (below) so the plugin — which runs inside tsserver and has no
-	// location.href — loads it without depending on a runtime config setting.
-	const eslintEngineUrl = new URL("./lsp/eslint-engine.js", location.href).href;
-
 	boot({
 		"parts": parts,
 		"files": files,
@@ -266,11 +258,13 @@ function maybeBoot(): void {
 			const eslintPluginPkg = JSON.stringify({ "name": "eslint-ts-plugin", "version": "0.0.1", "browser": "index.js" });
 
 			eslintExt.registerFileUrl("./node_modules/eslint-ts-plugin/package.json", "data:application/json," + encodeURIComponent(eslintPluginPkg));
-			// Bake the served engine URL into the plugin source (the plugin runs inside tsserver and has no
-			// location.href of its own, and the workbench's persisted config can shadow a runtime setting).
-			const eslintPluginSource = tsPluginSource.replaceAll("__ESLINT_ENGINE_URL__", eslintEngineUrl);
+			// The plugin itself is a SERVED file (built by eslint.engine.config.ts next to the engine), registered
+			// by its URL rather than embedded as a data: blob — its code leaves workbench.js, and tsserver imports
+			// it from that URL so its import.meta.url self-locates the sibling engine. (package.json stays a tiny
+			// data: URL.)
+			const eslintPluginUrl = new URL("./lsp/eslint-ts-plugin.js", location.href).href;
 
-			eslintExt.registerFileUrl("./node_modules/eslint-ts-plugin/index.js", "data:text/javascript," + encodeURIComponent(eslintPluginSource));
+			eslintExt.registerFileUrl("./node_modules/eslint-ts-plugin/index.js", eslintPluginUrl);
 
 			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod", "eslint"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration

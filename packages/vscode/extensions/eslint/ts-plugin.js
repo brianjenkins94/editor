@@ -29,12 +29,6 @@ export default function init(modules) {
 	let engine;
 	let engineError;
 
-	// The engine URL is BAKED in at registration time: workbench-entry replaces this sentinel with the served
-	// /__vscode__/lsp/eslint-engine.js URL (it has location.href; the plugin, inside tsserver, does not). This
-	// avoids depending on a runtime config setting reaching the plugin (which the workbench's persisted config
-	// can shadow). `_typescript.configurePlugin` still works as an override (see applyConfig).
-	const BAKED_ENGINE_URL = "__ESLINT_ENGINE_URL__";
-
 	function loadEngine() {
 		if (engineUrl === undefined || engine !== undefined || engineError !== undefined) {
 			return;
@@ -54,11 +48,14 @@ export default function init(modules) {
 		}
 	}
 
-	// If the sentinel was replaced with a real URL, load the engine straight away (no configurePlugin needed).
-	if ((/^https?:/u).test(BAKED_ENGINE_URL)) {
-		engineUrl = BAKED_ENGINE_URL;
+	// This plugin is served as a real file next to the engine (/__vscode__/lsp/eslint-ts-plugin.js and
+	// eslint-engine.js), so resolve the engine RELATIVE to this module's own URL — deploy-base-agnostic, with no
+	// runtime-baked URL and no config dependency. `import.meta.url` is the plugin's served URL because tsserver
+	// imports it from there. `_typescript.configurePlugin({ engineUrl })` still overrides (see applyConfig).
+	try {
+		engineUrl = new URL("./eslint-engine.js", import.meta.url).href;
 		loadEngine();
-	}
+	} catch (error) { /* fall back to configurePlugin */ }
 
 	/** eslint 1-based (line, column) → absolute offset in the source file; clamped so an out-of-range
 	 *  position can't throw and abort the whole diagnostics pass. */

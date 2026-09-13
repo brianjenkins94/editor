@@ -1,7 +1,9 @@
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
+// eslint-disable-next-line ts/no-restricted-imports -- build-time plugin; needs sync fs to read the plugin source off disk
+import * as nodeFs from "node:fs";
 import { createRequire } from "node:module";
 import * as url from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 
 /**
  * Builds the ESLint ENGINE (extensions/eslint/engine.ts → dist/lsp/eslint-engine.js) — eslint's browser-safe
@@ -25,6 +27,25 @@ const resolvePath = (relative: string): string => url.fileURLToPath(new URL(rela
 // isn't reachable from this package directly. A hardcoded ./node_modules/esquery path broke the CD build.
 const esqueryCjs = createRequire(createRequire(import.meta.url).resolve("eslint")).resolve("esquery");
 
+/**
+ * Emit the tsserver plugin (ts-plugin.js) VERBATIM to dist/lsp/eslint-ts-plugin.js — a served file, not a
+ * runtime `data:` blob registered into workbench.js. tsserver imports it from that URL, so its `import.meta.url`
+ * is the served URL and it self-locates the sibling engine (`./eslint-engine.js`). Copied byte-for-byte (not a
+ * vite input) so vite doesn't rewrite `import.meta.url`. See workbench-entry's registerFileUrl.
+ */
+function eslintTsPlugin(): Plugin {
+	return {
+		"name": "eslint-ts-plugin-asset",
+		"generateBundle": function() {
+			this.emitFile({
+				"type": "asset",
+				"fileName": "lsp/eslint-ts-plugin.js",
+				"source": nodeFs.readFileSync(resolvePath("./extensions/eslint/ts-plugin.js"))
+			});
+		}
+	};
+}
+
 export default defineConfig({
 	"base": "./",
 	"resolve": {
@@ -46,7 +67,8 @@ export default defineConfig({
 		"conditions": ["browser", "import", "default"]
 	},
 	// Handles the node-builtin surface (path/util/… → polyfills, fs/… → stubs) + process/Buffer globals.
-	"plugins": [polyfillNode()],
+	// eslintTsPlugin emits the served ts-plugin.js next to the engine.
+	"plugins": [polyfillNode(), eslintTsPlugin()],
 	"build": {
 		"target": "esnext",
 		"outDir": "dist",
