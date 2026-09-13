@@ -18,7 +18,7 @@
  * trip intact and stitch across contexts; the collector tags each by `context.source`.
  */
 import type { Hub, WebSocketLike } from "@brianjenkins94/hub";
-import { portTransport, websocketTransport } from "@brianjenkins94/hub";
+import { portTransport, serve, websocketTransport } from "@brianjenkins94/hub";
 import type { Logger, LogRecord } from "@brianjenkins94/util/logger";
 import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
 
@@ -93,16 +93,86 @@ export function linkServiceWorkerHub(rootHub: Hub): void {
 }
 
 /**
- * Dev-only: link the page's rootHub to a running `@brianjenkins94/dev-hub` over a WebSocket, so the whole tree's
- * `$sys.log.>` stream federates out to the Node collector and becomes queryable over MCP (query_logs /
- * query_spans / get_tree_state / wait_for) — no screenshots. No-op off localhost. It makes ONE quiet attempt: if
- * no dev-hub is running the failed connect is left alone (no retry, no spam); once it HAS connected, a later drop
- * reconnects with a short backoff (the hub's `hello` handshake re-advertises interest on each relink).
+ * Is the dev-hub link enabled for this page? Always on localhost; on any other origin (e.g. the DEPLOYED Pages
+ * site) only when the developer opts in with `?devhub` or `localStorage.devhub`. So the deployed site can talk to
+ * a dev-hub on YOUR machine when you ask, and a random visitor's tab never probes their localhost or serves tools.
  */
-export function linkDevHub(rootHub: Hub, url = "ws://localhost:7378"): void {
+function devHubEnabled(): boolean {
 	const host = location.hostname;
 
-	if (host !== "localhost" && host !== "127.0.0.1") {
+	if (host === "localhost" || host === "127.0.0.1") {
+		return true;
+	}
+
+	try {
+		if (new URLSearchParams(location.search).has("devhub") || localStorage.getItem("devhub") !== null) {
+			return true;
+		}
+	} catch { /* no URL/storage access — treat as disabled */ }
+
+	return false;
+}
+
+/** JSON-safe a page_eval result: the reply crosses a WebSocket (JSON), so functions/DOM nodes/undefined can't ride
+ *  raw. undefined→null, functions→a label, objects→a JSON round-trip (or their String() if that fails). */
+function jsonSafe(value: unknown): unknown {
+	if (value === undefined) {
+		return null;
+	}
+
+	if (typeof value === "function") {
+		return "ƒ " + ((value as { "name"?: string }).name ?? "");
+	}
+
+	if (typeof value === "object" && value !== null) {
+		try {
+			return JSON.parse(JSON.stringify(value));
+		} catch {
+			return String(value);
+		}
+	}
+
+	return value;
+}
+
+/**
+ * Host live MCP tools IN THIS TAB. When the dev-hub link is enabled (see `devHubEnabled`), register handlers the
+ * dev-hub relay forwards agent tool calls to — so an MCP client (Claude Code) can query the LIVE page, not just
+ * the log stream: `page_eval` (evaluate an expression in page scope) and `page_query` (a CSS selector's count +
+ * text sample). This is what makes the tab the de-facto MCP server; the relay is a pipe. Dev-only + gated, and
+ * `eval` here is reachable only by a relay that passed its own Origin check — but it IS arbitrary in-page eval,
+ * so keep it behind the opt-in.
+ */
+export function servePageTools(hub: Hub): void {
+	if (!devHubEnabled()) {
+		return;
+	}
+
+	serve(hub, "page_eval", (args) => {
+		const { expression } = args as { "expression": string };
+		const indirectEval = eval; // indirect eval → runs in global scope, not this closure
+
+		return jsonSafe(indirectEval(expression));
+	});
+
+	serve(hub, "page_query", (args) => {
+		const { selector, limit = 10 } = args as { "selector": string; "limit"?: number };
+		const nodes = Array.from(document.querySelectorAll(selector));
+
+		return { "count": nodes.length, "sample": nodes.slice(0, limit).map((node) => (node.textContent ?? "").trim().slice(0, 120)) };
+	});
+}
+
+/**
+ * Dev-only: link the page's rootHub to a running `@brianjenkins94/dev-hub` over a WebSocket, so the whole tree's
+ * `$sys.log.>` stream federates out to the Node collector and becomes queryable over MCP (query_logs /
+ * query_spans / get_tree_state / wait_for) — no screenshots. Enabled per `devHubEnabled` (localhost, or `?devhub`
+ * on the deployed site). It makes ONE quiet attempt: if no dev-hub is running the failed connect is left alone (no
+ * retry, no spam); once it HAS connected, a later drop reconnects with a short backoff (the hub's `hello`
+ * handshake re-advertises interest on each relink).
+ */
+export function linkDevHub(rootHub: Hub, url = "ws://localhost:7378"): void {
+	if (!devHubEnabled()) {
 		return;
 	}
 

@@ -11,7 +11,7 @@
  * the two share one process and one store. These tools are read-only, so no broker/run-ledger wiring is needed.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { defineTool, ok, registerTool } from "@brianjenkins94/util/mcp/tool";
+import { defineTool, fail, ok, registerTool } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
 
 import type { DevHub } from "./server.ts";
@@ -90,6 +90,52 @@ export function createMcpServer(devHub: DevHub): McpServer {
 			const record = await store.waitFor({ ...input, "timeoutMs": input.timeoutMs ?? 30000 });
 
 			return ok(record ?? { "timedOut": true });
+		}
+	}));
+
+	// ── Live page tools ────────────────────────────────────────────────────────────────────────────--
+	// These do NOT read the store; they FORWARD to a tool the connected page hosts (page.ts `serve`s them) and
+	// return its live answer. This is "an MCP server hosted in the tab": the tab owns the logic + live app state,
+	// the relay is a pipe. If no page is connected the rpc times out and the tool reports it, not a crash.
+
+	registerTool(server, defineTool({
+		"name": "page_eval",
+		"config": {
+			"title": "Evaluate in the page",
+			"description": "Evaluate a JavaScript expression IN THE LIVE editor page and return its result (JSON-serialized). Answers questions the log stream can't — current URL/title, element counts, localStorage, live app state. Requires a connected page (dev, localhost-gated).",
+			"inputSchema": {
+				"expression": z.string().describe("A JS expression, e.g. `document.title` or `document.querySelectorAll('.monaco-editor').length`.")
+			}
+		},
+		"handler": async (args) => {
+			const { expression } = args as { "expression": string };
+
+			try {
+				return ok(await devHub.rpc.request("page_eval", { "expression": expression }, { "timeoutMs": 5000 }));
+			} catch (error) {
+				return fail(error instanceof Error ? error.message : String(error));
+			}
+		}
+	}));
+
+	registerTool(server, defineTool({
+		"name": "page_query",
+		"config": {
+			"title": "Query the page DOM",
+			"description": "Run a CSS selector in the LIVE editor page and return the match count plus a sample of each match's trimmed text. Requires a connected page.",
+			"inputSchema": {
+				"selector": z.string().describe("A CSS selector, e.g. '.monaco-editor' or '[role=tab]'."),
+				"limit": z.number().optional().describe("Max sample entries to return (default 10).")
+			}
+		},
+		"handler": async (args) => {
+			const { selector, limit } = args as { "selector": string; "limit"?: number };
+
+			try {
+				return ok(await devHub.rpc.request("page_query", { "selector": selector, "limit": limit ?? 10 }, { "timeoutMs": 5000 }));
+			} catch (error) {
+				return fail(error instanceof Error ? error.message : String(error));
+			}
 		}
 	}));
 
