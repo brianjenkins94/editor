@@ -21,10 +21,12 @@ const LOG_SUBJECT = "$sys.log";
 /** Origins allowed to connect. Loopback (any port) for local dev, plus the deployed Pages origin — so the
  *  PUBLIC site can still reach a debug-mcp on YOUR machine over `ws://localhost` (loopback is exempt from
  *  mixed-content blocking). The check matters: without it any site you visit could open your debug-mcp and read
- *  your logs, or call the page tools. Extra origins via `origins`. A connection with no Origin (a non-browser
- *  client, e.g. tests) is allowed. */
+ *  your logs, or call the page tools (which include in-page `eval`). Extra origins via `origins`. A connection
+ *  with NO Origin header (a non-browser client — tests, the MCP bridge) is allowed; but the literal string
+ *  `"null"` — the opaque origin a SANDBOXED iframe or a `file://` page sends — is NOT, since that's a browser
+ *  context we can't attribute and must not hand eval to. */
 function originAllowed(origin: string | undefined, extra: string[]): boolean {
-	if (origin === undefined || origin === "null") {
+	if (origin === undefined) {
 		return true;
 	}
 
@@ -46,6 +48,9 @@ export interface DebugMcp {
 	"rpc": RpcClient;
 	/** How many pages are currently linked in (for tree-state health). */
 	"linkCount": () => number;
+	/** Resolves once the WS server is bound and accepting connections; rejects if it fails to bind (typically
+	 *  EADDRINUSE — another debug-mcp already owns the port). Await before announcing "listening". */
+	"whenListening": Promise<void>;
 	"close": () => Promise<void>;
 }
 
@@ -55,6 +60,25 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 	const store = new RecordStore({ "max": options.max });
 	const server = new WebSocketServer({ "port": options.port });
 	const links = new Set<WebSocket>();
+
+	// Surface bind success/failure. WebSocketServer emits 'listening' once bound, or 'error' if it can't bind
+	// (usually EADDRINUSE: a second debug-mcp on the same port). An 'error' event with NO listener is thrown as
+	// an unhandled exception and takes the whole process down — which is exactly how a port collision killed this
+	// server. Attach a listener always: reject `whenListening` on a pre-bind failure so the caller can report it
+	// and exit cleanly, and merely log any post-bind socket error rather than crash.
+	let markListening: () => void;
+	let failListening: (error: Error) => void;
+	const whenListening = new Promise<void>((resolve, reject) => { markListening = resolve; failListening = reject; });
+	let bound = false;
+
+	server.on("listening", () => { bound = true; markListening(); });
+	server.on("error", (error: Error) => {
+		if (bound) {
+			console.error("[debug-mcp] server error:", error.message);
+		} else {
+			failListening(error);
+		}
+	});
 
 	// The collector leaf. Its interest in `$sys.log.>` is what pulls each context's records across the links.
 	hub.subscribe(LOG_SUBJECT + ".>", (data) => { store.add(data as HubLogRecord); });
@@ -87,6 +111,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		"store": store,
 		"rpc": rpc,
 		"linkCount": () => links.size,
+		"whenListening": whenListening,
 		"close": () => new Promise<void>((resolve) => {
 			for (const socket of links) {
 				socket.close();

@@ -24,6 +24,10 @@ async function main(): Promise<void> {
 	const port = resolvePort();
 	const debugMcp = createDebugMcp({ "port": port });
 
+	// Wait for the socket to actually bind before announcing it — rejects on EADDRINUSE etc. (handled below),
+	// instead of the old unhandled 'error' that crashed the process on a port collision.
+	await debugMcp.whenListening;
+
 	console.error(`[debug-mcp] WebSocket collector listening on ws://localhost:${port}`);
 
 	const mcp = createMcpServer(debugMcp);
@@ -40,6 +44,11 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-	console.error("[debug-mcp] fatal:", error);
+	if ((error as { "code"?: string } | undefined)?.code === "EADDRINUSE") {
+		console.error(`[debug-mcp] port ${resolvePort()} already in use — another debug-mcp is likely running. Exiting.`);
+	} else {
+		console.error("[debug-mcp] fatal:", error);
+	}
+
 	process.exit(1);
 });
