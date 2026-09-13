@@ -1,8 +1,5 @@
 import { defaults } from "@brianjenkins94/util/vite/defaults";
 import { isCI } from "@brianjenkins94/util/env";
-// eslint-disable-next-line ts/no-restricted-imports -- build-time plugin; needs sync fs to read the referenced asset
-import * as nodeFs from "node:fs";
-import * as path from "node:path";
 import { mergeConfig } from "vite";
 
 // Inherits the repo's shared build defaults (esnext, [name].js, cleaned outDir) and bundles
@@ -17,7 +14,7 @@ export default mergeConfig(defaults, {
 	"base": "./",
 	"build": {
 		// Minify with vite's own (oxc) minifier — fast and within the default node heap.
-		"minify": true,
+		"minify": isCI,
 		// Sourcemaps for local debugging only — NEVER in CI (they're ~62MB of @codingame maps + our chunk maps,
 		// debug-only and never fetched at runtime; drop-sourcemaps below strips the copied ones in CI too).
 		"sourcemap": !isCI,
@@ -70,42 +67,6 @@ export default mergeConfig(defaults, {
 					);
 
 				return stubbed === code ? null : { "code": stubbed, "map": null };
-			}
-		},
-		{
-			// Inline the default extensions' .json / .code-snippets resources (language-configuration, package.nls,
-			// grammars, snippets, …) INTO the bundle instead of emitting ~86 separate files each fetched at
-			// runtime. @codingame registers them as `registerFileUrl(name, new URL("./x.json", import.meta.url)
-			// .toString(), …)`; rewrite that `new URL(...)` to a `data:application/json,<url-encoded content>` URL
-			// (read at build time), so registerFileUrl's RegisteredUriFile "fetches" it in-memory — no file, no
-			// network. URL-encoded (not base64) per the data-URI form. Runs before vite's asset-import-meta-url
-			// transform (enforce: pre) so nothing is emitted.
-			"name": "inline-json",
-			"enforce": "pre",
-			"transform": function(code, id) {
-				if (!(/\.(?:json|code-snippets)\b/u).test(code) || !code.includes("import.meta.url")) {
-					return null;
-				}
-
-				const dir = path.dirname(id.split("?")[0]);
-				let changed = false;
-
-				const out = code.replace(
-					/new URL\(\s*(['"])([^'"]+\.(?:json|code-snippets))\1\s*,\s*import\.meta\.url\s*\)/gu,
-					function(match, _quote, relative) {
-						try {
-							const content = nodeFs.readFileSync(path.resolve(dir, relative), "utf8");
-
-							changed = true;
-
-							return "new URL(" + JSON.stringify("data:application/json," + encodeURIComponent(content)) + ")";
-						} catch (error) {
-							return match;
-						}
-					}
-				);
-
-				return changed ? { "code": out, "map": null } : null;
 			}
 		},
 		{

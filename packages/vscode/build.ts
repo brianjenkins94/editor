@@ -51,7 +51,7 @@ function bundledModule(name: string, file: string, id: string, format: "cjs" | "
 				"root": root,
 				"build": {
 					"write": false,
-					"minify": true,
+					"minify": isCI,
 					"target": "esnext",
 					"lib": { "entry": dir + file, "formats": [format], "fileName": id },
 					// One self-contained chunk: large servers have dynamic imports that would otherwise code-split
@@ -173,7 +173,7 @@ export async function preBuild(): Promise<void> {
 		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"] },
 		"build": {
 			"outDir": "dist",
-			"minify": true,
+			"minify": isCI,
 			"rollupOptions": {
 				"input": { "workbench": "workbench-entry.tsx" },
 				"external": ["@brianjenkins94/monaco-vscode-api/main"],
