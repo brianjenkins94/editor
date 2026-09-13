@@ -14,7 +14,7 @@ export default mergeConfig(defaults, {
 	"base": "./",
 	"build": {
 		// Minify with vite's own (oxc) minifier — fast and within the default node heap.
-		"minify": isCI,
+		"minify": false, // TEMP: disabled while debugging the e.with cold-boot error (restore to isCI once fixed)
 		// Sourcemaps for local debugging only — NEVER in CI (they're ~62MB of @codingame maps + our chunk maps,
 		// debug-only and never fetched at runtime; drop-sourcemaps below strips the copied ones in CI too).
 		"sourcemap": !isCI,
