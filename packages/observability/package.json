@@ -1,7 +1,7 @@
 {
   "name": "@brianjenkins94/observability",
   "version": "0.0.0",
-  "description": "The observability plane: @brianjenkins94/util/logger spans/records carried over @brianjenkins94/hub. A source-scoped relay publishes each LogRecord onto its hub on $sys.log.<source>; a root collector renders the merged, span-nested, cross-context stream. The reusable middle layer between hub (routing) and a sink like dev-hub (a Node collector + MCP).",
+  "description": "The observability plane: @brianjenkins94/util/logger spans/records carried over @brianjenkins94/hub. A source-scoped relay publishes each LogRecord onto its hub on $sys.log.<source>; a root collector renders the merged, span-nested, cross-context stream. The reusable middle layer between hub (routing) and a sink like debug-mcp (a Node collector + MCP).",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

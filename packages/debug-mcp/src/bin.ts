@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * dev-hub entry — starts the WebSocket collector and serves the MCP tools over stdio.
+ * debug-mcp entry — starts the WebSocket collector and serves the MCP tools over stdio.
  *
  * The browser (the editor's rootHub) connects to `ws://localhost:<port>/`; an MCP client (Claude Code) spawns
  * this process and speaks MCP over stdio. Because MCP owns stdout, ALL diagnostics here go to stderr — a single
@@ -8,7 +8,7 @@
  */
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
-import { createDevHub } from "./server.ts";
+import { createDebugMcp } from "./server.ts";
 import { createMcpServer } from "./mcp.ts";
 
 function resolvePort(): number {
@@ -22,17 +22,17 @@ function resolvePort(): number {
 
 async function main(): Promise<void> {
 	const port = resolvePort();
-	const devHub = createDevHub({ "port": port });
+	const debugMcp = createDebugMcp({ "port": port });
 
-	console.error(`[dev-hub] WebSocket collector listening on ws://localhost:${port}`);
+	console.error(`[debug-mcp] WebSocket collector listening on ws://localhost:${port}`);
 
-	const mcp = createMcpServer(devHub);
+	const mcp = createMcpServer(debugMcp);
 
 	await mcp.connect(new StdioServerTransport());
-	console.error("[dev-hub] MCP server ready on stdio");
+	console.error("[debug-mcp] MCP server ready on stdio");
 
 	const shutdown = (): void => {
-		void devHub.close().then(() => process.exit(0));
+		void debugMcp.close().then(() => process.exit(0));
 	};
 
 	process.on("SIGINT", shutdown);
@@ -40,6 +40,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-	console.error("[dev-hub] fatal:", error);
+	console.error("[debug-mcp] fatal:", error);
 	process.exit(1);
 });

@@ -1,6 +1,6 @@
 /**
- * The dev-hub as a hub-tree node. It runs a WebSocket server; every page that links in (its rootHub over a
- * `websocketTransport`) becomes a child in the tree, so the dev-hub is just another hub — the war2 central-hub
+ * The debug-mcp as a hub-tree node. It runs a WebSocket server; every page that links in (its rootHub over a
+ * `websocketTransport`) becomes a child in the tree, so the debug-mcp is just another hub — the war2 central-hub
  * analog — that happens to live in Node. A single collector leaf subscribes to the reserved `$sys.log.>`
  * observability namespace and files every record into the store. Because routing is interest-based, the pages
  * forward their span/log traffic here precisely because this collector subscribed to it, and nothing else.
@@ -19,8 +19,8 @@ import type { HubLogRecord } from "./store.ts";
 const LOG_SUBJECT = "$sys.log";
 
 /** Origins allowed to connect. Loopback (any port) for local dev, plus the deployed Pages origin — so the
- *  PUBLIC site can still reach a dev-hub on YOUR machine over `ws://localhost` (loopback is exempt from
- *  mixed-content blocking). The check matters: without it any site you visit could open your dev-hub and read
+ *  PUBLIC site can still reach a debug-mcp on YOUR machine over `ws://localhost` (loopback is exempt from
+ *  mixed-content blocking). The check matters: without it any site you visit could open your debug-mcp and read
  *  your logs, or call the page tools. Extra origins via `origins`. A connection with no Origin (a non-browser
  *  client, e.g. tests) is allowed. */
 function originAllowed(origin: string | undefined, extra: string[]): boolean {
@@ -39,7 +39,7 @@ function originAllowed(origin: string | undefined, extra: string[]): boolean {
 	return ["https://brianjenkins94.github.io", ...extra].includes(origin);
 }
 
-export interface DevHub {
+export interface DebugMcp {
 	"hub": Hub;
 	"store": RecordStore;
 	/** Call tools SERVED BY A CONNECTED PAGE (the tab hosts them via `serve`); the MCP layer forwards here. */
@@ -49,9 +49,9 @@ export interface DevHub {
 	"close": () => Promise<void>;
 }
 
-/** Start the dev-hub WS server on `port` and return its hub, store, rpc client, and a close handle. */
-export function createDevHub(options: { "port": number; "max"?: number; "origins"?: string[] } = { "port": 7378 }): DevHub {
-	const hub = createHub({ "id": "dev-hub" });
+/** Start the debug-mcp WS server on `port` and return its hub, store, rpc client, and a close handle. */
+export function createDebugMcp(options: { "port": number; "max"?: number; "origins"?: string[] } = { "port": 7378 }): DebugMcp {
+	const hub = createHub({ "id": "debug-mcp" });
 	const store = new RecordStore({ "max": options.max });
 	const server = new WebSocketServer({ "port": options.port });
 	const links = new Set<WebSocket>();
@@ -59,7 +59,7 @@ export function createDevHub(options: { "port": number; "max"?: number; "origins
 	// The collector leaf. Its interest in `$sys.log.>` is what pulls each context's records across the links.
 	hub.subscribe(LOG_SUBJECT + ".>", (data) => { store.add(data as HubLogRecord); });
 
-	// Request client, created eagerly so its reply channel ($rpc.reply.dev-hub) is advertised to every page as it
+	// Request client, created eagerly so its reply channel ($rpc.reply.debug-mcp) is advertised to every page as it
 	// links in — a page-hosted tool call then never races interest. This is the relay half of "MCP server in the tab".
 	const rpc = createRpcClient(hub);
 

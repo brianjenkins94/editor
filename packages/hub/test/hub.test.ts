@@ -160,18 +160,18 @@ test("websocketTransport federates over a JSON-framed, EventTarget-shaped socket
 
 	const [clientSocket, serverSocket] = socketPair();
 	const page = createHub({ "id": "page" });
-	const devHub = createHub({ "id": "dev-hub" });
+	const debugMcp = createHub({ "id": "debug-mcp" });
 
 	page.link(websocketTransport(clientSocket));
-	devHub.link(websocketTransport(serverSocket));
+	debugMcp.link(websocketTransport(serverSocket));
 
 	const collected: unknown[] = [];
-	devHub.subscribe("$sys.log.>", (data) => { collected.push(data); });
+	debugMcp.subscribe("$sys.log.>", (data) => { collected.push(data); });
 
 	await flush(); // interest crosses the socket
 
 	page.publish("$sys.log.worker", { "message": "step", "durationMs": 3 });
-	page.publish("app.local", "should-not-cross"); // dev-hub never subscribed to this
+	page.publish("app.local", "should-not-cross"); // debug-mcp never subscribed to this
 
 	await flush();
 

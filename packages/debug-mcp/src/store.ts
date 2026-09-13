@@ -1,5 +1,5 @@
 /**
- * The dev-hub's record store — an in-memory, queryable window over the span/log stream the page's hub tree
+ * The debug-mcp's record store — an in-memory, queryable window over the span/log stream the page's hub tree
  * federates out over the WebSocket link. It is deliberately a plain JSON store: records arrive already shaped
  * by @brianjenkins94/util/logger, and everything downstream (the MCP tools, an eventual OTel exporter) reads
  * that shape without the store ever constructing a logger — the "construct downstream from Roarr" line.

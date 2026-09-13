@@ -1,5 +1,5 @@
 /**
- * The MCP face of the dev-hub — the four tools an agent uses to see what the live editor did WITHOUT a
+ * The MCP face of the debug-mcp — the four tools an agent uses to see what the live editor did WITHOUT a
  * screenshot: query_logs (point events), query_spans (timed operations, incl. still-open ones), get_tree_state
  * (which contexts are alive + what's running now), and wait_for (block until a matching record arrives, so the
  * agent synchronizes on a real event instead of polling).
@@ -14,16 +14,16 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { defineTool, fail, ok, registerTool } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
 
-import type { DevHub } from "./server.ts";
+import type { DebugMcp } from "./server.ts";
 import type { QueryLogsInput, QuerySpansInput, WaitInput } from "./store.ts";
 
 const LEVEL = z.enum(["trace", "debug", "info", "warn", "error", "fatal"]);
 const KIND = z.enum(["log", "span-open", "span-close"]);
 
-/** Build the MCP server exposing the dev-hub's store. Connect it to a transport (stdio) to serve. */
-export function createMcpServer(devHub: DevHub): McpServer {
-	const server = new McpServer({ "name": "dev-hub", "version": "0.0.0" });
-	const store = devHub.store;
+/** Build the MCP server exposing the debug-mcp's store. Connect it to a transport (stdio) to serve. */
+export function createMcpServer(debugMcp: DebugMcp): McpServer {
+	const server = new McpServer({ "name": "debug-mcp", "version": "0.0.0" });
+	const store = debugMcp.store;
 
 	registerTool(server, defineTool({
 		"name": "query_logs",
@@ -68,7 +68,7 @@ export function createMcpServer(devHub: DevHub): McpServer {
 			"description": "Health snapshot of the whole hub tree: how many pages are linked, every context (source) seen with its last message and how long ago, and all currently-open spans. The one-call answer to 'what is the editor doing right now?'.",
 			"inputSchema": {}
 		},
-		"handler": () => ok(store.treeState(devHub.linkCount()))
+		"handler": () => ok(store.treeState(debugMcp.linkCount()))
 	}));
 
 	registerTool(server, defineTool({
@@ -111,7 +111,7 @@ export function createMcpServer(devHub: DevHub): McpServer {
 			const { expression } = args as { "expression": string };
 
 			try {
-				return ok(await devHub.rpc.request("page_eval", { "expression": expression }, { "timeoutMs": 5000 }));
+				return ok(await debugMcp.rpc.request("page_eval", { "expression": expression }, { "timeoutMs": 5000 }));
 			} catch (error) {
 				return fail(error instanceof Error ? error.message : String(error));
 			}
@@ -132,7 +132,7 @@ export function createMcpServer(devHub: DevHub): McpServer {
 			const { selector, limit } = args as { "selector": string; "limit"?: number };
 
 			try {
-				return ok(await devHub.rpc.request("page_query", { "selector": selector, "limit": limit ?? 10 }, { "timeoutMs": 5000 }));
+				return ok(await debugMcp.rpc.request("page_query", { "selector": selector, "limit": limit ?? 10 }, { "timeoutMs": 5000 }));
 			} catch (error) {
 				return fail(error instanceof Error ? error.message : String(error));
 			}

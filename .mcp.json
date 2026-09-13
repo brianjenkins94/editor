@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "dev-hub": {
+    "debug-mcp": {
       "command": "node",
-      "args": ["packages/dev-hub/src/bin.ts"]
+      "args": ["packages/debug-mcp/src/bin.ts"]
     }
   }
 }

@@ -1,10 +1,10 @@
 {
-  "name": "@brianjenkins94/dev-hub",
+  "name": "@brianjenkins94/debug-mcp",
   "version": "0.0.0",
   "description": "A Node hub-tree node that collects the span/log stream a page's composable hubs federate out over a WebSocket, and serves it to an agent over MCP — query_logs / query_spans / get_tree_state / wait_for — so the live editor's rendered and errored state is queryable without screenshots.",
   "type": "module",
   "bin": {
-    "dev-hub": "./src/bin.ts"
+    "debug-mcp": "./src/bin.ts"
   },
   "exports": {
     ".": "./src/server.ts",

@@ -11,7 +11,7 @@
  * rides its own reserved `$sys.>` namespace, separate from application traffic.
  *
  * This is the reusable middle layer between `@brianjenkins94/hub` (transport/routing) and a sink such as
- * `@brianjenkins94/dev-hub` (a Node collector + MCP): the editor wires these three together, and a game or any
+ * `@brianjenkins94/debug-mcp` (a Node collector + MCP): the editor wires these three together, and a game or any
  * other host wires them the same way — no host imports another's internals.
  *
  * `LogRecord` carries `span/spanId/parentSpanId/traceId/depth/durationMs` as W3C-shaped ids, so spans survive the
@@ -23,7 +23,7 @@ import type { Logger, LogRecord } from "@brianjenkins94/util/logger";
 import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
 
 /** Reserved observability namespace — records are published on `$sys.log.<source>`; app code must not use it.
- *  A separate-process sink (a Node collector) must use this same value; see @brianjenkins94/dev-hub. */
+ *  A separate-process sink (a Node collector) must use this same value; see @brianjenkins94/debug-mcp. */
 export const LOG_SUBJECT = "$sys.log";
 
 /**
@@ -93,11 +93,11 @@ export function linkServiceWorkerHub(rootHub: Hub): void {
 }
 
 /**
- * Is the dev-hub link enabled for this page? Always on localhost; on any other origin (e.g. the DEPLOYED Pages
- * site) only when the developer opts in with `?devhub` or `localStorage.devhub`. So the deployed site can talk to
- * a dev-hub on YOUR machine when you ask, and a random visitor's tab never probes their localhost or serves tools.
+ * Is the debug-mcp link enabled for this page? Always on localhost; on any other origin (e.g. the DEPLOYED Pages
+ * site) only when the developer opts in with `?debug` or `localStorage.debug`. So the deployed site can talk to
+ * a debug-mcp on YOUR machine when you ask, and a random visitor's tab never probes their localhost or serves tools.
  */
-function devHubEnabled(): boolean {
+function debugEnabled(): boolean {
 	const host = location.hostname;
 
 	if (host === "localhost" || host === "127.0.0.1") {
@@ -105,7 +105,7 @@ function devHubEnabled(): boolean {
 	}
 
 	try {
-		if (new URLSearchParams(location.search).has("devhub") || localStorage.getItem("devhub") !== null) {
+		if (new URLSearchParams(location.search).has("debug") || localStorage.getItem("debug") !== null) {
 			return true;
 		}
 	} catch { /* no URL/storage access — treat as disabled */ }
@@ -136,15 +136,15 @@ function jsonSafe(value: unknown): unknown {
 }
 
 /**
- * Host live MCP tools IN THIS TAB. When the dev-hub link is enabled (see `devHubEnabled`), register handlers the
- * dev-hub relay forwards agent tool calls to — so an MCP client (Claude Code) can query the LIVE page, not just
+ * Host live MCP tools IN THIS TAB. When the debug-mcp link is enabled (see `debugEnabled`), register handlers the
+ * debug-mcp relay forwards agent tool calls to — so an MCP client (Claude Code) can query the LIVE page, not just
  * the log stream: `page_eval` (evaluate an expression in page scope) and `page_query` (a CSS selector's count +
  * text sample). This is what makes the tab the de-facto MCP server; the relay is a pipe. Dev-only + gated, and
  * `eval` here is reachable only by a relay that passed its own Origin check — but it IS arbitrary in-page eval,
  * so keep it behind the opt-in.
  */
 export function servePageTools(hub: Hub): void {
-	if (!devHubEnabled()) {
+	if (!debugEnabled()) {
 		return;
 	}
 
@@ -164,15 +164,15 @@ export function servePageTools(hub: Hub): void {
 }
 
 /**
- * Dev-only: link the page's rootHub to a running `@brianjenkins94/dev-hub` over a WebSocket, so the whole tree's
+ * Dev-only: link the page's rootHub to a running `@brianjenkins94/debug-mcp` over a WebSocket, so the whole tree's
  * `$sys.log.>` stream federates out to the Node collector and becomes queryable over MCP (query_logs /
- * query_spans / get_tree_state / wait_for) — no screenshots. Enabled per `devHubEnabled` (localhost, or `?devhub`
- * on the deployed site). It makes ONE quiet attempt: if no dev-hub is running the failed connect is left alone (no
+ * query_spans / get_tree_state / wait_for) — no screenshots. Enabled per `debugEnabled` (localhost, or `?debug`
+ * on the deployed site). It makes ONE quiet attempt: if no debug-mcp is running the failed connect is left alone (no
  * retry, no spam); once it HAS connected, a later drop reconnects with a short backoff (the hub's `hello`
  * handshake re-advertises interest on each relink).
  */
-export function linkDevHub(rootHub: Hub, url = "ws://localhost:7378"): void {
-	if (!devHubEnabled()) {
+export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
+	if (!debugEnabled()) {
 		return;
 	}
 
@@ -192,11 +192,11 @@ export function linkDevHub(rootHub: Hub, url = "ws://localhost:7378"): void {
 			unlink = undefined;
 
 			if (everConnected) {
-				setTimeout(connect, 2000); // dev-hub restarted — rejoin
+				setTimeout(connect, 2000); // debug-mcp restarted — rejoin
 			}
 		});
 
-		// Swallow the connect error so a missing dev-hub doesn't surface as an unhandled event; `close` follows.
+		// Swallow the connect error so a missing debug-mcp doesn't surface as an unhandled event; `close` follows.
 		ws.addEventListener("error", () => { /* handled by close */ });
 	};
 
