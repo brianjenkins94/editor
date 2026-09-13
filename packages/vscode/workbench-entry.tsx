@@ -67,7 +67,15 @@ window.addEventListener("error", (event) => {
 		paneLog.error("uncaught error", { "message": event.message, "file": event.filename, "line": event.lineno });
 	}
 });
-window.addEventListener("unhandledrejection", (event) => { paneLog.error("unhandled rejection", { "reason": String(event.reason) }); });
+window.addEventListener("unhandledrejection", (event) => {
+	const reason = event.reason;
+	// Capture the STACK, not just the message — the cold-boot `e.with` rejection is only diagnosable from its
+	// call chain, and with minify off the frames are readable. Relays to the $sys.log.> collector (debug-mcp).
+	paneLog.error("unhandled rejection", {
+		"reason": reason instanceof Error ? reason.message : String(reason),
+		"stack": reason instanceof Error ? reason.stack : undefined
+	});
+});
 
 /** Readable text for a caught `unknown` — Error message when it is one, a string as-is, else JSON (avoids
  *  the `[object Object]` a bare `String(error)` gives, and keeps relayed log attrs meaningful). */
