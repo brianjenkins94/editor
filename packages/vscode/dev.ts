@@ -11,13 +11,24 @@ import { hostPlugins, preBuild, root } from "./build";
  */
 await preBuild();
 
+// almostnode's zlib shim dynamically imports the optional `brotli-wasm` (with a @vite-ignore, since it's never
+// reached — only pako gzip/deflate is used). The BUILD honors that @vite-ignore (rollup leaves it external), but
+// vite's DEV pipeline transpiles the .ts with esbuild FIRST, which strips the comment, so vite:import-analysis
+// then tries to resolve brotli-wasm, fails, and throws a page-blocking error overlay. Stub it to an empty module
+// so the import resolves and degrades to a runtime no-op (brotliModule stays undefined, unused).
+const brotliStub = {
+	"name": "brotli-wasm-stub",
+	"resolveId": (id: string) => (id === "brotli-wasm" ? "\0brotli-wasm-stub" : undefined),
+	"load": (id: string) => (id === "\0brotli-wasm-stub" ? "export default undefined;" : undefined)
+};
+
 const server = await createServer({
 	"root": root,
 	"base": "./",
 	"configFile": false,
 	"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 	"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
-	"plugins": hostPlugins()
+	"plugins": [brotliStub, ...hostPlugins()]
 });
 
 await server.listen();
