@@ -9,13 +9,14 @@
  * WRITE the results into the same in-memory FS the seed uses — so the checker resolves them synchronously.
  *
  * It reuses OUR existing CDN path rather than a third-party acquirer: fetches go same-origin to
- * `<base>/workspace/node_modules/<pkg>/…`, which the service worker proxies to unpkg (following the unversioned
- * 302 to latest — see coi-serviceworker.js fetchCdn). Same-origin keeps it clear of the document's COEP, and no
- * `typescript`/@typescript/ata dependency rides along — discovery is a lightweight scan, matching snapshot.ts.
+ * `<base>/workspace/node_modules/<pkg>/…`, which the service worker proxies to unpkg (with `?meta` for a
+ * directory listing and `?v=` to pin a version — see coi-serviceworker.js fetchCdn). Same-origin keeps it clear
+ * of the document's COEP, and no `typescript`/@typescript/ata dependency rides along.
  *
- * Best-effort: it handles the common shapes (a package's own `types`/`typings`/`exports["."].types`, its
- * DefinitelyTyped `@types/<pkg>` counterpart, and relative `.d.ts` + triple-slash references). Exotic
- * conditional-exports-only type maps may not fully resolve; the bake seed still covers the curated demo deps.
+ * The crawl resolves references against the package's `?meta` FILE LISTING (so it fetches only files that exist —
+ * no blind `.d.ts`/`index.d.ts` probing), pins versions from the workspace's map, reads the modern `exports`
+ * types condition (not just `types`/`typings`), and memoizes every fetch in IndexedDB (so a reload rehydrates
+ * from cache — fast and offline — and only genuinely new imports hit the network).
  */
 import type * as vscode from "vscode";
 import type { Logger } from "@brianjenkins94/util/logger";
@@ -24,24 +25,25 @@ import type { Logger } from "@brianjenkins94/util/logger";
 const RELEVANT = /\.(?:tsx?|jsx?|mts|cts)$/u;
 /** Debounce edits — a re-scan only fetches genuinely new modules, so a short wait coalesces typing. */
 const DEBOUNCE_MS = 800;
-/** Safety cap on fetches per acquisition run, so a pathological type graph can't runaway. */
-const MAX_FETCHES = 500;
+/** Cap on NETWORK fetches per run (cache hits are free), so a pathological type graph can't runaway. */
+const MAX_NETWORK = 400;
+/** A declaration file. */
+const DECL = /\.d\.[mc]?ts$/u;
+
+const CACHE_DB = "ata-cache";
+const CACHE_STORE = "files";
+
+/** unpkg `?meta` directory node: a file, or a directory whose `files` recurse. */
+interface MetaNode { "type": "file" | "directory"; "path": string; "files"?: MetaNode[] }
 
 /** Bare package specifiers in source (scope-aware), reduced to their package root. Mirrors snapshot.ts. */
 function importedPackages(source: string): string[] {
 	const roots = new Set<string>();
 
 	for (const match of source.matchAll(/(?:from|import|require)\s*(?:\(\s*)?["']([^"']+)["']/gu)) {
-		const spec = match[1];
+		const pkg = packageRootOf(match[1]);
 
-		if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("node:")) {
-			continue;
-		}
-
-		const parts = spec.split("/");
-		const pkg = (parts[0]?.startsWith("@") ? parts.slice(0, 2) : parts.slice(0, 1)).join("/");
-
-		if (pkg !== "" && !(pkg.startsWith("@") && !pkg.includes("/"))) {
+		if (pkg !== undefined) {
 			roots.add(pkg);
 		}
 	}
@@ -49,12 +51,24 @@ function importedPackages(source: string): string[] {
 	return [...roots];
 }
 
+/** The package root of a bare specifier or node_modules-relative path (scope-aware); undefined for relative/node. */
+function packageRootOf(spec: string): string | undefined {
+	if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("node:")) {
+		return undefined;
+	}
+
+	const parts = spec.split("/");
+	const pkg = (parts[0]?.startsWith("@") ? parts.slice(0, 2) : parts.slice(0, 1)).join("/");
+
+	return pkg !== "" && !(pkg.startsWith("@") && !pkg.includes("/")) ? pkg : undefined;
+}
+
 /** The DefinitelyTyped counterpart: `react` → `@types/react`, `@scope/name` → `@types/scope__name`. */
 function typesCounterpart(pkg: string): string {
 	return pkg.startsWith("@") ? "@types/" + pkg.slice(1).replace("/", "__") : "@types/" + pkg;
 }
 
-/** The types entry a package declares (classic fields first, then a simple exports["."] types condition). */
+/** The types entry a package declares — classic `types`/`typings`, then the modern `exports["."]` types condition. */
 function typesEntry(meta: Record<string, unknown>): string | undefined {
 	const classic = meta["types"] ?? meta["typings"];
 
@@ -62,10 +76,49 @@ function typesEntry(meta: Record<string, unknown>): string | undefined {
 		return classic;
 	}
 
-	const root = (meta["exports"] as Record<string, unknown> | undefined)?.["."];
-	const types = typeof root === "object" && root !== null ? (root as Record<string, unknown>)["types"] : undefined;
+	return pickTypes((meta["exports"] as Record<string, unknown> | undefined)?.["."]);
+}
 
-	return typeof types === "string" ? types : (typeof types === "object" && types !== null ? (types as Record<string, unknown>)["default"] as string | undefined : undefined);
+/** Pull a `.d.ts` path out of an exports subtree: `{types}`, `{types:{default}}`, or a condition's own `types`. */
+function pickTypes(node: unknown): string | undefined {
+	if (node === null || typeof node !== "object") {
+		return undefined; // a string here is the JS entry, not types
+	}
+
+	const record = node as Record<string, unknown>;
+	const types = record["types"];
+
+	if (typeof types === "string") {
+		return types;
+	}
+
+	if (types !== null && typeof types === "object") {
+		const nested = types as Record<string, unknown>;
+		const chosen = nested["default"] ?? nested["import"] ?? nested["require"];
+
+		return typeof chosen === "string" ? chosen : undefined;
+	}
+
+	for (const condition of ["import", "require", "default"]) {
+		const value = record[condition];
+
+		if (value !== null && typeof value === "object" && typeof (value as Record<string, unknown>)["types"] === "string") {
+			return (value as Record<string, unknown>)["types"] as string;
+		}
+	}
+
+	return undefined;
+}
+
+/** Flatten a `?meta` tree into the set of file paths it contains (package-relative, no leading slash). */
+function collectFiles(node: MetaNode, out: Set<string>): void {
+	for (const child of node.files ?? []) {
+		if (child.type === "file") {
+			out.add(child.path.replace(/^\/+/u, ""));
+		} else {
+			collectFiles(child, out);
+		}
+	}
 }
 
 /** Module specifiers + triple-slash references in a `.d.ts` — the graph to crawl. */
@@ -83,60 +136,120 @@ function references(dts: string): { "relative": string[]; "packages": string[] }
 
 		if (kind === "types") {
 			packages.add(spec); // /// <reference types="node"> → a package
-		} else if (spec.startsWith(".") || spec.startsWith("/") || kind === "path") {
+		} else if (spec.startsWith(".") || kind === "path") {
 			relative.add(spec);
-		} else if (!spec.startsWith("node:")) {
-			const parts = spec.split("/");
-			packages.add((parts[0]?.startsWith("@") ? parts.slice(0, 2) : parts.slice(0, 1)).join("/"));
+		} else {
+			const pkg = packageRootOf(spec);
+
+			if (pkg !== undefined) {
+				packages.add(pkg);
+			}
 		}
 	}
 
 	return { "relative": [...relative], "packages": [...packages] };
 }
 
-/** The package root of a node_modules-relative path: `@types/react/index.d.ts` → `@types/react`. */
-function packageRootOf(rel: string): string {
-	const parts = rel.split("/");
+/** Resolve a relative reference to an EXISTING package file (from `?meta`) — no blind probing, no escaping. */
+function resolveInMeta(fromSub: string, ref: string, files: Set<string>): string | undefined {
+	const dir = fromSub.includes("/") ? fromSub.slice(0, fromSub.lastIndexOf("/")) : "";
+	const joined = new URL(ref, "file:///" + dir + "/").pathname.slice(1); // package-relative, normalized
 
-	return (parts[0]?.startsWith("@") ? parts.slice(0, 2) : parts.slice(0, 1)).join("/");
+	for (const candidate of [joined, joined + ".d.ts", joined + ".d.mts", joined + ".d.cts", joined + "/index.d.ts"]) {
+		if (files.has(candidate)) {
+			return candidate;
+		}
+	}
+
+	return undefined; // not a real file in this package (escaped, or JS-only) — don't chase it
 }
 
-/** Resolve `rel` (a `./x` reference from the file at `fromRel`) to candidate node_modules-relative `.d.ts` paths.
- *  Bounded to `fromRel`'s own package — a relative ref that escapes it (`../../other`) is dropped, not chased. */
-function resolveRelative(fromRel: string, rel: string): string[] {
-	const slash = fromRel.lastIndexOf("/");
-	const baseDir = slash === -1 ? "" : fromRel.slice(0, slash);
-	const joined = new URL(rel, "file:///" + baseDir + "/").pathname.slice(1); // normalize ./ and ../
-	const root = packageRootOf(fromRel);
+// ── A tiny IndexedDB cache: fetched file/meta text by key, so reloads rehydrate offline. ──
+function openCache(): Promise<IDBDatabase | undefined> {
+	return new Promise((resolve) => {
+		try {
+			const request = indexedDB.open(CACHE_DB, 1);
 
-	if (root !== "" && joined !== root && !joined.startsWith(root + "/")) {
-		return []; // escaped the package — a cross-package relative ref is a bug, not a type to fetch
-	}
+			request.onupgradeneeded = () => { request.result.createObjectStore(CACHE_STORE); };
+			request.onsuccess = () => { resolve(request.result); };
+			request.onerror = () => { resolve(undefined); };
+		} catch {
+			resolve(undefined); // private mode / blocked — acquisition just runs without a cache
+		}
+	});
+}
 
-	if (/\.d\.[mc]?ts$/u.test(joined)) {
-		return [joined];
-	}
+function cacheGet(db: IDBDatabase, key: string): Promise<string | undefined> {
+	return new Promise((resolve) => {
+		try {
+			const request = db.transaction(CACHE_STORE, "readonly").objectStore(CACHE_STORE).get(key);
 
-	return [joined + ".d.ts", joined + "/index.d.ts"]; // a bare ref → the file or a directory index
+			request.onsuccess = () => { resolve(request.result as string | undefined); };
+			request.onerror = () => { resolve(undefined); };
+		} catch {
+			resolve(undefined);
+		}
+	});
+}
+
+function cachePut(db: IDBDatabase, key: string, value: string): void {
+	try {
+		db.transaction(CACHE_STORE, "readwrite").objectStore(CACHE_STORE).put(value, key);
+	} catch { /* best-effort */ }
 }
 
 /**
  * Wire runtime type acquisition onto the workbench's vscode API. Runs on the active editor now and on every
- * active-editor change / document edit (debounced). Deduped across the session: a package/file is fetched once.
+ * active-editor change / document edit (debounced). Deduped across the session and memoized in IndexedDB, so a
+ * package/file is fetched over the network at most once (and once ever, until the cache is cleared).
  */
-export function installTypeAcquisition(api: typeof vscode, workspaceFolder: string, log: Logger): void {
+export function installTypeAcquisition(api: typeof vscode, workspaceFolder: string, versions: Record<string, string>, log: Logger): void {
 	const nodeModules = workspaceFolder.replace(/\/$/u, "") + "/node_modules";
 	// Same-origin base the SW intercepts; it proxies /workspace/node_modules/* to the CDN (unversioned → latest).
 	const deployBase = location.pathname.slice(0, location.pathname.indexOf("/__vscode__/") + 1) || "/";
+	const cacheReady = openCache();
 
-	const fetchedPath = new Set<string>();   // node_modules-relative paths already fetched (dedup + cycle guard)
-	const seenPackage = new Set<string>();   // packages already acquired
+	const fetchedPath = new Set<string>();          // node_modules-relative paths already written this session
+	const seenPackage = new Set<string>();          // packages already acquired this session
+	const metaCache = new Map<string, Set<string>>(); // pkg → its file set (from ?meta)
 
-	const cdnFetch = async (rel: string): Promise<string | undefined> => {
+	// Fetch text for a node_modules-relative path (or `?meta` of a package), cache-first. Network fetches (only)
+	// consume `budget`, pin the package's version when known, and are memoized in IndexedDB.
+	const cdnText = async (rel: string, meta: boolean, budget: { "n": number }): Promise<string | undefined> => {
+		const key = meta ? "meta:" + rel : rel;
+		const db = await cacheReady;
+
+		if (db !== undefined) {
+			const cached = await cacheGet(db, key);
+
+			if (cached !== undefined) {
+				return cached; // rehydrate from cache — free, offline, doesn't touch the budget
+			}
+		}
+
+		if (budget.n <= 0) {
+			return undefined;
+		}
+
+		budget.n -= 1;
+
+		const version = versions[packageRootOf(rel) ?? rel];
+		const search = meta ? "?meta" + (version === undefined ? "" : "&v=" + version) : (version === undefined ? "" : "?v=" + version);
+
 		try {
-			const response = await fetch(new URL(`${deployBase}${nodeModules.replace(/^\//u, "")}/${rel}`, location.href).href);
+			const response = await fetch(new URL(`${deployBase}${nodeModules.replace(/^\//u, "")}/${rel}${search}`, location.href).href);
 
-			return response.ok ? await response.text() : undefined;
+			if (!response.ok) {
+				return undefined;
+			}
+
+			const text = await response.text();
+
+			if (db !== undefined) {
+				cachePut(db, key, text);
+			}
+
+			return text;
 		} catch {
 			return undefined; // offline / CDN error — acquisition is best-effort
 		}
@@ -148,64 +261,122 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		} catch { /* already seeded (read-only) or unwritable — the existing copy stands */ }
 	};
 
-	// Fetch one .d.ts, write it, and crawl its references. `budget.n` bounds the whole run.
-	const acquireFile = async (rel: string, budget: { "n": number }): Promise<void> => {
-		if (fetchedPath.has(rel) || budget.n <= 0) {
-			return;
+	// The in-browser tsserver doesn't scan @types typeRoots (see snapshot.ts), so a written @types package resolves
+	// ONLY when a root .d.ts force-references it. We keep our own such file, rewritten as @types are acquired — the
+	// runtime twin of snapshot.ts's editor-ambient.d.ts.
+	const acquiredTypes = new Set<string>();
+
+	const writeAmbient = async (): Promise<void> => {
+		const refs = [...acquiredTypes].sort().map((pkg) => `/// <reference path="./node_modules/${pkg}/index.d.ts" />`).join("\n");
+
+		try {
+			await api.workspace.fs.writeFile(
+				api.Uri.file(`${workspaceFolder.replace(/\/$/u, "")}/ata-ambient.d.ts`),
+				new TextEncoder().encode("// Auto-generated by ata.ts — force-references acquired @types packages (typeRoots aren't scanned).\n" + refs + "\n")
+			);
+		} catch { /* unwritable — acquired @types just won't resolve until next attempt */ }
+	};
+
+	const packageFiles = async (pkg: string, budget: { "n": number }): Promise<Set<string>> => {
+		const existing = metaCache.get(pkg);
+
+		if (existing !== undefined) {
+			return existing;
+		}
+
+		const raw = await cdnText(pkg, true, budget);
+		const files = new Set<string>();
+
+		if (raw !== undefined) {
+			try {
+				collectFiles(JSON.parse(raw) as MetaNode, files);
+			} catch { /* malformed meta — treated as an empty listing */ }
+		}
+
+		metaCache.set(pkg, files);
+
+		return files;
+	};
+
+	const acquireFile = async (pkg: string, sub: string, files: Set<string>, budget: { "n": number }): Promise<boolean> => {
+		const rel = pkg + "/" + sub;
+
+		if (fetchedPath.has(rel)) {
+			return true; // already handled this session
 		}
 
 		fetchedPath.add(rel);
-		budget.n -= 1;
 
-		const code = await cdnFetch(rel);
+		const code = await cdnText(rel, false, budget);
 
 		if (code === undefined) {
-			return;
+			return false;
 		}
 
 		await write(rel, code);
 
+		if (!DECL.test(sub)) {
+			return true;
+		}
+
 		const { relative, packages } = references(code);
 
 		for (const ref of relative) {
-			for (const candidate of resolveRelative(rel, ref)) {
-				await acquireFile(candidate, budget);
+			const target = resolveInMeta(sub, ref, files);
+
+			if (target !== undefined) {
+				await acquireFile(pkg, target, files, budget);
 			}
 		}
 
-		for (const pkg of packages) {
-			await acquirePackage(pkg, budget);
+		for (const dep of packages) {
+			await acquirePackage(dep, budget);
 		}
+
+		return true;
 	};
 
 	async function acquirePackage(pkg: string, budget: { "n": number }): Promise<void> {
-		if (seenPackage.has(pkg) || budget.n <= 0) {
+		if (seenPackage.has(pkg)) {
 			return;
 		}
 
 		seenPackage.add(pkg);
 
-		const pkgJsonRel = `${pkg}/package.json`;
-		fetchedPath.add(pkgJsonRel);
-		budget.n -= 1;
+		const files = await packageFiles(pkg, budget);
+		const pkgJson = await cdnText(pkg + "/package.json", false, budget);
 
-		const raw = await cdnFetch(pkgJsonRel);
+		if (pkgJson === undefined) {
+			// Not published under this name → try the DefinitelyTyped counterpart (react → @types/react).
+			if (!pkg.startsWith("@types/")) {
+				await acquirePackage(typesCounterpart(pkg), budget);
+			}
 
-		if (raw === undefined) {
-			// No package.json on the CDN (not published) → nothing to do; @types is only tried below for a real pkg.
 			return;
 		}
 
-		await write(pkgJsonRel, raw);
+		fetchedPath.add(pkg + "/package.json");
+		await write(pkg + "/package.json", pkgJson);
 
 		let entry: string | undefined;
 
 		try {
-			entry = typesEntry(JSON.parse(raw) as Record<string, unknown>);
-		} catch { /* malformed package.json — fall through to @types */ }
+			entry = typesEntry(JSON.parse(pkgJson) as Record<string, unknown>);
+		} catch { /* malformed package.json */ }
 
-		if (entry !== undefined) {
-			await acquireFile(`${pkg}/${entry.replace(/^\.\//u, "")}`, budget);
+		entry = entry?.replace(/^\.\//u, "");
+
+		if (entry === undefined && files.has("index.d.ts")) {
+			entry = "index.d.ts"; // no declared types but a conventional index.d.ts exists
+		}
+
+		if (entry !== undefined && DECL.test(entry)) {
+			const wrote = await acquireFile(pkg, entry, files, budget);
+
+			// A resolved @types package needs a root force-reference (typeRoots aren't scanned) — record it.
+			if (wrote && pkg.startsWith("@types/") && entry === "index.d.ts") {
+				acquiredTypes.add(pkg);
+			}
 		} else if (!pkg.startsWith("@types/")) {
 			await acquirePackage(typesCounterpart(pkg), budget); // ships no types → DefinitelyTyped counterpart
 		}
@@ -223,10 +394,17 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 
 		const span = log.span("ata", { "file": document.uri.path, "imports": packages.length });
-		const budget = { "n": MAX_FETCHES };
+		const budget = { "n": MAX_NETWORK };
+		const typesBefore = acquiredTypes.size;
 
 		void Promise.all(packages.map((pkg) => acquirePackage(pkg, budget)))
-			.then(() => span.end({ "fetched": fetchedPath.size }))
+			.then(async () => {
+				if (acquiredTypes.size !== typesBefore) {
+					await writeAmbient(); // new @types acquired → refresh the force-reference file so they resolve
+				}
+
+				span.end({ "files": fetchedPath.size, "network": MAX_NETWORK - budget.n, "types": acquiredTypes.size });
+			})
 			.catch((error: unknown) => { span.error("ata failed", { "error": error instanceof Error ? error.message : String(error) }); span.end(); });
 	};
 
