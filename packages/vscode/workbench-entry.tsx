@@ -25,6 +25,7 @@ import helloManifest from "./extensions/hello/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
+import { installTypeAcquisition } from "./ata";
 import { relayLoggerToHub } from "./telemetry";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { connectAsPane } from "./pane-bus";
@@ -219,6 +220,9 @@ function maybeBoot(): void {
 				// (not a webview), so it composites in our coi-serviceworker single-origin harness. See
 				// debug-preview-view.ts.
 				installDebugPreview(() => vscodeApi);
+				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
+				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
+				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", paneLog);
 				// Uplink the extension pod to the page: a workbench hub bridges the pod (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the
 				// window. pod/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.
