@@ -9,6 +9,7 @@
  * (a DebugAdapterServer needs a socket). Time-travel (step-back) and the React/Atomics path arrive in M2/M3.
  */
 import { portTransport } from "@brianjenkins94/hub";
+import { logger, type Span } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
 import { podHub } from "./pod";
@@ -48,6 +49,12 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private readonly control = new Int32Array(new SharedArrayBuffer(4));
 	private lastStopAtomic = false;
 
+	// Each DAP action (launch/continue/next/…) opens a span here; its traceContext rides the control message so
+	// the worker's step span CONTINUES this trace (one cross-context trace per action). It ends on the resulting
+	// stop/terminate, so the span's duration is the action's true round-trip. Federates via the ext host's relay.
+	private readonly log = logger({ "source": "debug-adapter" });
+	private actionSpan: Span | undefined;
+
 	// The program runs only once BOTH the source is loaded (launch) and configuration is done — so breakpoints
 	// set between the `initialized` event and `configurationDone` are registered before the first step.
 	private source = "";
@@ -68,6 +75,21 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 	private event(event: string, body?: Dap): void {
 		this.send({ "type": "event", "event": event, "body": body ?? {} });
+	}
+
+	/** Open the span for a DAP action and return its traceContext to hand the worker (so its step continues this
+	 *  trace). Ends any still-open action span first — an action always resolves to a stop before the next one. */
+	private startAction(kind: string): { "traceId": string; "parentSpanId": string } {
+		this.actionSpan?.end();
+		this.actionSpan = this.log.span("debug." + kind);
+
+		return { "traceId": this.actionSpan.traceId, "parentSpanId": this.actionSpan.id };
+	}
+
+	/** Close the current action span (the worker reported a stop or terminated — the round-trip is done). */
+	private endAction(): void {
+		this.actionSpan?.end();
+		this.actionSpan = undefined;
 	}
 
 	public handleMessage(message: vscode.DebugProtocolMessage): void {
@@ -175,6 +197,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			case "terminate":
 				// Hard-stop: terminate() kills the worker even while it's blocked in Atomics.wait (an in-handler
 				// pause), which a postMessage could not reach.
+				this.endAction();
 				this.podUnlink?.();
 				this.podUnlink = undefined;
 				this.worker?.terminate();
@@ -221,17 +244,23 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		// worker channel first, so by the time the worker processes `launch` and publishes `pod.ready`, the pod
 		// is already known to want it (same ordered channel — no race).
 		this.podUnlink = podHub.link(portTransport(this.worker));
-		this.worker.postMessage({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.control.buffer, "react": this.reactMode });
+
+		const trace = this.startAction("launch");
+		this.worker.postMessage({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.control.buffer, "react": this.reactMode, "traceContext": trace });
 	}
 
 	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
 	 *  stop is driven by a control message the worker's loop is awaiting. */
 	private resume(kind: string): void {
+		const trace = this.startAction(kind);
+
 		if (this.lastStopAtomic) {
+			// In-handler pause: the worker is blocked in Atomics.wait mid-step, so it can't receive a message —
+			// it resumes its EXISTING step span (already parented to the action that first hit the breakpoint).
 			Atomics.store(this.control, 0, 1);
 			Atomics.notify(this.control, 0);
 		} else {
-			this.worker?.postMessage({ "type": kind });
+			this.worker?.postMessage({ "type": kind, "traceContext": trace });
 		}
 	}
 
@@ -240,10 +269,12 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			case "stopped":
 				this.snapshot = message.snapshot;
 				this.lastStopAtomic = message.atomic === true;
+				this.endAction(); // the action reached a stop — close its round-trip span
 				this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
 				break;
 
 			case "terminated":
+				this.endAction();
 				this.event("terminated");
 				this.podUnlink?.();
 				this.podUnlink = undefined;

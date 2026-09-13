@@ -36,13 +36,17 @@ const workerLog = relayLoggerToHub(hub, "debug-worker");
 
 type Vm = LoadedVM["vm"];
 
+/** A span's cross-context trace context (from @brianjenkins94/hub's envelope shape), carried on the control
+ *  messages that trigger work here so this worker's span continues the adapter's trace (see continueSpan). */
+type TraceContext = { "traceId": string; "parentSpanId": string };
+
 /** Control messages from the adapter. */
 type Incoming =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control": SharedArrayBuffer; "react"?: boolean }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control": SharedArrayBuffer; "react"?: boolean; "traceContext"?: TraceContext }
 	| { "type": "setBreakpoints"; "lines": number[] }
 	| { "type": "dispatch"; "id": number; "event": string }
 	| { "type": "timeTravel"; "index": number }
-	| { "type": "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect" };
+	| { "type": "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect"; "traceContext"?: TraceContext };
 
 type Action = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect";
 type ForwardAction = "continue" | "next" | "stepIn" | "stepOut";
@@ -65,6 +69,9 @@ let index = -1;
 let done = false;
 /** Resolver for the control message the session loop is currently awaiting (top-level, async pause). */
 let awaitAction: ((action: Action) => void) | undefined;
+/** Trace context of the control message currently being handled — so the step span it drives continues the
+ *  adapter's trace (one cross-context trace per debug action). Set just before the awaited action resolves. */
+let actionTrace: TraceContext | undefined;
 /**
  * Shared control word for the SYNCHRONOUS in-handler pause (M3b). A breakpoint reached inside a host-invoked
  * guest call (e.g. React's onClick) can't pause by awaiting — the call is on a synchronous stack the worker
@@ -193,9 +200,11 @@ function onBreakpointHook(vm: Vm): void {
 	Atomics.wait(control, 0, 0);
 }
 
-/** Advance `base` (a VM we own) by a forward action, then record the new stop or terminate. */
-function advanceFrom(base: Vm, action: ForwardAction): void {
-	const span = workerLog.span("step", { "action": action }); // per-step span; its duration federates via the pod
+/** Advance `base` (a VM we own) by a forward action, then record the new stop or terminate. When the action
+ *  carried a `trace` (the adapter's action span), the step span CONTINUES that trace, so a debug step is one
+ *  cross-context trace (adapter action → worker step) rather than an unrelated root. */
+function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): void {
+	const span = trace !== undefined ? workerLog.continueSpan(trace, "step", { "action": action }) : workerLog.span("step", { "action": action });
 
 	try {
 		try {
@@ -262,13 +271,13 @@ function handle(action: Action): void {
 
 		default:
 			// Forward: fork the current stop and advance a copy (honors the action even after a step-back).
-			advanceFrom(history[index].fork(), action);
+			advanceFrom(history[index].fork(), action, actionTrace);
 			break;
 	}
 }
 
-async function session(initial: Vm): Promise<void> {
-	advanceFrom(initial, "continue"); // run to the first breakpoint (or completion)
+async function session(initial: Vm, launchTrace?: TraceContext): Promise<void> {
+	advanceFrom(initial, "continue", launchTrace); // run to the first breakpoint (or completion)
 
 	while (!done) {
 		const action = await nextAction();
@@ -333,7 +342,7 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 			history = [];
 			index = -1;
 			done = false;
-			void session(loaded.vm);
+			void session(loaded.vm, message.traceContext);
 			break;
 		}
 
@@ -362,6 +371,7 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 		case "reverseContinue":
 		case "disconnect":
 			if (awaitAction !== undefined) {
+				actionTrace = message.traceContext; // continue the adapter action's trace in the step it drives
 				const resolve = awaitAction;
 				awaitAction = undefined;
 				resolve(message.type);
