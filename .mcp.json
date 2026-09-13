@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dev-hub": {
+      "command": "node",
+      "args": ["packages/dev-hub/src/bin.ts"]
+    }
+  }
+}
