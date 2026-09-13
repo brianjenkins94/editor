@@ -1,4 +1,5 @@
 import { defaults } from "@brianjenkins94/util/vite/defaults";
+import { isCI } from "@brianjenkins94/util/env";
 import { mergeConfig } from "vite";
 
 // Inherits the repo's shared build defaults (esnext, [name].js, cleaned outDir) and bundles
@@ -14,6 +15,9 @@ export default mergeConfig(defaults, {
 	"build": {
 		// Minify with vite's own (oxc) minifier — fast and within the default node heap.
 		"minify": true,
+		// Sourcemaps for local debugging only — NEVER in CI (they're ~62MB of @codingame maps + our chunk maps,
+		// debug-only and never fetched at runtime; drop-sourcemaps below strips the copied ones in CI too).
+		"sourcemap": !isCI,
 		"rollupOptions": {
 			"input": { "main": "main.ts" },
 			// Bundle everything; nothing is externalized. Output naming (deterministic content-hashed chunks +
@@ -55,6 +59,25 @@ export default mergeConfig(defaults, {
 				);
 
 				return stubbed === code ? null : { "code": stubbed, "map": null };
+			}
+		},
+		{
+			// Drop the ~62MB of sourcemaps @codingame ships alongside its prebuilt worker/server resources
+			// (htmlServerMain.js.map 23MB, tsserver.web.js.map 15MB, extension/css server maps, …), which vite
+			// emits as assets next to the .js. They're debug-only, never loaded at runtime — strip every emitted
+			// .map from the bundle so they don't bloat dist/ (and, downstream, docs/). CI ONLY: kept locally for
+			// debugging (a local build has sourcemap:true and keeps the copied maps).
+			"name": "drop-sourcemaps",
+			"generateBundle": function(_options, bundle) {
+				if (!isCI) {
+					return;
+				}
+
+				for (const fileName of Object.keys(bundle)) {
+					if (fileName.endsWith(".map")) {
+						delete bundle[fileName];
+					}
+				}
 			}
 		}
 	],

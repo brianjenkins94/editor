@@ -4,7 +4,7 @@ import * as nodeFs from "node:fs";
 import * as path from "node:path";
 import * as url from "node:url";
 import * as esbuild from "esbuild";
-import { isEntry } from "@brianjenkins94/util/env";
+import { isCI, isEntry } from "@brianjenkins94/util/env";
 import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import { build, type Plugin, type RollupOutput } from "vite";
@@ -216,7 +216,8 @@ export async function preBuild(): Promise<void> {
 		"build": {
 			"outDir": "dist",
 			"emptyOutDir": false,
-			"sourcemap": true,
+			// Sourcemap locally only (the ~7MB .map is debug-only, never fetched at runtime) — never in CI.
+			"sourcemap": !isCI,
 			"assetsInlineLimit": 0,
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
