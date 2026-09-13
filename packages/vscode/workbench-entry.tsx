@@ -213,7 +213,10 @@ function maybeBoot(): void {
 			// command. Registered as CJS via a data: URL (the bundled code from entry.config.ts).
 			const ext = registerExtension(helloManifest, ExtensionHostKind.LocalProcess);
 
-			ext.registerFileUrl("./extension.js", "data:text/javascript;base64," + window.btoa(helloExtensionCode));
+			// encodeURIComponent, NOT base64: btoa throws on any non-Latin1 codepoint, which the UNMINIFIED code
+			// carries (comments/strings) in a local build — aborting boot before the pod even registers. The other
+			// extensions below register the same way; match them.
+			ext.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(helloExtensionCode));
 			ext.setAsDefaultApi().catch((error: unknown) => {
 				bootSpan.error("setAsDefaultApi failed", { "error": errText(error) });
 			});
