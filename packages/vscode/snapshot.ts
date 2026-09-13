@@ -154,7 +154,11 @@ export function editorWorkspacePlugin(): Plugin {
 
 const DECL_SUFFIX = [".d.ts", ".d.mts", ".d.cts"];
 const PKG_DECL_CAP = 600 * 1024;                     // per package: larger .d.ts surfaces get shimmed, not baked
-const ALWAYS_REAL = new Set(["@types/node"]);        // Node globals + `node:` builtins — must resolve synchronously
+// Packages force-baked even when the demo doesn't import them. Empty now (unification M2): `@types/node` was the
+// only entry — 2.6 MB of Node globals the browser-only demo never uses. The bake is now just the offline PREWARM
+// of the demo's imported deps (react/react-dom); everything else, including `@types/node` for a file that
+// `/// <reference types="node">`s it, is acquired at runtime by ata.ts and persisted in the zen-fs store.
+const ALWAYS_REAL = new Set<string>();
 const ALWAYS_SHIM = new Set(["vscode", "lucide"]);   // ambient host API / heavy value-less icon union
 const AMBIENT_FILE = `${FOLDER}/editor-ambient.d.ts`; // root project .d.ts (see the note where it's written)
 
@@ -323,9 +327,10 @@ function typeSurface(): SnapshotFile[] {
 	}
 
 	// The in-browser tsserver does NOT scan typeRoots for @types/* (confirmed empirically), so a seeded @types
-	// package's GLOBALS (Node's `process` + `node:` builtins, React's JSX namespace) aren't auto-included. A
-	// ROOT-LEVEL project .d.ts is always part of the program, so it works instead: triple-slash PATH references
-	// force-include each seeded @types index.d.ts, and ambient `declare module` lines resolve shims to `any`.
+	// package's GLOBALS (e.g. React's JSX namespace) aren't auto-included. A ROOT-LEVEL project .d.ts is always
+	// part of the program, so it works instead: triple-slash PATH references force-include each seeded @types
+	// index.d.ts, and ambient `declare module` lines resolve shims to `any`. (ata.ts keeps its own such ambient
+	// file for @types it acquires at runtime.)
 	const refs = [...new Set(typeRefs)].sort().map((ref) => `/// <reference path="${ref}" />`).join("\n");
 	const body = shims.sort().map((pkg) => `declare module "${pkg}";\ndeclare module "${pkg}/*";`).join("\n");
 
