@@ -44,7 +44,7 @@ type TraceContext = { "traceId": string; "parentSpanId": string };
 type Incoming =
 	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control": SharedArrayBuffer; "react"?: boolean; "traceContext"?: TraceContext }
 	| { "type": "setBreakpoints"; "lines": number[] }
-	| { "type": "dispatch"; "id": number; "event": string }
+	| { "type": "dispatch"; "id": number; "event": string; "traceContext"?: TraceContext }
 	| { "type": "timeTravel"; "index": number }
 	| { "type": "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect"; "traceContext"?: TraceContext };
 
@@ -311,10 +311,18 @@ function launchReact(message: Extract<Incoming, { "type": "launch" }>): void {
 	sourceFile = loaded.sourceFile;
 	loaded.vm.addBreakpointsByLine(...message.lines);
 
+	// The initial mount is the launch's work — span it as a continuation of the adapter's launch trace, so the
+	// React app coming up is part of the same trace as `debug.launch` (see debug-adapter startAction).
+	const span = message.traceContext !== undefined
+		? workerLog.continueSpan(message.traceContext, "render", { "react": true })
+		: workerLog.span("render", { "react": true });
+
 	try {
 		loaded.vm.run(); // executes the module → guest render() → mount → mutations posted
 	} catch (error) {
 		post({ "type": "output", "text": "Uncaught " + String(error) });
+	} finally {
+		span.end();
 	}
 
 	post({ "type": "rendered" });
@@ -346,10 +354,22 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 			break;
 		}
 
-		case "dispatch":
-			guestRoot?.dispatch(message.id, message.event);
+		case "dispatch": {
+			// A DOM event routed back from the render pane → re-render. Span it (continuing the dispatch action's
+			// trace when present) so an interaction and the re-render it causes read as one operation.
+			const span = message.traceContext !== undefined
+				? workerLog.continueSpan(message.traceContext, "render", { "event": message.event })
+				: workerLog.span("render", { "event": message.event });
+
+			try {
+				guestRoot?.dispatch(message.id, message.event);
+			} finally {
+				span.end();
+			}
+
 			post({ "type": "history", "length": guestRoot?.historyLength() ?? 0 });
 			break;
+		}
 
 		case "timeTravel":
 			guestRoot?.timeTravel(message.index);

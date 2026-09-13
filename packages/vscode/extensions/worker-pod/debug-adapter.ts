@@ -128,10 +128,12 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 			// Host→adapter custom requests (via activeDebugSession.customRequest): a DOM event routed back from
 			// the render pane, and a time-travel jump. Both drive the worker.
-			case "dispatch":
-				this.worker?.postMessage({ "type": "dispatch", "id": args["id"], "event": args["event"] });
+			case "dispatch": {
+				const trace = this.startAction("dispatch");
+				this.worker?.postMessage({ "type": "dispatch", "id": args["id"], "event": args["event"], "traceContext": trace });
 				this.respond(request);
 				break;
+			}
 
 			case "timeTravel":
 				this.worker?.postMessage({ "type": "timeTravel", "index": args["index"] });
@@ -293,10 +295,12 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				break;
 
 			case "rendered":
+				this.endAction(); // React mount finished — close the launch action span (React launch has no "stopped")
 				this.event("tsvalRendered", {});
 				break;
 
 			case "history":
+				this.endAction(); // a dispatched re-render finished — close the dispatch action span
 				this.event("tsvalHistory", { "length": message.length });
 				break;
 
