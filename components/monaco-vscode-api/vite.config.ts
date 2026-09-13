@@ -35,6 +35,27 @@ export default mergeConfig(defaults, {
 
 				return undefined;
 			}
+		},
+		{
+			// Stub VS Code's accessibility audio cues (~1.5MB of .mp3 across ~30 default extensions). The
+			// @codingame source references each as `new URL("./<cue>.mp3", import.meta.url)`, which vite would
+			// emit + ship. Rewrite each to an empty `data:audio/mpeg` URL BEFORE vite's asset-import-meta-url
+			// transform runs (enforce: pre), so no .mp3 is emitted; the cue player gets a silent source. (Same
+			// trick as the retired esbuild build's importMetaUrlPlugin.)
+			"name": "stub-audio-cues",
+			"enforce": "pre",
+			"transform": function(code) {
+				if (!code.includes(".mp3")) {
+					return null;
+				}
+
+				const stubbed = code.replace(
+					/new URL\(\s*(['"])[^'"]+\.mp3\1\s*,\s*import\.meta\.url\s*\)/gu,
+					"new URL(\"data:audio/mpeg;base64,\")"
+				);
+
+				return stubbed === code ? null : { "code": stubbed, "map": null };
+			}
 		}
 	],
 	"resolve": {
