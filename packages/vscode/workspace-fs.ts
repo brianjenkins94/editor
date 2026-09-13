@@ -21,17 +21,22 @@ import type { IFileSystemProviderWithFileReadWriteCapability, IStat } from "@bri
 import { FileChangeType, FileSystemProviderCapabilities, FileType, registerFileSystemOverlay } from "@brianjenkins94/monaco-vscode-api/main";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { Logger } from "@brianjenkins94/util/logger";
-import { configureSingle, fs, InMemory } from "@zenfs/core";
+import { configureSingle, fs, InMemory, SingleBuffer } from "@zenfs/core";
 
 import { createChangeEvent, notFound } from "./provider-base";
 
 /** Handle returned to callers: an existence probe (so ata.ts can skip files already in the store, its
- *  cross-reload dedup) plus M0 instrumentation counters, also stashed on `globalThis.__workspaceFs`. */
-export interface WorkspaceFs { "reads": number; "writes": number; "has": (path: string) => boolean }
+ *  cross-reload dedup), M0 instrumentation counters, and — when the store is SharedArrayBuffer-backed — the
+ *  `buffer` itself, so other realms (the LSP workers, M3b) can attach to the SAME filesystem. Also on
+ *  `globalThis.__workspaceFs`. */
+export interface WorkspaceFs { "reads": number; "writes": number; "has": (path: string) => boolean; "buffer"?: SharedArrayBuffer }
 
 const PERSIST_DB = "workspace-fs";
 const PERSIST_STORE = "files";
 const FLUSH_MS = 500;
+/** Fixed size of the shared filesystem buffer (SingleBuffer can't grow). 64 MB: headroom for a real project's
+ *  type surface + sources; tunable. Overflow handling (evict / realloc) is a later concern. */
+const BUFFER_BYTES = 64 * 1024 * 1024;
 
 /** Ensure the parent directory of `path` exists in zen-fs (recursive mkdir). */
 function ensureParent(path: string): void {
@@ -85,7 +90,13 @@ function persistLoadAll(db: IDBDatabase): Promise<[string, Uint8Array][]> {
 }
 
 export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): Promise<WorkspaceFs> {
-	await configureSingle({ "backend": InMemory });
+	// A SharedArrayBuffer-backed store (zen-fs SingleBuffer) when cross-origin isolation is available — so the LSP
+	// workers + preview can later attach to the SAME filesystem via this buffer (M3b). Falls back to InMemory
+	// (single-realm) otherwise. COI is required for SharedArrayBuffer and is what the coi service worker provides.
+	const shared = typeof SharedArrayBuffer !== "undefined" && globalThis.crossOriginIsolated === true;
+	const buffer = shared ? new SharedArrayBuffer(BUFFER_BYTES) : undefined;
+
+	await configureSingle(buffer !== undefined ? { "backend": SingleBuffer, "buffer": buffer } : { "backend": InMemory });
 
 	// Seed the baked snapshot (not persisted — a rebuilt demo file stays fresh), then restore persisted writes
 	// (acquired types + edits) on top, so those override the seed for any overlapping path.
@@ -145,7 +156,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		}
 	};
 
-	const handle: WorkspaceFs = { "reads": 0, "writes": 0, "has": (path) => fs.existsSync(path) };
+	const handle: WorkspaceFs = { "reads": 0, "writes": 0, "has": (path) => fs.existsSync(path), "buffer": buffer };
 
 	const provider: IFileSystemProviderWithFileReadWriteCapability = {
 		"capabilities": FileSystemProviderCapabilities.FileReadWrite | FileSystemProviderCapabilities.PathCaseSensitive,
@@ -223,7 +234,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 	registerFileSystemOverlay(2, provider);
 
 	(globalThis as unknown as { "__workspaceFs": WorkspaceFs }).__workspaceFs = handle;
-	log.info("workspace zen-fs mounted", { "seeded": files.length, "restored": restored });
+	log.info("workspace zen-fs mounted", { "backend": buffer !== undefined ? "SingleBuffer" : "InMemory", "mb": Math.round(BUFFER_BYTES / 1048576), "seeded": files.length, "restored": restored });
 
 	return handle;
 }
