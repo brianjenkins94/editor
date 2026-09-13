@@ -2,7 +2,7 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { Transport, WebSocketLike } from "../src/index.ts";
-import { createHub, matches, websocketTransport } from "../src/index.ts";
+import { createHub, createRpcClient, matches, serve, websocketTransport } from "../src/index.ts";
 
 /** A connected pair of in-memory transports — delivery is async (a macrotask) to mirror postMessage, so tests
  *  `await flush()` to let interest control and messages settle across hops. */
@@ -176,6 +176,34 @@ test("websocketTransport federates over a JSON-framed, EventTarget-shaped socket
 	await flush();
 
 	assert.deepEqual(collected, [{ "message": "step", "durationMs": 3 }]);
+});
+
+test("request/reply across a link: relay calls a tool the far hub serves", async () => {
+	const [a, b] = pipe();
+	const relay = createHub({ "id": "relay" });
+	const tab = createHub({ "id": "tab" });
+
+	relay.link(a);
+	tab.link(b);
+
+	// The "tab" hosts a tool; the "relay" (what an MCP server would be) calls it and awaits the answer.
+	serve(tab, "add", (args) => { const { x, y } = args as { "x": number; "y": number }; return x + y; });
+	serve(tab, "boom", () => { throw new Error("nope"); });
+
+	const rpc = createRpcClient(relay);
+
+	await flush(); // reply-channel + serve interest propagate across the link before the first call
+
+	assert.equal(await rpc.request("add", { "x": 2, "y": 3 }), 5);
+
+	await assert.rejects(rpc.request("boom"), /nope/); // served errors surface as a rejection
+});
+
+test("request times out when nothing serves the tool", async () => {
+	const relay = createHub({ "id": "solo-relay" });
+	const rpc = createRpcClient(relay);
+
+	await assert.rejects(rpc.request("missing", undefined, { "timeoutMs": 30 }), /timed out/);
 });
 
 test("unlink stops federation and withdraws interest", async () => {
