@@ -114,6 +114,51 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 	const fetchMeta = (rel: string): Promise<UnpkgMeta | undefined> => memoFetch(rel, "?meta", (res) => res.json() as Promise<UnpkgMeta>);
 	const fetchFile = (rel: string): Promise<Uint8Array | undefined> => memoFetch(rel, "", async (res) => new Uint8Array(await res.arrayBuffer()));
 
+	// SYNCHRONOUS result caches. stat/readFile/readdir must answer the TS type-checker WITHOUT awaiting the
+	// network: that checker reads through the @vscode/sync-api SAB bridge, which blocks a worker thread on the
+	// reply, so an `await fetch(...)` here DEADLOCKS first-load analysis — workspace-fs throws notFound for a
+	// not-yet-acquired type, the checker falls through to this overlay, and hangs forever ("Analyzing…"). Instead
+	// serve resolved results synchronously and, on a miss, FAIL FAST (notFound) while fetching in the background;
+	// the fetch caches the result and fires a change event (announce), so the checker re-reads and resolves. The
+	// overlay was always "eventually-consistent" — this just stops it blocking the synchronous reader. (Async
+	// go-to-definition uses the same methods; a first read may notFound and resolve on the follow-up change.)
+	const metaResults = new Map<string, UnpkgMeta | undefined>();
+	const fileResults = new Map<string, Uint8Array | undefined>();
+	const metaInflight = new Set<string>();
+	const fileInflight = new Set<string>();
+
+	const ensureMeta = (rel: string, resource: Parameters<IFileSystemProviderWithFileReadWriteCapability["stat"]>[0]): void => {
+		if (metaInflight.has(rel)) {
+			return;
+		}
+
+		metaInflight.add(rel);
+		void fetchMeta(rel).then((meta) => {
+			metaResults.set(rel, meta);
+			metaInflight.delete(rel);
+
+			if (meta !== undefined) {
+				announce(resource, { "resource": resource, "type": FileChangeType.ADDED });
+			}
+		});
+	};
+
+	const ensureFile = (rel: string, resource: Parameters<IFileSystemProviderWithFileReadWriteCapability["readFile"]>[0]): void => {
+		if (fileInflight.has(rel)) {
+			return;
+		}
+
+		fileInflight.add(rel);
+		void fetchFile(rel).then((data) => {
+			fileResults.set(rel, data);
+			fileInflight.delete(rel);
+
+			if (data !== undefined) {
+				announce(resource, { "resource": resource, "type": FileChangeType.UPDATED });
+			}
+		});
+	};
+
 	return {
 		"capabilities":
 			FileSystemProviderCapabilities.FileReadWrite
@@ -127,6 +172,9 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			// nothing is watched — nothing to dispose
 		} }),
 
+		// All three reads are SYNCHRONOUS-SAFE: they answer from the resolved cache or fail fast (never awaiting a
+		// fetch), so the sync-api checker can't deadlock on them. A miss kicks off the background fetch, which
+		// caches + announces; the checker re-reads on that change and resolves.
 		"stat": async function(resource): Promise<IStat> {
 			const rel = toRel(resource.path);
 
@@ -138,13 +186,17 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				return { "type": FileType.Directory, "ctime": 0, "mtime": 0, "size": 0 };
 			}
 
-			const meta = await fetchMeta(rel);
+			if (!metaResults.has(rel)) {
+				ensureMeta(rel, resource);
+
+				throw notFound(); // not fetched yet — fail fast; the background fetch will announce and we re-stat
+			}
+
+			const meta = metaResults.get(rel);
 
 			if (meta === undefined) {
 				throw notFound();
 			}
-
-			announce(resource, { "resource": resource, "type": FileChangeType.ADDED });
 
 			return {
 				"type": meta.type === "directory" ? FileType.Directory : FileType.File,
@@ -161,13 +213,17 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				throw notFound();
 			}
 
-			const data = await fetchFile(rel);
+			if (!fileResults.has(rel)) {
+				ensureFile(rel, resource);
+
+				throw notFound(); // not fetched yet — fail fast; the background fetch will announce and we re-read
+			}
+
+			const data = fileResults.get(rel);
 
 			if (data === undefined) {
 				throw notFound();
 			}
-
-			announce(resource, { "resource": resource, "type": FileChangeType.UPDATED });
 
 			return data;
 		},
@@ -183,7 +239,13 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				return [];
 			}
 
-			const meta = await fetchMeta(rel);
+			if (!metaResults.has(rel)) {
+				ensureMeta(rel, resource);
+
+				throw notFound();
+			}
+
+			const meta = metaResults.get(rel);
 
 			if (meta?.type !== "directory") {
 				throw notFound();
