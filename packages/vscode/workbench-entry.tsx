@@ -260,6 +260,7 @@ function maybeBoot(): void {
 				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
+
 				// Uplink the extension pod to the page: a workbench hub bridges the pod (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the
 				// window. pod/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.
