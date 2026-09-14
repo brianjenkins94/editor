@@ -28,6 +28,7 @@
     "vscode-languageserver-textdocument": "^1.0.12"
   },
   "devDependencies": {
+    "@oxc-parser/binding-wasm32-wasi": "0.149.0",
     "@types/node": "latest",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",

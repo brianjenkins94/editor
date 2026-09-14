@@ -21,10 +21,12 @@ import { render } from "preact";
 import helloExtensionCode from "hello:extension";
 import workerPodExtensionCode from "worker-pod:extension";
 import eslintExtensionCode from "eslint:extension";
+import capabilitiesExtensionCode from "capabilities:extension";
 import type { PodBridge } from "./extensions/worker-pod/extension";
 import helloManifest from "./extensions/hello/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
 import eslintManifest from "./extensions/eslint/package.json";
+import capabilitiesManifest from "./extensions/capabilities/package.json";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
 import { installTypeAcquisition } from "./ata";
@@ -286,7 +288,23 @@ function maybeBoot(): void {
 
 			eslintExt.registerFileUrl("./node_modules/eslint-ts-plugin/index.js", eslintPluginUrl);
 
-			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod", "eslint"] });
+			// The capabilities extension — a TS server plugin (like eslint) that reuses tsserver's own `ts` + real
+			// Program/checker to run the capability kernel and publish NATIVE ts.Diagnostics (source "capabilities").
+			// Registered in the web-worker host so tsserver picks up its plugin; same served-plugin/self-locating-engine
+			// wiring as eslint. Its extension.ts is a no-op — the diagnostics render themselves.
+			const capabilitiesExt = registerExtension(capabilitiesManifest, ExtensionHostKind.LocalWebWorker);
+
+			capabilitiesExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(capabilitiesExtensionCode));
+
+			const capabilitiesPluginPkg = JSON.stringify({ "name": "capabilities-ts-plugin", "version": "0.0.1", "browser": "index.js" });
+
+			capabilitiesExt.registerFileUrl("./node_modules/capabilities-ts-plugin/package.json", "data:application/json," + encodeURIComponent(capabilitiesPluginPkg));
+
+			const capabilitiesPluginUrl = new URL("./lsp/capabilities-ts-plugin.js", location.href).href;
+
+			capabilitiesExt.registerFileUrl("./node_modules/capabilities-ts-plugin/index.js", capabilitiesPluginUrl);
+
+			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod", "eslint", "capabilities"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			bus.post({ "type": "online" });

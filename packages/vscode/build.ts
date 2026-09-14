@@ -7,6 +7,7 @@ import * as esbuild from "esbuild";
 import { isCI, isEntry } from "@brianjenkins94/util/env";
 import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
+import stdlib from "node-stdlib-browser";
 import { build, type Plugin, type RollupOutput } from "vite";
 import { editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./snapshot";
 import { nodeModulesCdnPlugin, vscodePlugin } from "./vite";
@@ -133,6 +134,17 @@ function eslintTsPlugin(): Plugin {
 	};
 }
 
+/** Same, for the capabilities tsserver plugin — emitted next to capabilities-engine.js so its import.meta.url
+ *  self-locates the sibling engine. */
+function capabilitiesTsPlugin(): Plugin {
+	return {
+		"name": "capabilities-ts-plugin-asset",
+		"generateBundle": function() {
+			this.emitFile({ "type": "asset", "fileName": "lsp/capabilities-ts-plugin.js", "source": nodeFs.readFileSync(resolvePath("./extensions/capabilities/ts-plugin.js")) });
+		}
+	};
+}
+
 // esquery's CJS build, resolved through eslint so it's found under npm's flat tree AND CI's pnpm workspace.
 const esqueryCjs = createRequire(createRequire(import.meta.url).resolve("eslint")).resolve("esquery");
 
@@ -167,7 +179,7 @@ export function hostPlugins(): Plugin[] {
 export async function preBuild(): Promise<void> {
 	// 1. Workbench iframe entry (workbench-entry.tsx → dist/workbench.js). monaco kept external → ./main.js.
 	await buildPackage(root, {
-		"plugins": [bundledExtension("hello"), bundledExtension("worker-pod"), bundledExtension("eslint")],
+		"plugins": [bundledExtension("hello"), bundledExtension("worker-pod"), bundledExtension("eslint"), bundledExtension("capabilities")],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
 		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"] },
@@ -224,6 +236,53 @@ export async function preBuild(): Promise<void> {
 				"preserveEntrySignatures": "strict",
 				"input": { "lsp/eslint-engine": resolvePath("./extensions/eslint/engine.ts") },
 				"output": { "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
+			}
+		}
+	});
+
+	// 3b. capabilities engine (dist/lsp/capabilities-engine.js) — the STATIC capability analysis (util/silo's
+	// reach + policy), run INSIDE the capabilities tsserver plugin (which anchors spans + enriches types). Pure
+	// oxc + AST logic — no typescript, tsval, or bablr (the root `src/` kernel is superseded) — so the only alias
+	// is oxc's wasm binding; oxc's wasm + its ES-module WASI worker emit alongside under lsp/ (worker output
+	// co-located there, else the relative refs split dirs and 404).
+	//
+	// oxc's WASI runtime (@napi-rs/wasm-runtime) drives the wasm parser through node builtins (`node:path`,
+	// `node:fs`, …), so those must be polyfilled for the browser. We pass ONLY the builtins that have a real browser
+	// polyfill (a node-stdlib-browser entry) — never the stub-only ones. That deliberately excludes `node:wasi` (no
+	// polyfill): polyfillNode would otherwise stub it to an empty module (→ "__nodeWASI is not a constructor"),
+	// clobbering oxc's own browser WASI. An empty stub set also avoids polyfillNode's stub-loader syntax errors.
+	const oxcPolyfills = polyfillNode(builtinModules.filter((builtin) => stdlib[builtin] !== undefined));
+
+	// silo's reach chain also reads the `process.env` global at module eval. polyfillNode injects a `process`, but we
+	// prepend a browser-flavored one (no `versions.node`) so napi-rs's runtime detection still picks its browser path.
+	const PROCESS_SHIM = "globalThis.process=globalThis.process||{\"env\":{},\"argv\":[],\"platform\":\"browser\",\"cwd\":function(){return \"/\";}};";
+
+	await buildPackage(root, {
+		"base": "./",
+		"resolve": {
+			"alias": [
+				// oxc's browser entry bare-imports its wasm binding, which pnpm only links into THIS package (a direct
+				// devDep) — not into oxc-parser's own store dir, where the bundler resolves the import from. Point it at
+				// the resolved entry so rolldown can bundle it (+ emit the .wasm / WASI worker) under lsp/. Crucially,
+				// resolve to the package's BROWSER entry (parser.wasi-browser.js) — createRequire.resolve picks node's
+				// `main` (parser.wasi.cjs), which imports `node:wasi`/`node:worker_threads` and drives @napi-rs down its
+				// node WASI path (→ "__nodeWASI is not a constructor" in the browser). The browser entry uses @napi-rs's
+				// own browser WASI runtime + the emitted wasi-worker-browser instead.
+				{ "find": /^@oxc-parser\/binding-wasm32-wasi$/u, "replacement": createRequire(import.meta.url).resolve("@oxc-parser/binding-wasm32-wasi").replace(/parser\.wasi\.cjs$/u, "parser.wasi-browser.js") }
+			]
+		},
+		"worker": { "format": "es", "rollupOptions": { "output": { "banner": PROCESS_SHIM, "entryFileNames": "lsp/[name]-[hash].js", "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" } } },
+		"plugins": [oxcPolyfills, capabilitiesTsPlugin()],
+		"build": {
+			"outDir": "dist",
+			"emptyOutDir": false,
+			"minify": false,
+			"sourcemap": !isCI,
+			"assetsInlineLimit": 0,
+			"rollupOptions": {
+				"preserveEntrySignatures": "strict",
+				"input": { "lsp/capabilities-engine": resolvePath("./extensions/capabilities/engine.ts") },
+				"output": { "banner": PROCESS_SHIM, "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
 			}
 		}
 	});

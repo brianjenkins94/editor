@@ -1,0 +1,26 @@
+{
+  "name": "capabilities",
+  "displayName": "Capabilities (tsserver plugin)",
+  "description": "Surfaces a program's capability use (net/fs/exec/env/eval) — static detect/reach plus a tsval canary — as native diagnostics, via a TypeScript Server Plugin that reuses tsserver's own typescript (real Program + checker, no bundled copy).",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact"
+  ],
+  "contributes": {
+    "typescriptServerPlugins": [
+      {
+        "name": "capabilities-ts-plugin",
+        "enableForWorkspaceTypeScriptVersions": true
+      }
+    ]
+  }
+}
