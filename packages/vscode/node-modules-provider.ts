@@ -169,64 +169,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		});
 	};
 
-	// The set of paths (files AND dirs) a package ACTUALLY ships, from its ?meta listing. The CDN answers a request
-	// for a path the package does NOT ship (e.g. react/index.ts, react/index.d.ts) with a redirect to its real
-	// entry, so a blind fetch serves the wrong bytes and tsserver resolves the import to it ("is not a module"),
-	// shadowing the @types surface. Gate every access on the listing so a probe for a non-shipped path stays a
-	// FAILED lookup (→ @types). Same principle ATA uses — crawl the listing, never blindly probe.
-	const pkgPaths = new Map<string, Set<string>>();
-	const pkgPathsInflight = new Set<string>();
-
-	const collectPaths = (node: UnpkgMeta, into: Set<string>): void => {
-		for (const child of node.files ?? []) {
-			into.add(child.path.replace(/^\/+/u, ""));
-
-			if (child.type === "directory") {
-				collectPaths(child as UnpkgMeta, into);
-			}
-		}
-	};
-
-	/** true = the package ships this sub-path, false = it doesn't (real miss), undefined = listing not fetched yet
-	 *  (a background fetch is kicked off; announce re-triggers resolution once it lands). */
-	const ships = (rel: string, resource: Parameters<IFileSystemProviderWithFileReadWriteCapability["stat"]>[0]): boolean | undefined => {
-		const { pkg, sub } = splitPackage(rel);
-
-		if (sub === "") {
-			return true; // the package root dir itself
-		}
-
-		const set = pkgPaths.get(pkg);
-
-		if (set !== undefined) {
-			return set.has(sub);
-		}
-
-		if (!pkgPathsInflight.has(pkg) && served(rel)) {
-			pkgPathsInflight.add(pkg);
-			void fetchMeta(pkg).then((meta) => {
-				const paths = new Set<string>();
-
-				if (meta !== undefined) {
-					collectPaths(meta, paths);
-				}
-
-				pkgPaths.set(pkg, paths);
-				pkgPathsInflight.delete(pkg);
-				fsTrace("nm.listing", pkg, { "count": paths.size, "hasSub": paths.has(sub) });
-
-				// Re-trigger resolution ONLY when the probed path is genuinely shipped — that's a runtime lib whose
-				// file just became servable. For a NOT-shipped probe (a spurious `<pkg>/index.d.ts` the CDN would
-				// redirect), announcing "created" would make tsserver try to read a file that then answers notFound,
-				// leaving it stuck mid-analysis; stay silent — its failed-lookup already fell through to @types.
-				if (paths.has(sub)) {
-					announce(resource, { "resource": resource, "type": FileChangeType.ADDED });
-				}
-			});
-		}
-
-		return undefined;
-	};
 
 	return {
 		"capabilities":
@@ -260,38 +202,29 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				throw notFound();
 			}
 
-			const shipped = ships(rel, resource);
-
-			if (shipped !== true) {
-				fsTrace("nm.stat", rel, { "r": shipped === undefined ? "listing-pending" : "not-shipped" });
-
-				throw notFound(); // package doesn't ship this path (or listing not known yet) — stay a failed lookup
-			}
-
-			if (!metaResults.has(rel)) {
-				ensureMeta(rel, resource);
+			// Existence via the ACTUAL FILE (404-aware), NOT `?meta`. unpkg's `?meta` lies: it returns
+			// `200 {files:[]}` for ANY path — existent or not — so a `?meta`-based stat reported every probe as a
+			// real 0-byte file, and readFile then 404'd, so tsserver resolved the import to a dead file ("is not a
+			// module") and shadowed @types. The actual file 404s correctly, so mirror readFile here.
+			if (!fileResults.has(rel)) {
+				ensureFile(rel, resource);
 
 				fsTrace("nm.stat", rel, { "r": "failfast-miss" });
 
-				throw notFound(); // not fetched yet — fail fast; the background fetch will announce and we re-stat
+				throw notFound(); // not fetched yet — fail fast; the background fetch caches + announces, then we re-stat
 			}
 
-			const meta = metaResults.get(rel);
+			const statData = fileResults.get(rel);
 
-			if (meta === undefined) {
-				fsTrace("nm.stat", rel, { "r": "cached-miss" });
+			if (statData === undefined) {
+				fsTrace("nm.stat", rel, { "r": "cdn-404" });
 
-				throw notFound();
+				throw notFound(); // 404 at the CDN — the file genuinely doesn't exist
 			}
 
-			fsTrace("nm.stat", rel, { "r": "found", "type": meta.type });
+			fsTrace("nm.stat", rel, { "r": "found" });
 
-			return {
-				"type": meta.type === "directory" ? FileType.Directory : FileType.File,
-				"ctime": 0,
-				"mtime": 0,
-				"size": meta.size ?? 0
-			};
+			return { "type": FileType.File, "ctime": 0, "mtime": 0, "size": statData.length };
 		},
 
 		"readFile": async function(resource): Promise<Uint8Array> {
@@ -305,14 +238,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				fsTrace("nm.readFile", rel, { "r": "tsprobe-notfound" });
 
 				throw notFound();
-			}
-
-			const shipped = ships(rel, resource);
-
-			if (shipped !== true) {
-				fsTrace("nm.readFile", rel, { "r": shipped === undefined ? "listing-pending" : "not-shipped" });
-
-				throw notFound(); // package doesn't ship this path (or listing not known yet) — stay a failed lookup
 			}
 
 			if (!fileResults.has(rel)) {
