@@ -6,21 +6,6 @@
 import type { IFileChange } from "@brianjenkins94/monaco-vscode-api/main";
 import { FileSystemProviderError, FileSystemProviderErrorCode } from "@brianjenkins94/monaco-vscode-api/main";
 
-// TEMP DEBUG — filesystem-op trace for the first-load resolution race. Every stat/readFile the TS checker
-// drives, and every change event fired, is pushed to globalThis.__fsTrace so it can be read deterministically
-// (iframe.contentWindow.__fsTrace) instead of racing the console. Capped. Remove once the race is understood.
-export function fsTrace(op: string, path: string, extra?: Record<string, unknown>): void {
-	try {
-		const g = globalThis as unknown as { "__fsTrace"?: Record<string, unknown>[] };
-
-		g.__fsTrace ??= [];
-
-		if (g.__fsTrace.length < 8000) {
-			g.__fsTrace.push({ "t": Math.round(performance.now()), "op": op, "path": path, ...extra });
-		}
-	} catch { /* ignore */ }
-}
-
 export function notFound(): FileSystemProviderError {
 	return FileSystemProviderError.create("not found", FileSystemProviderErrorCode.FileNotFound);
 }

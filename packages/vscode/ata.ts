@@ -353,7 +353,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			const wrote = await acquireFile(pkg, entry, files, budget);
 
 			// A resolved @types package needs a root force-reference (typeRoots aren't scanned) — record it.
-			if (wrote && pkg.startsWith("@types/") && entry === "index.d.ts") {
+			if (wrote && !present && pkg.startsWith("@types/") && entry === "index.d.ts") {
 				acquiredTypes.add(pkg);
 			}
 		} else if (!pkg.startsWith("@types/")) {

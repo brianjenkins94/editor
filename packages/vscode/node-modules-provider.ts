@@ -21,7 +21,7 @@ import {
 	FileSystemProviderCapabilities,
 	FileType
 } from "@brianjenkins94/monaco-vscode-api/main";
-import { createChangeEvent, fsTrace, notFound, readOnly, relUnder } from "./provider-base";
+import { createChangeEvent, notFound, readOnly, relUnder } from "./provider-base";
 
 interface UnpkgMeta {
 	"type": "file" | "directory";
@@ -63,7 +63,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		}
 
 		announced.add(key);
-		fsTrace("nm.announce", key, { "changeType": change.type });
 
 		for (const listener of [...listeners]) {
 			listener([change]);
@@ -198,7 +197,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			}
 
 			if (isTsSourceProbe(rel)) {
-				fsTrace("nm.stat", rel, { "r": "tsprobe-notfound" });
 				throw notFound();
 			}
 
@@ -209,20 +207,14 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			if (!fileResults.has(rel)) {
 				ensureFile(rel, resource);
 
-				fsTrace("nm.stat", rel, { "r": "failfast-miss" });
-
 				throw notFound(); // not fetched yet — fail fast; the background fetch caches + announces, then we re-stat
 			}
 
 			const statData = fileResults.get(rel);
 
 			if (statData === undefined) {
-				fsTrace("nm.stat", rel, { "r": "cdn-404" });
-
 				throw notFound(); // 404 at the CDN — the file genuinely doesn't exist
 			}
-
-			fsTrace("nm.stat", rel, { "r": "found" });
 
 			return { "type": FileType.File, "ctime": 0, "mtime": 0, "size": statData.length };
 		},
@@ -235,20 +227,14 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			}
 
 			if (isTsSourceProbe(rel)) {
-				fsTrace("nm.readFile", rel, { "r": "tsprobe-notfound" });
-
 				throw notFound();
 			}
 
 			if (!fileResults.has(rel)) {
 				ensureFile(rel, resource);
 
-				fsTrace("nm.readFile", rel, { "r": "failfast-miss" });
-
 				throw notFound(); // not fetched yet — fail fast; the background fetch will announce and we re-read
 			}
-
-			fsTrace("nm.readFile", rel, { "r": fileResults.get(rel) === undefined ? "cached-miss" : "found" });
 
 			const data = fileResults.get(rel);
 
