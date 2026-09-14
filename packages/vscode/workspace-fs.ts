@@ -160,9 +160,13 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 	};
 
 	const { listeners, onDidChangeFile } = createChangeEvent();
-	const fire = (path: string, type: FileChangeType): void => {
+	// Fire the REAL URI the provider was handed — not a `{ path }` stand-in. The Explorer's file-change reaction
+	// (a delayed RunOnceScheduler) calls `dirname(resource)` → `resource.with(...)` on each changed resource, so a
+	// plain object without `.with` (or a scheme) throws `TypeError: e.with is not a function` mid-boot (ATA's
+	// acquired-type writes fire ADDED, the scheduler reacts, and it crashes on the fake resource).
+	const fire = (resource: Parameters<IFileSystemProviderWithFileReadWriteCapability["writeFile"]>[0], type: FileChangeType): void => {
 		for (const listener of listeners) {
-			listener([{ "resource": { "path": path } as never, "type": type }]);
+			listener([{ "resource": resource, "type": type }]);
 		}
 	};
 
@@ -214,7 +218,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 			fs.writeFileSync(resource.path, content);
 			handle.writes += 1;
 			persist(resource.path, content);
-			fire(resource.path, existed ? FileChangeType.UPDATED : FileChangeType.ADDED);
+			fire(resource, existed ? FileChangeType.UPDATED : FileChangeType.ADDED);
 		},
 
 		"mkdir": async (resource): Promise<void> => {
@@ -224,7 +228,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		"delete": async (resource, options): Promise<void> => {
 			fs.rmSync(resource.path, { "recursive": options.recursive, "force": true });
 			persist(resource.path, null);
-			fire(resource.path, FileChangeType.DELETED);
+			fire(resource, FileChangeType.DELETED);
 		},
 
 		"rename": async (from, to): Promise<void> => {
@@ -234,8 +238,8 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 			fs.renameSync(from.path, to.path);
 			persist(from.path, null);
 			persist(to.path, typeof data === "string" ? new TextEncoder().encode(data) : data);
-			fire(from.path, FileChangeType.DELETED);
-			fire(to.path, FileChangeType.ADDED);
+			fire(from, FileChangeType.DELETED);
+			fire(to, FileChangeType.ADDED);
 		}
 	};
 
