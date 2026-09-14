@@ -7,6 +7,12 @@
 import { EventEmitter, EventListener } from './events';
 import { Duplex, Buffer } from './stream';
 
+// Keep the host's process alive while a server is listening (Node treats a listening server as a ref'd handle).
+// This hook is installed ONLY in the terminal's node worker (node-keepalive.ts) so it knows a `node server.js`
+// hasn't finished; everywhere else it's absent and these calls are no-ops.
+interface KeepAliveHook { retain(handle: object): void; release(handle: object): void; }
+const keepAlive = (): KeepAliveHook | undefined => (globalThis as unknown as { __nodeKeepAlive?: KeepAliveHook }).__nodeKeepAlive;
+
 export interface AddressInfo {
   address: string;
   family: string;
@@ -250,6 +256,7 @@ export class Server extends EventEmitter {
 
     this._listening = true;
     this.listening = true;
+    keepAlive()?.retain(this); // a listening server keeps the process alive
 
     queueMicrotask(() => {
       this.emit('listening');
@@ -266,6 +273,7 @@ export class Server extends EventEmitter {
   close(callback?: (err?: Error) => void): this {
     this._listening = false;
     this.listening = false;
+    keepAlive()?.release(this); // no longer listening — stop holding the process open
 
     // Close all connections
     for (const socket of this._connections) {
@@ -286,10 +294,12 @@ export class Server extends EventEmitter {
   }
 
   ref(): this {
+    keepAlive()?.retain(this); // opt back into keeping the process alive
     return this;
   }
 
   unref(): this {
+    keepAlive()?.release(this); // let the process exit even while this server is open
     return this;
   }
 

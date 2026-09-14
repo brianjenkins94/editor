@@ -18,9 +18,10 @@
  */
 import type { TerminalProcess } from "@brianjenkins94/monaco-vscode-api/main";
 
-import type { RunNode } from "./node-runner";
+import type { NodeOutput, NodeRunner } from "./node-runner";
 import { createWorkspaceTerminalFs } from "./terminal-fs";
 import { createNodeCommand } from "./terminal-node";
+import { createNpmCommand } from "./terminal-npm";
 
 type VscodeApi = typeof import("vscode");
 
@@ -36,10 +37,10 @@ const PROBE = `\n__jbrc=$?\nprintf '${RS}%s${RS}%s${RS}' "$PWD" "$__jbrc"`;
 const PROBE_RE = new RegExp(`${RS}([^${RS}]*)${RS}([^${RS}]*)${RS}$`, "u");
 
 /** Build the just-bash terminal process for one terminal. `fire` writes to the terminal; `cwd0` is the start dir. */
-export function createBashProcess(api: VscodeApi, runNode: RunNode, fire: (data: string) => void, cwd0: string): TerminalProcess {
+export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (data: string) => void, cwd0: string): TerminalProcess {
 	let sessionPromise: Promise<BashSession> | undefined;
 	const getSession = (): Promise<BashSession> => {
-		sessionPromise ??= import("just-bash/browser").then((module) => new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": [createNodeCommand(runNode)] }) as unknown as BashSession);
+		sessionPromise ??= import("just-bash/browser").then((module) => new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": [createNodeCommand(runner, writeLive), createNpmCommand(getSession)] }) as unknown as BashSession);
 
 		return sessionPromise;
 	};
@@ -49,17 +50,29 @@ export function createBashProcess(api: VscodeApi, runNode: RunNode, fire: (data:
 	let line = "";
 	let running = false;
 	let inEscape = false;
+	let controller: AbortController | undefined; // the running command's Ctrl-C handle
+	let stdinBuffer = ""; // the line being typed into a running process's stdin (flushed on Enter)
 
 	// terminals want CRLF; the shell emits LF.
 	const write = (text: string): void => fire(text.replace(/\r?\n/gu, "\r\n"));
+	// Live output from a streaming process (node): written to the terminal as it arrives, stderr in red.
+	const writeLive: NodeOutput = (stream, data) => {
+		const text = data.replace(/\r?\n/gu, "\r\n");
+
+		fire(stream === "err" ? `[31m${text}[0m` : text);
+	};
 	const prompt = (): void => fire(`\r\n[1;36m${cwd}[0m $ `);
 
 	const runLine = async (input: string): Promise<void> => {
 		running = true;
+		controller = new AbortController();
+		const { signal } = controller;
 
 		try {
 			const session = await getSession();
-			const result = await session.exec(input + PROBE, { "cwd": cwd, "env": env });
+			// `signal` is the shell's Ctrl-C: just-bash stops at the next statement boundary and forwards it to a
+			// custom command's `ctx.signal` (so `node` kills its worker). An interrupted run may not reach the PROBE.
+			const result = await session.exec(input + PROBE, { "cwd": cwd, "env": env, "signal": signal });
 
 			let stdout = result.stdout;
 			const match = PROBE_RE.exec(stdout);
@@ -72,7 +85,8 @@ export function createBashProcess(api: VscodeApi, runNode: RunNode, fire: (data:
 			env = result.env;
 
 			// stdout then stderr, each with its trailing newline trimmed (the prompt supplies one), joined so the
-			// two streams land on separate lines rather than run together.
+			// two streams land on separate lines rather than run together. (A streamed `node` wrote its output
+			// live and returns empty here.)
 			const blocks: string[] = [];
 
 			if (stdout !== "") {
@@ -83,21 +97,70 @@ export function createBashProcess(api: VscodeApi, runNode: RunNode, fire: (data:
 				blocks.push(`[31m${result.stderr.replace(/\n$/u, "")}[0m`);
 			}
 
-			if (blocks.length > 0) {
+			if (blocks.length > 0 && !signal.aborted) { // on Ctrl-C the output already streamed; skip abort noise
 				write(blocks.join("\n"));
 			}
 		} catch (error) {
-			write(`[31m${error instanceof Error ? error.message : String(error)}[0m`);
+			if (!signal.aborted) { // an abort is the user's Ctrl-C, not a failure to report
+				write(`[31m${error instanceof Error ? error.message : String(error)}[0m`);
+			}
 		} finally {
 			running = false;
+			controller = undefined;
+			stdinBuffer = "";
 			line = "";
 			prompt();
 		}
 	};
 
+	// While a process runs, keystrokes drive it, not the line editor: a foreground `node` process gets them as
+	// stdin, and Ctrl-C interrupts whatever is running. Like a terminal in cooked mode we buffer a line locally
+	// (with echo and backspace) and deliver it whole on Enter, so a `stdin.on('data')` reader sees a line at a
+	// time rather than a byte per keystroke.
+	const feedRunning = (data: string): void => {
+		for (const character of data) {
+			const code = character.charCodeAt(0);
+
+			if (code === 0x03) { // Ctrl-C — interrupt the running command (kills a node worker)
+				fire("^C\r\n");
+				stdinBuffer = "";
+				controller?.abort();
+
+				return;
+			}
+
+			if (!runner.isRunning()) {
+				continue; // a non-node command is running; only Ctrl-C reaches it
+			}
+
+			if (code === 0x0d || code === 0x0a) { // Enter → flush the buffered line into stdin
+				fire("\r\n");
+				runner.sendStdin(`${stdinBuffer}\n`);
+				stdinBuffer = "";
+			} else if (code === 0x7f || code === 0x08) { // Backspace — edit the buffer
+				if (stdinBuffer !== "") {
+					stdinBuffer = stdinBuffer.slice(0, -1);
+					fire("\b \b");
+				}
+			} else if (code === 0x04) { // Ctrl-D: submit a partial line if any, else signal end-of-input (like a tty)
+				if (stdinBuffer === "") {
+					runner.endStdin();
+				} else {
+					runner.sendStdin(stdinBuffer);
+					stdinBuffer = "";
+				}
+			} else if (code >= 0x20 || code === 0x09) { // printable / tab — echo and buffer
+				fire(character);
+				stdinBuffer += character;
+			}
+		}
+	};
+
 	const input = (data: string): void => {
 		if (running) {
-			return; // v1: ignore input while a command runs
+			feedRunning(data);
+
+			return;
 		}
 
 		for (const character of data) {

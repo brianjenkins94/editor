@@ -247,9 +247,9 @@ function maybeBoot(): void {
 				// backend's process factory (so every terminal is this one; no fake). `node` runs in a dedicated
 				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal.ts. One node runner
 				// (worker) is shared by every terminal.
-				const runNode = createNodeRunner(workbenchHub, workspaceFs?.buffer);
+				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer);
 
-				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), runNode, fire, cwd));
+				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
 				// Uplink the extension pod to the page: a workbench hub bridges the pod (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the
 				// window. pod/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.

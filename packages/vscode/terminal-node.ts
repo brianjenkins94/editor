@@ -7,7 +7,7 @@
 import { defineCommand } from "just-bash/browser";
 import type { CustomCommand } from "just-bash/browser";
 
-import type { RunNode } from "./node-runner";
+import type { NodeOutput, NodeRunner } from "./node-runner";
 
 /** POSIX resolve of `path` against `base` (collapsing `.`/`..`). */
 function resolvePosix(base: string, path: string): string {
@@ -29,8 +29,14 @@ function resolvePosix(base: string, path: string): string {
 	return `/${stack.join("/")}`;
 }
 
-/** The `node <file>` command: resolve the script against cwd and run it in the node worker. */
-export function createNodeCommand(runNode: RunNode): CustomCommand {
+/**
+ * The `node <file>` command: resolve the script against cwd and run it in the node worker, STREAMING its output
+ * straight to the terminal (`writeLive`) as it's produced rather than buffering it into the returned stdout —
+ * so a long-running or interactive process shows output live. It therefore returns empty stdout (already
+ * written); a consequence is that a streamed `node …` doesn't feed a shell pipe/redirect. `ctx.signal` is the
+ * shell's Ctrl-C, forwarded to the runner so the worker is killed.
+ */
+export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput): CustomCommand {
 	return defineCommand("node", async (args, ctx) => {
 		const target = args.find((argument) => !argument.startsWith("-"));
 
@@ -41,9 +47,11 @@ export function createNodeCommand(runNode: RunNode): CustomCommand {
 		const env = ctx.exportedEnv ?? Object.fromEntries(ctx.env);
 
 		try {
-			return await runNode(resolvePosix(ctx.cwd, target), ctx.cwd, env);
+			const { exitCode } = await runner.run(resolvePosix(ctx.cwd, target), ctx.cwd, env, { "onOutput": writeLive, "signal": ctx.signal });
+
+			return { "stdout": "", "stderr": "", "exitCode": exitCode };
 		} catch (error) {
-			// The worker unreachable or the run timed out — surface it rather than hanging the shell.
+			// The worker unreachable — surface it rather than hanging the shell.
 			return { "stdout": "", "stderr": `node: ${error instanceof Error ? error.message : String(error)}\n`, "exitCode": 1 };
 		}
 	});

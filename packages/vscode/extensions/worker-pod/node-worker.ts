@@ -1,25 +1,47 @@
 /**
  * The terminal's node runner — a dedicated, pod-style worker that runs `node <file>` through almostnode's
- * Runtime, OFF the workbench main thread and inside its OWN globalThis.
+ * Runtime, OFF the workbench main thread and inside its OWN globalThis. STREAMING + INTERACTIVE: output is
+ * published live as it is produced, stdin is delivered to the running process, and the run stays alive past the
+ * synchronous body until the event loop quiesces (or the main thread kills the worker).
  *
- * Two problems this solves over running node in the main thread (the v1): a heavy/long script no longer freezes
- * the UI (it blocks THIS worker), and almostnode's `globalThis.process` shim can't leak into the workbench.
+ * Why a worker at all: a heavy/long script no longer freezes the UI (it blocks THIS worker, not the page), and
+ * almostnode's `globalThis.process` shim can't leak into the workbench.
+ *
+ * Lifecycle is pub/sub over the hub (not one-shot RPC), keyed by a per-run id so output, exit and stdin all
+ * correlate — and, unlike RPC, a run has no timeout ceiling, so a long-lived server just keeps streaming until
+ * it's killed:
+ *   main → `node.start`         { runId, file, cwd, env }   start a run
+ *   worker → `node.out.<runId>` { stream: "out"|"err", data } live output, as produced
+ *   worker → `node.exit.<runId>`{ exitCode }                the run finished (event loop drained / process.exit)
+ *   main → `node.stdin.<runId>` { data } | { end: true }     feed the running process's stdin
+ * KILL is out-of-band: a synchronous body blocks this worker, so an in-band "stop" message can't be read — the
+ * main thread calls `worker.terminate()` (see node-runner.ts) and lazily respawns.
+ *
+ * "Done" detection: almostnode's `runFile` is synchronous and returns when the top-level body finishes, but a
+ * process is only truly done when nothing keeps its event loop alive. We ref-count keep-alive work — pending
+ * timeouts, live intervals, and a stdin `data`/`readable` listener — and publish `node.exit` when it drains to
+ * zero (this is what lets a one-shot script return the prompt while a server or an interactive reader stays up).
  *
  * Same almostnode-on-zen-fs pattern as server-host.ts: it runs on the SHARED workspace zen-fs (the SAB arrives
  * over a dedicated control port via receiveSharedWorkspace), so `node` sees exactly the files the editor,
- * type-checker and preview see — one filesystem. Dispatched AND observed over the hub: it serves the `node.run`
- * RPC and opens a span per run through relayLoggerToHub, so every execution shows in the observability plane
- * (federated up to the page's collector / debug-mcp). Mirrors debug-worker.ts's hub wiring.
+ * type-checker and preview see — one filesystem. Observed over the hub: each run opens a span through
+ * relayLoggerToHub, so every execution shows in the observability plane (federated up to the page's collector /
+ * debug-mcp). Mirrors debug-worker.ts's hub wiring.
  */
 import { Runtime } from "@brianjenkins94/almostnode";
-import { createHub, portTransport, serve } from "@brianjenkins94/hub";
+import { createHub, portTransport } from "@brianjenkins94/hub";
 
 import { relayLoggerToHub } from "../../telemetry";
 
+import { installTimerKeepAlive } from "./node-keepalive";
 import { createZenfsVFS, receiveSharedWorkspace } from "./zenfs-vfs.js";
 
 // Catch the shared workspace SAB from the spawner BEFORE anything runs (dedicated port; never the RPC channel).
 receiveSharedWorkspace();
+
+// Own the worker's timers before any Runtime touches them, so keep-alive ref-counting sees every timer the script
+// schedules (almostnode skips its own timer patch when it finds ours already installed — the `__patched` guard).
+const keepAlive = installTimerKeepAlive();
 
 const hub = createHub({ "id": "node" });
 
@@ -48,59 +70,138 @@ function formatArg(value: unknown): string {
 	}
 }
 
-interface RunArgs { "file": string; "cwd": string; "env": Record<string, string> }
-interface RunResult { "stdout": string; "stderr": string; "exitCode": number }
+/** A stream-shaped EventEmitter — what almostnode's `process.stdin` is (shims/process.ts). */
+interface ProcessStdin {
+	"emit": (event: string, ...args: unknown[]) => boolean;
+	"listenerCount": (event: string) => number;
+}
+interface ShimProcess { "stdin"?: ProcessStdin }
 
-serve(hub, "node.run", async (raw): Promise<RunResult> => {
-	const { file, cwd, env } = raw as RunArgs;
+interface StartArgs { "runId": string; "file": string; "cwd": string; "env": Record<string, string> }
+
+// `process.exit(code)` in the shim emits 'exit' then THROWS `Error("Process exited with code N")` — catch that
+// as a clean exit with the given code rather than a crash.
+const EXIT_THROW = /^Process exited with code (\d+)$/u;
+
+let running = false;
+// The running process's stdin (the shim EventEmitter), while a run is live — fed by `node.stdin.<runId>`.
+let currentStdin: ProcessStdin | undefined;
+
+/** Run one script to completion (event-loop quiescence or process.exit), streaming output over the hub. */
+async function runNode(args: StartArgs): Promise<void> {
+	const { runId, file, cwd, env } = args;
+	const emit = (stream: "out" | "err", data: string): void => {
+		hub.publish(`node.out.${runId}`, { "stream": stream, "data": data });
+	};
+	const exit = (exitCode: number): void => {
+		hub.publish(`node.exit.${runId}`, { "exitCode": exitCode });
+	};
+
+	if (running) {
+		emit("err", "node: the runner is busy with another process\n");
+		exit(1);
+
+		return;
+	}
+
 	const vfs = await getVfs();
 
 	if (!vfs.existsSync(file)) {
-		return { "stdout": "", "stderr": `node: cannot find module '${file}'\n`, "exitCode": 1 };
+		emit("err", `node: cannot find module '${file}'\n`);
+		exit(1);
+
+		return;
 	}
 
+	running = true;
 	const span = log.span("node.run", { "file": file, "cwd": cwd });
-	let out = "";
-	let err = "";
-	let failure: string | undefined;
-	// almostnode's module wrapper assigns globalThis.process; snapshot it and restore RIGHT AFTER the (synchronous)
-	// run — BEFORE any logging below, so the logger doesn't write through the leftover process shim into `out`, and
-	// so repeated runs on this worker don't inherit the previous script's shim.
+	// almostnode's module wrapper assigns globalThis.process; snapshot it and restore only when the run truly ends
+	// (NOT right after the sync body — a server/interactive reader keeps running and still needs its process shim).
 	const savedProcess = (globalThis as { "process"?: unknown }).process;
+	let settled = false;
+
+	const finish = (exitCode: number, failure?: string): void => {
+		if (settled) {
+			return;
+		}
+
+		settled = true;
+		running = false;
+		currentStdin = undefined;
+		keepAlive.reset();
+		(globalThis as { "process"?: unknown }).process = savedProcess; // restore before logging (logger writes via process)
+
+		if (failure === undefined) {
+			span.end({ "exitCode": exitCode });
+		} else {
+			span.error("node run failed", { "error": failure });
+			span.end({ "exitCode": exitCode });
+			emit("err", `${failure}\n`);
+		}
+
+		exit(exitCode);
+	};
+
+	const runtime = new Runtime(vfs, {
+		"cwd": cwd,
+		"env": env,
+		"base": base,
+		"onStdout": (data: string) => { emit("out", data); },
+		"onStderr": (data: string) => { emit("err", data); },
+		"onConsole": (method: string, methodArgs: unknown[]) => {
+			emit(method === "error" || method === "warn" ? "err" : "out", `${methodArgs.map(formatArg).join(" ")}\n`);
+		}
+	});
+
+	// The process is "alive" past its sync body while a stdin reader is attached — otherwise a script that only
+	// does `process.stdin.on('data', …)` would look idle and we'd exit out from under it. Re-checked on each drain.
+	const stdinIsListening = (): boolean => {
+		const stdin = (globalThis as unknown as { "process"?: ShimProcess }).process?.stdin;
+
+		return stdin !== undefined && (stdin.listenerCount("data") > 0 || stdin.listenerCount("readable") > 0);
+	};
 
 	try {
-		const runtime = new Runtime(vfs, {
-			"cwd": cwd,
-			"env": env,
-			"base": base,
-			"onStdout": (data: string) => { out += data; },
-			"onStderr": (data: string) => { err += data; },
-			"onConsole": (method: string, methodArgs: unknown[]) => {
-				const line = `${methodArgs.map(formatArg).join(" ")}\n`;
-
-				if (method === "error" || method === "warn") {
-					err += line;
-				} else {
-					out += line;
-				}
-			}
-		});
-
-		runtime.runFile(file); // synchronous — blocks THIS worker, not the UI
+		keepAlive.begin(stdinIsListening);
+		runtime.runFile(file); // synchronous — runs the top-level body; timers/promises continue after it returns
+		currentStdin = (globalThis as unknown as { "process"?: ShimProcess }).process?.stdin;
+		// Resolve when the event loop drains (no pending timers, no interval, no stdin reader). For a one-shot
+		// script that's immediate; for a server/reader it's when it finally stops keeping itself alive.
+		keepAlive.whenQuiescent(() => finish(0));
 	} catch (error) {
-		failure = error instanceof Error ? (error.stack ?? error.message) : String(error);
-	} finally {
-		(globalThis as { "process"?: unknown }).process = savedProcess; // restore before logging (see note above)
+		const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
+		const exitMatch = EXIT_THROW.exec(error instanceof Error ? error.message : String(error));
+
+		if (exitMatch !== null) {
+			finish(Number(exitMatch[1])); // process.exit(code) — a clean, deliberate exit
+		} else {
+			finish(1, message);
+		}
+	}
+}
+
+hub.subscribe("node.start", (data) => { void runNode(data as StartArgs); });
+
+// Tell the main thread we're subscribed so its first `node.start` doesn't out-race our interest. Repeated a few
+// times because the router only forwards `node.ready` once the main side's interest in it has propagated here
+// (which lands a tick or two after boot); the runner's fallback timeout covers the case where they all miss.
+const announceReady = (): void => { hub.publish("node.ready", {}); };
+
+announceReady();
+setTimeout(announceReady, 0);
+setTimeout(announceReady, 80);
+setTimeout(announceReady, 250);
+
+hub.subscribe("node.stdin.>", (data) => {
+	const message = data as { "data"?: string; "end"?: boolean };
+
+	if (currentStdin === undefined) {
+		return;
 	}
 
-	if (failure === undefined) {
-		span.end({ "exitCode": 0, "stdoutBytes": out.length, "stderrBytes": err.length });
-
-		return { "stdout": out, "stderr": err, "exitCode": 0 };
+	if (message.end === true) {
+		currentStdin.emit("end");
+	} else if (message.data !== undefined) {
+		currentStdin.emit("data", message.data);
 	}
-
-	span.error("node run failed", { "error": failure });
-	span.end({ "exitCode": 1 });
-
-	return { "stdout": out, "stderr": `${err}${failure}\n`, "exitCode": 1 };
 });
