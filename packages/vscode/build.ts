@@ -289,12 +289,19 @@ export async function preBuild(): Promise<void> {
 
 	// 3c. capabilities canary engine (dist/lsp/capabilities-canary.js) — the DYNAMIC half: runs the module in the
 	// tsval interpreter and observes the concrete pre-call resource at each capability call (the middle column).
-	// Bundles tsval + typescript (tsval's parser); no oxc here (unlike the static engine — the canary classifies
-	// by injected-stand-in identity, not silo/reach's AST matchers, precisely to keep oxc out of this bundle).
-	// Node builtins polyfilled + the process banner for silo/policy, same as the static engine.
+	// It runs INSIDE the tsserver plugin, so `typescript` is EXTERNALIZED to the ts-external shim (the plugin sets
+	// globalThis.__capabilitiesTs = modules.typescript before loading it) — reusing tsserver's own ts and dropping
+	// the ~7MB bundled copy (16.7MB → a few hundred KB). No oxc here either: the canary classifies by injected-
+	// stand-in identity, not silo/reach's AST matchers, precisely to keep oxc out of this bundle.
 	await buildPackage(root, {
 		"base": "./",
-		"resolve": { "alias": [{ "find": /^@brianjenkins94\/tsval$/u, "replacement": resolvePath("../tsval/src/index.ts") }] },
+		"resolve": {
+			"alias": [
+				{ "find": /^@brianjenkins94\/tsval$/u, "replacement": resolvePath("../tsval/src/index.ts") },
+				{ "find": /^typescript(\/.*)?$/u, "replacement": resolvePath("./extensions/capabilities/ts-external.js") }
+			],
+			"conditions": ["browser", "import", "default"]
+		},
 		"plugins": [polyfillNode()],
 		"build": {
 			"outDir": "dist",

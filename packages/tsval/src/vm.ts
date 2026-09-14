@@ -150,6 +150,10 @@ export interface VMOptions {
 	 *  drive — this hook is where a debugger regains control there (it may block, e.g. Atomics.wait, and read
 	 *  machine state before returning to resume). Fires just before the breakpointed statement executes. */
 	"onBreakpoint"?: (vm: VM) => void;
+	/** A fuel limit: once `steps` exceeds this, the next `step()` throws an uncatchable error (guest try/catch
+	 *  can't swallow it). Lets a host run untrusted code with a bounded cost — e.g. a language-server-resident
+	 *  driver that must never hang on a `while (true)`. Default undefined = unlimited (existing behavior). */
+	"maxSteps"?: number;
 }
 
 /**
@@ -280,6 +284,8 @@ export class Machine implements VM {
 	public hostGuard: HostGuard | undefined;
 	public onAsyncFiber: ((promise: Promise<unknown>) => void) | undefined;
 	public onBreakpoint: ((vm: VM) => void) | undefined;
+	/** Fuel limit (see VMOptions.maxSteps): once `steps` passes it, `step()` throws uncatchably. */
+	public maxSteps: number | undefined;
 
 	/** The guest realm's Error constructors, so errors tsval itself throws (ReferenceError on an
 	 *  unbound name, TypeError on a bad call, …) are instances of the *guest's* classes. Resolved
@@ -333,6 +339,7 @@ export class Machine implements VM {
 		this.hostGuard = options.hostGuard;
 		this.onAsyncFiber = options.onAsyncFiber;
 		this.onBreakpoint = options.onBreakpoint;
+		this.maxSteps = options.maxSteps;
 	}
 
 	public get top(): Frame | undefined {
@@ -457,6 +464,11 @@ export class Machine implements VM {
 		}
 
 		this.steps += 1;
+
+		// Fuel limit: bail uncatchably so untrusted code can't hang a host (e.g. a language-server-resident driver).
+		if (this.maxSteps !== undefined && this.steps > this.maxSteps) {
+			throw new TsvalInternalError(`step budget exceeded (${this.maxSteps})`);
+		}
 
 		if (this.signal !== null) {
 			this.unwind(frame, this.signal);

@@ -2,70 +2,71 @@
  * Capabilities — extension host entry (plain CJS, loads in the web-worker host that can't load ESM entrypoints:
  * CodinGame/monaco-vscode-api#818). Two responsibilities:
  *
- * 1. The STATIC half renders itself — a tsserver plugin (ts-plugin.js) publishes native ts.Diagnostics (squiggles
- *    + Problems), no host-side code needed. (Do NOT add a timer-based `restartTsServer` — it races the initial
- *    `updateOpen` and hangs the "Analyzing…" progress; see extensions/eslint/extension.ts.)
+ * 1. The tsserver plugin (ts-plugin.js) runs BOTH halves inside tsserver — static (util/silo) + the tsval canary,
+ *    reusing tsserver's own `ts` — and publishes NATIVE ts.Diagnostics (source "capabilities"): squiggles +
+ *    Problems + hover, with the concrete runtime value merged in once the canary's background run completes.
+ *    (Do NOT add a timer-based `restartTsServer` — it races the initial `updateOpen` and hangs the "Analyzing…"
+ *    progress; see extensions/eslint/extension.ts.)
  *
- * 2. The DYNAMIC half (the middle column) is rendered HERE: a TreeView listing each capability call in the active
- *    file with its static value and the concrete RUNTIME value the canary observed. The canary (canary.ts, bundled
- *    with tsval) is served separately and loaded on demand via a native dynamic import of an absolute URL injected
- *    by workbench-entry (the extension is a data: URL and can't self-locate). M0 runs the canary INLINE in the ext
- *    host; a later milestone moves it to a dedicated worker so a long run can't block the host.
+ * 2. The "Capability calls" panel (the middle column) is rendered HERE by READING those diagnostics back
+ *    (`vscode.languages.getDiagnostics`, filtered to source "capabilities") — the clean, sentinel-free channel out
+ *    of tsserver. No canary code runs in the ext host; the panel just reflects what the plugin published.
  */
 import * as vscode from "vscode";
 
-/** One capability call, as shown in the panel. Mirrors canary.ts's CanaryObservation (kept loose to avoid a
- *  build-time dep on the served engine's types). */
-interface Observation {
+interface Row {
 	"capability": string;
 	"callee": string;
 	"value": string;
-	"observed": boolean;
-	"static"?: string;
-	"start": number;
-	"end": number;
 	"dangerous": boolean;
+	"range": vscode.Range;
 }
 
-type CanaryModule = { "runCanary": (src: string, fileName: string) => Promise<Observation[]> };
+/** Parse the plugin's diagnostic message "capability: callee → value (ran) · type" into its parts. Best-effort:
+ *  fields fall back to the raw message so a format change degrades rather than breaks. */
+function parseMessage(message: string): { "capability": string; "callee": string; "value": string } {
+	const arrow = message.indexOf(" → ");
+	const head = arrow === -1 ? message : message.slice(0, arrow);
+	let value = arrow === -1 ? "" : message.slice(arrow + 3);
+	const typeSep = value.indexOf(" · ");
 
-/** Native dynamic import of the served engine URL — `new Function` so the CJS bundler can't rewrite it to require. */
-const importUrl = new Function("u", "return import(u);") as (url: string) => Promise<CanaryModule>;
+	if (typeSep !== -1) {
+		value = value.slice(0, typeSep);
+	}
 
-const LANGUAGES = new Set(["typescript", "typescriptreact", "javascript", "javascriptreact"]);
+	const colon = head.indexOf(": ");
+
+	return {
+		"capability": colon === -1 ? "" : head.slice(0, colon),
+		"callee": colon === -1 ? head : head.slice(colon + 2),
+		"value": value
+	};
+}
 
 export function activate(context: vscode.ExtensionContext): void {
-	const canaryUrl = (globalThis as { "__CAPABILITIES_CANARY_URL__"?: string }).__CAPABILITIES_CANARY_URL__;
-
-	let canary: Promise<CanaryModule> | undefined;
-	const loadCanary = (): Promise<CanaryModule> => {
-		if (canary === undefined) {
-			canary = importUrl(canaryUrl!);
-		}
-
-		return canary;
-	};
-
-	let rows: Observation[] = [];
+	let rows: Row[] = [];
 	const changed = new vscode.EventEmitter<void>();
 
-	const provider: vscode.TreeDataProvider<Observation> = {
+	const provider: vscode.TreeDataProvider<Row> = {
 		"onDidChangeTreeData": changed.event,
 		"getChildren": (element) => (element === undefined ? rows : []),
 		"getTreeItem": (row) => {
 			const item = new vscode.TreeItem(row.callee, vscode.TreeItemCollapsibleState.None);
-			// runtime value is the point of this column; fall back to the static literal, else say it didn't resolve.
-			const runtime = row.observed ? row.value : row.static !== undefined ? row.static : "(ran; no string resource)";
 
-			item.description = `${row.capability} → ${runtime}`;
+			item.description = `${row.capability} → ${row.value}`;
 			item.tooltip = new vscode.MarkdownString([
 				`**${row.capability}**${row.dangerous ? " · ⚠ dangerous" : ""}`,
 				"",
 				`- callee: \`${row.callee}\``,
-				`- static: ${row.static !== undefined ? "`" + row.static + "`" : "_unresolved_"}`,
-				`- runtime: ${row.observed ? "`" + row.value + "`" : "_not observed as a string_"}`
+				`- resource: ${row.value !== "" ? "`" + row.value + "`" : "_unresolved_"}`
 			].join("\n"));
 			item.iconPath = new vscode.ThemeIcon(row.dangerous ? "warning" : "circle-small-filled");
+			// Click a row → jump to the call in the editor.
+			item.command = {
+				"command": "vscode.open",
+				"title": "Go to call",
+				"arguments": [vscode.window.activeTextEditor?.document.uri, { "selection": row.range }]
+			};
 
 			return item;
 		}
@@ -73,53 +74,45 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(vscode.window.registerTreeDataProvider("capabilities.calls", provider));
 
-	let token = 0;
-	const analyze = async (document: vscode.TextDocument | undefined): Promise<void> => {
-		const current = ++token;
+	const refresh = (): void => {
+		const editor = vscode.window.activeTextEditor;
 
-		if (document === undefined || !LANGUAGES.has(document.languageId) || canaryUrl === undefined || canaryUrl === "") {
+		if (editor === undefined) {
 			rows = [];
 			changed.fire();
 
 			return;
 		}
 
-		try {
-			const { runCanary } = await loadCanary();
-			const observed = await runCanary(document.getText(), document.fileName);
+		const diagnostics = vscode.languages.getDiagnostics(editor.document.uri).filter((diagnostic) => diagnostic.source === "capabilities");
 
-			if (current === token) { // ignore a stale run superseded by a newer edit/switch
-				rows = observed;
-				changed.fire();
-			}
-		} catch (error) {
-			if (current === token) {
-				rows = [];
-				changed.fire();
-			}
-		}
-	};
+		rows = diagnostics.map((diagnostic) => {
+			const parsed = parseMessage(diagnostic.message);
 
-	// Re-run on editor switch and on edits to the active doc (debounced — the canary run isn't free).
-	let debounce: ReturnType<typeof setTimeout> | undefined;
-	const schedule = (document: vscode.TextDocument | undefined, delay: number): void => {
-		if (debounce !== undefined) {
-			clearTimeout(debounce);
-		}
-
-		debounce = setTimeout(() => { void analyze(document); }, delay);
+			return {
+				"capability": parsed.capability,
+				"callee": parsed.callee,
+				"value": parsed.value,
+				"dangerous": diagnostic.severity === vscode.DiagnosticSeverity.Warning,
+				"range": diagnostic.range
+			};
+		});
+		changed.fire();
 	};
 
 	context.subscriptions.push(
-		vscode.window.onDidChangeActiveTextEditor((editor) => schedule(editor?.document, 0)),
-		vscode.workspace.onDidChangeTextDocument((event) => {
-			if (event.document === vscode.window.activeTextEditor?.document) {
-				schedule(event.document, 500);
+		// The plugin re-publishes (with runtime values) after the canary's async run → onDidChangeDiagnostics fires.
+		vscode.languages.onDidChangeDiagnostics((event) => {
+			const uri = vscode.window.activeTextEditor?.document.uri;
+
+			if (uri !== undefined && event.uris.some((changedUri) => changedUri.toString() === uri.toString())) {
+				refresh();
 			}
-		})
+		}),
+		vscode.window.onDidChangeActiveTextEditor(() => refresh())
 	);
 
-	void analyze(vscode.window.activeTextEditor?.document);
+	refresh();
 }
 
 export function deactivate(): void { /* subscriptions disposed by the host */ }

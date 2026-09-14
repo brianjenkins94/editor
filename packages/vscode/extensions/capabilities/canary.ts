@@ -4,21 +4,20 @@
  * The static engine (engine.ts, util/silo `findReach`) captures a capability call's resource only when it's a
  * STATIC STRING LITERAL. The canary covers the rest: it RUNS the module in the tsval interpreter and, at the
  * host↔guest boundary, observes the CONCRETE argument each capability call is actually invoked with — the real
- * URL a `fetch(base + id)` builds, the path a computed `writeFile(dir + name)` writes. Read-only: capability
- * callables are inert stand-ins, so observing a run performs no real net/fs/exec effect (M0 observes; boxing /
- * tripwire is a later milestone).
+ * URL a `fetch(base + id)` builds, the path a computed `writeFile(dir + name)` writes.
  *
- * tsval's `HostGuard.beforeCall` is the seam: it fires just before the interpreter invokes a host callable, with
- * the call-expression node (→ source span, same anchor the static rows use) and the arguments AS EVALUATED. We
- * classify NOT by re-matching the AST (silo/reach does that, but it pulls oxc — too heavy for a tsval worker)
- * but by the IDENTITY of the invoked callable: the canary OWNS the capability surface it injects, so it tags each
- * stand-in with its capability. That also resolves aliasing for free (`const f = fetch; f(url)` still hits the
- * tagged `fetch`). Danger grading stays with silo policy (`isDangerous`, which is parser-free).
+ * The interpreter IS the sandbox: tsval runs with zero ambient authority (no real fetch/fs/exec unless injected),
+ * and `HostGuard.beforeCall` fires BEFORE any host call, so nothing dangerous can execute — we observe and hand
+ * back an inert stand-in. That's why the canary needs no almostnode-style runtime: almostnode performs REAL
+ * effects (real network), the opposite of what a canary wants. `beforeCall` gives the call-expression node (→
+ * source span, the same anchor the static rows use) and the arguments AS EVALUATED. Capability calls are
+ * classified by the IDENTITY of the injected stand-in (each is tagged), which also catches aliasing
+ * (`const f = fetch; f(url)`); danger grading stays with silo policy (`isDangerous`, parser-free).
  *
- * M0 scope: CALL capabilities that execute during a normal module run (top-level, or reachable from one). `env`
- * is a member read (`process.env.KEY`) whose key is always a literal — the static half already resolves it — so
- * the canary skips it. Calls inside functions never invoked during the run are not observed (the nature of
- * dynamic analysis; a later milestone can drive entrypoints).
+ * This runs INSIDE the tsserver plugin, reusing tsserver's own `typescript` (the build externalizes it), so the
+ * engine ships ~1MB instead of bundling a ~7MB copy. A step budget bounds the run so untrusted code can't hang
+ * the language server. M0 scope: CALL capabilities that execute during a normal run (top-level, or reachable from
+ * one); `env` is a member read the static half already resolves, so the canary skips it.
  */
 import { createVM } from "@brianjenkins94/tsval";
 import type { HostCallSite } from "@brianjenkins94/tsval";
@@ -35,9 +34,7 @@ export interface CanaryObservation {
 	/** Whether a string resource was observed (false → the call ran but its resource wasn't a string arg). */
 	"observed": boolean;
 	/** The STATICALLY-known resource: the literal text when the resource argument is a string literal in the
-	 *  source, else undefined (a concatenation / variable / computed value the static half can't resolve). This
-	 *  is the panel's "static" column; `value` is its "runtime" column. When both are set and equal, the static
-	 *  half already had it; when only `value` is set, the canary is what resolved it. */
+	 *  source, else undefined (a concatenation / variable / computed value the static half can't resolve). */
 	"static"?: string;
 	/** Source span of the call, for anchoring to the document (same basis as the static rows). */
 	"start": number;
@@ -79,6 +76,37 @@ function inertResponse(): unknown {
 	return { "ok": true, "status": 200, "json": async () => ({}), "text": async () => "", "arrayBuffer": async () => new ArrayBuffer(0) };
 }
 
+/**
+ * A recursive inert stand-in for an UNMOCKED module, so `import x from "some-lib"` (or `require`) doesn't abort the
+ * run — the code keeps going and can still reach the capability calls it makes directly. Callable, constructable,
+ * every property yields another inert; it deliberately does NOT look like a Promise (`then` undefined) and iterates
+ * as empty, so `await`/destructuring/`for…of` don't hang or throw. Untagged: unmocked modules aren't classified
+ * (a future refinement can tag known HTTP clients like axios); this is purely about not stopping the run.
+ */
+function inert(): unknown {
+	const target = function() { /* inert */ };
+
+	return new Proxy(target, {
+		"get": (_target, property) => {
+			if (property === "then") {
+				return undefined; // not a thenable — don't let `await` adopt it
+			}
+
+			if (property === Symbol.iterator) {
+				return function *() { /* empty */ };
+			}
+
+			if (property === Symbol.toPrimitive || property === "toString" || property === "valueOf") {
+				return () => "";
+			}
+
+			return inert();
+		},
+		"apply": () => inert(),
+		"construct": () => inert()
+	});
+}
+
 /** The tagged host globals + module stand-ins: resolvable AND inert during observation. */
 function capabilityStandins(): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
 	const noop = (): void => { /* inert */ };
@@ -109,7 +137,8 @@ function capabilityStandins(): { "globals": Record<string, unknown>; "modules": 
 
 /**
  * Run `src` in the tsval interpreter and return the concrete pre-call resource observed at each capability call
- * that executed. Best-effort: a run that throws still returns whatever was observed before the throw.
+ * that executed. Best-effort: a run that throws (or exceeds the step budget) still returns whatever was observed
+ * before it stopped.
  */
 export async function runCanary(src: string, fileName: string): Promise<CanaryObservation[]> {
 	const observations: CanaryObservation[] = [];
@@ -143,8 +172,13 @@ export async function runCanary(src: string, fileName: string): Promise<CanaryOb
 
 	const loaded = createVM(src, {
 		"fileName": fileName,
+		// A fuel limit: this runs untrusted module code INSIDE the tsserver worker, so a `while (true)` must not
+		// hang the language server. Exceeding it throws uncatchably → caught below, partial observations kept.
+		"maxSteps": 5_000_000,
 		"globals": standins.globals,
-		"resolveModule": (specifier) => standins.modules[specifier],
+		// Known capability modules → tagged inert mocks; anything else → a recursive inert stand-in so the import
+		// doesn't abort the run (coverage) while still doing nothing real.
+		"resolveModule": (specifier) => (Object.prototype.hasOwnProperty.call(standins.modules, specifier) ? standins.modules[specifier] : inert()),
 		"hostGuard": {
 			"beforeCall": (callee, _thisArg, _isConstruct, site) => {
 				record(callee as Tagged, site);
@@ -158,7 +192,7 @@ export async function runCanary(src: string, fileName: string): Promise<CanaryOb
 
 	try {
 		await loaded.vm.runAsync();
-	} catch (error) { /* best-effort: keep whatever was observed before the throw */ }
+	} catch (error) { /* best-effort: keep whatever was observed before the throw / budget stop */ }
 
 	return observations;
 }
