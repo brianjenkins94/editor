@@ -29,16 +29,6 @@ interface UnpkgMeta {
 	"files"?: { "path": string; "type": "file" | "directory"; "size"?: number }[];
 }
 
-/** A spurious TypeScript-SOURCE probe: `.ts`/`.tsx`/`.mts`/`.cts` that is NOT a declaration (`.d.ts` …).
- *  Published npm packages ship `.js` + `.d.ts`, NEVER `.ts` source, so tsserver's module resolution probing
- *  `<pkg>/index.ts` (it tries `.ts` BEFORE `.d.ts`) never names a real file. But the CDN can answer such a
- *  request with an empty/redirect body, which tsserver then reads as "File '…/index.ts' is not a module",
- *  shadowing the package's REAL types (its `.d.ts` / the @types surface). Answering these notFound lets
- *  resolution fall through to `.d.ts` / @types — and keeps it stable across a tsserver project reload. */
-function isTsSourceProbe(rel: string): boolean {
-	return (/\.(?:tsx?|mts|cts)$/u).test(rel) && !(/\.d\.(?:ts|mts|cts)$/u).test(rel);
-}
-
 /** Split a node_modules-relative path into package + subpath, honouring scopes (@scope/name). */
 function splitPackage(rel: string): { "pkg": string; "sub": string } {
 	const parts = rel.split("/");
@@ -196,10 +186,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				return { "type": FileType.Directory, "ctime": 0, "mtime": 0, "size": 0 };
 			}
 
-			if (isTsSourceProbe(rel)) {
-				throw notFound(); // spurious `.ts` resolution probe — never a real npm file; fall through to `.d.ts`/@types
-			}
-
 			if (!metaResults.has(rel)) {
 				ensureMeta(rel, resource);
 
@@ -225,10 +211,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 
 			if (rel === undefined || rel === "") {
 				throw notFound();
-			}
-
-			if (isTsSourceProbe(rel)) {
-				throw notFound(); // spurious `.ts` resolution probe — never a real npm file; fall through to `.d.ts`/@types
 			}
 
 			if (!fileResults.has(rel)) {

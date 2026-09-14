@@ -379,13 +379,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		void Promise.all(packages.map((pkg) => acquirePackage(pkg, budget)))
 			.then(async () => {
 				if (acquiredTypes.size !== typesBefore) {
-					await writeAmbient(); // new @types acquired → refresh the force-reference file so their GLOBALS resolve
-					// …but MODULE resolution is cached by tsserver and is NOT invalidated by these node_modules
-					// writes, so a package that hasn't resolved yet stays unresolved until the project reloads.
-					// Reload to force a re-resolve — THIS is what makes an ARBITRARY runtime import resolve without
-					// a manual refresh (baking only covers build-time-known deps). Safe now that the provider no
-					// longer serves a spurious `<pkg>/index.ts` for a reload to latch onto (node-modules-provider).
-					await Promise.resolve(api.commands.executeCommand("typescript.reloadProjects")).catch(() => undefined);
+					await writeAmbient(); // new @types acquired → refresh the force-reference file so they resolve
 				}
 
 				span.end({ "files": fetchedPath.size, "network": MAX_NETWORK - budget.n, "types": acquiredTypes.size });
