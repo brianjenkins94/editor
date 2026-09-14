@@ -69,19 +69,12 @@ window.addEventListener("error", (event) => {
 });
 window.addEventListener("unhandledrejection", (event) => {
 	const reason = event.reason;
-	const stack = reason instanceof Error ? reason.stack : undefined;
-	// Capture the STACK, not just the message — the cold-boot `e.with` rejection is only diagnosable from its
-	// call chain, and with minify off the frames are readable. Relays to the $sys.log.> collector (debug-mcp).
+	// Capture the STACK, not just the message — a bare message is rarely enough to place a boot-time rejection.
+	// Relays to the $sys.log.> collector (debug-mcp). (This is how the workspace-fs fake-URI `e.with` was traced.)
 	paneLog.error("unhandled rejection", {
 		"reason": reason instanceof Error ? reason.message : String(reason),
-		"stack": stack
+		"stack": reason instanceof Error ? reason.stack : undefined
 	});
-	// TEMP (e.with debug): the rejection fires in the narrow window right after the COI reload, which the
-	// console-tracking tools miss — stash it where it can be read after the boot settles. Remove with the
-	// minify toggle once traced.
-	try {
-		localStorage.setItem("__lastRejection", JSON.stringify({ "reason": String(reason), "stack": stack, "at": Date.now() }));
-	} catch { /* storage unavailable */ }
 });
 
 /** Readable text for a caught `unknown` — Error message when it is one, a string as-is, else JSON (avoids
