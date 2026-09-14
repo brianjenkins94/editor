@@ -34,6 +34,8 @@ export interface NodeRunner {
 	"isRunning": () => boolean;
 	/** Relay a request to an http server the running process is listening with (preview bridge, M0). */
 	"virtualRequest": (port: number, method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<VirtualResponse>;
+	/** Start a ViteDevServer in the worker on `root` of the shared workspace, reachable on `port` (preview, M1). */
+	"startPreview": (port: number, root: string) => Promise<void>;
 }
 
 /** Spawn/manage the node worker, wire it into `hub`, and return the streaming runner the terminal drives. */
@@ -162,6 +164,12 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 			await ready; // the worker must be subscribed before we send it a request
 
 			return rpc.request("virtual.request", { "port": port, "method": method, "url": url, "headers": headers, "body": body }, { "timeoutMs": 30000 }) as Promise<VirtualResponse>;
+		},
+		"startPreview": async (port, root) => {
+			ensureWorker();
+			await ready;
+
+			await rpc.request("preview.start", { "port": port, "root": root }, { "timeoutMs": 30000 });
 		}
 	};
 }

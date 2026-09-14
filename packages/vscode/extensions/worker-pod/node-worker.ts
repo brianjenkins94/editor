@@ -207,16 +207,21 @@ hub.subscribe("node.stdin.>", (data) => {
 	}
 });
 
-// Preview bridge relay (M0): the main thread forwards a `/__virtual__/<port>/…` request here; we look up the
-// http server the running script is listening with (almostnode's port registry) and drive its `handleRequest`,
-// returning the response. Body crosses as a Uint8Array (structured-clone over the worker port).
+// Preview bridge relay (M0): the main thread forwards a `/__virtual__/<port>/…` request here; we drive the
+// server listening on that port and return its response. The server is EITHER a preview dev server started in
+// this worker (M1, below) OR a raw http server the running script is listening with (almostnode's port
+// registry). Body crosses as a Uint8Array (structured-clone over the worker port).
 interface VirtualRequest { "port": number; "method": string; "url": string; "headers": Record<string, string>; "body"?: Uint8Array }
-interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": Uint8Array }
+interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }
+type RequestHandler = { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> };
+
+// Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry.
+const previewServers = new Map<number, RequestHandler>();
 
 serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
 	const { port, method, url, headers, body } = raw as VirtualRequest;
-	const server = getServer(port) as { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> } | undefined;
+	const server = previewServers.get(port) ?? (getServer(port) as RequestHandler | undefined);
 
 	if (server === undefined) {
 		return { "status": 503, "statusText": "Service Unavailable", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`No server listening on port ${port}`) };
@@ -224,5 +229,20 @@ serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
 
 	const response = await server.handleRequest(method, url, headers, body);
 
-	return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": Uint8Array.from(response.body) };
+	return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": response.body };
+});
+
+// M1: start almostnode's ViteDevServer in THIS worker on the shared workspace zen-fs, so the preview runs off
+// the main thread and shares the editor's filesystem (no separate VFS / save mirroring). `ViteDevServer` pulls
+// in `typescript` (its transpiler), so it's DYNAMICALLY imported — ts lands in a lazy chunk, off the node path.
+serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number }> => {
+	const { port, root } = raw as { "port": number; "root": string };
+	const { ViteDevServer } = await import("@brianjenkins94/almostnode");
+	const vfs = await getVfs();
+	const server = new ViteDevServer(vfs, { "port": port, "root": root });
+
+	server.start();
+	previewServers.set(port, server as unknown as RequestHandler);
+
+	return { "ok": true, "port": port };
 });

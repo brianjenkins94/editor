@@ -204,6 +204,10 @@ export async function preBuild(): Promise<void> {
 			"outDir": "dist",
 			"emptyOutDir": false,
 			"assetsInlineLimit": 0,
+			// These run as Web Workers (no DOM). Vite's default dynamic-import preload helper injects a
+			// <link rel=modulepreload> via `document`, which throws in a worker — so the node worker's lazy
+			// `import()` of the ViteDevServer (ts) chunk crashes. Disable the polyfill; workers just fetch chunks.
+			"modulePreload": false,
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
 				"input": {

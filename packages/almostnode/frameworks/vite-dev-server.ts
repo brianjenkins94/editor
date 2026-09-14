@@ -13,11 +13,14 @@ import { Buffer } from "../shims/stream";
 import { simpleHash } from "../utils/hash";
 import { addReactRefresh as _addReactRefresh } from "./code-transforms";
 
-// Check if we're in a real browser environment (not jsdom or Node.js)
-// jsdom has window but doesn't have ServiceWorker or SharedArrayBuffer
-const isBrowser = typeof window !== "undefined"
+// Check if we're in a real runtime that should transpile (not jsdom or a Node test).
+// A real browser has window + navigator.serviceWorker (jsdom has window but not that); a Web Worker (where the
+// editor runs this dev server, off the main thread) has no window at all but IS a real runtime with `ts` loaded,
+// so detect WorkerGlobalScope too — otherwise transformCode() would serve raw TSX and the browser chokes on JSX.
+const isBrowser = (typeof window !== "undefined"
 	&& typeof window.navigator !== "undefined"
-	&& "serviceWorker" in window.navigator;
+	&& "serviceWorker" in window.navigator)
+	|| typeof WorkerGlobalScope !== "undefined";
 
 // Transpilation uses the browser TypeScript compiler (`ts.transpileModule`) — see transformCode(). The
 // editor already loads `typescript` (tsval, the preflight engine, the tsserver worker), so this reuses that
