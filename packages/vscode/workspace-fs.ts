@@ -160,13 +160,29 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 	};
 
 	const { listeners, onDidChangeFile } = createChangeEvent();
-	// Fire the REAL URI the provider was handed — not a `{ path }` stand-in. The Explorer's file-change reaction
-	// (a delayed RunOnceScheduler) calls `dirname(resource)` → `resource.with(...)` on each changed resource, so a
-	// plain object without `.with` (or a scheme) throws `TypeError: e.with is not a function` mid-boot (ATA's
-	// acquired-type writes fire ADDED, the scheduler reacts, and it crashes on the fake resource).
-	const fire = (resource: Parameters<IFileSystemProviderWithFileReadWriteCapability["writeFile"]>[0], type: FileChangeType): void => {
-		for (const listener of listeners) {
-			listener([{ "resource": resource, "type": type }]);
+	// Emit change events the way a real vscode provider does: fire the REAL URI (not a `{ path }` stand-in —
+	// the Explorer's file-change reaction calls `dirname(resource)` → `resource.with(...)`, which throws
+	// `e.with is not a function` on a plain object), and fire it BATCHED + DEFERRED off the write's call stack.
+	// Notifying synchronously inside `writeFile` deadlocks first-load type acquisition: the notification makes
+	// tsserver (a worker) request a SYNCHRONOUS file read over the @vscode/sync-api SAB, which blocks its thread
+	// on the MAIN thread — but the main thread is still inside this listener chain and can't service the read.
+	// A short debounce (VS Code's own `fireSoon` pattern) returns control to the event loop and coalesces bursts.
+	type Change = { "resource": Parameters<IFileSystemProviderWithFileReadWriteCapability["writeFile"]>[0]; "type": FileChangeType };
+	let changeBatch: Change[] = [];
+	let changeTimer: ReturnType<typeof setTimeout> | undefined;
+	const fire = (resource: Change["resource"], type: FileChangeType): void => {
+		changeBatch.push({ "resource": resource, "type": type });
+
+		if (changeTimer === undefined) {
+			changeTimer = setTimeout(() => {
+				changeTimer = undefined;
+				const batch = changeBatch;
+				changeBatch = [];
+
+				for (const listener of listeners) {
+					listener(batch);
+				}
+			}, 5);
 		}
 	};
 
