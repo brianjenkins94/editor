@@ -11,6 +11,9 @@ export { execute, Runtime } from "./runtime";
 export type { Module, RequireFunction, RuntimeOptions } from "./runtime";
 export type { CreateRuntimeOptions, IExecuteResult, IRuntime, IRuntimeOptions, VFSSnapshot } from "./runtime-interface";
 export { getServerBridge, resetServerBridge, ServerBridge } from "./server-bridge";
+// The in-worker server registry: `http.Server.listen` registers by port here (see shims/http.ts), so the node
+// worker can look a listening server up by port and drive its `handleRequest` for the preview bridge relay.
+export { getAllServers, getServer } from "./shims/http";
 export type { BridgeOptions, InitServiceWorkerOptions, IVirtualServer, VirtualServer } from "./server-bridge";
 /**
  * Vendored, trimmed almostnode — an in-browser node runtime.

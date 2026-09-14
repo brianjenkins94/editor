@@ -28,8 +28,8 @@
  * relayLoggerToHub, so every execution shows in the observability plane (federated up to the page's collector /
  * debug-mcp). Mirrors debug-worker.ts's hub wiring.
  */
-import { Runtime } from "@brianjenkins94/almostnode";
-import { createHub, portTransport } from "@brianjenkins94/hub";
+import { getServer, Runtime } from "@brianjenkins94/almostnode";
+import { createHub, portTransport, serve } from "@brianjenkins94/hub";
 
 import { relayLoggerToHub } from "../../telemetry";
 
@@ -205,4 +205,24 @@ hub.subscribe("node.stdin.>", (data) => {
 	} else if (message.data !== undefined) {
 		currentStdin.emit("data", message.data);
 	}
+});
+
+// Preview bridge relay (M0): the main thread forwards a `/__virtual__/<port>/…` request here; we look up the
+// http server the running script is listening with (almostnode's port registry) and drive its `handleRequest`,
+// returning the response. Body crosses as a Uint8Array (structured-clone over the worker port).
+interface VirtualRequest { "port": number; "method": string; "url": string; "headers": Record<string, string>; "body"?: Uint8Array }
+interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": Uint8Array }
+interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }
+
+serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
+	const { port, method, url, headers, body } = raw as VirtualRequest;
+	const server = getServer(port) as { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> } | undefined;
+
+	if (server === undefined) {
+		return { "status": 503, "statusText": "Service Unavailable", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`No server listening on port ${port}`) };
+	}
+
+	const response = await server.handleRequest(method, url, headers, body);
+
+	return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": Uint8Array.from(response.body) };
 });

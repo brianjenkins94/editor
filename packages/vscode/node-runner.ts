@@ -14,11 +14,14 @@
  * after a (re)spawn can't out-race the worker's interest and be dropped by the router.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import { portTransport } from "@brianjenkins94/hub";
+import { createRpcClient, portTransport } from "@brianjenkins94/hub";
 
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
 export type NodeOutput = (stream: "out" | "err", data: string) => void;
 export interface NodeRunHooks { "onOutput": NodeOutput; "signal"?: AbortSignal }
+
+/** A response relayed back from an http server running in the worker (the preview bridge). */
+export interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": Uint8Array }
 
 export interface NodeRunner {
 	/** Run `file` (already resolved against cwd) to completion, streaming output; resolves with its exit code. */
@@ -29,6 +32,8 @@ export interface NodeRunner {
 	"endStdin": () => void;
 	/** Whether a process is currently running (the terminal routes keystrokes to stdin while it is). */
 	"isRunning": () => boolean;
+	/** Relay a request to an http server the running process is listening with (preview bridge, M0). */
+	"virtualRequest": (port: number, method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<VirtualResponse>;
 }
 
 /** Spawn/manage the node worker, wire it into `hub`, and return the streaming runner the terminal drives. */
@@ -41,6 +46,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 	let resolveReady: (() => void) | undefined;
 
 	hub.subscribe("node.ready", () => { resolveReady?.(); }); // kept for the runner's life (survives respawns)
+	const rpc = createRpcClient(hub); // for request/reply calls into the worker (e.g. the preview bridge relay)
 
 	const ensureWorker = (): void => {
 		if (worker !== undefined) {
@@ -150,6 +156,12 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 				hub.publish(`node.stdin.${currentRunId}`, { "end": true });
 			}
 		},
-		"isRunning": () => currentRunId !== undefined
+		"isRunning": () => currentRunId !== undefined,
+		"virtualRequest": async (port, method, url, headers, body) => {
+			ensureWorker();
+			await ready; // the worker must be subscribed before we send it a request
+
+			return rpc.request("virtual.request", { "port": port, "method": method, "url": url, "headers": headers, "body": body }, { "timeoutMs": 30000 }) as Promise<VirtualResponse>;
+		}
 	};
 }
