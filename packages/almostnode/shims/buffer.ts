@@ -4,7 +4,7 @@
  */
 
 // Re-export Buffer from stream where it's defined
-import { Buffer as BufferClass } from './stream';
+import { Buffer as BufferClass } from "./stream";
 
 // The buffer module exports Buffer as a named export
 export const Buffer = BufferClass;
@@ -20,56 +20,56 @@ export const INSPECT_MAX_BYTES = 50;
 
 // Constants for Buffer pooling
 export const constants = {
-  MAX_LENGTH: kMaxLength,
-  MAX_STRING_LENGTH: 536870888,
+	"MAX_LENGTH": kMaxLength,
+	"MAX_STRING_LENGTH": 536870888
 };
 
 // transcode function - simplified
 export function transcode(
-  source: Uint8Array,
-  _fromEnc: string,
-  _toEnc: string
+	source: Uint8Array,
+	_fromEnc: string,
+	_toEnc: string
 ): InstanceType<typeof Buffer> {
   // Simplified - just return a copy
-  return Buffer.from(source);
+	return Buffer.from(source);
 }
 
 // resolveObjectURL - returns undefined (no blob support)
 export function resolveObjectURL(id: string): undefined {
-  return undefined;
+	return undefined;
 }
 
 // atob and btoa wrappers
 export function atob(data: string): string {
-  return globalThis.atob(data);
+	return globalThis.atob(data);
 }
 
 export function btoa(data: string): string {
-  return globalThis.btoa(data);
+	return globalThis.btoa(data);
 }
 
 // Default export as a plain object with all exports
 // Using Object.create(null) and then assigning doesn't work well,
 // so we use a regular object that has hasOwnProperty
 const bufferModule: Record<string, unknown> = {
-  Buffer,
-  SlowBuffer,
-  kMaxLength,
-  INSPECT_MAX_BYTES,
-  constants,
-  transcode,
-  resolveObjectURL,
-  atob,
-  btoa,
+	"Buffer": Buffer,
+	"SlowBuffer": SlowBuffer,
+	"kMaxLength": kMaxLength,
+	"INSPECT_MAX_BYTES": INSPECT_MAX_BYTES,
+	"constants": constants,
+	"transcode": transcode,
+	"resolveObjectURL": resolveObjectURL,
+	"atob": atob,
+	"btoa": btoa
 };
 
 // Ensure hasOwnProperty is accessible (should already be from Object.prototype)
 // but we make it explicit
-Object.defineProperty(bufferModule, 'hasOwnProperty', {
-  value: Object.prototype.hasOwnProperty,
-  enumerable: false,
-  configurable: true,
-  writable: true,
+Object.defineProperty(bufferModule, "hasOwnProperty", {
+	"value": Object.prototype.hasOwnProperty,
+	"enumerable": false,
+	"configurable": true,
+	"writable": true
 });
 
 export default bufferModule;

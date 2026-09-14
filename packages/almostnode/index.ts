@@ -1,3 +1,17 @@
+export { createRuntime } from "./create-runtime";
+// Preview dev server (Path B): a Vite-compatible dev server that runs in the page, serves the VirtualFS with
+// `ts.transpileModule` JSX/TS transforms + React-Refresh HMR, and is reached from the preview iframe through
+// the ServerBridge service worker (`/__virtual__/<port>/`). See frameworks/vite-dev-server.ts.
+export { DevServer } from "./dev-server";
+export type { DevServerOptions, HMRUpdate, ResponseData } from "./dev-server";
+export { ViteDevServer } from "./frameworks/vite-dev-server";
+export type { ViteDevServerOptions } from "./frameworks/vite-dev-server";
+export { execute, Runtime } from "./runtime";
+
+export type { Module, RequireFunction, RuntimeOptions } from "./runtime";
+export type { CreateRuntimeOptions, IExecuteResult, IRuntime, IRuntimeOptions, VFSSnapshot } from "./runtime-interface";
+export { getServerBridge, resetServerBridge, ServerBridge } from "./server-bridge";
+export type { BridgeOptions, InitServiceWorkerOptions, IVirtualServer, VirtualServer } from "./server-bridge";
 /**
  * Vendored, trimmed almostnode — an in-browser node runtime.
  *
@@ -10,18 +24,4 @@
  * This barrel intentionally exports only what the editor consumes; see create-runtime.ts / runtime.ts.
  */
 export { VirtualFS } from "./virtual-fs";
-export type { FSNode, Stats, FSWatcher, WatchListener, WatchEventType } from "./virtual-fs";
-export { Runtime, execute } from "./runtime";
-export type { Module, RuntimeOptions, RequireFunction } from "./runtime";
-export { createRuntime } from "./create-runtime";
-export type { IRuntime, IExecuteResult, CreateRuntimeOptions, IRuntimeOptions, VFSSnapshot } from "./runtime-interface";
-
-// Preview dev server (Path B): a Vite-compatible dev server that runs in the page, serves the VirtualFS with
-// `ts.transpileModule` JSX/TS transforms + React-Refresh HMR, and is reached from the preview iframe through
-// the ServerBridge service worker (`/__virtual__/<port>/`). See frameworks/vite-dev-server.ts.
-export { DevServer } from "./dev-server";
-export type { DevServerOptions, ResponseData, HMRUpdate } from "./dev-server";
-export { ViteDevServer } from "./frameworks/vite-dev-server";
-export type { ViteDevServerOptions } from "./frameworks/vite-dev-server";
-export { ServerBridge, getServerBridge, resetServerBridge } from "./server-bridge";
-export type { IVirtualServer, VirtualServer, BridgeOptions, InitServiceWorkerOptions } from "./server-bridge";
+export type { FSNode, FSWatcher, Stats, WatchEventType, WatchListener } from "./virtual-fs";

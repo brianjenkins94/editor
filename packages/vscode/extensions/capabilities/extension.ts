@@ -109,7 +109,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				refresh();
 			}
 		}),
-		vscode.window.onDidChangeActiveTextEditor(() => refresh())
+		vscode.window.onDidChangeActiveTextEditor(() => { refresh(); })
 	);
 
 	refresh();

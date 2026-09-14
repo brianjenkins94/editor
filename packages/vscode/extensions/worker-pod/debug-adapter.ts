@@ -8,8 +8,9 @@
  * stackTrace/scopes/variables straight out of the latest snapshot. Inline is the only viable shape in-browser
  * (a DebugAdapterServer needs a socket). Time-travel (step-back) and the React/Atomics path arrive in M2/M3.
  */
+import type { Span } from "@brianjenkins94/util/logger";
 import { portTransport } from "@brianjenkins94/hub";
-import { logger, type Span } from "@brianjenkins94/util/logger";
+import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
 import { podHub } from "./pod";
@@ -68,7 +69,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private reactMode = false;
 
 	private send(message: Dap): void {
-		this.sendEmitter.fire({ ...message, "seq": this.seq } as vscode.DebugProtocolMessage);
+		this.sendEmitter.fire({ ...message, "seq": this.seq });
 		this.seq += 1;
 	}
 
@@ -96,7 +97,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	}
 
 	public handleMessage(message: vscode.DebugProtocolMessage): void {
-		const request = message as unknown as DapRequest;
+		const request = message as DapRequest;
 
 		if (request.type !== "request") {
 			return;
@@ -113,6 +114,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 			case "setBreakpoints": {
 				const points = (args["breakpoints"] as { "line": number }[] | undefined) ?? [];
+
 				this.lines = points.map((point) => point.line);
 				this.worker?.postMessage({ "type": "setBreakpoints", "lines": this.lines });
 				this.respond(request, { "breakpoints": points.map((point) => ({ "verified": true, "line": point.line })) });
@@ -133,6 +135,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			// the render pane, and a time-travel jump. Both drive the worker.
 			case "dispatch": {
 				const trace = this.startAction("dispatch");
+
 				this.worker?.postMessage({ "type": "dispatch", "id": args["id"], "event": args["event"], "traceContext": trace });
 				this.respond(request);
 				break;
@@ -220,6 +223,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private async loadSource(): Promise<void> {
 		try {
 			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(this.program));
+
 			this.source = document.getText();
 			// React mode if the program mounts via ReactDOM — then run it through the reconciler (M3c) rather
 			// than as a plain script.
@@ -241,6 +245,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		// Cache-bust so a rebuilt worker is picked up (the Worker constructor may reuse the browser's module
 		// cache for an unchanged URL even after a rebuild); harmless in production.
 		const workerUrl = new URL("./lsp/debug-worker.js", location.href);
+
 		workerUrl.searchParams.set("v", String(Date.now()));
 		this.worker = new Worker(workerUrl, { "type": "module" });
 		this.worker.onmessage = (event: MessageEvent<WorkerMessage>) => { this.onWorker(event.data); };
@@ -251,6 +256,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.podUnlink = podHub.link(portTransport(this.worker));
 
 		const trace = this.startAction("launch");
+
 		this.worker.postMessage({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.control?.buffer, "react": this.reactMode, "traceContext": trace });
 	}
 

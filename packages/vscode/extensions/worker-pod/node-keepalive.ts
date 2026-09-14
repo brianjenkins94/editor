@@ -112,7 +112,7 @@ export function installTimerKeepAlive(): TimerKeepAlive {
 		}, timeout, ...rest);
 
 		return makeTimer(token);
-	}, { "__patched": true, "__keepAlive": undefined as unknown as TimerKeepAlive }) as typeof globals.setTimeout;
+	}, { "__patched": true, "__keepAlive": undefined }) as typeof globals.setTimeout;
 
 	globals.setInterval = Object.assign((handler: TimerHandler, timeout?: number, ...rest: unknown[]): NodeTimer => {
 		const token = { "realId": 0 as unknown as ReturnType<typeof setTimeout>, "interval": true };

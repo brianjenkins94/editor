@@ -68,7 +68,7 @@ export function icon(node: IconNode, { size = 16, stroke = 2, "class": cls }: Ic
 		"height": size,
 		"stroke-width": stroke,
 		"class": cls ? `lucide ${cls}` : "lucide"
-	}) as SVGElement;
+	});
 }
 
 /** Render a lucide icon node to an SVG markup string (for innerHTML / dangerouslySetInnerHTML). */

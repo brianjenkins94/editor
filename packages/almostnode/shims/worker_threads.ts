@@ -3,7 +3,7 @@
  * Stub implementation for browser environment
  */
 
-import { EventEmitter } from './events';
+import { EventEmitter } from "./events";
 
 export const isMainThread = true;
 export const parentPort = null;
@@ -11,82 +11,82 @@ export const workerData = null;
 export const threadId = 0;
 
 export class Worker extends EventEmitter {
-  threadId = 0;
-  resourceLimits = {};
+	threadId = 0;
+	resourceLimits = {};
 
-  constructor(filename: string, options?: { workerData?: unknown }) {
-    super();
-    console.warn('Worker threads are not fully supported in browser environment');
-  }
+	constructor(filename: string, options?: { "workerData"?: unknown }) {
+		super();
+		console.warn("Worker threads are not fully supported in browser environment");
+	}
 
-  postMessage(value: unknown, transferList?: unknown[]): void {
+	postMessage(value: unknown, transferList?: unknown[]): void {
     // No-op
-  }
+	}
 
-  terminate(): Promise<number> {
-    return Promise.resolve(0);
-  }
+	terminate(): Promise<number> {
+		return Promise.resolve(0);
+	}
 
-  ref(): void {}
-  unref(): void {}
+	ref(): void {}
+	unref(): void {}
 
-  getHeapSnapshot(): Promise<unknown> {
-    return Promise.resolve({});
-  }
+	getHeapSnapshot(): Promise<unknown> {
+		return Promise.resolve({});
+	}
 }
 
 export class MessageChannel {
-  port1 = new MessagePort();
-  port2 = new MessagePort();
+	port1 = new MessagePort();
+	port2 = new MessagePort();
 }
 
 export class MessagePort extends EventEmitter {
-  postMessage(value: unknown, transferList?: unknown[]): void {
+	postMessage(value: unknown, transferList?: unknown[]): void {
     // No-op
-  }
+	}
 
-  start(): void {}
-  close(): void {}
-  ref(): void {}
-  unref(): void {}
+	start(): void {}
+	close(): void {}
+	ref(): void {}
+	unref(): void {}
 }
 
 export class BroadcastChannel extends EventEmitter {
-  name: string;
+	name: string;
 
-  constructor(name: string) {
-    super();
-    this.name = name;
-  }
+	constructor(name: string) {
+		super();
+		this.name = name;
+	}
 
-  postMessage(message: unknown): void {
+	postMessage(message: unknown): void {
     // No-op in single-threaded environment
-  }
+	}
 
-  close(): void {}
-  ref(): void {}
-  unref(): void {}
+	close(): void {}
+	ref(): void {}
+	unref(): void {}
 }
 
 export function moveMessagePortToContext(
-  port: MessagePort,
-  contextifiedSandbox: unknown
+	port: MessagePort,
+	contextifiedSandbox: unknown
 ): MessagePort {
-  return port;
+	return port;
 }
 
-export function receiveMessageOnPort(port: MessagePort): { message: unknown } | undefined {
-  return undefined;
+export function receiveMessageOnPort(port: MessagePort): { "message": unknown } | undefined {
+	return undefined;
 }
 
-export const SHARE_ENV = Symbol.for('nodejs.worker_threads.SHARE_ENV');
+export const SHARE_ENV = Symbol.for("nodejs.worker_threads.SHARE_ENV");
 
 export function markAsUntransferable(object: unknown): void {
   // No-op
 }
 
 export function getEnvironmentData(key: unknown): unknown {
-  return undefined;
+	return undefined;
 }
 
 export function setEnvironmentData(key: unknown, value: unknown): void {
@@ -94,18 +94,18 @@ export function setEnvironmentData(key: unknown, value: unknown): void {
 }
 
 export default {
-  isMainThread,
-  parentPort,
-  workerData,
-  threadId,
-  Worker,
-  MessageChannel,
-  MessagePort,
-  BroadcastChannel,
-  moveMessagePortToContext,
-  receiveMessageOnPort,
-  SHARE_ENV,
-  markAsUntransferable,
-  getEnvironmentData,
-  setEnvironmentData,
+	"isMainThread": isMainThread,
+	"parentPort": parentPort,
+	"workerData": workerData,
+	"threadId": threadId,
+	"Worker": Worker,
+	"MessageChannel": MessageChannel,
+	"MessagePort": MessagePort,
+	"BroadcastChannel": BroadcastChannel,
+	"moveMessagePortToContext": moveMessagePortToContext,
+	"receiveMessageOnPort": receiveMessageOnPort,
+	"SHARE_ENV": SHARE_ENV,
+	"markAsUntransferable": markAsUntransferable,
+	"getEnvironmentData": getEnvironmentData,
+	"setEnvironmentData": setEnvironmentData
 };

@@ -58,10 +58,11 @@ export function installDebugPreview(getApi: () => Api): void {
 	function connect(win: Window): void {
 		const channel = new MessageChannel();
 		const surface = { "port": channel.port1, "win": win };
+
 		surfaces.add(surface);
 
 		channel.port1.onmessage = (event: MessageEvent): void => {
-			const data = event.data;
+			const { data } = event;
 
 			if (data?.type === "event") {
 				// A DOM event on node `id` → run the guest handler in the worker (may hit a breakpoint, M3b).
@@ -100,6 +101,7 @@ export function installDebugPreview(getApi: () => Api): void {
 	api.debug.onDidReceiveDebugSessionCustomEvent((event: { "event": string; "body": any }) => {
 		if (event.event === "tsvalMutation") {
 			const message: ToPreview = { "type": "mutation", "mutation": event.body.mutation };
+
 			buffer.push(message);
 			broadcast(message);
 		} else if (event.event === "tsvalRendered") {
@@ -127,6 +129,7 @@ export function installDebugPreview(getApi: () => Api): void {
 			container.style.padding = "0";
 
 			const frame = document.createElement("iframe");
+
 			frame.src = previewUrl();
 			frame.style.cssText = "display:block;border:0;width:100%;height:100%;background:#1e1e1e";
 			frame.title = "tsval preview";

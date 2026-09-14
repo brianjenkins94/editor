@@ -18,26 +18,27 @@ import { boot, ExtensionHostKind, registerExtension, registerFileSystemOverlay, 
 import { render } from "preact";
 // The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
 // virtual module in entry.config.ts).
+import type { PodBridge } from "./extensions/worker-pod/extension";
+import type { WorkspaceFs } from "./workspace-fs";
+import capabilitiesExtensionCode from "capabilities:extension";
+import eslintExtensionCode from "eslint:extension";
 import helloExtensionCode from "hello:extension";
 import workerPodExtensionCode from "worker-pod:extension";
-import eslintExtensionCode from "eslint:extension";
-import capabilitiesExtensionCode from "capabilities:extension";
-import type { PodBridge } from "./extensions/worker-pod/extension";
-import helloManifest from "./extensions/hello/package.json";
-import workerPodManifest from "./extensions/worker-pod/package.json";
-import eslintManifest from "./extensions/eslint/package.json";
-import capabilitiesManifest from "./extensions/capabilities/package.json";
+import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
-import { installTypeAcquisition } from "./ata";
-import { installWorkspaceFs, type WorkspaceFs } from "./workspace-fs";
-import { relayLoggerToHub } from "./telemetry";
+import capabilitiesManifest from "./extensions/capabilities/package.json";
+import eslintManifest from "./extensions/eslint/package.json";
+import helloManifest from "./extensions/hello/package.json";
+import workerPodManifest from "./extensions/worker-pod/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
-import { createBashProcess } from "./terminal";
 import { connectAsPane } from "./pane-bus";
+import { relayLoggerToHub } from "./telemetry";
+import { createBashProcess } from "./terminal";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
+import { installWorkspaceFs } from "./workspace-fs";
 
 interface Init { "files": WorkbenchFile[]; "openEditors": string[]; "workspaceFolder"?: string; "moduleVersions"?: Record<string, string> }
 
@@ -72,7 +73,8 @@ window.addEventListener("error", (event) => {
 	}
 });
 window.addEventListener("unhandledrejection", (event) => {
-	const reason = event.reason;
+	const { reason } = event;
+
 	// Capture the STACK, not just the message — a bare message is rarely enough to place a boot-time rejection.
 	// Relays to the $sys.log.> collector (debug-mcp). (This is how the workspace-fs fake-URI `e.with` was traced.)
 	paneLog.error("unhandled rejection", {
@@ -146,7 +148,11 @@ function wireWorkbenchHub(workspaceBuffer?: SharedArrayBuffer): void {
 		// top-page link is the transferred MessagePort wired above.)
 		workbenchHub.link({
 			"send": (message) => { bridge.fromWorkbench(message); },
-			"listen": (onMessage) => { const subscription = bridge.toWorkbench(onMessage); return () => { subscription.dispose(); }; }
+			"listen": (onMessage) => {
+				const subscription = bridge.toWorkbench(onMessage);
+
+				return () => { subscription.dispose(); };
+			}
 		});
 	}).catch((error: unknown) => { paneLog.error("workbench hub uplink failed", { "error": errText(error) }); });
 }
@@ -212,7 +218,11 @@ function maybeBoot(): void {
 			// zen-fs unification (M0): back the workspace with a zen-fs-backed FileSystemProvider the type-checker
 			// reads through (priority 2, above the boot seed). Additive for now — proves the mechanism; later
 			// milestones make it the sole store. See workspace-fs.ts.
-			workspaceFs = await installWorkspaceFs(files, paneLog).catch((error: unknown) => { bootSpan.error("workspace zen-fs failed", { "error": errText(error) }); return undefined; });
+			workspaceFs = await installWorkspaceFs(files, paneLog).catch((error: unknown) => {
+				bootSpan.error("workspace zen-fs failed", { "error": errText(error) });
+
+				return undefined;
+			});
 			// Filesystem overlays, layered UNDER the seeded snapshot (they only answer paths the in-memory
 			// FS misses, falling through on FileNotFound). Registered after boot so the file service is up.
 			// The CDN node_modules overlay is the first; a real-disk File System Access overlay will be its

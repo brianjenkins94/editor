@@ -168,7 +168,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		});
 	};
 
-
 	return {
 		"capabilities":
 			FileSystemProviderCapabilities.FileReadWrite

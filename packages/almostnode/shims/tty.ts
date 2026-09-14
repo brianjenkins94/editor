@@ -3,62 +3,67 @@
  * Provides terminal detection utilities
  */
 
-import { Readable, Writable } from './stream';
+import { Readable, Writable } from "./stream";
 
 export class ReadStream extends Readable {
-  isTTY: boolean = false;
-  isRaw: boolean = false;
+	isTTY = false;
+	isRaw = false;
 
-  setRawMode(mode: boolean): this {
-    this.isRaw = mode;
-    return this;
-  }
+	setRawMode(mode: boolean): this {
+		this.isRaw = mode;
+
+		return this;
+	}
 }
 
 export class WriteStream extends Writable {
-  isTTY: boolean = false;
-  columns: number = 80;
-  rows: number = 24;
+	isTTY = false;
+	columns = 80;
+	rows = 24;
 
-  clearLine(dir: number, callback?: () => void): boolean {
-    if (callback) callback();
-    return true;
-  }
+	clearLine(dir: number, callback?: () => void): boolean {
+		if (callback) { callback(); }
 
-  clearScreenDown(callback?: () => void): boolean {
-    if (callback) callback();
-    return true;
-  }
+		return true;
+	}
 
-  cursorTo(x: number, y?: number, callback?: () => void): boolean {
-    if (callback) callback();
-    return true;
-  }
+	clearScreenDown(callback?: () => void): boolean {
+		if (callback) { callback(); }
 
-  moveCursor(dx: number, dy: number, callback?: () => void): boolean {
-    if (callback) callback();
-    return true;
-  }
+		return true;
+	}
 
-  getColorDepth(env?: object): number {
-    return 1; // No color support in browser
-  }
+	cursorTo(x: number, y?: number, callback?: () => void): boolean {
+		if (callback) { callback(); }
 
-  hasColors(count?: number | object, env?: object): boolean {
-    return false;
-  }
+		return true;
+	}
 
-  getWindowSize(): [number, number] {
-    return [this.columns, this.rows];
-  }
+	moveCursor(dx: number, dy: number, callback?: () => void): boolean {
+		if (callback) { callback(); }
+
+		return true;
+	}
+
+	getColorDepth(env?: object): number {
+		return 1; // No color support in browser
+	}
+
+	hasColors(count?: number | object, env?: object): boolean {
+		return false;
+	}
+
+	getWindowSize(): [number, number] {
+		return [this.columns, this.rows];
+	}
 }
 
 export function isatty(fd: number): boolean {
-  return false; // Browser is never a TTY
+	return false; // Browser is never a TTY
 }
 
 export default {
-  ReadStream,
-  WriteStream,
-  isatty,
+	"ReadStream": ReadStream,
+	"WriteStream": WriteStream,
+	"isatty": isatty
 };

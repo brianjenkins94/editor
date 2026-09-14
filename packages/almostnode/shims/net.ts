@@ -4,367 +4,378 @@
  * Basic Socket and Server classes for virtual networking
  */
 
-import { EventEmitter, EventListener } from './events';
-import { Duplex, Buffer } from './stream';
+import type { EventListener } from "./events";
+import { EventEmitter } from "./events";
+import { Buffer, Duplex } from "./stream";
 
 // Keep the host's process alive while a server is listening (Node treats a listening server as a ref'd handle).
 // This hook is installed ONLY in the terminal's node worker (node-keepalive.ts) so it knows a `node server.js`
 // hasn't finished; everywhere else it's absent and these calls are no-ops.
-interface KeepAliveHook { retain(handle: object): void; release(handle: object): void; }
-const keepAlive = (): KeepAliveHook | undefined => (globalThis as unknown as { __nodeKeepAlive?: KeepAliveHook }).__nodeKeepAlive;
+interface KeepAliveHook { "retain": (handle: object) => void; "release": (handle: object) => void }
+const keepAlive = (): KeepAliveHook | undefined => (globalThis as unknown as { "__nodeKeepAlive"?: KeepAliveHook }).__nodeKeepAlive;
 
 export interface AddressInfo {
-  address: string;
-  family: string;
-  port: number;
+	"address": string;
+	"family": string;
+	"port": number;
 }
 
 export interface SocketOptions {
-  allowHalfOpen?: boolean;
-  readable?: boolean;
-  writable?: boolean;
+	"allowHalfOpen"?: boolean;
+	"readable"?: boolean;
+	"writable"?: boolean;
 }
 
 export interface ServerOptions {
-  allowHalfOpen?: boolean;
-  pauseOnConnect?: boolean;
+	"allowHalfOpen"?: boolean;
+	"pauseOnConnect"?: boolean;
 }
 
 export interface ListenOptions {
-  port?: number;
-  host?: string;
-  backlog?: number;
+	"port"?: number;
+	"host"?: string;
+	"backlog"?: number;
 }
 
 /**
  * Virtual Socket implementation
  */
 export class Socket extends Duplex {
-  private _connecting: boolean = false;
-  private _connected: boolean = false;
-  private _destroyed: boolean = false;
-  private _remoteAddress: string = '';
-  private _remotePort: number = 0;
-  private _localAddress: string = '127.0.0.1';
-  private _localPort: number = 0;
+	private _connecting = false;
+	private _connected = false;
+	private _destroyed = false;
+	private _remoteAddress = "";
+	private _remotePort = 0;
+	private readonly _localAddress = "127.0.0.1";
+	private readonly _localPort = 0;
 
-  localAddress: string = '127.0.0.1';
-  localPort: number = 0;
-  remoteAddress?: string;
-  remotePort?: number;
-  remoteFamily?: string;
-  connecting: boolean = false;
-  destroyed: boolean = false;
-  readyState: string = 'closed';
+	localAddress = "127.0.0.1";
+	localPort = 0;
+	remoteAddress?: string;
+	remotePort?: number;
+	remoteFamily?: string;
+	connecting = false;
+	destroyed = false;
+	readyState = "closed";
 
-  constructor(options?: SocketOptions) {
-    super();
-  }
+	constructor(options?: SocketOptions) {
+		super();
+	}
 
-  connect(
-    portOrOptions: number | { port: number; host?: string },
-    hostOrCallback?: string | (() => void),
-    callback?: () => void
-  ): this {
-    let port: number;
-    let host: string = '127.0.0.1';
-    let cb: (() => void) | undefined;
+	connect(
+		portOrOptions: number | { "port": number; "host"?: string },
+		hostOrCallback?: string | (() => void),
+		callback?: () => void
+	): this {
+		let port: number;
+		let host = "127.0.0.1";
+		let cb: (() => void) | undefined;
 
-    if (typeof portOrOptions === 'number') {
-      port = portOrOptions;
-      if (typeof hostOrCallback === 'string') {
-        host = hostOrCallback;
-        cb = callback;
-      } else {
-        cb = hostOrCallback;
-      }
-    } else {
-      port = portOrOptions.port;
-      host = portOrOptions.host || '127.0.0.1';
-      cb = typeof hostOrCallback === 'function' ? hostOrCallback : callback;
-    }
+		if (typeof portOrOptions === "number") {
+			port = portOrOptions;
+			if (typeof hostOrCallback === "string") {
+				host = hostOrCallback;
+				cb = callback;
+			} else {
+				cb = hostOrCallback;
+			}
+		} else {
+			port = portOrOptions.port;
+			host = portOrOptions.host || "127.0.0.1";
+			cb = typeof hostOrCallback === "function" ? hostOrCallback : callback;
+		}
 
-    this._connecting = true;
-    this.connecting = true;
-    this._remoteAddress = host;
-    this._remotePort = port;
-    this.remoteAddress = host;
-    this.remotePort = port;
-    this.remoteFamily = 'IPv4';
-    this.readyState = 'opening';
+		this._connecting = true;
+		this.connecting = true;
+		this._remoteAddress = host;
+		this._remotePort = port;
+		this.remoteAddress = host;
+		this.remotePort = port;
+		this.remoteFamily = "IPv4";
+		this.readyState = "opening";
 
     // Simulate async connection
-    queueMicrotask(() => {
-      this._connecting = false;
-      this._connected = true;
-      this.connecting = false;
-      this.readyState = 'open';
-      this.emit('connect');
-      if (cb) cb();
-    });
+		queueMicrotask(() => {
+			this._connecting = false;
+			this._connected = true;
+			this.connecting = false;
+			this.readyState = "open";
+			this.emit("connect");
+			if (cb) { cb(); }
+		});
 
-    return this;
-  }
+		return this;
+	}
 
-  address(): AddressInfo | null {
-    if (!this._connected) return null;
-    return {
-      address: this._localAddress,
-      family: 'IPv4',
-      port: this._localPort,
-    };
-  }
+	address(): AddressInfo | null {
+		if (!this._connected) { return null; }
 
-  setEncoding(encoding: BufferEncoding): this {
-    return this;
-  }
+		return {
+			"address": this._localAddress,
+			"family": "IPv4",
+			"port": this._localPort
+		};
+	}
 
-  setTimeout(timeout: number, callback?: () => void): this {
-    if (callback) {
-      this.once('timeout', callback);
-    }
-    return this;
-  }
+	setEncoding(encoding: BufferEncoding): this {
+		return this;
+	}
 
-  setNoDelay(noDelay?: boolean): this {
-    return this;
-  }
+	setTimeout(timeout: number, callback?: () => void): this {
+		if (callback) {
+			this.once("timeout", callback);
+		}
 
-  setKeepAlive(enable?: boolean, initialDelay?: number): this {
-    return this;
-  }
+		return this;
+	}
 
-  ref(): this {
-    return this;
-  }
+	setNoDelay(noDelay?: boolean): this {
+		return this;
+	}
 
-  unref(): this {
-    return this;
-  }
+	setKeepAlive(enable?: boolean, initialDelay?: number): this {
+		return this;
+	}
 
-  destroy(error?: Error): this {
-    if (this._destroyed) return this;
+	ref(): this {
+		return this;
+	}
 
-    this._destroyed = true;
-    this._connected = false;
-    this.destroyed = true;
-    this.readyState = 'closed';
+	unref(): this {
+		return this;
+	}
 
-    if (error) {
-      this.emit('error', error);
-    }
+	destroy(error?: Error): this {
+		if (this._destroyed) { return this; }
 
-    queueMicrotask(() => {
-      this.emit('close', !!error);
-    });
+		this._destroyed = true;
+		this._connected = false;
+		this.destroyed = true;
+		this.readyState = "closed";
 
-    return this;
-  }
+		if (error) {
+			this.emit("error", error);
+		}
+
+		queueMicrotask(() => {
+			this.emit("close", Boolean(error));
+		});
+
+		return this;
+	}
 
   // Internal: simulate receiving data from remote
-  _receiveData(data: Buffer | string): void {
-    const buffer = typeof data === 'string' ? Buffer.from(data) : data;
-    this.push(buffer);
-  }
+	_receiveData(data: Buffer | string): void {
+		const buffer = typeof data === "string" ? Buffer.from(data) : data;
+
+		this.push(buffer);
+	}
 
   // Internal: signal end of remote data
-  _receiveEnd(): void {
-    this.push(null);
-  }
+	_receiveEnd(): void {
+		this.push(null);
+	}
 }
 
 /**
  * Virtual Server implementation
  */
 export class Server extends EventEmitter {
-  private _listening: boolean = false;
-  private _address: AddressInfo | null = null;
-  private _connections: Set<Socket> = new Set();
-  private _maxConnections: number = Infinity;
+	private _listening = false;
+	private _address: AddressInfo | null = null;
+	private readonly _connections = new Set<Socket>();
+	private readonly _maxConnections = Infinity;
 
-  listening: boolean = false;
-  maxConnections?: number;
+	listening = false;
+	maxConnections?: number;
 
-  constructor(
-    optionsOrConnectionListener?: ServerOptions | ((socket: Socket) => void),
-    connectionListener?: (socket: Socket) => void
-  ) {
-    super();
+	constructor(
+		optionsOrConnectionListener?: ServerOptions | ((socket: Socket) => void),
+		connectionListener?: (socket: Socket) => void
+	) {
+		super();
 
-    let listener: ((socket: Socket) => void) | undefined;
+		let listener: ((socket: Socket) => void) | undefined;
 
-    if (typeof optionsOrConnectionListener === 'function') {
-      listener = optionsOrConnectionListener;
-    } else {
-      listener = connectionListener;
-    }
+		if (typeof optionsOrConnectionListener === "function") {
+			listener = optionsOrConnectionListener;
+		} else {
+			listener = connectionListener;
+		}
 
-    if (listener) {
-      this.on('connection', listener as EventListener);
-    }
-  }
+		if (listener) {
+			this.on("connection", listener as EventListener);
+		}
+	}
 
-  listen(
-    portOrOptions?: number | ListenOptions,
-    hostOrCallback?: string | number | (() => void),
-    backlogOrCallback?: number | (() => void),
-    callback?: () => void
-  ): this {
-    let port: number = 0;
-    let host: string = '0.0.0.0';
-    let cb: (() => void) | undefined;
+	listen(
+		portOrOptions?: number | ListenOptions,
+		hostOrCallback?: string | number | (() => void),
+		backlogOrCallback?: number | (() => void),
+		callback?: () => void
+	): this {
+		let port = 0;
+		let host = "0.0.0.0";
+		let cb: (() => void) | undefined;
 
-    if (typeof portOrOptions === 'number') {
-      port = portOrOptions;
+		if (typeof portOrOptions === "number") {
+			port = portOrOptions;
 
-      if (typeof hostOrCallback === 'string') {
-        host = hostOrCallback;
-        if (typeof backlogOrCallback === 'function') {
-          cb = backlogOrCallback;
-        } else {
-          cb = callback;
-        }
-      } else if (typeof hostOrCallback === 'function') {
-        cb = hostOrCallback;
-      } else if (typeof hostOrCallback === 'number') {
+			if (typeof hostOrCallback === "string") {
+				host = hostOrCallback;
+				if (typeof backlogOrCallback === "function") {
+					cb = backlogOrCallback;
+				} else {
+					cb = callback;
+				}
+			} else if (typeof hostOrCallback === "function") {
+				cb = hostOrCallback;
+			} else if (typeof hostOrCallback === "number") {
         // backlog
-        cb = typeof backlogOrCallback === 'function' ? backlogOrCallback : callback;
-      } else {
+				cb = typeof backlogOrCallback === "function" ? backlogOrCallback : callback;
+			} else {
         // hostOrCallback is undefined, check if callback is in third position
-        if (typeof backlogOrCallback === 'function') {
-          cb = backlogOrCallback;
-        } else if (typeof callback === 'function') {
-          cb = callback;
-        }
-      }
-    } else if (portOrOptions) {
-      port = portOrOptions.port || 0;
-      host = portOrOptions.host || '0.0.0.0';
-      cb = typeof hostOrCallback === 'function' ? hostOrCallback : callback;
-    }
+				if (typeof backlogOrCallback === "function") {
+					cb = backlogOrCallback;
+				} else if (typeof callback === "function") {
+					cb = callback;
+				}
+			}
+		} else if (portOrOptions) {
+			port = portOrOptions.port || 0;
+			host = portOrOptions.host || "0.0.0.0";
+			cb = typeof hostOrCallback === "function" ? hostOrCallback : callback;
+		}
 
     // Assign random port if 0
-    if (port === 0) {
-      port = 3000 + Math.floor(Math.random() * 1000);
-    }
+		if (port === 0) {
+			port = 3000 + Math.floor(Math.random() * 1000);
+		}
 
-    this._address = {
-      address: host,
-      family: 'IPv4',
-      port,
-    };
+		this._address = {
+			"address": host,
+			"family": "IPv4",
+			"port": port
+		};
 
-    this._listening = true;
-    this.listening = true;
-    keepAlive()?.retain(this); // a listening server keeps the process alive
+		this._listening = true;
+		this.listening = true;
+		keepAlive()?.retain(this); // a listening server keeps the process alive
 
-    queueMicrotask(() => {
-      this.emit('listening');
-      if (cb) cb();
-    });
+		queueMicrotask(() => {
+			this.emit("listening");
+			if (cb) { cb(); }
+		});
 
-    return this;
-  }
+		return this;
+	}
 
-  address(): AddressInfo | null {
-    return this._address;
-  }
+	address(): AddressInfo | null {
+		return this._address;
+	}
 
-  close(callback?: (err?: Error) => void): this {
-    this._listening = false;
-    this.listening = false;
-    keepAlive()?.release(this); // no longer listening — stop holding the process open
+	close(callback?: (err?: Error) => void): this {
+		this._listening = false;
+		this.listening = false;
+		keepAlive()?.release(this); // no longer listening — stop holding the process open
 
     // Close all connections
-    for (const socket of this._connections) {
-      socket.destroy();
-    }
-    this._connections.clear();
+		for (const socket of this._connections) {
+			socket.destroy();
+		}
 
-    queueMicrotask(() => {
-      this.emit('close');
-      if (callback) callback();
-    });
+		this._connections.clear();
 
-    return this;
-  }
+		queueMicrotask(() => {
+			this.emit("close");
+			if (callback) { callback(); }
+		});
 
-  getConnections(callback: (err: Error | null, count: number) => void): void {
-    callback(null, this._connections.size);
-  }
+		return this;
+	}
 
-  ref(): this {
-    keepAlive()?.retain(this); // opt back into keeping the process alive
-    return this;
-  }
+	getConnections(callback: (err: Error | null, count: number) => void): void {
+		callback(null, this._connections.size);
+	}
 
-  unref(): this {
-    keepAlive()?.release(this); // let the process exit even while this server is open
-    return this;
-  }
+	ref(): this {
+		keepAlive()?.retain(this); // opt back into keeping the process alive
+
+		return this;
+	}
+
+	unref(): this {
+		keepAlive()?.release(this); // let the process exit even while this server is open
+
+		return this;
+	}
 
   // Internal: handle incoming connection
-  _handleConnection(socket: Socket): void {
-    if (!this._listening) {
-      socket.destroy();
-      return;
-    }
+	_handleConnection(socket: Socket): void {
+		if (!this._listening) {
+			socket.destroy();
 
-    this._connections.add(socket);
+			return;
+		}
 
-    socket.on('close', () => {
-      this._connections.delete(socket);
-    });
+		this._connections.add(socket);
 
-    this.emit('connection', socket);
-  }
+		socket.on("close", () => {
+			this._connections.delete(socket);
+		});
+
+		this.emit("connection", socket);
+	}
 }
 
 export function createServer(
-  optionsOrConnectionListener?: ServerOptions | ((socket: Socket) => void),
-  connectionListener?: (socket: Socket) => void
+	optionsOrConnectionListener?: ServerOptions | ((socket: Socket) => void),
+	connectionListener?: (socket: Socket) => void
 ): Server {
-  return new Server(optionsOrConnectionListener, connectionListener);
+	return new Server(optionsOrConnectionListener, connectionListener);
 }
 
 export function createConnection(
-  portOrOptions: number | { port: number; host?: string },
-  hostOrCallback?: string | (() => void),
-  callback?: () => void
+	portOrOptions: number | { "port": number; "host"?: string },
+	hostOrCallback?: string | (() => void),
+	callback?: () => void
 ): Socket {
-  const socket = new Socket();
-  return socket.connect(portOrOptions, hostOrCallback as string, callback);
+	const socket = new Socket();
+
+	return socket.connect(portOrOptions, hostOrCallback, callback);
 }
 
 export const connect = createConnection;
 
 export function isIP(input: string): number {
   // Simple IPv4 check
-  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(input)) {
-    return 4;
-  }
+	if (/^(\d{1,3}\.){3}\d{1,3}$/.test(input)) {
+		return 4;
+	}
+
   // Simple IPv6 check
-  if (/^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/.test(input)) {
-    return 6;
-  }
-  return 0;
+	if (/^([0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}$/i.test(input)) {
+		return 6;
+	}
+
+	return 0;
 }
 
 export function isIPv4(input: string): boolean {
-  return isIP(input) === 4;
+	return isIP(input) === 4;
 }
 
 export function isIPv6(input: string): boolean {
-  return isIP(input) === 6;
+	return isIP(input) === 6;
 }
 
 export default {
-  Socket,
-  Server,
-  createServer,
-  createConnection,
-  connect,
-  isIP,
-  isIPv4,
-  isIPv6,
+	"Socket": Socket,
+	"Server": Server,
+	"createServer": createServer,
+	"createConnection": createConnection,
+	"connect": connect,
+	"isIP": isIP,
+	"isIPv4": isIPv4,
+	"isIPv6": isIPv6
 };

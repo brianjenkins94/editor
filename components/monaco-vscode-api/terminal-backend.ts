@@ -13,18 +13,18 @@
  * (Replaces the vendored demo `TerminalBackend`, which lived in the gitignored `demo/` tree and so couldn't carry
  * a committed change.)
  */
+import type { ITerminalChildProcess } from "@codingame/monaco-vscode-terminal-service-override";
 import {
-	ITerminalChildProcess,
 	SimpleTerminalBackend,
 	SimpleTerminalProcess
 } from "@codingame/monaco-vscode-terminal-service-override";
 import * as vscode from "vscode";
 
 export interface TerminalProcess {
-	start: () => void;
-	input: (data: string) => void;
-	resize?: (cols: number, rows: number) => void;
-	shutdown?: () => void;
+	"start": () => void;
+	"input": (data: string) => void;
+	"resize"?: (cols: number, rows: number) => void;
+	"shutdown"?: () => void;
 }
 
 export type TerminalProcessFactory = (fire: (data: string) => void, cwd: string) => TerminalProcess;
@@ -58,7 +58,7 @@ export class TerminalBackend extends SimpleTerminalBackend {
 			async start(): Promise<undefined> {
 				const factory = await whenFactory(); // may resolve after boot creates this process
 
-				process = factory((data) => dataEmitter.fire(data), cwd);
+				process = factory((data) => { dataEmitter.fire(data); }, cwd);
 				process.start();
 
 				if (buffered !== "") {
@@ -81,9 +81,8 @@ export class TerminalBackend extends SimpleTerminalBackend {
 				process?.resize?.(cols, rows);
 			}
 
-			override shutdown(immediate: boolean): void {
+			override shutdown(): void {
 				process?.shutdown?.();
-				void immediate;
 			}
 
 			override clearBuffer(): void | Promise<void> { /* nothing buffered */ }

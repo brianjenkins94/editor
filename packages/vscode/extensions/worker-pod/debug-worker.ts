@@ -15,20 +15,22 @@
  * On every stop the worker sends the adapter a COMPLETE snapshot (frame + Locals scope + variable values), so
  * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
-import ts from "typescript";
-import React from "react";
+import type { LoadedVM } from "@brianjenkins94/tsval";
+import type { GuestRoot } from "./debug-react";
 
 import { createHub, portTransport } from "@brianjenkins94/hub";
-import { createVM, type LoadedVM } from "@brianjenkins94/tsval";
+import { createVM } from "@brianjenkins94/tsval";
+import React from "react";
 
+import ts from "typescript";
 import { relayLoggerToHub } from "../../telemetry";
-import { createGuestRoot, type GuestRoot } from "./debug-react";
+import { createGuestRoot } from "./debug-react";
 
 // This worker's own hub, linked UP to the pod hub over its own channel (hub messages are `\0hub`-wrapped, so
 // they ride alongside the raw {type} debug protocol without collision). It announces `pod.ready` after launch.
 const hub = createHub({ "id": "debug-worker" });
 
-hub.link(portTransport(globalThis as unknown as Worker));
+hub.link(portTransport(globalThis));
 
 // This worker's util/logger spans/records federate UP through the pod (which links our hub) to the root
 // collector — so a step's span shows up in the top-page timeline with no worker→page window path of its own.
@@ -38,7 +40,7 @@ type Vm = LoadedVM["vm"];
 
 /** A span's cross-context trace context (from @brianjenkins94/hub's envelope shape), carried on the control
  *  messages that trigger work here so this worker's span continues the adapter's trace (see continueSpan). */
-type TraceContext = { "traceId": string; "parentSpanId": string };
+interface TraceContext { "traceId": string; "parentSpanId": string }
 
 /** Control messages from the adapter. */
 type Incoming =
@@ -60,7 +62,7 @@ interface Snapshot {
 	"traveled"?: boolean;
 }
 
-const post = (message: Record<string, unknown>): void => { (globalThis as unknown as Worker).postMessage(message); };
+function post(message: Record<string, unknown>): void { (globalThis as unknown as Worker).postMessage(message); }
 
 let sourceFile: ts.SourceFile | undefined;
 /** Forks, one per stop reached; `index` is the currently-displayed stop. */
@@ -94,6 +96,7 @@ function format(value: unknown): string {
 		case "object":
 			if (value === null) { return "null"; }
 			try { return Array.isArray(value) ? `Array(${value.length})` : "{…}"; } catch { return "{…}"; }
+
 		default: return String(value);
 	}
 }
@@ -136,8 +139,8 @@ function snapshot(vm: Vm): Snapshot {
 
 	return {
 		"frames": [{ "id": 1, "name": functionName(loc?.pos), "line": (loc?.line ?? 0) + 1, "column": (loc?.character ?? 0) + 1 }],
-		"scopes": { 1: [{ "name": "Locals", "variablesReference": 1000, "expensive": false }] },
-		"variables": { 1000: rows }
+		"scopes": { "1": [{ "name": "Locals", "variablesReference": 1000, "expensive": false }] },
+		"variables": { "1000": rows }
 	};
 }
 
@@ -150,14 +153,13 @@ function functionName(pos: number | undefined): string {
 		return "<module>";
 	}
 
-	const isFunctionLike = (node: ts.Node): boolean =>
-		ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node);
+	const isFunctionLike = (node: ts.Node): boolean => ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node);
 	let best: ts.FunctionLikeDeclaration | undefined;
 	let bestSpan = Infinity;
 
 	const visit = (node: ts.Node): void => {
-		if (isFunctionLike(node) && node.getStart(sourceFile!) <= pos && pos < node.getEnd()) {
-			const span = node.getEnd() - node.getStart(sourceFile!);
+		if (isFunctionLike(node) && node.getStart(sourceFile) <= pos && pos < node.getEnd()) {
+			const span = node.getEnd() - node.getStart(sourceFile);
 
 			if (span < bestSpan) {
 				bestSpan = span;
@@ -281,6 +283,7 @@ async function session(initial: Vm, launchTrace?: TraceContext): Promise<void> {
 
 	while (!done) {
 		const action = await nextAction();
+
 		handle(action);
 	}
 }
@@ -293,11 +296,11 @@ async function session(initial: Vm, launchTrace?: TraceContext): Promise<void> {
  * events routed back from the iframe) — each re-renders and streams more mutations.
  */
 function launchReact(message: Extract<Incoming, { "type": "launch" }>): void {
-	guestRoot = createGuestRoot(React, (mutation) => post({ "type": "mutation", "mutation": mutation }));
+	guestRoot = createGuestRoot(React, (mutation) => { post({ "type": "mutation", "mutation": mutation }); });
 
 	const reactDom = {
-		"createRoot": () => ({ "render": (element: unknown) => guestRoot?.render(element), "unmount": () => guestRoot?.unmount() }),
-		"render": (element: unknown) => guestRoot?.render(element)
+		"createRoot": () => ({ "render": (element: unknown) => { guestRoot?.render(element); }, "unmount": () => { guestRoot?.unmount(); } }),
+		"render": (element: unknown) => { guestRoot?.render(element); }
 	};
 	// Minimal document shim so `ReactDOM.createRoot(document.getElementById("root"))` (the idiomatic entry)
 	// doesn't throw; the container arg is ignored (our root is the reconciler container).
@@ -308,6 +311,7 @@ function launchReact(message: Extract<Incoming, { "type": "launch" }>): void {
 		"onBreakpoint": onBreakpointHook,
 		"globals": { "React": React, "ReactDOM": reactDom, "document": documentShim }
 	});
+
 	sourceFile = loaded.sourceFile;
 	loaded.vm.addBreakpointsByLine(...message.lines);
 
@@ -345,6 +349,7 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 			}
 
 			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook });
+
 			sourceFile = loaded.sourceFile;
 			loaded.vm.addBreakpointsByLine(...message.lines);
 			history = [];
@@ -381,6 +386,7 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 				vm.breakpoints.clear();
 				vm.addBreakpointsByLine(...message.lines);
 			}
+
 			break;
 
 		case "continue":
@@ -393,9 +399,11 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 			if (awaitAction !== undefined) {
 				actionTrace = message.traceContext; // continue the adapter action's trace in the step it drives
 				const resolve = awaitAction;
+
 				awaitAction = undefined;
 				resolve(message.type);
 			}
+
 			break;
 
 		default:

@@ -19,8 +19,8 @@
  * and skips anything already present there — which is its cross-reload dedup, since that store persists (so a
  * reload refetches nothing and only genuinely new imports hit the network). No bespoke cache of its own.
  */
-import type * as vscode from "vscode";
 import type { Logger } from "@brianjenkins94/util/logger";
+import type * as vscode from "vscode";
 
 /** Files whose imports are worth acquiring types for. */
 const RELEVANT = /\.(?:tsx?|jsx?|mts|cts)$/u;
@@ -394,10 +394,10 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			clearTimeout(timer);
 		}
 
-		timer = setTimeout(() => run(document), DEBOUNCE_MS);
+		timer = setTimeout(run, DEBOUNCE_MS, document);
 	};
 
-	api.window.onDidChangeActiveTextEditor((editor) => schedule(editor?.document));
-	api.workspace.onDidChangeTextDocument((event) => schedule(event.document));
+	api.window.onDidChangeActiveTextEditor((editor) => { schedule(editor?.document); });
+	api.workspace.onDidChangeTextDocument((event) => { schedule(event.document); });
 	run(api.window.activeTextEditor?.document); // acquire for whatever's already open
 }

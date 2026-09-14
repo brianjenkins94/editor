@@ -13,8 +13,8 @@
  * reusable worker is enough. A fresh worker announces `node.ready` once subscribed, so the first `node.start`
  * after a (re)spawn can't out-race the worker's interest and be dropped by the router.
  */
-import { portTransport } from "@brianjenkins94/hub";
 import type { Hub } from "@brianjenkins94/hub";
+import { portTransport } from "@brianjenkins94/hub";
 
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
 export type NodeOutput = (stream: "out" | "err", data: string) => void;

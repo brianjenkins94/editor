@@ -7,9 +7,9 @@
 //   echo 'const x = 1' | node run.mjs           # production defaults to the grammar's defaultMatcher
 //
 import { readFileSync } from "node:fs";
-import { exec } from "@brianjenkins94/util/exec";
 import * as path from "node:path";
 import * as url from "node:url";
+import { exec } from "@brianjenkins94/util/exec";
 
 const here = path.dirname(url.fileURLToPath(import.meta.url));
 const grammarUrl = url.pathToFileURL(path.resolve(here, "lib/grammar.ts")).href;

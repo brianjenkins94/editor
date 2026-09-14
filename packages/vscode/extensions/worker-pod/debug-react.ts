@@ -28,7 +28,7 @@ export type Mutation =
 
 interface Instance { "id": number; "type": string }
 interface TextInstance { "id": number }
-type Container = { "id": "root" };
+interface Container { "id": "root" }
 
 export interface GuestRoot {
 	/** Render a React element (typically `React.createElement(App)`) — mount or update. Runs the guest
@@ -72,14 +72,19 @@ export function createGuestRoot(React: typeof ReactNamespace, emit: (mutation: M
 	let values = new Map<number, unknown>();
 	let nextKey = 1;
 	const subscribers = new Set<() => void>();
-	const subscribe = (callback: () => void): (() => void) => { subscribers.add(callback); return () => subscribers.delete(callback); };
+	const subscribe = (callback: () => void): (() => void) => {
+		subscribers.add(callback);
+
+		return () => subscribers.delete(callback);
+	};
+
 	const notify = (): void => { for (const callback of subscribers) { callback(); } };
 	const history: Map<number, unknown>[] = [];
 	const snapshot = (): void => { history.push(new Map(values)); };
 
 	// Replace React.useState with a store-backed version (it still uses React's own useRef/useSyncExternalStore,
 	// so it's a valid hook). The worker's React is per-session, so patching it is safe.
-	(React as { "useState": unknown }).useState = <S,>(initial: S | (() => S)): [S, (next: S | ((prev: S) => S)) => void] => {
+	(React as { "useState": unknown }).useState = <S>(initial: S | (() => S)): [S, (next: S | ((prev: S) => S)) => void] => {
 		const keyRef = React.useRef<number | null>(null);
 
 		if (keyRef.current === null) {
@@ -149,6 +154,7 @@ export function createGuestRoot(React: typeof ReactNamespace, emit: (mutation: M
 		"shouldSetTextContent": () => false,
 		"createInstance": (type: string, props: Record<string, unknown>): Instance => {
 			const instance: Instance = { "id": nextId, "type": type };
+
 			nextId += 1;
 			emit({ "op": "createElement", "id": instance.id, "type": type });
 
@@ -160,17 +166,18 @@ export function createGuestRoot(React: typeof ReactNamespace, emit: (mutation: M
 		},
 		"createTextInstance": (text: string): TextInstance => {
 			const instance: TextInstance = { "id": nextId };
+
 			nextId += 1;
 			emit({ "op": "createText", "id": instance.id, "text": text });
 
 			return instance;
 		},
-		"appendInitialChild": (parent: Instance, child: Instance | TextInstance) => emit({ "op": "appendChild", "parent": parent.id, "child": child.id }),
+		"appendInitialChild": (parent: Instance, child: Instance | TextInstance) => { emit({ "op": "appendChild", "parent": parent.id, "child": child.id }); },
 		"finalizeInitialChildren": () => false,
-		"appendChild": (parent: Instance, child: Instance | TextInstance) => emit({ "op": "appendChild", "parent": parent.id, "child": child.id }),
-		"appendChildToContainer": (_container: Container, child: Instance | TextInstance) => emit({ "op": "appendChild", "parent": "root", "child": child.id }),
-		"insertBefore": (parent: Instance, child: Instance | TextInstance, before: Instance | TextInstance) => emit({ "op": "insertBefore", "parent": parent.id, "child": child.id, "before": before.id }),
-		"insertInContainerBefore": (_container: Container, child: Instance | TextInstance, before: Instance | TextInstance) => emit({ "op": "insertBefore", "parent": "root", "child": child.id, "before": before.id }),
+		"appendChild": (parent: Instance, child: Instance | TextInstance) => { emit({ "op": "appendChild", "parent": parent.id, "child": child.id }); },
+		"appendChildToContainer": (_container: Container, child: Instance | TextInstance) => { emit({ "op": "appendChild", "parent": "root", "child": child.id }); },
+		"insertBefore": (parent: Instance, child: Instance | TextInstance, before: Instance | TextInstance) => { emit({ "op": "insertBefore", "parent": parent.id, "child": child.id, "before": before.id }); },
+		"insertInContainerBefore": (_container: Container, child: Instance | TextInstance, before: Instance | TextInstance) => { emit({ "op": "insertBefore", "parent": "root", "child": child.id, "before": before.id }); },
 		"removeChild": (parent: Instance, child: Instance | TextInstance) => { handlers.delete(child.id); emit({ "op": "removeChild", "parent": parent.id, "child": child.id }); },
 		"removeChildFromContainer": (_container: Container, child: Instance | TextInstance) => { handlers.delete(child.id); emit({ "op": "removeChild", "parent": "root", "child": child.id }); },
 		"clearContainer": () => undefined,
@@ -193,7 +200,7 @@ export function createGuestRoot(React: typeof ReactNamespace, emit: (mutation: M
 				}
 			}
 		},
-		"commitTextUpdate": (instance: TextInstance, _old: string, next: string) => emit({ "op": "setText", "id": instance.id, "text": next }),
+		"commitTextUpdate": (instance: TextInstance, _old: string, next: string) => { emit({ "op": "setText", "id": instance.id, "text": next }); },
 		"getPublicInstance": (instance: Instance) => instance,
 		"getInstanceFromNode": () => null,
 		"getInstanceFromScope": () => null,
@@ -204,7 +211,7 @@ export function createGuestRoot(React: typeof ReactNamespace, emit: (mutation: M
 		"maySuspendCommit": () => false
 	};
 
-	const reconciler = Reconciler(hostConfig as unknown as Reconciler.HostConfig<string, Record<string, unknown>, Container, Instance, TextInstance, never, never, Instance, unknown, unknown, number, number, number>);
+	const reconciler = Reconciler(hostConfig);
 	const root = reconciler.createContainer({ "id": "root" }, 0, null, false, null, "", () => undefined, null);
 
 	return {

@@ -1,9 +1,9 @@
 /** @jsxImportSource preact */
 import type { Preview } from "./preview";
+import { createHub } from "@brianjenkins94/hub";
 import types from "editor:types";
 import moduleVersions from "editor:versions";
 import workspace from "editor:workspace";
-import { createHub } from "@brianjenkins94/hub";
 import { ensureCrossOriginIsolated } from "./coi";
 import { hostLog } from "./logging";
 import { consoleCollector, installHubCollector, linkDebugMcp, linkServiceWorkerHub, servePageTools } from "./telemetry";

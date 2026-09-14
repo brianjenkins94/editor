@@ -7,15 +7,15 @@
  * worker/sandbox runtime is ever needed again, restore worker-runtime.ts / sandbox-runtime.ts from upstream.
  */
 
-import { Runtime } from "./runtime";
+import type { CreateRuntimeOptions, IExecuteResult, IRuntime, IRuntimeOptions } from "./runtime-interface";
 import type { VirtualFS } from "./virtual-fs";
-import type { IRuntime, IExecuteResult, CreateRuntimeOptions, IRuntimeOptions } from "./runtime-interface";
+import { Runtime } from "./runtime";
 
 /**
  * Wrapper that makes the synchronous Runtime conform to the async IRuntime interface
  */
 class AsyncRuntimeWrapper implements IRuntime {
-	private runtime: Runtime;
+	private readonly runtime: Runtime;
 
 	constructor(vfs: VirtualFS, options: IRuntimeOptions = {}) {
 		this.runtime = new Runtime(vfs, options);
@@ -65,9 +65,9 @@ export async function createRuntime(
 
 	if (!dangerouslyAllowSameOrigin) {
 		throw new Error(
-			"almostnode: Same-origin execution requires explicit opt-in: { dangerouslyAllowSameOrigin: true }\n" +
-			"Same-origin execution allows code to access cookies, localStorage, and IndexedDB.\n" +
-			"Only use dangerouslyAllowSameOrigin for trusted code."
+			"almostnode: Same-origin execution requires explicit opt-in: { dangerouslyAllowSameOrigin: true }\n"
+			+ "Same-origin execution allows code to access cookies, localStorage, and IndexedDB.\n"
+			+ "Only use dangerouslyAllowSameOrigin for trusted code."
 		);
 	}
 
@@ -77,9 +77,9 @@ export async function createRuntime(
 // Re-export types and classes for convenience
 export { Runtime } from "./runtime";
 export type {
-	IRuntime,
-	IExecuteResult,
-	IRuntimeOptions,
 	CreateRuntimeOptions,
-	VFSSnapshot,
+	IExecuteResult,
+	IRuntime,
+	IRuntimeOptions,
+	VFSSnapshot
 } from "./runtime-interface";

@@ -5,14 +5,14 @@
  * observability namespace and files every record into the store. Because routing is interest-based, the pages
  * forward their span/log traffic here precisely because this collector subscribed to it, and nothing else.
  */
-import { WebSocketServer } from "ws";
+import type { Hub, RpcClient } from "@brianjenkins94/hub";
 import type { WebSocket } from "ws";
 
-import { createHub, createRpcClient, websocketTransport } from "@brianjenkins94/hub";
-import type { Hub, RpcClient, WebSocketLike } from "@brianjenkins94/hub";
-
-import { RecordStore } from "./store.ts";
 import type { HubLogRecord } from "./store.ts";
+import { createHub, createRpcClient, websocketTransport } from "@brianjenkins94/hub";
+
+import { WebSocketServer } from "ws";
+import { RecordStore } from "./store.ts";
 
 /** Reserved observability namespace — must match `@brianjenkins94/observability`'s `LOG_SUBJECT` (kept as its
  *  own constant so this Node collector doesn't pull the browser-oriented observability package). */
@@ -98,7 +98,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 
 		// A ws socket is EventTarget-shaped (addEventListener + readyState), so websocketTransport drives it
 		// unchanged — the same transport the browser end uses. Unlink on close so interest is withdrawn cleanly.
-		const unlink = hub.link(websocketTransport(socket as unknown as WebSocketLike));
+		const unlink = hub.link(websocketTransport(socket));
 
 		socket.addEventListener("close", () => {
 			unlink();
@@ -117,7 +117,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 				socket.close();
 			}
 
-			server.close(() => resolve());
+			server.close(() => { resolve(); });
 		})
 	};
 }

@@ -21,7 +21,7 @@ export function ensureCrossOriginIsolated(): boolean {
 		const base = (import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/";
 
 		// {type:module}: the SW is now a bundled ES module (it imports @brianjenkins94/hub — see sw.config.ts).
-			navigator.serviceWorker.register(base + "coi-serviceworker.js", { "type": "module" }).then((registration) => {
+		navigator.serviceWorker.register(base + "coi-serviceworker.js", { "type": "module" }).then((registration) => {
 			if (isolated) {
 				return;   // headers already isolate this load; the worker just attaches for the resolver — no reload
 			}

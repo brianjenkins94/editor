@@ -26,9 +26,9 @@ import { createNpmCommand } from "./terminal-npm";
 type VscodeApi = typeof import("vscode");
 
 /** The persistent bits of just-bash's Bash we use (loaded lazily so its bundle stays off the boot path). */
-type BashSession = {
+interface BashSession {
 	"exec": (commandLine: string, options: { "cwd": string; "env": Record<string, string> }) => Promise<{ "stdout": string; "stderr": string; "exitCode": number; "env": Record<string, string> }>;
-};
+}
 
 const RS = ""; // record separator — frames the cwd/exit-code probe; ~never appears in real shell output
 // Appended to every command: capture the user command's exit code, then emit `<RS>cwd<RS>rc<RS>` so we can read
@@ -54,14 +54,15 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 	let stdinBuffer = ""; // the line being typed into a running process's stdin (flushed on Enter)
 
 	// terminals want CRLF; the shell emits LF.
-	const write = (text: string): void => fire(text.replace(/\r?\n/gu, "\r\n"));
+	const write = (text: string): void => { fire(text.replace(/\r?\n/gu, "\r\n")); };
 	// Live output from a streaming process (node): written to the terminal as it arrives, stderr in red.
 	const writeLive: NodeOutput = (stream, data) => {
 		const text = data.replace(/\r?\n/gu, "\r\n");
 
 		fire(stream === "err" ? `[31m${text}[0m` : text);
 	};
-	const prompt = (): void => fire(`\r\n[1;36m${cwd}[0m $ `);
+
+	const prompt = (): void => { fire(`\r\n[1;36m${cwd}[0m $ `); };
 
 	const runLine = async (input: string): Promise<void> => {
 		running = true;
@@ -74,7 +75,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 			// custom command's `ctx.signal` (so `node` kills its worker). An interrupted run may not reach the PROBE.
 			const result = await session.exec(input + PROBE, { "cwd": cwd, "env": env, "signal": signal });
 
-			let stdout = result.stdout;
+			let { stdout } = result;
 			const match = PROBE_RE.exec(stdout);
 
 			if (match !== null) {
@@ -133,11 +134,11 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 				continue; // a non-node command is running; only Ctrl-C reaches it
 			}
 
-			if (code === 0x0d || code === 0x0a) { // Enter → flush the buffered line into stdin
+			if (code === 0x0D || code === 0x0A) { // Enter → flush the buffered line into stdin
 				fire("\r\n");
 				runner.sendStdin(`${stdinBuffer}\n`);
 				stdinBuffer = "";
-			} else if (code === 0x7f || code === 0x08) { // Backspace — edit the buffer
+			} else if (code === 0x7F || code === 0x08) { // Backspace — edit the buffer
 				if (stdinBuffer !== "") {
 					stdinBuffer = stdinBuffer.slice(0, -1);
 					fire("\b \b");
@@ -167,18 +168,18 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 			const code = character.charCodeAt(0);
 
 			if (inEscape) {
-				inEscape = !(code >= 0x40 && code <= 0x7e); // consume a CSI/escape sequence to its final byte
+				inEscape = !(code >= 0x40 && code <= 0x7E); // consume a CSI/escape sequence to its final byte
 				continue;
 			}
 
-			if (code === 0x1b) {
+			if (code === 0x1B) {
 				inEscape = true;
-			} else if (code === 0x0d || code === 0x0a) { // Enter (CR from a terminal; LF from paste/automation)
+			} else if (code === 0x0D || code === 0x0A) { // Enter (CR from a terminal; LF from paste/automation)
 				fire("\r\n");
 				void runLine(line);
 
 				return; // the rest of this chunk waits until the command finishes
-			} else if (code === 0x7f || code === 0x08) { // Backspace
+			} else if (code === 0x7F || code === 0x08) { // Backspace
 				if (line !== "") {
 					line = line.slice(0, -1);
 					fire("\b \b");

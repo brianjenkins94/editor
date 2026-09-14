@@ -112,7 +112,8 @@ export function analyze(cases, results, { size, started, top = 40 } = {}) {
   // coarse position buckets — group failing rows by JS/TS + coarse position, keep a count + first 2 examples
 	const buckets = new Map(
 		[...Map.groupBy(rows.filter((row) => row.status !== "pass"), (row) => `${row.usesTs ? "TS" : "JS"} | ${row.bucket}`)]
-			.map(([key, group]) => [key, {
+			.map(([key, group]) => [key,
+{
 				"count": group.length,
 				"examples": group.slice(0, 2).map((row) => ({ "id": `${row.corpus}/${row.id}`, "line": row.at?.line, "excerpt": row.at?.excerpt }))
 			}])

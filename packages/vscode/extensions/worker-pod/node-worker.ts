@@ -45,7 +45,7 @@ const keepAlive = installTimerKeepAlive();
 
 const hub = createHub({ "id": "node" });
 
-hub.link(portTransport(globalThis as unknown as Worker));
+hub.link(portTransport(globalThis));
 const log = relayLoggerToHub(hub, "node");
 
 let vfsPromise: ReturnType<typeof createZenfsVFS> | undefined;
@@ -93,6 +93,7 @@ async function runNode(args: StartArgs): Promise<void> {
 	const emit = (stream: "out" | "err", data: string): void => {
 		hub.publish(`node.out.${runId}`, { "stream": stream, "data": data });
 	};
+
 	const exit = (exitCode: number): void => {
 		hub.publish(`node.exit.${runId}`, { "exitCode": exitCode });
 	};
@@ -167,7 +168,7 @@ async function runNode(args: StartArgs): Promise<void> {
 		currentStdin = (globalThis as unknown as { "process"?: ShimProcess }).process?.stdin;
 		// Resolve when the event loop drains (no pending timers, no interval, no stdin reader). For a one-shot
 		// script that's immediate; for a server/reader it's when it finally stops keeping itself alive.
-		keepAlive.whenQuiescent(() => finish(0));
+		keepAlive.whenQuiescent(() => { finish(0); });
 	} catch (error) {
 		const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
 		const exitMatch = EXIT_THROW.exec(error instanceof Error ? error.message : String(error));
@@ -185,7 +186,7 @@ hub.subscribe("node.start", (data) => { void runNode(data as StartArgs); });
 // Tell the main thread we're subscribed so its first `node.start` doesn't out-race our interest. Repeated a few
 // times because the router only forwards `node.ready` once the main side's interest in it has propagated here
 // (which lands a tick or two after boot); the runner's fallback timeout covers the case where they all miss.
-const announceReady = (): void => { hub.publish("node.ready", {}); };
+function announceReady(): void { hub.publish("node.ready", {}); }
 
 announceReady();
 setTimeout(announceReady, 0);

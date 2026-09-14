@@ -81,12 +81,8 @@ import getProcessControllerServiceOverride from "@codingame/monaco-vscode-proces
 import getQuickAccessServiceOverride from "@codingame/monaco-vscode-quickaccess-service-override";
 import getViewsServiceOverride, { attachPart, isEditorPartVisible, isPartVisibile as isPartVisible, onDidChangeSideBarPosition, onPartVisibilityChange, Parts } from "@codingame/monaco-vscode-views-service-override";
 import { openNewCodeEditor } from "./demo/src/features/editor";
-import { TerminalBackend } from "./terminal-backend";
-
-// The editor registers the default terminal's process factory (just-bash on the workspace fs). See terminal.ts.
-export { setTerminalProcessFactory } from "./terminal-backend";
-export type { TerminalProcess, TerminalProcessFactory } from "./terminal-backend";
 import { Worker } from "./demo/src/tools/fakeWorker";
+import { TerminalBackend } from "./terminal-backend";
 import "vscode/localExtensionHost";
 
 // Default language / feature extensions (loaded for side effects)
@@ -137,6 +133,10 @@ import "@codingame/monaco-vscode-typescript-language-features-default-extension"
 import "@codingame/monaco-vscode-vb-default-extension";
 import "@codingame/monaco-vscode-xml-default-extension";
 import "@codingame/monaco-vscode-yaml-default-extension";
+
+// The editor registers the default terminal's process factory (just-bash on the workspace fs). See terminal.ts.
+export { setTerminalProcessFactory } from "./terminal-backend";
+export type { TerminalProcess, TerminalProcessFactory } from "./terminal-backend";
 
 /** A file seeded into the workbench's in-memory workspace. */
 export interface WorkbenchFile {

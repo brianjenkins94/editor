@@ -33,7 +33,7 @@ let patchedCount = 0;
 
 for (const name of workers) {
 	const file = path.join(assetsDir, name);
-	let code = readFileSync(file, "utf8");
+	const code = readFileSync(file, "utf8");
 
 	if (code.includes(MARKER)) {
 		console.log(`patch-esm-ext-host: ${name} already patched`);
@@ -49,8 +49,7 @@ for (const name of workers) {
 
 	const [, reviveNs, proxy] = resolveMatch;
 
-	const next = code.replace(throwRe, (_full, p1, p2, p3) =>
-		`_loadESMModule(${p1},${p2},${p3}){${MARKER}return ${proxy}.$asBrowserUri(${p2}).then((u)=>import(${reviveNs}.revive(u).toString(!0)))}`);
+	const next = code.replace(throwRe, (_full, p1, p2, p3) => `_loadESMModule(${p1},${p2},${p3}){${MARKER}return ${proxy}.$asBrowserUri(${p2}).then((u)=>import(${reviveNs}.revive(u).toString(!0)))}`);
 
 	if (next === code) {
 		throw new Error(`patch-esm-ext-host: could not find _loadESMModule's throw in ${name} — upstream shape changed; update the patch`);

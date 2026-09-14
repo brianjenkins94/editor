@@ -39,7 +39,7 @@ function resolveParser(module: Record<string, unknown>): Linter.Parser {
 	throw new Error("[eslint-engine] @typescript-eslint/parser has no parse/parseForESLint export");
 }
 
-const tsParser = resolveParser(tsParserModule as unknown as Record<string, unknown>);
+const tsParser = resolveParser(tsParserModule);
 
 // A small, universally-applicable flat config (carried over verbatim from the retired server-node-eslint.ts).
 // `files` must match (relative to the cwd basePath) or eslint reports "No matching configuration found" instead

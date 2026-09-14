@@ -4,10 +4,10 @@
  * almostnode on the shared zen-fs, off the main thread and observable over the hub. just-bash owns the shell;
  * almostnode is the runtime. `node App.tsx` works because almostnode transpiles TS/JSX.
  */
-import { defineCommand } from "just-bash/browser";
 import type { CustomCommand } from "just-bash/browser";
-
 import type { NodeOutput, NodeRunner } from "./node-runner";
+
+import { defineCommand } from "just-bash/browser";
 
 /** POSIX resolve of `path` against `base` (collapsing `.`/`..`). */
 function resolvePosix(base: string, path: string): string {

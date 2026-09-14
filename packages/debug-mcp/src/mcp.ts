@@ -10,12 +10,12 @@
  * — serveMcp owns the process (its own stdio / Vite dev bridge), which leaves no room for the WS server; here
  * the two share one process and one store. These tools are read-only, so no broker/run-ledger wiring is needed.
  */
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { defineTool, fail, ok, registerTool } from "@brianjenkins94/util/mcp/tool";
-import { z } from "zod";
-
 import type { DebugMcp } from "./server.ts";
 import type { QueryLogsInput, QuerySpansInput, WaitInput } from "./store.ts";
+import { defineTool, fail, ok, registerTool } from "@brianjenkins94/util/mcp/tool";
+
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 
 const LEVEL = z.enum(["trace", "debug", "info", "warn", "error", "fatal"]);
 const KIND = z.enum(["log", "span-open", "span-close"]);
@@ -23,7 +23,7 @@ const KIND = z.enum(["log", "span-open", "span-close"]);
 /** Build the MCP server exposing the debug-mcp's store. Connect it to a transport (stdio) to serve. */
 export function createMcpServer(debugMcp: DebugMcp): McpServer {
 	const server = new McpServer({ "name": "debug-mcp", "version": "0.0.0" });
-	const store = debugMcp.store;
+	const { store } = debugMcp;
 
 	registerTool(server, defineTool({
 		"name": "query_logs",

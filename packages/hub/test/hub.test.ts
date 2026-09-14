@@ -1,7 +1,7 @@
-import * as assert from "node:assert/strict";
-import { test } from "node:test";
-
 import type { Transport, WebSocketLike } from "../src/index.ts";
+import * as assert from "node:assert/strict";
+
+import { test } from "node:test";
 import { createHub, createRpcClient, matches, serve, websocketTransport } from "../src/index.ts";
 
 /** A connected pair of in-memory transports — delivery is async (a macrotask) to mirror postMessage, so tests
@@ -11,8 +11,16 @@ function pipe(): [Transport, Transport] {
 	let right: ((message: unknown) => void) | undefined;
 
 	return [
-		{ "send": (message) => { setTimeout(() => right?.(message), 0); }, "listen": (onMessage) => { left = onMessage; return () => { left = undefined; }; } },
-		{ "send": (message) => { setTimeout(() => left?.(message), 0); }, "listen": (onMessage) => { right = onMessage; return () => { right = undefined; }; } }
+		{ "send": (message) => { setTimeout(() => right?.(message), 0); }, "listen": (onMessage) => {
+			left = onMessage;
+
+			return () => { left = undefined; };
+		} },
+		{ "send": (message) => { setTimeout(() => left?.(message), 0); }, "listen": (onMessage) => {
+			right = onMessage;
+
+			return () => { right = undefined; };
+		} }
 	];
 }
 
@@ -77,11 +85,13 @@ test("local traffic stays local — an unsubscribed subject never crosses the li
 
 	// The far side only wants `cmd.run`; it must never receive pod-local chatter.
 	const atRoot: unknown[] = [];
+
 	root.subscribe("cmd.run", (data) => { atRoot.push(data); });
 
 	await flush();
 
 	let crossed = false;
+
 	root.subscribe("pod.internal", () => { crossed = true; }); // subscribed AFTER interest settled; still shouldn't arrive from a pre-existing publish
 	pod.publish("pod.internal", "secret");
 
@@ -105,6 +115,7 @@ test("three-level tree: interest propagates up, messages route down", async () =
 	worker.link(workerEnd);
 
 	const atWorker: unknown[] = [];
+
 	worker.subscribe("ping", (data) => { atWorker.push(data); });
 
 	await flush(); // worker → pod → root interest propagation
@@ -121,13 +132,34 @@ test("interest survives a late link on a LOSSY transport (hello handshake)", asy
 	// a MessagePort). The hub's `hello` handshake must recover from an interest advertisement lost to the race.
 	let left: ((message: unknown) => void) | undefined;
 	let right: ((message: unknown) => void) | undefined;
-	const a: Transport = { "send": (message) => { if (right !== undefined) { const to = right; setTimeout(() => to(message), 0); } }, "listen": (onMessage) => { left = onMessage; return () => { left = undefined; }; } };
-	const b: Transport = { "send": (message) => { if (left !== undefined) { const to = left; setTimeout(() => to(message), 0); } }, "listen": (onMessage) => { right = onMessage; return () => { right = undefined; }; } };
+	const a: Transport = { "send": (message) => {
+		if (right !== undefined) {
+			const to = right;
+
+			setTimeout(to, 0, message);
+		}
+	}, "listen": (onMessage) => {
+		left = onMessage;
+
+		return () => { left = undefined; };
+	} };
+	const b: Transport = { "send": (message) => {
+		if (left !== undefined) {
+			const to = left;
+
+			setTimeout(to, 0, message);
+		}
+	}, "listen": (onMessage) => {
+		right = onMessage;
+
+		return () => { right = undefined; };
+	} };
 
 	const root = createHub({ "id": "root" });
 	const pod = createHub({ "id": "pod" });
 
 	const atRoot: unknown[] = [];
+
 	root.subscribe("cmd", (data) => { atRoot.push(data); });
 
 	root.link(a); // root advertises "cmd" — but pod isn't listening yet, so it's DROPPED
@@ -150,7 +182,11 @@ test("websocketTransport federates over a JSON-framed, EventTarget-shaped socket
 
 		const make = (self: 0 | 1): WebSocketLike => ({
 			"readyState": 1,
-			"send": (data) => { const peer = listeners[self === 0 ? 1 : 0]; const wire = self === 0 ? Buffer.from(data) : data; setTimeout(() => { for (const fn of peer) { fn({ "data": wire }); } }, 0); },
+			"send": (data) => {
+				const peer = listeners[self === 0 ? 1 : 0]; const wire = self === 0 ? Buffer.from(data) : data;
+
+				setTimeout(() => { for (const fn of peer) { fn({ "data": wire }); } }, 0);
+			},
 			"addEventListener": (_type, handler) => { listeners[self].add(handler); },
 			"removeEventListener": (_type, handler) => { listeners[self].delete(handler); }
 		});
@@ -166,6 +202,7 @@ test("websocketTransport federates over a JSON-framed, EventTarget-shaped socket
 	debugMcp.link(websocketTransport(serverSocket));
 
 	const collected: unknown[] = [];
+
 	debugMcp.subscribe("$sys.log.>", (data) => { collected.push(data); });
 
 	await flush(); // interest crosses the socket
@@ -187,7 +224,11 @@ test("request/reply across a link: relay calls a tool the far hub serves", async
 	tab.link(b);
 
 	// The "tab" hosts a tool; the "relay" (what an MCP server would be) calls it and awaits the answer.
-	serve(tab, "add", (args) => { const { x, y } = args as { "x": number; "y": number }; return x + y; });
+	serve(tab, "add", (args) => {
+		const { x, y } = args as { "x": number; "y": number };
+
+		return x + y;
+	});
 	serve(tab, "boom", () => { throw new Error("nope"); });
 
 	const rpc = createRpcClient(relay);
@@ -215,6 +256,7 @@ test("unlink stops federation and withdraws interest", async () => {
 	const unlink = pod.link(b);
 
 	const atPod: unknown[] = [];
+
 	pod.subscribe("cmd.run", (data) => { atPod.push(data); });
 
 	await flush();

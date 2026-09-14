@@ -2,29 +2,29 @@
  * Runtime Interface - Common interface for main-thread and worker runtimes
  */
 
-import type { VirtualFS } from './virtual-fs';
+import type { VirtualFS } from "./virtual-fs";
 
 export interface IRuntimeOptions {
-  cwd?: string;
-  env?: Record<string, string>;
-  onConsole?: (method: string, args: unknown[]) => void;
+	"cwd"?: string;
+	"env"?: Record<string, string>;
+	"onConsole"?: (method: string, args: unknown[]) => void;
   // Base URL the VFS is served from, used to resolve `file://` dynamic imports to a fetchable same-origin URL
   // (e.g. "https://host/editor/" on a subpath deploy). Defaults to the page origin root when unset.
-  base?: string;
+	"base"?: string;
 }
 
 export interface IModule {
-  id: string;
-  filename: string;
-  exports: unknown;
-  loaded: boolean;
-  children: IModule[];
-  paths: string[];
+	"id": string;
+	"filename": string;
+	"exports": unknown;
+	"loaded": boolean;
+	"children": IModule[];
+	"paths": string[];
 }
 
 export interface IExecuteResult {
-  exports: unknown;
-  module: IModule;
+	"exports": unknown;
+	"module": IModule;
 }
 
 /**
@@ -34,27 +34,27 @@ export interface IRuntime {
   /**
    * Execute code as a module
    */
-  execute(code: string, filename?: string): Promise<IExecuteResult>;
+	"execute": (code: string, filename?: string) => Promise<IExecuteResult>;
 
   /**
    * Run a file from the virtual file system
    */
-  runFile(filename: string): Promise<IExecuteResult>;
+	"runFile": (filename: string) => Promise<IExecuteResult>;
 
   /**
    * Clear the module cache
    */
-  clearCache(): void;
+	"clearCache": () => void;
 
   /**
    * Get the virtual file system (only available on main thread runtime)
    */
-  getVFS?(): VirtualFS;
+	"getVFS"?: () => VirtualFS;
 
   /**
    * Terminate the runtime (only applicable to worker runtime)
    */
-  terminate?(): void;
+	"terminate"?: () => void;
 }
 
 /**
@@ -68,7 +68,7 @@ export interface CreateRuntimeOptions extends IRuntimeOptions {
    *
    * Example: 'https://myapp-sandbox.vercel.app'
    */
-  sandbox?: string;
+	"sandbox"?: string;
 
   /**
    * Explicitly allow same-origin execution (less secure).
@@ -78,7 +78,7 @@ export interface CreateRuntimeOptions extends IRuntimeOptions {
    * cookies, localStorage, and other same-origin resources.
    * Only use this for trusted code or demos.
    */
-  dangerouslyAllowSameOrigin?: boolean;
+	"dangerouslyAllowSameOrigin"?: boolean;
 
   /**
    * Whether to use a Web Worker for code execution (same-origin only)
@@ -89,18 +89,18 @@ export interface CreateRuntimeOptions extends IRuntimeOptions {
    * Note: Workers provide thread isolation but NOT origin isolation.
    * They still have access to IndexedDB and can make network requests.
    */
-  useWorker?: boolean | 'auto';
+	"useWorker"?: boolean | "auto";
 }
 
 /**
  * VFS snapshot for transferring to worker
  */
 export interface VFSSnapshot {
-  files: VFSFileEntry[];
+	"files": VFSFileEntry[];
 }
 
 export interface VFSFileEntry {
-  path: string;
-  type: 'file' | 'directory';
-  content?: string; // base64 encoded for binary files
+	"path": string;
+	"type": "file" | "directory";
+	"content"?: string; // base64 encoded for binary files
 }

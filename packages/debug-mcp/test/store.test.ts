@@ -1,7 +1,7 @@
-import * as assert from "node:assert/strict";
-import { test } from "node:test";
-
 import type { HubLogRecord } from "../src/store.ts";
+import * as assert from "node:assert/strict";
+
+import { test } from "node:test";
 import { RecordStore } from "../src/store.ts";
 
 function rec(partial: Partial<HubLogRecord> & { "source"?: string }): HubLogRecord {
@@ -53,13 +53,16 @@ test("querySpans pairs opens with closes and flags still-open spans", () => {
 	store.add(rec({ "source": "debug-worker", "kind": "span-open", "span": "step", "spanId": "bb", "time": now }));
 
 	const all = store.querySpans({ "source": "debug-worker" });
+
 	assert.equal(all.length, 2);
 
 	const closed = all.find((row) => row.spanId === "aa");
+
 	assert.equal(closed?.open, false);
 	assert.equal(closed?.durationMs, 5);
 
 	const open = store.querySpans({ "onlyOpen": true });
+
 	assert.deepEqual(open.map((row) => row.spanId), ["bb"]);
 });
 
@@ -76,6 +79,7 @@ test("treeState reports sources, last message, and open spans", () => {
 	assert.equal(state.totalRecords, 3);
 
 	const sw = state.sources.find((entry) => entry.source === "sw");
+
 	assert.equal(sw?.records, 2);
 	assert.equal(sw?.lastMessage, "two");
 
@@ -91,8 +95,10 @@ test("waitFor resolves on a matching record and times out otherwise", async () =
 	store.add(rec({ "source": "debug-worker", "message": "component rendered" }));
 
 	const hit = await pending;
+
 	assert.equal(hit?.message, "component rendered");
 
 	const missed = await store.waitFor({ "source": "nobody", "timeoutMs": 20 });
+
 	assert.equal(missed, null);
 });

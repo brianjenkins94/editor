@@ -1,5 +1,5 @@
-import { defaults } from "@brianjenkins94/util/vite/defaults";
 import { isCI } from "@brianjenkins94/util/env";
+import { defaults } from "@brianjenkins94/util/vite/defaults";
 import { mergeConfig } from "vite";
 
 // Inherits the repo's shared build defaults (esnext, [name].js, cleaned outDir) and bundles

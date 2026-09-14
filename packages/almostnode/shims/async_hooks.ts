@@ -4,82 +4,84 @@
  */
 
 export class AsyncResource {
-  constructor(_type: string, _options?: object) {}
-  runInAsyncScope<T>(fn: (...args: any[]) => T, thisArg?: unknown, ...args: any[]): T {
-    return fn.apply(thisArg, args);
-  }
+	constructor(_type: string, _options?: object) {}
+	runInAsyncScope<T>(fn: (...args: any[]) => T, thisArg?: unknown, ...args: any[]): T {
+		return fn.apply(thisArg, args);
+	}
 
-  emitDestroy(): this { return this; }
-  asyncId(): number { return 0; }
-  triggerAsyncId(): number { return 0; }
-  static bind<T extends (...args: any[]) => any>(fn: T, _type?: string): T {
-    return fn;
-  }
+	emitDestroy(): this { return this; }
+	asyncId(): number { return 0; }
+	triggerAsyncId(): number { return 0; }
+	static bind<T extends (...args: any[]) => any>(fn: T, _type?: string): T {
+		return fn;
+	}
 }
 
 export class AsyncLocalStorage<T> {
-  private store: T | undefined;
+	private store: T | undefined;
 
-  disable(): void {}
+	disable(): void {}
 
-  getStore(): T | undefined {
-    return this.store;
-  }
+	getStore(): T | undefined {
+		return this.store;
+	}
 
-  run<R>(store: T, callback: () => R): R {
-    const prev = this.store;
-    this.store = store;
-    try {
-      return callback();
-    } finally {
-      this.store = prev;
-    }
-  }
+	run<R>(store: T, callback: () => R): R {
+		const prev = this.store;
 
-  exit<R>(callback: () => R): R {
-    const prev = this.store;
-    this.store = undefined;
-    try {
-      return callback();
-    } finally {
-      this.store = prev;
-    }
-  }
+		this.store = store;
+		try {
+			return callback();
+		} finally {
+			this.store = prev;
+		}
+	}
 
-  enterWith(store: T): void {
-    this.store = store;
-  }
+	exit<R>(callback: () => R): R {
+		const prev = this.store;
+
+		this.store = undefined;
+		try {
+			return callback();
+		} finally {
+			this.store = prev;
+		}
+	}
+
+	enterWith(store: T): void {
+		this.store = store;
+	}
 }
 
 export interface AsyncHook {
-  enable(): this;
-  disable(): this;
+	enable(): this;
+	disable(): this;
 }
 
 export function createHook(_callbacks: object): AsyncHook {
-  return {
-    enable(): AsyncHook { return this; },
-    disable(): AsyncHook { return this; },
-  };
+	return {
+		"enable": function(): AsyncHook { return this; },
+		"disable": function(): AsyncHook { return this; }
+	};
 }
 
 export function executionAsyncId(): number {
-  return 0;
+	return 0;
 }
 
 export function executionAsyncResource(): object {
-  return {};
+	return {};
 }
 
 export function triggerAsyncId(): number {
-  return 0;
+	return 0;
 }
 
 export default {
-  AsyncResource,
-  AsyncLocalStorage,
-  createHook,
-  executionAsyncId,
-  executionAsyncResource,
-  triggerAsyncId,
+	"AsyncResource": AsyncResource,
+	"AsyncLocalStorage": AsyncLocalStorage,
+	"createHook": createHook,
+	"executionAsyncId": executionAsyncId,
+	"executionAsyncResource": executionAsyncResource,
+	"triggerAsyncId": triggerAsyncId
 };

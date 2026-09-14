@@ -20,9 +20,9 @@
  * folds node_modules in from the CDN. See coi-serviceworker.js.
  */
 import type { IFileSystemProviderWithFileReadWriteCapability, IStat } from "@brianjenkins94/monaco-vscode-api/main";
-import { FileChangeType, FileSystemProviderCapabilities, FileType, registerFileSystemOverlay } from "@brianjenkins94/monaco-vscode-api/main";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { Logger } from "@brianjenkins94/util/logger";
+import { FileChangeType, FileSystemProviderCapabilities, FileType, registerFileSystemOverlay } from "@brianjenkins94/monaco-vscode-api/main";
 import { configure, fs, InMemory, SingleBuffer } from "@zenfs/core";
 
 import { createChangeEvent, notFound, readOnly } from "./provider-base";
@@ -91,7 +91,8 @@ function persistLoadAll(db: IDBDatabase): Promise<[string, Uint8Array][]> {
 			store.transaction.oncomplete = () => {
 				resolve((keys.result as string[]).map((key, index) => [key, (values.result as Uint8Array[])[index]]));
 			};
-			store.transaction.onerror = () => resolve([]);
+
+			store.transaction.onerror = () => { resolve([]); };
 		} catch {
 			resolve([]);
 		}
@@ -155,6 +156,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		}
 
 		const batch = [...pending];
+
 		pending.clear();
 
 		try {
@@ -169,6 +171,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 			}
 		} catch { /* best-effort persistence */ }
 	};
+
 	const persist = (path: string, contents: Uint8Array | null): void => {
 		pending.set(path, contents);
 
@@ -178,6 +181,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 	};
 
 	const { listeners, onDidChangeFile } = createChangeEvent();
+
 	// Emit change events the way a real vscode provider does: fire the REAL URI (not a `{ path }` stand-in —
 	// the Explorer's file-change reaction calls `dirname(resource)` → `resource.with(...)`, which throws
 	// `e.with is not a function` on a plain object), and fire it BATCHED + DEFERRED off the write's call stack.
@@ -185,7 +189,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 	// tsserver (a worker) request a SYNCHRONOUS file read over the @vscode/sync-api SAB, which blocks its thread
 	// on the MAIN thread — but the main thread is still inside this listener chain and can't service the read.
 	// A short debounce (VS Code's own `fireSoon` pattern) returns control to the event loop and coalesces bursts.
-	type Change = { "resource": Parameters<IFileSystemProviderWithFileReadWriteCapability["writeFile"]>[0]; "type": FileChangeType };
+	interface Change { "resource": Parameters<IFileSystemProviderWithFileReadWriteCapability["writeFile"]>[0]; "type": FileChangeType }
 	let changeBatch: Change[] = [];
 	let changeTimer: ReturnType<typeof setTimeout> | undefined;
 	const fire = (resource: Change["resource"], type: FileChangeType): void => {
@@ -195,6 +199,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 			changeTimer = setTimeout(() => {
 				changeTimer = undefined;
 				const batch = changeBatch;
+
 				changeBatch = [];
 
 				for (const listener of listeners) {

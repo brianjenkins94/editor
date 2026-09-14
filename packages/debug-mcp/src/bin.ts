@@ -8,8 +8,8 @@
  */
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
-import { createDebugMcp } from "./server.ts";
 import { createMcpServer } from "./mcp.ts";
+import { createDebugMcp } from "./server.ts";
 
 function resolvePort(): number {
 	const flagIndex = process.argv.indexOf("--port");

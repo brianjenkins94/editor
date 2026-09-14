@@ -65,7 +65,7 @@ export function installDebugBridge(getApi: () => Api): void {
 				return false;
 			}
 
-			const document = editor.document;
+			const { document } = editor;
 			const range = new api.Range(document.positionAt(0), document.positionAt(document.getText().length));
 
 			return editor.edit((builder: any) => builder.replace(range, text));
@@ -78,8 +78,7 @@ export function installDebugBridge(getApi: () => Api): void {
 			await api.window.showTextDocument(document);
 		},
 
-		"getDiagnostics": (): { "uri": string; "items": any[] }[] => requireApi().languages.getDiagnostics()
-			.map(([uri, items]: [any, any[]]) => ({ "uri": uri.toString(), "items": items })),
+		"getDiagnostics": (): { "uri": string; "items": any[] }[] => requireApi().languages.getDiagnostics().map(([uri, items]: [any, any[]]) => ({ "uri": uri.toString(), "items": items })),
 
 		// ── TypeScript access via the host (see if we can drop the engine's bundled typescript) ──
 

@@ -3,93 +3,94 @@
  * Provides stubs that allow code to load without crashing
  */
 
-import { EventEmitter } from './events';
-import * as net from './net';
+import { EventEmitter } from "./events";
 
 export class TLSSocket extends EventEmitter {
-  authorized = false;
-  encrypted = true;
+	authorized = false;
+	encrypted = true;
 
-  constructor(_socket?: unknown, _options?: unknown) {
-    super();
-  }
+	constructor(_socket?: unknown, _options?: unknown) {
+		super();
+	}
 
-  getPeerCertificate(_detailed?: boolean): object {
-    return {};
-  }
+	getPeerCertificate(_detailed?: boolean): object {
+		return {};
+	}
 
-  getCipher(): { name: string; version: string } | null {
-    return null;
-  }
+	getCipher(): { "name": string; "version": string } | null {
+		return null;
+	}
 
-  getProtocol(): string | null {
-    return null;
-  }
+	getProtocol(): string | null {
+		return null;
+	}
 
-  setServername(_name: string): void {}
+	setServername(_name: string): void {}
 
-  renegotiate(_options: unknown, _callback: (err: Error | null) => void): boolean {
-    return false;
-  }
+	renegotiate(_options: unknown, _callback: (err: Error | null) => void): boolean {
+		return false;
+	}
 }
 
 export class Server extends EventEmitter {
-  constructor(_options?: unknown, _connectionListener?: (socket: TLSSocket) => void) {
-    super();
-  }
+	constructor(_options?: unknown, _connectionListener?: (socket: TLSSocket) => void) {
+		super();
+	}
 
-  listen(..._args: unknown[]): this {
-    return this;
-  }
+	listen(..._args: unknown[]): this {
+		return this;
+	}
 
-  close(_callback?: (err?: Error) => void): this {
-    return this;
-  }
+	close(_callback?: (err?: Error) => void): this {
+		return this;
+	}
 
-  address(): { port: number; family: string; address: string } | string | null {
-    return null;
-  }
+	address(): { "port": number; "family": string; "address": string } | string | null {
+		return null;
+	}
 
-  getTicketKeys(): Buffer {
-    return Buffer.from('');
-  }
+	getTicketKeys(): Buffer {
+		return Buffer.from("");
+	}
 
-  setTicketKeys(_keys: Buffer): void {}
+	setTicketKeys(_keys: Buffer): void {}
 
-  setSecureContext(_options: unknown): void {}
+	setSecureContext(_options: unknown): void {}
 }
 
 export function createServer(_options?: unknown, _connectionListener?: (socket: TLSSocket) => void): Server {
-  return new Server(_options, _connectionListener);
+	return new Server(_options, _connectionListener);
 }
 
 export function connect(_options: unknown, _callback?: () => void): TLSSocket {
-  const socket = new TLSSocket();
-  if (_callback) {
-    setTimeout(_callback, 0);
-  }
-  return socket;
+	const socket = new TLSSocket();
+
+	if (_callback) {
+		setTimeout(_callback, 0);
+	}
+
+	return socket;
 }
 
 export const createSecureContext = (_options?: unknown) => ({});
 
-export const getCiphers = () => ['TLS_AES_256_GCM_SHA384', 'TLS_AES_128_GCM_SHA256'];
+export const getCiphers = () => ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"];
 
-export const DEFAULT_ECDH_CURVE = 'auto';
-export const DEFAULT_MAX_VERSION = 'TLSv1.3';
-export const DEFAULT_MIN_VERSION = 'TLSv1.2';
+export const DEFAULT_ECDH_CURVE = "auto";
+export const DEFAULT_MAX_VERSION = "TLSv1.3";
+export const DEFAULT_MIN_VERSION = "TLSv1.2";
 
 export const rootCertificates: string[] = [];
 
 export default {
-  TLSSocket,
-  Server,
-  createServer,
-  connect,
-  createSecureContext,
-  getCiphers,
-  DEFAULT_ECDH_CURVE,
-  DEFAULT_MAX_VERSION,
-  DEFAULT_MIN_VERSION,
-  rootCertificates,
+	"TLSSocket": TLSSocket,
+	"Server": Server,
+	"createServer": createServer,
+	"connect": connect,
+	"createSecureContext": createSecureContext,
+	"getCiphers": getCiphers,
+	"DEFAULT_ECDH_CURVE": DEFAULT_ECDH_CURVE,
+	"DEFAULT_MAX_VERSION": DEFAULT_MAX_VERSION,
+	"DEFAULT_MIN_VERSION": DEFAULT_MIN_VERSION,
+	"rootCertificates": rootCertificates
 };

@@ -1,14 +1,15 @@
-import { builtinModules, createRequire } from "node:module";
+import type { Plugin, RollupOutput } from "vite";
 // eslint-disable-next-line ts/no-restricted-imports -- build-time script; needs sync fs to read assets off disk
 import * as nodeFs from "node:fs";
+import { builtinModules, createRequire } from "node:module";
 import * as path from "node:path";
 import * as url from "node:url";
-import * as esbuild from "esbuild";
 import { isCI, isEntry } from "@brianjenkins94/util/env";
 import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
+import * as esbuild from "esbuild";
 import stdlib from "node-stdlib-browser";
-import { build, type Plugin, type RollupOutput } from "vite";
+import { build } from "vite";
 import { editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./snapshot";
 import { nodeModulesCdnPlugin, vscodePlugin } from "./vite";
 

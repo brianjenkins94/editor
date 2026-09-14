@@ -4,10 +4,10 @@
  */
 
 // ── Version pins ──
-export const REACT_VERSION = '18.2.0';
-export const ESBUILD_WASM_VERSION = '0.20.0';
-export const ROLLUP_BROWSER_VERSION = '4.9.0';
-export const REACT_REFRESH_VERSION = '0.14.0';
+export const REACT_VERSION = "18.2.0";
+export const ESBUILD_WASM_VERSION = "0.20.0";
+export const ROLLUP_BROWSER_VERSION = "4.9.0";
+export const REACT_REFRESH_VERSION = "0.14.0";
 
 // ── React CDN URLs ──
 export const REACT_CDN = `https://esm.sh/react@${REACT_VERSION}`;
@@ -21,4 +21,4 @@ export const ESBUILD_WASM_BROWSER_CDN = `https://unpkg.com/esbuild-wasm@${ESBUIL
 export const ROLLUP_BROWSER_CDN = `https://esm.sh/@rollup/browser@${ROLLUP_BROWSER_VERSION}`;
 
 // ── Styling CDN URLs ──
-export const TAILWIND_CDN_URL = 'https://cdn.tailwindcss.com';
+export const TAILWIND_CDN_URL = "https://cdn.tailwindcss.com";

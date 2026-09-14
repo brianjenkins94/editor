@@ -19,8 +19,8 @@
  * the language server. M0 scope: CALL capabilities that execute during a normal run (top-level, or reachable from
  * one); `env` is a member read the static half already resolves, so the canary skips it.
  */
-import { createVM } from "@brianjenkins94/tsval";
 import type { HostCallSite } from "@brianjenkins94/tsval";
+import { createVM } from "@brianjenkins94/tsval";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
 
@@ -111,26 +111,42 @@ function inert(): unknown {
 function capabilityStandins(): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
 	const noop = (): void => { /* inert */ };
 	const fsMock = {
-		"readFile": tag("fs:read", async () => ""), "readFileSync": tag("fs:read", () => ""),
-		"writeFile": tag("fs:write", async () => undefined), "writeFileSync": tag("fs:write", noop),
-		"appendFile": tag("fs:write", async () => undefined), "appendFileSync": tag("fs:write", noop),
-		"unlink": tag("fs:write", async () => undefined), "unlinkSync": tag("fs:write", noop),
-		"mkdir": tag("fs:write", async () => undefined), "mkdirSync": tag("fs:write", noop)
+		"readFile": tag("fs:read", async () => ""),
+		"readFileSync": tag("fs:read", () => ""),
+		"writeFile": tag("fs:write", async () => undefined),
+		"writeFileSync": tag("fs:write", noop),
+		"appendFile": tag("fs:write", async () => undefined),
+		"appendFileSync": tag("fs:write", noop),
+		"unlink": tag("fs:write", async () => undefined),
+		"unlinkSync": tag("fs:write", noop),
+		"mkdir": tag("fs:write", async () => undefined),
+		"mkdirSync": tag("fs:write", noop)
 	};
 	const childProcessMock = {
 		"spawn": tag("exec", () => ({ "on": noop, "stdout": { "on": noop }, "stderr": { "on": noop }, "kill": noop })),
 		"spawnSync": tag("exec", () => ({ "status": 0, "stdout": "", "stderr": "" })),
-		"exec": tag("exec", (_command: string, callback?: (error: unknown, stdout: string, stderr: string) => void) => { callback?.(null, "", ""); return { "on": noop }; }),
+		"exec": tag("exec", (_command: string, callback?: (error: unknown, stdout: string, stderr: string) => void) => {
+			callback?.(null, "", "");
+
+			return { "on": noop };
+		}),
 		"execSync": tag("exec", () => ""),
-		"execFile": tag("exec", (_file: string, _args: unknown, callback?: (error: unknown, stdout: string, stderr: string) => void) => { callback?.(null, "", ""); return { "on": noop }; })
+		"execFile": tag("exec", (_file: string, _args: unknown, callback?: (error: unknown, stdout: string, stderr: string) => void) => {
+			callback?.(null, "", "");
+
+			return { "on": noop };
+		})
 	};
 
 	return {
 		"globals": { "fetch": tag("net", async () => inertResponse()) },
 		"modules": {
-			"node:fs": fsMock, "fs": fsMock,
-			"node:fs/promises": fsMock, "fs/promises": fsMock,
-			"node:child_process": childProcessMock, "child_process": childProcessMock
+			"node:fs": fsMock,
+			"fs": fsMock,
+			"node:fs/promises": fsMock,
+			"fs/promises": fsMock,
+			"node:child_process": childProcessMock,
+			"child_process": childProcessMock
 		}
 	};
 }
@@ -178,10 +194,10 @@ export async function runCanary(src: string, fileName: string): Promise<CanaryOb
 		"globals": standins.globals,
 		// Known capability modules → tagged inert mocks; anything else → a recursive inert stand-in so the import
 		// doesn't abort the run (coverage) while still doing nothing real.
-		"resolveModule": (specifier) => (Object.prototype.hasOwnProperty.call(standins.modules, specifier) ? standins.modules[specifier] : inert()),
+		"resolveModule": (specifier) => (Object.hasOwn(standins.modules, specifier) ? standins.modules[specifier] : inert()),
 		"hostGuard": {
 			"beforeCall": (callee, _thisArg, _isConstruct, site) => {
-				record(callee as Tagged, site);
+				record(callee, site);
 
 				return callee;
 			}

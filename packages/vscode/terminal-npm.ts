@@ -4,8 +4,8 @@
  * through the SAME just-bash session, so a script that calls `node …` hits the node worker and the whole thing
  * composes. Install / the registry are out of scope (a separate dependency-provisioning track).
  */
-import { defineCommand } from "just-bash/browser";
 import type { CustomCommand } from "just-bash/browser";
+import { defineCommand } from "just-bash/browser";
 
 /** Re-enter the shell to run a script line — the lazily-created Bash session (see terminal.ts). */
 export type ShellRunner = () => Promise<{ "exec": (commandLine: string, options: { "cwd": string; "env": Record<string, string> }) => Promise<{ "stdout": string; "stderr": string; "exitCode": number; "env": Record<string, string> }> }>;

@@ -78,7 +78,7 @@ export async function createZenfsVFS(): Promise<VirtualFS> {
 	}
 
 	// Duck-typed: almostnode only calls the public VirtualFS methods, which this delegates to zen-fs.
-	return adapter as unknown as VirtualFS;
+	return adapter;
 }
 
 /**

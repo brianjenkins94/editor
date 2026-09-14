@@ -85,6 +85,7 @@ function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 	// Hand the worker a dedicated control port BEFORE the LSP client attaches, so the shared-workspace SAB rides
 	// its own channel (never the LSP one). If the buffer's already here, send it now; else attachWorkspaceBuffer does.
 	const channel = new MessageChannel();
+
 	worker.postMessage({ "type": "ws-control" }, [channel.port2]);
 	controlPorts.push(channel.port1);
 
@@ -118,7 +119,11 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	context.subscriptions.push(incoming, outgoing, {
 		"dispose": podHub.link({
 			"send": (message) => { outgoing.fire(message); },
-			"listen": (onMessage) => { const subscription = incoming.event(onMessage); return () => subscription.dispose(); }
+			"listen": (onMessage) => {
+				const subscription = incoming.event(onMessage);
+
+				return () => subscription.dispose();
+			}
 		})
 	});
 

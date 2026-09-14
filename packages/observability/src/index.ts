@@ -17,9 +17,9 @@
  * `LogRecord` carries `span/spanId/parentSpanId/traceId/depth/durationMs` as W3C-shaped ids, so spans survive the
  * trip intact and stitch across contexts; the collector tags each by `context.source`.
  */
-import type { Hub, WebSocketLike } from "@brianjenkins94/hub";
-import { portTransport, serve, websocketTransport } from "@brianjenkins94/hub";
+import type { Hub } from "@brianjenkins94/hub";
 import type { Logger, LogRecord } from "@brianjenkins94/util/logger";
+import { portTransport, serve, websocketTransport } from "@brianjenkins94/hub";
 import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
 
 /** Reserved observability namespace — records are published on `$sys.log.<source>`; app code must not use it.
@@ -75,7 +75,7 @@ export function linkServiceWorkerHub(rootHub: Hub): void {
 	let unlink: (() => void) | undefined;
 
 	const wire = (): void => {
-		const controller = navigator.serviceWorker.controller;
+		const { controller } = navigator.serviceWorker;
 
 		if (controller === null) {
 			return;
@@ -84,6 +84,7 @@ export function linkServiceWorkerHub(rootHub: Hub): void {
 		unlink?.();
 
 		const channel = new MessageChannel();
+
 		controller.postMessage({ "type": "hub", "port": channel.port2 }, [channel.port2]);
 		unlink = rootHub.link(portTransport(channel.port1));
 	};
@@ -185,7 +186,7 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 
 		ws.addEventListener("open", () => {
 			everConnected = true;
-			unlink = rootHub.link(websocketTransport(ws as unknown as WebSocketLike));
+			unlink = rootHub.link(websocketTransport(ws));
 		});
 
 		ws.addEventListener("close", () => {

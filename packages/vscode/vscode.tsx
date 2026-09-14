@@ -20,8 +20,8 @@
  * Singleton — monaco-vscode-api is one global workbench; subsequent calls are no-ops.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import { portTransport } from "@brianjenkins94/hub";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
+import { portTransport } from "@brianjenkins94/hub";
 import { hostLog } from "./logging";
 import { createPaneBusHost } from "./pane-bus";
 import { createPaneWindow } from "./window";

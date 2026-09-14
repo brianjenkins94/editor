@@ -15,12 +15,12 @@
  * user's). The two optional interface methods (`readFileBytes`, `readdirWithFileTypes`) are omitted; just-bash
  * falls back to the required ones.
  */
-import { fs as zenfs } from "@zenfs/core";
-
 import type { FileContent, FsStat, IFileSystem, MkdirOptions, RmOptions } from "just-bash/browser";
 
+import { fs as zenfs } from "@zenfs/core";
+
 /** just-bash's `ReadFileOptions` isn't re-exported from its `/browser` entry, so mirror the shape we use. */
-type ReadOptions = { "encoding"?: string | null };
+interface ReadOptions { "encoding"?: string | null }
 
 type VscodeApi = typeof import("vscode");
 
@@ -41,19 +41,19 @@ function translate(error: unknown, path: string): Error {
 	const name = (error as { "name"?: string } | undefined)?.name ?? "";
 	const code = (error as { "code"?: string } | undefined)?.code ?? "";
 
-	if ((/FileNotFound/u).test(name) || (/FileNotFound/u).test(code)) {
+	if (name.includes("FileNotFound") || code.includes("FileNotFound")) {
 		return fsError("ENOENT", `ENOENT: no such file or directory, '${path}'`);
 	}
 
-	if ((/NoPermissions/u).test(name) || (/NoPermissions/u).test(code)) {
+	if (name.includes("NoPermissions") || code.includes("NoPermissions")) {
 		return fsError("EACCES", `EACCES: permission denied, '${path}'`);
 	}
 
-	if ((/FileExists/u).test(name) || (/FileExists/u).test(code)) {
+	if (name.includes("FileExists") || code.includes("FileExists")) {
 		return fsError("EEXIST", `EEXIST: file already exists, '${path}'`);
 	}
 
-	if ((/FileIsADirectory/u).test(name) || (/FileNotADirectory/u).test(name)) {
+	if (name.includes("FileIsADirectory") || name.includes("FileNotADirectory")) {
 		return fsError("EISDIR", `EISDIR: illegal operation on a directory, '${path}'`);
 	}
 
@@ -90,7 +90,7 @@ function resolvePosix(base: string, path: string): string {
  * namespace (`/workspace/...`); pair with `new Bash({ fs, cwd: "/workspace" })`.
  */
 export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
-	const fs = api.workspace.fs;
+	const { fs } = api.workspace;
 	const uri = (path: string) => api.Uri.file(path);
 
 	const statRaw = async (path: string) => {
@@ -119,7 +119,7 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 			try {
 				const bytes = await fs.readFile(uri(path));
 
-				return new TextDecoder(encoding === "utf-8" ? "utf8" : (encoding as string)).decode(bytes);
+				return new TextDecoder(encoding === "utf-8" ? "utf8" : (encoding)).decode(bytes);
 			} catch (error) {
 				throw translate(error, path);
 			}
