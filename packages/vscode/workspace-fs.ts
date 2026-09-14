@@ -25,13 +25,20 @@ import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { Logger } from "@brianjenkins94/util/logger";
 import { configure, fs, InMemory, SingleBuffer } from "@zenfs/core";
 
-import { createChangeEvent, notFound } from "./provider-base";
+import { createChangeEvent, notFound, readOnly } from "./provider-base";
+
+/** VS Code's platform `FilePermission.Readonly` bit (vs/platform/files/common/files: `Readonly = 1 << 0`). Set in
+ *  a file's `stat`, it makes the editor render the read-only lock, disable editing the buffer, and block Save. The
+ *  platform enum isn't re-exported by the api surface, so use the constant; `writeFile` enforces the block for real
+ *  (the permission is only the UI hint — a provider that answered writes anyway would silently accept them). */
+const FILE_PERMISSION_READONLY = 1 as unknown as NonNullable<IStat["permissions"]>;
 
 /** Handle returned to callers: an existence probe (so ata.ts can skip files already in the store, its
- *  cross-reload dedup), M0 instrumentation counters, and — when the store is SharedArrayBuffer-backed — the
- *  `buffer` itself, so other realms (the LSP workers, M3b) can attach to the SAME filesystem. Also on
- *  `globalThis.__workspaceFs`. */
-export interface WorkspaceFs { "reads": number; "writes": number; "has": (path: string) => boolean; "buffer"?: SharedArrayBuffer }
+ *  cross-reload dedup), a read-only probe (so a client filesystem — e.g. the just-bash terminal adapter — can
+ *  reflect managed configs as un-writable), M0 instrumentation counters, and — when the store is
+ *  SharedArrayBuffer-backed — the `buffer` itself, so other realms (the LSP workers, M3b) can attach to the SAME
+ *  filesystem. Also on `globalThis.__workspaceFs`. */
+export interface WorkspaceFs { "reads": number; "writes": number; "has": (path: string) => boolean; "isReadonly": (path: string) => boolean; "buffer"?: SharedArrayBuffer }
 
 const PERSIST_DB = "workspace-fs";
 const PERSIST_STORE = "files";
@@ -108,11 +115,22 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		await configure({ "mounts": { "/": InMemory } });
 	}
 
+	// Paths seeded read-only (managed configs like tsconfig.json, the baked type surface, ambient files). The
+	// snapshot carries the `readonly` flag; we enforce it here — boot's own seed marks them read-only too, but this
+	// overlay sits ABOVE it and would otherwise answer their stats/writes as writable, shadowing that. A `Set`
+	// (not a per-file bit) so a future "unlock to customize" can just drop the entry. Seeded files only: a file the
+	// user later creates is never in here, so it stays writable.
+	const readonlyPaths = new Set<string>();
+
 	// Seed the baked snapshot (not persisted — a rebuilt demo file stays fresh), then restore persisted writes
 	// (acquired types + edits) on top, so those override the seed for any overlapping path.
 	for (const file of files) {
 		ensureParent(file.path);
 		fs.writeFileSync(file.path, file.contents);
+
+		if (file.readonly === true) {
+			readonlyPaths.add(file.path);
+		}
 	}
 
 	const db = await openPersist();
@@ -186,7 +204,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		}
 	};
 
-	const handle: WorkspaceFs = { "reads": 0, "writes": 0, "has": (path) => fs.existsSync(path), "buffer": buffer };
+	const handle: WorkspaceFs = { "reads": 0, "writes": 0, "has": (path) => fs.existsSync(path), "isReadonly": (path) => readonlyPaths.has(path), "buffer": buffer };
 
 	const provider: IFileSystemProviderWithFileReadWriteCapability = {
 		"capabilities": FileSystemProviderCapabilities.FileReadWrite | FileSystemProviderCapabilities.PathCaseSensitive,
@@ -200,8 +218,9 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 			}
 
 			const stat = fs.statSync(resource.path);
+			const result: IStat = { "type": fileType(stat), "ctime": stat.ctimeMs, "mtime": stat.mtimeMs, "size": stat.size };
 
-			return { "type": fileType(stat), "ctime": stat.ctimeMs, "mtime": stat.mtimeMs, "size": stat.size };
+			return readonlyPaths.has(resource.path) ? { ...result, "permissions": FILE_PERMISSION_READONLY } : result;
 		},
 
 		"readFile": async (resource): Promise<Uint8Array> => {
@@ -228,6 +247,10 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		},
 
 		"writeFile": async (resource, content): Promise<void> => {
+			if (readonlyPaths.has(resource.path)) {
+				throw readOnly(); // managed/read-only — reject EVERY write path (editor Save, the vscode API, the terminal)
+			}
+
 			const existed = fs.existsSync(resource.path);
 
 			ensureParent(resource.path);
@@ -242,12 +265,20 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		},
 
 		"delete": async (resource, options): Promise<void> => {
+			if (readonlyPaths.has(resource.path)) {
+				throw readOnly(); // a managed config can't be deleted out from under the tooling that owns it
+			}
+
 			fs.rmSync(resource.path, { "recursive": options.recursive, "force": true });
 			persist(resource.path, null);
 			fire(resource, FileChangeType.DELETED);
 		},
 
 		"rename": async (from, to): Promise<void> => {
+			if (readonlyPaths.has(from.path) || readonlyPaths.has(to.path)) {
+				throw readOnly(); // can't rename a managed file away, nor clobber one by renaming onto it
+			}
+
 			ensureParent(to.path);
 			const data = fs.readFileSync(from.path);
 

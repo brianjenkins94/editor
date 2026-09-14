@@ -29,6 +29,13 @@ const MAX_BYTES = 256 * 1024;                 // skip anything unexpectedly larg
 // are kept regardless since they carry no extension.
 const TEXT = new Set(["ts", "tsx", "mjs", "cjs", "js", "jsx", "json", "md", "yml", "yaml", "html", "css", "txt"]);
 
+// Root-level config files the EDITOR manages rather than the user: seeded read-only, so workspace-fs enforces it
+// (the editor shows the lock + blocks Save, the vscode API and the terminal get a permission error). Matched
+// against the workspace-relative path, so only the ROOT one is managed — a nested config the user makes stays
+// theirs. `tsconfig.json` is the only functional one today (tsserver reads it); the rest are here for when eslint
+// reads a workspace config / a git layer lands.
+const MANAGED_CONFIGS = new Set(["tsconfig.json", "jsconfig.json", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", ".gitignore"]);
+
 export interface SnapshotFile { "path": string; "contents": string; "readonly"?: boolean }
 
 /** This file's directory. */
@@ -117,7 +124,7 @@ function snapshot(): SnapshotFile[] {
 			const stat = statOf(abs);
 
 			if (stat !== undefined && stat.isFile() && stat.size <= MAX_BYTES) {
-				files.push({ "path": `${FOLDER}/${rel}`, "contents": readFileSync(abs, "utf8") });
+				files.push({ "path": `${FOLDER}/${rel}`, "contents": readFileSync(abs, "utf8"), "readonly": MANAGED_CONFIGS.has(rel) });
 			}
 		}
 	}
