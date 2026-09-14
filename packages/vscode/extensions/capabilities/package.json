@@ -29,6 +29,23 @@
           "name": "Capability calls"
         }
       ]
+    },
+    "commands": [
+      { "command": "capabilities.allow", "title": "Allow", "category": "Capabilities", "icon": "$(pass)" },
+      { "command": "capabilities.deny", "title": "Deny", "category": "Capabilities", "icon": "$(circle-slash)" },
+      { "command": "capabilities.clear", "title": "Clear disposition", "category": "Capabilities", "icon": "$(discard)" }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "capabilities.allow", "when": "false" },
+        { "command": "capabilities.deny", "when": "false" },
+        { "command": "capabilities.clear", "when": "false" }
+      ],
+      "view/item/context": [
+        { "command": "capabilities.allow", "when": "view == capabilities.calls && viewItem == capabilityCall.resolved", "group": "inline@1" },
+        { "command": "capabilities.deny", "when": "view == capabilities.calls && viewItem == capabilityCall.resolved", "group": "inline@2" },
+        { "command": "capabilities.clear", "when": "view == capabilities.calls && viewItem == capabilityCall.resolved", "group": "capabilities@1" }
+      ]
     }
   }
 }
