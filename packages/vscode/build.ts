@@ -195,7 +195,8 @@ export async function preBuild(): Promise<void> {
 				"preserveEntrySignatures": "strict",
 				"input": {
 					"lsp/server-host": resolvePath("./extensions/worker-pod/server-host.ts"),
-					"lsp/debug-worker": resolvePath("./extensions/worker-pod/debug-worker.ts")
+					"lsp/debug-worker": resolvePath("./extensions/worker-pod/debug-worker.ts"),
+					"lsp/node-worker": resolvePath("./extensions/worker-pod/node-worker.ts")
 				},
 				"output": { "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
 			}
