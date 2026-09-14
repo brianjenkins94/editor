@@ -84,7 +84,7 @@ function inertResponse(): unknown {
  * (a future refinement can tag known HTTP clients like axios); this is purely about not stopping the run.
  */
 function inert(): unknown {
-	const target = function() { /* inert */ };
+	function target(): void { /* inert */ }
 
 	return new Proxy(target, {
 		"get": (_target, property) => {
