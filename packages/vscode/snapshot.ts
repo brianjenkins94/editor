@@ -288,6 +288,19 @@ function typeSurface(): SnapshotFile[] {
 		return true;
 	};
 
+	// Bake JUST a package's package.json. A no-types package whose types come from an @types counterpart still
+	// needs its own manifest seeded synchronously: without it, tsserver directory-probes `node_modules/<pkg>` and
+	// — via the async CDN overlay — resolves `<pkg>/index.ts` (an empty stub) to "is not a module", never reaching
+	// the @types surface (incl. the JSX namespace) on the FIRST load, before ATA fills the store. The manifest
+	// makes resolution follow package.json → @types instead. (react/react-dom ship no .d.ts, so this is them.)
+	const seedManifest = (pkg: string): void => {
+		const manifest = path.join(nm, pkg, "package.json");
+
+		if (existsSync(manifest)) {
+			files.push({ "path": `${FOLDER}/` + path.relative(root, manifest).split(path.sep).join("/"), "contents": readFileSync(manifest, "utf8"), "readonly": true });
+		}
+	};
+
 	for (const pkg of packages) {
 		if (ALWAYS_SHIM.has(pkg)) {
 			shims.push(pkg);
@@ -297,14 +310,17 @@ function typeSurface(): SnapshotFile[] {
 
 		// A package's own types, plus its DefinitelyTyped counterpart (react → @types/react): react/react-dom ship
 		// no types, so the @types package is what provides the module types AND the global JSX namespace.
-		let covered = seedPackage(pkg);
+		const ownTypes = seedPackage(pkg);
 		const typesPkg = pkg.startsWith("@types/") ? undefined : typesCounterpart(pkg);
+		const viaTypes = typesPkg !== undefined && seedPackage(typesPkg);
 
-		if (typesPkg !== undefined && seedPackage(typesPkg)) {
-			covered = true;
+		// Covered by @types but ships no own types → bake its manifest so resolution follows it to @types rather
+		// than probing the physical (async-served) tree and stalling on an empty `<pkg>/index.ts`.
+		if (viaTypes && !ownTypes) {
+			seedManifest(pkg);
 		}
 
-		if (!covered) {
+		if (!ownTypes && !viaTypes) {
 			shims.push(pkg);   // ships no types and has no installed @types counterpart → ambient any
 		}
 	}
