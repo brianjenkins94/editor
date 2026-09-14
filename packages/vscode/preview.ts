@@ -1,106 +1,91 @@
 /**
  * Live preview pane — runs the workspace as a real app through an in-browser Vite dev server, no backend.
  *
- * Path B ("almostnode as WebContainer"): a {@link ViteDevServer} runs HERE in the host page over an almostnode
- * {@link VirtualFS} seeded with the workspace files. It transpiles JSX/TS with the browser TypeScript
- * (`ts.transpileModule`) and does React-Fast-Refresh HMR. The preview <iframe> reaches it over ordinary HTTP
- * at `/__virtual__/<port>/`, routed by the one service worker (coi-serviceworker.js, which also provides COI +
- * the module resolver) through the ServerBridge MessageChannel. When a file is saved in the editor we mirror
- * it into the VFS; the dev server watches the VFS and pushes an HMR update to the iframe — component state
- * survives the edit.
- *
- * This module is LAZY-loaded (dynamic import) because it pulls in `typescript` (the transpiler); keeping it out
- * of the initial host bundle means that cost is paid only when the preview is actually opened. The service
+ * The dev server (almostnode's ViteDevServer) runs IN THE NODE WORKER on the shared workspace zen-fs (see
+ * extensions/worker-pod/node-worker.ts) — off the main thread, and on the same filesystem the editor writes, so
+ * there's no separate VFS and no file mirroring. This host-page module is the bridge END: it drives the worker
+ * over the hub (`preview.start` / `virtual.request` / `preview.fileChanged`, and subscribes `preview.hmr`),
+ * registers a virtual server with the ServerBridge so the <iframe>'s `/__virtual__/<port>/` requests (routed by
+ * coi-serviceworker) relay to the worker, and forwards the worker's HMR updates to the iframe. `typescript` (the
+ * transpiler) now lives in the worker, so this module no longer pulls it into the host bundle. The service
  * worker can't be registered in the in-app Browser pane, so the preview only works in a real browser tab.
  */
-import { getServerBridge, VirtualFS, ViteDevServer } from "@brianjenkins94/almostnode";
+import type { Hub } from "@brianjenkins94/hub";
+import { getServerBridge } from "@brianjenkins94/almostnode";
+import { createRpcClient } from "@brianjenkins94/hub";
 
 /** The virtual port the dev server is registered on (any value; it only namespaces the `/__virtual__/` URL). */
 const PREVIEW_PORT = 5173;
 
 export interface Preview {
-	/** Mirror an edited workspace file into the preview's VFS, triggering HMR. Path is workspace-absolute. */
+	/** Tell the worker's dev server a workspace file changed (workspace-absolute path), triggering HMR. */
 	"update": (path: string, contents: string) => void;
 }
 
 export interface PreviewOptions {
-	/** The workspace files to seed (workspace-absolute paths, e.g. "/workspace/src/App.tsx"). */
-	"files": { "path": string; "contents": string }[];
-	/** The explorer root the files live under (stripped so the dev server sees "/index.html", "/src/…"). */
-	"workspaceFolder": string;
 	/** The iframe the preview renders into. */
 	"iframe": HTMLIFrameElement;
 	/** URL of the shared service worker (coi-serviceworker.js) that routes `/__virtual__/` to the bridge. */
 	"swUrl": string;
+	/** The hub whose tree reaches the node worker (the page root hub). */
+	"hub": Hub;
+	/** The explorer root the app lives under in the shared workspace (default "/workspace"). */
+	"workspaceFolder"?: string;
 }
 
-/** ViteDevServer isn't an http.Server; the bridge wants {listening, address, handleRequest}. Thin adapter. */
-function httpWrapper(server: ViteDevServer): unknown {
-	return {
-		"listening": true,
-		"address": () => ({ "port": server.getPort(), "address": "0.0.0.0", "family": "IPv4" }),
-		"handleRequest": (method: string, url: string, headers: Record<string, string>, body?: unknown) => server.handleRequest(method, url, headers, body as never)
-	};
-}
+/** The worker's relayed response to a virtual request (see node-runner.ts / node-worker.ts). */
+interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": Uint8Array }
 
 export async function createPreview(options: PreviewOptions): Promise<Preview> {
-	const { files, workspaceFolder, iframe, swUrl } = options;
-	const prefix = workspaceFolder.replace(/\/$/u, "");
+	const { iframe, swUrl, hub } = options;
+	const workspaceFolder = options.workspaceFolder ?? "/workspace";
+	const rpc = createRpcClient(hub);
 
-	// Workspace-absolute path → VFS path (dev-server root is "/"): "/workspace/src/App.tsx" → "/src/App.tsx".
-	const toVfsPath = (path: string): string => {
-		const stripped = path.startsWith(prefix + "/") ? path.slice(prefix.length) : path;
+	// Start the dev server in the node worker, rooted at the workspace on the shared zen-fs.
+	await rpc.request("preview.start", { "port": PREVIEW_PORT, "root": workspaceFolder }, { "timeoutMs": 30000 });
 
-		return stripped.startsWith("/") ? stripped : "/" + stripped;
+	// The ServerBridge wants an http-server-shaped `{listening, address, handleRequest}`; each request relays to
+	// the worker's dev server over the hub and comes back as status/headers/body.
+	const virtualServer = {
+		"listening": true,
+		"address": () => ({ "port": PREVIEW_PORT, "address": "0.0.0.0", "family": "IPv4" }),
+		"handleRequest": async (method: string, url: string, headers: Record<string, string>, body?: ArrayBufferLike) => {
+			const response = await rpc.request("virtual.request", {
+				"port": PREVIEW_PORT,
+				"method": method,
+				"url": url,
+				"headers": headers,
+				"body": body === undefined ? undefined : new Uint8Array(body)
+			}, { "timeoutMs": 30000 }) as VirtualResponse;
+
+			return { "statusCode": response.status, "statusMessage": response.statusText, "headers": response.headers, "body": response.body };
+		}
 	};
 
-	const vfs = new VirtualFS();
-
-	const write = (path: string, contents: string): void => {
-		const vfsPath = toVfsPath(path);
-		const dir = vfsPath.slice(0, vfsPath.lastIndexOf("/"));
-
-		if (dir !== "" && !vfs.existsSync(dir)) {
-			vfs.mkdirSync(dir, { "recursive": true });
-		}
-
-		vfs.writeFileSync(vfsPath, contents);
-	};
-
-	// Seed the app files. Skip the seeded type surface (node_modules/*.d.ts) — that's for the editor's TS
-	// server, not part of the running app (which resolves react from the CDN import map the dev server injects).
-	for (const file of files) {
-		const vfsPath = toVfsPath(file.path);
-
-		if (vfsPath.startsWith("/node_modules/") || vfsPath.endsWith(".d.ts")) {
-			continue;
-		}
-
-		write(file.path, file.contents);
-	}
-
-	const server = new ViteDevServer(vfs, { "port": PREVIEW_PORT, "root": "/" });
 	const bridge = getServerBridge();
 
-	// Attach to the already-registered service worker and open the MessageChannel (idempotent re-register).
 	await bridge.initServiceWorker({ "swUrl": swUrl });
-	bridge.registerServer(httpWrapper(server) as never, PREVIEW_PORT);
-	server.start();
+	bridge.registerServer(virtualServer as never, PREVIEW_PORT);
 
-	// Point the iframe at the dev server; (re)set the HMR target each time it loads so pushed updates land.
-	iframe.addEventListener("load", () => {
-		if (iframe.contentWindow !== null) {
-			server.setHMRTarget(iframe.contentWindow);
-		}
-	});
+	// HMR: the worker's dev server publishes each update on the hub; forward it to the iframe, whose injected HMR
+	// client (a `window.message` listener) applies it — React Fast Refresh, state preserved.
+	hub.subscribe(`preview.hmr.${PREVIEW_PORT}`, (message) => { iframe.contentWindow?.postMessage(message, "*"); });
+
 	// Serve UNDER the deploy base (e.g. /editor/__virtual__/…), not root — the SW is scoped to the base, so a
-	// root-absolute /__virtual__/ URL would fall outside its scope and never be intercepted. Base = the SW
-	// script's own directory. (bridge.getServerUrl returns a root-absolute URL, so we build it ourselves.)
+	// root-absolute /__virtual__/ URL would fall outside its scope and never be intercepted.
 	const base = swUrl.slice(0, swUrl.lastIndexOf("/") + 1);
 
 	iframe.src = base + "__virtual__/" + PREVIEW_PORT + "/";
 
+	const prefix = workspaceFolder.replace(/\/$/u, "");
+
 	return {
-		"update": (path, contents) => { write(path, contents); }
+		// The editor already wrote the file into the shared workspace zen-fs the worker reads — we only tell the
+		// worker which (root-relative) path changed so it re-reads and emits the HMR update. Content isn't sent.
+		"update": (path) => {
+			const relative = path.startsWith(prefix + "/") ? path.slice(prefix.length) : path;
+
+			hub.publish("preview.fileChanged", { "port": PREVIEW_PORT, "path": relative.startsWith("/") ? relative : "/" + relative });
+		}
 	};
 }

@@ -67,10 +67,10 @@ if (ensureCrossOriginIsolated()) {
 
 		const start = (): void => {
 			import("./preview").then(({ createPreview }) => createPreview({
-				"files": workspace,
 				"workspaceFolder": "/workspace",
 				"iframe": previewFrame,
-				"swUrl": base + "coi-serviceworker.js"
+				"swUrl": base + "coi-serviceworker.js",
+				"hub": rootHub
 			})).then((handle) => {
 				preview = handle;
 				hostLog.info("preview ready");
