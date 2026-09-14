@@ -22,6 +22,7 @@ import type { NodeOutput, NodeRunner } from "./node-runner";
 import { createWorkspaceTerminalFs } from "./terminal-fs";
 import { createNodeCommand } from "./terminal-node";
 import { createNpmCommand } from "./terminal-npm";
+import { createViteCommand } from "./terminal-vite";
 
 type VscodeApi = typeof import("vscode");
 
@@ -40,7 +41,7 @@ const PROBE_RE = new RegExp(`${RS}([^${RS}]*)${RS}([^${RS}]*)${RS}$`, "u");
 export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (data: string) => void, cwd0: string): TerminalProcess {
 	let sessionPromise: Promise<BashSession> | undefined;
 	const getSession = (): Promise<BashSession> => {
-		sessionPromise ??= import("just-bash/browser").then((module) => new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": [createNodeCommand(runner, writeLive), createNpmCommand(getSession)] }) as unknown as BashSession);
+		sessionPromise ??= import("just-bash/browser").then((module) => new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": [createNodeCommand(runner, writeLive), createNpmCommand(getSession), createViteCommand(runner.openPreview)] }) as unknown as BashSession);
 
 		return sessionPromise;
 	};

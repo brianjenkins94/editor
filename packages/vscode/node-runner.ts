@@ -41,6 +41,8 @@ export interface NodeRunner {
 	/** Subscribe to HMR updates the worker's preview server emits; `handler` relays them to the iframe. Returns
 	 *  an unsubscribe (M2). */
 	"onPreviewHmr": (port: number, handler: (message: unknown) => void) => () => void;
+	/** Ask the host to open the preview pane on `root` — the terminal's `vite` command fires this (M3). */
+	"openPreview": (root: string) => void;
 }
 
 /** Spawn/manage the node worker, wire it into `hub`, and return the streaming runner the terminal drives. */
@@ -177,6 +179,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 			await rpc.request("preview.start", { "port": port, "root": root }, { "timeoutMs": 30000 });
 		},
 		"notifyPreviewChange": (port, path) => { hub.publish("preview.fileChanged", { "port": port, "path": path }); },
-		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); })
+		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); }),
+		"openPreview": (root) => { hub.publish("preview.open", { "root": root }); }
 	};
 }

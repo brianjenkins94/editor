@@ -47,49 +47,34 @@ if (ensureCrossOriginIsolated()) {
 	const previewFrame = document.createElement("iframe");
 
 	previewWindow.body.appendChild(previewFrame);
-	document.body.appendChild(previewWindow.element);
 
-	// Spinning up the preview is expensive — its own in-browser dev server plus the `typescript` transpiler, a
-	// few MB of extra JS — and it competes with the editor for the main thread and network during the critical
-	// boot. So hold it back until the editor is genuinely up and idle: our worker-pod extension publishes
-	// `editor.ready` on the hub once it has activated and its language client has connected (see
-	// extensions/worker-pod/extension.ts). We then import + create it inside an idle callback, so it never steals
-	// a frame from a still-settling editor. Idempotent, and a timeout fallback covers a missed beacon (extension
-	// failure or a hub interest race) so the preview is only ever delayed, never stranded.
-	let previewRequested = false;
+	// The preview is EXPLICIT (M3): the pane opens when the workspace's dev script runs — `npm run dev` invokes
+	// the terminal's `vite` command, which publishes `preview.open` — not at boot, so the pane stays hidden until
+	// then (fewer things on screen you didn't ask for). The dev server is almostnode's ViteDevServer in the node
+	// worker (preview.ts); loading is lazy — with `typescript` now in the worker, this only pulls the small host
+	// bridge module. Idempotent: repeat `npm run dev` re-uses the running preview.
+	let previewStarted = false;
 
-	function loadPreview(): void {
-		if (previewRequested) {
+	rootHub.subscribe("preview.open", (data) => {
+		if (previewStarted) {
 			return;
 		}
 
-		previewRequested = true;
+		previewStarted = true;
+		previewWindow.show();
 
-		const start = (): void => {
-			import("./preview").then(({ createPreview }) => createPreview({
-				"workspaceFolder": "/workspace",
-				"iframe": previewFrame,
-				"swUrl": base + "coi-serviceworker.js",
-				"hub": rootHub
-			})).then((handle) => {
-				preview = handle;
-				hostLog.info("preview ready");
-			}).catch((error: unknown) => {
-				hostLog.error("preview failed", { "error": error instanceof Error ? error.message : String(error) });
-			});
-		};
-
-		if (typeof requestIdleCallback === "function") {
-			requestIdleCallback(start, { "timeout": 2000 });
-		} else {
-			setTimeout(start, 200);
-		}
-	}
-
-	rootHub.subscribe("editor.ready", loadPreview);
-	// Fallback: if the editor never signals ready (extension failed to activate, or the beacon lost a hub race),
-	// load the preview anyway rather than leave the pane forever empty.
-	setTimeout(loadPreview, 15000);
+		import("./preview").then(({ createPreview }) => createPreview({
+			"workspaceFolder": (data as { "root"?: string }).root ?? "/workspace",
+			"iframe": previewFrame,
+			"swUrl": base + "coi-serviceworker.js",
+			"hub": rootHub
+		})).then((handle) => {
+			preview = handle;
+			hostLog.info("preview ready");
+		}).catch((error: unknown) => {
+			hostLog.error("preview failed", { "error": error instanceof Error ? error.message : String(error) });
+		});
+	});
 
 	createVscodeWindow({
 		"workspaceFolder": "/workspace",
