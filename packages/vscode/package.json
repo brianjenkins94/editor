@@ -34,9 +34,7 @@
     "esbuild": "^0.28.2",
     "tsx": "latest",
     "typescript": "^5.9.3",
-    "vite": "latest",
-    "vite-plugin-top-level-await": "^1.6.0",
-    "vite-plugin-wasm": "^3.6.0"
+    "vite": "latest"
   },
   "exports": {
     ".": {
