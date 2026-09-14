@@ -253,6 +253,14 @@ export class ViteDevServer extends DevServer {
 	}
 
   /**
+   * Externally trigger an HMR update for `path` (root-relative URL path, e.g. "/src/App.tsx"). For hosts whose
+   * VFS doesn't emit watch events — a Web Worker on a shared zen-fs — where startWatching() can't observe saves.
+   */
+	notifyChange(path: string): void {
+		this.handleFileChange(path);
+	}
+
+  /**
    * Handle an incoming HTTP request
    */
 	async handleRequest(

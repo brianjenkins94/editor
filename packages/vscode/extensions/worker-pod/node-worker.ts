@@ -215,9 +215,10 @@ interface VirtualRequest { "port": number; "method": string; "url": string; "hea
 interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 type RequestHandler = { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> };
+type PreviewServer = RequestHandler & { "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "notifyChange": (path: string) => void };
 
 // Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry.
-const previewServers = new Map<number, RequestHandler>();
+const previewServers = new Map<number, PreviewServer>();
 
 serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
 	const { port, method, url, headers, body } = raw as VirtualRequest;
@@ -239,10 +240,21 @@ serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number
 	const { port, root } = raw as { "port": number; "root": string };
 	const { ViteDevServer } = await import("@brianjenkins94/almostnode");
 	const vfs = await getVfs();
-	const server = new ViteDevServer(vfs, { "port": port, "root": root });
+	const server = new ViteDevServer(vfs, { "port": port, "root": root }) as unknown as PreviewServer;
 
 	server.start();
-	previewServers.set(port, server as unknown as RequestHandler);
+	// HMR delivery (M2): the worker has no Window to post updates to, so give the server a stand-in whose
+	// postMessage publishes the update over the hub; the main thread relays it to the preview iframe.
+	server.setHMRTarget({ "postMessage": (message) => { hub.publish(`preview.hmr.${port}`, message); } });
+	previewServers.set(port, server);
 
 	return { "ok": true, "port": port };
+});
+
+// M2: an editor save can't fire the worker's zen-fs watch (it's a no-op), so the main thread tells us which file
+// changed; we re-read it from the shared workspace and emit the HMR update (path is root-relative, e.g. /src/App.tsx).
+hub.subscribe("preview.fileChanged", (data) => {
+	const { port, path } = data as { "port": number; "path": string };
+
+	previewServers.get(port)?.notifyChange(path);
 });

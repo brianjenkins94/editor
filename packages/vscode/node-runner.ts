@@ -36,6 +36,11 @@ export interface NodeRunner {
 	"virtualRequest": (port: number, method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<VirtualResponse>;
 	/** Start a ViteDevServer in the worker on `root` of the shared workspace, reachable on `port` (preview, M1). */
 	"startPreview": (port: number, root: string) => Promise<void>;
+	/** Tell the worker's preview server a file changed (root-relative path), triggering an HMR update (M2). */
+	"notifyPreviewChange": (port: number, path: string) => void;
+	/** Subscribe to HMR updates the worker's preview server emits; `handler` relays them to the iframe. Returns
+	 *  an unsubscribe (M2). */
+	"onPreviewHmr": (port: number, handler: (message: unknown) => void) => () => void;
 }
 
 /** Spawn/manage the node worker, wire it into `hub`, and return the streaming runner the terminal drives. */
@@ -170,6 +175,8 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 			await ready;
 
 			await rpc.request("preview.start", { "port": port, "root": root }, { "timeoutMs": 30000 });
-		}
+		},
+		"notifyPreviewChange": (port, path) => { hub.publish("preview.fileChanged", { "port": port, "path": path }); },
+		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); })
 	};
 }
