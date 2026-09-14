@@ -287,6 +287,29 @@ export async function preBuild(): Promise<void> {
 		}
 	});
 
+	// 3c. capabilities canary engine (dist/lsp/capabilities-canary.js) — the DYNAMIC half: runs the module in the
+	// tsval interpreter and observes the concrete pre-call resource at each capability call (the middle column).
+	// Bundles tsval + typescript (tsval's parser); no oxc here (unlike the static engine — the canary classifies
+	// by injected-stand-in identity, not silo/reach's AST matchers, precisely to keep oxc out of this bundle).
+	// Node builtins polyfilled + the process banner for silo/policy, same as the static engine.
+	await buildPackage(root, {
+		"base": "./",
+		"resolve": { "alias": [{ "find": /^@brianjenkins94\/tsval$/u, "replacement": resolvePath("../tsval/src/index.ts") }] },
+		"plugins": [polyfillNode()],
+		"build": {
+			"outDir": "dist",
+			"emptyOutDir": false,
+			"minify": false,
+			"sourcemap": !isCI,
+			"assetsInlineLimit": 0,
+			"rollupOptions": {
+				"preserveEntrySignatures": "strict",
+				"input": { "lsp/capabilities-canary": resolvePath("./extensions/capabilities/canary.ts") },
+				"output": { "banner": PROCESS_SHIM, "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
+			}
+		}
+	});
+
 	// 4. COI service worker (→ docs/coi-serviceworker.js), single-file ES module.
 	await buildPackage(root, {
 		"base": "./",

@@ -288,13 +288,18 @@ function maybeBoot(): void {
 
 			eslintExt.registerFileUrl("./node_modules/eslint-ts-plugin/index.js", eslintPluginUrl);
 
-			// The capabilities extension — a TS server plugin (like eslint) that reuses tsserver's own `ts` + real
-			// Program/checker to run the capability kernel and publish NATIVE ts.Diagnostics (source "capabilities").
-			// Registered in the web-worker host so tsserver picks up its plugin; same served-plugin/self-locating-engine
-			// wiring as eslint. Its extension.ts is a no-op — the diagnostics render themselves.
+			// The capabilities extension — two halves. STATIC: a TS server plugin (like eslint) that reuses tsserver's
+			// own `ts` + real Program/checker to run util/silo's findReach and publish NATIVE ts.Diagnostics (source
+			// "capabilities"); same served-plugin/self-locating-engine wiring as eslint. DYNAMIC: extension.ts renders
+			// the "Capability calls" panel from the tsval canary (loaded from the injected URL below).
 			const capabilitiesExt = registerExtension(capabilitiesManifest, ExtensionHostKind.LocalWebWorker);
 
-			capabilitiesExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(capabilitiesExtensionCode));
+			// The extension is served from a data: URL, so it can't self-locate sibling served files via
+			// import.meta.url — inject the canary engine's absolute URL as a global it reads at activate().
+			const capabilitiesCanaryUrl = new URL("./lsp/capabilities-canary.js", location.href).href;
+			const capabilitiesExtWithUrl = "globalThis.__CAPABILITIES_CANARY_URL__ = " + JSON.stringify(capabilitiesCanaryUrl) + ";\n" + capabilitiesExtensionCode;
+
+			capabilitiesExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(capabilitiesExtWithUrl));
 
 			const capabilitiesPluginPkg = JSON.stringify({ "name": "capabilities-ts-plugin", "version": "0.0.1", "browser": "index.js" });
 
