@@ -198,7 +198,9 @@ export async function preBuild(): Promise<void> {
 	// 2. LSP host + tsval debug workers (dist/lsp/), almostnode-hosted — node builtins external.
 	await buildPackage(root, {
 		"base": "./",
-		"resolve": { "alias": { "@brianjenkins94/tsval": resolvePath("../tsval/src/index.ts") } },
+		// `dedupe` collapses the two physical typescript installs (almostnode's own dep + tsval's) to ONE, so the
+		// manualChunks below emits a single ~7MB ts chunk both workers share, not two copies in one 14MB chunk.
+		"resolve": { "alias": { "@brianjenkins94/tsval": resolvePath("../tsval/src/index.ts") }, "dedupe": ["typescript"] },
 		"plugins": [bundledNodeServer("worker-pod"), cspellDict()],
 		"build": {
 			"outDir": "dist",
@@ -215,7 +217,14 @@ export async function preBuild(): Promise<void> {
 					"lsp/debug-worker": resolvePath("./extensions/worker-pod/debug-worker.ts"),
 					"lsp/node-worker": resolvePath("./extensions/worker-pod/node-worker.ts")
 				},
-				"output": { "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
+				"output": {
+					"chunkFileNames": "lsp/[name]-[hash].js",
+					"assetFileNames": "lsp/[name]-[hash][extname]",
+					// Force `typescript` into ONE shared chunk. The node worker (ViteDevServer transpile) loads it
+					// lazily; the debug worker (tsval) would otherwise INLINE its own ~7MB copy — this makes both
+					// reference the same lsp/typescript-*.js instead of shipping ts twice.
+					"manualChunks": (id) => (/[\\/]node_modules[\\/]typescript[\\/]/u.test(id) ? "typescript" : undefined)
+				}
 			}
 		}
 	});
