@@ -25,7 +25,7 @@ import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { Logger } from "@brianjenkins94/util/logger";
 import { configure, fs, InMemory, SingleBuffer } from "@zenfs/core";
 
-import { createChangeEvent, notFound } from "./provider-base";
+import { createChangeEvent, fsTrace, notFound } from "./provider-base";
 
 /** Handle returned to callers: an existence probe (so ata.ts can skip files already in the store, its
  *  cross-reload dedup), M0 instrumentation counters, and — when the store is SharedArrayBuffer-backed — the
@@ -172,6 +172,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 	let changeTimer: ReturnType<typeof setTimeout> | undefined;
 	const fire = (resource: Change["resource"], type: FileChangeType): void => {
 		changeBatch.push({ "resource": resource, "type": type });
+			fsTrace("ws.fire", resource.path, { "changeType": type });
 
 		if (changeTimer === undefined) {
 			changeTimer = setTimeout(() => {
@@ -195,6 +196,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		"watch": () => ({ "dispose": () => undefined }),
 
 		"stat": async (resource): Promise<IStat> => {
+			fsTrace("ws.stat", resource.path, { "r": fs.existsSync(resource.path) ? "found" : "miss" });
 			if (!fs.existsSync(resource.path)) {
 				throw notFound(); // fall through to a lower overlay (the CDN node_modules provider)
 			}
@@ -205,6 +207,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		},
 
 		"readFile": async (resource): Promise<Uint8Array> => {
+			fsTrace("ws.readFile", resource.path, { "r": fs.existsSync(resource.path) ? "found" : "miss" });
 			if (!fs.existsSync(resource.path)) {
 				throw notFound();
 			}

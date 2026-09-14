@@ -21,12 +21,20 @@ import {
 	FileSystemProviderCapabilities,
 	FileType
 } from "@brianjenkins94/monaco-vscode-api/main";
-import { createChangeEvent, notFound, readOnly, relUnder } from "./provider-base";
+import { createChangeEvent, fsTrace, notFound, readOnly, relUnder } from "./provider-base";
 
 interface UnpkgMeta {
 	"type": "file" | "directory";
 	"size"?: number;
 	"files"?: { "path": string; "type": "file" | "directory"; "size"?: number }[];
+}
+
+/** A spurious TypeScript-SOURCE probe: `.ts`/`.tsx`/`.mts`/`.cts` that is NOT a declaration (`.d.ts` …).
+ *  Published packages never ship `.ts` source; tsserver probes `<pkg>/index.ts` before `.d.ts`, and the CDN
+ *  answers those with content (a redirect to the real file), which tsserver then RESOLVES the import to
+ *  ("is not a module") — shadowing the @types surface. Serving them notFound keeps the probe a failed lookup. */
+function isTsSourceProbe(rel: string): boolean {
+	return (/\.(?:tsx?|mts|cts)$/u).test(rel) && !(/\.d\.(?:ts|mts|cts)$/u).test(rel);
 }
 
 /** Split a node_modules-relative path into package + subpath, honouring scopes (@scope/name). */
@@ -55,6 +63,8 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		}
 
 		announced.add(key);
+		fsTrace("nm.announce", key, { "changeType": change.type });
+
 		for (const listener of [...listeners]) {
 			listener([change]);
 		}
@@ -159,6 +169,65 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		});
 	};
 
+	// The set of paths (files AND dirs) a package ACTUALLY ships, from its ?meta listing. The CDN answers a request
+	// for a path the package does NOT ship (e.g. react/index.ts, react/index.d.ts) with a redirect to its real
+	// entry, so a blind fetch serves the wrong bytes and tsserver resolves the import to it ("is not a module"),
+	// shadowing the @types surface. Gate every access on the listing so a probe for a non-shipped path stays a
+	// FAILED lookup (→ @types). Same principle ATA uses — crawl the listing, never blindly probe.
+	const pkgPaths = new Map<string, Set<string>>();
+	const pkgPathsInflight = new Set<string>();
+
+	const collectPaths = (node: UnpkgMeta, into: Set<string>): void => {
+		for (const child of node.files ?? []) {
+			into.add(child.path.replace(/^\/+/u, ""));
+
+			if (child.type === "directory") {
+				collectPaths(child as UnpkgMeta, into);
+			}
+		}
+	};
+
+	/** true = the package ships this sub-path, false = it doesn't (real miss), undefined = listing not fetched yet
+	 *  (a background fetch is kicked off; announce re-triggers resolution once it lands). */
+	const ships = (rel: string, resource: Parameters<IFileSystemProviderWithFileReadWriteCapability["stat"]>[0]): boolean | undefined => {
+		const { pkg, sub } = splitPackage(rel);
+
+		if (sub === "") {
+			return true; // the package root dir itself
+		}
+
+		const set = pkgPaths.get(pkg);
+
+		if (set !== undefined) {
+			return set.has(sub);
+		}
+
+		if (!pkgPathsInflight.has(pkg) && served(rel)) {
+			pkgPathsInflight.add(pkg);
+			void fetchMeta(pkg).then((meta) => {
+				const paths = new Set<string>();
+
+				if (meta !== undefined) {
+					collectPaths(meta, paths);
+				}
+
+				pkgPaths.set(pkg, paths);
+				pkgPathsInflight.delete(pkg);
+				fsTrace("nm.listing", pkg, { "count": paths.size, "hasSub": paths.has(sub) });
+
+				// Re-trigger resolution ONLY when the probed path is genuinely shipped — that's a runtime lib whose
+				// file just became servable. For a NOT-shipped probe (a spurious `<pkg>/index.d.ts` the CDN would
+				// redirect), announcing "created" would make tsserver try to read a file that then answers notFound,
+				// leaving it stuck mid-analysis; stay silent — its failed-lookup already fell through to @types.
+				if (paths.has(sub)) {
+					announce(resource, { "resource": resource, "type": FileChangeType.ADDED });
+				}
+			});
+		}
+
+		return undefined;
+	};
+
 	return {
 		"capabilities":
 			FileSystemProviderCapabilities.FileReadWrite
@@ -186,8 +255,23 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				return { "type": FileType.Directory, "ctime": 0, "mtime": 0, "size": 0 };
 			}
 
+			if (isTsSourceProbe(rel)) {
+				fsTrace("nm.stat", rel, { "r": "tsprobe-notfound" });
+				throw notFound();
+			}
+
+			const shipped = ships(rel, resource);
+
+			if (shipped !== true) {
+				fsTrace("nm.stat", rel, { "r": shipped === undefined ? "listing-pending" : "not-shipped" });
+
+				throw notFound(); // package doesn't ship this path (or listing not known yet) — stay a failed lookup
+			}
+
 			if (!metaResults.has(rel)) {
 				ensureMeta(rel, resource);
+
+				fsTrace("nm.stat", rel, { "r": "failfast-miss" });
 
 				throw notFound(); // not fetched yet — fail fast; the background fetch will announce and we re-stat
 			}
@@ -195,8 +279,12 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			const meta = metaResults.get(rel);
 
 			if (meta === undefined) {
+				fsTrace("nm.stat", rel, { "r": "cached-miss" });
+
 				throw notFound();
 			}
+
+			fsTrace("nm.stat", rel, { "r": "found", "type": meta.type });
 
 			return {
 				"type": meta.type === "directory" ? FileType.Directory : FileType.File,
@@ -213,11 +301,29 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				throw notFound();
 			}
 
+			if (isTsSourceProbe(rel)) {
+				fsTrace("nm.readFile", rel, { "r": "tsprobe-notfound" });
+
+				throw notFound();
+			}
+
+			const shipped = ships(rel, resource);
+
+			if (shipped !== true) {
+				fsTrace("nm.readFile", rel, { "r": shipped === undefined ? "listing-pending" : "not-shipped" });
+
+				throw notFound(); // package doesn't ship this path (or listing not known yet) — stay a failed lookup
+			}
+
 			if (!fileResults.has(rel)) {
 				ensureFile(rel, resource);
 
+				fsTrace("nm.readFile", rel, { "r": "failfast-miss" });
+
 				throw notFound(); // not fetched yet — fail fast; the background fetch will announce and we re-read
 			}
+
+			fsTrace("nm.readFile", rel, { "r": fileResults.get(rel) === undefined ? "cached-miss" : "found" });
 
 			const data = fileResults.get(rel);
 
