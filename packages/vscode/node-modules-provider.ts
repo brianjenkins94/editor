@@ -29,18 +29,6 @@ interface UnpkgMeta {
 	"files"?: { "path": string; "type": "file" | "directory"; "size"?: number }[];
 }
 
-/** A spurious TypeScript-SOURCE probe: `.ts`/`.tsx`/`.mts`/`.cts` that is NOT a declaration (`.d.ts` …).
- *  Published npm packages ship `.js` + `.d.ts`, NEVER `.ts` source, so tsserver's module resolution probing
- *  `<pkg>/index.ts` (it tries `.ts` BEFORE `.d.ts`) never names a real file. But the CDN can answer such a
- *  request with an empty/redirect body, and tsserver then RESOLVES the import to that empty file — reporting
- *  "File '…/index.ts' is not a module" and, worse, treating the module as FOUND: it then watches that dead
- *  `.ts` (which never changes) instead of the failed-lookup locations, so it never re-resolves when ATA later
- *  writes the real `.d.ts`/@types. Answering notFound keeps it a FAILED lookup, so tsserver's own directory
- *  watch fires a targeted re-resolve the moment those types land — no project reload. */
-function isTsSourceProbe(rel: string): boolean {
-	return (/\.(?:tsx?|mts|cts)$/u).test(rel) && !(/\.d\.(?:ts|mts|cts)$/u).test(rel);
-}
-
 /** Split a node_modules-relative path into package + subpath, honouring scopes (@scope/name). */
 function splitPackage(rel: string): { "pkg": string; "sub": string } {
 	const parts = rel.split("/");
@@ -198,10 +186,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				return { "type": FileType.Directory, "ctime": 0, "mtime": 0, "size": 0 };
 			}
 
-			if (isTsSourceProbe(rel)) {
-				throw notFound(); // spurious `.ts` resolution probe — never a real npm file; keep it a failed lookup
-			}
-
 			if (!metaResults.has(rel)) {
 				ensureMeta(rel, resource);
 
@@ -227,10 +211,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 
 			if (rel === undefined || rel === "") {
 				throw notFound();
-			}
-
-			if (isTsSourceProbe(rel)) {
-				throw notFound(); // spurious `.ts` resolution probe — never a real npm file; keep it a failed lookup
 			}
 
 			if (!fileResults.has(rel)) {
