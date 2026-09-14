@@ -31,6 +31,7 @@ import { installTypeAcquisition } from "./ata";
 import { installWorkspaceFs, type WorkspaceFs } from "./workspace-fs";
 import { relayLoggerToHub } from "./telemetry";
 import { createNodeModulesProvider } from "./node-modules-provider";
+import { installTerminal } from "./terminal";
 import { connectAsPane } from "./pane-bus";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
@@ -239,6 +240,9 @@ function maybeBoot(): void {
 				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
 				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
 				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", moduleVersions ?? {}, (path) => workspaceFs?.has(path) ?? false, paneLog);
+				// The workspace terminal — a real VS Code terminal backed by just-bash on the workspace filesystem
+				// (managed configs reject writes; shell-created files show in the explorer). See terminal.ts.
+				installTerminal(api as typeof import("vscode"));
 				// Uplink the extension pod to the page: a workbench hub bridges the pod (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the
 				// window. pod/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.
