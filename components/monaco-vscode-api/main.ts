@@ -81,7 +81,11 @@ import getProcessControllerServiceOverride from "@codingame/monaco-vscode-proces
 import getQuickAccessServiceOverride from "@codingame/monaco-vscode-quickaccess-service-override";
 import getViewsServiceOverride, { attachPart, isEditorPartVisible, isPartVisibile as isPartVisible, onDidChangeSideBarPosition, onPartVisibilityChange, Parts } from "@codingame/monaco-vscode-views-service-override";
 import { openNewCodeEditor } from "./demo/src/features/editor";
-import { TerminalBackend } from "./demo/src/features/terminal";
+import { TerminalBackend } from "./terminal-backend";
+
+// The editor registers the default terminal's process factory (just-bash on the workspace fs). See terminal.ts.
+export { setTerminalProcessFactory } from "./terminal-backend";
+export type { TerminalProcess, TerminalProcessFactory } from "./terminal-backend";
 import { Worker } from "./demo/src/tools/fakeWorker";
 import "vscode/localExtensionHost";
 

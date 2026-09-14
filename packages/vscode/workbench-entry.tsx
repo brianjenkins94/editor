@@ -14,7 +14,7 @@
  */
 import type { WorkbenchFile, WorkbenchParts } from "@brianjenkins94/monaco-vscode-api/main";
 import { createHub, portTransport } from "@brianjenkins94/hub";
-import { boot, ExtensionHostKind, registerExtension, registerFileSystemOverlay } from "@brianjenkins94/monaco-vscode-api/main";
+import { boot, ExtensionHostKind, registerExtension, registerFileSystemOverlay, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
 // The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
 // virtual module in entry.config.ts).
@@ -31,7 +31,8 @@ import { installTypeAcquisition } from "./ata";
 import { installWorkspaceFs, type WorkspaceFs } from "./workspace-fs";
 import { relayLoggerToHub } from "./telemetry";
 import { createNodeModulesProvider } from "./node-modules-provider";
-import { installTerminal } from "./terminal";
+import { createNodeRunner } from "./node-runner";
+import { createBashProcess } from "./terminal";
 import { connectAsPane } from "./pane-bus";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
@@ -240,9 +241,13 @@ function maybeBoot(): void {
 				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
 				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
 				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", moduleVersions ?? {}, (path) => workspaceFs?.has(path) ?? false, paneLog);
-				// The workspace terminal — a real VS Code terminal backed by just-bash on the workspace filesystem
-				// (managed configs reject writes; shell-created files show in the explorer). See terminal.ts.
-				installTerminal(api as typeof import("vscode"));
+				// The workspace terminal — just-bash on the workspace filesystem, registered as the DEFAULT terminal
+				// backend's process factory (so every terminal is this one; no fake). `node` runs in a dedicated
+				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal.ts. One node runner
+				// (worker) is shared by every terminal.
+				const runNode = createNodeRunner(workbenchHub, workspaceFs?.buffer);
+
+				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), runNode, fire, cwd));
 				// Uplink the extension pod to the page: a workbench hub bridges the pod (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the
 				// window. pod/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.
