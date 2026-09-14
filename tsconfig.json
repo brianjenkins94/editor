@@ -3,6 +3,7 @@
   "compilerOptions": {
     "paths": {
       "@brianjenkins94/almostnode": ["./packages/almostnode/index.ts"],
+      "@brianjenkins94/almostnode/bridge": ["./packages/almostnode/server-bridge.ts"],
       "@brianjenkins94/tsval": ["./packages/tsval/src/index.ts"],
       "@brianjenkins94/tsval/typed": ["./packages/tsval/src/typed.ts"],
       "@brianjenkins94/bablr": ["./packages/bablr/src/index.js"],

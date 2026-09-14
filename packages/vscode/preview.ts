@@ -11,7 +11,10 @@
  * worker can't be registered in the in-app Browser pane, so the preview only works in a real browser tab.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import { getServerBridge } from "@brianjenkins94/almostnode";
+// Import the bridge from the NARROW subpath, not the barrel — the barrel re-exports ViteDevServer, which pulls
+// `typescript` (~7MB); this host-page module only needs the ServerBridge, so the narrow path keeps ts out of the
+// main-thread bundle (the dev server + its ts live in the node worker).
+import { getServerBridge } from "@brianjenkins94/almostnode/bridge";
 import { createRpcClient } from "@brianjenkins94/hub";
 
 /** The virtual port the dev server is registered on (any value; it only namespaces the `/__virtual__/` URL). */

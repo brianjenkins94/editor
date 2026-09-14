@@ -5,7 +5,8 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./bridge": "./server-bridge.ts"
   },
   "main": "./index.ts",
   "types": "./index.ts",
