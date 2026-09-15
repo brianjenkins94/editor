@@ -45,9 +45,20 @@ export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput): Cu
 		}
 
 		const env = ctx.exportedEnv ?? Object.fromEntries(ctx.env);
+		const file = resolvePosix(ctx.cwd, target);
 
 		try {
-			const { exitCode } = await runner.run(resolvePosix(ctx.cwd, target), ctx.cwd, env, { "onOutput": writeLive, "signal": ctx.signal });
+			// Auto-attach: try to run `node <file>` under the tsval debug adapter (always debug mode) — breakpoints,
+			// step-back, capability hard-stops. If the debugger can't attach, fall back to a plain run so the command
+			// never breaks. (`npm run dev` → `vite` is a separate command and stays on the almostnode "production"
+			// path — a full server can't run under the interpreter.)
+			const debugged = await runner.debug(file, ctx.cwd, env, { "onOutput": writeLive, "signal": ctx.signal });
+
+			if (debugged.attached) {
+				return { "stdout": "", "stderr": "", "exitCode": debugged.exitCode };
+			}
+
+			const { exitCode } = await runner.run(file, ctx.cwd, env, { "onOutput": writeLive, "signal": ctx.signal });
 
 			return { "stdout": "", "stderr": "", "exitCode": exitCode };
 		} catch (error) {

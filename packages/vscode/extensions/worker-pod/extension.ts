@@ -134,6 +134,72 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// The tsval debug type — a worker-backed stepping debugger (debug-adapter.ts + debug-worker.ts).
 	registerTsvalDebug(context);
 
+	// AUTO-ATTACH: a terminal `node <file>` (node-runner's startDebug) publishes `debug.launch`; start a tsval
+	// debug session for it, so running in the terminal IS a debug session (breakpoints, step-back, capability
+	// stops). Relay the session's end back on the `node.exit.<runId>` channel the terminal awaits; `debug.stop`
+	// (Ctrl-C) stops it. The runId rides in the launch config so start/terminate can correlate.
+	//
+	// Guarded end-to-end: this must NEVER break activate() (a failed worker-pod activation hangs the whole boot).
+	// If any vscode.debug event API is missing here, we skip wiring AND fail `debug.launch` fast so the terminal
+	// (which awaits node.exit) doesn't hang.
+	try {
+		const debugApi = vscode.debug as Partial<typeof vscode.debug>;
+		const canTrack = typeof debugApi.onDidStartDebugSession === "function" && typeof debugApi.onDidTerminateDebugSession === "function";
+		const debugSessionsByRunId = new Map<string, vscode.DebugSession>();
+
+		if (canTrack) {
+			context.subscriptions.push(
+				vscode.debug.onDidStartDebugSession((session) => {
+					const runId = session.configuration["__runId"] as string | undefined;
+
+					if (typeof runId === "string") {
+						debugSessionsByRunId.set(runId, session);
+					}
+				}),
+				vscode.debug.onDidTerminateDebugSession((session) => {
+					const runId = session.configuration["__runId"] as string | undefined;
+
+					if (typeof runId === "string") {
+						debugSessionsByRunId.delete(runId);
+						podHub.publish(`node.exit.${runId}`, { "exitCode": 0 });
+					}
+				})
+			);
+		}
+
+		context.subscriptions.push(
+			{ "dispose": podHub.subscribe("debug.launch", (data) => {
+				const info = data as { "runId": string; "file": string };
+
+				// Can't track session end → decline, so the terminal falls back to a plain run (never breaks `node`).
+				if (!canTrack) {
+					podHub.publish(`debug.declined.${info.runId}`, {});
+
+					return;
+				}
+
+				void (async () => {
+					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file}`, "program": info.file, "__runId": info.runId });
+
+					if (started === true) {
+						podHub.publish(`node.out.${info.runId}`, { "stream": "out", "data": "[debug] running in the Debug Console…\n" });
+					} else {
+						podHub.publish(`debug.declined.${info.runId}`, {}); // start failed → fall back to a plain run
+					}
+				})();
+			}) },
+			{ "dispose": podHub.subscribe("debug.stop", (data) => {
+				const session = debugSessionsByRunId.get((data as { "runId": string }).runId);
+
+				if (session !== undefined && typeof debugApi.stopDebugging === "function") {
+					void vscode.debug.stopDebugging(session);
+				}
+			}) }
+		);
+	} catch (error) {
+		podLog.error("auto-attach wiring failed", { "error": String(error) });
+	}
+
 	for (const spec of SERVERS) {
 		startServer(context, spec);
 	}

@@ -26,6 +26,11 @@ export interface VirtualResponse { "status": number; "statusText": string; "head
 export interface NodeRunner {
 	/** Run `file` (already resolved against cwd) to completion, streaming output; resolves with its exit code. */
 	"run": (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks) => Promise<{ "exitCode": number }>;
+	/** Auto-attach: try to launch `file` under the tsval DEBUG adapter (breakpoints, step-back, capability stops).
+	 *  Resolves `{ attached: true, exitCode }` when the debug session ends, or `{ attached: false }` when the ext
+	 *  host declined (debugger unavailable) — the caller should then fall back to `run` so `node <file>` never
+	 *  breaks. Signals the ext host over the hub (`debug.launch`); Ctrl-C sends `debug.stop`. */
+	"debug": (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks) => Promise<{ "attached": boolean; "exitCode": number }>;
 	/** Feed a chunk to the running process's stdin (no-op when nothing is running). */
 	"sendStdin": (data: string) => void;
 	/** Signal end-of-input (EOF) to the running process's stdin (no-op when nothing is running). */
@@ -150,6 +155,65 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		hub.publish("node.start", { "runId": runId, "file": file, "cwd": cwd, "env": env });
 	});
 
+	// Auto-attach: launch under the tsval debug adapter (ext host) instead of the node worker. We reuse the SAME
+	// `node.out/exit.<runId>` channels — the adapter (or its terminate) relays onto them — so the terminal drives a
+	// debug run exactly like a plain one. No node worker needed; the adapter spawns its own debug worker.
+	const startDebug = (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks): Promise<{ "attached": boolean; "exitCode": number }> => new Promise((resolve) => {
+		const runId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+		currentRunId = runId; // so the terminal treats it as running (routes Ctrl-C to the abort signal below)
+		let settled = false;
+
+		const offOutput = hub.subscribe(`node.out.${runId}`, (data) => {
+			const message = data as { "stream": "out" | "err"; "data": string };
+
+			hooks.onOutput(message.stream, message.data);
+		});
+
+		const finish = (attached: boolean, exitCode: number): void => {
+			if (settled) {
+				return;
+			}
+
+			settled = true;
+			offOutput();
+			offExit();
+			offDeclined();
+			if (currentRunId === runId) {
+				currentRunId = undefined;
+			}
+
+			hooks.signal?.removeEventListener("abort", onAbort);
+			resolve({ "attached": attached, "exitCode": exitCode });
+		};
+
+		const offExit = hub.subscribe(`node.exit.${runId}`, (data) => {
+			finish(true, (data as { "exitCode"?: number }).exitCode ?? 0);
+		});
+		// The ext host couldn't attach a debug session (debugger API unavailable / start failed) → the caller falls
+		// back to a plain run, so `node <file>` keeps working.
+		const offDeclined = hub.subscribe(`debug.declined.${runId}`, () => {
+			finish(false, 0);
+		});
+
+		const onAbort = (): void => {
+			hub.publish("debug.stop", { "runId": runId }); // ask the ext host to stop the debug session
+			finish(true, 130);
+		};
+
+		if (hooks.signal !== undefined) {
+			if (hooks.signal.aborted) {
+				onAbort();
+
+				return;
+			}
+
+			hooks.signal.addEventListener("abort", onAbort, { "once": true });
+		}
+
+		hub.publish("debug.launch", { "runId": runId, "file": file, "cwd": cwd, "env": env });
+	});
+
 	return {
 		"run": async (file, cwd, env, hooks) => {
 			ensureWorker();
@@ -157,6 +221,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 
 			return startRun(file, cwd, env, hooks);
 		},
+		"debug": (file, cwd, env, hooks) => startDebug(file, cwd, env, hooks), // runs via the debug adapter (ext host), not the node worker
 		"sendStdin": (data) => {
 			if (currentRunId !== undefined) {
 				hub.publish(`node.stdin.${currentRunId}`, { "data": data });
