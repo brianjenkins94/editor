@@ -7,7 +7,7 @@
 import type { DevServerOptions, HMRUpdate, ResponseData } from "../dev-server";
 import type { VirtualFS } from "../virtual-fs";
 import ts from "typescript";
-import { REACT_CDN, REACT_DOM_CDN, REACT_REFRESH_CDN } from "../config/cdn";
+import { REACT_REFRESH_CDN, REACT_VERSION } from "../config/cdn";
 import { DevServer } from "../dev-server";
 import { Buffer } from "../shims/stream";
 import { simpleHash } from "../utils/hash";
@@ -612,23 +612,57 @@ export default css;
    * and injectIntoGlobalHook is called. This ensures React Refresh hooks into
    * React BEFORE React is imported by any module.
    */
+  /**
+   * Build the import map from the workspace package.json dependencies — every declared dep resolves from esm.sh
+   * at runtime (no install / no node_modules). react + react-dom get the `?dev` build the React-Refresh preamble
+   * hooks; other deps get `?external=react,react-dom` so a component library shares the app's single React copy
+   * rather than pulling its own. A missing/unparseable package.json still yields a working plain-React map.
+   */
+	private buildImportMap(): string {
+		let deps: Record<string, string> = {};
+
+		try {
+			const pkgPath = this.root === "/" ? "/package.json" : `${this.root}/package.json`;
+			const parsed = JSON.parse(this.vfs.readFileSync(pkgPath, "utf8") as string) as { "dependencies"?: Record<string, string> };
+
+			deps = { ...parsed.dependencies };
+		} catch {
+      // No / invalid package.json — the react defaults below still let a plain React app run.
+		}
+
+		const base = (name: string, version: string): string => `https://esm.sh/${name}@${version}`;
+		const reactVersion = deps.react ?? REACT_VERSION;
+		const reactDomVersion = deps["react-dom"] ?? reactVersion;
+		const reactUrl = base("react", reactVersion);
+		const reactDomUrl = base("react-dom", reactDomVersion);
+		const imports: Record<string, string> = {
+			"react": `${reactUrl}?dev`,
+			"react/": `${reactUrl}&dev/`,
+			"react-dom": `${reactDomUrl}?dev`,
+			"react-dom/": `${reactDomUrl}&dev/`
+		};
+
+		for (const [name, version] of Object.entries(deps)) {
+			if (name === "react" || name === "react-dom") {
+				continue;
+			}
+
+			imports[name] = `${base(name, version)}?external=react,react-dom`;
+			imports[`${name}/`] = `${base(name, version)}&external=react,react-dom/`;
+		}
+
+		return `<script type="importmap">\n${JSON.stringify({ "imports": imports }, null, 2)}\n</script>`;
+	}
+
 	private serveHtmlWithHMR(filePath: string): ResponseData {
 		try {
 			let content = this.vfs.readFileSync(filePath, "utf8");
 
-      // Inject a React import map if the HTML doesn't already have one.
-      // This lets seed HTML omit the esm.sh boilerplate — the platform provides it.
+      // Inject an import map if the HTML doesn't already have one, built from the workspace package.json so any
+      // declared dependency resolves from esm.sh at runtime — no `npm install` needed. This lets seed HTML omit
+      // the esm.sh boilerplate; the platform provides it.
 			if (!content.includes("\"importmap\"")) {
-				const importMap = `<script type="importmap">
-{
-  "imports": {
-    "react": "${REACT_CDN}?dev",
-    "react/": "${REACT_CDN}&dev/",
-    "react-dom": "${REACT_DOM_CDN}?dev",
-    "react-dom/": "${REACT_DOM_CDN}&dev/"
-  }
-}
-</script>`;
+				const importMap = this.buildImportMap();
 
 				if (content.includes("</head>")) {
 					content = content.replace("</head>", `${importMap}\n</head>`);
