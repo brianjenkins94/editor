@@ -79,8 +79,8 @@ export function activate(context: vscode.ExtensionContext): void {
 				`- callee: \`${row.callee}\``,
 				`- resource: ${row.resolved ? "`" + row.resource + "`" : "_unresolved (needs a run / a literal)_"}`
 			].join("\n"));
-			// Only a resolved resource can be dispositioned (you can't allow what you can't see) — the context menu
-			// (real VS Code) keys off this; everywhere, clicking the row opens a disposition QuickPick.
+			// Only a resolved resource can be dispositioned (you can't allow what you can't see) — the inline +
+			// context menus key off this contextValue; clicking the row itself opens the same disposition QuickPick.
 			item.contextValue = row.resolved ? "capabilityCall.resolved" : "capabilityCall.unresolved";
 			item.command = { "command": "capabilities.disposition", "title": "Disposition…", "arguments": [row] };
 
@@ -197,8 +197,9 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
-	/** Row click → a QuickPick of dispositions (+ reveal). The inline/context menus (package.json) cover real VS
-	 *  Code; this works everywhere, including monaco-vscode-api where dynamic `contributes.menus` isn't wired. */
+	/** Row click → a QuickPick of dispositions (+ reveal). A convenience alongside the inline/context-menu icons
+	 *  (package.json) — those DO render and work here (view/item/context is wired for a dynamically-registered
+	 *  extension); the QuickPick is just a bigger click target than a ~16px hover icon. */
 	const disposition = async (row?: Row): Promise<void> => {
 		if (row === undefined) {
 			return;
