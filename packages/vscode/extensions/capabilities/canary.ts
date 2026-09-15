@@ -22,6 +22,7 @@
 import type { HostCallSite } from "@brianjenkins94/tsval";
 import { createVM } from "@brianjenkins94/tsval";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
+import { type CapabilityHit, classifyCall, renderCallee } from "./capability-breakpoints";
 import ts from "typescript";
 
 export interface CanaryObservation {
@@ -58,17 +59,19 @@ function tag<T extends (...args: never[]) => unknown>(capability: string, fn: T,
 	return fn;
 }
 
-/** Render a call's callee for display: `fetch` or `fs.writeFile` (`?` for a dynamic receiver). */
-function renderCallee(callee: ts.Expression): string {
-	if (ts.isIdentifier(callee)) {
-		return callee.text;
+/** Aliasing fallback: when AST classification misses (`const f = fetch; f(url)` — the callee is `f`), the invoked
+ *  stand-in's own tag still identifies the capability. Same CapabilityHit shape as the shared AST classifier. */
+function tagHit(callee: Tagged, site: HostCallSite): CapabilityHit | undefined {
+	const capability = callee[CAPABILITY];
+
+	if (capability === undefined || !ts.isCallExpression(site.node)) {
+		return undefined;
 	}
 
-	if (ts.isPropertyAccessExpression(callee)) {
-		return (ts.isIdentifier(callee.expression) ? callee.expression.text : "?") + "." + callee.name.text;
-	}
+	const argIndex = callee[RESOURCE_ARG] ?? 0;
+	const resource = site.args[argIndex];
 
-	return "?";
+	return { "capability": capability, "resource": typeof resource === "string" ? resource : "", "callee": renderCallee(site.node.expression), "dangerous": isDangerous(capability), "argIndex": argIndex };
 }
 
 /** An inert Response stand-in so a run performs no real network but keeps executing. */
@@ -162,27 +165,32 @@ export async function runCanary(src: string, fileName: string): Promise<CanaryOb
 	let sourceFile: ts.SourceFile | undefined;
 
 	const record = (callee: Tagged, site: HostCallSite): void => {
-		const capability = callee[CAPABILITY];
-
-		if (capability === undefined || !ts.isCallExpression(site.node) || sourceFile === undefined) {
+		if (sourceFile === undefined || !ts.isCallExpression(site.node)) {
 			return;
 		}
 
-		const argIndex = callee[RESOURCE_ARG] ?? 0;
-		const resource = site.args[argIndex];
+		// One classifier for everyone: the shared AST classifier decides capability + resource-arg; the tag is only
+		// a fallback for aliasing the AST can't see. (The debugger uses classifyCall alone — it has no tags.)
+		const hit = classifyCall(site.node, site.args) ?? tagHit(callee, site);
+
+		if (hit === undefined) {
+			return;
+		}
+
+		const argNode = site.node.arguments[hit.argIndex];
+		const resource = site.args[hit.argIndex];
 		const observed = typeof resource === "string";
-		const argNode = site.node.arguments[argIndex];
 		const staticLiteral = argNode !== undefined && ts.isStringLiteralLike(argNode) ? argNode.text : undefined;
 
 		observations.push({
-			"capability": capability,
-			"callee": renderCallee(site.node.expression),
+			"capability": hit.capability,
+			"callee": hit.callee,
 			"value": observed ? resource : "",
 			"observed": observed,
 			"static": staticLiteral,
 			"start": site.node.getStart(sourceFile),
 			"end": site.node.getEnd(),
-			"dangerous": isDangerous(capability)
+			"dangerous": hit.dangerous
 		});
 	};
 

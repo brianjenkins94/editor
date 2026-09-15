@@ -18,12 +18,15 @@ import { isDangerous } from "@brianjenkins94/util/silo/policy";
 import { effectiveDisposition, type Policy } from "./policy-core";
 import ts from "typescript";
 
-/** A capability call the debugger reached: what it is, and the resource it targets (when a string). */
+/** A capability call the debugger (or the canary) reached: what it is, and the resource it targets (when a
+ *  string). `argIndex` is which argument carried the resource, so a caller with the raw args + the call node can
+ *  recover the observed value / static literal without re-deciding the capability. */
 export interface CapabilityHit {
 	"capability": string;
 	"resource": string;
 	"callee": string;
 	"dangerous": boolean;
+	"argIndex": number;
 }
 
 interface Matcher {
@@ -57,7 +60,7 @@ const NAME_MATCHERS: Record<string, Matcher> = {
 };
 
 /** Render a callee for display: `fetch` or `fs.writeFile` (`?` for a dynamic receiver). */
-function renderCallee(callee: ts.Expression): string {
+export function renderCallee(callee: ts.Expression): string {
 	if (ts.isIdentifier(callee)) {
 		return callee.text;
 	}
@@ -95,7 +98,8 @@ export function classifyCall(node: ts.CallExpression, args: readonly unknown[]):
 		"capability": matcher.capability,
 		"resource": typeof resource === "string" ? resource : "",
 		"callee": renderCallee(node.expression),
-		"dangerous": isDangerous(matcher.capability)
+		"dangerous": isDangerous(matcher.capability),
+		"argIndex": matcher.arg
 	};
 }
 
