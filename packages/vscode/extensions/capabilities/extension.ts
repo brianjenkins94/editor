@@ -10,8 +10,11 @@
  * 2. The "Capability calls" panel — the middle AND third columns — is rendered HERE. It reads those diagnostics
  *    back (`vscode.languages.getDiagnostics`, source "capabilities") for the resource each call reaches (columns 1
  *    & 2: code + resolved value), and overlays the DISPOSITION (column 3) from the workspace `.capabilities.json`
- *    policy: allow / deny, or a computed `review` for an undecided dangerous call. Context-menu commands edit the
- *    policy file; a view badge counts the calls still needing attention. No canary code runs in the ext host.
+ *    policy: allow / deny, or a computed `review` for an undecided dangerous call. Clicking a row edits the
+ *    disposition; a view badge counts the calls still needing attention. No canary code runs in the ext host.
+ *
+ * 3. The TRIPWIRE (M0 = surface): a `deny`d call the code reaches gets its own ERROR squiggle (a separate
+ *    `capabilities-policy` diagnostic collection). Runtime blocking/substituting is the next layer, at real-run.
  */
 import * as vscode from "vscode";
 
@@ -87,9 +90,59 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	const view = vscode.window.createTreeView("capabilities.calls", { "treeDataProvider": provider });
 
-	context.subscriptions.push(view);
+	// The TRIPWIRE (M0 = surface): a `deny`d capability call the code reaches gets an ERROR squiggle + Problems
+	// entry — "you said no, but the code does this". Extension-owned (no plugin change, no cross-context policy
+	// sync). Runtime BLOCKING/substituting a denied or mocked call happens where real effects do (preview/runtime)
+	// and is the next layer. `capabilities-policy` is a separate source from the plugin's `capabilities`.
+	const violations = vscode.languages.createDiagnosticCollection("capabilities-policy");
+	// A stable digest of what we last published, so re-publishing identical violations (our own `set` re-fires
+	// onDidChangeDiagnostics → refresh → updateViolations) short-circuits instead of looping.
+	let lastViolationsKey = "";
+
+	context.subscriptions.push(view, violations);
 
 	let policy: Policy = { "version": 1, "rules": [] };
+
+	/** Re-derive deny-violations across every file with capability diagnostics; publish only when they changed. */
+	const updateViolations = (): void => {
+		const next = new Map<string, vscode.Diagnostic[]>();
+
+		for (const [uri, diagnostics] of vscode.languages.getDiagnostics()) {
+			const denied: vscode.Diagnostic[] = [];
+
+			for (const diagnostic of diagnostics) {
+				if (diagnostic.source !== "capabilities") {
+					continue;
+				}
+
+				const parsed = parseMessage(diagnostic.message);
+				const dangerous = diagnostic.severity === vscode.DiagnosticSeverity.Warning;
+
+				if (parsed.resolved && effectiveDisposition(policy, parsed.capability, parsed.resource, dangerous) === "deny") {
+					const violation = new vscode.Diagnostic(diagnostic.range, `${parsed.capability} call to "${parsed.resource}" is denied by capability policy`, vscode.DiagnosticSeverity.Error);
+
+					violation.source = "capabilities-policy";
+					denied.push(violation);
+				}
+			}
+
+			if (denied.length > 0) {
+				next.set(uri.toString(), denied);
+			}
+		}
+
+		const key = [...next.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([uri, list]) => uri + "#" + list.map((diagnostic) => `${diagnostic.range.start.line}:${diagnostic.range.start.character}`).join(",")).join("|");
+
+		if (key === lastViolationsKey) {
+			return; // nothing changed — don't re-publish (avoids the onDidChangeDiagnostics feedback loop)
+		}
+
+		lastViolationsKey = key;
+		violations.clear();
+		for (const [uri, list] of next) {
+			violations.set(vscode.Uri.parse(uri), list);
+		}
+	};
 
 	const refresh = async (): Promise<void> => {
 		policy = await readPolicy(policyUri());
@@ -117,6 +170,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 		view.badge = attention === 0 ? undefined : { "value": attention, "tooltip": `${attention} capabilit${attention === 1 ? "y" : "ies"} to review` };
 		changed.fire();
+		updateViolations();
 	};
 
 	/** Apply a disposition edit to the policy file, then refresh. */
