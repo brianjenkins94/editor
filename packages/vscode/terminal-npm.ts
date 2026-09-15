@@ -16,8 +16,9 @@ import { defineCommand } from "just-bash/browser";
 const LIFECYCLE = new Set(["start", "stop", "test", "restart"]);
 const INSTALL = new Set(["install", "i", "add"]);
 
-/** Re-enter the shell to run a script line — the lazily-created Bash session (see terminal.ts). */
-export type ShellRunner = () => Promise<{ "exec": (commandLine: string, options: { "cwd": string; "env": Record<string, string> }) => Promise<{ "stdout": string; "stderr": string; "exitCode": number; "env": Record<string, string> }> }>;
+/** Re-enter the shell to run a script line — the lazily-created Bash session (see terminal.ts). `signal` is
+ *  forwarded so Ctrl-C reaches a long-running script (e.g. `npm run dev` → the blocking `vite` command). */
+export type ShellRunner = () => Promise<{ "exec": (commandLine: string, options: { "cwd": string; "env": Record<string, string>; "signal"?: AbortSignal }) => Promise<{ "stdout": string; "stderr": string; "exitCode": number; "env": Record<string, string> }> }>;
 
 /** Split a spec into name + version: `lodash` → latest, `lodash@4` → 4, `@scope/pkg@1` → 1 (scoped-name safe). */
 function parseSpec(spec: string): { "name": string; "version": string } {
@@ -117,7 +118,7 @@ export function createNpmCommand(getSession: ShellRunner): CustomCommand {
 		const env = ctx.exportedEnv ?? Object.fromEntries(ctx.env);
 		const line = scriptArgs.length > 0 ? `${command} ${scriptArgs.join(" ")}` : command;
 		const session = await getSession();
-		const result = await session.exec(line, { "cwd": ctx.cwd, "env": { ...env, "npm_lifecycle_event": script } });
+		const result = await session.exec(line, { "cwd": ctx.cwd, "env": { ...env, "npm_lifecycle_event": script }, "signal": ctx.signal });
 
 		return { "stdout": result.stdout, "stderr": result.stderr, "exitCode": result.exitCode };
 	});

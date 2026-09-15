@@ -215,7 +215,7 @@ interface VirtualRequest { "port": number; "method": string; "url": string; "hea
 interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 type RequestHandler = { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> };
-type PreviewServer = RequestHandler & { "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "notifyChange": (path: string) => void };
+type PreviewServer = RequestHandler & { "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "notifyChange": (path: string) => void; "stop": () => void };
 
 // Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry.
 const previewServers = new Map<number, PreviewServer>();
@@ -257,4 +257,14 @@ hub.subscribe("preview.fileChanged", (data) => {
 	const { port, path } = data as { "port": number; "path": string };
 
 	previewServers.get(port)?.notifyChange(path);
+});
+
+// Ctrl-C on the terminal's `vite` command: stop every dev server so it's really gone (a later `npm run dev`
+// starts a fresh one).
+hub.subscribe("preview.close", () => {
+	for (const server of previewServers.values()) {
+		server.stop();
+	}
+
+	previewServers.clear();
 });

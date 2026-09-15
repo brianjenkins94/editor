@@ -23,6 +23,8 @@ const PREVIEW_PORT = 5173;
 export interface Preview {
 	/** Tell the worker's dev server a workspace file changed (workspace-absolute path), triggering HMR. */
 	"update": (path: string, contents: string) => void;
+	/** Tear the preview down: unsubscribe HMR and unregister the bridge server (Ctrl-C on `vite`). */
+	"close": () => void;
 }
 
 export interface PreviewOptions {
@@ -72,7 +74,7 @@ export async function createPreview(options: PreviewOptions): Promise<Preview> {
 
 	// HMR: the worker's dev server publishes each update on the hub; forward it to the iframe, whose injected HMR
 	// client (a `window.message` listener) applies it — React Fast Refresh, state preserved.
-	hub.subscribe(`preview.hmr.${PREVIEW_PORT}`, (message) => { iframe.contentWindow?.postMessage(message, "*"); });
+	const offHmr = hub.subscribe(`preview.hmr.${PREVIEW_PORT}`, (message) => { iframe.contentWindow?.postMessage(message, "*"); });
 
 	// Serve UNDER the deploy base (e.g. /editor/__virtual__/…), not root — the SW is scoped to the base, so a
 	// root-absolute /__virtual__/ URL would fall outside its scope and never be intercepted.
@@ -89,6 +91,11 @@ export async function createPreview(options: PreviewOptions): Promise<Preview> {
 			const relative = path.startsWith(prefix + "/") ? path.slice(prefix.length) : path;
 
 			hub.publish("preview.fileChanged", { "port": PREVIEW_PORT, "path": relative.startsWith("/") ? relative : "/" + relative });
+		},
+		"close": () => {
+			offHmr();
+			bridge.unregisterServer(PREVIEW_PORT);
+			iframe.removeAttribute("src");
 		}
 	};
 }

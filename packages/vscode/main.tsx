@@ -52,15 +52,16 @@ if (ensureCrossOriginIsolated()) {
 	// the terminal's `vite` command, which publishes `preview.open` — not at boot, so the pane stays hidden until
 	// then (fewer things on screen you didn't ask for). The dev server is almostnode's ViteDevServer in the node
 	// worker (preview.ts); loading is lazy — with `typescript` now in the worker, this only pulls the small host
-	// bridge module. Idempotent: repeat `npm run dev` re-uses the running preview.
-	let previewStarted = false;
+	// bridge module. Ctrl-C on `vite` publishes `preview.close`, which tears the preview down and hides the pane.
+	let previewOpen = false;
 
 	rootHub.subscribe("preview.open", (data) => {
-		if (previewStarted) {
+		if (previewOpen) {
+			previewWindow.show(); // already running — just resurface the pane
 			return;
 		}
 
-		previewStarted = true;
+		previewOpen = true;
 		previewWindow.show();
 
 		import("./preview").then(({ createPreview }) => createPreview({
@@ -74,6 +75,13 @@ if (ensureCrossOriginIsolated()) {
 		}).catch((error: unknown) => {
 			hostLog.error("preview failed", { "error": error instanceof Error ? error.message : String(error) });
 		});
+	});
+
+	rootHub.subscribe("preview.close", () => {
+		previewOpen = false;
+		preview?.close();
+		preview = undefined;
+		previewWindow.element.remove(); // hidden until the next `npm run dev`
 	});
 
 	createVscodeWindow({

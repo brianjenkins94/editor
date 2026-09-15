@@ -43,6 +43,8 @@ export interface NodeRunner {
 	"onPreviewHmr": (port: number, handler: (message: unknown) => void) => () => void;
 	/** Ask the host to open the preview pane on `root` — the terminal's `vite` command fires this (M3). */
 	"openPreview": (root: string) => void;
+	/** Stop the preview: the host closes the pane and the worker stops its dev server (Ctrl-C on `vite`). */
+	"closePreview": () => void;
 }
 
 /** Spawn/manage the node worker, wire it into `hub`, and return the streaming runner the terminal drives. */
@@ -180,6 +182,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		},
 		"notifyPreviewChange": (port, path) => { hub.publish("preview.fileChanged", { "port": port, "path": path }); },
 		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); }),
-		"openPreview": (root) => { hub.publish("preview.open", { "root": root }); }
+		"openPreview": (root) => { hub.publish("preview.open", { "root": root }); },
+		"closePreview": () => { hub.publish("preview.close", {}); }
 	};
 }
