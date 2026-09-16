@@ -82,7 +82,8 @@ function collapse(rows: DiffRow[]): (DiffRow | { "t": "gap"; "text": string })[]
 const STYLE = `
 .gp { display: flex; flex-direction: column; gap: 0; height: 100%; font-size: 13px; }
 #git-panel { height: 100%; }
-.gp .commit { padding: 10px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.gp .commit { padding: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px;
+  flex: 0 0 auto; background: var(--chrome); }
 .gp textarea { width: 100%; min-height: 52px; resize: vertical; background: #ffffff0a; color: var(--fg);
   border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; font: inherit; }
 .gp textarea:focus { outline: none; border-color: var(--accent); }
@@ -92,7 +93,7 @@ const STYLE = `
 .gp .head { padding: 8px 10px; text-transform: uppercase; font-size: 11px; letter-spacing: .06em; color: var(--muted);
   display: flex; gap: 6px; align-items: baseline; }
 .gp .head .count { color: var(--fg); font-weight: 600; }
-.gp .files { overflow: auto; max-height: 34%; flex: 0 0 auto; }
+.gp .files { overflow: auto; flex: 1 1 0; min-height: 80px; }
 .gp .file { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; padding: 5px 10px;
   cursor: pointer; border-left: 2px solid transparent; }
 .gp .file:hover { background: #ffffff10; }
@@ -102,7 +103,7 @@ const STYLE = `
 .gp .file .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .gp .file .cos { font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .gp .file.cosmetic .nm { opacity: .6; }
-.gp .diffwrap { flex: 1 1 auto; overflow: auto; border-top: 1px solid var(--line); min-height: 0; }
+.gp .diffwrap { flex: 2 1 0; overflow: auto; border-top: 1px solid var(--line); min-height: 0; }
 .gp .diffhead { padding: 6px 10px; color: var(--muted); font: 500 11px "SF Mono", ui-monospace, monospace;
   position: sticky; top: 0; background: var(--chrome); border-bottom: 1px solid var(--line); }
 .gp .diff { font: 12px/1.5 "SF Mono", ui-monospace, monospace; white-space: pre; }
@@ -126,13 +127,13 @@ export function renderGitPanel(container: HTMLElement, hub: Hub): void {
 
 	container.innerHTML = `
 		<div class="gp">
+			<div class="head">Changes <span class="count">0</span></div>
+			<div class="files"></div>
+			<div class="diffwrap" hidden><div class="diffhead"></div><div class="diff"></div></div>
 			<div class="commit">
 				<textarea class="msg" placeholder="Summary — describe your changes"></textarea>
 				<button class="commitBtn" disabled>Commit all changes</button>
 			</div>
-			<div class="head">Changes <span class="count">0</span></div>
-			<div class="files"></div>
-			<div class="diffwrap" hidden><div class="diffhead"></div><div class="diff"></div></div>
 		</div>`;
 
 	const rpc = createRpcClient(hub);
