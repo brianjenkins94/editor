@@ -39,74 +39,126 @@ function matcherFor(production) {
  * @property {boolean} trivia  whitespace/comment (anything under an unnamed `#` reference; `#separatorTokens` are code)
  */
 
-/** @returns {{ spans: CstSpan[], length: number }} spans in close order (children before parents) */
+/** Running state for the tag walk, mutated tag-by-tag by `walkTag` and shared by the sync + async drivers. */
+function makeWalkState() {
+	return {
+		"spans": [],
+		"stack": [],
+		"offset": 0,
+		"pendingRef": null, // the ReferenceTag preceding the next open tag
+		"triviaDepth": 0, // > 0 while inside a trivia subtree
+		"shiftStart": null, // start for nodes opened after a ShiftTag, until the GapTag re-adopts the held node
+		"lastClosed": null // last closed non-trivia node (the one a ShiftTag refers to)
+	};
+}
+
+/** Fold one CST tag into `state` (updates the running offset and pushes completed spans). */
 // eslint-disable-next-line complexity -- an inherently branchy dispatch over the CST tag stream; splitting it would obscure the single running-offset invariant it maintains
-export function cstSpans(src, production = "Program") {
-	const spans = [];
-	const stack = [];
-	let offset = 0;
-	let pendingRef = null; // the ReferenceTag preceding the next open tag
-	let triviaDepth = 0; // > 0 while inside a trivia subtree
-	let shiftStart = null; // start to give nodes opened after a ShiftTag, until the GapTag re-adopts the held node
-	let lastClosed = null; // last closed non-trivia node (the one a ShiftTag refers to)
+function walkTag(state, tag, src) {
+	const kind = parseTagType(tag);
 
-	for (const tag of streamParse(TypeScript, matcherFor(production), src)) {
-		const kind = parseTagType(tag);
+	if (kind === ReferenceTag) {
+		state.pendingRef = parseTag(tag).value;
+	} else if (kind === ShiftTag) {
+		state.shiftStart = state.lastClosed ? state.lastClosed.start : state.offset;
+	} else if (kind === GapTag) {
+		state.shiftStart = null;
+	} else if (kind === OpenNodeTag) {
+		const { value } = parseTag(tag);
+		// trivia is what the trivia hook emits under an UNNAMED `#` reference; a named `#` reference such as
+		// `#separatorTokens` is a code token the grammar keeps unbound
+		const trivia = state.triviaDepth > 0 || (state.pendingRef?.type === "#" && (state.pendingRef.name === null || state.pendingRef.name === undefined));
+		const entry = {
+			"type": value.name?.description ?? null,
+			"field": state.pendingRef?.name ?? null,
+			"start": state.shiftStart ?? state.offset,
+			"token": Boolean(value.flags?.token),
+			"cover": value.type === COVER,
+			"trivia": trivia
+		};
 
-		if (kind === ReferenceTag) {
-			pendingRef = parseTag(tag).value;
-		} else if (kind === ShiftTag) {
-			shiftStart = lastClosed ? lastClosed.start : offset;
-		} else if (kind === GapTag) {
-			shiftStart = null;
-		} else if (kind === OpenNodeTag) {
-			const { value } = parseTag(tag);
-			// trivia is what the trivia hook emits under an UNNAMED `#` reference; a named `#` reference such as
-			// `#separatorTokens` is a code token the grammar keeps unbound
-			const trivia = triviaDepth > 0 || (pendingRef?.type === "#" && (pendingRef.name === null || pendingRef.name === undefined));
-			const entry = {
-				"type": value.name?.description ?? null,
-				"field": pendingRef?.name ?? null,
-				"start": shiftStart ?? offset,
-				"token": Boolean(value.flags?.token),
-				"cover": value.type === COVER,
-				"trivia": trivia
-			};
+		state.pendingRef = null;
+		if (value.literalValue !== null && value.literalValue !== undefined) {
+			// self-closing token: its text is inline
+			state.offset += value.literalValue.length;
+			state.spans.push({ ...entry, "end": state.offset });
+		} else {
+			state.stack.push(entry);
 
-			pendingRef = null;
-			if (value.literalValue !== null && value.literalValue !== undefined) {
-				// self-closing token: its text is inline
-				offset += value.literalValue.length;
-				spans.push({ ...entry, "end": offset });
-			} else {
-				stack.push(entry);
-
-				if (trivia) {
-					triviaDepth += 1;
-				}
+			if (trivia) {
+				state.triviaDepth += 1;
 			}
-		} else if (kind === LiteralTag) {
-			offset += parseTag(tag).value.length;
-		} else if (kind === CloseNodeTag) {
-			const entry = stack.pop();
+		}
+	} else if (kind === LiteralTag) {
+		state.offset += parseTag(tag).value.length;
+	} else if (kind === CloseNodeTag) {
+		const entry = state.stack.pop();
 
-			if (entry !== undefined) {
-				const span = { ...entry, "end": offset };
+		if (entry !== undefined) {
+			const span = { ...entry, "end": state.offset };
 
-				spans.push(span);
+			state.spans.push(span);
 
-				if (entry.trivia) {
-					triviaDepth -= 1;
-				} else {
-					lastClosed = span;
-				}
+			if (entry.trivia) {
+				state.triviaDepth -= 1;
+			} else {
+				state.lastClosed = span;
 			}
 		}
 	}
+}
 
-	if (offset !== src.length) {
-		throw new Error(`cstSpans: walked ${offset} characters of a ${src.length}-character source`);
+/** @returns {{ spans: CstSpan[], length: number }} spans in close order (children before parents) */
+export function cstSpans(src, production = "Program") {
+	const state = makeWalkState();
+
+	for (const tag of streamParse(TypeScript, matcherFor(production), src)) {
+		walkTag(state, tag, src);
 	}
 
-	return { "spans": spans, "length": offset };
+	if (state.offset !== src.length) {
+		throw new Error(`cstSpans: walked ${state.offset} characters of a ${src.length}-character source`);
+	}
+
+	return { "spans": state.spans, "length": state.offset };
+}
+
+/**
+ * Yielding variant of {@link cstSpans}: `streamParse` is a lazy tag generator, so pulling one tag at a time and
+ * awaiting a macrotask every `budget` tags PACES THE PARSE — the BABLR VM only advances when we pull. That keeps a
+ * long parse from monopolising the thread and lets the host process messages between chunks; `signal`, checked at
+ * each yield, makes it cooperatively cancellable (throws AbortError) without killing the worker.
+ * @param {string} src
+ * @param {string} production
+ * @param {{ signal?: AbortSignal, budget?: number }} [options]
+ * @returns {Promise<{ spans: CstSpan[], length: number }>}
+ */
+export async function cstSpansAsync(src, production = "Program", options = {}) {
+	const { signal, budget = 1500 } = options;
+
+	if (signal?.aborted === true) {
+		throw new DOMException("cstSpans aborted", "AbortError");
+	}
+
+	const state = makeWalkState();
+	let seen = 0;
+
+	for (const tag of streamParse(TypeScript, matcherFor(production), src)) {
+		walkTag(state, tag, src);
+		seen += 1;
+
+		if (seen % budget === 0) {
+			if (signal?.aborted === true) {
+				throw new DOMException("cstSpans aborted", "AbortError");
+			}
+
+			await new Promise((resolve) => { setTimeout(resolve, 0); });
+		}
+	}
+
+	if (state.offset !== src.length) {
+		throw new Error(`cstSpans: walked ${state.offset} characters of a ${src.length}-character source`);
+	}
+
+	return { "spans": state.spans, "length": state.offset };
 }

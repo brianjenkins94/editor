@@ -6,4 +6,6 @@
 export { cstSpans } from "../../bablr-language-ts/lib/spans";
 // classifyChange(before, after): "cosmetic" | "semantic" | "unparsable" — a structural (not text) diff verdict, so
 // reformatting/comment edits read as cosmetic and meaning changes read as semantic. See ../../bablr-language-ts/lib/cosmetic.
-export { classifyChange } from "../../bablr-language-ts/lib/cosmetic";
+// classifyChangeAsync: same verdict, but PACED (yields the BABLR VM) and cooperatively cancellable via an
+// AbortSignal — for callers that classify large files off a hot path and want to bail if the reviewer moves on.
+export { classifyChange, classifyChangeAsync } from "../../bablr-language-ts/lib/cosmetic";

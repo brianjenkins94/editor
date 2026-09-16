@@ -8,20 +8,19 @@
 //
 // This is the BABLR payoff a text-based git diff can't give: it distinguishes "reindented / recommented" from "the
 // meaning changed". Language-agnostic in principle (any BABLR grammar); TS/JS today via lib/grammar.
-import { cstSpans } from "./spans";
+import { cstSpans, cstSpansAsync } from "./spans";
 
 /** @typedef {"cosmetic" | "semantic" | "unparsable"} ChangeKind */
 
 /**
- * The non-trivia structural signature of `src`: one line per code node — `type\t<tokenText>` — in CST close order
- * (children before parents), a canonical, position-independent serialization of the tree minus whitespace/comments.
- * Token text is JSON-quoted so an empty token and a missing one can't collide.
+ * Serialize CST spans to the non-trivia structural signature: one line per code node — `type\t<tokenText>` — in CST
+ * close order (children before parents), position-independent, whitespace/comments dropped. Token text is JSON-quoted
+ * so an empty token and a missing one can't collide.
  * @param {string} src
- * @param {string} production
+ * @param {CstSpan[]} spans
  * @returns {string}
  */
-function signature(src, production = "Program") {
-	const { spans } = cstSpans(src, production);
+function spansToSignature(src, spans) {
 	const lines = [];
 
 	for (const span of spans) {
@@ -33,6 +32,16 @@ function signature(src, production = "Program") {
 	}
 
 	return lines.join("\n");
+}
+
+/**
+ * The non-trivia structural signature of `src`.
+ * @param {string} src
+ * @param {string} production
+ * @returns {string}
+ */
+function signature(src, production = "Program") {
+	return spansToSignature(src, cstSpans(src, production).spans);
 }
 
 /**
@@ -58,6 +67,38 @@ export function classifyChange(before, after, production = "Program") {
 		a = signature(before, production);
 		b = signature(after, production);
 	} catch {
+		return "unparsable";
+	}
+
+	return a === b ? "cosmetic" : "semantic";
+}
+
+/**
+ * Yielding variant of {@link classifyChange} for slow parses: paces the BABLR VM (via {@link cstSpansAsync}) so it
+ * doesn't monopolise the thread, and is cooperatively cancellable through `options.signal` — on abort the promise
+ * rejects with an AbortError (distinct from "unparsable", which the caller should still treat as a real verdict).
+ * @param {string} before
+ * @param {string} after
+ * @param {string} production
+ * @param {{ signal?: AbortSignal, budget?: number }} [options]
+ * @returns {Promise<ChangeKind>}
+ */
+export async function classifyChangeAsync(before, after, production = "Program", options = {}) {
+	if (before === after) {
+		return "cosmetic";
+	}
+
+	let a;
+	let b;
+
+	try {
+		a = spansToSignature(before, (await cstSpansAsync(before, production, options)).spans);
+		b = spansToSignature(after, (await cstSpansAsync(after, production, options)).spans);
+	} catch (error) {
+		if (error instanceof DOMException && error.name === "AbortError") {
+			throw error; // cancellation is not a verdict — let the caller drop it
+		}
+
 		return "unparsable";
 	}
 

@@ -84,7 +84,11 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 	});
 
 	// BABLR verdict for the whole change, requested LAZILY after the diff is shown so BABLR never blocks the open.
-	// Only meaningful for a MODIFIED code file — added/deleted/non-code return "none". Cached by content in the classifier.
+	// Only meaningful for a MODIFIED code file — added/deleted/non-code return "none". Cached by content in the
+	// classifier. Only ONE diff is open at a time, so a new request SUPERSEDES the previous: we abort the older run
+	// (the classifier's yielding worker bails cooperatively) instead of letting a stale parse tie up the worker.
+	let classifyInFlight: AbortController | undefined;
+
 	serve(hub, "git.classify", async (args) => {
 		const path = (args as { "path"?: string } | null)?.path;
 
@@ -104,10 +108,19 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 			return { "verdict": "none" };
 		}
 
+		classifyInFlight?.abort();
+		const controller = new AbortController();
+
+		classifyInFlight = controller;
+
 		try {
-			return { "verdict": await classifier.classify(head, working) };
+			return { "verdict": await classifier.classify(head, working, controller.signal) };
 		} catch {
-			return { "verdict": "none" };
+			return { "verdict": "none" }; // aborted (superseded) or worker error — the newer request will answer
+		} finally {
+			if (classifyInFlight === controller) {
+				classifyInFlight = undefined;
+			}
 		}
 	});
 
