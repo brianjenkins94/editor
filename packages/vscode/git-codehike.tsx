@@ -8,19 +8,25 @@
  * SIDE-BY-SIDE (step 2): HEAD on the left, working tree on the right, aligned ROW-BY-ROW by the diff. The two sides
  * share ONE CSS grid so a row's height is the taller of its two cells — which is what makes alignment survive word
  * wrap. We get there through codehike's handler slots rather than hand-rolling tokens (so AnnotationHandlers still
- * COMPOSE for step 3's cosmetic/semantic verdict): a `Pre` handler replaces InnerPre with a `display:contents`
- * wrapper (codehike's own `<pre><div>` wrappers would otherwise trap the lines below the grid), and a `Line` handler
- * places each line as a `subgrid` item at its diff-row track — number gutter + word-wrapped code — with `InnerLine`
- * still rendering the tokens underneath.
+ * COMPOSE): a `Pre` handler replaces InnerPre with a `display:contents` wrapper (codehike's own `<pre><div>` would
+ * otherwise trap the lines below the grid), and a `Line` handler places each line as a `subgrid` item — number
+ * gutter + word-wrapped code — with `InnerLine` still rendering the tokens underneath.
+ *
+ * COLLAPSING: two kinds, both hide rows and reassign grid tracks.
+ *   1. Context folding — long runs of UNCHANGED rows collapse to a clickable "⋯ N unchanged lines" gap. Pure diff
+ *      data, no parser.
+ *   2. Block folding — `{ … }` regions found by scanning the working tokens for brace DEPTH (skipping braces inside
+ *      strings/comments by their github-dark colour), foldable from a gutter chevron. Token-based, so a brace in a
+ *      string doesn't miscount; no parser / BABLR needed.
  *
  * NOTE (production): shiki is WebAssembly and fetches grammars from lighter.codehike.org at runtime — needs
  * `script-src 'wasm-unsafe-eval'` and `connect-src https://lighter.codehike.org` IF a CSP is ever added (our app
  * sets none today).
  */
-import type { AnnotationHandler } from "codehike/code";
+import type { AnnotationHandler, HighlightedCode, Tokens } from "codehike/code";
 import type { ChangeKind } from "./cosmetic-classifier";
 import { highlight, InnerLine, Pre } from "codehike/code";
-import { createElement, type ReactNode } from "react";
+import { createElement, type ReactNode, useMemo, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 /** One React root per host element, reused across diff switches (root.render updates in place). */
@@ -36,6 +42,8 @@ export interface DiffRowInfo {
 }
 
 export interface DiffInput {
+	/** Stable identity for this file (its path) — resets fold/expand state when a different file is opened. */
+	"docKey": string;
 	/** HEAD file contents (left column). Empty for an added file. */
 	"head": string;
 	/** Working-tree file contents (right column). Empty for a deleted file. */
@@ -51,6 +59,16 @@ export interface DiffInput {
 const ADD_BG = "#2ea04326";
 const DEL_BG = "#f8514926";
 const COSMETIC_BG = "#8a8a8a26";
+
+/** github-dark colours for string & comment tokens — braces inside these don't count toward block depth. */
+const NON_CODE_COLORS = new Set(["#a5d6ff", "#8b949e"]);
+
+/** Collapse an unchanged run longer than this, keeping CTX_KEEP rows of context at each end. */
+const CTX_KEEP = 3;
+
+interface Rendered { "row": number; "type": DiffRowInfo["type"] }
+interface FoldRegion { "id": string; "startRow": number; "endRow": number; "count": number }
+interface FoldHeader { "id": string; "folded": boolean; "count": number }
 
 /**
  * Background tint for a line. A `cosmetic` verdict (whitespace/comments only) mutes every changed line to grey, so
@@ -71,18 +89,210 @@ function tint(type: DiffRowInfo["type"], side: "left" | "right", verdict: Change
 }
 
 /**
- * Build the handlers + gutter for one side. `lineToRow` maps a source line number → { grid row, row type }; a line
- * that maps nowhere (the phantom empty line of an empty file) renders nothing.
+ * Brace-depth scan over the highlighted WORKING tokens → `{ … }` regions spanning >1 line. Skips braces inside
+ * string/comment tokens (by colour) so `"{"` or `// {` don't open a phantom region; still advances the line counter
+ * through them so multi-line strings don't desync. Regions map to working line numbers (1-based).
  */
+function computeFolds(tokens: Tokens): { "start": number; "end": number }[] {
+	const stack: number[] = [];
+	const regions: { "start": number; "end": number }[] = [];
+	let line = 1;
+
+	for (const token of tokens) {
+		const text = typeof token === "string" ? token : token[0];
+		const skip = typeof token !== "string" && token[1] !== undefined && NON_CODE_COLORS.has(token[1]);
+
+		for (const ch of text) {
+			if (ch === "\n") {
+				line += 1;
+			} else if (!skip && ch === "{") {
+				stack.push(line);
+			} else if (!skip && ch === "}") {
+				const open = stack.pop();
+
+				if (open !== undefined && open < line) {
+					regions.push({ "start": open, "end": line });
+				}
+			}
+		}
+	}
+
+	return regions;
+}
+
+/** Turn working-line brace regions into row-index regions (only those whose start & end rows both exist). */
+function toFoldRegions(regions: { "start": number; "end": number }[], rows: DiffRowInfo[]): FoldRegion[] {
+	const rightToRow = new Map<number, number>();
+
+	rows.forEach((row, index) => {
+		if (row.rightNo !== undefined) {
+			rightToRow.set(row.rightNo, index);
+		}
+	});
+
+	const out: FoldRegion[] = [];
+	const seen = new Set<string>();
+
+	for (const { start, end } of regions) {
+		const startRow = rightToRow.get(start);
+		const endRow = rightToRow.get(end);
+		const id = start + "-" + end;
+
+		if (startRow !== undefined && endRow !== undefined && endRow > startRow && !seen.has(id)) {
+			seen.add(id);
+			out.push({ "id": id, "startRow": startRow, "endRow": endRow, "count": endRow - startRow });
+		}
+	}
+
+	return out;
+}
+
+interface DiffPlan {
+	"leftLineToRow": Map<number, Rendered>;
+	"rightLineToRow": Map<number, Rendered>;
+	"spacers": { "row": number; "side": "left" | "right" }[];
+	"gaps": { "row": number; "count": number; "id": string }[];
+	"foldHeaders": Map<number, FoldHeader>;
+}
+
+/**
+ * Resolve rows + fold regions + user toggles into a render plan: which grid track each visible line lands on, where
+ * the gap and empty-side filler go, and which right-hand lines carry a fold chevron. Block folds are applied first,
+ * then unchanged runs are collapsed among whatever rows remain visible.
+ */
+function buildPlan(
+	rows: DiffRowInfo[],
+	folds: FoldRegion[],
+	expanded: ReadonlySet<string>,
+	folded: ReadonlySet<string>
+): DiffPlan {
+	const hiddenFold = new Set<number>();
+
+	for (const fold of folds) {
+		if (folded.has(fold.id)) {
+			for (let r = fold.startRow + 1; r <= fold.endRow; r += 1) {
+				hiddenFold.add(r);
+			}
+		}
+	}
+
+	// Collapse runs of unchanged rows that survive folding.
+	const hiddenCollapse = new Set<number>();
+	const gapAtFirstRow = new Map<number, { "count": number; "id": string }>();
+	let runStart = -1;
+	let runLength = 0;
+
+	const flushRun = (endExclusive: number): void => {
+		if (runLength - CTX_KEEP * 2 >= 2 && !expanded.has("gap-" + runStart)) {
+			const firstHidden = runStart + CTX_KEEP;
+			const lastHidden = endExclusive - 1 - CTX_KEEP;
+
+			for (let r = firstHidden; r <= lastHidden; r += 1) {
+				hiddenCollapse.add(r);
+			}
+
+			gapAtFirstRow.set(firstHidden, { "count": lastHidden - firstHidden + 1, "id": "gap-" + runStart });
+		}
+
+		runStart = -1;
+		runLength = 0;
+	};
+
+	for (let r = 0; r < rows.length; r += 1) {
+		if (rows[r].type === "ctx" && !hiddenFold.has(r)) {
+			if (runStart < 0) {
+				runStart = r;
+			}
+
+			runLength += 1;
+		} else {
+			flushRun(r);
+		}
+	}
+
+	flushRun(rows.length);
+
+	// Assign grid tracks to the rows that remain, emitting one track per gap.
+	const leftLineToRow = new Map<number, Rendered>();
+	const rightLineToRow = new Map<number, Rendered>();
+	const spacers: DiffPlan["spacers"] = [];
+	const gaps: DiffPlan["gaps"] = [];
+	let gridRow = 0;
+
+	for (let r = 0; r < rows.length; r += 1) {
+		if (hiddenFold.has(r)) {
+			continue;
+		}
+
+		if (hiddenCollapse.has(r)) {
+			const gap = gapAtFirstRow.get(r);
+
+			if (gap !== undefined) {
+				gridRow += 1;
+				gaps.push({ "row": gridRow, "count": gap.count, "id": gap.id });
+			}
+
+			continue;
+		}
+
+		gridRow += 1;
+
+		const row = rows[r];
+
+		if (row.leftNo !== undefined) {
+			leftLineToRow.set(row.leftNo, { "row": gridRow, "type": row.type });
+		}
+
+		if (row.rightNo !== undefined) {
+			rightLineToRow.set(row.rightNo, { "row": gridRow, "type": row.type });
+		}
+
+		if (row.leftNo === undefined) {
+			spacers.push({ "row": gridRow, "side": "left" });
+		} else if (row.rightNo === undefined) {
+			spacers.push({ "row": gridRow, "side": "right" });
+		}
+	}
+
+	// Chevrons on the visible header rows only.
+	const foldHeaders = new Map<number, FoldHeader>();
+
+	for (const fold of folds) {
+		const headerLine = rows[fold.startRow].rightNo;
+
+		if (headerLine !== undefined && !hiddenFold.has(fold.startRow) && !hiddenCollapse.has(fold.startRow)) {
+			foldHeaders.set(headerLine, { "id": fold.id, "folded": folded.has(fold.id), "count": fold.count });
+		}
+	}
+
+	return { "leftLineToRow": leftLineToRow, "rightLineToRow": rightLineToRow, "spacers": spacers, "gaps": gaps, "foldHeaders": foldHeaders };
+}
+
+/** The BABLR verdict banner above the diff (nothing for a non-classified change). */
+function banner(verdict: ChangeKind | "none"): ReactNode {
+	const label = verdict === "cosmetic" ? "Cosmetic change — whitespace & comments only"
+		: verdict === "semantic" ? "Semantic change"
+			: verdict === "unparsable" ? "Couldn’t parse — showing the raw text diff"
+				: undefined;
+
+	if (label === undefined) {
+		return null;
+	}
+
+	return createElement("div", { "className": "sxs-verdict " + verdict },
+		createElement("span", { "className": "sxs-dot" }), label);
+}
+
+/** Build the codehike handlers for one side: a display:contents Pre wrapper + a subgrid Line placer. */
 function sideHandlers(
 	side: "left" | "right",
-	lineToRow: Map<number, { "row": number; "type": DiffRowInfo["type"] }>,
-	verdict: ChangeKind | "none"
+	lineToRow: Map<number, Rendered>,
+	verdict: ChangeKind | "none",
+	foldHeaders: Map<number, FoldHeader> | undefined,
+	onToggleFold: (id: string) => void
 ): AnnotationHandler[] {
 	const cols = side === "left" ? "1 / span 2" : "3 / span 2";
 
-	// Replace InnerPre so the lines aren't wrapped in codehike's <pre><div> (which would sit below the shared grid);
-	// display:contents lets each line become a direct grid item of the parent.
 	const contents: AnnotationHandler = {
 		"name": "sxs-contents",
 		"Pre": (props: { "children"?: ReactNode }) =>
@@ -101,8 +311,8 @@ function sideHandlers(
 			// Word wrap that hangs at the line's own indent level (codehike's recipe): shift the whole line right by
 			// its indentation, then pull the first row back by the same amount with a negative text-indent — so the
 			// first row's leading whitespace still lands where it should while every WRAPPED row hangs under the code.
-			// (`ch` == the mono space width; the leading spaces stay in the text via pre-wrap.)
 			const indent = typeof props.indentation === "number" ? props.indentation : 0;
+			const header = foldHeaders?.get(props.lineNumber);
 
 			return createElement("div", {
 				"className": "sxs-line " + side,
@@ -114,67 +324,78 @@ function sideHandlers(
 					"background": tint(at.type, side, verdict)
 				}
 			},
-			createElement("span", { "className": "sxs-num", "key": "n" }, props.lineNumber),
+			createElement("span", { "className": "sxs-num", "key": "n" },
+				header !== undefined
+					? createElement("button", {
+						"className": "sxs-fold",
+						"title": header.folded ? "Unfold " + header.count + " lines" : "Fold block",
+						"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleFold(header.id); }
+					}, header.folded ? "▸" : "▾")
+					: null,
+				createElement("span", { "className": "sxs-lineno", "key": "l" }, props.lineNumber)),
 			createElement("div", {
 				"className": "sxs-code",
 				"key": "c",
 				"style": indent > 0 ? { "marginLeft": indent + "ch", "textIndent": "-" + indent + "ch" } : undefined
-			}, createElement(InnerLine, { "merge": props })));
+			},
+			createElement(InnerLine, { "merge": props }),
+			header?.folded === true ? createElement("span", { "className": "sxs-folded-mark", "key": "f" }, " ⋯") : null));
 		}
 	};
 
 	return [contents, line];
 }
 
-/** The BABLR verdict banner above the diff (nothing for a non-classified change). */
-function banner(verdict: ChangeKind | "none" | undefined): ReactNode {
-	const label = verdict === "cosmetic" ? "Cosmetic change — whitespace & comments only"
-		: verdict === "semantic" ? "Semantic change"
-			: verdict === "unparsable" ? "Couldn’t parse — showing the raw text diff"
-				: undefined;
+/** The interactive diff: highlighted code in, fold/expand state held here, one shared grid out. */
+function Diff(props: {
+	"leftCode": HighlightedCode;
+	"rightCode": HighlightedCode;
+	"rows": DiffRowInfo[];
+	"verdict": ChangeKind | "none";
+	"foldRegions": FoldRegion[];
+}): ReactNode {
+	const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+	const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
 
-	if (label === undefined) {
-		return null;
-	}
+	const plan = useMemo(() => buildPlan(props.rows, props.foldRegions, expanded, folded),
+		[props.rows, props.foldRegions, expanded, folded]);
 
-	return createElement("div", { "className": "sxs-verdict " + verdict },
-		createElement("span", { "className": "sxs-dot" }), label);
-}
+	const toggleFold = (id: string): void => {
+		setFolded((prev) => {
+			const next = new Set(prev);
 
-/** Faint fill for the empty half of an add/del row, so the gutter reads as continuous. */
-function spacers(rows: DiffRowInfo[]): ReactNode[] {
-	const out: ReactNode[] = [];
+			if (!next.delete(id)) {
+				next.add(id);
+			}
 
-	rows.forEach((row, index) => {
-		const missing = row.leftNo === undefined ? "left" : row.rightNo === undefined ? "right" : undefined;
+			return next;
+		});
+	};
 
-		if (missing !== undefined) {
-			out.push(createElement("div", {
-				"key": "s" + String(index),
-				"className": "sxs-empty " + missing,
-				"style": { "gridColumn": missing === "left" ? "1 / span 2" : "3 / span 2", "gridRow": index + 1 }
-			}));
-		}
-	});
+	const expand = (id: string): void => {
+		setExpanded((prev) => new Set(prev).add(id));
+	};
 
-	return out;
+	const grid = createElement("div", { "className": "sxs" },
+		...plan.spacers.map((spacer) => createElement("div", {
+			"key": "s" + spacer.side + spacer.row,
+			"className": "sxs-empty " + spacer.side,
+			"style": { "gridColumn": spacer.side === "left" ? "1 / span 2" : "3 / span 2", "gridRow": spacer.row }
+		})),
+		...plan.gaps.map((gap) => createElement("button", {
+			"key": gap.id,
+			"className": "sxs-gap",
+			"style": { "gridRow": gap.row },
+			"onClick": () => { expand(gap.id); }
+		}, "⋯ " + gap.count + " unchanged lines")),
+		createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, props.verdict, undefined, toggleFold) }),
+		createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, props.verdict, plan.foldHeaders, toggleFold) }));
+
+	return createElement("div", { "className": "sxs-wrap" }, banner(props.verdict), grid);
 }
 
 /** Render (or re-render) the side-by-side diff for one file into `host`. */
 export async function mountDiff(host: HTMLElement, input: DiffInput): Promise<void> {
-	const leftMap = new Map<number, { "row": number; "type": DiffRowInfo["type"] }>();
-	const rightMap = new Map<number, { "row": number; "type": DiffRowInfo["type"] }>();
-
-	input.rows.forEach((row, index) => {
-		if (row.leftNo !== undefined) {
-			leftMap.set(row.leftNo, { "row": index + 1, "type": row.type });
-		}
-
-		if (row.rightNo !== undefined) {
-			rightMap.set(row.rightNo, { "row": index + 1, "type": row.type });
-		}
-	});
-
 	const verdict = input.verdict ?? "none";
 
 	const [leftCode, rightCode] = await Promise.all([
@@ -182,10 +403,7 @@ export async function mountDiff(host: HTMLElement, input: DiffInput): Promise<vo
 		highlight({ "value": input.working, "lang": input.lang, "meta": "" }, "github-dark")
 	]);
 
-	const grid = createElement("div", { "className": "sxs" },
-		...spacers(input.rows),
-		createElement(Pre, { "code": leftCode, "handlers": sideHandlers("left", leftMap, verdict) }),
-		createElement(Pre, { "code": rightCode, "handlers": sideHandlers("right", rightMap, verdict) }));
+	const foldRegions = toFoldRegions(computeFolds(rightCode.tokens), input.rows);
 
 	let root = roots.get(host);
 
@@ -194,7 +412,9 @@ export async function mountDiff(host: HTMLElement, input: DiffInput): Promise<vo
 		roots.set(host, root);
 	}
 
-	root.render(createElement("div", { "className": "sxs-wrap" }, banner(verdict), grid));
+	// `key` = the file path: switching files remounts Diff with fresh fold/expand state; re-showing the same file
+	// (e.g. after a git.changed refresh) reuses it, so the reviewer's collapsed regions survive the refresh.
+	root.render(createElement(Diff, { "key": input.docKey, "leftCode": leftCode, "rightCode": rightCode, "rows": input.rows, "verdict": verdict, "foldRegions": foldRegions }));
 }
 
 /** Tear down the React root (when the diff pane is emptied). */

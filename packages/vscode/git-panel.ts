@@ -173,10 +173,19 @@ const STYLE = `
 #diff-overlay-body .sxs { display: grid; align-items: stretch; padding-bottom: 8px;
   grid-template-columns: min-content minmax(0, 1fr) min-content minmax(0, 1fr);
   font: 12px/1.6 "SF Mono", ui-monospace, monospace; }
-#diff-overlay-body .sxs-num { text-align: right; padding: 0 8px; color: var(--muted); user-select: none; white-space: nowrap; }
+#diff-overlay-body .sxs-num { display: flex; justify-content: flex-end; align-items: baseline; gap: 4px;
+  padding: 0 8px; color: var(--muted); user-select: none; white-space: nowrap; }
 #diff-overlay-body .sxs-line.right .sxs-num, #diff-overlay-body .sxs-empty.right { border-left: 1px solid var(--line); }
 #diff-overlay-body .sxs-code { padding: 0 10px; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 #diff-overlay-body .sxs-empty { background: #ffffff05; }
+/* Block-fold chevron (right gutter) + the "⋯" left on a folded header line. */
+#diff-overlay-body .sxs-fold { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0; font-size: 9px; line-height: 1.6; }
+#diff-overlay-body .sxs-fold:hover { color: var(--fg); }
+#diff-overlay-body .sxs-folded-mark { color: var(--muted); }
+/* Collapsed unchanged-context gap — spans both columns, click to reveal. */
+#diff-overlay-body .sxs-gap { grid-column: 1 / span 4; text-align: left; border: 0; cursor: pointer; font: inherit;
+  background: #ffffff08; color: var(--muted); padding: 2px 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+#diff-overlay-body .sxs-gap:hover { background: #ffffff14; color: var(--fg); }
 /* Plain-diff fallback content, rendered into the overlay body (outside .gp) when the codehike island can't load. */
 #diff-overlay-body .diff { font: 12px/1.5 "SF Mono", ui-monospace, monospace; padding: 4px 0; }
 #diff-overlay-body .diff .row { padding: 0 12px; white-space: pre-wrap; }
@@ -273,7 +282,7 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 		try {
 			const { mountDiff } = await import("./git-codehike");
 
-			await mountDiff(overlay.body, { "head": head, "working": working, "lang": langFor(path), "rows": rows, "verdict": verdict });
+			await mountDiff(overlay.body, { "docKey": path, "head": head, "working": working, "lang": langFor(path), "rows": rows, "verdict": verdict });
 			codehikeActive = true;
 		} catch (error) {
 			if (!codehikeActive) {
