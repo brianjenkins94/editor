@@ -114,6 +114,24 @@ export function renderShell(): void {
 	const rpc = createRpcClient(shellHub);
 	let currentId: string | undefined;
 
+	// ONE delegated click handler (not a closure created per item in a loop — that trips no-loop-func): open the
+	// clicked project and move the selection highlight.
+	pickerEl.addEventListener("click", (event) => {
+		const button = (event.target as HTMLElement).closest<HTMLElement>(".proj");
+		const id = button?.dataset["id"];
+
+		if (id === undefined) {
+			return;
+		}
+
+		currentId = id;
+		shellHub.publish("project.open", { "id": id });
+
+		for (const el of pickerEl.querySelectorAll<HTMLElement>(".proj")) {
+			el.setAttribute("aria-current", String(el === button));
+		}
+	});
+
 	const renderPicker = (samples: SampleInfo[]): void => {
 		pickerEl.innerHTML = "";
 
@@ -125,16 +143,7 @@ export function renderShell(): void {
 			button.innerHTML = `<span class="n"></span><span class="d"></span>`;
 			button.querySelector<HTMLElement>(".n")!.textContent = sample.name;
 			button.querySelector<HTMLElement>(".d")!.textContent = sample.description;
-			button.addEventListener("click", () => {
-				currentId = sample.id;
-				shellHub.publish("project.open", { "id": sample.id });
-
-				for (const el of pickerEl.querySelectorAll<HTMLElement>(".proj")) {
-					el.setAttribute("aria-current", "false");
-				}
-
-				button.setAttribute("aria-current", "true");
-			});
+			button.dataset["id"] = sample.id;
 			pickerEl.appendChild(button);
 		}
 	};
@@ -152,7 +161,7 @@ export function renderShell(): void {
 				}
 			} catch { /* app not linked yet — retry */ }
 
-			await new Promise((resolve) => setTimeout(resolve, 500));
+			await new Promise((resolve) => { setTimeout(resolve, 500); });
 		}
 
 		pickerEl.textContent = "Could not reach the editor.";
