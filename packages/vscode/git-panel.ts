@@ -10,6 +10,12 @@ import { createRpcClient } from "@brianjenkins94/hub";
 interface GitFileChange { "path": string; "status": "A" | "M" | "D"; "staged": boolean; "unstaged": boolean; "cosmetic": boolean }
 interface DiffRow { "t": "ctx" | "add" | "del"; "text": string }
 
+/**
+ * The diff dialog — a shell-owned overlay that covers the LHS picker + editor when a file is opened (side-by-side
+ * needs the width; the RHS stays the files + commit rail). The shell hands us its four elements; we drive them.
+ */
+export interface DiffOverlay { "el": HTMLElement; "title": HTMLElement; "body": HTMLElement; "close": HTMLElement }
+
 /** Unified line diff via LCS (fine for the file sizes a review touches). Long unchanged runs are collapsed. */
 function lineDiff(before: string, after: string): DiffRow[] {
 	const a = before === "" ? [] : before.split("\n");
@@ -103,20 +109,21 @@ const STYLE = `
 .gp .file .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .gp .file .cos { font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .gp .file.cosmetic .nm { opacity: .6; }
-.gp .diffwrap { flex: 2 1 0; overflow: auto; border-top: 1px solid var(--line); min-height: 0; }
-.gp .diffhead { padding: 6px 10px; color: var(--muted); font: 500 11px "SF Mono", ui-monospace, monospace;
-  position: sticky; top: 0; background: var(--chrome); border-bottom: 1px solid var(--line); }
-.gp .diff { font: 12px/1.5 "SF Mono", ui-monospace, monospace; white-space: pre; }
-.gp .diff .row { padding: 0 10px; }
-.gp .diff .add { background: #4ec9b022; color: #cfeee6; }
-.gp .diff .del { background: #f14c4c22; color: #f3c9c9; }
-.gp .diff .ctx { color: var(--muted); }
-.gp .diff .gap { color: var(--muted); text-align: center; background: #ffffff08; font-style: italic; }
 .gp .empty { padding: 24px 10px; color: var(--muted); text-align: center; }
+/* Plain-diff fallback content, rendered into the shell's overlay body (outside .gp). codehike brings its own CSS. */
+#diff-overlay-body .diff { font: 12px/1.5 "SF Mono", ui-monospace, monospace; padding: 4px 0; }
+#diff-overlay-body .diff .row { padding: 0 12px; white-space: pre-wrap; }
+#diff-overlay-body .diff .add { background: #4ec9b022; color: #cfeee6; }
+#diff-overlay-body .diff .del { background: #f14c4c22; color: #f3c9c9; }
+#diff-overlay-body .diff .ctx { color: var(--muted); }
+#diff-overlay-body .diff .gap { color: var(--muted); text-align: center; background: #ffffff08; font-style: italic; }
 `;
 
-/** Mount the review panel into `container`, talking to the git service over `hub`. */
-export function renderGitPanel(container: HTMLElement, hub: Hub): void {
+/**
+ * Mount the review panel into `container` (files list + commit box), driving the shell's diff `overlay` when a file
+ * is opened, and talking to the git service over `hub`.
+ */
+export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub: Hub): void {
 	if (!document.getElementById("gp-style")) {
 		const style = document.createElement("style");
 
@@ -129,7 +136,6 @@ export function renderGitPanel(container: HTMLElement, hub: Hub): void {
 		<div class="gp">
 			<div class="head">Changes <span class="count">0</span></div>
 			<div class="files"></div>
-			<div class="diffwrap" hidden><div class="diffhead"></div><div class="diff"></div></div>
 			<div class="commit">
 				<textarea class="msg" placeholder="Summary — describe your changes"></textarea>
 				<button class="commitBtn" disabled>Commit all changes</button>
@@ -141,22 +147,35 @@ export function renderGitPanel(container: HTMLElement, hub: Hub): void {
 	const countEl = container.querySelector<HTMLElement>(".count")!;
 	const msgEl = container.querySelector<HTMLTextAreaElement>(".msg")!;
 	const commitBtn = container.querySelector<HTMLButtonElement>(".commitBtn")!;
-	const diffWrap = container.querySelector<HTMLElement>(".diffwrap")!;
-	const diffHead = container.querySelector<HTMLElement>(".diffhead")!;
-	const diffEl = container.querySelector<HTMLElement>(".diff")!;
 	let selected: string | undefined;
+
+	// Hide the diff dialog and drop the file selection (the ✕ button and the "no changes" / "file gone" paths).
+	const hideOverlay = (): void => {
+		overlay.el.classList.remove("open");
+		selected = undefined;
+
+		for (const el of filesEl.querySelectorAll<HTMLElement>(".file")) {
+			el.setAttribute("aria-current", "false");
+		}
+	};
+
+	overlay.close.addEventListener("click", hideOverlay);
 
 	// Plain unified diff (the fallback when the codehike island can't load — e.g. offline: shiki fetches grammars).
 	const renderPlain = (head: string, working: string): void => {
-		diffEl.innerHTML = "";
+		const diff = document.createElement("div");
+
+		diff.className = "diff";
 
 		for (const row of collapse(lineDiff(head, working))) {
 			const line = document.createElement("div");
 
 			line.className = "row " + row.t;
 			line.textContent = (row.t === "add" ? "+" : row.t === "del" ? "-" : row.t === "gap" ? "" : " ") + row.text;
-			diffEl.appendChild(line);
+			diff.appendChild(line);
 		}
+
+		overlay.body.replaceChildren(diff);
 	};
 
 	const langFor = (path: string): string =>
@@ -176,8 +195,8 @@ export function renderGitPanel(container: HTMLElement, hub: Hub): void {
 
 		const { head, working } = await rpc.request("git.file", { "path": path }) as { "head": string; "working": string };
 
-		diffHead.textContent = path;
-		diffWrap.hidden = false;
+		overlay.title.textContent = path;
+		overlay.el.classList.add("open");
 
 		// added working-line numbers (for the codehike line marks), derived from the LCS diff
 		const addedLines: number[] = [];
@@ -193,17 +212,17 @@ export function renderGitPanel(container: HTMLElement, hub: Hub): void {
 		}
 
 		// Lazy-load the codehike island (react + codehike + shiki) on first diff; fall back to the plain diff if the
-		// module can't load. Once codehike owns diffEl (a React root), never touch it with innerHTML again.
+		// module can't load. Once codehike owns overlay.body (a React root), never touch it with innerHTML again.
 		try {
 			const { mountDiff } = await import("./git-codehike");
 
-			await mountDiff(diffEl, { "working": working, "addedLines": addedLines, "lang": langFor(path) });
+			await mountDiff(overlay.body, { "working": working, "addedLines": addedLines, "lang": langFor(path) });
 			codehikeActive = true;
 		} catch (error) {
 			if (!codehikeActive) {
 				renderPlain(head, working);
 			} else {
-				diffHead.textContent = path + " — diff unavailable";
+				overlay.title.textContent = path + " — diff unavailable";
 			}
 		}
 	};
@@ -217,8 +236,7 @@ export function renderGitPanel(container: HTMLElement, hub: Hub): void {
 
 		if (files.length === 0) {
 			filesEl.innerHTML = `<div class="empty">No changes</div>`;
-			diffWrap.hidden = true;
-			selected = undefined;
+			hideOverlay();
 
 			return;
 		}
@@ -235,12 +253,11 @@ export function renderGitPanel(container: HTMLElement, hub: Hub): void {
 			filesEl.appendChild(row);
 		}
 
-		// keep the open diff current, or drop it if its file is gone
+		// keep the open diff current, or drop it (and close the dialog) if its file is gone
 		if (selected !== undefined && files.some((file) => file.path === selected)) {
 			void showDiff(selected);
-		} else {
-			diffWrap.hidden = true;
-			selected = undefined;
+		} else if (selected !== undefined) {
+			hideOverlay();
 		}
 	};
 

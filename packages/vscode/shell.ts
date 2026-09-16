@@ -30,6 +30,16 @@ html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg);
 .shell[data-rhs="collapsed"] { grid-template-columns: var(--side-w) 1fr var(--rail); }
 .shell[data-lhs="collapsed"][data-rhs="collapsed"] { grid-template-columns: var(--rail) 1fr var(--rail); }
 .shell .rhs .body { padding: 0; overflow: hidden; }
+/* The diff opens as an overlay covering the LHS picker + editor (side-by-side needs the width); the RHS stays the
+   files + commit rail. Spans grid row 2, columns 1–2. */
+.shell .diff-overlay { grid-row: 2; grid-column: 1 / 3; z-index: 20; background: var(--bg);
+  display: none; flex-direction: column; border-right: 1px solid var(--line); }
+.shell .diff-overlay.open { display: flex; }
+.shell .do-head { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--line); background: var(--chrome); flex: 0 0 auto; }
+.shell .do-title { flex: 1; font: 500 12px "SF Mono", ui-monospace, monospace; color: var(--fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shell .do-body { flex: 1 1 auto; overflow: auto; min-height: 0; }
 .shell .top { grid-area: top; background: var(--chrome); border-bottom: 1px solid var(--line);
   display: flex; align-items: center; gap: 4px; padding: 0 8px; }
 .shell .top .title { font-weight: 600; margin-right: 10px; color: var(--muted); }
@@ -81,6 +91,11 @@ const MARKUP = `
       <button class="iconbtn" data-toggle="rhs" title="Collapse">›</button></div>
     <div class="body"><div id="git-panel"></div></div>
   </aside>
+  <div class="diff-overlay" id="diff-overlay">
+    <div class="do-head"><span class="do-title" id="diff-overlay-title"></span>
+      <button class="iconbtn do-close" id="diff-overlay-close" title="Close diff">✕</button></div>
+    <div class="do-body" id="diff-overlay-body"></div>
+  </div>
 </div>
 `;
 
@@ -114,8 +129,13 @@ export function renderShell(): void {
 
 	shellHub.link(windowTransport(appFrame.contentWindow!));
 
-	// The RHS review panel — a GitHub-Desktop-style changes/diff/commit surface over the git service (git-panel.ts).
-	renderGitPanel(document.getElementById("git-panel")!, shellHub);
+	// The RHS review panel — GitHub-Desktop-style changes + commit; the diff opens in the overlay (over LHS+editor).
+	renderGitPanel(document.getElementById("git-panel")!, {
+		"el": document.getElementById("diff-overlay")!,
+		"title": document.getElementById("diff-overlay-title")!,
+		"body": document.getElementById("diff-overlay-body")!,
+		"close": document.getElementById("diff-overlay-close")!
+	}, shellHub);
 
 	const rpc = createRpcClient(shellHub);
 	let currentId: string | undefined;
