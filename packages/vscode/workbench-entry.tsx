@@ -48,6 +48,24 @@ interface Init { "files": WorkbenchFile[]; "openEditors": string[]; "workspaceFo
 const host = window.opener ?? window.parent;
 const bus = connectAsPane("editor");
 
+// The workbench manages its own internal scrolling; the HOST document must never scroll. Monaco keeps huge
+// off-screen editor elements (`.lines-content` at ~16M px, a wide `.region`) that make the body horizontally
+// scrollable even under `overflow:hidden`, and focusing/revealing a document programmatically scrolls the body —
+// which shifts the WHOLE workbench left and clips it (dead space on the right). Most visible when the editor fills
+// the shell's middle space (fill mode); harmless otherwise. Pin the document scroll to 0 — capture phase so it
+// catches the body's own scroll event, and body/documentElement directly since the body is the scroller here.
+window.addEventListener("scroll", () => {
+	if (document.body.scrollLeft !== 0 || document.body.scrollTop !== 0) {
+		document.body.scrollLeft = 0;
+		document.body.scrollTop = 0;
+	}
+
+	if (document.documentElement.scrollLeft !== 0 || document.documentElement.scrollTop !== 0) {
+		document.documentElement.scrollLeft = 0;
+		document.documentElement.scrollTop = 0;
+	}
+}, true);
+
 // The workbench-iframe hub — bridges the extension pod (linked in wireWorkbenchHub, once the ext host is up)
 // UP to the page's root hub over a MessagePort the host transfers here ({__hubPort}, from vscode.tsx). Created
 // eagerly so that port — which the host sends right after we announce "ready" — has somewhere to attach; a port
@@ -111,12 +129,54 @@ let booted = false;
 // eslint-disable-next-line ts/no-explicit-any
 let vscodeApi: any = null;
 
+// Resolves once `vscodeApi` is captured — an `openProject` message (from the shell's picker, over the pane bus)
+// may arrive right after "online" but before getApi()'s promise settles, so its handler awaits this.
+let markApiReady: () => void;
+const apiReady = new Promise<void>((resolve) => { markApiReady = resolve; });
+
 function runCommand(command: string): void {
 	const pending = vscodeApi?.commands?.executeCommand(command) as Promise<unknown> | undefined;
 
 	pending?.catch((error: unknown) => {
 		console.error("[vscode] command failed", command, error);
 	});
+}
+
+/**
+ * Open a project into the LIVE workbench (the LHS picker → shell hub → app → pane bus → here): write each file
+ * through the vscode FS API (creating parent dirs first, since the zen-fs provider won't auto-create them) so it
+ * lands in the workspace + shows in the explorer, then open + focus each entry. No reboot — one booted workbench.
+ */
+async function openProject(files: { "path": string; "contents": string }[], openEditors: string[]): Promise<void> {
+	await apiReady;
+
+	const vscode = vscodeApi;
+	const encoder = new TextEncoder();
+	const madeDirs = new Set<string>();
+
+	for (const file of files) {
+		const dir = file.path.slice(0, file.path.lastIndexOf("/"));
+
+		if (dir.length > 0 && !madeDirs.has(dir)) {
+			madeDirs.add(dir);
+			await vscode.workspace.fs.createDirectory(vscode.Uri.file(dir)).then(undefined, () => { /* exists */ });
+		}
+
+		await vscode.workspace.fs.writeFile(vscode.Uri.file(file.path), encoder.encode(file.contents));
+	}
+
+	for (const path of openEditors) {
+		try {
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(path));
+
+			await vscode.window.showTextDocument(document, { "preview": false });
+		} catch (error) {
+			paneLog.error("openProject: show failed", { "path": path, "error": errText(error) });
+		}
+	}
+
+	runCommand("workbench.view.explorer");
+	paneLog.info("openProject wrote sample", { "files": files.length });
 }
 
 /**
@@ -245,6 +305,7 @@ function maybeBoot(): void {
 			ext.getApi().then((api: unknown) => {
 				vscodeApi = api;
 				// Unblock the debug bridge (window.__editor.ready / .api). See debug-bridge.ts.
+				markApiReady(); // let a queued openProject (picker) proceed
 				markBridgeReady();
 				// The tsval debug preview: a dumb-iframe panel view + the adapter↔surface render bridge. Real DOM
 				// (not a webview), so it composites in our coi-serviceworker single-origin harness. See
@@ -335,6 +396,10 @@ bus.on((payload) => {
 	if (data.type === "init") {
 		init = { "files": data.files ?? [], "openEditors": data.openEditors ?? [], "workspaceFolder": data.workspaceFolder, "moduleVersions": data.moduleVersions };
 		maybeBoot();
+	} else if (data.type === "openProject") {
+		const project = data as { "files"?: { "path": string; "contents": string }[]; "openEditors"?: string[] };
+
+		void openProject(project.files ?? [], project.openEditors ?? []);
 	}
 });
 

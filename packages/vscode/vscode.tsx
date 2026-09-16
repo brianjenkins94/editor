@@ -44,16 +44,25 @@ export interface VscodeWindowOptions {
 	"onSave"?: (path: string, contents: string) => void;
 	/** Where to mount the workbench window. Default: document.body. */
 	"mountInto"?: HTMLElement;
+	/** Fill `mountInto` directly (no draggable window chrome) — used when the editor is slotted into the outer
+	 *  shell's middle space. Default false: the standalone, poppable WebAwesome window. */
+	"fill"?: boolean;
 	/** The page's root hub. When given, the workbench pane's hub (the extension pod + its workers) is linked
 	 *  into it, so pod/worker spans federate to the root collector. Re-linked to the pane's CURRENT window on
 	 *  every "ready" (so it follows a popout, exactly as the pane bus does). */
 	"rootHub"?: Hub;
 }
 
+/** A file to write when opening a project into the live workbench (path + contents). */
+export interface ProjectFile { "path": string; "contents": string }
+
 /** Handle returned by createVscodeWindow for talking to the workbench after it's mounted. */
 export interface VscodeWindowHandle {
 	/** Resolves once the workbench has actually booted (monaco mounted), for readiness gating. */
 	"whenReady": Promise<void>;
+	/** Open a project into the ALREADY-BOOTED workbench: write `files` into the workspace and focus `openEditors`.
+	 *  Waits for readiness internally, so a call made before boot still lands. Drives the LHS picker. */
+	"openProject": (files: ProjectFile[], openEditors: string[]) => void;
 }
 
 interface PaneMessage { "type"?: string; "path"?: string; "contents"?: string }
@@ -62,7 +71,7 @@ let booted = false;
 
 export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWindowHandle {
 	if (booted) {
-		return { "whenReady": Promise.resolve() };
+		return { "whenReady": Promise.resolve(), "openProject": () => { /* singleton already booted elsewhere */ } };
 	}
 
 	booted = true;
@@ -75,7 +84,7 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 		markReady = resolve;
 	});
 
-	const { files = [], openEditors = [], workspaceFolder, moduleVersions, onSave, mountInto = document.body, rootHub } = options;
+	const { files = [], openEditors = [], workspaceFolder, moduleVersions, onSave, mountInto = document.body, rootHub, fill = false } = options;
 	const base = (import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/";
 
 	const iframe = document.createElement("iframe");
@@ -85,17 +94,26 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 	// so a popped-out reload still announces as the same pane (see pane-bus.ts).
 	iframe.src = base + "__vscode__/host.html?pane=" + PANE_ID;
 
-	// A large, centered window — the editor is the primary content, just no longer welded to the viewport.
-	const paneWindow = createPaneWindow({
-		"title": "Editor",
-		"storageKey": PANE_ID,
-		"width": Math.min(1200, window.innerWidth - 80),
-		"height": Math.min(760, window.innerHeight - 120)
-	});
+	// Two mount modes. FILL (embedded in the outer shell): the editor IS the middle space, so the iframe fills
+	// `mountInto` directly — no draggable window chrome. WINDOWED (standalone /): a large, centered, poppable
+	// WebAwesome window, the editor's shape today. Either way the iframe + pane bus below are identical.
+	if (fill) {
+		iframe.style.cssText = "width:100%;height:100%;border:0;display:block;";
+		mountInto.style.height ||= "100%";
+		mountInto.appendChild(iframe);
+		span.info("workbench mounted (fill)", { "pane": PANE_ID });
+	} else {
+		const paneWindow = createPaneWindow({
+			"title": "Editor",
+			"storageKey": PANE_ID,
+			"width": Math.min(1200, window.innerWidth - 80),
+			"height": Math.min(760, window.innerHeight - 120)
+		});
 
-	paneWindow.body.appendChild(iframe);
-	mountInto.appendChild(paneWindow.element);
-	span.info("workbench window mounted", { "pane": PANE_ID });
+		paneWindow.body.appendChild(iframe);
+		mountInto.appendChild(paneWindow.element);
+		span.info("workbench window mounted", { "pane": PANE_ID });
+	}
 
 	// The pane bus routes to the pane's CURRENT window (iframe now, popped-out window later) and tracks it
 	// from every inbound message, so the handshake below is unchanged when the editor gains a popout.
@@ -141,5 +159,14 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 		}
 	});
 
-	return { "whenReady": whenReady };
+	// Open a project into the live workbench: forward the files + entry to the pane once it's online (the pane
+	// writes them via the vscode FS API and focuses the entry — no reboot). Sent over the SAME pane bus as the
+	// init handshake, so it follows a popped-out pane for free.
+	const openProject = (projectFiles: ProjectFile[], openEditors: string[]): void => {
+		void whenReady.then(() => {
+			bus.post(PANE_ID, { "type": "openProject", "files": projectFiles, "openEditors": openEditors });
+		});
+	};
+
+	return { "whenReady": whenReady, "openProject": openProject };
 }
