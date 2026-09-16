@@ -172,6 +172,18 @@ export async function setWorking(path: string, content: string): Promise<void> {
 	await fs.promises.writeFile(DIR + "/" + path, content);
 }
 
+/**
+ * Persist a file's `.bablr` sidecar (its identity snapshot) under `.git/bablr/`. Inside `.git`, so it's outside the
+ * working tree — never shows up in status, no .gitignore needed. Local + per-session for now (zen-fs is ephemeral);
+ * portable/committed sidecars are a later milestone. The filename encodes the path (reversible, collision-free).
+ */
+export async function writeBablr(path: string, json: string): Promise<void> {
+	const dir = DIR + "/.git/bablr";
+
+	await fs.promises.mkdir(dir, { "recursive": true });
+	await fs.promises.writeFile(dir + "/" + encodeURIComponent(path) + ".json", json);
+}
+
 /** The HEAD version of a file, for quick-diff gutters + the diff view. "" when the repo is unborn or the file is
  *  new (no HEAD blob), which is exactly what a diff against "nothing" wants. */
 export async function headContent(path: string): Promise<string> {

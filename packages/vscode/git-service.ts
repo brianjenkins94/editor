@@ -114,7 +114,15 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		classifyInFlight = controller;
 
 		try {
-			return { "verdict": await classifier.classify(head, working, controller.signal) };
+			// analyze() gives the verdict AND the `.bablr` identity snapshot; persist the sidecar and answer with the
+			// verdict (the diff still just needs that today; changedNodeIds rides along for per-node highlighting next).
+			const result = await classifier.analyze(head, working, controller.signal);
+
+			if (result.snapshot !== null) {
+				await engine.writeBablr(path, JSON.stringify({ "path": path, "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "snapshot": result.snapshot }));
+			}
+
+			return { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds };
 		} catch {
 			return { "verdict": "none" }; // aborted (superseded) or worker error — the newer request will answer
 		} finally {

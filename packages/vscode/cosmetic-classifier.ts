@@ -1,49 +1,51 @@
 /**
  * Cosmetic-vs-semantic classification service — the reusable seam between BABLR and any consumer.
  *
- * Owns the classify worker (BABLR is a VM interpreter, too slow for the UI thread); takes two text versions and
- * returns a verdict — no cache (see the note below). Knows NOTHING about git or SCM — the git SCM binding (`git-scm.ts`) is
- * merely one consumer, and a future standalone classifier extension would be another. That decoupling is the point:
- * the novel capability (tell cosmetic from semantic) lives here, independent of whatever provider surfaces it.
+ * Owns the classify worker (BABLR is a VM interpreter, too slow for the UI thread) and runs the CST-node IDENTITY
+ * analysis: `classify` returns just the verdict (for SCM badges); `analyze` also returns which nodes changed and the
+ * working `.bablr` snapshot (nodes with anchored ids) so the caller can persist a sidecar and, later, highlight
+ * per-node changes. Knows NOTHING about git or SCM — the git SCM binding (`git-scm.ts`) is merely one consumer.
  *
- * ABORT: the worker runs a YIELDING classifier (`classifyChangeAsync`), so it pauses between chunks of the parse and
- * its message loop can see an `{ abort }` message mid-run. The classifier drives ONE request at a time (a serial
- * queue); to cancel the running one it posts an abort for that id and the worker bails cooperatively (the worker and
- * its cache stay warm — no termination). Aborting a still-queued request just drops it.
+ * ABORT: the worker yields between parse chunks, so its message loop can see an `{ abort }` message mid-run. The
+ * classifier drives ONE request at a time (a serial queue); to cancel the running one it posts an abort for that id
+ * and the worker bails cooperatively (worker stays warm — no termination). Aborting a still-queued request drops it.
+ *
+ * NOTE: no verdict cache. A content-derived key can be wrong; the correct key is a STABLE NODE IDENTITY — which is
+ * exactly what `analyze`'s snapshot now provides, and what a future .bablr-keyed cache will use.
  */
 
-/** BABLR's verdict for a change (mirrors `@brianjenkins94/bablr`'s classifyChange). */
+/** BABLR's verdict for a change (mirrors `@brianjenkins94/bablr`). */
 export type ChangeKind = "cosmetic" | "semantic" | "unparsable";
 
+/** The identity analysis of a HEAD→working change: verdict + changed node ids + the working `.bablr` snapshot. */
+export interface FileAnalysis {
+	"verdict": ChangeKind;
+	"changedNodeIds": string[];
+	"snapshot": unknown;
+}
+
 export interface CosmeticClassifier {
-	/**
-	 * Classify the change from `before` to `after`. Not cached (a content-derived key can be wrong — see the note on
-	 * createCosmeticClassifier); only identical text short-circuits. Pass an `AbortSignal` to cancel: if the request
-	 * is already running, the worker bails cooperatively at its next yield and the promise rejects with an AbortError.
-	 */
+	/** Just the verdict (SCM badges). Pass an `AbortSignal` to cancel; the promise then rejects with an AbortError. */
 	"classify": (before: string, after: string, signal?: AbortSignal) => Promise<ChangeKind>;
+	/** Verdict + changed node ids + the working `.bablr` snapshot (for the diff to persist / highlight). */
+	"analyze": (before: string, after: string, signal?: AbortSignal) => Promise<FileAnalysis>;
 	/** Tear down the worker. */
 	"dispose": () => void;
 }
 
-interface ClassifyResponse { "id": number; "kind"?: ChangeKind; "aborted"?: true }
+interface ClassifyResponse { "id": number; "verdict"?: ChangeKind; "changedNodeIds"?: string[]; "snapshot"?: unknown; "aborted"?: true }
 
 interface QueueItem {
 	"id": number;
 	"before": string;
 	"after": string;
-	"resolve": (kind: ChangeKind) => void;
+	"wantSnapshot": boolean;
+	"resolve": (result: FileAnalysis) => void;
 	"reject": (error: unknown) => void;
 	"aborted": boolean;
 }
 
-/**
- * Create a classifier backed by the BABLR classify worker (served at `lsp/classify-worker.js`).
- *
- * NOTE: no verdict cache. A content-derived key (hash or size) carries a chance of returning a stale/wrong verdict,
- * and the correct key is a STABLE IDENTITY for the changed code (track a line/node as it moves) — the persisted-CST /
- * patch-identity direction — which we haven't built yet. Until then the only shortcut is the exact `before === after`.
- */
+/** Create a classifier backed by the BABLR classify worker (served at `lsp/classify-worker.js`). */
 export function createCosmeticClassifier(): CosmeticClassifier {
 	const queue: QueueItem[] = [];
 	let running: QueueItem | undefined;
@@ -60,10 +62,10 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 
 		running = undefined;
 
-		if (event.data.aborted === true || event.data.kind === undefined) {
+		if (event.data.aborted === true || event.data.verdict === undefined) {
 			settled.reject(new DOMException("classification aborted", "AbortError"));
 		} else {
-			settled.resolve(event.data.kind);
+			settled.resolve({ "verdict": event.data.verdict, "changedNodeIds": event.data.changedNodeIds ?? [], "snapshot": event.data.snapshot ?? null });
 		}
 
 		pump();
@@ -86,45 +88,47 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		}
 
 		running = next;
-		worker.postMessage({ "id": next.id, "before": next.before, "after": next.after });
+		worker.postMessage({ "id": next.id, "before": next.before, "after": next.after, "wantSnapshot": next.wantSnapshot });
 	}
 
+	const request = async (before: string, after: string, signal: AbortSignal | undefined, wantSnapshot: boolean): Promise<FileAnalysis> => {
+		if (before === after) {
+			return { "verdict": "cosmetic", "changedNodeIds": [], "snapshot": null }; // identical — the only provably-correct shortcut
+		}
+
+		if (signal?.aborted === true) {
+			throw new DOMException("classification aborted", "AbortError");
+		}
+
+		return new Promise<FileAnalysis>((resolve, reject) => {
+			const item: QueueItem = { "id": nextId, "before": before, "after": after, "wantSnapshot": wantSnapshot, "resolve": resolve, "reject": reject, "aborted": false };
+
+			nextId += 1;
+			queue.push(item);
+
+			signal?.addEventListener("abort", () => {
+				if (item.aborted) {
+					return;
+				}
+
+				item.aborted = true;
+
+				if (running === item) {
+					// Mid-flight: ask the worker to bail (it yields between parse chunks) — it posts `aborted`, which
+					// settles + pumps the next request, keeping the worker warm.
+					worker.postMessage({ "abort": true, "id": item.id });
+				} else {
+					item.reject(new DOMException("classification aborted", "AbortError")); // queued — pump() skips it
+				}
+			}, { "once": true });
+
+			pump();
+		});
+	};
+
 	return {
-		"classify": async (before, after, signal) => {
-			if (before === after) {
-				return "cosmetic"; // identical text — the only provably-correct shortcut
-			}
-
-			if (signal?.aborted === true) {
-				throw new DOMException("classification aborted", "AbortError");
-			}
-
-			return new Promise<ChangeKind>((resolve, reject) => {
-				const item: QueueItem = { "id": nextId, "before": before, "after": after, "resolve": resolve, "reject": reject, "aborted": false };
-
-				nextId += 1;
-				queue.push(item);
-
-				signal?.addEventListener("abort", () => {
-					if (item.aborted) {
-						return;
-					}
-
-					item.aborted = true;
-
-					if (running === item) {
-						// Mid-flight: ask the worker to bail. It yields between parse chunks, so it will see this and
-						// post an `aborted` response, which settles + pumps the next request (worker stays warm).
-						worker.postMessage({ "abort": true, "id": item.id });
-					} else {
-						// Still queued — reject now; pump() skips it.
-						item.reject(new DOMException("classification aborted", "AbortError"));
-					}
-				}, { "once": true });
-
-				pump();
-			});
-		},
+		"classify": async (before, after, signal) => (await request(before, after, signal, false)).verdict,
+		"analyze": (before, after, signal) => request(before, after, signal, true),
 		"dispose": () => { worker.terminate(); }
 	};
 }

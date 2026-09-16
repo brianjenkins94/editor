@@ -11,4 +11,6 @@ export { cstSpans } from "../../bablr-language-ts/lib/spans";
 export { classifyChange, classifyChangeAsync } from "../../bablr-language-ts/lib/cosmetic";
 // stable CST-node identity (the xit/Pijul model, diff-derived): reidentify carries node ids across edits so data can
 // be pinned to a line/node as it moves — the basis for .bablr sidecars. See ../../bablr-language-ts/lib/identity.
-export { nodeAtoms, reidentify, reidentifyFromSource } from "../../bablr-language-ts/lib/identity";
+// fileDiffIdentity produces the .bablr snapshot for a HEAD→working change (working nodes with anchored ids), the
+// changed-node set, and the whole-file verdict (identity-derived) — the cosmetic classifier, restated over identity.
+export { nodeAtoms, reidentify, reidentifyFromSource, fileDiffIdentity, fileDiffIdentityAsync } from "../../bablr-language-ts/lib/identity";

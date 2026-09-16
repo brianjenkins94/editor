@@ -1,21 +1,19 @@
 /**
- * Classify worker — runs BABLR's `classifyChange` (cosmetic vs semantic) OFF the main thread.
+ * Classify worker — runs BABLR's cosmetic/semantic analysis OFF the main thread, now over the CST-node IDENTITY core.
  *
- * BABLR is a VM interpreter: parsing a file is tens-to-hundreds of ms (it parses BOTH versions), far too slow for
- * the workbench thread. So a caller posts (before, after) here and gets the verdict back.
+ * `fileDiffIdentity` restates the verdict on top of stable node identity: cosmetic exactly when the trivia-insensitive
+ * node atoms are unchanged, otherwise semantic (a deletion counts), or unparsable. It also yields the working
+ * `.bablr` snapshot (nodes with anchored ids) and which nodes changed — returned only when `wantSnapshot` is set, so
+ * the badge path stays lightweight while the diff path can persist the sidecar.
  *
- * YIELDING + ABORT: we use `classifyChangeAsync`, which PACES the BABLR VM (yields to the event loop as it parses)
- * instead of blocking the worker straight through. Because the worker's message loop runs between those yields, an
- * `{ abort }` message can land mid-parse; we trip that request's AbortController and the run bails cooperatively —
- * no worker termination, so the cache and warm state survive. One request in flight at a time (the classifier drives
- * it serially), correlated by id.
+ * YIELDING + ABORT: `fileDiffIdentityAsync` paces the BABLR VM (yields as it parses), so an `{ abort }` message can
+ * land mid-parse and trip this request's AbortController — the run bails cooperatively, no worker termination. One
+ * request in flight at a time (the classifier drives it serially), correlated by id.
  */
-import { classifyChangeAsync } from "@brianjenkins94/bablr";
+import { fileDiffIdentityAsync } from "@brianjenkins94/bablr";
 
-interface ClassifyRequest { "id": number; "before": string; "after": string }
+interface ClassifyRequest { "id": number; "before": string; "after": string; "wantSnapshot": boolean }
 interface AbortRequest { "abort": true; "id": number }
-interface ClassifyResponse { "id": number; "kind": "cosmetic" | "semantic" | "unparsable" }
-interface AbortedResponse { "id": number; "aborted": true }
 
 let current: { "id": number; "controller": AbortController } | undefined;
 
@@ -30,21 +28,27 @@ globalThis.onmessage = async (event: MessageEvent<ClassifyRequest | AbortRequest
 		return;
 	}
 
-	const { id, before, after } = data;
+	const { id, before, after, wantSnapshot } = data;
 	const controller = new AbortController();
 
 	current = { "id": id, "controller": controller };
 
 	try {
-		const kind = await classifyChangeAsync(before, after, "Program", { "signal": controller.signal });
+		const result = await fileDiffIdentityAsync(before, after, { "signal": controller.signal });
+		const reply: Record<string, unknown> = { "id": id, "verdict": result.verdict };
 
-		(globalThis as unknown as Worker).postMessage({ "id": id, "kind": kind } satisfies ClassifyResponse);
+		if (wantSnapshot) {
+			reply["changedNodeIds"] = result.changedNodeIds;
+			reply["snapshot"] = result.snapshot;
+		}
+
+		(globalThis as unknown as Worker).postMessage(reply);
 	} catch (error) {
 		if (error instanceof DOMException && error.name === "AbortError") {
-			(globalThis as unknown as Worker).postMessage({ "id": id, "aborted": true } satisfies AbortedResponse);
+			(globalThis as unknown as Worker).postMessage({ "id": id, "aborted": true });
 		} else {
 			// never let a parse blow up the worker — the caller falls back to a plain diff
-			(globalThis as unknown as Worker).postMessage({ "id": id, "kind": "unparsable" } satisfies ClassifyResponse);
+			(globalThis as unknown as Worker).postMessage({ "id": id, "verdict": "unparsable" });
 		}
 	} finally {
 		if (current?.id === id) {

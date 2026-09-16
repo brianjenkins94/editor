@@ -5,7 +5,7 @@ import test from "node:test";
 // Local integration test against the BUILT bundle (`npm run build` in packages/bablr first): identity.ts pulls in
 // the BABLR parser via spans.ts, which only resolves once bundled. dist is gitignored, so this runs locally, not in CI.
 // eslint-disable-next-line antfu/no-import-dist -- intentional: exercise the shipped artifact
-import { nodeAtoms, reidentify, reidentifyFromSource } from "../../bablr/dist/index.js";
+import { fileDiffIdentity, nodeAtoms, reidentify, reidentifyFromSource } from "../../bablr/dist/index.js";
 
 const atomOf = (nodes, needle) => nodes.find((n) => n.atom.includes(needle));
 
@@ -71,6 +71,31 @@ test("real CST: reindenting + blank lines preserves every node id (trivia-insens
 
 	assert.deepEqual(s2.nodes.map((n) => n.id), s1.nodes.map((n) => n.id), "every node id must survive a reindent");
 	assert.ok(s1.nodes.length > 3, "sanity: parsed several nodes");
+});
+
+test("fileDiffIdentity: verdict is identity-derived (cosmetic / semantic / deletion / unparsable)", () => {
+	const base = "function total(items) {\n  let sum = 0;\n  return sum;\n}\n";
+
+	// reindent only -> cosmetic, nothing changed
+	const reindent = fileDiffIdentity(base, "function total(items) {\n        let sum = 0;\n        return sum;\n}\n");
+	assert.equal(reindent.verdict, "cosmetic");
+	assert.equal(reindent.changedNodeIds.length, 0, "no changed nodes for a pure reindent");
+
+	// changed token -> semantic, and the changed node is reported
+	const edited = fileDiffIdentity(base, "function total(items) {\n  let sum = 1;\n  return sum;\n}\n");
+	assert.equal(edited.verdict, "semantic");
+	assert.ok(edited.changedNodeIds.length > 0, "an edit reports changed node ids");
+
+	// pure deletion (removed a statement) is still semantic even though nothing was inserted
+	const deleted = fileDiffIdentity(base, "function total(items) {\n  return sum;\n}\n");
+	assert.equal(deleted.verdict, "semantic", "a deletion must read semantic");
+
+	// a side that can't parse -> unparsable
+	const broken = fileDiffIdentity(base, "function total(items) {\n  let sum = ;;;\n");
+	assert.equal(broken.verdict, "unparsable");
+
+	// the snapshot is a real .bablr view: nodes carry ids
+	assert.ok(edited.snapshot && edited.snapshot.nodes.length > 0 && edited.snapshot.nodes[0].id.includes(":"));
 });
 
 test("real CST: a shift (new statement above) preserves the moved statement's ids", () => {
