@@ -96,18 +96,42 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 	});
 
 	serve(hub, "git.commit", async (args) => {
-		const message = (args as { "message"?: string } | null)?.message?.trim();
+		const request = args as { "message"?: string; "files"?: engine.CommitFile[] } | null;
+		const message = request?.message?.trim();
 
 		if (message === undefined || message === "") {
 			throw new Error("Enter a commit message first.");
 		}
 
-		const oid = await engine.commitAll(message);
+		// `files` present → selective commit (the shell's checkbox / line selection); absent → legacy commit-all.
+		const oid = request?.files !== undefined
+			? await engine.commitSelection(message, request.files)
+			: await engine.commitAll(message);
 
 		hub.publish("git.changed");
-		log.info("git commit (service)", { "oid": oid.slice(0, 7) });
+		log.info("git commit (service)", { "oid": oid.slice(0, 7), "files": request?.files?.length });
 
 		return { "oid": oid };
+	});
+
+	// Discard a file's working-tree changes: whole file (restore HEAD / delete), or a PARTIAL discard when the shell
+	// sends the exact post-discard `content` (working with the chosen hunks reverted).
+	serve(hub, "git.discard", async (args) => {
+		const request = args as { "path"?: string; "content"?: string } | null;
+
+		if (typeof request?.path !== "string") {
+			throw new Error("git.discard needs a path.");
+		}
+
+		if (typeof request.content === "string") {
+			await engine.setWorking(request.path, request.content);
+		} else {
+			await engine.discardFile(request.path);
+		}
+
+		hub.publish("git.changed");
+
+		return { "ok": true };
 	});
 
 	// Tell the shell to refresh when the working tree changes (saves, and picker-driven writes).

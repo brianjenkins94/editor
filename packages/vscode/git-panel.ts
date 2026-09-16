@@ -143,17 +143,24 @@ const STYLE = `
   background: var(--accent); color: #fff; font-weight: 600; }
 .gp .commitBtn:disabled { opacity: .5; cursor: default; }
 .gp .head { padding: 8px 10px; text-transform: uppercase; font-size: 11px; letter-spacing: .06em; color: var(--muted);
-  display: flex; gap: 6px; align-items: baseline; }
+  display: flex; gap: 6px; align-items: center; }
 .gp .head .count { color: var(--fg); font-weight: 600; }
+.gp .pick, .gp .pickAll { margin: 0; cursor: pointer; accent-color: var(--accent); flex: 0 0 auto; }
 .gp .files { overflow: auto; flex: 1 1 0; min-height: 80px; }
-.gp .file { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; padding: 5px 10px;
+.gp .file { display: grid; grid-template-columns: 16px 16px 1fr auto; gap: 8px; align-items: center; padding: 5px 10px;
   cursor: pointer; border-left: 2px solid transparent; }
 .gp .file:hover { background: #ffffff10; }
 .gp .file[aria-current="true"] { background: #3794ff1f; border-left-color: var(--accent); }
 .gp .file .st { font: 600 12px "SF Mono", ui-monospace, monospace; text-align: center; }
 .gp .file .st.A { color: #4ec9b0; } .gp .file .st.M { color: #d7ba7d; } .gp .file .st.D { color: #f14c4c; }
 .gp .file .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.gp .file .tail { display: flex; align-items: center; gap: 6px; }
 .gp .file .cos { font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.gp .file .discard { visibility: hidden; border: 0; background: none; color: var(--muted); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 0 2px; }
+.gp .file:hover .discard { visibility: visible; }
+.gp .file .discard:hover { color: #f14c4c; }
+.gp .file .discard.armed { visibility: visible; color: #f14c4c; font-size: 11px; font-weight: 600; }
 .gp .file.cosmetic .nm { opacity: .6; }
 .gp .empty { padding: 24px 10px; color: var(--muted); text-align: center; }
 /* BABLR verdict banner — sticky at the top of the diff, colour-coded by whether the change moves the meaning. */
@@ -210,7 +217,7 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 
 	container.innerHTML = `
 		<div class="gp">
-			<div class="head">Changes <span class="count">0</span></div>
+			<div class="head"><input type="checkbox" class="pickAll" checked title="Select all changes"> Changes <span class="count">0</span></div>
 			<div class="files"></div>
 			<div class="commit">
 				<textarea class="msg" placeholder="Summary — describe your changes"></textarea>
@@ -223,7 +230,12 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 	const countEl = container.querySelector<HTMLElement>(".count")!;
 	const msgEl = container.querySelector<HTMLTextAreaElement>(".msg")!;
 	const commitBtn = container.querySelector<HTMLButtonElement>(".commitBtn")!;
+	const pickAll = container.querySelector<HTMLInputElement>(".pickAll")!;
 	let selected: string | undefined;
+	// Files the reviewer has UN-checked (excluded from the commit). Absence = selected — so new changes default in.
+	const deselected = new Set<string>();
+	// The changed files from the latest status, for the master checkbox + commit to consult.
+	let currentFiles: GitFileChange[] = [];
 
 	// Hide the diff dialog and drop the file selection (the ✕ button and the "no changes" / "file gone" paths).
 	const hideOverlay = (): void => {
@@ -236,6 +248,39 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 	};
 
 	overlay.close.addEventListener("click", hideOverlay);
+
+	const isSelected = (path: string): boolean => !deselected.has(path);
+
+	// Reflect the current selection in the master checkbox (tri-state) and the commit button.
+	const syncSelectionUi = (): void => {
+		const total = currentFiles.length;
+		const chosen = currentFiles.filter((file) => isSelected(file.path)).length;
+
+		pickAll.checked = total > 0 && chosen === total;
+		pickAll.indeterminate = chosen > 0 && chosen < total;
+		commitBtn.disabled = chosen === 0;
+		commitBtn.textContent = chosen === total ? "Commit all changes" : "Commit " + chosen + " of " + total;
+	};
+
+	// Master checkbox: check all → clear exclusions; uncheck → exclude every file.
+	pickAll.addEventListener("change", () => {
+		deselected.clear();
+
+		if (!pickAll.checked) {
+			for (const file of currentFiles) {
+				deselected.add(file.path);
+			}
+		}
+
+		for (const row of filesEl.querySelectorAll<HTMLElement>(".file")) {
+			const checkbox = row.querySelector<HTMLInputElement>(".pick")!;
+
+			checkbox.checked = isSelected(row.dataset["path"]!);
+		}
+
+		syncSelectionUi();
+	});
+
 
 	// Plain unified diff (the fallback when the codehike island can't load — e.g. offline: shiki fetches grammars).
 	const renderPlain = (head: string, working: string): void => {
@@ -296,13 +341,22 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 	const refresh = async (): Promise<void> => {
 		const { files } = await rpc.request("git.status") as { "files": GitFileChange[] };
 
+		currentFiles = files;
+
+		// Drop exclusions for files that are no longer changed (committed or discarded), so they don't linger.
+		for (const path of [...deselected]) {
+			if (!files.some((file) => file.path === path)) {
+				deselected.delete(path);
+			}
+		}
+
 		countEl.textContent = String(files.length);
-		commitBtn.disabled = files.length === 0;
 		filesEl.innerHTML = "";
 
 		if (files.length === 0) {
 			filesEl.innerHTML = `<div class="empty">No changes</div>`;
 			hideOverlay();
+			syncSelectionUi();
 
 			return;
 		}
@@ -313,11 +367,60 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 			row.className = "file" + (file.cosmetic ? " cosmetic" : "");
 			row.dataset["path"] = file.path;
 			row.setAttribute("aria-current", String(file.path === selected));
-			row.innerHTML = `<span class="st ${file.status}">${file.status}</span><span class="nm"></span>${file.cosmetic ? '<span class="cos">cosmetic</span>' : ""}`;
+			row.innerHTML = `<input type="checkbox" class="pick"><span class="st ${file.status}">${file.status}</span><span class="nm"></span><span class="tail">${file.cosmetic ? '<span class="cos">cosmetic</span>' : ""}<button class="discard" title="Discard changes">⨯</button></span>`;
 			row.querySelector<HTMLElement>(".nm")!.textContent = file.path;
-			row.addEventListener("click", () => { void showDiff(file.path); });
+
+			const checkbox = row.querySelector<HTMLInputElement>(".pick")!;
+
+			checkbox.checked = isSelected(file.path);
+			checkbox.addEventListener("change", () => {
+				if (checkbox.checked) {
+					deselected.delete(file.path);
+				} else {
+					deselected.add(file.path);
+				}
+
+				syncSelectionUi();
+			});
+
+			// Discard is destructive and can't be undone, so it arms on the first click ("Discard?") and only fires on
+			// the second — a lightweight confirm that needs no blocking dialog. It disarms after a few seconds.
+			const discardBtn = row.querySelector<HTMLButtonElement>(".discard")!;
+			let armed = false;
+			let disarmTimer: ReturnType<typeof setTimeout> | undefined;
+
+			discardBtn.addEventListener("click", (event) => {
+				event.stopPropagation();
+
+				if (!armed) {
+					armed = true;
+					discardBtn.classList.add("armed");
+					discardBtn.textContent = "Discard?";
+					disarmTimer = setTimeout(() => {
+						armed = false;
+						discardBtn.classList.remove("armed");
+						discardBtn.textContent = "⨯";
+					}, 3000);
+
+					return;
+				}
+
+				clearTimeout(disarmTimer);
+				void rpc.request("git.discard", { "path": file.path });
+				// git.changed → refresh() repaints the list (and closes the diff if the file is now clean).
+			});
+
+			// Open the diff on a row click, EXCEPT clicks on the checkbox or the discard button.
+			row.addEventListener("click", (event) => {
+				if ((event.target as HTMLElement).closest(".pick, .discard") === null) {
+					void showDiff(file.path);
+				}
+			});
+
 			filesEl.appendChild(row);
 		}
+
+		syncSelectionUi();
 
 		// keep the open diff current, or drop it (and close the dialog) if its file is gone
 		if (selected !== undefined && files.some((file) => file.path === selected)) {
@@ -336,14 +439,22 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 			return;
 		}
 
+		const files = currentFiles
+			.filter((file) => isSelected(file.path))
+			.map((file) => ({ "path": file.path, "deleted": file.status === "D" }));
+
+		if (files.length === 0) {
+			return;
+		}
+
 		commitBtn.disabled = true;
 
 		try {
-			await rpc.request("git.commit", { "message": message });
+			await rpc.request("git.commit", { "message": message, "files": files });
 			msgEl.value = "";
 		} catch (error) {
 			commitBtn.textContent = "Commit failed";
-			setTimeout(() => { commitBtn.textContent = "Commit all changes"; }, 1800);
+			setTimeout(syncSelectionUi, 1800);
 		}
 
 		void refresh();

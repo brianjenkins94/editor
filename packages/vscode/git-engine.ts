@@ -11,7 +11,7 @@
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
 import { Buffer } from "buffer";
 import { fs } from "@zenfs/core";
-import { add, commit, init, readBlob, remove, resetIndex, resolveRef, statusMatrix } from "isomorphic-git";
+import { add, commit, init, readBlob, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism); the browser has none and the workbench bundle doesn't
 // polyfill node globals, so provide it. The `buffer` import resolves to the node-stdlib-browser polyfill via the
@@ -97,6 +97,78 @@ export async function commitAll(message: string): Promise<string> {
 	await stageAll();
 
 	return commit({ "fs": fs, "dir": DIR, "message": message, "author": AUTHOR });
+}
+
+/** One file's contribution to a selective commit. */
+export interface CommitFile {
+	"path": string;
+	/** Exact blob text to commit (a PARTIAL selection: HEAD + only the chosen hunks). Omit to stage the working file. */
+	"content"?: string;
+	/** The file was deleted in the working tree and the deletion is selected. */
+	"deleted"?: boolean;
+}
+
+/**
+ * Commit exactly the given files (GitHub-Desktop-style selective commit), leaving the working tree untouched. The
+ * index is first reset to HEAD for every currently-changed path so nothing outside `files` sneaks in; then each file
+ * is staged — a `content` blob for a PARTIAL selection (written via writeBlob + updateIndex so the working tree keeps
+ * the unselected changes), a removal for a deletion, or the working file otherwise — and the index is committed.
+ */
+export async function commitSelection(message: string, files: CommitFile[]): Promise<string> {
+	const { staged, unstaged } = await status();
+
+	for (const path of new Set([...staged, ...unstaged].map((change) => change.path))) {
+		try {
+			await resetIndex({ "fs": fs, "dir": DIR, "filepath": path });
+		} catch { /* nothing to reset */ }
+	}
+
+	for (const file of files) {
+		if (file.deleted === true) {
+			await remove({ "fs": fs, "dir": DIR, "filepath": file.path });
+		} else if (file.content !== undefined) {
+			const oid = await writeBlob({ "fs": fs, "dir": DIR, "blob": new TextEncoder().encode(file.content) });
+
+			await updateIndex({ "fs": fs, "dir": DIR, "filepath": file.path, "oid": oid });
+		} else {
+			await add({ "fs": fs, "dir": DIR, "filepath": file.path });
+		}
+	}
+
+	return commit({ "fs": fs, "dir": DIR, "message": message, "author": AUTHOR });
+}
+
+/** True when `path` exists in HEAD (i.e. it's tracked, not a brand-new file). */
+async function isTracked(path: string): Promise<boolean> {
+	try {
+		const oid = await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" });
+
+		await readBlob({ "fs": fs, "dir": DIR, "oid": oid, "filepath": path });
+
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** Discard ALL of a file's working-tree changes: restore a tracked file to its HEAD content, or delete an added one. */
+export async function discardFile(path: string): Promise<void> {
+	const full = DIR + "/" + path;
+
+	if (await isTracked(path)) {
+		await fs.promises.writeFile(full, await headContent(path));
+
+		try {
+			await resetIndex({ "fs": fs, "dir": DIR, "filepath": path });
+		} catch { /* nothing staged */ }
+	} else if (fs.existsSync(full)) {
+		await fs.promises.unlink(full);
+	}
+}
+
+/** Overwrite a file's working-tree content (a PARTIAL discard: working with the chosen hunks reverted to HEAD). */
+export async function setWorking(path: string, content: string): Promise<void> {
+	await fs.promises.writeFile(DIR + "/" + path, content);
 }
 
 /** The HEAD version of a file, for quick-diff gutters + the diff view. "" when the repo is unborn or the file is
