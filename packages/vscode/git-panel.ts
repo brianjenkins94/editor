@@ -131,6 +131,37 @@ function buildRows(before: string, after: string): DiffRowInfo[] {
 	return rows;
 }
 
+/**
+ * Reconstruct the blob to COMMIT for a partial selection: HEAD with only the SELECTED changes applied. A deselected
+ * row index (into `rows`) means "leave this as HEAD" — a deselected add is dropped, a deselected deletion keeps the
+ * old line, a deselected modification keeps the old line. Unchanged lines always carry through.
+ */
+function committedContent(head: string, working: string, rows: DiffRowInfo[], deselected: ReadonlySet<number>): string {
+	const headLines = head === "" ? [] : head.split("\n");
+	const workingLines = working === "" ? [] : working.split("\n");
+	const out: string[] = [];
+
+	rows.forEach((row, index) => {
+		const selected = !deselected.has(index);
+
+		if (row.type === "ctx") {
+			out.push(workingLines[row.rightNo! - 1]);
+		} else if (row.type === "add") {
+			if (selected) {
+				out.push(workingLines[row.rightNo! - 1]);
+			}
+		} else if (row.type === "del") {
+			if (!selected) {
+				out.push(headLines[row.leftNo! - 1]);
+			}
+		} else {
+			out.push(selected ? workingLines[row.rightNo! - 1] : headLines[row.leftNo! - 1]);
+		}
+	});
+
+	return out.join("\n");
+}
+
 const STYLE = `
 .gp { display: flex; flex-direction: column; gap: 0; height: 100%; font-size: 13px; }
 #git-panel { height: 100%; }
@@ -180,8 +211,9 @@ const STYLE = `
 #diff-overlay-body .sxs { display: grid; align-items: stretch; padding-bottom: 8px;
   grid-template-columns: min-content minmax(0, 1fr) min-content minmax(0, 1fr);
   font: 12px/1.6 "SF Mono", ui-monospace, monospace; }
-#diff-overlay-body .sxs-num { display: flex; justify-content: flex-end; align-items: baseline; gap: 4px;
+#diff-overlay-body .sxs-num { display: flex; justify-content: flex-end; align-items: center; gap: 4px;
   padding: 0 8px; color: var(--muted); user-select: none; white-space: nowrap; }
+#diff-overlay-body .sxs-pick { margin: 0; cursor: pointer; accent-color: var(--accent); width: 12px; height: 12px; flex: 0 0 auto; }
 #diff-overlay-body .sxs-line.right .sxs-num, #diff-overlay-body .sxs-empty.right { border-left: 1px solid var(--line); }
 #diff-overlay-body .sxs-code { padding: 0 10px; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 #diff-overlay-body .sxs-empty { background: #ffffff05; }
@@ -232,8 +264,12 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 	const commitBtn = container.querySelector<HTMLButtonElement>(".commitBtn")!;
 	const pickAll = container.querySelector<HTMLInputElement>(".pickAll")!;
 	let selected: string | undefined;
-	// Files the reviewer has UN-checked (excluded from the commit). Absence = selected — so new changes default in.
+	// Files the reviewer has UN-checked entirely (excluded from the commit). Absence = selected.
 	const deselected = new Set<string>();
+	// Per-file PARTIAL selection: row indices (into that file's diff rows) the reviewer un-checked in the diff.
+	const lineDeselect = new Map<string, Set<number>>();
+	// Changed-row count per file that has an open/partial selection, so a file row can show its indeterminate state.
+	const changedCount = new Map<string, number>();
 	// The changed files from the latest status, for the master checkbox + commit to consult.
 	let currentFiles: GitFileChange[] = [];
 
@@ -249,33 +285,54 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 
 	overlay.close.addEventListener("click", hideOverlay);
 
-	const isSelected = (path: string): boolean => !deselected.has(path);
+	// A file is fully in ("all"), fully out ("off"), or has a per-line partial selection ("partial"). A partial
+	// selection that has grown to cover every changed row reads as "off" (nothing left to commit).
+	const fileState = (path: string): "all" | "partial" | "off" => {
+		if (deselected.has(path)) {
+			return "off";
+		}
 
-	// Reflect the current selection in the master checkbox (tri-state) and the commit button.
-	const syncSelectionUi = (): void => {
-		const total = currentFiles.length;
-		const chosen = currentFiles.filter((file) => isSelected(file.path)).length;
+		const dropped = lineDeselect.get(path);
+		const total = changedCount.get(path);
 
-		pickAll.checked = total > 0 && chosen === total;
-		pickAll.indeterminate = chosen > 0 && chosen < total;
-		commitBtn.disabled = chosen === 0;
-		commitBtn.textContent = chosen === total ? "Commit all changes" : "Commit " + chosen + " of " + total;
+		if (dropped !== undefined && dropped.size > 0) {
+			return total !== undefined && dropped.size >= total ? "off" : "partial";
+		}
+
+		return "all";
 	};
 
-	// Master checkbox: check all → clear exclusions; uncheck → exclude every file.
+	const isIncluded = (path: string): boolean => fileState(path) !== "off";
+
+	// Reflect the selection everywhere: each file checkbox (tri-state), the master checkbox, the commit button.
+	const syncSelectionUi = (): void => {
+		const total = currentFiles.length;
+		const chosen = currentFiles.filter((file) => isIncluded(file.path)).length;
+		const anyPartial = currentFiles.some((file) => fileState(file.path) === "partial");
+
+		pickAll.checked = total > 0 && chosen === total && !anyPartial;
+		pickAll.indeterminate = chosen > 0 && (chosen < total || anyPartial);
+		commitBtn.disabled = chosen === 0;
+		commitBtn.textContent = chosen === total && !anyPartial ? "Commit all changes" : "Commit " + chosen + " of " + total;
+
+		for (const row of filesEl.querySelectorAll<HTMLElement>(".file")) {
+			const state = fileState(row.dataset["path"]!);
+			const checkbox = row.querySelector<HTMLInputElement>(".pick")!;
+
+			checkbox.checked = state !== "off";
+			checkbox.indeterminate = state === "partial";
+		}
+	};
+
+	// Master checkbox: check all → clear every exclusion; uncheck → exclude every file.
 	pickAll.addEventListener("change", () => {
 		deselected.clear();
+		lineDeselect.clear();
 
 		if (!pickAll.checked) {
 			for (const file of currentFiles) {
 				deselected.add(file.path);
 			}
-		}
-
-		for (const row of filesEl.querySelectorAll<HTMLElement>(".file")) {
-			const checkbox = row.querySelector<HTMLInputElement>(".pick")!;
-
-			checkbox.checked = isSelected(row.dataset["path"]!);
 		}
 
 		syncSelectionUi();
@@ -322,12 +379,32 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 
 		const rows: DiffRowInfo[] = buildRows(head, working);
 
+		changedCount.set(path, rows.filter((row) => row.type !== "ctx").length);
+
 		// Lazy-load the codehike island (react + codehike + shiki) on first diff; fall back to the plain diff if the
 		// module can't load. Once codehike owns overlay.body (a React root), never touch it with innerHTML again.
 		try {
 			const { mountDiff } = await import("./git-codehike");
 
-			await mountDiff(overlay.body, { "docKey": path, "head": head, "working": working, "lang": langFor(path), "rows": rows, "verdict": verdict });
+			await mountDiff(overlay.body, {
+				"docKey": path,
+				"head": head,
+				"working": working,
+				"lang": langFor(path),
+				"rows": rows,
+				"verdict": verdict,
+				"deselectedRows": [...(lineDeselect.get(path) ?? [])],
+				"onRowSelection": (dropped) => {
+					if (dropped.length === 0) {
+						lineDeselect.delete(path);
+					} else {
+						lineDeselect.set(path, new Set(dropped));
+					}
+
+					deselected.delete(path); // touching lines means the file is (partially) IN, not fully excluded
+					syncSelectionUi();
+				}
+			});
 			codehikeActive = true;
 		} catch (error) {
 			if (!codehikeActive) {
@@ -343,10 +420,19 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 
 		currentFiles = files;
 
-		// Drop exclusions for files that are no longer changed (committed or discarded), so they don't linger.
+		// Drop selection bookkeeping for files that are no longer changed (committed or discarded).
+		const stillChanged = (path: string): boolean => files.some((file) => file.path === path);
+
 		for (const path of [...deselected]) {
-			if (!files.some((file) => file.path === path)) {
+			if (!stillChanged(path)) {
 				deselected.delete(path);
+			}
+		}
+
+		for (const path of [...lineDeselect.keys()]) {
+			if (!stillChanged(path)) {
+				lineDeselect.delete(path);
+				changedCount.delete(path);
 			}
 		}
 
@@ -372,8 +458,10 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 
 			const checkbox = row.querySelector<HTMLInputElement>(".pick")!;
 
-			checkbox.checked = isSelected(file.path);
 			checkbox.addEventListener("change", () => {
+				// A file-level toggle overrides any per-line selection: fully in, or fully out.
+				lineDeselect.delete(file.path);
+
 				if (checkbox.checked) {
 					deselected.delete(file.path);
 				} else {
@@ -439,19 +527,34 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 			return;
 		}
 
-		const files = currentFiles
-			.filter((file) => isSelected(file.path))
-			.map((file) => ({ "path": file.path, "deleted": file.status === "D" }));
+		const included = currentFiles.filter((file) => isIncluded(file.path));
 
-		if (files.length === 0) {
+		if (included.length === 0) {
 			return;
 		}
 
 		commitBtn.disabled = true;
 
 		try {
+			// Build the commit list: a partial file sends the exact blob to commit (HEAD + selected hunks); a full
+			// file just names its path (the service stages the working copy) or flags a deletion.
+			const files = await Promise.all(included.map(async (file) => {
+				if (fileState(file.path) !== "partial") {
+					return { "path": file.path, "deleted": file.status === "D" };
+				}
+
+				const { head, working } = await rpc.request("git.file", { "path": file.path }) as { "head": string; "working": string };
+				const rows = buildRows(head, working);
+				const content = committedContent(head, working, rows, lineDeselect.get(file.path) ?? new Set());
+
+				return { "path": file.path, "content": content };
+			}));
+
 			await rpc.request("git.commit", { "message": message, "files": files });
 			msgEl.value = "";
+			// The committed hunks are gone; any remaining changes should default back to selected next time.
+			lineDeselect.clear();
+			changedCount.clear();
 		} catch (error) {
 			commitBtn.textContent = "Commit failed";
 			setTimeout(syncSelectionUi, 1800);

@@ -26,7 +26,7 @@
 import type { AnnotationHandler, HighlightedCode, Tokens } from "codehike/code";
 import type { ChangeKind } from "./cosmetic-classifier";
 import { highlight, InnerLine, Pre } from "codehike/code";
-import { createElement, type ReactNode, useMemo, useState } from "react";
+import { createElement, type ReactNode, useMemo, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 /** One React root per host element, reused across diff switches (root.render updates in place). */
@@ -54,6 +54,10 @@ export interface DiffInput {
 	"rows": DiffRowInfo[];
 	/** BABLR's verdict for the whole change ("none" when not a modified code file). */
 	"verdict"?: ChangeKind | "none";
+	/** Row indices (into `rows`) the reviewer has UN-checked for commit — the initial per-line selection. */
+	"deselectedRows"?: number[];
+	/** Called when the per-line selection changes, with the new deselected row indices. */
+	"onRowSelection"?: (deselected: number[]) => void;
 }
 
 const ADD_BG = "#2ea04326";
@@ -66,7 +70,7 @@ const NON_CODE_COLORS = new Set(["#a5d6ff", "#8b949e"]);
 /** Collapse an unchanged run longer than this, keeping CTX_KEEP rows of context at each end. */
 const CTX_KEEP = 3;
 
-interface Rendered { "row": number; "type": DiffRowInfo["type"] }
+interface Rendered { "row": number; "type": DiffRowInfo["type"]; "index": number }
 interface FoldRegion { "id": string; "startRow": number; "endRow": number; "count": number }
 interface FoldHeader { "id": string; "folded": boolean; "count": number }
 
@@ -241,11 +245,11 @@ function buildPlan(
 		const row = rows[r];
 
 		if (row.leftNo !== undefined) {
-			leftLineToRow.set(row.leftNo, { "row": gridRow, "type": row.type });
+			leftLineToRow.set(row.leftNo, { "row": gridRow, "type": row.type, "index": r });
 		}
 
 		if (row.rightNo !== undefined) {
-			rightLineToRow.set(row.rightNo, { "row": gridRow, "type": row.type });
+			rightLineToRow.set(row.rightNo, { "row": gridRow, "type": row.type, "index": r });
 		}
 
 		if (row.leftNo === undefined) {
@@ -301,7 +305,9 @@ function sideHandlers(
 	lineToRow: Map<number, Rendered>,
 	verdict: ChangeKind | "none",
 	foldHeaders: Map<number, FoldHeader> | undefined,
-	onToggleFold: (id: string) => void
+	onToggleFold: (id: string) => void,
+	deselectedRows: ReadonlySet<number>,
+	onToggleRow: (index: number) => void
 ): AnnotationHandler[] {
 	const cols = side === "left" ? "1 / span 2" : "3 / span 2";
 
@@ -337,9 +343,21 @@ function sideHandlers(
 				}
 			},
 			createElement("span", { "className": "sxs-num", "key": "n" },
+				at.type !== "ctx"
+					? createElement("input", {
+						"type": "checkbox",
+						"className": "sxs-pick",
+						"key": "p",
+						"title": "Include this change in the commit",
+						"checked": !deselectedRows.has(at.index),
+						"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); },
+						"onChange": () => { onToggleRow(at.index); }
+					})
+					: null,
 				header !== undefined
 					? createElement("button", {
 						"className": "sxs-fold",
+						"key": "b",
 						"title": header.folded ? "Unfold " + header.count + " lines" : "Fold block",
 						"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleFold(header.id); }
 					}, header.folded ? "▸" : "▾")
@@ -365,9 +383,34 @@ function Diff(props: {
 	"rows": DiffRowInfo[];
 	"verdict": ChangeKind | "none";
 	"foldRegions": FoldRegion[];
+	"contentKey": string;
+	"deselectedRows"?: number[];
+	"onRowSelection"?: (deselected: number[]) => void;
 }): ReactNode {
 	const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
 	const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
+	const [deselectedRows, setDeselectedRows] = useState<ReadonlySet<number>>(() => new Set(props.deselectedRows));
+
+	// Reset the per-line selection when the file's CONTENT changes (e.g. after a partial commit) while the same file
+	// stays open — the component isn't remounted then (its key is the path), so adopt the fresh selection here. Fold
+	// and expand state deliberately survive an ordinary refresh.
+	const lastContentKey = useRef(props.contentKey);
+
+	if (lastContentKey.current !== props.contentKey) {
+		lastContentKey.current = props.contentKey;
+		setDeselectedRows(new Set(props.deselectedRows));
+	}
+
+	const toggleRow = (index: number): void => {
+		const next = new Set(deselectedRows);
+
+		if (!next.delete(index)) {
+			next.add(index);
+		}
+
+		setDeselectedRows(next);
+		props.onRowSelection?.([...next]);
+	};
 
 	const plan = useMemo(() => buildPlan(props.rows, props.foldRegions, expanded, folded),
 		[props.rows, props.foldRegions, expanded, folded]);
@@ -400,8 +443,8 @@ function Diff(props: {
 			"style": { "gridRow": gap.row },
 			"onClick": () => { expand(gap.id); }
 		}, "⋯ " + gap.count + " unchanged lines")),
-		createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, props.verdict, plan.leftFoldHeaders, toggleFold) }),
-		createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, props.verdict, plan.rightFoldHeaders, toggleFold) }));
+		createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, props.verdict, plan.leftFoldHeaders, toggleFold, deselectedRows, toggleRow) }),
+		createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, props.verdict, plan.rightFoldHeaders, toggleFold, deselectedRows, toggleRow) }));
 
 	return createElement("div", { "className": "sxs-wrap" }, banner(props.verdict), grid);
 }
@@ -426,7 +469,10 @@ export async function mountDiff(host: HTMLElement, input: DiffInput): Promise<vo
 
 	// `key` = the file path: switching files remounts Diff with fresh fold/expand state; re-showing the same file
 	// (e.g. after a git.changed refresh) reuses it, so the reviewer's collapsed regions survive the refresh.
-	root.render(createElement(Diff, { "key": input.docKey, "leftCode": leftCode, "rightCode": rightCode, "rows": input.rows, "verdict": verdict, "foldRegions": foldRegions }));
+	// A cheap identity for the file's content — changes after a (partial) commit so the diff re-adopts the selection.
+	const contentKey = input.head.length + ":" + input.working.length + ":" + input.rows.length;
+
+	root.render(createElement(Diff, { "key": input.docKey, "leftCode": leftCode, "rightCode": rightCode, "rows": input.rows, "verdict": verdict, "foldRegions": foldRegions, "contentKey": contentKey, "deselectedRows": input.deselectedRows, "onRowSelection": input.onRowSelection }));
 }
 
 /** Tear down the React root (when the diff pane is emptied). */

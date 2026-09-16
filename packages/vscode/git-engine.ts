@@ -129,7 +129,8 @@ export async function commitSelection(message: string, files: CommitFile[]): Pro
 		} else if (file.content !== undefined) {
 			const oid = await writeBlob({ "fs": fs, "dir": DIR, "blob": new TextEncoder().encode(file.content) });
 
-			await updateIndex({ "fs": fs, "dir": DIR, "filepath": file.path, "oid": oid });
+			// `add: true` so a new (or index-reset) path gets an entry created; `mode` is required for a fresh entry.
+			await updateIndex({ "fs": fs, "dir": DIR, "filepath": file.path, "oid": oid, "add": true, "mode": 0o100644 });
 		} else {
 			await add({ "fs": fs, "dir": DIR, "filepath": file.path });
 		}
