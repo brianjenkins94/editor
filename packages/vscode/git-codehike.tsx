@@ -152,7 +152,8 @@ interface DiffPlan {
 	"rightLineToRow": Map<number, Rendered>;
 	"spacers": { "row": number; "side": "left" | "right" }[];
 	"gaps": { "row": number; "count": number; "id": string }[];
-	"foldHeaders": Map<number, FoldHeader>;
+	"leftFoldHeaders": Map<number, FoldHeader>;
+	"rightFoldHeaders": Map<number, FoldHeader>;
 }
 
 /**
@@ -254,18 +255,29 @@ function buildPlan(
 		}
 	}
 
-	// Chevrons on the visible header rows only.
-	const foldHeaders = new Map<number, FoldHeader>();
+	// Chevrons on the visible header rows only — on BOTH gutters (either toggles the same region), wherever that
+	// header row has a line on that side.
+	const leftFoldHeaders = new Map<number, FoldHeader>();
+	const rightFoldHeaders = new Map<number, FoldHeader>();
 
 	for (const fold of folds) {
-		const headerLine = rows[fold.startRow].rightNo;
+		if (hiddenFold.has(fold.startRow) || hiddenCollapse.has(fold.startRow)) {
+			continue;
+		}
 
-		if (headerLine !== undefined && !hiddenFold.has(fold.startRow) && !hiddenCollapse.has(fold.startRow)) {
-			foldHeaders.set(headerLine, { "id": fold.id, "folded": folded.has(fold.id), "count": fold.count });
+		const header: FoldHeader = { "id": fold.id, "folded": folded.has(fold.id), "count": fold.count };
+		const row = rows[fold.startRow];
+
+		if (row.leftNo !== undefined) {
+			leftFoldHeaders.set(row.leftNo, header);
+		}
+
+		if (row.rightNo !== undefined) {
+			rightFoldHeaders.set(row.rightNo, header);
 		}
 	}
 
-	return { "leftLineToRow": leftLineToRow, "rightLineToRow": rightLineToRow, "spacers": spacers, "gaps": gaps, "foldHeaders": foldHeaders };
+	return { "leftLineToRow": leftLineToRow, "rightLineToRow": rightLineToRow, "spacers": spacers, "gaps": gaps, "leftFoldHeaders": leftFoldHeaders, "rightFoldHeaders": rightFoldHeaders };
 }
 
 /** The BABLR verdict banner above the diff (nothing for a non-classified change). */
@@ -388,8 +400,8 @@ function Diff(props: {
 			"style": { "gridRow": gap.row },
 			"onClick": () => { expand(gap.id); }
 		}, "⋯ " + gap.count + " unchanged lines")),
-		createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, props.verdict, undefined, toggleFold) }),
-		createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, props.verdict, plan.foldHeaders, toggleFold) }));
+		createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, props.verdict, plan.leftFoldHeaders, toggleFold) }),
+		createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, props.verdict, plan.rightFoldHeaders, toggleFold) }));
 
 	return createElement("div", { "className": "sxs-wrap" }, banner(props.verdict), grid);
 }
