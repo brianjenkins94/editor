@@ -1,8 +1,8 @@
 /**
  * Cosmetic-vs-semantic classification service — the reusable seam between BABLR and any consumer.
  *
- * Owns the classify worker (BABLR is a VM interpreter, too slow for the UI thread) and a content-keyed cache; takes
- * two text versions and returns a verdict. Knows NOTHING about git or SCM — the git SCM binding (`git-scm.ts`) is
+ * Owns the classify worker (BABLR is a VM interpreter, too slow for the UI thread); takes two text versions and
+ * returns a verdict — no cache (see the note below). Knows NOTHING about git or SCM — the git SCM binding (`git-scm.ts`) is
  * merely one consumer, and a future standalone classifier extension would be another. That decoupling is the point:
  * the novel capability (tell cosmetic from semantic) lives here, independent of whatever provider surfaces it.
  *
@@ -17,9 +17,9 @@ export type ChangeKind = "cosmetic" | "semantic" | "unparsable";
 
 export interface CosmeticClassifier {
 	/**
-	 * Classify the change from `before` to `after`. Cached by content, so re-asking about an unchanged file is free.
-	 * Pass an `AbortSignal` to cancel: if the request is already running in the worker, the worker is terminated
-	 * (killing the BABLR VM mid-flight); the returned promise then rejects with an AbortError.
+	 * Classify the change from `before` to `after`. Not cached (a content-derived key can be wrong — see the note on
+	 * createCosmeticClassifier); only identical text short-circuits. Pass an `AbortSignal` to cancel: if the request
+	 * is already running, the worker bails cooperatively at its next yield and the promise rejects with an AbortError.
 	 */
 	"classify": (before: string, after: string, signal?: AbortSignal) => Promise<ChangeKind>;
 	/** Tear down the worker. */
@@ -32,27 +32,19 @@ interface QueueItem {
 	"id": number;
 	"before": string;
 	"after": string;
-	"key": string;
 	"resolve": (kind: ChangeKind) => void;
 	"reject": (error: unknown) => void;
 	"aborted": boolean;
 }
 
-/** A cheap, stable content key (djb2 over before+after) so unchanged files skip the worker round-trip. */
-function contentKey(before: string, after: string): string {
-	let hash = 5381;
-	const combined = before + " " + after;
-
-	for (let index = 0; index < combined.length; index += 1) {
-		hash = (Math.imul(hash, 33) ^ combined.charCodeAt(index)) >>> 0;
-	}
-
-	return hash.toString(36) + ":" + combined.length;
-}
-
-/** Create a classifier backed by the BABLR classify worker (served at `lsp/classify-worker.js`). */
+/**
+ * Create a classifier backed by the BABLR classify worker (served at `lsp/classify-worker.js`).
+ *
+ * NOTE: no verdict cache. A content-derived key (hash or size) carries a chance of returning a stale/wrong verdict,
+ * and the correct key is a STABLE IDENTITY for the changed code (track a line/node as it moves) — the persisted-CST /
+ * patch-identity direction — which we haven't built yet. Until then the only shortcut is the exact `before === after`.
+ */
 export function createCosmeticClassifier(): CosmeticClassifier {
-	const cache = new Map<string, ChangeKind>();
 	const queue: QueueItem[] = [];
 	let running: QueueItem | undefined;
 	let nextId = 0;
@@ -71,7 +63,6 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		if (event.data.aborted === true || event.data.kind === undefined) {
 			settled.reject(new DOMException("classification aborted", "AbortError"));
 		} else {
-			cache.set(settled.key, event.data.kind);
 			settled.resolve(event.data.kind);
 		}
 
@@ -101,14 +92,7 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 	return {
 		"classify": async (before, after, signal) => {
 			if (before === after) {
-				return "cosmetic"; // identical text — no work, no round-trip
-			}
-
-			const key = contentKey(before, after);
-			const cached = cache.get(key);
-
-			if (cached !== undefined) {
-				return cached;
+				return "cosmetic"; // identical text — the only provably-correct shortcut
 			}
 
 			if (signal?.aborted === true) {
@@ -116,7 +100,7 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 			}
 
 			return new Promise<ChangeKind>((resolve, reject) => {
-				const item: QueueItem = { "id": nextId, "before": before, "after": after, "key": key, "resolve": resolve, "reject": reject, "aborted": false };
+				const item: QueueItem = { "id": nextId, "before": before, "after": after, "resolve": resolve, "reject": reject, "aborted": false };
 
 				nextId += 1;
 				queue.push(item);

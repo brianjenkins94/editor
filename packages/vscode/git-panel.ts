@@ -303,9 +303,6 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 	const lineDeselect = new Map<string, Set<number>>();
 	// Changed-row count per file that has an open/partial selection, so a file row can show its indeterminate state.
 	const changedCount = new Map<string, number>();
-	// Shell-side memo of BABLR verdicts, keyed by path + content size, so re-opening unchanged content skips the RPC
-	// (the classifier also caches by content in the worker realm; this just avoids the round-trip).
-	const verdictCache = new Map<string, ChangeKind | "none">();
 	// The changed files from the latest status, for the master checkbox + commit to consult.
 	let currentFiles: GitFileChange[] = [];
 
@@ -438,22 +435,9 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 					deselected.delete(path); // touching lines means the file is (partially) IN, not fully excluded
 					syncSelectionUi();
 				},
-				// Lazy BABLR verdict (drives the banner + cosmetic fade) — requested after the diff is on screen, and
-				// memoized by content so re-opening an unchanged file is instant.
-				"classify": async () => {
-					const key = path + ":" + head.length + ":" + working.length;
-					const cached = verdictCache.get(key);
-
-					if (cached !== undefined) {
-						return cached;
-					}
-
-					const result = (await rpc.request("git.classify", { "path": path }) as { "verdict": ChangeKind | "none" }).verdict;
-
-					verdictCache.set(key, result);
-
-					return result;
-				},
+				// Lazy BABLR verdict (drives the banner + cosmetic fade) — requested after the diff is on screen. No
+				// shell-side cache: a content-approximate key can be wrong, and the real fix is stable line identity.
+				"classify": async () => (await rpc.request("git.classify", { "path": path }) as { "verdict": ChangeKind | "none" }).verdict,
 				// Discard a hunk: recompute the working content with those rows reverted to HEAD, then write it back.
 				"onDiscardRows": async (hunkRows) => {
 					const fresh = await rpc.request("git.file", { "path": path }) as { "head": string; "working": string };
