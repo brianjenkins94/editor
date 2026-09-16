@@ -146,6 +146,27 @@ export function renderGitPanel(container: HTMLElement, hub: Hub): void {
 	const diffEl = container.querySelector<HTMLElement>(".diff")!;
 	let selected: string | undefined;
 
+	// Plain unified diff (the fallback when the codehike island can't load — e.g. offline: shiki fetches grammars).
+	const renderPlain = (head: string, working: string): void => {
+		diffEl.innerHTML = "";
+
+		for (const row of collapse(lineDiff(head, working))) {
+			const line = document.createElement("div");
+
+			line.className = "row " + row.t;
+			line.textContent = (row.t === "add" ? "+" : row.t === "del" ? "-" : row.t === "gap" ? "" : " ") + row.text;
+			diffEl.appendChild(line);
+		}
+	};
+
+	const langFor = (path: string): string =>
+		/\.(?:tsx|jsx)$/u.test(path) ? "tsx"
+			: /\.(?:ts|mts|cts)$/u.test(path) ? "typescript"
+				: /\.(?:js|mjs|cjs)$/u.test(path) ? "javascript"
+					: /\.json$/u.test(path) ? "json" : "tsx";
+
+	let codehikeActive = false;
+
 	const showDiff = async (path: string): Promise<void> => {
 		selected = path;
 
@@ -156,17 +177,35 @@ export function renderGitPanel(container: HTMLElement, hub: Hub): void {
 		const { head, working } = await rpc.request("git.file", { "path": path }) as { "head": string; "working": string };
 
 		diffHead.textContent = path;
-		diffEl.innerHTML = "";
+		diffWrap.hidden = false;
 
-		for (const row of collapse(lineDiff(head, working))) {
-			const line = document.createElement("div");
+		// added working-line numbers (for the codehike line marks), derived from the LCS diff
+		const addedLines: number[] = [];
+		let workingLine = 0;
 
-			line.className = "row " + row.t;
-			line.textContent = (row.t === "add" ? "+" : row.t === "del" ? "-" : row.t === "gap" ? "" : " ") + row.text;
-			diffEl.appendChild(line);
+		for (const row of lineDiff(head, working)) {
+			if (row.t === "add") {
+				workingLine += 1;
+				addedLines.push(workingLine);
+			} else if (row.t === "ctx") {
+				workingLine += 1;
+			}
 		}
 
-		diffWrap.hidden = false;
+		// Lazy-load the codehike island (react + codehike + shiki) on first diff; fall back to the plain diff if the
+		// module can't load. Once codehike owns diffEl (a React root), never touch it with innerHTML again.
+		try {
+			const { mountDiff } = await import("./git-codehike");
+
+			await mountDiff(diffEl, { "working": working, "addedLines": addedLines, "lang": langFor(path) });
+			codehikeActive = true;
+		} catch (error) {
+			if (!codehikeActive) {
+				renderPlain(head, working);
+			} else {
+				diffHead.textContent = path + " — diff unavailable";
+			}
+		}
 	};
 
 	const refresh = async (): Promise<void> => {
