@@ -9,3 +9,6 @@ export { cstSpans } from "../../bablr-language-ts/lib/spans";
 // classifyChangeAsync: same verdict, but PACED (yields the BABLR VM) and cooperatively cancellable via an
 // AbortSignal — for callers that classify large files off a hot path and want to bail if the reviewer moves on.
 export { classifyChange, classifyChangeAsync } from "../../bablr-language-ts/lib/cosmetic";
+// stable CST-node identity (the xit/Pijul model, diff-derived): reidentify carries node ids across edits so data can
+// be pinned to a line/node as it moves — the basis for .bablr sidecars. See ../../bablr-language-ts/lib/identity.
+export { nodeAtoms, reidentify, reidentifyFromSource } from "../../bablr-language-ts/lib/identity";
