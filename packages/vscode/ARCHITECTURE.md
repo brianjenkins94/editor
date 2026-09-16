@@ -57,7 +57,61 @@ CDN `node_modules` overlay. Not a place you put feature code.
 - **pane-bus** (`pane-bus.ts`) — the app ↔ workbench boot handshake specifically (`ready` → `init` → `online`,
   plus `save` and `openProject`). Separate from the hub because it predates it and tracks the pane's live window
   (so it survives a pop-out).
-- **plain postMessage** — fine for a single-purpose worker with one request/response shape (e.g. `git-classify-worker`).
+- **plain postMessage** — fine for a single-purpose worker with one request/response shape (e.g. `classify-worker`).
+
+## Diagram — realms & channels
+
+```mermaid
+flowchart TB
+  SW["Service Worker — coi-serviceworker.js<br/>stamps COOP/COEP (cross-origin isolation) · node_modules CDN resolver"]
+
+  subgraph SHELL["Shell · top window — main.tsx renderShell() / shell.ts"]
+    S["chrome: LHS project picker · RHS history · top bar<br/>shell hub · (later: GitHub token)"]
+    subgraph APP["App iframe · / — main.tsx app branch / vscode.tsx / coi.ts / samples.ts"]
+      A["rootHub · COI bootstrap · pane-bus host<br/>serves project.list · routes project.open → openProject"]
+      subgraph WB["Workbench iframe · /__vscode__/host.html — workbench-entry.tsx"]
+        W["monaco boot · zen-fs mounted · vscodeApi captured<br/>ATA · terminal factory · debug preview"]
+        GIT["git SCM — browser parity for desktop's built-in git<br/>git-scm · git-engine + isomorphic-git"]
+        COS["cosmetic-classifier (worker client + cache)"]
+      end
+    end
+  end
+
+  EXT["Extension host — LocalProcess + LocalWebWorker<br/>hello · worker-pod · eslint + capabilities (run inside tsserver, reuse ts)"]
+
+  NW["node-worker<br/>almostnode / preview"]
+  DW["debug-worker<br/>tsval stepping / time-travel"]
+  SH["server-host<br/>LSP"]
+  CW["classify-worker<br/>BABLR classifyChange"]
+
+  PKG["packages/* engines — pure, bundled at build time<br/>@brianjenkins94/bablr · tsval · policy-core · capability-breakpoints · util/silo"]
+
+  S -.->|"loads iframe (src = self)"| A
+  A -.->|"creates iframe (src = host.html)"| W
+
+  S <-->|"hub · windowTransport — project.list (RPC), project.open"| A
+  A <-->|"pane-bus — ready→init→online · save · openProject"| W
+  A <-->|"hub · MessagePort — rootHub ↔ workbench hub"| W
+  W <-->|"hub · ext event/fn bridge (wireWorkbenchHub)"| EXT
+
+  W ==>|"node-runner spawns · hub"| NW
+  EXT ==>|"spawns · hub (portTransport)"| DW
+  EXT ==>|"spawns · hub"| SH
+  COS ==>|"spawns · postMessage"| CW
+  GIT -->|"uses"| COS
+
+  W -.->|"SharedArrayBuffer — same zen-fs"| NW
+  W -.->|"SharedArrayBuffer"| SH
+
+  SW -.->|"COI headers · serves all assets"| S
+  PKG -.->|"bundled at build"| W
+  PKG -.->|"bundled at build"| EXT
+  PKG -.->|"bundled at build"| CW
+```
+
+Edge styles: **solid arrows** = live message channels; **thick arrows** = a realm spawning a worker; **dotted arrows**
+= frame creation, shared-memory, service-worker serving, and build-time bundling. Nesting = iframe containment
+(shell ▸ app ▸ workbench).
 
 ## Placement procedure
 
