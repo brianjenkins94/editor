@@ -8,7 +8,7 @@
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
-import type { ChangeKind, CosmeticClassifier } from "./cosmetic-classifier";
+import type { CosmeticClassifier } from "./cosmetic-classifier";
 import { serve } from "@brianjenkins94/hub";
 import * as engine from "./git-engine";
 
@@ -79,20 +79,36 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 			working = await readWorking(path);
 		} catch { /* deleted in the working tree */ }
 
-		const head = await engine.headContent(path);
+		// Fast path — no BABLR here (it's slow); the shell asks for the verdict separately via git.classify.
+		return { "head": await engine.headContent(path), "working": working };
+	});
 
-		// BABLR verdict for the whole change, so the diff can flag a cosmetic (whitespace/comments-only) edit and
-		// de-emphasise it. Only meaningful for a MODIFIED code file — added/deleted/non-code stay "none". One call
-		// per open, cached by content in the classifier.
-		let verdict: ChangeKind | "none" = "none";
+	// BABLR verdict for the whole change, requested LAZILY after the diff is shown so BABLR never blocks the open.
+	// Only meaningful for a MODIFIED code file — added/deleted/non-code return "none". Cached by content in the classifier.
+	serve(hub, "git.classify", async (args) => {
+		const path = (args as { "path"?: string } | null)?.path;
 
-		if (head !== "" && working !== "" && CLASSIFIABLE.test(path)) {
-			try {
-				verdict = await classifier.classify(head, working);
-			} catch { /* unparsable / worker error → no banner */ }
+		if (typeof path !== "string" || !CLASSIFIABLE.test(path)) {
+			return { "verdict": "none" };
 		}
 
-		return { "head": head, "working": working, "verdict": verdict };
+		let working = "";
+
+		try {
+			working = await readWorking(path);
+		} catch { /* deleted */ }
+
+		const head = await engine.headContent(path);
+
+		if (head === "" || working === "") {
+			return { "verdict": "none" };
+		}
+
+		try {
+			return { "verdict": await classifier.classify(head, working) };
+		} catch {
+			return { "verdict": "none" };
+		}
 	});
 
 	serve(hub, "git.commit", async (args) => {

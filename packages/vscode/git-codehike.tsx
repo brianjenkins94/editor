@@ -26,7 +26,7 @@
 import type { AnnotationHandler, HighlightedCode, Tokens } from "codehike/code";
 import type { ChangeKind } from "./cosmetic-classifier";
 import { highlight, InnerLine, Pre } from "codehike/code";
-import { createElement, type ReactNode, useMemo, useRef, useState } from "react";
+import { createElement, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 /** One React root per host element, reused across diff switches (root.render updates in place). */
@@ -52,12 +52,14 @@ export interface DiffInput {
 	"lang": string;
 	/** The aligned diff rows, in display order. */
 	"rows": DiffRowInfo[];
-	/** BABLR's verdict for the whole change ("none" when not a modified code file). */
-	"verdict"?: ChangeKind | "none";
 	/** Row indices (into `rows`) the reviewer has UN-checked for commit — the initial per-line selection. */
 	"deselectedRows"?: number[];
 	/** Called when the per-line selection changes, with the new deselected row indices. */
 	"onRowSelection"?: (deselected: number[]) => void;
+	/** Discard the given change rows (revert them to HEAD in the working tree). */
+	"onDiscardRows"?: (rows: number[]) => void;
+	/** Classify the whole change with BABLR — called lazily after the diff is shown (BABLR is slow). */
+	"classify"?: () => Promise<ChangeKind | "none">;
 }
 
 const ADD_BG = "#2ea04326";
@@ -374,7 +376,7 @@ function sideHandlers(
 			const cells = side === "left" ? [codeCell, numCell] : [numCell, codeCell];
 
 			return createElement("div", {
-				"className": "sxs-line " + side,
+				"className": "sxs-line " + side + (at.type !== "ctx" ? " chg" : ""),
 				"style": {
 					"display": "grid",
 					"gridTemplateColumns": "subgrid",
@@ -394,15 +396,20 @@ function Diff(props: {
 	"leftCode": HighlightedCode;
 	"rightCode": HighlightedCode;
 	"rows": DiffRowInfo[];
-	"verdict": ChangeKind | "none";
 	"foldRegions": FoldRegion[];
 	"contentKey": string;
 	"deselectedRows"?: number[];
 	"onRowSelection"?: (deselected: number[]) => void;
+	"onDiscardRows"?: (rows: number[]) => void;
+	"classify"?: () => Promise<ChangeKind | "none">;
 }): ReactNode {
 	const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
 	const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
 	const [deselectedRows, setDeselectedRows] = useState<ReadonlySet<number>>(() => new Set(props.deselectedRows));
+	// The BABLR verdict arrives LAZILY (it's slow); until then the diff shows at full strength, then cosmetic changes
+	// fade down. "none" = not yet known / not applicable.
+	const [verdict, setVerdict] = useState<ChangeKind | "none">("none");
+	const [menu, setMenu] = useState<{ "x": number; "y": number; "rows": number[] } | null>(null);
 
 	// Reset the per-line selection when the file's CONTENT changes (e.g. after a partial commit) while the same file
 	// stays open — the component isn't remounted then (its key is the path), so adopt the fresh selection here. Fold
@@ -412,7 +419,23 @@ function Diff(props: {
 	if (lastContentKey.current !== props.contentKey) {
 		lastContentKey.current = props.contentKey;
 		setDeselectedRows(new Set(props.deselectedRows));
+		setVerdict("none");
 	}
+
+	// Kick off classification after paint; drop the result if the content changed underneath (a stale verdict).
+	const classify = props.classify;
+
+	useEffect(() => {
+		if (classify === undefined) {
+			return undefined;
+		}
+
+		let live = true;
+
+		void classify().then((result) => { if (live) { setVerdict(result); } });
+
+		return () => { live = false; };
+	}, [classify, props.contentKey]);
 
 	const toggleRow = (index: number): void => {
 		const next = new Set(deselectedRows);
@@ -484,7 +507,8 @@ function Diff(props: {
 		props.onRowSelection?.([...next]);
 	};
 
-	const grid = createElement("div", { "className": "sxs" },
+	// A cosmetic change (whitespace/comments only) fades DOWN once BABLR reports back — focus stays on real edits.
+	const grid = createElement("div", { "className": "sxs" + (verdict === "cosmetic" ? " dim" : "") },
 		...hunks.map((hunk) => {
 			const chosen = hunk.rows.filter((index) => !deselectedRows.has(index)).length;
 			const state = chosen === hunk.rows.length ? "all" : chosen === 0 ? "none" : "partial";
@@ -492,9 +516,13 @@ function Diff(props: {
 			return createElement("button", {
 				"key": "h" + hunk.gridStart,
 				"className": "sxs-hunk " + state,
-				"title": state === "all" ? "Exclude this whole change" : "Include this whole change",
+				"title": (state === "all" ? "Exclude this whole change" : "Include this whole change") + " · right-click to discard",
 				"style": { "gridRow": hunk.gridStart + " / " + (hunk.gridEnd + 1) },
-				"onClick": () => { toggleHunk(hunk.rows); }
+				"onClick": () => { toggleHunk(hunk.rows); },
+				"onContextMenu": (event: { "preventDefault": () => void; "clientX": number; "clientY": number }) => {
+					event.preventDefault();
+					setMenu({ "x": event.clientX, "y": event.clientY, "rows": hunk.rows });
+				}
 			}, state === "all" ? "✓" : state === "partial" ? "–" : "");
 		}),
 		...plan.spacers.map((spacer) => createElement("div", {
@@ -508,16 +536,28 @@ function Diff(props: {
 			"style": { "gridRow": gap.row },
 			"onClick": () => { expand(gap.id); }
 		}, "⋯ " + gap.count + " unchanged lines")),
-		createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, props.verdict, plan.leftFoldHeaders, toggleFold, deselectedRows, toggleRow) }),
-		createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, props.verdict, plan.rightFoldHeaders, toggleFold, deselectedRows, toggleRow) }));
+		createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, verdict, plan.leftFoldHeaders, toggleFold, deselectedRows, toggleRow) }),
+		createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, verdict, plan.rightFoldHeaders, toggleFold, deselectedRows, toggleRow) }));
 
-	return createElement("div", { "className": "sxs-wrap" }, banner(props.verdict), grid);
+	// Right-click discard menu (a hunk at a time).
+	const menuEl = menu === null ? null : createElement("div", {
+		"className": "sxs-menu-backdrop",
+		"onClick": () => { setMenu(null); },
+		"onContextMenu": (event: { "preventDefault": () => void }) => { event.preventDefault(); setMenu(null); }
+	}, createElement("div", {
+		"className": "sxs-menu",
+		"style": { "left": menu.x, "top": menu.y },
+		"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); }
+	}, createElement("button", {
+		"className": "sxs-menu-item",
+		"onClick": () => { props.onDiscardRows?.(menu.rows); setMenu(null); }
+	}, "Discard this change (" + menu.rows.length + " line" + (menu.rows.length === 1 ? "" : "s") + ")")));
+
+	return createElement("div", { "className": "sxs-wrap" }, banner(verdict), grid, menuEl);
 }
 
 /** Render (or re-render) the side-by-side diff for one file into `host`. */
 export async function mountDiff(host: HTMLElement, input: DiffInput): Promise<void> {
-	const verdict = input.verdict ?? "none";
-
 	const [leftCode, rightCode] = await Promise.all([
 		highlight({ "value": input.head, "lang": input.lang, "meta": "" }, "github-dark"),
 		highlight({ "value": input.working, "lang": input.lang, "meta": "" }, "github-dark")
@@ -537,7 +577,7 @@ export async function mountDiff(host: HTMLElement, input: DiffInput): Promise<vo
 	// A cheap identity for the file's content — changes after a (partial) commit so the diff re-adopts the selection.
 	const contentKey = input.head.length + ":" + input.working.length + ":" + input.rows.length;
 
-	root.render(createElement(Diff, { "key": input.docKey, "leftCode": leftCode, "rightCode": rightCode, "rows": input.rows, "verdict": verdict, "foldRegions": foldRegions, "contentKey": contentKey, "deselectedRows": input.deselectedRows, "onRowSelection": input.onRowSelection }));
+	root.render(createElement(Diff, { "key": input.docKey, "leftCode": leftCode, "rightCode": rightCode, "rows": input.rows, "foldRegions": foldRegions, "contentKey": contentKey, "deselectedRows": input.deselectedRows, "onRowSelection": input.onRowSelection, "onDiscardRows": input.onDiscardRows, "classify": input.classify }));
 }
 
 /** Tear down the React root (when the diff pane is emptied). */

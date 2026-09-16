@@ -6,7 +6,8 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { createRpcClient } from "@brianjenkins94/hub";
-import type { DiffInput, DiffRowInfo } from "./git-codehike";
+import type { ChangeKind } from "./cosmetic-classifier";
+import type { DiffRowInfo } from "./git-codehike";
 
 interface GitFileChange { "path": string; "status": "A" | "M" | "D"; "staged": boolean; "unstaged": boolean; "cosmetic": boolean }
 interface DiffRow { "t": "ctx" | "add" | "del"; "text": string }
@@ -238,6 +239,17 @@ const STYLE = `
 #diff-overlay-body .sxs-line.right .sxs-num, #diff-overlay-body .sxs-empty.right { border-left: 1px solid var(--line); }
 #diff-overlay-body .sxs-code { padding: 0 10px; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 #diff-overlay-body .sxs-empty { background: #ffffff05; }
+/* Focus dimming: once BABLR reports the change is cosmetic, the changed rows fade DOWN (transition = lazy fade-in). */
+#diff-overlay-body .sxs-line, #diff-overlay-body .sxs-hunk { transition: opacity .45s ease; }
+#diff-overlay-body .sxs.dim .sxs-line.chg, #diff-overlay-body .sxs.dim .sxs-hunk { opacity: .4; }
+#diff-overlay-body .sxs.dim .sxs-line.chg:hover { opacity: 1; }
+/* Right-click discard menu. */
+#diff-overlay-body .sxs-menu-backdrop { position: fixed; inset: 0; z-index: 50; }
+#diff-overlay-body .sxs-menu { position: fixed; min-width: 180px; background: var(--chrome); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px; box-shadow: 0 6px 20px #0009; font: 13px -apple-system, "Segoe UI", system-ui, sans-serif; }
+#diff-overlay-body .sxs-menu-item { display: block; width: 100%; text-align: left; border: 0; background: none;
+  color: var(--fg); padding: 6px 10px; border-radius: 4px; cursor: pointer; font: inherit; white-space: nowrap; }
+#diff-overlay-body .sxs-menu-item:hover { background: #f14c4c; color: #fff; }
 /* Block-fold chevron (right gutter) + the "⋯" left on a folded header line. */
 #diff-overlay-body .sxs-fold { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0; font-size: 9px; line-height: 1.6; }
 #diff-overlay-body .sxs-fold:hover { color: var(--fg); }
@@ -291,6 +303,9 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 	const lineDeselect = new Map<string, Set<number>>();
 	// Changed-row count per file that has an open/partial selection, so a file row can show its indeterminate state.
 	const changedCount = new Map<string, number>();
+	// Shell-side memo of BABLR verdicts, keyed by path + content size, so re-opening unchanged content skips the RPC
+	// (the classifier also caches by content in the worker realm; this just avoids the round-trip).
+	const verdictCache = new Map<string, ChangeKind | "none">();
 	// The changed files from the latest status, for the master checkbox + commit to consult.
 	let currentFiles: GitFileChange[] = [];
 
@@ -392,8 +407,7 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 			el.setAttribute("aria-current", String(el.dataset["path"] === path));
 		}
 
-		const { head, working, verdict } = await rpc.request("git.file", { "path": path }) as
-			{ "head": string; "working": string; "verdict"?: DiffInput["verdict"] };
+		const { head, working } = await rpc.request("git.file", { "path": path }) as { "head": string; "working": string };
 
 		overlay.title.textContent = path;
 		overlay.el.classList.add("open");
@@ -413,7 +427,6 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 				"working": working,
 				"lang": langFor(path),
 				"rows": rows,
-				"verdict": verdict,
 				"deselectedRows": [...(lineDeselect.get(path) ?? [])],
 				"onRowSelection": (dropped) => {
 					if (dropped.length === 0) {
@@ -424,6 +437,30 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 
 					deselected.delete(path); // touching lines means the file is (partially) IN, not fully excluded
 					syncSelectionUi();
+				},
+				// Lazy BABLR verdict (drives the banner + cosmetic fade) — requested after the diff is on screen, and
+				// memoized by content so re-opening an unchanged file is instant.
+				"classify": async () => {
+					const key = path + ":" + head.length + ":" + working.length;
+					const cached = verdictCache.get(key);
+
+					if (cached !== undefined) {
+						return cached;
+					}
+
+					const result = (await rpc.request("git.classify", { "path": path }) as { "verdict": ChangeKind | "none" }).verdict;
+
+					verdictCache.set(key, result);
+
+					return result;
+				},
+				// Discard a hunk: recompute the working content with those rows reverted to HEAD, then write it back.
+				"onDiscardRows": async (hunkRows) => {
+					const fresh = await rpc.request("git.file", { "path": path }) as { "head": string; "working": string };
+					const freshRows = buildRows(fresh.head, fresh.working);
+					const reverted = committedContent(fresh.head, fresh.working, freshRows, new Set(hunkRows));
+
+					await rpc.request("git.discard", { "path": path, "content": reverted });
 				}
 			});
 			codehikeActive = true;
