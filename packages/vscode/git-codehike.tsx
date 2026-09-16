@@ -158,6 +158,8 @@ interface DiffPlan {
 	"gaps": { "row": number; "count": number; "id": string }[];
 	"leftFoldHeaders": Map<number, FoldHeader>;
 	"rightFoldHeaders": Map<number, FoldHeader>;
+	/** Visible changed row index → its grid track, for grouping hunks and placing the center bar. */
+	"indexToGrid": Map<number, number>;
 }
 
 /**
@@ -222,6 +224,7 @@ function buildPlan(
 	const rightLineToRow = new Map<number, Rendered>();
 	const spacers: DiffPlan["spacers"] = [];
 	const gaps: DiffPlan["gaps"] = [];
+	const indexToGrid = new Map<number, number>();
 	let gridRow = 0;
 
 	for (let r = 0; r < rows.length; r += 1) {
@@ -241,6 +244,7 @@ function buildPlan(
 		}
 
 		gridRow += 1;
+		indexToGrid.set(r, gridRow);
 
 		const row = rows[r];
 
@@ -281,7 +285,7 @@ function buildPlan(
 		}
 	}
 
-	return { "leftLineToRow": leftLineToRow, "rightLineToRow": rightLineToRow, "spacers": spacers, "gaps": gaps, "leftFoldHeaders": leftFoldHeaders, "rightFoldHeaders": rightFoldHeaders };
+	return { "leftLineToRow": leftLineToRow, "rightLineToRow": rightLineToRow, "spacers": spacers, "gaps": gaps, "leftFoldHeaders": leftFoldHeaders, "rightFoldHeaders": rightFoldHeaders, "indexToGrid": indexToGrid };
 }
 
 /** The BABLR verdict banner above the diff (nothing for a non-classified change). */
@@ -309,7 +313,7 @@ function sideHandlers(
 	deselectedRows: ReadonlySet<number>,
 	onToggleRow: (index: number) => void
 ): AnnotationHandler[] {
-	const cols = side === "left" ? "1 / span 2" : "3 / span 2";
+	const cols = side === "left" ? "1 / span 2" : "4 / span 2";
 
 	const contents: AnnotationHandler = {
 		"name": "sxs-contents",
@@ -428,11 +432,63 @@ function Diff(props: {
 		setExpanded((prev) => new Set(prev).add(id));
 	};
 
+	// Group consecutive visible changed rows into hunks; each gets a center bar that toggles the whole change.
+	const hunks: { "rows": number[]; "gridStart": number; "gridEnd": number }[] = [];
+	let run: number[] = [];
+
+	const flushHunk = (): void => {
+		if (run.length > 0) {
+			const grids = run.map((index) => plan.indexToGrid.get(index)!);
+
+			hunks.push({ "rows": run, "gridStart": Math.min(...grids), "gridEnd": Math.max(...grids) });
+		}
+
+		run = [];
+	};
+
+	props.rows.forEach((row, index) => {
+		if (row.type !== "ctx" && plan.indexToGrid.has(index)) {
+			run.push(index);
+		} else {
+			flushHunk();
+		}
+	});
+
+	flushHunk();
+
+	const toggleHunk = (rowsInHunk: number[]): void => {
+		const allSelected = rowsInHunk.every((index) => !deselectedRows.has(index));
+		const next = new Set(deselectedRows);
+
+		for (const index of rowsInHunk) {
+			if (allSelected) {
+				next.add(index);
+			} else {
+				next.delete(index);
+			}
+		}
+
+		setDeselectedRows(next);
+		props.onRowSelection?.([...next]);
+	};
+
 	const grid = createElement("div", { "className": "sxs" },
+		...hunks.map((hunk) => {
+			const chosen = hunk.rows.filter((index) => !deselectedRows.has(index)).length;
+			const state = chosen === hunk.rows.length ? "all" : chosen === 0 ? "none" : "partial";
+
+			return createElement("button", {
+				"key": "h" + hunk.gridStart,
+				"className": "sxs-hunk " + state,
+				"title": state === "all" ? "Exclude this whole change" : "Include this whole change",
+				"style": { "gridRow": hunk.gridStart + " / " + (hunk.gridEnd + 1) },
+				"onClick": () => { toggleHunk(hunk.rows); }
+			}, state === "all" ? "✓" : state === "partial" ? "–" : "");
+		}),
 		...plan.spacers.map((spacer) => createElement("div", {
 			"key": "s" + spacer.side + spacer.row,
 			"className": "sxs-empty " + spacer.side,
-			"style": { "gridColumn": spacer.side === "left" ? "1 / span 2" : "3 / span 2", "gridRow": spacer.row }
+			"style": { "gridColumn": spacer.side === "left" ? "1 / span 2" : "4 / span 2", "gridRow": spacer.row }
 		})),
 		...plan.gaps.map((gap) => createElement("button", {
 			"key": gap.id,
