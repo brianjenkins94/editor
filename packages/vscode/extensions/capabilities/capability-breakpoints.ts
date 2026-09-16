@@ -139,3 +139,34 @@ export function findCapabilitySites(sourceFile: ts.SourceFile): CapabilitySite[]
 
 	return sites;
 }
+
+/**
+ * The 1-based source lines a debugger should pre-arm as capability breakpoints under `policy` — every capability
+ * call the policy would NOT let pass. The decision is STATIC (the resource is the literal argument when there is
+ * one, else empty → an undecided dangerous call still breaks), because a debugger arms breakpoints at line
+ * granularity BEFORE the run; the concrete runtime resource is then visible in the Variables pane at the stop.
+ * A debug worker adds these alongside the user's breakpoints, so a gated call hard-stops at its line with the
+ * debugger's normal step / step-back.
+ */
+export function capabilityBreakLines(sourceFile: ts.SourceFile, policy: Policy): number[] {
+	const lines = new Set<number>();
+
+	(function visit(node: ts.Node): void {
+		if (ts.isCallExpression(node)) {
+			const hit = classifyCall(node, []); // no runtime args at arm time — resource comes from a literal below
+
+			if (hit !== undefined) {
+				const argNode = node.arguments[hit.argIndex];
+				const resource = argNode !== undefined && ts.isStringLiteralLike(argNode) ? argNode.text : "";
+
+				if (shouldBreak(policy, { ...hit, "resource": resource })) {
+					lines.add(sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1);
+				}
+			}
+		}
+
+		node.forEachChild(visit);
+	})(sourceFile);
+
+	return [...lines];
+}

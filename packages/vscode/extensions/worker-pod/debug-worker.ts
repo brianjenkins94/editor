@@ -18,11 +18,14 @@
 import type { LoadedVM } from "@brianjenkins94/tsval";
 import type { GuestRoot } from "./debug-react";
 
+import type { Policy } from "../capabilities/policy-core";
+
 import { createHub, portTransport } from "@brianjenkins94/hub";
 import { createVM } from "@brianjenkins94/tsval";
 import React from "react";
 
 import ts from "typescript";
+import { capabilityBreakLines } from "../capabilities/capability-breakpoints";
 import { relayLoggerToHub } from "../../telemetry";
 import { createGuestRoot } from "./debug-react";
 
@@ -44,7 +47,7 @@ interface TraceContext { "traceId": string; "parentSpanId": string }
 
 /** Control messages from the adapter. */
 type Incoming =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control": SharedArrayBuffer; "react"?: boolean; "traceContext"?: TraceContext }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control": SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "traceContext"?: TraceContext }
 	| { "type": "setBreakpoints"; "lines": number[] }
 	| { "type": "dispatch"; "id": number; "event": string; "traceContext"?: TraceContext }
 	| { "type": "timeTravel"; "index": number }
@@ -65,6 +68,9 @@ interface Snapshot {
 function post(message: Record<string, unknown>): void { (globalThis as unknown as Worker).postMessage(message); }
 
 let sourceFile: ts.SourceFile | undefined;
+/** 1-based lines pre-armed as capability breakpoints (policy said stop) — so a stop there reports reason
+ *  "capability" rather than "breakpoint". Computed at launch from the policy the adapter sent. */
+let capabilityLines = new Set<number>();
 /** Forks, one per stop reached; `index` is the currently-displayed stop. */
 let history: Vm[] = [];
 let index = -1;
@@ -241,7 +247,12 @@ function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): voi
 		history = history.slice(0, index + 1);
 		history.push(base);
 		index = history.length - 1;
-		emitStopped(base, action === "continue" ? "breakpoint" : "step");
+		// A "continue" that landed on a capability line is a capability stop (the policy gated it); steps stay "step".
+		const location = base.location();
+		const stopLine = location !== null ? location.line + 1 : undefined;
+		const reason = action === "continue" ? (stopLine !== undefined && capabilityLines.has(stopLine) ? "capability" : "breakpoint") : "step";
+
+		emitStopped(base, reason);
 	} finally {
 		span.end();
 	}
@@ -352,6 +363,14 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 
 			sourceFile = loaded.sourceFile;
 			loaded.vm.addBreakpointsByLine(...message.lines);
+			// Capability breakpoints: pre-arm a breakpoint at every capability call the policy won't let pass, so a
+			// gated call hard-stops at its line with the debugger's normal step / step-back (the runtime resource is
+			// visible in Variables at the stop). No policy → every undecided dangerous call breaks (firewall default).
+			capabilityLines = new Set(message.policy !== undefined ? capabilityBreakLines(loaded.sourceFile, message.policy) : []);
+			if (capabilityLines.size > 0) {
+				loaded.vm.addBreakpointsByLine(...capabilityLines);
+			}
+
 			history = [];
 			index = -1;
 			done = false;

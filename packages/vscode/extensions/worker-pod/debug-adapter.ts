@@ -13,6 +13,7 @@ import { portTransport } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
+import { EMPTY_POLICY, parsePolicy, type Policy } from "../capabilities/policy-core";
 import { podHub } from "./pod";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
@@ -62,6 +63,10 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	// The program runs only once BOTH the source is loaded (launch) and configuration is done — so breakpoints
 	// set between the `initialized` event and `configurationDone` are registered before the first step.
 	private source = "";
+	// Capability policy snapshot, read from .capabilities.json at launch and handed to the worker so it pre-arms
+	// capability breakpoints (a gated call hard-stops at its line). Empty when there's no policy file — then every
+	// undecided dangerous call breaks (firewall default).
+	private policy: Policy = EMPTY_POLICY;
 	private sourceReady = false;
 	private configDone = false;
 	private started = false;
@@ -228,11 +233,29 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 			// React mode if the program mounts via ReactDOM — then run it through the reconciler (M3c) rather
 			// than as a plain script.
 			this.reactMode = /\bReactDOM\b/u.test(this.source) || /\bReact\s*\.\s*createElement\b/u.test(this.source);
+			this.policy = await this.loadPolicy();
 			this.sourceReady = true;
 			this.maybeStart();
 		} catch (error) {
 			this.event("output", { "category": "stderr", "output": `Failed to read ${this.program}: ${String(error)}\n` });
 			this.event("terminated");
+		}
+	}
+
+	/** Read the workspace `.capabilities.json` (empty policy if absent/malformed) — the capability-breakpoint set. */
+	private async loadPolicy(): Promise<Policy> {
+		const folder = vscode.workspace.workspaceFolders?.[0];
+
+		if (folder === undefined) {
+			return EMPTY_POLICY;
+		}
+
+		try {
+			const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(folder.uri, ".capabilities.json"));
+
+			return parsePolicy(new TextDecoder().decode(bytes));
+		} catch (error) {
+			return EMPTY_POLICY;
 		}
 	}
 
@@ -257,7 +280,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		const trace = this.startAction("launch");
 
-		this.worker.postMessage({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.control?.buffer, "react": this.reactMode, "traceContext": trace });
+		this.worker.postMessage({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.control?.buffer, "react": this.reactMode, "policy": this.policy, "traceContext": trace });
 	}
 
 	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
