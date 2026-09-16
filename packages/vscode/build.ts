@@ -203,7 +203,9 @@ export async function preBuild(): Promise<void> {
 		"base": "./",
 		// `dedupe` collapses the two physical typescript installs (almostnode's own dep + tsval's) to ONE, so the
 		// manualChunks below emits a single ~7MB ts chunk both workers share, not two copies in one 14MB chunk.
-		"resolve": { "alias": { "@brianjenkins94/tsval": resolvePath("../tsval/src/index.ts") }, "dedupe": ["typescript"] },
+		// `@brianjenkins94/bablr` → its BUILT, browser-safe dist (the classify worker's CST engine): the alias uses
+		// the fresh dist directly, sidestepping the pnpm file:-dep store staleness that bites workspace packages.
+		"resolve": { "alias": { "@brianjenkins94/tsval": resolvePath("../tsval/src/index.ts"), "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript"] },
 		"plugins": [bundledNodeServer("worker-pod"), cspellDict()],
 		"build": {
 			"outDir": "dist",
@@ -218,7 +220,9 @@ export async function preBuild(): Promise<void> {
 				"input": {
 					"lsp/server-host": resolvePath("./extensions/worker-pod/server-host.ts"),
 					"lsp/debug-worker": resolvePath("./extensions/worker-pod/debug-worker.ts"),
-					"lsp/node-worker": resolvePath("./extensions/worker-pod/node-worker.ts")
+					"lsp/node-worker": resolvePath("./extensions/worker-pod/node-worker.ts"),
+					// A git/SCM worker (not part of the LSP pod), but served from lsp/ like the other worker chunks.
+					"lsp/git-classify-worker": resolvePath("./git-classify-worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",
