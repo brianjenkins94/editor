@@ -339,14 +339,8 @@ function sideHandlers(
 
 			const rowSelected = at.type !== "ctx" && !deselectedRows.has(at.index);
 			const numCell = createElement("span", { "className": "sxs-num" + (rowSelected ? " sel" : ""), "key": "n" },
-				at.type !== "ctx"
-					? createElement("button", {
-						"className": "sxs-pick" + (deselectedRows.has(at.index) ? "" : " on"),
-						"key": "p",
-						"title": deselectedRows.has(at.index) ? "Include this line in the commit" : "Exclude this line from the commit",
-						"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleRow(at.index); }
-					}, deselectedRows.has(at.index) ? "" : "✓")
-					: null,
+				// Fold slot FIRST (present on every row when the file has folds) so chevrons share one column and the
+				// checkmark that follows lands in the same place whether or not a row is a fold header.
 				hasFolds
 					? createElement("span", { "className": "sxs-fold-slot", "key": "b" },
 						header !== undefined
@@ -356,6 +350,14 @@ function sideHandlers(
 								"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleFold(header.id); }
 							}, header.folded ? "▸" : "▾")
 							: null)
+					: null,
+				at.type !== "ctx"
+					? createElement("button", {
+						"className": "sxs-pick" + (deselectedRows.has(at.index) ? "" : " on"),
+						"key": "p",
+						"title": deselectedRows.has(at.index) ? "Include this line in the commit" : "Exclude this line from the commit",
+						"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleRow(at.index); }
+					}, deselectedRows.has(at.index) ? "" : "✓")
 					: null,
 				createElement("span", { "className": "sxs-lineno", "key": "l" }, props.lineNumber));
 
