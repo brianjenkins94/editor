@@ -10,24 +10,26 @@
  * cross this channel — the catalog lives app-side (samples.ts); we send only ids.
  */
 import { createHub, createRpcClient, windowTransport } from "@brianjenkins94/hub";
+import { renderGitPanel } from "./git-panel";
 
 interface SampleInfo { "id": string; "name": string; "description": string }
 
 const STYLES = `
 :root {
   --bg: #181818; --chrome: #202020; --line: #2d2d2d; --fg: #d4d4d4; --muted: #8a8a8a;
-  --accent: #3794ff; --top-h: 40px; --side-w: 260px; --rail: 44px;
+  --accent: #3794ff; --top-h: 40px; --side-w: 260px; --rhs-w: 380px; --rail: 44px;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg);
   font: 13px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; }
 .shell { display: grid; height: 100%;
   grid-template-rows: var(--top-h) 1fr;
-  grid-template-columns: var(--side-w) 1fr var(--side-w);
+  grid-template-columns: var(--side-w) 1fr var(--rhs-w);
   grid-template-areas: "top top top" "lhs editor rhs"; }
-.shell[data-lhs="collapsed"] { grid-template-columns: var(--rail) 1fr var(--side-w); }
+.shell[data-lhs="collapsed"] { grid-template-columns: var(--rail) 1fr var(--rhs-w); }
 .shell[data-rhs="collapsed"] { grid-template-columns: var(--side-w) 1fr var(--rail); }
 .shell[data-lhs="collapsed"][data-rhs="collapsed"] { grid-template-columns: var(--rail) 1fr var(--rail); }
+.shell .rhs .body { padding: 0; overflow: hidden; }
 .shell .top { grid-area: top; background: var(--chrome); border-bottom: 1px solid var(--line);
   display: flex; align-items: center; gap: 4px; padding: 0 8px; }
 .shell .top .title { font-weight: 600; margin-right: 10px; color: var(--muted); }
@@ -75,9 +77,9 @@ const MARKUP = `
   </aside>
   <main class="editor"><iframe id="app-frame" title="editor" allow="cross-origin-isolated"></iframe></main>
   <aside class="panel rhs">
-    <div class="head"><span class="label">History</span>
+    <div class="head"><span class="label">Changes</span>
       <button class="iconbtn" data-toggle="rhs" title="Collapse">›</button></div>
-    <div class="body">Revision history — coming soon.</div>
+    <div class="body"><div id="git-panel"></div></div>
   </aside>
 </div>
 `;
@@ -106,10 +108,14 @@ export function renderShell(): void {
 	// Load the SAME page into the iframe; that instance sees `window.parent !== window` → main.tsx boots the app.
 	appFrame.src = location.href;
 
-	// The shell hub, linked to the app iframe. The app serves `project.list` and subscribes `project.open`.
+	// The shell hub, linked to the app iframe. The app serves `project.list` and subscribes `project.open`; the git
+	// service (workbench realm, reached through the app) serves `git.status` / `git.file` / `git.commit`.
 	const shellHub = createHub({ "id": "shell" });
 
 	shellHub.link(windowTransport(appFrame.contentWindow!));
+
+	// The RHS review panel — a GitHub-Desktop-style changes/diff/commit surface over the git service (git-panel.ts).
+	renderGitPanel(document.getElementById("git-panel")!, shellHub);
 
 	const rpc = createRpcClient(shellHub);
 	let currentId: string | undefined;

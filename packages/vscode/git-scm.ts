@@ -10,15 +10,16 @@
  */
 import type * as vscodeApi from "vscode";
 import type { Logger } from "@brianjenkins94/util/logger";
-import { createCosmeticClassifier } from "./cosmetic-classifier";
+import type { CosmeticClassifier } from "./cosmetic-classifier";
 import * as engine from "./git-engine";
 
 const DIR = "/workspace";
 /** A read-only scheme serving each file's HEAD version, for quick-diff gutters and the diff editor. */
 const HEAD_SCHEME = "git-head";
 
-/** Install the git SourceControl into the running workbench. `vscode` is the captured extension API. */
-export async function installGitScm(vscode: typeof vscodeApi, log: Logger): Promise<void> {
+/** Install the git SourceControl into the running workbench. `vscode` is the captured extension API; `classifier`
+ *  is the shared cosmetic classifier (also used by the git service). */
+export async function installGitScm(vscode: typeof vscodeApi, log: Logger, classifier: CosmeticClassifier): Promise<void> {
 	await engine.ensureRepo();
 
 	const scm = vscode.scm.createSourceControl("git", "Git", vscode.Uri.file(DIR));
@@ -36,9 +37,8 @@ export async function installGitScm(vscode: typeof vscodeApi, log: Logger): Prom
 	});
 
 	// ── cosmetic vs semantic classification ───────────────────────────────────────────────────────────────────
-	// The verdict itself is a git-agnostic service (worker + cache lives in cosmetic-classifier.ts). This binding
-	// just asks it about each MODIFIED file and paints a faded "cosmetic only" badge for the cosmetic ones.
-	const classifier = createCosmeticClassifier();
+	// The verdict is a git-agnostic service (worker + cache in cosmetic-classifier.ts), shared with the git service;
+	// this binding just asks it about each MODIFIED file and paints a faded "cosmetic only" badge for the cosmetic ones.
 	const CLASSIFIABLE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 	const cosmeticPaths = new Set<string>(); // paths whose CURRENT working content is cosmetic-only
 
