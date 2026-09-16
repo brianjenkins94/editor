@@ -91,12 +91,18 @@ function sideHandlers(
 
 	const line: AnnotationHandler = {
 		"name": "sxs-line",
-		"Line": (props: { "lineNumber": number }) => {
+		"Line": (props: { "lineNumber": number; "indentation"?: number }) => {
 			const at = lineToRow.get(props.lineNumber);
 
 			if (at === undefined) {
 				return null;
 			}
+
+			// Word wrap that hangs at the line's own indent level (codehike's recipe): shift the whole line right by
+			// its indentation, then pull the first row back by the same amount with a negative text-indent — so the
+			// first row's leading whitespace still lands where it should while every WRAPPED row hangs under the code.
+			// (`ch` == the mono space width; the leading spaces stay in the text via pre-wrap.)
+			const indent = typeof props.indentation === "number" ? props.indentation : 0;
 
 			return createElement("div", {
 				"className": "sxs-line " + side,
@@ -109,7 +115,11 @@ function sideHandlers(
 				}
 			},
 			createElement("span", { "className": "sxs-num", "key": "n" }, props.lineNumber),
-			createElement("div", { "className": "sxs-code", "key": "c" }, createElement(InnerLine, { "merge": props })));
+			createElement("div", {
+				"className": "sxs-code",
+				"key": "c",
+				"style": indent > 0 ? { "marginLeft": indent + "ch", "textIndent": "-" + indent + "ch" } : undefined
+			}, createElement(InnerLine, { "merge": props })));
 		}
 	};
 
