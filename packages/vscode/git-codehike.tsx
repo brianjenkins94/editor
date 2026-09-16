@@ -336,17 +336,7 @@ function sideHandlers(
 			const indent = typeof props.indentation === "number" ? props.indentation : 0;
 			const header = foldHeaders?.get(props.lineNumber);
 
-			return createElement("div", {
-				"className": "sxs-line " + side,
-				"style": {
-					"display": "grid",
-					"gridTemplateColumns": "subgrid",
-					"gridColumn": cols,
-					"gridRow": at.row,
-					"background": tint(at.type, side, verdict)
-				}
-			},
-			createElement("span", { "className": "sxs-num", "key": "n" },
+			const numCell = createElement("span", { "className": "sxs-num", "key": "n" },
 				at.type !== "ctx"
 					? createElement("button", {
 						"className": "sxs-pick" + (deselectedRows.has(at.index) ? "" : " on"),
@@ -363,14 +353,30 @@ function sideHandlers(
 						"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleFold(header.id); }
 					}, header.folded ? "▸" : "▾")
 					: null,
-				createElement("span", { "className": "sxs-lineno", "key": "l" }, props.lineNumber)),
-			createElement("div", {
+				createElement("span", { "className": "sxs-lineno", "key": "l" }, props.lineNumber));
+
+			const codeCell = createElement("div", {
 				"className": "sxs-code",
 				"key": "c",
 				"style": indent > 0 ? { "marginLeft": indent + "ch", "textIndent": "-" + indent + "ch" } : undefined
 			},
 			createElement(InnerLine, { "merge": props }),
-			header?.folded === true ? createElement("span", { "className": "sxs-folded-mark", "key": "f" }, " ⋯") : null));
+			header?.folded === true ? createElement("span", { "className": "sxs-folded-mark", "key": "f" }, " ⋯") : null);
+
+			// The left pane is mirrored — code on the outer edge, gutter hugging the centre — so both number columns
+			// sit either side of the centre bar (like GitHub Desktop's split view).
+			const cells = side === "left" ? [codeCell, numCell] : [numCell, codeCell];
+
+			return createElement("div", {
+				"className": "sxs-line " + side,
+				"style": {
+					"display": "grid",
+					"gridTemplateColumns": "subgrid",
+					"gridColumn": cols,
+					"gridRow": at.row,
+					"background": tint(at.type, side, verdict)
+				}
+			}, ...cells);
 		}
 	};
 
