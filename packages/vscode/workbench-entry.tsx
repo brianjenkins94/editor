@@ -13,7 +13,7 @@
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
 import type { WorkbenchFile, WorkbenchParts } from "@brianjenkins94/monaco-vscode-api/main";
-import { createHub, portTransport } from "@brianjenkins94/hub";
+import { createHub, createRpcClient } from "@brianjenkins94/hub";
 import { boot, ExtensionHostKind, registerExtension, registerFileSystemOverlay, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
 // The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
@@ -34,7 +34,7 @@ import helloManifest from "./extensions/hello/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
-import { connectAsPane } from "./pane-bus";
+import { windowClientTransport } from "./pane-link";
 import { relayLoggerToHub } from "./telemetry";
 import { createBashProcess } from "./terminal";
 import { Workbench } from "./Workbench";
@@ -44,10 +44,11 @@ import { installWorkspaceFs } from "./workspace-fs";
 interface Init { "files": WorkbenchFile[]; "openEditors": string[]; "workspaceFolder"?: string; "moduleVersions"?: Record<string, string> }
 
 // The host page we report to: our parent when nested in its iframe (in-page window), or our opener when
-// we've been popped out into our own standalone tab/window. The pane bus carries the workbench handshake;
-// the log relay funnels our structured logs to that same host (its own message channel).
+// we've been popped out into our own standalone tab/window. One hub link (below) to it carries the boot
+// handshake AND our structured logs. Identity from the URL (`?pane=`), so a popped-out reload re-pairs on the
+// same pane-link channel.
 const host = window.opener ?? window.parent;
-const bus = connectAsPane("editor");
+const paneId = new URLSearchParams(location.search).get("pane") ?? "editor";
 
 // The workbench manages its own internal scrolling; the HOST document must never scroll. Monaco keeps huge
 // off-screen editor elements (`.lines-content` at ~16M px, a wide `.region`) that make the body horizontally
@@ -67,17 +68,13 @@ window.addEventListener("scroll", () => {
 	}
 }, true);
 
-// The workbench-iframe hub — bridges the extension pod (linked in wireWorkbenchHub, once the ext host is up)
-// UP to the page's root hub over a MessagePort the host transfers here ({__hubPort}, from vscode.tsx). Created
-// eagerly so that port — which the host sends right after we announce "ready" — has somewhere to attach; a port
-// queues, so the root's interest can't be lost to a not-yet-listening race (the failure a windowTransport hit).
+// The workbench-iframe hub — links UP to the page's root hub over the pane-link window transport (ONE link for the
+// boot handshake below AND the pod/worker span federation), and bridges the extension pod into that same hub
+// (wireWorkbenchHub, once the ext host is up). The link's `hello` handshake recovers the lossy-window race the old
+// MessagePort was guarding, so no port is needed.
 const workbenchHub = createHub({ "id": "workbench" });
 
-window.addEventListener("message", (event) => {
-	if ((event.data as { "__hubPort"?: boolean } | null)?.__hubPort === true && event.ports[0] !== undefined) {
-		workbenchHub.link(portTransport(event.ports[0]));
-	}
-});
+workbenchHub.link(windowClientTransport(paneId, host));
 
 // The pane's logger — its spans/records now ride the workbench hub to the root collector (converging the old
 // bespoke window log relay onto the hub). Uncaught errors/rejections go through the same logger so they reach
@@ -270,7 +267,7 @@ function maybeBoot(): void {
 		"configuration": configuration,
 		"keybindings": keybindings,
 		"onSave": (path, contents) => {
-			bus.post({ "type": "save", "path": path, "contents": contents });
+			workbenchHub.publish("workbench.save", { "path": path, "contents": contents });
 			paneLog.info("saved", { "path": path, "bytes": contents.length });
 		}
 	})
@@ -386,7 +383,7 @@ function maybeBoot(): void {
 			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod", "eslint", "capabilities"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
-			bus.post({ "type": "online" });
+			workbenchHub.publish("workbench.online");
 			bootSpan.end();
 		})
 		.catch((error: unknown) => {
@@ -395,19 +392,31 @@ function maybeBoot(): void {
 		});
 }
 
-// Workspace from the host, over the pane bus. Doubles as the pane announcing its window to the host, so a
-// popped-out reload re-pairs by re-sending "ready" (below) with no special-casing here.
-bus.on((payload) => {
-	const data = payload as { "type"?: string } & Partial<Init>;
+// Workspace from the host: request it over the hub (retried until the serve's interest has settled across the
+// freshly-linked window transport), then boot. Linking the hub above is itself the announce — the host retargets to
+// this window on the first frame — so there's no separate "ready" ping.
+const paneRpc = createRpcClient(workbenchHub);
 
-	if (data.type === "init") {
-		init = { "files": data.files ?? [], "openEditors": data.openEditors ?? [], "workspaceFolder": data.workspaceFolder, "moduleVersions": data.moduleVersions };
-		maybeBoot();
-	} else if (data.type === "openProject") {
-		const project = data as { "files"?: { "path": string; "contents": string }[]; "openEditors"?: string[] };
+void (async () => {
+	for (;;) {
+		try {
+			const data = await paneRpc.request("workbench.init", undefined, { "timeoutMs": 1500 }) as Init;
 
-		void openProject(project.files ?? [], project.openEditors ?? []);
+			init = { "files": data.files ?? [], "openEditors": data.openEditors ?? [], "workspaceFolder": data.workspaceFolder, "moduleVersions": data.moduleVersions };
+			maybeBoot();
+
+			return;
+		} catch {
+			await new Promise((resolve) => { setTimeout(resolve, 250); });
+		}
 	}
+})();
+
+// A live project switch (the LHS picker → host) arrives as a publish; write + focus it into the running workbench.
+workbenchHub.subscribe("workbench.openProject", (data) => {
+	const project = data as { "files"?: { "path": string; "contents": string }[]; "openEditors"?: string[] };
+
+	void openProject(project.files ?? [], project.openEditors ?? []);
 });
 
 // Dev-only host-page debug bridge (window.__editor). Reads the captured API lazily; no-op off localhost.
@@ -424,6 +433,5 @@ render(
 	document.body
 );
 
-// Tell the host we're ready to receive the workspace (also registers this window with the host bus).
-paneLog.info("pane ready", { "pane": bus.id });
-bus.post({ "type": "ready" });
+// The hub link + the `workbench.init` request above are the whole handshake now; nothing else to announce.
+paneLog.info("pane ready", { "pane": paneId });

@@ -8,11 +8,11 @@
  * definite-height body gives the iframe a laid-out box to measure at boot (what the old full-viewport
  * `position: fixed; inset: 0` mount was for).
  *
- * Host ⇄ pane talk goes over the pane bus (pane-bus.ts), which carries the workbench handshake as its
- * payload: the entry signals "ready" → we send it the workspace `files`/`openEditors`; it posts "save" back
- * with the edited path + contents (→ `onSave`) and "online" when monaco is up (→ whenReady). The bus tracks
- * the pane's live window, so once the editor can be popped out these same messages reach the popped window
- * with no change here. The host app must only call this once `crossOriginIsolated` is true (SharedArrayBuffer).
+ * Host ⇄ pane talk rides ONE hub link over a retargeting window transport (pane-link.ts): the entry requests
+ * `workbench.init` (RPC) → we serve the workspace `files`/`openEditors`; it publishes `workbench.save` (→ `onSave`)
+ * and `workbench.online` when monaco is up (→ whenReady). The transport tracks the pane's live window, so once the
+ * editor can be popped out these messages reach the popped window with no change here. The host app must only call
+ * this once `crossOriginIsolated` is true (SharedArrayBuffer).
  *
  * Every pane's structured logs are funnelled back here (logging.ts) so the host console is the one place to
  * read what the editor did — including after it's popped into its own tab.
@@ -21,9 +21,9 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
-import { portTransport } from "@brianjenkins94/hub";
+import { serve } from "@brianjenkins94/hub";
 import { hostLog } from "./logging";
-import { createPaneBusHost } from "./pane-bus";
+import { windowServerTransport } from "./pane-link";
 import { createPaneWindow } from "./window";
 import "./webawesome";
 
@@ -47,9 +47,9 @@ export interface VscodeWindowOptions {
 	/** Fill `mountInto` directly (no draggable window chrome) — used when the editor is slotted into the outer
 	 *  shell's middle space. Default false: the standalone, poppable WebAwesome window. */
 	"fill"?: boolean;
-	/** The page's root hub. When given, the workbench pane's hub (the extension pod + its workers) is linked
-	 *  into it, so pod/worker spans federate to the root collector. Re-linked to the pane's CURRENT window on
-	 *  every "ready" (so it follows a popout, exactly as the pane bus does). */
+	/** The page's root hub — REQUIRED in practice: the workbench boots over it (we serve `workbench.init`), and the
+	 *  pane's hub (extension pod + workers) federates into it for spans. The link retargets to the pane's live
+	 *  window on popout. Typed optional only to keep the options bag ergonomic; omitting it throws. */
 	"rootHub"?: Hub;
 }
 
@@ -64,8 +64,6 @@ export interface VscodeWindowHandle {
 	 *  Waits for readiness internally, so a call made before boot still lands. Drives the LHS picker. */
 	"openProject": (files: ProjectFile[], openEditors: string[]) => void;
 }
-
-interface PaneMessage { "type"?: string; "path"?: string; "contents"?: string }
 
 let booted = false;
 
@@ -91,7 +89,7 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 
 	// Explicit host page (not the directory root): monaco's own dist/index.html is the webview pre-page, so
 	// the workbench host ships as host.html alongside it. `?pane` gives the entry its identity from the URL,
-	// so a popped-out reload still announces as the same pane (see pane-bus.ts).
+	// so a popped-out reload still announces as the same pane (the pane-link channel; see pane-link.ts).
 	iframe.src = base + "__vscode__/host.html?pane=" + PANE_ID;
 
 	// Two mount modes. FILL (embedded in the outer shell): the editor IS the middle space, so the iframe fills
@@ -115,56 +113,38 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 		span.info("workbench window mounted", { "pane": PANE_ID });
 	}
 
-	// The pane bus routes to the pane's CURRENT window (iframe now, popped-out window later) and tracks it
-	// from every inbound message, so the handshake below is unchanged when the editor gains a popout.
-	const bus = createPaneBusHost();
+	// ONE hub link carries everything host ⇄ pane — the boot handshake AND the pod/worker span federation — over a
+	// retargeting window transport that re-pairs to the pane's live window on popout (pane-link.ts). rootHub is
+	// required: the workbench boots from the `workbench.init` we serve below.
+	if (rootHub === undefined) {
+		throw new Error("createVscodeWindow requires a rootHub — the workbench boots over it");
+	}
 
-	bus.register(PANE_ID, iframe);
+	const paneHub = rootHub;
 
-	// Link the page's root hub to the pane over a DEDICATED MessagePort (transferred to the pane's current
-	// window), so the extension pod's spans federate to the root collector. A port (not windowTransport) so
-	// interest queues instead of racing a not-yet-listening peer — the same reason the SW link uses a port.
-	// Re-done on every "ready" (initial + popout re-announce): the pane bus has just recorded the live window,
-	// and a popped-out pane re-announces, so it gets a fresh port for free.
-	let unlinkPaneHub: (() => void) | undefined;
-	const linkPaneHub = (): void => {
-		const win = bus.windowFor(PANE_ID);
+	paneHub.link(windowServerTransport(PANE_ID, () => iframe.contentWindow ?? undefined));
 
-		if (rootHub !== undefined && win !== undefined) {
-			unlinkPaneHub?.();
+	// The pane requests its workspace once linked (RPC, retried on its side until interest settles); serve it.
+	serve(paneHub, "workbench.init", () => ({ "files": files, "openEditors": openEditors, "workspaceFolder": workspaceFolder, "moduleVersions": moduleVersions }));
 
-			const channel = new MessageChannel();
+	// The pane announces it's up (→ whenReady) and streams saves back (→ onSave).
+	paneHub.subscribe("workbench.online", () => {
+		span.end();
+		markReady();
+	});
+	paneHub.subscribe("workbench.save", (data) => {
+		const save = data as { "path"?: string; "contents"?: string };
 
-			win.postMessage({ "__hubPort": true }, "*", [channel.port2]);
-			unlinkPaneHub = rootHub.link(portTransport(channel.port1));
-		}
-	};
-
-	bus.on((id, payload) => {
-		if (id !== PANE_ID) {
-			return;
-		}
-
-		const data = payload as PaneMessage;
-
-		if (data.type === "ready") {
-			bus.post(PANE_ID, { "type": "init", "files": files, "openEditors": openEditors, "workspaceFolder": workspaceFolder, "moduleVersions": moduleVersions });
-			linkPaneHub();
-			span.info("pane ready → sent init", { "files": files.length, "openEditors": openEditors.length });
-		} else if (data.type === "save" && typeof data.path === "string" && typeof data.contents === "string") {
-			onSave?.(data.path, data.contents);
-		} else if (data.type === "online") {
-			span.end();
-			markReady();
+		if (typeof save.path === "string" && typeof save.contents === "string") {
+			onSave?.(save.path, save.contents);
 		}
 	});
 
-	// Open a project into the live workbench: forward the files + entry to the pane once it's online (the pane
-	// writes them via the vscode FS API and focuses the entry — no reboot). Sent over the SAME pane bus as the
-	// init handshake, so it follows a popped-out pane for free.
-	const openProject = (projectFiles: ProjectFile[], openEditors: string[]): void => {
+	// Open a project into the live workbench: publish the files + entry once it's online (the pane writes them via
+	// the vscode FS API and focuses the entry — no reboot). Rides the same hub link, so it follows a popped-out pane.
+	const openProject = (projectFiles: ProjectFile[], entryFiles: string[]): void => {
 		void whenReady.then(() => {
-			bus.post(PANE_ID, { "type": "openProject", "files": projectFiles, "openEditors": openEditors });
+			paneHub.publish("workbench.openProject", { "files": projectFiles, "openEditors": entryFiles });
 		});
 	};
 

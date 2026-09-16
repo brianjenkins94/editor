@@ -38,7 +38,7 @@ also works over desktop's built-in git.
 | Realm | Entry / key files | Can access | What lives here |
 |---|---|---|---|
 | **Shell** (top window) | `main.tsx` `renderShell()` branch, `shell.ts` | DOM, the shell hub; *later* the GitHub token (trust boundary) | Surrounding chrome (LHS project picker, RHS history, top bar), cross-project coordination. Loads the app in an iframe pointing back at the same page. |
-| **App iframe** (`/`) | `main.tsx` app branch, `coi.ts`, `vscode.tsx`, `samples.ts` | DOM, `rootHub`, COI bootstrap, the pane-bus host | Boots the workbench iframe (+ preview iframe); serves `project.list`, routes `project.open` → `openProject`. Owns the top of the hub tree. |
+| **App iframe** (`/`) | `main.tsx` app branch, `coi.ts`, `vscode.tsx`, `samples.ts`, `pane-link.ts` | DOM, `rootHub`, COI bootstrap | Boots the workbench iframe (+ preview iframe) and links it into `rootHub` over the retargeting pane-link transport; serves `project.list` + `workbench.init`, routes `project.open` → `openProject`. Owns the top of the hub tree. |
 | **Workbench iframe** (`/__vscode__/host.html`) | `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal.ts`, `node-runner.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()`, mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(git SCM `git-scm.ts`/`git-engine.ts` install here too — legitimate browser parity for desktop's built-in git; the BABLR classifier welded into it is the part that should become a standalone extension.)* |
 | **Extension host** (`LocalProcess` / `LocalWebWorker`) | `extensions/*/extension.ts`, `extensions/*/ts-plugin.js` | the vscode API — **no DOM, no zen-fs singleton** | Extensions: `hello` (default API context), `worker-pod` (spawns the LSP/debug/node workers). `eslint` + `capabilities` run in the WebWorker host *inside tsserver*, reusing tsserver's own `ts` as TS-plugins. |
 | **Workers** (`dist/lsp/*`, spawned from the workbench realm) | only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `git-classify-worker` (BABLR classify). |
@@ -50,13 +50,15 @@ CDN `node_modules` overlay. Not a place you put feature code.
 
 ## Cross-realm communication
 
-- **hub** (`@brianjenkins94/hub`) — the composed message tree for everything: pub/sub + RPC (`createRpcClient` /
-  `serve`). Shape today: shell ↔ app over `windowTransport`; app `rootHub` ↔ workbench hub over a transferred
-  `MessagePort`; workbench ↔ extension pod over the pod's exported event/function bridge; pod ↔ its workers over
-  `portTransport`. A message only crosses a link if the far side subscribed, so each realm runs standalone.
-- **pane-bus** (`pane-bus.ts`) — the app ↔ workbench boot handshake specifically (`ready` → `init` → `online`,
-  plus `save` and `openProject`). Separate from the hub because it predates it and tracks the pane's live window
-  (so it survives a pop-out).
+- **hub** (`@brianjenkins94/hub`) — the composed message tree for *everything*, including the workbench boot
+  handshake: pub/sub + RPC (`createRpcClient` / `serve`). Shape today: shell ↔ app over `windowTransport`; app
+  `rootHub` ↔ workbench hub over the **pane-link** transport (`pane-link.ts`) — a `windowTransport` variant that
+  *retargets* to the pane's live window so it survives a pop-out; workbench ↔ extension pod over the pod's exported
+  event/function bridge; pod ↔ its workers over `portTransport`. A message only crosses a link if the far side
+  subscribed, so each realm runs standalone. The app↔workbench boot handshake is just hub messages on that link:
+  the pane requests `workbench.init` (RPC, retried until interest settles), then publishes `workbench.online` /
+  `workbench.save`, and the host publishes `workbench.openProject`. (This folded the old separate `pane-bus` + a
+  dedicated `MessagePort` into one hub link; hub's `hello` handshake covers the lossy-window race the port guarded.)
 - **plain postMessage** — fine for a single-purpose worker with one request/response shape (e.g. `classify-worker`).
 
 ## Diagram — realms & channels
@@ -68,7 +70,7 @@ flowchart TB
   subgraph SHELL["Shell · top window — main.tsx renderShell() / shell.ts"]
     S["chrome: LHS project picker · RHS history · top bar<br/>shell hub · (later: GitHub token)"]
     subgraph APP["App iframe · / — main.tsx app branch / vscode.tsx / coi.ts / samples.ts"]
-      A["rootHub · COI bootstrap · pane-bus host<br/>serves project.list · routes project.open → openProject"]
+      A["rootHub · COI bootstrap<br/>serves project.list + workbench.init · routes project.open"]
       subgraph WB["Workbench iframe · /__vscode__/host.html — workbench-entry.tsx"]
         W["monaco boot · zen-fs mounted · vscodeApi captured<br/>ATA · terminal factory · debug preview"]
         GIT["git SCM — browser parity for desktop's built-in git<br/>git-scm · git-engine + isomorphic-git"]
@@ -90,8 +92,7 @@ flowchart TB
   A -.->|"creates iframe (src = host.html)"| W
 
   S <-->|"hub · windowTransport — project.list (RPC), project.open"| A
-  A <-->|"pane-bus — ready→init→online · save · openProject"| W
-  A <-->|"hub · MessagePort — rootHub ↔ workbench hub"| W
+  A <-->|"hub · pane-link (retargets) — workbench.init/online/save/openProject + spans"| W
   W <-->|"hub · ext event/fn bridge (wireWorkbenchHub)"| EXT
 
   W ==>|"node-runner spawns · hub"| NW
