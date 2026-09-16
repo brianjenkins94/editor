@@ -1,7 +1,7 @@
 {
   "name": "@brianjenkins94/bablr-language-ts",
   "version": "0.0.0",
-  "description": "Our own BABLR grammar for the modern-TypeScript subset tsval interprets \u2014 a lossless CSTML substrate for the capability IDE.",
+  "description": "Our own BABLR grammar for the modern-TypeScript subset tsval interprets — a lossless CSTML substrate for the capability IDE.",
   "type": "module",
   "scripts": {
     "parse": "tsx run.mjs",
@@ -11,7 +11,8 @@
     "test:roundtrip": "tsx test/roundtrip.mjs --fast",
     "test:roundtrip:full": "tsx test/roundtrip.mjs --fast --full",
     "test:failures": "tsx test/failures.mjs",
-    "test:spans": "tsx test/spans.mjs"
+    "test:spans": "tsx test/spans.mjs",
+    "test:cosmetic": "tsx test/cosmetic.mjs"
   },
   "dependencies": {
     "@bablr/agast-helpers": "0.11.4",
