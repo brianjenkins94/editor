@@ -12,13 +12,23 @@ after this; this doc is the whole-editor picture.
 2. **Engine or binding?** — a pure, reusable **engine** (fewest host deps, node-testable) kept separate from a thin
    **binding** that maps it into one realm. This axis cuts across every realm.
 
+**Portability caveat — the tie-breaker on Axis 1.** The **workbench iframe** realm is *our* custom
+monaco-vscode-api boot; it does **not** exist in desktop VS Code. So any code that is *product functionality* — the
+kind that should one day ship as a **self-contained (eventually desktop) VS Code extension** — belongs in an
+**extension** (ext host), reaching the workspace through the **vscode API** (`vscode.workspace.fs`), never a
+realm-specific singleton like a direct `@zenfs/core` import. Reserve `workbench-entry` (the workbench realm) for
+host-**boot glue** that only makes sense for our custom boot (the monaco `boot()` call, the terminal process
+factory, registering the extensions). The `capabilities` extension is the model. **Known debt:** the git/SCM + BABLR
+stack currently sits in the workbench realm as a deliberate shortcut — its portable home is an extension (see the
+git worked example).
+
 ## The realms
 
 | Realm | Entry / key files | Can access | What lives here |
 |---|---|---|---|
 | **Shell** (top window) | `main.tsx` `renderShell()` branch, `shell.ts` | DOM, the shell hub; *later* the GitHub token (trust boundary) | Surrounding chrome (LHS project picker, RHS history, top bar), cross-project coordination. Loads the app in an iframe pointing back at the same page. |
 | **App iframe** (`/`) | `main.tsx` app branch, `coi.ts`, `vscode.tsx`, `samples.ts` | DOM, `rootHub`, COI bootstrap, the pane-bus host | Boots the workbench iframe (+ preview iframe); serves `project.list`, routes `project.open` → `openProject`. Owns the top of the hub tree. |
-| **Workbench iframe** (`/__vscode__/host.html`) | `workbench-entry.tsx`, `workspace-fs.ts`, `git-scm.ts`, `git-engine.ts`, `ata.ts`, `terminal.ts`, `node-runner.ts` | **the vscode API *and* zen-fs** (both live here), DOM | Monaco/VS Code itself, and anything needing the editor API together with the workspace filesystem: git SCM, type acquisition, the terminal factory, the debug preview. Spawns the workers below. |
+| **Workbench iframe** (`/__vscode__/host.html`) | `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal.ts`, `node-runner.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()`, mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(git SCM `git-scm.ts`/`git-engine.ts` currently install here too — a shortcut; portable home is an extension.)* |
 | **Extension host** (`LocalProcess` / `LocalWebWorker`) | `extensions/*/extension.ts`, `extensions/*/ts-plugin.js` | the vscode API — **no DOM, no zen-fs singleton** | Extensions: `hello` (default API context), `worker-pod` (spawns the LSP/debug/node workers). `eslint` + `capabilities` run in the WebWorker host *inside tsserver*, reusing tsserver's own `ts` as TS-plugins. |
 | **Workers** (`dist/lsp/*`, spawned from the workbench realm) | only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `git-classify-worker` (BABLR classify). |
 | **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (`cstSpans`, `classifyChange`), `tsval`, `util/silo`, and the vscode-package-local pure modules `policy-core`, `capability-breakpoints`. Built/aliased into the realms above. |
@@ -44,33 +54,42 @@ Ask, in order:
 
 1. **Pure logic, no host deps?** → a **package / engine module** (node-testable). *e.g. `classifyChange`, `git-engine`
    (no vscode dep), `policy-core`, `capability-breakpoints`.*
-2. **Needs the vscode API *and* the workspace filesystem?** → the **workbench realm** (`workbench-entry` installs it,
-   using the captured `vscodeApi` + zen-fs). *e.g. `git-scm`, type acquisition, the terminal factory.*
+2. **Product functionality that should ship in a self-contained (eventually desktop) extension?** → an **extension**
+   in the ext host, reaching the workspace through **`vscode.workspace.fs`** (never a direct `zen-fs` import), and
+   **spawning any heavy worker itself**. Model: the `capabilities` extension. *This is where git SCM + BABLR classify
+   BELONG; they currently live in the workbench realm as a shortcut (debt).*
 3. **Needs tsserver's Program / to run during type-checking?** → a **TS-plugin in the WebWorker ext host**, reusing
-   tsserver's `ts`. *e.g. `capabilities`, `eslint`.*
-4. **Heavy or blocking** (parse, interpret, run node)? → a **worker**, spawned from the workbench realm, async.
+   tsserver's `ts`. *e.g. `capabilities`, `eslint`.* (A special case of rule 2 — it ships in an extension.)
+4. **Heavy or blocking** (parse, interpret, run node)? → a **worker**, async. Spawned by whoever owns it — the
+   *extension* for extension functionality (portable), the workbench realm only for host-boot workers.
    *e.g. `git-classify-worker` — BABLR is ~1.7s/file, it cannot run on the UI thread.*
 5. **Chrome / layout / cross-project / token custody?** → the **shell**.
+6. **Host-boot glue only** — things that only make sense for our monaco-vscode-api boot (the `boot()` call, mounting
+   zen-fs, the terminal process factory, registering extensions)? → the **workbench realm** (`workbench-entry`). This
+   is the *only* thing that legitimately lives there, because it does not port to desktop VS Code.
 
 Then apply **Axis 2**: split the part with the fewest host deps into an **engine** and leave a thin **binding** in
 the realm. If you can't node-test the logic, you probably haven't separated the engine yet.
 
 ## Worked examples (the git/SCM + BABLR stack)
 
-The cosmetic-diff feature spans four realms, each piece placed by the procedure:
+The cosmetic-diff feature is the running example — and its git/SCM stack shows both the *right* target and the
+*shortcut we took*:
 
-- `classifyChange` / `cstSpans` — **package** (`@brianjenkins94/bablr`): pure, node-tested (rule 1).
-- `git-engine.ts` — **workbench realm engine**: no vscode dep, but uses zen-fs, so it runs where zen-fs is; the
-  reusable core of the two-tier history's coarse (git) tier (rule 1 within the realm).
-- `git-scm.ts` — **workbench binding**: maps `git-engine` ↔ `vscode.scm` (rule 2). Swap this for a custom shell UI
-  later; the engine is untouched.
-- `git-classify-worker.ts` — **worker**: BABLR classification off-thread (rule 4). It sits at the top level next to
-  the other git files — **not** under `extensions/worker-pod/`: worker-pod is the *LSP pod*, and this is a git
-  concern. (Placement follows the *concern*; the realm follows the *capability*.)
+- `classifyChange` / `cstSpans` — **package** (`@brianjenkins94/bablr`): pure, node-tested (rule 1). Correctly placed.
+- `git-engine.ts` — an **engine** with no vscode dep, but it imports `@zenfs/core` directly. That direct import is
+  the non-portable part: to ship in an extension it must take an injected fs / go through `vscode.workspace.fs`
+  (which is the real fs on desktop and the zen-fs-backed provider here).
+- `git-scm.ts` + `git-classify-worker.ts` — **currently installed from the workbench realm** (`workbench-entry`
+  calls `installGitScm`, which spawns the worker). This WORKS but is a shortcut: it's product functionality, so by
+  rule 2 its portable home is a **self-contained extension** — an `extensions/git/` with its own manifest that
+  registers `vscode.scm`, spawns the classify worker itself, and reaches files via `vscode.workspace.fs`. Then the
+  whole feature ports to desktop VS Code unchanged. The `capabilities` extension is exactly this shape and is the
+  template to follow. *(This is the "bablr belongs in the extension" correction — recorded as debt, not yet done.)*
 
-The capability overlay is the same shape one layer over: pure core (`policy-core`, `capability-breakpoints`) → a
-tsserver plugin (ext host) that emits diagnostics → an ext-host binding (`extensions/capabilities/extension.ts`)
-that renders the panel. See `extensions/capabilities/ARCHITECTURE.md`.
+The capability overlay already did it right: pure core (`policy-core`, `capability-breakpoints`) → a tsserver plugin
+(ext host) that emits diagnostics → an ext-host binding (`extensions/capabilities/extension.ts`) that renders the
+panel. See `extensions/capabilities/ARCHITECTURE.md`. Follow that shape for the git/SCM extension.
 
 ## The one gotcha the realms impose
 
