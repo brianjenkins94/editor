@@ -318,7 +318,8 @@ const noSemiStatements = [
 	"FunctionDeclaration",
 	"ClassDeclaration",
 	"InterfaceDeclaration",
-	"EnumDeclaration"
+	"EnumDeclaration",
+	"ModuleDeclaration"
 ];
 const blockSemiStatements = ["DoWhile", "While", "For", "If"];
 
@@ -428,9 +429,13 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		}
 
 		const res = yield match(
-			m`/interface\b|(?:const[ \t]+)?enum\b|abstract[ \t]+class\b|declare[ \t]+(?:const|let|var|function|class|abstract|enum|module|namespace|global|interface|type|async)\b|type[ \t]+[a-zA-Z_$][a-zA-Z\d_$]*[ \t]*[<=]/`
+			// The bare `module`/`namespace`/`global` alternatives (contextual keywords) require whitespace + a
+			// name-start (or `{` for `global`) after the keyword, so `module.exports`, `namespace;`, `global.x`
+			// stay ordinary expressions. The `declare …` alternative already re-enters here via AmbientDeclaration.
+			m`/interface\b|(?:const[ \t]+)?enum\b|abstract[ \t]+class\b|declare[ \t]+(?:const|let|var|function|class|abstract|enum|module|namespace|global|interface|type|async)\b|type[ \t]+[a-zA-Z_$][a-zA-Z\d_$]*[ \t]*[<=]|namespace[ \t]+[a-zA-Z_$]|module[ \t]+(?:[a-zA-Z_$]|['"])|global[ \t\r\n]*\{/`
 		);
-		const word = res ? printSource(res).split(/[ \t]/)[0] : null;
+		// The leading keyword — `^[a-zA-Z]+` (not split on space) so `global\n{` still reads as "global".
+		const word = res ? printSource(res).match(/^[a-zA-Z]+/u)[0] : null;
 
 		switch (word) {
 			case "interface":
@@ -448,6 +453,11 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 				break;
 			case "type":
 				yield eat(m`<TypeAliasDeclaration />`);
+				break;
+			case "module":
+			case "namespace":
+			case "global":
+				yield eat(m`<ModuleDeclaration />`);
 				break;
 			default:
 				return yield* super.Statement(args);
@@ -511,6 +521,26 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 	public *AmbientDeclaration() {
 		yield eat(m`declareToken*: <*Keyword 'declare' />`);
 		yield eat(m`declaration+$: <_Statement />`);
+	}
+
+  // `module M { … }`, `namespace app { … }`, `module "foo" { … }`, `global { … }` — a named (or, for `global`,
+  // nameless) block of statements. The body is a normal Block, so its members (interface / enum / type alias /
+  // ambient `const x: T;` and bodyless `function f(): T;` / nested module) parse through the extended Statement.
+  // A dotted namespace name (`namespace A.B`) is left for a follow-up; the cases here use a plain name.
+	public *ModuleDeclaration() {
+		const isGlobal = yield match(m`/global\b/`);
+
+		yield eat(m`sigilToken*: <*Keyword ${/module|namespace|global/} />`);
+
+		if (!isGlobal) {
+			if (yield match(m`/['"]/`)) {
+				yield eat(m`name$: <String /['"]/ />`);
+			} else {
+				yield eat(m`name$: <*Identifier />`, o({ "scoped": false }));
+			}
+		}
+
+		yield eat(m`body$: <Block '{' />`);
 	}
 
   // ── classes ──────────────────────────────────────────────────────────────────────────────────────────────
