@@ -27,6 +27,7 @@ import workerPodExtensionCode from "worker-pod:extension";
 import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
+import { installGitScm } from "./git-scm";
 import capabilitiesManifest from "./extensions/capabilities/package.json";
 import eslintManifest from "./extensions/eslint/package.json";
 import helloManifest from "./extensions/hello/package.json";
@@ -326,7 +327,13 @@ function maybeBoot(): void {
 				// exported event/function channel — the ext host has no window path) to the top page over the
 				// window. pod/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.
 				wireWorkbenchHub(workspaceFs?.buffer);
-				bootSpan.info("hello extension api captured");
+				// Source Control: browser-git (isomorphic-git over the zen-fs workspace) lighting up the standard
+					// viewlet. Wired here in the workbench realm because that's where BOTH zen-fs and the vscode API
+					// live. See git-scm.ts / git-engine.ts.
+					void installGitScm(api as typeof import("vscode"), paneLog).catch((error: unknown) => {
+						bootSpan.error("git SCM install failed", { "error": errText(error) });
+					});
+					bootSpan.info("hello extension api captured");
 				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
 				// AFTER the workbench restores its last-active viewlet (which would otherwise win).
 				setTimeout(runCommand, 0, "workbench.view.explorer");

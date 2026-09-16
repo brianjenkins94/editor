@@ -183,7 +183,10 @@ export async function preBuild(): Promise<void> {
 		"plugins": [bundledExtension("hello"), bundledExtension("worker-pod"), bundledExtension("eslint"), bundledExtension("capabilities")],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
-		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"] },
+		// `buffer` → the node-stdlib-browser polyfill: isomorphic-git (the git SCM engine) uses the `Buffer` global,
+		// which the browser lacks and this bundle otherwise doesn't polyfill; the alias makes the import resolve to
+		// the real polyfill (git-engine.ts then assigns it to globalThis) instead of vite's empty browser stub.
+		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "buffer": stdlib["buffer"] as string } },
 		"build": {
 			"outDir": "dist",
 			"minify": isCI,
