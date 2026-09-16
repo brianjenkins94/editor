@@ -1,10 +1,10 @@
 /**
  * Classify worker — runs BABLR's `classifyChange` (cosmetic vs semantic) OFF the main thread.
  *
- * BABLR is a VM interpreter: parsing a file is tens-to-hundreds of ms (it parses BOTH the HEAD and working
- * versions), far too slow to run on the workbench thread during an SCM refresh. So the git SCM posts each changed
- * file's (before, after) here and paints the "cosmetic only" badge when the verdict comes back. Plain postMessage
- * (no hub) — one request in, one verdict out, correlated by id.
+ * BABLR is a VM interpreter: parsing a file is tens-to-hundreds of ms (it parses BOTH versions), far too slow for
+ * the workbench thread. So a caller posts (before, after) here and gets the verdict back. Plain postMessage (no hub)
+ * — one request in, one verdict out, correlated by id. Git-agnostic: driven today by `cosmetic-classifier.ts`
+ * (which the git SCM binding consumes), reusable by anything else that needs the verdict.
  */
 import { classifyChange } from "@brianjenkins94/bablr";
 

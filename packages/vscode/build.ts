@@ -221,8 +221,9 @@ export async function preBuild(): Promise<void> {
 					"lsp/server-host": resolvePath("./extensions/worker-pod/server-host.ts"),
 					"lsp/debug-worker": resolvePath("./extensions/worker-pod/debug-worker.ts"),
 					"lsp/node-worker": resolvePath("./extensions/worker-pod/node-worker.ts"),
-					// A git/SCM worker (not part of the LSP pod), but served from lsp/ like the other worker chunks.
-					"lsp/git-classify-worker": resolvePath("./git-classify-worker.ts")
+					// BABLR cosmetic/semantic classify worker (not part of the LSP pod), served from lsp/ like the
+					// other worker chunks. Driven by cosmetic-classifier.ts.
+					"lsp/classify-worker": resolvePath("./classify-worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",
