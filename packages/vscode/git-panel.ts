@@ -209,7 +209,7 @@ const STYLE = `
 /* Side-by-side codehike diff: HEAD | working, sharing one grid so a row's height is the taller of its two cells
    (that's what keeps alignment under word wrap). Each line is a subgrid item = number gutter + wrapped code. */
 #diff-overlay-body .sxs { display: grid; align-items: stretch; padding-bottom: 8px;
-  grid-template-columns: minmax(0, 1fr) min-content 14px min-content minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 3.4em 14px 3.4em minmax(0, 1fr);
   font: 12px/1.6 "SF Mono", ui-monospace, monospace; }
 /* Center gutter bar (GitHub-Desktop split view): one per change hunk, spanning its rows, toggles the WHOLE change. */
 #diff-overlay-body .sxs-hunk { grid-column: 3; border: 0; padding: 2px 0 0; margin: 0; cursor: pointer;
@@ -218,19 +218,19 @@ const STYLE = `
 #diff-overlay-body .sxs-hunk:hover { background: #ffffff1a; color: var(--muted); }
 #diff-overlay-body .sxs-hunk.all { background: var(--accent); color: #fff; }
 #diff-overlay-body .sxs-hunk.partial { background: color-mix(in srgb, var(--accent) 45%, transparent); color: #fff; }
-/* Both number gutters hug the centre bar: the left pane packs its [✓ #] to the right, the right pane to the left. */
-#diff-overlay-body .sxs-num { display: flex; align-items: flex-start; gap: 4px; padding: 0 6px;
+/* Both number gutters hug the centre bar: the left pane packs its [✓ #] to the right, the right pane to the left.
+   A SELECTED changed line fills the whole gutter cell with the accent (checkmark + number in white) — consecutive
+   selected rows read as one solid column, like GitHub Desktop. */
+#diff-overlay-body .sxs-num { display: flex; align-items: flex-start; gap: 3px; padding: 0 6px;
   color: var(--muted); user-select: none; white-space: nowrap; }
 #diff-overlay-body .sxs-line.left .sxs-num { justify-content: flex-end; }
 #diff-overlay-body .sxs-line.right .sxs-num { justify-content: flex-start; }
-/* GitHub-Desktop-style line selector: a checkmark on a filled bar when selected (consecutive rows read as one bar);
-   an empty box on hover when excluded. */
-#diff-overlay-body .sxs-pick { flex: 0 0 auto; align-self: stretch; width: 16px; border: 0;
-  padding: 2px 0 0; cursor: pointer; display: flex; align-items: flex-start; justify-content: center; font-size: 10px;
-  line-height: 1; background: transparent; color: transparent; }
-#diff-overlay-body .sxs-line:hover .sxs-pick { color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
-#diff-overlay-body .sxs-pick.on { background: var(--accent); color: #fff; box-shadow: none; }
-#diff-overlay-body .sxs-line:hover .sxs-pick.on { color: #fff; }
+#diff-overlay-body .sxs-num.sel { background: var(--accent); }
+#diff-overlay-body .sxs-num.sel, #diff-overlay-body .sxs-num.sel .sxs-lineno { color: #fff; }
+#diff-overlay-body .sxs-pick { flex: 0 0 auto; width: 12px; height: 17px; border: 0; padding: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1;
+  background: transparent; color: inherit; }
+#diff-overlay-body .sxs-line:hover .sxs-num:not(.sel) .sxs-pick { color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
 /* Dividers flanking the centre bar (inner edge of each pane's number gutter). */
 #diff-overlay-body .sxs-line.left .sxs-num, #diff-overlay-body .sxs-empty.left { border-right: 1px solid var(--line); }
 #diff-overlay-body .sxs-line.right .sxs-num, #diff-overlay-body .sxs-empty.right { border-left: 1px solid var(--line); }

@@ -336,7 +336,8 @@ function sideHandlers(
 			const indent = typeof props.indentation === "number" ? props.indentation : 0;
 			const header = foldHeaders?.get(props.lineNumber);
 
-			const numCell = createElement("span", { "className": "sxs-num", "key": "n" },
+			const rowSelected = at.type !== "ctx" && !deselectedRows.has(at.index);
+			const numCell = createElement("span", { "className": "sxs-num" + (rowSelected ? " sel" : ""), "key": "n" },
 				at.type !== "ctx"
 					? createElement("button", {
 						"className": "sxs-pick" + (deselectedRows.has(at.index) ? "" : " on"),
