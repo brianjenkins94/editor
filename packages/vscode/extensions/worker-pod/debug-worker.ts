@@ -26,6 +26,7 @@ import React from "react";
 
 import ts from "typescript";
 import { capabilityBreakLines } from "../capabilities/capability-breakpoints";
+import { capabilityStandins, inert } from "../capabilities/canary";
 import { relayLoggerToHub } from "../../telemetry";
 import { createGuestRoot } from "./debug-react";
 
@@ -92,6 +93,22 @@ let guestRoot: GuestRoot | undefined;
 
 function nextAction(): Promise<Action> {
 	return new Promise((resolve) => { awaitAction = resolve; });
+}
+
+/**
+ * A debugged tsval run gets the SAME zero-authority capability surface the canary uses (shared `capabilityStandins`):
+ * `fetch` and node builtins (`node:fs`, `node:child_process`, …) resolve to inert, effect-free stand-ins, and any
+ * OTHER import resolves to a recursive inert proxy. Without this the guest crashes on the first `import` of a node
+ * builtin (there is no real module system in the worker) BEFORE reaching a capability breakpoint — the whole point of
+ * the hard-stop. Real effects belong to the almostnode "production" adapter, not to tsval's reverse-steppable VM.
+ */
+function capabilitySurface(): { "globals": Record<string, unknown>; "resolveModule": (specifier: string) => unknown } {
+	const standins = capabilityStandins();
+
+	return {
+		"globals": standins.globals,
+		"resolveModule": (specifier: string) => (Object.hasOwn(standins.modules, specifier) ? standins.modules[specifier] : inert())
+	};
 }
 
 /** A readable one-line rendering of a runtime value for the Variables pane. */
@@ -359,7 +376,7 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 				break;
 			}
 
-			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook });
+			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, ...capabilitySurface() });
 
 			sourceFile = loaded.sourceFile;
 			loaded.vm.addBreakpointsByLine(...message.lines);

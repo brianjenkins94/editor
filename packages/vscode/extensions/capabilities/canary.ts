@@ -86,7 +86,7 @@ function inertResponse(): unknown {
  * as empty, so `await`/destructuring/`for…of` don't hang or throw. Untagged: unmocked modules aren't classified
  * (a future refinement can tag known HTTP clients like axios); this is purely about not stopping the run.
  */
-function inert(): unknown {
+export function inert(): unknown {
 	function target(): void { /* inert */ }
 
 	return new Proxy(target, {
@@ -110,8 +110,11 @@ function inert(): unknown {
 	});
 }
 
-/** The tagged host globals + module stand-ins: resolvable AND inert during observation. */
-function capabilityStandins(): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
+/** The tagged host globals + module stand-ins: resolvable AND inert during observation. Shared with the tsval debug
+ *  worker so a debugged run has the SAME zero-authority surface as the canary — the guest can `import` node builtins
+ *  / call `fetch` and keep executing to a capability breakpoint instead of crashing on an unresolved module. (Real
+ *  effects are the almostnode "production" path's job, not tsval's.) */
+export function capabilityStandins(): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
 	const noop = (): void => { /* inert */ };
 	const fsMock = {
 		"readFile": tag("fs:read", async () => ""),
