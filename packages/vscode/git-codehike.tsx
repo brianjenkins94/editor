@@ -18,6 +18,7 @@
  * sets none today).
  */
 import type { AnnotationHandler } from "codehike/code";
+import type { ChangeKind } from "./cosmetic-classifier";
 import { highlight, InnerLine, Pre } from "codehike/code";
 import { createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -43,18 +44,30 @@ export interface DiffInput {
 	"lang": string;
 	/** The aligned diff rows, in display order. */
 	"rows": DiffRowInfo[];
+	/** BABLR's verdict for the whole change ("none" when not a modified code file). */
+	"verdict"?: ChangeKind | "none";
 }
 
 const ADD_BG = "#2ea04326";
 const DEL_BG = "#f8514926";
+const COSMETIC_BG = "#8a8a8a26";
 
-/** Background tint for a line, by row type and which side it's on. */
-function tint(type: DiffRowInfo["type"], side: "left" | "right"): string | undefined {
-	if (side === "left") {
-		return type === "del" || type === "mod" ? DEL_BG : undefined;
+/**
+ * Background tint for a line. A `cosmetic` verdict (whitespace/comments only) mutes every changed line to grey, so
+ * the reviewer's eye isn't pulled to changes that don't move the meaning; otherwise del/mod is red, add/mod green.
+ */
+function tint(type: DiffRowInfo["type"], side: "left" | "right", verdict: ChangeKind | "none"): string | undefined {
+	const changed = side === "left" ? type === "del" || type === "mod" : type === "add" || type === "mod";
+
+	if (!changed) {
+		return undefined;
 	}
 
-	return type === "add" || type === "mod" ? ADD_BG : undefined;
+	if (verdict === "cosmetic") {
+		return COSMETIC_BG;
+	}
+
+	return side === "left" ? DEL_BG : ADD_BG;
 }
 
 /**
@@ -63,7 +76,8 @@ function tint(type: DiffRowInfo["type"], side: "left" | "right"): string | undef
  */
 function sideHandlers(
 	side: "left" | "right",
-	lineToRow: Map<number, { "row": number; "type": DiffRowInfo["type"] }>
+	lineToRow: Map<number, { "row": number; "type": DiffRowInfo["type"] }>,
+	verdict: ChangeKind | "none"
 ): AnnotationHandler[] {
 	const cols = side === "left" ? "1 / span 2" : "3 / span 2";
 
@@ -91,7 +105,7 @@ function sideHandlers(
 					"gridTemplateColumns": "subgrid",
 					"gridColumn": cols,
 					"gridRow": at.row,
-					"background": tint(at.type, side)
+					"background": tint(at.type, side, verdict)
 				}
 			},
 			createElement("span", { "className": "sxs-num", "key": "n" }, props.lineNumber),
@@ -100,6 +114,21 @@ function sideHandlers(
 	};
 
 	return [contents, line];
+}
+
+/** The BABLR verdict banner above the diff (nothing for a non-classified change). */
+function banner(verdict: ChangeKind | "none" | undefined): ReactNode {
+	const label = verdict === "cosmetic" ? "Cosmetic change — whitespace & comments only"
+		: verdict === "semantic" ? "Semantic change"
+			: verdict === "unparsable" ? "Couldn’t parse — showing the raw text diff"
+				: undefined;
+
+	if (label === undefined) {
+		return null;
+	}
+
+	return createElement("div", { "className": "sxs-verdict " + verdict },
+		createElement("span", { "className": "sxs-dot" }), label);
 }
 
 /** Faint fill for the empty half of an add/del row, so the gutter reads as continuous. */
@@ -136,6 +165,8 @@ export async function mountDiff(host: HTMLElement, input: DiffInput): Promise<vo
 		}
 	});
 
+	const verdict = input.verdict ?? "none";
+
 	const [leftCode, rightCode] = await Promise.all([
 		highlight({ "value": input.head, "lang": input.lang, "meta": "" }, "github-dark"),
 		highlight({ "value": input.working, "lang": input.lang, "meta": "" }, "github-dark")
@@ -143,8 +174,8 @@ export async function mountDiff(host: HTMLElement, input: DiffInput): Promise<vo
 
 	const grid = createElement("div", { "className": "sxs" },
 		...spacers(input.rows),
-		createElement(Pre, { "code": leftCode, "handlers": sideHandlers("left", leftMap) }),
-		createElement(Pre, { "code": rightCode, "handlers": sideHandlers("right", rightMap) }));
+		createElement(Pre, { "code": leftCode, "handlers": sideHandlers("left", leftMap, verdict) }),
+		createElement(Pre, { "code": rightCode, "handlers": sideHandlers("right", rightMap, verdict) }));
 
 	let root = roots.get(host);
 
@@ -153,7 +184,7 @@ export async function mountDiff(host: HTMLElement, input: DiffInput): Promise<vo
 		roots.set(host, root);
 	}
 
-	root.render(grid);
+	root.render(createElement("div", { "className": "sxs-wrap" }, banner(verdict), grid));
 }
 
 /** Tear down the React root (when the diff pane is emptied). */

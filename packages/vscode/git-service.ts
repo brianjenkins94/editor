@@ -8,7 +8,7 @@
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
-import type { CosmeticClassifier } from "./cosmetic-classifier";
+import type { ChangeKind, CosmeticClassifier } from "./cosmetic-classifier";
 import { serve } from "@brianjenkins94/hub";
 import * as engine from "./git-engine";
 
@@ -70,7 +70,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		const path = (args as { "path"?: string } | null)?.path;
 
 		if (typeof path !== "string") {
-			return { "head": "", "working": "" };
+			return { "head": "", "working": "", "verdict": "none" };
 		}
 
 		let working = "";
@@ -79,7 +79,20 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 			working = await readWorking(path);
 		} catch { /* deleted in the working tree */ }
 
-		return { "head": await engine.headContent(path), "working": working };
+		const head = await engine.headContent(path);
+
+		// BABLR verdict for the whole change, so the diff can flag a cosmetic (whitespace/comments-only) edit and
+		// de-emphasise it. Only meaningful for a MODIFIED code file — added/deleted/non-code stay "none". One call
+		// per open, cached by content in the classifier.
+		let verdict: ChangeKind | "none" = "none";
+
+		if (head !== "" && working !== "" && CLASSIFIABLE.test(path)) {
+			try {
+				verdict = await classifier.classify(head, working);
+			} catch { /* unparsable / worker error → no banner */ }
+		}
+
+		return { "head": head, "working": working, "verdict": verdict };
 	});
 
 	serve(hub, "git.commit", async (args) => {

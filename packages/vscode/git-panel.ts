@@ -6,7 +6,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { createRpcClient } from "@brianjenkins94/hub";
-import type { DiffRowInfo } from "./git-codehike";
+import type { DiffInput, DiffRowInfo } from "./git-codehike";
 
 interface GitFileChange { "path": string; "status": "A" | "M" | "D"; "staged": boolean; "unstaged": boolean; "cosmetic": boolean }
 interface DiffRow { "t": "ctx" | "add" | "del"; "text": string }
@@ -156,6 +156,18 @@ const STYLE = `
 .gp .file .cos { font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .gp .file.cosmetic .nm { opacity: .6; }
 .gp .empty { padding: 24px 10px; color: var(--muted); text-align: center; }
+/* BABLR verdict banner — sticky at the top of the diff, colour-coded by whether the change moves the meaning. */
+#diff-overlay-body .sxs-wrap { display: flex; flex-direction: column; min-height: 100%; }
+#diff-overlay-body .sxs-verdict { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px; background: var(--chrome); border-bottom: 1px solid var(--line);
+  font: 500 11px -apple-system, "Segoe UI", system-ui, sans-serif; letter-spacing: .02em; }
+#diff-overlay-body .sxs-verdict .sxs-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+#diff-overlay-body .sxs-verdict.cosmetic { color: #9aa0a6; }
+#diff-overlay-body .sxs-verdict.cosmetic .sxs-dot { background: #9aa0a6; }
+#diff-overlay-body .sxs-verdict.semantic { color: #e0a35e; }
+#diff-overlay-body .sxs-verdict.semantic .sxs-dot { background: #e0a35e; }
+#diff-overlay-body .sxs-verdict.unparsable { color: #e0785e; }
+#diff-overlay-body .sxs-verdict.unparsable .sxs-dot { background: #e0785e; }
 /* Side-by-side codehike diff: HEAD | working, sharing one grid so a row's height is the taller of its two cells
    (that's what keeps alignment under word wrap). Each line is a subgrid item = number gutter + wrapped code. */
 #diff-overlay-body .sxs { display: grid; align-items: stretch; padding-bottom: 8px;
@@ -248,7 +260,8 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 			el.setAttribute("aria-current", String(el.dataset["path"] === path));
 		}
 
-		const { head, working } = await rpc.request("git.file", { "path": path }) as { "head": string; "working": string };
+		const { head, working, verdict } = await rpc.request("git.file", { "path": path }) as
+			{ "head": string; "working": string; "verdict"?: DiffInput["verdict"] };
 
 		overlay.title.textContent = path;
 		overlay.el.classList.add("open");
@@ -260,7 +273,7 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 		try {
 			const { mountDiff } = await import("./git-codehike");
 
-			await mountDiff(overlay.body, { "head": head, "working": working, "lang": langFor(path), "rows": rows });
+			await mountDiff(overlay.body, { "head": head, "working": working, "lang": langFor(path), "rows": rows, "verdict": verdict });
 			codehikeActive = true;
 		} catch (error) {
 			if (!codehikeActive) {
