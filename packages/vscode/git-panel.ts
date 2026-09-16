@@ -209,7 +209,7 @@ const STYLE = `
 /* Side-by-side codehike diff: HEAD | working, sharing one grid so a row's height is the taller of its two cells
    (that's what keeps alignment under word wrap). Each line is a subgrid item = number gutter + wrapped code. */
 #diff-overlay-body .sxs { display: grid; align-items: stretch; padding-bottom: 8px;
-  grid-template-columns: minmax(0, 1fr) 3.4em 14px 3.4em minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 4em 14px 4em minmax(0, 1fr);
   font: 12px/1.6 "SF Mono", ui-monospace, monospace; }
 /* Center gutter bar (GitHub-Desktop split view): one per change hunk, spanning its rows, toggles the WHOLE change. */
 #diff-overlay-body .sxs-hunk { grid-column: 3; border: 0; padding: 2px 0 0; margin: 0; cursor: pointer;
@@ -221,12 +221,14 @@ const STYLE = `
 /* Both number gutters hug the centre bar: the left pane packs its [✓ #] to the right, the right pane to the left.
    A SELECTED changed line fills the whole gutter cell with the accent (checkmark + number in white) — consecutive
    selected rows read as one solid column, like GitHub Desktop. */
-#diff-overlay-body .sxs-num { display: flex; align-items: flex-start; gap: 3px; padding: 0 6px;
-  color: var(--muted); user-select: none; white-space: nowrap; }
-#diff-overlay-body .sxs-line.left .sxs-num { justify-content: flex-end; }
-#diff-overlay-body .sxs-line.right .sxs-num { justify-content: flex-start; }
+#diff-overlay-body .sxs-num { display: flex; align-items: flex-start; justify-content: flex-start; gap: 3px;
+  padding: 0 6px; color: var(--muted); user-select: none; white-space: nowrap; }
+/* Number pinned to the outer-right of the gutter with tabular figures, so it lands in the same place on every row
+   regardless of the checkmark or fold chevron beside it. The chevron lives in a fixed-width slot for the same reason. */
+#diff-overlay-body .sxs-lineno { margin-left: auto; font-variant-numeric: tabular-nums; }
+#diff-overlay-body .sxs-fold-slot { flex: 0 0 auto; width: 11px; display: flex; align-items: flex-start; justify-content: center; }
 #diff-overlay-body .sxs-num.sel { background: var(--accent); }
-#diff-overlay-body .sxs-num.sel, #diff-overlay-body .sxs-num.sel .sxs-lineno { color: #fff; }
+#diff-overlay-body .sxs-num.sel, #diff-overlay-body .sxs-num.sel .sxs-lineno, #diff-overlay-body .sxs-num.sel .sxs-fold { color: #fff; }
 #diff-overlay-body .sxs-pick { flex: 0 0 auto; width: 12px; height: 17px; border: 0; padding: 0; cursor: pointer;
   display: flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1;
   background: transparent; color: inherit; }

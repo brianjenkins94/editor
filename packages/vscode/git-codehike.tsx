@@ -314,6 +314,7 @@ function sideHandlers(
 	onToggleRow: (index: number) => void
 ): AnnotationHandler[] {
 	const cols = side === "left" ? "1 / span 2" : "4 / span 2";
+	const hasFolds = foldHeaders !== undefined && foldHeaders.size > 0;
 
 	const contents: AnnotationHandler = {
 		"name": "sxs-contents",
@@ -346,13 +347,15 @@ function sideHandlers(
 						"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleRow(at.index); }
 					}, deselectedRows.has(at.index) ? "" : "✓")
 					: null,
-				header !== undefined
-					? createElement("button", {
-						"className": "sxs-fold",
-						"key": "b",
-						"title": header.folded ? "Unfold " + header.count + " lines" : "Fold block",
-						"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleFold(header.id); }
-					}, header.folded ? "▸" : "▾")
+				hasFolds
+					? createElement("span", { "className": "sxs-fold-slot", "key": "b" },
+						header !== undefined
+							? createElement("button", {
+								"className": "sxs-fold",
+								"title": header.folded ? "Unfold " + header.count + " lines" : "Fold block",
+								"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleFold(header.id); }
+							}, header.folded ? "▸" : "▾")
+							: null)
 					: null,
 				createElement("span", { "className": "sxs-lineno", "key": "l" }, props.lineNumber));
 
