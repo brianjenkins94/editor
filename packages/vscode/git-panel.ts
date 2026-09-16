@@ -6,6 +6,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { createRpcClient } from "@brianjenkins94/hub";
+import type { DiffRowInfo } from "./git-codehike";
 
 interface GitFileChange { "path": string; "status": "A" | "M" | "D"; "staged": boolean; "unstaged": boolean; "cosmetic": boolean }
 interface DiffRow { "t": "ctx" | "add" | "del"; "text": string }
@@ -85,6 +86,51 @@ function collapse(rows: DiffRow[]): (DiffRow | { "t": "gap"; "text": string })[]
 	return out;
 }
 
+/**
+ * Turn the flat LCS diff into the row-aligned form the side-by-side renderer wants, pairing each run of deletions
+ * with the additions that follow it (del[k] ↔ add[k]) into `mod` rows so a replaced line sits opposite its
+ * replacement; any leftover on either side stays a single-sided `del` / `add` row.
+ */
+function buildRows(before: string, after: string): DiffRowInfo[] {
+	const diff = lineDiff(before, after);
+	const rows: DiffRowInfo[] = [];
+	let leftNo = 0;
+	let rightNo = 0;
+	let k = 0;
+
+	while (k < diff.length) {
+		if (diff[k].t === "ctx") {
+			leftNo += 1;
+			rightNo += 1;
+			rows.push({ "type": "ctx", "leftNo": leftNo, "rightNo": rightNo });
+			k += 1;
+
+			continue;
+		}
+
+		const dels: number[] = [];
+		const adds: number[] = [];
+
+		while (k < diff.length && diff[k].t === "del") { leftNo += 1; dels.push(leftNo); k += 1; }
+		while (k < diff.length && diff[k].t === "add") { rightNo += 1; adds.push(rightNo); k += 1; }
+
+		for (let p = 0; p < Math.max(dels.length, adds.length); p += 1) {
+			const l = dels[p];
+			const r = adds[p];
+
+			if (l !== undefined && r !== undefined) {
+				rows.push({ "type": "mod", "leftNo": l, "rightNo": r });
+			} else if (l !== undefined) {
+				rows.push({ "type": "del", "leftNo": l });
+			} else {
+				rows.push({ "type": "add", "rightNo": r });
+			}
+		}
+	}
+
+	return rows;
+}
+
 const STYLE = `
 .gp { display: flex; flex-direction: column; gap: 0; height: 100%; font-size: 13px; }
 #git-panel { height: 100%; }
@@ -110,7 +156,16 @@ const STYLE = `
 .gp .file .cos { font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .gp .file.cosmetic .nm { opacity: .6; }
 .gp .empty { padding: 24px 10px; color: var(--muted); text-align: center; }
-/* Plain-diff fallback content, rendered into the shell's overlay body (outside .gp). codehike brings its own CSS. */
+/* Side-by-side codehike diff: HEAD | working, sharing one grid so a row's height is the taller of its two cells
+   (that's what keeps alignment under word wrap). Each line is a subgrid item = number gutter + wrapped code. */
+#diff-overlay-body .sxs { display: grid; align-items: stretch; padding-bottom: 8px;
+  grid-template-columns: min-content minmax(0, 1fr) min-content minmax(0, 1fr);
+  font: 12px/1.6 "SF Mono", ui-monospace, monospace; }
+#diff-overlay-body .sxs-num { text-align: right; padding: 0 8px; color: var(--muted); user-select: none; white-space: nowrap; }
+#diff-overlay-body .sxs-line.right .sxs-num, #diff-overlay-body .sxs-empty.right { border-left: 1px solid var(--line); }
+#diff-overlay-body .sxs-code { padding: 0 10px; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+#diff-overlay-body .sxs-empty { background: #ffffff05; }
+/* Plain-diff fallback content, rendered into the overlay body (outside .gp) when the codehike island can't load. */
 #diff-overlay-body .diff { font: 12px/1.5 "SF Mono", ui-monospace, monospace; padding: 4px 0; }
 #diff-overlay-body .diff .row { padding: 0 12px; white-space: pre-wrap; }
 #diff-overlay-body .diff .add { background: #4ec9b022; color: #cfeee6; }
@@ -198,25 +253,14 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 		overlay.title.textContent = path;
 		overlay.el.classList.add("open");
 
-		// added working-line numbers (for the codehike line marks), derived from the LCS diff
-		const addedLines: number[] = [];
-		let workingLine = 0;
-
-		for (const row of lineDiff(head, working)) {
-			if (row.t === "add") {
-				workingLine += 1;
-				addedLines.push(workingLine);
-			} else if (row.t === "ctx") {
-				workingLine += 1;
-			}
-		}
+		const rows: DiffRowInfo[] = buildRows(head, working);
 
 		// Lazy-load the codehike island (react + codehike + shiki) on first diff; fall back to the plain diff if the
 		// module can't load. Once codehike owns overlay.body (a React root), never touch it with innerHTML again.
 		try {
 			const { mountDiff } = await import("./git-codehike");
 
-			await mountDiff(overlay.body, { "working": working, "addedLines": addedLines, "lang": langFor(path) });
+			await mountDiff(overlay.body, { "head": head, "working": working, "lang": langFor(path), "rows": rows });
 			codehikeActive = true;
 		} catch (error) {
 			if (!codehikeActive) {
