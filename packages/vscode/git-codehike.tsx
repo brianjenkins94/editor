@@ -344,15 +344,12 @@ function sideHandlers(
 			},
 			createElement("span", { "className": "sxs-num", "key": "n" },
 				at.type !== "ctx"
-					? createElement("input", {
-						"type": "checkbox",
-						"className": "sxs-pick",
+					? createElement("button", {
+						"className": "sxs-pick" + (deselectedRows.has(at.index) ? "" : " on"),
 						"key": "p",
-						"title": "Include this change in the commit",
-						"checked": !deselectedRows.has(at.index),
-						"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); },
-						"onChange": () => { onToggleRow(at.index); }
-					})
+						"title": deselectedRows.has(at.index) ? "Include this line in the commit" : "Exclude this line from the commit",
+						"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleRow(at.index); }
+					}, deselectedRows.has(at.index) ? "" : "✓")
 					: null,
 				header !== undefined
 					? createElement("button", {

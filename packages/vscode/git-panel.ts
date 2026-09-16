@@ -212,8 +212,15 @@ const STYLE = `
   grid-template-columns: min-content minmax(0, 1fr) min-content minmax(0, 1fr);
   font: 12px/1.6 "SF Mono", ui-monospace, monospace; }
 #diff-overlay-body .sxs-num { display: flex; justify-content: flex-end; align-items: center; gap: 4px;
-  padding: 0 8px; color: var(--muted); user-select: none; white-space: nowrap; }
-#diff-overlay-body .sxs-pick { margin: 0; cursor: pointer; accent-color: var(--accent); width: 12px; height: 12px; flex: 0 0 auto; }
+  padding: 0 8px 0 0; color: var(--muted); user-select: none; white-space: nowrap; }
+/* GitHub-Desktop-style line selector: a checkmark on a filled bar when selected (consecutive rows read as one bar);
+   an empty box on hover when excluded. Pinned to the gutter's outer edge via margin-right:auto. */
+#diff-overlay-body .sxs-pick { flex: 0 0 auto; align-self: stretch; margin-right: auto; width: 16px; border: 0;
+  padding: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 10px;
+  line-height: 1; background: transparent; color: transparent; }
+#diff-overlay-body .sxs-line:hover .sxs-pick { color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
+#diff-overlay-body .sxs-pick.on { background: var(--accent); color: #fff; box-shadow: none; }
+#diff-overlay-body .sxs-line:hover .sxs-pick.on { color: #fff; }
 #diff-overlay-body .sxs-line.right .sxs-num, #diff-overlay-body .sxs-empty.right { border-left: 1px solid var(--line); }
 #diff-overlay-body .sxs-code { padding: 0 10px; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 #diff-overlay-body .sxs-empty { background: #ffffff05; }
