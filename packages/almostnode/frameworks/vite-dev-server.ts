@@ -470,15 +470,44 @@ export class ViteDevServer extends DevServer {
    * Transform and serve a JSX/TS file
    */
 	private async transformAndServe(filePath: string, urlPath: string): Promise<ResponseData> {
-		try {
-			const content = this.vfs.readFileSync(filePath, "utf8");
-			const hash = simpleHash(content);
+		// A transform can transiently fail on the very first (cold) request for a module — e.g. the file isn't yet
+		// visible in the worker's shared zen-fs, or the transform pipeline loses a cold-start race with a
+		// near-simultaneous request for a sibling module. Retry a few times so the FIRST response is still a correct
+		// module: the failure mode we must avoid is serving a bad module as a linkable 200 (see the 500 below), which
+		// a browser caches — poisoning every importer's `import { X }` link permanently until a manual reload.
+		let lastError: unknown;
 
-      // Check transform cache
-			const cached = this.transformCache.get(filePath);
+		for (let attempt = 0; attempt < 5; attempt += 1) {
+			try {
+				const content = this.vfs.readFileSync(filePath, "utf8");
+				const hash = simpleHash(content);
 
-			if (cached && cached.hash === hash) {
-				const buffer = Buffer.from(cached.code);
+        // Check transform cache (a concurrent request may have populated it between our attempts)
+				const cached = this.transformCache.get(filePath);
+
+				if (cached && cached.hash === hash) {
+					const buffer = Buffer.from(cached.code);
+
+					return {
+						"statusCode": 200,
+						"statusMessage": "OK",
+						"headers": {
+							"Content-Type": "application/javascript; charset=utf-8",
+							"Content-Length": String(buffer.length),
+							"Cache-Control": "no-cache",
+							"X-Transformed": "true",
+							"X-Cache": "hit"
+						},
+						"body": buffer
+					};
+				}
+
+				const transformed = await this.transformCode(content, urlPath);
+
+        // Cache the transform result
+				this.transformCache.set(filePath, { "code": transformed, "hash": hash });
+
+				const buffer = Buffer.from(transformed);
 
 				return {
 					"statusCode": 200,
@@ -487,46 +516,35 @@ export class ViteDevServer extends DevServer {
 						"Content-Type": "application/javascript; charset=utf-8",
 						"Content-Length": String(buffer.length),
 						"Cache-Control": "no-cache",
-						"X-Transformed": "true",
-						"X-Cache": "hit"
+						"X-Transformed": "true"
 					},
 					"body": buffer
 				};
+			} catch (error) {
+				lastError = error;
+				// Brief backoff, then retry — recovers the cold-start race within this single request.
+				await new Promise<void>((resolve) => { setTimeout(resolve, 50); });
 			}
-
-			const transformed = await this.transformCode(content, urlPath);
-
-      // Cache the transform result
-			this.transformCache.set(filePath, { "code": transformed, "hash": hash });
-
-			const buffer = Buffer.from(transformed);
-
-			return {
-				"statusCode": 200,
-				"statusMessage": "OK",
-				"headers": {
-					"Content-Type": "application/javascript; charset=utf-8",
-					"Content-Length": String(buffer.length),
-					"Cache-Control": "no-cache",
-					"X-Transformed": "true"
-				},
-				"body": buffer
-			};
-		} catch (error) {
-			console.error("[ViteDevServer] Transform error:", error);
-			const message = error instanceof Error ? error.message : "Transform failed";
-			const body = `// Transform Error: ${message}\nconsole.error(${JSON.stringify(message)});`;
-
-			return {
-				"statusCode": 200, // Return 200 with error in code to show in browser console
-				"statusMessage": "OK",
-				"headers": {
-					"Content-Type": "application/javascript; charset=utf-8",
-					"X-Transform-Error": "true"
-				},
-				"body": Buffer.from(body)
-			};
 		}
+
+		// Retries exhausted → treat as a genuine failure (e.g. a real syntax error in the source). Return 500, NOT a
+		// 200 whose body is an export-less error module: a 500 is a failed fetch the browser retries on the next load
+		// and never caches as a linked module, whereas a 200 error-module links successfully with no exports and
+		// permanently breaks every `import { X } from './that-module'` that depends on it.
+		const message = lastError instanceof Error ? lastError.message : "Transform failed";
+
+		console.error("[ViteDevServer] Transform error (after retries):", urlPath, lastError);
+
+		return {
+			"statusCode": 500,
+			"statusMessage": "Transform Error",
+			"headers": {
+				"Content-Type": "text/plain; charset=utf-8",
+				"Cache-Control": "no-cache",
+				"X-Transform-Error": "true"
+			},
+			"body": Buffer.from(`Transform error for ${urlPath}: ${message}`)
+		};
 	}
 
   /**
