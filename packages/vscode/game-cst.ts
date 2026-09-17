@@ -12,7 +12,7 @@
  * tree (covers nested outside their concrete node) and, when walking, flatten cover wrappers while propagating
  * their `field` down — so `kids(call)` yields the concrete arguments already tagged `field: "arguments"`.
  */
-import { cstSpans, nodeAtoms, reidentify } from "@brianjenkins94/bablr";
+import { cstSpans, reidentify } from "@brianjenkins94/bablr";
 
 export interface Node {
 	"type": string | null;
@@ -25,9 +25,11 @@ export interface Node {
 	"children": Node[];
 }
 
-/** Parse `code` into a CST tree (a synthetic `Program` root spanning the whole source). */
-export function parse(code: string): Node {
-	const { spans } = cstSpans(code) as { "spans": { "type": string | null; "field": string | null; "start": number; "end": number; "token": boolean; "cover": boolean }[] };
+/** The raw span shape `cstSpans` emits (close order, with trivia/cover/token flags). */
+type RawSpan = { "type": string | null; "field": string | null; "start": number; "end": number; "token": boolean; "cover": boolean; "trivia": boolean };
+
+/** Build the CST tree from already-computed spans (a synthetic `Program` root spanning the source). */
+function buildTree(spans: RawSpan[], code: string): Node {
 	// Pre-order: outer node first; for an equal span (a cover chain) the outer one closed LATER, i.e. has the
 	// higher original (close-order) index — so break ties by index descending.
 	const ordered = spans.map((span, index) => ({ span, index }))
@@ -54,6 +56,22 @@ export function parse(code: string): Node {
 	}
 
 	return root;
+}
+
+/** Parse `code` into a CST tree (a synthetic `Program` root spanning the whole source). */
+export function parse(code: string): Node {
+	return buildTree((cstSpans(code) as { "spans": RawSpan[] }).spans, code);
+}
+
+/**
+ * Parse ONCE, returning both the CST tree and the stable-identity view — a single `cstSpans` pass feeds both.
+ * BABLR is slow, so a file is never parsed more than once (previously extraction, the identity spans, and
+ * `nodeAtoms` each re-parsed — three passes; this is one).
+ */
+export function parseSource(code: string): { "root": Node; "identity": Identity } {
+	const spans = (cstSpans(code) as { "spans": RawSpan[] }).spans;
+
+	return { "root": buildTree(spans, code), "identity": identityFromSpans(spans, code) };
 }
 
 /** Direct children with cover wrappers flattened away, propagating a cover's `field` onto its concrete child. */
@@ -163,14 +181,30 @@ function lineAt(code: string, offset: number): number {
 	return line;
 }
 
+/** The trivia-insensitive atom of each non-trivia span — a local, verified-identical replica of BABLR's own
+ *  `atomsFromSpans` (`type\t<JSON tokenText>`), so we derive atoms from the spans we ALREADY have instead of
+ *  re-parsing via `nodeAtoms`. Identical atoms → identical ids, consistent with the comments/history spine. */
+function atomsFromSpans(code: string, spans: RawSpan[]): string[] {
+	const atoms: string[] = [];
+
+	for (const span of spans) {
+		if (span.trivia) {
+			continue;
+		}
+
+		atoms.push((span.type ?? "") + "\t" + (span.token ? JSON.stringify(code.slice(span.start, span.end)) : ""));
+	}
+
+	return atoms;
+}
+
 /**
- * Compute stable node identity for `code`: BABLR's `reidentify(null, nodeAtoms(code))` yields a snapshot whose
- * nodes align 1:1 with the non-trivia spans (the same alignment history-identity uses), so each concrete node
- * gets a durable id + line. Ids survive edits via `reidentify` (verified) — the basis for anchoring event-sheet
- * data, dispositions, breakpoints, comments and history to a node as it moves.
+ * Stable node identity from already-computed spans: `reidentify(null, atoms)` yields a snapshot whose nodes align
+ * 1:1 with the non-trivia spans (the alignment history-identity uses), so each concrete node gets a durable id +
+ * line. Ids survive edits via `reidentify` — the basis for anchoring event-sheet data, dispositions, breakpoints,
+ * comments and history to a node as it moves. No re-parse: atoms come from the passed spans.
  */
-export function identify(code: string): Identity {
-	const { spans } = cstSpans(code) as { "spans": { "start": number; "end": number; "cover": boolean; "trivia": boolean }[] };
+function identityFromSpans(spans: RawSpan[], code: string): Identity {
 	const nonTrivia = spans.filter((span) => !span.trivia);
 	const byRange = new Map<string, string>();
 	const nodeLines: Record<string, number> = {};
@@ -178,7 +212,7 @@ export function identify(code: string): Identity {
 	let nodes: { "id": unknown }[] = [];
 
 	try {
-		nodes = (reidentify(null, nodeAtoms(code)) as { "nodes": { "id": unknown }[] }).nodes;
+		nodes = (reidentify(null, atomsFromSpans(code, spans)) as { "nodes": { "id": unknown }[] }).nodes;
 	} catch { /* unparsable — no identity, callers fall back to spans */ }
 
 	nodes.forEach((node, index) => {
@@ -204,6 +238,11 @@ export function identify(code: string): Identity {
 		"lineOf": (node) => lineAt(code, node.start),
 		"nodeLines": nodeLines
 	};
+}
+
+/** Stable node identity for `code` (parses once). Prefer `parseSource` when you also need the tree. */
+export function identify(code: string): Identity {
+	return identityFromSpans((cstSpans(code) as { "spans": RawSpan[] }).spans, code);
 }
 
 /** Concrete property entries of an `Object` node: `[keyText, valueNode]` per property.

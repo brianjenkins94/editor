@@ -6,7 +6,7 @@
  * Every projected element that maps to a single source node carries that node's span, so the view can edit it
  * back surgically (paint a tile → replace one gid literal). It's a projection of the CST, not regex over text.
  */
-import { arrayElements, callArguments, callsNamed, calleeName, findAll, identify, kids, numberValue, objectProperties, parse, stringValue } from "./game-cst";
+import { arrayElements, callArguments, callsNamed, calleeName, findAll, kids, numberValue, objectProperties, parse, parseSource, stringValue } from "./game-cst";
 import type { Identity, Node } from "./game-cst";
 import type { Component, EntityType, GameProjection, Layer, Level, PlacedTile, ProjectSources, System, Tileset } from "./game-model";
 
@@ -23,8 +23,7 @@ function cellGid(cell: Node): number {
 }
 
 /** Extract the level (Tilemap builder) into a Level model, with per-cell spans + stable node ids. */
-export function extractLevel(file: string, code: string, identity: Identity): Level | undefined {
-	const root = parse(code);
+export function extractLevel(file: string, root: Node, identity: Identity): Level | undefined {
 	const ctorArgs = constructorArgs(root, "Tilemap");
 
 	if (ctorArgs === undefined) {
@@ -93,8 +92,7 @@ export function extractLevel(file: string, code: string, identity: Identity): Le
 }
 
 /** Extract an ECS component from one schema file (`export const X = {…}` / `= []`), anchored to its name node. */
-export function extractComponent(code: string, identity: Identity): Component | undefined {
-	const root = parse(code);
+export function extractComponent(root: Node, identity: Identity): Component | undefined {
 	const declarator = findAll(root, (node) => node.type === "VariableDeclarator")[0];
 
 	if (declarator === undefined) {
@@ -123,8 +121,7 @@ export function extractComponent(code: string, identity: Identity): Component | 
 
 /** Extract the object-spawn wiring from game.ts's `load(scene, name, level, { <obj>: {components, depth} })`,
  *  each anchored to its config Object node. */
-export function extractEntities(gameCode: string, identity: Identity): EntityType[] {
-	const root = parse(gameCode);
+export function extractEntities(root: Node, identity: Identity): EntityType[] {
 	const config = callArguments(callsNamed(root, "load")[0] ?? root).find((argument) => argument.type === "Object");
 
 	if (config === undefined) {
@@ -147,8 +144,7 @@ export function extractEntities(gameCode: string, identity: Identity): EntityTyp
 
 /** The Identifier nodes of `scene.systems = [a, b, c]` (the non-empty assignment) in execution order — each is
  *  the anchor a system's event-sheet row / breakpoint / disposition pins to. */
-export function extractSystemNodes(gameCode: string): Node[] {
-	const root = parse(gameCode);
+export function extractSystemNodes(root: Node): Node[] {
 	let best: Node[] = [];
 
 	for (const assignment of findAll(root, (node) => node.type === "AssignmentExpression")) {
@@ -191,20 +187,28 @@ export function systemFileBase(name: string): string {
  *  its stable BABLR node id, and every identified node's line is merged into `nodeLines` (id → line). */
 export function extractProjection(sources: ProjectSources): GameProjection {
 	const nodeLines: Record<string, number> = {};
-	const merge = (identity: Identity): Identity => {
-		Object.assign(nodeLines, identity.nodeLines);
+	// Parse each file ONCE (parseSource → tree + identity from one cstSpans) and merge its id→line map.
+	const source = (code: string): { "root": Node; "identity": Identity } => {
+		const parsed = parseSource(code);
 
-		return identity;
+		Object.assign(nodeLines, parsed.identity.nodeLines);
+
+		return parsed;
 	};
 
-	const level = sources.levelFile !== undefined && sources.levelCode !== undefined
-		? extractLevel(sources.levelFile, sources.levelCode, merge(identify(sources.levelCode)))
-		: undefined;
+	let level: Level | undefined;
+
+	if (sources.levelFile !== undefined && sources.levelCode !== undefined) {
+		const { root, identity } = source(sources.levelCode);
+
+		level = extractLevel(sources.levelFile, root, identity);
+	}
 
 	const components: Component[] = [];
 
 	for (const schema of sources.schemas) {
-		const component = extractComponent(schema.code, merge(identify(schema.code)));
+		const { root, identity } = source(schema.code);
+		const component = extractComponent(root, identity);
 
 		if (component !== undefined) {
 			components.push(component);
@@ -215,20 +219,20 @@ export function extractProjection(sources: ProjectSources): GameProjection {
 	const systems: System[] = [];
 
 	if (sources.gameCode !== undefined) {
-		const gameIdentity = merge(identify(sources.gameCode));
+		const { root, identity } = source(sources.gameCode);
 
-		for (const object of extractEntities(sources.gameCode, gameIdentity)) {
+		for (const object of extractEntities(root, identity)) {
 			objects.push(object);
 		}
 
 		const byBase = new Map(sources.systems.map((entry) => [entry.file.slice(entry.file.lastIndexOf("/") + 1).replace(/\.ts$/u, ""), entry.code]));
 
-		for (const node of extractSystemNodes(sources.gameCode)) {
+		for (const node of extractSystemNodes(root)) {
 			const name = node.text;
 			const code = byBase.get(systemFileBase(name));
 			const parsed = code !== undefined ? extractSystem(name, code) : { "name": name, "queries": [], "body": "" };
 
-			systems.push({ ...parsed, "nodeId": gameIdentity.idOf(node) });
+			systems.push({ ...parsed, "nodeId": identity.idOf(node) });
 		}
 	}
 
