@@ -35,12 +35,29 @@ async function main(): Promise<void> {
 	await mcp.connect(new StdioServerTransport());
 	console.error("[debug-mcp] MCP server ready on stdio");
 
+	let closing = false;
 	const shutdown = (): void => {
+		if (closing) {
+			return;
+		}
+
+		closing = true;
+		// Hard stop after a beat so a hung close() (e.g. a socket that won't finish closing) can't leave us holding
+		// the port — the exact orphan this teardown exists to prevent. unref so it never keeps us alive on its own.
+		setTimeout(() => process.exit(0), 1000).unref();
 		void debugMcp.close().then(() => process.exit(0));
 	};
 
 	process.on("SIGINT", shutdown);
 	process.on("SIGTERM", shutdown);
+
+	// The MCP client (our stdio parent) doesn't always signal on the way out — it can just close the pipe. Without
+	// this the process kept running and kept the WS port bound, so the NEXT debug-mcp couldn't bind (EADDRINUSE)
+	// and every reconnect died until the orphan was killed by hand. Exit when the client's half of the stdio
+	// channel ends/closes, so the port is freed the instant the client disconnects. (Do NOT override
+	// transport.onclose — the MCP SDK owns that for its own teardown; observing stdin is independent of it.)
+	process.stdin.on("end", shutdown);
+	process.stdin.on("close", shutdown);
 }
 
 void main().catch((error: unknown) => {
