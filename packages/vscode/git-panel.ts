@@ -239,10 +239,11 @@ const STYLE = `
 #diff-overlay-body .sxs-line.right .sxs-num, #diff-overlay-body .sxs-empty.right { border-left: 1px solid var(--line); }
 #diff-overlay-body .sxs-code { padding: 0 10px; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 #diff-overlay-body .sxs-empty { background: #ffffff05; }
-/* Focus dimming: once BABLR reports the change is cosmetic, the changed rows fade DOWN (transition = lazy fade-in). */
-#diff-overlay-body .sxs-line, #diff-overlay-body .sxs-hunk { transition: opacity .45s ease; }
-#diff-overlay-body .sxs.dim .sxs-line.chg, #diff-overlay-body .sxs.dim .sxs-hunk { opacity: .4; }
-#diff-overlay-body .sxs.dim .sxs-line.chg:hover { opacity: 1; }
+/* Per-line focus: once BABLR reports back, a changed line that carries NO semantic (node-level) change fades DOWN,
+   so the eye stays on real edits. Transition doubles as the lazy fade-in when the verdict arrives; hover restores. */
+#diff-overlay-body .sxs-line { transition: opacity .45s ease; }
+#diff-overlay-body .sxs-line.faded { opacity: .38; }
+#diff-overlay-body .sxs-line.faded:hover { opacity: 1; }
 /* Right-click discard menu. */
 #diff-overlay-body .sxs-menu-backdrop { position: fixed; inset: 0; z-index: 50; }
 #diff-overlay-body .sxs-menu { position: fixed; min-width: 180px; background: var(--chrome); border: 1px solid var(--line);
@@ -435,9 +436,13 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 					deselected.delete(path); // touching lines means the file is (partially) IN, not fully excluded
 					syncSelectionUi();
 				},
-				// Lazy BABLR verdict (drives the banner + cosmetic fade) — requested after the diff is on screen. No
-				// shell-side cache: a content-approximate key can be wrong, and the real fix is stable line identity.
-				"classify": async () => (await rpc.request("git.classify", { "path": path }) as { "verdict": ChangeKind | "none" }).verdict,
+				// Lazy BABLR verdict + per-node changed lines (drives the banner and the per-line focus fade) — requested
+				// after the diff is on screen. No shell-side cache: identity is the correct key, computed in the worker.
+				"classify": async () => {
+					const result = await rpc.request("git.classify", { "path": path }) as { "verdict": ChangeKind | "none"; "changedLines"?: number[] };
+
+					return { "verdict": result.verdict, "changedLines": result.changedLines ?? [] };
+				},
 				// Discard a hunk: recompute the working content with those rows reverted to HEAD, then write it back.
 				"onDiscardRows": async (hunkRows) => {
 					const fresh = await rpc.request("git.file", { "path": path }) as { "head": string; "working": string };

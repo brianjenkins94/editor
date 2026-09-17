@@ -58,13 +58,13 @@ export interface DiffInput {
 	"onRowSelection"?: (deselected: number[]) => void;
 	/** Discard the given change rows (revert them to HEAD in the working tree). */
 	"onDiscardRows"?: (rows: number[]) => void;
-	/** Classify the whole change with BABLR — called lazily after the diff is shown (BABLR is slow). */
-	"classify"?: () => Promise<ChangeKind | "none">;
+	/** Classify the whole change with BABLR — called lazily after the diff is shown (BABLR is slow). Returns the
+	 *  whole-file verdict plus the WORKING line numbers that carry a semantic (node-level) change. */
+	"classify"?: () => Promise<{ "verdict": ChangeKind | "none"; "changedLines": number[] }>;
 }
 
 const ADD_BG = "#2ea04326";
 const DEL_BG = "#f8514926";
-const COSMETIC_BG = "#8a8a8a26";
 
 /** github-dark colours for string & comment tokens — braces inside these don't count toward block depth. */
 const NON_CODE_COLORS = new Set(["#a5d6ff", "#8b949e"]);
@@ -76,22 +76,12 @@ interface Rendered { "row": number; "type": DiffRowInfo["type"]; "index": number
 interface FoldRegion { "id": string; "startRow": number; "endRow": number; "count": number }
 interface FoldHeader { "id": string; "folded": boolean; "count": number }
 
-/**
- * Background tint for a line. A `cosmetic` verdict (whitespace/comments only) mutes every changed line to grey, so
- * the reviewer's eye isn't pulled to changes that don't move the meaning; otherwise del/mod is red, add/mod green.
- */
-function tint(type: DiffRowInfo["type"], side: "left" | "right", verdict: ChangeKind | "none"): string | undefined {
+/** Background tint for a changed line: del/mod red on the left, add/mod green on the right. De-emphasis of cosmetic
+ *  changes is done per-line with opacity (the `.faded` class), driven by node-level identity — not by the tint. */
+function tint(type: DiffRowInfo["type"], side: "left" | "right"): string | undefined {
 	const changed = side === "left" ? type === "del" || type === "mod" : type === "add" || type === "mod";
 
-	if (!changed) {
-		return undefined;
-	}
-
-	if (verdict === "cosmetic") {
-		return COSMETIC_BG;
-	}
-
-	return side === "left" ? DEL_BG : ADD_BG;
+	return changed ? (side === "left" ? DEL_BG : ADD_BG) : undefined;
 }
 
 /**
@@ -309,7 +299,7 @@ function banner(verdict: ChangeKind | "none"): ReactNode {
 function sideHandlers(
 	side: "left" | "right",
 	lineToRow: Map<number, Rendered>,
-	verdict: ChangeKind | "none",
+	fadedRows: ReadonlySet<number>,
 	foldHeaders: Map<number, FoldHeader> | undefined,
 	onToggleFold: (id: string) => void,
 	deselectedRows: ReadonlySet<number>,
@@ -376,13 +366,13 @@ function sideHandlers(
 			const cells = side === "left" ? [codeCell, numCell] : [numCell, codeCell];
 
 			return createElement("div", {
-				"className": "sxs-line " + side + (at.type !== "ctx" ? " chg" : ""),
+				"className": "sxs-line " + side + (at.type !== "ctx" ? " chg" : "") + (fadedRows.has(at.index) ? " faded" : ""),
 				"style": {
 					"display": "grid",
 					"gridTemplateColumns": "subgrid",
 					"gridColumn": cols,
 					"gridRow": at.row,
-					"background": tint(at.type, side, verdict)
+					"background": tint(at.type, side)
 				}
 			}, ...cells);
 		}
@@ -401,14 +391,15 @@ function Diff(props: {
 	"deselectedRows"?: number[];
 	"onRowSelection"?: (deselected: number[]) => void;
 	"onDiscardRows"?: (rows: number[]) => void;
-	"classify"?: () => Promise<ChangeKind | "none">;
+	"classify"?: () => Promise<{ "verdict": ChangeKind | "none"; "changedLines": number[] }>;
 }): ReactNode {
 	const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
 	const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
 	const [deselectedRows, setDeselectedRows] = useState<ReadonlySet<number>>(() => new Set(props.deselectedRows));
-	// The BABLR verdict arrives LAZILY (it's slow); until then the diff shows at full strength, then cosmetic changes
-	// fade down. "none" = not yet known / not applicable.
+	// The BABLR verdict + per-node changed lines arrive LAZILY (parsing is slow); until then the diff shows at full
+	// strength, then the changed lines that DON'T carry a semantic node fade down. "none" = not yet known / n/a.
 	const [verdict, setVerdict] = useState<ChangeKind | "none">("none");
+	const [changedLines, setChangedLines] = useState<ReadonlySet<number>>(() => new Set());
 	const [menu, setMenu] = useState<{ "x": number; "y": number; "rows": number[] } | null>(null);
 
 	// Reset the per-line selection when the file's CONTENT changes (e.g. after a partial commit) while the same file
@@ -420,6 +411,7 @@ function Diff(props: {
 		lastContentKey.current = props.contentKey;
 		setDeselectedRows(new Set(props.deselectedRows));
 		setVerdict("none");
+		setChangedLines(new Set());
 	}
 
 	// Kick off classification after paint; drop the result if the content changed underneath (a stale verdict).
@@ -432,7 +424,12 @@ function Diff(props: {
 
 		let live = true;
 
-		void classify().then((result) => { if (live) { setVerdict(result); } });
+		void classify().then((result) => {
+			if (live) {
+				setVerdict(result.verdict);
+				setChangedLines(new Set(result.changedLines));
+			}
+		});
 
 		return () => { live = false; };
 	}, [classify, props.contentKey]);
@@ -507,8 +504,29 @@ function Diff(props: {
 		props.onRowSelection?.([...next]);
 	};
 
-	// A cosmetic change (whitespace/comments only) fades DOWN once BABLR reports back — focus stays on real edits.
-	const grid = createElement("div", { "className": "sxs" + (verdict === "cosmetic" ? " dim" : "") },
+	// Per-line focus: once BABLR reports back, a CHANGED row whose working line carries no semantic (node-level) change
+	// fades down, so the eye stays on real edits. A deletion falls back to the whole-file verdict. Nothing fades until
+	// the verdict resolves (verdict "none"/"unparsable" ⇒ show everything at full strength).
+	const classified = verdict === "cosmetic" || verdict === "semantic";
+	const fadedRows = new Set<number>();
+
+	if (classified) {
+		props.rows.forEach((row, index) => {
+			if (row.type === "ctx") {
+				return;
+			}
+
+			if (row.rightNo !== undefined) {
+				if (!changedLines.has(row.rightNo)) {
+					fadedRows.add(index);
+				}
+			} else if (verdict === "cosmetic") {
+				fadedRows.add(index);
+			}
+		});
+	}
+
+	const grid = createElement("div", { "className": "sxs" },
 		...hunks.map((hunk) => {
 			const chosen = hunk.rows.filter((index) => !deselectedRows.has(index)).length;
 			const state = chosen === hunk.rows.length ? "all" : chosen === 0 ? "none" : "partial";
@@ -536,8 +554,8 @@ function Diff(props: {
 			"style": { "gridRow": gap.row },
 			"onClick": () => { expand(gap.id); }
 		}, "⋯ " + gap.count + " unchanged lines")),
-		createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, verdict, plan.leftFoldHeaders, toggleFold, deselectedRows, toggleRow) }),
-		createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, verdict, plan.rightFoldHeaders, toggleFold, deselectedRows, toggleRow) }));
+		createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, fadedRows, plan.leftFoldHeaders, toggleFold, deselectedRows, toggleRow) }),
+		createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, fadedRows, plan.rightFoldHeaders, toggleFold, deselectedRows, toggleRow) }));
 
 	// Right-click discard menu (a hunk at a time).
 	const menuEl = menu === null ? null : createElement("div", {

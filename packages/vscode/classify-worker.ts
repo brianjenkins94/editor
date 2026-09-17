@@ -44,6 +44,9 @@ globalThis.onmessage = async (event: MessageEvent<ClassifyRequest | AbortRequest
 		if (wantSnapshot) {
 			reply["changedNodeIds"] = result.changedNodeIds;
 			reply["snapshot"] = result.snapshot;
+			if ("changedLines" in result) {
+				reply["changedLines"] = result.changedLines;
+			}
 		}
 
 		(globalThis as unknown as Worker).postMessage(reply);

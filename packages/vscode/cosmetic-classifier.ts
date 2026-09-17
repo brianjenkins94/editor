@@ -17,10 +17,11 @@
 /** BABLR's verdict for a change (mirrors `@brianjenkins94/bablr`). */
 export type ChangeKind = "cosmetic" | "semantic" | "unparsable";
 
-/** The identity analysis of a change: verdict + changed node ids + the working `.bablr` snapshot. */
+/** The identity analysis of a change: verdict + changed nodes + the working lines they land on + the `.bablr` snapshot. */
 export interface FileAnalysis {
 	"verdict": ChangeKind | "none";
 	"changedNodeIds": string[];
+	"changedLines": number[];
 	"snapshot": unknown;
 }
 
@@ -35,7 +36,7 @@ export interface CosmeticClassifier {
 	"dispose": () => void;
 }
 
-interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "snapshot"?: unknown; "aborted"?: true }
+interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "changedLines"?: number[]; "snapshot"?: unknown; "aborted"?: true }
 
 interface RequestMessage { "before"?: string; "after"?: string; "contents"?: string[] }
 
@@ -68,7 +69,7 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		if (event.data.aborted === true || event.data.verdict === undefined) {
 			settled.reject(new DOMException("classification aborted", "AbortError"));
 		} else {
-			settled.resolve({ "verdict": event.data.verdict, "changedNodeIds": event.data.changedNodeIds ?? [], "snapshot": event.data.snapshot ?? null });
+			settled.resolve({ "verdict": event.data.verdict, "changedNodeIds": event.data.changedNodeIds ?? [], "changedLines": event.data.changedLines ?? [], "snapshot": event.data.snapshot ?? null });
 		}
 
 		pump();
@@ -96,7 +97,7 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 
 	const request = async (message: RequestMessage, signal: AbortSignal | undefined, wantSnapshot: boolean): Promise<FileAnalysis> => {
 		if (message.contents === undefined && message.before === message.after) {
-			return { "verdict": "cosmetic", "changedNodeIds": [], "snapshot": null }; // identical — the only provably-correct shortcut
+			return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [], "snapshot": null }; // identical — the only provably-correct shortcut
 		}
 
 		if (signal?.aborted === true) {

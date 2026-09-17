@@ -13,7 +13,8 @@
 // (selectBase over the common-ancestor index) — the boundary they both possess. Knob N trades recompute depth for
 // base stability; with no boundary back to the root, the root is the base (a short history is cheap anyway).
 import type { ChangeKind, Snapshot } from "./identity";
-import { nodeAtoms, nodeAtomsAsync, reidentify } from "./identity";
+import { nodeAtoms, reidentify } from "./identity";
+import { cstSpansAsync } from "./spans";
 
 /** A commit's contribution for one file: its oid and the file's content at that commit. */
 export interface Commit {
@@ -77,24 +78,49 @@ function atomsEqual(a: string[], b: string[]): boolean {
 	return a.length === b.length && a.every((atom, index) => atom === b[index]);
 }
 
+interface Span { "type": string | null; "trivia": boolean; "token": boolean; "start": number; "end": number }
+
+/** The non-trivia node atoms (aligned 1:1 with the non-trivia spans, in the same order the snapshot uses). */
+function atomsFor(src: string, spans: Span[]): string[] {
+	return spans.filter((span) => !span.trivia).map((span) => (span.type ?? "") + "\t" + (span.token ? JSON.stringify(src.slice(span.start, span.end)) : ""));
+}
+
+/** 1-based line number of a source offset. */
+function lineAt(src: string, offset: number): number {
+	let line = 1;
+
+	for (let index = 0; index < offset && index < src.length; index += 1) {
+		if (src[index] === "\n") {
+			line += 1;
+		}
+	}
+
+	return line;
+}
+
 /**
  * Yielding derive over an ALREADY-WINDOWED content chain (base first … HEAD … working last), for the classify worker.
  * The `contents` are what the caller pulled from real git history plus the working copy; this parses each (paced +
  * cancellable), re-identifies forward, and returns the final (working) snapshot with history-anchored ids, the
  * whole-file verdict from the last two contents (HEAD→working), and which working nodes are new/changed vs HEAD.
  */
-export async function deriveIdentityAsync(contents: string[], options: { "signal"?: AbortSignal; "budget"?: number; "production"?: string } = {}): Promise<{ "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "snapshot": Snapshot | null }> {
+export async function deriveIdentityAsync(contents: string[], options: { "signal"?: AbortSignal; "budget"?: number; "production"?: string } = {}): Promise<{ "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[]; "snapshot": Snapshot | null }> {
 	const production = options.production ?? "Program";
 
 	try {
 		if (contents.length === 0) {
-			return { "verdict": "none", "changedNodeIds": [], "snapshot": { "nodes": [] } };
+			return { "verdict": "none", "changedNodeIds": [], "changedLines": [], "snapshot": { "nodes": [] } };
 		}
 
+		// Parse each link once (keeping spans so we can map changed nodes back to WORKING line numbers).
 		const atomsChain: string[][] = [];
+		let lastSpans: Span[] = [];
 
 		for (const content of contents) {
-			atomsChain.push(await nodeAtomsAsync(content, production, options));
+			const spans = (await cstSpansAsync(content, production, options)).spans as Span[];
+
+			lastSpans = spans;
+			atomsChain.push(atomsFor(content, spans));
 		}
 
 		let snapshot = reidentify(null, atomsChain[0]);
@@ -109,16 +135,30 @@ export async function deriveIdentityAsync(contents: string[], options: { "signal
 			? "none"
 			: (atomsEqual(atomsChain[atomsChain.length - 2], atomsChain[atomsChain.length - 1]) ? "cosmetic" : "semantic");
 		const previousIds = new Set(previous.nodes.map((node) => node.id));
-		const changedNodeIds = atomsChain.length < 2
-			? snapshot.nodes.map((node) => node.id)
-			: snapshot.nodes.filter((node) => !previousIds.has(node.id)).map((node) => node.id);
+		const changed = atomsChain.length < 2
+			? new Set(snapshot.nodes.map((node) => node.id))
+			: new Set(snapshot.nodes.filter((node) => !previousIds.has(node.id)).map((node) => node.id));
 
-		return { "verdict": verdict, "changedNodeIds": changedNodeIds, "snapshot": snapshot };
+		// Map each changed working node to its line: snapshot.nodes[i] aligns with the i-th non-trivia span of the
+		// working content, so a changed node's span.start gives the line the reviewer should keep in focus.
+		const workingContent = contents[contents.length - 1];
+		const workingSpans = lastSpans.filter((span) => !span.trivia);
+		const lineSet = new Set<number>();
+
+		snapshot.nodes.forEach((node, index) => {
+			const span = workingSpans[index];
+
+			if (span !== undefined && changed.has(node.id)) {
+				lineSet.add(lineAt(workingContent, span.start));
+			}
+		});
+
+		return { "verdict": verdict, "changedNodeIds": [...changed], "changedLines": [...lineSet].sort((a, b) => a - b), "snapshot": snapshot };
 	} catch (error) {
 		if (error instanceof DOMException && error.name === "AbortError") {
 			throw error;
 		}
 
-		return { "verdict": "unparsable", "changedNodeIds": [], "snapshot": null };
+		return { "verdict": "unparsable", "changedNodeIds": [], "changedLines": [], "snapshot": null };
 	}
 }

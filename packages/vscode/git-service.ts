@@ -124,7 +124,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 				await engine.writeBablr(path, JSON.stringify({ "path": path, "baseOid": baseOid, "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "snapshot": result.snapshot }));
 			}
 
-			return { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "baseOid": baseOid };
+			return { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": result.changedLines, "baseOid": baseOid };
 		} catch {
 			return { "verdict": "none" }; // aborted (superseded) or worker error — the newer request will answer
 		} finally {
