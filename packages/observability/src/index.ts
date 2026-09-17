@@ -19,7 +19,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger, LogRecord } from "@brianjenkins94/util/logger";
-import { portTransport, serve, websocketTransport } from "@brianjenkins94/hub";
+import { createRpcClient, portTransport, serve, websocketTransport } from "@brianjenkins94/hub";
 import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
 
 /** Reserved observability namespace — records are published on `$sys.log.<source>`; app code must not use it.
@@ -163,6 +163,13 @@ export function servePageTools(hub: Hub): void {
 
 		return { "count": nodes.length, "sample": nodes.slice(0, limit).map((node) => (node.textContent ?? "").trim().slice(0, 120)) };
 	});
+
+	// Forward `provoke_transform` down to the preview worker (which hosts `preview.provoke`). page_eval can't reach
+	// the worker's dev server, but an rpc request from this page routes to it — so this thin bridge lets an agent
+	// loop the cold-start transform race from debug-mcp instead of hand-driving cold boots. See node-worker.ts.
+	const rpc = createRpcClient(hub);
+
+	serve(hub, "preview_provoke", (args) => rpc.request("preview.provoke", args ?? {}, { "timeoutMs": 120000 }));
 }
 
 /**

@@ -139,5 +139,26 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 		}
 	}));
 
+	registerTool(server, defineTool({
+		"name": "provoke_transform",
+		"config": {
+			"title": "Provoke the preview transform race",
+			"description": "Force the preview's in-browser Vite dev server through the cold-start transform race on demand: each round tears the server down (empty transform cache) and fires the whole src/ graph's transforms concurrently. Returns { rounds, modules, provoked, failures[] } — a failure is a transform that came back 500 (the race losing). Requires a connected page with a preview already started (run the terminal `vite` command once). Use this instead of hand-driving cold boots to hunt the race.",
+			"inputSchema": {
+				"rounds": z.number().optional().describe("Cold-restart + concurrent-transform cycles to run (default 10)."),
+				"modules": z.array(z.string()).optional().describe("Module URLs to hammer each round, e.g. ['/src/App.tsx']. Default: the whole src/ graph.")
+			}
+		},
+		"handler": async (args) => {
+			const { rounds, modules } = args as { "rounds"?: number; "modules"?: string[] };
+
+			try {
+				return ok(await debugMcp.rpc.request("preview_provoke", { "rounds": rounds ?? 10, "modules": modules }, { "timeoutMs": 130000 }));
+			} catch (error) {
+				return fail(error instanceof Error ? error.message : String(error));
+			}
+		}
+	}));
+
 	return server;
 }
