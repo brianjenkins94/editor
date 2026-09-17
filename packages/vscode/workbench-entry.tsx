@@ -27,6 +27,7 @@ import workerPodExtensionCode from "worker-pod:extension";
 import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
+import { installGameView } from "./game-view";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
 import { installEditHistory } from "./edit-history";
 import { installCommentAnnotations } from "./git-comments";
@@ -315,6 +316,8 @@ function maybeBoot(): void {
 				// (not a webview), so it composites in our coi-serviceworker single-origin harness. See
 				// debug-preview-view.ts.
 				installDebugPreview(() => vscodeApi);
+				// The game-maker level surface (M1): a real-DOM projection of the active Tilemap level file.
+				installGameView(() => vscodeApi);
 				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
 				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
 				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", moduleVersions ?? {}, (path) => workspaceFs?.has(path) ?? false, paneLog);
