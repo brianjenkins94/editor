@@ -17,6 +17,7 @@
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
+import type { CosmeticClassifier } from "./cosmetic-classifier";
 import { serve } from "@brianjenkins94/hub";
 import * as engine from "./git-engine";
 
@@ -54,10 +55,7 @@ function repoRelative(uri: vscodeApi.Uri): string | undefined {
 	return CLASSIFIABLE.test(path) ? path : undefined;
 }
 
-/** One edit-burst as the changes pane consumes it: the text before and after, with when + who. */
-interface EditChunk { "id": number; "time": number; "actor": string; "before": string; "after": string }
-
-export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, log: Logger): void {
+export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifier: CosmeticClassifier, log: Logger): void {
 	// Per-file in-memory doc + its pending-flush timer. The doc is the source of truth; the binary on disk is a mirror.
 	const docs = new Map<string, AutomergeDoc>();
 	const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -144,13 +142,14 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, log: Logg
 		}
 	});
 
-	// The chunks a reviewer sees: every burst SINCE the last commit (the latest history snapshot equal to HEAD text),
-	// oldest-first, each carrying its before→after so the pane can diff + node-group it. Raw + lossless; the view groups.
+	// The "your edits" timeline: the reviewer's uncommitted work SINCE the last commit, decomposed into node-grouped
+	// chunks. Base = the LAST history snapshot equal to current HEAD (self-resets on commit); the burst chain from there
+	// [HEAD, …afters] is fed to the identity core (off-thread), which returns the net-changed nodes + their line ranges.
 	serve(hub, "history.chunks", async (args) => {
 		const path = (args as { "path"?: string } | null)?.path;
 
 		if (typeof path !== "string" || !CLASSIFIABLE.test(path)) {
-			return { "chunks": [] };
+			return { "groups": [], "bursts": 0, "lastTime": 0 };
 		}
 
 		const AM = await automerge();
@@ -158,7 +157,6 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, log: Logg
 		const head = await engine.headContent(path);
 		const history = AM.getHistory(doc);
 
-		// The base is the LAST point whose snapshot matches current HEAD — everything after it is uncommitted work.
 		let base = 0;
 
 		for (let index = 0; index < history.length; index += 1) {
@@ -167,19 +165,15 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, log: Logg
 			}
 		}
 
-		const chunks: EditChunk[] = [];
-
-		for (let index = base + 1; index < history.length; index += 1) {
-			chunks.push({
-				"id": index,
-				"time": history[index].change.time,
-				"actor": history[index].change.actor,
-				"before": history[index - 1].snapshot.text,
-				"after": history[index].snapshot.text,
-			});
+		if (base >= history.length - 1) {
+			return { "groups": [], "bursts": 0, "lastTime": 0 }; // nothing since the last commit
 		}
 
-		return { "chunks": chunks };
+		// [HEAD, …burst afters] — the last entry is the current working text, so line ranges land in working coords.
+		const chain = history.slice(base).map((entry) => entry.snapshot.text);
+		const { groups, bursts } = await classifier.editGroups(chain);
+
+		return { "groups": groups, "bursts": bursts, "lastTime": history[history.length - 1].change.time };
 	});
 
 	log.info("edit history installed");

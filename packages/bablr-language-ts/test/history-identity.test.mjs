@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // eslint-disable-next-line antfu/no-import-dist -- intentional: exercise the shipped artifact (dist is gitignored, local-only)
-import { deriveIdentity, deriveIdentityAsync, headIdentity, isCommitBoundary, selectBase } from "../../bablr/dist/index.js";
+import { deriveIdentity, deriveIdentityAsync, editGroups, headIdentity, isCommitBoundary, selectBase } from "../../bablr/dist/index.js";
 
 const ids = (snapshot) => snapshot.nodes.map((node) => node.id);
 
@@ -93,4 +93,23 @@ test("deriveIdentityAsync: nodeLines maps every working node to its line, and a 
 	assert.ok(bNode !== undefined, "found the const-b value node at HEAD");
 	assert.equal(headOnly.nodeLines[bNode.id], 2, "was on line 2 at HEAD");
 	assert.equal(derived.nodeLines[bNode.id], 3, "same id re-anchors to line 3 after an insert above — the note follows");
+});
+
+test("editGroups: decomposes a burst chain into node-grouped chunks with hover ranges", async () => {
+	// The "your edits" timeline: feed [HEAD, …burst afters]; get one merged chunk per changed statement, labelled by
+	// its identifier, with the line range the pane highlights on hover. Token-level nodes on a line merge into one chunk.
+	const HEAD = "const a = 1;\nconst b = 2;\n";
+	const b1 = "const a = 1;\nconst b = 2;\nconst c = 3;\n";
+	const b2 = "const a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\n";
+
+	const { groups, bursts } = await editGroups([HEAD, b1, b2]);
+
+	assert.equal(bursts, 2, "two bursts counted");
+	assert.equal(groups.length, 2, "one chunk per added statement (tokens merged, not one-per-token)");
+	assert.deepEqual(groups.map((group) => group.label), ["c", "d"], "each chunk labelled by its identifier");
+	assert.deepEqual(groups.map((group) => [group.startLine, group.endLine]), [[3, 3], [4, 4]], "hover ranges are the changed lines");
+	assert.ok(groups.every((group) => group.nodeIds.length > 0), "each chunk carries its merged node ids");
+	assert.ok(groups.every((group) => group.startLine >= 3), "unchanged lines 1-2 produce no chunk");
+
+	assert.deepEqual((await editGroups([HEAD])).groups, [], "no edits since HEAD → no chunks");
 });

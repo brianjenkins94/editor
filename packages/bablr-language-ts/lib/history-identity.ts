@@ -171,3 +171,109 @@ export async function deriveIdentityAsync(contents: string[], options: { "signal
 		return { "verdict": "unparsable", "changedNodeIds": [], "changedLines": [], "nodeLines": {}, "snapshot": null };
 	}
 }
+
+/** A human label + type for a changed node, derived from its atom (`type\t<jsonToken>`). */
+function labelFor(atom: string): { "label": string; "kind": string } {
+	const tab = atom.indexOf("\t");
+	const kind = (tab === -1 ? atom : atom.slice(0, tab)) || "node";
+	const token = tab === -1 ? "" : atom.slice(tab + 1);
+
+	if (token !== "") {
+		try {
+			return { "label": JSON.parse(token) as string, "kind": kind };
+		} catch { /* fall through to the type */ }
+	}
+
+	return { "label": kind, "kind": kind };
+}
+
+/** One node-grouped chunk for the changes-pane timeline: what changed, and the line range to highlight on hover.
+ *  A chunk merges the changed CST nodes that share lines (so `const c = 3;` is one chunk, not six tokens). */
+export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "nodeIds": string[] }
+
+/** Merge per-node changes that overlap on a line into region-chunks; label each by its most meaningful token. */
+function mergeGroups(nodes: { "id": string; "label": string; "kind": string; "startLine": number; "endLine": number }[]): EditGroup[] {
+	const sorted = [...nodes].sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
+	const clusters: { "startLine": number; "endLine": number; "members": typeof sorted }[] = [];
+
+	for (const node of sorted) {
+		const current = clusters[clusters.length - 1];
+
+		if (current !== undefined && node.startLine <= current.endLine) {
+			current.endLine = Math.max(current.endLine, node.endLine);
+			current.members.push(node);
+		} else {
+			clusters.push({ "startLine": node.startLine, "endLine": node.endLine, "members": [node] });
+		}
+	}
+
+	// Prefer an Identifier's name as the chunk label; else the longest word-like token; else the cluster's line span.
+	const pick = (members: typeof sorted): { "label": string; "kind": string } => {
+		const named = members.find((member) => member.kind === "Identifier" && /\w/u.test(member.label));
+		const wordy = [...members].filter((member) => /^\w[\w$]*$/u.test(member.label)).sort((a, b) => b.label.length - a.label.length)[0];
+		const chosen = named ?? wordy;
+
+		return chosen !== undefined ? { "label": chosen.label, "kind": chosen.kind } : { "label": "", "kind": members[0]?.kind ?? "node" };
+	};
+
+	return clusters.map((cluster) => {
+		const { label, kind } = pick(cluster.members);
+
+		return { "label": label === "" ? "line " + cluster.startLine : label, "kind": kind, "startLine": cluster.startLine, "endLine": cluster.endLine, "nodeIds": cluster.members.map((member) => member.id) };
+	});
+}
+
+/**
+ * Decompose a change into node-grouped chunks for the "your edits" timeline. `contents` is the burst chain
+ * [HEAD, …burst afters] (last = working); this re-identifies forward (so ids are stable across the bursts) and returns
+ * the nodes that are NET new/changed HEAD→working, each with a display label and its current line range — the range the
+ * pane highlights when the reviewer hovers the chunk. `bursts` is how many edit-bursts produced this change.
+ */
+export async function editGroups(contents: string[], options: { "signal"?: AbortSignal; "budget"?: number; "production"?: string } = {}): Promise<{ "groups": EditGroup[]; "bursts": number }> {
+	const production = options.production ?? "Program";
+
+	if (contents.length < 2) {
+		return { "groups": [], "bursts": 0 };
+	}
+
+	try {
+		const atomsChain: string[][] = [];
+		let lastSpans: Span[] = [];
+
+		for (const content of contents) {
+			const spans = (await cstSpansAsync(content, production, options)).spans as Span[];
+
+			lastSpans = spans;
+			atomsChain.push(atomsFor(content, spans));
+		}
+
+		let snapshot = reidentify(null, atomsChain[0]);
+		const headIds = new Set(snapshot.nodes.map((node) => node.id));
+
+		for (let index = 1; index < atomsChain.length; index += 1) {
+			snapshot = reidentify(snapshot, atomsChain[index]);
+		}
+
+		const working = contents[contents.length - 1];
+		const workingSpans = lastSpans.filter((span) => !span.trivia);
+		const changed: { "id": string; "label": string; "kind": string; "startLine": number; "endLine": number }[] = [];
+
+		snapshot.nodes.forEach((node, index) => {
+			const span = workingSpans[index];
+
+			if (span !== undefined && !headIds.has(node.id)) {
+				const { label, kind } = labelFor(node.atom);
+
+				changed.push({ "id": node.id, "label": label, "kind": kind, "startLine": lineAt(working, span.start), "endLine": lineAt(working, span.end) });
+			}
+		});
+
+		return { "groups": mergeGroups(changed), "bursts": contents.length - 1 };
+	} catch (error) {
+		if (error instanceof DOMException && error.name === "AbortError") {
+			throw error;
+		}
+
+		return { "groups": [], "bursts": contents.length - 1 };
+	}
+}

@@ -10,9 +10,9 @@
  * land mid-parse and trip this request's AbortController — the run bails cooperatively, no worker termination. One
  * request in flight at a time (the classifier drives it serially), correlated by id.
  */
-import { deriveIdentityAsync, fileDiffIdentityAsync } from "@brianjenkins94/bablr";
+import { deriveIdentityAsync, editGroups, fileDiffIdentityAsync } from "@brianjenkins94/bablr";
 
-interface ClassifyRequest { "id": number; "before"?: string; "after"?: string; "contents"?: string[]; "wantSnapshot": boolean }
+interface ClassifyRequest { "id": number; "before"?: string; "after"?: string; "contents"?: string[]; "editGroupsContents"?: string[]; "wantSnapshot": boolean }
 interface AbortRequest { "abort": true; "id": number }
 
 let current: { "id": number; "controller": AbortController } | undefined;
@@ -28,12 +28,21 @@ globalThis.onmessage = async (event: MessageEvent<ClassifyRequest | AbortRequest
 		return;
 	}
 
-	const { id, before, after, contents, wantSnapshot } = data;
+	const { id, before, after, contents, editGroupsContents, wantSnapshot } = data;
 	const controller = new AbortController();
 
 	current = { "id": id, "controller": controller };
 
 	try {
+		// `editGroupsContents` = a burst chain [HEAD, …afters] ⇒ node-grouped chunks for the "your edits" timeline.
+		if (editGroupsContents !== undefined) {
+			const grouped = await editGroups(editGroupsContents, { "signal": controller.signal });
+
+			(globalThis as unknown as Worker).postMessage({ "id": id, "groups": grouped.groups, "bursts": grouped.bursts });
+
+			return;
+		}
+
 		// `contents` = a windowed commit chain (base…HEAD…working) ⇒ history-anchored identity; otherwise the plain
 		// HEAD→working pair. Both yield a verdict; the chain path also anchors node ids to the shared base.
 		const result = contents !== undefined

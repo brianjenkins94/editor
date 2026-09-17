@@ -344,7 +344,7 @@ function maybeBoot(): void {
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
 					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
 					// edit-history.ts.
-					installEditHistory(api as typeof import("vscode"), workbenchHub, paneLog);
+					installEditHistory(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
 					bootSpan.info("hello extension api captured");
 				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
 				// AFTER the workbench restores its last-active viewlet (which would otherwise win).

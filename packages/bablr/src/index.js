@@ -16,4 +16,4 @@ export { classifyChange, classifyChangeAsync } from "../../bablr-language-ts/lib
 export { nodeAtoms, reidentify, reidentifyFromSource, fileDiffIdentity, fileDiffIdentityAsync } from "../../bablr-language-ts/lib/identity";
 // SHARED identity across a commit history without full history or git persistence: content-defined chunking of the
 // commit CHAIN picks a deterministic base every participant agrees on. See ../../bablr-language-ts/lib/history-identity.
-export { isCommitBoundary, selectBase, deriveIdentity, deriveIdentityAsync, headIdentity } from "../../bablr-language-ts/lib/history-identity";
+export { isCommitBoundary, selectBase, deriveIdentity, deriveIdentityAsync, headIdentity, editGroups } from "../../bablr-language-ts/lib/history-identity";

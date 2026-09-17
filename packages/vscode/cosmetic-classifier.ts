@@ -34,19 +34,27 @@ export interface CosmeticClassifier {
 	"analyze": (before: string, after: string, signal?: AbortSignal) => Promise<FileAnalysis>;
 	/** Derive over a windowed commit chain (base…HEAD…working) → HISTORY-ANCHORED snapshot + verdict + changes. */
 	"identify": (contents: string[], signal?: AbortSignal) => Promise<FileAnalysis>;
+	/** Node-grouped chunks for the "your edits" timeline, over a burst chain [HEAD, …afters] → groups + burst count. */
+	"editGroups": (contents: string[], signal?: AbortSignal) => Promise<{ "groups": EditGroup[]; "bursts": number }>;
 	/** Tear down the worker. */
 	"dispose": () => void;
 }
 
-interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "changedLines"?: number[]; "nodeLines"?: Record<string, number>; "snapshot"?: unknown; "aborted"?: true }
+/** One node-grouped chunk for the "your edits" timeline — mirrors bablr's EditGroup (kept local to avoid a type dep). */
+export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "nodeIds": string[] }
 
-interface RequestMessage { "before"?: string; "after"?: string; "contents"?: string[] }
+interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "changedLines"?: number[]; "nodeLines"?: Record<string, number>; "snapshot"?: unknown; "groups"?: EditGroup[]; "bursts"?: number; "aborted"?: true }
+
+interface RequestMessage { "before"?: string; "after"?: string; "contents"?: string[]; "editGroupsContents"?: string[] }
+
+/** The raw worker reply the queue resolves; each public method projects the fields it needs. */
+interface WorkerResult { "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[]; "nodeLines": Record<string, number>; "snapshot": unknown; "groups": EditGroup[]; "bursts": number }
 
 interface QueueItem {
 	"id": number;
 	"message": RequestMessage;
 	"wantSnapshot": boolean;
-	"resolve": (result: FileAnalysis) => void;
+	"resolve": (result: WorkerResult) => void;
 	"reject": (error: unknown) => void;
 	"aborted": boolean;
 }
@@ -68,10 +76,11 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 
 		running = undefined;
 
-		if (event.data.aborted === true || event.data.verdict === undefined) {
+		// An editGroups reply carries no verdict — only `aborted` means "bailed"; otherwise resolve (verdict defaults).
+		if (event.data.aborted === true) {
 			settled.reject(new DOMException("classification aborted", "AbortError"));
 		} else {
-			settled.resolve({ "verdict": event.data.verdict, "changedNodeIds": event.data.changedNodeIds ?? [], "changedLines": event.data.changedLines ?? [], "nodeLines": event.data.nodeLines ?? {}, "snapshot": event.data.snapshot ?? null });
+			settled.resolve({ "verdict": event.data.verdict ?? "none", "changedNodeIds": event.data.changedNodeIds ?? [], "changedLines": event.data.changedLines ?? [], "nodeLines": event.data.nodeLines ?? {}, "snapshot": event.data.snapshot ?? null, "groups": event.data.groups ?? [], "bursts": event.data.bursts ?? 0 });
 		}
 
 		pump();
@@ -97,16 +106,16 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		worker.postMessage({ "id": next.id, ...next.message, "wantSnapshot": next.wantSnapshot });
 	}
 
-	const request = async (message: RequestMessage, signal: AbortSignal | undefined, wantSnapshot: boolean): Promise<FileAnalysis> => {
-		if (message.contents === undefined && message.before === message.after) {
-			return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [], "nodeLines": {}, "snapshot": null }; // identical — the only provably-correct shortcut
+	const request = async (message: RequestMessage, signal: AbortSignal | undefined, wantSnapshot: boolean): Promise<WorkerResult> => {
+		if (message.contents === undefined && message.editGroupsContents === undefined && message.before === message.after) {
+			return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [], "nodeLines": {}, "snapshot": null, "groups": [], "bursts": 0 }; // identical — the only provably-correct shortcut
 		}
 
 		if (signal?.aborted === true) {
 			throw new DOMException("classification aborted", "AbortError");
 		}
 
-		return new Promise<FileAnalysis>((resolve, reject) => {
+		return new Promise<WorkerResult>((resolve, reject) => {
 			const item: QueueItem = { "id": nextId, "message": message, "wantSnapshot": wantSnapshot, "resolve": resolve, "reject": reject, "aborted": false };
 
 			nextId += 1;
@@ -132,10 +141,13 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		});
 	};
 
+	const toAnalysis = (result: WorkerResult): FileAnalysis => ({ "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": result.changedLines, "nodeLines": result.nodeLines, "snapshot": result.snapshot });
+
 	return {
 		"classify": async (before, after, signal) => (await request({ "before": before, "after": after }, signal, false)).verdict,
-		"analyze": (before, after, signal) => request({ "before": before, "after": after }, signal, true),
-		"identify": (contents, signal) => request({ "contents": contents }, signal, true),
+		"analyze": async (before, after, signal) => toAnalysis(await request({ "before": before, "after": after }, signal, true)),
+		"identify": async (contents, signal) => toAnalysis(await request({ "contents": contents }, signal, true)),
+		"editGroups": async (contents, signal) => { const result = await request({ "editGroupsContents": contents }, signal, true); return { "groups": result.groups, "bursts": result.bursts }; },
 		"dispose": () => { worker.terminate(); }
 	};
 }
