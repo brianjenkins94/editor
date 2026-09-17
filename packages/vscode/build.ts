@@ -7,7 +7,6 @@ import * as url from "node:url";
 import { isCI, isEntry } from "@brianjenkins94/util/env";
 import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
-import * as esbuild from "esbuild";
 import stdlib from "node-stdlib-browser";
 import { build } from "vite";
 import { editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./snapshot";
@@ -74,42 +73,10 @@ function bundledExtension(name: string): Plugin {
 	return bundledModule(name, "extension.ts", "extension", "cjs", ["vscode"]);
 }
 
-/** esbuild lib-mode bundle of a node server → one self-contained ESM string, node builtins external. eslint's
- *  typescript survives esbuild but not rolldown here; cspell is the reverse — so each server picks its bundler. */
-async function esbuildNodeServer(entry: string): Promise<string> {
-	const result = await esbuild.build({
-		"entryPoints": [entry],
-		"bundle": true,
-		"format": "esm",
-		"platform": "node",
-		"conditions": ["browser", "import", "default"],
-		"target": "esnext",
-		// Identifiers only — whitespace/syntax minification breaks almostnode's regex ESM transform.
-		"minifyIdentifiers": true,
-		"external": [...nodeBuiltins, "jiti", "jiti/*"],
-		"write": false,
-		"logLevel": "silent"
-	});
-
-	return result.outputFiles[0].text;
-}
-
 /** A language server's `<file>` → ESM string (`<name>:<id>`) with ALL NODE BUILTINS EXTERNAL, run by almostnode
- *  in a worker host. `bundler` picks vite/rolldown or esbuild (not interchangeable — see esbuildNodeServer). */
-function bundledNodeServer(name: string, file = "server-node.ts", id = "server-node", bundler: "vite" | "esbuild" = "vite"): Plugin {
-	if (bundler === "vite") {
-		return bundledModule(name, file, id, "es", nodeBuiltins);
-	}
-
-	const virtual = `${name}:${id}`;
-	const resolved = "\0" + virtual;
-	const entry = url.fileURLToPath(new URL(`./extensions/${name}/${file}`, import.meta.url));
-
-	return {
-		"name": `${name}-${id}`,
-		"resolveId": (source) => (source === virtual ? resolved : undefined),
-		"load": async (moduleId) => (moduleId === resolved ? `export default ${JSON.stringify(await esbuildNodeServer(entry))};` : undefined)
-	};
+ *  in a worker host. */
+function bundledNodeServer(name: string, file = "server-node.ts", id = "server-node"): Plugin {
+	return bundledModule(name, file, id, "es", nodeBuiltins);
 }
 
 /** Emit the cspell English dictionary (gzipped trie) at a fixed, unhashed URL server-host fetches at runtime. */
