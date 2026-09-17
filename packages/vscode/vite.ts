@@ -31,6 +31,11 @@ const HOST_HTML = `<!DOCTYPE html>
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<title>monaco-vscode-api</title>
 	<style>html, body { height: 100%; margin: 0; overflow: hidden; }</style>
+	<!-- perf: start fetching the workbench entry AND its ~4.5MB main.js chunk in parallel the moment this
+	     document parses, instead of serially (workbench.js download+parse → discover the import → then main.js).
+	     modulepreload also kicks off parse/compile early, shaving the largest single item off the critical path. -->
+	<link rel="modulepreload" href="./workbench.js" />
+	<link rel="modulepreload" href="./main.js" />
 </head>
 <body>
 	<script type="module" src="./workbench.js"></script>

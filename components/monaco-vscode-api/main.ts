@@ -44,27 +44,37 @@ import * as monaco from "monaco-editor";
 import * as vscode from "vscode";
 // AI/chat disabled — re-enable when games configures it:
 // import getChatServiceOverride, { ChatEntitlement } from '@codingame/monaco-vscode-chat-service-override'
-import getNotebookServiceOverride from "@codingame/monaco-vscode-notebook-service-override";
+// perf-trim: notebooks (.ipynb) — ~450KB gzip of its own worker + renderer infra, dropped from the initial bundle.
+// import getNotebookServiceOverride from "@codingame/monaco-vscode-notebook-service-override";
 import getUserDataProfileServiceOverride from "@codingame/monaco-vscode-user-data-profile-service-override";
-import getUserDataSyncServiceOverride from "@codingame/monaco-vscode-user-data-sync-service-override";
-import getWalkThroughServiceOverride from "@codingame/monaco-vscode-walkthrough-service-override";
-import getWelcomeServiceOverride from "@codingame/monaco-vscode-welcome-service-override";
+// perf-trim: cloud settings-sync — never surfaced here, dropped from the initial bundle.
+// import getUserDataSyncServiceOverride from "@codingame/monaco-vscode-user-data-sync-service-override";
+// perf-trim: getting-started walkthroughs — dropped from the initial bundle.
+// import getWalkThroughServiceOverride from "@codingame/monaco-vscode-walkthrough-service-override";
+// perf-trim: welcome page — dropped from the initial bundle.
+// import getWelcomeServiceOverride from "@codingame/monaco-vscode-welcome-service-override";
 // AI/chat disabled:
 // import getAiServiceOverride from '@codingame/monaco-vscode-ai-service-override'
 import getCommentsServiceOverride from "@codingame/monaco-vscode-comments-service-override";
-import getEditSessionsServiceOverride from "@codingame/monaco-vscode-edit-sessions-service-override";
+// perf-trim: cloud edit-sessions — dropped from the initial bundle.
+// import getEditSessionsServiceOverride from "@codingame/monaco-vscode-edit-sessions-service-override";
 import getEmmetServiceOverride from "@codingame/monaco-vscode-emmet-service-override";
 import getExplorerServiceOverride from "@codingame/monaco-vscode-explorer-service-override";
-import getInteractiveServiceOverride from "@codingame/monaco-vscode-interactive-service-override";
-import getIssueServiceOverride from "@codingame/monaco-vscode-issue-service-override";
+// perf-trim: interactive window (REPL) — dropped from the initial bundle.
+// import getInteractiveServiceOverride from "@codingame/monaco-vscode-interactive-service-override";
+// perf-trim: issue reporter — dropped from the initial bundle.
+// import getIssueServiceOverride from "@codingame/monaco-vscode-issue-service-override";
 import getLocalizationServiceOverride from "@codingame/monaco-vscode-localization-service-override";
 import getMultiDiffEditorServiceOverride from "@codingame/monaco-vscode-multi-diff-editor-service-override";
 import getOutlineServiceOverride from "@codingame/monaco-vscode-outline-service-override";
 import getPerformanceServiceOverride from "@codingame/monaco-vscode-performance-service-override";
 import getRelauncherServiceOverride from "@codingame/monaco-vscode-relauncher-service-override";
-import getShareServiceOverride from "@codingame/monaco-vscode-share-service-override";
-import getSpeechServiceOverride from "@codingame/monaco-vscode-speech-service-override";
-import getSurveyServiceOverride from "@codingame/monaco-vscode-survey-service-override";
+// perf-trim: share provider — dropped from the initial bundle.
+// import getShareServiceOverride from "@codingame/monaco-vscode-share-service-override";
+// perf-trim: speech-to-text — dropped from the initial bundle.
+// import getSpeechServiceOverride from "@codingame/monaco-vscode-speech-service-override";
+// perf-trim: NPS surveys — dropped from the initial bundle.
+// import getSurveyServiceOverride from "@codingame/monaco-vscode-survey-service-override";
 import getTaskServiceOverride from "@codingame/monaco-vscode-task-service-override";
 import getTelemetryServiceOverride from "@codingame/monaco-vscode-telemetry-service-override";
 import getTimelineServiceOverride from "@codingame/monaco-vscode-timeline-service-override";
@@ -75,9 +85,12 @@ import getUpdateServiceOverride from "@codingame/monaco-vscode-update-service-ov
 import type { EnvironmentOverride } from "@codingame/monaco-vscode-api/workbench";
 import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
 import { setUnexpectedErrorHandler } from "@codingame/monaco-vscode-api/monaco";
-import getAssignmentServiceOverride from "@codingame/monaco-vscode-assignment-service-override";
-import getImageResizeServiceOverride from "@codingame/monaco-vscode-image-resize-service-override";
-import getProcessControllerServiceOverride from "@codingame/monaco-vscode-process-explorer-service-override";
+// perf-trim: A/B experiment assignment — dropped from the initial bundle.
+// import getAssignmentServiceOverride from "@codingame/monaco-vscode-assignment-service-override";
+// perf-trim: in-editor image resize — dropped from the initial bundle.
+// import getImageResizeServiceOverride from "@codingame/monaco-vscode-image-resize-service-override";
+// perf-trim: process explorer — dropped from the initial bundle.
+// import getProcessControllerServiceOverride from "@codingame/monaco-vscode-process-explorer-service-override";
 import getQuickAccessServiceOverride from "@codingame/monaco-vscode-quickaccess-service-override";
 import getViewsServiceOverride, { attachPart, isEditorPartVisible, isPartVisibile as isPartVisible, onDidChangeSideBarPosition, onPartVisibilityChange, Parts } from "@codingame/monaco-vscode-views-service-override";
 import { openNewCodeEditor } from "./demo/src/features/editor";
@@ -292,25 +305,30 @@ const commonServices: IEditorOverrideServices = {
 	//     sessionId: 'unused'
 	//   }
 	// }),
-	...getNotebookServiceOverride(),
-	...getWelcomeServiceOverride(),
-	...getWalkThroughServiceOverride(),
+	// perf-trim: notebooks removed from the initial bundle (see import above).
+	// ...getNotebookServiceOverride(),
+	// perf-trim: welcome / walkthrough / cloud settings-sync removed from the initial bundle.
+	// ...getWelcomeServiceOverride(),
+	// ...getWalkThroughServiceOverride(),
 	...getUserDataProfileServiceOverride(),
-	...getUserDataSyncServiceOverride(),
+	// ...getUserDataSyncServiceOverride(),
 	// AI/chat disabled:
 	// ...getAiServiceOverride(),
 	...getTaskServiceOverride(),
 	...getCommentsServiceOverride(),
-	...getEditSessionsServiceOverride(),
+	// perf-trim: cloud edit-sessions removed from the initial bundle.
+	// ...getEditSessionsServiceOverride(),
 	...getEmmetServiceOverride(),
-	...getInteractiveServiceOverride(),
-	...getIssueServiceOverride(),
+	// perf-trim: interactive window (REPL) / issue reporter removed from the initial bundle.
+	// ...getInteractiveServiceOverride(),
+	// ...getIssueServiceOverride(),
 	...getMultiDiffEditorServiceOverride(),
 	...getPerformanceServiceOverride(),
 	...getRelauncherServiceOverride(),
-	...getShareServiceOverride(),
-	...getSpeechServiceOverride(),
-	...getSurveyServiceOverride(),
+	// perf-trim: share provider / speech-to-text / NPS surveys removed from the initial bundle.
+	// ...getShareServiceOverride(),
+	// ...getSpeechServiceOverride(),
+	// ...getSurveyServiceOverride(),
 	...getUpdateServiceOverride(),
 	...getExplorerServiceOverride(),
 	...getLocalizationServiceOverride({
@@ -331,12 +349,13 @@ const commonServices: IEditorOverrideServices = {
 		]
 	}),
 	...getSecretStorageServiceOverride(),
-	...getTelemetryServiceOverride(),
+	...getTelemetryServiceOverride()
 	// AI/chat disabled (MCP = Model Context Protocol):
 	// ...getMcpServiceOverride(),
-	...getProcessControllerServiceOverride(),
-	...getImageResizeServiceOverride(),
-	...getAssignmentServiceOverride()
+	// perf-trim: process explorer / in-editor image resize / A/B assignment removed from the initial bundle.
+	// ...getProcessControllerServiceOverride(),
+	// ...getImageResizeServiceOverride(),
+	// ...getAssignmentServiceOverride()
 };
 
 /**
