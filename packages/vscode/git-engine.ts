@@ -28,14 +28,15 @@ export interface GitChange { "path": string; "status": "A" | "M" | "D" }
 export interface GitStatus { "staged": GitChange[]; "unstaged": GitChange[] }
 
 /** Ensure /workspace is a git repo — `git init` on first run (idempotent), with a default `.gitignore` so the
- *  seeded dependency types under node_modules/ don't flood the status (statusMatrix honors .gitignore). */
+ *  seeded dependency types under node_modules/ (and re-derivable `*.ts.bablr` identity sidecars) don't flood the
+ *  status (statusMatrix honors .gitignore). */
 export async function ensureRepo(): Promise<void> {
 	if (!fs.existsSync(DIR + "/.git")) {
 		await init({ "fs": fs, "dir": DIR, "defaultBranch": "main" });
 	}
 
 	if (!fs.existsSync(DIR + "/.gitignore")) {
-		await fs.promises.writeFile(DIR + "/.gitignore", "node_modules/\n");
+		await fs.promises.writeFile(DIR + "/.gitignore", "node_modules/\n*.ts.bablr\n");
 	}
 }
 

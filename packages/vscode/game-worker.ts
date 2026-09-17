@@ -11,7 +11,7 @@ import { createHub, portTransport, serve } from "@brianjenkins94/hub";
 import { extractProjection } from "./game-extract";
 import { relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
 
-import type { IdSnapshot, ProjectSources } from "./game-model";
+import type { ProjectSources } from "./game-model";
 
 const hub = createHub({ "id": "game" });
 
@@ -21,23 +21,16 @@ const log = relayLoggerToHub(hub, "game");
 
 tapConsoleAndErrors(hub, "game"); // raw uncaught error/rejection → the plane, beside the structured logs
 
-// Rolling identity baseline per file (path → last snapshot). Each request reidentifies from it, so a node keeps
-// its id across edits (an insertion doesn't renumber ordinals); then we roll the new snapshots in. This in-memory
-// map IS the live `.ts.bablr` index — materialising it to disk is the next sub-step.
-const priors: Record<string, IdSnapshot> = {};
-
-// Project a game's sources into the plain GameProjection model. One request at a time is fine — the view debounces
-// and only asks per active file / edit. The span times each parse so "BABLR is slow" stays observable.
+// Project a game's sources into the plain GameProjection model. Identity reidentifies from the prior snapshots
+// the client read out of the `.ts.bablr` sidecars, so ids carry across edits (and survive a worker restart — the
+// FILE is the baseline). The returned `snapshots` are the new sidecar contents the client writes back. One request
+// at a time is fine — the view debounces. The span times each parse so "BABLR is slow" stays observable.
 serve(hub, "game.project", (args) => {
 	const sources = args as ProjectSources;
 	const span = log.span("project", { "level": sources.levelFile, "schemas": sources.schemas.length, "systems": sources.systems.length });
 
 	try {
-		const projection = extractProjection(sources, priors);
-
-		Object.assign(priors, projection.snapshots); // roll forward: the next edit reidentifies from these
-
-		return projection;
+		return extractProjection(sources, sources.priorSnapshots);
 	} finally {
 		span.end();
 	}

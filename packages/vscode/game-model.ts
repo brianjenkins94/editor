@@ -72,4 +72,7 @@ export interface ProjectSources {
 	"schemas": { "file": string; "code": string }[];
 	/** systems/*.ts — system bodies, by path. */
 	"systems": { "file": string; "code": string }[];
+	/** Prior identity snapshots read from the `.ts.bablr` sidecars (path → snapshot) — the reidentify baseline, so
+	 *  ids carry across edits and survive a worker restart. Empty on first open (bootstrap). */
+	"priorSnapshots": Record<string, IdSnapshot>;
 }
