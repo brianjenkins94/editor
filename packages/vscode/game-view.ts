@@ -1,293 +1,23 @@
 /**
- * Game-maker level surface (M1) — a PROJECTION of a `Tilemap` builder file (e.g. games/dozer's
- * `levels/level1.ts`) rendered as a tile grid.
+ * Game-maker "Level" surface — a PROJECTION of a game project (a Tilemap builder file + its sibling schemas/*.ts
+ * and game.ts), rendered as a tile grid plus a component/object/system inspector.
  *
- * The code is the source of truth: this view parses the `new Tilemap(...)` + `addTileset`/`addLayer`/
- * `addObjectLayer`/`fill`/`bitblt` calls out of the ACTIVE text editor and composites them onto a canvas the
- * same way util/phaser/Tilemap.ts builds its data — so the grid you see is exactly what Phaser renders. It's one
- * more projection of the CST alongside the text (per the game-maker design); editing the code re-renders the
- * grid, and (M1b) painting the grid will write back into the `bitblt` array literal.
- *
- * Real DOM via `registerCustomView` — NOT a webview, so it composites under the coi-serviceworker single-origin
- * harness (same reason debug-preview-view.ts avoids webviews). Installed from workbench-entry.tsx.
+ * This file is BABLR-FREE: it's a thin client. It gathers the project's source files (via the vscode workspace fs)
+ * and hands them to the game-worker over hub RPC (`game.project`); the worker parses the BABLR CST off-thread and
+ * returns the plain GameProjection model, which we render here. The code is the source of truth; each panel is a
+ * projection of it (per the game-maker design). Real DOM via `registerCustomView` — NOT a webview, so it
+ * composites under the coi-serviceworker single-origin harness (same reason debug-preview-view.ts avoids them).
  */
 /* eslint-disable ts/no-explicit-any */
+import type { Hub } from "@brianjenkins94/hub";
 import { registerCustomView, ViewContainerLocation } from "@brianjenkins94/monaco-vscode-api/main";
+import { createRpcClient, portTransport } from "@brianjenkins94/hub";
+
+import type { Component, EntityType, GameProjection, Level, ProjectSources, System, Tileset } from "./game-model";
 
 type Api = any;
 
-/** A tileset entry: its name and the image URL (data: or http). gid → tilesets[gid - 1] (firstgid = index+1). */
-interface Tileset { "name": string; "url": string }
-/** A tile layer: a flat width*height gid grid (0 = empty). Object layers instead carry placed `objects`. */
-interface Layer { "name": string; "isObjectLayer": boolean; "data": number[]; "objects": { "gid": number; "tx": number; "ty": number }[] }
-interface Level { "width": number; "height": number; "tileW": number; "tileH": number; "tilesets": Tileset[]; "layers": Layer[] }
-
-/** Find each `.<method>(` call and return the substring of its parenthesised arguments (balanced parens). */
-function callArgs(code: string, method: string): string[] {
-	const out: string[] = [];
-	const needle = "." + method + "(";
-	let from = 0;
-
-	for (;;) {
-		const start = code.indexOf(needle, from);
-
-		if (start === -1) {
-			break;
-		}
-
-		let depth = 0;
-		let i = start + needle.length - 1; // at the "("
-
-		for (; i < code.length; i += 1) {
-			const ch = code[i];
-
-			if (ch === "(") { depth += 1; } else if (ch === ")") { depth -= 1; if (depth === 0) { break; } }
-		}
-
-		out.push(code.slice(start + needle.length, i));
-		from = i + 1;
-	}
-
-	return out;
-}
-
-/** Read a JS 2D grid literal (with `_` for undefined) into a number[][] — `_`/undefined become 0. */
-function parseGrid(arrayText: string): number[][] {
-	const json = arrayText
-		.replace(/\b_\b/gu, "null")
-		.replace(/\bundefined\b/gu, "null")
-		.replace(/,(\s*[\]}])/gu, "$1"); // trailing commas
-
-	try {
-		const raw = JSON.parse(json) as (number | null)[][];
-
-		return raw.map((row) => row.map((cell) => cell ?? 0));
-	} catch {
-		return [];
-	}
-}
-
-/** Parse a Tilemap builder file into a Level. Tolerant: unrecognised calls are ignored. */
-export function parseLevel(code: string): Level | undefined {
-	const ctor = /new\s+Tilemap\(\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*(\d+)\s*,\s*(\d+))?\s*\)/u.exec(code);
-
-	if (ctor === null) {
-		return undefined;
-	}
-
-	const width = Number(ctor[1]);
-	const height = Number(ctor[2]);
-	const tileW = ctor[3] !== undefined ? Number(ctor[3]) : 32;
-	const tileH = ctor[4] !== undefined ? Number(ctor[4]) : 32;
-
-	const tilesets: Tileset[] = [];
-
-	for (const args of callArgs(code, "addTileset")) {
-		const match = /^\s*"([^"]+)"\s*,\s*"([^"]*)"/u.exec(args);
-
-		if (match !== null) {
-			tilesets.push({ "name": match[1], "url": match[2] });
-		}
-	}
-
-	// Split the chain into per-layer chunks at each addLayer/addObjectLayer call, so a layer's fill/bitblt bind
-	// to it (and not to a later layer). Each chunk runs until the next add(Object)Layer.
-	const layers: Layer[] = [];
-	const layerStarts = [...code.matchAll(/\.(addLayer|addObjectLayer)\(\s*"([^"]+)"\s*\)/gu)];
-
-	for (let index = 0; index < layerStarts.length; index += 1) {
-		const start = layerStarts[index];
-		const isObjectLayer = start[1] === "addObjectLayer";
-		const name = start[2];
-		const chunkStart = start.index ?? 0;
-		const chunkEnd = index + 1 < layerStarts.length ? (layerStarts[index + 1].index ?? code.length) : code.length;
-		const chunk = code.slice(chunkStart, chunkEnd);
-
-		const data = new Array<number>(width * height).fill(0);
-		const objects: Layer["objects"] = [];
-
-		const fill = /\.fill\(\s*(\d+)\s*\)/u.exec(chunk);
-
-		if (fill !== null) {
-			data.fill(Number(fill[1]));
-		}
-
-		for (const args of callArgs(chunk, "bitblt")) {
-			const head = /^\s*(\d+)\s*,\s*(\d+)\s*,/u.exec(args);
-			const bracket = args.indexOf("[");
-
-			if (head === null || bracket === -1) {
-				continue;
-			}
-
-			const dx = Number(head[1]);
-			const dy = Number(head[2]);
-			const grid = parseGrid(args.slice(bracket));
-
-			// Replicate Tilemap.ts's exact index math (note the x/y transposition + inclusive loop bounds).
-			for (let x = 0; x <= (grid[0]?.length ?? 0); x += 1) {
-				for (let y = 0; y <= grid.length; y += 1) {
-					const cell = grid[x]?.[y];
-
-					if (cell === undefined || cell === 0) {
-						continue;
-					}
-
-					if (isObjectLayer) {
-						objects.push({ "gid": cell, "tx": dx + y, "ty": dy + x });
-					} else {
-						const ti = ((dy + x) * width) + dx + y;
-
-						if (ti >= 0 && ti < data.length) {
-							data[ti] = cell;
-						}
-					}
-				}
-			}
-		}
-
-		layers.push({ "name": name, "isObjectLayer": isObjectLayer, "data": data, "objects": objects });
-	}
-
-	return { "width": width, "height": height, "tileW": tileW, "tileH": tileH, "tilesets": tilesets, "layers": layers };
-}
-
-/** Load every tileset image; resolves once all are ready (missing/broken ones resolve to undefined). */
-async function loadImages(tilesets: Tileset[]): Promise<(HTMLImageElement | undefined)[]> {
-	return Promise.all(tilesets.map((tileset) => new Promise<HTMLImageElement | undefined>((resolve) => {
-		const image = new Image();
-
-		image.onload = (): void => { resolve(image); };
-		image.onerror = (): void => { resolve(undefined); };
-		image.src = tileset.url;
-	})));
-}
-
-// ── M2: components (schemas) + object-spawn wiring ────────────────────────────────────────────────────────
-
-/** An ECS component parsed from a schema file: a tag (no data) or a data component with named fields. */
-interface Component { "name": string; "kind": "tag" | "data" | "enum"; "fields": string[] }
-/** One object type's spawn config from game.ts's load() entityConfig: its components + render depth. */
-interface EntityType { "name": string; "components": string[]; "depth"?: number }
-
-/** Parse a bitECS-style component from one schema file. `new Uint…Array`/typed fields → data; `[]` → tag; a
- *  plain numeric object (e.g. Direction) → enum (not a component, shown separately). */
-export function parseComponent(fileName: string, code: string): Component | undefined {
-	const object = /export\s+const\s+(\w+)\s*=\s*\{([\s\S]*?)\}\s*(?:as\s+const)?\s*;/u.exec(code);
-
-	if (object !== null) {
-		const body = object[2];
-		const fields = [...body.matchAll(/(?:"(\w+)"|(\w+))\s*:/gu)].map((match) => match[1] ?? match[2]);
-
-		return { "name": object[1], "kind": /new\s+\w*Array|Float|Int|Uint/u.test(body) ? "data" : "enum", "fields": fields };
-	}
-
-	const tag = /export\s+const\s+(\w+)\s*(?::\s*number\[\])?\s*=\s*\[\s*\]/u.exec(code);
-
-	if (tag !== null) {
-		return { "name": tag[1], "kind": "tag", "fields": [] };
-	}
-
-	return undefined;
-}
-
-/** Parse game.ts's `load(scene, name, level, { <obj>: { components: [...], depth: N } })` entityConfig. `load`
- *  is imported and called BARE (not `obj.load(...)`), so match it at a word boundary and balance its parens. */
-export function parseEntityConfig(code: string): EntityType[] {
-	const call = /(?:^|[^.\w])load\s*\(/mu.exec(code);
-
-	if (call === null) {
-		return [];
-	}
-
-	let depthParen = 0;
-	let end = call.index + call[0].length - 1; // at the "("
-
-	for (; end < code.length; end += 1) {
-		if (code[end] === "(") { depthParen += 1; } else if (code[end] === ")") { depthParen -= 1; if (depthParen === 0) { break; } }
-	}
-
-	const args = code.slice(call.index + call[0].length, end);
-	const brace = args.indexOf("{");
-	const configText = brace === -1 ? "" : args.slice(brace);
-
-	if (configText === "") {
-		return [];
-	}
-
-	const out: EntityType[] = [];
-	// Each entry: `"name": { … }` — grab the name, then its brace-balanced body.
-	const entry = /(?:"([^"]+)"|(\w+))\s*:\s*\{/gu;
-	let match: RegExpExecArray | null;
-
-	while ((match = entry.exec(configText)) !== null) {
-		const name = match[1] ?? match[2];
-		let depth = match.index + match[0].length - 1; // at the entry's "{"
-		let level = 0;
-		let i = depth;
-
-		for (; i < configText.length; i += 1) {
-			if (configText[i] === "{") { level += 1; } else if (configText[i] === "}") { level -= 1; if (level === 0) { break; } }
-		}
-
-		const body = configText.slice(depth, i + 1);
-		const componentsMatch = /components\s*:\s*\[([^\]]*)\]/u.exec(body);
-		const components = componentsMatch !== null ? componentsMatch[1].split(",").map((token) => token.trim()).filter(Boolean) : [];
-		const depthMatch = /depth\s*:\s*(\d+)/u.exec(body);
-
-		out.push({ "name": name, "components": components, "depth": depthMatch !== null ? Number(depthMatch[1]) : undefined });
-		entry.lastIndex = i + 1;
-	}
-
-	return out;
-}
-
-/** Derive the game project root from a level file uri: the folder above `levels/`, else the file's folder. */
-function projectRootPath(levelPath: string): string {
-	const marker = levelPath.lastIndexOf("/levels/");
-
-	return marker !== -1 ? levelPath.slice(0, marker) : levelPath.slice(0, levelPath.lastIndexOf("/"));
-}
-
-/** Read + parse the project's components (schemas/*.ts) and object-spawn wiring (game.ts). Tolerant of missing
- *  files. Uses the vscode workspace fs so it works on the shared zen-fs. */
-async function readEntities(api: Api, levelUri: any): Promise<{ "components": Component[]; "objects": EntityType[] }> {
-	const decoder = new TextDecoder();
-	const rootPath = projectRootPath(String(levelUri.path));
-	const root = levelUri.with({ "path": rootPath });
-	const components: Component[] = [];
-	let objects: EntityType[] = [];
-
-	try {
-		const schemasDir = api.Uri.joinPath(root, "schemas");
-		const files = await api.workspace.fs.readDirectory(schemasDir) as [string, number][];
-
-		for (const [name] of files) {
-			if (!name.endsWith(".ts")) {
-				continue;
-			}
-
-			try {
-				const bytes = await api.workspace.fs.readFile(api.Uri.joinPath(schemasDir, name)) as Uint8Array;
-				const component = parseComponent(name, decoder.decode(bytes));
-
-				if (component !== undefined) {
-					components.push(component);
-				}
-			} catch { /* skip unreadable file */ }
-		}
-	} catch { /* no schemas dir */ }
-
-	try {
-		const bytes = await api.workspace.fs.readFile(api.Uri.joinPath(root, "game.ts")) as Uint8Array;
-
-		objects = parseEntityConfig(decoder.decode(bytes));
-	} catch { /* no game.ts */ }
-
-	return { "components": components, "objects": objects };
-}
-
-/** Small DOM helpers (kept module-level so no closures are created inside render loops → no-loop-func). */
+// ── small DOM helpers (module-level: no closures created inside render loops → no-loop-func) ─────────────────
 function el(tag: string, css: string, text?: string): HTMLElement {
 	const node = document.createElement(tag);
 
@@ -307,19 +37,135 @@ const COMPONENT_COLORS: Record<Component["kind"], string> = {
 	"enum": "background:#3a3320;color:#e0cf9f"
 };
 
-/** Render the M2 inspector: a component palette (tag/data/enum) + each object's component + depth wiring. */
-function renderInspector(host: HTMLElement, components: Component[], objects: EntityType[], level: Level): void {
-	host.replaceChildren();
-	host.style.cssText = "align-self:stretch;flex:0 0 auto;display:flex;flex-direction:column;gap:14px";
+/** Load every tileset image; resolves once all are ready (missing/broken ones resolve to undefined). */
+async function loadImages(tilesets: Tileset[]): Promise<(HTMLImageElement | undefined)[]> {
+	return Promise.all(tilesets.map((tileset) => new Promise<HTMLImageElement | undefined>((resolve) => {
+		const image = new Image();
 
-	const sectionCss = "display:flex;flex-direction:column;gap:6px";
+		image.onload = (): void => { resolve(image); };
+		image.onerror = (): void => { resolve(undefined); };
+		image.src = tileset.url;
+	})));
+}
+
+// ── gathering the project sources (client side) ─────────────────────────────────────────────────────────────
+/** Walk up from a project file to the nearest ancestor dir containing game.ts (the project root). */
+async function findProjectRoot(api: Api, uri: any): Promise<any> {
+	let dir = uri.with({ "path": String(uri.path).slice(0, String(uri.path).lastIndexOf("/")) });
+
+	for (let up = 0; up < 4; up += 1) {
+		try {
+			await api.workspace.fs.stat(api.Uri.joinPath(dir, "game.ts"));
+
+			return dir;
+		} catch { /* not here — go up */ }
+
+		const parentPath = String(dir.path).slice(0, String(dir.path).lastIndexOf("/"));
+
+		if (parentPath === "" || parentPath === String(dir.path)) {
+			break;
+		}
+
+		dir = dir.with({ "path": parentPath });
+	}
+
+	return undefined;
+}
+
+/** Read every `.ts` file in `dir` as `{ file, code }` (tolerant of a missing dir). */
+async function readTsDir(api: Api, dir: any): Promise<{ "file": string; "code": string }[]> {
+	const out: { "file": string; "code": string }[] = [];
+	const decoder = new TextDecoder();
+
+	try {
+		for (const [name] of await api.workspace.fs.readDirectory(dir) as [string, number][]) {
+			if (!name.endsWith(".ts")) {
+				continue;
+			}
+
+			try {
+				const uri = api.Uri.joinPath(dir, name);
+				const bytes = await api.workspace.fs.readFile(uri) as Uint8Array;
+
+				out.push({ "file": String(uri.path), "code": decoder.decode(bytes) });
+			} catch { /* skip unreadable */ }
+		}
+	} catch { /* no dir */ }
+
+	return out;
+}
+
+/** Gather a level file + its project's game.ts / schemas / systems into a ProjectSources for the worker. */
+async function gatherSources(api: Api, levelUri: any, levelCode: string): Promise<ProjectSources> {
+	const sources: ProjectSources = { "levelFile": String(levelUri.path), "levelCode": levelCode, "schemas": [], "systems": [] };
+	const root = await findProjectRoot(api, levelUri);
+
+	if (root === undefined) {
+		return sources;
+	}
+
+	const decoder = new TextDecoder();
+
+	try {
+		const gameUri = api.Uri.joinPath(root, "game.ts");
+
+		sources.gameFile = String(gameUri.path);
+		sources.gameCode = decoder.decode(await api.workspace.fs.readFile(gameUri) as Uint8Array);
+	} catch { /* no game.ts */ }
+
+	sources.schemas = await readTsDir(api, api.Uri.joinPath(root, "schemas"));
+	sources.systems = await readTsDir(api, api.Uri.joinPath(root, "systems"));
+
+	return sources;
+}
+
+// ── rendering the model ─────────────────────────────────────────────────────────────────────────────────────
+/** Draw the composited level onto `canvas` (fill per layer, then each placed tile). */
+function renderLevelCanvas(canvas: HTMLCanvasElement, level: Level, images: (HTMLImageElement | undefined)[]): void {
+	canvas.width = level.width * level.tileW;
+	canvas.height = level.height * level.tileH;
+
+	const context = canvas.getContext("2d");
+
+	if (context === null) {
+		return;
+	}
+
+	context.imageSmoothingEnabled = false;
+	context.clearRect(0, 0, canvas.width, canvas.height);
+
+	const drawTile = (gid: number, tx: number, ty: number): void => {
+		const image = images[gid - 1];
+
+		if (image !== undefined) {
+			context.drawImage(image, tx * level.tileW, ty * level.tileH, level.tileW, level.tileH);
+		}
+	};
+
+	for (const layer of level.layers) {
+		if (layer.fill !== undefined && layer.fill !== 0) {
+			for (let ty = 0; ty < level.height; ty += 1) {
+				for (let tx = 0; tx < level.width; tx += 1) {
+					drawTile(layer.fill, tx, ty);
+				}
+			}
+		}
+
+		for (const tile of layer.tiles) {
+			drawTile(tile.gid, tile.tx, tile.ty);
+		}
+	}
+}
+
+/** Render the component palette + per-object component/depth wiring (M2). */
+function renderInspector(host: HTMLElement, components: Component[], objects: EntityType[], level: Level | undefined): void {
+	host.replaceChildren();
+
 	const headerCss = "font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#888";
 	const wrapCss = "display:flex;flex-wrap:wrap;gap:6px";
 
 	if (components.length > 0) {
-		const section = el("div", sectionCss);
-
-		section.appendChild(el("div", headerCss, `Components (${components.length})`));
+		host.appendChild(el("div", headerCss, `Components (${components.length})`));
 
 		const wrap = el("div", wrapCss);
 
@@ -331,18 +177,15 @@ function renderInspector(host: HTMLElement, components: Component[], objects: En
 			wrap.appendChild(chip);
 		}
 
-		section.appendChild(wrap);
-		host.appendChild(section);
+		host.appendChild(wrap);
 	}
 
 	if (objects.length > 0) {
-		const section = el("div", sectionCss);
-
-		section.appendChild(el("div", headerCss, `Objects (${objects.length})`));
+		host.appendChild(el("div", `${headerCss};margin-top:8px`, `Objects (${objects.length})`));
 
 		for (const object of objects) {
-			const row = el("div", "display:flex;align-items:center;gap:8px;padding:6px;border:1px solid #333;border-radius:6px");
-			const tileset = level.tilesets.find((entry) => entry.name === object.name);
+			const row = el("div", "display:flex;align-items:center;gap:8px;padding:6px;border:1px solid #333;border-radius:6px;margin-top:6px");
+			const tileset = level?.tilesets.find((entry) => entry.name === object.name);
 
 			if (tileset !== undefined) {
 				const swatch = document.createElement("img");
@@ -367,21 +210,96 @@ function renderInspector(host: HTMLElement, components: Component[], objects: En
 
 			for (const componentName of object.components) {
 				const known = components.find((entry) => entry.name === componentName);
-				const style = known !== undefined ? COMPONENT_COLORS[known.kind] : "background:#333;color:#aaa";
 
-				chips.appendChild(el("span", `${CHIP_CSS};${style}`, componentName));
+				chips.appendChild(el("span", `${CHIP_CSS};${known !== undefined ? COMPONENT_COLORS[known.kind] : "background:#333;color:#aaa"}`, componentName));
 			}
 
 			label.appendChild(chips);
 			row.appendChild(label);
-			section.appendChild(row);
+			host.appendChild(row);
 		}
-
-		host.appendChild(section);
 	}
 }
 
-export function installGameView(getApi: () => Api): void {
+/** Render the system/event sheet: ordered, top-to-bottom rows, each a query (chips) + body as expandable code (M3). */
+function renderSystems(host: HTMLElement, systems: System[], components: Component[]): void {
+	host.replaceChildren();
+
+	if (systems.length === 0) {
+		return;
+	}
+
+	host.appendChild(el("div", "font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#888", `Systems — top to bottom, every tick (${systems.length})`));
+
+	for (let index = 0; index < systems.length; index += 1) {
+		const system = systems[index];
+		const details = document.createElement("details");
+
+		details.style.cssText = "border:1px solid #333;border-radius:6px;overflow:hidden;margin-top:6px";
+
+		const summary = document.createElement("summary");
+
+		summary.style.cssText = "cursor:pointer;padding:7px 9px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;list-style:none";
+		summary.appendChild(el("span", `${CHIP_CSS};background:#333;color:#aaa;font-variant-numeric:tabular-nums`, String(index + 1)));
+		summary.appendChild(el("span", "font-weight:600", system.name));
+
+		const seen = new Set<string>();
+
+		for (const query of system.queries) {
+			for (const name of query) {
+				seen.add(name);
+			}
+		}
+
+		if (seen.size > 0) {
+			summary.appendChild(el("span", "color:#777;font-size:11px", "for each"));
+
+			for (const name of seen) {
+				const known = components.find((entry) => entry.name === name);
+
+				summary.appendChild(el("span", `${CHIP_CSS};${known !== undefined ? COMPONENT_COLORS[known.kind] : "background:#333;color:#aaa"}`, name));
+			}
+		}
+
+		details.appendChild(summary);
+
+		const pre = document.createElement("pre");
+
+		pre.textContent = system.body || "// (source not found)";
+		pre.style.cssText = "margin:0;padding:9px;border-top:1px solid #333;background:#161616;color:#c8c8c8;font:11px/1.5 ui-monospace,monospace;overflow:auto;white-space:pre";
+		details.appendChild(pre);
+		host.appendChild(details);
+	}
+}
+
+// ── the view ────────────────────────────────────────────────────────────────────────────────────────────────
+export function installGameView(getApi: () => Api, hub: Hub): void {
+	// Lazily spawn the parse worker + wire its hub into the workbench hub on first render (so BABLR only loads when
+	// the view is actually used, and its logs/RPC federate over the one link). `ready` resolves on the worker's
+	// `game.ready` — the client must not request before `serve` is registered + advertised, or the fire-and-forget
+	// hub drops the request (the "no responder" timeout). A timeout fallback keeps us from hanging if it's missed.
+	let rpc: ReturnType<typeof createRpcClient> | undefined;
+	let ready: Promise<void> | undefined;
+
+	const ensureWorker = async (): Promise<ReturnType<typeof createRpcClient>> => {
+		if (rpc === undefined) {
+			const worker = new Worker(new URL("./lsp/game-worker.js", location.href), { "type": "module" });
+
+			worker.addEventListener("error", (event) => { console.error("[game-worker] load error:", event.message); });
+			ready = new Promise<void>((resolve) => {
+				const off = hub.subscribe("game.ready", () => { off(); resolve(); });
+
+				setTimeout(resolve, 4000); // fallback: proceed even if the ready ping was missed
+			});
+			hub.link(portTransport(worker));
+			rpc = createRpcClient(hub);
+		}
+
+		await ready;
+
+		return rpc;
+	};
+
 	registerCustomView({
 		"id": "gameMaker.level",
 		"name": "Level",
@@ -390,29 +308,23 @@ export function installGameView(getApi: () => Api): void {
 		"renderBody": (container: HTMLElement) => {
 			container.style.cssText = "height:100%;display:flex;flex-direction:column;background:#1e1e1e;color:#ccc;font:12px system-ui,sans-serif";
 
-			const status = document.createElement("div");
-
-			status.style.cssText = "padding:6px 10px;border-bottom:1px solid #333;flex:0 0 auto";
-			status.textContent = "Open a Tilemap level file (e.g. levels/level1.ts) to see it here.";
-
-			const stage = document.createElement("div");
-
-			stage.style.cssText = "flex:1 1 auto;overflow:auto;display:flex;flex-direction:column;align-items:center;gap:12px;padding:12px";
-
+			const status = el("div", "padding:6px 10px;border-bottom:1px solid #333;flex:0 0 auto", "Open a Tilemap level file (e.g. levels/level1.ts) to see it here.");
+			const scroll = el("div", "flex:1 1 auto;overflow:auto;display:flex;flex-direction:column;gap:14px;padding:12px");
 			const canvas = document.createElement("canvas");
 
-			canvas.style.cssText = "image-rendering:pixelated;background:#000;max-width:100%;box-shadow:0 0 0 1px #333;flex:0 0 auto";
+			canvas.style.cssText = "image-rendering:pixelated;background:#000;max-width:100%;box-shadow:0 0 0 1px #333;flex:0 0 auto;align-self:center;display:none";
 
-			const inspector = document.createElement("div");
+			const inspector = el("div", "display:flex;flex-direction:column");
+			const systems = el("div", "display:flex;flex-direction:column");
 
-			inspector.style.cssText = "align-self:stretch;flex:0 0 auto";
-
-			stage.append(canvas, inspector);
-			container.append(status, stage);
+			scroll.append(canvas, inspector, systems);
+			container.append(status, scroll);
 
 			let token = 0;
 
 			async function render(): Promise<void> {
+				token += 1;
+				const mine = token;
 				const api = getApi();
 				const editor = api?.window?.activeTextEditor;
 				const code: string | undefined = editor?.document?.getText();
@@ -421,78 +333,57 @@ export function installGameView(getApi: () => Api): void {
 					status.textContent = "Open a Tilemap level file (e.g. levels/level1.ts) to see it here.";
 					canvas.style.display = "none";
 					inspector.replaceChildren();
+					systems.replaceChildren();
 
 					return;
 				}
 
-				const level = parseLevel(code);
+				const sources = await gatherSources(api, editor.document.uri, code);
+
+				if (mine !== token) {
+					return;
+				}
+
+				let projection: GameProjection;
+
+				try {
+					const client = await ensureWorker();
+
+					projection = await client.request("game.project", sources, { "timeoutMs": 20000 }) as GameProjection;
+				} catch (error) {
+					status.textContent = "Parse failed: " + (error instanceof Error ? error.message : String(error));
+
+					return;
+				}
+
+				if (mine !== token) {
+					return;
+				}
+
+				const { level, components, objects, systems: systemList } = projection;
+
+				renderInspector(inspector, components, objects, level);
+				renderSystems(systems, systemList, components);
 
 				if (level === undefined) {
-					status.textContent = "Could not parse a Tilemap level from this file.";
 					canvas.style.display = "none";
-					inspector.replaceChildren();
+					status.textContent = "Could not parse a Tilemap level from this file.";
 
 					return;
 				}
 
-				token += 1;
-				const mine = token;
 				const images = await loadImages(level.tilesets);
 
 				if (mine !== token) {
-					return; // a newer render superseded us
-				}
-
-				canvas.width = level.width * level.tileW;
-				canvas.height = level.height * level.tileH;
-				canvas.style.display = "block";
-
-				const context = canvas.getContext("2d");
-
-				if (context === null) {
 					return;
 				}
 
-				context.imageSmoothingEnabled = false;
-				context.clearRect(0, 0, canvas.width, canvas.height);
-
-				const drawTile = (gid: number, tx: number, ty: number): void => {
-					const image = images[gid - 1];
-
-					if (image !== undefined) {
-						context.drawImage(image, tx * level.tileW, ty * level.tileH, level.tileW, level.tileH);
-					}
-				};
-
-				for (const layer of level.layers) {
-					if (layer.isObjectLayer) {
-						for (const object of layer.objects) {
-							drawTile(object.gid, object.tx, object.ty);
-						}
-					} else {
-						for (let ti = 0; ti < layer.data.length; ti += 1) {
-							if (layer.data[ti] !== 0) {
-								drawTile(layer.data[ti], ti % level.width, Math.floor(ti / level.width));
-							}
-						}
-					}
-				}
+				canvas.style.display = "block";
+				renderLevelCanvas(canvas, level, images);
 
 				const fileName = String(editor.document.uri.path).split("/").pop();
 
 				status.textContent = `${fileName} — ${level.width}×${level.height}, ${level.tilesets.length} tilesets, ${level.layers.length} layers`;
-
-				// M2: entity inspector — components palette + per-object component/depth wiring, read from the
-				// sibling schemas/*.ts and game.ts. The projection spans the whole game project, not just this file.
-				inspector.replaceChildren();
-
-				try {
-					const { components, objects } = await readEntities(api, editor.document.uri);
-
-					if (mine === token) {
-						renderInspector(inspector, components, objects, level);
-					}
-				} catch { /* the inspector is optional — a bad read just leaves it empty */ }
 			}
 
 			void render();

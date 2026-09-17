@@ -316,8 +316,9 @@ function maybeBoot(): void {
 				// (not a webview), so it composites in our coi-serviceworker single-origin harness. See
 				// debug-preview-view.ts.
 				installDebugPreview(() => vscodeApi);
-				// The game-maker level surface (M1): a real-DOM projection of the active Tilemap level file.
-				installGameView(() => vscodeApi);
+				// The game-maker level surface: a real-DOM projection of the active game project. BABLR parsing runs
+				// off-thread in the game-worker, reached over the workbench hub (RPC `game.project`).
+				installGameView(() => vscodeApi, workbenchHub);
 				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
 				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
 				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", moduleVersions ?? {}, (path) => workspaceFs?.has(path) ?? false, paneLog);
