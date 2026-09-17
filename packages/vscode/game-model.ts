@@ -10,6 +10,10 @@
 /** A source range `[start, end)` in a specific file (workspace-absolute path). */
 export interface Span { "file": string; "start": number; "end": number }
 
+/** A file's identity snapshot — BABLR's per-file `Snapshot` (nodes in file order, each with its stable id + atom).
+ *  This is the re-derivable `.ts.bablr` index content AND the `reidentify` baseline that carries ids across edits. */
+export interface IdSnapshot { "nodes": { "id": string; "atom": string }[] }
+
 /** A tileset image: its name and URL (data: or http). gid → tilesets[gid - 1] (firstgid = index + 1). */
 export interface Tileset { "name": string; "url": string }
 
@@ -51,6 +55,9 @@ export interface GameProjection {
 	"objects": EntityType[];
 	"systems": System[];
 	"nodeLines": Record<string, number>;
+	/** The identity snapshot each parsed file produced (path → snapshot) — the worker rolls these forward as the
+	 *  `reidentify` baseline, and they're the content of the re-derivable `.ts.bablr` index. */
+	"snapshots": Record<string, IdSnapshot>;
 }
 
 /** The file set the client hands the worker to project (all workspace-absolute paths + contents). */

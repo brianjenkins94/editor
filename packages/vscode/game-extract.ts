@@ -8,7 +8,7 @@
  */
 import { arrayElements, callArguments, callsNamed, calleeName, findAll, kids, numberValue, objectProperties, parse, parseSource, stringValue } from "./game-cst";
 import type { Identity, Node } from "./game-cst";
-import type { Component, EntityType, GameProjection, Layer, Level, PlacedTile, ProjectSources, System, Tileset } from "./game-model";
+import type { Component, EntityType, GameProjection, IdSnapshot, Layer, Level, PlacedTile, ProjectSources, System, Tileset } from "./game-model";
 
 /** Find a `new Ctor(...)` / `Ctor(...)` whose callee is `name`, returning its argument nodes. */
 function constructorArgs(root: Node, name: string): Node[] | undefined {
@@ -185,13 +185,16 @@ export function systemFileBase(name: string): string {
 
 /** Extract the whole projection from a project's sources. Tolerant of missing files. Each element is anchored to
  *  its stable BABLR node id, and every identified node's line is merged into `nodeLines` (id → line). */
-export function extractProjection(sources: ProjectSources): GameProjection {
+export function extractProjection(sources: ProjectSources, priors: Record<string, IdSnapshot> = {}): GameProjection {
 	const nodeLines: Record<string, number> = {};
-	// Parse each file ONCE (parseSource → tree + identity from one cstSpans) and merge its id→line map.
-	const source = (code: string): { "root": Node; "identity": Identity } => {
-		const parsed = parseSource(code);
+	const snapshots: Record<string, IdSnapshot> = {};
+	// Parse each file ONCE (parseSource → tree + identity from one cstSpans), reidentifying from its prior snapshot
+	// so ids carry across edits; collect the new snapshot (the rolling baseline / `.ts.bablr` index) + id→line map.
+	const source = (file: string, code: string): { "root": Node; "identity": Identity } => {
+		const parsed = parseSource(code, priors[file] ?? null);
 
 		Object.assign(nodeLines, parsed.identity.nodeLines);
+		snapshots[file] = parsed.identity.snapshot;
 
 		return parsed;
 	};
@@ -199,7 +202,7 @@ export function extractProjection(sources: ProjectSources): GameProjection {
 	let level: Level | undefined;
 
 	if (sources.levelFile !== undefined && sources.levelCode !== undefined) {
-		const { root, identity } = source(sources.levelCode);
+		const { root, identity } = source(sources.levelFile, sources.levelCode);
 
 		level = extractLevel(sources.levelFile, root, identity);
 	}
@@ -207,7 +210,7 @@ export function extractProjection(sources: ProjectSources): GameProjection {
 	const components: Component[] = [];
 
 	for (const schema of sources.schemas) {
-		const { root, identity } = source(schema.code);
+		const { root, identity } = source(schema.file, schema.code);
 		const component = extractComponent(root, identity);
 
 		if (component !== undefined) {
@@ -219,7 +222,7 @@ export function extractProjection(sources: ProjectSources): GameProjection {
 	const systems: System[] = [];
 
 	if (sources.gameCode !== undefined) {
-		const { root, identity } = source(sources.gameCode);
+		const { root, identity } = source(sources.gameFile ?? "game.ts", sources.gameCode);
 
 		for (const object of extractEntities(root, identity)) {
 			objects.push(object);
@@ -236,5 +239,5 @@ export function extractProjection(sources: ProjectSources): GameProjection {
 		}
 	}
 
-	return { "level": level, "components": components, "objects": objects, "systems": systems, "nodeLines": nodeLines };
+	return { "level": level, "components": components, "objects": objects, "systems": systems, "nodeLines": nodeLines, "snapshots": snapshots };
 }

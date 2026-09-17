@@ -14,6 +14,8 @@
  */
 import { cstSpans, reidentify } from "@brianjenkins94/bablr";
 
+import type { IdSnapshot } from "./game-model";
+
 export interface Node {
 	"type": string | null;
 	"field": string | null;
@@ -68,10 +70,10 @@ export function parse(code: string): Node {
  * BABLR is slow, so a file is never parsed more than once (previously extraction, the identity spans, and
  * `nodeAtoms` each re-parsed — three passes; this is one).
  */
-export function parseSource(code: string): { "root": Node; "identity": Identity } {
+export function parseSource(code: string, prior: IdSnapshot | null = null): { "root": Node; "identity": Identity } {
 	const spans = (cstSpans(code) as { "spans": RawSpan[] }).spans;
 
-	return { "root": buildTree(spans, code), "identity": identityFromSpans(spans, code) };
+	return { "root": buildTree(spans, code), "identity": identityFromSpans(spans, code, prior) };
 }
 
 /** Direct children with cover wrappers flattened away, propagating a cover's `field` onto its concrete child. */
@@ -166,6 +168,9 @@ export interface Identity {
 	"lineOf": (node: Node) => number;
 	/** Every identified node's line (id → line) — for the reverse (a line → its node ids). */
 	"nodeLines": Record<string, number>;
+	/** The identity snapshot this derivation produced — persist it as the `.ts.bablr` index + next `reidentify`
+	 *  baseline (so the following edit carries ids forward). */
+	"snapshot": IdSnapshot;
 }
 
 /** 1-based line at a source offset. */
@@ -204,18 +209,20 @@ function atomsFromSpans(code: string, spans: RawSpan[]): string[] {
  * line. Ids survive edits via `reidentify` — the basis for anchoring event-sheet data, dispositions, breakpoints,
  * comments and history to a node as it moves. No re-parse: atoms come from the passed spans.
  */
-function identityFromSpans(spans: RawSpan[], code: string): Identity {
+function identityFromSpans(spans: RawSpan[], code: string, prior: IdSnapshot | null): Identity {
 	const nonTrivia = spans.filter((span) => !span.trivia);
 	const byRange = new Map<string, string>();
 	const nodeLines: Record<string, number> = {};
 
-	let nodes: { "id": unknown }[] = [];
+	let snapshot: IdSnapshot = { "nodes": [] };
 
 	try {
-		nodes = (reidentify(null, atomsFromSpans(code, spans)) as { "nodes": { "id": unknown }[] }).nodes;
+		// Reidentify FROM the prior snapshot so ids carry across edits (an insertion keeps every unchanged node's
+		// id, rather than re-bootstrapping ordinals). null prior → first derivation bootstraps.
+		snapshot = reidentify(prior, atomsFromSpans(code, spans)) as IdSnapshot;
 	} catch { /* unparsable — no identity, callers fall back to spans */ }
 
-	nodes.forEach((node, index) => {
+	snapshot.nodes.forEach((node, index) => {
 		const span = nonTrivia[index];
 
 		if (span === undefined) {
@@ -236,13 +243,15 @@ function identityFromSpans(spans: RawSpan[], code: string): Identity {
 	return {
 		"idOf": (node) => byRange.get(`${node.start}:${node.end}`),
 		"lineOf": (node) => lineAt(code, node.start),
-		"nodeLines": nodeLines
+		"nodeLines": nodeLines,
+		"snapshot": snapshot
 	};
 }
 
-/** Stable node identity for `code` (parses once). Prefer `parseSource` when you also need the tree. */
-export function identify(code: string): Identity {
-	return identityFromSpans((cstSpans(code) as { "spans": RawSpan[] }).spans, code);
+/** Stable node identity for `code` (parses once), reidentified from an optional prior `.ts.bablr` snapshot so ids
+ *  carry across edits. Prefer `parseSource` when you also need the tree. */
+export function identify(code: string, prior: IdSnapshot | null = null): Identity {
+	return identityFromSpans((cstSpans(code) as { "spans": RawSpan[] }).spans, code, prior);
 }
 
 /** Concrete property entries of an `Object` node: `[keyText, valueNode]` per property.

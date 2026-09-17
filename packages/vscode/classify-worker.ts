@@ -10,6 +10,7 @@
  * land mid-parse and trip this request's AbortController — the run bails cooperatively, no worker termination. One
  * request in flight at a time (the classifier drives it serially), correlated by id.
  */
+import "./bablr-fast-freeze"; // MUST be first: neutralizes record freezing before the BABLR bundle captures Object.freeze
 import { deriveIdentityAsync, editGroups, fileDiffIdentityAsync } from "@brianjenkins94/bablr";
 
 interface ClassifyRequest { "id": number; "before"?: string; "after"?: string; "contents"?: string[]; "editGroupsContents"?: string[]; "wantSnapshot": boolean }

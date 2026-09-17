@@ -39,8 +39,10 @@
 // ║ W4  CLOSED in the grammar: the failed speculative call could not backtrack only because CallExpression's    ║
 // ║     `eatMatch(<TypeArguments '<' />)` COMMITTED (a node literal skips the branch — W6 in UPSTREAM_BUGS.md). It is ║
 // ║     `if (match('<')) eat(<TypeArguments />)` now and `f<T>(x)` vs `a < b` is decided by parsing.            ║
-// ║ W5  perf: record validation is ~25% of parse time. Off in THIS repo via patches/@bablr+record (opt back in with ║
-// ║     `globalThis[Symbol.for('@bablr/record:strict')] = true`); stock speed everywhere else.                  ║
+// ║ W5  perf: record validation (@bablr/record's recursive `validate` walk) is ~25-30% of parse time. It is         ║
+// ║     tree-shaken from the shipped bundle — packages/bablr aliases @bablr/record to shims/record.js, whose        ║
+// ║     `__BABLR_RECORD_STRICT__` build define folds to false (set it true to opt back in); stock speed elsewhere.  ║
+// ║     Record FREEZING (the other ~half) is no-op'd in the parse workers: packages/vscode/bablr-fast-freeze.ts.    ║
 // ║                                                                                                             ║
 // ║ RUNTIME PATCHES (patches/, this repo only; consumers get stock packages and lose exactly these inputs):     ║
 // ║ U1  astral characters (regex-vm `fromCharCode` truncation + bablr-vm UTF-16 `getSourceLength`).             ║
