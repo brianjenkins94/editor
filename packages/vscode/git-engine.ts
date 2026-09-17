@@ -279,6 +279,29 @@ export async function writeBablr(path: string, json: string): Promise<void> {
 	await fs.promises.writeFile(dir + "/" + encodeURIComponent(path) + ".json", json);
 }
 
+/**
+ * Persist a file's Automerge edit-history doc (the fine-grained local tier) under `.git/bablr-automerge/`, as the raw
+ * `Automerge.save` binary. Same rationale as the `.bablr` sidecar: inside `.git`, off the working tree, local + per
+ * session (zen-fs). The synced/shared version is the Keyhive milestone.
+ */
+export async function writeAutomerge(path: string, bytes: Uint8Array): Promise<void> {
+	const dir = DIR + "/.git/bablr-automerge";
+
+	await fs.promises.mkdir(dir, { "recursive": true });
+	await fs.promises.writeFile(dir + "/" + encodeURIComponent(path) + ".bin", bytes);
+}
+
+/** Read back a file's Automerge edit-history doc, or null if none has been recorded yet. */
+export async function readAutomerge(path: string): Promise<Uint8Array | null> {
+	try {
+		const data = await fs.promises.readFile(DIR + "/.git/bablr-automerge/" + encodeURIComponent(path) + ".bin");
+
+		return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+	} catch {
+		return null; // none yet
+	}
+}
+
 /** The HEAD version of a file, for quick-diff gutters + the diff view. "" when the repo is unborn or the file is
  *  new (no HEAD blob), which is exactly what a diff against "nothing" wants. */
 export async function headContent(path: string): Promise<string> {

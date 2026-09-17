@@ -28,6 +28,7 @@ import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
+import { installEditHistory } from "./edit-history";
 import { installCommentAnnotations } from "./git-comments";
 import { installGitScm } from "./git-scm";
 import { installGitService } from "./git-service";
@@ -340,6 +341,10 @@ function maybeBoot(): void {
 					// Comment-annotations: the inline UI consumer of the node-id annotation store (VS Code Comments API
 					// as the surface, the .git/bablr-annotations store as the move-stable backing). See git-comments.ts.
 					installCommentAnnotations(api as typeof import("vscode"), cosmeticClassifier, paneLog);
+					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
+					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
+					// edit-history.ts.
+					installEditHistory(api as typeof import("vscode"), workbenchHub, paneLog);
 					bootSpan.info("hello extension api captured");
 				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
 				// AFTER the workbench restores its last-active viewlet (which would otherwise win).

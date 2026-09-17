@@ -186,7 +186,10 @@ export async function preBuild(): Promise<void> {
 		// `buffer` → the node-stdlib-browser polyfill: isomorphic-git (the git SCM engine) uses the `Buffer` global,
 		// which the browser lacks and this bundle otherwise doesn't polyfill; the alias makes the import resolve to
 		// the real polyfill (git-engine.ts then assigns it to globalThis) instead of vite's empty browser stub.
-		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "buffer": stdlib["buffer"] as string } },
+		// `@automerge/automerge` → its base64-INLINED-WASM entry (fullfat_base64): the default browser condition wants a
+		// bundler to serve a separate `automerge.wasm`, which our static Pages deploy can't; the base64 build carries the
+		// wasm inline, so the lazily-imported edit-history chunk is self-contained. Resolve via package.json → sibling.
+		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "buffer": stdlib["buffer"] as string, "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
 		"build": {
 			"outDir": "dist",
 			"minify": isCI,
