@@ -143,17 +143,18 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 		"name": "provoke_transform",
 		"config": {
 			"title": "Provoke the preview transform race",
-			"description": "Force the preview's in-browser Vite dev server through the cold-start transform race on demand: each round tears the server down (empty transform cache) and fires the whole src/ graph's transforms concurrently. Returns { rounds, modules, provoked, failures[] } — a failure is a transform that came back 500 (the race losing). Requires a connected page with a preview already started (run the terminal `vite` command once). Use this instead of hand-driving cold boots to hunt the race.",
+			"description": "Force the preview's in-browser Vite dev server through the cold-start transform race on demand, and report any transform that lost (came back 500). Requires a connected page with a preview already started (run the terminal `vite` command once). Two modes: default (warm) restarts the in-process server each round — fast, but the worker's typescript stays hot; hardReset spawns a fresh CHILD worker per round (cold almostnode + ts) to reproduce the true first-load window — slower (a cold ts chunk per round, so use fewer rounds), needs cross-origin isolation. Returns { rounds, hardReset, provoked, failures[], transformErrors[] }. Use this instead of hand-driving cold boots to hunt the race.",
 			"inputSchema": {
-				"rounds": z.number().optional().describe("Cold-restart + concurrent-transform cycles to run (default 10)."),
-				"modules": z.array(z.string()).optional().describe("Module URLs to hammer each round, e.g. ['/src/App.tsx']. Default: the whole src/ graph.")
+				"rounds": z.number().optional().describe("Cold-restart + concurrent-transform cycles to run (default 10; use ~5 for hardReset, it's slower)."),
+				"modules": z.array(z.string()).optional().describe("Module URLs to hammer each round, e.g. ['/src/App.tsx']. Default: the whole src/ graph."),
+				"hardReset": z.boolean().optional().describe("Spawn a fresh cold child worker per round (cold ts realm — the true first-load race) instead of an in-process warm restart. Default false.")
 			}
 		},
 		"handler": async (args) => {
-			const { rounds, modules } = args as { "rounds"?: number; "modules"?: string[] };
+			const { rounds, modules, hardReset } = args as { "rounds"?: number; "modules"?: string[]; "hardReset"?: boolean };
 
 			try {
-				return ok(await debugMcp.rpc.request("preview_provoke", { "rounds": rounds ?? 10, "modules": modules }, { "timeoutMs": 130000 }));
+				return ok(await debugMcp.rpc.request("preview_provoke", { "rounds": rounds ?? 10, "modules": modules, "hardReset": hardReset ?? false }, { "timeoutMs": 300000 }));
 			} catch (error) {
 				return fail(error instanceof Error ? error.message : String(error));
 			}

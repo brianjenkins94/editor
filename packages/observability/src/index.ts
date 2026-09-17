@@ -169,7 +169,7 @@ export function servePageTools(hub: Hub): void {
 	// loop the cold-start transform race from debug-mcp instead of hand-driving cold boots. See node-worker.ts.
 	const rpc = createRpcClient(hub);
 
-	serve(hub, "preview_provoke", (args) => rpc.request("preview.provoke", args ?? {}, { "timeoutMs": 120000 }));
+	serve(hub, "preview_provoke", (args) => rpc.request("preview.provoke", args ?? {}, { "timeoutMs": 300000 }));
 }
 
 /**

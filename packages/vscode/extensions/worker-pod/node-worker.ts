@@ -34,7 +34,7 @@ import { createHub, portTransport, serve } from "@brianjenkins94/hub";
 import { relayLoggerToHub } from "../../telemetry";
 
 import { installTimerKeepAlive } from "./node-keepalive";
-import { createZenfsVFS, receiveSharedWorkspace } from "./zenfs-vfs.js";
+import { createZenfsVFS, getSharedWorkspaceBuffer, receiveSharedWorkspace } from "./zenfs-vfs.js";
 
 // Catch the shared workspace SAB from the spawner BEFORE anything runs (dedicated port; never the RPC channel).
 receiveSharedWorkspace();
@@ -215,7 +215,7 @@ interface VirtualRequest { "port": number; "method": string; "url": string; "hea
 interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 type RequestHandler = { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> };
-type PreviewServer = RequestHandler & { "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "stop": () => void };
+type PreviewServer = RequestHandler & { "start": () => void; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "stop": () => void };
 
 // Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry.
 const previewServers = new Map<number, PreviewServer>();
@@ -260,14 +260,42 @@ serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number
 	return { "ok": true, "port": port };
 });
 
+// Run ONE hardReset round in a freshly-spawned child worker (provoke-worker.ts): a cold module realm where
+// almostnode + typescript are imported for the first time, so the FIRST transform reproduces the true cold-start
+// window that a warm in-process restart can't. We hand it the workspace SAB, await its one reply, then terminate.
+async function provokeColdChild(buffer: SharedArrayBuffer, root: string, port: number, urls: string[], timeoutMs: number): Promise<{ "failures": string[]; "transformErrors": Array<{ "url": string; "name": string; "message": string }>; "error"?: string }> {
+	const worker = new Worker(new URL("./provoke-worker.js", location.href), { "type": "module" });
+
+	try {
+		const reply = await new Promise<{ "failures": Array<{ "url": string; "status": number }>; "transformErrors": Array<{ "url": string; "name": string; "message": string }>; "error"?: string }>((resolve, reject) => {
+			const timer = setTimeout(() => { reject(new Error("provoke child timed out after " + timeoutMs + "ms")); }, timeoutMs);
+
+			worker.addEventListener("message", (event: MessageEvent) => {
+				clearTimeout(timer);
+				resolve(event.data as { "failures": Array<{ "url": string; "status": number }>; "transformErrors": Array<{ "url": string; "name": string; "message": string }>; "error"?: string });
+			});
+			worker.addEventListener("error", (event: ErrorEvent) => { clearTimeout(timer); reject(new Error(event.message || "provoke child worker error")); });
+			worker.postMessage({ "buffer": buffer, "root": root, "port": port, "modules": urls });
+		});
+
+		return { "failures": reply.failures.map((failure) => failure.url), "transformErrors": reply.transformErrors, "error": reply.error };
+	} finally {
+		worker.terminate();
+	}
+}
+
 // Debug affordance: provoke the cold-start transform race on demand, so an agent can loop it via debug-mcp
-// (provoke_transform) instead of hand-driving full-page cold boots. Each round tears down the dev server (→ a
-// fresh, EMPTY transform cache — the exact window the race needs) and fires the whole src/ graph's transforms
-// CONCURRENTLY (the concurrency IS the provocation). A transform that loses the race now returns 500 (we removed
-// the masking retry), so we count 500s and surface the reporter's error shape. Leaves a working server running.
-interface ProvokeResult { "rounds": number; "modules": string[]; "provoked": boolean; "failures": Array<{ "round": number; "url": string; "status": number }> }
+// (provoke_transform) instead of hand-driving full-page cold boots. Two modes:
+//   • default (warm): each round tears down the in-process dev server (→ a fresh, EMPTY transform cache) and fires
+//     the whole src/ graph's transforms CONCURRENTLY. Fast, but the worker's typescript stays hot across rounds.
+//   • hardReset: each round spawns a fresh CHILD worker (cold almostnode + ts) that does one concurrent transform
+//     burst. Slower (a cold ts chunk per round) but reproduces the true first-load window. Needs the workspace SAB
+//     (cross-origin isolation); without it there's nothing to hand the child, so it errors.
+// A transform that loses the race returns 500 (we removed the masking retry), so we count 500s and surface the
+// reporter's error shape.
+interface ProvokeResult { "rounds": number; "modules": string[]; "hardReset": boolean; "provoked": boolean; "failures": Array<{ "round": number; "url": string; "status": number }>; "transformErrors": Array<{ "round": number; "url": string; "name": string; "message": string }> }
 serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
-	const { rounds = 10, modules, port: portArg, root: rootArg } = (raw ?? {}) as { "rounds"?: number; "modules"?: string[]; "port"?: number; "root"?: string };
+	const { rounds = 10, modules, hardReset = false, port: portArg, root: rootArg } = (raw ?? {}) as { "rounds"?: number; "modules"?: string[]; "hardReset"?: boolean; "port"?: number; "root"?: string };
 	const port = portArg ?? lastPreviewConfig?.port;
 	const root = rootArg ?? lastPreviewConfig?.root;
 
@@ -292,37 +320,64 @@ serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
 	}
 
 	const failures: ProvokeResult["failures"] = [];
-	const span = log.span("preview.provoke", { "rounds": rounds, "modules": urls.length });
+	const transformErrors: ProvokeResult["transformErrors"] = [];
+	const span = log.span("preview.provoke", { "rounds": rounds, "modules": urls.length, "hardReset": hardReset });
 
-	for (let round = 0; round < rounds; round += 1) {
-		previewServers.get(port)?.stop();
+	if (hardReset) {
+		const buffer = getSharedWorkspaceBuffer();
 
-		const server = new ViteDevServer(vfs, { "port": port, "root": root }) as unknown as PreviewServer;
+		if (buffer === undefined) {
+			span.end({ "failures": 0, "error": "no shared workspace buffer" });
 
-		server.start();
-		server.setHMRTarget({ "postMessage": (message) => { hub.publish(`preview.hmr.${port}`, message); } });
-		server.setTransformErrorReporter((info) => { log.warn("preview transform failed (provoke round " + round + ")", info); });
-		previewServers.set(port, server);
-		lastPreviewConfig = { "port": port, "root": root };
+			throw new Error("preview.provoke hardReset: no workspace SharedArrayBuffer (needs cross-origin isolation) — use the default (warm) mode instead");
+		}
 
-		// Fire the whole graph at once — losing the cold-start race is the thing we're trying to catch.
-		const results = await Promise.all(urls.map(async (url) => {
-			const response = await server.handleRequest("GET", url, {});
+		for (let round = 0; round < rounds; round += 1) {
+			const outcome = await provokeColdChild(buffer, root, port, urls, 30000);
 
-			return { "url": url, "status": response.statusCode };
-		}));
+			for (const url of outcome.failures) {
+				failures.push({ "round": round, "url": url, "status": 500 });
+			}
 
-		for (const result of results) {
-			if (result.status >= 500) {
-				failures.push({ "round": round, "url": result.url, "status": result.status });
+			for (const info of outcome.transformErrors) {
+				transformErrors.push({ "round": round, "url": info.url, "name": info.name, "message": info.message });
+			}
+
+			if (outcome.error !== undefined) {
+				log.warn("preview.provoke child error (round " + round + ")", { "error": outcome.error });
+			}
+		}
+	} else {
+		for (let round = 0; round < rounds; round += 1) {
+			previewServers.get(port)?.stop();
+
+			const server = new ViteDevServer(vfs, { "port": port, "root": root }) as unknown as PreviewServer;
+
+			server.start();
+			server.setHMRTarget({ "postMessage": (message) => { hub.publish(`preview.hmr.${port}`, message); } });
+			server.setTransformErrorReporter((info) => { log.warn("preview transform failed (provoke round " + round + ")", info); transformErrors.push({ "round": round, "url": info.url, "name": info.name, "message": info.message }); });
+			previewServers.set(port, server);
+			lastPreviewConfig = { "port": port, "root": root };
+
+			// Fire the whole graph at once — losing the cold-start race is the thing we're trying to catch.
+			const results = await Promise.all(urls.map(async (url) => {
+				const response = await server.handleRequest("GET", url, {});
+
+				return { "url": url, "status": response.statusCode };
+			}));
+
+			for (const result of results) {
+				if (result.status >= 500) {
+					failures.push({ "round": round, "url": result.url, "status": result.status });
+				}
 			}
 		}
 	}
 
 	span.end({ "failures": failures.length });
-	log.info("preview.provoke done", { "rounds": rounds, "failures": failures.length });
+	log.info("preview.provoke done", { "rounds": rounds, "hardReset": hardReset, "failures": failures.length });
 
-	return { "rounds": rounds, "modules": urls, "provoked": failures.length > 0, "failures": failures };
+	return { "rounds": rounds, "modules": urls, "hardReset": hardReset, "provoked": failures.length > 0, "failures": failures, "transformErrors": transformErrors };
 });
 
 // M2: an editor save can't fire the worker's zen-fs watch (it's a no-op), so the main thread tells us which file

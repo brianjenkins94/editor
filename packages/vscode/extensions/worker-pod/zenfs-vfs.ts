@@ -53,6 +53,27 @@ const WORKSPACE_MOUNT = "/workspace";
 let configured = false;
 let mounted = false;
 let pendingBuffer: SharedArrayBuffer | undefined;
+// The workspace SAB, retained once received so a worker can HAND IT ON to a freshly-spawned child worker (the
+// preview.provoke hardReset path spawns a cold child per round; it mounts this same buffer). undefined without COI.
+let sharedWorkspaceBuffer: SharedArrayBuffer | undefined;
+
+/** The received workspace SharedArrayBuffer, or undefined if none arrived (no cross-origin isolation / standalone). */
+export function getSharedWorkspaceBuffer(): SharedArrayBuffer | undefined {
+	return sharedWorkspaceBuffer;
+}
+
+/**
+ * Mount the workspace SAB into THIS realm's zen-fs and return a VirtualFS adapter over it. For a fresh child
+ * worker that received the buffer directly (not over the pod control port) — e.g. the provoke child worker.
+ */
+export async function mountWorkspaceVfs(buffer: SharedArrayBuffer): Promise<VirtualFS> {
+	await configure({ "mounts": { "/": InMemory } });
+	configured = true;
+	sharedWorkspaceBuffer = buffer;
+	await mountSharedWorkspace(buffer);
+
+	return adapter;
+}
 
 async function mountSharedWorkspace(buffer: SharedArrayBuffer): Promise<void> {
 	if (mounted) {
@@ -99,6 +120,8 @@ export function receiveSharedWorkspace(): void {
 			const buffer = (message.data as { "buffer"?: unknown } | undefined)?.buffer;
 
 			if (typeof SharedArrayBuffer !== "undefined" && buffer instanceof SharedArrayBuffer) {
+				sharedWorkspaceBuffer = buffer; // retained so we can hand it to a spawned child worker
+
 				if (configured) {
 					void mountSharedWorkspace(buffer);
 				} else {

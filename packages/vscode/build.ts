@@ -224,6 +224,9 @@ export async function preBuild(): Promise<void> {
 					"lsp/server-host": resolvePath("./extensions/worker-pod/server-host.ts"),
 					"lsp/debug-worker": resolvePath("./extensions/worker-pod/debug-worker.ts"),
 					"lsp/node-worker": resolvePath("./extensions/worker-pod/node-worker.ts"),
+					// provoke child worker (debug affordance): node-worker spawns it per hardReset round to get a cold
+					// almostnode + ts realm. Served at lsp/provoke-worker.js so node-worker's `new URL` resolves it.
+					"lsp/provoke-worker": resolvePath("./extensions/worker-pod/provoke-worker.ts"),
 					// BABLR cosmetic/semantic classify worker (not part of the LSP pod), served from lsp/ like the
 					// other worker chunks. Driven by cosmetic-classifier.ts.
 					"lsp/classify-worker": resolvePath("./classify-worker.ts")
