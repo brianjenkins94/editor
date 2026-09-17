@@ -522,6 +522,21 @@ export class ViteDevServer extends DevServer {
 				};
 			} catch (error) {
 				lastError = error;
+
+				// Log the FIRST failure even when a retry then recovers it: this is the transient cold-start
+				// transform race, and capturing its shape (which call threw, with what message + stack) is the only
+				// way to pin the actual source rather than infer it. Kept as a warn (not an error) since the retry
+				// usually succeeds and the request still returns a correct module.
+				if (attempt === 0) {
+					const asError = error instanceof Error ? error : undefined;
+
+					console.warn("[ViteDevServer] transform failed on first attempt (will retry):", urlPath, {
+						"name": asError?.name ?? typeof error,
+						"message": asError?.message ?? String(error),
+						"stack": asError?.stack
+					});
+				}
+
 				// Brief backoff, then retry — recovers the cold-start race within this single request.
 				await new Promise<void>((resolve) => { setTimeout(resolve, 50); });
 			}
