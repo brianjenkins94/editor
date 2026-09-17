@@ -146,8 +146,8 @@ export function tapConsoleAndErrors(hub: Hub, source: string, options: { "captur
 
 	if (options.captureConsole === true) {
 		const bay = console as unknown as Record<string, (...args: unknown[]) => void>;
-
-		for (const [method, level] of [["error", "error"], ["warn", "warn"]] as const) {
+		// Hoisted out of the level loop so the wrapper closure isn't declared inside a loop (no-loop-func).
+		const patch = (method: string, level: LogRecord["level"]): void => {
 			const original = typeof bay[method] === "function" ? bay[method].bind(console) : (): void => undefined;
 
 			bay[method] = (...args: unknown[]): void => {
@@ -158,7 +158,10 @@ export function tapConsoleAndErrors(hub: Hub, source: string, options: { "captur
 				original(...args);
 			};
 			disposers.push(() => { bay[method] = original; });
-		}
+		};
+
+		patch("error", "error");
+		patch("warn", "warn");
 	}
 
 	return () => {
