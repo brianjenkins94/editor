@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "debug-mcp": {
-      "command": "node",
+      "command": "packages/debug-mcp/node_modules/.bin/tsx",
       "args": ["packages/debug-mcp/src/bin.ts"]
     }
   }

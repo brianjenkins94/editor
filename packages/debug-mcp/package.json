@@ -16,7 +16,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "start": "node src/bin.ts",
+    "start": "tsx src/bin.ts",
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
@@ -29,6 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.13"
   }
 }
