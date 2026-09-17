@@ -17,7 +17,20 @@
         "command": "hello.helloWorld",
         "title": "Hello World",
         "category": "Hello"
+      },
+      {
+        "command": "bablr.addComment",
+        "title": "Add Note",
+        "enablement": "!commentIsEmpty"
       }
-    ]
+    ],
+    "menus": {
+      "comments/commentThread/context": [
+        {
+          "command": "bablr.addComment",
+          "group": "inline"
+        }
+      ]
+    }
   }
 }

@@ -22,6 +22,8 @@ export interface FileAnalysis {
 	"verdict": ChangeKind | "none";
 	"changedNodeIds": string[];
 	"changedLines": number[];
+	/** Every working node's 1-based line (node id → line) — the annotation surface resolves ids ↔ lines with this. */
+	"nodeLines": Record<string, number>;
 	"snapshot": unknown;
 }
 
@@ -36,7 +38,7 @@ export interface CosmeticClassifier {
 	"dispose": () => void;
 }
 
-interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "changedLines"?: number[]; "snapshot"?: unknown; "aborted"?: true }
+interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "changedLines"?: number[]; "nodeLines"?: Record<string, number>; "snapshot"?: unknown; "aborted"?: true }
 
 interface RequestMessage { "before"?: string; "after"?: string; "contents"?: string[] }
 
@@ -69,7 +71,7 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		if (event.data.aborted === true || event.data.verdict === undefined) {
 			settled.reject(new DOMException("classification aborted", "AbortError"));
 		} else {
-			settled.resolve({ "verdict": event.data.verdict, "changedNodeIds": event.data.changedNodeIds ?? [], "changedLines": event.data.changedLines ?? [], "snapshot": event.data.snapshot ?? null });
+			settled.resolve({ "verdict": event.data.verdict, "changedNodeIds": event.data.changedNodeIds ?? [], "changedLines": event.data.changedLines ?? [], "nodeLines": event.data.nodeLines ?? {}, "snapshot": event.data.snapshot ?? null });
 		}
 
 		pump();
@@ -97,7 +99,7 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 
 	const request = async (message: RequestMessage, signal: AbortSignal | undefined, wantSnapshot: boolean): Promise<FileAnalysis> => {
 		if (message.contents === undefined && message.before === message.after) {
-			return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [], "snapshot": null }; // identical — the only provably-correct shortcut
+			return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [], "nodeLines": {}, "snapshot": null }; // identical — the only provably-correct shortcut
 		}
 
 		if (signal?.aborted === true) {

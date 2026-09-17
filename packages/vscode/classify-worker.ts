@@ -47,6 +47,9 @@ globalThis.onmessage = async (event: MessageEvent<ClassifyRequest | AbortRequest
 			if ("changedLines" in result) {
 				reply["changedLines"] = result.changedLines;
 			}
+			if ("nodeLines" in result) {
+				reply["nodeLines"] = result.nodeLines;
+			}
 		}
 
 		(globalThis as unknown as Worker).postMessage(reply);

@@ -28,6 +28,7 @@ import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
+import { installCommentAnnotations } from "./git-comments";
 import { installGitScm } from "./git-scm";
 import { installGitService } from "./git-service";
 import capabilitiesManifest from "./extensions/capabilities/package.json";
@@ -336,6 +337,9 @@ function maybeBoot(): void {
 						bootSpan.error("git SCM install failed", { "error": errText(error) });
 					});
 					installGitService(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
+					// Comment-annotations: the inline UI consumer of the node-id annotation store (VS Code Comments API
+					// as the surface, the .git/bablr-annotations store as the move-stable backing). See git-comments.ts.
+					installCommentAnnotations(api as typeof import("vscode"), cosmeticClassifier, paneLog);
 					bootSpan.info("hello extension api captured");
 				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
 				// AFTER the workbench restores its last-active viewlet (which would otherwise win).

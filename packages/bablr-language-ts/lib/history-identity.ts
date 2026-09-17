@@ -104,12 +104,12 @@ function lineAt(src: string, offset: number): number {
  * cancellable), re-identifies forward, and returns the final (working) snapshot with history-anchored ids, the
  * whole-file verdict from the last two contents (HEAD→working), and which working nodes are new/changed vs HEAD.
  */
-export async function deriveIdentityAsync(contents: string[], options: { "signal"?: AbortSignal; "budget"?: number; "production"?: string } = {}): Promise<{ "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[]; "snapshot": Snapshot | null }> {
+export async function deriveIdentityAsync(contents: string[], options: { "signal"?: AbortSignal; "budget"?: number; "production"?: string } = {}): Promise<{ "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[]; "nodeLines": Record<string, number>; "snapshot": Snapshot | null }> {
 	const production = options.production ?? "Program";
 
 	try {
 		if (contents.length === 0) {
-			return { "verdict": "none", "changedNodeIds": [], "changedLines": [], "snapshot": { "nodes": [] } };
+			return { "verdict": "none", "changedNodeIds": [], "changedLines": [], "nodeLines": {}, "snapshot": { "nodes": [] } };
 		}
 
 		// Parse each link once (keeping spans so we can map changed nodes back to WORKING line numbers).
@@ -144,21 +144,30 @@ export async function deriveIdentityAsync(contents: string[], options: { "signal
 		const workingContent = contents[contents.length - 1];
 		const workingSpans = lastSpans.filter((span) => !span.trivia);
 		const lineSet = new Set<number>();
+		// EVERY working node's line (not just changed ones) — the annotation surface pins comments to node ids and needs
+		// to resolve any id (changed or not) to its current line, and the reverse (a line → the node id on it).
+		const nodeLines: Record<string, number> = {};
 
 		snapshot.nodes.forEach((node, index) => {
 			const span = workingSpans[index];
 
-			if (span !== undefined && changed.has(node.id)) {
-				lineSet.add(lineAt(workingContent, span.start));
+			if (span !== undefined) {
+				const line = lineAt(workingContent, span.start);
+
+				nodeLines[node.id] = line;
+
+				if (changed.has(node.id)) {
+					lineSet.add(line);
+				}
 			}
 		});
 
-		return { "verdict": verdict, "changedNodeIds": [...changed], "changedLines": [...lineSet].sort((a, b) => a - b), "snapshot": snapshot };
+		return { "verdict": verdict, "changedNodeIds": [...changed], "changedLines": [...lineSet].sort((a, b) => a - b), "nodeLines": nodeLines, "snapshot": snapshot };
 	} catch (error) {
 		if (error instanceof DOMException && error.name === "AbortError") {
 			throw error;
 		}
 
-		return { "verdict": "unparsable", "changedNodeIds": [], "changedLines": [], "snapshot": null };
+		return { "verdict": "unparsable", "changedNodeIds": [], "changedLines": [], "nodeLines": {}, "snapshot": null };
 	}
 }

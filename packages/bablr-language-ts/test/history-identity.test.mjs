@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // eslint-disable-next-line antfu/no-import-dist -- intentional: exercise the shipped artifact (dist is gitignored, local-only)
-import { deriveIdentity, headIdentity, isCommitBoundary, selectBase } from "../../bablr/dist/index.js";
+import { deriveIdentity, deriveIdentityAsync, headIdentity, isCommitBoundary, selectBase } from "../../bablr/dist/index.js";
 
 const ids = (snapshot) => snapshot.nodes.map((node) => node.id);
 
@@ -73,4 +73,24 @@ test("different heads converge on shared-ancestry ids by anchoring at the common
 	const bAtC2 = ids(deriveIdentity(commits, base, 2)); // B computes C2 en route to C3, same base
 
 	assert.deepEqual(aAtC2, bAtC2, "common-ancestry base ⇒ shared ids for the shared commit");
+});
+
+test("deriveIdentityAsync: nodeLines maps every working node to its line, and a node re-anchors as it shifts", async () => {
+	// This is what the comment-annotations surface stands on: a stored note is pinned to a node id, and on reopen we
+	// resolve that id → its CURRENT line via nodeLines. Insert a line ABOVE a statement and the SAME id must move down.
+	const head = "const a = 1;\nconst b = 2;\nconst c = 3;\n";
+	const working = "const a = 1;\nconst inserted = 99;\nconst b = 2;\nconst c = 3;\n";
+
+	const headOnly = await deriveIdentityAsync([head]);
+	const derived = await deriveIdentityAsync([head, working]);
+
+	assert.ok(Object.keys(derived.nodeLines).length > 0, "nodeLines is populated");
+	assert.ok(Object.values(derived.nodeLines).every((line) => line >= 1 && line <= 4), "every line is within the file");
+
+	// The `const b` value node (`2`) exists in both; its id must survive the insert and re-anchor from line 2 to line 3.
+	const bNode = headOnly.snapshot.nodes.find((node) => node.atom.includes("\"2\""));
+
+	assert.ok(bNode !== undefined, "found the const-b value node at HEAD");
+	assert.equal(headOnly.nodeLines[bNode.id], 2, "was on line 2 at HEAD");
+	assert.equal(derived.nodeLines[bNode.id], 3, "same id re-anchors to line 3 after an insert above — the note follows");
 });
