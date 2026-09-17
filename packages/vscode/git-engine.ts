@@ -10,8 +10,9 @@
  */
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
 import { Buffer } from "buffer";
+import { isCommitBoundary } from "@brianjenkins94/bablr";
 import { fs } from "@zenfs/core";
-import { add, commit, init, readBlob, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
+import { add, commit, init, readBlob, readCommit, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism); the browser has none and the workbench bundle doesn't
 // polyfill node globals, so provide it. The `buffer` import resolves to the node-stdlib-browser polyfill via the
@@ -170,6 +171,64 @@ export async function discardFile(path: string): Promise<void> {
 /** Overwrite a file's working-tree content (a PARTIAL discard: working with the chosen hunks reverted to HEAD). */
 export async function setWorking(path: string, content: string): Promise<void> {
 	await fs.promises.writeFile(DIR + "/" + path, content);
+}
+
+/** Commit-chain CDC boundary spacing: ~1 in N commits is a boundary the whole team agrees on (from the oid). */
+const BABLR_BOUNDARY_N = 8;
+/** Safety cap on the history walk when no boundary is hit (very long histories fall back toward the root). */
+const HISTORY_WALK_CAP = 10000;
+
+/**
+ * The file's DISTINCT contents from the content-defined base (nearest commit whose oid is a CDC boundary, else the
+ * root) up to HEAD, oldest first — the windowed chain the node-identity derivation seeds from. Everyone computes the
+ * same base from the oids, so identity converges without coordination, without the full history, and without
+ * persistence. Returns `{ baseOid, contents }`; `contents` is empty when the file has no committed history yet.
+ */
+export async function fileHistory(path: string): Promise<{ "baseOid": string | null; "contents": string[] }> {
+	let cur: string | null;
+
+	try {
+		cur = await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" });
+	} catch {
+		return { "baseOid": null, "contents": [] }; // unborn repo — nothing committed
+	}
+
+	const newestFirst: string[] = [];
+	let lastBlobOid: string | null = null;
+	let baseOid: string | null = null;
+
+	for (let step = 0; cur !== null && step < HISTORY_WALK_CAP; step += 1) {
+		let content: string | null = null;
+		let blobOid: string | null = null;
+
+		try {
+			const blob = await readBlob({ "fs": fs, "dir": DIR, "oid": cur, "filepath": path });
+
+			blobOid = blob.oid;
+			content = new TextDecoder().decode(blob.blob);
+		} catch { /* the file doesn't exist at this commit */ }
+
+		if (content !== null && blobOid !== lastBlobOid) {
+			newestFirst.push(content); // record each distinct version (unchanged commits add nothing)
+			lastBlobOid = blobOid;
+		}
+
+		const boundary = isCommitBoundary(cur, BABLR_BOUNDARY_N);
+		let parent: string | null = null;
+
+		try {
+			parent = (await readCommit({ "fs": fs, "dir": DIR, "oid": cur })).commit.parent[0] ?? null;
+		} catch { /* corrupt/missing — treat as root */ }
+
+		if (boundary || parent === null) {
+			baseOid = cur; // this boundary (or the root) is the shared base
+			break;
+		}
+
+		cur = parent;
+	}
+
+	return { "baseOid": baseOid, "contents": newestFirst.reverse() };
 }
 
 /**

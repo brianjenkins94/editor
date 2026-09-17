@@ -17,28 +17,31 @@
 /** BABLR's verdict for a change (mirrors `@brianjenkins94/bablr`). */
 export type ChangeKind = "cosmetic" | "semantic" | "unparsable";
 
-/** The identity analysis of a HEAD→working change: verdict + changed node ids + the working `.bablr` snapshot. */
+/** The identity analysis of a change: verdict + changed node ids + the working `.bablr` snapshot. */
 export interface FileAnalysis {
-	"verdict": ChangeKind;
+	"verdict": ChangeKind | "none";
 	"changedNodeIds": string[];
 	"snapshot": unknown;
 }
 
 export interface CosmeticClassifier {
 	/** Just the verdict (SCM badges). Pass an `AbortSignal` to cancel; the promise then rejects with an AbortError. */
-	"classify": (before: string, after: string, signal?: AbortSignal) => Promise<ChangeKind>;
-	/** Verdict + changed node ids + the working `.bablr` snapshot (for the diff to persist / highlight). */
+	"classify": (before: string, after: string, signal?: AbortSignal) => Promise<ChangeKind | "none">;
+	/** HEAD→working analysis: verdict + changed node ids + the working `.bablr` snapshot. */
 	"analyze": (before: string, after: string, signal?: AbortSignal) => Promise<FileAnalysis>;
+	/** Derive over a windowed commit chain (base…HEAD…working) → HISTORY-ANCHORED snapshot + verdict + changes. */
+	"identify": (contents: string[], signal?: AbortSignal) => Promise<FileAnalysis>;
 	/** Tear down the worker. */
 	"dispose": () => void;
 }
 
-interface ClassifyResponse { "id": number; "verdict"?: ChangeKind; "changedNodeIds"?: string[]; "snapshot"?: unknown; "aborted"?: true }
+interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "snapshot"?: unknown; "aborted"?: true }
+
+interface RequestMessage { "before"?: string; "after"?: string; "contents"?: string[] }
 
 interface QueueItem {
 	"id": number;
-	"before": string;
-	"after": string;
+	"message": RequestMessage;
 	"wantSnapshot": boolean;
 	"resolve": (result: FileAnalysis) => void;
 	"reject": (error: unknown) => void;
@@ -88,11 +91,11 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		}
 
 		running = next;
-		worker.postMessage({ "id": next.id, "before": next.before, "after": next.after, "wantSnapshot": next.wantSnapshot });
+		worker.postMessage({ "id": next.id, ...next.message, "wantSnapshot": next.wantSnapshot });
 	}
 
-	const request = async (before: string, after: string, signal: AbortSignal | undefined, wantSnapshot: boolean): Promise<FileAnalysis> => {
-		if (before === after) {
+	const request = async (message: RequestMessage, signal: AbortSignal | undefined, wantSnapshot: boolean): Promise<FileAnalysis> => {
+		if (message.contents === undefined && message.before === message.after) {
 			return { "verdict": "cosmetic", "changedNodeIds": [], "snapshot": null }; // identical — the only provably-correct shortcut
 		}
 
@@ -101,7 +104,7 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		}
 
 		return new Promise<FileAnalysis>((resolve, reject) => {
-			const item: QueueItem = { "id": nextId, "before": before, "after": after, "wantSnapshot": wantSnapshot, "resolve": resolve, "reject": reject, "aborted": false };
+			const item: QueueItem = { "id": nextId, "message": message, "wantSnapshot": wantSnapshot, "resolve": resolve, "reject": reject, "aborted": false };
 
 			nextId += 1;
 			queue.push(item);
@@ -127,8 +130,9 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 	};
 
 	return {
-		"classify": async (before, after, signal) => (await request(before, after, signal, false)).verdict,
-		"analyze": (before, after, signal) => request(before, after, signal, true),
+		"classify": async (before, after, signal) => (await request({ "before": before, "after": after }, signal, false)).verdict,
+		"analyze": (before, after, signal) => request({ "before": before, "after": after }, signal, true),
+		"identify": (contents, signal) => request({ "contents": contents }, signal, true),
 		"dispose": () => { worker.terminate(); }
 	};
 }

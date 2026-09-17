@@ -10,9 +10,9 @@
  * land mid-parse and trip this request's AbortController — the run bails cooperatively, no worker termination. One
  * request in flight at a time (the classifier drives it serially), correlated by id.
  */
-import { fileDiffIdentityAsync } from "@brianjenkins94/bablr";
+import { deriveIdentityAsync, fileDiffIdentityAsync } from "@brianjenkins94/bablr";
 
-interface ClassifyRequest { "id": number; "before": string; "after": string; "wantSnapshot": boolean }
+interface ClassifyRequest { "id": number; "before"?: string; "after"?: string; "contents"?: string[]; "wantSnapshot": boolean }
 interface AbortRequest { "abort": true; "id": number }
 
 let current: { "id": number; "controller": AbortController } | undefined;
@@ -28,13 +28,17 @@ globalThis.onmessage = async (event: MessageEvent<ClassifyRequest | AbortRequest
 		return;
 	}
 
-	const { id, before, after, wantSnapshot } = data;
+	const { id, before, after, contents, wantSnapshot } = data;
 	const controller = new AbortController();
 
 	current = { "id": id, "controller": controller };
 
 	try {
-		const result = await fileDiffIdentityAsync(before, after, { "signal": controller.signal });
+		// `contents` = a windowed commit chain (base…HEAD…working) ⇒ history-anchored identity; otherwise the plain
+		// HEAD→working pair. Both yield a verdict; the chain path also anchors node ids to the shared base.
+		const result = contents !== undefined
+			? await deriveIdentityAsync(contents, { "signal": controller.signal })
+			: await fileDiffIdentityAsync(before ?? "", after ?? "", { "signal": controller.signal });
 		const reply: Record<string, unknown> = { "id": id, "verdict": result.verdict };
 
 		if (wantSnapshot) {

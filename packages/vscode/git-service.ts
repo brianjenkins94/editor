@@ -114,15 +114,17 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		classifyInFlight = controller;
 
 		try {
-			// analyze() gives the verdict AND the `.bablr` identity snapshot; persist the sidecar and answer with the
-			// verdict (the diff still just needs that today; changedNodeIds rides along for per-node highlighting next).
-			const result = await classifier.analyze(head, working, controller.signal);
+			// Anchor identity in REAL history: pull the file's content chain from its CDC base up to HEAD, append the
+			// working copy, and derive over the whole chain. The resulting `.bablr` snapshot carries HISTORY-ANCHORED
+			// node ids (shared across participants), and the verdict is HEAD→working (the last two links).
+			const { baseOid, contents } = await engine.fileHistory(path);
+			const result = await classifier.identify([...contents, working], controller.signal);
 
 			if (result.snapshot !== null) {
-				await engine.writeBablr(path, JSON.stringify({ "path": path, "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "snapshot": result.snapshot }));
+				await engine.writeBablr(path, JSON.stringify({ "path": path, "baseOid": baseOid, "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "snapshot": result.snapshot }));
 			}
 
-			return { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds };
+			return { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "baseOid": baseOid };
 		} catch {
 			return { "verdict": "none" }; // aborted (superseded) or worker error — the newer request will answer
 		} finally {

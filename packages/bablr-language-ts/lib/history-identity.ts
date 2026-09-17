@@ -12,8 +12,8 @@
 // Two participants at DIFFERENT heads compare ids by anchoring at the most recent boundary in their COMMON ancestry
 // (selectBase over the common-ancestor index) — the boundary they both possess. Knob N trades recompute depth for
 // base stability; with no boundary back to the root, the root is the base (a short history is cheap anyway).
-import type { Snapshot } from "./identity";
-import { nodeAtoms, reidentify } from "./identity";
+import type { ChangeKind, Snapshot } from "./identity";
+import { nodeAtoms, nodeAtomsAsync, reidentify } from "./identity";
 
 /** A commit's contribution for one file: its oid and the file's content at that commit. */
 export interface Commit {
@@ -71,4 +71,54 @@ export function headIdentity(commits: Commit[], headIndex: number, n: number, pr
 	const baseIndex = selectBase(commits.map((commit) => commit.oid), headIndex, n);
 
 	return { "snapshot": deriveIdentity(commits, baseIndex, headIndex, production), "baseIndex": baseIndex, "steps": headIndex - baseIndex };
+}
+
+function atomsEqual(a: string[], b: string[]): boolean {
+	return a.length === b.length && a.every((atom, index) => atom === b[index]);
+}
+
+/**
+ * Yielding derive over an ALREADY-WINDOWED content chain (base first … HEAD … working last), for the classify worker.
+ * The `contents` are what the caller pulled from real git history plus the working copy; this parses each (paced +
+ * cancellable), re-identifies forward, and returns the final (working) snapshot with history-anchored ids, the
+ * whole-file verdict from the last two contents (HEAD→working), and which working nodes are new/changed vs HEAD.
+ */
+export async function deriveIdentityAsync(contents: string[], options: { "signal"?: AbortSignal; "budget"?: number; "production"?: string } = {}): Promise<{ "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "snapshot": Snapshot | null }> {
+	const production = options.production ?? "Program";
+
+	try {
+		if (contents.length === 0) {
+			return { "verdict": "none", "changedNodeIds": [], "snapshot": { "nodes": [] } };
+		}
+
+		const atomsChain: string[][] = [];
+
+		for (const content of contents) {
+			atomsChain.push(await nodeAtomsAsync(content, production, options));
+		}
+
+		let snapshot = reidentify(null, atomsChain[0]);
+		let previous = snapshot;
+
+		for (let index = 1; index < atomsChain.length; index += 1) {
+			previous = snapshot;
+			snapshot = reidentify(snapshot, atomsChain[index]);
+		}
+
+		const verdict: ChangeKind | "none" = atomsChain.length < 2
+			? "none"
+			: (atomsEqual(atomsChain[atomsChain.length - 2], atomsChain[atomsChain.length - 1]) ? "cosmetic" : "semantic");
+		const previousIds = new Set(previous.nodes.map((node) => node.id));
+		const changedNodeIds = atomsChain.length < 2
+			? snapshot.nodes.map((node) => node.id)
+			: snapshot.nodes.filter((node) => !previousIds.has(node.id)).map((node) => node.id);
+
+		return { "verdict": verdict, "changedNodeIds": changedNodeIds, "snapshot": snapshot };
+	} catch (error) {
+		if (error instanceof DOMException && error.name === "AbortError") {
+			throw error;
+		}
+
+		return { "verdict": "unparsable", "changedNodeIds": [], "snapshot": null };
+	}
 }
