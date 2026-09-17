@@ -48,6 +48,16 @@ export interface ViteDevServerOptions extends DevServerOptions {
 	"jsxAutoImport"?: boolean;
 }
 
+/** The shape reported for a first-attempt transform failure (see ViteDevServer.setTransformErrorReporter). */
+export interface TransformErrorInfo {
+	/** The requested module URL/path whose transform threw. */
+	"url": string;
+	/** The error's constructor name (or `typeof` for a non-Error throw) — e.g. "Error", "TypeError". */
+	"name": string;
+	"message": string;
+	"stack"?: string;
+}
+
 /**
  * React Refresh preamble - MUST run before React is loaded
  * This script is blocking to ensure injectIntoGlobalHook runs first
@@ -231,6 +241,7 @@ export class ViteDevServer extends DevServer {
 	private watcherCleanup: (() => void) | null = null;
 	private readonly options: ViteDevServerOptions;
 	private hmrTargetWindow: Window | null = null;
+	private transformErrorReporter: ((info: TransformErrorInfo) => void) | null = null;
 	private readonly transformCache = new Map<string, { "code": string; "hash": string }>();
 
 	constructor(vfs: VirtualFS, options: ViteDevServerOptions) {
@@ -250,6 +261,15 @@ export class ViteDevServer extends DevServer {
    */
 	setHMRTarget(targetWindow: Window): void {
 		this.hmrTargetWindow = targetWindow;
+	}
+
+  /**
+   * Report the FIRST transform failure (before a retry recovers it) to an external sink — e.g. the host worker's
+   * hub logger — so the transient cold-start transform race surfaces in the observability plane rather than only
+   * as a worker `console.warn` (which a remote agent can't read). See transformAndServe.
+   */
+	setTransformErrorReporter(reporter: (info: TransformErrorInfo) => void): void {
+		this.transformErrorReporter = reporter;
 	}
 
   /**
@@ -529,12 +549,20 @@ export class ViteDevServer extends DevServer {
 				// usually succeeds and the request still returns a correct module.
 				if (attempt === 0) {
 					const asError = error instanceof Error ? error : undefined;
-
-					console.warn("[ViteDevServer] transform failed on first attempt (will retry):", urlPath, {
+					const info: TransformErrorInfo = {
+						"url": urlPath,
 						"name": asError?.name ?? typeof error,
 						"message": asError?.message ?? String(error),
 						"stack": asError?.stack
-					});
+					};
+
+					// Route through the reporter (the host worker wires it to its hub logger, so the failure is
+					// queryable in the observability plane / debug-mcp); fall back to console.warn standalone.
+					if (this.transformErrorReporter !== null) {
+						this.transformErrorReporter(info);
+					} else {
+						console.warn("[ViteDevServer] transform failed on first attempt (will retry):", info);
+					}
 				}
 
 				// Brief backoff, then retry — recovers the cold-start race within this single request.

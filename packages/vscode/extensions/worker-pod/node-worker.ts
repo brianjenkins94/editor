@@ -215,7 +215,7 @@ interface VirtualRequest { "port": number; "method": string; "url": string; "hea
 interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 type RequestHandler = { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> };
-type PreviewServer = RequestHandler & { "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "notifyChange": (path: string) => void; "stop": () => void };
+type PreviewServer = RequestHandler & { "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "stop": () => void };
 
 // Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry.
 const previewServers = new Map<number, PreviewServer>();
@@ -246,6 +246,9 @@ serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number
 	// HMR delivery (M2): the worker has no Window to post updates to, so give the server a stand-in whose
 	// postMessage publishes the update over the hub; the main thread relays it to the preview iframe.
 	server.setHMRTarget({ "postMessage": (message) => { hub.publish(`preview.hmr.${port}`, message); } });
+	// Surface the transient cold-start transform race (the first transform failure, before the retry recovers it)
+	// on the observability plane so it's queryable via debug-mcp — not just a worker console.warn we can't read.
+	server.setTransformErrorReporter((info) => { log.warn("preview transform failed on first attempt (will retry)", info); });
 	previewServers.set(port, server);
 
 	return { "ok": true, "port": port };
