@@ -258,8 +258,26 @@ function renderInspector(host: HTMLElement, components: Component[], objects: En
 	}
 }
 
-/** Render the system/event sheet: ordered, top-to-bottom rows, each a query (chips) + body as expandable code (M3). */
-function renderSystems(host: HTMLElement, systems: System[], components: Component[]): void {
+/** One system's committed annotation (pinned to its node id in `.silo/annotations/<gameFile>.json`). Free-form
+ *  otherwise; the event sheet reads/writes a note + an enabled disposition. */
+interface SystemNote { "note"?: string; "enabled"?: boolean }
+
+/** The `.silo/`-derived data the event sheet joins onto the CST systems, by stable node id. */
+interface SystemSheet {
+	"notes": Record<string, SystemNote>;
+	/** node id → number of recorded runs that exercised that system (from `.silo/runs.jsonl`). */
+	"runCounts": Record<string, number>;
+	/** Persist an annotation for a system's node id (null clears it), then re-render. No-op if unanchored. */
+	"setNote": (nodeId: string | undefined, value: SystemNote | null) => void;
+}
+
+/**
+ * Render the system/event sheet (M3 → 2d): ordered top-to-bottom rows from the CST, each JOINED by its stable node
+ * id to its committed `.silo/` data — a note + enabled disposition (editable, written back to `.silo/`) and a badge
+ * for the recorded runs that exercised it. This is the payoff of the identity spine: systems come from the code, the
+ * durable per-system data comes from the committed store, and node ids stitch them together across edits.
+ */
+function renderSystems(host: HTMLElement, systems: System[], components: Component[], sheet: SystemSheet): void {
 	host.replaceChildren();
 
 	if (systems.length === 0) {
@@ -270,15 +288,25 @@ function renderSystems(host: HTMLElement, systems: System[], components: Compone
 
 	for (let index = 0; index < systems.length; index += 1) {
 		const system = systems[index];
+		const note = system.nodeId !== undefined ? sheet.notes[system.nodeId] : undefined;
+		const enabled = note?.enabled !== false; // default on; only an explicit false disables
+		const runCount = system.nodeId !== undefined ? (sheet.runCounts[system.nodeId] ?? 0) : 0;
 		const details = document.createElement("details");
 
-		details.style.cssText = "border:1px solid #333;border-radius:6px;overflow:hidden;margin-top:6px";
+		details.style.cssText = `border:1px solid #333;border-radius:6px;overflow:hidden;margin-top:6px${enabled ? "" : ";opacity:.5"}`;
 
 		const summary = document.createElement("summary");
 
 		summary.style.cssText = "cursor:pointer;padding:7px 9px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;list-style:none";
 		summary.appendChild(el("span", `${CHIP_CSS};background:#333;color:#aaa;font-variant-numeric:tabular-nums`, String(index + 1)));
-		summary.appendChild(el("span", "font-weight:600", system.name));
+
+		const nameEl = el("span", "font-weight:600", system.name);
+
+		if (!enabled) {
+			nameEl.style.textDecoration = "line-through";
+		}
+
+		summary.appendChild(nameEl);
 
 		const seen = new Set<string>();
 
@@ -298,7 +326,53 @@ function renderSystems(host: HTMLElement, systems: System[], components: Compone
 			}
 		}
 
+		// Runs badge (right-aligned) — how many recorded play-sessions exercised this system. 0 → nothing shown.
+		if (runCount > 0) {
+			const badge = el("span", `${CHIP_CSS};margin-left:auto;background:#1c3a2a;color:#6ee7a8`, `${runCount} run${runCount === 1 ? "" : "s"}`);
+
+			summary.appendChild(badge);
+		}
+
 		details.appendChild(summary);
+
+		// The joined `.silo/` panel: an enabled toggle + a note bound to this system's node id. Unanchored systems
+		// (no node id — shouldn't happen, but be safe) show the code only, since there's nothing stable to pin to.
+		if (system.nodeId !== undefined) {
+			const meta = el("div", "display:flex;align-items:center;gap:8px;padding:8px 9px;border-top:1px solid #333;background:#1a1a1a;flex-wrap:wrap");
+			const toggle = document.createElement("label");
+
+			toggle.style.cssText = "display:flex;align-items:center;gap:5px;font-size:11px;color:#bbb;cursor:pointer";
+
+			const check = document.createElement("input");
+
+			check.type = "checkbox";
+			check.checked = enabled;
+			check.addEventListener("change", () => { sheet.setNote(system.nodeId, { ...note, "enabled": check.checked }); });
+			toggle.append(check, document.createTextNode("enabled"));
+
+			const noteInput = document.createElement("input");
+
+			noteInput.type = "text";
+			noteInput.value = note?.note ?? "";
+			noteInput.placeholder = "note (pinned to this system)…";
+			noteInput.style.cssText = "flex:1 1 140px;min-width:120px;background:#111;border:1px solid #333;border-radius:4px;color:#ddd;font:11px system-ui,sans-serif;padding:4px 6px";
+			// Commit on blur / Enter so we don't thrash `.silo/` on every keystroke.
+			const commit = (): void => {
+				const text = noteInput.value.trim();
+
+				if (text === (note?.note ?? "")) {
+					return; // unchanged
+				}
+
+				sheet.setNote(system.nodeId, { ...note, "note": text === "" ? undefined : text });
+			};
+
+			noteInput.addEventListener("blur", commit);
+			noteInput.addEventListener("keydown", (event) => { if (event.key === "Enter") { noteInput.blur(); } });
+
+			meta.append(toggle, noteInput);
+			details.appendChild(meta);
+		}
 
 		const pre = document.createElement("pre");
 
@@ -382,9 +456,10 @@ export function installGameView(getApi: () => Api, hub: Hub): void {
 				}
 
 				let projection: GameProjection;
+				let client: ReturnType<typeof createRpcClient>;
 
 				try {
-					const client = await ensureWorker();
+					client = await ensureWorker();
 
 					projection = await client.request("game.project", sources, { "timeoutMs": 20000 }) as GameProjection;
 				} catch (error) {
@@ -404,7 +479,51 @@ export function installGameView(getApi: () => Api, hub: Hub): void {
 				const { level, components, objects, systems: systemList } = projection;
 
 				renderInspector(inspector, components, objects, level);
-				renderSystems(systems, systemList, components);
+
+				// 2d — the event sheet: join the CST systems to their committed `.silo/` data by stable node id.
+				// Read the game file's annotations + the play-session run log over the same hub (git-service). The
+				// store is optional (empty on a fresh project), so a read failure just yields an un-annotated sheet.
+				const gameFile = sources.gameFile;
+				const notes: Record<string, SystemNote> = {};
+				const runCounts: Record<string, number> = {};
+
+				if (gameFile !== undefined) {
+					try {
+						const [annotationReply, runsReply] = await Promise.all([
+							client.request("annotations.get", { "path": gameFile }, { "timeoutMs": 5000 }),
+							client.request("runs.get", undefined, { "timeoutMs": 5000 })
+						]);
+
+						Object.assign(notes, (annotationReply as { "annotations"?: Record<string, SystemNote> })?.annotations ?? {});
+
+						for (const run of (runsReply as { "runs"?: unknown[] })?.runs ?? []) {
+							for (const nodeId of (run as { "systems"?: string[] })?.systems ?? []) {
+								runCounts[nodeId] = (runCounts[nodeId] ?? 0) + 1;
+							}
+						}
+					} catch {
+						// `.silo/` not reachable/empty — render the systems without their joined data.
+					}
+				}
+
+				if (mine !== token) {
+					return;
+				}
+
+				const sheet: SystemSheet = {
+					"notes": notes,
+					"runCounts": runCounts,
+					"setNote": (nodeId, value): void => {
+						if (nodeId === undefined || gameFile === undefined) {
+							return;
+						}
+
+						// Persist to `.silo/annotations/<gameFile>.json` (committed), then re-render to reflect it.
+						void client.request("annotations.set", { "path": gameFile, "nodeId": nodeId, "value": value }, { "timeoutMs": 5000 }).then(() => render());
+					}
+				};
+
+				renderSystems(systems, systemList, components, sheet);
 
 				if (level === undefined) {
 					canvas.style.display = "none";
