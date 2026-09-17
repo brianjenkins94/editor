@@ -240,22 +240,38 @@ export async function blobOid(content: string): Promise<string> {
 }
 
 /**
+ * The `.silo/` store — the COMMITTED, durable half of the identity spine (the re-derivable half being the `.ts.bablr`
+ * sidecars). It lives IN the working tree (unlike the `.git/` caches), so it travels with the repo: clone it and the
+ * annotations + run log come along, and every change is reviewable in a diff. It holds only data pinned to derivable
+ * NODE IDS or appended as events — never the CST, which the `.ts.bablr` index reconstructs.
+ */
+const SILO = DIR + "/.silo";
+/** Legacy annotation location (pre-`.silo/`): read as a fallback so existing local notes migrate on first write. */
+const LEGACY_ANNOTATIONS = DIR + "/.git/bablr-annotations";
+
+/**
  * The annotation store — user data (review notes, dispositions, resolved state) PINNED TO NODE IDS. Because node ids
- * are derivable from git history, this small map is all that has to be shared/persisted for annotations to follow a
- * line as it moves; the CST itself never has to travel. Stored per file under `.git/` (outside the working tree);
- * local + per-session for now — the shared/synced version is the Automerge + Keyhive milestone.
+ * are derivable from git history + the `.ts.bablr` index, this small map is all that has to be shared for an
+ * annotation to follow a line as it moves; the CST itself never travels. Per file under `.silo/annotations/`, so it's
+ * committed with the repo (falls back to the legacy `.git/` location when a file hasn't migrated yet).
  */
 export async function readAnnotations(path: string): Promise<Record<string, unknown>> {
-	try {
-		return JSON.parse(new TextDecoder().decode(await fs.promises.readFile(DIR + "/.git/bablr-annotations/" + encodeURIComponent(path) + ".json"))) as Record<string, unknown>;
-	} catch {
-		return {}; // none yet
+	const name = "/" + encodeURIComponent(path) + ".json";
+
+	for (const file of [SILO + "/annotations" + name, LEGACY_ANNOTATIONS + name]) {
+		try {
+			return JSON.parse(new TextDecoder().decode(await fs.promises.readFile(file))) as Record<string, unknown>;
+		} catch {
+			continue; // not here — try the next location
+		}
 	}
+
+	return {}; // none yet
 }
 
-/** Pin (or, with a null value, clear) one annotation on a node id for a file. */
+/** Pin (or, with a null value, clear) one annotation on a node id for a file — writing to the committed `.silo/`. */
 export async function setAnnotation(path: string, nodeId: string, value: unknown): Promise<void> {
-	const dir = DIR + "/.git/bablr-annotations";
+	const dir = SILO + "/annotations";
 	const current = await readAnnotations(path);
 
 	if (value === null || value === undefined) {
@@ -266,6 +282,44 @@ export async function setAnnotation(path: string, nodeId: string, value: unknown
 
 	await fs.promises.mkdir(dir, { "recursive": true });
 	await fs.promises.writeFile(dir + "/" + encodeURIComponent(path) + ".json", JSON.stringify(current));
+}
+
+/**
+ * Append one play-session record to `.silo/runs.jsonl` (committed, append-only). Each line is a self-contained JSON
+ * event — one recorded run of the game (inputs / outcome / the system node ids it exercised) — so runs are shareable
+ * and replayable, and become the basis for regression checks against the systems they pin to. Newline-delimited so a
+ * run is one atomic append and the log stays diff-friendly.
+ */
+export async function appendRun(record: unknown): Promise<void> {
+	await fs.promises.mkdir(SILO, { "recursive": true });
+	await fs.promises.appendFile(SILO + "/runs.jsonl", JSON.stringify(record) + "\n");
+}
+
+/** Read the play-session log back as parsed records (skips blank/corrupt lines rather than throwing). */
+export async function readRuns(): Promise<unknown[]> {
+	let text: string;
+
+	try {
+		text = new TextDecoder().decode(await fs.promises.readFile(SILO + "/runs.jsonl"));
+	} catch {
+		return []; // no runs yet
+	}
+
+	const runs: unknown[] = [];
+
+	for (const line of text.split("\n")) {
+		if (line.trim() === "") {
+			continue;
+		}
+
+		try {
+			runs.push(JSON.parse(line));
+		} catch {
+			continue; // a partial/corrupt line — skip it, keep the rest
+		}
+	}
+
+	return runs;
 }
 
 /**

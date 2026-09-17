@@ -173,6 +173,24 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		return { "ok": true };
 	});
 
+	// The committed play-session log (`.silo/runs.jsonl`): append one run record, or read the whole log back. Each
+	// record is opaque here — the producer (the game maker) decides its shape; this just persists/returns the lines.
+	serve(hub, "runs.append", async (args) => {
+		const record = (args as { "record"?: unknown } | null)?.record;
+
+		if (record === undefined || record === null) {
+			throw new Error("runs.append needs a record.");
+		}
+
+		await engine.appendRun(record);
+
+		return { "ok": true };
+	});
+
+	serve(hub, "runs.get", async () => {
+		return { "runs": await engine.readRuns() };
+	});
+
 	serve(hub, "git.commit", async (args) => {
 		const request = args as { "message"?: string; "files"?: engine.CommitFile[] } | null;
 		const message = request?.message?.trim();
