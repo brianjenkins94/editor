@@ -264,9 +264,9 @@ export class ViteDevServer extends DevServer {
 	}
 
   /**
-   * Report the FIRST transform failure (before a retry recovers it) to an external sink — e.g. the host worker's
-   * hub logger — so the transient cold-start transform race surfaces in the observability plane rather than only
-   * as a worker `console.warn` (which a remote agent can't read). See transformAndServe.
+   * Report a transform failure to an external sink — e.g. the host worker's hub logger — so a cold-start transform
+   * failure surfaces in the observability plane rather than only as a worker `console.warn` (which a remote agent
+   * can't read). See transformAndServe.
    */
 	setTransformErrorReporter(reporter: (info: TransformErrorInfo) => void): void {
 		this.transformErrorReporter = reporter;
@@ -492,42 +492,21 @@ export class ViteDevServer extends DevServer {
 	private async transformAndServe(filePath: string, urlPath: string): Promise<ResponseData> {
 		// A transform can transiently fail on the very first (cold) request for a module — e.g. the file isn't yet
 		// visible in the worker's shared zen-fs, or the transform pipeline loses a cold-start race with a
-		// near-simultaneous request for a sibling module. Retry a few times so the FIRST response is still a correct
-		// module: the failure mode we must avoid is serving a bad module as a linkable 200 (see the 500 below), which
-		// a browser caches — poisoning every importer's `import { X }` link permanently until a manual reload.
-		let lastError: unknown;
+		// near-simultaneous request for a sibling module. We deliberately do NOT retry that here: the only failure
+		// mode that actually broke the preview was serving a bad module as a linkable 200 (see the 500 below), which
+		// a browser caches — poisoning every importer's `import { X }` link permanently. Returning a 500 makes a cold
+		// failure a self-healing transient (the browser re-fetches on the next load / reload) rather than a permanent
+		// blank, so a retry buys nothing the 500 doesn't. We report every failure (see setTransformErrorReporter) so
+		// a recurrence is visible in the observability plane instead of silently swallowed.
+		try {
+			const content = this.vfs.readFileSync(filePath, "utf8");
+			const hash = simpleHash(content);
 
-		for (let attempt = 0; attempt < 5; attempt += 1) {
-			try {
-				const content = this.vfs.readFileSync(filePath, "utf8");
-				const hash = simpleHash(content);
+			// Serve a prior transform if the source is unchanged.
+			const cached = this.transformCache.get(filePath);
 
-        // Check transform cache (a concurrent request may have populated it between our attempts)
-				const cached = this.transformCache.get(filePath);
-
-				if (cached && cached.hash === hash) {
-					const buffer = Buffer.from(cached.code);
-
-					return {
-						"statusCode": 200,
-						"statusMessage": "OK",
-						"headers": {
-							"Content-Type": "application/javascript; charset=utf-8",
-							"Content-Length": String(buffer.length),
-							"Cache-Control": "no-cache",
-							"X-Transformed": "true",
-							"X-Cache": "hit"
-						},
-						"body": buffer
-					};
-				}
-
-				const transformed = await this.transformCode(content, urlPath);
-
-        // Cache the transform result
-				this.transformCache.set(filePath, { "code": transformed, "hash": hash });
-
-				const buffer = Buffer.from(transformed);
+			if (cached && cached.hash === hash) {
+				const buffer = Buffer.from(cached.code);
 
 				return {
 					"statusCode": 200,
@@ -536,58 +515,67 @@ export class ViteDevServer extends DevServer {
 						"Content-Type": "application/javascript; charset=utf-8",
 						"Content-Length": String(buffer.length),
 						"Cache-Control": "no-cache",
-						"X-Transformed": "true"
+						"X-Transformed": "true",
+						"X-Cache": "hit"
 					},
 					"body": buffer
 				};
-			} catch (error) {
-				lastError = error;
-
-				// Log the FIRST failure even when a retry then recovers it: this is the transient cold-start
-				// transform race, and capturing its shape (which call threw, with what message + stack) is the only
-				// way to pin the actual source rather than infer it. Kept as a warn (not an error) since the retry
-				// usually succeeds and the request still returns a correct module.
-				if (attempt === 0) {
-					const asError = error instanceof Error ? error : undefined;
-					const info: TransformErrorInfo = {
-						"url": urlPath,
-						"name": asError?.name ?? typeof error,
-						"message": asError?.message ?? String(error),
-						"stack": asError?.stack
-					};
-
-					// Route through the reporter (the host worker wires it to its hub logger, so the failure is
-					// queryable in the observability plane / debug-mcp); fall back to console.warn standalone.
-					if (this.transformErrorReporter !== null) {
-						this.transformErrorReporter(info);
-					} else {
-						console.warn("[ViteDevServer] transform failed on first attempt (will retry):", info);
-					}
-				}
-
-				// Brief backoff, then retry — recovers the cold-start race within this single request.
-				await new Promise<void>((resolve) => { setTimeout(resolve, 50); });
 			}
+
+			const transformed = await this.transformCode(content, urlPath);
+
+			// Cache the transform result
+			this.transformCache.set(filePath, { "code": transformed, "hash": hash });
+
+			const buffer = Buffer.from(transformed);
+
+			return {
+				"statusCode": 200,
+				"statusMessage": "OK",
+				"headers": {
+					"Content-Type": "application/javascript; charset=utf-8",
+					"Content-Length": String(buffer.length),
+					"Cache-Control": "no-cache",
+					"X-Transformed": "true"
+				},
+				"body": buffer
+			};
+		} catch (error) {
+			// Capture the failure's shape (which call threw, with what message + stack) so the transient cold-start
+			// transform race — if it still exists — can be pinned from a real sample rather than inferred.
+			const asError = error instanceof Error ? error : undefined;
+			const info: TransformErrorInfo = {
+				"url": urlPath,
+				"name": asError?.name ?? typeof error,
+				"message": asError?.message ?? String(error),
+				"stack": asError?.stack
+			};
+
+			// Route through the reporter (the host worker wires it to its hub logger, so the failure is queryable in
+			// the observability plane / debug-mcp); fall back to console.warn standalone.
+			if (this.transformErrorReporter !== null) {
+				this.transformErrorReporter(info);
+			} else {
+				console.warn("[ViteDevServer] transform failed:", info);
+			}
+
+			// Return 500, NOT a 200 whose body is an export-less error module: a 500 is a failed fetch the browser
+			// retries on the next load and never caches as a linked module, whereas a 200 error-module links
+			// successfully with no exports and permanently breaks every `import { X } from './that-module'` that
+			// depends on it.
+			console.error("[ViteDevServer] Transform error:", urlPath, error);
+
+			return {
+				"statusCode": 500,
+				"statusMessage": "Transform Error",
+				"headers": {
+					"Content-Type": "text/plain; charset=utf-8",
+					"Cache-Control": "no-cache",
+					"X-Transform-Error": "true"
+				},
+				"body": Buffer.from(`Transform error for ${urlPath}: ${info.message}`)
+			};
 		}
-
-		// Retries exhausted → treat as a genuine failure (e.g. a real syntax error in the source). Return 500, NOT a
-		// 200 whose body is an export-less error module: a 500 is a failed fetch the browser retries on the next load
-		// and never caches as a linked module, whereas a 200 error-module links successfully with no exports and
-		// permanently breaks every `import { X } from './that-module'` that depends on it.
-		const message = lastError instanceof Error ? lastError.message : "Transform failed";
-
-		console.error("[ViteDevServer] Transform error (after retries):", urlPath, lastError);
-
-		return {
-			"statusCode": 500,
-			"statusMessage": "Transform Error",
-			"headers": {
-				"Content-Type": "text/plain; charset=utf-8",
-				"Cache-Control": "no-cache",
-				"X-Transform-Error": "true"
-			},
-			"body": Buffer.from(`Transform error for ${urlPath}: ${message}`)
-		};
 	}
 
   /**

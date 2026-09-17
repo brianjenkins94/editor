@@ -220,6 +220,10 @@ type PreviewServer = RequestHandler & { "setHMRTarget": (target: { "postMessage"
 // Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry.
 const previewServers = new Map<number, PreviewServer>();
 
+// The last preview.start config, so preview.provoke (the debug affordance below) can cold-restart on the same
+// port/root without the caller having to know them.
+let lastPreviewConfig: { "port": number; "root": string } | undefined;
+
 serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
 	const { port, method, url, headers, body } = raw as VirtualRequest;
 	const server = previewServers.get(port) ?? (getServer(port) as RequestHandler | undefined);
@@ -246,12 +250,79 @@ serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number
 	// HMR delivery (M2): the worker has no Window to post updates to, so give the server a stand-in whose
 	// postMessage publishes the update over the hub; the main thread relays it to the preview iframe.
 	server.setHMRTarget({ "postMessage": (message) => { hub.publish(`preview.hmr.${port}`, message); } });
-	// Surface the transient cold-start transform race (the first transform failure, before the retry recovers it)
-	// on the observability plane so it's queryable via debug-mcp — not just a worker console.warn we can't read.
-	server.setTransformErrorReporter((info) => { log.warn("preview transform failed on first attempt (will retry)", info); });
+	// Surface a cold-start transform failure on the observability plane so it's queryable via debug-mcp — not just a
+	// worker console.warn we can't read. The server now returns a 500 (self-healing) instead of retrying, so if this
+	// fires the preview may show a one-load error that recovers on reload; a recurrence means the race is still live.
+	server.setTransformErrorReporter((info) => { log.warn("preview transform failed (served 500, recovers on reload)", info); });
 	previewServers.set(port, server);
+	lastPreviewConfig = { "port": port, "root": root };
 
 	return { "ok": true, "port": port };
+});
+
+// Debug affordance: provoke the cold-start transform race on demand, so an agent can loop it via debug-mcp
+// (provoke_transform) instead of hand-driving full-page cold boots. Each round tears down the dev server (→ a
+// fresh, EMPTY transform cache — the exact window the race needs) and fires the whole src/ graph's transforms
+// CONCURRENTLY (the concurrency IS the provocation). A transform that loses the race now returns 500 (we removed
+// the masking retry), so we count 500s and surface the reporter's error shape. Leaves a working server running.
+interface ProvokeResult { "rounds": number; "modules": string[]; "provoked": boolean; "failures": Array<{ "round": number; "url": string; "status": number }> }
+serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
+	const { rounds = 10, modules, port: portArg, root: rootArg } = (raw ?? {}) as { "rounds"?: number; "modules"?: string[]; "port"?: number; "root"?: string };
+	const port = portArg ?? lastPreviewConfig?.port;
+	const root = rootArg ?? lastPreviewConfig?.root;
+
+	if (port === undefined || root === undefined) {
+		throw new Error("preview.provoke: no preview started yet (run the terminal `vite` command first, or pass port + root)");
+	}
+
+	const { ViteDevServer } = await import("@brianjenkins94/almostnode");
+	const vfs = await getVfs();
+
+	// The module set to hammer: caller-supplied, else the whole src/ graph (what a cold boot fetches at once).
+	let urls = modules;
+
+	if (urls === undefined) {
+		try {
+			const srcDir = root.replace(/\/$/, "") + "/src";
+
+			urls = (vfs.readdirSync(srcDir) as string[]).filter((name) => /\.[jt]sx?$/.test(name)).map((name) => "/src/" + name);
+		} catch {
+			urls = ["/src/main.tsx", "/src/App.tsx"];
+		}
+	}
+
+	const failures: ProvokeResult["failures"] = [];
+	const span = log.span("preview.provoke", { "rounds": rounds, "modules": urls.length });
+
+	for (let round = 0; round < rounds; round += 1) {
+		previewServers.get(port)?.stop();
+
+		const server = new ViteDevServer(vfs, { "port": port, "root": root }) as unknown as PreviewServer;
+
+		server.start();
+		server.setHMRTarget({ "postMessage": (message) => { hub.publish(`preview.hmr.${port}`, message); } });
+		server.setTransformErrorReporter((info) => { log.warn("preview transform failed (provoke round " + round + ")", info); });
+		previewServers.set(port, server);
+		lastPreviewConfig = { "port": port, "root": root };
+
+		// Fire the whole graph at once — losing the cold-start race is the thing we're trying to catch.
+		const results = await Promise.all(urls.map(async (url) => {
+			const response = await server.handleRequest("GET", url, {});
+
+			return { "url": url, "status": response.statusCode };
+		}));
+
+		for (const result of results) {
+			if (result.status >= 500) {
+				failures.push({ "round": round, "url": result.url, "status": result.status });
+			}
+		}
+	}
+
+	span.end({ "failures": failures.length });
+	log.info("preview.provoke done", { "rounds": rounds, "failures": failures.length });
+
+	return { "rounds": rounds, "modules": urls, "provoked": failures.length > 0, "failures": failures };
 });
 
 // M2: an editor save can't fire the worker's zen-fs watch (it's a no-op), so the main thread tells us which file
