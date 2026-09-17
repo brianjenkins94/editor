@@ -12,7 +12,7 @@
 import { Buffer } from "buffer";
 import { isCommitBoundary } from "@brianjenkins94/bablr";
 import { fs } from "@zenfs/core";
-import { add, commit, init, readBlob, readCommit, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
+import { add, commit, hashBlob, init, readBlob, readCommit, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism); the browser has none and the workbench bundle doesn't
 // polyfill node globals, so provide it. The `buffer` import resolves to the node-stdlib-browser polyfill via the
@@ -184,14 +184,16 @@ const HISTORY_WALK_CAP = 10000;
  * same base from the oids, so identity converges without coordination, without the full history, and without
  * persistence. Returns `{ baseOid, contents }`; `contents` is empty when the file has no committed history yet.
  */
-export async function fileHistory(path: string): Promise<{ "baseOid": string | null; "contents": string[] }> {
+export async function fileHistory(path: string): Promise<{ "baseOid": string | null; "headOid": string | null; "contents": string[] }> {
 	let cur: string | null;
 
 	try {
 		cur = await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" });
 	} catch {
-		return { "baseOid": null, "contents": [] }; // unborn repo — nothing committed
+		return { "baseOid": null, "headOid": null, "contents": [] }; // unborn repo — nothing committed
 	}
+
+	const headOid = cur;
 
 	const newestFirst: string[] = [];
 	let lastBlobOid: string | null = null;
@@ -228,7 +230,41 @@ export async function fileHistory(path: string): Promise<{ "baseOid": string | n
 		cur = parent;
 	}
 
-	return { "baseOid": baseOid, "contents": newestFirst.reverse() };
+	return { "baseOid": baseOid, "headOid": headOid, "contents": newestFirst.reverse() };
+}
+
+/** The git blob oid (content hash) of some working text — a collision-free, content-addressed cache key part. */
+export async function blobOid(content: string): Promise<string> {
+	return (await hashBlob({ "object": new TextEncoder().encode(content) })).oid;
+}
+
+/**
+ * The annotation store — user data (review notes, dispositions, resolved state) PINNED TO NODE IDS. Because node ids
+ * are derivable from git history, this small map is all that has to be shared/persisted for annotations to follow a
+ * line as it moves; the CST itself never has to travel. Stored per file under `.git/` (outside the working tree);
+ * local + per-session for now — the shared/synced version is the Automerge + Keyhive milestone.
+ */
+export async function readAnnotations(path: string): Promise<Record<string, unknown>> {
+	try {
+		return JSON.parse(new TextDecoder().decode(await fs.promises.readFile(DIR + "/.git/bablr-annotations/" + encodeURIComponent(path) + ".json"))) as Record<string, unknown>;
+	} catch {
+		return {}; // none yet
+	}
+}
+
+/** Pin (or, with a null value, clear) one annotation on a node id for a file. */
+export async function setAnnotation(path: string, nodeId: string, value: unknown): Promise<void> {
+	const dir = DIR + "/.git/bablr-annotations";
+	const current = await readAnnotations(path);
+
+	if (value === null || value === undefined) {
+		delete current[nodeId];
+	} else {
+		current[nodeId] = value;
+	}
+
+	await fs.promises.mkdir(dir, { "recursive": true });
+	await fs.promises.writeFile(dir + "/" + encodeURIComponent(path) + ".json", JSON.stringify(current));
 }
 
 /**

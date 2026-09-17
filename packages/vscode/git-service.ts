@@ -84,10 +84,15 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 	});
 
 	// BABLR verdict for the whole change, requested LAZILY after the diff is shown so BABLR never blocks the open.
-	// Only meaningful for a MODIFIED code file — added/deleted/non-code return "none". Cached by content in the
-	// classifier. Only ONE diff is open at a time, so a new request SUPERSEDES the previous: we abort the older run
-	// (the classifier's yielding worker bails cooperatively) instead of letting a stale parse tie up the worker.
+	// Only meaningful for a MODIFIED code file — added/deleted/non-code return "none". Only ONE diff is open at a time,
+	// so a new request SUPERSEDES the previous: we abort the older run (the yielding worker bails cooperatively).
 	let classifyInFlight: AbortController | undefined;
+
+	// A CORRECT, content-addressed cache: keyed by (baseOid, headOid, working blob oid) — all git content hashes, so a
+	// hit means genuinely identical inputs (this is the identity-based cache the commit-chain design bought us; it
+	// replaces the approximate caches we removed). Bounded so a long session can't grow it without limit.
+	interface ClassifyResult { "verdict": string; "changedNodeIds": string[]; "changedLines": number[]; "baseOid": string | null }
+	const classifyCache = new Map<string, ClassifyResult>();
 
 	serve(hub, "git.classify", async (args) => {
 		const path = (args as { "path"?: string } | null)?.path;
@@ -108,23 +113,37 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 			return { "verdict": "none" };
 		}
 
+		const { baseOid, headOid, contents } = await engine.fileHistory(path);
+		const cacheKey = path + "\0" + baseOid + "\0" + headOid + "\0" + await engine.blobOid(working);
+		const cached = classifyCache.get(cacheKey);
+
+		if (cached !== undefined) {
+			return cached; // exact same inputs (by content hash) — the derivation is deterministic, so reuse it
+		}
+
 		classifyInFlight?.abort();
 		const controller = new AbortController();
 
 		classifyInFlight = controller;
 
 		try {
-			// Anchor identity in REAL history: pull the file's content chain from its CDC base up to HEAD, append the
-			// working copy, and derive over the whole chain. The resulting `.bablr` snapshot carries HISTORY-ANCHORED
-			// node ids (shared across participants), and the verdict is HEAD→working (the last two links).
-			const { baseOid, contents } = await engine.fileHistory(path);
+			// Anchor identity in REAL history: derive over [base…HEAD, working]. The `.bablr` snapshot carries
+			// HISTORY-ANCHORED node ids; the verdict is HEAD→working (the last two links).
 			const result = await classifier.identify([...contents, working], controller.signal);
 
 			if (result.snapshot !== null) {
 				await engine.writeBablr(path, JSON.stringify({ "path": path, "baseOid": baseOid, "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "snapshot": result.snapshot }));
 			}
 
-			return { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": result.changedLines, "baseOid": baseOid };
+			const answer: ClassifyResult = { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": result.changedLines, "baseOid": baseOid };
+
+			if (classifyCache.size > 200) {
+				classifyCache.clear();
+			}
+
+			classifyCache.set(cacheKey, answer);
+
+			return answer;
 		} catch {
 			return { "verdict": "none" }; // aborted (superseded) or worker error — the newer request will answer
 		} finally {
@@ -132,6 +151,26 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 				classifyInFlight = undefined;
 			}
 		}
+	});
+
+	// Annotation store — user data pinned to derivable NODE IDS (from the .bablr snapshot), so it follows a line as
+	// it moves without shipping the CST. Read one file's map, or set/clear one node's annotation.
+	serve(hub, "annotations.get", async (args) => {
+		const path = (args as { "path"?: string } | null)?.path;
+
+		return { "annotations": typeof path === "string" ? await engine.readAnnotations(path) : {} };
+	});
+
+	serve(hub, "annotations.set", async (args) => {
+		const request = args as { "path"?: string; "nodeId"?: string; "value"?: unknown } | null;
+
+		if (typeof request?.path !== "string" || typeof request.nodeId !== "string") {
+			throw new Error("annotations.set needs a path and nodeId.");
+		}
+
+		await engine.setAnnotation(request.path, request.nodeId, request.value ?? null);
+
+		return { "ok": true };
 	});
 
 	serve(hub, "git.commit", async (args) => {
