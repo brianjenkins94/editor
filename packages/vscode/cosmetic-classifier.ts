@@ -41,7 +41,7 @@ export interface CosmeticClassifier {
 }
 
 /** One node-grouped chunk for the "your edits" timeline — mirrors bablr's EditGroup (kept local to avoid a type dep). */
-export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "nodeIds": string[] }
+export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
 
 interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "changedLines"?: number[]; "nodeLines"?: Record<string, number>; "snapshot"?: unknown; "groups"?: EditGroup[]; "bursts"?: number; "aborted"?: true }
 

@@ -12,8 +12,8 @@
 // Two participants at DIFFERENT heads compare ids by anchoring at the most recent boundary in their COMMON ancestry
 // (selectBase over the common-ancestor index) — the boundary they both possess. Knob N trades recompute depth for
 // base stability; with no boundary back to the root, the root is the base (a short history is cheap anyway).
-import type { ChangeKind, Snapshot } from "./identity";
-import { nodeAtoms, reidentify } from "./identity";
+import type { ChangeKind, Op, Snapshot } from "./identity";
+import { lcsOps, nodeAtoms, reidentify } from "./identity";
 import { cstSpansAsync } from "./spans";
 
 /** A commit's contribution for one file: its oid and the file's content at that commit. */
@@ -188,11 +188,97 @@ function labelFor(atom: string): { "label": string; "kind": string } {
 }
 
 /** One node-grouped chunk for the changes-pane timeline: what changed, and the line range to highlight on hover.
- *  A chunk merges the changed CST nodes that share lines (so `const c = 3;` is one chunk, not six tokens). */
-export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "nodeIds": string[] }
+ *  A chunk merges the changed CST nodes that share lines (so `const c = 3;` is one chunk, not six tokens). `edits` is
+ *  how many distinct edit-bursts touched this chunk's region (repeated in-place edits count each time). */
+export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
 
-/** Merge per-node changes that overlap on a line into region-chunks; label each by its most meaningful token. */
-function mergeGroups(nodes: { "id": string; "label": string; "kind": string; "startLine": number; "endLine": number }[]): EditGroup[] {
+/**
+ * Attribute each edit-burst to the FINAL lines it touched, so a chunk can show how many bursts shaped it. Works purely
+ * at the line level: a burst's changed lines are mapped to final-content coordinates via LCS anchors — so an edit that
+ * was later replaced in place (typed `x=1`, then `x=2`, then `x=3`) still attributes to the final line it lived on,
+ * giving the intuitive "3 edits" rather than only counting the surviving node's single birth. Returns, per 1-based final
+ * line, the set of burst indices that touched it.
+ */
+function burstAttribution(contents: string[]): Set<number>[] {
+	const lineArrays = contents.map((content) => content.split("\n"));
+	const finalLines = lineArrays[lineArrays.length - 1];
+	const perLine: Set<number>[] = Array.from({ "length": finalLines.length + 1 }, () => new Set<number>());
+
+	for (let step = 1; step < lineArrays.length; step += 1) {
+		const prev = lineArrays[step - 1];
+		const cur = lineArrays[step];
+
+		// The lines this burst added/changed, in `cur` coords (a deletion attributes to the line it collapsed onto).
+		const stepOps = lcsOps(prev, cur);
+		const touchedCur = new Set<number>();
+
+		stepOps.forEach((op, index) => {
+			if (op.kind === "ins") {
+				touchedCur.add(op.bi!);
+			} else if (op.kind === "del") {
+				const next = stepOps.slice(index).find((later) => later.bi !== undefined);
+
+				touchedCur.add(next?.bi ?? Math.max(0, cur.length - 1));
+			}
+		});
+
+		// Map `cur` lines to final lines by their surviving matches; anchors bracket the ones that don't survive.
+		const curToFinal = new Map<number, number>();
+		const matchedCur: number[] = [];
+
+		for (const op of lcsOps(cur, finalLines) as Op[]) {
+			if (op.kind === "eql") {
+				curToFinal.set(op.ai!, op.bi!);
+				matchedCur.push(op.ai!);
+			}
+		}
+
+		for (const cursor of touchedCur) {
+			const finalLinesHit = new Set<number>();
+
+			if (curToFinal.has(cursor)) {
+				finalLinesHit.add(curToFinal.get(cursor)! + 1); // survived unchanged → its own final line
+			} else {
+				// Replaced/deleted later: attribute the final lines that sit between the surrounding surviving anchors.
+				let below = -1;
+				let above = finalLines.length;
+
+				for (const matched of matchedCur) {
+					if (matched < cursor) {
+						below = curToFinal.get(matched)!;
+					} else {
+						above = curToFinal.get(matched)!;
+						break;
+					}
+				}
+
+				if (below + 1 <= above - 1) {
+					for (let line = below + 1; line <= above - 1; line += 1) {
+						finalLinesHit.add(line + 1);
+					}
+				} else {
+					const anchor = above < finalLines.length ? above : below;
+
+					if (anchor >= 0 && anchor < finalLines.length) {
+						finalLinesHit.add(anchor + 1);
+					}
+				}
+			}
+
+			for (const line of finalLinesHit) {
+				if (line >= 1 && line <= finalLines.length) {
+					perLine[line].add(step);
+				}
+			}
+		}
+	}
+
+	return perLine;
+}
+
+/** Merge per-node changes that overlap on a line into region-chunks; label each by its most meaningful token. The
+ *  per-chunk `edits` count is attached later (editGroups), once the whole burst chain is available for attribution. */
+function mergeGroups(nodes: { "id": string; "label": string; "kind": string; "startLine": number; "endLine": number }[]): Omit<EditGroup, "edits">[] {
 	const sorted = [...nodes].sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
 	const clusters: { "startLine": number; "endLine": number; "members": typeof sorted }[] = [];
 
@@ -283,7 +369,21 @@ export async function editGroups(contents: string[], options: { "signal"?: Abort
 		const minimal = changed.filter((node) => !changed.some((other) =>
 			other !== node && other.startLine >= node.startLine && other.endLine <= node.endLine && (other.startLine > node.startLine || other.endLine < node.endLine)));
 
-		return { "groups": mergeGroups(minimal), "bursts": contents.length - 1 };
+		// Attribute bursts to final lines, then count the distinct bursts each chunk's line range saw (≥1: it exists).
+		const perLine = burstAttribution(contents);
+		const groups: EditGroup[] = mergeGroups(minimal).map((group) => {
+			const steps = new Set<number>();
+
+			for (let line = group.startLine; line <= group.endLine; line += 1) {
+				for (const step of perLine[line] ?? []) {
+					steps.add(step);
+				}
+			}
+
+			return { ...group, "edits": Math.max(1, steps.size) };
+		});
+
+		return { "groups": groups, "bursts": contents.length - 1 };
 	} catch (error) {
 		if (error instanceof DOMException && error.name === "AbortError") {
 			throw error;

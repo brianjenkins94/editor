@@ -119,4 +119,12 @@ test("editGroups: decomposes a burst chain into node-grouped chunks with hover r
 
 	assert.equal(added.bursts, 2, "added file: bursts counted across the empty base");
 	assert.deepEqual(added.groups.map((group) => group.label), ["x", "y"], "added file: one chunk per statement, not one file-wide blob");
+
+	// Per-chunk burst attribution: a region refined in place across 3 bursts reads as 3 edits (not 1), while a region
+	// added once reads as 1 — so the count reflects how much you fussed over each chunk, not just node births.
+	const refined = await editGroups(["let z = 0;\n", "let z = 1;\n", "let z = 2;\n", "let z = 3;\n"]);
+
+	assert.equal(refined.groups.length, 1, "the refined line is one chunk");
+	assert.equal(refined.groups[0].edits, 3, "refined-in-place across 3 bursts → 3 edits");
+	assert.deepEqual(added.groups.map((group) => group.edits), [1, 1], "each once-added statement → 1 edit");
 });

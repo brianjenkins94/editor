@@ -200,11 +200,12 @@ const STYLE = `
 .gp .file .exp { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 9px; line-height: 1; }
 .gp .file .exp:hover { color: var(--fg); }
 .gp .chunks { display: flex; flex-direction: column; gap: 1px; padding: 2px 10px 6px 30px; background: #ffffff06; }
-.gp .chunk { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline;
+.gp .chunk { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 8px; align-items: baseline;
   padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 12px; }
 .gp .chunk:hover { background: var(--sxs-hl, #c8a53340); }
 .gp .chunk .ck { font-size: 10px; color: var(--muted); text-transform: lowercase; }
 .gp .chunk .cl { font-family: "SF Mono", ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gp .chunk .ce { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .gp .chunk .cr { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11px; }
 .gp .chunk.info { color: var(--muted); cursor: default; display: block; font-size: 11px; }
 .gp .chunk.info:hover { background: none; }
@@ -480,7 +481,7 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 	};
 
 	// A node-grouped chunk of "your edits" (from the Automerge tier), as history.chunks returns it.
-	interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "nodeIds": string[] }
+	interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
 
 	// Populate a file's expanded chunk list. Each row, on hover, spotlights its line range in the open diff.
 	const renderChunks = async (host: HTMLElement, path: string): Promise<void> => {
@@ -521,7 +522,10 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 			const range = group.endLine > group.startLine ? "L" + group.startLine + "–" + group.endLine : "L" + group.startLine;
 
 			chunk.className = "chunk";
-			chunk.innerHTML = `<span class="ck"></span><span class="cl"></span><span class="cr">${range}</span>`;
+			// The "N edits" badge shows only when a region was touched by more than one burst (repeated in-place edits).
+			const edits = group.edits > 1 ? `<span class="ce" title="${group.edits} edit-bursts touched this">${group.edits} edits</span>` : `<span class="ce"></span>`;
+
+			chunk.innerHTML = `<span class="ck"></span><span class="cl"></span>${edits}<span class="cr">${range}</span>`;
 			chunk.querySelector<HTMLElement>(".ck")!.textContent = group.kind;
 			chunk.querySelector<HTMLElement>(".cl")!.textContent = group.label;
 			chunk.addEventListener("mouseenter", () => { setDiffHighlight({ "start": group.startLine, "end": group.endLine }); });
