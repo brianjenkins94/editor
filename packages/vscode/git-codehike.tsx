@@ -303,7 +303,8 @@ function sideHandlers(
 	foldHeaders: Map<number, FoldHeader> | undefined,
 	onToggleFold: (id: string) => void,
 	deselectedRows: ReadonlySet<number>,
-	onToggleRow: (index: number) => void
+	onToggleRow: (index: number) => void,
+	highlightedLines: ReadonlySet<number>
 ): AnnotationHandler[] {
 	const cols = side === "left" ? "1 / span 2" : "4 / span 2";
 	const hasFolds = foldHeaders !== undefined && foldHeaders.size > 0;
@@ -365,20 +366,47 @@ function sideHandlers(
 			// sit either side of the centre bar (like GitHub Desktop's split view).
 			const cells = side === "left" ? [codeCell, numCell] : [numCell, codeCell];
 
+			// Hover-highlight from the changes-pane chunk list: mark the range's lines (right side, working coords) — the
+			// codehike-`mark` equivalent for our custom side-by-side grid. Overrides the tint so the range reads clearly.
+			const highlighted = side === "right" && highlightedLines.has(props.lineNumber);
+
 			return createElement("div", {
-				"className": "sxs-line " + side + (at.type !== "ctx" ? " chg" : "") + (fadedRows.has(at.index) ? " faded" : ""),
+				"className": "sxs-line " + side + (at.type !== "ctx" ? " chg" : "") + (fadedRows.has(at.index) ? " faded" : "") + (highlighted ? " hl" : ""),
 				"style": {
 					"display": "grid",
 					"gridTemplateColumns": "subgrid",
 					"gridColumn": cols,
 					"gridRow": at.row,
-					"background": tint(at.type, side)
+					"background": highlighted ? "var(--sxs-hl, #c8a53340)" : tint(at.type, side)
 				}
 			}, ...cells);
 		}
 	};
 
 	return [contents, line];
+}
+
+/** A 1-based inclusive line range (working/right-side coords) to spotlight, or null for none. */
+export type HighlightRange = { "start": number; "end": number } | null;
+
+// A tiny external store so the changes-pane chunk list (a different surface) can drive the open diff's highlight on
+// hover, without prop-drilling through the React root. One diff is open at a time, so a singleton is enough.
+let currentHighlight: HighlightRange = null;
+const highlightListeners = new Set<(range: HighlightRange) => void>();
+
+/** Spotlight a line range in the open diff (from a chunk-row hover), or clear it with null. */
+export function setDiffHighlight(range: HighlightRange): void {
+	currentHighlight = range;
+
+	for (const listener of highlightListeners) {
+		listener(range);
+	}
+}
+
+function subscribeHighlight(listener: (range: HighlightRange) => void): () => void {
+	highlightListeners.add(listener);
+
+	return () => { highlightListeners.delete(listener); };
 }
 
 /** The interactive diff: highlighted code in, fold/expand state held here, one shared grid out. */
@@ -401,6 +429,10 @@ function Diff(props: {
 	const [verdict, setVerdict] = useState<ChangeKind | "none">("none");
 	const [changedLines, setChangedLines] = useState<ReadonlySet<number>>(() => new Set());
 	const [menu, setMenu] = useState<{ "x": number; "y": number; "rows": number[] } | null>(null);
+	const [highlight, setHighlight] = useState<HighlightRange>(currentHighlight);
+
+	// Subscribe to the external highlight store (driven by chunk-row hover in the changes pane).
+	useEffect(() => subscribeHighlight(setHighlight), []);
 
 	// Reset the per-line selection when the file's CONTENT changes (e.g. after a partial commit) while the same file
 	// stays open — the component isn't remounted then (its key is the path), so adopt the fresh selection here. Fold
@@ -526,6 +558,15 @@ function Diff(props: {
 		});
 	}
 
+	// Lines (right-side / working coords) the hovered chunk spotlights.
+	const highlightedLines = new Set<number>();
+
+	if (highlight !== null) {
+		for (let line = highlight.start; line <= highlight.end; line += 1) {
+			highlightedLines.add(line);
+		}
+	}
+
 	const grid = createElement("div", { "className": "sxs" },
 		...hunks.map((hunk) => {
 			const chosen = hunk.rows.filter((index) => !deselectedRows.has(index)).length;
@@ -554,8 +595,8 @@ function Diff(props: {
 			"style": { "gridRow": gap.row },
 			"onClick": () => { expand(gap.id); }
 		}, "⋯ " + gap.count + " unchanged lines")),
-		createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, fadedRows, plan.leftFoldHeaders, toggleFold, deselectedRows, toggleRow) }),
-		createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, fadedRows, plan.rightFoldHeaders, toggleFold, deselectedRows, toggleRow) }));
+		createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, fadedRows, plan.leftFoldHeaders, toggleFold, deselectedRows, toggleRow, highlightedLines) }),
+		createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, fadedRows, plan.rightFoldHeaders, toggleFold, deselectedRows, toggleRow, highlightedLines) }));
 
 	// Right-click discard menu (a hunk at a time).
 	const menuEl = menu === null ? null : createElement("div", {

@@ -195,6 +195,19 @@ const STYLE = `
 .gp .file .discard.armed { visibility: visible; color: #f14c4c; font-size: 11px; font-weight: 600; }
 .gp .file.cosmetic .nm { opacity: .6; }
 .gp .empty { padding: 24px 10px; color: var(--muted); text-align: center; }
+/* "Your edits" — per-file chunk timeline (Automerge edit-bursts, node-grouped). Hovering a chunk spotlights its range
+   in the open diff (setDiffHighlight). Rows live here in the changes list; the diff stays open in the overlay. */
+.gp .file .exp { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 9px; line-height: 1; }
+.gp .file .exp:hover { color: var(--fg); }
+.gp .chunks { display: flex; flex-direction: column; gap: 1px; padding: 2px 10px 6px 30px; background: #ffffff06; }
+.gp .chunk { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline;
+  padding: 3px 6px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.gp .chunk:hover { background: var(--sxs-hl, #c8a53340); }
+.gp .chunk .ck { font-size: 10px; color: var(--muted); text-transform: lowercase; }
+.gp .chunk .cl { font-family: "SF Mono", ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gp .chunk .cr { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11px; }
+.gp .chunk.info { color: var(--muted); cursor: default; display: block; font-size: 11px; }
+.gp .chunk.info:hover { background: none; }
 /* BABLR verdict banner — sticky at the top of the diff, colour-coded by whether the change moves the meaning. */
 #diff-overlay-body .sxs-wrap { display: flex; flex-direction: column; min-height: 100%; }
 #diff-overlay-body .sxs-verdict { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
@@ -304,6 +317,8 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 	const lineDeselect = new Map<string, Set<number>>();
 	// Changed-row count per file that has an open/partial selection, so a file row can show its indeterminate state.
 	const changedCount = new Map<string, number>();
+	// Files whose "your edits" chunk timeline is expanded in the list (kept across refreshes, like `deselected`).
+	const expandedFiles = new Set<string>();
 	// The changed files from the latest status, for the master checkbox + commit to consult.
 	let currentFiles: GitFileChange[] = [];
 
@@ -417,7 +432,9 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 		// Lazy-load the codehike island (react + codehike + shiki) on first diff; fall back to the plain diff if the
 		// module can't load. Once codehike owns overlay.body (a React root), never touch it with innerHTML again.
 		try {
-			const { mountDiff } = await import("./git-codehike");
+			const { mountDiff, setDiffHighlight } = await import("./git-codehike");
+
+			setDiffHighlight(null); // drop any spotlight left over from the previously-open file
 
 			await mountDiff(overlay.body, {
 				"docKey": path,
@@ -462,6 +479,58 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 		}
 	};
 
+	// A node-grouped chunk of "your edits" (from the Automerge tier), as history.chunks returns it.
+	interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "nodeIds": string[] }
+
+	// Populate a file's expanded chunk list. Each row, on hover, spotlights its line range in the open diff.
+	const renderChunks = async (host: HTMLElement, path: string): Promise<void> => {
+		host.innerHTML = `<div class="chunk info">Loading your edits…</div>`;
+
+		let setDiffHighlight: (range: { "start": number; "end": number } | null) => void = () => {};
+
+		try {
+			({ setDiffHighlight } = await import("./git-codehike"));
+		} catch { /* codehike island unavailable — hover highlight is a no-op, the list still renders */ }
+
+		let result: { "groups": EditGroup[]; "bursts": number };
+
+		try {
+			result = await rpc.request("history.chunks", { "path": path }) as { "groups": EditGroup[]; "bursts": number };
+		} catch {
+			host.innerHTML = `<div class="chunk info">Couldn't load edit history.</div>`;
+
+			return;
+		}
+
+		if (result.groups.length === 0) {
+			host.innerHTML = `<div class="chunk info">No edits recorded since the last commit.</div>`;
+
+			return;
+		}
+
+		host.innerHTML = "";
+
+		const header = document.createElement("div");
+
+		header.className = "chunk info";
+		header.textContent = result.groups.length + " change" + (result.groups.length === 1 ? "" : "s") + " · " + result.bursts + " edit" + (result.bursts === 1 ? "" : "s");
+		host.appendChild(header);
+
+		for (const group of result.groups) {
+			const chunk = document.createElement("div");
+			const range = group.endLine > group.startLine ? "L" + group.startLine + "–" + group.endLine : "L" + group.startLine;
+
+			chunk.className = "chunk";
+			chunk.innerHTML = `<span class="ck"></span><span class="cl"></span><span class="cr">${range}</span>`;
+			chunk.querySelector<HTMLElement>(".ck")!.textContent = group.kind;
+			chunk.querySelector<HTMLElement>(".cl")!.textContent = group.label;
+			chunk.addEventListener("mouseenter", () => { setDiffHighlight({ "start": group.startLine, "end": group.endLine }); });
+			chunk.addEventListener("mouseleave", () => { setDiffHighlight(null); });
+			chunk.addEventListener("click", () => { void showDiff(path); });
+			host.appendChild(chunk);
+		}
+	};
+
 	const refresh = async (): Promise<void> => {
 		const { files } = await rpc.request("git.status") as { "files": GitFileChange[] };
 
@@ -497,10 +566,13 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 		for (const file of files) {
 			const row = document.createElement("div");
 
+			const isCode = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u.test(file.path) && file.status !== "D";
+			const expanded = expandedFiles.has(file.path);
+
 			row.className = "file" + (file.cosmetic ? " cosmetic" : "");
 			row.dataset["path"] = file.path;
 			row.setAttribute("aria-current", String(file.path === selected));
-			row.innerHTML = `<input type="checkbox" class="pick"><span class="st ${file.status}">${file.status}</span><span class="nm"></span><span class="tail">${file.cosmetic ? '<span class="cos">cosmetic</span>' : ""}<button class="discard" title="Discard changes">⨯</button></span>`;
+			row.innerHTML = `<input type="checkbox" class="pick"><span class="st ${file.status}">${file.status}</span><span class="nm"></span><span class="tail">${isCode ? `<button class="exp" title="Your edits">${expanded ? "▾" : "▸"}</button>` : ""}${file.cosmetic ? '<span class="cos">cosmetic</span>' : ""}<button class="discard" title="Discard changes">⨯</button></span>`;
 			row.querySelector<HTMLElement>(".nm")!.textContent = file.path;
 
 			const checkbox = row.querySelector<HTMLInputElement>(".pick")!;
@@ -545,14 +617,51 @@ export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub
 				// git.changed → refresh() repaints the list (and closes the diff if the file is now clean).
 			});
 
-			// Open the diff on a row click, EXCEPT clicks on the checkbox or the discard button.
+			// Open the diff on a row click, EXCEPT clicks on the checkbox, discard, or the "your edits" expander.
 			row.addEventListener("click", (event) => {
-				if ((event.target as HTMLElement).closest(".pick, .discard") === null) {
+				if ((event.target as HTMLElement).closest(".pick, .discard, .exp") === null) {
 					void showDiff(file.path);
 				}
 			});
 
 			filesEl.appendChild(row);
+
+			// "Your edits" expander: toggles a node-grouped chunk timeline below the file. Opening it also opens the diff
+			// so a chunk-hover has a diff to spotlight into. Expansion survives refresh (re-rendered here from the set).
+			const expander = row.querySelector<HTMLButtonElement>(".exp");
+
+			if (expander !== null) {
+				const mountChunks = (): HTMLElement => {
+					const host = document.createElement("div");
+
+					host.className = "chunks";
+					row.after(host);
+					void renderChunks(host, file.path);
+
+					return host;
+				};
+
+				if (expanded) {
+					mountChunks();
+				}
+
+				expander.addEventListener("click", (event) => {
+					event.stopPropagation();
+
+					const open = row.nextElementSibling?.classList.contains("chunks") === true;
+
+					if (open) {
+						expandedFiles.delete(file.path);
+						expander.textContent = "▸";
+						row.nextElementSibling?.remove();
+					} else {
+						expandedFiles.add(file.path);
+						expander.textContent = "▾";
+						void showDiff(file.path); // ensure the diff is open so a chunk-hover has somewhere to spotlight
+						mountChunks();
+					}
+				});
+			}
 		}
 
 		syncSelectionUi();

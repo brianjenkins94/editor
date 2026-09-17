@@ -112,4 +112,11 @@ test("editGroups: decomposes a burst chain into node-grouped chunks with hover r
 	assert.ok(groups.every((group) => group.startLine >= 3), "unchanged lines 1-2 produce no chunk");
 
 	assert.deepEqual((await editGroups([HEAD])).groups, [], "no edits since HEAD → no chunks");
+
+	// Regression: an ADDED file's HEAD side is "" — BABLR can't parse the empty string, and every node is new (incl.
+	// the root container). editGroups must not throw, must drop the containers, and must surface per-statement chunks.
+	const added = await editGroups(["", "const x = 1;\n", "const x = 1;\nconst y = 2;\n"]);
+
+	assert.equal(added.bursts, 2, "added file: bursts counted across the empty base");
+	assert.deepEqual(added.groups.map((group) => group.label), ["x", "y"], "added file: one chunk per statement, not one file-wide blob");
 });

@@ -241,6 +241,15 @@ export async function editGroups(contents: string[], options: { "signal"?: Abort
 		let lastSpans: Span[] = [];
 
 		for (const content of contents) {
+			// BABLR can't parse the empty string (it throws) — an empty file is simply zero nodes. This is the common
+			// case for an ADDED file, whose HEAD side is "" (the timeline's base), so it must not abort the whole derive.
+			if (content === "") {
+				lastSpans = [];
+				atomsChain.push([]);
+
+				continue;
+			}
+
 			const spans = (await cstSpansAsync(content, production, options)).spans as Span[];
 
 			lastSpans = spans;
@@ -268,7 +277,13 @@ export async function editGroups(contents: string[], options: { "signal"?: Abort
 			}
 		});
 
-		return { "groups": mergeGroups(changed), "bursts": contents.length - 1 };
+		// Keep the INNERMOST changed nodes: drop any whose line range strictly contains another changed node's (a
+		// container). Otherwise an added file — where every node incl. the root is "new" — collapses into one file-wide
+		// blob; dropping containers leaves the real per-statement chunks.
+		const minimal = changed.filter((node) => !changed.some((other) =>
+			other !== node && other.startLine >= node.startLine && other.endLine <= node.endLine && (other.startLine > node.startLine || other.endLine < node.endLine)));
+
+		return { "groups": mergeGroups(minimal), "bursts": contents.length - 1 };
 	} catch (error) {
 		if (error instanceof DOMException && error.name === "AbortError") {
 			throw error;
