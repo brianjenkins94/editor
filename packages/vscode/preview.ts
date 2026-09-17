@@ -17,6 +17,11 @@ import type { Hub } from "@brianjenkins94/hub";
 import { getServerBridge } from "@brianjenkins94/almostnode/bridge";
 import { createRpcClient } from "@brianjenkins94/hub";
 
+import { LOG_SUBJECT } from "./telemetry";
+
+/** Levels the preview tap emits — anything else is coerced to "info". */
+const OBS_LEVELS = new Set(["trace", "debug", "info", "warn", "error", "fatal"]);
+
 /** The virtual port the dev server is registered on (any value; it only namespaces the `/__virtual__/` URL). */
 const PREVIEW_PORT = 5173;
 
@@ -76,6 +81,36 @@ export async function createPreview(options: PreviewOptions): Promise<Preview> {
 	// client (a `window.message` listener) applies it — React Fast Refresh, state preserved.
 	const offHmr = hub.subscribe(`preview.hmr.${PREVIEW_PORT}`, (message) => { iframe.contentWindow?.postMessage(message, "*"); });
 
+	// Observability bridge: the injected preview tap (node-worker.ts OBS_TAP) posts each console call / uncaught
+	// error up as `{channel:"obs-log", record}`. Re-shape it into a LogRecord and publish on `$sys.log.preview` so
+	// the preview iframe — otherwise invisible to the plane (app code logs through raw console, not util/logger) —
+	// federates to the root collector and out to debug-mcp like every other context.
+	const onObsLog = (event: MessageEvent): void => {
+		if (event.source !== iframe.contentWindow) {
+			return; // only our preview iframe
+		}
+
+		const payload = event.data as { "channel"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;
+
+		if (payload?.channel !== "obs-log" || payload.record === undefined) {
+			return;
+		}
+
+		const { level, message, attrs } = payload.record;
+
+		hub.publish(`${LOG_SUBJECT}.preview`, {
+			"kind": "log",
+			"level": typeof level === "string" && OBS_LEVELS.has(level) ? level : "info",
+			"message": typeof message === "string" ? message : String(message),
+			"attrs": attrs ?? {},
+			"context": { "source": "preview" },
+			"time": Date.now(),
+			"depth": 0
+		});
+	};
+
+	globalThis.addEventListener("message", onObsLog as EventListener);
+
 	// Serve UNDER the deploy base (e.g. /editor/__virtual__/…), not root — the SW is scoped to the base, so a
 	// root-absolute /__virtual__/ URL would fall outside its scope and never be intercepted.
 	const base = swUrl.slice(0, swUrl.lastIndexOf("/") + 1);
@@ -94,6 +129,7 @@ export async function createPreview(options: PreviewOptions): Promise<Preview> {
 		},
 		"close": () => {
 			offHmr();
+			globalThis.removeEventListener("message", onObsLog as EventListener);
 			bridge.unregisterServer(PREVIEW_PORT);
 			iframe.removeAttribute("src");
 		}

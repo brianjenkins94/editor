@@ -31,7 +31,7 @@
 import { getServer, Runtime } from "@brianjenkins94/almostnode";
 import { createHub, portTransport, serve } from "@brianjenkins94/hub";
 
-import { relayLoggerToHub } from "../../telemetry";
+import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
 
 import { installTimerKeepAlive } from "./node-keepalive";
 import { createZenfsVFS, getSharedWorkspaceBuffer, receiveSharedWorkspace } from "./zenfs-vfs.js";
@@ -47,6 +47,8 @@ const hub = createHub({ "id": "node" });
 
 hub.link(portTransport(globalThis));
 const log = relayLoggerToHub(hub, "node");
+
+tapConsoleAndErrors(hub, "node"); // raw uncaught error/rejection → the plane, beside the structured logs
 
 let vfsPromise: ReturnType<typeof createZenfsVFS> | undefined;
 const getVfs = (): ReturnType<typeof createZenfsVFS> => (vfsPromise ??= createZenfsVFS());
@@ -217,6 +219,58 @@ interface ServerResponse { "statusCode": number; "statusMessage": string; "heade
 type RequestHandler = { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> };
 type PreviewServer = RequestHandler & { "start": () => void; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "stop": () => void };
 
+// Observability tap injected as the FIRST script of every previewed HTML document, so it patches console +
+// captures uncaught error/rejection BEFORE the app's (deferred module) code runs — the errors thrown during the
+// app's own module eval are exactly the ones we were previously blind to. It's a classic (non-module) inline
+// script with zero imports; it just posts each record to the embedding host (`channel:"obs-log"`), which bridges
+// it onto the rootHub as `$sys.log.preview` (see preview.ts). This lights up the preview iframe — the one
+// boundary the observability plane couldn't see, because app code logs through raw console, not util/logger.
+const OBS_TAP = `<script>
+(function () {
+	if (window.__obsTap) { return; }
+	window.__obsTap = true;
+	var fmt = function (x) { if (typeof x === "string") { return x; } try { return JSON.stringify(x); } catch (e) { return String(x); } };
+	var send = function (rec) { try { parent.postMessage({ channel: "obs-log", record: rec }, "*"); } catch (e) {} };
+	var wrap = function (method, level) {
+		var orig = typeof console[method] === "function" ? console[method].bind(console) : function () {};
+		console[method] = function () {
+			try { send({ level: level, message: Array.prototype.map.call(arguments, fmt).join(" ") }); } catch (e) {}
+			return orig.apply(console, arguments);
+		};
+	};
+	wrap("log", "info"); wrap("info", "info"); wrap("warn", "warn"); wrap("error", "error"); wrap("debug", "debug");
+	addEventListener("error", function (e) {
+		send({ level: "error", message: (e && e.message) || "uncaught error", attrs: { src: e && e.filename, line: e && e.lineno, col: e && e.colno, stack: e && e.error && e.error.stack } });
+	});
+	addEventListener("unhandledrejection", function (e) {
+		var r = e && e.reason;
+		send({ level: "error", message: "unhandledrejection: " + ((r && r.message) || String(r)), attrs: { stack: r && r.stack } });
+	});
+})();
+</script>
+`;
+
+/** Inject the observability tap as the first thing inside <head> (fallback: after <html>, else prepend). */
+function injectObsTap(html: string): string {
+	const headMatch = /<head[^>]*>/iu.exec(html);
+
+	if (headMatch !== null) {
+		const at = headMatch.index + headMatch[0].length;
+
+		return html.slice(0, at) + "\n" + OBS_TAP + html.slice(at);
+	}
+
+	const htmlMatch = /<html[^>]*>/iu.exec(html);
+
+	if (htmlMatch !== null) {
+		const at = htmlMatch.index + htmlMatch[0].length;
+
+		return html.slice(0, at) + "\n" + OBS_TAP + html.slice(at);
+	}
+
+	return OBS_TAP + html;
+}
+
 // Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry.
 const previewServers = new Map<number, PreviewServer>();
 
@@ -233,6 +287,22 @@ serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
 	}
 
 	const response = await server.handleRequest(method, url, headers, body);
+
+	// HTML documents get the observability tap injected as their first script (see OBS_TAP). Re-encode and fix
+	// content-length; only touch text/html so assets/JS/JSON pass through untouched.
+	const contentType = response.headers["content-type"] ?? response.headers["Content-Type"] ?? "";
+
+	if (contentType.includes("text/html")) {
+		const injected = injectObsTap(new TextDecoder().decode(new Uint8Array(response.body)));
+		const bytes = new TextEncoder().encode(injected);
+		const nextHeaders = { ...response.headers };
+
+		delete nextHeaders["content-length"];
+		delete nextHeaders["Content-Length"];
+		nextHeaders["content-length"] = String(bytes.byteLength);
+
+		return { "status": response.statusCode, "statusText": response.statusMessage, "headers": nextHeaders, "body": bytes };
+	}
 
 	return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": response.body };
 });

@@ -6,7 +6,7 @@ import moduleVersions from "editor:versions";
 import workspace from "editor:workspace";
 import { ensureCrossOriginIsolated } from "./coi";
 import { hostLog } from "./logging";
-import { consoleCollector, installHubCollector, linkDebugMcp, linkServiceWorkerHub, servePageTools } from "./telemetry";
+import { consoleCollector, installHubCollector, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "./telemetry";
 import { sampleById, sampleList } from "./samples";
 import { renderShell } from "./shell";
 import { createVscodeWindow } from "./vscode";
@@ -38,6 +38,7 @@ if (isolated && window.parent === window) {
 	const rootHub = createHub({ "id": "root" });
 
 	installHubCollector(rootHub, consoleCollector);
+	tapConsoleAndErrors(rootHub, "host"); // raw uncaught error/rejection on the page → the plane (errors-only: loop-safe on the collector context)
 	linkServiceWorkerHub(rootHub);
 	linkDebugMcp(rootHub); // dev-only: federate the tree to a running @brianjenkins94/debug-mcp for MCP querying
 	servePageTools(rootHub); // dev-only: host live MCP tools (page_eval/page_query) the debug-mcp relay forwards to

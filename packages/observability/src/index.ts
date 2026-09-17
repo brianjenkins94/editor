@@ -46,6 +46,11 @@ export function installHubCollector(hub: Hub, onRecord: (record: LogRecord) => v
 	return hub.subscribe(LOG_SUBJECT + ".>", (data) => { onRecord(data as LogRecord); });
 }
 
+// Set true only while the collector (or another observability path) writes to console, so a same-realm console
+// tap (tapConsoleAndErrors with captureConsole) never re-captures observability's own console output — the one
+// way console capture could loop when the collector and a tap share a realm (the page/root).
+let observabilityWriting = false;
+
 /** A console renderer for collected records — tagged by source, span-aware (`→ name` / `← name (Xms)`) via
  *  `renderRecord`, routed to the matching console method so levels survive in devtools. */
 export function consoleCollector(record: LogRecord): void {
@@ -53,13 +58,114 @@ export function consoleCollector(record: LogRecord): void {
 	const line = `[${tag}] ${renderRecord(record)}`;
 	const attrs = record.attrs !== undefined && Object.keys(record.attrs).length > 0 ? [record.attrs] : [];
 
-	if (record.level === "error" || record.level === "fatal") {
-		console.error(line, ...attrs);
-	} else if (record.level === "warn") {
-		console.warn(line, ...attrs);
-	} else {
-		console.log(line, ...attrs);
+	observabilityWriting = true;
+
+	try {
+		if (record.level === "error" || record.level === "fatal") {
+			console.error(line, ...attrs);
+		} else if (record.level === "warn") {
+			console.warn(line, ...attrs);
+		} else {
+			console.log(line, ...attrs);
+		}
+	} finally {
+		observabilityWriting = false;
 	}
+}
+
+/** Render one console argument for a captured record: strings as-is, objects as compact JSON (String() fallback). */
+function fmtArg(value: unknown): string {
+	if (typeof value === "string") {
+		return value;
+	}
+
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return String(value);
+	}
+}
+
+/** Publish a raw (non-logger) record straight onto the plane — the taps use this for console/error capture that
+ *  didn't originate from a structured logger, so it stays decoupled from `sinks` (no default-console-sink loop). */
+function publishRecord(hub: Hub, source: string, level: LogRecord["level"], message: string, attrs: Record<string, unknown> = {}): void {
+	try {
+		hub.publish(`${LOG_SUBJECT}.${source}`, {
+			"kind": "log",
+			"level": level,
+			"message": message,
+			"attrs": attrs,
+			"context": { "source": source },
+			"time": Date.now(),
+			"depth": 0
+		} satisfies LogRecord);
+	} catch { /* telemetry must never break the observed context */ }
+}
+
+/**
+ * Capture the RAW failures that `relayLoggerToHub` misses — uncaught `error` + `unhandledrejection` on this
+ * context's global — and publish them onto the plane as `$sys.log.<source>` records, so every boundary's crashes
+ * (not just its intentional, structured logs) show up in the one collected stream. Loop-free everywhere: an error
+ * event is never produced by console, and publishing never touches console.
+ *
+ * `captureConsole` additionally patches `console.error`/`console.warn` (for contexts WITHOUT a structured logger,
+ * e.g. an app iframe — a context WITH `relayLoggerToHub` would double-log, since the logger's own console sink
+ * would be re-captured). It's guarded against the collector's own writes via `observabilityWriting`, and calls the
+ * ORIGINAL console (captured at patch time) so it never self-loops. Returns a disposer.
+ */
+export function tapConsoleAndErrors(hub: Hub, source: string, options: { "captureConsole"?: boolean } = {}): () => void {
+	const disposers: (() => void)[] = [];
+	const target = globalThis as { "addEventListener"?: (type: string, handler: (event: Event) => void) => void; "removeEventListener"?: (type: string, handler: (event: Event) => void) => void };
+
+	if (typeof target.addEventListener === "function") {
+		const onError = (event: Event): void => {
+			const error = event as ErrorEvent;
+
+			publishRecord(hub, source, "error", error.message || "uncaught error", {
+				"src": error.filename,
+				"line": error.lineno,
+				"col": error.colno,
+				"stack": error.error instanceof Error ? error.error.stack : undefined
+			});
+		};
+		const onRejection = (event: Event): void => {
+			const reason = (event as PromiseRejectionEvent).reason;
+
+			publishRecord(hub, source, "error", "unhandledrejection: " + (reason instanceof Error ? reason.message : String(reason)), {
+				"stack": reason instanceof Error ? reason.stack : undefined
+			});
+		};
+
+		target.addEventListener("error", onError);
+		target.addEventListener("unhandledrejection", onRejection);
+		disposers.push(() => {
+			target.removeEventListener?.("error", onError);
+			target.removeEventListener?.("unhandledrejection", onRejection);
+		});
+	}
+
+	if (options.captureConsole === true) {
+		const bay = console as unknown as Record<string, (...args: unknown[]) => void>;
+
+		for (const [method, level] of [["error", "error"], ["warn", "warn"]] as const) {
+			const original = typeof bay[method] === "function" ? bay[method].bind(console) : (): void => undefined;
+
+			bay[method] = (...args: unknown[]): void => {
+				if (!observabilityWriting) {
+					publishRecord(hub, source, level, args.map(fmtArg).join(" "));
+				}
+
+				original(...args);
+			};
+			disposers.push(() => { bay[method] = original; });
+		}
+	}
+
+	return () => {
+		for (const dispose of disposers) {
+			dispose();
+		}
+	};
 }
 
 /**

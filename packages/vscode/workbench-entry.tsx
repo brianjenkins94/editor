@@ -39,7 +39,7 @@ import workerPodManifest from "./extensions/worker-pod/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { windowClientTransport } from "./pane-link";
-import { relayLoggerToHub } from "./telemetry";
+import { relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
 import { createBashProcess } from "./terminal";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
@@ -85,6 +85,8 @@ workbenchHub.link(windowClientTransport(paneId, host));
 // the collector too. Records published before the port links simply don't federate (the boot span may be an
 // early casualty); everything after — saves, diagnostics, errors — arrives.
 const paneLog = relayLoggerToHub(workbenchHub, "workbench");
+
+tapConsoleAndErrors(workbenchHub, "workbench"); // raw uncaught error/rejection → the plane, beside the structured logs
 
 window.addEventListener("error", (event) => {
 	// A benign ResizeObserver notice monaco triggers constantly — not a real fault; don't relay it as an error.

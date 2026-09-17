@@ -27,7 +27,7 @@
  * import the hub below; registered {type:module} (coi.ts / server-bridge.ts).
  */
 import { createHub, portTransport } from "@brianjenkins94/hub";
-import { relayLoggerToHub } from "./telemetry";
+import { relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
 
 // The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,
 // errors) is recorded through a source-scoped logger whose records — timed SPANS included — ride the hub to
@@ -35,6 +35,8 @@ import { relayLoggerToHub } from "./telemetry";
 // below), separate from the ServerBridge data port. Standalone until linked — records just drop, by design.
 const swHub = createHub({ "id": "sw" });
 const swLog = relayLoggerToHub(swHub, "sw");
+
+tapConsoleAndErrors(swHub, "sw"); // raw uncaught error/rejection → the plane, beside the structured logs
 
 globalThis.addEventListener("install", () => globalThis.skipWaiting());
 globalThis.addEventListener("activate", (event) => event.waitUntil(globalThis.clients.claim()));

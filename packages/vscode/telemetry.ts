@@ -3,4 +3,4 @@
  * the service-worker / debug-mcp links), so a game or any other host wires the same plane without copying it. This
  * file stays as the editor's local import point — existing `./telemetry` imports keep working unchanged.
  */
-export { consoleCollector, installHubCollector, linkDebugMcp, linkServiceWorkerHub, LOG_SUBJECT, relayLoggerToHub, servePageTools } from "@brianjenkins94/observability";
+export { consoleCollector, installHubCollector, linkDebugMcp, linkServiceWorkerHub, LOG_SUBJECT, relayLoggerToHub, servePageTools, tapConsoleAndErrors } from "@brianjenkins94/observability";

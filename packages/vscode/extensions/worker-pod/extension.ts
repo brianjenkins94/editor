@@ -13,7 +13,7 @@
 import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
-import { relayLoggerToHub } from "../../telemetry";
+import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
 import { registerTsvalDebug } from "./debug-adapter";
 import { podHub } from "./pod";
 
@@ -106,6 +106,8 @@ function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 export function activate(context: vscode.ExtensionContext): PodBridge {
 	// The pod's own logger — its spans/records ride podHub.
 	const podLog = relayLoggerToHub(podHub, "pod");
+
+	tapConsoleAndErrors(podHub, "pod"); // raw uncaught error/rejection → the plane, beside the structured logs
 
 	// The pod->root UPLINK. The ext host is an isolated `extension-file://` realm with no window path to the
 	// page, so podHub can't use windowTransport. Instead it rides the extension's EXPORTED API (spike-verified:
