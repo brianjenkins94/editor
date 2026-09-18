@@ -234,8 +234,10 @@ function bootWithFallbackViewport(root: HTMLElement): void {
 		return;
 	}
 
+	/* eslint-disable webawesome/no-inline-styles -- fallback viewport dims for an unlaid-out host (0×0), so the workbench can measure at boot; restored below. Intrinsic geometry, not themeable chrome. */
 	root.style.width = "1280px";
 	root.style.height = "720px";
+	/* eslint-enable webawesome/no-inline-styles */
 
 	const restore = (): void => {
 		if (window.innerWidth === 0 || window.innerHeight === 0) {
@@ -351,6 +353,20 @@ function maybeBoot(): void {
 					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
 					// edit-history.ts.
 					installEditHistory(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
+
+					// Editor theme follows the OS, like the shell chrome. `window.autoDetectColorScheme` isn't wired to
+					// `prefers-color-scheme` in this monaco-vscode-api build, so drive `workbench.colorTheme` ourselves.
+					// The SHELL is the source of truth (it reliably gets prefers-color-scheme changes; an iframe may not),
+					// so apply what it publishes on `theme.colorScheme`; also react to this frame's own matchMedia as a
+					// real-browser fallback.
+					const themeApi = api as typeof import("vscode");
+					const applyEditorTheme = (dark: boolean): void => {
+						void themeApi.workspace.getConfiguration().update("workbench.colorTheme", dark ? "Default Dark+" : "Default Light+", themeApi.ConfigurationTarget.Global);
+					};
+					const themeMq = window.matchMedia("(prefers-color-scheme: dark)");
+
+					workbenchHub.subscribe("theme.colorScheme", (data) => { applyEditorTheme((data as { "dark"?: boolean } | null)?.dark ?? themeMq.matches); });
+					themeMq.addEventListener("change", () => { applyEditorTheme(themeMq.matches); });
 					bootSpan.info("hello extension api captured");
 				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
 				// AFTER the workbench restores its last-active viewlet (which would otherwise win).

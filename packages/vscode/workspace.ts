@@ -3,9 +3,14 @@
  * settings/keybindings live here.
  */
 
+/** Whether the OS currently prefers dark — picks the initial editor theme so boot matches the shell (no flash).
+ *  Live switching is wired in workbench-entry.tsx (autoDetectColorScheme isn't hooked to matchMedia in this build). */
+const prefersDark = typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+
 /** VS Code user settings (settings.json), passed to `boot({ configuration })`. */
 export const configuration: Record<string, unknown> = {
-	"workbench.colorTheme": "Default Dark+",
+	// Follow the OS light/dark preference, like the shell chrome. Initial pick here; workbench-entry.tsx updates it live.
+	"workbench.colorTheme": prefersDark ? "Default Dark+" : "Default Light+",
 	"workbench.iconTheme": "vs-seti",
 	"editor.fontSize": 12,
 	"editor.semanticHighlighting.enabled": true,

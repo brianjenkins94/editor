@@ -161,6 +161,15 @@ function Shell() {
 		// The preview window lives in the top frame so it can roam beyond the editor. See shell-preview.ts.
 		installShellPreview(shellHub);
 
+		// The editor (workbench iframe) follows the OS theme too. The shell is the source of truth for the OS
+		// preference — it reliably gets prefers-color-scheme changes, whereas the iframe may not — so publish the
+		// scheme (initially + on change) and let workbench-entry.tsx set the editor theme from it.
+		const scheme = window.matchMedia("(prefers-color-scheme: dark)");
+		const publishScheme = (): void => { shellHub.publish("theme.colorScheme", { "dark": scheme.matches }); };
+
+		publishScheme();
+		scheme.addEventListener("change", publishScheme);
+
 		// The RHS review panel — GitHub-Desktop-style changes + commit; the diff opens in the overlay over the editor.
 		renderGitPanel(gitPanelRef.current!, {
 			"el": overlayRef.current!,
