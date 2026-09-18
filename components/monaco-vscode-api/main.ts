@@ -488,10 +488,12 @@ export async function boot(options: BootOptions): Promise<void> {
 		});
 
 		if (!isPartVisible(config.part)) {
+			// eslint-disable-next-line webawesome/no-inline-styles -- toggling a workbench part's visibility (show/hide); intrinsic layout state, not themeable chrome
 			config.element.style.display = "none";
 		}
 
 		onPartVisibilityChange(config.part, (visible) => {
+			// eslint-disable-next-line webawesome/no-inline-styles -- toggling a workbench part's visibility (show/hide); intrinsic layout state, not themeable chrome
 			config.element.style.display = visible ? "block" : "none";
 		});
 	}

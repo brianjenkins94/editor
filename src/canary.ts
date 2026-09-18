@@ -424,7 +424,7 @@ function capabilityEnvironment(recorder: Recorder, options: CanaryOptions): Envi
 
 	// --- eval ---
 	const evalShim = (code: unknown) => {
-		recorder.record({ "capability": "eval", "value": typeof code === "string" ? code : "<non-string>", "callee": "eval", "safe": false });
+		recorder.record({ "capability": "eval", "value": typeof code === "string" ? code : "(non-string)", "callee": "eval", "safe": false });
 
 		return undefined;
 	};
