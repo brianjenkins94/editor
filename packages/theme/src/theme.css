@@ -1,5 +1,5 @@
 /*
- * @brianjenkins94/wa-theme — a custom theme layered on Web Awesome, expressed entirely in --wa-* design tokens.
+ * theme — the app's theme, layered on Web Awesome and expressed entirely in --wa-* design tokens.
  *
  * The whole point of this file (and this pivot): rebrand by RETONING WEB AWESOME'S TOKENS, not by writing our own
  * component CSS. Import order matters — the consumer loads Web Awesome's default theme FIRST, then this, so these
@@ -7,7 +7,7 @@
  *
  *     import "@awesome.me/webawesome/dist/styles/themes/default.css";
  *     import "@awesome.me/webawesome/dist/styles/utilities.css";
- *     import "@brianjenkins94/wa-theme";   // ← this file, last
+ *     import "theme";                      // ← this file, last
  *
  * Web Awesome derives every component's look from two token layers:
  *   1. the COLOR RAMPS — `--wa-color-<role>-{10..95}` (10 = darkest, 95 = lightest), where <role> is brand / neutral /

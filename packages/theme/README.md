@@ -1,6 +1,6 @@
-# @brianjenkins94/wa-theme
+# theme
 
-A custom theme layered on top of [Web Awesome](https://webawesome.com), expressed **entirely in `--wa-*` design
+The app's theme, layered on top of [Web Awesome](https://webawesome.com) and expressed **entirely in `--wa-*` design
 tokens** — the sandbox for rebranding the editor without writing our own component CSS.
 
 ## How it works
@@ -22,7 +22,7 @@ Import **after** Web Awesome's default theme so the overrides win:
 ```ts
 import "@awesome.me/webawesome/dist/styles/themes/default.css";
 import "@awesome.me/webawesome/dist/styles/utilities.css";
-import "@brianjenkins94/wa-theme";
+import "theme";
 ```
 
 ## This starter
