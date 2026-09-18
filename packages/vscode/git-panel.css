@@ -75,10 +75,12 @@
 .wa-diff-body .sxs-fold-slot { flex: 0 0 auto; width: 11px; display: flex; align-items: flex-start; justify-content: center; }
 .wa-diff-body .sxs-num.sel { background: var(--accent); }
 .wa-diff-body .sxs-num.sel, .wa-diff-body .sxs-num.sel .sxs-lineno, .wa-diff-body .sxs-num.sel .sxs-fold { color: #fff; }
-.wa-diff-body .sxs-pick { flex: 0 0 auto; width: 12px; height: 17px; border: 0; padding: 0; cursor: pointer;
+.wa-diff-body .sxs-pick { order: -1; flex: 0 0 auto; width: 12px; height: 17px; border: 0; padding: 0; cursor: pointer;
   display: flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1;
   background: transparent; color: inherit; }
-.wa-diff-body .sxs-line:hover .sxs-num:not(.sel) .sxs-pick { color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
+/* order: -1 places the pick checkmark LEFT of the fold chevron; an empty slot on context rows just reserves width. */
+.wa-diff-body .sxs-pick-empty { pointer-events: none; }
+.wa-diff-body .sxs-line:hover .sxs-num:not(.sel) button.sxs-pick { color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
 .wa-diff-body .sxs-code { padding: 0 10px; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .wa-diff-body .sxs-empty { background: #ffffff05; }
 .wa-diff-body .sxs-line { transition: opacity .45s ease; }

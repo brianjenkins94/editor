@@ -343,8 +343,8 @@ function sideHandlers(
 
 			const rowSelected = at.type !== "ctx" && !deselectedRows.has(at.index);
 			const numCell = createElement("span", { "className": "sxs-num" + (rowSelected ? " sel" : ""), "key": "n" },
-				// Fold slot FIRST (present on every row when the file has folds) so chevrons share one column and the
-				// checkmark that follows lands in the same place whether or not a row is a fold header.
+				// Pick checkmark shows LEFT of the fold chevron (via CSS `order`). The fold slot is present on every row when the
+				// file has folds so chevrons share one column; a context row (no pick) renders an empty pick slot to match.
 				hasFolds
 					? createElement("span", { "className": "sxs-fold-slot", "key": "b" },
 						header !== undefined
@@ -362,7 +362,7 @@ function sideHandlers(
 						"title": deselectedRows.has(at.index) ? "Include this line in the commit" : "Exclude this line from the commit",
 						"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleRow(at.index); }
 					}, deselectedRows.has(at.index) ? "" : "✓")
-					: null,
+					: (hasFolds ? createElement("span", { "className": "sxs-pick sxs-pick-empty", "key": "p" }) : null),
 				createElement("span", { "className": "sxs-lineno", "key": "l" }, props.lineNumber));
 
 			// A folded block collapses to `{ ⋯ }` on the opening line: the code already ends with `{`, so we append the
