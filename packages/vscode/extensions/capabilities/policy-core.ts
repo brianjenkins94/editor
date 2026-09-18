@@ -14,6 +14,10 @@ export interface Rule {
 	"capability": string;
 	"resource": string;
 	"disposition": Disposition;
+	/** ISO timestamp of when this decision was FIRST authorized (a user "Allow always"/"Deny always"). Immutable
+	 *  across later disposition flips — it answers "which capabilities did I grant during window X" for a
+	 *  retroactive compromise audit. Absent on hand-authored base rules; stamped on silo-written overrides. */
+	"added"?: string;
 }
 
 export interface Policy {
@@ -23,7 +27,7 @@ export interface Policy {
 
 export const EMPTY_POLICY: Policy = { "version": 1, "rules": [] };
 
-/** Parse `.capabilities.json` text, tolerating malformed input (→ empty policy). */
+/** Parse a policy file's text (`.silo/policy.json` or a `<user>.policy.json`), tolerating malformed input (→ empty policy). */
 export function parsePolicy(text: string): Policy {
 	try {
 		const parsed = JSON.parse(text) as Partial<Policy>;
@@ -60,11 +64,21 @@ export function effectiveDisposition(policy: Policy, capability: string, resourc
 	return dangerous ? "review" : "allow";
 }
 
-/** Return a copy of `policy` with the (capability, resource) rule set to `disposition` (replacing any existing). */
-export function withRule(policy: Policy, capability: string, resource: string, disposition: Disposition): Policy {
+/** Return a copy of `policy` with the (capability, resource) rule set to `disposition` (replacing any existing).
+ *  `added` (an ISO stamp, passed by the caller that owns the clock) records first-authorization: it's set on a
+ *  brand-new rule and PRESERVED from the existing rule across a later disposition flip, so it always means "when
+ *  I first decided this", not "when I last touched it". */
+export function withRule(policy: Policy, capability: string, resource: string, disposition: Disposition, added?: string): Policy {
+	const existing = policy.rules.find((rule) => rule.capability === capability && rule.resource === resource);
 	const rules = policy.rules.filter((rule) => !(rule.capability === capability && rule.resource === resource));
+	const rule: Rule = { "capability": capability, "resource": resource, "disposition": disposition };
+	const stamp = existing?.added ?? added;
 
-	rules.push({ "capability": capability, "resource": resource, "disposition": disposition });
+	if (stamp !== undefined) {
+		rule.added = stamp;
+	}
+
+	rules.push(rule);
 	rules.sort((a, b) => (a.capability + a.resource).localeCompare(b.capability + b.resource));
 
 	return { "version": policy.version, "rules": rules };

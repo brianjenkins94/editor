@@ -9,8 +9,8 @@
  *
  * 2. The "Capability calls" panel — the middle AND third columns — is rendered HERE. It reads those diagnostics
  *    back (`vscode.languages.getDiagnostics`, source "capabilities") for the resource each call reaches (columns 1
- *    & 2: code + resolved value), and overlays the DISPOSITION (column 3) from the workspace `.capabilities.json`
- *    policy: allow / deny, or a computed `review` for an undecided dangerous call. Clicking a row edits the
+ *    & 2: code + resolved value), and overlays the DISPOSITION (column 3) from the base `.silo/policy.json`
+ *    contract: allow / deny, or a computed `review` for an undecided dangerous call. Clicking a row edits the
  *    disposition; a view badge counts the calls still needing attention. No canary code runs in the ext host.
  *
  * 3. The TRIPWIRE (M0 = surface): a `deny`d call the code reaches gets its own ERROR squiggle (a separate
@@ -249,8 +249,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.window.onDidChangeActiveTextEditor(() => { void refresh(); })
 	);
 
-	// Hand-edits to the policy file re-render the panel too.
-	const watcher = vscode.workspace.createFileSystemWatcher("**/.capabilities.json");
+	// Hand-edits to the base policy file re-render the panel too.
+	const watcher = vscode.workspace.createFileSystemWatcher("**/.silo/policy.json");
 
 	context.subscriptions.push(
 		watcher,

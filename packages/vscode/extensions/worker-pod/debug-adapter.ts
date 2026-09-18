@@ -13,7 +13,8 @@ import { portTransport } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
-import { EMPTY_POLICY, parsePolicy, type Policy } from "../capabilities/policy-core";
+import { EMPTY_POLICY, type Policy } from "../capabilities/policy-core";
+import { loadEffectivePolicy } from "../capabilities/silo-store";
 import { podHub } from "./pod";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
@@ -63,9 +64,9 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	// The program runs only once BOTH the source is loaded (launch) and configuration is done — so breakpoints
 	// set between the `initialized` event and `configurationDone` are registered before the first step.
 	private source = "";
-	// Capability policy snapshot, read from .capabilities.json at launch and handed to the worker so it pre-arms
-	// capability breakpoints (a gated call hard-stops at its line). Empty when there's no policy file — then every
-	// undecided dangerous call breaks (firewall default).
+	// Effective capability policy snapshot (.silo base + my overrides), read at launch and handed to the worker so
+	// it pre-arms capability breakpoints (a gated call hard-stops at its line). Empty when there's no policy — then
+	// every undecided dangerous call breaks (firewall default).
 	private policy: Policy = EMPTY_POLICY;
 	private sourceReady = false;
 	private configDone = false;
@@ -242,18 +243,12 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		}
 	}
 
-	/** Read the workspace `.capabilities.json` (empty policy if absent/malformed) — the capability-breakpoint set. */
+	/** The effective `.silo/` policy — base `policy.json` + my `<user>.policy.json` overrides, exactly as the
+	 *  runtime enforcer sees it — as the capability-breakpoint set, so the tsval debugger pre-arms the same rules
+	 *  that would actually gate a production run. Empty policy if absent/malformed/no workspace. */
 	private async loadPolicy(): Promise<Policy> {
-		const folder = vscode.workspace.workspaceFolders?.[0];
-
-		if (folder === undefined) {
-			return EMPTY_POLICY;
-		}
-
 		try {
-			const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(folder.uri, ".capabilities.json"));
-
-			return parsePolicy(new TextDecoder().decode(bytes));
+			return await loadEffectivePolicy();
 		} catch (error) {
 			return EMPTY_POLICY;
 		}

@@ -8,15 +8,16 @@
  * It reuses the portable core published in @brianjenkins94/util/silo/enforce: `gate`/`CapabilityDenied`
  * (the fixed order), `redline` (BERNARD catastrophic scopes), and the intercept helpers (CAP_FS + scope
  * builders) as the single classification source. The decider is a VS Code popup today (Allow / Allow always /
- * Deny); an external program or AI can replace it later behind the same seam. Grants persist under `.silo/`.
+ * Deny); an external program or AI can replace it later behind the same seam. All `.silo/` I/O — the base+override
+ * policy merge, the observed-capability rollup, the run firehose — lives in silo-store.ts.
  */
 import type { BrokerOptions, CapabilityRequest, GrantStore, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
-import type { Policy } from "./policy-core";
 import * as vscode from "vscode";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
 import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
-import { EMPTY_POLICY, effectiveDisposition, parsePolicy, withRule } from "./policy-core";
+import { effectiveDisposition } from "./policy-core";
+import { loadEffectivePolicy, persistOverride, recordObservation } from "./silo-store";
 
 /**
  * The RAW call an interceptor sends — deliberately un-classified so the interceptors stay dumb and decoupled
@@ -68,49 +69,6 @@ function classify(call: CapabilityCall): CapabilityRequest | undefined {
 	return { "kind": "eval", "scope": evalScope(kind), "resource": kind };
 }
 
-/** The `.silo/policy.json` under the (first) workspace root — the committed, reviewable capability policy:
- *  default dispositions + user overrides (an "Allow always" appends an allow rule here). Policy lives in a
- *  file alongside silo's runs.jsonl / registry.json, NOT a code constant. */
-function policyUri(): vscode.Uri | undefined {
-	const folder = vscode.workspace.workspaceFolders?.[0];
-
-	return folder === undefined ? undefined : vscode.Uri.joinPath(folder.uri, ".silo", "policy.json");
-}
-
-// Read once (cached), refreshed after our own writes.
-let policyCache: Policy | undefined;
-
-async function loadPolicy(): Promise<Policy> {
-	if (policyCache !== undefined) {
-		return policyCache;
-	}
-
-	policyCache = { ...EMPTY_POLICY };
-
-	const uri = policyUri();
-
-	if (uri !== undefined) {
-		try {
-			policyCache = parsePolicy(new TextDecoder().decode(await vscode.workspace.fs.readFile(uri)));
-		} catch { /* absent or malformed → empty policy */ }
-	}
-
-	return policyCache;
-}
-
-/** Append an allow/deny rule to `.silo/policy.json` (an "Allow always" / a persisted denial) + refresh the cache. */
-async function persistRule(capability: string, resource: string, disposition: "allow" | "deny"): Promise<void> {
-	const uri = policyUri();
-
-	if (uri === undefined) {
-		return;
-	}
-
-	policyCache = withRule(await loadPolicy(), capability, resource, disposition);
-	await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, ".."));
-	await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify(policyCache, null, "\t") + "\n"));
-}
-
 /** The silo capability axis for a request: `fs:read`/`fs:write` carry the op; net/exec/eval are the kind. */
 function capabilityOf(request: CapabilityRequest): string {
 	return request.kind === "fs" ? `fs:${request.op ?? "read"}` : request.kind;
@@ -127,21 +85,23 @@ function createSessionStore(): GrantStore {
 	};
 }
 
-/** The decider: consult `.silo/policy.json` FIRST (allow / deny with NO prompt — so pre-approved scopes and
- *  default-allow patterns like fs:read under the workspace never nag), then for an undecided (review) capability
- *  show the VS Code popup. "Allow always" appends an allow rule to the policy file (your "don't show again");
- *  "Allow once" is session-only (the broker adds it to the session store). Swappable for an external/AI decider. */
+/** The decider: consult the effective policy FIRST — my `<user>.policy.json` overrides layered over the base
+ *  `policy.json` contract — and allow / deny with NO prompt (so pre-approved scopes and default-allow patterns
+ *  like fs:read under the workspace never nag). For an undecided (review) capability, show the VS Code popup.
+ *  "Allow always" writes an allow rule to MY override file (never the shared contract — that's your "don't show
+ *  again"); "Allow once" is session-only (the broker adds it to the session store). Swappable for an external/AI
+ *  decider behind this same seam. */
 async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 	const capability = capabilityOf(request);
 	const resource = request.resource ?? "";
-	const effective = effectiveDisposition(await loadPolicy(), capability, resource, isDangerous(capability));
+	const effective = effectiveDisposition(await loadEffectivePolicy(), capability, resource, isDangerous(capability));
 
 	if (effective === "allow") {
 		return { "behavior": "allow" };
 	}
 
 	if (effective === "deny") {
-		return { "behavior": "deny", "message": "denied by .silo/policy.json" };
+		return { "behavior": "deny", "message": "denied by .silo policy" };
 	}
 
 	const pick = await vscode.window.showInformationMessage(
@@ -153,7 +113,7 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 	);
 
 	if (pick === "Allow always") {
-		await persistRule(capability, resource, "allow");
+		await persistOverride(capability, resource, "allow");
 
 		return { "behavior": "allow" };
 	}
@@ -192,10 +152,13 @@ export async function decideCapability(call: CapabilityCall): Promise<boolean> {
 
 	try {
 		await gate(request, options);
+		recordObservation(request, "allow"); // fired ⇒ folds into the observed surface + firehose
 
 		return true;
 	} catch (error) {
 		if (error instanceof CapabilityDenied) {
+			recordObservation(request, "deny"); // attempt-but-blocked: logged to the firehose, not the surface
+
 			return false;
 		}
 
