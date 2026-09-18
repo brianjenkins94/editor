@@ -1,21 +1,21 @@
 /**
- * Comment-annotations — the first UI consumer of the node-id annotation store. VS Code's native Comments API is the
- * inline surface (gutter "+", threaded widget, markdown, reply); our store (`.git/bablr-annotations/`, keyed by
- * DERIVABLE node ids) is the persistence + move-stable anchor the Comments API deliberately lacks.
+ * Comment-annotations — the UI consumer of the durable annotation store. VS Code's native Comments API is the inline
+ * surface (gutter "+", threaded widget, markdown); the store is the persistence + move-stable anchor it lacks.
  *
  * Division of labour:
- *   - Comments API pins a thread to a `Range`; on edit it drifts and VS Code forgets it on reload.
- *   - We store each thread under a NODE ID (from the history-anchored `.bablr` identity), so a thread follows its line
- *     as the file changes. At render time we resolve node id → current line via the identity's `nodeLines` map; when a
- *     reviewer starts a thread on a line we resolve line → the node id on it and persist under that id.
+ *   - The Comments API pins a thread to a `Range`; on edit it drifts and VS Code forgets it on reload.
+ *   - We persist each thread under a CONTENT-ADDRESSED SPAN-ANCHOR ID (bablr `spanAnchors`): a hash of the span's node
+ *     type + trivia-insensitive content. It's move-stable (survives edits elsewhere, reindent, and even moving the
+ *     span to another file) and self-edit-aware (editing the span itself mints a new id). On open we RE-DERIVE the
+ *     span anchors of the current file and look each stored id up → its line; an id that's gone ORPHANS (kept on disk,
+ *     just not shown). When a reviewer starts a thread on a line we resolve line → the span id there and persist it.
  *
- * SLICE 1: rehydrate threads on open (and re-place them on save, which recomputes positions from the store for free),
- * and persist on comment create. Reply/resolve and character-precise ranges are a later pass. Runs in the workbench
- * realm (vscode API + zen-fs both live here), so it calls the engine directly — no hub hop.
+ * The store lives in `.silo/` (committed, durable — see git-engine); it's keyed only by span id, so nothing about the
+ * CST or history has to travel. Runs in the workbench realm (vscode API + zen-fs live here) → calls the engine directly.
  */
 import type * as vscodeApi from "vscode";
 import type { Logger } from "@brianjenkins94/util/logger";
-import type { CosmeticClassifier } from "./cosmetic-classifier";
+import type { CosmeticClassifier, SpanAnchorLine } from "./cosmetic-classifier";
 import * as engine from "./git-engine";
 
 const DIR = "/workspace";
@@ -23,7 +23,7 @@ const CLASSIFIABLE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 
 const errText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-/** One persisted comment (the annotation value for a node id is an array of these). */
+/** One persisted comment (the annotation value for a span id is an array of these). */
 interface StoredComment { "author": string; "body": string; "timestamp": string }
 
 /** Repo-relative path for a workspace file uri, or undefined for anything outside the workspace / not classifiable. */
@@ -47,9 +47,9 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 			(repoRelative(document.uri) === undefined ? [] : [new vscode.Range(0, 0, Math.max(0, document.lineCount - 1), 0)]),
 	};
 
-	// Live threads per uri, so we can dispose + rebuild on rehydrate. The node-line map per uri backs line ↔ node id.
+	// Live threads per uri, so we can dispose + rebuild on rehydrate. The span anchors per uri back line ↔ span id.
 	const threadsByUri = new Map<string, vscodeApi.CommentThread[]>();
-	const nodeLinesByUri = new Map<string, Record<string, number>>();
+	const anchorsByUri = new Map<string, SpanAnchorLine[]>();
 
 	const toComment = (stored: StoredComment): vscodeApi.Comment => ({
 		"body": new vscode.MarkdownString(stored.body),
@@ -58,41 +58,40 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 		"timestamp": new Date(stored.timestamp),
 	});
 
-	// The node id whose current line is `line` (1-based); if none sits exactly on it, the nearest node at or above it
-	// (the enclosing/preceding node) — so a comment on a blank/trivia line still anchors to real structure.
-	const nodeIdForLine = (nodeLines: Record<string, number>, line: number): string | undefined => {
-		let exact: string | undefined;
-		let bestBelow: { "id": string; "line": number } | undefined;
+	// The span-anchor id for a comment on `line` (1-based): the statement STARTING there, else the smallest statement
+	// covering it (multi-line), so a comment on any of a statement's lines pins to that statement.
+	const spanIdForLine = (anchors: SpanAnchorLine[], line: number): string | undefined => {
+		const starting = anchors.find((anchor) => anchor.startLine === line);
 
-		for (const [id, nodeLine] of Object.entries(nodeLines)) {
-			if (nodeLine === line) {
-				exact ??= id;
-			} else if (nodeLine < line && (bestBelow === undefined || nodeLine > bestBelow.line)) {
-				bestBelow = { "id": id, "line": nodeLine };
+		if (starting !== undefined) {
+			return starting.id;
+		}
+
+		let covering: SpanAnchorLine | undefined;
+
+		for (const anchor of anchors) {
+			if (anchor.startLine <= line && line <= anchor.endLine && (covering === undefined || anchor.endLine - anchor.startLine < covering.endLine - covering.startLine)) {
+				covering = anchor;
 			}
 		}
 
-		return exact ?? bestBelow?.id;
+		return covering?.id;
 	};
 
-	// Derive the current node id → line map for a file (HEAD→working identity — the same ids classify produces).
-	const nodeLinesFor = async (path: string): Promise<Record<string, number>> => {
-		let working: string;
-
+	// Re-derive the current span anchors (off-thread) for a file — the content-addressed handles annotations pin to.
+	const anchorsFor = async (path: string): Promise<SpanAnchorLine[]> => {
 		try {
-			working = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
+			const working = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
+
+			return await classifier.anchors(working);
 		} catch {
-			return {};
+			return [];
 		}
-
-		const head = await engine.headContent(path);
-		const analysis = await classifier.identify([head, working]);
-
-		return analysis.nodeLines;
 	};
 
-	// Rebuild a file's threads from the store — dispose the old ones, then re-anchor each stored node id to its current
-	// line. Called on open AND save, so a save re-places every thread (positions come back from the identity) for free.
+	// Rebuild a file's threads from the store — dispose the old ones, then re-anchor each stored SPAN ID to its current
+	// line via freshly-derived anchors. Called on open AND save, so a save re-places every thread for free; a stored id
+	// whose span no longer exists orphans (its data is kept, just not shown).
 	const rehydrate = async (uri: vscodeApi.Uri): Promise<void> => {
 		const path = repoRelative(uri);
 
@@ -101,7 +100,6 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 		}
 
 		const key = uri.toString();
-
 		const annotations = await engine.readAnnotations(path) as Record<string, StoredComment[]>;
 		const ids = Object.keys(annotations);
 
@@ -112,23 +110,24 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 		threadsByUri.delete(key);
 
 		if (ids.length === 0) {
-			nodeLinesByUri.delete(key);
+			anchorsByUri.delete(key);
 
 			return; // nothing pinned here — skip the parse entirely
 		}
 
-		const nodeLines = await nodeLinesFor(path);
+		const anchors = await anchorsFor(path);
 
-		nodeLinesByUri.set(key, nodeLines);
+		anchorsByUri.set(key, anchors);
+		const lineOf = new Map(anchors.map((anchor) => [anchor.id, anchor.startLine]));
 
 		const threads: vscodeApi.CommentThread[] = [];
 
 		for (const id of ids) {
-			const line = nodeLines[id];
+			const line = lineOf.get(id);
 			const comments = annotations[id];
 
 			if (line === undefined || comments.length === 0) {
-				continue; // the node no longer exists in the working file (deleted) — keep the data, just don't show it
+				continue; // the span no longer exists in the working file — keep the data, just don't show it (orphaned)
 			}
 
 			const range = new vscode.Range(line - 1, 0, line - 1, 0);
@@ -139,11 +138,11 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 		}
 
 		threadsByUri.set(key, threads);
-		log.info("comment annotations rehydrated", { "path": path, "threads": threads.length });
+		log.info("comment annotations rehydrated", { "path": path, "threads": threads.length, "orphaned": ids.length - threads.length });
 	};
 
 	// Submit handler for the gutter "+" (contributed to comments/commentThread/context in the hello manifest). Resolve
-	// the thread's line → the node id on it, append the comment under that id, and persist.
+	// the thread's line → the span id there, append the comment under that id, and persist to `.silo/`.
 	const addComment = async (reply: vscodeApi.CommentReply): Promise<void> => {
 		const uri = reply.thread.uri;
 		const path = repoRelative(uri);
@@ -153,27 +152,26 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 		}
 
 		const key = uri.toString();
-		let nodeLines = nodeLinesByUri.get(key);
+		let anchors = anchorsByUri.get(key);
 
-		if (nodeLines === undefined) {
-			nodeLines = await nodeLinesFor(path);
-			nodeLinesByUri.set(key, nodeLines);
+		if (anchors === undefined) {
+			anchors = await anchorsFor(path);
+			anchorsByUri.set(key, anchors);
 		}
 
-		const line = reply.thread.range.start.line + 1; // 1-based
-		const nodeId = nodeIdForLine(nodeLines, line);
+		const spanId = spanIdForLine(anchors, reply.thread.range.start.line + 1);
 
-		if (nodeId === undefined) {
-			void vscode.window.showWarningMessage("Couldn't anchor this note to a code node — try a line with code on it.");
+		if (spanId === undefined) {
+			void vscode.window.showWarningMessage("Couldn't anchor this note to a statement — try a line with code on it.");
 			reply.thread.dispose();
 
 			return;
 		}
 
 		const existing = await engine.readAnnotations(path) as Record<string, StoredComment[]>;
-		const stored: StoredComment[] = [...(existing[nodeId] ?? []), { "author": "You", "body": reply.text, "timestamp": new Date().toISOString() }];
+		const stored: StoredComment[] = [...(existing[spanId] ?? []), { "author": "You", "body": reply.text, "timestamp": new Date().toISOString() }];
 
-		await engine.setAnnotation(path, nodeId, stored);
+		await engine.setAnnotation(path, spanId, stored);
 
 		// Reflect it in the widget immediately, and remember the thread so a later rehydrate can replace it.
 		reply.thread.comments = stored.map(toComment);
@@ -186,7 +184,7 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 		}
 
 		threadsByUri.set(key, threads);
-		log.info("comment annotation saved", { "path": path, "nodeId": nodeId });
+		log.info("comment annotation saved", { "path": path, "spanId": spanId });
 	};
 
 	vscode.commands.registerCommand("bablr.addComment", (reply: vscodeApi.CommentReply) => {
