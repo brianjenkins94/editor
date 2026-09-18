@@ -101,7 +101,7 @@ const railRegion = css({ "height": "calc(100dvh - var(--header-height, 40px))", 
 const railCard = css({ "alignSelf": "flex-start", "&::part(body)": { "padding": "var(--wa-space-xs)", "borderRadius": "var(--wa-border-radius-pill)" } });
 const railStack = css({ "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-s)" });
 const railItem = css({ "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-2xs)" });
-const railCaption = css({ "fontSize": "10px", "letterSpacing": "0.04em", "color": "var(--wa-color-text-quiet)", "textTransform": "uppercase" });
+const railCaption = css({ "fontSize": "10px", "lineHeight": 1.1, "color": "var(--wa-color-text-quiet)", "textAlign": "center", "maxWidth": "100%", "overflowWrap": "anywhere" });
 // Keeps an imperatively-mounted region (the git panel) in the DOM but out of view while its pane is collapsed.
 const hiddenBox = css({ "display": "none" });
 const sideBody = css({ "flex": "1 1 0", "minHeight": 0, "overflowY": "auto" });
