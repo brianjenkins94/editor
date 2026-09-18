@@ -10,9 +10,11 @@
  * it spawns them by URL relative to the workbench origin (`location.href`). (eslint moved OUT of this pod to a
  * tsserver plugin — extensions/eslint — that reuses tsserver's typescript; only cspell remains here.)
  */
+import { serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
+import { type CapabilityCall, decideCapability } from "../capabilities/decide";
 import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
 import { registerTsvalDebug } from "./debug-adapter";
 import { podHub } from "./pod";
@@ -132,6 +134,12 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// Workers link UP to podHub and announce themselves on `pod.ready`; log each join so pod membership shows
 	// up in the collector (as a `[pod]` record).
 	context.subscriptions.push({ "dispose": podHub.subscribe("pod.ready", (data) => { podLog.info("worker joined", data as Record<string, unknown>); }) });
+
+	// ENFORCE — the single capability DECISION ENDPOINT (see ../capabilities/decide). Every thin interceptor
+	// (the service-worker net gate; the almostnode fs/exec shim hook) full-round-trips here over the hub: the SW's
+	// swHub → root → workbench → podHub reaches this serve, and the popup/grant-store/redline logic all lives here
+	// (the ext host has vscode + workspace.fs), never in an interceptor. Returns true=allow, false=deny.
+	context.subscriptions.push({ "dispose": serve(podHub, "capability.decide", (call) => decideCapability(call as CapabilityCall)) });
 
 	// The tsval debug type — a worker-backed stepping debugger (debug-adapter.ts + debug-worker.ts).
 	registerTsvalDebug(context);

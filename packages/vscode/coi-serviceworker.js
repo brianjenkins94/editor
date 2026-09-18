@@ -26,7 +26,7 @@
  * adapted from github.com/gzuidhof/coi-serviceworker (MIT). Bundled as an ES MODULE (sw.config.ts) so it can
  * import the hub below; registered {type:module} (coi.ts / server-bridge.ts).
  */
-import { createHub, portTransport } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, portTransport } from "@brianjenkins94/hub";
 import { relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
 
 // The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,
@@ -37,6 +37,59 @@ const swHub = createHub({ "id": "sw" });
 const swLog = relayLoggerToHub(swHub, "sw");
 
 tapConsoleAndErrors(swHub, "sw"); // raw uncaught error/rejection → the plane, beside the structured logs
+
+// The capability NET gate. A previewed app's outbound fetch/XHR full-round-trips to the ext-host decision
+// endpoint, but the SW reaches it through a TRUSTED editor client (the SW node doesn't do hub RPC): each
+// trusted window client gets its own MessageChannel port; the app realm (main.tsx) relays the call to
+// "capability.decide" over the hub and replies on the port. The SW holds NO policy — it only asks, then
+// allows (fetch) or blocks (403). The PREVIEW client is never asked (it's the untrusted app). Fail-OPEN on a
+// transport error / no editor realm, so a hiccup never bricks the preview (the endpoint fails closed itself).
+// The SW is a first-class hub node (swHub, linked to the page's root hub), so it asks the ext-host decision
+// endpoint DIRECTLY over the hub — swHub → root → workbench → podHub reaches worker-pod's "capability.decide"
+// serve, which owns the popup / grant store / redline. The SW holds NO policy; it only asks, then allows
+// (fetch) or blocks (403). A long timeout so a deliberating user isn't cut off; fail-OPEN past it / on any
+// transport error, so a hub hiccup never bricks the preview (the endpoint itself fails closed on redline / an
+// abstaining decider).
+const capabilityRpc = createRpcClient(swHub);
+
+async function decideNet(url) {
+	try {
+		return (await capabilityRpc.request("capability.decide", { "kind": "net", "args": [url] }, { "timeoutMs": 300000 })) !== false;
+	} catch (rpcError) {
+		swLog.error("capability.decide failed — allowing (fail-open)", { "error": String(rpcError) });
+
+		return true;
+	}
+}
+
+// Gate a previewed app's DATA fetches (destination "" = fetch/XHR, not a subresource/module load) to http(s),
+// then fetch or block. Non-preview clients and non-data requests pass straight through — same as before.
+async function gateAndFetch(event, request, requestUrl) {
+	try {
+		if (request.destination === "" && (requestUrl.protocol === "https:" || requestUrl.protocol === "http:") && event.clientId) {
+			const client = await globalThis.clients.get(event.clientId);
+			let previewClient = false;
+
+			try {
+				previewClient = Boolean(client) && parseVirtual(new URL(client.url).pathname) !== null;
+			} catch (clientError) {
+				previewClient = false;
+			}
+
+			if (previewClient && !(await decideNet(request.url))) {
+				return new Response("Blocked by capability policy: net " + requestUrl.host, { "status": 403, "statusText": "Capability denied" });
+			}
+		}
+	} catch (gateError) {
+		swLog.error("capability net gate error — allowing", { "error": String(gateError) });
+	}
+
+	return fetch(request).then(stamp).catch((error) => {
+		console.error("[coi-serviceworker]", error);
+
+		return Promise.reject(error);
+	});
+}
 
 globalThis.addEventListener("install", () => globalThis.skipWaiting());
 globalThis.addEventListener("activate", (event) => event.waitUntil(globalThis.clients.claim()));
@@ -402,9 +455,8 @@ globalThis.addEventListener("fetch", (event) => {
 		return;
 	}
 
-	event.respondWith(fetch(request).then(stamp).catch((error) => {
-		console.error("[coi-serviceworker]", error);
-
-		return Promise.reject(error);
-	}));
+	// Fallback: everything not virtual/workspace/same-origin-relayed. A previewed app's outbound data fetch is
+	// gated here (gateAndFetch resolves the client to tell a preview request from editor/CDN infra); everything
+	// else passes straight through with COI stamping.
+	event.respondWith(gateAndFetch(event, request, requestUrl));
 });
