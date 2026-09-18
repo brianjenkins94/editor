@@ -53,8 +53,10 @@
 .wa-diff-body .sxs-verdict.unparsable .sxs-dot { background: #e0785e; }
 /* Side-by-side codehike diff: HEAD | working, sharing one grid so a row's height is the taller of its two cells
    (that's what keeps alignment under word wrap). Each line is a subgrid item = number gutter + wrapped code. */
+/* Number gutters are `auto` (content-sized), not a fixed width: each holds a fold chevron slot + the pick toggle +
+   the line number, so a fixed gutter clips the number once folds appear or line numbers reach 3–4 digits. */
 .wa-diff-body .sxs { display: grid; align-items: stretch; padding-bottom: 8px;
-  grid-template-columns: minmax(0, 1fr) 4em 14px 4em minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto 14px auto minmax(0, 1fr);
   font: 12px/1.6 "SF Mono", ui-monospace, monospace; }
 /* Center gutter bar (GitHub-Desktop split view): one per change hunk, spanning its rows, toggles the WHOLE change. */
 .wa-diff-body .sxs-hunk { grid-column: 3; border: 0; padding: 2px 0 0; margin: 0; cursor: pointer;
