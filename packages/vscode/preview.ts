@@ -1,14 +1,17 @@
 /**
- * Live preview pane — runs the workspace as a real app through an in-browser Vite dev server, no backend.
+ * Live preview BACKEND — runs the workspace as a real app through an in-browser Vite dev server, no backend server.
  *
  * The dev server (almostnode's ViteDevServer) runs IN THE NODE WORKER on the shared workspace zen-fs (see
  * extensions/worker-pod/node-worker.ts) — off the main thread, and on the same filesystem the editor writes, so
- * there's no separate VFS and no file mirroring. This host-page module is the bridge END: it drives the worker
- * over the hub (`preview.start` / `virtual.request` / `preview.fileChanged`, and subscribes `preview.hmr`),
- * registers a virtual server with the ServerBridge so the <iframe>'s `/__virtual__/<port>/` requests (routed by
- * coi-serviceworker) relay to the worker, and forwards the worker's HMR updates to the iframe. `typescript` (the
- * transpiler) now lives in the worker, so this module no longer pulls it into the host bundle. The service
- * worker can't be registered in the in-app Browser pane, so the preview only works in a real browser tab.
+ * there's no separate VFS and no file mirroring. This module is the bridge END: it drives the worker over the hub
+ * (`preview.start` / `virtual.request` / `preview.fileChanged`) and registers a virtual server with the ServerBridge
+ * so `/__virtual__/<port>/` requests (routed by coi-serviceworker) relay to the worker. It runs in the APP realm
+ * (2-hop to the worker), and is display-free: the movable preview WINDOW + iframe live in the SHELL/top frame
+ * (shell-preview.ts) so the preview can roam beyond the editor's bounds. The service-worker URL it exposes is the
+ * only handoff — the shell points its iframe there; HMR (`preview.hmr.<port>`) and the injected console tap ride the
+ * hub / postMessage up to the shell, which applies them. `typescript` (the transpiler) lives in the worker, so this
+ * stays out of the host bundle. The service worker can't be registered in the in-app Browser pane, so the preview
+ * only works in a real browser tab.
  */
 import type { Hub } from "@brianjenkins94/hub";
 // Import the bridge from the NARROW subpath, not the barrel — the barrel re-exports ViteDevServer, which pulls
@@ -17,24 +20,19 @@ import type { Hub } from "@brianjenkins94/hub";
 import { getServerBridge } from "@brianjenkins94/almostnode/bridge";
 import { createRpcClient } from "@brianjenkins94/hub";
 
-import { LOG_SUBJECT } from "./telemetry";
-
-/** Levels the preview tap emits — anything else is coerced to "info". */
-const OBS_LEVELS = new Set(["trace", "debug", "info", "warn", "error", "fatal"]);
-
 /** The virtual port the dev server is registered on (any value; it only namespaces the `/__virtual__/` URL). */
 const PREVIEW_PORT = 5173;
 
 export interface Preview {
+	/** The `/__virtual__/<port>/` URL the shell points its preview iframe at (served by the SW → this bridge). */
+	"url": string;
 	/** Tell the worker's dev server a workspace file changed (workspace-absolute path), triggering HMR. */
 	"update": (path: string, contents: string) => void;
-	/** Tear the preview down: unsubscribe HMR and unregister the bridge server (Ctrl-C on `vite`). */
+	/** Tear the preview down: unregister the bridge server (Ctrl-C on `vite`). */
 	"close": () => void;
 }
 
 export interface PreviewOptions {
-	/** The iframe the preview renders into. */
-	"iframe": HTMLIFrameElement;
 	/** URL of the shared service worker (coi-serviceworker.js) that routes `/__virtual__/` to the bridge. */
 	"swUrl": string;
 	/** The hub whose tree reaches the node worker (the page root hub). */
@@ -47,7 +45,7 @@ export interface PreviewOptions {
 interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": Uint8Array }
 
 export async function createPreview(options: PreviewOptions): Promise<Preview> {
-	const { iframe, swUrl, hub } = options;
+	const { swUrl, hub } = options;
 	const workspaceFolder = options.workspaceFolder ?? "/workspace";
 	const rpc = createRpcClient(hub);
 
@@ -77,49 +75,18 @@ export async function createPreview(options: PreviewOptions): Promise<Preview> {
 	await bridge.initServiceWorker({ "swUrl": swUrl });
 	bridge.registerServer(virtualServer as never, PREVIEW_PORT);
 
-	// HMR: the worker's dev server publishes each update on the hub; forward it to the iframe, whose injected HMR
-	// client (a `window.message` listener) applies it — React Fast Refresh, state preserved.
-	const offHmr = hub.subscribe(`preview.hmr.${PREVIEW_PORT}`, (message) => { iframe.contentWindow?.postMessage(message, "*"); });
-
-	// Observability bridge: the injected preview tap (node-worker.ts OBS_TAP) posts each console call / uncaught
-	// error up as `{channel:"obs-log", record}`. Re-shape it into a LogRecord and publish on `$sys.log.preview` so
-	// the preview iframe — otherwise invisible to the plane (app code logs through raw console, not util/logger) —
-	// federates to the root collector and out to debug-mcp like every other context.
-	const onObsLog = (event: MessageEvent): void => {
-		if (event.source !== iframe.contentWindow) {
-			return; // only our preview iframe
-		}
-
-		const payload = event.data as { "channel"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;
-
-		if (payload?.channel !== "obs-log" || payload.record === undefined) {
-			return;
-		}
-
-		const { level, message, attrs } = payload.record;
-
-		hub.publish(`${LOG_SUBJECT}.preview`, {
-			"kind": "log",
-			"level": typeof level === "string" && OBS_LEVELS.has(level) ? level : "info",
-			"message": typeof message === "string" ? message : String(message),
-			"attrs": attrs ?? {},
-			"context": { "source": "preview" },
-			"time": Date.now(),
-			"depth": 0
-		});
-	};
-
-	globalThis.addEventListener("message", onObsLog as EventListener);
+	// The iframe lives in the SHELL now, so HMR and the injected console tap are applied there (shell-preview.ts):
+	// the worker publishes `preview.hmr.<port>` on the hub (the shell subscribes and posts it into its iframe), and
+	// the tap's messages arrive in the shell window. This backend just serves assets over the bridge.
 
 	// Serve UNDER the deploy base (e.g. /editor/__virtual__/…), not root — the SW is scoped to the base, so a
 	// root-absolute /__virtual__/ URL would fall outside its scope and never be intercepted.
 	const base = swUrl.slice(0, swUrl.lastIndexOf("/") + 1);
-
-	iframe.src = base + "__virtual__/" + PREVIEW_PORT + "/";
-
+	const url = base + "__virtual__/" + PREVIEW_PORT + "/";
 	const prefix = workspaceFolder.replace(/\/$/u, "");
 
 	return {
+		"url": url,
 		// The editor already wrote the file into the shared workspace zen-fs the worker reads — we only tell the
 		// worker which (root-relative) path changed so it re-reads and emits the HMR update. Content isn't sent.
 		"update": (path) => {
@@ -128,10 +95,7 @@ export async function createPreview(options: PreviewOptions): Promise<Preview> {
 			hub.publish("preview.fileChanged", { "port": PREVIEW_PORT, "path": relative.startsWith("/") ? relative : "/" + relative });
 		},
 		"close": () => {
-			offHmr();
-			globalThis.removeEventListener("message", onObsLog as EventListener);
 			bridge.unregisterServer(PREVIEW_PORT);
-			iframe.removeAttribute("src");
 		}
 	};
 }

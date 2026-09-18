@@ -1,12 +1,12 @@
 /** @jsxImportSource preact */
 /**
- * VS Code workbench mounted inside a WebAwesome window, in an <iframe>.
+ * VS Code workbench mounted in an <iframe> that fills the shell's editor space.
  *
  * The workbench runs inside an <iframe> (its own document) so monaco taking over `document.body` never
  * touches the host page. The iframe loads `/__vscode__/host.html?pane=editor`, which runs the entry
- * (workbench.js). The iframe lives in the body of a draggable/collapsible window (window.ts) — the window's
- * definite-height body gives the iframe a laid-out box to measure at boot (what the old full-viewport
- * `position: fixed; inset: 0` mount was for).
+ * (workbench.js). It fills its mount container directly (the shell's middle grid area) — a laid-out box the
+ * iframe can measure at boot. (The old poppable WebAwesome window that hosted it is gone; all movable-window
+ * chrome — including the preview — now lives in the shell/top frame, so the editor realm carries no WebAwesome.)
  *
  * Host ⇄ pane talk rides ONE hub link over a retargeting window transport (pane-link.ts): the entry requests
  * `workbench.init` (RPC) → we serve the workspace `files`/`openEditors`; it publishes `workbench.save` (→ `onSave`)
@@ -24,8 +24,6 @@ import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import { serve } from "@brianjenkins94/hub";
 import { hostLog } from "./logging";
 import { windowServerTransport } from "./pane-link";
-import { createPaneWindow } from "./window";
-import "./webawesome";
 
 /** The workbench pane's stable id — travels in the iframe URL (`?pane=`) so it survives a popout reload. */
 const PANE_ID = "editor";
@@ -42,11 +40,8 @@ export interface VscodeWindowOptions {
 	"moduleVersions"?: Record<string, string>;
 	/** Called in *this* document when a document is saved in the workbench. */
 	"onSave"?: (path: string, contents: string) => void;
-	/** Where to mount the workbench window. Default: document.body. */
+	/** Where to mount the workbench (the iframe fills this box). Default: document.body. */
 	"mountInto"?: HTMLElement;
-	/** Fill `mountInto` directly (no draggable window chrome) — used when the editor is slotted into the outer
-	 *  shell's middle space. Default false: the standalone, poppable WebAwesome window. */
-	"fill"?: boolean;
 	/** The page's root hub — REQUIRED in practice: the workbench boots over it (we serve `workbench.init`), and the
 	 *  pane's hub (extension pod + workers) federates into it for spans. The link retargets to the pane's live
 	 *  window on popout. Typed optional only to keep the options bag ergonomic; omitting it throws. */
@@ -82,7 +77,7 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 		markReady = resolve;
 	});
 
-	const { files = [], openEditors = [], workspaceFolder, moduleVersions, onSave, mountInto = document.body, rootHub, fill = false } = options;
+	const { files = [], openEditors = [], workspaceFolder, moduleVersions, onSave, mountInto = document.body, rootHub } = options;
 	const base = (import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/";
 
 	const iframe = document.createElement("iframe");
@@ -92,26 +87,14 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 	// so a popped-out reload still announces as the same pane (the pane-link channel; see pane-link.ts).
 	iframe.src = base + "__vscode__/host.html?pane=" + PANE_ID;
 
-	// Two mount modes. FILL (embedded in the outer shell): the editor IS the middle space, so the iframe fills
-	// `mountInto` directly — no draggable window chrome. WINDOWED (standalone /): a large, centered, poppable
-	// WebAwesome window, the editor's shape today. Either way the iframe + pane bus below are identical.
-	if (fill) {
-		iframe.style.cssText = "width:100%;height:100%;border:0;display:block;";
-		mountInto.style.height ||= "100%";
-		mountInto.appendChild(iframe);
-		span.info("workbench mounted (fill)", { "pane": PANE_ID });
-	} else {
-		const paneWindow = createPaneWindow({
-			"title": "Editor",
-			"storageKey": PANE_ID,
-			"width": Math.min(1200, window.innerWidth - 80),
-			"height": Math.min(760, window.innerHeight - 120)
-		});
-
-		paneWindow.body.appendChild(iframe);
-		mountInto.appendChild(paneWindow.element);
-		span.info("workbench window mounted", { "pane": PANE_ID });
-	}
+	// The editor IS the shell's middle space: the iframe fills `mountInto` directly, giving it the laid-out box it
+	// must measure at boot. (The iframe fill is intrinsic geometry, not chrome — so it's inline style by necessity.)
+	// eslint-disable-next-line webawesome/no-inline-styles, webawesome/no-css-in-strings -- an iframe filling its own mount box; not themeable chrome
+	iframe.style.cssText = "width:100%;height:100%;border:0;display:block;";
+	// eslint-disable-next-line webawesome/no-inline-styles -- give the mount box a definite height so the iframe can measure at boot
+	mountInto.style.height ||= "100%";
+	mountInto.appendChild(iframe);
+	span.info("workbench mounted (fill)", { "pane": PANE_ID });
 
 	// ONE hub link carries everything host ⇄ pane — the boot handshake AND the pod/worker span federation — over a
 	// retargeting window transport that re-pairs to the pane's live window on popout (pane-link.ts). rootHub is

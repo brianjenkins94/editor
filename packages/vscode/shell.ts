@@ -11,6 +11,8 @@
  */
 import { createHub, createRpcClient, windowTransport } from "@brianjenkins94/hub";
 import { renderGitPanel } from "./git-panel";
+import { installShellPreview } from "./shell-preview";
+import "./webawesome";
 
 interface SampleInfo { "id": string; "name": string; "description": string }
 
@@ -128,6 +130,11 @@ export function renderShell(): void {
 	const shellHub = createHub({ "id": "shell" });
 
 	shellHub.link(windowTransport(appFrame.contentWindow!));
+
+	// The live preview's movable window lives HERE in the top frame (not the app iframe), so it can be dragged
+	// anywhere in the viewport, beyond the editor's bounds. The dev-server backend stays in the app realm; this just
+	// shows the window + iframe and applies HMR/console over the hub. See shell-preview.ts / preview.ts.
+	installShellPreview(shellHub);
 
 	// The RHS review panel — GitHub-Desktop-style changes + commit; the diff opens in the overlay (over LHS+editor).
 	renderGitPanel(document.getElementById("git-panel")!, {
