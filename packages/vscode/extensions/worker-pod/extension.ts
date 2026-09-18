@@ -18,6 +18,7 @@ import { type CapabilityCall, decideCapability } from "../capabilities/decide";
 import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
 import { registerTsvalDebug } from "./debug-adapter";
 import { podHub } from "./pod";
+import { registerProductionDebug } from "./production-adapter";
 
 /** This extension's exports — the pod->workbench half of the hub uplink (ext host is an isolated realm, so it
  *  rides the exported API rather than a window transport). See activate + workbench-entry's bridge. */
@@ -143,6 +144,18 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 	// The tsval debug type — a worker-backed stepping debugger (debug-adapter.ts + debug-worker.ts).
 	registerTsvalDebug(context);
+
+	// The production debug type — presents an almostnode run (the vite preview) as a debug session with a
+	// run-control controller (Stop + Debug Console). The run's driver publishes `production.launch` (federates
+	// to podHub); we start the attach session, and the adapter rides the run's `production.*` channels.
+	registerProductionDebug(context, podHub);
+	context.subscriptions.push({ "dispose": podHub.subscribe("production.launch", (data) => {
+		const info = data as { "id"?: string; "name"?: string };
+
+		if (typeof info.id === "string") {
+			void vscode.debug.startDebugging(undefined, { "type": "production", "request": "attach", "name": info.name ?? "Production run", "__prodId": info.id });
+		}
+	}) });
 
 	// AUTO-ATTACH: a terminal `node <file>` (node-runner's startDebug) publishes `debug.launch`; start a tsval
 	// debug session for it, so running in the terminal IS a debug session (breakpoints, step-back, capability

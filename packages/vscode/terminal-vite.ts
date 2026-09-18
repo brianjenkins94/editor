@@ -21,6 +21,11 @@ function stamp(): string {
 export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput): CustomCommand {
 	return defineCommand("vite", async (_args, ctx) => {
 		runner.openPreview(ctx.cwd);
+		// Present the dev server as a VS Code debug session too (the "production" debug mode) — it shows in Run and
+		// Debug with a Stop button, not just as a terminal process. Output/lifecycle ride its Debug Console.
+		const sessionId = runner.startProductionSession("vite (preview)");
+
+		runner.emitProductionOutput(sessionId, "out", `VITE dev server ready (on ${ctx.cwd}) — Stop from the debug toolbar or Ctrl-C.\n`);
 		writeLive("out", `\n  [1m[35mVITE[0m  dev server ready [2m(in the worker, on ${ctx.cwd})[0m\n\n  [32m➜[0m  Preview:  opened the Preview pane\n  [2m➜  press Ctrl-C to stop[0m\n\n`);
 
 		// Stream HMR activity as dev-server-style log lines while we block.
@@ -31,8 +36,10 @@ export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput): Cu
 			writeLive("out", `  [2m${stamp()}[0m [36m[vite][0m ${kind} [2m${update.path ?? ""}[0m\n`);
 		});
 
-		// Block like a real dev server until the shell's Ctrl-C aborts us (the signal is forwarded through
-		// `npm run dev` too — see terminal-npm.ts).
+		// Block like a real dev server until EITHER the shell's Ctrl-C (ctx.signal, also forwarded through
+		// `npm run dev` — see terminal-npm.ts) OR the debug session's Stop button (production.stop) fires.
+		let offStop = (): void => { /* set below */ };
+
 		await new Promise<void>((resolve) => {
 			if (ctx.signal?.aborted === true) {
 				resolve();
@@ -41,9 +48,12 @@ export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput): Cu
 			}
 
 			ctx.signal?.addEventListener("abort", () => { resolve(); }, { "once": true });
+			offStop = runner.onProductionStop(sessionId, () => { resolve(); });
 		});
 
 		off();
+		offStop();
+		runner.endProductionSession(sessionId);
 		runner.closePreview();
 		writeLive("out", "\n  [2mvite: dev server stopped[0m\n");
 

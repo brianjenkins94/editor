@@ -44,6 +44,18 @@
             "program": "${file}"
           }
         ]
+      },
+      {
+        "type": "production",
+        "label": "production (almostnode run)",
+        "languages": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
+        "initialConfigurations": [
+          {
+            "type": "production",
+            "request": "attach",
+            "name": "Production run"
+          }
+        ]
       }
     ]
   }
