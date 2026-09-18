@@ -19,6 +19,7 @@
 import * as vscode from "vscode";
 
 import { type Disposition, type Effective, type Policy, effectiveDisposition, policyUri, readPolicy, withRule, withoutRule, writePolicy } from "./policy";
+import { type StaticEntry, type StaticSurface, loadStaticSurface, writeStaticSurface } from "./silo-store";
 
 interface Row {
 	"capability": string;
@@ -99,6 +100,14 @@ export function activate(context: vscode.ExtensionContext): void {
 	// onDidChangeDiagnostics → refresh → updateViolations) short-circuits instead of looping.
 	let lastViolationsKey = "";
 
+		// The STATIC capability surface (.silo/capabilities.json): what analysis says each file CAN reach, built from
+		// the same "capabilities" diagnostics. Merged across the session — tsserver only analyzes OPEN files, so this
+		// fills in as you browse (a whole-project sweep is a later engine change); the ACTIVE file is updated
+		// authoritatively (including removals) since we know it was just analyzed. Digest-guarded so the committed
+		// file is written only on real DRIFT (a file gaining/losing a capability), not on every diagnostics refresh.
+		let staticSurface: StaticSurface | undefined;
+		let lastStaticKey = "";
+
 	context.subscriptions.push(view, violations);
 
 	let policy: Policy = { "version": 1, "rules": [] };
@@ -144,6 +153,68 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
+	/** Rebuild the STATIC surface from the current "capabilities" diagnostics and persist it (digest-guarded). */
+	const updateStaticSurface = async (): Promise<void> => {
+		if (staticSurface === undefined) {
+			staticSurface = await loadStaticSurface();
+		}
+
+		const byFile = new Map<string, StaticEntry[]>();
+
+		for (const [uri, diagnostics] of vscode.languages.getDiagnostics()) {
+			const seen = new Set<string>();
+			const entries: StaticEntry[] = [];
+
+			for (const diagnostic of diagnostics) {
+				if (diagnostic.source !== "capabilities") {
+					continue;
+				}
+
+				const parsed = parseMessage(diagnostic.message);
+
+				if (parsed.capability === "") {
+					continue;
+				}
+
+				const dedupe = `${parsed.capability} ${parsed.callee} ${parsed.resource}`;
+
+				if (!seen.has(dedupe)) {
+					seen.add(dedupe);
+					entries.push({ "capability": parsed.capability, "callee": parsed.callee, "resource": parsed.resource });
+				}
+			}
+
+			if (entries.length > 0) {
+				byFile.set(vscode.workspace.asRelativePath(uri, false), entries);
+			}
+		}
+
+		// Set every file we saw caps for. The ACTIVE file additionally gets authoritative removal — it was just
+		// analyzed, so zero caps means its calls are genuinely gone (other closed files are left as-is: merge).
+		for (const [path, entries] of byFile) {
+			staticSurface.capabilities[path] = entries;
+		}
+
+		const activeUri = vscode.window.activeTextEditor?.document.uri;
+
+		if (activeUri !== undefined) {
+			const activePath = vscode.workspace.asRelativePath(activeUri, false);
+
+			if (!byFile.has(activePath)) {
+				delete staticSurface.capabilities[activePath];
+			}
+		}
+
+		const key = JSON.stringify(Object.entries(staticSurface.capabilities).sort(([a], [b]) => a.localeCompare(b)));
+
+		if (key === lastStaticKey) {
+			return; // no drift → don't rewrite (also breaks the onDidChangeDiagnostics feedback loop)
+		}
+
+		lastStaticKey = key;
+		await writeStaticSurface(staticSurface);
+	};
+
 	const refresh = async (): Promise<void> => {
 		policy = await readPolicy(policyUri());
 
@@ -171,6 +242,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		view.badge = attention === 0 ? undefined : { "value": attention, "tooltip": `${attention} capabilit${attention === 1 ? "y" : "ies"} to review` };
 		changed.fire();
 		updateViolations();
+		void updateStaticSurface();
 	};
 
 	/** Apply a disposition edit to the policy file, then refresh. */

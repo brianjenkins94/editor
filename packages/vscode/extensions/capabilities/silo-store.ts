@@ -210,6 +210,64 @@ export async function persistOverride(capability: string, resource: string, disp
 	await writeText(vscode.Uri.joinPath(root, `${user}.policy.json`), JSON.stringify(overrideCache, null, "\t") + "\n");
 }
 
+// ── static facts: the capability surface (committed, shared) ─────────────────────────────────────────────────
+
+/** One statically-detected capability site: what a file CAN reach (from findReach, surfaced via the plugin's
+ *  diagnostics). `resource` is "" when unresolved (a call whose target a run/literal hasn't pinned yet). No line
+ *  number — the surface is "what capabilities/resources this file reaches", so it churns only on real DRIFT (a new
+ *  capability or resource), not on every edit that shifts a line. */
+export interface StaticEntry {
+	"capability": string;
+	"callee": string;
+	"resource": string;
+}
+export interface StaticSurface {
+	"version": number;
+	"capabilities": Record<string, StaticEntry[]>;
+}
+
+/** Read `.silo/capabilities.json` (the committed STATIC surface), empty if absent/malformed. */
+export async function loadStaticSurface(): Promise<StaticSurface> {
+	const root = siloRoot();
+
+	if (root === undefined) {
+		return { "version": 1, "capabilities": {} };
+	}
+
+	const text = await readText(vscode.Uri.joinPath(root, "capabilities.json"));
+
+	if (text !== undefined) {
+		try {
+			const parsed = JSON.parse(text) as Partial<StaticSurface>;
+
+			if (parsed.capabilities !== undefined && typeof parsed.capabilities === "object") {
+				return { "version": parsed.version ?? 1, "capabilities": parsed.capabilities };
+			}
+		} catch { /* malformed → empty */ }
+	}
+
+	return { "version": 1, "capabilities": {} };
+}
+
+/** Write `.silo/capabilities.json` with file keys AND each file's entries sorted, so the committed file diffs
+ *  cleanly (drift shows as a real add/remove, never a reorder). */
+export async function writeStaticSurface(surface: StaticSurface): Promise<void> {
+	const root = siloRoot();
+
+	if (root === undefined) {
+		return;
+	}
+
+	const sorted: StaticSurface = { "version": surface.version, "capabilities": {} };
+
+	for (const path of Object.keys(surface.capabilities).sort((a, b) => a.localeCompare(b))) {
+		sorted.capabilities[path] = [...surface.capabilities[path]].sort((a, b) =>
+			(a.capability + a.callee + a.resource).localeCompare(b.capability + b.callee + b.resource));
+	}
+
+	await writeText(vscode.Uri.joinPath(root, "capabilities.json"), JSON.stringify(sorted, null, "\t") + "\n");
+}
+
 // ── observed facts: the rollup + the firehose ────────────────────────────────────────────────────────────────
 
 interface ObservedEntry {
