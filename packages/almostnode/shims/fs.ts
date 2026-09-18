@@ -231,7 +231,7 @@ function trackCall(method: "statSync" | "readdirSync", path: string): void {
 	}
 }
 
-export function createFsShim(vfs: VirtualFS, getCwd?: () => string): FsShim {
+export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFsWrite?: (op: "write", method: string, path: string) => void): FsShim {
   // Helper to resolve paths with cwd
 	const resolvePath = (pathLike: unknown) => toPath(pathLike, getCwd);
 	const constants: FsConstants = {
@@ -393,7 +393,7 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string): FsShim {
 		}
 	} as FsPromises;
 
-	return {
+	const shim = {
 		"readFileSync": function(
 			pathLike: unknown,
 			encodingOrOptions?: string | { "encoding"?: string | null }
@@ -872,6 +872,44 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string): FsShim {
 		"promises": promises,
 		"constants": constants
 	} as FsShim;
+
+	// Capability gate: wrap every fs WRITE/DELETE method (sync + promises) so a run's mutations pass through
+	// `beforeFsWrite` first — which THROWS to deny (the shim then propagates it as the call's error). Decoupled:
+	// almostnode only reports (op, method, path); the host decides (deleting a workspace is hostile even here,
+	// and on a desktop CLI these hit the real disk). Reads aren't gated yet (too frequent — needs a policy first).
+	if (beforeFsWrite !== undefined) {
+		const SYNC_WRITES = ["writeFileSync", "appendFileSync", "mkdirSync", "unlinkSync", "rmSync", "rmdirSync", "renameSync", "copyFileSync", "createWriteStream", "truncateSync"];
+		const PROMISE_WRITES = ["writeFile", "appendFile", "mkdir", "unlink", "rm", "rmdir", "rename", "copyFile", "truncate"];
+		const record = shim as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
+
+		for (const method of SYNC_WRITES) {
+			const original = record[method];
+
+			if (typeof original === "function") {
+				record[method] = (...args: unknown[]) => {
+					beforeFsWrite("write", method, String(args[0]));
+
+					return original(...args);
+				};
+			}
+		}
+
+		const promisesRecord = promises as unknown as Record<string, ((...args: unknown[]) => Promise<unknown>) | undefined>;
+
+		for (const method of PROMISE_WRITES) {
+			const original = promisesRecord[method];
+
+			if (typeof original === "function") {
+				promisesRecord[method] = async (...args: unknown[]) => {
+					beforeFsWrite("write", method, String(args[0]));
+
+					return original(...args);
+				};
+			}
+		}
+	}
+
+	return shim;
 }
 
 export default createFsShim;

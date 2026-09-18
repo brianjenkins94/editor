@@ -145,10 +145,41 @@ async function runNode(args: StartArgs): Promise<void> {
 		exit(exitCode);
 	};
 
+	// fs WRITE/DELETE capability gate. almostnode's fs is synchronous, so we can't await a popup mid-run — instead a
+	// BLOCKING sync-XHR to the service worker's /__capability__/decide route lets this worker wait while the SW runs
+	// the async decision (the same "capability.decide" endpoint the net gate uses) and replies { allow }. No
+	// SharedArrayBuffer needed. Throw (EACCES) to deny → almostnode propagates it as the fs call's error. Fail OPEN
+	// on any transport error so a hiccup never bricks a run (the SW route itself fails closed on redline).
+	const gateFsWrite = (op: "write", method: string, path: string): void => {
+		let allow = true;
+
+		try {
+			const xhr = new XMLHttpRequest();
+
+			xhr.open("POST", new URL("__capability__/decide", location.href).href, false); // sync: blocks until the SW replies
+			xhr.send(JSON.stringify({ "kind": "fs", "op": op, "method": method, "args": [path] }));
+
+			if (xhr.status === 200) {
+				allow = (JSON.parse(xhr.responseText) as { "allow"?: boolean }).allow !== false;
+			}
+		} catch {
+			allow = true; // transport/parse error → fail open
+		}
+
+		if (!allow) {
+			const error = new Error(`EACCES: capability denied — fs:${op} ${path}`) as Error & { "code"?: string };
+
+			error.code = "EACCES";
+
+			throw error;
+		}
+	};
+
 	const runtime = new Runtime(vfs, {
 		"cwd": cwd,
 		"env": env,
 		"base": base,
+		"beforeFsWrite": gateFsWrite,
 		"onStdout": (data: string) => { emit("out", data); },
 		"onStderr": (data: string) => { emit("err", data); },
 		"onConsole": (method: string, methodArgs: unknown[]) => {

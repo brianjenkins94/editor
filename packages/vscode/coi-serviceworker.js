@@ -62,6 +62,23 @@ async function decideNet(url) {
 	}
 }
 
+// Capability decision route (fs/exec, from almostnode). A worker's SYNCHRONOUS XHR blocks on this request while
+// we run the async decision (same "capability.decide" endpoint the net gate uses) and reply — the sync-XHR ⇄ SW
+// trick that lets a synchronous shim (writeFileSync) await an async popup with no SharedArrayBuffer. Body is the
+// raw CapabilityCall; reply is `{ allow }`. Fail-OPEN on error so a hiccup never bricks a run.
+async function handleCapabilityDecide(request) {
+	try {
+		const call = await request.json();
+		const allow = (await capabilityRpc.request("capability.decide", call, { "timeoutMs": 300000 })) !== false;
+
+		return new Response(JSON.stringify({ "allow": allow }), { "headers": { "content-type": "application/json" } });
+	} catch (decideError) {
+		swLog.error("capability decide route failed — allowing (fail-open)", { "error": String(decideError) });
+
+		return new Response(JSON.stringify({ "allow": true }), { "headers": { "content-type": "application/json" } });
+	}
+}
+
 // Gate a previewed app's DATA fetches (destination "" = fetch/XHR, not a subresource/module load) to http(s),
 // then fetch or block. Non-preview clients and non-data requests pass straight through — same as before.
 async function gateAndFetch(event, request, requestUrl) {
@@ -405,6 +422,14 @@ globalThis.addEventListener("fetch", (event) => {
 	const request = event.request;
 	const requestUrl = new URL(request.url);
 	const pathname = requestUrl.pathname;
+
+	// Capability decision route: a worker's blocking sync-XHR asks here (fs/exec gate). Matched by substring so it
+	// works under any base prefix, same as the virtual marker below.
+	if (pathname.indexOf("/__capability__/decide") !== -1) {
+		event.respondWith(handleCapabilityDecide(request));
+
+		return;
+	}
 
 	// Dev-server bridge: <base>/__virtual__/<port>/…
 	const virtual = parseVirtual(pathname);
