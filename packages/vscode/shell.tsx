@@ -47,8 +47,9 @@ const injectGlobals = globalCss({
 	"body": { "backgroundColor": "var(--wa-color-surface-default)", "color": "var(--wa-color-text-normal)", "fontFamily": "var(--wa-font-family-body, system-ui, sans-serif)" },
 	// The shell fills the viewport; its menu/aside widths are theme-driven and collapse to 0 via the classes below.
 	".wa-shell": { "height": "100vh", "--menu-width": "260px", "--aside-width": "380px" },
-	".wa-shell.lhs-collapsed": { "--menu-width": "0px" },
-	".wa-shell.rhs-collapsed": { "--aside-width": "0px" }
+	// Collapsed = a slim rail, not hidden (the effect drives the exact value; these are the first-paint fallback).
+	".wa-shell.lhs-collapsed": { "--menu-width": "68px" },
+	".wa-shell.rhs-collapsed": { "--aside-width": "68px" }
 });
 
 // The top bar: branding + icon actions, spread across the header. wa-button (plain) for every control.
@@ -92,6 +93,17 @@ function loadPaneWidth(key: string, fallback: number): number {
 		return fallback;
 	}
 }
+
+// A collapsed pane isn't hidden — it becomes a slim RAIL (WebAwesome vertical social-share pattern): a pill card
+// with a stacked icon-button + tiny caption that reopens the pane. This is the region's width when collapsed.
+const RAIL_WIDTH = 68;
+const railRegion = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "justifyContent": "center", "paddingBlockStart": "var(--wa-space-s)", "overflow": "hidden" });
+const railCard = css({ "alignSelf": "flex-start", "&::part(body)": { "padding": "var(--wa-space-xs)", "borderRadius": "var(--wa-border-radius-pill)" } });
+const railStack = css({ "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-s)" });
+const railItem = css({ "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-2xs)" });
+const railCaption = css({ "fontSize": "10px", "letterSpacing": "0.04em", "color": "var(--wa-color-text-quiet)", "textTransform": "uppercase" });
+// Keeps an imperatively-mounted region (the git panel) in the DOM but out of view while its pane is collapsed.
+const hiddenBox = css({ "display": "none" });
 const sideBody = css({ "flex": "1 1 0", "minHeight": 0, "overflowY": "auto" });
 const sideHost = css({ "flex": "1 1 0", "minHeight": 0 });
 
@@ -156,6 +168,22 @@ function Picker({ samples, currentId, onOpen }: { "samples": SampleInfo[]; "curr
 				</wa-card>
 			))}
 		</div>
+	);
+}
+
+/** A collapsed pane's rail contents: a pill card holding one stacked icon-button + caption that reopens the pane
+ *  (the WebAwesome vertical social-share pattern). Rendered inside the pane's own slot region so the region's other
+ *  content (e.g. the imperatively-mounted git panel) can stay mounted-but-hidden across collapse. */
+function RailContent({ node, label, title, onExpand }: { "node": Parameters<typeof iconSvg>[0]; "label": string; "title": string; "onExpand": () => void }) {
+	return (
+		<wa-card class={railCard()}>
+			<div class={railStack()}>
+				<span class={railItem()}>
+					<wa-button appearance="plain" variant="neutral" size="large" pill title={title} aria-label={title} onClick={onExpand}><Icon node={node} /></wa-button>
+					<span class={railCaption()}>{label}</span>
+				</span>
+			</div>
+		</wa-card>
 	);
 }
 
@@ -245,8 +273,8 @@ function Shell() {
 
 		const max = paneMax();
 
-		page.style.setProperty("--menu-width", (lhsCollapsed ? 0 : Math.min(navWidth, max)) + "px");
-		page.style.setProperty("--aside-width", (rhsCollapsed ? 0 : Math.min(asideWidth, max)) + "px");
+		page.style.setProperty("--menu-width", (lhsCollapsed ? RAIL_WIDTH : Math.min(navWidth, max)) + "px");
+		page.style.setProperty("--aside-width", (rhsCollapsed ? RAIL_WIDTH : Math.min(asideWidth, max)) + "px");
 	}, [navWidth, asideWidth, lhsCollapsed, rhsCollapsed]);
 
 	// Persist widths so they survive reloads (per browser; localStorage may be unavailable in private mode).
@@ -329,26 +357,30 @@ function Shell() {
 				<wa-button appearance="plain" size="small" title="Toggle history panel" aria-label="Toggle history panel" onClick={() => { setRhsCollapsed((value) => !value); }}><Icon node={PanelRight} /></wa-button>
 			</div>
 
-			{!lhsCollapsed && (
-				<div slot="navigation" class={sideCol() + " " + navPane()}>
-					<div class={navHead()}>
-						<span class={navHeadLabel()}>Projects</span>
-						<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse project panel" onClick={() => { setLhsCollapsed(true); }}><Icon node={ChevronLeft} /></wa-button>
-					</div>
-					<div class={sideBody()}>
-						<Picker samples={samples} currentId={currentId} onOpen={openProject} />
-					</div>
-					<div
-						class={resizer() + " " + resizerRight()}
-						role="separator"
-						aria-orientation="vertical"
-						aria-label="Resize project panel"
-						tabIndex={0}
-						onPointerDown={startResize("nav")}
-						onKeyDown={onResizeKey("nav")}
-					/>
-				</div>
-			)}
+			<div slot="navigation" class={lhsCollapsed ? railRegion() : sideCol() + " " + navPane()}>
+				{lhsCollapsed ? (
+					<RailContent node={PanelLeft} label="Projects" title="Expand project panel" onExpand={() => { setLhsCollapsed(false); }} />
+				) : (
+					<>
+						<div class={navHead()}>
+							<span class={navHeadLabel()}>Projects</span>
+							<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse project panel" onClick={() => { setLhsCollapsed(true); }}><Icon node={ChevronLeft} /></wa-button>
+						</div>
+						<div class={sideBody()}>
+							<Picker samples={samples} currentId={currentId} onOpen={openProject} />
+						</div>
+						<div
+							class={resizer() + " " + resizerRight()}
+							role="separator"
+							aria-orientation="vertical"
+							aria-label="Resize project panel"
+							tabIndex={0}
+							onPointerDown={startResize("nav")}
+							onKeyDown={onResizeKey("nav")}
+						/>
+					</>
+				)}
+			</div>
 
 			<div class={mainWrap()}>
 				<iframe ref={appFrameRef} class={appFrame()} title="editor" allow="cross-origin-isolated" />
@@ -365,13 +397,19 @@ function Shell() {
 				</div>
 			</div>
 
-			{!rhsCollapsed && (
-				<div slot="aside" class={sideCol() + " " + asidePane()}>
+			{/* The aside slot stays mounted across collapse so the imperatively-rendered git panel (mounted once, in
+			    the effect below) survives — collapsed just hides it and shows the rail. */}
+			<div slot="aside" class={rhsCollapsed ? railRegion() : sideCol() + " " + asidePane()}>
+				{rhsCollapsed ? (
+					<RailContent node={PanelRight} label="Changes" title="Expand changes panel" onExpand={() => { setRhsCollapsed(false); }} />
+				) : (
 					<div class={navHead()}>
 						<span class={navHeadLabel()}>Changes</span>
 						<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse changes panel" onClick={() => { setRhsCollapsed(true); }}><Icon node={ChevronRight} /></wa-button>
 					</div>
-					<div ref={gitPanelRef} class={sideHost()} />
+				)}
+				<div ref={gitPanelRef} class={rhsCollapsed ? hiddenBox() : sideHost()} />
+				{!rhsCollapsed && (
 					<div
 						class={resizer() + " " + resizerLeft()}
 						role="separator"
@@ -381,8 +419,8 @@ function Shell() {
 						onPointerDown={startResize("aside")}
 						onKeyDown={onResizeKey("aside")}
 					/>
-				</div>
-			)}
+				)}
+			</div>
 		</wa-page>
 	);
 }
