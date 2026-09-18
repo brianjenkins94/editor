@@ -58,9 +58,33 @@ export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput): Cu
 				return { "stdout": "", "stderr": "", "exitCode": debugged.exitCode };
 			}
 
-			const { exitCode } = await runner.run(file, ctx.cwd, env, { "onOutput": writeLive, "signal": ctx.signal });
+			// tsval declined → run on the almostnode "production" path. Present it as a production debug session too
+			// (Run and Debug controller + Debug Console), same as the vite preview — so this path isn't a bare
+			// process. The debug Stop button and the shell's Ctrl-C both abort the run via one combined signal.
+			const controller = new AbortController();
 
-			return { "stdout": "", "stderr": "", "exitCode": exitCode };
+			if (ctx.signal !== undefined) {
+				if (ctx.signal.aborted) {
+					controller.abort();
+				} else {
+					ctx.signal.addEventListener("abort", () => { controller.abort(); }, { "once": true });
+				}
+			}
+
+			const sessionId = runner.startProductionSession(`node ${target}`);
+			const offStop = runner.onProductionStop(sessionId, () => { controller.abort(); });
+
+			try {
+				const { exitCode } = await runner.run(file, ctx.cwd, env, {
+					"onOutput": (stream, data) => { writeLive(stream, data); runner.emitProductionOutput(sessionId, stream, data); },
+					"signal": controller.signal
+				});
+
+				return { "stdout": "", "stderr": "", "exitCode": exitCode };
+			} finally {
+				offStop();
+				runner.endProductionSession(sessionId);
+			}
 		} catch (error) {
 			// The worker unreachable — surface it rather than hanging the shell.
 			return { "stdout": "", "stderr": `node: ${error instanceof Error ? error.message : String(error)}\n`, "exitCode": 1 };
