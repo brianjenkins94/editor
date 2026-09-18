@@ -54,11 +54,13 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 			record(change, "unstaged");
 		}
 
-		// Cosmetic verdict for modified, classifiable files (off-thread + cached in the classifier).
+		// Cosmetic verdict for modified, classifiable files — read-through cached in the classifier (in-memory + the
+		// durable `.git/bablr/` store), so a refresh re-derives nothing: an unchanged file's verdict is a cache hit and
+		// BABLR (slow) is never re-run for it. Shares the cache with git.classify below and the SCM viewlet.
 		await Promise.all([...byPath.values()].map(async (entry) => {
 			if (entry.status === "M" && CLASSIFIABLE.test(entry.path)) {
 				try {
-					entry.cosmetic = (await classifier.classify(await engine.headContent(entry.path), await readWorking(entry.path))) === "cosmetic";
+					entry.cosmetic = (await classifier.verdict(await engine.headContent(entry.path), await readWorking(entry.path))).verdict === "cosmetic";
 				} catch { /* unreadable / unparsable → no badge */ }
 			}
 		}));
@@ -85,14 +87,10 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 
 	// BABLR verdict for the whole change, requested LAZILY after the diff is shown so BABLR never blocks the open.
 	// Only meaningful for a MODIFIED code file — added/deleted/non-code return "none". Only ONE diff is open at a time,
-	// so a new request SUPERSEDES the previous: we abort the older run (the yielding worker bails cooperatively).
+	// so a new request SUPERSEDES the previous: we abort the older run (the yielding worker bails cooperatively). The
+	// content-addressed cache lives in the classifier now (in-memory + the durable `.git/bablr/` store), shared with the
+	// status badges + SCM viewlet — so a hit skips BABLR and this handler just guards inputs and supersession.
 	let classifyInFlight: AbortController | undefined;
-
-	// A CORRECT, content-addressed cache keyed by the two content hashes the verdict actually depends on: HEAD blob +
-	// working blob. Identity is HEAD→working (`reidentify`) — no commit-chain/base anymore (removed; see
-	// collab-identity-durability). A hit means genuinely identical inputs, so the deterministic derivation is reused.
-	interface ClassifyResult { "verdict": string; "changedNodeIds": string[]; "changedLines": number[] }
-	const classifyCache = new Map<string, ClassifyResult>();
 
 	serve(hub, "git.classify", async (args) => {
 		const path = (args as { "path"?: string } | null)?.path;
@@ -113,30 +111,13 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 			return { "verdict": "none" };
 		}
 
-		const cacheKey = path + "\0" + await engine.blobOid(head) + "\0" + await engine.blobOid(working);
-		const cached = classifyCache.get(cacheKey);
-
-		if (cached !== undefined) {
-			return cached; // exact same inputs (by content hash) — the derivation is deterministic, so reuse it
-		}
-
 		classifyInFlight?.abort();
 		const controller = new AbortController();
 
 		classifyInFlight = controller;
 
 		try {
-			// HEAD→working identity: verdict, changed nodes, and their working lines — the whole diff, no history chain.
-			const result = await classifier.identify([head, working], controller.signal);
-			const answer: ClassifyResult = { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": result.changedLines };
-
-			if (classifyCache.size > 200) {
-				classifyCache.clear();
-			}
-
-			classifyCache.set(cacheKey, answer);
-
-			return answer;
+			return await classifier.verdict(head, working, controller.signal);
 		} catch {
 			return { "verdict": "none" }; // aborted (superseded) or worker error — the newer request will answer
 		} finally {

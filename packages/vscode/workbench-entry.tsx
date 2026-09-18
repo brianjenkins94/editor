@@ -27,7 +27,9 @@ import workerPodExtensionCode from "worker-pod:extension";
 import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
+import type { VerdictEntry } from "./cosmetic-classifier";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
+import * as gitEngine from "./git-engine";
 import { installEditHistory } from "./edit-history";
 import { installGitScm } from "./git-scm";
 import { installGitService } from "./git-service";
@@ -333,7 +335,13 @@ function maybeBoot(): void {
 					// shared by the vscode SCM viewlet (git-scm) AND the hub git service (git-service) the shell's
 					// review panel consumes. Wired here in the workbench realm — BOTH zen-fs and the vscode API live
 					// here. See git-scm.ts / git-service.ts / git-engine.ts.
-					const cosmeticClassifier = createCosmeticClassifier();
+					// One classifier, shared by both panes, with its verdict cache persisted through the engine's
+					// content-addressed `.git/bablr/` store — so cosmetic/semantic is derived once per content pair and
+					// re-read (not re-computed) across refreshes and reloads.
+					const cosmeticClassifier = createCosmeticClassifier({
+						"read": async (before, after) => (await gitEngine.readVerdict(before, after)) as VerdictEntry | null,
+						"write": (before, after, entry) => gitEngine.writeVerdict(before, after, entry)
+					});
 
 					void installGitScm(api as typeof import("vscode"), paneLog, cosmeticClassifier).catch((error: unknown) => {
 						bootSpan.error("git SCM install failed", { "error": errText(error) });

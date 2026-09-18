@@ -2,38 +2,41 @@
  * Cosmetic-vs-semantic classification service — the reusable seam between BABLR and any consumer.
  *
  * Owns the classify worker (BABLR is a VM interpreter, too slow for the UI thread) and runs the CST-node IDENTITY
- * analysis: `classify` returns just the verdict (for SCM badges); `analyze` also returns which nodes changed and the
- * working `.bablr` snapshot (nodes with anchored ids) so the caller can persist a sidecar and, later, highlight
- * per-node changes. Knows NOTHING about git or SCM — the git SCM binding (`git-scm.ts`) is merely one consumer.
+ * analysis. `verdict` is the single classification entry point: the cosmetic/semantic verdict of a HEAD→working change
+ * plus which nodes changed and the working lines they land on — everything the changes panes need for both the badge
+ * and per-node diff focus. `editGroups` decomposes an edit-burst chain for the "your edits" timeline. Knows NOTHING
+ * about git — the git bindings (git-scm.ts, git-service.ts) are merely consumers.
+ *
+ * CACHING: a verdict is a pure, deterministic function of the (before, after) content pair, so it is READ-THROUGH
+ * cached — an in-memory tier for the session, then an optional injected `VerdictStore` (git-engine's content-addressed
+ * `.git/bablr/`, durable across reloads) — and BABLR (slow) runs only on a true miss. Both changes panes share this one
+ * cache, so a file is classified once per content pair, not once per pane per refresh.
  *
  * ABORT: the worker yields between parse chunks, so its message loop can see an `{ abort }` message mid-run. The
  * classifier drives ONE request at a time (a serial queue); to cancel the running one it posts an abort for that id
  * and the worker bails cooperatively (worker stays warm — no termination). Aborting a still-queued request drops it.
- *
- * NOTE: no verdict cache. A content-derived key can be wrong; the correct key is a STABLE NODE IDENTITY — which is
- * exactly what `analyze`'s snapshot now provides, and what a future .bablr-keyed cache will use.
  */
 
 /** BABLR's verdict for a change (mirrors `@brianjenkins94/bablr`). */
 export type ChangeKind = "cosmetic" | "semantic" | "unparsable";
 
-/** The identity analysis of a change: verdict + changed nodes + the working lines they land on + the `.bablr` snapshot. */
-export interface FileAnalysis {
-	"verdict": ChangeKind | "none";
-	"changedNodeIds": string[];
-	"changedLines": number[];
-	/** Every working node's 1-based line (node id → line) — the annotation surface resolves ids ↔ lines with this. */
-	"nodeLines": Record<string, number>;
-	"snapshot": unknown;
+/** A change's verdict + the changed node ids and the working lines they land on — the badge AND the diff-focus data. */
+export interface VerdictEntry { "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[] }
+
+/**
+ * Durable, content-addressed backing for the verdict cache (git-engine's `.git/bablr/`). Optional — without it the
+ * classifier still caches in memory for the session. Keyed by the two contents (the store hashes them, e.g. to git
+ * blob oids), so a hit is provably the same inputs.
+ */
+export interface VerdictStore {
+	"read": (before: string, after: string) => Promise<VerdictEntry | null>;
+	"write": (before: string, after: string, entry: VerdictEntry) => Promise<void>;
 }
 
 export interface CosmeticClassifier {
-	/** Just the verdict (SCM badges). Pass an `AbortSignal` to cancel; the promise then rejects with an AbortError. */
-	"classify": (before: string, after: string, signal?: AbortSignal) => Promise<ChangeKind | "none">;
-	/** HEAD→working analysis: verdict + changed node ids + the working `.bablr` snapshot. */
-	"analyze": (before: string, after: string, signal?: AbortSignal) => Promise<FileAnalysis>;
-	/** Derive over a content chain (in practice [HEAD, working]) → snapshot + verdict + changed nodes + nodeLines. */
-	"identify": (contents: string[], signal?: AbortSignal) => Promise<FileAnalysis>;
+	/** The verdict of a change + its changed-node detail. Read-through cached (memory → store → BABLR). Pass an
+	 *  `AbortSignal` to cancel a superseded request; the promise then rejects with an AbortError. */
+	"verdict": (before: string, after: string, signal?: AbortSignal) => Promise<VerdictEntry>;
 	/** Node-grouped chunks for the "your edits" timeline, over a burst chain [HEAD, …afters] → groups + burst count. */
 	"editGroups": (contents: string[], signal?: AbortSignal) => Promise<{ "groups": EditGroup[]; "bursts": number }>;
 	/** Tear down the worker. */
@@ -43,24 +46,36 @@ export interface CosmeticClassifier {
 /** One node-grouped chunk for the "your edits" timeline — mirrors bablr's EditGroup (kept local to avoid a type dep). */
 export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
 
-interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "changedLines"?: number[]; "nodeLines"?: Record<string, number>; "snapshot"?: unknown; "groups"?: EditGroup[]; "bursts"?: number; "aborted"?: true }
+interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "changedLines"?: number[]; "groups"?: EditGroup[]; "bursts"?: number; "aborted"?: true }
 
-interface RequestMessage { "before"?: string; "after"?: string; "contents"?: string[]; "editGroupsContents"?: string[] }
+interface RequestMessage { "contents"?: string[]; "editGroupsContents"?: string[] }
 
 /** The raw worker reply the queue resolves; each public method projects the fields it needs. */
-interface WorkerResult { "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[]; "nodeLines": Record<string, number>; "snapshot": unknown; "groups": EditGroup[]; "bursts": number }
+interface WorkerResult { "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[]; "groups": EditGroup[]; "bursts": number }
 
 interface QueueItem {
 	"id": number;
 	"message": RequestMessage;
-	"wantSnapshot": boolean;
 	"resolve": (result: WorkerResult) => void;
 	"reject": (error: unknown) => void;
 	"aborted": boolean;
 }
 
-/** Create a classifier backed by the BABLR classify worker (served at `lsp/classify-worker.js`). */
-export function createCosmeticClassifier(): CosmeticClassifier {
+/** FNV-1a 32-bit — a cheap key for the in-memory tier (the durable store keys by collision-free git blob oid). */
+function fnv32(text: string): number {
+	let h = 0x811c9dc5;
+
+	for (let index = 0; index < text.length; index += 1) {
+		h ^= text.charCodeAt(index);
+		h = Math.imul(h, 0x01000193);
+	}
+
+	return h >>> 0;
+}
+
+/** Create a classifier backed by the BABLR classify worker (served at `lsp/classify-worker.js`), optionally persisting
+ *  verdicts through `store` for a durable, cross-reload cache. */
+export function createCosmeticClassifier(store?: VerdictStore): CosmeticClassifier {
 	const queue: QueueItem[] = [];
 	let running: QueueItem | undefined;
 	let nextId = 0;
@@ -80,7 +95,7 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		if (event.data.aborted === true) {
 			settled.reject(new DOMException("classification aborted", "AbortError"));
 		} else {
-			settled.resolve({ "verdict": event.data.verdict ?? "none", "changedNodeIds": event.data.changedNodeIds ?? [], "changedLines": event.data.changedLines ?? [], "nodeLines": event.data.nodeLines ?? {}, "snapshot": event.data.snapshot ?? null, "groups": event.data.groups ?? [], "bursts": event.data.bursts ?? 0 });
+			settled.resolve({ "verdict": event.data.verdict ?? "none", "changedNodeIds": event.data.changedNodeIds ?? [], "changedLines": event.data.changedLines ?? [], "groups": event.data.groups ?? [], "bursts": event.data.bursts ?? 0 });
 		}
 
 		pump();
@@ -103,20 +118,16 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		}
 
 		running = next;
-		worker.postMessage({ "id": next.id, ...next.message, "wantSnapshot": next.wantSnapshot });
+		worker.postMessage({ "id": next.id, ...next.message });
 	}
 
-	const request = async (message: RequestMessage, signal: AbortSignal | undefined, wantSnapshot: boolean): Promise<WorkerResult> => {
-		if (message.contents === undefined && message.editGroupsContents === undefined && message.before === message.after) {
-			return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [], "nodeLines": {}, "snapshot": null, "groups": [], "bursts": 0 }; // identical — the only provably-correct shortcut
-		}
-
+	const request = async (message: RequestMessage, signal: AbortSignal | undefined): Promise<WorkerResult> => {
 		if (signal?.aborted === true) {
 			throw new DOMException("classification aborted", "AbortError");
 		}
 
 		return new Promise<WorkerResult>((resolve, reject) => {
-			const item: QueueItem = { "id": nextId, "message": message, "wantSnapshot": wantSnapshot, "resolve": resolve, "reject": reject, "aborted": false };
+			const item: QueueItem = { "id": nextId, "message": message, "resolve": resolve, "reject": reject, "aborted": false };
 
 			nextId += 1;
 			queue.push(item);
@@ -141,13 +152,46 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		});
 	};
 
-	const toAnalysis = (result: WorkerResult): FileAnalysis => ({ "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": result.changedLines, "nodeLines": result.nodeLines, "snapshot": result.snapshot });
+	// The verdict cache's in-memory tier — keyed by a cheap content-pair hash (the durable store keys by git blob oid).
+	const memo = new Map<string, VerdictEntry>();
+	const memoKey = (before: string, after: string): string => before.length + ":" + after.length + ":" + fnv32(before) + ":" + fnv32(after);
 
 	return {
-		"classify": async (before, after, signal) => (await request({ "before": before, "after": after }, signal, false)).verdict,
-		"analyze": async (before, after, signal) => toAnalysis(await request({ "before": before, "after": after }, signal, true)),
-		"identify": async (contents, signal) => toAnalysis(await request({ "contents": contents }, signal, true)),
-		"editGroups": async (contents, signal) => { const result = await request({ "editGroupsContents": contents }, signal, true); return { "groups": result.groups, "bursts": result.bursts }; },
+		"verdict": async (before, after, signal) => {
+			if (before === after) {
+				return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [] }; // identical — the only provably-correct shortcut
+			}
+
+			const key = memoKey(before, after);
+			const hit = memo.get(key);
+
+			if (hit !== undefined) {
+				return hit;
+			}
+
+			// Durable tier: a content-addressed hit means genuinely identical inputs, so skip BABLR entirely.
+			const persisted = store === undefined ? null : await store.read(before, after);
+
+			if (persisted !== null && persisted !== undefined) {
+				memo.set(key, persisted);
+
+				return persisted;
+			}
+
+			// True miss — derive over [HEAD, working]: verdict + changed nodes + their working lines. Then cache both tiers.
+			const result = await request({ "contents": [before, after] }, signal);
+			const entry: VerdictEntry = { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": result.changedLines };
+
+			if (memo.size > 200) {
+				memo.clear();
+			}
+
+			memo.set(key, entry);
+			void store?.write(before, after, entry).catch(() => { /* best-effort durability — never block the answer */ });
+
+			return entry;
+		},
+		"editGroups": async (contents, signal) => { const result = await request({ "editGroupsContents": contents }, signal); return { "groups": result.groups, "bursts": result.bursts }; },
 		"dispose": () => { worker.terminate(); }
 	};
 }

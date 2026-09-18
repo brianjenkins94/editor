@@ -179,6 +179,34 @@ export async function blobOid(content: string): Promise<string> {
 }
 
 /**
+ * Content-addressed cache for a change's cosmetic/semantic VERDICT (+ its changed-node detail), keyed by the PAIR of
+ * blob oids it derives from — the HEAD content and the working content. The verdict is a pure, deterministic function
+ * of exactly those two contents, so the key is exact: a hit is provably the same inputs and BABLR (slow) is skipped; a
+ * miss just recomputes. Flat under `.git/` (derivable, off the working tree), so identical edits dedup and a new edit
+ * mints a new entry. This is the real reader the removed single-blob spanAnchors cache never had — the changes panes
+ * ask for a verdict per modified file on every refresh, so all but the first derivation becomes free AND durable across
+ * reloads. Storage only; the cosmetic classifier owns the read-through logic (in-memory tier + this).
+ */
+const VERDICT_CACHE = DIR + "/.git/bablr";
+const verdictFile = async (before: string, after: string): Promise<string> =>
+	VERDICT_CACHE + "/" + (await blobOid(before)) + "_" + (await blobOid(after)) + ".json";
+
+/** The cached verdict payload for a (before, after) change, or null on a miss. */
+export async function readVerdict(before: string, after: string): Promise<unknown> {
+	try {
+		return JSON.parse(new TextDecoder().decode(await fs.promises.readFile(await verdictFile(before, after))));
+	} catch {
+		return null; // not cached (or unreadable)
+	}
+}
+
+/** Persist the verdict payload for a (before, after) change, keyed by the two contents' blob oids. */
+export async function writeVerdict(before: string, after: string, payload: unknown): Promise<void> {
+	await fs.promises.mkdir(VERDICT_CACHE, { "recursive": true });
+	await fs.promises.writeFile(await verdictFile(before, after), JSON.stringify(payload));
+}
+
+/**
  * Persist a file's Automerge edit-history doc (the fine-grained local tier) under `.git/bablr-automerge/`, as the raw
  * `Automerge.save` binary. Same rationale as the `.bablr` sidecar: inside `.git`, off the working tree, local + per
  * session (zen-fs). The synced/shared version is the Keyhive milestone.

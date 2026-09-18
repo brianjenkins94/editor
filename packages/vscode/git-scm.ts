@@ -37,8 +37,9 @@ export async function installGitScm(vscode: typeof vscodeApi, log: Logger, class
 	});
 
 	// ── cosmetic vs semantic classification ───────────────────────────────────────────────────────────────────
-	// The verdict is a git-agnostic service (worker + cache in cosmetic-classifier.ts), shared with the git service;
-	// this binding just asks it about each MODIFIED file and paints a faded "cosmetic only" badge for the cosmetic ones.
+	// The verdict is a git-agnostic service (worker + read-through cache in cosmetic-classifier.ts, backed by the
+	// durable `.git/bablr/` store), shared with the git service; this binding just asks it about each MODIFIED file and
+	// paints a faded "cosmetic only" badge for the cosmetic ones — a cache hit, so it re-runs no BABLR on refresh.
 	const CLASSIFIABLE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 	const cosmeticPaths = new Set<string>(); // paths whose CURRENT working content is cosmetic-only
 
@@ -78,7 +79,7 @@ export async function installGitScm(vscode: typeof vscodeApi, log: Logger, class
 				const before = await engine.headContent(change.path);
 				const after = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + change.path)));
 
-				if (await classifier.classify(before, after) === "cosmetic") {
+				if ((await classifier.verdict(before, after)).verdict === "cosmetic") {
 					cosmeticPaths.add(change.path);
 				} else {
 					cosmeticPaths.delete(change.path);
