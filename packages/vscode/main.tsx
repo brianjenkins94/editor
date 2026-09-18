@@ -20,9 +20,9 @@ if (isolated && window.parent === window) {
 	// TOP LEVEL: render the outer shell — the app's main layout (chrome + LHS project picker + RHS history). It
 	// iframes THIS same page back in; that nested instance sees `window.parent !== window` and takes the app
 	// branch below, booting the workbench into the middle (fill mode). One entry, one bundle, one COI bootstrap.
-	// DYNAMIC import so the shell's WebAwesome chrome (window.ts + the theme) lands in a shell-only chunk and never
-	// loads in the app iframe — the editor realm stays WA-free.
-	void import("./shell").then(({ renderShell }) => { renderShell(); });
+	// DYNAMIC import so the shell's WebAwesome chrome (wa-page, wa-button, the theme) lands in a shell-only chunk and
+	// never loads in the app iframe — the editor realm stays WA-free.
+	void import("./shell.tsx").then(({ renderShell }) => { renderShell(); });
 } else if (isolated) {
 	// The workbench opens on the bundled demo workspace (snapshot.ts bakes `demo/` in at build time as
 	// `editor:workspace`). The dependency type surface (`editor:types`) is seeded alongside so the
