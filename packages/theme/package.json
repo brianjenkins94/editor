@@ -1,13 +1,13 @@
 {
   "name": "theme",
   "version": "0.0.0",
-  "private": true,
   "description": "The app's theme — a sandbox for rebranding via the --wa-* design tokens (the brand color ramp + semantic surface/text tokens) layered on Web Awesome, instead of hand-written CSS. Import AFTER Web Awesome's default theme.",
   "type": "module",
   "exports": {
     ".": "./src/theme.css",
     "./theme.css": "./src/theme.css"
   },
+  "files": ["src"],
   "license": "MIT",
   "peerDependencies": {
     "@awesome.me/webawesome": ">=3"
