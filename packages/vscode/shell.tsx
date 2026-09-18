@@ -52,13 +52,17 @@ const injectGlobals = globalCss({
 });
 
 // The top bar: branding + icon actions, spread across the header. wa-button (plain) for every control.
-const topBar = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "padding": "0 var(--wa-space-s)", "height": "40px" });
+const topBar = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "padding": "0 var(--wa-space-s)", "height": "40px", "borderBottom": "1px solid var(--wa-color-surface-border)" });
 const brand = css({ "fontWeight": "var(--wa-font-weight-semibold)", "marginInlineEnd": "var(--wa-space-s)", "color": "var(--wa-color-text-quiet)" });
 const spacer = css({ "flex": "1 1 auto" });
 
 // The menu/aside regions are full-height flex columns: a fixed header strip, then a scrolling body — so the projects
 // list and the (kept) git-panel each fill their side and scroll internally. `--header-height` is published by wa-page.
 const sideCol = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "flexDirection": "column", "minHeight": 0 });
+// The panes flanking the editor get a border on the edge that meets it: the LHS project pane on its right, the RHS
+// changes pane on its left.
+const navPane = css({ "borderInlineEnd": "1px solid var(--wa-color-surface-border)" });
+const asidePane = css({ "borderInlineStart": "1px solid var(--wa-color-surface-border)" });
 const sideBody = css({ "flex": "1 1 0", "minHeight": 0, "overflowY": "auto" });
 const sideHost = css({ "flex": "1 1 0", "minHeight": 0 });
 
@@ -219,7 +223,7 @@ function Shell() {
 			</div>
 
 			{!lhsCollapsed && (
-				<div slot="navigation" class={sideCol()}>
+				<div slot="navigation" class={sideCol() + " " + navPane()}>
 					<div class={navHead()}>
 						<span class={navHeadLabel()}>Projects</span>
 						<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse project panel" onClick={() => { setLhsCollapsed(true); }}><Icon node={ChevronLeft} /></wa-button>
@@ -246,7 +250,7 @@ function Shell() {
 			</div>
 
 			{!rhsCollapsed && (
-				<div slot="aside" class={sideCol()}>
+				<div slot="aside" class={sideCol() + " " + asidePane()}>
 					<div class={navHead()}>
 						<span class={navHeadLabel()}>Changes</span>
 						<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse changes panel" onClick={() => { setRhsCollapsed(true); }}><Icon node={ChevronRight} /></wa-button>
