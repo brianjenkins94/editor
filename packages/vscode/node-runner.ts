@@ -256,7 +256,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		},
 		"notifyPreviewChange": (port, path) => { hub.publish("preview.fileChanged", { "port": port, "path": path }); },
 		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); }),
-		"openPreview": (root) => { hub.publish("preview.open", { "root": root }); },
+		"openPreview": (root) => { hub.publish("preview.open", { "root": root, "mode": "production" }); },
 		"closePreview": () => { hub.publish("preview.close", {}); },
 		"startProductionSession": (name) => {
 			const id = Math.random().toString(36).slice(2) + Date.now().toString(36);

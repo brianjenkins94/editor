@@ -12,10 +12,11 @@
  * policy merge, the observed-capability rollup, the run firehose — lives in silo-store.ts.
  */
 import type { BrokerOptions, CapabilityRequest, GrantStore, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
-import * as vscode from "vscode";
+import { createRpcClient } from "@brianjenkins94/hub";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
 import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
+import { podHub } from "../worker-pod/pod";
 import { effectiveDisposition } from "./policy-core";
 import { loadEffectivePolicy, persistOverride, recordObservation } from "./silo-store";
 
@@ -89,12 +90,27 @@ function createSessionStore(): GrantStore {
 	};
 }
 
+const shellRpc = createRpcClient(podHub);
+
+/** The TOFU prompt: OUR WebAwesome overlay INSIDE the preview window (shell-preview.ts), reached over the hub —
+ *  never a VS Code notification. Returns the user's choice, or undefined if the shell can't be reached at all
+ *  (then we fail CLOSED: if we can't ask, we don't allow — an unreachable shell is a bigger problem anyway). */
+async function promptViaShell(request: { "kind": string; "scope": string; "resource": string; "dangerous"?: boolean; "redline"?: boolean }): Promise<string | undefined> {
+	try {
+		const reply = await shellRpc.request("capability.prompt", request, { "timeoutMs": 300000 });
+
+		return typeof reply === "string" ? reply : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /** The decider: consult the effective policy FIRST — my `<user>.policy.json` overrides layered over the base
  *  `policy.json` contract — and allow / deny with NO prompt (so pre-approved scopes and default-allow patterns
- *  like fs:read under the workspace never nag). For an undecided (review) capability, show the VS Code popup.
- *  "Allow always" writes an allow rule to MY override file (never the shared contract — that's your "don't show
- *  again"); "Allow once" is session-only (the broker adds it to the session store). Swappable for an external/AI
- *  decider behind this same seam. */
+ *  like fs:read under the workspace never nag). For an undecided (review) capability, raise the WebAwesome prompt
+ *  overlay in the preview window. "Allow always" writes an allow rule to MY override file (never the shared
+ *  contract — that's your "don't show again"); "Allow once" is session-only (the broker adds it to the session
+ *  store). Swappable for an external/AI decider behind this same seam. */
 async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 	const capability = capabilityOf(request);
 	const resource = request.resource ?? "";
@@ -108,36 +124,25 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 		return { "behavior": "deny", "message": "denied by .silo policy" };
 	}
 
-	const pick = await vscode.window.showInformationMessage(
-		`Allow ${request.kind} — ${request.scope}?`,
-		{ "modal": false },
-		"Allow once",
-		"Allow always",
-		"Deny"
-	);
+	const choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability) });
 
-	if (pick === "Allow always") {
+	if (choice === "allow-always") {
 		await persistOverride(capability, resource, "allow");
 
 		return { "behavior": "allow" };
 	}
 
-	if (pick === "Allow once") {
+	if (choice === "allow-once") {
 		return { "behavior": "allow" };
 	}
 
-	return { "behavior": "deny", "message": pick === "Deny" ? "denied" : "dismissed" };
+	return { "behavior": "deny", "message": choice === "deny" ? "denied" : "no decision" };
 }
 
-/** BERNARD break-glass for redline scopes — a MODAL the user must actively confirm; never persisted. */
+/** BERNARD break-glass for redline scopes — the preview overlay's redline variant (a deliberate one-time
+ *  "Authorize once"); never persisted. Fail closed if the shell can't be reached. */
 async function breakGlass(request: CapabilityRequest): Promise<boolean> {
-	const pick = await vscode.window.showWarningMessage(
-		`⛔ Redline capability: ${request.scope}\n\nThis is a catastrophic scope that cannot be routinely allowed. Authorize this ONE time?`,
-		{ "modal": true },
-		"Authorize once"
-	);
-
-	return pick === "Authorize once";
+	return (await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": request.resource ?? "", "redline": true })) === "authorize";
 }
 
 const store = createSessionStore();
