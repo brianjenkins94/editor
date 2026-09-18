@@ -11,10 +11,10 @@ export interface IRuntimeOptions {
   // Base URL the VFS is served from, used to resolve `file://` dynamic imports to a fetchable same-origin URL
   // (e.g. "https://host/editor/" on a subpath deploy). Defaults to the page origin root when unset.
 	"base"?: string;
-  // Capability gate for fs WRITE/DELETE calls — invoked before the mutation; THROW to deny. The host decides
-  // (e.g. a synchronous XHR to a service-worker route that runs the async policy check); almostnode only
-  // reports (op, method, path), staying decoupled from any policy engine. See createFsShim.
-	"beforeFsWrite"?: (op: "write", method: string, path: string) => void;
+  // Capability gate for fs READ + WRITE/DELETE calls — invoked before the access; THROW to deny. The host
+  // decides (e.g. a synchronous XHR to a service-worker route running the async policy check, fast-pathing
+  // workspace reads); almostnode only reports (op, method, path), staying decoupled from any policy engine.
+	"beforeFs"?: (op: "read" | "write", method: string, path: string) => void;
 }
 
 export interface IModule {

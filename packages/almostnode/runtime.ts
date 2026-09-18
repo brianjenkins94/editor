@@ -240,10 +240,10 @@ export interface RuntimeOptions {
 	"onStderr"?: (data: string) => void;
   // Base URL the VFS is served from, for resolving `file://` dynamic imports (see createDynamicImport).
 	"base"?: string;
-  // Capability gate for fs WRITE/DELETE calls — invoked before the mutation; THROW to deny (the shim
+  // Capability gate for fs READ + WRITE/DELETE calls — invoked before the access; THROW to deny (the shim
   // propagates it as the call's error). The host implements the decision (e.g. a synchronous round-trip to a
-  // service worker); almostnode only reports (op, method, path). See createFsShim.
-	"beforeFsWrite"?: (op: "write", method: string, path: string) => void;
+  // service worker, fast-pathing workspace reads); almostnode only reports (op, method, path). See createFsShim.
+	"beforeFs"?: (op: "read" | "write", method: string, path: string) => void;
 }
 
 export interface RequireFunction {
@@ -1076,7 +1076,7 @@ export class Runtime {
 			"onStderr": options.onStderr
 		});
     // Create fs shim with cwd getter for relative path resolution
-		this.fsShim = createFsShim(vfs, () => this.process.cwd(), options.beforeFsWrite);
+		this.fsShim = createFsShim(vfs, () => this.process.cwd(), options.beforeFs);
 		this.options = options;
 
     // Initialize child_process with VFS for bash command support

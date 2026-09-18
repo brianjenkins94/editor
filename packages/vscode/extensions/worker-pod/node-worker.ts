@@ -145,12 +145,18 @@ async function runNode(args: StartArgs): Promise<void> {
 		exit(exitCode);
 	};
 
-	// fs WRITE/DELETE capability gate. almostnode's fs is synchronous, so we can't await a popup mid-run — instead a
-	// BLOCKING sync-XHR to the service worker's /__capability__/decide route lets this worker wait while the SW runs
-	// the async decision (the same "capability.decide" endpoint the net gate uses) and replies { allow }. No
-	// SharedArrayBuffer needed. Throw (EACCES) to deny → almostnode propagates it as the fs call's error. Fail OPEN
-	// on any transport error so a hiccup never bricks a run (the SW route itself fails closed on redline).
-	const gateFsWrite = (op: "write", method: string, path: string): void => {
+	// fs READ + WRITE/DELETE capability gate. almostnode's fs is synchronous, so we can't await a popup mid-run —
+	// instead a BLOCKING sync-XHR to the service worker's /__capability__/decide route lets this worker wait while
+	// the SW runs the async decision (the same "capability.decide" endpoint the net gate uses) and replies
+	// { allow }. No SharedArrayBuffer needed. Throw (EACCES) to deny → almostnode propagates it as the fs call's
+	// error. Fail OPEN on any transport error so a hiccup never bricks a run (the SW route fails closed on redline).
+	const gateFs = (op: "read" | "write", method: string, path: string): void => {
+		// Fast-path workspace READS (frequent + benign): no round-trip. Writes/deletes always gate (tamper axis),
+		// and reads OUTSIDE the workspace gate (exfiltration axis — e.g. secrets on a desktop CLI's real disk).
+		if (op === "read" && (path === "/workspace" || path.startsWith("/workspace/"))) {
+			return;
+		}
+
 		let allow = true;
 
 		try {
@@ -179,7 +185,7 @@ async function runNode(args: StartArgs): Promise<void> {
 		"cwd": cwd,
 		"env": env,
 		"base": base,
-		"beforeFsWrite": gateFsWrite,
+		"beforeFs": gateFs,
 		"onStdout": (data: string) => { emit("out", data); },
 		"onStderr": (data: string) => { emit("err", data); },
 		"onConsole": (method: string, methodArgs: unknown[]) => {

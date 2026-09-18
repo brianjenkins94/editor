@@ -231,7 +231,7 @@ function trackCall(method: "statSync" | "readdirSync", path: string): void {
 	}
 }
 
-export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFsWrite?: (op: "write", method: string, path: string) => void): FsShim {
+export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (op: "read" | "write", method: string, path: string) => void): FsShim {
   // Helper to resolve paths with cwd
 	const resolvePath = (pathLike: unknown) => toPath(pathLike, getCwd);
 	const constants: FsConstants = {
@@ -873,21 +873,28 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFsWrit
 		"constants": constants
 	} as FsShim;
 
-	// Capability gate: wrap every fs WRITE/DELETE method (sync + promises) so a run's mutations pass through
-	// `beforeFsWrite` first — which THROWS to deny (the shim then propagates it as the call's error). Decoupled:
-	// almostnode only reports (op, method, path); the host decides (deleting a workspace is hostile even here,
-	// and on a desktop CLI these hit the real disk). Reads aren't gated yet (too frequent — needs a policy first).
-	if (beforeFsWrite !== undefined) {
-		const SYNC_WRITES = ["writeFileSync", "appendFileSync", "mkdirSync", "unlinkSync", "rmSync", "rmdirSync", "renameSync", "copyFileSync", "createWriteStream", "truncateSync"];
-		const PROMISE_WRITES = ["writeFile", "appendFile", "mkdir", "unlink", "rm", "rmdir", "rename", "copyFile", "truncate"];
+	// Capability gate: wrap every fs READ and WRITE/DELETE method (sync + promises) so a run's accesses pass
+	// through `beforeFs` first — which THROWS to deny (the shim propagates it as the call's error). Decoupled:
+	// almostnode only reports (op, method, path); the host decides. On a desktop CLI these hit the real disk —
+	// reads OUTSIDE the workspace (e.g. ~/.ssh) are the exfiltration axis, writes/deletes the tamper axis. The
+	// host is expected to fast-path workspace reads so this stays cheap (reads are frequent).
+	if (beforeFs !== undefined) {
+		const SYNC: Record<string, "read" | "write"> = {
+			"readFileSync": "read", "existsSync": "read", "statSync": "read", "lstatSync": "read", "readdirSync": "read", "realpathSync": "read", "accessSync": "read", "createReadStream": "read",
+			"writeFileSync": "write", "appendFileSync": "write", "mkdirSync": "write", "unlinkSync": "write", "rmSync": "write", "rmdirSync": "write", "renameSync": "write", "copyFileSync": "write", "createWriteStream": "write", "truncateSync": "write"
+		};
+		const PROMISE: Record<string, "read" | "write"> = {
+			"readFile": "read", "stat": "read", "lstat": "read", "readdir": "read", "realpath": "read", "access": "read",
+			"writeFile": "write", "appendFile": "write", "mkdir": "write", "unlink": "write", "rm": "write", "rmdir": "write", "rename": "write", "copyFile": "write", "truncate": "write"
+		};
 		const record = shim as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
 
-		for (const method of SYNC_WRITES) {
+		for (const [method, op] of Object.entries(SYNC)) {
 			const original = record[method];
 
 			if (typeof original === "function") {
 				record[method] = (...args: unknown[]) => {
-					beforeFsWrite("write", method, String(args[0]));
+					beforeFs(op, method, String(args[0]));
 
 					return original(...args);
 				};
@@ -896,12 +903,12 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFsWrit
 
 		const promisesRecord = promises as unknown as Record<string, ((...args: unknown[]) => Promise<unknown>) | undefined>;
 
-		for (const method of PROMISE_WRITES) {
+		for (const [method, op] of Object.entries(PROMISE)) {
 			const original = promisesRecord[method];
 
 			if (typeof original === "function") {
 				promisesRecord[method] = async (...args: unknown[]) => {
-					beforeFsWrite("write", method, String(args[0]));
+					beforeFs(op, method, String(args[0]));
 
 					return original(...args);
 				};

@@ -11,9 +11,12 @@
  * Deny); an external program or AI can replace it later behind the same seam. Grants persist under `.silo/`.
  */
 import type { BrokerOptions, CapabilityRequest, GrantStore, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
+import type { Policy } from "./policy-core";
 import * as vscode from "vscode";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
 import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
+import { isDangerous } from "@brianjenkins94/util/silo/policy";
+import { EMPTY_POLICY, effectiveDisposition, parsePolicy, withRule } from "./policy-core";
 
 /**
  * The RAW call an interceptor sends — deliberately un-classified so the interceptors stay dumb and decoupled
@@ -65,68 +68,82 @@ function classify(call: CapabilityCall): CapabilityRequest | undefined {
 	return { "kind": "eval", "scope": evalScope(kind), "resource": kind };
 }
 
-/** The `.silo/grants.json` under the (first) workspace root — the TOFU-persisted approved scopes. */
-function grantsUri(): vscode.Uri | undefined {
+/** The `.silo/policy.json` under the (first) workspace root — the committed, reviewable capability policy:
+ *  default dispositions + user overrides (an "Allow always" appends an allow rule here). Policy lives in a
+ *  file alongside silo's runs.jsonl / registry.json, NOT a code constant. */
+function policyUri(): vscode.Uri | undefined {
 	const folder = vscode.workspace.workspaceFolders?.[0];
 
-	return folder === undefined ? undefined : vscode.Uri.joinPath(folder.uri, ".silo", "grants.json");
+	return folder === undefined ? undefined : vscode.Uri.joinPath(folder.uri, ".silo", "policy.json");
 }
 
-/** A grant store over `.silo/grants.json` (silo registry model, simplified to a flat approved-scope list):
- *  session grants live in memory; "Allow always" also persists. Loaded once, lazily. */
-function createGrantStore(): GrantStore {
+// Read once (cached), refreshed after our own writes.
+let policyCache: Policy | undefined;
+
+async function loadPolicy(): Promise<Policy> {
+	if (policyCache !== undefined) {
+		return policyCache;
+	}
+
+	policyCache = { ...EMPTY_POLICY };
+
+	const uri = policyUri();
+
+	if (uri !== undefined) {
+		try {
+			policyCache = parsePolicy(new TextDecoder().decode(await vscode.workspace.fs.readFile(uri)));
+		} catch { /* absent or malformed → empty policy */ }
+	}
+
+	return policyCache;
+}
+
+/** Append an allow/deny rule to `.silo/policy.json` (an "Allow always" / a persisted denial) + refresh the cache. */
+async function persistRule(capability: string, resource: string, disposition: "allow" | "deny"): Promise<void> {
+	const uri = policyUri();
+
+	if (uri === undefined) {
+		return;
+	}
+
+	policyCache = withRule(await loadPolicy(), capability, resource, disposition);
+	await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, ".."));
+	await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify(policyCache, null, "\t") + "\n"));
+}
+
+/** The silo capability axis for a request: `fs:read`/`fs:write` carry the op; net/exec/eval are the kind. */
+function capabilityOf(request: CapabilityRequest): string {
+	return request.kind === "fs" ? `fs:${request.op ?? "read"}` : request.kind;
+}
+
+/** Session-only store — "Allow once" lives here (a fast-path short-circuit in broker.gate); persisted decisions
+ *  live in the policy file (consulted by the decider), so the store itself needs no disk. */
+function createSessionStore(): GrantStore {
 	const session = new Set<string>();
-	let persisted: Set<string> | undefined;
-
-	const load = async (): Promise<Set<string>> => {
-		if (persisted !== undefined) {
-			return persisted;
-		}
-
-		persisted = new Set();
-
-		const uri = grantsUri();
-
-		if (uri !== undefined) {
-			try {
-				const parsed = JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(uri))) as { "approved"?: string[] };
-
-				for (const scope of parsed.approved ?? []) {
-					persisted.add(scope);
-				}
-			} catch { /* absent or malformed → empty */ }
-		}
-
-		return persisted;
-	};
-
-	const save = async (): Promise<void> => {
-		const uri = grantsUri();
-
-		if (uri === undefined || persisted === undefined) {
-			return;
-		}
-
-		await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, ".."));
-		await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify({ "approved": [...persisted].sort() }, null, "\t") + "\n"));
-	};
 
 	return {
-		"has": (scope) => session.has(scope) || (persisted?.has(scope) ?? false),
-		"grant": async (scope, persist) => {
-			session.add(scope);
-
-			if (persist === true) {
-				(await load()).add(scope);
-				await save();
-			}
-		}
+		"has": (scope) => session.has(scope),
+		"grant": (scope) => { session.add(scope); }
 	};
 }
 
-/** The VS Code popup decider — "Allow / Allow always / Deny". "Allow always" persists (your "don't show
- *  again"). Dismissing (Escape) is a decline → deny. Swappable for an external/AI decider behind this seam. */
-async function popupDecider(request: CapabilityRequest): Promise<Verdict> {
+/** The decider: consult `.silo/policy.json` FIRST (allow / deny with NO prompt — so pre-approved scopes and
+ *  default-allow patterns like fs:read under the workspace never nag), then for an undecided (review) capability
+ *  show the VS Code popup. "Allow always" appends an allow rule to the policy file (your "don't show again");
+ *  "Allow once" is session-only (the broker adds it to the session store). Swappable for an external/AI decider. */
+async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
+	const capability = capabilityOf(request);
+	const resource = request.resource ?? "";
+	const effective = effectiveDisposition(await loadPolicy(), capability, resource, isDangerous(capability));
+
+	if (effective === "allow") {
+		return { "behavior": "allow" };
+	}
+
+	if (effective === "deny") {
+		return { "behavior": "deny", "message": "denied by .silo/policy.json" };
+	}
+
 	const pick = await vscode.window.showInformationMessage(
 		`Allow ${request.kind} — ${request.scope}?`,
 		{ "modal": false },
@@ -135,12 +152,14 @@ async function popupDecider(request: CapabilityRequest): Promise<Verdict> {
 		"Deny"
 	);
 
-	if (pick === "Allow once") {
+	if (pick === "Allow always") {
+		await persistRule(capability, resource, "allow");
+
 		return { "behavior": "allow" };
 	}
 
-	if (pick === "Allow always") {
-		return { "behavior": "allow", "persist": true };
+	if (pick === "Allow once") {
+		return { "behavior": "allow" };
 	}
 
 	return { "behavior": "deny", "message": pick === "Deny" ? "denied" : "dismissed" };
@@ -157,8 +176,8 @@ async function breakGlass(request: CapabilityRequest): Promise<boolean> {
 	return pick === "Authorize once";
 }
 
-const store = createGrantStore();
-const options: BrokerOptions = { "store": store, "decide": popupDecider, "breakGlass": breakGlass };
+const store = createSessionStore();
+const options: BrokerOptions = { "store": store, "decide": policyDecider, "breakGlass": breakGlass };
 
 /**
  * Decide one raw capability call. Resolves `true` to allow, `false` to deny. This is the endpoint every
