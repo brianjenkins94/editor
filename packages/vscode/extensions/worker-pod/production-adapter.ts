@@ -24,8 +24,11 @@ class ProductionDebugSession implements vscode.DebugAdapter {
 	private seq = 1;
 	private id = "";
 	private readonly offs: (() => void)[] = [];
+	private readonly hub: Hub;
 
-	public constructor(private readonly hub: Hub) {}
+	public constructor(hub: Hub) {
+		this.hub = hub;
+	}
 
 	private send(message: Dap): void {
 		this.sendEmitter.fire({ ...message, "seq": this.seq });
