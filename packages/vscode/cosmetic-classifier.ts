@@ -36,8 +36,6 @@ export interface CosmeticClassifier {
 	"identify": (contents: string[], signal?: AbortSignal) => Promise<FileAnalysis>;
 	/** Node-grouped chunks for the "your edits" timeline, over a burst chain [HEAD, …afters] → groups + burst count. */
 	"editGroups": (contents: string[], signal?: AbortSignal) => Promise<{ "groups": EditGroup[]; "bursts": number }>;
-	/** Content-addressed span anchors (Statement-level) with their lines — the durable handle the annotation store keys on. */
-	"anchors": (content: string, signal?: AbortSignal) => Promise<SpanAnchorLine[]>;
 	/** Tear down the worker. */
 	"dispose": () => void;
 }
@@ -45,15 +43,12 @@ export interface CosmeticClassifier {
 /** One node-grouped chunk for the "your edits" timeline — mirrors bablr's EditGroup (kept local to avoid a type dep). */
 export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
 
-/** A content-addressed span anchor with its current line range — what annotations pin to (see bablr spanAnchors). */
-export interface SpanAnchorLine { "id": string; "startLine": number; "endLine": number }
+interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "changedLines"?: number[]; "nodeLines"?: Record<string, number>; "snapshot"?: unknown; "groups"?: EditGroup[]; "bursts"?: number; "aborted"?: true }
 
-interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "changedLines"?: number[]; "nodeLines"?: Record<string, number>; "snapshot"?: unknown; "groups"?: EditGroup[]; "bursts"?: number; "anchors"?: SpanAnchorLine[]; "aborted"?: true }
-
-interface RequestMessage { "before"?: string; "after"?: string; "contents"?: string[]; "editGroupsContents"?: string[]; "anchorsContent"?: string }
+interface RequestMessage { "before"?: string; "after"?: string; "contents"?: string[]; "editGroupsContents"?: string[] }
 
 /** The raw worker reply the queue resolves; each public method projects the fields it needs. */
-interface WorkerResult { "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[]; "nodeLines": Record<string, number>; "snapshot": unknown; "groups": EditGroup[]; "bursts": number; "anchors": SpanAnchorLine[] }
+interface WorkerResult { "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[]; "nodeLines": Record<string, number>; "snapshot": unknown; "groups": EditGroup[]; "bursts": number }
 
 interface QueueItem {
 	"id": number;
@@ -85,7 +80,7 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		if (event.data.aborted === true) {
 			settled.reject(new DOMException("classification aborted", "AbortError"));
 		} else {
-			settled.resolve({ "verdict": event.data.verdict ?? "none", "changedNodeIds": event.data.changedNodeIds ?? [], "changedLines": event.data.changedLines ?? [], "nodeLines": event.data.nodeLines ?? {}, "snapshot": event.data.snapshot ?? null, "groups": event.data.groups ?? [], "bursts": event.data.bursts ?? 0, "anchors": event.data.anchors ?? [] });
+			settled.resolve({ "verdict": event.data.verdict ?? "none", "changedNodeIds": event.data.changedNodeIds ?? [], "changedLines": event.data.changedLines ?? [], "nodeLines": event.data.nodeLines ?? {}, "snapshot": event.data.snapshot ?? null, "groups": event.data.groups ?? [], "bursts": event.data.bursts ?? 0 });
 		}
 
 		pump();
@@ -112,8 +107,8 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 	}
 
 	const request = async (message: RequestMessage, signal: AbortSignal | undefined, wantSnapshot: boolean): Promise<WorkerResult> => {
-		if (message.contents === undefined && message.editGroupsContents === undefined && message.anchorsContent === undefined && message.before === message.after) {
-			return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [], "nodeLines": {}, "snapshot": null, "groups": [], "bursts": 0, "anchors": [] }; // identical — the only provably-correct shortcut
+		if (message.contents === undefined && message.editGroupsContents === undefined && message.before === message.after) {
+			return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [], "nodeLines": {}, "snapshot": null, "groups": [], "bursts": 0 }; // identical — the only provably-correct shortcut
 		}
 
 		if (signal?.aborted === true) {
@@ -153,7 +148,6 @@ export function createCosmeticClassifier(): CosmeticClassifier {
 		"analyze": async (before, after, signal) => toAnalysis(await request({ "before": before, "after": after }, signal, true)),
 		"identify": async (contents, signal) => toAnalysis(await request({ "contents": contents }, signal, true)),
 		"editGroups": async (contents, signal) => { const result = await request({ "editGroupsContents": contents }, signal, true); return { "groups": result.groups, "bursts": result.bursts }; },
-		"anchors": async (content, signal) => (await request({ "anchorsContent": content }, signal, false)).anchors,
 		"dispose": () => { worker.terminate(); }
 	};
 }

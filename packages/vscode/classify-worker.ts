@@ -11,25 +11,12 @@
  * request in flight at a time (the classifier drives it serially), correlated by id.
  */
 import "./bablr-fast-freeze"; // MUST be first: neutralizes record freezing before the BABLR bundle captures Object.freeze
-import { deriveIdentityAsync, editGroups, fileDiffIdentityAsync, spanAnchors } from "@brianjenkins94/bablr";
+import { deriveIdentityAsync, editGroups, fileDiffIdentityAsync } from "@brianjenkins94/bablr";
 
-interface ClassifyRequest { "id": number; "before"?: string; "after"?: string; "contents"?: string[]; "editGroupsContents"?: string[]; "anchorsContent"?: string; "wantSnapshot": boolean }
+interface ClassifyRequest { "id": number; "before"?: string; "after"?: string; "contents"?: string[]; "editGroupsContents"?: string[]; "wantSnapshot": boolean }
 interface AbortRequest { "abort": true; "id": number }
 
 let current: { "id": number; "controller": AbortController } | undefined;
-
-/** 1-based line number of a source offset. */
-function lineAt(src: string, offset: number): number {
-	let line = 1;
-
-	for (let index = 0; index < offset && index < src.length; index += 1) {
-		if (src[index] === "\n") {
-			line += 1;
-		}
-	}
-
-	return line;
-}
 
 globalThis.onmessage = async (event: MessageEvent<ClassifyRequest | AbortRequest>): Promise<void> => {
 	const data = event.data;
@@ -42,24 +29,12 @@ globalThis.onmessage = async (event: MessageEvent<ClassifyRequest | AbortRequest
 		return;
 	}
 
-	const { id, before, after, contents, editGroupsContents, anchorsContent, wantSnapshot } = data;
+	const { id, before, after, contents, editGroupsContents, wantSnapshot } = data;
 	const controller = new AbortController();
 
 	current = { "id": id, "controller": controller };
 
 	try {
-		// `anchorsContent` ⇒ the content-addressed span anchors (Statement-level) with their lines — the durable handle
-		// the annotation store keys on. Move-stable, so an annotation follows its span across edits, files, and history.
-		if (anchorsContent !== undefined) {
-			const anchors = spanAnchors(anchorsContent)
-				.filter((anchor) => anchor.type === "Statement")
-				.map((anchor) => ({ "id": anchor.id, "startLine": lineAt(anchorsContent, anchor.start), "endLine": lineAt(anchorsContent, anchor.end) }));
-
-			(globalThis as unknown as Worker).postMessage({ "id": id, "anchors": anchors });
-
-			return;
-		}
-
 		// `editGroupsContents` = a burst chain [HEAD, …afters] ⇒ node-grouped chunks for the "your edits" timeline.
 		if (editGroupsContents !== undefined) {
 			const grouped = await editGroups(editGroupsContents, { "signal": controller.signal });

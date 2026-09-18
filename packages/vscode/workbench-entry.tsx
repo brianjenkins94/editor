@@ -27,10 +27,8 @@ import workerPodExtensionCode from "worker-pod:extension";
 import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
-import { installGameView } from "./game-view";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
 import { installEditHistory } from "./edit-history";
-import { installCommentAnnotations } from "./git-comments";
 import { installGitScm } from "./git-scm";
 import { installGitService } from "./git-service";
 import capabilitiesManifest from "./extensions/capabilities/package.json";
@@ -316,9 +314,6 @@ function maybeBoot(): void {
 				// (not a webview), so it composites in our coi-serviceworker single-origin harness. See
 				// debug-preview-view.ts.
 				installDebugPreview(() => vscodeApi);
-				// The game-maker level surface: a real-DOM projection of the active game project. BABLR parsing runs
-				// off-thread in the game-worker, reached over the workbench hub (RPC `game.project`).
-				installGameView(() => vscodeApi, workbenchHub);
 				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
 				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
 				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", moduleVersions ?? {}, (path) => workspaceFs?.has(path) ?? false, paneLog);
@@ -344,9 +339,6 @@ function maybeBoot(): void {
 						bootSpan.error("git SCM install failed", { "error": errText(error) });
 					});
 					installGitService(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
-					// Comment-annotations: the inline UI consumer of the node-id annotation store (VS Code Comments API
-					// as the surface, the .git/bablr-annotations store as the move-stable backing). See git-comments.ts.
-					installCommentAnnotations(api as typeof import("vscode"), cosmeticClassifier, paneLog);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
 					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
 					// edit-history.ts.

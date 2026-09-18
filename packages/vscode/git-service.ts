@@ -146,44 +146,6 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		}
 	});
 
-	// Annotation store — user data pinned to derivable NODE IDS (from the .bablr snapshot), so it follows a line as
-	// it moves without shipping the CST. Read one file's map, or set/clear one node's annotation.
-	serve(hub, "annotations.get", async (args) => {
-		const path = (args as { "path"?: string } | null)?.path;
-
-		return { "annotations": typeof path === "string" ? await engine.readAnnotations(path) : {} };
-	});
-
-	serve(hub, "annotations.set", async (args) => {
-		const request = args as { "path"?: string; "nodeId"?: string; "value"?: unknown } | null;
-
-		if (typeof request?.path !== "string" || typeof request.nodeId !== "string") {
-			throw new Error("annotations.set needs a path and nodeId.");
-		}
-
-		await engine.setAnnotation(request.path, request.nodeId, request.value ?? null);
-
-		return { "ok": true };
-	});
-
-	// The committed play-session log (`.silo/runs.jsonl`): append one run record, or read the whole log back. Each
-	// record is opaque here — the producer (the game maker) decides its shape; this just persists/returns the lines.
-	serve(hub, "runs.append", async (args) => {
-		const record = (args as { "record"?: unknown } | null)?.record;
-
-		if (record === undefined || record === null) {
-			throw new Error("runs.append needs a record.");
-		}
-
-		await engine.appendRun(record);
-
-		return { "ok": true };
-	});
-
-	serve(hub, "runs.get", async () => {
-		return { "runs": await engine.readRuns() };
-	});
-
 	serve(hub, "git.commit", async (args) => {
 		const request = args as { "message"?: string; "files"?: engine.CommitFile[] } | null;
 		const message = request?.message?.trim();

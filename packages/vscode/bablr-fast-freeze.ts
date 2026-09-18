@@ -15,7 +15,7 @@
 //
 // WHY IT'S SAFE HERE (and why it is NOT viable as a global patch / bundle banner). This overrides the SHARED
 // `Object.freeze`/`Object.isFrozen` of whatever realm evaluates it, so it may only run in a realm that contains
-// nothing but BABLR. Dedicated parse workers (classify-worker, game-worker) are exactly that. It must NOT be baked
+// nothing but BABLR. The dedicated classify worker is exactly that. It must NOT be baked
 // into the bablr bundle itself, because the bundle may also be imported on the main thread, and polluting the main
 // realm's `Object.freeze` would affect every other library.
 //

@@ -196,10 +196,7 @@ export async function preBuild(): Promise<void> {
 					"lsp/provoke-worker": resolvePath("./extensions/worker-pod/provoke-worker.ts"),
 					// BABLR cosmetic/semantic classify worker (not part of the LSP pod), served from lsp/ like the
 					// other worker chunks. Driven by cosmetic-classifier.ts.
-					"lsp/classify-worker": resolvePath("./classify-worker.ts"),
-					// Game-maker parse worker: BABLR CST → projection model, off-thread. Driven by game-view.ts over
-					// hub RPC (`game.project`). Keeps the BABLR parser out of the workbench bundle.
-					"lsp/game-worker": resolvePath("./game-worker.ts")
+					"lsp/classify-worker": resolvePath("./classify-worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",
