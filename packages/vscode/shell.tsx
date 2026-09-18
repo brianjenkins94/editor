@@ -60,9 +60,38 @@ const spacer = css({ "flex": "1 1 auto" });
 // list and the (kept) git-panel each fill their side and scroll internally. `--header-height` is published by wa-page.
 const sideCol = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "flexDirection": "column", "minHeight": 0 });
 // The panes flanking the editor get a border on the edge that meets it: the LHS project pane on its right, the RHS
-// changes pane on its left.
-const navPane = css({ "borderInlineEnd": "1px solid var(--wa-color-surface-border)" });
-const asidePane = css({ "borderInlineStart": "1px solid var(--wa-color-surface-border)" });
+// changes pane on its left. `position: relative` anchors the absolute resize grip on that inner edge.
+const navPane = css({ "position": "relative", "borderInlineEnd": "1px solid var(--wa-color-surface-border)" });
+const asidePane = css({ "position": "relative", "borderInlineStart": "1px solid var(--wa-color-surface-border)" });
+
+// A thin drag grip straddling a pane's inner edge (the border meeting the editor) — absolute so it never shifts
+// layout, with a wider hit area than the 1px border and a hover/active accent. Pointer-capture drives the drag so
+// it keeps tracking even as the cursor passes over the editor iframe.
+const resizer = css({
+	"position": "absolute", "top": 0, "bottom": 0, "width": "7px", "zIndex": 5, "cursor": "col-resize",
+	"touchAction": "none",
+	"&:hover": { "backgroundColor": "var(--wa-color-brand-fill-quiet)" },
+	"&:active": { "backgroundColor": "var(--wa-color-brand-fill-loud)" },
+	"&:focus-visible": { "outline": "2px solid var(--wa-color-focus)", "outlineOffset": "-2px" }
+});
+const resizerRight = css({ "insetInlineEnd": "-3px" }); // nav pane: grip on its right edge
+const resizerLeft = css({ "insetInlineStart": "-3px" }); // aside pane: grip on its left edge
+
+// Resizable-pane limits (px). Defaults match the former fixed widths; the min keeps each pane usable, the max caps
+// at a fraction of the viewport so a pane can't swallow the editor.
+const PANE = { "navDefault": 260, "asideDefault": 380, "navMin": 200, "asideMin": 300 };
+const paneMax = (): number => Math.min(600, Math.round(window.innerWidth * 0.45));
+
+/** A persisted pane width, clamped later against the live max. Falls back to the default if unset/invalid. */
+function loadPaneWidth(key: string, fallback: number): number {
+	try {
+		const value = Number(localStorage.getItem("shell:" + key));
+
+		return Number.isFinite(value) && value > 0 ? value : fallback;
+	} catch {
+		return fallback;
+	}
+}
 const sideBody = css({ "flex": "1 1 0", "minHeight": 0, "overflowY": "auto" });
 const sideHost = css({ "flex": "1 1 0", "minHeight": 0 });
 
@@ -137,7 +166,10 @@ function Shell() {
 	const [rhsCollapsed, setRhsCollapsed] = useState(false);
 	const [samples, setSamples] = useState<SampleInfo[]>([]);
 	const [currentId, setCurrentId] = useState<string | undefined>(undefined);
+	const [navWidth, setNavWidth] = useState(() => loadPaneWidth("navWidth", PANE.navDefault));
+	const [asideWidth, setAsideWidth] = useState(() => loadPaneWidth("asideWidth", PANE.asideDefault));
 
+	const pageRef = useRef<HTMLElement>(null);
 	const appFrameRef = useRef<HTMLIFrameElement>(null);
 	const gitPanelRef = useRef<HTMLDivElement>(null);
 	const overlayRef = useRef<HTMLDivElement>(null);
@@ -202,6 +234,81 @@ function Shell() {
 		})();
 	}, []);
 
+	// Apply the pane widths to wa-page's CSS vars (collapsed → 0). Clamp against the live max so a narrow viewport
+	// can't leave a pane wider than the editor. Inline `setProperty` wins over the static `.wa-shell` defaults.
+	useEffect(() => {
+		const page = pageRef.current;
+
+		if (page === null) {
+			return;
+		}
+
+		const max = paneMax();
+
+		page.style.setProperty("--menu-width", (lhsCollapsed ? 0 : Math.min(navWidth, max)) + "px");
+		page.style.setProperty("--aside-width", (rhsCollapsed ? 0 : Math.min(asideWidth, max)) + "px");
+	}, [navWidth, asideWidth, lhsCollapsed, rhsCollapsed]);
+
+	// Persist widths so they survive reloads (per browser; localStorage may be unavailable in private mode).
+	useEffect(() => {
+		try {
+			localStorage.setItem("shell:navWidth", String(navWidth));
+			localStorage.setItem("shell:asideWidth", String(asideWidth));
+		} catch { /* private mode / disabled */ }
+	}, [navWidth, asideWidth]);
+
+	// Drag a pane's inner-edge grip. Pointer capture keeps the drag tracking even over the editor iframe.
+	const startResize = (side: "nav" | "aside") => (event: PointerEvent): void => {
+		event.preventDefault();
+
+		const handle = event.currentTarget as HTMLElement;
+		const min = side === "nav" ? PANE.navMin : PANE.asideMin;
+		const max = paneMax();
+
+		handle.setPointerCapture(event.pointerId);
+
+		const onMove = (move: PointerEvent): void => {
+			const raw = side === "nav" ? move.clientX : window.innerWidth - move.clientX;
+			const width = Math.max(min, Math.min(max, Math.round(raw)));
+
+			if (side === "nav") {
+				setNavWidth(width);
+			} else {
+				setAsideWidth(width);
+			}
+		};
+
+		const onUp = (up: PointerEvent): void => {
+			handle.releasePointerCapture(up.pointerId);
+			handle.removeEventListener("pointermove", onMove);
+			handle.removeEventListener("pointerup", onUp);
+		};
+
+		handle.addEventListener("pointermove", onMove);
+		handle.addEventListener("pointerup", onUp);
+	};
+
+	// Keyboard resize (the grip is a focusable separator): arrows nudge by 16px — nav grows rightward, aside grows
+	// leftward, mirroring the drag direction.
+	const onResizeKey = (side: "nav" | "aside") => (event: KeyboardEvent): void => {
+		if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+			return;
+		}
+
+		event.preventDefault();
+
+		const grow = event.key === "ArrowRight" ? side === "nav" : side !== "nav";
+		const min = side === "nav" ? PANE.navMin : PANE.asideMin;
+		const max = paneMax();
+		const clamp = (value: number): number => Math.max(min, Math.min(max, value + (grow ? 16 : -16)));
+
+		if (side === "nav") {
+			setNavWidth(clamp);
+		} else {
+			setAsideWidth(clamp);
+		}
+	};
+
 	const openProject = (id: string): void => {
 		setCurrentId(id);
 		hubRef.current?.publish("project.open", { "id": id });
@@ -210,7 +317,7 @@ function Shell() {
 	const shellClass = ["wa-shell", lhsCollapsed ? "lhs-collapsed" : "", rhsCollapsed ? "rhs-collapsed" : ""].filter(Boolean).join(" ");
 
 	return (
-		<wa-page class={shellClass} mobile-breakpoint="0" disable-navigation-toggle>
+		<wa-page ref={pageRef} class={shellClass} mobile-breakpoint="0" disable-navigation-toggle>
 			<div slot="header" class={topBar()}>
 				<span class={brand()}>editor</span>
 				<wa-button appearance="plain" size="small" title="Toggle project panel" aria-label="Toggle project panel" onClick={() => { setLhsCollapsed((value) => !value); }}><Icon node={PanelLeft} /></wa-button>
@@ -231,6 +338,15 @@ function Shell() {
 					<div class={sideBody()}>
 						<Picker samples={samples} currentId={currentId} onOpen={openProject} />
 					</div>
+					<div
+						class={resizer() + " " + resizerRight()}
+						role="separator"
+						aria-orientation="vertical"
+						aria-label="Resize project panel"
+						tabIndex={0}
+						onPointerDown={startResize("nav")}
+						onKeyDown={onResizeKey("nav")}
+					/>
 				</div>
 			)}
 
@@ -256,6 +372,15 @@ function Shell() {
 						<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse changes panel" onClick={() => { setRhsCollapsed(true); }}><Icon node={ChevronRight} /></wa-button>
 					</div>
 					<div ref={gitPanelRef} class={sideHost()} />
+					<div
+						class={resizer() + " " + resizerLeft()}
+						role="separator"
+						aria-orientation="vertical"
+						aria-label="Resize changes panel"
+						tabIndex={0}
+						onPointerDown={startResize("aside")}
+						onKeyDown={onResizeKey("aside")}
+					/>
 				</div>
 			)}
 		</wa-page>
