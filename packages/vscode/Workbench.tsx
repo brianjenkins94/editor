@@ -106,7 +106,14 @@ const injectGlobals = globalCss({
 		"backgroundColor": "var(--vscode-editor-background)"
 	},
 	"[id^=\"workbench.parts.\"]": { "height": "100%" },
-	"[id^=\"workbench.parts.\"] > .content": { "height": "100% !important", "width": "100% !important" }
+	"[id^=\"workbench.parts.\"] > .content": { "height": "100% !important", "width": "100% !important" },
+	// The panel (terminal / output / problems) has a tab bar ABOVE its content, so the blanket `height: 100%` above
+	// overflows the content past the panel — the terminal ran ~a tab-bar's-worth behind the status bar (text hidden)
+	// and bottom-aligned (a gap at the top). The panel is a flex column, so let the content FLEX to fill the space
+	// below the tabs instead of forcing full height. (Monaco sets no inline height on the panel content — it relies
+	// on this flex — unlike the sidebar/editor, which it sizes directly.)
+	"[id^=\"workbench.parts.panel\"]": { "display": "flex", "flexDirection": "column" },
+	"[id^=\"workbench.parts.panel\"] > .content": { "height": "auto !important", "flex": "1 1 auto", "minHeight": 0 }
 });
 
 // Pure-CSS resize controls (faithful port of the original layout — no JS). Each divider is a thin

@@ -49,8 +49,13 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 	let cwd = cwd0;
 	let env: Record<string, string> = {};
 	let line = "";
+	let pos = 0; // cursor position within `line`
 	let running = false;
 	let inEscape = false;
+	let esc = ""; // accumulates an in-progress escape sequence (arrow keys, Home/End, Delete…)
+	const history: string[] = [];
+	let histIndex = 0; // index into `history`; === history.length means the live, un-submitted line
+	let draft = ""; // the live line, stashed while browsing history so ↓ can restore it
 	let controller: AbortController | undefined; // the running command's Ctrl-C handle
 	let stdinBuffer = ""; // the line being typed into a running process's stdin (flushed on Enter)
 
@@ -111,6 +116,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 			controller = undefined;
 			stdinBuffer = "";
 			line = "";
+			pos = 0;
 			prompt();
 		}
 	};
@@ -158,6 +164,82 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 		}
 	};
 
+	// A small line editor over `line`/`pos` — cursor movement (←/→, Home/End, Ctrl-A/E), in-place insert/delete, and
+	// ↑/↓ command history. Redraws are done with bare escapes: `\b` (cursor left), `\x1b[C` (cursor right),
+	// `\x1b[0K` (erase to end of line). After an in-place edit we reprint the tail and step the cursor back onto it.
+	const setLine = (next: string): void => {
+		fire("\b".repeat(pos) + "\x1b[0K" + next); // cursor to start, erase to EOL, print the replacement
+		line = next;
+		pos = next.length;
+	};
+	const insert = (chars: string): void => {
+		const tail = line.slice(pos);
+
+		line = line.slice(0, pos) + chars + tail;
+		fire(chars + tail + "\b".repeat(tail.length)); // print inserted text + tail, then back onto the insertion point
+		pos += chars.length;
+	};
+	const backspace = (): void => {
+		if (pos === 0) {
+			return;
+		}
+
+		const tail = line.slice(pos);
+
+		line = line.slice(0, pos - 1) + tail;
+		pos -= 1;
+		fire("\b" + tail + " " + "\b".repeat(tail.length + 1)); // move left, reprint tail over the gap, erase last cell, restore cursor
+	};
+	const deleteAt = (): void => {
+		if (pos >= line.length) {
+			return;
+		}
+
+		const tail = line.slice(pos + 1);
+
+		line = line.slice(0, pos) + tail;
+		fire(tail + " " + "\b".repeat(tail.length + 1));
+	};
+	const moveLeft = (): void => { if (pos > 0) { pos -= 1; fire("\b"); } };
+	const moveRight = (): void => { if (pos < line.length) { fire("\x1b[C"); pos += 1; } };
+	const moveHome = (): void => { if (pos > 0) { fire("\b".repeat(pos)); pos = 0; } };
+	const moveEnd = (): void => { if (pos < line.length) { fire("\x1b[C".repeat(line.length - pos)); pos = line.length; } };
+	const historyPrev = (): void => {
+		if (histIndex === 0) {
+			return;
+		}
+
+		if (histIndex === history.length) {
+			draft = line; // leaving the live line — stash it so ↓ can come back
+		}
+
+		histIndex -= 1;
+		setLine(history[histIndex]);
+	};
+	const historyNext = (): void => {
+		if (histIndex >= history.length) {
+			return;
+		}
+
+		histIndex += 1;
+		setLine(histIndex === history.length ? draft : history[histIndex]);
+	};
+
+	// Dispatch a completed escape sequence — the part AFTER the ESC, e.g. "[A" (up), "[3~" (delete), "OD" (left in
+	// application-cursor mode). Anything unmapped (modified arrows like "[1;5C") is ignored rather than echoed.
+	const handleEscape = (seq: string): void => {
+		switch (seq) {
+			case "[A": case "OA": { historyPrev(); break; }
+			case "[B": case "OB": { historyNext(); break; }
+			case "[C": case "OC": { moveRight(); break; }
+			case "[D": case "OD": { moveLeft(); break; }
+			case "[H": case "OH": case "[1~": case "[7~": { moveHome(); break; }
+			case "[F": case "OF": case "[4~": case "[8~": { moveEnd(); break; }
+			case "[3~": { deleteAt(); break; }
+			default: break;
+		}
+	};
+
 	const input = (data: string): void => {
 		if (running) {
 			feedRunning(data);
@@ -169,29 +251,53 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 			const code = character.charCodeAt(0);
 
 			if (inEscape) {
-				inEscape = !(code >= 0x40 && code <= 0x7E); // consume a CSI/escape sequence to its final byte
+				esc += character;
+
+				// The final byte of a CSI/SS3 sequence is a letter or `~` (0x40–0x7E); digits and `;` are parameters.
+				// The introducer (`[` or `O`) is the first char and never terminates on its own.
+				if (esc.length >= 2 && code >= 0x40 && code <= 0x7E) {
+					inEscape = false;
+					handleEscape(esc);
+					esc = "";
+				} else if (esc.length === 1 && esc !== "[" && esc !== "O") {
+					inEscape = false; // not a sequence we track (bare ESC, etc.) — drop it
+					esc = "";
+				}
+
 				continue;
 			}
 
-			if (code === 0x1B) {
+			if (code === 0x1B) { // ESC — begin an escape sequence
 				inEscape = true;
+				esc = "";
 			} else if (code === 0x0D || code === 0x0A) { // Enter (CR from a terminal; LF from paste/automation)
 				fire("\r\n");
-				void runLine(line);
+
+				const command = line;
+
+				if (command.trim() !== "" && history[history.length - 1] !== command) {
+					history.push(command); // record for ↑/↓ (skip blanks and consecutive dupes)
+				}
+
+				histIndex = history.length;
+				draft = "";
+				void runLine(command);
 
 				return; // the rest of this chunk waits until the command finishes
 			} else if (code === 0x7F || code === 0x08) { // Backspace
-				if (line !== "") {
-					line = line.slice(0, -1);
-					fire("\b \b");
-				}
+				backspace();
 			} else if (code === 0x03) { // Ctrl-C — abandon the current line
 				fire("^C");
 				line = "";
+				pos = 0;
+				histIndex = history.length;
 				prompt();
-			} else if (code >= 0x20) { // printable
-				line += character;
-				fire(character);
+			} else if (code === 0x01) { // Ctrl-A → start of line
+				moveHome();
+			} else if (code === 0x05) { // Ctrl-E → end of line
+				moveEnd();
+			} else if (code >= 0x20) { // printable — insert at the cursor
+				insert(character);
 			}
 		}
 	};
