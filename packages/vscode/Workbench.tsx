@@ -88,22 +88,22 @@ const injectGlobals = globalCss({
 	".monaco-workbench.mac": { "fontFamily": "-apple-system, BlinkMacSystemFont, sans-serif" },
 	".monaco-workbench.windows": { "fontFamily": "\"Segoe WPC\", \"Segoe UI\", sans-serif" },
 	".monaco-workbench.linux": { "fontFamily": "system-ui, \"Ubuntu\", \"Droid Sans\", sans-serif" },
-	// Base body styles the reference host (monaco-vscode-api demo's style.css) sets that our minimal host.html
-	// omits. `.monaco-workbench` IS the body, and nothing sets these on it, so it inherits browser defaults —
-	// 16px, BLACK text, transparent background, subpixel-smoothed. Parts set their own, but overlays that don't
-	// (notifications, context menus, the command palette) inherit the wrong values: too big, black-on-dark
-	// (unreadable), heavier-than-VS-Code text. Pin VS Code's UI size (13px), the theme fg/bg, and the same
-	// font-rendering hints VS Code's Electron shell uses so overlays match the rest of the workbench.
+	// Safe root defaults from the reference host (monaco-vscode-api demo's style.css) that our minimal host.html omits.
+	// NB: we deliberately do NOT force `-webkit-font-smoothing: antialiased` / `text-rendering: optimizeLegibility`
+	// here — those render text thin/pale; letting the OS default (subpixel) apply matches the real editor's weight
+	// better. Keep only the harmless ones: no faux-bold synthesis, and no mobile text-size inflation.
+	":root": {
+		"fontSynthesis": "none",
+		"WebkitTextSizeAdjust": "100%"
+	},
+	// Base body styles the reference sets that our minimal host.html omits. `.monaco-workbench` IS the body, and
+	// nothing sets these on it, so it inherits browser defaults — 16px, BLACK text, transparent background. Parts set
+	// their own, but body-level overlays that don't (notifications, context menus, the command palette) inherit the
+	// wrong values: too big, black-on-dark (unreadable). Pin VS Code's UI size (13px) and the theme fg/bg.
 	".monaco-workbench": {
 		"fontSize": 13,
 		"color": "var(--vscode-foreground)",
-		"backgroundColor": "var(--vscode-editor-background)",
-		"WebkitFontSmoothing": "antialiased",
-		"MozOsxFontSmoothing": "grayscale",
-		// NB: no `text-rendering: optimizeLegibility` — VS Code doesn't set it, and it visibly alters glyph
-		// rendering (reads as the wrong weight). Let it default to `auto` so text matches the real editor.
-		"textRendering": "auto",
-		"fontSynthesis": "none"
+		"backgroundColor": "var(--vscode-editor-background)"
 	},
 	"[id^=\"workbench.parts.\"]": { "height": "100%" },
 	"[id^=\"workbench.parts.\"] > .content": { "height": "100% !important", "width": "100% !important" }
@@ -143,7 +143,7 @@ const injectControls = globalCss({
 	// flush against the sidebar WITHOUT moving the panel part — so the resize region and panel clicks are
 	// untouched. Monaco's own panel-top border is hidden below (it would sit 5px lower); the flush divider is
 	// the handle's ::before instead.
-	".wb-shell .console-control > .handle": { "gridArea": "console-handle", "position": "relative", "zIndex": 10, "pointerEvents": "none", "marginLeft": -5, "backgroundColor": "var(--vscode-panel-background)" },
+	".wb-shell .console-control > .handle": { "gridArea": "console-handle", "position": "relative", "zIndex": 10, "pointerEvents": "none", "backgroundColor": "var(--vscode-panel-background)" },
 	".wb-shell .auxbar-control > .handle": { "gridArea": "auxbar-handle", "position": "relative", "zIndex": 11, "pointerEvents": "none" },
 
 	// The sash line is drawn only on hover — at rest the handle is fully transparent and monaco's own part
