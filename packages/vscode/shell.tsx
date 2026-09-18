@@ -238,7 +238,10 @@ function Shell() {
 						<span ref={overlayTitleRef} class={overlayTitle()} />
 						<wa-button ref={overlayCloseRef} appearance="plain" size="small" title="Close diff" aria-label="Close diff"><Icon node={ChevronRight} /></wa-button>
 					</div>
-					<div ref={overlayBodyRef} class={overlayBody()} />
+					{/* `wa-diff-body` scopes the codehike diff grid CSS (git-panel.css). It MUST be declared here in JSX, not
+					    added imperatively by git-panel: preact owns this element's `class`, so any Shell re-render would
+					    otherwise reconcile it back and wipe an imperatively-added class — collapsing the diff grid. */}
+					<div ref={overlayBodyRef} class={overlayBody() + " wa-diff-body"} />
 				</div>
 			</div>
 

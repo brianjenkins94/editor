@@ -449,9 +449,10 @@ function GitPanel({ overlay, hub }: { "overlay": DiffOverlay; "hub": Hub }) {
 		});
 	};
 
-	// Mount-once wiring: the overlay close button, git.changed refresh, and the initial load.
+	// Mount-once wiring: the overlay close button, git.changed refresh, and the initial load. NOTE: the diff grid's
+	// scoping class (`wa-diff-body`) is declared on overlay.body in the SHELL's JSX (shell.tsx), not added here — the
+	// shell owns that element, so an imperative classList.add would be clobbered on its next preact re-render.
 	useEffect(() => {
-		overlay.body.classList.add("wa-diff-body");
 		overlay.close.addEventListener("click", hideOverlay);
 
 		const off = hub.subscribe("git.changed", () => { void refresh(); });
