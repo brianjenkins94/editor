@@ -163,7 +163,7 @@ async function runNode(args: StartArgs): Promise<void> {
 			const xhr = new XMLHttpRequest();
 
 			xhr.open("POST", new URL("__capability__/decide", location.href).href, false); // sync: blocks until the SW replies
-			xhr.send(JSON.stringify({ "kind": "fs", "op": op, "method": method, "args": [path] }));
+			xhr.send(JSON.stringify({ "kind": "fs", "op": op, "method": method, "args": [path], "runId": runId })); // runId → run-grain record
 
 			if (xhr.status === 200) {
 				allow = (JSON.parse(xhr.responseText) as { "allow"?: boolean }).allow !== false;

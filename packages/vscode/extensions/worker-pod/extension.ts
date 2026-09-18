@@ -15,6 +15,7 @@ import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
 import { type CapabilityCall, decideCapability } from "../capabilities/decide";
+import { flushRun } from "../capabilities/silo-store";
 import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
 import { registerTsvalDebug } from "./debug-adapter";
 import { podHub } from "./pod";
@@ -155,6 +156,28 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		if (typeof info.id === "string") {
 			void vscode.debug.startDebugging(undefined, { "type": "production", "request": "attach", "name": info.name ?? "Production run", "__prodId": info.id });
 		}
+	}) });
+
+	// RUN-GRAIN ledger: an almostnode run (node-worker path — the tsval-declined fallback + explicit runs, where
+	// REAL fs effects happen) publishes `node.start` {runId, file} then `node.exit.<runId>` {exitCode}. The fs shim
+	// threads the runId to `decide`, so silo-store accumulates the run's distinct scopes; here we flush ONE record
+	// to <user>.runs.jsonl at exit. tsval runs are inert (no node.start) so they produce no record — correct, they
+	// have no real effects. Guarded: a missing lifecycle event just means no record for that run, never a crash.
+	// (A hard Ctrl-C terminates the worker before node.exit, so a killed run leaves no record; its scopes are still
+	// captured in the observed rollup via recordObservation.)
+	context.subscriptions.push({ "dispose": podHub.subscribe("node.start", (data) => {
+		const info = data as { "runId"?: string; "file"?: string };
+
+		if (typeof info.runId !== "string") {
+			return;
+		}
+
+		const runId = info.runId;
+		const entry = typeof info.file === "string" ? info.file : "";
+		const off = podHub.subscribe(`node.exit.${runId}`, (exitData) => {
+			off();
+			flushRun(runId, { "entry": entry, "mode": "run", "exit": (exitData as { "exitCode"?: number }).exitCode ?? 0 });
+		});
 	}) });
 
 	// AUTO-ATTACH: a terminal `node <file>` (node-runner's startDebug) publishes `debug.launch`; start a tsval

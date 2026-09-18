@@ -303,14 +303,37 @@ async function loadObserved(root: vscode.Uri, user: string): Promise<ObservedSur
 	return observedCache;
 }
 
+// Per-run accumulation of distinct scopes, keyed by runId, drained into ONE run-grain record at flushRun. `scopes`
+// FIRED (allowed); `denied` were attempted-but-blocked (kept for the attempt audit).
+interface RunScopes {
+	"scopes": Set<string>;
+	"denied": Set<string>;
+}
+const runScopes = new Map<string, RunScopes>();
+
 /**
  * Record one gated decision on the OBSERVED axis (best-effort, never blocks or fails a decision):
- *   • append every decision to `<user>.runs.jsonl` — the raw exposure firehose (gitignored; churn is fine).
  *   • fold ALLOWED scopes into `<user>.capabilities.json` — the committed rollup, day-coarsened (rewritten only
  *     when a scope is first seen or its last-seen DATE advances) so the tracked file stays quiet in git.
- * A denied call fired nothing, so it's logged (an attempt worth auditing) but kept out of the observed surface.
+ *   • when `runId` is known (an almostnode run), attribute the scope to that RUN — distinct scopes accumulate and a
+ *     single run-grain record is written at flushRun, so `<user>.runs.jsonl` stays one-line-per-run, not per-call.
+ *   • with NO runId (e.g. a preview app's own fetch, which belongs to no single run) append a call-grain line to
+ *     `<user>.runs.jsonl` so nothing is lost.
+ * A denied call fired nothing, so it's kept out of the observed surface (but is recorded as an attempt).
  */
-export function recordObservation(request: CapabilityRequest, disposition: Disposition): void {
+export function recordObservation(request: CapabilityRequest, disposition: Disposition, runId?: string): void {
+	// Attribute to the run SYNCHRONOUSLY (before any await) so a fast run-exit can't race the accumulation.
+	if (runId !== undefined) {
+		let bucket = runScopes.get(runId);
+
+		if (bucket === undefined) {
+			bucket = { "scopes": new Set(), "denied": new Set() };
+			runScopes.set(runId, bucket);
+		}
+
+		(disposition === "allow" ? bucket.scopes : bucket.denied).add(request.scope);
+	}
+
 	void (async () => {
 		try {
 			const root = siloRoot();
@@ -322,11 +345,14 @@ export function recordObservation(request: CapabilityRequest, disposition: Dispo
 			const now = new Date().toISOString();
 			const user = await currentUser();
 
-			await ensureGitignore(root);
-			await appendLine(
-				vscode.Uri.joinPath(root, `${user}.runs.jsonl`),
-				JSON.stringify({ "ts": now, "scope": request.scope, "kind": request.kind, "resource": request.resource ?? "", "disposition": disposition })
-			);
+			// Runless observations have no run record to fold into → straight to the firehose, call-grain.
+			if (runId === undefined) {
+				await ensureGitignore(root);
+				await appendLine(
+					vscode.Uri.joinPath(root, `${user}.runs.jsonl`),
+					JSON.stringify({ "type": "call", "ts": now, "scope": request.scope, "kind": request.kind, "resource": request.resource ?? "", "disposition": disposition })
+				);
+			}
 
 			if (disposition !== "allow") {
 				return; // denied ⇒ nothing fired ⇒ not part of the observed surface
@@ -346,6 +372,66 @@ export function recordObservation(request: CapabilityRequest, disposition: Dispo
 			await writeText(vscode.Uri.joinPath(root, `${user}.capabilities.json`), JSON.stringify(surface, null, "\t") + "\n");
 		} catch { /* observation is advisory; a failure must never affect enforcement */ }
 	})();
+}
+
+/**
+ * Flush a finished run to `<user>.runs.jsonl` as ONE run-grain record — `{type:"run", ts, entry, sha, mode, exit,
+ * scopes, denied?}` — correlating the code version (content sha of `entry`) with the distinct scopes it exercised,
+ * for the "was I exposed to compromised dep X in window W" audit. Best-effort; clears the run's accumulation either
+ * way. A run with no gated calls still gets a record (proof of a clean run).
+ */
+export function flushRun(runId: string, run: { "entry": string; "mode": string; "exit": number }): void {
+	const bucket = runScopes.get(runId);
+
+	runScopes.delete(runId);
+
+	void (async () => {
+		try {
+			const root = siloRoot();
+
+			if (root === undefined) {
+				return;
+			}
+
+			const user = await currentUser();
+			const record: Record<string, unknown> = {
+				"type": "run",
+				"ts": new Date().toISOString(),
+				"entry": run.entry,
+				"sha": await hashFile(run.entry),
+				"mode": run.mode,
+				"exit": run.exit,
+				"scopes": bucket === undefined ? [] : [...bucket.scopes].sort((a, b) => a.localeCompare(b))
+			};
+
+			if (bucket !== undefined && bucket.denied.size > 0) {
+				record["denied"] = [...bucket.denied].sort((a, b) => a.localeCompare(b));
+			}
+
+			await ensureGitignore(root);
+			await appendLine(vscode.Uri.joinPath(root, `${user}.runs.jsonl`), JSON.stringify(record));
+		} catch { /* advisory */ }
+	})();
+}
+
+/** SHA-256 (first 12 hex — silo's convention) of a run's entry file, or "" if unreadable. Ties a run record to the
+ *  exact code version that ran. `entry` is an absolute VFS path (e.g. /workspace/src/app.ts) or workspace-relative. */
+async function hashFile(entry: string): Promise<string> {
+	try {
+		const folder = vscode.workspace.workspaceFolders?.[0];
+
+		if (folder === undefined || typeof crypto === "undefined" || crypto.subtle === undefined) {
+			return "";
+		}
+
+		const rel = entry.startsWith("/workspace/") ? entry.slice("/workspace/".length) : entry.replace(/^\/+/, "");
+		const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(folder.uri, rel));
+		const digest = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
+
+		return [...new Uint8Array(digest)].slice(0, 6).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+	} catch {
+		return "";
+	}
 }
 
 /** Append a line (workspace.fs has no append; read-concat-write — fine at observation volume, the fast-pathed

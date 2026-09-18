@@ -33,6 +33,10 @@ export interface CapabilityCall {
 	"op"?: "read" | "write";
 	"resource"?: string;
 	"args"?: readonly unknown[];
+	/** The almostnode run this call belongs to, when known (the fs shim threads it). Lets the observation attribute
+	 *  to a run so `<user>.runs.jsonl` gets one run-grain record instead of a line per call. Absent for a preview
+	 *  app's own fetch (which belongs to no single run) — those stay call-grain. */
+	"runId"?: string;
 }
 
 /** Turn a raw interceptor call into the canonical silo request (scope string + context), or undefined if it
@@ -152,12 +156,12 @@ export async function decideCapability(call: CapabilityCall): Promise<boolean> {
 
 	try {
 		await gate(request, options);
-		recordObservation(request, "allow"); // fired ⇒ folds into the observed surface + firehose
+		recordObservation(request, "allow", call.runId); // fired ⇒ observed surface + this run's record
 
 		return true;
 	} catch (error) {
 		if (error instanceof CapabilityDenied) {
-			recordObservation(request, "deny"); // attempt-but-blocked: logged to the firehose, not the surface
+			recordObservation(request, "deny", call.runId); // attempt-but-blocked: recorded, not in the surface
 
 			return false;
 		}
