@@ -183,6 +183,9 @@ const langFor = (path: string): string =>
 
 const isCodeFile = (file: GitFileChange): boolean => /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u.test(file.path) && file.status !== "D";
 
+/** Current OS colour scheme — the diff highlights with the matching shiki theme (the shell drives the same query). */
+const prefersDark = (): boolean => window.matchMedia("(prefers-color-scheme: dark)").matches;
+
 /** The "your edits" chunk timeline for one expanded file — hovering a chunk spotlights its range in the open diff. */
 function Chunks({ path, rpc, onOpen }: { "path": string; "rpc": ReturnType<typeof createRpcClient>; "onOpen": (path: string) => void }) {
 	const [state, setState] = useState<{ "status": "loading" | "error" | "empty" | "ready"; "groups"?: EditGroup[]; "bursts"?: number }>({ "status": "loading" });
@@ -383,6 +386,7 @@ function GitPanel({ overlay, hub }: { "overlay": DiffOverlay; "hub": Hub }) {
 				"head": head,
 				"working": working,
 				"lang": langFor(path),
+				"mode": prefersDark() ? "dark" : "light",
 				"rows": rows,
 				"deselectedRows": [...(lineDeselect.get(path) ?? [])],
 				"onRowSelection": (dropped) => {
@@ -471,6 +475,17 @@ function GitPanel({ overlay, hub }: { "overlay": DiffOverlay; "hub": Hub }) {
 			void showDiff(selected);
 		}
 	}, [files]);
+
+	// Follow the OS light/dark scheme: re-highlight the open diff with the matching shiki theme when it flips. The
+	// docKey (path) is unchanged, so the diff's fold/selection state survives the re-mount.
+	useEffect(() => {
+		const mq = window.matchMedia("(prefers-color-scheme: dark)");
+		const onChange = (): void => { if (selected !== undefined) { void showDiff(selected); } };
+
+		mq.addEventListener("change", onChange);
+
+		return () => { mq.removeEventListener("change", onChange); };
+	}, [selected]);
 
 	const total = files.length;
 	const chosen = files.filter((file) => isIncluded(file.path)).length;

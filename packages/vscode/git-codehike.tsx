@@ -50,6 +50,8 @@ export interface DiffInput {
 	"working": string;
 	/** shiki language id (from the file extension). */
 	"lang": string;
+	/** Light/dark mode for the shiki theme — follows the app's OS-driven scheme. Defaults to dark. */
+	"mode"?: DiffMode;
 	/** The aligned diff rows, in display order. */
 	"rows": DiffRowInfo[];
 	/** Row indices (into `rows`) the reviewer has UN-checked for commit — the initial per-line selection. */
@@ -66,8 +68,17 @@ export interface DiffInput {
 const ADD_BG = "#2ea04326";
 const DEL_BG = "#f8514926";
 
-/** github-dark colours for string & comment tokens — braces inside these don't count toward block depth. */
-const NON_CODE_COLORS = new Set(["#a5d6ff", "#8b949e"]);
+/** The shiki theme used per mode — follows the app's OS-driven light/dark scheme (git-panel passes the mode). */
+const SHIKI_THEME = { "light": "github-light", "dark": "github-dark" } as const;
+
+/** String & comment token colours per theme — braces inside these don't count toward block depth. Both themes'
+ *  values, so the brace-depth scan stays correct in light mode too. */
+const NON_CODE_COLORS = {
+	"dark": new Set(["#a5d6ff", "#8b949e"]),
+	"light": new Set(["#0a3069", "#6e7781"])
+} as const;
+
+export type DiffMode = "light" | "dark";
 
 /** Collapse an unchanged run longer than this, keeping CTX_KEEP rows of context at each end. */
 const CTX_KEEP = 3;
@@ -89,14 +100,14 @@ function tint(type: DiffRowInfo["type"], side: "left" | "right"): string | undef
  * string/comment tokens (by colour) so `"{"` or `// {` don't open a phantom region; still advances the line counter
  * through them so multi-line strings don't desync. Regions map to working line numbers (1-based).
  */
-function computeFolds(tokens: Tokens): { "start": number; "end": number }[] {
+function computeFolds(tokens: Tokens, nonCode: ReadonlySet<string>): { "start": number; "end": number }[] {
 	const stack: number[] = [];
 	const regions: { "start": number; "end": number }[] = [];
 	let line = 1;
 
 	for (const token of tokens) {
 		const text = typeof token === "string" ? token : token[0];
-		const skip = typeof token !== "string" && token[1] !== undefined && NON_CODE_COLORS.has(token[1]);
+		const skip = typeof token !== "string" && token[1] !== undefined && nonCode.has(token[1]);
 
 		for (const ch of text) {
 			if (ch === "\n") {
@@ -617,12 +628,15 @@ function Diff(props: {
 
 /** Render (or re-render) the side-by-side diff for one file into `host`. */
 export async function mountDiff(host: HTMLElement, input: DiffInput): Promise<void> {
+	const mode: DiffMode = input.mode ?? "dark";
+	const theme = SHIKI_THEME[mode];
+
 	const [leftCode, rightCode] = await Promise.all([
-		highlight({ "value": input.head, "lang": input.lang, "meta": "" }, "github-dark"),
-		highlight({ "value": input.working, "lang": input.lang, "meta": "" }, "github-dark")
+		highlight({ "value": input.head, "lang": input.lang, "meta": "" }, theme),
+		highlight({ "value": input.working, "lang": input.lang, "meta": "" }, theme)
 	]);
 
-	const foldRegions = toFoldRegions(computeFolds(rightCode.tokens), input.rows);
+	const foldRegions = toFoldRegions(computeFolds(rightCode.tokens, NON_CODE_COLORS[mode]), input.rows);
 
 	let root = roots.get(host);
 
