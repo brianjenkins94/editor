@@ -14,6 +14,8 @@ export { classifyChange, classifyChangeAsync } from "../../bablr-language-ts/lib
 // fileDiffIdentity produces the .bablr snapshot for a HEAD→working change (working nodes with anchored ids), the
 // changed-node set, and the whole-file verdict (identity-derived) — the cosmetic classifier, restated over identity.
 export { nodeAtoms, reidentify, reidentifyFromSource, fileDiffIdentity, fileDiffIdentityAsync } from "../../bablr-language-ts/lib/identity";
+// Content-addressed, move-stable span ids (the durable anchor annotations attach to). See ../../bablr-language-ts/lib/anchors.
+export { spanAnchors } from "../../bablr-language-ts/lib/anchors";
 // HEAD→working (or baseline→current) identity over a content chain + the "your edits" node-grouped chunks. No
 // commit-chain CDC (removed — see history-identity.ts / [[collab-identity-durability]]).
 export { deriveIdentityAsync, editGroups } from "../../bablr-language-ts/lib/history-identity";
