@@ -12,7 +12,9 @@ export default [
 		"plugins": { "webawesome": webawesome },
 		"rules": {
 			"webawesome/prefer-components": "error",
-			"webawesome/no-html-in-strings": "error"
+			"webawesome/no-html-in-strings": "error",
+			"webawesome/no-css-in-strings": "error",
+			"webawesome/no-inline-styles": "error"
 		}
 	},
 	{
