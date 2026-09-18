@@ -26,16 +26,16 @@ const AUTHOR = { "name": "editor", "email": "editor@localhost" };
 export interface GitChange { "path": string; "status": "A" | "M" | "D" }
 export interface GitStatus { "staged": GitChange[]; "unstaged": GitChange[] }
 
-/** Ensure /workspace is a git repo — `git init` on first run (idempotent), with a default `.gitignore` so the
- *  seeded dependency types under node_modules/ (and re-derivable `*.ts.bablr` identity sidecars) don't flood the
- *  status (statusMatrix honors .gitignore). */
+/** Ensure /workspace is a git repo — `git init` on first run (idempotent), with a default `.gitignore` so the seeded
+ *  dependency types under node_modules/ don't flood the status (statusMatrix honors .gitignore). The `.bablr`/`.silo`
+ *  sidecars need no ignore: the derivable caches live inside `.git/`, and `.silo/` is meant to be committed. */
 export async function ensureRepo(): Promise<void> {
 	if (!fs.existsSync(DIR + "/.git")) {
 		await init({ "fs": fs, "dir": DIR, "defaultBranch": "main" });
 	}
 
 	if (!fs.existsSync(DIR + "/.gitignore")) {
-		await fs.promises.writeFile(DIR + "/.gitignore", "node_modules/\n*.ts.bablr\n");
+		await fs.promises.writeFile(DIR + "/.gitignore", "node_modules/\n");
 	}
 }
 
@@ -224,6 +224,48 @@ export async function setAnnotation(path: string, nodeId: string, value: unknown
 }
 
 /**
+ * The review-NOTE store — comment annotations pinned to CONTENT-ADDRESSED span-anchor ids (bablr spanAnchors), NOT to
+ * file paths. Each note is one file named by its span id under `.silo/notes/`, so a note is never tied to a path: rename
+ * a file, or move the span to another file, and the note is still found the moment any open file contains that span —
+ * no path-migration. Committed, so notes travel with the repo; per-span files, so distinct notes don't merge-conflict.
+ */
+const NOTES = SILO + "/notes";
+const noteFile = (spanId: string): string => NOTES + "/" + encodeURIComponent(spanId) + ".json";
+
+/** Read the note stored on a span id, or undefined if none. */
+export async function readNote(spanId: string): Promise<unknown> {
+	try {
+		return JSON.parse(new TextDecoder().decode(await fs.promises.readFile(noteFile(spanId))));
+	} catch {
+		return undefined; // none
+	}
+}
+
+/** Pin (or, with a null value, clear) the note on a span id. */
+export async function setNote(spanId: string, value: unknown): Promise<void> {
+	if (value === null || value === undefined) {
+		try {
+			await fs.promises.unlink(noteFile(spanId));
+		} catch { /* already absent */ }
+
+		return;
+	}
+
+	await fs.promises.mkdir(NOTES, { "recursive": true });
+	await fs.promises.writeFile(noteFile(spanId), JSON.stringify(value));
+}
+
+/** Every span id that currently carries a note (the `.silo/notes/` filenames, decoded) — an open file intersects this
+ *  with its own span anchors to know which of its spans to show threads on. */
+export async function annotatedSpanIds(): Promise<string[]> {
+	try {
+		return (await fs.promises.readdir(NOTES)).filter((name) => name.endsWith(".json")).map((name) => decodeURIComponent(name.slice(0, -".json".length)));
+	} catch {
+		return []; // no notes yet
+	}
+}
+
+/**
  * Append one play-session record to `.silo/runs.jsonl` (committed, append-only). Each line is a self-contained JSON
  * event — one recorded run of the game (inputs / outcome / the system node ids it exercised) — so runs are shareable
  * and replayable, and become the basis for regression checks against the systems they pin to. Newline-delimited so a
@@ -262,15 +304,49 @@ export async function readRuns(): Promise<unknown[]> {
 }
 
 /**
- * Persist a file's `.bablr` sidecar (its identity snapshot) under `.git/bablr/`. Inside `.git`, so it's outside the
- * working tree — never shows up in status, no .gitignore needed. Local + per-session for now (zen-fs is ephemeral);
- * portable/committed sidecars are a later milestone. The filename encodes the path (reversible, collision-free).
+ * The `.ts.bablr` CACHE — a derivable, CONTENT-ADDRESSED sidecar under `.git/bablr/<blobOid>.json` (git's own model).
+ * Keyed by the content's blob oid, not its path, so a file moving/renaming is a non-problem (same content → same
+ * entry), identical content dedups, and an edit naturally mints a new entry (the old one stale/GC-able). Inside `.git/`
+ * → never in the working tree, no .gitignore needed. A miss just re-derives — it's a pure parse cache.
  */
-export async function writeBablr(path: string, json: string): Promise<void> {
-	const dir = DIR + "/.git/bablr";
+const BABLR_CACHE = DIR + "/.git/bablr";
+const cacheFile = (blob: string): string => BABLR_CACHE + "/" + blob + ".json";
 
-	await fs.promises.mkdir(dir, { "recursive": true });
-	await fs.promises.writeFile(dir + "/" + encodeURIComponent(path) + ".json", json);
+/** Read a cached `.ts.bablr` payload (e.g. the span anchors) for some content by its blob oid, or null on a miss. */
+export async function readBablr(blob: string): Promise<unknown> {
+	try {
+		return JSON.parse(new TextDecoder().decode(await fs.promises.readFile(cacheFile(blob))));
+	} catch {
+		return null; // not cached
+	}
+}
+
+/** Write a content's `.ts.bablr` cache payload, keyed by its blob oid. */
+export async function writeBablr(blob: string, payload: unknown): Promise<void> {
+	await fs.promises.mkdir(BABLR_CACHE, { "recursive": true });
+	await fs.promises.writeFile(cacheFile(blob), JSON.stringify(payload));
+}
+
+/**
+ * The game-maker's per-file identity snapshot (its reidentify baseline for the event-sheet projection). Under `.git/`
+ * like the other derivable sidecars — off the working tree, so no `.gitignore` needed and never accidentally committed
+ * (this replaces the old working-tree `<file>.ts.bablr` sidecars). Path-keyed: it's the baseline for a specific file.
+ */
+const GAME_SIDECARS = DIR + "/.git/bablr-game";
+
+/** Read a game file's prior identity snapshot, or undefined if none. */
+export async function readGameSidecar(path: string): Promise<unknown> {
+	try {
+		return JSON.parse(new TextDecoder().decode(await fs.promises.readFile(GAME_SIDECARS + "/" + encodeURIComponent(path) + ".json")));
+	} catch {
+		return undefined; // none yet
+	}
+}
+
+/** Persist a game file's new identity snapshot. */
+export async function writeGameSidecar(path: string, snapshot: unknown): Promise<void> {
+	await fs.promises.mkdir(GAME_SIDECARS, { "recursive": true });
+	await fs.promises.writeFile(GAME_SIDECARS + "/" + encodeURIComponent(path) + ".json", JSON.stringify(snapshot));
 }
 
 /**

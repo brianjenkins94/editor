@@ -14,6 +14,7 @@ import { registerCustomView, ViewContainerLocation } from "@brianjenkins94/monac
 import { createRpcClient, portTransport } from "@brianjenkins94/hub";
 
 import type { Component, EntityType, GameProjection, IdSnapshot, Level, ProjectSources, System, Tileset } from "./game-model";
+import * as engine from "./git-engine";
 
 type Api = any;
 
@@ -95,29 +96,17 @@ async function readTsDir(api: Api, dir: any): Promise<{ "file": string; "code": 
 	return out;
 }
 
-/** The `.ts.bablr` sidecar uri for a source file (`levels/level1.ts` → `levels/level1.ts.bablr`). */
-function sidecarUri(api: Api, filePath: string): any {
-	return api.Uri.file(filePath + ".bablr");
+/** Read a file's prior identity snapshot (undefined if none yet) — from the `.git/` sidecar store, off the working tree. */
+async function readSnapshot(filePath: string): Promise<IdSnapshot | undefined> {
+	const snapshot = await engine.readGameSidecar(filePath);
+
+	return snapshot === undefined || snapshot === null ? undefined : snapshot as IdSnapshot;
 }
 
-/** Read a file's `.ts.bablr` prior snapshot (undefined if none yet / unreadable). */
-async function readSnapshot(api: Api, filePath: string): Promise<IdSnapshot | undefined> {
-	try {
-		return JSON.parse(new TextDecoder().decode(await api.workspace.fs.readFile(sidecarUri(api, filePath)) as Uint8Array)) as IdSnapshot;
-	} catch {
-		return undefined;
-	}
-}
-
-/** Persist each file's new identity snapshot to its `.ts.bablr` sidecar (re-derivable, gitignored). */
-async function writeSnapshots(api: Api, snapshots: Record<string, IdSnapshot>): Promise<void> {
-	const encoder = new TextEncoder();
-
-	await Promise.all(Object.entries(snapshots).map(async ([filePath, snapshot]) => {
-		try {
-			await api.workspace.fs.writeFile(sidecarUri(api, filePath), encoder.encode(JSON.stringify(snapshot)));
-		} catch { /* best-effort: the index is re-derivable, a failed write just means a rebuild next time */ }
-	}));
+/** Persist each file's new identity snapshot under `.git/` (re-derivable, never in the working tree). */
+async function writeSnapshots(snapshots: Record<string, IdSnapshot>): Promise<void> {
+	await Promise.all(Object.entries(snapshots).map(([filePath, snapshot]) =>
+		engine.writeGameSidecar(filePath, snapshot).catch(() => { /* best-effort: re-derivable, a failed write just rebuilds next time */ })));
 }
 
 /** Gather a level file + its project's game.ts / schemas / systems (+ each file's prior `.ts.bablr` snapshot,
@@ -146,7 +135,7 @@ async function gatherSources(api: Api, levelUri: any, levelCode: string): Promis
 	const identified = [sources.levelFile, sources.gameFile, ...sources.schemas.map((entry) => entry.file)].filter((path): path is string => path !== undefined);
 
 	await Promise.all(identified.map(async (path) => {
-		const snapshot = await readSnapshot(api, path);
+		const snapshot = await readSnapshot(path);
 
 		if (snapshot !== undefined) {
 			sources.priorSnapshots[path] = snapshot;
@@ -474,7 +463,7 @@ export function installGameView(getApi: () => Api, hub: Hub): void {
 
 				// Persist the rolling snapshots to their `.ts.bablr` sidecars — the re-derivable on-disk index + the
 				// next reidentify baseline. Best-effort; re-derivable if a write fails.
-				void writeSnapshots(api, projection.snapshots);
+				void writeSnapshots(projection.snapshots);
 
 				const { level, components, objects, systems: systemList } = projection;
 

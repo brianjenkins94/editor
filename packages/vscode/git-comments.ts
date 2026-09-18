@@ -10,8 +10,9 @@
  *     span anchors of the current file and look each stored id up → its line; an id that's gone ORPHANS (kept on disk,
  *     just not shown). When a reviewer starts a thread on a line we resolve line → the span id there and persist it.
  *
- * The store lives in `.silo/` (committed, durable — see git-engine); it's keyed only by span id, so nothing about the
- * CST or history has to travel. Runs in the workbench realm (vscode API + zen-fs live here) → calls the engine directly.
+ * The store lives in `.silo/notes/`, one file PER SPAN ID (never named by a file path) — so a rename is a non-problem
+ * (there's no path in the key to migrate) and distinct notes don't merge-conflict. Committed, so notes travel with the
+ * repo. Runs in the workbench realm (vscode API + zen-fs live here) → calls the engine directly.
  */
 import type * as vscodeApi from "vscode";
 import type { Logger } from "@brianjenkins94/util/logger";
@@ -78,15 +79,29 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 		return covering?.id;
 	};
 
-	// Re-derive the current span anchors (off-thread) for a file — the content-addressed handles annotations pin to.
+	// The current span anchors for a file — via the CONTENT-ADDRESSED `.git/bablr/<blobOid>.json` cache (a hit skips the
+	// parse), else derive off-thread and cache. Keyed by the working blob oid, so it survives renames + dedups content.
 	const anchorsFor = async (path: string): Promise<SpanAnchorLine[]> => {
-		try {
-			const working = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
+		let working: string;
 
-			return await classifier.anchors(working);
+		try {
+			working = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
 		} catch {
 			return [];
 		}
+
+		const blob = await engine.blobOid(working);
+		const cached = await engine.readBablr(blob);
+
+		if (Array.isArray(cached)) {
+			return cached as SpanAnchorLine[];
+		}
+
+		const anchors = await classifier.anchors(working);
+
+		void engine.writeBablr(blob, anchors).catch(() => { /* best-effort cache */ });
+
+		return anchors;
 	};
 
 	// Rebuild a file's threads from the store — dispose the old ones, then re-anchor each stored SPAN ID to its current
@@ -100,8 +115,7 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 		}
 
 		const key = uri.toString();
-		const annotations = await engine.readAnnotations(path) as Record<string, StoredComment[]>;
-		const ids = Object.keys(annotations);
+		const annotatedIds = new Set(await engine.annotatedSpanIds());
 
 		for (const thread of threadsByUri.get(key) ?? []) {
 			thread.dispose();
@@ -109,28 +123,32 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 
 		threadsByUri.delete(key);
 
-		if (ids.length === 0) {
+		if (annotatedIds.size === 0) {
 			anchorsByUri.delete(key);
 
-			return; // nothing pinned here — skip the parse entirely
+			return; // no notes anywhere — skip the parse entirely
 		}
 
 		const anchors = await anchorsFor(path);
 
 		anchorsByUri.set(key, anchors);
-		const lineOf = new Map(anchors.map((anchor) => [anchor.id, anchor.startLine]));
 
 		const threads: vscodeApi.CommentThread[] = [];
 
-		for (const id of ids) {
-			const line = lineOf.get(id);
-			const comments = annotations[id];
-
-			if (line === undefined || comments.length === 0) {
-				continue; // the span no longer exists in the working file — keep the data, just don't show it (orphaned)
+		// Show a thread on every span of THIS file that carries a note; a note whose span is gone (edited away / lives in
+		// another file) simply isn't matched here — no path lookup, so it's found wherever its span turns up.
+		for (const anchor of anchors) {
+			if (!annotatedIds.has(anchor.id)) {
+				continue;
 			}
 
-			const range = new vscode.Range(line - 1, 0, line - 1, 0);
+			const comments = await engine.readNote(anchor.id) as StoredComment[] | undefined;
+
+			if (comments === undefined || comments.length === 0) {
+				continue;
+			}
+
+			const range = new vscode.Range(anchor.startLine - 1, 0, anchor.startLine - 1, 0);
 			const thread = controller.createCommentThread(uri, range, comments.map(toComment));
 
 			thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
@@ -138,7 +156,7 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 		}
 
 		threadsByUri.set(key, threads);
-		log.info("comment annotations rehydrated", { "path": path, "threads": threads.length, "orphaned": ids.length - threads.length });
+		log.info("comment annotations rehydrated", { "path": path, "threads": threads.length });
 	};
 
 	// Submit handler for the gutter "+" (contributed to comments/commentThread/context in the hello manifest). Resolve
@@ -168,10 +186,10 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 			return;
 		}
 
-		const existing = await engine.readAnnotations(path) as Record<string, StoredComment[]>;
-		const stored: StoredComment[] = [...(existing[spanId] ?? []), { "author": "You", "body": reply.text, "timestamp": new Date().toISOString() }];
+		const existing = await engine.readNote(spanId) as StoredComment[] | undefined;
+		const stored: StoredComment[] = [...(existing ?? []), { "author": "You", "body": reply.text, "timestamp": new Date().toISOString() }];
 
-		await engine.setAnnotation(path, spanId, stored);
+		await engine.setNote(spanId, stored);
 
 		// Reflect it in the widget immediately, and remember the thread so a later rehydrate can replace it.
 		reply.thread.comments = stored.map(toComment);

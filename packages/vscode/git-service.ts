@@ -128,11 +128,6 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		try {
 			// HEAD→working identity: verdict, changed nodes, and their working lines — the whole diff, no history chain.
 			const result = await classifier.identify([head, working], controller.signal);
-
-			if (result.snapshot !== null) {
-				await engine.writeBablr(path, JSON.stringify({ "path": path, "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "snapshot": result.snapshot }));
-			}
-
 			const answer: ClassifyResult = { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": result.changedLines };
 
 			if (classifyCache.size > 200) {
