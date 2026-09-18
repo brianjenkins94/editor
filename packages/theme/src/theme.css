@@ -7,17 +7,16 @@
  *
  *     import "@awesome.me/webawesome/dist/styles/themes/default.css";
  *     import "@awesome.me/webawesome/dist/styles/utilities.css";
- *     import "theme";                      // ← this file, last
+ *     import "theme";   // ← this file, last
  *
- * Web Awesome derives every component's look from two token layers:
- *   1. the COLOR RAMPS — `--wa-color-<role>-{10..95}` (10 = darkest, 95 = lightest), where <role> is brand / neutral /
- *      success / warning / danger. Semantic tokens point INTO the ramp (e.g. `--wa-color-brand-fill-loud:
- *      var(--wa-color-brand-50)`), so re-toning a role is just overriding its ramp.
- *   2. the SEMANTIC SURFACE/TEXT tokens — `--wa-color-surface-*`, `--wa-color-text-*` — the page's chrome.
- *
- * This starter is DARK-FIRST, matching the editor shell's chrome, and sets the brand ramp to the editor's blue accent
- * (#3794ff at the mid step). Treat every value here as a starting point to experiment with — that's what this package
- * is for.
+ * MODE-AGNOSTIC. Web Awesome switches light/dark via the `.wa-light` / `.wa-dark` classes on the root (the shell sets
+ * them from `prefers-color-scheme`), and its default theme supplies the per-mode SURFACE and TEXT tokens. So this file
+ * overrides only the BRAND color ramp — `--wa-color-brand-{10..95}` (10 = darkest, 95 = lightest) — which the semantic
+ * tokens point into (`--wa-color-brand-fill-loud: var(--wa-color-brand-50)`, and in dark mode fill-quiet →
+ * brand-10, in light mode → brand-95). Because the ramp spans dark→light, the SAME ramp reads correctly in both
+ * modes, so re-toning the brand here rebrands every `<wa-*>` component in light and dark alike, with no per-mode CSS.
+ * Focus follows the brand mid. (Add `.wa-dark { … }` / `.wa-light { … }` blocks here if a token ever needs to differ
+ * per mode.)
  */
 
 :root {
@@ -33,18 +32,6 @@
 	--wa-color-brand-90: #d6ebff;
 	--wa-color-brand-95: #ebf5ff;
 
-	/* Dark chrome — the editor shell's surfaces + text, as semantic tokens (so components inherit them, no per-widget CSS). */
-	--wa-color-surface-default: #181818;
-	--wa-color-surface-raised: #202020;
-	--wa-color-surface-lowered: #141414;
-	--wa-color-surface-border: #2d2d2d;
-
-	--wa-color-text-normal: #d4d4d4;
-	--wa-color-text-quiet: #8a8a8a;
-	--wa-color-text-link: var(--wa-color-brand-60);
-
-	/* Focus ring picks up the brand mid so keyboard focus reads as "editor blue". */
+	/* Focus ring picks up the brand mid so keyboard focus reads as "editor blue" in either mode. */
 	--wa-color-focus: var(--wa-color-brand-50);
-
-	color-scheme: dark;
 }

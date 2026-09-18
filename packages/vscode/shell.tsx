@@ -26,14 +26,23 @@ import "@awesome.me/webawesome/dist/components/button/button.js";
 import "@awesome.me/webawesome/dist/components/card/card.js";
 import "@awesome.me/webawesome/dist/components/divider/divider.js";
 import "./webawesome";
+import "theme"; // our brand tokens, layered on Web Awesome's default theme (must come after it)
 
 interface SampleInfo { "id": string; "name": string; "description": string }
 
 // Structural CSS — the little that wa-page doesn't give us: full-viewport height, the editor iframe filling `main`,
 // the diff overlay, and the collapse widths. All via theme tokens (stitches objects, not CSS strings).
 const injectGlobals = globalCss({
-	// Legacy CSS vars the (kept) git-panel.ts still references for its own styling — carried until its WA rebuild.
-	":root": { "--bg": "#181818", "--chrome": "#202020", "--line": "#2d2d2d", "--fg": "#d4d4d4", "--muted": "#8a8a8a", "--accent": "#3794ff" },
+	// Legacy CSS vars the (kept) git-panel.ts still references — mapped onto WA tokens so it follows light/dark too,
+	// until its own WA rebuild.
+	":root": {
+		"--bg": "var(--wa-color-surface-default)",
+		"--chrome": "var(--wa-color-surface-raised)",
+		"--line": "var(--wa-color-surface-border)",
+		"--fg": "var(--wa-color-text-normal)",
+		"--muted": "var(--wa-color-text-quiet)",
+		"--accent": "var(--wa-color-brand-fill-loud)"
+	},
 	"html, body": { "height": "100%", "margin": 0 },
 	"body": { "backgroundColor": "var(--wa-color-surface-default)", "color": "var(--wa-color-text-normal)", "fontFamily": "var(--wa-font-family-body, system-ui, sans-serif)" },
 	// The shell fills the viewport; its menu/aside widths are theme-driven and collapse to 0 via the classes below.
@@ -237,10 +246,20 @@ function Shell() {
 	);
 }
 
+/** Reflect the OS light/dark preference onto Web Awesome's mode classes (WA switches via `.wa-light` / `.wa-dark`,
+ *  not `prefers-color-scheme`), so the shell theme follows the system and updates live when it changes. */
+function applySystemColorScheme(): void {
+	const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+	document.documentElement.classList.toggle("wa-dark", dark);
+	document.documentElement.classList.toggle("wa-light", !dark);
+}
+
 /** Build the shell chrome, iframe the app, and wire the LHS picker over the hub. */
 export function renderShell(): void {
-	// Activate Web Awesome's default DARK theme on the document (WA switches via classes, not prefers-color-scheme).
-	document.documentElement.classList.add("wa-theme-default", "wa-dark");
+	document.documentElement.classList.add("wa-theme-default");
+	applySystemColorScheme();
+	window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applySystemColorScheme);
 	injectGlobals();
 	render(<Shell />, document.body);
 }
