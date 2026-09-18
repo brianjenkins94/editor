@@ -32,7 +32,7 @@ export interface CosmeticClassifier {
 	"classify": (before: string, after: string, signal?: AbortSignal) => Promise<ChangeKind | "none">;
 	/** HEAD→working analysis: verdict + changed node ids + the working `.bablr` snapshot. */
 	"analyze": (before: string, after: string, signal?: AbortSignal) => Promise<FileAnalysis>;
-	/** Derive over a windowed commit chain (base…HEAD…working) → HISTORY-ANCHORED snapshot + verdict + changes. */
+	/** Derive over a content chain (in practice [HEAD, working]) → snapshot + verdict + changed nodes + nodeLines. */
 	"identify": (contents: string[], signal?: AbortSignal) => Promise<FileAnalysis>;
 	/** Node-grouped chunks for the "your edits" timeline, over a burst chain [HEAD, …afters] → groups + burst count. */
 	"editGroups": (contents: string[], signal?: AbortSignal) => Promise<{ "groups": EditGroup[]; "bursts": number }>;

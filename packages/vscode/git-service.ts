@@ -88,10 +88,10 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 	// so a new request SUPERSEDES the previous: we abort the older run (the yielding worker bails cooperatively).
 	let classifyInFlight: AbortController | undefined;
 
-	// A CORRECT, content-addressed cache: keyed by (baseOid, headOid, working blob oid) — all git content hashes, so a
-	// hit means genuinely identical inputs (this is the identity-based cache the commit-chain design bought us; it
-	// replaces the approximate caches we removed). Bounded so a long session can't grow it without limit.
-	interface ClassifyResult { "verdict": string; "changedNodeIds": string[]; "changedLines": number[]; "baseOid": string | null }
+	// A CORRECT, content-addressed cache keyed by the two content hashes the verdict actually depends on: HEAD blob +
+	// working blob. Identity is HEAD→working (`reidentify`) — no commit-chain/base anymore (removed; see
+	// collab-identity-durability). A hit means genuinely identical inputs, so the deterministic derivation is reused.
+	interface ClassifyResult { "verdict": string; "changedNodeIds": string[]; "changedLines": number[] }
 	const classifyCache = new Map<string, ClassifyResult>();
 
 	serve(hub, "git.classify", async (args) => {
@@ -113,8 +113,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 			return { "verdict": "none" };
 		}
 
-		const { baseOid, headOid, contents } = await engine.fileHistory(path);
-		const cacheKey = path + "\0" + baseOid + "\0" + headOid + "\0" + await engine.blobOid(working);
+		const cacheKey = path + "\0" + await engine.blobOid(head) + "\0" + await engine.blobOid(working);
 		const cached = classifyCache.get(cacheKey);
 
 		if (cached !== undefined) {
@@ -127,15 +126,14 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		classifyInFlight = controller;
 
 		try {
-			// Anchor identity in REAL history: derive over [base…HEAD, working]. The `.bablr` snapshot carries
-			// HISTORY-ANCHORED node ids; the verdict is HEAD→working (the last two links).
-			const result = await classifier.identify([...contents, working], controller.signal);
+			// HEAD→working identity: verdict, changed nodes, and their working lines — the whole diff, no history chain.
+			const result = await classifier.identify([head, working], controller.signal);
 
 			if (result.snapshot !== null) {
-				await engine.writeBablr(path, JSON.stringify({ "path": path, "baseOid": baseOid, "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "snapshot": result.snapshot }));
+				await engine.writeBablr(path, JSON.stringify({ "path": path, "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "snapshot": result.snapshot }));
 			}
 
-			const answer: ClassifyResult = { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": result.changedLines, "baseOid": baseOid };
+			const answer: ClassifyResult = { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": result.changedLines };
 
 			if (classifyCache.size > 200) {
 				classifyCache.clear();

@@ -44,8 +44,8 @@ globalThis.onmessage = async (event: MessageEvent<ClassifyRequest | AbortRequest
 			return;
 		}
 
-		// `contents` = a windowed commit chain (base…HEAD…working) ⇒ history-anchored identity; otherwise the plain
-		// HEAD→working pair. Both yield a verdict; the chain path also anchors node ids to the shared base.
+		// `contents` = a content chain (in practice [HEAD, working]) ⇒ snapshot + verdict + changed nodes + nodeLines;
+		// otherwise the plain before/after pair. Both yield a verdict; ids are relative to the chain's first link.
 		const result = contents !== undefined
 			? await deriveIdentityAsync(contents, { "signal": controller.signal })
 			: await fileDiffIdentityAsync(before ?? "", after ?? "", { "signal": controller.signal });

@@ -16,8 +16,8 @@
 // WHY IT'S SAFE HERE (and why it is NOT viable as a global patch / bundle banner). This overrides the SHARED
 // `Object.freeze`/`Object.isFrozen` of whatever realm evaluates it, so it may only run in a realm that contains
 // nothing but BABLR. Dedicated parse workers (classify-worker, game-worker) are exactly that. It must NOT be baked
-// into the bablr bundle itself, because the bundle is also imported on the main thread (git-engine's cheap,
-// parse-free `isCommitBoundary`), and polluting the main realm's `Object.freeze` would affect every other library.
+// into the bablr bundle itself, because the bundle may also be imported on the main thread, and polluting the main
+// realm's `Object.freeze` would affect every other library.
 //
 //   - `Object.freeze` → identity: records are no longer frozen (the ~27% + GC we want back).
 //   - `Object.isFrozen` → true: the agast-helpers / @bablr/btree invariant assertions (`assert isFrozen(node)` at

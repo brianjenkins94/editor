@@ -75,7 +75,7 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 		return exact ?? bestBelow?.id;
 	};
 
-	// Derive the current node id → line map (history-anchored, matching the stored ids) for a file.
+	// Derive the current node id → line map for a file (HEAD→working identity — the same ids classify produces).
 	const nodeLinesFor = async (path: string): Promise<Record<string, number>> => {
 		let working: string;
 
@@ -85,8 +85,8 @@ export function installCommentAnnotations(vscode: typeof vscodeApi, classifier: 
 			return {};
 		}
 
-		const { contents } = await engine.fileHistory(path);
-		const analysis = await classifier.identify([...contents, working]);
+		const head = await engine.headContent(path);
+		const analysis = await classifier.identify([head, working]);
 
 		return analysis.nodeLines;
 	};
