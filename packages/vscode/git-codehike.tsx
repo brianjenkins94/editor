@@ -365,13 +365,31 @@ function sideHandlers(
 					: null,
 				createElement("span", { "className": "sxs-lineno", "key": "l" }, props.lineNumber));
 
+			// A folded block collapses to `{ ⋯ }` on the opening line: the code already ends with `{`, so we append the
+			// ellipsis and a synthetic closing brace (the real `}` row is hidden), and clicking it unfolds the block.
+			// The `folded` class switches the cell to `white-space: normal` (see git-panel.css) so the trailing newline
+			// InnerLine emits collapses — otherwise `pre-wrap` breaks the mark onto its own line. That collapse also
+			// trims the leading indent, so a folded row keeps `margin-left` for the indent but drops the (now-moot,
+			// wrap-only) negative `text-indent`.
+			const foldedHeader = header?.folded === true ? header : undefined;
 			const codeCell = createElement("div", {
-				"className": "sxs-code",
+				"className": "sxs-code" + (foldedHeader !== undefined ? " folded" : ""),
 				"key": "c",
-				"style": indent > 0 ? { "marginLeft": indent + "ch", "textIndent": "-" + indent + "ch" } : undefined
+				"style": indent > 0
+					? (foldedHeader === undefined
+						? { "marginLeft": indent + "ch", "textIndent": "-" + indent + "ch" }
+						: { "marginLeft": indent + "ch" })
+					: undefined
 			},
 			createElement(InnerLine, { "merge": props }),
-			header?.folded === true ? createElement("span", { "className": "sxs-folded-mark", "key": "f" }, " ⋯") : null);
+			foldedHeader !== undefined
+				? createElement("span", {
+					"className": "sxs-folded-mark",
+					"key": "f",
+					"title": "Unfold " + foldedHeader.count + " lines",
+					"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleFold(foldedHeader.id); }
+				}, " ⋯ }")
+				: null);
 
 			// The left pane is mirrored — code on the outer edge, gutter hugging the centre — so both number columns
 			// sit either side of the centre bar (like GitHub Desktop's split view).

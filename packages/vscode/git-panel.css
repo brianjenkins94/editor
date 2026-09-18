@@ -91,7 +91,13 @@
 .wa-diff-body .sxs-menu-item:hover { background: #f14c4c; color: #fff; }
 .wa-diff-body .sxs-fold { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0; font-size: 9px; line-height: 1.6; }
 .wa-diff-body .sxs-fold:hover { color: var(--fg); }
-.wa-diff-body .sxs-folded-mark { color: var(--muted); }
+/* A folded row shows `{ ⋯ }`. InnerLine emits a trailing newline that `pre-wrap` would break onto its own line, so a
+   folded row uses `white-space: normal` (collapsing that newline) and renders the code inline, so the mark flows right
+   after the opening brace and still wraps on-screen for a long signature. Indent comes from the cell's margin-left. */
+.wa-diff-body .sxs-code.folded, .wa-diff-body .sxs-code.folded > div { white-space: normal; }
+.wa-diff-body .sxs-code.folded > div { display: inline; }
+.wa-diff-body .sxs-folded-mark { color: var(--muted); cursor: pointer; padding: 0 4px; border-radius: 3px; white-space: nowrap; }
+.wa-diff-body .sxs-folded-mark:hover { background: #8884; color: var(--fg); }
 .wa-diff-body .sxs-gap { grid-column: 1 / span 5; text-align: left; border: 0; cursor: pointer; font: inherit;
   background: #ffffff08; color: var(--muted); padding: 2px 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .wa-diff-body .sxs-gap:hover { background: #ffffff14; color: var(--fg); }
