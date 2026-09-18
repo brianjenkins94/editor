@@ -4,21 +4,11 @@ import webawesome from "./packages/eslint-plugin-webawesome/src/index.js";
 export default [
 	...config,
 	{
-		// Web Awesome guardrails for the shell UI (see packages/eslint-plugin-webawesome): reach for a `<wa-*>`
-		// component when one exists, and author markup as JSX — never native elements or HTML baked into strings.
-		// Scoped to the shell/UI surface on purpose: sample projects (samples.ts), the BABLR grammar, and test
-		// fixtures legitimately contain angle brackets and must not be caught. Widen `files` as the migration spreads.
-		"files": ["packages/vscode/shell.ts", "packages/vscode/window.ts", "packages/vscode/git-panel.ts", "packages/vscode/**/*.tsx"],
-		"ignores": [
-			"packages/vscode/demo/**",
-			// MIGRATION BACKLOG — files not yet ported to wa-components + JSX. Each entry is a definition-of-done:
-			// delete it when the file is converted and the rule will then enforce it. Captured 2026-09-18:
-			//   • shell.ts, git-panel.ts — HTML baked into MARKUP/innerHTML template strings
-			//   • Workbench.tsx — a native <button>
-			"packages/vscode/shell.ts",
-			"packages/vscode/git-panel.ts",
-			"packages/vscode/Workbench.tsx"
-		],
+		// Web Awesome guardrails (see packages/eslint-plugin-webawesome), REPO-WIDE: reach for a `<wa-*>` component
+		// when one exists, and author markup as JSX — never native elements or HTML baked into strings. (Vendored/
+		// generated paths are already dropped by the global `ignores` above.)
+		"files": ["**/*.{ts,tsx,mjs,cjs,js}"],
+		"ignores": ["packages/vscode/demo/**", "packages/vscode/Workbench.tsx"],
 		"plugins": { "webawesome": webawesome },
 		"rules": {
 			"webawesome/prefer-components": "error",

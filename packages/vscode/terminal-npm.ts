@@ -95,6 +95,7 @@ export function createNpmCommand(getSession: ShellRunner): CustomCommand {
 		}
 
 		if (script === undefined) {
+			// eslint-disable-next-line webawesome/no-html-in-strings -- false positive: "<script>" here is npm-run usage placeholder text, not markup
 			return { "stdout": "", "stderr": "usage: npm run <script>\n", "exitCode": 1 };
 		}
 

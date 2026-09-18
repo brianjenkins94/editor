@@ -82,6 +82,7 @@ const DOZER_FILES: SampleFile[] = [
 	}
 }
 ` },
+	// eslint-disable-next-line webawesome/no-html-in-strings -- sample project FILE CONTENTS (a real index.html the editor loads as data), not app chrome
 	{ "path": "/workspace/samples/dozer/index.html", "contents": `<!DOCTYPE html>
 <html lang="en">
 <head>

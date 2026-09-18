@@ -225,6 +225,7 @@ type PreviewServer = RequestHandler & { "start": () => void; "setHMRTarget": (ta
 // script with zero imports; it just posts each record to the embedding host (`channel:"obs-log"`), which bridges
 // it onto the rootHub as `$sys.log.preview` (see preview.ts). This lights up the preview iframe — the one
 // boundary the observability plane couldn't see, because app code logs through raw console, not util/logger.
+// eslint-disable-next-line webawesome/no-html-in-strings -- an observability tap SCRIPT injected into the preview page as text, not app chrome
 const OBS_TAP = `<script>
 (function () {
 	if (window.__obsTap) { return; }

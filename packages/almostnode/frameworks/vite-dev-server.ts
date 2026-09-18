@@ -1,4 +1,5 @@
 /* eslint-disable ts/no-unused-private-class-members, regexp/no-contradiction-with-assertion -- vendored fork of macaly/almostnode — upstream/runtime idioms kept close to source, not restyled to this repo rules */
+/* eslint-disable webawesome/no-html-in-strings -- a Vite dev server that assembles and injects SERVED HTML documents as text (import maps, HMR + React-Refresh script payloads); these strings are the payload, not app chrome */
 /**
  * ViteDevServer - Vite-compatible dev server for browser environment
  * Serves files from VirtualFS with JSX/TypeScript transformation
