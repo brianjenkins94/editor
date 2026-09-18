@@ -8,9 +8,9 @@
 // (→ flag) while edits elsewhere carry. Run: node --test (needs bablr/dist built).
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
-import nodefs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import * as nodefs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import test from "node:test";
 import * as gitmod from "isomorphic-git";
 // eslint-disable-next-line antfu/no-import-dist -- exercise the shipped artifact (dist is gitignored, local/CI-built)
