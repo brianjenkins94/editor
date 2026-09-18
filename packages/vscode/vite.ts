@@ -24,7 +24,7 @@ const MOUNT = "/__vscode__/";
 
 // Minimal iframe host page: the grid/layout lives in the <Workbench/> component (stitches), so this
 // just resets the document and loads the workbench entry bundle.
-// eslint-disable-next-line webawesome/no-html-in-strings -- the iframe HOST DOCUMENT served to bootstrap the workbench (a full HTML page as text), not app chrome
+// eslint-disable-next-line webawesome/no-html-in-strings, webawesome/no-css-in-strings -- the iframe HOST DOCUMENT served to bootstrap the workbench (a full HTML page + its reset CSS, as text), not app chrome
 const HOST_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>

@@ -1,0 +1,15 @@
+/*
+ * Chrome for the movable pane window (window.ts) — a wa-card in a fixed-position, draggable shell. Lives in a real
+ * .css file (not a JS string). Colours/spacing come from Web Awesome tokens, so it follows the theme. The drag
+ * GEOMETRY (left/top/width/height) is set imperatively in window.ts — that's intrinsic, per-instance state, not chrome.
+ */
+.wa-win { position: fixed; z-index: 2147483000; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+.wa-win wa-card { width: 100%; --spacing: var(--wa-space-s); }
+.wa-win__bar { display: flex; align-items: center; gap: var(--wa-space-2xs); cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
+.wa-win__bar.dragging { cursor: grabbing; }
+.wa-win__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--wa-font-weight-semibold); }
+.wa-win__actions { display: flex; gap: var(--wa-space-3xs); }
+.wa-win__actions wa-button::part(base) { padding: 0 var(--wa-space-2xs); line-height: 1.4; }
+.wa-win__body { overflow: hidden; }
+.wa-win__body > iframe { display: block; border: 0; width: 100%; height: 100%; }
+.wa-win[data-collapsed] wa-card::part(body) { display: none; }

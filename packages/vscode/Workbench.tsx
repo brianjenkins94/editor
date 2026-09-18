@@ -48,8 +48,10 @@ function region(area: string, extra: Record<string, unknown> = {}) {
 const headerCss = region("header");
 // Sidebar area = our own 48px activity bar (icon switcher) laid beside the real sidebar part.
 const sidebarCss = region("sidebar", { "display": "flex", "backgroundColor": "var(--vscode-sideBar-background)" });
-// The activity bar: a darker (editor-bg) strip of icon buttons that switch the sidebar viewlet.
-const activityBarCss = css({ "flex": "0 0 48px", "display": "flex", "flexDirection": "column", "backgroundColor": "var(--vscode-editor-background)", "zIndex": 1 });
+// The activity bar: a CONSTANT dark strip of icon buttons that switch the sidebar viewlet. Deliberately fixed (not
+// theme-var-driven) so it reads as stable chrome and does NOT flip when the editor follows the OS light/dark theme —
+// like the shell's own dark chrome. Colours match the shell (#1e1e1e ground, muted → bright icons, brand accent bar).
+const activityBarCss = css({ "flex": "0 0 48px", "display": "flex", "flexDirection": "column", "backgroundColor": "#1e1e1e", "zIndex": 1 });
 const activityItemCss = css({
 	"height": 48,
 	"display": "flex",
@@ -59,11 +61,11 @@ const activityItemCss = css({
 	"background": "transparent",
 	"border": "none",
 	"borderLeft": "2px solid transparent",   // active indicator slot (keeps icons from shifting)
-	"color": "var(--vscode-icon-foreground)",   // solid gray (opaque — not the translucent inactiveForeground that looked blurry)
+	"color": "#858585",   // muted gray, constant across themes
 	"cursor": "pointer",
 	"transition": "color 0.1s ease",
-	"&:hover": { "color": "var(--vscode-activityBar-foreground)" },   // brighten on hover
-	"&.active": { "color": "var(--vscode-activityBar-foreground)", "borderLeftColor": "var(--vscode-activityBar-activeBorder)" },   // active brightens to white + left bar
+	"&:hover": { "color": "#ffffff" },   // brighten on hover
+	"&.active": { "color": "#ffffff", "borderLeftColor": "#3794ff" },   // active brightens to white + brand left bar
 	"& svg": { "display": "block", "width": 24, "height": 24 }   // iconSvg uses currentColor → driven by `color`
 });
 // The real sidebar part attaches into this; it fills the space beside the activity bar.

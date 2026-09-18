@@ -125,6 +125,7 @@ export function installDebugPreview(getApi: () => Api): void {
 		"order": 1,
 		"location": ViewContainerLocation.AuxiliaryBar,
 		"renderBody": (container: HTMLElement) => {
+			/* eslint-disable webawesome/no-inline-styles, webawesome/no-css-in-strings -- filling the aux-bar view with an iframe: intrinsic geometry, not themeable chrome */
 			container.style.height = "100%";
 			container.style.padding = "0";
 
@@ -132,6 +133,7 @@ export function installDebugPreview(getApi: () => Api): void {
 
 			frame.src = previewUrl();
 			frame.style.cssText = "display:block;border:0;width:100%;height:100%;background:#1e1e1e";
+			/* eslint-enable webawesome/no-inline-styles, webawesome/no-css-in-strings */
 			frame.title = "tsval preview";
 			container.appendChild(frame);
 

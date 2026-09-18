@@ -12,8 +12,10 @@
  * The theme tokens the `--wa-*` vars resolve against must be loaded once in this document — import
  * ./webawesome there (the host page does).
  */
+/* eslint-disable webawesome/no-inline-styles -- a draggable, fixed-position window primitive: left/top/width/height are per-instance geometry set imperatively (drag + persisted position), not themeable chrome */
 import "@awesome.me/webawesome/dist/components/card/card.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
+import "./window.css";
 
 export interface PaneWindow {
 	readonly "element": HTMLElement;
@@ -25,32 +27,6 @@ export interface PaneWindow {
 }
 
 interface Persisted { "left"?: number; "top"?: number; "collapsed"?: boolean }
-
-let stylesInjected = false;
-
-function injectStyles(): void {
-	if (stylesInjected) {
-		return;
-	}
-
-	stylesInjected = true;
-
-	const style = document.createElement("style");
-
-	style.textContent = `
-		.wa-win { position: fixed; z-index: 2147483000; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); color-scheme: light; }
-		.wa-win wa-card { width: 100%; --spacing: var(--wa-space-s); }
-		.wa-win__bar { display: flex; align-items: center; gap: var(--wa-space-2xs); cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
-		.wa-win__bar.dragging { cursor: grabbing; }
-		.wa-win__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--wa-font-weight-semibold); }
-		.wa-win__actions { display: flex; gap: var(--wa-space-3xs); }
-		.wa-win__actions wa-button::part(base) { padding: 0 var(--wa-space-2xs); line-height: 1.4; }
-		.wa-win__body { overflow: hidden; }
-		.wa-win__body > iframe { display: block; border: 0; width: 100%; height: 100%; }
-		.wa-win[data-collapsed] wa-card::part(body) { display: none; }
-	`;
-	document.head.appendChild(style);
-}
 
 function loadState(key: string): Persisted {
 	try {
@@ -79,8 +55,6 @@ export interface PaneWindowOptions {
 }
 
 export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
-	injectStyles();
-
 	const width = options.width ?? 960;
 	const height = options.height ?? 640;
 	const state = loadState(options.storageKey);

@@ -10,6 +10,7 @@
  * `tsconfig.json` applies and the in-browser TS server type-checks them. Opening a sample writes its files and
  * focuses its entry; see workbench-entry.tsx `openProject`.
  */
+/* eslint-disable webawesome/no-html-in-strings, webawesome/no-css-in-strings -- this is a catalog of sample project FILE CONTENTS (real index.html/CSS the editor loads as data), not app chrome */
 
 /** One file in a sample project. Matches the snapshot file shape (path + contents). */
 export interface SampleFile { "path": string; "contents": string }
@@ -82,7 +83,6 @@ const DOZER_FILES: SampleFile[] = [
 	}
 }
 ` },
-	// eslint-disable-next-line webawesome/no-html-in-strings -- sample project FILE CONTENTS (a real index.html the editor loads as data), not app chrome
 	{ "path": "/workspace/samples/dozer/index.html", "contents": `<!DOCTYPE html>
 <html lang="en">
 <head>
