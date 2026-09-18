@@ -1,0 +1,50 @@
+/*
+ * @brianjenkins94/wa-theme — a custom theme layered on Web Awesome, expressed entirely in --wa-* design tokens.
+ *
+ * The whole point of this file (and this pivot): rebrand by RETONING WEB AWESOME'S TOKENS, not by writing our own
+ * component CSS. Import order matters — the consumer loads Web Awesome's default theme FIRST, then this, so these
+ * overrides win:
+ *
+ *     import "@awesome.me/webawesome/dist/styles/themes/default.css";
+ *     import "@awesome.me/webawesome/dist/styles/utilities.css";
+ *     import "@brianjenkins94/wa-theme";   // ← this file, last
+ *
+ * Web Awesome derives every component's look from two token layers:
+ *   1. the COLOR RAMPS — `--wa-color-<role>-{10..95}` (10 = darkest, 95 = lightest), where <role> is brand / neutral /
+ *      success / warning / danger. Semantic tokens point INTO the ramp (e.g. `--wa-color-brand-fill-loud:
+ *      var(--wa-color-brand-50)`), so re-toning a role is just overriding its ramp.
+ *   2. the SEMANTIC SURFACE/TEXT tokens — `--wa-color-surface-*`, `--wa-color-text-*` — the page's chrome.
+ *
+ * This starter is DARK-FIRST, matching the editor shell's chrome, and sets the brand ramp to the editor's blue accent
+ * (#3794ff at the mid step). Treat every value here as a starting point to experiment with — that's what this package
+ * is for.
+ */
+
+:root {
+	/* Brand ramp — the editor blue (#3794ff at -50). Everything brand-colored (buttons, focus, links) follows from it. */
+	--wa-color-brand-10: #071a33;
+	--wa-color-brand-20: #0a2a52;
+	--wa-color-brand-30: #0f3d78;
+	--wa-color-brand-40: #1e5fb0;
+	--wa-color-brand-50: #3794ff;
+	--wa-color-brand-60: #5aa8ff;
+	--wa-color-brand-70: #83c0ff;
+	--wa-color-brand-80: #add6ff;
+	--wa-color-brand-90: #d6ebff;
+	--wa-color-brand-95: #ebf5ff;
+
+	/* Dark chrome — the editor shell's surfaces + text, as semantic tokens (so components inherit them, no per-widget CSS). */
+	--wa-color-surface-default: #181818;
+	--wa-color-surface-raised: #202020;
+	--wa-color-surface-lowered: #141414;
+	--wa-color-surface-border: #2d2d2d;
+
+	--wa-color-text-normal: #d4d4d4;
+	--wa-color-text-quiet: #8a8a8a;
+	--wa-color-text-link: var(--wa-color-brand-60);
+
+	/* Focus ring picks up the brand mid so keyboard focus reads as "editor blue". */
+	--wa-color-focus: var(--wa-color-brand-50);
+
+	color-scheme: dark;
+}

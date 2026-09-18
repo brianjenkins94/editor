@@ -1,0 +1,17 @@
+{
+  "name": "eslint-plugin-webawesome",
+  "version": "0.0.0",
+  "description": "ESLint rules that push UI code onto Web Awesome components and JSX: flag native HTML elements that have a `<wa-*>` complement, and flag HTML markup baked into strings/template literals. Authored as plain ESM so the flat config loads it with no build step.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "keywords": ["eslint", "eslintplugin", "eslint-plugin", "webawesome"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "peerDependencies": {
+    "eslint": ">=9"
+  }
+}
