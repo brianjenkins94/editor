@@ -38,6 +38,31 @@ const PROBE = `\n__jbrc=$?\nprintf '${RS}%s${RS}%s${RS}' "$PWD" "$__jbrc"`;
 const PROBE_RE = new RegExp(`${RS}([^${RS}]*)${RS}([^${RS}]*)${RS}$`, "u");
 
 /** Build the just-bash terminal process for one terminal. `fire` writes to the terminal; `cwd0` is the start dir. */
+// Tab-completion candidates for the first word (command position): the custom commands (node/npm/vite) plus the
+// just-bash builtins users actually reach for. just-bash exposes no command registry, so this is curated.
+const COMMANDS = [
+	"alias", "basename", "cat", "cd", "clear", "cp", "dirname", "echo", "env", "export", "false", "find", "grep",
+	"head", "history", "ls", "mkdir", "more", "mv", "node", "npm", "printenv", "printf", "pwd", "rm", "rmdir",
+	"sed", "seq", "sleep", "sort", "tail", "tee", "test", "touch", "true", "uniq", "unalias", "vite", "wc", "which"
+];
+
+/** The longest string that every item starts with (for extending a partial to the common prefix on Tab). */
+function longestCommonPrefix(items: string[]): string {
+	if (items.length === 0) {
+		return "";
+	}
+
+	let prefix = items[0];
+
+	for (const item of items) {
+		while (!item.startsWith(prefix)) {
+			prefix = prefix.slice(0, -1);
+		}
+	}
+
+	return prefix;
+}
+
 export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (data: string) => void, cwd0: string): TerminalProcess {
 	let sessionPromise: Promise<BashSession> | undefined;
 	const getSession = (): Promise<BashSession> => {
@@ -225,6 +250,91 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 		setLine(histIndex === history.length ? draft : history[histIndex]);
 	};
 
+	// Resolve a (possibly relative) directory path against cwd, collapsing "." and ".." — for path completion.
+	const resolveDir = (part: string): string => {
+		const raw = part.startsWith("/") ? part : cwd.replace(/\/+$/u, "") + "/" + part;
+		const segments: string[] = [];
+
+		for (const segment of raw.split("/")) {
+			if (segment === "" || segment === ".") {
+				continue;
+			}
+
+			if (segment === "..") {
+				segments.pop();
+			} else {
+				segments.push(segment);
+			}
+		}
+
+		return "/" + segments.join("/");
+	};
+
+	// Tab completion (only at end of line — the common case). First word → command names; later words / anything
+	// with a slash → filesystem entries under cwd. One match completes inline (dir → "/", else " "); several extend
+	// to their common prefix, or list when there's nothing more to share.
+	const complete = async (): Promise<void> => {
+		if (running || pos !== line.length) {
+			return;
+		}
+
+		const token = line.slice(line.lastIndexOf(" ") + 1); // the word being completed (may be "")
+		const before = line.slice(0, line.length - token.length);
+		const isCommand = before.trim() === "" && !token.includes("/");
+
+		const slash = token.lastIndexOf("/");
+		const dirPrefix = isCommand || slash === -1 ? "" : token.slice(0, slash + 1);
+		const base = isCommand || slash === -1 ? token : token.slice(slash + 1);
+
+		const matches: string[] = [];
+		const isDir = new Map<string, boolean>();
+
+		if (isCommand) {
+			matches.push(...COMMANDS.filter((name) => name.startsWith(base)));
+		} else {
+			try {
+				for (const [name, type] of await api.workspace.fs.readDirectory(api.Uri.file(resolveDir(dirPrefix)))) {
+					if (name.startsWith(base)) {
+						matches.push(name);
+						isDir.set(name, (type & 2) === 2); // FileType.Directory bit
+					}
+				}
+			} catch {
+				return; // unreadable dir → nothing to offer
+			}
+		}
+
+		matches.sort((a, b) => a.localeCompare(b));
+
+		if (matches.length === 0) {
+			fire("\x07"); // bell
+
+			return;
+		}
+
+		if (matches.length === 1) {
+			const only = matches[0];
+			const suffix = isCommand ? " " : isDir.get(only) === true ? "/" : " ";
+
+			setLine(before + dirPrefix + only + suffix);
+
+			return;
+		}
+
+		const prefix = longestCommonPrefix(matches);
+
+		if (prefix.length > base.length) {
+			setLine(before + dirPrefix + prefix); // extend to the shared prefix; more to type
+
+			return;
+		}
+
+		// Ambiguous with nothing more in common — list the candidates (dirs marked with "/"), then restore the line.
+		fire("\r\n" + matches.map((name) => (isCommand || isDir.get(name) !== true ? name : name + "/")).join("  "));
+		prompt();
+		fire(line);
+	};
+
 	// Dispatch a completed escape sequence — the part AFTER the ESC, e.g. "[A" (up), "[3~" (delete), "OD" (left in
 	// application-cursor mode). Anything unmapped (modified arrows like "[1;5C") is ignored rather than echoed.
 	const handleEscape = (seq: string): void => {
@@ -296,6 +406,8 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 				moveHome();
 			} else if (code === 0x05) { // Ctrl-E → end of line
 				moveEnd();
+			} else if (code === 0x09) { // Tab → complete the current word (command or path)
+				void complete();
 			} else if (code >= 0x20) { // printable — insert at the cursor
 				insert(character);
 			}
