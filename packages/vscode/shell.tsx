@@ -199,8 +199,9 @@ function RailContent({ items }: { "items": RailItem[] }) {
 /** The shell chrome. Owns the shell hub and, once mounted, links it to the app iframe, mounts the review panel into
  *  the aside, and installs the (top-frame) preview window. */
 function Shell() {
-	const [lhsCollapsed, setLhsCollapsed] = useState(false);
-	const [rhsCollapsed, setRhsCollapsed] = useState(false);
+	// Both panes start collapsed (as rails) so the editor gets the room by default; expand from the rail when needed.
+	const [lhsCollapsed, setLhsCollapsed] = useState(true);
+	const [rhsCollapsed, setRhsCollapsed] = useState(true);
 	const [samples, setSamples] = useState<SampleInfo[]>([]);
 	const [currentId, setCurrentId] = useState<string | undefined>(undefined);
 	const [navWidth, setNavWidth] = useState(() => loadPaneWidth("navWidth", PANE.navDefault));
@@ -348,6 +349,7 @@ function Shell() {
 
 	const openProject = (id: string): void => {
 		setCurrentId(id);
+		setLhsCollapsed(true); // making a selection collapses the projects pane back to its rail
 		hubRef.current?.publish("project.open", { "id": id });
 	};
 

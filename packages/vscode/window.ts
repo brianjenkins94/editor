@@ -21,6 +21,9 @@ export interface PaneWindow {
 	readonly "element": HTMLElement;
 	/** Put your content (the iframe) here — a definite-height box, so the iframe can measure at boot. */
 	readonly "body": HTMLElement;
+	/** A flex row in the titlebar, left of the collapse/close controls — the caller fills it with extra header
+	 *  actions (e.g. the preview's debug toolbar). */
+	readonly "headerActions": HTMLElement;
 	"setCollapsed": (collapsed: boolean) => void;
 	/** Append to <body> if not already shown. */
 	"show": () => void;
@@ -85,6 +88,12 @@ export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
 
 	actions.className = "wa-win__actions";
 	actions.setAttribute("slot", "header-actions");
+
+	// Caller-owned header actions (e.g. the debug toolbar), left of the built-in collapse/close controls.
+	const headerExtras = document.createElement("div");
+
+	headerExtras.className = "wa-win__extras";
+	actions.appendChild(headerExtras);
 
 	const collapseBtn = document.createElement("wa-button");
 
@@ -168,6 +177,7 @@ export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
 	return {
 		"element": win,
 		"body": body,
+		"headerActions": headerExtras,
 		"setCollapsed": setCollapsed,
 		"show": show
 	};

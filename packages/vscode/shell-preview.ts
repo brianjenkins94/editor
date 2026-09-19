@@ -14,8 +14,9 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { serve } from "@brianjenkins94/hub";
+import { ArrowDownToLine, ArrowUpToLine, Pause, Play, Redo2, RotateCcw, Unplug } from "lucide";
 import { LOG_SUBJECT } from "./telemetry";
-import { css } from "./theme";
+import { css, iconSvg } from "./theme";
 import { createPaneWindow, type PaneWindow } from "./window";
 
 /** Levels the preview tap emits — anything else is coerced to "info". */
@@ -52,6 +53,8 @@ export function installShellPreview(hub: Hub): void {
 	// The debug-run type shown in the window title. The live preview is always the almostnode "production" run
 	// (see production-adapter.ts); `preview.open` may override it.
 	let previewMode = "production";
+	// Latest active-debug-session state, published by debug-toolbar.ts — mirrored into the titlebar toolbar.
+	let debugState = { "active": false, "type": "", "paused": false };
 
 	const ensureWindow = (): void => {
 		if (paneWindow !== undefined) {
@@ -75,6 +78,54 @@ export function installShellPreview(hub: Hub): void {
 		promptEl = document.createElement("div");
 		promptEl.className = promptLayer();
 		paneWindow.body.appendChild(promptEl);
+
+		renderDebugToolbar(); // in case a session is already active when the window opens
+	};
+
+	// Mirror the active debug session's toolbar (debug-toolbar.ts) into the preview titlebar: pause/step only for a
+	// stepping session (tsval), always restart + stop; each button rides `debug.command` back to the real command.
+	const renderDebugToolbar = (): void => {
+		if (paneWindow === undefined) {
+			return;
+		}
+
+		const host = paneWindow.headerActions;
+
+		host.replaceChildren();
+
+		if (!debugState.active) {
+			return;
+		}
+
+		const button = (icon: Parameters<typeof iconSvg>[0], command: string, title: string, enabled = true): HTMLElement => {
+			const element = document.createElement("wa-button");
+
+			element.setAttribute("appearance", "plain");
+			element.setAttribute("size", "small");
+			element.title = title;
+			element.setAttribute("aria-label", title);
+			element.innerHTML = iconSvg(icon, { "size": 15 });
+
+			if (!enabled) {
+				element.setAttribute("disabled", "");
+			}
+
+			element.addEventListener("click", () => { hub.publish("debug.command", { "command": command }); });
+
+			return element;
+		};
+
+		// Stepping applies only to a stepping debugger (tsval); the production preview is run-control only.
+		if (debugState.type === "tsval") {
+			host.append(
+				debugState.paused ? button(Play, "continue", "Continue") : button(Pause, "pause", "Pause"),
+				button(Redo2, "stepOver", "Step Over", debugState.paused),
+				button(ArrowDownToLine, "stepInto", "Step Into", debugState.paused),
+				button(ArrowUpToLine, "stepOut", "Step Out", debugState.paused)
+			);
+		}
+
+		host.append(button(RotateCcw, "restart", "Restart"), button(Unplug, "stop", "Stop"));
 	};
 
 	hub.subscribe("preview.open", (data) => {
@@ -101,6 +152,13 @@ export function installShellPreview(hub: Hub): void {
 		paneWindow = undefined;
 		frame = undefined;
 		promptEl = undefined;
+	});
+
+	hub.subscribe("debug.state", (data) => {
+		const next = data as { "active"?: boolean; "type"?: string; "paused"?: boolean };
+
+		debugState = { "active": next.active === true, "type": next.type ?? "", "paused": next.paused === true };
+		renderDebugToolbar();
 	});
 
 	/** Show ONE capability prompt as the overlay and resolve with the user's choice. Ensures a preview window

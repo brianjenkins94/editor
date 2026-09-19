@@ -18,6 +18,7 @@ import { type CapabilityCall, decideCapability } from "../capabilities/decide";
 import { flushRun } from "../capabilities/silo-store";
 import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
 import { registerTsvalDebug } from "./debug-adapter";
+import { registerDebugToolbar } from "./debug-toolbar";
 import { podHub } from "./pod";
 import { registerProductionDebug } from "./production-adapter";
 
@@ -150,6 +151,10 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// run-control controller (Stop + Debug Console). The run's driver publishes `production.launch` (federates
 	// to podHub); we start the attach session, and the adapter rides the run's `production.*` channels.
 	registerProductionDebug(context, podHub);
+
+	// Mirror the active debug session's toolbar (state out, commands in) so the preview titlebar can host a replica
+	// of VS Code's in-iframe debug controls. See extensions/worker-pod/debug-toolbar.ts + shell-preview.ts.
+	registerDebugToolbar(context, podHub);
 	context.subscriptions.push({ "dispose": podHub.subscribe("production.launch", (data) => {
 		const info = data as { "id"?: string; "name"?: string };
 

@@ -8,8 +8,11 @@
 .wa-win__bar { display: flex; align-items: center; gap: var(--wa-space-2xs); cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
 .wa-win__bar.dragging { cursor: grabbing; }
 .wa-win__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--wa-font-weight-semibold); }
-.wa-win__actions { display: flex; gap: var(--wa-space-3xs); }
+.wa-win__actions { display: flex; align-items: center; gap: var(--wa-space-3xs); }
 .wa-win__actions wa-button::part(base) { padding: 0 var(--wa-space-2xs); line-height: 1.4; }
+/* Caller-owned header actions (the debug toolbar); a hairline separates it from the built-in controls. */
+.wa-win__extras { display: flex; align-items: center; gap: 1px; margin-inline-end: var(--wa-space-2xs); padding-inline-end: var(--wa-space-2xs); border-inline-end: 1px solid var(--wa-color-surface-border); }
+.wa-win__extras:empty { display: none; }
 .wa-win__body { overflow: hidden; }
 .wa-win__body > iframe { display: block; border: 0; width: 100%; height: 100%; }
 .wa-win[data-collapsed] wa-card::part(body) { display: none; }
