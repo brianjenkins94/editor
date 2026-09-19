@@ -99,8 +99,10 @@ function loadPaneWidth(key: string, fallback: number): number {
 const RAIL_WIDTH = 68;
 // A bare vertical column of icon-buttons, top-aligned and centered in the rail — no card, no region padding (the
 // wa-page menu/aside parts already have none), just the stack.
-const railRegion = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-xs)", "paddingBlockStart": "var(--wa-space-2xs)", "overflow": "hidden" });
-const railItem = css({ "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-2xs)" });
+const railRegion = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-m)", "paddingBlockStart": "var(--wa-space-2xs)", "overflow": "hidden" });
+// Caption hugs its icon (tight) while the gap BETWEEN items (railRegion, above) is larger — so each icon+caption
+// reads as one unit.
+const railItem = css({ "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "2px" });
 const railCaption = css({ "fontSize": "10px", "lineHeight": 1.1, "color": "var(--wa-color-text-quiet)", "textAlign": "center", "maxWidth": "100%", "overflowWrap": "anywhere" });
 // Keeps an imperatively-mounted region (the git panel) in the DOM but out of view while its pane is collapsed.
 const hiddenBox = css({ "display": "none" });
@@ -186,7 +188,7 @@ function RailContent({ items }: { "items": RailItem[] }) {
 		<>
 			{items.map((item) => (
 				<span key={item.label} class={railItem()}>
-					<wa-button appearance="plain" variant="neutral" size="large" pill title={item.title} aria-label={item.title} onClick={item.onClick}><Icon node={item.node} /></wa-button>
+					<wa-button appearance="plain" variant="neutral" size="small" pill title={item.title} aria-label={item.title} onClick={item.onClick}><Icon node={item.node} /></wa-button>
 					<span class={railCaption()}>{item.label}</span>
 				</span>
 			))}
