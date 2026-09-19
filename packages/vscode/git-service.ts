@@ -185,4 +185,8 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 	watcher.onDidDelete(schedule);
 
 	log.info("git service installed");
+
+	// Announce readiness: the shell panel subscribes `git.changed`, so this prompts its first load the moment the
+	// serves are live (the panel also polls, but this makes a fresh Pages load populate promptly).
+	hub.publish("git.changed");
 }

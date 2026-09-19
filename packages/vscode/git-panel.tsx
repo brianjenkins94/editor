@@ -422,8 +422,8 @@ function GitPanel({ overlay, hub }: { "overlay": DiffOverlay; "hub": Hub }) {
 		}
 	};
 
-	const refresh = async (): Promise<void> => {
-		const { files: next } = await rpc.request("git.status") as { "files": GitFileChange[] };
+	const refresh = async (options?: { "timeoutMs": number }): Promise<void> => {
+		const { files: next } = await rpc.request("git.status", undefined, options) as { "files": GitFileChange[] };
 		const stillChanged = (path: string): boolean => next.some((file) => file.path === path);
 
 		for (const path of [...deselected]) {
@@ -461,7 +461,20 @@ function GitPanel({ overlay, hub }: { "overlay": DiffOverlay; "hub": Hub }) {
 
 		const off = hub.subscribe("git.changed", () => { void refresh(); });
 
-		void refresh();
+		// The workbench git service registers late in its boot (and the shell→app→workbench link takes a moment to
+		// form), so the initial load POLLS with a short timeout until the responder answers — instead of one
+		// default 15s "no responder" hang. Once up, `git.changed` drives subsequent refreshes.
+		void (async () => {
+			for (let attempt = 0; attempt < 20; attempt += 1) {
+				try {
+					await refresh({ "timeoutMs": 1500 });
+
+					return;
+				} catch {
+					await new Promise((resolve) => { setTimeout(resolve, 500); });
+				}
+			}
+		})();
 
 		return () => {
 			overlay.close.removeEventListener("click", hideOverlay);
