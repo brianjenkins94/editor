@@ -52,33 +52,34 @@ tapConsoleAndErrors(swHub, "sw"); // raw uncaught error/rejection → the plane,
 // abstaining decider).
 const capabilityRpc = createRpcClient(swHub);
 
-// The active production/preview run id, learned from the hub (production.launch → set, production.exit.<id> →
-// clear). A previewed app's gated net calls carry it so they attribute to that run — accumulated in silo-store's
-// bucket and flushed as one `mode:"preview"` run record when the run ends. Null when nothing is running, so the
-// decision stays call-grain.
-let currentPreviewRunId = null;
+// Attribute a previewed app's gated net calls to the RUN that owns its port — so multiple concurrent previews (a
+// multi-server app, a multiplayer game over WS/WebRTC) each record independently, instead of a single global run.
+// The shell mints {id, port} at launch (production.launch) and the run ends at production.exit.<id>; we key by
+// PORT because a fetch's preview client resolves to its virtual port. Empty → the net decision stays call-grain.
+const previewRunByPort = new Map();
 
 swHub.subscribe("production.launch", (data) => {
 	const id = data && data.id;
+	const port = data && data.port;
 
-	if (typeof id !== "string") {
-		return;
+	if (typeof id !== "string" || typeof port !== "number") {
+		return; // no port ⇒ not a preview run (e.g. a node fallback) — nothing to attribute by port
 	}
 
-	currentPreviewRunId = id;
+	previewRunByPort.set(port, id);
 
 	const off = swHub.subscribe("production.exit." + id, () => {
 		off();
 
-		if (currentPreviewRunId === id) {
-			currentPreviewRunId = null;
+		if (previewRunByPort.get(port) === id) {
+			previewRunByPort.delete(port);
 		}
 	});
 });
 
-async function decideNet(url) {
+async function decideNet(url, runId) {
 	try {
-		return (await capabilityRpc.request("capability.decide", { "kind": "net", "args": [url], "runId": currentPreviewRunId ?? undefined }, { "timeoutMs": 300000 })) !== false;
+		return (await capabilityRpc.request("capability.decide", { "kind": "net", "args": [url], "runId": runId ?? undefined }, { "timeoutMs": 300000 })) !== false;
 	} catch (rpcError) {
 		swLog.error("capability.decide failed — allowing (fail-open)", { "error": String(rpcError) });
 
@@ -109,15 +110,19 @@ async function gateAndFetch(event, request, requestUrl) {
 	try {
 		if (request.destination === "" && (requestUrl.protocol === "https:" || requestUrl.protocol === "http:") && event.clientId) {
 			const client = await globalThis.clients.get(event.clientId);
-			let previewClient = false;
+			let previewPort;
 
 			try {
-				previewClient = Boolean(client) && parseVirtual(new URL(client.url).pathname) !== null;
+				const parsed = client ? parseVirtual(new URL(client.url).pathname) : null;
+
+				previewPort = parsed ? parsed.port : undefined;
 			} catch (clientError) {
-				previewClient = false;
+				previewPort = undefined;
 			}
 
-			if (previewClient && !(await decideNet(request.url))) {
+			// A preview client's fetch → gate it, attributed to the run that owns its port (undefined runId if the
+			// mapping hasn't arrived yet → recorded call-grain, still gated).
+			if (previewPort !== undefined && !(await decideNet(request.url, previewRunByPort.get(previewPort)))) {
 				return new Response("Blocked by capability policy: net " + requestUrl.host, { "status": 403, "statusText": "Capability denied" });
 			}
 		}
