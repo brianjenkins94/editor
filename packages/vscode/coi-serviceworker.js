@@ -52,9 +52,33 @@ tapConsoleAndErrors(swHub, "sw"); // raw uncaught error/rejection → the plane,
 // abstaining decider).
 const capabilityRpc = createRpcClient(swHub);
 
+// The active production/preview run id, learned from the hub (production.launch → set, production.exit.<id> →
+// clear). A previewed app's gated net calls carry it so they attribute to that run — accumulated in silo-store's
+// bucket and flushed as one `mode:"preview"` run record when the run ends. Null when nothing is running, so the
+// decision stays call-grain.
+let currentPreviewRunId = null;
+
+swHub.subscribe("production.launch", (data) => {
+	const id = data && data.id;
+
+	if (typeof id !== "string") {
+		return;
+	}
+
+	currentPreviewRunId = id;
+
+	const off = swHub.subscribe("production.exit." + id, () => {
+		off();
+
+		if (currentPreviewRunId === id) {
+			currentPreviewRunId = null;
+		}
+	});
+});
+
 async function decideNet(url) {
 	try {
-		return (await capabilityRpc.request("capability.decide", { "kind": "net", "args": [url] }, { "timeoutMs": 300000 })) !== false;
+		return (await capabilityRpc.request("capability.decide", { "kind": "net", "args": [url], "runId": currentPreviewRunId ?? undefined }, { "timeoutMs": 300000 })) !== false;
 	} catch (rpcError) {
 		swLog.error("capability.decide failed — allowing (fail-open)", { "error": String(rpcError) });
 

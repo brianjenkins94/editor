@@ -158,9 +158,21 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	context.subscriptions.push({ "dispose": podHub.subscribe("production.launch", (data) => {
 		const info = data as { "id"?: string; "name"?: string };
 
-		if (typeof info.id === "string") {
-			void vscode.debug.startDebugging(undefined, { "type": "production", "request": "attach", "name": info.name ?? "Production run", "__prodId": info.id });
+		if (typeof info.id !== "string") {
+			return;
 		}
+
+		const id = info.id;
+		const name = info.name ?? "Production run";
+
+		void vscode.debug.startDebugging(undefined, { "type": "production", "request": "attach", "name": name, "__prodId": id });
+
+		// Run-grain bracket for the preview: the SW tags this preview's gated net calls with `id`, so they
+		// accumulate in silo-store's bucket; flush them as one `mode:"preview"` run record when the run ends.
+		const off = podHub.subscribe(`production.exit.${id}`, () => {
+			off();
+			flushRun(id, { "entry": name, "mode": "preview", "exit": 0 });
+		});
 	}) });
 
 	// RUN-GRAIN ledger: an almostnode run (node-worker path — the tsval-declined fallback + explicit runs, where
