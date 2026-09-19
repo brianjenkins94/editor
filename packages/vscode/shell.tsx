@@ -97,9 +97,9 @@ function loadPaneWidth(key: string, fallback: number): number {
 // A collapsed pane isn't hidden — it becomes a slim RAIL (WebAwesome vertical social-share pattern): a pill card
 // with a stacked icon-button + tiny caption that reopens the pane. This is the region's width when collapsed.
 const RAIL_WIDTH = 68;
-const railRegion = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "justifyContent": "center", "paddingBlockStart": "var(--wa-space-s)", "overflow": "hidden" });
-const railCard = css({ "alignSelf": "flex-start", "&::part(body)": { "padding": "var(--wa-space-xs)", "borderRadius": "var(--wa-border-radius-pill)" } });
-const railStack = css({ "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-s)" });
+// A bare vertical column of icon-buttons, top-aligned and centered in the rail — no card, no region padding (the
+// wa-page menu/aside parts already have none), just the stack.
+const railRegion = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-xs)", "paddingBlockStart": "var(--wa-space-2xs)", "overflow": "hidden" });
 const railItem = css({ "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-2xs)" });
 const railCaption = css({ "fontSize": "10px", "lineHeight": 1.1, "color": "var(--wa-color-text-quiet)", "textAlign": "center", "maxWidth": "100%", "overflowWrap": "anywhere" });
 // Keeps an imperatively-mounted region (the git panel) in the DOM but out of view while its pane is collapsed.
@@ -171,19 +171,26 @@ function Picker({ samples, currentId, onOpen }: { "samples": SampleInfo[]; "curr
 	);
 }
 
-/** A collapsed pane's rail contents: a pill card holding one stacked icon-button + caption that reopens the pane
- *  (the WebAwesome vertical social-share pattern). Rendered inside the pane's own slot region so the region's other
- *  content (e.g. the imperatively-mounted git panel) can stay mounted-but-hidden across collapse. */
-function RailContent({ node, label, title, onExpand }: { "node": Parameters<typeof iconSvg>[0]; "label": string; "title": string; "onExpand": () => void }) {
+interface RailItem {
+	"node": Parameters<typeof iconSvg>[0];
+	"label": string;
+	"title": string;
+	"onClick": () => void;
+}
+
+/** A collapsed pane's rail: a bare vertical stack of pill icon-buttons with captions (no card). Rendered as a
+ *  fragment straight into the pane's slot region so the region's other content (the imperatively-mounted git panel)
+ *  can stay mounted-but-hidden across collapse. */
+function RailContent({ items }: { "items": RailItem[] }) {
 	return (
-		<wa-card class={railCard()}>
-			<div class={railStack()}>
-				<span class={railItem()}>
-					<wa-button appearance="plain" variant="neutral" size="large" pill title={title} aria-label={title} onClick={onExpand}><Icon node={node} /></wa-button>
-					<span class={railCaption()}>{label}</span>
+		<>
+			{items.map((item) => (
+				<span key={item.label} class={railItem()}>
+					<wa-button appearance="plain" variant="neutral" size="large" pill title={item.title} aria-label={item.title} onClick={item.onClick}><Icon node={item.node} /></wa-button>
+					<span class={railCaption()}>{item.label}</span>
 				</span>
-			</div>
-		</wa-card>
+			))}
+		</>
 	);
 }
 
@@ -359,7 +366,12 @@ function Shell() {
 
 			<div slot="navigation" class={lhsCollapsed ? railRegion() : sideCol() + " " + navPane()}>
 				{lhsCollapsed ? (
-					<RailContent node={PanelLeft} label="Projects" title="Expand project panel" onExpand={() => { setLhsCollapsed(false); }} />
+					<RailContent items={[
+						{ "node": PanelLeft, "label": "Projects", "title": "Expand project panel", "onClick": () => { setLhsCollapsed(false); } },
+						// placeholders to preview the stacked look — settle final contents next
+						{ "node": FolderOpen, "label": "Open", "title": "Open project", "onClick": () => undefined },
+						{ "node": Play, "label": "Run", "title": "Run", "onClick": () => undefined }
+					]} />
 				) : (
 					<>
 						<div class={navHead()}>
@@ -401,7 +413,12 @@ function Shell() {
 			    the effect below) survives — collapsed just hides it and shows the rail. */}
 			<div slot="aside" class={rhsCollapsed ? railRegion() : sideCol() + " " + asidePane()}>
 				{rhsCollapsed ? (
-					<RailContent node={PanelRight} label="Changes" title="Expand changes panel" onExpand={() => { setRhsCollapsed(false); }} />
+					<RailContent items={[
+						{ "node": PanelRight, "label": "Changes", "title": "Expand changes panel", "onClick": () => { setRhsCollapsed(false); } },
+						// placeholders to preview the stacked look — settle final contents next
+						{ "node": GitCommit, "label": "Commit", "title": "Commit", "onClick": () => undefined },
+						{ "node": History, "label": "History", "title": "History", "onClick": () => undefined }
+					]} />
 				) : (
 					<div class={navHead()}>
 						<span class={navHeadLabel()}>Changes</span>
