@@ -380,7 +380,7 @@ export function recordObservation(request: CapabilityRequest, disposition: Dispo
  * for the "was I exposed to compromised dep X in window W" audit. Best-effort; clears the run's accumulation either
  * way. A run with no gated calls still gets a record (proof of a clean run).
  */
-export function flushRun(runId: string, run: { "entry": string; "mode": string; "exit": number }): void {
+export function flushRun(runId: string, run: { "entry": string; "mode": string; "exit": number; "aborted"?: boolean }): void {
 	const bucket = runScopes.get(runId);
 
 	runScopes.delete(runId);
@@ -406,6 +406,10 @@ export function flushRun(runId: string, run: { "entry": string; "mode": string; 
 
 			if (bucket !== undefined && bucket.denied.size > 0) {
 				record["denied"] = [...bucket.denied].sort((a, b) => a.localeCompare(b));
+			}
+
+			if (run.aborted === true) {
+				record["aborted"] = true; // run was killed (Ctrl-C) before it drained — scopes are what fired so far
 			}
 
 			await ensureGitignore(root);

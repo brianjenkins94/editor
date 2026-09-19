@@ -168,8 +168,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// threads the runId to `decide`, so silo-store accumulates the run's distinct scopes; here we flush ONE record
 	// to <user>.runs.jsonl at exit. tsval runs are inert (no node.start) so they produce no record — correct, they
 	// have no real effects. Guarded: a missing lifecycle event just means no record for that run, never a crash.
-	// (A hard Ctrl-C terminates the worker before node.exit, so a killed run leaves no record; its scopes are still
-	// captured in the observed rollup via recordObservation.)
+	// A hard Ctrl-C terminates the worker before it can publish node.exit, so node-runner publishes a synthetic
+	// {exitCode:130, aborted:true} on abort — the run is still recorded (marked aborted) and its bucket released.
 	context.subscriptions.push({ "dispose": podHub.subscribe("node.start", (data) => {
 		const info = data as { "runId"?: string; "file"?: string };
 
@@ -181,7 +181,10 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		const entry = typeof info.file === "string" ? info.file : "";
 		const off = podHub.subscribe(`node.exit.${runId}`, (exitData) => {
 			off();
-			flushRun(runId, { "entry": entry, "mode": "run", "exit": (exitData as { "exitCode"?: number }).exitCode ?? 0 });
+
+			const info = exitData as { "exitCode"?: number; "aborted"?: boolean };
+
+			flushRun(runId, { "entry": entry, "mode": "run", "exit": info.exitCode ?? 0, "aborted": info.aborted === true });
 		});
 	}) });
 

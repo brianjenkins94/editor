@@ -145,8 +145,11 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		});
 
 		// Ctrl-C: the worker may be blocked in a synchronous body, so terminate it (and drop the current run);
-		// the next run lazily respawns. 130 = terminated by SIGINT.
+		// the next run lazily respawns. 130 = terminated by SIGINT. Publish the exit OURSELVES first (the killed
+		// worker can't) so the run-grain ledger still records the aborted run + releases its scope bucket — this
+		// reaches the pod via the uplink, which killWorker doesn't tear down, and our own offExit finishes the run.
 		const onAbort = (): void => {
+			hub.publish(`node.exit.${runId}`, { "exitCode": 130, "aborted": true });
 			killWorker();
 			finish(130);
 		};
