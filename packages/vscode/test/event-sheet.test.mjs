@@ -8,8 +8,9 @@
 // change it) yet self-edit-aware (changing a row's own action changes its anchor → orphan).
 import assert from "node:assert/strict";
 import test from "node:test";
-// Node 24 strips the types; the module's only runtime import is bablr/dist (gitignored, local/CI-built).
-import { generate, rowAnchors, sampleSheet } from "../event-sheet.ts";
+// Node 24 strips the types; rowAnchors' only runtime import is bablr/dist (gitignored, local/CI-built).
+import { generate, sampleSheet } from "../event-sheet.ts";
+import { rowAnchors } from "../event-sheet-anchors.ts";
 
 test("every generated line is chrome or maps to exactly one row", () => {
 	const program = generate(sampleSheet);

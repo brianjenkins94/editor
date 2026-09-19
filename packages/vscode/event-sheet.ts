@@ -13,10 +13,13 @@
  *     UNRELATED row — a row still finds its code, and a row whose own code changed orphans (the "diverged from
  *     generated" signal). That's the same identity mechanism the annotation spine used, reused here.
  *
+ * This module is deliberately BABLR-FREE (pure string/model ops) so the auxpane view can import it on the main
+ * workbench thread without pulling the heavy BABLR bundle in. The durable map (map #2) lives in `event-sheet-anchors.ts`
+ * because it calls spanAnchors; run it off-thread when the map needs to survive edits.
+ *
  * The vocabulary here (a handful of conditions/actions) is a PLACEHOLDER to exercise nesting and multi-line rows; the
  * real palette, the ECS-system-per-row shape, and the idiomatic-vs-procedural house style are later, deliberate calls.
  */
-import { spanAnchors } from "@brianjenkins94/bablr";
 
 /** A trigger/query for a row. `kind` picks the shape; `arg` is its single placeholder parameter (real params later). */
 export interface Condition { "kind": "onStart" | "everyTick" | "onKey"; "arg"?: string }
@@ -192,80 +195,31 @@ export function generate(sheet: EventSheet): GeneratedProgram {
 	};
 }
 
-/**
- * A row's DURABLE handle: the content-addressed anchor id of the statement it emitted. Deriving spanAnchors over the
- * generated code and taking the innermost span that covers a row's line range gives a key that survives regen and
- * unrelated edits (move-stable + shift-resistant) — so a row re-finds its code by anchor, not by line number, and a row
- * whose own code changed no longer matches any anchor (it orphans → "diverged from generated", the review signal).
- *
- * Returns rowId → anchorId. A row with no covered span (e.g. empty actions) is omitted.
- */
-export function rowAnchors(program: GeneratedProgram): Map<string, string> {
-	const anchors = spanAnchors(program.code);
-
-	// 1-based line for a character offset in the generated code.
-	const lineStarts: number[] = [0];
-
-	for (let index = 0; index < program.code.length; index += 1) {
-		if (program.code[index] === "\n") {
-			lineStarts.push(index + 1);
+/** A short human summary of one action — for the event-sheet table's "Do" column (mirrors actionStatement, but prose). */
+function actionSummary(action: Action): string {
+	switch (action.kind) {
+		case "spawn": {
+			return "spawn " + (action.arg ?? "entity");
+		}
+		case "move": {
+			return "move " + (action.arg ?? "");
+		}
+		case "setVar": {
+			return "set " + (action.arg ?? "") + " = " + (action.value ?? "0");
+		}
+		case "log":
+		default: {
+			return "log " + (action.arg ?? "");
 		}
 	}
+}
 
-	const lineAt = (offset: number): number => {
-		let low = 0;
-		let high = lineStarts.length - 1;
-
-		while (low < high) {
-			const mid = (low + high + 1) >> 1;
-
-			if (lineStarts[mid] <= offset) {
-				low = mid;
-			} else {
-				high = mid - 1;
-			}
-		}
-
-		return low + 1; // 1-based
+/** The row's display strings for the event-sheet table: its condition ("when") and its actions ("then"). */
+export function rowLabels(row: EventRow): { "when": string; "then": string } {
+	return {
+		"when": conditionLabel(row.condition),
+		"then": row.actions.length === 0 ? "(no actions)" : row.actions.map(actionSummary).join(", ")
 	};
-
-	const result = new Map<string, string>();
-
-	for (const span of program.spans) {
-		// The row's durable handle is its most DISTINCTIVE owned span: a real node (not a bare punctuator, `type: null`)
-		// that lies entirely inside the row's lines. Prefer a BARE-hash id (unique content ⇒ no `#ordinal` ⇒ immune to
-		// spans added elsewhere), and among those the LARGEST — the whole emitted statement, e.g. `world.spawn("bullet")`,
-		// rather than a sub-token like `world` that repeats in every row. A leaf like `(` was the trap: same content
-		// everywhere, so its ordinal (and thus its id) slid the instant a row was inserted above.
-		let best: { "id": string; "bare": boolean; "size": number } | undefined;
-
-		for (const anchor of anchors) {
-			if (anchor.type === null) {
-				continue; // punctuation — always duplicated, never a stable handle
-			}
-
-			const startLine = lineAt(anchor.start);
-			const endLine = lineAt(Math.max(anchor.start, anchor.end - 1));
-
-			if (startLine < span.startLine || endLine > span.endLine) {
-				continue; // not fully inside this row
-			}
-
-			const bare = !anchor.id.includes("#");
-			const size = anchor.end - anchor.start;
-
-			// Bare beats ordinal'd; then larger beats smaller.
-			if (best === undefined || (bare && !best.bare) || (bare === best.bare && size > best.size)) {
-				best = { "id": anchor.id, "bare": bare, "size": size };
-			}
-		}
-
-		if (best !== undefined) {
-			result.set(span.rowId, best.id);
-		}
-	}
-
-	return result;
 }
 
 /** A small, realistic sample sheet — enough to exercise nesting, multi-action rows, and every condition/action kind. */

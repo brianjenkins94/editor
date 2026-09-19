@@ -27,6 +27,8 @@ import workerPodExtensionCode from "worker-pod:extension";
 import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
+import { eventSheetAugmentation } from "./event-sheet-view";
+import { installFileAugmentations } from "./file-augmentations";
 import type { VerdictEntry } from "./cosmetic-classifier";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
 import * as gitEngine from "./git-engine";
@@ -318,6 +320,10 @@ function maybeBoot(): void {
 				// (not a webview), so it composites in our coi-serviceworker single-origin harness. See
 				// debug-preview-view.ts.
 				installDebugPreview(() => vscodeApi);
+					// File augmentations: the auxpane shows a per-file-type projection of the active file. First one is
+					// the Event Sheet (a Construct-style projection of the CST) — a 3-column table whose rows jump the
+					// editor to the code they map to. See file-augmentations.ts / event-sheet-view.ts.
+					installFileAugmentations(() => vscodeApi, [eventSheetAugmentation]);
 				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
 				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
 				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", moduleVersions ?? {}, (path) => workspaceFs?.has(path) ?? false, paneLog);
