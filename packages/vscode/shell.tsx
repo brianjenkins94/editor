@@ -423,10 +423,17 @@ function Shell() {
 								{targets.length === 0 ? (
 									<div class={runEmpty()}>No run targets found</div>
 								) : targets.map((target) => (
-									<button key={target.id} type="button" class={runItem()} role="menuitem" onClick={() => { runTarget(target); }}>
+									<div
+										key={target.id}
+										class={runItem()}
+										role="menuitem"
+										tabIndex={0}
+										onClick={() => { runTarget(target); }}
+										onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); runTarget(target); } }}
+									>
 										<span class={runItemName()}>{target.name}</span>
 										<span class={runItemMeta()}>{target.kind === "bin" ? "bin" : target.package === "." ? "script" : target.package}</span>
-									</button>
+									</div>
 								))}
 							</div>
 						</>
