@@ -276,19 +276,32 @@ export function installShellPreview(hub: Hub): void {
 		return result;
 	});
 
-	// Observability bridge: the injected tap (node-worker.ts OBS_TAP) posts each console call / uncaught error up as
-	// `{channel:"obs-log", record}`. Reshape into a LogRecord and publish on `$sys.log.preview` so a preview iframe —
-	// otherwise invisible to the plane (app code logs through raw console) — federates to the root collector.
+	// Bridge from the injected tap (node-worker.ts OBS_TAP) — two channels, both from a preview iframe:
+	//   • `obs-log` : each console call / uncaught error → reshape into a LogRecord on `$sys.log.preview`, so a
+	//     preview iframe (otherwise invisible to the plane — app code logs through raw console) reaches the collector.
+	//   • `obs-cap` : a WebSocket / WebRTC endpoint the SW net gate can't see (Phase 1 capability capture) → publish
+	//     `capability.observed`, keyed by the SOURCE surface's port so the ext host attributes it to that run.
 	globalThis.addEventListener("message", (event: MessageEvent) => {
-		const fromPreview = [...surfaces.values()].some((surface) => surface.frame.contentWindow === event.source);
+		const source = [...surfaces.entries()].find(([, surface]) => surface.frame.contentWindow === event.source);
 
-		if (!fromPreview) {
+		if (source === undefined) {
 			return; // only our preview iframes
 		}
 
-		const payload = event.data as { "channel"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;
+		const port = source[0];
+		const payload = event.data as { "channel"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown>; "kind"?: string; "resource"?: string } } | null;
 
-		if (payload?.channel !== "obs-log" || payload.record === undefined) {
+		if (payload?.record === undefined) {
+			return;
+		}
+
+		if (payload.channel === "obs-cap" && typeof payload.record.kind === "string") {
+			hub.publish("capability.observed", { "kind": payload.record.kind, "resource": payload.record.resource ?? "", "port": port });
+
+			return;
+		}
+
+		if (payload.channel !== "obs-log") {
 			return;
 		}
 

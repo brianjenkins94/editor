@@ -284,6 +284,40 @@ const OBS_TAP = `<script>
 		var r = e && e.reason;
 		send({ level: "error", message: "unhandledrejection: " + ((r && r.message) || String(r)), attrs: { stack: r && r.stack } });
 	});
+	// Capability capture (Phase 1, OBSERVE-ONLY): the service worker's net gate only sees HTTP(S) — WebSocket
+	// (excluded from SW fetch by spec) and WebRTC (P2P over UDP) slip past it. Wrap their constructors HERE, in the
+	// preview realm, before app code runs, and post each endpoint up (channel "obs-cap", tagged with this
+	// preview's port) so the shell records it on the run ledger. It never blocks — enforcement is a later phase.
+	var vport = (function () { var m = /\\/__virtual__\\/(\\d+)\\//.exec(location.pathname); return m ? Number(m[1]) : undefined; })();
+	var sendCap = function (rec) { try { rec.port = vport; parent.postMessage({ channel: "obs-cap", record: rec }, "*"); } catch (e) {} };
+	var OrigWS = window.WebSocket;
+	if (OrigWS) {
+		var WS = function (url, protocols) {
+			try { sendCap({ kind: "net.ws", resource: String(url) }); } catch (e) {}
+			return new OrigWS(url, protocols);
+		};
+		WS.prototype = OrigWS.prototype;
+		WS.CONNECTING = OrigWS.CONNECTING; WS.OPEN = OrigWS.OPEN; WS.CLOSING = OrigWS.CLOSING; WS.CLOSED = OrigWS.CLOSED;
+		window.WebSocket = WS;
+	}
+	var OrigRTC = window.RTCPeerConnection;
+	if (OrigRTC) {
+		var RTC = function (config) {
+			try {
+				var servers = (config && config.iceServers) || [];
+				var urls = [];
+				for (var i = 0; i < servers.length; i++) {
+					var u = servers[i] && servers[i].urls;
+					if (typeof u === "string") { urls.push(u); } else if (u) { for (var j = 0; j < u.length; j++) { urls.push(u[j]); } }
+				}
+				if (urls.length === 0) { urls.push("(no ice servers)"); }
+				for (var k = 0; k < urls.length; k++) { sendCap({ kind: "net.webrtc", resource: urls[k] }); }
+			} catch (e) {}
+			return new OrigRTC(config);
+		};
+		RTC.prototype = OrigRTC.prototype;
+		window.RTCPeerConnection = RTC;
+	}
 })();
 </script>
 `;

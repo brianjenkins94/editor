@@ -174,3 +174,30 @@ export async function decideCapability(call: CapabilityCall): Promise<boolean> {
 		throw error;
 	}
 }
+
+/** The network endpoint of a WS/WebRTC resource: `hostOf` covers ws(s):// (a special scheme with a real host);
+ *  stun:/turn: are non-special (URL.host is empty → "*"), so parse `scheme:host:port` by hand. */
+function endpointOf(resource: string): string {
+	const host = hostOf(resource);
+
+	if (host !== "*") {
+		return host;
+	}
+
+	const match = /^[a-z][a-z0-9+.-]*:([^?#]+)/iu.exec(resource);
+
+	return match !== null ? match[1] : resource;
+}
+
+/**
+ * OBSERVE-ONLY capture (Phase 1) for capabilities the enforced `classify` path can't see — a preview app's
+ * WebSocket / WebRTC endpoints, which the service-worker net gate never intercepts. Builds the silo request
+ * directly (these kinds aren't gated yet) and folds it into the observed surface + the run's ledger exactly like
+ * an allowed net call, so the exposure audit is complete. It NEVER prompts or blocks; enforcement (a proxy-buffered
+ * gate) is a later phase.
+ */
+export function observeCapability(kind: string, resource: string, runId?: string): void {
+	const endpoint = endpointOf(resource);
+
+	recordObservation({ "kind": kind, "scope": `${kind}:${endpoint}`, "resource": resource } as CapabilityRequest, "allow", runId);
+}
