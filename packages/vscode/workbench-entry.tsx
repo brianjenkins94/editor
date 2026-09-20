@@ -35,6 +35,7 @@ import * as gitEngine from "./git-engine";
 import { installEditHistory } from "./edit-history";
 import { installGitScm } from "./git-scm";
 import { installGitService } from "./git-service";
+import { installRunTargets } from "./targets";
 import capabilitiesManifest from "./extensions/capabilities/package.json";
 import eslintManifest from "./extensions/eslint/package.json";
 import helloManifest from "./extensions/hello/package.json";
@@ -355,6 +356,9 @@ function maybeBoot(): void {
 						bootSpan.error("git SCM install failed", { "error": errText(error) });
 					});
 					installGitService(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
+					// Run targets: enumerate the repo's runnables (package.json scripts/bins, per package) for the
+					// shell's run picker, and run a chosen one in a terminal. See targets.ts.
+					installRunTargets(api as typeof import("vscode"), workbenchHub, paneLog);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
 					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
 					// edit-history.ts.
