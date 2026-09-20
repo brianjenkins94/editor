@@ -98,12 +98,37 @@ export function installRunTargets(vscode: typeof vscodeApi, hub: Hub, log: Logge
 			return;
 		}
 
-		// A fresh terminal per run — so concurrent runs (multiple previews) each get their own. cwd puts it in the
-		// target's package; sendText runs the command through our bash process, which brackets it as a run.
-		const terminal = vscode.window.createTerminal({ "name": request.name ?? "run", "cwd": request.cwd });
+		const command = request.command;
 
-		terminal.show();
-		terminal.sendText(request.command);
+		void (async () => {
+			try {
+				// `createTerminal({options})` is NotSupported in this vendored build, so open a fresh terminal via the
+				// workbench command (a new one per run → concurrent runs each get their own), falling back to an
+				// existing terminal if that's unavailable.
+				try {
+					await vscode.commands.executeCommand("workbench.action.terminal.new");
+				} catch { /* fall back to whatever terminal exists */ }
+
+				const terminal = vscode.window.activeTerminal ?? vscode.window.terminals[0];
+
+				if (terminal === undefined) {
+					log.error("run target: no terminal available");
+
+					return;
+				}
+
+				terminal.show();
+
+				// cwd is set inline (`cd … && …`) since we can't pass it to the terminal; a single line runs in that
+				// dir. sendText runs it through our bash process, which brackets + records the run.
+				const cwd = typeof request.cwd === "string" ? request.cwd : "";
+				const line = cwd !== "" && cwd !== "/workspace" ? `cd ${cwd} && ${command}` : command;
+
+				setTimeout(() => { terminal.sendText(line); }, 200);
+			} catch (error) {
+				log.error("run target failed", { "error": String(error) });
+			}
+		})();
 	});
 
 	log.info("run targets service installed");
