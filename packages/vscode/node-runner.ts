@@ -52,8 +52,9 @@ export interface NodeRunner {
 	"closePreview": () => void;
 	/** Present a long-running production run (the vite preview) as a VS Code debug session: publishes
 	 *  `production.launch` (the ext host starts a `production` attach session) and returns its id. `port`, when the
-	 *  run binds one (a preview server), is carried so the SW can attribute that port's net to this run. */
-	"startProductionSession": (name: string, port?: number) => string;
+	 *  run binds one (a preview server), is carried so the SW can attribute that port's net to this run. `target`
+	 *  is the runnable's stable identity (e.g. the project dir), recorded on the run-grain ledger. */
+	"startProductionSession": (name: string, port?: number, target?: string) => string;
 	/** Stream a line of the run's output to the production debug session's Debug Console. */
 	"emitProductionOutput": (id: string, stream: "out" | "err", data: string) => void;
 	/** The debug session's Stop button (or session close) fired — the driver should tear the run down. */
@@ -262,10 +263,10 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); }),
 		"openPreview": (root) => { hub.publish("preview.open", { "root": root, "mode": "production" }); },
 		"closePreview": () => { hub.publish("preview.close", {}); },
-		"startProductionSession": (name, port) => {
+		"startProductionSession": (name, port, target) => {
 			const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-			hub.publish("production.launch", { "id": id, "name": name, "port": port });
+			hub.publish("production.launch", { "id": id, "name": name, "port": port, "target": target });
 
 			return id;
 		},

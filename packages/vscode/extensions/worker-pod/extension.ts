@@ -22,6 +22,11 @@ import { registerDebugToolbar } from "./debug-toolbar";
 import { podHub } from "./pod";
 import { registerProductionDebug } from "./production-adapter";
 
+/** A run target's repo-relative identity — strips the /workspace root; "." for the root itself. */
+function repoRelative(path: string): string {
+	return path.replace(/^\/workspace\/?/u, "") || ".";
+}
+
 /** This extension's exports — the pod->workbench half of the hub uplink (ext host is an isolated realm, so it
  *  rides the exported API rather than a window transport). See activate + workbench-entry's bridge. */
 export interface PodBridge {
@@ -156,7 +161,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// of VS Code's in-iframe debug controls. See extensions/worker-pod/debug-toolbar.ts + shell-preview.ts.
 	registerDebugToolbar(context, podHub);
 	context.subscriptions.push({ "dispose": podHub.subscribe("production.launch", (data) => {
-		const info = data as { "id"?: string; "name"?: string };
+		const info = data as { "id"?: string; "name"?: string; "port"?: number; "target"?: string };
 
 		if (typeof info.id !== "string") {
 			return;
@@ -167,11 +172,18 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 		void vscode.debug.startDebugging(undefined, { "type": "production", "request": "attach", "name": name, "__prodId": id });
 
-		// Run-grain bracket for the preview: the SW tags this preview's gated net calls with `id`, so they
-		// accumulate in silo-store's bucket; flush them as one `mode:"preview"` run record when the run ends.
+		// Run-grain bracket for the PREVIEW only (a port-bound run): the SW tags that port's gated net calls with
+		// `id`, so they accumulate in silo-store's bucket; flush them as one `mode:"preview"` run record at exit. A
+		// port-less production session (the node fallback) is already recorded via its node.start bracket — don't
+		// double-record it here.
+		if (typeof info.port !== "number") {
+			return;
+		}
+
+		const target = typeof info.target === "string" ? repoRelative(info.target) : name;
 		const off = podHub.subscribe(`production.exit.${id}`, () => {
 			off();
-			flushRun(id, { "entry": name, "mode": "preview", "exit": 0 });
+			flushRun(id, { "entry": name, "mode": "preview", "exit": 0, "target": target });
 		});
 	}) });
 
@@ -196,7 +208,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 			const info = exitData as { "exitCode"?: number; "aborted"?: boolean };
 
-			flushRun(runId, { "entry": entry, "mode": "run", "exit": info.exitCode ?? 0, "aborted": info.aborted === true });
+			// `node <file>` target = the entry, repo-relative — so repeated runs of the same file aggregate.
+			flushRun(runId, { "entry": entry, "mode": "run", "exit": info.exitCode ?? 0, "aborted": info.aborted === true, "target": repoRelative(entry) });
 		});
 	}) });
 

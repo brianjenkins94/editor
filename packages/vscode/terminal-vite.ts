@@ -23,7 +23,7 @@ export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput): Cu
 		runner.openPreview(ctx.cwd);
 		// Present the dev server as a VS Code debug session too (the "production" debug mode) — it shows in Run and
 		// Debug with a Stop button, not just as a terminal process. Output/lifecycle ride its Debug Console.
-		const sessionId = runner.startProductionSession("vite (preview)", PREVIEW_PORT);
+		const sessionId = runner.startProductionSession("vite (preview)", PREVIEW_PORT, ctx.cwd);
 
 		runner.emitProductionOutput(sessionId, "out", `VITE dev server ready (on ${ctx.cwd}) — Stop from the debug toolbar or Ctrl-C.\n`);
 		writeLive("out", `\n  [1m[35mVITE[0m  dev server ready [2m(in the worker, on ${ctx.cwd})[0m\n\n  [32m➜[0m  Preview:  opened the Preview pane\n  [2m➜  press Ctrl-C to stop[0m\n\n`);

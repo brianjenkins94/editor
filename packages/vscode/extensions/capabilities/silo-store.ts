@@ -380,7 +380,7 @@ export function recordObservation(request: CapabilityRequest, disposition: Dispo
  * for the "was I exposed to compromised dep X in window W" audit. Best-effort; clears the run's accumulation either
  * way. A run with no gated calls still gets a record (proof of a clean run).
  */
-export function flushRun(runId: string, run: { "entry": string; "mode": string; "exit": number; "aborted"?: boolean }): void {
+export function flushRun(runId: string, run: { "entry": string; "mode": string; "exit": number; "aborted"?: boolean; "target"?: string }): void {
 	const bucket = runScopes.get(runId);
 
 	runScopes.delete(runId);
@@ -397,6 +397,9 @@ export function flushRun(runId: string, run: { "entry": string; "mode": string; 
 			const record: Record<string, unknown> = {
 				"type": "run",
 				"ts": new Date().toISOString(),
+				// The runnable's stable identity (repo-relative file, or a package/preview) — records aggregate by
+				// `target`, so the exposure audit + trust are per-runnable, not per-invocation. Defaults to the entry.
+				"target": run.target ?? run.entry,
 				"entry": run.entry,
 				"sha": await hashFile(run.entry),
 				"mode": run.mode,
