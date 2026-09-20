@@ -29,7 +29,7 @@ import { loadEffectivePolicy, persistOverride, recordObservation } from "./silo-
  *   • eval:`{ kind: "eval", resource }` — the codegen kind.
  */
 export interface CapabilityCall {
-	"kind": "net" | "fs" | "exec" | "eval";
+	"kind": "net" | "fs" | "exec" | "eval" | "net.ws" | "net.webrtc";
 	"method"?: string;
 	"op"?: "read" | "write";
 	"resource"?: string;
@@ -38,6 +38,9 @@ export interface CapabilityCall {
 	 *  to a run so `<user>.runs.jsonl` gets one run-grain record instead of a line per call. Absent for a preview
 	 *  app's own fetch (which belongs to no single run) — those stay call-grain. */
 	"runId"?: string;
+	/** The preview port a shell-forwarded call (the WS/WebRTC shim) originates from — the ext host resolves it to
+	 *  the run that owns the port (mirroring the SW's runId for net), since the shim can't know the runId itself. */
+	"port"?: number;
 }
 
 /** Turn a raw interceptor call into the canonical silo request (scope string + context), or undefined if it
@@ -49,6 +52,14 @@ function classify(call: CapabilityCall): CapabilityRequest | undefined {
 		const host = hostOf(arg0);
 
 		return { "kind": "net", "scope": netScope(host), "resource": host };
+	}
+
+	// WebSocket / WebRTC — captured in the preview realm (the SW can't see them). Gate by endpoint host, one
+	// capability axis per protocol so a `net` allow doesn't silently cover a socket.
+	if (call.kind === "net.ws" || call.kind === "net.webrtc") {
+		const resource = typeof arg0 === "string" ? arg0 : call.resource ?? "";
+
+		return { "kind": call.kind, "scope": `${call.kind}:${endpointOf(resource)}`, "resource": resource } as CapabilityRequest;
 	}
 
 	if (call.kind === "fs") {
@@ -74,9 +85,16 @@ function classify(call: CapabilityCall): CapabilityRequest | undefined {
 	return { "kind": "eval", "scope": evalScope(kind), "resource": kind };
 }
 
-/** The silo capability axis for a request: `fs:read`/`fs:write` carry the op; net/exec/eval are the kind. */
+/** The silo capability axis for a request: `fs:read`/`fs:write` carry the op; net/exec/eval/net.ws/net.webrtc are
+ *  the kind. */
 function capabilityOf(request: CapabilityRequest): string {
 	return request.kind === "fs" ? `fs:${request.op ?? "read"}` : request.kind;
+}
+
+/** WS/WebRTC aren't in silo's DANGEROUS set (net/exec/eval/fs:write), but a preview reaching an arbitrary socket
+ *  IS worth gating — so an undecided WS/WebRTC scope must prompt (review), not silently default-allow. */
+function dangerousCapability(capability: string): boolean {
+	return isDangerous(capability) || capability === "net.ws" || capability === "net.webrtc";
 }
 
 /** Session-only store — "Allow once" lives here (a fast-path short-circuit in broker.gate); persisted decisions
@@ -114,7 +132,7 @@ async function promptViaShell(request: { "kind": string; "scope": string; "resou
 async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 	const capability = capabilityOf(request);
 	const resource = request.resource ?? "";
-	const effective = effectiveDisposition(await loadEffectivePolicy(), capability, resource, isDangerous(capability));
+	const effective = effectiveDisposition(await loadEffectivePolicy(), capability, resource, dangerousCapability(capability));
 
 	if (effective === "allow") {
 		return { "behavior": "allow" };
@@ -124,7 +142,7 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 		return { "behavior": "deny", "message": "denied by .silo policy" };
 	}
 
-	const choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability) });
+	const choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": dangerousCapability(capability) });
 
 	if (choice === "allow-always") {
 		await persistOverride(capability, resource, "allow");
@@ -187,17 +205,4 @@ function endpointOf(resource: string): string {
 	const match = /^[a-z][a-z0-9+.-]*:([^?#]+)/iu.exec(resource);
 
 	return match !== null ? match[1] : resource;
-}
-
-/**
- * OBSERVE-ONLY capture (Phase 1) for capabilities the enforced `classify` path can't see — a preview app's
- * WebSocket / WebRTC endpoints, which the service-worker net gate never intercepts. Builds the silo request
- * directly (these kinds aren't gated yet) and folds it into the observed surface + the run's ledger exactly like
- * an allowed net call, so the exposure audit is complete. It NEVER prompts or blocks; enforcement (a proxy-buffered
- * gate) is a later phase.
- */
-export function observeCapability(kind: string, resource: string, runId?: string): void {
-	const endpoint = endpointOf(resource);
-
-	recordObservation({ "kind": kind, "scope": `${kind}:${endpoint}`, "resource": resource } as CapabilityRequest, "allow", runId);
 }

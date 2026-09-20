@@ -18,7 +18,7 @@
  * routing of those is a follow-up).
  */
 import type { Hub } from "@brianjenkins94/hub";
-import { serve } from "@brianjenkins94/hub";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { ArrowDownToLine, ArrowUpToLine, Pause, Play, Redo2, RotateCcw, Unplug } from "lucide";
 import { LOG_SUBJECT } from "./telemetry";
 import { css, iconSvg } from "./theme";
@@ -68,6 +68,8 @@ export function installShellPreview(hub: Hub): void {
 	let previewMode = "production";
 	// Latest active-debug-session state, published by debug-toolbar.ts — mirrored into the primary window's toolbar.
 	let debugState = { "active": false, "type": "", "paused": false };
+	// For the preview shim's WS/WebRTC capability decisions — round-trips to the ext-host decider over the hub.
+	const capRpc = createRpcClient(hub);
 
 	const primary = (): PreviewSurface | undefined => (primaryPort === undefined ? undefined : surfaces.get(primaryPort));
 
@@ -277,10 +279,11 @@ export function installShellPreview(hub: Hub): void {
 	});
 
 	// Bridge from the injected tap (node-worker.ts OBS_TAP) — two channels, both from a preview iframe:
+	//   • `cap-decide` : the WS/WebRTC shim asks whether to allow a connection the SW net gate can't see. Round-trip
+	//     to the ext-host decider (`capability.decide`, keyed by the SOURCE surface's port so it attributes to that
+	//     run + can prompt the TOFU overlay) and post the verdict back into the iframe. FAIL CLOSED (deny) on error.
 	//   • `obs-log` : each console call / uncaught error → reshape into a LogRecord on `$sys.log.preview`, so a
 	//     preview iframe (otherwise invisible to the plane — app code logs through raw console) reaches the collector.
-	//   • `obs-cap` : a WebSocket / WebRTC endpoint the SW net gate can't see (Phase 1 capability capture) → publish
-	//     `capability.observed`, keyed by the SOURCE surface's port so the ext host attributes it to that run.
 	globalThis.addEventListener("message", (event: MessageEvent) => {
 		const source = [...surfaces.entries()].find(([, surface]) => surface.frame.contentWindow === event.source);
 
@@ -289,19 +292,20 @@ export function installShellPreview(hub: Hub): void {
 		}
 
 		const port = source[0];
-		const payload = event.data as { "channel"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown>; "kind"?: string; "resource"?: string } } | null;
+		const payload = event.data as { "channel"?: string; "id"?: number; "kind"?: string; "resource"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;
 
-		if (payload?.record === undefined) {
+		if (payload?.channel === "cap-decide" && typeof payload.kind === "string") {
+			const id = payload.id;
+			const reply = (allow: boolean): void => { (event.source as Window | null)?.postMessage({ "channel": "cap-decision", "id": id, "allow": allow }, "*"); };
+
+			capRpc.request("capability.decide", { "kind": payload.kind, "args": [payload.resource ?? ""], "port": port }, { "timeoutMs": 300000 })
+				.then((allow) => { reply(allow !== false); })
+				.catch(() => { reply(false); }); // can't reach the decider ⇒ fail closed
+
 			return;
 		}
 
-		if (payload.channel === "obs-cap" && typeof payload.record.kind === "string") {
-			hub.publish("capability.observed", { "kind": payload.record.kind, "resource": payload.record.resource ?? "", "port": port });
-
-			return;
-		}
-
-		if (payload.channel !== "obs-log") {
+		if (payload?.channel !== "obs-log" || payload.record === undefined) {
 			return;
 		}
 

@@ -14,7 +14,7 @@ import { serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
-import { type CapabilityCall, decideCapability, observeCapability } from "../capabilities/decide";
+import { type CapabilityCall, decideCapability } from "../capabilities/decide";
 import { flushRun } from "../capabilities/silo-store";
 import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
 import { registerTsvalDebug } from "./debug-adapter";
@@ -143,11 +143,25 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// up in the collector (as a `[pod]` record).
 	context.subscriptions.push({ "dispose": podHub.subscribe("pod.ready", (data) => { podLog.info("worker joined", data as Record<string, unknown>); }) });
 
+	// port → preview run id, so a shell-forwarded WS/WebRTC decision (keyed by the preview's port, which is all the
+	// shim knows) attributes to the run that owns that port — the same port→run attribution the SW does for net.
+	const previewRunByPort = new Map<number, string>();
+
 	// ENFORCE — the single capability DECISION ENDPOINT (see ../capabilities/decide). Every thin interceptor
-	// (the service-worker net gate; the almostnode fs/exec shim hook) full-round-trips here over the hub: the SW's
-	// swHub → root → workbench → podHub reaches this serve, and the popup/grant-store/redline logic all lives here
-	// (the ext host has vscode + workspace.fs), never in an interceptor. Returns true=allow, false=deny.
-	context.subscriptions.push({ "dispose": serve(podHub, "capability.decide", (call) => decideCapability(call as CapabilityCall)) });
+	// (the service-worker net gate; the WS/WebRTC preview shim; the almostnode fs/exec shim hook) full-round-trips
+	// here over the hub: the SW's swHub → root → workbench → podHub reaches this serve, and the popup/grant-store/
+	// redline logic all lives here (the ext host has vscode + workspace.fs), never in an interceptor. A call that
+	// carries a `port` (the preview shim) but no `runId` gets its runId resolved from the port here, so the record
+	// attributes to the right run. Returns true=allow, false=deny.
+	context.subscriptions.push({ "dispose": serve(podHub, "capability.decide", (data) => {
+		const call = data as CapabilityCall;
+
+		if (call.runId === undefined && typeof call.port === "number") {
+			call.runId = previewRunByPort.get(call.port);
+		}
+
+		return decideCapability(call);
+	}) });
 
 	// The tsval debug type — a worker-backed stepping debugger (debug-adapter.ts + debug-worker.ts).
 	registerTsvalDebug(context);
@@ -160,10 +174,6 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// Mirror the active debug session's toolbar (state out, commands in) so the preview titlebar can host a replica
 	// of VS Code's in-iframe debug controls. See extensions/worker-pod/debug-toolbar.ts + shell-preview.ts.
 	registerDebugToolbar(context, podHub);
-	// port → preview run id, so a WS/WebRTC observation the shell forwards (`capability.observed`, keyed by the
-	// preview's port) attributes to the run that owns that port — the same port→run attribution the SW does for net.
-	const previewRunByPort = new Map<number, string>();
-
 	context.subscriptions.push({ "dispose": podHub.subscribe("production.launch", (data) => {
 		const info = data as { "id"?: string; "name"?: string; "port"?: number; "target"?: string };
 
@@ -194,19 +204,6 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 			previewRunByPort.delete(port);
 			flushRun(id, { "entry": name, "mode": "preview", "exit": 0, "target": target });
 		});
-	}) });
-
-	// OBSERVE-ONLY capability capture (Phase 1): the preview tap wraps WebSocket / WebRTC (invisible to the SW net
-	// gate) and the shell forwards each endpoint here as `capability.observed` {kind, resource, port}. Attribute it
-	// to the port's run and record it — no gating, so a multiplayer preview is never blocked.
-	context.subscriptions.push({ "dispose": podHub.subscribe("capability.observed", (data) => {
-		const obs = data as { "kind"?: string; "resource"?: string; "port"?: number };
-
-		if (typeof obs.kind !== "string") {
-			return;
-		}
-
-		observeCapability(obs.kind, obs.resource ?? "", typeof obs.port === "number" ? previewRunByPort.get(obs.port) : undefined);
 	}) });
 
 	// RUN-GRAIN ledger: an almostnode run (node-worker path — the tsval-declined fallback + explicit runs, where

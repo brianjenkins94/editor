@@ -284,36 +284,100 @@ const OBS_TAP = `<script>
 		var r = e && e.reason;
 		send({ level: "error", message: "unhandledrejection: " + ((r && r.message) || String(r)), attrs: { stack: r && r.stack } });
 	});
-	// Capability capture (Phase 1, OBSERVE-ONLY): the service worker's net gate only sees HTTP(S) — WebSocket
-	// (excluded from SW fetch by spec) and WebRTC (P2P over UDP) slip past it. Wrap their constructors HERE, in the
-	// preview realm, before app code runs, and post each endpoint up (channel "obs-cap", tagged with this
-	// preview's port) so the shell records it on the run ledger. It never blocks — enforcement is a later phase.
+	// Capability ENFORCEMENT (Phase 2): the service worker's net gate only sees HTTP(S) — WebSocket (excluded from
+	// SW fetch by spec) and WebRTC (P2P over UDP) slip past it. Gate them HERE, in the preview realm, before app
+	// code runs. A sync constructor can't await a decision on the main thread (no Atomics.wait), so WebSocket
+	// returns a DEFERRED PROXY that buffers send()/listeners and only opens the real socket on allow (else fires
+	// error+close); RTCPeerConnection is built with its ICE servers STRIPPED and only restored (setConfiguration)
+	// on allow, closed on deny. Each decision round-trips to the shell (cap-decide → capability.decide → the TOFU
+	// overlay), tagged with this preview's port; it FAILS CLOSED (deny) if the shell can't be reached.
 	var vport = (function () { var m = /\\/__virtual__\\/(\\d+)\\//.exec(location.pathname); return m ? Number(m[1]) : undefined; })();
-	var sendCap = function (rec) { try { rec.port = vport; parent.postMessage({ channel: "obs-cap", record: rec }, "*"); } catch (e) {} };
+	var capSeq = 0, capPending = {};
+	addEventListener("message", function (e) {
+		var d = e.data;
+		if (d && d.channel === "cap-decision" && capPending[d.id]) { var cb = capPending[d.id]; delete capPending[d.id]; cb(d.allow === true); }
+	});
+	var decide = function (kind, resource) {
+		return new Promise(function (resolve) {
+			var id = ++capSeq;
+			capPending[id] = resolve;
+			try { parent.postMessage({ channel: "cap-decide", id: id, kind: kind, resource: resource, port: vport }, "*"); } catch (err) { delete capPending[id]; resolve(false); return; }
+			setTimeout(function () { if (capPending[id]) { delete capPending[id]; resolve(false); } }, 300000); // unanswered ⇒ fail closed
+		});
+	};
 	var OrigWS = window.WebSocket;
 	if (OrigWS) {
-		var WS = function (url, protocols) {
-			try { sendCap({ kind: "net.ws", resource: String(url) }); } catch (e) {}
-			return new OrigWS(url, protocols);
+		// Rebuild a fresh event to redispatch on the proxy — an Event can be dispatched only once.
+		var relayWs = function (ev) {
+			if (ev.type === "message") { return new MessageEvent("message", { data: ev.data, origin: ev.origin, lastEventId: ev.lastEventId }); }
+			if (ev.type === "close") { try { return new CloseEvent("close", { code: ev.code, reason: ev.reason, wasClean: ev.wasClean }); } catch (e) { return new Event("close"); } }
+			return new Event(ev.type);
 		};
-		WS.prototype = OrigWS.prototype;
-		WS.CONNECTING = OrigWS.CONNECTING; WS.OPEN = OrigWS.OPEN; WS.CLOSING = OrigWS.CLOSING; WS.CLOSED = OrigWS.CLOSED;
-		window.WebSocket = WS;
+		class GatedWebSocket extends EventTarget {
+			constructor(url, protocols) {
+				super();
+				this.url = String(url); this.protocol = ""; this.extensions = ""; this.binaryType = "blob";
+				this.readyState = OrigWS.CONNECTING; this.bufferedAmount = 0;
+				this._real = null; this._queue = []; this._closed = false; this._closeArgs = null;
+				var self = this;
+				decide("net.ws", this.url).then(function (allow) { if (allow) { self._open(url, protocols); } else { self._deny(); } });
+			}
+			_open(url, protocols) {
+				var self = this, real = protocols === undefined ? new OrigWS(url) : new OrigWS(url, protocols);
+				this._real = real;
+				try { real.binaryType = this.binaryType; } catch (e) {}
+				["open", "message", "error", "close"].forEach(function (type) {
+					real.addEventListener(type, function (ev) {
+						if (type === "open") { self.readyState = OrigWS.OPEN; self.protocol = real.protocol; self.extensions = real.extensions; self._flush(); }
+						else if (type === "close") { self.readyState = OrigWS.CLOSED; }
+						self.dispatchEvent(relayWs(ev));
+					});
+				});
+				if (this._closed) { try { real.close.apply(real, this._closeArgs || []); } catch (e) {} }
+			}
+			_flush() { var q = this._queue; this._queue = []; for (var i = 0; i < q.length; i++) { try { this._real.send(q[i]); } catch (e) {} } }
+			_deny() {
+				this.readyState = OrigWS.CLOSED;
+				this.dispatchEvent(new Event("error"));
+				var ce; try { ce = new CloseEvent("close", { code: 4403, reason: "Blocked by capability policy", wasClean: false }); } catch (e) { ce = new Event("close"); }
+				this.dispatchEvent(ce);
+			}
+			send(data) { if (this._closed) { return; } if (this._real && this.readyState === OrigWS.OPEN) { this._real.send(data); } else { this._queue.push(data); } }
+			close(code, reason) { this._closed = true; this._closeArgs = [code, reason]; if (this._real) { try { this._real.close(code, reason); } catch (e) {} } else { this.readyState = OrigWS.CLOSING; } }
+		}
+		// on* handlers as accessors, so dispatchEvent alone delivers to BOTH addEventListener and the on* handler.
+		["onopen", "onmessage", "onerror", "onclose"].forEach(function (name) {
+			var type = name.slice(2), key = "_" + name;
+			Object.defineProperty(GatedWebSocket.prototype, name, {
+				configurable: true,
+				get: function () { return this[key] || null; },
+				set: function (fn) { if (this[key]) { this.removeEventListener(type, this[key]); } this[key] = typeof fn === "function" ? fn : null; if (this[key]) { this.addEventListener(type, this[key]); } }
+			});
+		});
+		GatedWebSocket.CONNECTING = OrigWS.CONNECTING; GatedWebSocket.OPEN = OrigWS.OPEN; GatedWebSocket.CLOSING = OrigWS.CLOSING; GatedWebSocket.CLOSED = OrigWS.CLOSED;
+		window.WebSocket = GatedWebSocket;
 	}
 	var OrigRTC = window.RTCPeerConnection;
 	if (OrigRTC) {
 		var RTC = function (config) {
-			try {
-				var servers = (config && config.iceServers) || [];
-				var urls = [];
-				for (var i = 0; i < servers.length; i++) {
-					var u = servers[i] && servers[i].urls;
-					if (typeof u === "string") { urls.push(u); } else if (u) { for (var j = 0; j < u.length; j++) { urls.push(u[j]); } }
-				}
-				if (urls.length === 0) { urls.push("(no ice servers)"); }
-				for (var k = 0; k < urls.length; k++) { sendCap({ kind: "net.webrtc", resource: urls[k] }); }
-			} catch (e) {}
-			return new OrigRTC(config);
+			config = config || {};
+			var servers = config.iceServers || [], urls = [];
+			for (var i = 0; i < servers.length; i++) {
+				var u = servers[i] && servers[i].urls;
+				if (typeof u === "string") { urls.push(u); } else if (u) { for (var j = 0; j < u.length; j++) { urls.push(u[j]); } }
+			}
+			// Give the app a REAL peer connection (full API) but with NO reachable ICE relays until allowed.
+			var stripped = {};
+			for (var key in config) { if (Object.prototype.hasOwnProperty.call(config, key)) { stripped[key] = config[key]; } }
+			stripped.iceServers = [];
+			var pc = new OrigRTC(stripped);
+			decide("net.webrtc", urls.length ? urls.join(",") : "peer").then(function (allow) {
+				try {
+					if (pc.signalingState === "closed") { return; }
+					if (allow) { if (urls.length) { pc.setConfiguration(config); } } else { pc.close(); }
+				} catch (e) {}
+			});
+			return pc;
 		};
 		RTC.prototype = OrigRTC.prototype;
 		window.RTCPeerConnection = RTC;
