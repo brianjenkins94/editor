@@ -46,10 +46,12 @@ export interface NodeRunner {
 	/** Subscribe to HMR updates the worker's preview server emits; `handler` relays them to the iframe. Returns
 	 *  an unsubscribe (M2). */
 	"onPreviewHmr": (port: number, handler: (message: unknown) => void) => () => void;
-	/** Ask the host to open the preview pane on `root` — the terminal's `vite` command fires this (M3). */
-	"openPreview": (root: string) => void;
-	/** Stop the preview: the host closes the pane and the worker stops its dev server (Ctrl-C on `vite`). */
-	"closePreview": () => void;
+	/** Ask the host to open the preview pane on `root` for `port` — the terminal's `vite` command fires this (M3).
+	 *  `port` keys the surface so multiple concurrent previews (multi-server / multiplayer) each get their own
+	 *  window; it defaults to the single-preview port when omitted. */
+	"openPreview": (root: string, port?: number) => void;
+	/** Stop the preview on `port`: the host closes that window and the worker stops its dev server (Ctrl-C on `vite`). */
+	"closePreview": (port?: number) => void;
 	/** Present a long-running production run (the vite preview) as a VS Code debug session: publishes
 	 *  `production.launch` (the ext host starts a `production` attach session) and returns its id. `port`, when the
 	 *  run binds one (a preview server), is carried so the SW can attribute that port's net to this run. `target`
@@ -261,8 +263,8 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		},
 		"notifyPreviewChange": (port, path) => { hub.publish("preview.fileChanged", { "port": port, "path": path }); },
 		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); }),
-		"openPreview": (root) => { hub.publish("preview.open", { "root": root, "mode": "production" }); },
-		"closePreview": () => { hub.publish("preview.close", {}); },
+		"openPreview": (root, port) => { hub.publish("preview.open", { "root": root, "mode": "production", "port": port }); },
+		"closePreview": (port) => { hub.publish("preview.close", { "port": port }); },
 		"startProductionSession": (name, port, target) => {
 			const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
 

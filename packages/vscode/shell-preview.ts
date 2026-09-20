@@ -1,16 +1,21 @@
 /**
- * The preview WINDOW — the display half of the live preview, hosted in the SHELL (top frame) so it can be dragged
- * anywhere in the viewport, beyond the confines of the editor iframe (which would clip a window created inside it).
+ * The preview WINDOWS — the display half of the live preview(s), hosted in the SHELL (top frame) so they can be
+ * dragged anywhere in the viewport, beyond the confines of the editor iframe (which would clip a window created
+ * inside it).
  *
- * The dev-server BACKEND stays in the app realm (preview.ts): it runs the dev server in the node worker and registers
- * the ServerBridge so the coi-serviceworker serves `/__virtual__/<port>/`. This module only shows a movable WebAwesome
- * window (window.ts) with an iframe pointed at that SW URL, and applies what arrives over the hub:
- *   • `preview.open`  → create/resurface the window (published by `npm run dev`; also on repeat runs).
- *   • `preview.ready` → the backend is up; set the iframe to the `{ url }` it served.
- *   • `preview.close` → tear the window down (Ctrl-C on `vite`, or the window's own close button).
- *   • `preview.hmr.>` → the worker's HMR updates; post them into the iframe (its injected client applies them).
- * The iframe's injected console tap posts `{channel:"obs-log"}` messages up to THIS window; we reshape them onto
- * `$sys.log.preview` so the preview still federates to the root collector like every other context.
+ * The dev-server BACKEND stays in the app realm (preview.ts): it runs each dev server in the node worker and
+ * registers the ServerBridge so the coi-serviceworker serves `/__virtual__/<port>/`. This module shows a movable
+ * WebAwesome window PER PORT (window.ts) with an iframe pointed at that SW URL, so multiple concurrent previews (a
+ * multi-server app, a multiplayer game) each get their own surface. It applies what arrives over the hub, keyed by
+ * port:
+ *   • `preview.open`  { port } → create/resurface that port's window.
+ *   • `preview.ready` { url, port } → point that port's iframe at the URL it served.
+ *   • `preview.close` { port } → tear that port's window down.
+ *   • `preview.hmr.<port>` → post the HMR update into that port's iframe (its injected client applies it).
+ * Each iframe's injected console tap posts `{channel:"obs-log"}` up here; we reshape onto `$sys.log.preview`.
+ *
+ * The capability-prompt overlay + mirrored debug toolbar attach to the MOST-RECENTLY-OPENED window (per-port
+ * routing of those is a follow-up).
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { serve } from "@brianjenkins94/hub";
@@ -21,11 +26,12 @@ import { createPaneWindow, type PaneWindow } from "./window";
 
 /** Levels the preview tap emits — anything else is coerced to "info". */
 const OBS_LEVELS = new Set(["trace", "debug", "info", "warn", "error", "fatal"]);
+/** The default preview port, used when an event omits one (single-preview back-compat). */
+const DEFAULT_PORT = 5173;
 
-// The capability-prompt overlay — a WebAwesome-styled scrim + card that fills the PREVIEW WINDOW body (not the
-// whole shell): a TOFU decision clearly interrupts just the running app. Shown on `capability.prompt` (served
-// below), resolved by the user's click. The ext-host decider round-trips here and falls back to a VS Code
-// notification only when no preview window is open.
+// The capability-prompt overlay — a WebAwesome-styled scrim + card that fills a PREVIEW WINDOW body (not the whole
+// shell): a TOFU decision clearly interrupts just the running app. Shown on `capability.prompt` (served below),
+// resolved by the user's click.
 const bodyRelative = css({ "position": "relative" });
 const promptLayer = css({
 	"position": "absolute", "inset": 0, "zIndex": 5,
@@ -43,53 +49,36 @@ const promptActions = css({ "display": "flex", "flexWrap": "wrap", "gap": "var(-
 type PromptChoice = "allow-once" | "allow-always" | "deny" | "authorize";
 interface PromptRequest { "kind"?: string; "scope"?: string; "resource"?: string; "dangerous"?: boolean; "redline"?: boolean }
 
-/** Wire the preview window to a hub that reaches the app realm (the shell hub). Idempotent per shell. */
+/** One preview surface: its window, the iframe, the capability-prompt overlay, and its HMR unsubscribe. */
+interface PreviewSurface {
+	"paneWindow": PaneWindow;
+	"frame": HTMLIFrameElement;
+	"promptEl": HTMLDivElement;
+	"offHmr": () => void;
+}
+
+/** Wire the preview windows to a hub that reaches the app realm (the shell hub). Idempotent per shell. */
 export function installShellPreview(hub: Hub): void {
-	let paneWindow: PaneWindow | undefined;
-	let frame: HTMLIFrameElement | undefined;
-	let promptEl: HTMLDivElement | undefined; // the capability-prompt overlay, over the preview iframe
-	// Serializes concurrent prompts (several held fetches) through the single overlay, one at a time.
+	const surfaces = new Map<number, PreviewSurface>();
+	let primaryPort: number | undefined; // the window the overlay + debug toolbar attach to (most-recent)
+	// Serializes concurrent prompts (several held fetches) through the overlay, one at a time.
 	let promptChain: Promise<unknown> = Promise.resolve();
-	// The debug-run type shown in the window title. The live preview is always the almostnode "production" run
+	// The debug-run type shown in a window title. The live preview is the almostnode "production" run
 	// (see production-adapter.ts); `preview.open` may override it.
 	let previewMode = "production";
-	// Latest active-debug-session state, published by debug-toolbar.ts — mirrored into the titlebar toolbar.
+	// Latest active-debug-session state, published by debug-toolbar.ts — mirrored into the primary window's toolbar.
 	let debugState = { "active": false, "type": "", "paused": false };
 
-	const ensureWindow = (): void => {
-		if (paneWindow !== undefined) {
-			return;
-		}
+	const primary = (): PreviewSurface | undefined => (primaryPort === undefined ? undefined : surfaces.get(primaryPort));
 
-		paneWindow = createPaneWindow({
-			"title": `Preview · ${previewMode}`, // titlebar states which debug run type is driving the preview
-			"storageKey": "preview",
-			"width": Math.min(520, window.innerWidth - 80),
-			"height": Math.min(600, window.innerHeight - 120),
-			"onClose": () => { hub.publish("preview.close"); }
-		});
-		frame = document.createElement("iframe");
-		// The iframe fills the window body via window.ts's own CSS (`.wa-win__body > iframe`) — no inline style here.
-		paneWindow.body.appendChild(frame);
-
-		// The capability-prompt overlay lives ABOVE the iframe, filling the window body — so a TOFU decision
-		// interrupts the running app (dimmed behind it), not the whole shell. Hidden until `capability.prompt`.
-		paneWindow.body.classList.add(bodyRelative());
-		promptEl = document.createElement("div");
-		promptEl.className = promptLayer();
-		paneWindow.body.appendChild(promptEl);
-
-		renderDebugToolbar(); // in case a session is already active when the window opens
-	};
-
-	// Mirror the active debug session's toolbar (debug-toolbar.ts) into the preview titlebar: pause/step only for a
-	// stepping session (tsval), always restart + stop; each button rides `debug.command` back to the real command.
+	// Mirror the active debug session's toolbar (debug-toolbar.ts) into the primary preview titlebar: pause/step
+	// only for a stepping session (tsval), always restart + stop; each button rides `debug.command` to the command.
 	const renderDebugToolbar = (): void => {
-		if (paneWindow === undefined) {
+		const host = primary()?.paneWindow.headerActions;
+
+		if (host === undefined) {
 			return;
 		}
-
-		const host = paneWindow.headerActions;
 
 		host.replaceChildren();
 
@@ -115,7 +104,6 @@ export function installShellPreview(hub: Hub): void {
 			return element;
 		};
 
-		// Stepping applies only to a stepping debugger (tsval); the production preview is run-control only.
 		if (debugState.type === "tsval") {
 			host.append(
 				debugState.paused ? button(Play, "continue", "Continue") : button(Pause, "pause", "Pause"),
@@ -128,30 +116,80 @@ export function installShellPreview(hub: Hub): void {
 		host.append(button(RotateCcw, "restart", "Restart"), button(Unplug, "stop", "Stop"));
 	};
 
-	hub.subscribe("preview.open", (data) => {
-		const mode = (data as { "mode"?: string } | null)?.mode;
+	/** Create (or resurface) the window for `port`, and make it the primary (overlay/toolbar target). */
+	const ensureSurface = (port: number): PreviewSurface => {
+		const existing = surfaces.get(port);
 
-		if (typeof mode === "string" && mode !== "") {
-			previewMode = mode;
+		if (existing !== undefined) {
+			primaryPort = port;
+
+			return existing;
 		}
 
-		ensureWindow();
-		paneWindow?.show();
+		const paneWindow = createPaneWindow({
+			"title": `Preview :${port} · ${previewMode}`, // titlebar states the port + which debug run type drives it
+			"storageKey": `preview:${port}`,
+			"width": Math.min(520, window.innerWidth - 80),
+			"height": Math.min(600, window.innerHeight - 120),
+			"onClose": () => { hub.publish("preview.close", { "port": port }); }
+		});
+		const frame = document.createElement("iframe");
+
+		paneWindow.body.appendChild(frame);
+		paneWindow.body.classList.add(bodyRelative());
+
+		const promptEl = document.createElement("div");
+
+		promptEl.className = promptLayer();
+		paneWindow.body.appendChild(promptEl);
+
+		// Each surface applies ITS port's HMR into ITS iframe (React Fast Refresh, state preserved).
+		const offHmr = hub.subscribe(`preview.hmr.${port}`, (message) => { frame.contentWindow?.postMessage(message, "*"); });
+		const surface: PreviewSurface = { "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "offHmr": offHmr };
+
+		surfaces.set(port, surface);
+		primaryPort = port;
+		renderDebugToolbar(); // in case a session is already active when the window opens
+
+		return surface;
+	};
+
+	hub.subscribe("preview.open", (data) => {
+		const info = data as { "mode"?: string; "port"?: number } | null;
+
+		if (typeof info?.mode === "string" && info.mode !== "") {
+			previewMode = info.mode;
+		}
+
+		ensureSurface(typeof info?.port === "number" ? info.port : DEFAULT_PORT).paneWindow.show();
 	});
 
 	hub.subscribe("preview.ready", (data) => {
-		const url = (data as { "url"?: string } | null)?.url;
+		const info = data as { "url"?: string; "port"?: number } | null;
+		const surface = surfaces.get(typeof info?.port === "number" ? info.port : DEFAULT_PORT);
 
-		if (frame !== undefined && typeof url === "string") {
-			frame.src = url;
+		if (surface !== undefined && typeof info?.url === "string") {
+			surface.frame.src = info.url;
 		}
 	});
 
-	hub.subscribe("preview.close", () => {
-		paneWindow?.element.remove();
-		paneWindow = undefined;
-		frame = undefined;
-		promptEl = undefined;
+	hub.subscribe("preview.close", (data) => {
+		const port = typeof (data as { "port"?: number } | null)?.port === "number" ? (data as { "port": number }).port : DEFAULT_PORT;
+		const surface = surfaces.get(port);
+
+		if (surface === undefined) {
+			return;
+		}
+
+		surface.offHmr();
+		surface.paneWindow.element.remove();
+		surfaces.delete(port);
+
+		if (primaryPort === port) {
+			primaryPort = [...surfaces.keys()].pop(); // fall back to another open preview, if any
+		}
+
+		renderDebugToolbar();
 	});
 
 	hub.subscribe("debug.state", (data) => {
@@ -161,20 +199,15 @@ export function installShellPreview(hub: Hub): void {
 		renderDebugToolbar();
 	});
 
-	/** Show ONE capability prompt as the overlay and resolve with the user's choice. Ensures a preview window
-	 *  exists so the prompt always has a home (the running app is dimmed behind it). */
+	/** Show ONE capability prompt as an overlay on the primary preview window (created if none) and resolve with the
+	 *  user's choice — the running app is dimmed behind it. */
 	const runOnePrompt = (request: PromptRequest): Promise<PromptChoice> => {
-		ensureWindow();
-		paneWindow?.show();
+		const surface = primary() ?? ensureSurface(DEFAULT_PORT);
+
+		surface.paneWindow.show();
 
 		return new Promise<PromptChoice>((resolve) => {
-			const layer = promptEl;
-
-			if (layer === undefined) {
-				resolve("deny"); // no surface to prompt on → fail closed
-				return;
-			}
-
+			const layer = surface.promptEl;
 			// Auto-deny if the prompt is ignored — matches the decider's RPC timeout so the overlay never stalls the
 			// queue (an unanswered prompt fails closed on both ends).
 			let timer: ReturnType<typeof setTimeout>;
@@ -232,9 +265,9 @@ export function installShellPreview(hub: Hub): void {
 		});
 	};
 
-	// The ext-host decider (extensions/capabilities/decide.ts) round-trips here for every TOFU decision — the
-	// prompt is OUR WebAwesome overlay in the preview window, never a VS Code notification. Serialized so several
-	// held requests queue through the one overlay.
+	// The ext-host decider (extensions/capabilities/decide.ts) round-trips here for every TOFU decision — the prompt
+	// is OUR WebAwesome overlay in the preview window, never a VS Code notification. Serialized so several held
+	// requests queue through the one overlay.
 	serve(hub, "capability.prompt", (request) => {
 		const result = promptChain.then(() => runOnePrompt(request as PromptRequest));
 
@@ -243,17 +276,14 @@ export function installShellPreview(hub: Hub): void {
 		return result;
 	});
 
-	// HMR: the worker publishes `preview.hmr.<port>`; post each update into the iframe, whose injected HMR client
-	// applies it (React Fast Refresh, state preserved). The `>` wildcard avoids hard-coding the port here.
-	hub.subscribe("preview.hmr.>", (message) => { frame?.contentWindow?.postMessage(message, "*"); });
-
 	// Observability bridge: the injected tap (node-worker.ts OBS_TAP) posts each console call / uncaught error up as
-	// `{channel:"obs-log", record}`. Reshape into a LogRecord and publish on `$sys.log.preview` so the preview iframe —
-	// otherwise invisible to the plane (app code logs through raw console, not util/logger) — federates to the root
-	// collector and out to debug-mcp like every other context.
+	// `{channel:"obs-log", record}`. Reshape into a LogRecord and publish on `$sys.log.preview` so a preview iframe —
+	// otherwise invisible to the plane (app code logs through raw console) — federates to the root collector.
 	globalThis.addEventListener("message", (event: MessageEvent) => {
-		if (frame === undefined || event.source !== frame.contentWindow) {
-			return; // only our preview iframe
+		const fromPreview = [...surfaces.values()].some((surface) => surface.frame.contentWindow === event.source);
+
+		if (!fromPreview) {
+			return; // only our preview iframes
 		}
 
 		const payload = event.data as { "channel"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;

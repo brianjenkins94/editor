@@ -47,35 +47,45 @@ if (isolated && window.parent === window) {
 	// save. Display-free — the movable window + iframe live in the shell (top frame); this realm runs the dev server +
 	// ServerBridge and hands the shell the SW URL. Created lazily (dynamic import) so `typescript` — the preview's
 	// transpiler — stays out of the initial host bundle. Saves that arrive before it's ready are covered by the seed.
-	let preview: Preview | undefined;
+	// Keyed by virtual port, so several previews (a multi-server app, a multiplayer game) run concurrently, each with
+	// its own dev server + shell window. The single-preview path is just the map with one entry on the default port.
+	const previews = new Map<number, Preview>();
+	const DEFAULT_PREVIEW_PORT = 5173;
 
 	// EXPLICIT (M3): the backend starts when the workspace's dev script runs — `npm run dev` invokes the terminal's
 	// `vite` command, which publishes `preview.open` — not at boot. On success we publish `preview.ready` with the SW
 	// URL; the SHELL shows its movable window on `preview.open` and points the iframe there on `preview.ready`, so the
-	// preview can roam beyond the editor. A repeat open just re-announces the URL for the shell to resurface. Ctrl-C on
-	// `vite` publishes `preview.close` (backend teardown here; the shell hides its window on the same event).
+	// preview can roam beyond the editor. A repeat open on the same port just re-announces the URL for the shell to
+	// resurface. Ctrl-C on `vite` publishes `preview.close` (backend teardown here; the shell hides its window too).
 	rootHub.subscribe("preview.open", (data) => {
-		if (preview !== undefined) {
-			rootHub.publish("preview.ready", { "url": preview.url }); // already running — let the shell resurface
+		const request = data as { "root"?: string; "port"?: number } | null;
+		const port = typeof request?.port === "number" ? request.port : DEFAULT_PREVIEW_PORT;
+		const existing = previews.get(port);
+
+		if (existing !== undefined) {
+			rootHub.publish("preview.ready", { "url": existing.url, "port": port }); // already running — resurface
 			return;
 		}
 
 		import("./preview").then(({ createPreview }) => createPreview({
-			"workspaceFolder": (data as { "root"?: string } | null)?.root ?? "/workspace",
+			"workspaceFolder": request?.root ?? "/workspace",
 			"swUrl": base + "coi-serviceworker.js",
-			"hub": rootHub
+			"hub": rootHub,
+			"port": port
 		})).then((handle) => {
-			preview = handle;
-			rootHub.publish("preview.ready", { "url": handle.url });
-			hostLog.info("preview ready", { "url": handle.url });
+			previews.set(handle.port, handle);
+			rootHub.publish("preview.ready", { "url": handle.url, "port": handle.port });
+			hostLog.info("preview ready", { "url": handle.url, "port": handle.port });
 		}).catch((error: unknown) => {
 			hostLog.error("preview failed", { "error": error instanceof Error ? error.message : String(error) });
 		});
 	});
 
-	rootHub.subscribe("preview.close", () => {
-		preview?.close();
-		preview = undefined;
+	rootHub.subscribe("preview.close", (data) => {
+		const port = typeof (data as { "port"?: number } | null)?.port === "number" ? (data as { "port": number }).port : DEFAULT_PREVIEW_PORT;
+
+		previews.get(port)?.close();
+		previews.delete(port);
 	});
 
 	// The app branch only runs inside the shell's iframe (top-level / renders the shell), so we're always embedded:
@@ -90,7 +100,9 @@ if (isolated && window.parent === window) {
 		"openEditors": ["/workspace/src/App.tsx"],
 		"onSave": (path: string, contents: string) => {
 			hostLog.info("saved", { "path": path, "bytes": contents.length });
-			preview?.update(path, contents);
+			for (const preview of previews.values()) {
+				preview.update(path, contents); // every live preview re-reads the changed file (they share the zen-fs)
+			}
 		}
 	});
 

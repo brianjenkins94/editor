@@ -496,9 +496,18 @@ hub.subscribe("preview.fileChanged", (data) => {
 	previewServers.get(port)?.notifyChange(path);
 });
 
-// Ctrl-C on the terminal's `vite` command: stop every dev server so it's really gone (a later `npm run dev`
-// starts a fresh one).
-hub.subscribe("preview.close", () => {
+// Ctrl-C on the terminal's `vite` command: stop that port's dev server so it's really gone (a later `npm run dev`
+// starts a fresh one). With no port (legacy single-preview teardown), stop every server.
+hub.subscribe("preview.close", (data) => {
+	const port = (data as { "port"?: number } | null)?.port;
+
+	if (typeof port === "number") {
+		previewServers.get(port)?.stop();
+		previewServers.delete(port);
+
+		return;
+	}
+
 	for (const server of previewServers.values()) {
 		server.stop();
 	}

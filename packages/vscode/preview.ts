@@ -20,10 +20,12 @@ import type { Hub } from "@brianjenkins94/hub";
 import { getServerBridge } from "@brianjenkins94/almostnode/bridge";
 import { createRpcClient } from "@brianjenkins94/hub";
 
-/** The virtual port the dev server is registered on (any value; it only namespaces the `/__virtual__/` URL). */
-const PREVIEW_PORT = 5173;
+/** The default virtual port when none is given (single-preview back-compat); the value only namespaces the URL. */
+const DEFAULT_PREVIEW_PORT = 5173;
 
 export interface Preview {
+	/** The virtual port this preview is registered on (keys the shell window + SW port→run attribution). */
+	"port": number;
 	/** The `/__virtual__/<port>/` URL the shell points its preview iframe at (served by the SW → this bridge). */
 	"url": string;
 	/** Tell the worker's dev server a workspace file changed (workspace-absolute path), triggering HMR. */
@@ -39,6 +41,8 @@ export interface PreviewOptions {
 	"hub": Hub;
 	/** The explorer root the app lives under in the shared workspace (default "/workspace"). */
 	"workspaceFolder"?: string;
+	/** The virtual port to register this preview on — pass a distinct one per concurrent preview (default 5173). */
+	"port"?: number;
 }
 
 /** The worker's relayed response to a virtual request (see node-runner.ts / node-worker.ts). */
@@ -47,19 +51,20 @@ interface VirtualResponse { "status": number; "statusText": string; "headers": R
 export async function createPreview(options: PreviewOptions): Promise<Preview> {
 	const { swUrl, hub } = options;
 	const workspaceFolder = options.workspaceFolder ?? "/workspace";
+	const port = options.port ?? DEFAULT_PREVIEW_PORT;
 	const rpc = createRpcClient(hub);
 
 	// Start the dev server in the node worker, rooted at the workspace on the shared zen-fs.
-	await rpc.request("preview.start", { "port": PREVIEW_PORT, "root": workspaceFolder }, { "timeoutMs": 30000 });
+	await rpc.request("preview.start", { "port": port, "root": workspaceFolder }, { "timeoutMs": 30000 });
 
 	// The ServerBridge wants an http-server-shaped `{listening, address, handleRequest}`; each request relays to
 	// the worker's dev server over the hub and comes back as status/headers/body.
 	const virtualServer = {
 		"listening": true,
-		"address": () => ({ "port": PREVIEW_PORT, "address": "0.0.0.0", "family": "IPv4" }),
+		"address": () => ({ "port": port, "address": "0.0.0.0", "family": "IPv4" }),
 		"handleRequest": async (method: string, url: string, headers: Record<string, string>, body?: ArrayBufferLike) => {
 			const response = await rpc.request("virtual.request", {
-				"port": PREVIEW_PORT,
+				"port": port,
 				"method": method,
 				"url": url,
 				"headers": headers,
@@ -73,7 +78,7 @@ export async function createPreview(options: PreviewOptions): Promise<Preview> {
 	const bridge = getServerBridge();
 
 	await bridge.initServiceWorker({ "swUrl": swUrl });
-	bridge.registerServer(virtualServer as never, PREVIEW_PORT);
+	bridge.registerServer(virtualServer as never, port);
 
 	// The iframe lives in the SHELL now, so HMR and the injected console tap are applied there (shell-preview.ts):
 	// the worker publishes `preview.hmr.<port>` on the hub (the shell subscribes and posts it into its iframe), and
@@ -82,20 +87,21 @@ export async function createPreview(options: PreviewOptions): Promise<Preview> {
 	// Serve UNDER the deploy base (e.g. /editor/__virtual__/…), not root — the SW is scoped to the base, so a
 	// root-absolute /__virtual__/ URL would fall outside its scope and never be intercepted.
 	const base = swUrl.slice(0, swUrl.lastIndexOf("/") + 1);
-	const url = base + "__virtual__/" + PREVIEW_PORT + "/";
+	const url = base + "__virtual__/" + port + "/";
 	const prefix = workspaceFolder.replace(/\/$/u, "");
 
 	return {
+		"port": port,
 		"url": url,
 		// The editor already wrote the file into the shared workspace zen-fs the worker reads — we only tell the
 		// worker which (root-relative) path changed so it re-reads and emits the HMR update. Content isn't sent.
 		"update": (path) => {
 			const relative = path.startsWith(prefix + "/") ? path.slice(prefix.length) : path;
 
-			hub.publish("preview.fileChanged", { "port": PREVIEW_PORT, "path": relative.startsWith("/") ? relative : "/" + relative });
+			hub.publish("preview.fileChanged", { "port": port, "path": relative.startsWith("/") ? relative : "/" + relative });
 		},
 		"close": () => {
-			bridge.unregisterServer(PREVIEW_PORT);
+			bridge.unregisterServer(port);
 		}
 	};
 }
