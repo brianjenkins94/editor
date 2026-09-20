@@ -26,9 +26,23 @@ async function jumpTo(context: AugmentationContext, startLine: number, endLine: 
 	editor.revealRange(range, api.TextEditorRevealType.InCenter);
 }
 
-/** Build the 3-column table for a generated program; each row jumps to its own line range on click. */
-function renderTable(container: HTMLElement, context: AugmentationContext): void {
+const SELECTED_BG = "var(--vscode-list-inactiveSelectionBackground,#37373d)";
+const HOVER_BG = "var(--vscode-list-hoverBackground,#2a2d2e)";
+
+/**
+ * Build the 3-column table for a generated program and wire the map BOTH ways:
+ *  - row → code: clicking a row jumps the editor to its line range (`spanOf`);
+ *  - code → row: as the cursor moves in the generated file, the owning row highlights (`rowAt`).
+ * Returns a disposer (tears down the selection listener + the DOM).
+ */
+function renderTable(container: HTMLElement, context: AugmentationContext): () => void {
+	const { api } = context;
 	const program = generate(sampleSheet);
+	const rowEls = new Map<string, HTMLElement>();
+	let activeRowId: string | undefined;
+	// The row's resting background — SELECTED when the cursor is in its code, else blank. Declared out here (not in the
+	// row loop) so the mouseleave handler reads the LATEST activeRowId without a per-row closure over it.
+	const idleBg = (rowId: string): string => (rowId === activeRowId ? SELECTED_BG : "transparent");
 
 	const table = document.createElement("table");
 
@@ -52,8 +66,9 @@ function renderTable(container: HTMLElement, context: AugmentationContext): void
 		const tr = document.createElement("tr");
 
 		tr.style.cssText = "cursor:pointer;border-bottom:1px solid var(--vscode-panel-border,#2a2a2a)";
-		tr.addEventListener("mouseenter", () => { tr.style.background = "var(--vscode-list-hoverBackground,#2a2d2e)"; });
-		tr.addEventListener("mouseleave", () => { tr.style.background = "transparent"; });
+		// Hover is transient; on leave fall back to the row's SELECTED state (set by the cursor), not blindly to blank.
+		tr.addEventListener("mouseenter", () => { tr.style.background = HOVER_BG; });
+		tr.addEventListener("mouseleave", () => { tr.style.background = idleBg(row.id); });
 
 		const cell = (text: string, mono = false): HTMLElement => {
 			const td = document.createElement("td");
@@ -70,10 +85,35 @@ function renderTable(container: HTMLElement, context: AugmentationContext): void
 			tr.addEventListener("click", () => { void jumpTo(context, span.startLine, span.endLine); });
 		}
 
+		rowEls.set(row.id, tr);
 		table.append(tr);
 	}
 
 	container.append(table);
+
+	// Reverse map (code → row): highlight the row that owns the cursor's line.
+	const highlight = (rowId: string | undefined): void => {
+		activeRowId = rowId;
+
+		for (const [id, tr] of rowEls) {
+			tr.style.background = id === rowId ? SELECTED_BG : "transparent";
+		}
+	};
+
+	const reflect = (editor: any): void => {
+		// Only track the file this augmentation is attached to.
+		if (editor === undefined || String(editor.document?.uri?.path ?? "") !== String(context.document.uri?.path ?? "")) {
+			return;
+		}
+
+		highlight(program.rowAt((editor.selection?.active?.line ?? 0) + 1)); // selection line is 0-based; rowAt is 1-based
+	};
+
+	const sub = api.window.onDidChangeTextEditorSelection((event: any) => { reflect(event.textEditor); });
+
+	reflect(api.window.activeTextEditor); // reflect the current cursor immediately
+
+	return (): void => { sub.dispose(); container.replaceChildren(); };
 }
 
 /** The event-sheet augmentation, keyed to the generated file. */
@@ -82,9 +122,7 @@ export const eventSheetAugmentation: FileAugmentation = {
 	"title": "Event Sheet",
 	"when": (document: any) => String(document.uri?.path ?? "").endsWith("event-sheet.generated.ts"),
 	"render": (container, context) => {
-		renderTable(container, context);
-
-		return { "dispose": () => { container.replaceChildren(); } };
+		return { "dispose": renderTable(container, context) };
 	},
 	"bootstrap": {
 		"label": "Open Event Sheet demo",
