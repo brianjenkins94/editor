@@ -30,8 +30,11 @@ export function registerDebugToolbar(context: vscode.ExtensionContext, hub: Hub)
 
 	const publish = (): void => {
 		const session = vscode.debug.activeDebugSession;
+		// A production session stamps the preview port it drives (extension.ts) so the shell mirrors the toolbar onto
+		// THAT window; absent for a node/tsval session (→ the shell's primary window).
+		const port = session?.configuration["__port"] as number | undefined;
 
-		hub.publish("debug.state", { "active": session !== undefined, "type": session?.type ?? "", "paused": paused });
+		hub.publish("debug.state", { "active": session !== undefined, "type": session?.type ?? "", "paused": paused, "port": typeof port === "number" ? port : undefined });
 	};
 
 	try {

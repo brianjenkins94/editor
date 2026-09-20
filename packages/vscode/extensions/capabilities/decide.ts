@@ -113,7 +113,7 @@ const shellRpc = createRpcClient(podHub);
 /** The TOFU prompt: OUR WebAwesome overlay INSIDE the preview window (shell-preview.ts), reached over the hub —
  *  never a VS Code notification. Returns the user's choice, or undefined if the shell can't be reached at all
  *  (then we fail CLOSED: if we can't ask, we don't allow — an unreachable shell is a bigger problem anyway). */
-async function promptViaShell(request: { "kind": string; "scope": string; "resource": string; "dangerous"?: boolean; "redline"?: boolean }): Promise<string | undefined> {
+async function promptViaShell(request: { "kind": string; "scope": string; "resource": string; "dangerous"?: boolean; "redline"?: boolean; "port"?: number }): Promise<string | undefined> {
 	try {
 		const reply = await shellRpc.request("capability.prompt", request, { "timeoutMs": 300000 });
 
@@ -142,7 +142,7 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 		return { "behavior": "deny", "message": "denied by .silo policy" };
 	}
 
-	const choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": dangerousCapability(capability) });
+	const choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": dangerousCapability(capability), "port": (request as { "port"?: number }).port });
 
 	if (choice === "allow-always") {
 		await persistOverride(capability, resource, "allow");
@@ -160,7 +160,7 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 /** BERNARD break-glass for redline scopes — the preview overlay's redline variant (a deliberate one-time
  *  "Authorize once"); never persisted. Fail closed if the shell can't be reached. */
 async function breakGlass(request: CapabilityRequest): Promise<boolean> {
-	return (await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": request.resource ?? "", "redline": true })) === "authorize";
+	return (await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": request.resource ?? "", "redline": true, "port": (request as { "port"?: number }).port })) === "authorize";
 }
 
 const store = createSessionStore();
@@ -175,6 +175,12 @@ export async function decideCapability(call: CapabilityCall): Promise<boolean> {
 
 	if (request === undefined) {
 		return true;
+	}
+
+	// Carry the originating preview port onto the request so the decider can route the TOFU overlay to that
+	// window (the shell forwards the SW net gate + the WS/WebRTC shim with a port).
+	if (typeof call.port === "number") {
+		(request as { "port"?: number }).port = call.port;
 	}
 
 	try {

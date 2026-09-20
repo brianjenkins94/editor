@@ -184,7 +184,9 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		const id = info.id;
 		const name = info.name ?? "Production run";
 
-		void vscode.debug.startDebugging(undefined, { "type": "production", "request": "attach", "name": name, "__prodId": id });
+		// Stamp the preview port into the session config so the debug-toolbar mirror can tell the shell WHICH preview
+		// window this session drives (per-port toolbar routing). Undefined for a port-less node fallback.
+		void vscode.debug.startDebugging(undefined, { "type": "production", "request": "attach", "name": name, "__prodId": id, "__port": info.port });
 
 		// Run-grain bracket for the PREVIEW only (a port-bound run): the SW tags that port's gated net calls with
 		// `id`, so they accumulate in silo-store's bucket; flush them as one `mode:"preview"` run record at exit. A

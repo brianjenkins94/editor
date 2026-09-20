@@ -55,36 +55,43 @@ interface PreviewSurface {
 	"frame": HTMLIFrameElement;
 	"promptEl": HTMLDivElement;
 	"offHmr": () => void;
+	/** Serializes THIS window's capability prompts through its overlay, one at a time (another window's prompt can
+	 *  show concurrently on its own overlay). */
+	"promptChain": Promise<unknown>;
 }
 
 /** Wire the preview windows to a hub that reaches the app realm (the shell hub). Idempotent per shell. */
 export function installShellPreview(hub: Hub): void {
 	const surfaces = new Map<number, PreviewSurface>();
-	let primaryPort: number | undefined; // the window the overlay + debug toolbar attach to (most-recent)
-	// Serializes concurrent prompts (several held fetches) through the overlay, one at a time.
-	let promptChain: Promise<unknown> = Promise.resolve();
+	let primaryPort: number | undefined; // fallback window for prompts/toolbar not bound to a specific preview port
 	// The debug-run type shown in a window title. The live preview is the almostnode "production" run
 	// (see production-adapter.ts); `preview.open` may override it.
 	let previewMode = "production";
-	// Latest active-debug-session state, published by debug-toolbar.ts — mirrored into the primary window's toolbar.
-	let debugState = { "active": false, "type": "", "paused": false };
+	// Latest active-debug-session state, published by debug-toolbar.ts. `port` is the preview the session drives (a
+	// production run stamps its port); mirrored into THAT window's titlebar. Undefined for node/tsval sessions.
+	let debugState = { "active": false, "type": "", "paused": false, "port": undefined as number | undefined };
 	// For the preview shim's WS/WebRTC capability decisions — round-trips to the ext-host decider over the hub.
 	const capRpc = createRpcClient(hub);
 
 	const primary = (): PreviewSurface | undefined => (primaryPort === undefined ? undefined : surfaces.get(primaryPort));
 
-	// Mirror the active debug session's toolbar (debug-toolbar.ts) into the primary preview titlebar: pause/step
-	// only for a stepping session (tsval), always restart + stop; each button rides `debug.command` to the command.
+	// Mirror the active debug session's toolbar (debug-toolbar.ts) into the titlebar of the window it drives —
+	// the session's own preview port, or the primary window for a node/tsval session with no port. VS Code has ONE
+	// active session at a time, so the toolbar lives on ONE window; clear every window first so it never lingers on
+	// a previously-active one. pause/step show only for a stepping session (tsval); restart + stop always.
 	const renderDebugToolbar = (): void => {
-		const host = primary()?.paneWindow.headerActions;
+		for (const surface of surfaces.values()) {
+			surface.paneWindow.headerActions.replaceChildren();
+		}
 
-		if (host === undefined) {
+		if (!debugState.active) {
 			return;
 		}
 
-		host.replaceChildren();
+		const target = (debugState.port !== undefined ? surfaces.get(debugState.port) : undefined) ?? primary();
+		const host = target?.paneWindow.headerActions;
 
-		if (!debugState.active) {
+		if (host === undefined) {
 			return;
 		}
 
@@ -147,7 +154,7 @@ export function installShellPreview(hub: Hub): void {
 
 		// Each surface applies ITS port's HMR into ITS iframe (React Fast Refresh, state preserved).
 		const offHmr = hub.subscribe(`preview.hmr.${port}`, (message) => { frame.contentWindow?.postMessage(message, "*"); });
-		const surface: PreviewSurface = { "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "offHmr": offHmr };
+		const surface: PreviewSurface = { "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "offHmr": offHmr, "promptChain": Promise.resolve() };
 
 		surfaces.set(port, surface);
 		primaryPort = port;
@@ -195,17 +202,15 @@ export function installShellPreview(hub: Hub): void {
 	});
 
 	hub.subscribe("debug.state", (data) => {
-		const next = data as { "active"?: boolean; "type"?: string; "paused"?: boolean };
+		const next = data as { "active"?: boolean; "type"?: string; "paused"?: boolean; "port"?: number };
 
-		debugState = { "active": next.active === true, "type": next.type ?? "", "paused": next.paused === true };
+		debugState = { "active": next.active === true, "type": next.type ?? "", "paused": next.paused === true, "port": typeof next.port === "number" ? next.port : undefined };
 		renderDebugToolbar();
 	});
 
-	/** Show ONE capability prompt as an overlay on the primary preview window (created if none) and resolve with the
-	 *  user's choice — the running app is dimmed behind it. */
-	const runOnePrompt = (request: PromptRequest): Promise<PromptChoice> => {
-		const surface = primary() ?? ensureSurface(DEFAULT_PORT);
-
+	/** Show ONE capability prompt as an overlay on `surface`'s preview window and resolve with the user's choice —
+	 *  the running app is dimmed behind it. */
+	const runOnePrompt = (surface: PreviewSurface, request: PromptRequest): Promise<PromptChoice> => {
 		surface.paneWindow.show();
 
 		return new Promise<PromptChoice>((resolve) => {
@@ -268,12 +273,16 @@ export function installShellPreview(hub: Hub): void {
 	};
 
 	// The ext-host decider (extensions/capabilities/decide.ts) round-trips here for every TOFU decision — the prompt
-	// is OUR WebAwesome overlay in the preview window, never a VS Code notification. Serialized so several held
-	// requests queue through the one overlay.
+	// is OUR WebAwesome overlay, never a VS Code notification. It shows on the window whose app triggered it: the
+	// request's `port` (threaded from the SW net gate / the WS-WebRTC shim), or the primary window for a decision
+	// not bound to a preview (a node/fs run). Serialized PER WINDOW so held requests queue on their own overlay
+	// without blocking another window's.
 	serve(hub, "capability.prompt", (request) => {
-		const result = promptChain.then(() => runOnePrompt(request as PromptRequest));
+		const port = (request as { "port"?: number }).port;
+		const surface = (typeof port === "number" ? surfaces.get(port) : undefined) ?? primary() ?? ensureSurface(DEFAULT_PORT);
+		const result = surface.promptChain.then(() => runOnePrompt(surface, request as PromptRequest));
 
-		promptChain = result.catch(() => undefined);
+		surface.promptChain = result.catch(() => undefined);
 
 		return result;
 	});

@@ -77,9 +77,9 @@ swHub.subscribe("production.launch", (data) => {
 	});
 });
 
-async function decideNet(url, runId) {
+async function decideNet(url, runId, port) {
 	try {
-		return (await capabilityRpc.request("capability.decide", { "kind": "net", "args": [url], "runId": runId ?? undefined }, { "timeoutMs": 300000 })) !== false;
+		return (await capabilityRpc.request("capability.decide", { "kind": "net", "args": [url], "runId": runId ?? undefined, "port": port }, { "timeoutMs": 300000 })) !== false;
 	} catch (rpcError) {
 		swLog.error("capability.decide failed — allowing (fail-open)", { "error": String(rpcError) });
 
@@ -122,7 +122,7 @@ async function gateAndFetch(event, request, requestUrl) {
 
 			// A preview client's fetch → gate it, attributed to the run that owns its port (undefined runId if the
 			// mapping hasn't arrived yet → recorded call-grain, still gated).
-			if (previewPort !== undefined && !(await decideNet(request.url, previewRunByPort.get(previewPort)))) {
+			if (previewPort !== undefined && !(await decideNet(request.url, previewRunByPort.get(previewPort), previewPort))) {
 				return new Response("Blocked by capability policy: net " + requestUrl.host, { "status": 403, "statusText": "Capability denied" });
 			}
 		}
