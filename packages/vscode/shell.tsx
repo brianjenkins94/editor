@@ -20,6 +20,7 @@ import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { renderGitPanel } from "./git-panel";
 import { installShellPreview } from "./shell-preview";
+import type { RunTarget } from "./targets";
 import { css, globalCss, iconSvg } from "./theme";
 import "@awesome.me/webawesome/dist/components/page/page.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
@@ -56,6 +57,28 @@ const injectGlobals = globalCss({
 const topBar = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "padding": "0 var(--wa-space-s)", "height": "40px", "borderBottom": "1px solid var(--wa-color-surface-border)" });
 const brand = css({ "fontWeight": "var(--wa-font-weight-semibold)", "marginInlineEnd": "var(--wa-space-s)", "color": "var(--wa-color-text-quiet)" });
 const spacer = css({ "flex": "1 1 auto" });
+
+// Run picker: the top-bar Run button opens a small popover listing the repo's discovered run targets. A fixed,
+// transparent backdrop closes it on an outside click; the menu sits above it.
+const runWrap = css({ "position": "relative", "display": "inline-flex" });
+// High z-indexes so the popover clears the editor iframe (which sits in a separate app-shell region).
+const runBackdrop = css({ "position": "fixed", "inset": 0, "zIndex": 2147482000 });
+const runMenu = css({
+	"position": "absolute", "top": "calc(100% + 4px)", "insetInlineStart": 0, "zIndex": 2147482001,
+	"minWidth": "240px", "maxHeight": "60vh", "overflowY": "auto",
+	"backgroundColor": "var(--wa-color-surface-raised)", "border": "1px solid var(--wa-color-surface-border)",
+	"borderRadius": "var(--wa-border-radius-m)", "boxShadow": "var(--wa-shadow-l)", "padding": "var(--wa-space-2xs)"
+});
+const runItem = css({
+	"display": "flex", "alignItems": "baseline", "gap": "var(--wa-space-s)", "width": "100%",
+	"padding": "var(--wa-space-2xs) var(--wa-space-xs)", "borderRadius": "var(--wa-border-radius-s)",
+	"cursor": "pointer", "textAlign": "start", "background": "transparent", "border": 0, "color": "inherit", "font": "inherit",
+	"&:hover": { "backgroundColor": "var(--wa-color-neutral-fill-quiet)" },
+	"&:focus-visible": { "outline": "2px solid var(--wa-color-focus)", "outlineOffset": "-2px" }
+});
+const runItemName = css({ "fontWeight": "var(--wa-font-weight-semibold)" });
+const runItemMeta = css({ "marginInlineStart": "auto", "fontSize": "11px", "color": "var(--wa-color-text-quiet)" });
+const runEmpty = css({ "padding": "var(--wa-space-xs)", "fontSize": "12px", "color": "var(--wa-color-text-quiet)" });
 
 // The menu/aside regions are full-height flex columns: a fixed header strip, then a scrolling body — so the projects
 // list and the (kept) git-panel each fill their side and scroll internally. `--header-height` is published by wa-page.
@@ -206,7 +229,10 @@ function Shell() {
 	const [currentId, setCurrentId] = useState<string | undefined>(undefined);
 	const [navWidth, setNavWidth] = useState(() => loadPaneWidth("navWidth", PANE.navDefault));
 	const [asideWidth, setAsideWidth] = useState(() => loadPaneWidth("asideWidth", PANE.asideDefault));
+	const [runOpen, setRunOpen] = useState(false);
+	const [targets, setTargets] = useState<RunTarget[]>([]);
 
+	const rpcRef = useRef<ReturnType<typeof createRpcClient>>();
 	const pageRef = useRef<HTMLElement>(null);
 	const appFrameRef = useRef<HTMLIFrameElement>(null);
 	const gitPanelRef = useRef<HTMLDivElement>(null);
@@ -253,6 +279,8 @@ function Shell() {
 		}, shellHub);
 
 		const rpc = createRpcClient(shellHub);
+
+		rpcRef.current = rpc; // reused by the run picker
 
 		// Pull the catalog, retrying until the app iframe has linked (the hub's hello handshake reconciles interest).
 		void (async () => {
@@ -347,6 +375,31 @@ function Shell() {
 		}
 	};
 
+	// The run picker: toggle the popover; on open, fetch the repo's discovered run targets. Selecting one publishes
+	// `run.target` so the workbench runs it in a terminal (which mints + records the run with its target identity).
+	const toggleRun = (): void => {
+		const willOpen = !runOpen;
+
+		setRunOpen(willOpen);
+
+		if (willOpen) {
+			void (async () => {
+				try {
+					const result = await rpcRef.current?.request("targets.list", undefined, { "timeoutMs": 4000 }) as { "targets"?: RunTarget[] } | undefined;
+
+					setTargets(Array.isArray(result?.targets) ? result.targets : []);
+				} catch {
+					setTargets([]);
+				}
+			})();
+		}
+	};
+
+	const runTarget = (target: RunTarget): void => {
+		hubRef.current?.publish("run.target", { "command": target.command, "cwd": target.cwd, "name": target.package === "." ? target.name : `${target.name} · ${target.package}` });
+		setRunOpen(false);
+	};
+
 	const openProject = (id: string): void => {
 		setCurrentId(id);
 		setLhsCollapsed(true); // making a selection collapses the projects pane back to its rail
@@ -361,7 +414,24 @@ function Shell() {
 				<span class={brand()}>editor</span>
 				<wa-button appearance="plain" size="small" title="Toggle project panel" aria-label="Toggle project panel" onClick={() => { setLhsCollapsed((value) => !value); }}><Icon node={PanelLeft} /></wa-button>
 				<wa-button appearance="plain" size="small" title="Open project" aria-label="Open project"><Icon node={FolderOpen} /></wa-button>
-				<wa-button appearance="plain" size="small" title="Run" aria-label="Run"><Icon node={Play} /></wa-button>
+				<span class={runWrap()}>
+					<wa-button appearance="plain" size="small" title="Run" aria-label="Run" aria-expanded={runOpen} onClick={toggleRun}><Icon node={Play} /></wa-button>
+					{runOpen && (
+						<>
+							<div class={runBackdrop()} onClick={() => { setRunOpen(false); }} />
+							<div class={runMenu()} role="menu">
+								{targets.length === 0 ? (
+									<div class={runEmpty()}>No run targets found</div>
+								) : targets.map((target) => (
+									<button key={target.id} type="button" class={runItem()} role="menuitem" onClick={() => { runTarget(target); }}>
+										<span class={runItemName()}>{target.name}</span>
+										<span class={runItemMeta()}>{target.kind === "bin" ? "bin" : target.package === "." ? "script" : target.package}</span>
+									</button>
+								))}
+							</div>
+						</>
+					)}
+				</span>
 				<wa-button appearance="plain" size="small" title="Commit" aria-label="Commit"><Icon node={GitCommit} /></wa-button>
 				<span class={spacer()} />
 				<wa-button appearance="plain" size="small" title="History" aria-label="History"><Icon node={History} /></wa-button>
