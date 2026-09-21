@@ -13,7 +13,7 @@ import { portTransport } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
-import { EMPTY_POLICY, type Policy } from "../capabilities/policy-core";
+import { EMPTY_POLICY, type Policy } from "@brianjenkins94/util/silo/policy";
 import { loadEffectivePolicy } from "../capabilities/silo-store";
 import { podHub } from "./pod";
 

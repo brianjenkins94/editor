@@ -42,7 +42,7 @@ also works over desktop's built-in git.
 | **Workbench iframe** (`/__vscode__/host.html`) | `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal.ts`, `node-runner.ts`, `git-scm.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()`, mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(git SCM `git-scm.ts`/`git-engine.ts` install here too — legitimate browser parity for desktop's built-in git; the BABLR classifier welded into it is the part that should become a standalone extension.)* |
 | **Extension host** (`LocalProcess` / `LocalWebWorker`) | `extensions/*/extension.ts`, `extensions/*/ts-plugin.js` | the vscode API — **no DOM, no zen-fs singleton** | Extensions: `hello` (default API context), `worker-pod` (spawns the LSP/debug/node workers). `eslint` + `capabilities` run in the WebWorker host *inside tsserver*, reusing tsserver's own `ts` as TS-plugins. |
 | **Workers** (`dist/lsp/*`, spawned from the workbench realm) | only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `git-classify-worker` (BABLR classify). |
-| **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (`cstSpans`, `classifyChange`), `tsval`, `util/silo`, and the vscode-package-local pure modules `policy-core`, `capability-breakpoints`. Built/aliased into the realms above. |
+| **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (`cstSpans`, `classifyChange`), `tsval`, `util/silo` (incl. `silo/policy` — the shared policy model), and the vscode-package-local pure module `capability-breakpoints`. Built/aliased into the realms above. |
 
 There is also a **service worker** (`coi-serviceworker.js`, registered by `coi.ts`): one per origin, it stamps the
 COOP/COEP headers that make every realm cross-origin-isolated (SharedArrayBuffer) on a static host, and resolves the
@@ -86,7 +86,7 @@ flowchart TB
   SH["server-host<br/>LSP"]
   CW["classify-worker<br/>BABLR classifyChange"]
 
-  PKG["packages/* engines — pure, bundled at build time<br/>@brianjenkins94/bablr · tsval · policy-core · capability-breakpoints · util/silo"]
+  PKG["packages/* engines — pure, bundled at build time<br/>@brianjenkins94/bablr · tsval · util/silo (silo/policy) · capability-breakpoints"]
 
   S -.->|"loads iframe (src = self)"| A
   A -.->|"creates iframe (src = host.html)"| W
@@ -119,7 +119,7 @@ Edge styles: **solid arrows** = live message channels; **thick arrows** = a real
 Ask, in order:
 
 1. **Pure logic, no host deps?** → a **package / engine module** (node-testable). *e.g. `classifyChange`, `git-engine`
-   (no vscode dep), `policy-core`, `capability-breakpoints`.*
+   (no vscode dep), `silo/policy`, `capability-breakpoints`.*
 2. **NOVEL product functionality** (desktop VS Code does *not* provide it)? → a self-contained **extension** in the
    ext host, reaching the workspace through **`vscode.workspace.fs`** (never a direct `zen-fs` import), and
    **spawning any heavy worker itself**. Model: the `capabilities` extension. *The BABLR cosmetic classifier belongs
@@ -160,7 +160,7 @@ The cosmetic-diff feature is the running example — and its git/SCM stack shows
   SCM/diff/fs APIs and adds the badge — so it works over desktop's built-in git too. *(This is the "bablr belongs in
   the extension" correction, correctly scoped: the classifier ports; the SCM shim does not.)* Recorded as debt.
 
-The capability overlay is the template for that classifier extension: pure core (`policy-core`,
+The capability overlay is the template for that classifier extension: pure core (`silo/policy`,
 `capability-breakpoints`) → a tsserver plugin (ext host) that emits diagnostics → an ext-host binding
 (`extensions/capabilities/extension.ts`) that renders the panel. See `extensions/capabilities/ARCHITECTURE.md`.
 

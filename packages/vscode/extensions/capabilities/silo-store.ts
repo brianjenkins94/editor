@@ -27,9 +27,9 @@
  * root `.silo` plus per-package ones without any schema change. No caller assumes a single root.
  */
 import type { CapabilityRequest } from "@brianjenkins94/util/silo/enforce/broker";
-import type { Disposition, Policy } from "./policy-core";
+import type { Disposition, Policy } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { EMPTY_POLICY, parsePolicy, withRule } from "./policy-core";
+import { EMPTY_POLICY, parsePolicy, withRule } from "@brianjenkins94/util/silo/policy";
 
 // ── paths ──────────────────────────────────────────────────────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@ the core at its own call boundary. Hold to that and the seams stay put.
 
 ```
                            ┌──────────────────────── THE CORE (pure; no vscode / node / oxc) ───────────────────┐
-                           │  policy-core.ts              dispositions, rules, resource matching  → .silo/ layout
+                           │  silo/policy (util)          dispositions, rules, resource matching  → .silo/ layout
                            │  capability-breakpoints.ts   classifyCall(node,args) · shouldBreak(policy) · findSites
                            └──────────────────────────────────────────────────────────────────────────────────┘
                                         ▲ consumed by every stage / runtime ▲
@@ -67,14 +67,14 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
 
 | file | role | runs in |
 | --- | --- | --- |
-| `policy-core.ts` | pure policy model: `Policy`/`Rule`, `effectiveDisposition`, `findRule`, `matchesResource`, edits | anywhere (pure) |
+| `@brianjenkins94/util/silo/policy` | pure policy model: `Policy`/`Rule`, `effectiveDisposition`, `findRule`, `matchesResource`, edits, `DANGEROUS`/`isDangerous` (shared with silo; was the local `policy-core.ts` fork) | anywhere (pure) |
 | `capability-breakpoints.ts` | pure call model: `classifyCall`, `shouldBreak`, `findCapabilitySites`, `renderCallee` | anywhere (needs only `ts` types) |
 | `engine.ts` → `capabilities-engine.js` | DETECT — util/silo `findReach` (oxc) | tsserver plugin |
 | `canary.ts` → `capabilities-canary.js` | RESOLVE — tsval run, observes pre-call values (ts **external**, reuses tsserver's) | tsserver plugin |
 | `ts-plugin.js` | loads both engines, runs the canary in the background, merges results into diagnostics | tsserver plugin |
 | `ts-external.js` | the `typescript` shim (`= globalThis.__capabilitiesTs`) that lets the canary reuse tsserver's ts | build only |
 | `extension.ts` | the "Capability calls" panel + the tripwire error-surface | ext host |
-| `policy.ts` | vscode read/write of the base `.silo/policy.json` the panel curates (wraps `policy-core`) | ext host |
+| `policy.ts` | vscode read/write of the base `.silo/policy.json` the panel curates (wraps `silo/policy`) | ext host |
 | `silo-store.ts` | the whole `.silo/` layout: base+override policy merge, observed rollup, run firehose, git-user resolution | ext host |
 | `decide.ts` | the single capability decision endpoint every interceptor round-trips to (classify → gate → decide) | ext host |
 
@@ -83,8 +83,9 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
 - **One classifier.** `capability-breakpoints.classifyCall` is THE way to decide "is this a capability, what
   resource." The canary uses it (AST-primary); its injected stand-ins carry tags only as an *aliasing fallback*
   (`const f = fetch; f(url)`), never as a second classifier. A new runtime uses `classifyCall` too.
-- **One policy model.** `policy-core` is the single source of dispositions + matching; `silo-store` is the single
-  source of `.silo/` I/O (base+override merge, observed facts). `policy.ts` only adds the panel's base-file I/O.
+- **One policy model.** `@brianjenkins94/util/silo/policy` is the single source of dispositions + matching (shared
+  with silo, no longer a local fork); `silo-store` is the single source of `.silo/` I/O (base+override merge,
+  observed facts). `policy.ts` only adds the panel's base-file I/O.
 - **Diagnostics are the bus out of tsserver.** Anything the plugin needs to tell the UI rides a `ts.Diagnostic`.
 - **One decision endpoint; thin interceptors.** Every runtime interceptor (the service-worker net gate, the
   almostnode fs/exec shim hook) is dumb and full-round-trips to `decide.ts` (`classify → gate → decide`); no

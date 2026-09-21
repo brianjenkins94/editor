@@ -15,9 +15,8 @@ import type { BrokerOptions, CapabilityRequest, GrantStore, Verdict } from "@bri
 import { createRpcClient } from "@brianjenkins94/hub";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
 import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
-import { isDangerous } from "@brianjenkins94/util/silo/policy";
+import { effectiveDisposition, isDangerous } from "@brianjenkins94/util/silo/policy";
 import { podHub } from "../worker-pod/pod";
-import { effectiveDisposition } from "./policy-core";
 import { loadEffectivePolicy, persistOverride, recordObservation } from "./silo-store";
 
 /**
@@ -91,11 +90,6 @@ function capabilityOf(request: CapabilityRequest): string {
 	return request.kind === "fs" ? `fs:${request.op ?? "read"}` : request.kind;
 }
 
-/** WS/WebRTC aren't in silo's DANGEROUS set (net/exec/eval/fs:write), but a preview reaching an arbitrary socket
- *  IS worth gating — so an undecided WS/WebRTC scope must prompt (review), not silently default-allow. */
-function dangerousCapability(capability: string): boolean {
-	return isDangerous(capability) || capability === "net.ws" || capability === "net.webrtc";
-}
 
 /** Session-only store — "Allow once" lives here (a fast-path short-circuit in broker.gate); persisted decisions
  *  live in the policy file (consulted by the decider), so the store itself needs no disk. */
@@ -132,7 +126,7 @@ async function promptViaShell(request: { "kind": string; "scope": string; "resou
 async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 	const capability = capabilityOf(request);
 	const resource = request.resource ?? "";
-	const effective = effectiveDisposition(await loadEffectivePolicy(), capability, resource, dangerousCapability(capability));
+	const effective = effectiveDisposition(await loadEffectivePolicy(), capability, resource, isDangerous(capability));
 
 	if (effective === "allow") {
 		return { "behavior": "allow" };
@@ -142,7 +136,7 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 		return { "behavior": "deny", "message": "denied by .silo policy" };
 	}
 
-	const choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": dangerousCapability(capability), "port": (request as { "port"?: number }).port });
+	const choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), "port": (request as { "port"?: number }).port });
 
 	if (choice === "allow-always") {
 		await persistOverride(capability, resource, "allow");

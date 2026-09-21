@@ -1,7 +1,8 @@
 /**
  * Capability policy — the vscode I/O half (read/write the workspace `.silo/policy.json`). The PURE model (types,
- * disposition logic, rule edits, resource matching) lives in policy-core.ts so the runtime enforcer (silo-store.ts,
- * consulted by decide.ts) governs by the exact same rules the panel shows.
+ * disposition logic, rule edits, resource matching) lives in silo's shared policy layer
+ * (`@brianjenkins94/util/silo/policy`) so the runtime enforcer (silo-store.ts, consulted by decide.ts) — and any
+ * other silo harness — governs by the exact same rules the panel shows.
  *
  * This panel edits the BASE policy — the shared, human-authored contract at `.silo/policy.json`. A person clicking
  * a disposition here IS the human authoring it (silo itself never writes this file). Per-user runtime grants (the
@@ -13,10 +14,10 @@
  */
 import * as vscode from "vscode";
 
-import { EMPTY_POLICY, parsePolicy, type Policy } from "./policy-core";
+import { EMPTY_POLICY, parsePolicy, type Policy } from "@brianjenkins94/util/silo/policy";
 
-export { effectiveDisposition, withRule, withoutRule } from "./policy-core";
-export type { Disposition, Effective, Policy, Rule } from "./policy-core";
+export { effectiveDisposition, withRule, withoutRule } from "@brianjenkins94/util/silo/policy";
+export type { Disposition, Effective, Policy, Rule } from "@brianjenkins94/util/silo/policy";
 
 /** The base `.silo/policy.json` at the (first) workspace root, or undefined with no workspace open. */
 export function policyUri(): vscode.Uri | undefined {

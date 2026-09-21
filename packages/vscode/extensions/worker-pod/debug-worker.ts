@@ -18,7 +18,7 @@
 import type { LoadedVM } from "@brianjenkins94/tsval";
 import type { GuestRoot } from "./debug-react";
 
-import type { Policy } from "../capabilities/policy-core";
+import type { Policy } from "@brianjenkins94/util/silo/policy";
 
 import { createHub, portTransport } from "@brianjenkins94/hub";
 import { createVM } from "@brianjenkins94/tsval";

@@ -5,8 +5,8 @@
  * require a hard stop here? If so, the debugger pauses at that line (native VS Code debug UI); the user inspects,
  * steps (back, under tsval), and decides.
  *
- * Kept free of any debugger/vscode dependency (only `typescript` for the AST node shape + policy-core + silo's
- * danger set) so it can be consumed from either the tsval debug worker or an almostnode adapter without coupling
+ * Kept free of any debugger/vscode dependency (only `typescript` for the AST node shape + silo's policy layer,
+ * `@brianjenkins94/util/silo/policy`) so it can be consumed from either the tsval debug worker or an almostnode adapter without coupling
  * to either — the point of building it standalone first.
  *
  * Classification is AST-based (callee name → capability, a fixed argument as the resource), NOT the canary's
@@ -15,7 +15,7 @@
  * caught here, unlike the canary; a later refinement can resolve it.)
  */
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
-import { effectiveDisposition, type Policy } from "./policy-core";
+import { effectiveDisposition, type Policy } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
 
 /** A capability call the debugger (or the canary) reached: what it is, and the resource it targets (when a
