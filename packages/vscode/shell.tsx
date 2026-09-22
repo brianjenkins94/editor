@@ -20,7 +20,6 @@ import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { renderGitPanel } from "./git-panel";
 import { installShellPreview } from "./shell-preview";
-import { installShellTsvalPreview } from "./shell-tsval-preview";
 import type { RunTarget } from "./targets";
 import { css, globalCss, iconSvg } from "./theme";
 import "@awesome.me/webawesome/dist/components/page/page.js";
@@ -259,11 +258,9 @@ function Shell() {
 		hubRef.current = shellHub;
 		shellHub.link(windowTransport(appFrame.contentWindow!));
 
-		// The preview window lives in the top frame so it can roam beyond the editor. See shell-preview.ts.
+		// The preview windows live in the top frame so they can roam beyond the editor — the app dev-server previews AND
+		// the tsval debugger's render surface, all managed here. See shell-preview.ts / debug-preview-view.ts.
 		installShellPreview(shellHub);
-		// The tsval debugger's render surface also gets its own floating window (like the app preview). See
-		// shell-tsval-preview.ts / debug-preview-view.ts.
-		installShellTsvalPreview(shellHub);
 
 		// The editor (workbench iframe) follows the OS theme too. The shell is the source of truth for the OS
 		// preference — it reliably gets prefers-color-scheme changes, whereas the iframe may not — so publish the

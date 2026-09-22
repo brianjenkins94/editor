@@ -75,6 +75,13 @@ export function installShellPreview(hub: Hub): void {
 
 	const primary = (): PreviewSurface | undefined => (primaryPort === undefined ? undefined : surfaces.get(primaryPort));
 
+	// The tsval debugger's render surface (debug-preview.html) gets its OWN window too — a live runtime surface, like
+	// the app previews — but it's fed a mutation stream over the hub rather than a served URL, so it's tracked apart
+	// from the port-keyed `surfaces` while reusing this module's window + debug-toolbar machinery. See
+	// debug-preview-view.ts (the workbench-side bridge). The page is served next to the shell (public/debug-preview.html).
+	const tsvalUrl = new URL("debug-preview.html", location.href).href;
+	let tsvalSurface: { "paneWindow": PaneWindow; "frame": HTMLIFrameElement; "port"?: MessagePort } | undefined;
+
 	// Mirror the active debug session's toolbar (debug-toolbar.ts) into the titlebar of the window it drives —
 	// the session's own preview port, or the primary window for a node/tsval session with no port. VS Code has ONE
 	// active session at a time, so the toolbar lives on ONE window; clear every window first so it never lingers on
@@ -84,11 +91,17 @@ export function installShellPreview(hub: Hub): void {
 			surface.paneWindow.headerActions.replaceChildren();
 		}
 
+		tsvalSurface?.paneWindow.headerActions.replaceChildren();
+
 		if (!debugState.active) {
 			return;
 		}
 
-		const target = (debugState.port !== undefined ? surfaces.get(debugState.port) : undefined) ?? primary();
+		// A tsval session drives the tsval render window; every other session drives its app-preview window (its port,
+		// else the primary). So the step controls always sit on the window showing the run they drive.
+		const target = debugState.type === "tsval"
+			? tsvalSurface
+			: (debugState.port !== undefined ? surfaces.get(debugState.port) : undefined) ?? primary();
 		const host = target?.paneWindow.headerActions;
 
 		if (host === undefined) {
@@ -208,6 +221,43 @@ export function installShellPreview(hub: Hub): void {
 		renderDebugToolbar();
 	});
 
+	// The tsval render window — opened on session start, torn down on stop; the workbench bridge (debug-preview-view.ts)
+	// drives it over the hub. It reuses createPaneWindow + renderDebugToolbar, so the step controls land on THIS window.
+	const teardownTsval = (): void => {
+		tsvalSurface?.port?.close();
+		tsvalSurface?.paneWindow.element.remove();
+		tsvalSurface = undefined;
+		renderDebugToolbar();
+	};
+
+	const ensureTsval = (): void => {
+		if (tsvalSurface !== undefined) {
+			tsvalSurface.paneWindow.show();
+
+			return;
+		}
+
+		const paneWindow = createPaneWindow({
+			"title": "tsval Preview",
+			"storageKey": "tsval-preview",
+			"width": Math.min(460, window.innerWidth - 80),
+			"height": Math.min(560, window.innerHeight - 120),
+			"onClose": teardownTsval
+		});
+		const frame = document.createElement("iframe"); // .wa-win__body > iframe fills the body (window.css)
+
+		frame.title = "tsval preview";
+		frame.src = tsvalUrl;
+		paneWindow.body.appendChild(frame);
+		tsvalSurface = { "paneWindow": paneWindow, "frame": frame };
+		paneWindow.show();
+		renderDebugToolbar(); // a tsval session may already be active when the window opens
+	};
+
+	hub.subscribe("tsval.preview.open", () => { ensureTsval(); });
+	hub.subscribe("tsval.preview.close", () => { teardownTsval(); });
+	hub.subscribe("tsval.preview.stream", (message) => { tsvalSurface?.port?.postMessage(message); });
+
 	/** Show ONE capability prompt as an overlay on `surface`'s preview window and resolve with the user's choice —
 	 *  the running app is dimmed behind it. */
 	const runOnePrompt = (surface: PreviewSurface, request: PromptRequest): Promise<PromptChoice> => {
@@ -294,6 +344,29 @@ export function installShellPreview(hub: Hub): void {
 	//   • `obs-log` : each console call / uncaught error → reshape into a LogRecord on `$sys.log.preview`, so a
 	//     preview iframe (otherwise invisible to the plane — app code logs through raw console) reaches the collector.
 	globalThis.addEventListener("message", (event: MessageEvent) => {
+		// The tsval render surface announced itself → hand it a MessagePort and bridge that port to the hub (same-realm
+		// transfer here; the hub carries the cross-realm half to/from the workbench bridge).
+		if ((event.data as { "type"?: string } | null)?.type === "preview-ready" && tsvalSurface !== undefined && event.source === tsvalSurface.frame.contentWindow) {
+			const channel = new MessageChannel();
+
+			tsvalSurface.port = channel.port1;
+			channel.port1.onmessage = (message: MessageEvent): void => {
+				const data = message.data as { "type"?: string; "id"?: unknown; "event"?: unknown; "index"?: unknown } | null;
+
+				if (data?.type === "event") {
+					hub.publish("tsval.preview.event", { "id": data.id, "event": data.event });
+				} else if (data?.type === "timeTravel") {
+					hub.publish("tsval.preview.timeTravel", { "index": data.index });
+				} else if (data?.type === "hello") {
+					hub.publish("tsval.preview.hello", {}); // → the workbench replays reset + buffer + history to us
+				}
+			};
+			channel.port1.start();
+			tsvalSurface.frame.contentWindow?.postMessage({ "type": "init" }, "*", [channel.port2]);
+
+			return;
+		}
+
 		const source = [...surfaces.entries()].find(([, surface]) => surface.frame.contentWindow === event.source);
 
 		if (source === undefined) {

@@ -1,7 +1,7 @@
 /**
  * tsval debug preview — workbench-side BRIDGE (no view).
  *
- * The render surface (public/debug-preview.html) now lives in a SHELL pane window (shell-tsval-preview.ts), like the
+ * The render surface (public/debug-preview.html) now lives in a SHELL pane window (managed by shell-preview.ts), like the
  * app preview — a live runtime surface belongs in a floating window you can place, not an auxbar tab. This module stays
  * in the workbench realm (it needs the vscode `api` + debug events) and BRIDGES the debugger to that surface over the
  * hub (which spans realms): it forwards the adapter's DAP custom events as `tsval.preview.*`, opens/closes the shell
