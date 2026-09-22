@@ -320,7 +320,7 @@ function maybeBoot(): void {
 				// The tsval debug preview: a dumb-iframe panel view + the adapter↔surface render bridge. Real DOM
 				// (not a webview), so it composites in our coi-serviceworker single-origin harness. See
 				// debug-preview-view.ts.
-				installDebugPreview(() => vscodeApi);
+				installDebugPreview(() => vscodeApi, workbenchHub);
 					// File augmentations: the auxpane shows a per-file-type projection of the active file. First one is
 					// the Event Sheet (a Construct-style projection of the CST) — a 3-column table whose rows jump the
 					// editor to the code they map to. See file-augmentations.ts / event-sheet-view.ts.
