@@ -1,8 +1,9 @@
 /**
  * The Event Sheet augmentation — the FIRST file augmentation (see file-augmentations.ts). A projection of the game the
- * active file belongs to, rendered in the auxpane as a cross-file structural map: OBJECTS (entity types + their
- * behaviors), RULES (systems + their subjects and event→action rows), and the BEHAVIORS library. Every node deep-links
- * to where its code actually lives — click and the editor opens that file at that line.
+ * active file belongs to, rendered in the auxpane as a cross-file structural map: OBJECTS (entity types + their traits),
+ * RULES (systems + their subjects, event→action rows, and the behaviors they compose), BEHAVIORS (the composed reusable
+ * behaviors — the built-in library and the kid's own), and COMPONENTS (the ECS data/tag traits underneath). Every node
+ * deep-links to where its code actually lives — click and the editor opens that file at that line.
  *
  * The model is the REVERSE-PROJECTION of real code (code is the source of truth): the game's files are read and sent to
  * the recognizer worker (game-projection.ts → recognizer-worker.ts, which runs on the editor's shared TypeScript), and
@@ -12,7 +13,7 @@
 /* eslint-disable webawesome/no-inline-styles, webawesome/no-css-in-strings -- a plain structural map in the aux-bar body; intrinsic layout, not themeable chrome */
 import type { AugmentationContext, FileAugmentation } from "./file-augmentations";
 import type { AuthoredGame } from "./game-generator";
-import type { Behavior, GameModel, GameObject, Rule } from "./game-recognizer";
+import type { Behavior, Composite, GameModel, GameObject, Rule } from "./game-recognizer";
 import { renderAuthoring, writeGeneratedGame } from "./authoring-view";
 import { authoredFromModel, blankGame, generateGame } from "./game-generator";
 import { createGameProjection, type GameProjection } from "./game-projection";
@@ -158,11 +159,11 @@ function renderObjects(container: HTMLElement, api: any, root: string, objects: 
 	}
 }
 
-function renderRules(container: HTMLElement, api: any, root: string, rules: Rule[]): void {
+function renderRules(container: HTMLElement, api: any, root: string, rules: Rule[], composites: Map<string, Composite>): void {
 	container.append(heading("Rules · " + rules.length));
 
 	for (const rule of rules) {
-		// The rule header — jumps to the system's definition; shows its subject(s) ("for each ...").
+		// The rule header — jumps to the system's definition; shows its subject(s) ("for each ...") and the behaviors it composes.
 		container.append(clickableRow(() => { void openAt(api, root, rule.defPath, rule.defLine); }, (row) => {
 			const name = document.createElement("span");
 
@@ -175,6 +176,27 @@ function renderRules(container: HTMLElement, api: any, root: string, rules: Rule
 			subject.textContent = rule.queries.length === 0 ? "" : "for each " + rule.queries.map((set) => set.join(" + ")).join(", ");
 			subject.style.cssText = "font-size:11px;opacity:0.6;margin-top:2px";
 			row.append(subject);
+
+			// The behaviors this rule composes — clickable chips that jump to the behavior's definition.
+			if (rule.composes.length > 0) {
+				const uses = document.createElement("div");
+
+				uses.style.cssText = "margin-top:3px";
+
+				for (const composedName of rule.composes) {
+					const element = chip("→ " + composedName);
+					const composite = composites.get(composedName);
+
+					if (composite !== undefined) {
+						element.style.cursor = "pointer";
+						element.addEventListener("click", (event) => { event.stopPropagation(); void openAt(api, root, composite.defPath, composite.defLine); });
+					}
+
+					uses.append(element);
+				}
+
+				row.append(uses);
+			}
 		}));
 
 		// Its event→action rows (indented) — each jumps to its own line.
@@ -201,7 +223,7 @@ function renderRules(container: HTMLElement, api: any, root: string, rules: Rule
 			}));
 		}
 
-		if (rule.rows.length === 0) {
+		if (rule.rows.length === 0 && rule.composes.length === 0) {
 			const note = document.createElement("div");
 
 			note.textContent = "opaque — custom code / runtime glue";
@@ -211,8 +233,42 @@ function renderRules(container: HTMLElement, api: any, root: string, rules: Rule
 	}
 }
 
-function renderBehaviors(container: HTMLElement, api: any, root: string, behaviors: Behavior[]): void {
-	container.append(heading("Behaviors · " + behaviors.length));
+/** BEHAVIORS — the composed reusable behaviors (the built-in library + the kid's own): each a function of primitives. */
+function renderComposites(container: HTMLElement, api: any, root: string, composites: Composite[]): void {
+	if (composites.length === 0) {
+		return;
+	}
+
+	container.append(heading("Behaviors · " + composites.length));
+
+	for (const composite of composites) {
+		container.append(clickableRow(() => { void openAt(api, root, composite.defPath, composite.defLine); }, (row) => {
+			const name = document.createElement("span");
+
+			name.textContent = composite.name;
+			name.style.cssText = "font-weight:600";
+			row.append(name);
+
+			const chips = document.createElement("div");
+
+			chips.style.cssText = "margin-top:3px";
+
+			for (const use of composite.uses) {
+				chips.append(chip(use));
+			}
+
+			for (const sub of composite.composes) {
+				chips.append(chip("→ " + sub));
+			}
+
+			row.append(chips);
+		}));
+	}
+}
+
+/** COMPONENTS — the ECS components (data/tag traits) that objects and behaviors are built on. */
+function renderComponents(container: HTMLElement, api: any, root: string, behaviors: Behavior[]): void {
+	container.append(heading("Components · " + behaviors.length));
 
 	for (const behavior of behaviors) {
 		container.append(clickableRow(() => { void openAt(api, root, behavior.defPath, behavior.defLine); }, (row) => {
@@ -234,7 +290,7 @@ function renderBehaviors(container: HTMLElement, api: any, root: string, behavio
 function paint(container: HTMLElement, context: AugmentationContext, root: string, model: GameModel): void {
 	container.replaceChildren();
 
-	if (model.objects.length === 0 && model.rules.length === 0 && model.behaviors.length === 0) {
+	if (model.objects.length === 0 && model.rules.length === 0 && model.behaviors.length === 0 && model.composites.length === 0) {
 		const note = document.createElement("div");
 
 		note.textContent = "No game recognized in " + (root.split("/").pop() ?? root) + ".";
@@ -244,9 +300,12 @@ function paint(container: HTMLElement, context: AugmentationContext, root: strin
 		return;
 	}
 
+	const composites = new Map(model.composites.map((composite) => [composite.name, composite]));
+
 	renderObjects(container, context.api, root, model.objects);
-	renderRules(container, context.api, root, model.rules);
-	renderBehaviors(container, context.api, root, model.behaviors);
+	renderRules(container, context.api, root, model.rules, composites);
+	renderComposites(container, context.api, root, model.composites);
+	renderComponents(container, context.api, root, model.behaviors);
 }
 
 /** The event-sheet augmentation: projects the active file's game into the auxpane, deep-linking every node. */

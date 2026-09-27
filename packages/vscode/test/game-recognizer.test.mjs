@@ -117,6 +117,9 @@ test("recognizeGame composes all three into one JSON model (what the worker retu
 	assert.equal(model.behaviors.length, 5);
 	assert.equal(model.objects.length, 3);
 	assert.equal(model.rules.length, 4);
+	// No false-positive composites: dozer's systems all query (they're rules), and its scene lifecycle hooks
+	// (preload/create/update) reference components but are not reusable behaviors — none should read as a composite.
+	assert.equal(model.composites.length, 0);
 	// Plain JSON — survives the worker boundary (structuredClone stands in for postMessage).
 	assert.deepEqual(structuredClone(model), model);
 });

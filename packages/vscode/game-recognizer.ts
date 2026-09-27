@@ -394,6 +394,12 @@ export function recognizeComposites(files: Record<string, string>, ts: TsApi, co
 			return; // only exported functions can be library behaviors (excludes local helpers)
 		}
 
+		const firstParam = node.parameters[0]?.name;
+
+		if (firstParam !== undefined && ts.isIdentifier(firstParam) && firstParam.text === "scene") {
+			return; // a Phaser scene lifecycle hook (init/preload/create/update/load), not a reusable behavior
+		}
+
 		let callsQuery = false;
 		const uses = new Set<string>();
 		const calls = new Set<string>();
