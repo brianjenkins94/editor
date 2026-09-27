@@ -19,7 +19,7 @@
 
 import type { GameModel } from "./game-recognizer";
 import type { Behavior, Rule } from "./game-rules";
-import { behaviorsUsedBy, builtinBehaviors, compileGame, dozerBehaviors, dozerRules } from "./game-rules";
+import { behaviorsUsedBy, builtinBehaviors, compileGame, dozerBehaviors, dozerRules, fly } from "./game-rules";
 import { sampleById } from "./samples";
 
 /** Import specifier + vendored-file path (relative to the game dir; also its subpath inside the dozer sample). */
@@ -529,6 +529,116 @@ export function generateGame(game: AuthoredGame): Record<string, string> {
 
 	// Assembly.
 	files["game.ts"] = generateSceneFile(game);
+
+	return files;
+}
+
+/**
+ * Generate a minimal real-time ARCADE game — a flyable ship — as a complete, runnable, self-contained game. This is a
+ * different scaffold from the grid path: no Tilemap/level, PIXEL positions (Int16, not Uint8 grid cells), sprites created
+ * directly, a pixel-direct render, and a FIXED-TIMESTEP update loop (accumulate Phaser's variable frame delta, step the
+ * sim in equal chunks) so the simulation is deterministic regardless of frame rate. The gameplay (fly) is compiled from
+ * the same primitive vocabulary as the grid games — proving the toolbox + determinism reach real-time genres.
+ */
+export function generateArcadeGame(): Record<string, string> {
+	const files: Record<string, string> = {};
+	const vendored = dozerFiles();
+	const ship = spriteDataUrls().player;
+
+	// Infra is game-agnostic — reuse the sample's index.html / scene.ts / package.json (no Tilemap needed here).
+	for (const path of ["index.html", "scene.ts", "package.json"]) {
+		if (vendored[path] !== undefined) {
+			files[path] = vendored[path];
+		}
+	}
+
+	// Pixel position (signed, room for a whole screen) + a Ship tag.
+	files["schemas/position.ts"] = "export const Position = {\n\t\"x\": new Int16Array(1024),\n\t\"y\": new Int16Array(1024)\n};\n";
+	files["schemas/ship.ts"] = "// Tag component — marks the player's ship.\nexport const Ship: number[] = [];\n";
+
+	// Gameplay, compiled from primitives: for each Ship, every tick, fly (move by the held keys).
+	const shipRule: Rule = { "kind": "perEntity", "name": "shipFly", "subject": "Ship", "on": "step", "body": [{ "use": "fly" }] };
+
+	Object.assign(files, compileGame([shipRule], [fly]));
+
+	// Render: sprites follow pixel positions directly (no tile scaling).
+	files["systems/render.ts"] = [
+		"import { query } from \"bitecs\";",
+		"import { Position } from \"../schemas/position\";",
+		"",
+		"export function renderSystem(world) {",
+		"\tfor (const eid of query(world, [Position])) {",
+		"\t\tconst sprite = world.sprites.get(eid);",
+		"",
+		"\t\tif (!sprite) { continue; }",
+		"",
+		"\t\tsprite.x = Position.x[eid];",
+		"\t\tsprite.y = Position.y[eid];",
+		"\t}",
+		"}",
+		""
+	].join("\n");
+
+	// Scaffold: spawn a ship, then run the sim on a FIXED TIMESTEP (deterministic; lockstep-ready).
+	files["game.ts"] = [
+		"import { addComponent, addEntity, createWorld } from \"bitecs\";",
+		"import { Position } from \"./schemas/position\";",
+		"import { Ship } from \"./schemas/ship\";",
+		"import { shipFly } from \"./systems/shipFly\";",
+		"import { renderSystem } from \"./systems/render\";",
+		"",
+		"export const name = \"arcade\";",
+		"",
+		"// The sim advances in equal ticks regardless of frame rate — accumulate the variable frame delta, step fixed.",
+		"const STEP = 1000 / 60;",
+		"",
+		"export function init(scene) {}",
+		"",
+		"export function preload(scene) {",
+		"\tscene.load.image(\"ship\", \"" + ship + "\");",
+		"}",
+		"",
+		"export function create(scene) {",
+		"\tconst width = 640;",
+		"\tconst height = 384;",
+		"",
+		"\tscene.game.scale.setGameSize(width, height);",
+		"",
+		"\tconst world = createWorld();",
+		"",
+		"\tscene.world = world;",
+		"\tworld.cursors = scene.input.keyboard.createCursorKeys();",
+		"\tworld.sprites = new Map();",
+		"\tworld.acc = 0;",
+		"",
+		"\tconst ship = addEntity(world);",
+		"",
+		"\taddComponent(world, ship, Ship);",
+		"\taddComponent(world, ship, Position);",
+		"\tPosition.x[ship] = width / 2;",
+		"\tPosition.y[ship] = height / 2;",
+		"\tworld.sprites.set(ship, scene.add.sprite(Position.x[ship], Position.y[ship], \"ship\"));",
+		"",
+		"\tscene.systems = [shipFly, renderSystem];",
+		"}",
+		"",
+		"export function preupdate(scene) {}",
+		"",
+		"export function update(scene, time, delta) {",
+		"\tconst world = scene.world;",
+		"",
+		"\tworld.acc += delta;",
+		"",
+		"\twhile (world.acc >= STEP) {",
+		"\t\tfor (const system of scene.systems) {",
+		"\t\t\tsystem(world);",
+		"\t\t}",
+		"",
+		"\t\tworld.acc -= STEP;",
+		"\t}",
+		"}",
+		""
+	].join("\n");
 
 	return files;
 }

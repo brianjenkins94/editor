@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import ts from "typescript";
-import { blankGame, dozerAuthored, dozerComposed, generateGame } from "../game-generator.ts";
+import { blankGame, dozerAuthored, dozerComposed, generateArcadeGame, generateGame } from "../game-generator.ts";
 import { recognizeGame } from "../game-recognizer.ts";
 
 test("generating the dozer block model emits a complete runnable game", () => {
@@ -96,6 +96,26 @@ test("the COMPOSED dozer generates a complete runnable game whose systems are co
 	assert.deepEqual(model.rules.map((rule) => rule.name).sort(), ["playerMove", "renderSystem", "winSystem"]);
 	assert.deepEqual(model.composites.map((composite) => composite.name), ["gridPush"]);
 	assert.deepEqual(model.rules.find((rule) => rule.name === "playerMove")?.composes, ["gridPush"], "the rule round-trips its composition");
+});
+
+test("the arcade game generates a complete, deterministic real-time game (fixed timestep, pixel positions)", () => {
+	const files = generateArcadeGame();
+
+	for (const path of ["index.html", "scene.ts", "package.json", "schemas/position.ts", "schemas/ship.ts", "behaviors/fly.ts", "systems/shipFly.ts", "systems/render.ts", "game.ts"]) {
+		assert.ok(typeof files[path] === "string" && files[path].length > 0, path + " is present");
+	}
+
+	// Continuous, not grid: pixel positions + a fixed-timestep sim loop.
+	assert.match(files["schemas/position.ts"], /Int16Array/u, "pixel positions (Int16), not the grid's Uint8 cells");
+	assert.match(files["game.ts"], /const STEP = 1000 \/ 60/u, "fixed simulation timestep");
+	assert.match(files["game.ts"], /world\.acc \+= delta[\s\S]*while \(world\.acc >= STEP\)/u, "accumulate the frame delta, step fixed");
+	assert.match(files["behaviors/fly.ts"], /Position\.x\[self\] \+= input\.x \* 3/u, "movement is integer, from held keys");
+
+	// The compiled sim carries no nondeterminism.
+	for (const source of [/Math\./u, /random/u, /\bDate\b/u]) {
+		assert.doesNotMatch(files["behaviors/fly.ts"], source);
+		assert.doesNotMatch(files["systems/shipFly.ts"], source);
+	}
 });
 
 test("adding an entity to the model shows up in the regenerated projection", () => {
