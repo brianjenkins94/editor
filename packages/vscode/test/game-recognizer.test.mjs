@@ -9,7 +9,7 @@ import * as url from "node:url";
 import ts from "typescript";
 // Node 24 strips the types. The recognizer imports NO typescript itself (would bundle ~16MB in the editor) — the host
 // injects its `ts`; here the test injects node's, the way the editor injects its ambient tsserver instance.
-import { recognizeBehaviors } from "../game-recognizer.ts";
+import { recognizeBehaviors, recognizeObjects } from "../game-recognizer.ts";
 
 const fixtureDir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "fixtures", "dozer");
 
@@ -54,4 +54,23 @@ test("excludes non-components: the Direction enum (object of numbers, never quer
 	assert.equal(behaviors.find((behavior) => behavior.name === "Direction"), undefined);
 	// Strength check: exactly the five real components, nothing else.
 	assert.deepEqual(behaviors.map((behavior) => behavior.name), ["MoveIntent", "Player", "Position", "Pushable", "Target"]);
+});
+
+test("recognizes entity types by spec SHAPE (components array), not by a load() callee", () => {
+	const objects = recognizeObjects(readGame(fixtureDir), ts);
+	const byName = new Map(objects.map((object) => [object.name, object]));
+
+	assert.deepEqual([...byName.keys()].sort(), ["boulder", "player", "target"]);
+	assert.deepEqual(byName.get("player")?.behaviors, ["MoveIntent", "Player"]);
+	assert.equal(byName.get("player")?.depth, 2);
+	assert.deepEqual(byName.get("boulder")?.behaviors, ["Pushable"]);
+	assert.equal(byName.get("boulder")?.depth, 1);
+	assert.deepEqual(byName.get("target")?.behaviors, ["Target"]);
+	assert.equal(byName.get("target")?.depth, 0);
+
+	// All declared in game.ts, with a real deep-link line.
+	for (const object of objects) {
+		assert.equal(object.defPath, "game.ts", object.name + " is declared in game.ts");
+		assert.ok(object.defLine > 0, object.name + " has a deep-link line");
+	}
 });
