@@ -81,6 +81,10 @@ export function anchorGame(files: Record<string, string>, model: GameModel): Gam
 		attach(behavior);
 	}
 
+	for (const composite of model.composites) {
+		attach(composite);
+	}
+
 	for (const object of model.objects) {
 		attach(object);
 	}

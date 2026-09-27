@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import ts from "typescript";
+import { anchorGame } from "../game-anchors.ts";
 import { compileGame, dozerBehaviors, dozerRules } from "../game-rules.ts";
 import { recognizeGame } from "../game-recognizer.ts";
 
@@ -91,4 +92,25 @@ test("the compiled game reverse-projects back to dozer's map (the round-trip)", 
 	assert.deepEqual(push?.uses, ["Position", "Pushable"], "it reports the components it touches");
 	assert.deepEqual(push?.composes, [], "it composes no other behavior");
 	assert.equal(push?.defPath, "behaviors/gridPush.ts", "it deep-links to its own file");
+});
+
+test("composed behaviors get durable anchors (the library keeps its identity across edits)", () => {
+	const files = { ...SCHEMAS, ...GAME, ...compileGame(dozerRules, dozerBehaviors) };
+	const model = anchorGame(files, recognizeGame(files, ts));
+
+	const push = model.composites.find((composite) => composite.name === "gridPush");
+
+	assert.ok(typeof push?.anchor === "string" && push.anchor.length > 0, "the composite carries a durable anchor id");
+
+	// Its id is its own — not shared with the rules that compose it.
+	const ruleAnchors = model.rules.map((rule) => rule.anchor).filter((anchor) => anchor !== undefined);
+
+	assert.ok(!ruleAnchors.includes(push.anchor), "the composite's anchor is distinct from the rules'");
+
+	// A cosmetic edit ABOVE the behavior (a new comment line) must not change its anchor — that is the point of anchoring.
+	const shifted = { ...files, "behaviors/gridPush.ts": "// a new comment above\n" + files["behaviors/gridPush.ts"] };
+	const reanchored = anchorGame(shifted, recognizeGame(shifted, ts));
+	const pushAgain = reanchored.composites.find((composite) => composite.name === "gridPush");
+
+	assert.equal(pushAgain?.anchor, push.anchor, "the anchor survives an edit above it (move-stable)");
 });
