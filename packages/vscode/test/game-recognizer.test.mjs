@@ -9,7 +9,7 @@ import * as url from "node:url";
 import ts from "typescript";
 // Node 24 strips the types. The recognizer imports NO typescript itself (would bundle ~16MB in the editor) — the host
 // injects its `ts`; here the test injects node's, the way the editor injects its ambient tsserver instance.
-import { recognizeBehaviors, recognizeObjects } from "../game-recognizer.ts";
+import { recognizeBehaviors, recognizeObjects, recognizeRules } from "../game-recognizer.ts";
 
 const fixtureDir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "fixtures", "dozer");
 
@@ -73,4 +73,34 @@ test("recognizes entity types by spec SHAPE (components array), not by a load() 
 		assert.equal(object.defPath, "game.ts", object.name + " is declared in game.ts");
 		assert.ok(object.defLine > 0, object.name + " has a deep-link line");
 	}
+});
+
+test("recognizes rules (systems) by shape, with subjects and event→action rows", () => {
+	const rules = recognizeRules(readGame(fixtureDir), ts);
+	const byName = new Map(rules.map((rule) => [rule.name, rule]));
+
+	// All four systems, recognized by querying (not by name), each deep-linked to its systems/*.ts file.
+	assert.deepEqual([...byName.keys()].sort(), ["inputSystem", "movementSystem", "renderSystem", "winSystem"]);
+
+	for (const rule of rules) {
+		assert.match(rule.defPath, /^systems\//u, rule.name + " lives in systems/");
+		assert.ok(rule.defLine > 0);
+	}
+
+	// input decomposes cleanly: subject = [MoveIntent], four key→intent rows.
+	const input = byName.get("inputSystem");
+
+	assert.deepEqual(input?.queries, [["MoveIntent"]]);
+	assert.equal(input?.rows.length, 4);
+	assert.match(input.rows[0].event, /JustDown/u);
+	assert.match(input.rows[0].event, /up/u);
+	assert.match(input.rows[0].actions[0], /MoveIntent\.direction/u);
+	assert.match(input.rows[0].actions[0], /Direction\.Up/u);
+	assert.ok(input.rows[0].line > 0, "each row is deep-linked");
+
+	// win/render don't decompose into rows (guards / glue) — still recognized, still deep-linked. win reads its subjects.
+	assert.equal(byName.get("winSystem")?.rows.length, 0);
+	assert.deepEqual(byName.get("winSystem")?.queries, [["Target", "Position"], ["Pushable", "Position"]]);
+	assert.equal(byName.get("renderSystem")?.rows.length, 0);
+	assert.deepEqual(byName.get("renderSystem")?.queries, [["Position"]]);
 });

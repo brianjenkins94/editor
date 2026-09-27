@@ -241,3 +241,101 @@ export function recognizeObjects(files: Record<string, string>, ts: TsApi): Game
 
 	return objects.sort((a, b) => a.defPath.localeCompare(b.defPath) || a.defLine - b.defLine);
 }
+
+/** One recognized event→action row: a condition (the "when") guarding one or more effects (the "do"). */
+export interface RuleRow {
+	"event": string;
+	"actions": string[];
+	"line": number;
+}
+
+/**
+ * A rule = a system: a unit of behavior. Recognized by SHAPE — an exported function that runs an ECS `query(...)` (a
+ * loader/registration naming convention isn't required) — not by name. `queries` are its subjects ("for each object with
+ * these behaviors"); `rows` are the event→action pairs its body decomposes into. A rule with no rows didn't decompose
+ * (custom code / runtime glue, still deep-linked); a rule with rows may still have an un-decomposed remainder.
+ */
+export interface Rule {
+	"name": string;
+	"queries": string[][];
+	"rows": RuleRow[];
+	"defPath": string;
+	"defLine": number;
+}
+
+/** Single-line source text for a node (whitespace collapsed) — for display in the sheet. */
+function cleanText(source: TS.SourceFile, node: TS.Node): string {
+	return node.getText(source).replace(/\s+/gu, " ").trim();
+}
+
+/** The ACTIONS in an if's then-branch: its expression statements (assignments/calls). Control flow only (return /
+ *  continue / break) and declarations are NOT actions, so guard branches produce no row. */
+function actionTexts(ts: TsApi, source: TS.SourceFile, thenStatement: TS.Statement): string[] {
+	const statements = ts.isBlock(thenStatement) ? thenStatement.statements : [thenStatement];
+	const actions: string[] = [];
+
+	for (const statement of statements) {
+		if (ts.isExpressionStatement(statement)) {
+			actions.push(cleanText(source, statement.expression));
+		}
+	}
+
+	return actions;
+}
+
+/**
+ * Recognize the game's rules across its files. A rule is an exported function whose body runs a `query(...)`; its
+ * queried component sets are its subjects, and its `if (cond) { effects }` statements decompose into event→action rows
+ * (branches whose body is only control flow — the guards in movement/win — yield no row, so those systems read as
+ * not-yet-decomposed rather than as noise). Everything is deep-linked (the rule, and each row).
+ */
+export function recognizeRules(files: Record<string, string>, ts: TsApi): Rule[] {
+	const rules: Rule[] = [];
+
+	eachNode(files, ts, (node, source, path) => {
+		if (!ts.isFunctionDeclaration(node) || node.name === undefined || node.body === undefined) {
+			return;
+		}
+
+		const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) : undefined;
+
+		if (modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) !== true) {
+			return; // only exported functions are rules (excludes local helpers like `entityAt`)
+		}
+
+		const queries: string[][] = [];
+		const rows: RuleRow[] = [];
+
+		const scan = (inner: TS.Node): void => {
+			// Subject: a query(world, [A, B]) — take the array-literal argument's identifiers.
+			if (ts.isCallExpression(inner) && ts.isIdentifier(inner.expression) && inner.expression.text === "query") {
+				const array = inner.arguments.find((argument) => ts.isArrayLiteralExpression(argument));
+
+				if (array !== undefined && ts.isArrayLiteralExpression(array)) {
+					queries.push(array.elements.filter((element) => ts.isIdentifier(element)).map((element) => element.text));
+				}
+			}
+
+			// Row: an if whose then-branch performs actions (not just a guard return/continue).
+			if (ts.isIfStatement(inner)) {
+				const actions = actionTexts(ts, source, inner.thenStatement);
+
+				if (actions.length > 0) {
+					rows.push({ "event": cleanText(source, inner.expression), "actions": actions, "line": lineOf(ts, source, inner) });
+				}
+			}
+
+			ts.forEachChild(inner, scan);
+		};
+
+		scan(node.body);
+
+		if (queries.length === 0) {
+			return; // not a system — a rule must query
+		}
+
+		rules.push({ "name": node.name.text, "queries": queries, "rows": rows, "defPath": path, "defLine": lineOf(ts, source, node) });
+	});
+
+	return rules.sort((a, b) => a.defPath.localeCompare(b.defPath) || a.defLine - b.defLine);
+}
