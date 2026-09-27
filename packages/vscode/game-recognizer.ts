@@ -23,15 +23,22 @@ import type * as TS from "typescript";
 /** The injected TypeScript API (the editor's own instance, or node's in tests). */
 export type TsApi = typeof TS;
 
+/** Source location of a recognized node in its file: 1-based deep-link line + char offsets (for anchoring / reverse-map).
+ *  `anchor` is the durable content-addressed id, attached later by anchorGame (game-anchors.ts). */
+export interface NodeLoc {
+	"defPath": string;
+	"defLine": number;
+	"start": number;
+	"end": number;
+	"anchor"?: string;
+}
+
 /** A behavior = an exported ECS component, presented without the bitECS wiring. */
-export interface Behavior {
+export interface Behavior extends NodeLoc {
 	"name": string;
 	/** DATA carries per-entity fields; TAG is a marker (empty component). */
 	"kind": "data" | "tag";
 	"fields": string[];
-	/** Where it's defined — the deep-link target. */
-	"defPath": string;
-	"defLine": number;
 }
 
 const TYPED_ARRAYS = new Set(["Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array"]);
@@ -118,13 +125,18 @@ function lineOf(ts: TsApi, source: TS.SourceFile, node: TS.Node): number {
 	return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
 }
 
+/** The deep-link + range for a node (anchor is filled in later). */
+function nodeLoc(ts: TsApi, source: TS.SourceFile, path: string, node: TS.Node): NodeLoc {
+	return { "defPath": path, "defLine": lineOf(ts, source, node), "start": node.getStart(source), "end": node.getEnd() };
+}
+
 /**
  * Recognize the game's behaviors across all its files: every component (data or tag) that is actually USED as one
  * (queried, added, or listed in a `components:` config). Usage confirmation is what makes the projection strong — it
  * keeps enums/plain arrays out and resolves cross-file (a tag defined in schemas/, used only in game.ts's load config).
  */
 export function recognizeBehaviors(files: Record<string, string>, ts: TsApi): Behavior[] {
-	const defs = new Map<string, { "kind": "data" | "tag"; "fields": string[]; "path": string; "line": number }>();
+	const defs = new Map<string, { "kind": "data" | "tag"; "fields": string[]; "loc": NodeLoc }>();
 	const used = new Set<string>();
 
 	eachNode(files, ts, (node, source, path) => {
@@ -133,7 +145,7 @@ export function recognizeBehaviors(files: Record<string, string>, ts: TsApi): Be
 			const classified = classifyInitializer(ts, node.initializer);
 
 			if (classified !== undefined) {
-				defs.set(node.name.text, { ...classified, "path": path, "line": lineOf(ts, source, node) });
+				defs.set(node.name.text, { "kind": classified.kind, "fields": classified.fields, "loc": nodeLoc(ts, source, path, node) });
 			}
 		}
 
@@ -166,7 +178,7 @@ export function recognizeBehaviors(files: Record<string, string>, ts: TsApi): Be
 
 	for (const [name, def] of defs) {
 		if (used.has(name)) {
-			behaviors.push({ "name": name, "kind": def.kind, "fields": def.fields, "defPath": def.path, "defLine": def.line });
+			behaviors.push({ "name": name, "kind": def.kind, "fields": def.fields, ...def.loc });
 		}
 	}
 
@@ -174,14 +186,11 @@ export function recognizeBehaviors(files: Record<string, string>, ts: TsApi): Be
 }
 
 /** An object = an entity type: a named thing with a list of attached behaviors, plus a few scalar attributes. */
-export interface GameObject {
+export interface GameObject extends NodeLoc {
 	"name": string;
 	"behaviors": string[];
 	/** Render order, when the spec sets it (`depth: N`). */
 	"depth"?: number;
-	/** Where it's declared (the map entry) — the deep-link target. */
-	"defPath": string;
-	"defLine": number;
 }
 
 /**
@@ -227,15 +236,15 @@ export function recognizeObjects(files: Record<string, string>, ts: TsApi): Game
 				continue; // not an entity spec — no `components` array
 			}
 
-			const line = lineOf(ts, source, entry);
-			const dedupe = path + ":" + line + ":" + name;
+			const loc = nodeLoc(ts, source, path, entry);
+			const dedupe = path + ":" + loc.defLine + ":" + name;
 
 			if (seen.has(dedupe)) {
 				continue;
 			}
 
 			seen.add(dedupe);
-			objects.push({ "name": name, "behaviors": behaviors, ...(depth === undefined ? {} : { "depth": depth }), "defPath": path, "defLine": line });
+			objects.push({ "name": name, "behaviors": behaviors, ...(depth === undefined ? {} : { "depth": depth }), ...loc });
 		}
 	});
 
@@ -243,9 +252,10 @@ export function recognizeObjects(files: Record<string, string>, ts: TsApi): Game
 }
 
 /** One recognized event→action row: a condition (the "when") guarding one or more effects (the "do"). */
-export interface RuleRow {
+export interface RuleRow extends NodeLoc {
 	"event": string;
 	"actions": string[];
+	/** Alias of defLine — the row's line (kept for the view's existing use). */
 	"line": number;
 }
 
@@ -255,12 +265,10 @@ export interface RuleRow {
  * these behaviors"); `rows` are the event→action pairs its body decomposes into. A rule with no rows didn't decompose
  * (custom code / runtime glue, still deep-linked); a rule with rows may still have an un-decomposed remainder.
  */
-export interface Rule {
+export interface Rule extends NodeLoc {
 	"name": string;
 	"queries": string[][];
 	"rows": RuleRow[];
-	"defPath": string;
-	"defLine": number;
 }
 
 /** Single-line source text for a node (whitespace collapsed) — for display in the sheet. */
@@ -321,7 +329,9 @@ export function recognizeRules(files: Record<string, string>, ts: TsApi): Rule[]
 				const actions = actionTexts(ts, source, inner.thenStatement);
 
 				if (actions.length > 0) {
-					rows.push({ "event": cleanText(source, inner.expression), "actions": actions, "line": lineOf(ts, source, inner) });
+					const loc = nodeLoc(ts, source, path, inner);
+
+					rows.push({ "event": cleanText(source, inner.expression), "actions": actions, "line": loc.defLine, ...loc });
 				}
 			}
 
@@ -334,7 +344,7 @@ export function recognizeRules(files: Record<string, string>, ts: TsApi): Rule[]
 			return; // not a system — a rule must query
 		}
 
-		rules.push({ "name": node.name.text, "queries": queries, "rows": rows, "defPath": path, "defLine": lineOf(ts, source, node) });
+		rules.push({ "name": node.name.text, "queries": queries, "rows": rows, ...nodeLoc(ts, source, path, node) });
 	});
 
 	return rules.sort((a, b) => a.defPath.localeCompare(b.defPath) || a.defLine - b.defLine);

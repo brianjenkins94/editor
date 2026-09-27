@@ -33,8 +33,14 @@ test("recognizes every dozer behavior (data + tag), cross-file, with correct kin
 	const behaviors = recognizeBehaviors(readGame(fixtureDir), ts);
 	const byName = new Map(behaviors.map((behavior) => [behavior.name, behavior]));
 
-	// Data components carry fields.
-	assert.deepEqual(byName.get("Position"), { "name": "Position", "kind": "data", "fields": ["x", "y"], "defPath": "schemas/position.ts", "defLine": 1 });
+	// Data components carry fields. (Check the meaningful fields; nodes also carry loc offsets/anchor.)
+	const position = byName.get("Position");
+
+	assert.equal(position?.kind, "data");
+	assert.deepEqual(position?.fields, ["x", "y"]);
+	assert.equal(position?.defPath, "schemas/position.ts");
+	assert.equal(position?.defLine, 1);
+	assert.ok(position?.end > position?.start, "Position carries a source range");
 	assert.equal(byName.get("MoveIntent")?.kind, "data");
 	assert.deepEqual(byName.get("MoveIntent")?.fields, ["direction"]);
 

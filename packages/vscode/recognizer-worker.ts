@@ -10,6 +10,7 @@
  * game-projection.ts in the workbench realm.
  */
 import type { TsApi } from "./game-recognizer";
+import { anchorGame } from "./game-anchors";
 import { recognizeGame } from "./game-recognizer";
 
 interface ProjectRequest { "id": number; "files": Record<string, string> }
@@ -23,7 +24,8 @@ globalThis.onmessage = async (event: MessageEvent<ProjectRequest>): Promise<void
 		// The shared ts chunk — loaded once, on first use.
 		tsApi ??= ((await import("typescript")) as unknown as { "default": TsApi }).default;
 
-		const model = recognizeGame(files, tsApi);
+		// Recognize with the TS AST, then attach durable BABLR anchors (game-anchors.ts).
+		const model = anchorGame(files, recognizeGame(files, tsApi));
 
 		(globalThis as unknown as Worker).postMessage({ "id": id, "model": model });
 	} catch (error) {
