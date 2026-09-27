@@ -76,9 +76,19 @@ test("the compiled game reverse-projects back to dozer's map (the round-trip)", 
 
 	assert.deepEqual(move?.queries, [["Player", "Position"]], "the Player is the subject");
 	assert.equal(move?.rows.length, 0, "the rule is a clean composition — the push decomposes inside the behavior, not here");
+	assert.deepEqual(move?.composes, ["gridPush"], "the rule reports the behavior it composes");
 
 	const win = rules.get("winSystem");
 
 	assert.deepEqual([...(win?.queries ?? [])].sort(), [["Pushable", "Position"], ["Target", "Position"]].sort());
 	assert.equal(win?.rows.length, 0, "win is an aggregate, not event->action rows");
+
+	// The library round-trips: the reusable behavior is recognized as its own first-class node.
+	assert.deepEqual(model.composites.map((composite) => composite.name), ["gridPush"], "the built-in behavior is recognized");
+
+	const push = model.composites.find((composite) => composite.name === "gridPush");
+
+	assert.deepEqual(push?.uses, ["Position", "Pushable"], "it reports the components it touches");
+	assert.deepEqual(push?.composes, [], "it composes no other behavior");
+	assert.equal(push?.defPath, "behaviors/gridPush.ts", "it deep-links to its own file");
 });

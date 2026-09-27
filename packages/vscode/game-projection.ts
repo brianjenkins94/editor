@@ -31,7 +31,7 @@ export function createGameProjection(): GameProjection {
 		if (event.data.error !== undefined) {
 			request.reject(new Error(event.data.error));
 		} else {
-			request.resolve(event.data.model ?? { "behaviors": [], "objects": [], "rules": [] });
+			request.resolve(event.data.model ?? { "behaviors": [], "composites": [], "objects": [], "rules": [] });
 		}
 	});
 

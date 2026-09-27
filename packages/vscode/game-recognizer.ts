@@ -269,6 +269,8 @@ export interface Rule extends NodeLoc {
 	"name": string;
 	"queries": string[][];
 	"rows": RuleRow[];
+	/** Reusable composite behaviors this rule COMPOSES (calls) — the library units it draws on. */
+	"composes": string[];
 }
 
 /** Single-line source text for a node (whitespace collapsed) — for display in the sheet. */
@@ -297,7 +299,7 @@ function actionTexts(ts: TsApi, source: TS.SourceFile, thenStatement: TS.Stateme
  * (branches whose body is only control flow — the guards in movement/win — yield no row, so those systems read as
  * not-yet-decomposed rather than as noise). Everything is deep-linked (the rule, and each row).
  */
-export function recognizeRules(files: Record<string, string>, ts: TsApi): Rule[] {
+export function recognizeRules(files: Record<string, string>, ts: TsApi, composites: Set<string> = new Set()): Rule[] {
 	const rules: Rule[] = [];
 
 	eachNode(files, ts, (node, source, path) => {
@@ -313,14 +315,20 @@ export function recognizeRules(files: Record<string, string>, ts: TsApi): Rule[]
 
 		const queries: string[][] = [];
 		const rows: RuleRow[] = [];
+		const calls = new Set<string>();
 
 		const scan = (inner: TS.Node): void => {
-			// Subject: a query(world, [A, B]) — take the array-literal argument's identifiers.
-			if (ts.isCallExpression(inner) && ts.isIdentifier(inner.expression) && inner.expression.text === "query") {
-				const array = inner.arguments.find((argument) => ts.isArrayLiteralExpression(argument));
+			if (ts.isCallExpression(inner) && ts.isIdentifier(inner.expression)) {
+				// Subject: a query(world, [A, B]) — take the array-literal argument's identifiers.
+				if (inner.expression.text === "query") {
+					const array = inner.arguments.find((argument) => ts.isArrayLiteralExpression(argument));
 
-				if (array !== undefined && ts.isArrayLiteralExpression(array)) {
-					queries.push(array.elements.filter((element) => ts.isIdentifier(element)).map((element) => element.text));
+					if (array !== undefined && ts.isArrayLiteralExpression(array)) {
+						queries.push(array.elements.filter((element) => ts.isIdentifier(element)).map((element) => element.text));
+					}
+				} else {
+					// Composition: a call to another function — resolved against the known composite set below.
+					calls.add(inner.expression.text);
 				}
 			}
 
@@ -344,21 +352,100 @@ export function recognizeRules(files: Record<string, string>, ts: TsApi): Rule[]
 			return; // not a system — a rule must query
 		}
 
-		rules.push({ "name": node.name.text, "queries": queries, "rows": rows, ...nodeLoc(ts, source, path, node) });
+		const composes = [...calls].filter((name) => composites.has(name)).sort();
+
+		rules.push({ "name": node.name.text, "queries": queries, "rows": rows, "composes": composes, ...nodeLoc(ts, source, path, node) });
 	});
 
 	return rules.sort((a, b) => a.defPath.localeCompare(b.defPath) || a.defLine - b.defLine);
+}
+
+/** A composite = a reusable BEHAVIOR: a function composed of the primitive vocabulary (the built-in library's unit; the
+ *  READ image of game-rules.ts's `Behavior`). It is NOT a `Behavior` here — that name is an ECS component (a data/tag
+ *  trait attached to objects). In the product both are "behaviors"; the recognizer distinguishes the component-trait from
+ *  the composed-function so the library round-trips. */
+export interface Composite extends NodeLoc {
+	"name": string;
+	/** The components (traits) it reads or writes. */
+	"uses": string[];
+	/** Other composite behaviors it composes (calls). */
+	"composes": string[];
+}
+
+/**
+ * Recognize composed behaviors — the reusable functions the built-in library is made of, and that a kid writes. A
+ * composite is recognized by SHAPE: an exported function that references at least one recognized component (so it is game
+ * logic, not a plain utility) but does NOT itself drive a `query(...)` loop (that shape is a rule/system). Local helpers
+ * (`entityAt`, `isWall`, `pressed`) are excluded because they aren't exported; rules are excluded because they query. So
+ * `gridPush` — exported, touches Position/Pushable, delegates iteration to a helper — reads back as a composite.
+ */
+export function recognizeComposites(files: Record<string, string>, ts: TsApi, componentNames?: Set<string>): Composite[] {
+	const components = componentNames ?? new Set(recognizeBehaviors(files, ts).map((behavior) => behavior.name));
+	const candidates: { "name": string; "uses": string[]; "calls": Set<string>; "loc": NodeLoc }[] = [];
+
+	eachNode(files, ts, (node, source, path) => {
+		if (!ts.isFunctionDeclaration(node) || node.name === undefined || node.body === undefined) {
+			return;
+		}
+
+		const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) : undefined;
+
+		if (modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) !== true) {
+			return; // only exported functions can be library behaviors (excludes local helpers)
+		}
+
+		let callsQuery = false;
+		const uses = new Set<string>();
+		const calls = new Set<string>();
+
+		const scan = (inner: TS.Node): void => {
+			if (ts.isCallExpression(inner) && ts.isIdentifier(inner.expression)) {
+				if (inner.expression.text === "query") {
+					callsQuery = true;
+				} else {
+					calls.add(inner.expression.text);
+				}
+			}
+
+			if (ts.isIdentifier(inner) && components.has(inner.text)) {
+				uses.add(inner.text);
+			}
+
+			ts.forEachChild(inner, scan);
+		};
+
+		scan(node.body);
+
+		if (callsQuery || uses.size === 0) {
+			return; // a query-loop is a rule; touching no component is a plain utility — neither is a behavior
+		}
+
+		candidates.push({ "name": node.name.text, "uses": [...uses].sort(), "calls": calls, "loc": nodeLoc(ts, source, path, node) });
+	});
+
+	const names = new Set(candidates.map((candidate) => candidate.name));
+
+	return candidates
+		.map((candidate) => ({ "name": candidate.name, "uses": candidate.uses, "composes": [...candidate.calls].filter((name) => names.has(name) && name !== candidate.name).sort(), ...candidate.loc }))
+		.sort((a, b) => a.defPath.localeCompare(b.defPath) || a.defLine - b.defLine);
 }
 
 /** The whole reverse-projection of a game: the nouns (objects + their behaviors) and the verbs (rules). Plain JSON, so
  *  it can cross a worker boundary — the recognizer runs where `ts` lives; only this model reaches the auxpane. */
 export interface GameModel {
 	"behaviors": Behavior[];
+	/** The composed reusable behaviors — the built-in library, and the kid's own — that rules draw on. */
+	"composites": Composite[];
 	"objects": GameObject[];
 	"rules": Rule[];
 }
 
-/** Run all recognizers over a game's `{ path → source }` with an injected `ts`. */
+/** Run all recognizers over a game's `{ path → source }` with an injected `ts`. Composites are recognized first so rules
+ *  can report which of them they compose (`rule.composes`), and so the library round-trips as first-class nodes. */
 export function recognizeGame(files: Record<string, string>, ts: TsApi): GameModel {
-	return { "behaviors": recognizeBehaviors(files, ts), "objects": recognizeObjects(files, ts), "rules": recognizeRules(files, ts) };
+	const behaviors = recognizeBehaviors(files, ts);
+	const composites = recognizeComposites(files, ts, new Set(behaviors.map((behavior) => behavior.name)));
+	const compositeNames = new Set(composites.map((composite) => composite.name));
+
+	return { "behaviors": behaviors, "composites": composites, "objects": recognizeObjects(files, ts), "rules": recognizeRules(files, ts, compositeNames) };
 }
