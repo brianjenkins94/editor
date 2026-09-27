@@ -19,7 +19,7 @@
 
 import type { GameModel } from "./game-recognizer";
 import type { Behavior, Rule } from "./game-rules";
-import { compileGame, dozerBehaviors, dozerRules } from "./game-rules";
+import { behaviorsUsedBy, builtinBehaviors, compileGame, dozerBehaviors, dozerRules } from "./game-rules";
 import { sampleById } from "./samples";
 
 /** Import specifier + vendored-file path (relative to the game dir; also its subpath inside the dozer sample). */
@@ -55,8 +55,10 @@ export interface ObjectPreset {
 	"depth": number;
 }
 
+// The player carries only the Player tag: in the composed model, input is folded into the compiled playerMove rule
+// (which reads the cursors and queries [Player]) — there is no MoveIntent/Direction.
 const OBJECT_PRESETS: ObjectPreset[] = [
-	{ "type": "player", "sprite": "player", "components": ["MoveIntent", "Player"], "depth": 2 },
+	{ "type": "player", "sprite": "player", "components": ["Player"], "depth": 2 },
 	{ "type": "boulder", "sprite": "boulder", "components": ["Pushable"], "depth": 1 },
 	{ "type": "target", "sprite": "target", "components": ["Target"], "depth": 0 }
 ];
@@ -460,7 +462,20 @@ export function generateGame(game: AuthoredGame): Record<string, string> {
 			}
 		}
 
-		Object.assign(files, compileGame(game.rules, game.behaviors ?? []));
+		// Behaviors to compile: those the game carries, plus the built-in library behaviors the rules compose (so a rule
+		// that composes `gridPush` gets it emitted even when the model didn't list it explicitly).
+		const behaviorsByName = new Map((game.behaviors ?? []).map((behavior) => [behavior.name, behavior]));
+		const library = new Map(builtinBehaviors().map((behavior) => [behavior.name, behavior]));
+
+		for (const name of behaviorsUsedBy(game.rules)) {
+			const fromLibrary = library.get(name);
+
+			if (!behaviorsByName.has(name) && fromLibrary !== undefined) {
+				behaviorsByName.set(name, fromLibrary);
+			}
+		}
+
+		Object.assign(files, compileGame(game.rules, [...behaviorsByName.values()]));
 
 		if (vendored["systems/render.ts"] !== undefined) {
 			files["systems/render.ts"] = vendored["systems/render.ts"]; // the render engine system — glue, not authored

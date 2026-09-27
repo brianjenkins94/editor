@@ -89,6 +89,35 @@ export const gridPush: Behavior = {
 /** dozer's built-in library. */
 export const dozerBehaviors: Behavior[] = [gridPush];
 
+/** The built-in behavior library a rule can COMPOSE — reusable functions of primitives, each one a kid can open and fork.
+ *  (Authoring a behavior's own primitive body in the UI is a later slice; for now the library provides them.) */
+export function builtinBehaviors(): Behavior[] {
+	return [gridPush];
+}
+
+/** The behavior names these rules compose (via `use`) — so the generator knows which behaviors to emit alongside them. */
+export function behaviorsUsedBy(rules: Rule[]): string[] {
+	const used = new Set<string>();
+
+	const walk = (body: Stmt[]): void => {
+		for (const statement of body) {
+			if ("use" in statement) {
+				used.add(statement.use);
+			} else if ("ifHas" in statement) {
+				walk(statement.then);
+			}
+		}
+	};
+
+	for (const rule of rules) {
+		if (rule.kind === "perEntity") {
+			walk(rule.body);
+		}
+	}
+
+	return [...used];
+}
+
 // ── dozer, composed: rules that pick a subject + event and compose a behavior ────────────────────────────────────
 
 /** Move & push: the Player, on a pressed direction, composes the gridPush behavior. */

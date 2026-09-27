@@ -8,7 +8,31 @@
 /* eslint-disable ts/no-explicit-any -- the vscode api is untyped here (captured from the hello extension) */
 /* eslint-disable webawesome/no-inline-styles, webawesome/no-css-in-strings, webawesome/prefer-components -- a prototype authoring surface in the aux-bar body; intrinsic layout + custom sprite/label paint-tool tiles, not themeable chrome */
 import type { AuthoredGame } from "./game-generator";
-import { generateGame, libraryComponents, librarySystems, objectPresets, spriteDataUrls } from "./game-generator";
+import { generateGame, libraryComponents, objectPresets, spriteDataUrls } from "./game-generator";
+import type { Rule } from "./game-rules";
+import { builtinBehaviors } from "./game-rules";
+
+/** Capitalize the first letter (for auto-naming generated rules). */
+function capitalize(text: string): string {
+	return text.length === 0 ? text : text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** A rule/system name not already taken in `rules` (fn names must be unique per game). */
+function uniqueName(rules: Rule[], base: string): string {
+	const taken = new Set(rules.map((rule) => rule.name));
+
+	if (!taken.has(base)) {
+		return base;
+	}
+
+	let index = 2;
+
+	while (taken.has(base + index)) {
+		index += 1;
+	}
+
+	return base + index;
+}
 
 const BORDER = "1px solid var(--vscode-panel-border,#2a2a2a)";
 
@@ -384,40 +408,121 @@ export function renderAuthoring(container: HTMLElement, api: any, root: string, 
 		container.append(card);
 	}
 
-	// ── systems ──────────────────────────────────────────────────────────────────
-	const systemsHeading = document.createElement("div");
+	// ── rules (the game's logic: event-sheet rows composed from behaviors) ─────────────
+	// Adding a rule puts the game on the COMPOSED path (Generate compiles these to systems; see game-generator). We only
+	// define model.rules once the user actually adds one, so Generate over an as-yet-unauthored game keeps its old path.
+	const rules = model.rules ?? [];
+	const addRuleTo = (rule: Rule): void => { model.rules = [...rules, rule]; rerender(); };
+	const entityNames = model.entities.map((entity) => entity.name);
+	const subjectOf = (name: string): string | undefined => model.entities.find((entity) => entity.name === name)?.components[0];
 
-	systemsHeading.textContent = "SYSTEMS";
-	systemsHeading.style.cssText = "padding:8px 10px 4px;font-size:11px;font-weight:600;letter-spacing:0.04em;opacity:0.6;border-top:" + BORDER;
-	container.append(systemsHeading);
+	const rulesHeading = document.createElement("div");
 
-	const systemChips = document.createElement("div");
+	rulesHeading.textContent = "RULES";
+	rulesHeading.style.cssText = "padding:8px 10px 4px;font-size:11px;font-weight:600;letter-spacing:0.04em;opacity:0.6;border-top:" + BORDER;
+	container.append(rulesHeading);
 
-	systemChips.style.cssText = "padding:2px 10px";
+	if (rules.length === 0) {
+		const empty = document.createElement("div");
 
-	for (const system of model.systems) {
-		systemChips.append(chip(system, () => {
-			model.systems = model.systems.filter((other) => other !== system);
-			rerender();
-		}));
+		empty.textContent = entityNames.length === 0 ? "Paint some objects first, then add rules." : "Add a rule: pick when it happens and what it does.";
+		empty.style.cssText = "padding:2px 10px 6px;font-size:11px;opacity:0.5";
+		container.append(empty);
 	}
 
-	const addSystem = document.createElement("span");
+	for (const rule of rules) {
+		const card = document.createElement("div");
 
-	addSystem.textContent = "＋ system";
-	addSystem.style.cssText = "cursor:pointer;font-size:11px;opacity:0.6";
-	addSystem.addEventListener("click", () => {
+		card.style.cssText = "padding:6px 10px;border-bottom:" + BORDER + ";display:flex;align-items:center;gap:6px";
+
+		const text = document.createElement("span");
+
+		text.style.cssText = "font-size:12px";
+
+		if (rule.kind === "aggregate") {
+			text.textContent = "Win when every " + rule.allOn + " is on a " + rule.goal;
+		} else {
+			const uses = rule.body.flatMap((statement) => ("use" in statement ? [statement.use] : []));
+
+			text.textContent = "When " + (rule.on === "keyDirection" ? "a key is pressed" : "every tick") + " · for each " + rule.subject + (uses.length > 0 ? " → " + uses.join(", ") : "");
+		}
+
+		const remove = document.createElement("span");
+
+		remove.textContent = "×";
+		remove.style.cssText = "cursor:pointer;opacity:0.5;margin-left:auto";
+		remove.addEventListener("click", () => {
+			model.rules = rules.filter((other) => other !== rule);
+			rerender();
+		});
+
+		card.append(text, remove);
+		container.append(card);
+	}
+
+	const addRule = document.createElement("div");
+
+	addRule.style.cssText = "padding:6px 10px";
+	addRule.append(button("＋ Rule", () => {
 		void (async (): Promise<void> => {
-			const options = librarySystems().filter((system) => !model.systems.includes(system));
-			const picked = await api.window.showQuickPick(options, { "title": "Add system" });
+			const when = await api.window.showQuickPick(["When a key is pressed", "Every tick", "Win when…"], { "title": "Add a rule" });
 
-			if (typeof picked === "string") {
-				model.systems.push(picked);
-				rerender();
+			if (typeof when !== "string") {
+				return;
+			}
+
+			if (when === "Win when…") {
+				const these = await api.window.showQuickPick(entityNames, { "title": "Win when every…" });
+				const goals = typeof these === "string" ? await api.window.showQuickPick(entityNames, { "title": "…is standing on a…" }) : undefined;
+				const allOn = subjectOf(these ?? "");
+				const goal = subjectOf(goals ?? "");
+
+				if (allOn !== undefined && goal !== undefined) {
+					addRuleTo({ "kind": "aggregate", "name": uniqueName(rules, "winSystem"), "on": "step", "allOn": allOn, "goal": goal });
+				}
+
+				return;
+			}
+
+			const subjectName = await api.window.showQuickPick(entityNames, { "title": "For each…" });
+			const subject = subjectOf(subjectName ?? "");
+
+			if (subject === undefined) {
+				return;
+			}
+
+			const behavior = await api.window.showQuickPick(builtinBehaviors().map((entry) => entry.name), { "title": "Do what?" });
+
+			if (typeof behavior === "string") {
+				addRuleTo({ "kind": "perEntity", "name": uniqueName(rules, (subjectName ?? "each") + capitalize(behavior)), "subject": subject, "on": when === "When a key is pressed" ? "keyDirection" : "step", "body": [{ "use": behavior }] });
 			}
 		})();
-	});
+	}));
+	container.append(addRule);
 
-	systemChips.append(addSystem);
-	container.append(systemChips);
+	// ── behaviors (the reusable library rules compose) ─────────────────────────────────
+	const behaviorsHeading = document.createElement("div");
+
+	behaviorsHeading.textContent = "BEHAVIORS";
+	behaviorsHeading.style.cssText = "padding:8px 10px 4px;font-size:11px;font-weight:600;letter-spacing:0.04em;opacity:0.6;border-top:" + BORDER;
+	container.append(behaviorsHeading);
+
+	const behaviorList = document.createElement("div");
+
+	behaviorList.style.cssText = "padding:2px 10px 8px";
+
+	for (const behavior of builtinBehaviors()) {
+		const badge = document.createElement("span");
+
+		badge.textContent = behavior.name;
+		badge.style.cssText = "display:inline-block;margin:2px 4px 2px 0;padding:1px 8px;border-radius:9px;font-size:11px;background:var(--vscode-badge-background,#4d4d4d);color:var(--vscode-badge-foreground,#fff)";
+		behaviorList.append(badge);
+	}
+
+	const behaviorNote = document.createElement("div");
+
+	behaviorNote.textContent = "Reusable behaviors built from primitives — composed by rules. After Generate, open one to see there's no magic.";
+	behaviorNote.style.cssText = "padding:4px 10px 0;font-size:11px;opacity:0.5";
+	behaviorList.append(behaviorNote);
+	container.append(behaviorList);
 }
