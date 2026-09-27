@@ -1,20 +1,42 @@
 // Generator round-trip spec — the AUTHOR direction, proven against the READ direction. Assembling dozer as a block
-// model and generating it must produce code that reverse-projects to the SAME map. That closes the loop
-// (author → generate → recognize → same map) and is the generator's correctness test. Run: node --test.
+// model and generating it must produce a COMPLETE runnable game whose code reverse-projects to the SAME map. That closes
+// the loop (author → generate → recognize → same map) and is the generator's correctness test. Run: node --test.
 import assert from "node:assert/strict";
 import test from "node:test";
 import ts from "typescript";
-import { dozerAuthored, generateGame } from "../game-generator.ts";
+import { blankGame, dozerAuthored, generateGame } from "../game-generator.ts";
 import { recognizeGame } from "../game-recognizer.ts";
 
-test("generating the dozer block model reverse-projects to the dozer map", () => {
+test("generating the dozer block model emits a complete runnable game", () => {
 	const files = generateGame(dozerAuthored);
+
+	// Infra is vendored verbatim so the game runs standalone.
+	for (const path of ["index.html", "scene.ts", "Tilemap.ts", "package.json"]) {
+		assert.ok(typeof files[path] === "string" && files[path].length > 0, path + " is vendored");
+	}
+
+	// The generated assembly imports the local Tilemap (self-contained, not a shared workspace path).
+	assert.match(files["game.ts"], /from "\.\/Tilemap"/u, "game.ts uses the local Tilemap");
 
 	// It emitted a generated game.ts plus the library files the behaviors need.
 	assert.ok(typeof files["game.ts"] === "string", "game.ts is generated");
 	for (const path of ["schemas/position.ts", "schemas/moveIntent.ts", "systems/input.ts", "systems/win.ts"]) {
 		assert.ok(typeof files[path] === "string", path + " is emitted from the library");
 	}
+
+	// The vendored input system is the real, runnable one (imports Phaser — the old hand-retyped copy didn't).
+	assert.match(files["systems/input.ts"], /import Phaser from "phaser"/u, "input system is the real vendored copy");
+
+	// The level is generated from the painted grid: the used sprites + every placement.
+	const level = files["levels/level1.ts"];
+
+	assert.ok(typeof level === "string", "the level file is generated");
+	for (const sprite of ["gray_square", "player", "boulder", "target"]) {
+		assert.match(level, new RegExp('addTileset\\("' + sprite + '"', "u"), sprite + " tileset is emitted with its data URL");
+	}
+	assert.match(level, /\["player", 10, 6\]/u, "the player is placed where it was authored");
+	assert.equal((level.match(/\["boulder",/gu) ?? []).length, 4, "all four boulders are placed");
+	assert.equal((level.match(/\["target",/gu) ?? []).length, 4, "all four targets are placed");
 
 	const model = recognizeGame(files, ts);
 
@@ -34,6 +56,20 @@ test("generating the dozer block model reverse-projects to the dozer map", () =>
 	// Rules: the four systems the model listed, recognized from the emitted library files.
 	assert.deepEqual(model.rules.map((rule) => rule.name).sort(), ["inputSystem", "movementSystem", "renderSystem", "winSystem"]);
 	assert.equal(model.rules.find((rule) => rule.name === "inputSystem")?.rows.length, 4, "input still decomposes to 4 rows");
+});
+
+test("a blank game is a complete, runnable, empty scaffold", () => {
+	const files = generateGame(blankGame());
+
+	// Runs standalone: infra + an (empty) level + an assembly, no entities/systems.
+	for (const path of ["index.html", "scene.ts", "Tilemap.ts", "package.json", "levels/level1.ts", "game.ts"]) {
+		assert.ok(typeof files[path] === "string", path + " is present in a blank game");
+	}
+
+	const model = recognizeGame(files, ts);
+
+	assert.equal(model.objects.length, 0, "a blank game has no objects");
+	assert.equal(model.rules.length, 0, "a blank game has no rules");
 });
 
 test("adding an entity to the model shows up in the regenerated projection", () => {

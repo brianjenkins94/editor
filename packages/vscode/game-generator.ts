@@ -1,170 +1,120 @@
 /**
  * Game generator + starter behavior library — the AUTHOR direction (write), inverse of the recognizer (read).
  *
- * `generateGame` takes a block model (entities + their behaviors + which systems run + a level) and emits the game's
- * files: a thin, generated `game.ts` ASSEMBLY plus the library files the used behaviors provide. The heavy logic is never
- * generated — it comes from the LIBRARY below (dozer's reusable schemas + systems) — which is what makes a drag-and-drop
- * build tractable (the GameMaker/Construct insight): the author composes behaviors; they never hand-write movement/push.
+ * `generateGame` takes a block model (entities + their behaviors + which systems run + a painted level) and emits a
+ * COMPLETE, runnable game: the constant infra (index.html, scene.ts, Tilemap.ts, package.json), the library files the
+ * used behaviors provide (schemas + systems), the generated `levels/<level>.ts` (from the grid), and a thin generated
+ * `game.ts` ASSEMBLY that wires it all. The heavy logic is never generated — it is VENDORED from the library (dozer's
+ * reusable schemas + systems) — which is what makes a near-zero-typing, drag-and-drop build tractable (the
+ * GameMaker/Construct insight): the author composes behaviors and paints a grid; they never hand-write movement/push.
+ *
+ * SINGLE SOURCE OF TRUTH: the constant infra + library files are pulled from the `dozer` sample (samples.ts) rather than
+ * re-embedded here, so they can't drift from the code the editor actually ships and runs. Only `game.ts` (assembly) and
+ * the level file are generated. The sprites live inline in the sample's level as data URLs; we parse them back out as the
+ * asset palette, so a rebuilt game needs no binary files either.
  *
  * The generated code is designed to reverse-project cleanly: run recognizeGame over the output and you get the same map
  * the author assembled. That round-trip (author → generate → recognize → same map) is both the payoff and the test.
- *
- * The library lives inline (not a separate module) so this file has no relative value import — it type-strips under node
- * (tests) and bundles in the editor without an extension-resolution mismatch. Systems use string concat instead of
- * template literals only so they embed cleanly here; behaviour is identical. Later this becomes a published library.
  */
 
 import type { GameModel } from "./game-recognizer";
+import { sampleById } from "./samples";
 
-interface LibFile { "path": string; "content": string }
-interface LibComponent { "from": string; "file": LibFile }
-interface LibSystem { "from": string; "file": LibFile; "needs": string[] }
+/** Import specifier + vendored-file path (relative to the game dir; also its subpath inside the dozer sample). */
+interface ComponentMeta { "from": string; "path": string }
+interface SystemMeta { "from": string; "path": string; "needs": string[] }
 
-const COMPONENTS: Record<string, LibComponent> = {
-	"Position": { "from": "./schemas/position", "file": { "path": "schemas/position.ts", "content": "export const Position = {\n\t\"x\": new Uint8Array(1024),\n\t\"y\": new Uint8Array(1024)\n};\n" } },
-	"MoveIntent": { "from": "./schemas/moveIntent", "file": { "path": "schemas/moveIntent.ts", "content": "export const MoveIntent = {\n\t\"direction\": new Uint8Array(1024)\n};\n" } },
-	"Direction": { "from": "./schemas/direction", "file": { "path": "schemas/direction.ts", "content": "// None = 0 so uninitialized TypedArray slots mean \"no intent\".\nexport const Direction = {\n\t\"None\": 0,\n\t\"Up\": 1,\n\t\"Right\": 2,\n\t\"Down\": 3,\n\t\"Left\": 4\n} as const;\n" } },
-	"Player": { "from": "./schemas/player", "file": { "path": "schemas/player.ts", "content": "// Tag component — marks the player entity.\nexport const Player: number[] = [];\n" } },
-	"Pushable": { "from": "./schemas/pushable", "file": { "path": "schemas/pushable.ts", "content": "// Tag component — marks entities the player can push.\nexport const Pushable: number[] = [];\n" } },
-	"Target": { "from": "./schemas/target", "file": { "path": "schemas/target.ts", "content": "// Tag component — marks goal tiles boulders must be pushed onto.\nexport const Target: number[] = [];\n" } }
+const COMPONENT_META: Record<string, ComponentMeta> = {
+	"Position": { "from": "./schemas/position", "path": "schemas/position.ts" },
+	"MoveIntent": { "from": "./schemas/moveIntent", "path": "schemas/moveIntent.ts" },
+	"Direction": { "from": "./schemas/direction", "path": "schemas/direction.ts" },
+	"Player": { "from": "./schemas/player", "path": "schemas/player.ts" },
+	"Pushable": { "from": "./schemas/pushable", "path": "schemas/pushable.ts" },
+	"Target": { "from": "./schemas/target", "path": "schemas/target.ts" }
 };
 
-const INPUT_SYSTEM = `import { query } from "bitecs";
-import { Direction } from "../schemas/direction";
-import { MoveIntent } from "../schemas/moveIntent";
-
-export function inputSystem(world) {
-	const { cursors } = world;
-
-	for (const eid of query(world, [MoveIntent])) {
-		if (Phaser.Input.Keyboard.JustDown(cursors.up)) {
-			MoveIntent.direction[eid] = Direction.Up;
-		} else if (Phaser.Input.Keyboard.JustDown(cursors.right)) {
-			MoveIntent.direction[eid] = Direction.Right;
-		} else if (Phaser.Input.Keyboard.JustDown(cursors.down)) {
-			MoveIntent.direction[eid] = Direction.Down;
-		} else if (Phaser.Input.Keyboard.JustDown(cursors.left)) {
-			MoveIntent.direction[eid] = Direction.Left;
-		}
-	}
-}
-`;
-
-const MOVEMENT_SYSTEM = `import { query } from "bitecs";
-import { Direction } from "../schemas/direction";
-import { MoveIntent } from "../schemas/moveIntent";
-import { Position } from "../schemas/position";
-import { Pushable } from "../schemas/pushable";
-
-const deltas = {
-	[Direction.Up]: [0, -1],
-	[Direction.Right]: [1, 0],
-	[Direction.Down]: [0, 1],
-	[Direction.Left]: [-1, 0]
+const SYSTEM_META: Record<string, SystemMeta> = {
+	"inputSystem": { "from": "./systems/input", "path": "systems/input.ts", "needs": ["MoveIntent", "Direction"] },
+	"movementSystem": { "from": "./systems/movement", "path": "systems/movement.ts", "needs": ["MoveIntent", "Position", "Pushable", "Direction"] },
+	"renderSystem": { "from": "./systems/render", "path": "systems/render.ts", "needs": ["Position"] },
+	"winSystem": { "from": "./systems/win", "path": "systems/win.ts", "needs": ["Target", "Position", "Pushable"] }
 };
 
-function entityAt(world, x, y, exclude = -1) {
-	for (const eid of query(world, [Pushable, Position])) {
-		if (eid !== exclude && Position.x[eid] === x && Position.y[eid] === y) {
-			return eid;
-		}
-	}
+/** The constant files every generated game vendors verbatim (infra that isn't authored). */
+const INFRA_FILES = ["index.html", "scene.ts", "Tilemap.ts", "package.json"];
 
-	return undefined;
+/** One placeable object archetype — the object palette. `type` is BOTH the entity name and the sprite/tileset name
+ *  (load() spawns an object-layer entry by matching its name to the entityConfig key and the tileset), so one pick
+ *  supplies name + behaviors + sprite with no typing. */
+export interface ObjectPreset {
+	"type": string;
+	"sprite": string;
+	"components": string[];
+	"depth": number;
 }
 
-export function movementSystem(world) {
-	const { walls } = world;
+const OBJECT_PRESETS: ObjectPreset[] = [
+	{ "type": "player", "sprite": "player", "components": ["MoveIntent", "Player"], "depth": 2 },
+	{ "type": "boulder", "sprite": "boulder", "components": ["Pushable"], "depth": 1 },
+	{ "type": "target", "sprite": "target", "components": ["Target"], "depth": 0 }
+];
 
-	for (const eid of query(world, [MoveIntent, Position])) {
-		const dir = MoveIntent.direction[eid];
+// ── the vendored dozer files, pulled from the sample catalog (one source of truth) ──────────────────────────────
+const SAMPLE_PREFIX = "/workspace/samples/dozer/";
+let dozerFileCache: Record<string, string> | undefined;
 
-		if (!dir) { continue; }
+/** The dozer sample's files keyed by path RELATIVE to the game dir (e.g. "systems/input.ts"). */
+function dozerFiles(): Record<string, string> {
+	if (dozerFileCache === undefined) {
+		const sample = sampleById("dozer");
 
-		const [dx, dy] = deltas[dir];
-		const nx = Position.x[eid] + dx;
-		const ny = Position.y[eid] + dy;
-
-		if (walls.has(nx + "," + ny)) {
-			MoveIntent.direction[eid] = Direction.None;
-			continue;
+		if (sample === undefined) {
+			throw new Error("dozer sample not found — the generator vendors its library from it");
 		}
 
-		const pushedEid = entityAt(world, nx, ny);
+		dozerFileCache = {};
 
-		if (pushedEid !== undefined) {
-			const bx = nx + dx;
-			const by = ny + dy;
-
-			if (walls.has(bx + "," + by) || entityAt(world, bx, by, pushedEid) !== undefined) {
-				MoveIntent.direction[eid] = Direction.None;
-				continue;
+		for (const file of sample.files) {
+			if (file.path.startsWith(SAMPLE_PREFIX)) {
+				dozerFileCache[file.path.slice(SAMPLE_PREFIX.length)] = file.contents;
 			}
-
-			Position.x[pushedEid] = bx;
-			Position.y[pushedEid] = by;
 		}
-
-		Position.x[eid] = nx;
-		Position.y[eid] = ny;
-		MoveIntent.direction[eid] = Direction.None;
 	}
+
+	return dozerFileCache;
 }
-`;
 
-const RENDER_SYSTEM = `import { query } from "bitecs";
-import { Position } from "../schemas/position";
+let assetCache: Record<string, string> | undefined;
 
-export function renderSystem(world) {
-	const { sprites, tileConfig: { tileWidth, tileHeight } } = world;
+/** The sprite palette — tileset name → inline data-URL, parsed out of the sample level's `addTileset(...)` calls. */
+export function spriteDataUrls(): Record<string, string> {
+	if (assetCache === undefined) {
+		assetCache = {};
 
-	for (const eid of query(world, [Position])) {
-		const sprite = sprites.get(eid);
+		const source = dozerFiles()["levels/level1.ts"] ?? "";
+		const pattern = /addTileset\("([^"]+)",\s*"(data:[^"]+)"\)/gu;
+		let match: RegExpExecArray | null;
 
-		if (!sprite) { continue; }
-
-		sprite.x = Position.x[eid] * tileWidth + tileWidth / 2;
-		sprite.y = Position.y[eid] * tileHeight + tileHeight / 2;
+		while ((match = pattern.exec(source)) !== null) {
+			assetCache[match[1]] = match[2];
+		}
 	}
+
+	return assetCache;
 }
-`;
-
-const WIN_SYSTEM = `import { query } from "bitecs";
-import { Position } from "../schemas/position";
-import { Pushable } from "../schemas/pushable";
-import { Target } from "../schemas/target";
-
-export function winSystem(world) {
-	const targets = new Set();
-
-	for (const eid of query(world, [Target, Position])) {
-		targets.add(Position.x[eid] + "," + Position.y[eid]);
-	}
-
-	if (!targets.size) { return; }
-
-	for (const eid of query(world, [Pushable, Position])) {
-		if (!targets.has(Position.x[eid] + "," + Position.y[eid])) { return; }
-	}
-
-	world.onWin?.();
-}
-`;
-
-const SYSTEMS: Record<string, LibSystem> = {
-	"inputSystem": { "from": "./systems/input", "file": { "path": "systems/input.ts", "content": INPUT_SYSTEM }, "needs": ["MoveIntent", "Direction"] },
-	"movementSystem": { "from": "./systems/movement", "file": { "path": "systems/movement.ts", "content": MOVEMENT_SYSTEM }, "needs": ["MoveIntent", "Position", "Pushable", "Direction"] },
-	"renderSystem": { "from": "./systems/render", "file": { "path": "systems/render.ts", "content": RENDER_SYSTEM }, "needs": ["Position"] },
-	"winSystem": { "from": "./systems/win", "file": { "path": "systems/win.ts", "content": WIN_SYSTEM }, "needs": ["Target", "Position", "Pushable"] }
-};
 
 /** The behaviors (components + systems) the author can attach — the palette. */
 export function libraryComponents(): string[] {
-	return Object.keys(COMPONENTS);
+	return Object.keys(COMPONENT_META);
 }
 
 export function librarySystems(): string[] {
-	return Object.keys(SYSTEMS);
+	return Object.keys(SYSTEM_META);
+}
+
+/** The placeable object archetypes — the object palette. */
+export function objectPresets(): ObjectPreset[] {
+	return OBJECT_PRESETS;
 }
 
 /** One authored entity: a name, the component behaviors attached, and a render depth. */
@@ -174,15 +124,41 @@ export interface AuthoredEntity {
 	"depth": number;
 }
 
-/** The authored game — what a drag-and-drop session produces. */
+/** One placed object instance on the grid: which archetype, and where (tile coords). */
+export interface PlacedObject {
+	"type": string;
+	"x": number;
+	"y": number;
+}
+
+/** The painted level: a grid of walkable FLOOR cells (everything else is a wall) and placed object instances. */
+export interface AuthoredLevel {
+	"width": number;
+	"height": number;
+	/** Tile size in px (square). */
+	"tile": number;
+	/** Walkable cells as [x, y]; a cell with no floor is a wall. */
+	"floor": [number, number][];
+	"objects": PlacedObject[];
+}
+
+/** The authored game — what a drag-and-drop / grid-painting session produces. */
 export interface AuthoredGame {
-	/** The level module (loaded from `./levels/<level>`). */
+	/** The level module name (emitted as `./levels/<level>`). */
 	"level": string;
 	"entities": AuthoredEntity[];
 	/** System behaviors to run each tick, in order. */
 	"systems": string[];
-	/** Where the Tilemap loader is imported from (defaults to the sample layout). */
+	/** The painted level. When present, the level file is generated from it; when absent, an existing level file on
+	 *  disk is left untouched (e.g. Generate over a recognized game whose level wasn't recovered). */
+	"map"?: AuthoredLevel;
+	/** Where the Tilemap loader is imported from (defaults to the self-contained local copy). */
 	"tilemapImport"?: string;
+}
+
+/** A blank but runnable game: infra + an empty level, no entities, no systems. The from-scratch starting point. */
+export function blankGame(width = 20, height = 12, tile = 32): AuthoredGame {
+	return { "level": "level1", "entities": [], "systems": [], "map": { width, height, tile, "floor": [], "objects": [] } };
 }
 
 /** dozer, as a block model — the starter template. Assembling THIS and generating reproduces the dozer game. */
@@ -193,11 +169,29 @@ export const dozerAuthored: AuthoredGame = {
 		{ "name": "boulder", "components": ["Pushable"], "depth": 1 },
 		{ "name": "target", "components": ["Target"], "depth": 0 }
 	],
-	"systems": ["inputSystem", "movementSystem", "renderSystem", "winSystem"]
+	"systems": ["inputSystem", "movementSystem", "renderSystem", "winSystem"],
+	"map": {
+		"width": 20,
+		"height": 12,
+		"tile": 32,
+		"floor": [[9, 3], [9, 4], [9, 5], [10, 5], [11, 5], [12, 5], [7, 6], [8, 6], [9, 6], [10, 6], [10, 7], [10, 8]],
+		"objects": [
+			{ "type": "player", "x": 10, "y": 6 },
+			{ "type": "boulder", "x": 9, "y": 5 },
+			{ "type": "boulder", "x": 11, "y": 5 },
+			{ "type": "boulder", "x": 9, "y": 6 },
+			{ "type": "boulder", "x": 10, "y": 7 },
+			{ "type": "target", "x": 9, "y": 3 },
+			{ "type": "target", "x": 12, "y": 5 },
+			{ "type": "target", "x": 7, "y": 6 },
+			{ "type": "target", "x": 10, "y": 8 }
+		]
+	}
 };
 
 /** Seed an editable block model from a recognized game (read → write bridge): objects become entities, rules become the
- *  systems list. The level isn't recognized from code, so it defaults (dozer's `level1`). */
+ *  systems list. The level isn't recognized from code, so `map` is left undefined (the on-disk level stays authoritative
+ *  until the grid painter is opened). */
 export function authoredFromModel(model: GameModel, level = "level1"): AuthoredGame {
 	return {
 		"level": level,
@@ -208,7 +202,7 @@ export function authoredFromModel(model: GameModel, level = "level1"): AuthoredG
 
 /** The generated `game.ts` — the scene assembly, parameterized by the block model; wires the library, never the logic. */
 function generateSceneFile(game: AuthoredGame): string {
-	const tilemap = game.tilemapImport ?? "../../util/phaser/Tilemap";
+	const tilemap = game.tilemapImport ?? "./Tilemap";
 
 	// Position is imported for setPosition; the rest come from the entities' attached components.
 	const componentNames = new Set<string>(["Position"]);
@@ -219,8 +213,8 @@ function generateSceneFile(game: AuthoredGame): string {
 		}
 	}
 
-	const componentImports = [...componentNames].map((name) => `import { ${name} } from "${COMPONENTS[name]?.from ?? "./schemas/" + name.toLowerCase()}";`).join("\n");
-	const systemImports = game.systems.map((name) => `import { ${name} } from "${SYSTEMS[name]?.from ?? "./systems/" + name}";`).join("\n");
+	const componentImports = [...componentNames].map((name) => `import { ${name} } from "${COMPONENT_META[name]?.from ?? "./schemas/" + name.toLowerCase()}";`).join("\n");
+	const systemImports = game.systems.map((name) => `import { ${name} } from "${SYSTEM_META[name]?.from ?? "./systems/" + name}";`).join("\n");
 	const entityConfig = game.entities
 		.map((entity) => `\t\t"${entity.name}": { "components": [${entity.components.join(", ")}], "depth": ${entity.depth}, "onSpawn": setPosition }`)
 		.join(",\n");
@@ -272,13 +266,82 @@ export function update(scene, time, delta) {
 `;
 }
 
+/** The generated `levels/<level>.ts` — reconstructs the Tilemap from the painted grid: the sprite tilesets it uses, a
+ *  background backdrop, the walkable floor layer, and the placed objects. Readable, house-style code (a coordinate list
+ *  + a tiny paint loop), not an opaque blob — the visible code is a core value. */
+function generateLevelFile(game: AuthoredGame): string {
+	const map = game.map;
+
+	if (map === undefined) {
+		throw new Error("generateLevelFile requires an authored map");
+	}
+
+	const assets = spriteDataUrls();
+	const presetBySprite = new Map(OBJECT_PRESETS.map((preset) => [preset.type, preset.sprite]));
+	const spriteOf = (type: string): string => presetBySprite.get(type) ?? type;
+
+	// Tileset order fixes the gids. Floor (gray_square) + backdrop (wall_block) are always present so painting works;
+	// each distinct placed object's sprite follows.
+	const objectSprites = [...new Set(map.objects.map((object) => spriteOf(object.type)))].filter((sprite) => sprite !== "wall_block" && sprite !== "gray_square");
+	const tilesetOrder = ["wall_block", "gray_square", ...objectSprites].filter((name) => assets[name] !== undefined);
+
+	const gid: Record<string, number> = {};
+
+	tilesetOrder.forEach((name, index) => { gid[name] = index + 1; });
+
+	const tilesetLines = tilesetOrder.map((name) => `${game.level}.addTileset("${name}", "${assets[name]}");`).join("\n");
+	const gidEntries = tilesetOrder.map((name) => `"${name}": ${gid[name]}`).join(", ");
+	const floorLines = map.floor.map(([x, y]) => `\t[${x}, ${y}]`).join(",\n");
+	const objectLines = map.objects.map((object) => `\t["${spriteOf(object.type)}", ${object.x}, ${object.y}]`).join(",\n");
+
+	return `import { Tilemap } from "../Tilemap";
+
+export const ${game.level} = new Tilemap(${map.width}, ${map.height}, ${map.tile}, ${map.tile});
+
+${tilesetLines}
+
+const gid: Record<string, number> = { ${gidEntries} };
+
+// A tiled backdrop, then the walkable floor. Any cell WITHOUT a floor tile is a wall (see Tilemap.load).
+${game.level}.addLayer("background")
+	.addProperty({ "name": "ge_charLayer", "type": "string", "value": "background" })
+	.fill(gid.wall_block);
+
+const floor = ${game.level}.addLayer("layer1")
+	.addProperty({ "name": "ge_charLayer", "type": "string", "value": "layer1" });
+
+for (const [x, y] of [
+${floorLines}
+] as [number, number][]) {
+	floor.bitblt(x, y, [[gid.gray_square]]);
+}
+
+// Placed objects — spawned by load() into ECS entities via game.ts's entityConfig (keyed by these names).
+const objects = ${game.level}.addObjectLayer("objects");
+
+for (const [name, x, y] of [
+${objectLines}
+] as [string, number, number][]) {
+	objects.bitblt(x, y, [[gid[name]]]);
+}
+`;
+}
+
 /**
- * Generate all of a game's code files from its block model: the generated `game.ts`, plus the library component + system
- * files the used behaviors require. Returns `{ path → content }`; the level, assets, and entry (index.html) come from the
- * workspace/library, not here.
+ * Generate all of a game's code files from its block model: the constant infra, the library component + system files the
+ * used behaviors require, the generated level (when a map is authored), and the generated `game.ts` assembly. Returns
+ * `{ path → content }` — a complete, self-contained, runnable game.
  */
 export function generateGame(game: AuthoredGame): Record<string, string> {
 	const files: Record<string, string> = {};
+	const vendored = dozerFiles();
+
+	// Infra — constant, vendored verbatim.
+	for (const path of INFRA_FILES) {
+		if (vendored[path] !== undefined) {
+			files[path] = vendored[path];
+		}
+	}
 
 	// Components to emit: everything the entities attach, Position (setPosition), and each system's needs.
 	const componentNames = new Set<string>(["Position"]);
@@ -290,27 +353,34 @@ export function generateGame(game: AuthoredGame): Record<string, string> {
 	}
 
 	for (const system of game.systems) {
-		for (const need of SYSTEMS[system]?.needs ?? []) {
+		for (const need of SYSTEM_META[system]?.needs ?? []) {
 			componentNames.add(need);
 		}
 	}
 
 	for (const name of componentNames) {
-		const component = COMPONENTS[name];
+		const meta = COMPONENT_META[name];
 
-		if (component !== undefined) {
-			files[component.file.path] = component.file.content;
+		if (meta !== undefined && vendored[meta.path] !== undefined) {
+			files[meta.path] = vendored[meta.path];
 		}
 	}
 
+	// Systems — vendored verbatim (the heavy behavior logic).
 	for (const system of game.systems) {
-		const definition = SYSTEMS[system];
+		const meta = SYSTEM_META[system];
 
-		if (definition !== undefined) {
-			files[definition.file.path] = definition.file.content;
+		if (meta !== undefined && vendored[meta.path] !== undefined) {
+			files[meta.path] = vendored[meta.path];
 		}
 	}
 
+	// Level — generated from the painted grid (when authored).
+	if (game.map !== undefined) {
+		files["levels/" + game.level + ".ts"] = generateLevelFile(game);
+	}
+
+	// Assembly.
 	files["game.ts"] = generateSceneFile(game);
 
 	return files;

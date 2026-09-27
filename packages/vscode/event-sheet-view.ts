@@ -13,8 +13,8 @@
 import type { AugmentationContext, FileAugmentation } from "./file-augmentations";
 import type { AuthoredGame } from "./game-generator";
 import type { Behavior, GameModel, GameObject, Rule } from "./game-recognizer";
-import { renderAuthoring } from "./authoring-view";
-import { authoredFromModel } from "./game-generator";
+import { renderAuthoring, writeGeneratedGame } from "./authoring-view";
+import { authoredFromModel, blankGame, generateGame } from "./game-generator";
 import { createGameProjection, type GameProjection } from "./game-projection";
 
 const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
@@ -281,6 +281,18 @@ export const eventSheetAugmentation: FileAugmentation = {
 		// Declared out of the loop so the click handler doesn't close over the mutable `viewMode`.
 		const setMode = (mode: ViewMode): void => { viewMode = mode; void rebuild(); };
 
+		// Scaffold a blank, runnable game the user owns, then open it (its own augmentation instance renders in Build,
+		// reading the seeded block model — a paintable empty grid).
+		const createGame = async (name: string): Promise<void> => {
+			const dest = "/workspace/games/" + name.replace(/[^\w.-]+/gu, "-");
+			const game = blankGame();
+
+			await writeGeneratedGame(api, dest, generateGame(game));
+			authoredByRoot.set(dest, game);
+			viewMode = "build";
+			await api.window.showTextDocument(api.Uri.file(dest + "/game.ts"));
+		};
+
 		const renderToggle = (): void => {
 			bar.replaceChildren();
 
@@ -335,7 +347,7 @@ export const eventSheetAugmentation: FileAugmentation = {
 					authoredByRoot.set(root, authored);
 				}
 
-				renderAuthoring(body, api, root, authored, () => { void rebuild(); });
+				renderAuthoring(body, api, root, authored, { "rerender": () => { void rebuild(); }, "createGame": createGame });
 
 				return;
 			}
