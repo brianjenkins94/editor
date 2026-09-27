@@ -18,6 +18,8 @@
  */
 
 import type { GameModel } from "./game-recognizer";
+import type { Behavior, Rule } from "./game-rules";
+import { compileGame, dozerBehaviors, dozerRules } from "./game-rules";
 import { sampleById } from "./samples";
 
 /** Import specifier + vendored-file path (relative to the game dir; also its subpath inside the dozer sample). */
@@ -154,6 +156,11 @@ export interface AuthoredGame {
 	"map"?: AuthoredLevel;
 	/** Where the Tilemap loader is imported from (defaults to the self-contained local copy). */
 	"tilemapImport"?: string;
+	/** When present, the game's systems are COMPILED from these ECA rules (via game-rules) rather than vendored by name
+	 *  from `systems`. Their `behaviors` are compiled into the game's own `behaviors/` library. This is the composed path:
+	 *  gameplay logic built from primitives, plus the render engine system, all self-contained and runnable. */
+	"rules"?: Rule[];
+	"behaviors"?: Behavior[];
 }
 
 /** A blank but runnable game: infra + an empty level, no entities, no systems. The from-scratch starting point. */
@@ -187,6 +194,23 @@ export const dozerAuthored: AuthoredGame = {
 			{ "type": "target", "x": 10, "y": 8 }
 		]
 	}
+};
+
+/** dozer, COMPOSED from primitives — the same game, but its systems are compiled from ECA rules + behaviors (game-rules)
+ *  instead of vendored pre-made. Generating THIS produces a complete, runnable dozer whose push and win were built from
+ *  the toolbox, not handed over: the honest end of the thesis. The player needs only the Player tag (input is folded into
+ *  the compiled playerMove, which reads the cursors and queries [Player]); there is no MoveIntent/Direction. */
+export const dozerComposed: AuthoredGame = {
+	"level": "level1",
+	"entities": [
+		{ "name": "player", "components": ["Player"], "depth": 2 },
+		{ "name": "boulder", "components": ["Pushable"], "depth": 1 },
+		{ "name": "target", "components": ["Target"], "depth": 0 }
+	],
+	"systems": [],
+	"map": dozerAuthored.map,
+	"rules": dozerRules,
+	"behaviors": dozerBehaviors
 };
 
 /** Seed an editable block model from a recognized game (read → write bridge): objects become entities, rules become the
@@ -254,6 +278,79 @@ export function create(scene) {
 	};
 
 	scene.systems = [${game.systems.join(", ")}];
+}
+
+export function preupdate(scene) {}
+
+export function update(scene, time, delta) {
+	for (const system of scene.systems) {
+		system(scene.world);
+	}
+}
+`;
+}
+
+/** The generated `game.ts` for the COMPOSED path — wires the compiled rule systems (from game-rules) plus the render
+ *  engine system. Same scene shape as `generateSceneFile`, but the systems come from `./systems/<rule>` (compiled) and
+ *  `./systems/render` (engine glue), not the vendored library. */
+function generateComposedScene(game: AuthoredGame): string {
+	const tilemap = game.tilemapImport ?? "./Tilemap";
+	const rules = game.rules ?? [];
+
+	const componentNames = new Set<string>(["Position"]);
+
+	for (const entity of game.entities) {
+		for (const component of entity.components) {
+			componentNames.add(component);
+		}
+	}
+
+	// Systems run: the per-entity rules (movers), then render (sync sprites to positions), then the aggregate rules (win).
+	const moverSystems = rules.filter((rule) => rule.kind === "perEntity").map((rule) => rule.name);
+	const aggregateSystems = rules.filter((rule) => rule.kind === "aggregate").map((rule) => rule.name);
+	const systemNames = [...moverSystems, "renderSystem", ...aggregateSystems];
+
+	const componentImports = [...componentNames].map((name) => `import { ${name} } from "${COMPONENT_META[name]?.from ?? "./schemas/" + name.toLowerCase()}";`).join("\n");
+	const systemImports = systemNames.map((name) => `import { ${name} } from "./systems/${name === "renderSystem" ? "render" : name}";`).join("\n");
+	const entityConfig = game.entities
+		.map((entity) => `\t\t"${entity.name}": { "components": [${entity.components.join(", ")}], "depth": ${entity.depth}, "onSpawn": setPosition }`)
+		.join(",\n");
+
+	return `import { addComponent, createWorld } from "bitecs";
+import { load } from "${tilemap}";
+import { ${game.level} } from "./levels/${game.level}";
+${componentImports}
+${systemImports}
+
+export const name = "${game.level}";
+
+export function init(scene) {}
+
+export function preload(scene) {
+	scene.world = createWorld();
+
+	function setPosition(eid, tx, ty) {
+		addComponent(scene.world, eid, Position);
+		Position.x[eid] = tx;
+		Position.y[eid] = ty;
+	}
+
+	load(scene, "${game.level}", ${game.level}, {
+${entityConfig}
+	});
+}
+
+export function create(scene) {
+	const { mapWidth, mapHeight } = scene.world.tileConfig;
+
+	scene.game.scale.setGameSize(mapWidth, mapHeight);
+	scene.world.cursors = scene.input.keyboard.createCursorKeys();
+	scene.world.onWin = () => {
+		scene.add.text(mapWidth / 2, mapHeight / 2, "You Win!", { "fontSize": "32px", "color": "#ffffff", "backgroundColor": "#000000", "padding": { "x": 16, "y": 8 } }).setOrigin(0.5).setDepth(10);
+		scene.systems = [];
+	};
+
+	scene.systems = [${systemNames.join(", ")}];
 }
 
 export function preupdate(scene) {}
@@ -341,6 +438,41 @@ export function generateGame(game: AuthoredGame): Record<string, string> {
 		if (vendored[path] !== undefined) {
 			files[path] = vendored[path];
 		}
+	}
+
+	// Composed path: the gameplay systems are COMPILED from ECA rules (+ their behaviors), not vendored by name. Emit the
+	// components the entities attach, the compiled behaviors/ + systems/, the render engine system, the level, and a scene
+	// that wires the compiled systems.
+	if (game.rules !== undefined) {
+		const composedComponents = new Set<string>(["Position"]);
+
+		for (const entity of game.entities) {
+			for (const component of entity.components) {
+				composedComponents.add(component);
+			}
+		}
+
+		for (const name of composedComponents) {
+			const meta = COMPONENT_META[name];
+
+			if (meta !== undefined && vendored[meta.path] !== undefined) {
+				files[meta.path] = vendored[meta.path];
+			}
+		}
+
+		Object.assign(files, compileGame(game.rules, game.behaviors ?? []));
+
+		if (vendored["systems/render.ts"] !== undefined) {
+			files["systems/render.ts"] = vendored["systems/render.ts"]; // the render engine system — glue, not authored
+		}
+
+		if (game.map !== undefined) {
+			files["levels/" + game.level + ".ts"] = generateLevelFile(game);
+		}
+
+		files["game.ts"] = generateComposedScene(game);
+
+		return files;
 	}
 
 	// Components to emit: everything the entities attach, Position (setPosition), and each system's needs.

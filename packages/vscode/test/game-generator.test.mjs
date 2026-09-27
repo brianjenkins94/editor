@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import ts from "typescript";
-import { blankGame, dozerAuthored, generateGame } from "../game-generator.ts";
+import { blankGame, dozerAuthored, dozerComposed, generateGame } from "../game-generator.ts";
 import { recognizeGame } from "../game-recognizer.ts";
 
 test("generating the dozer block model emits a complete runnable game", () => {
@@ -70,6 +70,32 @@ test("a blank game is a complete, runnable, empty scaffold", () => {
 
 	assert.equal(model.objects.length, 0, "a blank game has no objects");
 	assert.equal(model.rules.length, 0, "a blank game has no rules");
+});
+
+test("the COMPOSED dozer generates a complete runnable game whose systems are compiled from primitives", () => {
+	const files = generateGame(dozerComposed);
+
+	// Complete + self-contained: infra, schemas, the compiled library + systems, the render engine glue, level, assembly.
+	for (const path of ["index.html", "scene.ts", "Tilemap.ts", "package.json", "schemas/player.ts", "schemas/pushable.ts", "schemas/target.ts", "schemas/position.ts", "behaviors/gridPush.ts", "systems/playerMove.ts", "systems/winSystem.ts", "systems/render.ts", "levels/level1.ts", "game.ts"]) {
+		assert.ok(typeof files[path] === "string" && files[path].length > 0, path + " is present");
+	}
+
+	// The player logic is COMPILED, not vendored: playerMove composes the gridPush behavior.
+	assert.match(files["systems/playerMove.ts"], /gridPush\(world, eid, dir\)/u, "playerMove composes the built-in behavior");
+	assert.match(files["behaviors/gridPush.ts"], /Position\.x\[rock\] = pastX/u, "the push lives in the behavior, built from primitives");
+
+	// The assembly wires the compiled systems + render, in order, and needs no MoveIntent/Direction (input is folded in).
+	assert.match(files["game.ts"], /scene\.systems = \[playerMove, renderSystem, winSystem\]/u, "systems run move -> render -> win");
+	assert.match(files["game.ts"], /import \{ playerMove \} from "\.\/systems\/playerMove"/u);
+	assert.doesNotMatch(files["game.ts"], /MoveIntent|Direction/u, "the composed player needs only the Player tag");
+
+	// Round-trip: the composed game reverse-projects to dozer's map, with the library recognized.
+	const model = recognizeGame(files, ts);
+
+	assert.deepEqual(model.objects.map((object) => object.name).sort(), ["boulder", "player", "target"]);
+	assert.deepEqual(model.rules.map((rule) => rule.name).sort(), ["playerMove", "renderSystem", "winSystem"]);
+	assert.deepEqual(model.composites.map((composite) => composite.name), ["gridPush"]);
+	assert.deepEqual(model.rules.find((rule) => rule.name === "playerMove")?.composes, ["gridPush"], "the rule round-trips its composition");
 });
 
 test("adding an entity to the model shows up in the regenerated projection", () => {
