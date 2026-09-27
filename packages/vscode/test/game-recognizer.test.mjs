@@ -9,7 +9,7 @@ import * as url from "node:url";
 import ts from "typescript";
 // Node 24 strips the types. The recognizer imports NO typescript itself (would bundle ~16MB in the editor) — the host
 // injects its `ts`; here the test injects node's, the way the editor injects its ambient tsserver instance.
-import { recognizeBehaviors, recognizeObjects, recognizeRules } from "../game-recognizer.ts";
+import { recognizeBehaviors, recognizeGame, recognizeObjects, recognizeRules } from "../game-recognizer.ts";
 
 const fixtureDir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "fixtures", "dozer");
 
@@ -103,4 +103,14 @@ test("recognizes rules (systems) by shape, with subjects and event→action rows
 	assert.deepEqual(byName.get("winSystem")?.queries, [["Target", "Position"], ["Pushable", "Position"]]);
 	assert.equal(byName.get("renderSystem")?.rows.length, 0);
 	assert.deepEqual(byName.get("renderSystem")?.queries, [["Position"]]);
+});
+
+test("recognizeGame composes all three into one JSON model (what the worker returns)", () => {
+	const model = recognizeGame(readGame(fixtureDir), ts);
+
+	assert.equal(model.behaviors.length, 5);
+	assert.equal(model.objects.length, 3);
+	assert.equal(model.rules.length, 4);
+	// Plain JSON — survives the worker boundary (structuredClone stands in for postMessage).
+	assert.deepEqual(structuredClone(model), model);
 });

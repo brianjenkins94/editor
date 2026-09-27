@@ -339,3 +339,16 @@ export function recognizeRules(files: Record<string, string>, ts: TsApi): Rule[]
 
 	return rules.sort((a, b) => a.defPath.localeCompare(b.defPath) || a.defLine - b.defLine);
 }
+
+/** The whole reverse-projection of a game: the nouns (objects + their behaviors) and the verbs (rules). Plain JSON, so
+ *  it can cross a worker boundary — the recognizer runs where `ts` lives; only this model reaches the auxpane. */
+export interface GameModel {
+	"behaviors": Behavior[];
+	"objects": GameObject[];
+	"rules": Rule[];
+}
+
+/** Run all recognizers over a game's `{ path → source }` with an injected `ts`. */
+export function recognizeGame(files: Record<string, string>, ts: TsApi): GameModel {
+	return { "behaviors": recognizeBehaviors(files, ts), "objects": recognizeObjects(files, ts), "rules": recognizeRules(files, ts) };
+}

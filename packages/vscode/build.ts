@@ -196,7 +196,10 @@ export async function preBuild(): Promise<void> {
 					"lsp/provoke-worker": resolvePath("./extensions/worker-pod/provoke-worker.ts"),
 					// BABLR cosmetic/semantic classify worker (not part of the LSP pod), served from lsp/ like the
 					// other worker chunks. Driven by cosmetic-classifier.ts.
-					"lsp/classify-worker": resolvePath("./classify-worker.ts")
+					"lsp/classify-worker": resolvePath("./classify-worker.ts"),
+					// Reverse-projection recognizer worker — built HERE so its `typescript` shares the deduped ts chunk
+					// above (no second copy in main.js). Driven by game-projection.ts.
+					"lsp/recognizer-worker": resolvePath("./recognizer-worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",
