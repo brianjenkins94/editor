@@ -1,103 +1,27 @@
 /**
- * Reverse-projection recognizer — maps a game's BABLR CST INTO the event-sheet toolbox (objects · behaviors · rules),
- * so the code stays the source of truth and the sheet is a strong, derived view of it (see the event-sheet vision).
+ * Reverse-projection recognizer — maps a game's source INTO the event-sheet toolbox (objects · behaviors · rules), so
+ * the code stays the source of truth and the sheet is a strong, derived view of it (see the event-sheet vision).
  *
- * "Strong" = maximize what folds into the toolbox and minimize opaque custom code. This module grows one idiom-matcher
- * at a time, keyed to the house-style (bitECS + Phaser). The FIRST and highest-leverage matcher is component→BEHAVIOR:
- * it's what hides bitECS and creates the toolbox's force multiplier (attach behaviors to an object → it gains
- * capabilities). A behavior is an exported component — a DATA component (`{ field: new Uint8Array(N) }`) or a TAG
- * (`export const X: number[] = []`) — CONFIRMED by usage in `query(...)`/`addComponent(...)`/a `components: [...]` config
- * (which excludes look-alikes like the `Direction` enum, an object of plain numbers, that's never queried).
+ * TWO tools, each for its strength:
+ *  - RECOGNITION (structure: "is this a component / a query / an entity config?") uses the TYPESCRIPT AST — fast, robust
+ *    on real-world TS, and type-aware if run inside tsserver. That's THIS module.
+ *  - ANCHORING (durable identity: "which node is this, so its attachment survives edits/moves?") uses BABLR spanAnchors,
+ *    mapped to a recognized node's source range by offset. That's added at the wiring step, not here.
  *
- * Pure + framework-only (BABLR via cstSpans); no vscode. Runs off-thread when wired to the worker. Cross-file: it takes
- * the whole game's `{ path → source }` so usage in one file confirms a behavior defined in another.
+ * IMPORTANT — the `ts` is INJECTED, never imported: the editor already runs one TypeScript (the externalized tsserver
+ * instance the capabilities plugin reuses). Importing `typescript` here would bundle a second ~16MB copy into the
+ * workbench. So the host passes its ambient `ts` (the tsserver plugin's, or the LSP worker's); the node test passes
+ * node's. `import type` below is erased at build time — no runtime dependency.
+ *
+ * "Strong" = maximize what folds into the toolbox, minimize opaque custom code. Grows one idiom-matcher at a time,
+ * keyed to the house-style (bitECS + Phaser). FIRST matcher = component→BEHAVIOR: it hides bitECS and is the toolbox's
+ * force multiplier. Pure + cross-file: it takes the whole game's `{ path → source }` so usage in one file confirms a
+ * behavior defined in another.
  */
-import { cstSpans } from "@brianjenkins94/bablr";
+import type * as TS from "typescript";
 
-/** A containment node built from the flat CST spans — type, the reference `field` it was emitted under, source text. */
-export interface CstNode {
-	"type": string | null;
-	"field": string | null;
-	"start": number;
-	"end": number;
-	"text": string;
-	"children": CstNode[];
-}
-
-/** Build a containment tree from BABLR's flat close-order spans (drop trivia, anonymous punctuation, and cover wrappers). */
-export function cstTree(src: string, production = "Program"): CstNode {
-	const spans = cstSpans(src, production).spans.filter((span) => span.type !== null && !span.trivia && !span.cover);
-
-	// close-order is children-before-parents; reverse so equal-span wrappers land OUTER-first, then stable-sort to preorder.
-	spans.reverse();
-
-	const nodes: CstNode[] = spans
-		.map((span) => ({ "type": span.type, "field": span.field, "start": span.start, "end": span.end, "text": src.slice(span.start, span.end), "children": [] as CstNode[] }))
-		.sort((a, b) => a.start - b.start || b.end - a.end);
-
-	const root = nodes[0] ?? { "type": "Program", "field": null, "start": 0, "end": src.length, "text": src, "children": [] };
-	const stack: CstNode[] = [root];
-
-	for (let index = 1; index < nodes.length; index += 1) {
-		const node = nodes[index];
-
-		while (stack.length > 0 && !(stack[stack.length - 1].start <= node.start && stack[stack.length - 1].end >= node.end)) {
-			stack.pop();
-		}
-
-		stack[stack.length - 1]?.children.push(node);
-		stack.push(node);
-	}
-
-	return root;
-}
-
-function* walk(node: CstNode): Generator<CstNode> {
-	yield node;
-
-	for (const child of node.children) {
-		yield* walk(child);
-	}
-}
-
-/** First direct child emitted under `field`. */
-function childField(node: CstNode, field: string): CstNode | undefined {
-	return node.children.find((child) => child.field === field);
-}
-
-/** First descendant (or self) of `type`, in preorder. */
-function firstType(node: CstNode, type: string): CstNode | undefined {
-	for (const descendant of walk(node)) {
-		if (descendant.type === type) {
-			return descendant;
-		}
-	}
-
-	return undefined;
-}
-
-/** All descendants (or self) of `type`. */
-function allType(node: CstNode, type: string): CstNode[] {
-	return [...walk(node)].filter((descendant) => descendant.type === type);
-}
-
-/** 1-based line of a source offset. */
-function lineAt(src: string, offset: number): number {
-	let line = 1;
-
-	for (let index = 0; index < offset && index < src.length; index += 1) {
-		if (src[index] === "\n") {
-			line += 1;
-		}
-	}
-
-	return line;
-}
-
-const TYPED_ARRAYS = new Set(["Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array"]);
-const COMPONENT_CALLS = new Set(["query", "addComponent", "hasComponent", "removeComponent"]);
-const LEADING_IDENT = /^\s*([A-Za-z_$][\w$]*)\s*\(/u;
-const NEW_CALLEE = /new\s+([A-Za-z_$][\w$]*)/u;
+/** The injected TypeScript API (the editor's own instance, or node's in tests). */
+export type TsApi = typeof TS;
 
 /** A behavior = an exported ECS component, presented without the bitECS wiring. */
 export interface Behavior {
@@ -110,30 +34,50 @@ export interface Behavior {
 	"defLine": number;
 }
 
-/** Classify an exported const's initializer as a data component (object of TypedArrays), a tag (empty array), or neither. */
-function classifyDeclarator(declarator: CstNode): { "kind": "data" | "tag"; "fields": string[] } | undefined {
-	// The initializer is found by TYPE, not by the `value` field: that field rides on an Expression COVER node, which
-	// cstTree drops, leaving the Object/Array sitting directly under the declarator. `Object`/`Array` only occur in the
-	// value (the receiver is an Identifier, a type annotation uses ObjectType/ArrayType), so this is unambiguous.
-	const object = firstType(declarator, "Object");
-	const array = firstType(declarator, "Array");
+const TYPED_ARRAYS = new Set(["Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array"]);
+const COMPONENT_CALLS = new Set(["query", "addComponent", "hasComponent", "removeComponent"]);
 
-	if (object === undefined && array === undefined) {
-		return undefined; // no object/array initializer (e.g. a for-of binding, `new Set()`, a scalar)
+/** ScriptKind from a path's extension, so TSX/JSX parse correctly. */
+function scriptKind(ts: TsApi, path: string): TS.ScriptKind {
+	if (path.endsWith(".tsx")) {
+		return ts.ScriptKind.TSX;
 	}
 
-	if (object !== undefined && (array === undefined || object.start <= array.start)) {
+	if (path.endsWith(".jsx")) {
+		return ts.ScriptKind.JSX;
+	}
+
+	if (path.endsWith(".js") || path.endsWith(".mjs") || path.endsWith(".cjs")) {
+		return ts.ScriptKind.JS;
+	}
+
+	return ts.ScriptKind.TS;
+}
+
+/** A property key's text (identifier or string/number literal), or undefined for a computed key. */
+function propName(ts: TsApi, name: TS.PropertyName): string | undefined {
+	if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
+		return name.text;
+	}
+
+	return undefined;
+}
+
+/** Classify a declaration's initializer as a data component (object of TypedArrays), a tag (empty array), or neither. */
+function classifyInitializer(ts: TsApi, init: TS.Expression | undefined): { "kind": "data" | "tag"; "fields": string[] } | undefined {
+	if (init === undefined) {
+		return undefined;
+	}
+
+	if (ts.isObjectLiteralExpression(init)) {
 		const fields: string[] = [];
 
-		for (const property of allType(object, "Property")) {
-			const created = firstType(property, "NewExpression");
-			const callee = created?.text.match(NEW_CALLEE);
-
-			if (callee !== null && callee !== undefined && TYPED_ARRAYS.has(callee[1])) {
-				const key = firstType(property, "StringContent") ?? firstType(property, "Identifier");
+		for (const property of init.properties) {
+			if (ts.isPropertyAssignment(property) && ts.isNewExpression(property.initializer) && ts.isIdentifier(property.initializer.expression) && TYPED_ARRAYS.has(property.initializer.expression.text)) {
+				const key = propName(ts, property.name);
 
 				if (key !== undefined) {
-					fields.push(key.text.trim());
+					fields.push(key);
 				}
 			}
 		}
@@ -142,65 +86,69 @@ function classifyDeclarator(declarator: CstNode): { "kind": "data" | "tag"; "fie
 		return fields.length > 0 ? { "kind": "data", "fields": fields } : undefined;
 	}
 
-	if (array !== undefined) {
-		// Empty array literal = a tag component; a populated array export is something else.
-		return allType(array, "ArrayElement").length === 0 ? { "kind": "tag", "fields": [] } : undefined;
+	if (ts.isArrayLiteralExpression(init) && init.elements.length === 0) {
+		return { "kind": "tag", "fields": [] }; // empty array literal = a tag component
 	}
 
 	return undefined;
 }
 
 /**
- * Recognize the game's behaviors across all its files: every exported component (data or tag) that is actually USED as
- * one (queried, added, or listed in a `components:` config). Usage confirmation is what makes the projection strong —
- * it keeps enums/plain arrays out and resolves cross-file (a tag defined in schemas/, used in game.ts's load config).
+ * Recognize the game's behaviors across all its files: every component (data or tag) that is actually USED as one
+ * (queried, added, or listed in a `components:` config). Usage confirmation is what makes the projection strong — it
+ * keeps enums/plain arrays out and resolves cross-file (a tag defined in schemas/, used only in game.ts's load config).
  */
-export function recognizeBehaviors(files: Record<string, string>): Behavior[] {
+export function recognizeBehaviors(files: Record<string, string>, ts: TsApi): Behavior[] {
 	const defs = new Map<string, { "kind": "data" | "tag"; "fields": string[]; "path": string; "line": number }>();
 	const used = new Set<string>();
 
 	for (const [path, src] of Object.entries(files)) {
-		let root: CstNode;
+		let source: TS.SourceFile;
 
 		try {
-			root = cstTree(src);
+			source = ts.createSourceFile(path, src, ts.ScriptTarget.Latest, true, scriptKind(ts, path));
 		} catch {
 			continue; // unparsable file — skip, don't fail the whole projection
 		}
 
-		for (const declarator of allType(root, "VariableDeclarator")) {
-			const name = childField(declarator, "receiver")?.text.trim();
-			const classified = name === undefined ? undefined : classifyDeclarator(declarator);
+		const visit = (node: TS.Node): void => {
+			// Definition: a `const X = <object|array>` whose shape is component-like.
+			if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+				const classified = classifyInitializer(ts, node.initializer);
 
-			if (name !== undefined && classified !== undefined) {
-				defs.set(name, { ...classified, "path": path, "line": lineAt(src, declarator.start) });
-			}
-		}
-
-		// Usage 1 — component calls: query/addComponent/hasComponent/removeComponent (callee via leading identifier,
-		// since BABLR labels the callee field inconsistently across call forms).
-		for (const call of allType(root, "CallExpression")) {
-			const callee = call.text.match(LEADING_IDENT);
-
-			if (callee !== null && COMPONENT_CALLS.has(callee[1])) {
-				for (const identifier of allType(call, "Identifier")) {
-					used.add(identifier.text.trim());
+				if (classified !== undefined) {
+					defs.set(node.name.text, { ...classified, "path": path, "line": source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1 });
 				}
 			}
-		}
 
-		// Usage 2 — a `components: [A, B]` entry in an object config (the load(...) entity spec).
-		for (const property of allType(root, "Property")) {
-			if (firstType(property, "StringContent")?.text.trim() === "components") {
-				const array = firstType(property, "Array");
+			// Usage 1 — component calls: query/addComponent/hasComponent/removeComponent (bare-identifier callee).
+			if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && COMPONENT_CALLS.has(node.expression.text)) {
+				for (const argument of node.arguments) {
+					const collect = (inner: TS.Node): void => {
+						if (ts.isIdentifier(inner)) {
+							used.add(inner.text);
+						}
 
-				if (array !== undefined) {
-					for (const identifier of allType(array, "Identifier")) {
-						used.add(identifier.text.trim());
+						ts.forEachChild(inner, collect);
+					};
+
+					collect(argument);
+				}
+			}
+
+			// Usage 2 — a `components: [A, B]` entry in an object config (the load(...) entity spec).
+			if (ts.isPropertyAssignment(node) && propName(ts, node.name) === "components" && ts.isArrayLiteralExpression(node.initializer)) {
+				for (const element of node.initializer.elements) {
+					if (ts.isIdentifier(element)) {
+						used.add(element.text);
 					}
 				}
 			}
-		}
+
+			ts.forEachChild(node, visit);
+		};
+
+		visit(source);
 	}
 
 	const behaviors: Behavior[] = [];

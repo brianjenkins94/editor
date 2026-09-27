@@ -6,7 +6,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import test from "node:test";
 import * as url from "node:url";
-// Node 24 strips the types; the recognizer's only runtime import is bablr/dist (gitignored, local/CI-built).
+import ts from "typescript";
+// Node 24 strips the types. The recognizer imports NO typescript itself (would bundle ~16MB in the editor) — the host
+// injects its `ts`; here the test injects node's, the way the editor injects its ambient tsserver instance.
 import { recognizeBehaviors } from "../game-recognizer.ts";
 
 const fixtureDir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "fixtures", "dozer");
@@ -28,7 +30,7 @@ function readGame(dir, base = dir, out = {}) {
 }
 
 test("recognizes every dozer behavior (data + tag), cross-file, with correct kind and fields", () => {
-	const behaviors = recognizeBehaviors(readGame(fixtureDir));
+	const behaviors = recognizeBehaviors(readGame(fixtureDir), ts);
 	const byName = new Map(behaviors.map((behavior) => [behavior.name, behavior]));
 
 	// Data components carry fields.
@@ -47,7 +49,7 @@ test("recognizes every dozer behavior (data + tag), cross-file, with correct kin
 });
 
 test("excludes non-components: the Direction enum (object of numbers, never queried) is not a behavior", () => {
-	const behaviors = recognizeBehaviors(readGame(fixtureDir));
+	const behaviors = recognizeBehaviors(readGame(fixtureDir), ts);
 
 	assert.equal(behaviors.find((behavior) => behavior.name === "Direction"), undefined);
 	// Strength check: exactly the five real components, nothing else.
