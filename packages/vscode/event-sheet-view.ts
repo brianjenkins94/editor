@@ -11,7 +11,10 @@
 /* eslint-disable ts/no-explicit-any -- the vscode api is untyped here (captured from the hello extension) */
 /* eslint-disable webawesome/no-inline-styles, webawesome/no-css-in-strings -- a plain structural map in the aux-bar body; intrinsic layout, not themeable chrome */
 import type { AugmentationContext, FileAugmentation } from "./file-augmentations";
+import type { AuthoredGame } from "./game-generator";
 import type { Behavior, GameModel, GameObject, Rule } from "./game-recognizer";
+import { renderAuthoring } from "./authoring-view";
+import { authoredFromModel } from "./game-generator";
 import { createGameProjection, type GameProjection } from "./game-projection";
 
 const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
@@ -21,6 +24,12 @@ const BORDER = "1px solid var(--vscode-panel-border,#2a2a2a)";
 // One recognizer worker for the session (spawned lazily; keeps ts out of the main bundle). See game-projection.ts.
 let projection: GameProjection | undefined;
 const getProjection = (): GameProjection => (projection ??= createGameProjection());
+
+// The auxpane has two faces of one model: Build (author) and Map (read). Mode is sticky across activations; the authored
+// block model is cached per game root so edits persist (and don't re-project on every keystroke).
+type ViewMode = "build" | "map";
+let viewMode: ViewMode = "build";
+const authoredByRoot = new Map<string, AuthoredGame>();
 
 /** The nearest ancestor directory of `uri` that has a package.json — the game root (a game is a package). */
 async function findGameRoot(api: any, uri: any): Promise<string | undefined> {
@@ -249,16 +258,50 @@ export const eventSheetAugmentation: FileAugmentation = {
 		const { api } = context;
 		let disposed = false;
 
+		// Fixed toggle bar on top; the body swaps between Build (author) and Map (read).
+		container.style.cssText = "height:100%;display:flex;flex-direction:column;overflow:hidden";
+
+		const bar = document.createElement("div");
+
+		bar.style.cssText = "display:flex;gap:4px;padding:6px 10px;border-bottom:" + BORDER + ";flex:none";
+
+		const body = document.createElement("div");
+
+		body.style.cssText = "flex:1;overflow:auto;min-height:0";
+		container.replaceChildren(bar, body);
+
 		const showMessage = (text: string): void => {
 			const note = document.createElement("div");
 
 			note.textContent = text;
 			note.style.cssText = "padding:12px;font-size:13px;opacity:0.6";
-			container.replaceChildren(note);
+			body.replaceChildren(note);
+		};
+
+		// Declared out of the loop so the click handler doesn't close over the mutable `viewMode`.
+		const setMode = (mode: ViewMode): void => { viewMode = mode; void rebuild(); };
+
+		const renderToggle = (): void => {
+			bar.replaceChildren();
+
+			for (const mode of ["build", "map"] as const) {
+				const toggle = document.createElement("wa-button");
+
+				toggle.setAttribute("size", "small");
+				toggle.setAttribute("appearance", "outlined");
+
+				if (viewMode === mode) {
+					toggle.setAttribute("variant", "brand");
+				}
+
+				toggle.textContent = mode === "build" ? "Build" : "Map";
+				toggle.addEventListener("click", () => { setMode(mode); });
+				bar.append(toggle);
+			}
 		};
 
 		const rebuild = async (): Promise<void> => {
-			showMessage("Projecting…");
+			renderToggle();
 
 			const root = await findGameRoot(api, context.document.uri);
 
@@ -272,17 +315,39 @@ export const eventSheetAugmentation: FileAugmentation = {
 				return;
 			}
 
-			const files = await readGameFiles(api, root);
+			if (viewMode === "build") {
+				// Author face: seed the block model from the recognized game once, then edit locally (no re-projection).
+				let authored = authoredByRoot.get(root);
 
-			if (disposed) {
+				if (authored === undefined) {
+					showMessage("Loading…");
+
+					try {
+						authored = authoredFromModel(await getProjection().project(await readGameFiles(api, root)));
+					} catch {
+						authored = { "level": "level1", "entities": [], "systems": [] };
+					}
+
+					if (disposed) {
+						return;
+					}
+
+					authoredByRoot.set(root, authored);
+				}
+
+				renderAuthoring(body, api, root, authored, () => { void rebuild(); });
+
 				return;
 			}
 
+			// Map face: reverse-project the current code.
+			showMessage("Projecting…");
+
 			try {
-				const model = await getProjection().project(files);
+				const model = await getProjection().project(await readGameFiles(api, root));
 
 				if (!disposed) {
-					paint(container, context, root, model);
+					paint(body, context, root, model);
 				}
 			} catch (error) {
 				if (!disposed) {
@@ -291,9 +356,13 @@ export const eventSheetAugmentation: FileAugmentation = {
 			}
 		};
 
-		// Re-project on save (debounced), so the map tracks the code.
+		// Re-project the Map on save (debounced), so it tracks the code.
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const sub = api.workspace.onDidSaveTextDocument(() => {
+			if (viewMode !== "map") {
+				return; // Build is driven by the in-memory model, not the files
+			}
+
 			if (timer !== undefined) {
 				clearTimeout(timer);
 			}

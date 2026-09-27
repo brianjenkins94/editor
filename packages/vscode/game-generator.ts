@@ -14,6 +14,8 @@
  * template literals only so they embed cleanly here; behaviour is identical. Later this becomes a published library.
  */
 
+import type { GameModel } from "./game-recognizer";
+
 interface LibFile { "path": string; "content": string }
 interface LibComponent { "from": string; "file": LibFile }
 interface LibSystem { "from": string; "file": LibFile; "needs": string[] }
@@ -193,6 +195,16 @@ export const dozerAuthored: AuthoredGame = {
 	],
 	"systems": ["inputSystem", "movementSystem", "renderSystem", "winSystem"]
 };
+
+/** Seed an editable block model from a recognized game (read → write bridge): objects become entities, rules become the
+ *  systems list. The level isn't recognized from code, so it defaults (dozer's `level1`). */
+export function authoredFromModel(model: GameModel, level = "level1"): AuthoredGame {
+	return {
+		"level": level,
+		"entities": model.objects.map((object) => ({ "name": object.name, "components": [...object.behaviors], "depth": object.depth ?? 0 })),
+		"systems": model.rules.map((rule) => rule.name)
+	};
+}
 
 /** The generated `game.ts` — the scene assembly, parameterized by the block model; wires the library, never the logic. */
 function generateSceneFile(game: AuthoredGame): string {
