@@ -1,242 +1,319 @@
 /**
- * The Event Sheet augmentation — the FIRST file augmentation (see file-augmentations.ts). A Construct-style event sheet
- * rendered in the auxpane as a 3-column table (Name · Kind · Code), a PROJECTION of the active code file, with clicks
- * that drive the editor: click a row → jump to its lines; move the cursor → the owning row highlights.
+ * The Event Sheet augmentation — the FIRST file augmentation (see file-augmentations.ts). A projection of the game the
+ * active file belongs to, rendered in the auxpane as a cross-file structural map: OBJECTS (entity types + their
+ * behaviors), RULES (systems + their subjects and event→action rows), and the BEHAVIORS library. Every node deep-links
+ * to where its code actually lives — click and the editor opens that file at that line.
  *
- * WHAT A ROW IS is deliberately not decided yet, so this is an ARBITRARY first projection to find the general shape:
- * rows are the file's top-level symbols (via the document-symbol provider), and a placeholder recognizer tags a few as
- * "event" while EVERYTHING ELSE is "custom code" — the vision's custom-code bucket. Both the recognizer and the columns
- * are throwaway scaffolding; the real projection is the BABLR CST (source of truth), the real vocabulary is conditions/
- * actions, and custom code will become anchored snippets. This step is only to feel out rows ↔ code in a live pane.
- *
- * (The sheet→code half — event-sheet.ts generate()/sampleSheet + its source map — still backs the "Open demo" bootstrap
- * and stays as the tested model for the eventual round-trip; the table no longer reads from it.)
+ * The model is the REVERSE-PROJECTION of real code (code is the source of truth): the game's files are read and sent to
+ * the recognizer worker (game-projection.ts → recognizer-worker.ts, which runs on the editor's shared TypeScript), and
+ * the plain-JSON GameModel comes back. The "game" is scoped to the nearest ancestor directory with a package.json.
  */
 /* eslint-disable ts/no-explicit-any -- the vscode api is untyped here (captured from the hello extension) */
-/* eslint-disable webawesome/no-inline-styles, webawesome/no-css-in-strings -- a plain data table in the aux-bar body; intrinsic layout, not themeable chrome */
+/* eslint-disable webawesome/no-inline-styles, webawesome/no-css-in-strings -- a plain structural map in the aux-bar body; intrinsic layout, not themeable chrome */
 import type { AugmentationContext, FileAugmentation } from "./file-augmentations";
-import { generate, sampleSheet } from "./event-sheet";
+import type { Behavior, GameModel, GameObject, Rule } from "./game-recognizer";
+import { createGameProjection, type GameProjection } from "./game-projection";
 
-/** Files this augmentation projects (any code file, for now). */
 const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
-/** The bootstrap demo's generated code lives here. */
-const GENERATED_PATH = "/workspace/event-sheet.generated.ts";
+const IGNORE = /(?:^|\/)(?:node_modules|\.git|\.silo|dist|assets)(?:\/|$)/u;
+const BORDER = "1px solid var(--vscode-panel-border,#2a2a2a)";
 
-const SELECTED_BG = "var(--vscode-list-inactiveSelectionBackground,#37373d)";
-const HOVER_BG = "var(--vscode-list-hoverBackground,#2a2d2e)";
+// One recognizer worker for the session (spawned lazily; keeps ts out of the main bundle). See game-projection.ts.
+let projection: GameProjection | undefined;
+const getProjection = (): GameProjection => (projection ??= createGameProjection());
 
-/** One projected row: a top-level construct of the file, classified, with the line range it occupies (1-based). */
-interface Row {
-	"id": string;
-	"name": string;
-	"kind": "event" | "custom";
-	"startLine": number;
-	"endLine": number;
-}
+/** The nearest ancestor directory of `uri` that has a package.json — the game root (a game is a package). */
+async function findGameRoot(api: any, uri: any): Promise<string | undefined> {
+	let dir = String(uri.path ?? "").replace(/\/[^/]*$/u, "");
 
-/**
- * The ARBITRARY recognizer — the single seam to evolve. Today: top-level functions read as (placeholder) "event" rows,
- * everything else is "custom code". Tomorrow this becomes a real BABLR-CST reading of conditions/actions vs snippets.
- */
-function classify(api: any, symbolKind: number): "event" | "custom" {
-	return symbolKind === api.SymbolKind.Function || symbolKind === api.SymbolKind.Method ? "event" : "custom";
-}
+	while (dir !== "" && dir !== "/") {
+		try {
+			await api.workspace.fs.stat(api.Uri.file(dir + "/package.json"));
 
-/** Project a document into rows via its top-level symbols. Empty when the provider isn't ready or the file has none. */
-async function fetchRows(api: any, document: any): Promise<Row[]> {
-	let symbols: any[] = [];
+			return dir;
+		} catch { /* keep walking up */ }
 
-	try {
-		symbols = (await api.commands.executeCommand("vscode.executeDocumentSymbolProvider", document.uri)) ?? [];
-	} catch { /* provider not ready / unsupported → no rows */ }
-
-	const rows: Row[] = [];
-
-	for (const symbol of symbols) {
-		const range = symbol.range ?? symbol.location?.range;
-
-		if (range === undefined) {
-			continue;
-		}
-
-		rows.push({
-			"id": symbol.name + "@" + range.start.line,
-			"name": symbol.name,
-			"kind": classify(api, symbol.kind),
-			"startLine": range.start.line + 1,
-			"endLine": range.end.line + 1
-		});
+		dir = dir.replace(/\/[^/]*$/u, "");
 	}
 
-	return rows.sort((a, b) => a.startLine - b.startLine);
+	return undefined;
 }
 
-/** Reveal + select a 1-based inclusive line range in the augmented document. */
-async function jumpTo(context: AugmentationContext, startLine: number, endLine: number): Promise<void> {
-	const { api, document } = context;
-	const editor = await api.window.showTextDocument(document, { "preserveFocus": false });
-	const range = new api.Range(startLine - 1, 0, endLine - 1, Number.MAX_SAFE_INTEGER);
+/** Read every code file under `root` (skipping deps/build/assets and .d.ts), keyed by path RELATIVE to root. */
+async function readGameFiles(api: any, root: string): Promise<Record<string, string>> {
+	const files: Record<string, string> = {};
+	const decoder = new TextDecoder();
 
-	editor.selection = new api.Selection(range.start, range.end);
-	editor.revealRange(range, api.TextEditorRevealType.InCenter);
-}
+	const walk = async (dir: string): Promise<void> => {
+		let entries: [string, number][];
 
-/** The row whose range contains a 1-based line — the SMALLEST such (innermost), or undefined. */
-function rowAtLine(rows: Row[], line: number): string | undefined {
-	let best: Row | undefined;
-
-	for (const row of rows) {
-		if (line >= row.startLine && line <= row.endLine && (best === undefined || row.endLine - row.startLine < best.endLine - best.startLine)) {
-			best = row;
-		}
-	}
-
-	return best?.id;
-}
-
-/**
- * Render the projection of `context.document` into `container`, wiring the map both ways, and re-projecting on edits.
- * Returns a disposer (listeners + DOM).
- */
-function renderProjection(container: HTMLElement, context: AugmentationContext): () => void {
-	const { api } = context;
-	const sameDoc = (document: any): boolean => String(document?.uri?.path ?? "") === String(context.document.uri?.path ?? "");
-
-	let rows: Row[] = [];
-	const rowEls = new Map<string, HTMLElement>();
-	let activeRowId: string | undefined;
-	const idleBg = (rowId: string): string => (rowId === activeRowId ? SELECTED_BG : "transparent");
-
-	const highlight = (rowId: string | undefined): void => {
-		activeRowId = rowId;
-
-		for (const [id, tr] of rowEls) {
-			tr.style.background = id === rowId ? SELECTED_BG : "transparent";
-		}
-	};
-
-	const reflect = (editor: any): void => {
-		if (editor !== undefined && sameDoc(editor.document)) {
-			highlight(rowAtLine(rows, (editor.selection?.active?.line ?? 0) + 1)); // selection line 0-based; rows 1-based
-		}
-	};
-
-	const paint = (): void => {
-		rowEls.clear();
-		container.replaceChildren();
-
-		const table = document.createElement("table");
-
-		table.style.cssText = "width:100%;border-collapse:collapse;font-size:13px";
-
-		const header = document.createElement("tr");
-
-		for (const [label, width] of [["Name", "52%"], ["Kind", "26%"], ["Code", "22%"]] as const) {
-			const th = document.createElement("th");
-
-			th.textContent = label;
-			th.style.cssText = "text-align:left;padding:6px 8px;border-bottom:1px solid var(--vscode-panel-border,#333);opacity:0.7;font-weight:600;width:" + width;
-			header.append(th);
-		}
-
-		table.append(header);
-
-		if (rows.length === 0) {
-			const note = document.createElement("div");
-
-			note.textContent = "No top-level symbols to project yet.";
-			note.style.cssText = "padding:12px;opacity:0.6;font-size:13px";
-			container.append(table, note);
-
+		try {
+			entries = await api.workspace.fs.readDirectory(api.Uri.file(dir));
+		} catch {
 			return;
 		}
 
-		for (const row of rows) {
-			const tr = document.createElement("tr");
+		for (const [name, type] of entries) {
+			const full = dir + "/" + name;
 
-			tr.style.cssText = "cursor:pointer;border-bottom:1px solid var(--vscode-panel-border,#2a2a2a)";
-			tr.addEventListener("mouseenter", () => { tr.style.background = HOVER_BG; });
-			tr.addEventListener("mouseleave", () => { tr.style.background = idleBg(row.id); });
-			tr.addEventListener("click", () => { void jumpTo(context, row.startLine, row.endLine); });
+			if (IGNORE.test(full)) {
+				continue;
+			}
 
-			const cell = (text: string, style = ""): HTMLElement => {
-				const td = document.createElement("td");
-
-				td.textContent = text;
-				td.style.cssText = "padding:6px 8px;vertical-align:top;" + style;
-
-				return td;
-			};
-
-			// "custom code" is the everything-else bucket — muted; the arbitrary "event" is the recognized one.
-			const kindStyle = row.kind === "custom" ? "opacity:0.55;font-style:italic" : "color:var(--vscode-charts-blue,#4fc1ff)";
-
-			tr.append(
-				cell(row.name),
-				cell(row.kind === "custom" ? "custom code" : "event", kindStyle),
-				cell("L" + row.startLine + "–" + row.endLine, "font-family:var(--monaco-monospace-font,monospace);opacity:0.8")
-			);
-
-			rowEls.set(row.id, tr);
-			table.append(tr);
+			if (type === api.FileType.Directory) {
+				await walk(full);
+			} else if (CODE_FILE.test(name) && !name.endsWith(".d.ts")) {
+				try {
+					files[full.slice(root.length + 1)] = decoder.decode(await api.workspace.fs.readFile(api.Uri.file(full)));
+				} catch { /* unreadable — skip */ }
+			}
 		}
-
-		container.append(table);
 	};
 
-	// Re-project the file (debounced) — on open and on every edit — then repaint and re-sync the cursor highlight.
-	let timer: ReturnType<typeof setTimeout> | undefined;
-	const reproject = (): void => {
-		void fetchRows(api, context.document).then((next) => {
-			rows = next;
-			paint();
-			reflect(api.window.activeTextEditor);
-		});
-	};
-	const scheduleReproject = (): void => {
-		if (timer !== undefined) {
-			clearTimeout(timer);
-		}
+	await walk(root);
 
-		timer = setTimeout(reproject, 200);
-	};
-
-	paint(); // immediate empty frame, then fill
-	reproject();
-
-	const selSub = api.window.onDidChangeTextEditorSelection((event: any) => { reflect(event.textEditor); });
-	const editSub = api.workspace.onDidChangeTextDocument((event: any) => {
-		if (sameDoc(event.document)) {
-			scheduleReproject();
-		}
-	});
-
-	return (): void => {
-		if (timer !== undefined) {
-			clearTimeout(timer);
-		}
-
-		selSub.dispose();
-		editSub.dispose();
-		container.replaceChildren();
-	};
+	return files;
 }
 
-/** The event-sheet augmentation — projects any code file; bootstrap opens a demo generated file to look at. */
+/** Reveal a file (relative to the game root) at a 1-based line. */
+async function openAt(api: any, root: string, relPath: string, line: number): Promise<void> {
+	const editor = await api.window.showTextDocument(api.Uri.file(root + "/" + relPath), { "preserveFocus": false });
+	const position = new api.Position(Math.max(0, line - 1), 0);
+
+	editor.selection = new api.Selection(position, position);
+	editor.revealRange(new api.Range(position, position), api.TextEditorRevealType.InCenter);
+}
+
+/** A muted section heading. */
+function heading(text: string): HTMLElement {
+	const element = document.createElement("div");
+
+	element.textContent = text;
+	element.style.cssText = "padding:8px 10px 4px;font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;opacity:0.6";
+
+	return element;
+}
+
+/** A clickable row that deep-links; `build` fills its content. */
+function clickableRow(onClick: () => void, build: (row: HTMLElement) => void): HTMLElement {
+	const row = document.createElement("div");
+
+	row.style.cssText = "padding:5px 10px;cursor:pointer;border-bottom:" + BORDER;
+	row.addEventListener("mouseenter", () => { row.style.background = "var(--vscode-list-hoverBackground,#2a2d2e)"; });
+	row.addEventListener("mouseleave", () => { row.style.background = "transparent"; });
+	row.addEventListener("click", onClick);
+	build(row);
+
+	return row;
+}
+
+/** A small behavior chip. */
+function chip(text: string): HTMLElement {
+	const element = document.createElement("span");
+
+	element.textContent = text;
+	element.style.cssText = "display:inline-block;margin:1px 3px 1px 0;padding:0 6px;border-radius:8px;font-size:11px;background:var(--vscode-badge-background,#4d4d4d);color:var(--vscode-badge-foreground,#fff)";
+
+	return element;
+}
+
+function renderObjects(container: HTMLElement, api: any, root: string, objects: GameObject[]): void {
+	container.append(heading("Objects · " + objects.length));
+
+	for (const object of objects) {
+		container.append(clickableRow(() => { void openAt(api, root, object.defPath, object.defLine); }, (row) => {
+			const name = document.createElement("span");
+
+			name.textContent = object.name;
+			name.style.cssText = "font-weight:600";
+			row.append(name);
+
+			if (object.depth !== undefined) {
+				const depth = document.createElement("span");
+
+				depth.textContent = "depth " + object.depth;
+				depth.style.cssText = "float:right;font-size:11px;opacity:0.5";
+				row.append(depth);
+			}
+
+			const chips = document.createElement("div");
+
+			chips.style.cssText = "margin-top:3px";
+
+			for (const behavior of object.behaviors) {
+				chips.append(chip(behavior));
+			}
+
+			row.append(chips);
+		}));
+	}
+}
+
+function renderRules(container: HTMLElement, api: any, root: string, rules: Rule[]): void {
+	container.append(heading("Rules · " + rules.length));
+
+	for (const rule of rules) {
+		// The rule header — jumps to the system's definition; shows its subject(s) ("for each ...").
+		container.append(clickableRow(() => { void openAt(api, root, rule.defPath, rule.defLine); }, (row) => {
+			const name = document.createElement("span");
+
+			name.textContent = rule.name;
+			name.style.cssText = "font-weight:600";
+			row.append(name);
+
+			const subject = document.createElement("div");
+
+			subject.textContent = rule.queries.length === 0 ? "" : "for each " + rule.queries.map((set) => set.join(" + ")).join(", ");
+			subject.style.cssText = "font-size:11px;opacity:0.6;margin-top:2px";
+			row.append(subject);
+		}));
+
+		// Its event→action rows (indented) — each jumps to its own line.
+		for (const eventRow of rule.rows) {
+			container.append(clickableRow(() => { void openAt(api, root, rule.defPath, eventRow.line); }, (element) => {
+				element.style.paddingLeft = "22px";
+
+				const when = document.createElement("span");
+
+				when.textContent = "when ";
+				when.style.cssText = "opacity:0.5;font-size:12px";
+
+				const cond = document.createElement("span");
+
+				cond.textContent = eventRow.event;
+				cond.style.cssText = "font-family:var(--monaco-monospace-font,monospace);font-size:12px";
+				element.append(when, cond);
+
+				const does = document.createElement("div");
+
+				does.textContent = "→ " + eventRow.actions.join("; ");
+				does.style.cssText = "font-family:var(--monaco-monospace-font,monospace);font-size:12px;opacity:0.8;margin-top:2px";
+				element.append(does);
+			}));
+		}
+
+		if (rule.rows.length === 0) {
+			const note = document.createElement("div");
+
+			note.textContent = "opaque — custom code / runtime glue";
+			note.style.cssText = "padding:2px 10px 6px 22px;font-size:11px;font-style:italic;opacity:0.45";
+			container.append(note);
+		}
+	}
+}
+
+function renderBehaviors(container: HTMLElement, api: any, root: string, behaviors: Behavior[]): void {
+	container.append(heading("Behaviors · " + behaviors.length));
+
+	for (const behavior of behaviors) {
+		container.append(clickableRow(() => { void openAt(api, root, behavior.defPath, behavior.defLine); }, (row) => {
+			const name = document.createElement("span");
+
+			name.textContent = behavior.name;
+			row.append(name);
+
+			const kind = document.createElement("span");
+
+			kind.textContent = behavior.kind === "data" ? "data (" + behavior.fields.join(", ") + ")" : "tag";
+			kind.style.cssText = "float:right;font-size:11px;opacity:0.5;font-family:var(--monaco-monospace-font,monospace)";
+			row.append(kind);
+		}));
+	}
+}
+
+/** Render the whole model into the container. */
+function paint(container: HTMLElement, context: AugmentationContext, root: string, model: GameModel): void {
+	container.replaceChildren();
+
+	if (model.objects.length === 0 && model.rules.length === 0 && model.behaviors.length === 0) {
+		const note = document.createElement("div");
+
+		note.textContent = "No game recognized in " + (root.split("/").pop() ?? root) + ".";
+		note.style.cssText = "padding:12px;font-size:13px;opacity:0.6";
+		container.append(note);
+
+		return;
+	}
+
+	renderObjects(container, context.api, root, model.objects);
+	renderRules(container, context.api, root, model.rules);
+	renderBehaviors(container, context.api, root, model.behaviors);
+}
+
+/** The event-sheet augmentation: projects the active file's game into the auxpane, deep-linking every node. */
 export const eventSheetAugmentation: FileAugmentation = {
 	"id": "event-sheet",
 	"title": "Event Sheet",
 	"when": (document: any) => CODE_FILE.test(String(document.uri?.path ?? "")),
 	"render": (container, context) => {
-		return { "dispose": renderProjection(container, context) };
-	},
-	"bootstrap": {
-		"label": "Open Event Sheet demo",
-		"run": async (api: any) => {
-			const uri = api.Uri.file(GENERATED_PATH);
+		const { api } = context;
+		let disposed = false;
 
-			await api.workspace.fs.writeFile(uri, new TextEncoder().encode(generate(sampleSheet).code));
-			await api.window.showTextDocument(uri);
-		}
+		const showMessage = (text: string): void => {
+			const note = document.createElement("div");
+
+			note.textContent = text;
+			note.style.cssText = "padding:12px;font-size:13px;opacity:0.6";
+			container.replaceChildren(note);
+		};
+
+		const rebuild = async (): Promise<void> => {
+			showMessage("Projecting…");
+
+			const root = await findGameRoot(api, context.document.uri);
+
+			if (disposed) {
+				return;
+			}
+
+			if (root === undefined) {
+				showMessage("No package.json above this file — can't locate a game.");
+
+				return;
+			}
+
+			const files = await readGameFiles(api, root);
+
+			if (disposed) {
+				return;
+			}
+
+			try {
+				const model = await getProjection().project(files);
+
+				if (!disposed) {
+					paint(container, context, root, model);
+				}
+			} catch (error) {
+				if (!disposed) {
+					showMessage("Projection failed: " + (error instanceof Error ? error.message : String(error)));
+				}
+			}
+		};
+
+		// Re-project on save (debounced), so the map tracks the code.
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const sub = api.workspace.onDidSaveTextDocument(() => {
+			if (timer !== undefined) {
+				clearTimeout(timer);
+			}
+
+			timer = setTimeout(() => { void rebuild(); }, 300);
+		});
+
+		void rebuild();
+
+		return {
+			"dispose": (): void => {
+				disposed = true;
+
+				if (timer !== undefined) {
+					clearTimeout(timer);
+				}
+
+				sub.dispose();
+				container.replaceChildren();
+			}
+		};
 	}
 };
