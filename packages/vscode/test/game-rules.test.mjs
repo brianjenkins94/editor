@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import ts from "typescript";
 import { anchorGame } from "../game-anchors.ts";
-import { compileGame, dozerBehaviors, dozerRules } from "../game-rules.ts";
+import { compileGame, dozerBehaviors, dozerRules, fly } from "../game-rules.ts";
 import { recognizeGame } from "../game-recognizer.ts";
 
 // Minimal schemas + an entity config, so behaviors and objects recognize alongside the compiled rules.
@@ -92,6 +92,29 @@ test("the compiled game reverse-projects back to dozer's map (the round-trip)", 
 	assert.deepEqual(push?.uses, ["Position", "Pushable"], "it reports the components it touches");
 	assert.deepEqual(push?.composes, [], "it composes no other behavior");
 	assert.equal(push?.defPath, "behaviors/gridPush.ts", "it deep-links to its own file");
+});
+
+test("arcade: continuous movement compiles to deterministic fixed-point code, no nondeterminism", () => {
+	// A real-time rule: for each Ship, every tick, fly (move by the held keys).
+	const shipRule = { "kind": "perEntity", "name": "shipFly", "subject": "Ship", "on": "step", "body": [{ "use": "fly" }] };
+	const files = compileGame([shipRule], [fly]);
+	const behavior = files["behaviors/fly.ts"];
+	const system = files["systems/shipFly.ts"];
+
+	// Continuous integer movement from held input.
+	assert.match(behavior, /Position\.x\[self\] \+= input\.x \* 3/u, "moves by held keys in integer pixels");
+	assert.match(behavior, /held\(world\)/u);
+	assert.match(behavior, /\.isDown/u, "reads HELD keys (continuous), not one-shot");
+
+	// Deterministic by construction: none of the usual nondeterminism sources can appear (the vocabulary can't emit them).
+	for (const source of [/Math\./u, /\bDate\b/u, /performance/u, /\bdelta\b/u, /random/u, /Date\.now/u]) {
+		assert.doesNotMatch(behavior, source, "behavior is free of " + source);
+		assert.doesNotMatch(system, source, "system is free of " + source);
+	}
+
+	// A step rule has no `dir` in scope, so the composed call doesn't pass one.
+	assert.match(system, /fly\(world, eid\);/u, "step rule composes fly with just (world, self)");
+	assert.doesNotMatch(system, /fly\(world, eid, dir\)/u);
 });
 
 test("composed behaviors get durable anchors (the library keeps its identity across edits)", () => {

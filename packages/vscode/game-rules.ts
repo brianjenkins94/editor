@@ -36,6 +36,8 @@ export type Stmt =
 	| { "ifHas": string; "a": string; "bind": string; "then": Stmt[] }
 	/** Action: move an entity in scope onto a cell in scope. */
 	| { "move": string; "to": string }
+	/** Real-time action: move `me` by the held arrow keys × `speed` px this tick (continuous, fixed-point, integer). */
+	| { "moveByKeys": number }
 	/** Compose a reusable behavior on the acting entity ("grid-push me in dir"). */
 	| { "use": string };
 
@@ -86,13 +88,23 @@ export const gridPush: Behavior = {
 	]
 };
 
+/** Free-flying continuous movement — the arcade counterpart to gridPush. Moves `me` by the held arrow keys each fixed
+ *  tick, in integer pixels (fixed-point). No floats, no delta-time, no wall-clock: deterministic by construction, so it
+ *  works under lockstep and replays exactly. The `3` is pixels-per-tick. */
+export const fly: Behavior = {
+	"name": "fly",
+	"body": [
+		{ "moveByKeys": 3 }
+	]
+};
+
 /** dozer's built-in library. */
 export const dozerBehaviors: Behavior[] = [gridPush];
 
 /** The built-in behavior library a rule can COMPOSE — reusable functions of primitives, each one a kid can open and fork.
  *  (Authoring a behavior's own primitive body in the UI is a later slice; for now the library provides them.) */
 export function builtinBehaviors(): Behavior[] {
-	return [gridPush];
+	return [gridPush, fly];
 }
 
 /** The behavior names these rules compose (via `use`) — so the generator knows which behaviors to emit alongside them. */
@@ -162,6 +174,17 @@ const HELPERS: Record<string, string> = {
 		"\treturn world.walls.has(x + \",\" + y);",
 		"}"
 	].join("\n"),
+	"held": [
+		"function held(world) {",
+		"\tconst { cursors } = world;",
+		"",
+		"\t// Held state, read fresh each fixed tick (integer, no wall-clock) — deterministic under lockstep.",
+		"\treturn {",
+		"\t\t\"x\": (cursors.right.isDown ? 1 : 0) - (cursors.left.isDown ? 1 : 0),",
+		"\t\t\"y\": (cursors.down.isDown ? 1 : 0) - (cursors.up.isDown ? 1 : 0)",
+		"\t};",
+		"}"
+	].join("\n"),
 	"entityAt": [
 		"function entityAt(world, x, y, component, exclude) {",
 		"\tfor (const eid of query(world, [component, Position])) {",
@@ -188,6 +211,9 @@ interface Ctx {
 	"self": string;
 	/** How "stop" lowers: `continue` inside a loop (a rule), `return` inside a behavior. */
 	"stop": string;
+	/** Whether a `dir` value is in scope (keyDirection rules define it; step rules/behaviors don't) — so `use` only
+	 *  passes it when it exists. */
+	"hasDir": boolean;
 }
 
 /** The JS expression for an entity name in scope: `me` is the acting entity; any bound entity is its own name. */
@@ -258,9 +284,19 @@ function emitStmt(statement: Stmt, depth: number, context: Ctx): void {
 		return;
 	}
 
+	if ("moveByKeys" in statement) {
+		context.helpers.add("held");
+		context.components.add("Position");
+		context.lines.push(pad + "const input = held(world);");
+		context.lines.push(pad + "Position.x[" + context.self + "] += input.x * " + statement.moveByKeys + ";");
+		context.lines.push(pad + "Position.y[" + context.self + "] += input.y * " + statement.moveByKeys + ";");
+
+		return;
+	}
+
 	if ("use" in statement) {
 		context.uses.add(statement.use);
-		context.lines.push(pad + statement.use + "(world, " + context.self + ", dir);");
+		context.lines.push(pad + statement.use + "(world, " + context.self + (context.hasDir ? ", dir" : "") + ");");
 
 		return;
 	}
@@ -310,7 +346,7 @@ function importsFor(context: Ctx, phaser: boolean, needsQuery: boolean): string[
 
 /** Compile a reusable behavior to `behaviors/<name>.ts` — a function of (world, self, dir), composed of primitives. */
 export function compileBehavior(behavior: Behavior): { "path": string; "code": string } {
-	const context: Ctx = { "lines": [], "cells": new Map(), "helpers": new Set(), "components": new Set(["Position"]), "uses": new Set(), "self": "self", "stop": "return" };
+	const context: Ctx = { "lines": [], "cells": new Map(), "helpers": new Set(), "components": new Set(["Position"]), "uses": new Set(), "self": "self", "stop": "return", "hasDir": false };
 
 	for (const statement of behavior.body) {
 		emitStmt(statement, 1, context);
@@ -324,7 +360,7 @@ export function compileBehavior(behavior: Behavior): { "path": string; "code": s
 
 /** Compile a per-entity rule to `systems/<name>.ts`: `for each` subject entity, on its event, run the body. */
 function compilePerEntity(rule: PerEntityRule): { "path": string; "code": string } {
-	const context: Ctx = { "lines": [], "cells": new Map(), "helpers": new Set(), "components": new Set(["Position", rule.subject]), "uses": new Set(), "self": "eid", "stop": "continue" };
+	const context: Ctx = { "lines": [], "cells": new Map(), "helpers": new Set(), "components": new Set(["Position", rule.subject]), "uses": new Set(), "self": "eid", "stop": "continue", "hasDir": rule.on === "keyDirection" };
 	const phaser = rule.on === "keyDirection";
 
 	const inner: string[] = [];
@@ -355,7 +391,7 @@ function compilePerEntity(rule: PerEntityRule): { "path": string; "code": string
 
 /** Compile an aggregate rule to `systems/<name>.ts`: read the goal cells, then win iff every subject stands on one. */
 function compileAggregate(rule: AggregateRule): { "path": string; "code": string } {
-	const context: Ctx = { "lines": [], "cells": new Map(), "helpers": new Set(), "components": new Set(["Position", rule.allOn, rule.goal]), "uses": new Set(), "self": "eid", "stop": "return" };
+	const context: Ctx = { "lines": [], "cells": new Map(), "helpers": new Set(), "components": new Set(["Position", rule.allOn, rule.goal]), "uses": new Set(), "self": "eid", "stop": "return", "hasDir": false };
 
 	const body = [
 		"export function " + rule.name + "(world) {",
