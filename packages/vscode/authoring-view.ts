@@ -13,6 +13,25 @@ import type { AuthoredGame } from "./game-generator";
 import { generateGame, libraryComponents, librarySystems } from "./game-generator";
 
 const BORDER = "1px solid var(--vscode-panel-border,#2a2a2a)";
+/** The starter template a "New game" is scaffolded from — a complete, runnable game (level w/ inline data-URL sprites,
+ *  Tilemap loader, scene glue, index.html) the new game vendors and OWNS. */
+const STARTER_TEMPLATE = "/workspace/samples/dozer";
+
+/** Recursively copy a game dir (all text files; sprites are inline data URLs so there are no binaries to worry about). */
+async function copyDir(api: any, from: string, to: string): Promise<void> {
+	await api.workspace.fs.createDirectory(api.Uri.file(to));
+
+	for (const [name, type] of await api.workspace.fs.readDirectory(api.Uri.file(from))) {
+		const source = from + "/" + name;
+		const destination = to + "/" + name;
+
+		if (type === api.FileType.Directory) {
+			await copyDir(api, source, destination);
+		} else {
+			await api.workspace.fs.writeFile(api.Uri.file(destination), await api.workspace.fs.readFile(api.Uri.file(source)));
+		}
+	}
+}
 
 /** A small labelled button. */
 function button(label: string, onClick: () => void): HTMLElement {
@@ -71,7 +90,36 @@ export function renderAuthoring(container: HTMLElement, api: any, root: string, 
 	});
 
 	generate.setAttribute("variant", "brand");
-	toolbar.append(generate);
+
+	const newGame = button("New game", () => {
+		void (async (): Promise<void> => {
+			const chosen = await api.window.showInputBox({ "title": "New game", "prompt": "Name — scaffolds a runnable game you own, then author it in Build" });
+
+			if (typeof chosen !== "string" || chosen.trim() === "") {
+				return;
+			}
+
+			const dest = "/workspace/games/" + chosen.trim().replace(/[^\w.-]+/gu, "-");
+
+			try {
+				await api.workspace.fs.stat(api.Uri.file(STARTER_TEMPLATE));
+			} catch {
+				api.window.showErrorMessage?.("Starter template not found at " + STARTER_TEMPLATE);
+
+				return;
+			}
+
+			try {
+				await copyDir(api, STARTER_TEMPLATE, dest);
+				await api.window.showTextDocument(api.Uri.file(dest + "/game.ts"));
+				api.window.showInformationMessage?.("Scaffolded " + dest + " — it's yours; edit it in Build.");
+			} catch (error) {
+				api.window.showErrorMessage?.("New game failed: " + (error instanceof Error ? error.message : String(error)));
+			}
+		})();
+	});
+
+	toolbar.append(generate, newGame);
 	container.append(toolbar);
 
 	// ── objects ──────────────────────────────────────────────────────────────────
