@@ -48,8 +48,9 @@ export interface VscodeWindowOptions {
 	"rootHub"?: Hub;
 }
 
-/** A file to write when opening a project into the live workbench (path + contents). */
-export interface ProjectFile { "path": string; "contents": string }
+/** A file to write when opening a project into the live workbench. Text uses `contents`; binary (loaded from a
+ *  GitHub repo — sprites, etc.) uses `bytes`, which survives the postMessage hop via structured clone. */
+export interface ProjectFile { "path": string; "contents"?: string; "bytes"?: Uint8Array }
 
 /** Handle returned by createVscodeWindow for talking to the workbench after it's mounted. */
 export interface VscodeWindowHandle {

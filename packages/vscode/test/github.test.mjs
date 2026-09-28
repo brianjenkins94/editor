@@ -151,6 +151,29 @@ test("readTree requests the recursive tree; getRepo returns undefined on 404 but
 	await assert.rejects(() => gh.getRepo("me", "boom"), (error) => error instanceof GitHubError && error.status === 500, "a non-404 error still throws");
 });
 
+test("readRepo returns every blob as decoded bytes (text + binary), skipping tree entries", async () => {
+	const textB64 = Buffer.from("hello\n", "utf8").toString("base64");
+	const pngBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]); // PNG magic — arbitrary binary
+	const pngB64 = Buffer.from(pngBytes).toString("base64");
+	const { provider } = fakeProvider([
+		[{ "method": "GET", "path": "/git/trees/HEAD" }, () => ({ "json": { "sha": "T", "truncated": false, "tree": [
+			{ "path": "dir", "type": "tree", "sha": "d", "mode": "040000" },
+			{ "path": "a.ts", "type": "blob", "sha": "s1", "mode": "100644" },
+			{ "path": "assets/img.png", "type": "blob", "sha": "s2", "mode": "100644" }
+		] } })],
+		[{ "method": "GET", "path": "/git/blobs/s1" }, () => ({ "json": { "content": textB64, "encoding": "base64" } })],
+		[{ "method": "GET", "path": "/git/blobs/s2" }, () => ({ "json": { "content": pngB64, "encoding": "base64" } })]
+	]);
+	const gh = createGitHub(provider);
+
+	const files = await gh.readRepo("me", "games");
+	const byPath = new Map(files.map((file) => [file.path, file.bytes]));
+
+	assert.deepEqual([...byPath.keys()].sort(), ["a.ts", "assets/img.png"], "blobs only — the tree entry is skipped");
+	assert.equal(new TextDecoder().decode(byPath.get("a.ts")), "hello\n", "text decodes");
+	assert.deepEqual([...byPath.get("assets/img.png")], [...pngBytes], "binary bytes are preserved");
+});
+
 test("decodeBase64ToText round-trips UTF-8 through GitHub's wrapped base64", () => {
 	const text = "const π = 3.14;\nexport { π };\n";
 	const base64 = Buffer.from(text, "utf8").toString("base64");

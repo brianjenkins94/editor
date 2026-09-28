@@ -155,7 +155,7 @@ function runCommand(command: string): void {
  * through the vscode FS API (creating parent dirs first, since the zen-fs provider won't auto-create them) so it
  * lands in the workspace + shows in the explorer, then open + focus each entry. No reboot — one booted workbench.
  */
-async function openProject(files: { "path": string; "contents": string }[], openEditors: string[]): Promise<void> {
+async function openProject(files: { "path": string; "contents"?: string; "bytes"?: Uint8Array }[], openEditors: string[]): Promise<void> {
 	await apiReady;
 
 	const vscode = vscodeApi;
@@ -170,7 +170,8 @@ async function openProject(files: { "path": string; "contents": string }[], open
 			await vscode.workspace.fs.createDirectory(vscode.Uri.file(dir)).then(undefined, () => { /* exists */ });
 		}
 
-		await vscode.workspace.fs.writeFile(vscode.Uri.file(file.path), encoder.encode(file.contents));
+		// Binary files (from a GitHub repo) arrive as bytes; text samples as a string to encode.
+		await vscode.workspace.fs.writeFile(vscode.Uri.file(file.path), file.bytes ?? encoder.encode(file.contents ?? ""));
 	}
 
 	for (const path of openEditors) {
@@ -461,7 +462,7 @@ void (async () => {
 
 // A live project switch (the LHS picker → host) arrives as a publish; write + focus it into the running workbench.
 workbenchHub.subscribe("workbench.openProject", (data) => {
-	const project = data as { "files"?: { "path": string; "contents": string }[]; "openEditors"?: string[] };
+	const project = data as { "files"?: { "path": string; "contents"?: string; "bytes"?: Uint8Array }[]; "openEditors"?: string[] };
 
 	void openProject(project.files ?? [], project.openEditors ?? []);
 });

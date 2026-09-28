@@ -77,12 +77,22 @@ function jsonBody(payload: unknown): { "headers": Record<string, string>; "body"
 	return { "headers": { "Content-Type": "application/json" }, "body": JSON.stringify(payload) };
 }
 
-/** Decode a base64 blob (GitHub wraps it at 60 cols) to UTF-8 text. */
-export function decodeBase64ToText(base64: string): string {
+/** Decode a base64 blob (GitHub wraps it at 60 cols) to raw bytes. */
+export function base64ToBytes(base64: string): Uint8Array {
 	const binary = atob(base64.replace(/\n/gu, ""));
-	const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
 
-	return new TextDecoder().decode(bytes);
+	return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+/** Decode a base64 blob to UTF-8 text. */
+export function decodeBase64ToText(base64: string): string {
+	return new TextDecoder().decode(base64ToBytes(base64));
+}
+
+/** One file read from a repo — raw bytes so text and binary (sprites, etc.) both round-trip. */
+export interface RepoFile {
+	"path": string;
+	"bytes": Uint8Array;
 }
 
 /**
@@ -187,6 +197,24 @@ export function createGitHub(provider: AuthProvider = patProvider()) {
 		/** A blob's content (base64 + encoding). Use {@link decodeBase64ToText} for text; keep the base64 for binary. */
 		"readBlob": function(owner: string, repo: string, sha: string): Promise<{ "content": string; "encoding": string; "size": number }> {
 			return run(gh.get("/repos/" + owner + "/" + repo + "/git/blobs/" + sha));
+		},
+
+		/**
+		 * Read the WHOLE repo at a ref into a flat list of files (raw bytes, so binary round-trips). The recursive tree
+		 * gives every blob; each is fetched by sha (fido's limiter throttles the fan-out). Fine for game-sized repos;
+		 * a big repo would want the tarball endpoint instead (one request) — a later optimization.
+		 */
+		"readRepo": async function(owner: string, repo: string, ref = "HEAD"): Promise<RepoFile[]> {
+			const base = "/repos/" + owner + "/" + repo;
+			const tree = await run<{ "tree": TreeEntry[]; "truncated": boolean }>(gh.get(base + "/git/trees/" + ref, { "recursive": 1 }));
+			const blobs = tree.tree.filter((entry) => entry.type === "blob");
+
+			return Promise.all(blobs.map(async (entry) => {
+				const blob = await run<{ "content": string; "encoding": string }>(gh.get(base + "/git/blobs/" + entry.sha));
+				const bytes = blob.encoding === "base64" ? base64ToBytes(blob.content) : new TextEncoder().encode(blob.content);
+
+				return { "path": entry.path, "bytes": bytes };
+			}));
 		},
 
 		/**

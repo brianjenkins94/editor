@@ -156,6 +156,14 @@ const resizerLeft = css({ "insetInlineStart": "-3px" }); // aside pane: grip on 
 const PANE = { "navDefault": 260, "asideDefault": 380, "navMin": 200, "asideMin": 300 };
 const paneMax = (): number => Math.min(600, Math.round(window.innerWidth * 0.45));
 
+/** Pick a file to focus after loading a repo: a top-level README, else the first source/markup file, else the first
+ *  file — so the load is immediately visible. Paths are repo-relative; the caller has rooted them under /workspace. */
+function pickOpenEditors(paths: string[]): string[] {
+	const preferred = paths.find((path) => /^readme\.md$/iu.test(path)) ?? paths.find((path) => /\.(?:tsx?|jsx?|html|md)$/iu.test(path)) ?? paths[0];
+
+	return preferred !== undefined ? ["/workspace/" + preferred] : [];
+}
+
 /** A persisted pane width, clamped later against the live max. Falls back to the default if unset/invalid. */
 function loadPaneWidth(key: string, fallback: number): number {
 	try {
@@ -294,6 +302,9 @@ function Shell() {
 	const [githubBusy, setGithubBusy] = useState(false);
 	const [githubError, setGithubError] = useState<string | undefined>(undefined);
 	const [patInput, setPatInput] = useState("");
+	const [repoInput, setRepoInput] = useState("");
+	const [loadingRepo, setLoadingRepo] = useState(false);
+	const [loadError, setLoadError] = useState<string | undefined>(undefined);
 
 	const rpcRef = useRef<ReturnType<typeof createRpcClient>>();
 	const pageRef = useRef<HTMLElement>(null);
@@ -525,6 +536,43 @@ function Shell() {
 		setGithubOpen(false);
 	};
 
+	// Load a GitHub repo into the workspace: the SHELL fetches the files (token stays here) and publishes them to the
+	// app over the hub, which writes them into zen-fs. Repo paths are rooted under /workspace. github.ts is lazy so
+	// fido loads only when a repo is actually fetched.
+	const loadRepo = async (): Promise<void> => {
+		const match = /^([^\s/]+)\/([^\s/]+)$/u.exec(repoInput.trim());
+
+		if (match === null) {
+			setLoadError("Use the form owner/repo");
+
+			return;
+		}
+
+		setLoadingRepo(true);
+		setLoadError(undefined);
+
+		try {
+			const { createGitHub } = await import("./github");
+			const files = await createGitHub().readRepo(match[1], match[2]);
+
+			if (files.length === 0) {
+				setLoadError("That repo has no files");
+
+				return;
+			}
+
+			const projectFiles = files.map((file) => ({ "path": "/workspace/" + file.path, "bytes": file.bytes }));
+
+			hubRef.current?.publish("project.openFiles", { "files": projectFiles, "openEditors": pickOpenEditors(files.map((file) => file.path)) });
+			setGithubOpen(false);
+			setRepoInput("");
+		} catch (error) {
+			setLoadError(error instanceof Error ? error.message : "Could not load the repo");
+		} finally {
+			setLoadingRepo(false);
+		}
+	};
+
 	const openProject = (id: string): void => {
 		setCurrentId(id);
 		setLhsCollapsed(true); // making a selection collapses the projects pane back to its rail
@@ -600,6 +648,31 @@ function Shell() {
 												{" "}
 												Disconnect
 											</wa-button>
+										</div>
+
+										<wa-divider></wa-divider>
+
+										<span class={ghTitle()}>Load a repo</span>
+
+										<span class={ghHint()}>Its files open in the workspace.</span>
+
+										<wa-input
+											class={ghInput()}
+											size="small"
+											placeholder="owner/repo"
+											value={repoInput}
+											autocapitalize="off"
+											autocorrect="off"
+											spellcheck={false}
+											aria-label="Repository to load"
+											onInput={(event: Event) => { setRepoInput((event.currentTarget as HTMLInputElement).value); }}
+											onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter") { event.preventDefault(); void loadRepo(); } }}
+										></wa-input>
+
+										{loadError !== undefined && <span class={ghError()}>{loadError}</span>}
+
+										<div class={ghActions()}>
+											<wa-button variant="brand" size="small" disabled={loadingRepo || repoInput.trim() === ""} onClick={() => { void loadRepo(); }}>{loadingRepo ? "Loading…" : "Load"}</wa-button>
 										</div>
 									</>
 								) : (

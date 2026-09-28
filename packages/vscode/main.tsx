@@ -122,6 +122,17 @@ if (isolated && window.parent === window) {
 				hostLog.info("project.open", { "id": sample.id });
 			}
 		});
+		// A GitHub repo loaded by the shell (which holds the token): the shell fetches the files and sends them here
+		// (files cross the boundary, the token never does), and we write them straight into the workspace. Binary
+		// files arrive as `bytes`; text as `contents`.
+		rootHub.subscribe("project.openFiles", (data) => {
+			const request = data as { "files"?: { "path": string; "contents"?: string; "bytes"?: Uint8Array }[]; "openEditors"?: string[] } | null;
+
+			if (Array.isArray(request?.files) && request.files.length > 0) {
+				vscodeWindow.openProject(request.files, request.openEditors ?? []);
+				hostLog.info("project.openFiles", { "files": request.files.length });
+			}
+		});
 		hostLog.info("shell link established");
 	}
 }
