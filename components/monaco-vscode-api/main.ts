@@ -219,10 +219,12 @@ const workers: Partial<Record<string, Worker>> = {
 		),
 		{ "type": "module" }
 	),
-	"NotebookEditorWorker": new Worker(
-		new URL("@codingame/monaco-vscode-notebook-service-override/worker", import.meta.url),
-		{ "type": "module" }
-	),
+	// perf-trim: notebooks disabled (see getNotebookServiceOverride below) — referencing the worker URL
+	// would still make vite emit the unused ~270KB notebook worker.
+	// "NotebookEditorWorker": new Worker(
+	//   new URL("@codingame/monaco-vscode-notebook-service-override/worker", import.meta.url),
+	//   { "type": "module" }
+	// ),
 	"LocalFileSearchWorker": new Worker(
 		new URL("@codingame/monaco-vscode-search-service-override/worker", import.meta.url),
 		{ "type": "module" }
