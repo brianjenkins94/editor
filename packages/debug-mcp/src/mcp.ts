@@ -102,16 +102,17 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 		"name": "page_eval",
 		"config": {
 			"title": "Evaluate in the page",
-			"description": "Evaluate a JavaScript expression IN THE LIVE editor page and return its result (JSON-serialized). Answers questions the log stream can't — current URL/title, element counts, localStorage, live app state. Requires a connected page (dev, localhost-gated).",
+			"description": "Evaluate a JavaScript expression IN THE LIVE editor page and return its result (JSON-serialized). A Promise result is awaited. Answers questions the log stream can't — current URL/title, element counts, localStorage, live app state. Requires a connected page (dev, localhost-gated).",
 			"inputSchema": {
-				"expression": z.string().describe("A JS expression, e.g. `document.title` or `document.querySelectorAll('.monaco-editor').length`.")
+				"expression": z.string().describe("A JS expression, e.g. `document.title` or `document.querySelectorAll('.monaco-editor').length`. May evaluate to a Promise (e.g. an async IIFE), which is awaited."),
+				"timeoutMs": z.number().optional().describe("How long to wait for the result, including an awaited Promise (default 5000).")
 			}
 		},
 		"handler": async (args) => {
-			const { expression } = args as { "expression": string };
+			const { expression, timeoutMs = 5000 } = args as { "expression": string; "timeoutMs"?: number };
 
 			try {
-				return ok(await debugMcp.rpc.request("page_eval", { "expression": expression }, { "timeoutMs": 5000 }));
+				return ok(await debugMcp.rpc.request("page_eval", { "expression": expression }, { "timeoutMs": timeoutMs }));
 			} catch (error) {
 				return fail(error instanceof Error ? error.message : String(error));
 			}

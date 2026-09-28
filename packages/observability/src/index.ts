@@ -258,12 +258,13 @@ export function servePageTools(hub: Hub): void {
 		return;
 	}
 
-	serve(hub, "page_eval", (args) => {
+	serve(hub, "page_eval", async (args) => {
 		const { expression } = args as { "expression": string };
 		// eslint-disable-next-line no-eval -- page_eval's whole purpose is to evaluate a caller-supplied expression in the tab; indirect eval runs it in global scope, not this closure.
 		const indirectEval = eval;
 
-		return jsonSafe(indirectEval(expression));
+		// Await a thenable result: a Promise JSON-serializes to `{}`, which would hide every async answer.
+		return jsonSafe(await indirectEval(expression));
 	});
 
 	serve(hub, "page_query", (args) => {
