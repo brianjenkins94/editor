@@ -15,7 +15,9 @@
  *
  * The crawl resolves references against the package's `?meta` FILE LISTING (so it fetches only files that exist —
  * no blind `.d.ts`/`index.d.ts` probing), pins versions from the workspace's map, and reads the modern `exports`
- * types condition (not just `types`/`typings`). It writes ONCE, into the workspace filesystem (workspace-fs.ts),
+ * types condition (not just `types`/`typings`) plus each named `exports` subpath's types (`react/jsx-runtime`, which
+ * the automatic JSX runtime imports implicitly). When a run adds files, it reloads the TS projects so a resolution
+ * that failed before the files landed is retried (see `run`). It writes ONCE, into the workspace filesystem (workspace-fs.ts),
  * and skips anything already present there — which is its cross-reload dedup, since that store persists (so a
  * reload refetches nothing and only genuinely new imports hit the network). No bespoke cache of its own.
  */
@@ -75,6 +77,31 @@ function typesEntry(meta: Record<string, unknown>): string | undefined {
 	}
 
 	return pickTypes((meta["exports"] as Record<string, unknown> | undefined)?.["."]);
+}
+
+/** The types entries of a package's named `exports` subpaths (`./jsx-runtime` → its `.d.ts`). TS resolves these
+ *  without any textual import — e.g. the automatic JSX runtime implies `react/jsx-runtime` — so they're acquired
+ *  up front rather than discovered by crawling. Wildcard patterns are skipped (they'd need a directory walk). */
+function subpathTypes(meta: Record<string, unknown>): string[] {
+	const exportsField = meta["exports"];
+
+	if (exportsField === null || typeof exportsField !== "object") {
+		return [];
+	}
+
+	const out: string[] = [];
+
+	for (const [subpath, node] of Object.entries(exportsField as Record<string, unknown>)) {
+		if (subpath.startsWith("./") && !subpath.includes("*") && subpath !== "./package.json") {
+			const types = pickTypes(node);
+
+			if (types !== undefined) {
+				out.push(types);
+			}
+		}
+	}
+
+	return out;
 }
 
 /** Pull a `.d.ts` path out of an exports subtree: `{types}`, `{types:{default}}`, or a condition's own `types`. */
@@ -222,9 +249,12 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 	};
 
+	let written = 0; // files ATA has added to the store this session (see the reload in `run`)
+
 	const write = async (rel: string, code: string): Promise<void> => {
 		try {
 			await api.workspace.fs.writeFile(api.Uri.file(`${nodeModules}/${rel}`), new TextEncoder().encode(code));
+			written += 1;
 		} catch { /* already seeded (read-only) or unwritable — the existing copy stands */ }
 	};
 
@@ -319,9 +349,13 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 
 		let entry: string | undefined;
+		let subpaths: string[] = [];
 
 		try {
-			entry = typesEntry(JSON.parse(pkgJson) as Record<string, unknown>);
+			const meta = JSON.parse(pkgJson) as Record<string, unknown>;
+
+			entry = typesEntry(meta);
+			subpaths = subpathTypes(meta).map((sub) => sub.replace(/^\.\//u, "")).filter((sub) => DECL.test(sub) && sub !== entry?.replace(/^\.\//u, ""));
 		} catch { /* malformed package.json */ }
 
 		entry = entry?.replace(/^\.\//u, "");
@@ -338,6 +372,10 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		} else if (!pkg.startsWith("@types/")) {
 			await acquirePackage(typesCounterpart(pkg), budget); // ships no types → DefinitelyTyped counterpart
 		}
+
+		for (const sub of subpaths) {
+			await acquireFile(pkg, sub, files, budget);
+		}
 	}
 
 	const run = (document: vscode.TextDocument | undefined): void => {
@@ -353,10 +391,22 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 		const span = log.span("ata", { "file": document.uri.path, "imports": packages.length });
 		const budget = { "n": MAX_NETWORK };
+		const writtenBefore = written;
 
 		void Promise.all(packages.map((pkg) => acquirePackage(pkg, budget)))
-			.then(() => {
-				span.end({ "files": fetchedPath.size, "network": MAX_NETWORK - budget.n });
+			.then(async () => {
+				// tsserver may have resolved these imports (and failed) before the writes landed. Its failed-lookup
+				// watchers are registered asynchronously through the extension host, so on a cold boot the writes'
+				// change events can arrive before anyone is listening and the failure sticks. Reload the projects
+				// (NOT restartTsServer — killing the server mid-open orphans the "Analyzing…" progress) so resolution
+				// reruns against files that are now present. Nothing new written → nothing to pick up → no reload.
+				const added = written - writtenBefore;
+
+				if (added > 0) {
+					await api.commands.executeCommand("typescript.reloadProjects");
+				}
+
+				span.end({ "files": fetchedPath.size, "network": MAX_NETWORK - budget.n, "added": added });
 			})
 			.catch((error: unknown) => { span.error("ata failed", { "error": error instanceof Error ? error.message : String(error) }); span.end(); });
 	};
