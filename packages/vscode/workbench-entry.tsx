@@ -155,9 +155,9 @@ function runCommand(command: string): void {
  * through the vscode FS API (creating parent dirs first, since the zen-fs provider won't auto-create them) so it
  * lands in the workspace + shows in the explorer, then open + focus each entry. No reboot — one booted workbench.
  */
-// Editor-owned paths at the workspace root: ATA's ambient .d.ts, the capability ledger, acquired deps, git meta.
-// They survive a `replace` (the editor needs them) and are never sent back to a repo on commit.
-const SCAFFOLDING = new Set(["ata-ambient.d.ts", "editor-ambient.d.ts", ".silo", "node_modules", ".git"]);
+// Editor-owned paths at the workspace root: the shim .d.ts (when the demo needs one), the capability ledger,
+// acquired deps, git meta. They survive a `replace` (the editor needs them) and are never sent back to a repo on commit.
+const SCAFFOLDING = new Set(["editor-ambient.d.ts", ".silo", "node_modules", ".git"]);
 
 // Root-level managed configs are OVERRIDABLE DEFAULTS (writable in zen-fs; see workspace-fs.ts). A loaded repo's own
 // copy always wins — it OVERWRITES in place, because clearWorkspace keeps these (never delete-then-write: the VS Code

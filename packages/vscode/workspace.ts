@@ -20,7 +20,7 @@ export const configuration: Record<string, unknown> = {
 	"files.autoSave": "off",
 	"workbench.sideBar.location": "left",
 	// Keep the seeded node_modules type surface out of the explorer/search (a UI filter — doesn't affect
-	// module resolution). The root editor-ambient.d.ts stays visible, like a conventional env.d.ts.
+	// module resolution).
 	"files.exclude": { "**/node_modules": true }
 };
 

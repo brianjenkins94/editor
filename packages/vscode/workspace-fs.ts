@@ -46,6 +46,8 @@ const FLUSH_MS = 500;
 /** Fixed size of the shared filesystem buffer (SingleBuffer can't grow). 64 MB: headroom for a real project's
  *  type surface + sources; tunable. Overflow handling (evict / realloc) is a later concern. */
 const BUFFER_BYTES = 64 * 1024 * 1024;
+/** Persisted paths an older build wrote that no longer exist (ATA's retired force-reference file). */
+const RETIRED = new Set(["/workspace/ata-ambient.d.ts"]);
 
 /** Ensure the parent directory of `path` exists in zen-fs (recursive mkdir). */
 function ensureParent(path: string): void {
@@ -147,11 +149,17 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 	const db = await openPersist();
 	let restored = 0;
 
+	const retired: string[] = [];
+
 	if (db !== undefined) {
 		for (const [path, contents] of await persistLoadAll(db)) {
-			ensureParent(path);
-			fs.writeFileSync(path, contents);
-			restored += 1;
+			if (RETIRED.has(path)) {
+				retired.push(path); // written by an older build; dropped below rather than brought back
+			} else {
+				ensureParent(path);
+				fs.writeFileSync(path, contents);
+				restored += 1;
+			}
 		}
 	}
 
@@ -189,6 +197,10 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 			flushTimer = setTimeout(flush, FLUSH_MS);
 		}
 	};
+
+	for (const path of retired) {
+		persist(path, null);
+	}
 
 	const { listeners, onDidChangeFile } = createChangeEvent();
 
