@@ -159,6 +159,13 @@ function runCommand(command: string): void {
 // They survive a `replace` (the editor needs them) and are never sent back to a repo on commit.
 const SCAFFOLDING = new Set(["ata-ambient.d.ts", "editor-ambient.d.ts", ".silo", "node_modules", ".git"]);
 
+// Root-level TS project configs are OVERRIDABLE DEFAULTS (see workspace-fs.ts): a loaded repo's own copy wins, and
+// when a repo ships none the read-only base (boot's priority-1 overlay) shows through. On `replace` we OVERWRITE
+// them in place when the repo provides one, and DELETE them (to fall through to the base) when it doesn't — never
+// delete-then-write, because the VS Code overlay has no copy-up: once the writable copy is gone the path resolves
+// to the read-only base and a fresh write there is rejected. Keep in sync with workspace-fs.ts OVERRIDABLE_DEFAULTS.
+const OVERRIDABLE_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json"]);
+
 function workspaceRoot(): string {
 	return init?.workspaceFolder ?? "/workspace";
 }
@@ -169,7 +176,9 @@ async function clearWorkspace(root: string): Promise<void> {
 	const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(root));
 
 	for (const [name] of entries) {
-		if (SCAFFOLDING.has(name)) {
+		// Keep scaffolding always; keep overridable-default configs so a repo that ships its own can OVERWRITE them
+		// in place (openProject prunes the ones the repo omits afterwards, so those fall through to the base).
+		if (SCAFFOLDING.has(name) || OVERRIDABLE_DEFAULTS.has(name)) {
 			continue;
 		}
 
@@ -224,6 +233,21 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 
 		// Binary files (from a GitHub repo) arrive as bytes; text samples as a string to encode.
 		await vscode.workspace.fs.writeFile(vscode.Uri.file(file.path), file.bytes ?? encoder.encode(file.contents ?? ""));
+	}
+
+	if (replace) {
+		// Prune overridable-default configs the loaded repo did NOT provide, so they fall through to the read-only
+		// base default (clearWorkspace kept them; the write loop above overwrote any the repo DID ship).
+		const provided = new Set(files.map((file) => file.path));
+		const root = workspaceRoot();
+
+		for (const name of OVERRIDABLE_DEFAULTS) {
+			const path = root + "/" + name;
+
+			if (!provided.has(path)) {
+				await vscode.workspace.fs.delete(vscode.Uri.file(path), { "recursive": false, "useTrash": false }).then(undefined, () => { /* not present */ });
+			}
+		}
 	}
 
 	for (const path of openEditors) {

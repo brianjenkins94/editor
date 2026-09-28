@@ -123,13 +123,23 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 	// user later creates is never in here, so it stays writable.
 	const readonlyPaths = new Set<string>();
 
+	// TS project configs are OVERRIDABLE DEFAULTS, not locked managed files: they're seeded into zen-fs like
+	// everything else, but left WRITABLE so a repo load can clear/overwrite them — and when a repo ships none, the
+	// read-only base copy in boot's priority-1 overlay shows through (tsserver discovers it via the composite file
+	// service, which falls through priority 2 → 1). The type surface and the worker-consumed configs (eslint.config,
+	// .gitignore — read straight off THIS zen-fs by the LSP pod / isomorphic-git, so a priority-1 base is invisible
+	// to them) stay locked, i.e. a loaded repo can't yet override those. Match by basename (the snapshot only marks
+	// root-level configs readonly). See workbench-entry.tsx for the priority-1/2 split this pairs with.
+	const OVERRIDABLE_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json"]);
+	const basename = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+
 	// Seed the baked snapshot (not persisted — a rebuilt demo file stays fresh), then restore persisted writes
 	// (acquired types + edits) on top, so those override the seed for any overlapping path.
 	for (const file of files) {
 		ensureParent(file.path);
 		fs.writeFileSync(file.path, file.contents);
 
-		if (file.readonly === true) {
+		if (file.readonly === true && !OVERRIDABLE_DEFAULTS.has(basename(file.path))) {
 			readonlyPaths.add(file.path);
 		}
 	}
