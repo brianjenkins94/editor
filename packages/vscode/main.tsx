@@ -129,10 +129,14 @@ if (isolated && window.parent === window) {
 			const request = data as { "files"?: { "path": string; "contents"?: string; "bytes"?: Uint8Array }[]; "openEditors"?: string[] } | null;
 
 			if (Array.isArray(request?.files) && request.files.length > 0) {
-				vscodeWindow.openProject(request.files, request.openEditors ?? []);
+				// Replace: the loaded repo becomes the workspace (clears the demo first).
+				vscodeWindow.replaceProject(request.files, request.openEditors ?? []);
 				hostLog.info("project.openFiles", { "files": request.files.length });
 			}
 		});
+		// The shell asks for the current workspace to commit it back to GitHub; the workbench pane holds the FS, so we
+		// relay its file list up (bytes and all — the token never comes down here).
+		serve(rootHub, "workspace.files", () => vscodeWindow.readWorkspaceFiles());
 		hostLog.info("shell link established");
 	}
 }

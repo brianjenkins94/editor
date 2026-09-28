@@ -42,6 +42,33 @@ export function hasPat(): boolean {
 	return getPat() !== undefined;
 }
 
+const REPO_KEY = "shell:githubRepo";
+
+/** The repo the workspace was loaded from — so a commit knows where to push. */
+export interface RepoBinding { "owner": string; "repo": string; "branch": string }
+
+export function getRepoBinding(): RepoBinding | undefined {
+	try {
+		const raw = localStorage.getItem(REPO_KEY);
+
+		return raw !== null ? JSON.parse(raw) as RepoBinding : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+export function setRepoBinding(binding: RepoBinding | undefined): void {
+	try {
+		if (binding !== undefined) {
+			localStorage.setItem(REPO_KEY, JSON.stringify(binding));
+		} else {
+			localStorage.removeItem(REPO_KEY);
+		}
+	} catch {
+		/* private mode / storage disabled */
+	}
+}
+
 /**
  * The PAT provider (you, now). Resolves the token FRESH on every request via `getToken`, so changing the stored
  * PAT takes effect without rebuilding the GitHub client — this is the "hand out tokens, don't read storage once"

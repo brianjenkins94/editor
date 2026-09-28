@@ -20,7 +20,8 @@ import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, L
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { renderGitPanel } from "./git-panel";
-import { hasPat, setPat } from "./github-auth";
+import { getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
+import type { RepoBinding } from "./github-auth";
 import { installShellPreview } from "./shell-preview";
 import { css, globalCss, iconSvg } from "./theme";
 import "@awesome.me/webawesome/dist/components/page/page.js";
@@ -122,6 +123,7 @@ const ghHint = css({ "fontSize": "11px", "color": "var(--wa-color-text-quiet)", 
 const ghLink = css({ "color": "var(--wa-color-brand-fill-loud)", "textDecoration": "none", "whiteSpace": "nowrap", "&:hover": { "textDecoration": "underline" } });
 const ghInput = css({ "width": "100%", "&::part(input)": { "fontFamily": "var(--wa-font-family-code, monospace)" } });
 const ghError = css({ "fontSize": "11px", "color": "var(--wa-color-danger-fill-loud, #d94040)", "lineHeight": 1.4 });
+const ghOk = css({ "fontSize": "11px", "color": "var(--wa-color-success-fill-loud, #3a9d5d)", "lineHeight": 1.4 });
 const ghConnected = css({ "fontSize": "12px", "color": "var(--wa-color-text-normal)" });
 const ghActions = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-xs)", "marginBlockStart": "var(--wa-space-2xs)" });
 
@@ -305,6 +307,13 @@ function Shell() {
 	const [repoInput, setRepoInput] = useState("");
 	const [loadingRepo, setLoadingRepo] = useState(false);
 	const [loadError, setLoadError] = useState<string | undefined>(undefined);
+	const [boundRepo, setBoundRepo] = useState<RepoBinding | undefined>(() => getRepoBinding());
+	// Commit-back popover (the top-bar Commit button).
+	const [commitOpen, setCommitOpen] = useState(false);
+	const [commitMessage, setCommitMessage] = useState("");
+	const [committing, setCommitting] = useState(false);
+	const [commitError, setCommitError] = useState<string | undefined>(undefined);
+	const [commitResult, setCommitResult] = useState<string | undefined>(undefined);
 
 	const rpcRef = useRef<ReturnType<typeof createRpcClient>>();
 	const pageRef = useRef<HTMLElement>(null);
@@ -552,8 +561,18 @@ function Shell() {
 		setLoadError(undefined);
 
 		try {
+			const [owner, repo] = [match[1], match[2]];
 			const { createGitHub } = await import("./github");
-			const files = await createGitHub().readRepo(match[1], match[2]);
+			const gh = createGitHub();
+			const meta = await gh.getRepo(owner, repo);
+
+			if (meta === undefined) {
+				setLoadError("Repo not found, or your token can't see it");
+
+				return;
+			}
+
+			const files = await gh.readRepo(owner, repo);
 
 			if (files.length === 0) {
 				setLoadError("That repo has no files");
@@ -564,12 +583,65 @@ function Shell() {
 			const projectFiles = files.map((file) => ({ "path": "/workspace/" + file.path, "bytes": file.bytes }));
 
 			hubRef.current?.publish("project.openFiles", { "files": projectFiles, "openEditors": pickOpenEditors(files.map((file) => file.path)) });
+
+			// Remember where this workspace came from so a commit knows where to push.
+			const binding = { "owner": owner, "repo": repo, "branch": meta.default_branch };
+
+			setRepoBinding(binding);
+			setBoundRepo(binding);
 			setGithubOpen(false);
 			setRepoInput("");
 		} catch (error) {
 			setLoadError(error instanceof Error ? error.message : "Could not load the repo");
 		} finally {
 			setLoadingRepo(false);
+		}
+	};
+
+	// Commit the current workspace back to the bound repo: ask the app for the files (the pane holds the FS), convert
+	// to the Git Data write shape (repo-relative paths; text inline, binary as base64 blobs), and push.
+	const commit = async (): Promise<void> => {
+		const binding = boundRepo;
+
+		if (binding === undefined) {
+			setCommitError("Load a repo first");
+
+			return;
+		}
+
+		const message = commitMessage.trim();
+
+		if (message === "") {
+			setCommitError("Enter a commit message");
+
+			return;
+		}
+
+		setCommitting(true);
+		setCommitError(undefined);
+		setCommitResult(undefined);
+
+		try {
+			const files = await rpcRef.current?.request("workspace.files", undefined, { "timeoutMs": 20000 }) as { "path": string; "bytes": Uint8Array }[];
+			const prefix = "/workspace/";
+			const { bytesToBase64, createGitHub } = await import("./github");
+			const writes = files.map((file) => {
+				const path = file.path.startsWith(prefix) ? file.path.slice(prefix.length) : file.path;
+
+				// A NUL byte means binary (git's own heuristic) → upload as a base64 blob; otherwise inline as text.
+				return file.bytes.includes(0)
+					? { "path": path, "base64": bytesToBase64(file.bytes) }
+					: { "path": path, "content": new TextDecoder().decode(file.bytes) };
+			});
+
+			const sha = await createGitHub().commitFiles(binding.owner, binding.repo, { "branch": binding.branch, "message": message, "files": writes });
+
+			setCommitResult(sha.slice(0, 7));
+			setCommitMessage("");
+		} catch (error) {
+			setCommitError(error instanceof Error ? error.message : "Commit failed");
+		} finally {
+			setCommitting(false);
 		}
 	};
 
@@ -619,7 +691,52 @@ function Shell() {
 					)}
 				</span>
 
-				<wa-button appearance="plain" size="small" title="Commit" aria-label="Commit"><Icon node={GitCommit} /></wa-button>
+				<span class={runWrap()}>
+					<wa-button appearance="plain" size="small" title={boundRepo !== undefined ? "Commit to " + boundRepo.owner + "/" + boundRepo.repo : "Commit"} aria-label="Commit" aria-expanded={commitOpen} onClick={() => { setCommitError(undefined); setCommitResult(undefined); setCommitOpen((value) => !value); }}><Icon node={GitCommit} /></wa-button>
+					{commitOpen && (
+						<>
+							<div class={runBackdrop()} onClick={() => { setCommitOpen(false); }} />
+							<div class={githubMenu()} role="dialog" aria-label="Commit to GitHub">
+								<span class={ghTitle()}>Commit</span>
+
+								{githubUser === undefined ? (
+									<span class={ghHint()}>Connect GitHub first.</span>
+								) : boundRepo === undefined ? (
+									<span class={ghHint()}>Load a repo first — commits push back to the repo the workspace came from.</span>
+								) : (
+									<>
+										<span class={ghHint()}>To
+											{" "}
+											<strong>{boundRepo.owner}/{boundRepo.repo}</strong>
+											{" "}
+											on
+											{" "}
+											<strong>{boundRepo.branch}</strong>
+										</span>
+
+										<wa-input
+											class={ghInput()}
+											size="small"
+											placeholder="Commit message"
+											value={commitMessage}
+											aria-label="Commit message"
+											onInput={(event: Event) => { setCommitMessage((event.currentTarget as HTMLInputElement).value); }}
+											onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter") { event.preventDefault(); void commit(); } }}
+										></wa-input>
+
+										{commitError !== undefined && <span class={ghError()}>{commitError}</span>}
+
+										{commitResult !== undefined && <span class={ghOk()}>Committed {commitResult}</span>}
+
+										<div class={ghActions()}>
+											<wa-button variant="brand" size="small" disabled={committing || commitMessage.trim() === ""} onClick={() => { void commit(); }}>{committing ? "Committing…" : "Commit"}</wa-button>
+										</div>
+									</>
+								)}
+							</div>
+						</>
+					)}
+				</span>
 
 				<span class={spacer()} />
 

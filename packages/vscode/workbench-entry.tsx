@@ -13,7 +13,7 @@
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
 import type { WorkbenchFile, WorkbenchParts } from "@brianjenkins94/monaco-vscode-api/main";
-import { createHub, createRpcClient } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
 import { boot, ExtensionHostKind, registerExtension, registerFileSystemOverlay, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
 // The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
@@ -155,12 +155,64 @@ function runCommand(command: string): void {
  * through the vscode FS API (creating parent dirs first, since the zen-fs provider won't auto-create them) so it
  * lands in the workspace + shows in the explorer, then open + focus each entry. No reboot — one booted workbench.
  */
-async function openProject(files: { "path": string; "contents"?: string; "bytes"?: Uint8Array }[], openEditors: string[]): Promise<void> {
+// Editor-owned paths at the workspace root: ATA's ambient .d.ts, the capability ledger, acquired deps, git meta.
+// They survive a `replace` (the editor needs them) and are never sent back to a repo on commit.
+const SCAFFOLDING = new Set(["ata-ambient.d.ts", "editor-ambient.d.ts", ".silo", "node_modules", ".git"]);
+
+function workspaceRoot(): string {
+	return init?.workspaceFolder ?? "/workspace";
+}
+
+/** Delete every workspace entry except the editor scaffolding — the "workspace = the repo" reset before a load. */
+async function clearWorkspace(root: string): Promise<void> {
+	const vscode = vscodeApi;
+	const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(root));
+
+	for (const [name] of entries) {
+		if (SCAFFOLDING.has(name)) {
+			continue;
+		}
+
+		await vscode.workspace.fs.delete(vscode.Uri.file(root + "/" + name), { "recursive": true, "useTrash": false }).then(undefined, () => { /* already gone */ });
+	}
+}
+
+/** Walk the workspace and return every project file (path + bytes), skipping editor scaffolding — the commit source. */
+async function collectFiles(root: string): Promise<{ "path": string; "bytes": Uint8Array }[]> {
+	const vscode = vscodeApi;
+	const out: { "path": string; "bytes": Uint8Array }[] = [];
+
+	const walk = async (dir: string): Promise<void> => {
+		for (const [name, type] of await vscode.workspace.fs.readDirectory(vscode.Uri.file(dir))) {
+			if (dir === root && SCAFFOLDING.has(name)) {
+				continue;
+			}
+
+			const full = dir + "/" + name;
+
+			if (type === vscode.FileType.Directory) {
+				await walk(full);
+			} else if (type === vscode.FileType.File) {
+				out.push({ "path": full, "bytes": await vscode.workspace.fs.readFile(vscode.Uri.file(full)) });
+			}
+		}
+	};
+
+	await walk(root);
+
+	return out;
+}
+
+async function openProject(files: { "path": string; "contents"?: string; "bytes"?: Uint8Array }[], openEditors: string[], replace = false): Promise<void> {
 	await apiReady;
 
 	const vscode = vscodeApi;
 	const encoder = new TextEncoder();
 	const madeDirs = new Set<string>();
+
+	if (replace) {
+		await clearWorkspace(workspaceRoot());
+	}
 
 	for (const file of files) {
 		const dir = file.path.slice(0, file.path.lastIndexOf("/"));
@@ -272,10 +324,19 @@ function maybeBoot(): void {
 
 	bootWithFallbackViewport(document.documentElement);
 
+	// SPLIT: boot's priority-1 in-memory overlay carries ONLY the read-only base — managed configs (tsconfig etc.)
+	// + the baked type surface (all `readonly`). The writable workspace SOURCE lives solely in the zen-fs overlay
+	// (priority 2, installed after boot), so it can be cleared/replaced on a repo load; a priority-1 copy underneath
+	// would re-serve files deleted from priority 2 (that was the "demo won't clear on replace" bug). This also makes
+	// the base a genuine fall-through DEFAULT layer: a loaded repo that omits its own tsconfig reads the base one.
+	// Editors that reference source open POST-boot (in the .then below, after installWorkspaceFs seeds zen-fs) rather
+	// than via boot's defaultLayout, which can't read them — the file service isn't up until boot resolves.
+	const baseFiles = files.filter((file) => file.readonly === true);
+
 	boot({
 		"parts": parts,
-		"files": files,
-		"openEditors": openEditors,
+		"files": baseFiles,
+		"openEditors": [],
 		"workspaceFolder": workspaceFolder,
 		"configuration": configuration,
 		"keybindings": keybindings,
@@ -286,9 +347,10 @@ function maybeBoot(): void {
 	})
 		.then(async () => {
 			bootSpan.info("monaco booted");
-			// zen-fs unification (M0): back the workspace with a zen-fs-backed FileSystemProvider the type-checker
-			// reads through (priority 2, above the boot seed). Additive for now — proves the mechanism; later
-			// milestones make it the sole store. See workspace-fs.ts.
+			// The writable workspace: a zen-fs-backed FileSystemProvider the type-checker reads through (priority 2,
+			// above boot's now defaults-only priority-1 base). This is the SOLE store for source — it gets the FULL
+			// `files` (source + type surface), so the workers/type-checker that attach to this same zen-fs see them,
+			// and a repo load can clear/replace it. See workspace-fs.ts.
 			workspaceFs = await installWorkspaceFs(files, paneLog).catch((error: unknown) => {
 				bootSpan.error("workspace zen-fs failed", { "error": errText(error) });
 
@@ -300,6 +362,14 @@ function maybeBoot(): void {
 			// sibling here. Priority 0 = below the snapshot.
 			if (moduleVersions !== undefined && Object.keys(moduleVersions).length > 0) {
 				registerFileSystemOverlay(0, createNodeModulesProvider(workspaceFolder ?? "/workspace", moduleVersions));
+			}
+
+			// Open the initial editors now — deferred from boot's defaultLayout because the source files no longer live
+			// in boot's priority-1 seed (that layer now carries only the read-only base). They're in the zen-fs overlay
+			// seeded just above, so the editor can read them. Empty `files` = open only, don't rewrite (already seeded).
+			// openProject self-gates on the vscode API being ready (apiReady, captured below).
+			if (openEditors.length > 0) {
+				void openProject([], openEditors, false).catch((error: unknown) => { bootSpan.error("initial open failed", { "error": errText(error) }); });
 			}
 
 			// The hello extension — the default API context (so getApi()/runCommand work) + the hello world
@@ -461,11 +531,32 @@ void (async () => {
 })();
 
 // A live project switch (the LHS picker → host) arrives as a publish; write + focus it into the running workbench.
-workbenchHub.subscribe("workbench.openProject", (data) => {
-	const project = data as { "files"?: { "path": string; "contents"?: string; "bytes"?: Uint8Array }[]; "openEditors"?: string[] };
+// `replace` (a GitHub repo load) clears the workspace first — the workspace becomes the repo.
+//
+// COALESCED: the hub delivers a single load as a burst of identical publishes. That's harmless for a plain write
+// (idempotent), but a `replace` clears + rewrites the SingleBuffer (SAB) FS each time, and repeated clear/rewrite
+// cycles corrupt it ("offset is out of bounds"). So we debounce the burst to ONE run with the latest request.
+let pendingProject: { "files"?: { "path": string; "contents"?: string; "bytes"?: Uint8Array }[]; "openEditors"?: string[]; "replace"?: boolean } | undefined;
+let projectTimer: ReturnType<typeof setTimeout> | undefined;
 
-	void openProject(project.files ?? [], project.openEditors ?? []);
+workbenchHub.subscribe("workbench.openProject", (data) => {
+	pendingProject = data as typeof pendingProject;
+
+	clearTimeout(projectTimer);
+	projectTimer = setTimeout(() => {
+		const project = pendingProject;
+
+		pendingProject = undefined;
+
+		if (project !== undefined) {
+			void openProject(project.files ?? [], project.openEditors ?? [], project.replace ?? false).catch((error) => { paneLog.error("openProject failed", { "error": errText(error) }); });
+		}
+	}, 150);
 });
+
+// The host asks for the current workspace (for a commit back to GitHub). We hold the FS, so we serve it — every
+// project file as bytes, editor scaffolding excluded.
+serve(workbenchHub, "workbench.files", () => collectFiles(workspaceRoot()));
 
 // Dev-only host-page debug bridge (window.__editor). Reads the captured API lazily; no-op off localhost.
 installDebugBridge(() => vscodeApi);

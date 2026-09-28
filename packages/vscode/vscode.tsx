@@ -21,7 +21,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
-import { serve } from "@brianjenkins94/hub";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { hostLog } from "./logging";
 import { windowServerTransport } from "./pane-link";
 
@@ -59,6 +59,10 @@ export interface VscodeWindowHandle {
 	/** Open a project into the ALREADY-BOOTED workbench: write `files` into the workspace and focus `openEditors`.
 	 *  Waits for readiness internally, so a call made before boot still lands. Drives the LHS picker. */
 	"openProject": (files: ProjectFile[], openEditors: string[]) => void;
+	/** Like openProject, but CLEARS the workspace first (minus editor scaffolding) — "workspace = the repo". */
+	"replaceProject": (files: ProjectFile[], openEditors: string[]) => void;
+	/** Read the current workspace back (every project file as bytes, scaffolding excluded) — the commit source. */
+	"readWorkspaceFiles": () => Promise<{ "path": string; "bytes": Uint8Array }[]>;
 }
 
 let booted = false;
@@ -132,5 +136,19 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 		});
 	};
 
-	return { "whenReady": whenReady, "openProject": openProject };
+	const replaceProject = (projectFiles: ProjectFile[], entryFiles: string[]): void => {
+		void whenReady.then(() => {
+			paneHub.publish("workbench.openProject", { "files": projectFiles, "openEditors": entryFiles, "replace": true });
+		});
+	};
+
+	// The pane holds the FS and serves `workbench.files`; request it over the same hub link.
+	const paneRpc = createRpcClient(paneHub);
+	const readWorkspaceFiles = async (): Promise<{ "path": string; "bytes": Uint8Array }[]> => {
+		await whenReady;
+
+		return await paneRpc.request("workbench.files", undefined, { "timeoutMs": 15000 }) as { "path": string; "bytes": Uint8Array }[];
+	};
+
+	return { "whenReady": whenReady, "openProject": openProject, "replaceProject": replaceProject, "readWorkspaceFiles": readWorkspaceFiles };
 }

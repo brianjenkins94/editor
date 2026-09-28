@@ -84,6 +84,17 @@ export function base64ToBytes(base64: string): Uint8Array {
 	return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+/** Encode raw bytes to base64 (for committing a binary file as a blob). */
+export function bytesToBase64(bytes: Uint8Array): string {
+	let binary = "";
+
+	for (const byte of bytes) {
+		binary += String.fromCharCode(byte);
+	}
+
+	return btoa(binary);
+}
+
 /** Decode a base64 blob to UTF-8 text. */
 export function decodeBase64ToText(base64: string): string {
 	return new TextDecoder().decode(base64ToBytes(base64));
