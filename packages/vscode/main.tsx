@@ -97,7 +97,7 @@ if (isolated && window.parent === window) {
 		"files": files,
 		"moduleVersions": moduleVersions,
 		"rootHub": rootHub,
-		"openEditors": ["/workspace/src/App.tsx"],
+		"openEditors": ["/workspace/src/index.ts"],
 		"onSave": (path: string, contents: string) => {
 			hostLog.info("saved", { "path": path, "bytes": contents.length });
 			for (const preview of previews.values()) {

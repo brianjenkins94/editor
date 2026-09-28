@@ -1,13 +1,14 @@
 {
-	"name": "preview-demo",
-	"private": true,
-	"version": "0.0.0",
+	"name": "my-project",
 	"type": "module",
 	"scripts": {
-		"dev": "vite"
+		"start": "#"
 	},
 	"dependencies": {
-		"react": "^18.2.0",
-		"react-dom": "^18.2.0"
+		"typescript": "latest"
+	},
+	"devDependencies": {
+		"@tsconfig/node-lts": "latest",
+		"@types/node": "latest"
 	}
 }
