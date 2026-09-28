@@ -122,9 +122,11 @@ const esqueryCjs = createRequire(createRequire(import.meta.url).resolve("eslint"
 // it unresolvable from the importer's real path, and `packages/vscode build failed` in cd (the local per-package
 // install hoists it to top-level, which masked this). Resolve each shim through the plugin file — util declares
 // vite-plugin-node-polyfills, so it's always reachable there — and alias the exact specifiers to absolute paths,
-// immune to node_modules layout. Reused by hostBuild (below) and dev.ts (both run polyfillNode via hostPlugins).
+// immune to node_modules layout. Used by hostBuild (below); NOT applied to the dev server, whose dep optimizer
+// rejects these absolute shim paths as entries ("cannot be external") — and local dev resolves them via the
+// per-package install's hoist anyway, so it doesn't hit the cd break.
 const requireFromPolyfillNode = createRequire(createRequire(import.meta.url).resolve("@brianjenkins94/util/vite/plugins/polyfillNode"));
-export const nodePolyfillShimAlias: Record<string, string> = Object.fromEntries(
+const nodePolyfillShimAlias: Record<string, string> = Object.fromEntries(
 	["shims/buffer", "shims/global", "shims/process"].map((sub) => {
 		const id = `vite-plugin-node-polyfills/${sub}`;
 
