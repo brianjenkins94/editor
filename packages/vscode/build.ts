@@ -116,6 +116,22 @@ function capabilitiesTsPlugin(): Plugin {
 // esquery's CJS build, resolved through eslint so it's found under npm's flat tree AND CI's pnpm workspace.
 const esqueryCjs = createRequire(createRequire(import.meta.url).resolve("eslint")).resolve("esquery");
 
+// vite-plugin-node-polyfills (used by @brianjenkins94/util's polyfillNode plugin) injects bare imports to its OWN
+// shims — e.g. `vite-plugin-node-polyfills/shims/buffer` when it polyfills Buffer — into the bundled graph (the
+// almostnode shims trip this). It's only a TRANSITIVE dep (via util), so CI's strict pnpm workspace install leaves
+// it unresolvable from the importer's real path, and `packages/vscode build failed` in cd (the local per-package
+// install hoists it to top-level, which masked this). Resolve each shim through the plugin file — util declares
+// vite-plugin-node-polyfills, so it's always reachable there — and alias the exact specifiers to absolute paths,
+// immune to node_modules layout. Reused by hostBuild (below) and dev.ts (both run polyfillNode via hostPlugins).
+const requireFromPolyfillNode = createRequire(createRequire(import.meta.url).resolve("@brianjenkins94/util/vite/plugins/polyfillNode"));
+export const nodePolyfillShimAlias: Record<string, string> = Object.fromEntries(
+	["shims/buffer", "shims/global", "shims/process"].map((sub) => {
+		const id = `vite-plugin-node-polyfills/${sub}`;
+
+		return [id, requireFromPolyfillNode.resolve(id)];
+	})
+);
+
 /** The host site's plugins — shared by the host BUILD (hostBuild) and the DEV server (dev.ts): cross-origin
  *  isolation headers, the baked workspace/types/versions snapshots, the CDN node_modules dev mirror, and
  *  vscodePlugin (serves the entry dist/ + component under /__vscode__/). */
@@ -343,7 +359,7 @@ async function hostBuild(): Promise<void> {
 	await buildPackage(root, {
 		"base": "./",
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
-		"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
+		"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", "@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { ...nodePolyfillShimAlias } },
 		"build": { "outDir": "../../docs", "emptyOutDir": false },
 		"plugins": hostPlugins()
 	});
