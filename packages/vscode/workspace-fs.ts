@@ -38,7 +38,19 @@ const FILE_PERMISSION_READONLY = 1 as unknown as NonNullable<IStat["permissions"
  *  reflect managed configs as un-writable), M0 instrumentation counters, and — when the store is
  *  SharedArrayBuffer-backed — the `buffer` itself, so other realms (the LSP workers, M3b) can attach to the SAME
  *  filesystem. Also on `globalThis.__workspaceFs`. */
-export interface WorkspaceFs { "reads": number; "writes": number; "has": (path: string) => boolean; "isReadonly": (path: string) => boolean; "buffer"?: SharedArrayBuffer }
+export interface WorkspaceFs {
+	"reads": number;
+	"writes": number;
+	"has": (path: string) => boolean;
+	"isReadonly": (path: string) => boolean;
+	"buffer"?: SharedArrayBuffer;
+	/** Fire a change event for files that are already in the store, so services that read them once at startup —
+	 *  before this overlay was mounted — re-read them (the configuration service and `.vscode/settings.json`). */
+	"announce": (resources: FileResource[]) => void;
+}
+
+/** The URI type the provider's methods take (vscode's own URI; the extension API's `Uri.file` produces one). */
+type FileResource = Parameters<IFileSystemProviderWithFileReadWriteCapability["writeFile"]>[0];
 
 const PERSIST_DB = "workspace-fs";
 const PERSIST_STORE = "files";
@@ -132,7 +144,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 	// zen-fs by the LSP pod / isomorphic-git, so a priority-1 base is invisible) get the base default MATERIALIZED
 	// back into zen-fs. Only the type surface stays locked. Match by workspace-relative path (the snapshot marks
 	// root-level configs readonly). Keep in sync with workbench-entry.tsx OVERRIDABLE_DEFAULTS.
-	const OVERRIDABLE_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", ".gitignore", ".vscode/settings.json", ".vscode/extensions.json"]);
+	const OVERRIDABLE_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", ".gitignore"]);
 	const relative = (path: string): string => path.replace(/^\/workspace\//u, "");
 
 	// Seed the baked snapshot (not persisted — a rebuilt demo file stays fresh), then restore persisted writes
@@ -231,7 +243,20 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		}
 	};
 
-	const handle: WorkspaceFs = { "reads": 0, "writes": 0, "has": (path) => fs.existsSync(path), "isReadonly": (path) => readonlyPaths.has(path), "buffer": buffer };
+	const handle: WorkspaceFs = {
+		"reads": 0,
+		"writes": 0,
+		"has": (path) => fs.existsSync(path),
+		"isReadonly": (path) => readonlyPaths.has(path),
+		"buffer": buffer,
+		"announce": (resources) => {
+			for (const resource of resources) {
+				if (fs.existsSync(resource.path)) {
+					fire(resource, FileChangeType.UPDATED);
+				}
+			}
+		}
+	};
 
 	const provider: IFileSystemProviderWithFileReadWriteCapability = {
 		"capabilities": FileSystemProviderCapabilities.FileReadWrite | FileSystemProviderCapabilities.PathCaseSensitive,

@@ -21,6 +21,7 @@ import { render } from "preact";
 import type { PodBridge } from "./extensions/worker-pod/extension";
 import type { WorkspaceFs } from "./workspace-fs";
 import capabilitiesExtensionCode from "capabilities:extension";
+import settingsDefaults from "editor:settings-defaults";
 import eslintExtensionCode from "eslint:extension";
 import helloExtensionCode from "hello:extension";
 import workerPodExtensionCode from "worker-pod:extension";
@@ -163,16 +164,15 @@ const SCAFFOLDING = new Set(["editor-ambient.d.ts", ".silo", "node_modules", ".g
 // copy always wins — it OVERWRITES in place, because clearWorkspace keeps these (never delete-then-write: the VS Code
 // overlay has no copy-up, so once the writable copy is gone the path resolves to the read-only base and a fresh write
 // there is rejected). When a repo ships NONE, the reconciliation differs by how the config is read:
-//   FALLTHROUGH_DEFAULTS — TS project configs + workspace settings, read via the COMPOSITE file service: DELETE the
-//     writable copy so the read-only priority-1 base shows through.
+//   FALLTHROUGH_DEFAULTS — TS project configs, read by tsserver via the COMPOSITE file service: DELETE the writable
+//     copy so the read-only priority-1 base shows through.
 //   .gitignore — read straight off zen-fs by isomorphic-git (a priority-1 base would be invisible to it): MATERIALIZE
 //     the git default (gitEngine.DEFAULT_GITIGNORE) into zen-fs.
 //   ESLINT_CONFIGS — kept overridable so a repo's own is writable; the eslint engine falls back to its BUNDLED flat
 //     config (extensions/eslint/engine.ts) when the workspace has none, so there's nothing to materialize; on omit
 //     we just drop a stale one. Variants are one concept — a repo providing ANY counts.
 // Keep OVERRIDABLE_DEFAULTS in sync with workspace-fs.ts.
-const VSCODE_DEFAULTS = ["settings.json", "extensions.json"];
-const FALLTHROUGH_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json", ...VSCODE_DEFAULTS.map((name) => ".vscode/" + name)]);
+const FALLTHROUGH_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json"]);
 const ESLINT_CONFIGS = ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs"];
 const OVERRIDABLE_DEFAULTS = new Set([...FALLTHROUGH_DEFAULTS, ...ESLINT_CONFIGS, ".gitignore"]);
 
@@ -192,19 +192,19 @@ async function clearWorkspace(root: string): Promise<void> {
 			continue;
 		}
 
-		// .vscode: keep only the default settings files (same overwrite-in-place reason); the rest was the old project's.
-		if (name === ".vscode") {
-			for (const [child] of await vscode.workspace.fs.readDirectory(vscode.Uri.file(root + "/.vscode"))) {
-				if (!VSCODE_DEFAULTS.includes(child)) {
-					await vscode.workspace.fs.delete(vscode.Uri.file(root + "/.vscode/" + child), { "recursive": true, "useTrash": false }).then(undefined, () => { /* already gone */ });
-				}
-			}
-
-			continue;
-		}
-
 		await vscode.workspace.fs.delete(vscode.Uri.file(root + "/" + name), { "recursive": true, "useTrash": false }).then(undefined, () => { /* already gone */ });
 	}
+}
+
+/** Fire change events for the files in `<workspace>/.vscode/` so the configuration service re-reads them (see the
+ *  call site). A no-op when the folder doesn't exist. */
+async function announceWorkspaceSettings(vscode: typeof import("vscode"), store: WorkspaceFs | undefined): Promise<void> {
+	const dir = workspaceRoot() + "/.vscode";
+	const entries: [string, unknown][] = await vscode.workspace.fs.readDirectory(vscode.Uri.file(dir)).then((list) => list, () => []);
+	// The extension API's Uri IS vscode's URI class in this (local-process) host — the type the provider fires.
+	const uris = entries.map(([name]) => vscode.Uri.file(dir + "/" + name)) as unknown as Parameters<WorkspaceFs["announce"]>[0];
+
+	store?.announce(uris);
 }
 
 /** Walk the workspace and return every project file (path + bytes), skipping editor scaffolding — the commit source. */
@@ -264,7 +264,7 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 		const providedAtRoot = (name: string): boolean => provided.has(root + "/" + name);
 		const dropWritable = (name: string): Promise<void> => vscode.workspace.fs.delete(vscode.Uri.file(root + "/" + name), { "recursive": false, "useTrash": false }).then(undefined, () => { /* not present */ });
 
-		// TS project configs + workspace settings: DELETE so they fall through to the read-only base.
+		// TS project configs: DELETE so tsserver falls through to the read-only base via the composite file service.
 		for (const name of FALLTHROUGH_DEFAULTS) {
 			if (!providedAtRoot(name)) {
 				await dropWritable(name);
@@ -432,6 +432,18 @@ function maybeBoot(): void {
 				void openProject([], openEditors, false).catch((error: unknown) => { bootSpan.error("initial open failed", { "error": errText(error) }); });
 			}
 
+			// The editor's settings DEFAULTS — settings-defaults.jsonc, registered as the lowest settings layer (a
+			// contributions-only extension: no code, no host). Layers merge per key, so a workspace `.vscode/settings.json`
+			// that sets only a theme, or a loaded repo's own, keeps the curated eslint fix-all / format-on-save setup for
+			// every key it leaves out, while any key it sets still wins. No `.vscode/` is seeded: it's the user's/repo's.
+			registerExtension({
+				"name": "editor-defaults",
+				"publisher": "brianjenkins94",
+				"version": "0.0.1",
+				"engines": { "vscode": "*" },
+				"contributes": { "configurationDefaults": settingsDefaults }
+			});
+
 			// The hello extension — the default API context (so getApi()/runCommand work) + the hello world
 			// command. Registered as CJS via a data: URL (the bundled code from entry.config.ts).
 			const ext = registerExtension(helloManifest, ExtensionHostKind.LocalProcess);
@@ -448,6 +460,10 @@ function maybeBoot(): void {
 				// Unblock the debug bridge (window.__editor.ready / .api). See debug-bridge.ts.
 				markApiReady(); // let a queued openProject (picker) proceed
 				markBridgeReady();
+				// Workspace settings persisted in the store (a loaded repo's .vscode/, or the user's own) were invisible
+				// when the configuration service read them at startup — the store mounts after boot, and restoring it
+				// fires no change events. Announce them now so they apply. (Writes after boot fire events themselves.)
+				void announceWorkspaceSettings(api as typeof import("vscode"), workspaceFs);
 				// The tsval debug preview: a dumb-iframe panel view + the adapter↔surface render bridge. Real DOM
 				// (not a webview), so it composites in our coi-serviceworker single-origin harness. See
 				// debug-preview-view.ts.

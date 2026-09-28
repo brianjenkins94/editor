@@ -9,7 +9,7 @@ import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import stdlib from "node-stdlib-browser";
 import { build } from "vite";
-import { editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./snapshot";
+import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./snapshot";
 import { nodeModulesCdnPlugin, vscodePlugin } from "./vite";
 
 /**
@@ -172,7 +172,7 @@ export function hostPlugins(): Plugin[] {
 export async function preBuild(): Promise<void> {
 	// 1. Workbench iframe entry (workbench-entry.tsx → dist/workbench.js). monaco kept external → ./main.js.
 	await buildPackage(root, {
-		"plugins": [bundledExtension("hello"), bundledExtension("worker-pod"), bundledExtension("eslint"), bundledExtension("capabilities")],
+		"plugins": [bundledExtension("hello"), bundledExtension("worker-pod"), bundledExtension("eslint"), bundledExtension("capabilities"), editorSettingsDefaultsPlugin()],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
 		// `buffer` → the node-stdlib-browser polyfill: isomorphic-git (the git SCM engine) uses the `Buffer` global,

@@ -12,6 +12,13 @@ declare module "worker-pod:extension" {
 	export default code;
 }
 
+/** settings-defaults.jsonc, parsed — registered as the editor's configuration defaults (see snapshot.ts). */
+declare module "editor:settings-defaults" {
+	const defaults: Record<string, unknown>;
+
+	export default defaults;
+}
+
 /** The eslint extension bundled to a browser CommonJS string (see bundledExtension("eslint") in build.ts) —
  *  a TS server plugin that lints inside tsserver, reusing tsserver's own typescript. */
 declare module "eslint:extension" {

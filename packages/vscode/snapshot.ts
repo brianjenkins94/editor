@@ -18,6 +18,7 @@ import * as url from "node:url";
 import * as utilFs from "@brianjenkins94/util/fs";
 import { log } from "@brianjenkins94/util/logger";
 import { packageName } from "@brianjenkins94/util/vite/external";
+import * as ts from "typescript";
 
 const VIRTUAL = "editor:workspace";
 const TYPES_VIRTUAL = "editor:types";
@@ -32,9 +33,8 @@ const TEXT = new Set(["ts", "tsx", "mjs", "cjs", "js", "jsx", "json", "md", "yml
 // Root-level config files the EDITOR manages rather than the user: seeded read-only, so workspace-fs enforces it
 // (the editor shows the lock + blocks Save, the vscode API and the terminal get a permission error). Matched
 // against the workspace-relative path, so only the ROOT one is managed — a nested config the user makes stays
-// theirs. `.vscode/` settings must be in the boot base: VS Code reads workspace settings once at startup, before
-// the zen-fs layer is mounted.
-const MANAGED_CONFIGS = new Set(["tsconfig.json", "jsconfig.json", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", ".gitignore", ".vscode/settings.json", ".vscode/extensions.json"]);
+// theirs. (Editor settings aren't seeded as a file: see `editor:settings-defaults` below.)
+const MANAGED_CONFIGS = new Set(["tsconfig.json", "jsconfig.json", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", ".gitignore"]);
 
 export interface SnapshotFile { "path": string; "contents": string; "readonly"?: boolean }
 
@@ -73,10 +73,7 @@ function statOf(abs: string): ReturnType<typeof statSync> | undefined {
 	}
 }
 
-// Dotdirs are skipped, except the workspace's own editor settings/recommendations.
-const KEPT_DOTDIRS = new Set([".vscode"]);
-
-/** All files under `dir`, recursively (skips node_modules and dotdirs other than .vscode). */
+/** All files under `dir`, recursively (skips node_modules and dotdirs). */
 function walk(dir: string): string[] {
 	const out: string[] = [];
 
@@ -90,7 +87,7 @@ function walk(dir: string): string[] {
 		}
 
 		for (const entry of entries) {
-			const skip = entry.name === "node_modules" || (entry.name.startsWith(".") && entry.isDirectory() && !KEPT_DOTDIRS.has(entry.name));
+			const skip = entry.name === "node_modules" || (entry.name.startsWith(".") && entry.isDirectory());
 
 			if (!skip) {
 				const abs = path.join(current, entry.name);
@@ -398,6 +395,46 @@ export function editorTypesPlugin(): Plugin {
 		"name": "editor-types",
 		"resolveId": (id) => (id === TYPES_VIRTUAL ? resolved : undefined),
 		"load": (id) => (id === resolved ? (cache ??= `export default ${JSON.stringify(typeSurface())};`) : undefined)
+	};
+}
+
+// ── Settings defaults (`editor:settings-defaults`) ────────────────────────────────────────────────────────────
+//
+// The editor's curated settings (settings-defaults.jsonc — the user's lib/.vscode/settings.json), parsed (JSONC —
+// comments, trailing commas) into the object the workbench registers as CONFIGURATION DEFAULTS, the lowest settings
+// layer. VS Code merges settings layers per key, so a workspace `.vscode/settings.json` that sets only a theme — or
+// a loaded repo's own — still inherits the eslint fix-all / format-on-save setup for every key it doesn't set, while
+// any key it does set wins. That's why no `.vscode/` is seeded into the workspace: it belongs to the user or repo.
+
+const SETTINGS_DEFAULTS_VIRTUAL = "editor:settings-defaults";
+
+/** settings-defaults.jsonc as an object ({} when absent or unparsable). */
+function settingsDefaults(): Record<string, unknown> {
+	const file = path.join(here(), "settings-defaults.jsonc");
+	const text = readText(file);
+
+	if (text === undefined) {
+		return {};
+	}
+
+	const { config, error } = ts.parseConfigFileTextToJson(file, text);
+
+	if (error !== undefined || config === null || typeof config !== "object") {
+		log.warn(`[editor:settings-defaults] couldn't parse ${file}; no settings defaults registered`);
+
+		return {};
+	}
+
+	return config as Record<string, unknown>;
+}
+
+export function editorSettingsDefaultsPlugin(): Plugin {
+	const resolved = "\0" + SETTINGS_DEFAULTS_VIRTUAL;
+
+	return {
+		"name": "editor-settings-defaults",
+		"resolveId": (id) => (id === SETTINGS_DEFAULTS_VIRTUAL ? resolved : undefined),
+		"load": (id) => (id === resolved ? `export default ${JSON.stringify(settingsDefaults())};` : undefined)
 	};
 }
 
