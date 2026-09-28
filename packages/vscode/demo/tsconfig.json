@@ -1,16 +1,32 @@
 {
-	"compilerOptions": {
-		"target": "ESNext",
-		"module": "ESNext",
-		"moduleResolution": "Bundler",
-		"lib": ["ESNext"],
-		"types": ["node"],
-		"esModuleInterop": true,
-		"skipLibCheck": true,
-		"strict": true,
-		"noEmit": true,
-		"resolveJsonModule": true,
-		"isolatedModules": true
-	},
-	"include": ["src"]
+  "extends": "@tsconfig/node-lts/tsconfig.json",
+  "compilerOptions": {
+    "alwaysStrict": true,
+    //"exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": false,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    //"noImplicitAny": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    //"noImplicitThis": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "resolveJsonModule": true,
+    "strict": false,
+    "strictBindCallApply": true,
+    "strictFunctionTypes": true,
+    //"strictNullChecks": true,
+    //"strictPropertyInitialization": true,
+    //"useUnknownInCatchVariables": true
+    "target": "ESNext"
+  },
+  "exclude": ["node_modules"]
 }

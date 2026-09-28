@@ -1,14 +1,17 @@
 {
-	"name": "my-project",
-	"type": "module",
-	"scripts": {
-		"start": "#"
-	},
-	"dependencies": {
-		"typescript": "latest"
-	},
-	"devDependencies": {
-		"@tsconfig/node-lts": "latest",
-		"@types/node": "latest"
-	}
+  "name": "my-project",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "start": "#"
+  },
+  "devDependencies": {
+    "@tsconfig/node-lts": "latest",
+    "@types/node": "latest",
+    "typescript": "latest"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  }
 }

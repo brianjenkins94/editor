@@ -32,9 +32,9 @@ const TEXT = new Set(["ts", "tsx", "mjs", "cjs", "js", "jsx", "json", "md", "yml
 // Root-level config files the EDITOR manages rather than the user: seeded read-only, so workspace-fs enforces it
 // (the editor shows the lock + blocks Save, the vscode API and the terminal get a permission error). Matched
 // against the workspace-relative path, so only the ROOT one is managed — a nested config the user makes stays
-// theirs. `tsconfig.json` is the only functional one today (tsserver reads it); the rest are here for when eslint
-// reads a workspace config / a git layer lands.
-const MANAGED_CONFIGS = new Set(["tsconfig.json", "jsconfig.json", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", ".gitignore"]);
+// theirs. `.vscode/` settings must be in the boot base: VS Code reads workspace settings once at startup, before
+// the zen-fs layer is mounted.
+const MANAGED_CONFIGS = new Set(["tsconfig.json", "jsconfig.json", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", ".gitignore", ".vscode/settings.json", ".vscode/extensions.json"]);
 
 export interface SnapshotFile { "path": string; "contents": string; "readonly"?: boolean }
 
@@ -73,7 +73,10 @@ function statOf(abs: string): ReturnType<typeof statSync> | undefined {
 	}
 }
 
-/** All files under `dir`, recursively (skips node_modules and dotdirs). */
+// Dotdirs are skipped, except the workspace's own editor settings/recommendations.
+const KEPT_DOTDIRS = new Set([".vscode"]);
+
+/** All files under `dir`, recursively (skips node_modules and dotdirs other than .vscode). */
 function walk(dir: string): string[] {
 	const out: string[] = [];
 
@@ -87,7 +90,7 @@ function walk(dir: string): string[] {
 		}
 
 		for (const entry of entries) {
-			const skip = entry.name === "node_modules" || (entry.name.startsWith(".") && entry.isDirectory());
+			const skip = entry.name === "node_modules" || (entry.name.startsWith(".") && entry.isDirectory() && !KEPT_DOTDIRS.has(entry.name));
 
 			if (!skip) {
 				const abs = path.join(current, entry.name);

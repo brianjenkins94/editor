@@ -128,10 +128,10 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 	// configs then fall through to boot's read-only priority-1 base when a repo omits them (tsserver reads via the
 	// composite file service), while the worker-consumed ones (eslint.config, .gitignore — read straight off THIS
 	// zen-fs by the LSP pod / isomorphic-git, so a priority-1 base is invisible) get the base default MATERIALIZED
-	// back into zen-fs. Only the type surface stays locked. Match by basename (the snapshot marks root-level configs
-	// readonly). Keep in sync with workbench-entry.tsx OVERRIDABLE_DEFAULTS.
-	const OVERRIDABLE_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", ".gitignore"]);
-	const basename = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+	// back into zen-fs. Only the type surface stays locked. Match by workspace-relative path (the snapshot marks
+	// root-level configs readonly). Keep in sync with workbench-entry.tsx OVERRIDABLE_DEFAULTS.
+	const OVERRIDABLE_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", ".gitignore", ".vscode/settings.json", ".vscode/extensions.json"]);
+	const relative = (path: string): string => path.replace(/^\/workspace\//u, "");
 
 	// Seed the baked snapshot (not persisted — a rebuilt demo file stays fresh), then restore persisted writes
 	// (acquired types + edits) on top, so those override the seed for any overlapping path.
@@ -139,7 +139,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		ensureParent(file.path);
 		fs.writeFileSync(file.path, file.contents);
 
-		if (file.readonly === true && !OVERRIDABLE_DEFAULTS.has(basename(file.path))) {
+		if (file.readonly === true && !OVERRIDABLE_DEFAULTS.has(relative(file.path))) {
 			readonlyPaths.add(file.path);
 		}
 	}

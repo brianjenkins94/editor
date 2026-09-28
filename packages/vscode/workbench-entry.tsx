@@ -163,15 +163,16 @@ const SCAFFOLDING = new Set(["ata-ambient.d.ts", "editor-ambient.d.ts", ".silo",
 // copy always wins — it OVERWRITES in place, because clearWorkspace keeps these (never delete-then-write: the VS Code
 // overlay has no copy-up, so once the writable copy is gone the path resolves to the read-only base and a fresh write
 // there is rejected). When a repo ships NONE, the reconciliation differs by how the config is read:
-//   FALLTHROUGH_DEFAULTS — TS project configs, read by tsserver via the COMPOSITE file service: DELETE the writable
-//     copy so the read-only priority-1 base shows through.
+//   FALLTHROUGH_DEFAULTS — TS project configs + workspace settings, read via the COMPOSITE file service: DELETE the
+//     writable copy so the read-only priority-1 base shows through.
 //   .gitignore — read straight off zen-fs by isomorphic-git (a priority-1 base would be invisible to it): MATERIALIZE
 //     the git default (gitEngine.DEFAULT_GITIGNORE) into zen-fs.
-//   ESLINT_CONFIGS — kept overridable so a repo's own is writable, but the eslint engine uses a fixed BUNDLED flat
-//     config (extensions/eslint/engine.ts) and does NOT read a workspace eslint.config, so there's nothing to
-//     materialize; on omit we just drop a stale one. Variants are one concept — a repo providing ANY counts.
+//   ESLINT_CONFIGS — kept overridable so a repo's own is writable; the eslint engine falls back to its BUNDLED flat
+//     config (extensions/eslint/engine.ts) when the workspace has none, so there's nothing to materialize; on omit
+//     we just drop a stale one. Variants are one concept — a repo providing ANY counts.
 // Keep OVERRIDABLE_DEFAULTS in sync with workspace-fs.ts.
-const FALLTHROUGH_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json"]);
+const VSCODE_DEFAULTS = ["settings.json", "extensions.json"];
+const FALLTHROUGH_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json", ...VSCODE_DEFAULTS.map((name) => ".vscode/" + name)]);
 const ESLINT_CONFIGS = ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs"];
 const OVERRIDABLE_DEFAULTS = new Set([...FALLTHROUGH_DEFAULTS, ...ESLINT_CONFIGS, ".gitignore"]);
 
@@ -188,6 +189,17 @@ async function clearWorkspace(root: string): Promise<void> {
 		// Keep scaffolding always; keep overridable-default configs so a repo that ships its own can OVERWRITE them
 		// in place (openProject prunes the ones the repo omits afterwards, so those fall through to the base).
 		if (SCAFFOLDING.has(name) || OVERRIDABLE_DEFAULTS.has(name)) {
+			continue;
+		}
+
+		// .vscode: keep only the default settings files (same overwrite-in-place reason); the rest was the old project's.
+		if (name === ".vscode") {
+			for (const [child] of await vscode.workspace.fs.readDirectory(vscode.Uri.file(root + "/.vscode"))) {
+				if (!VSCODE_DEFAULTS.includes(child)) {
+					await vscode.workspace.fs.delete(vscode.Uri.file(root + "/.vscode/" + child), { "recursive": true, "useTrash": false }).then(undefined, () => { /* already gone */ });
+				}
+			}
+
 			continue;
 		}
 
@@ -252,7 +264,7 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 		const providedAtRoot = (name: string): boolean => provided.has(root + "/" + name);
 		const dropWritable = (name: string): Promise<void> => vscode.workspace.fs.delete(vscode.Uri.file(root + "/" + name), { "recursive": false, "useTrash": false }).then(undefined, () => { /* not present */ });
 
-		// TS project configs: DELETE so tsserver falls through to the read-only base via the composite file service.
+		// TS project configs + workspace settings: DELETE so they fall through to the read-only base.
 		for (const name of FALLTHROUGH_DEFAULTS) {
 			if (!providedAtRoot(name)) {
 				await dropWritable(name);
@@ -266,7 +278,7 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 		}
 
 		// eslint: a repo's own config already overwrote in place; when it ships none, drop any stale variant. Nothing
-		// to materialize — the eslint engine uses a fixed bundled flat config and doesn't read a workspace eslint.config.
+		// to materialize — the eslint engine falls back to its bundled flat config.
 		if (!ESLINT_CONFIGS.some((name) => providedAtRoot(name))) {
 			for (const name of ESLINT_CONFIGS) {
 				await dropWritable(name);
