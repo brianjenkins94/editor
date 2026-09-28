@@ -1,3 +1,4 @@
+import { polyfillNodeRolldown } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import { createServer } from "vite";
 import { hostPlugins, preBuild, root } from "./build";
 
@@ -28,6 +29,11 @@ const server = await createServer({
 	"configFile": false,
 	"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 	"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
+	// The dev dep-optimizer pre-bundles the browser GitHub client's deps (github.ts → fido → util/env, which calls
+	// `path.dirname` at eval and reads `process`) and BYPASSES hostPlugins' `polyfillNode`. Vite 8 optimizes with
+	// ROLLDOWN, not esbuild, so the fix is `rolldownOptions` + polyfillNodeRolldown (the esbuild variant throws
+	// "Not implemented" and kills the optimizer): it resolves the four builtins and inlines a `process` shim.
+	"optimizeDeps": { "rolldownOptions": { "plugins": [polyfillNodeRolldown(["fs", "path", "url", "util"])] } },
 	"plugins": [brotliStub, ...hostPlugins()]
 });
 

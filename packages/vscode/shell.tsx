@@ -14,18 +14,20 @@
  * mounted into the `aside` region as-is; its WA rebuild is a follow-on.
  */
 import type { Hub } from "@brianjenkins94/hub";
+import type { RunTarget } from "./targets";
 import { createHub, createRpcClient, windowTransport } from "@brianjenkins94/hub";
-import { ChevronLeft, ChevronRight, FolderOpen, GitCommit, History, Play, PanelLeft, PanelRight } from "lucide";
+import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play } from "lucide";
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { renderGitPanel } from "./git-panel";
+import { hasPat, setPat } from "./github-auth";
 import { installShellPreview } from "./shell-preview";
-import type { RunTarget } from "./targets";
 import { css, globalCss, iconSvg } from "./theme";
 import "@awesome.me/webawesome/dist/components/page/page.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
 import "@awesome.me/webawesome/dist/components/card/card.js";
 import "@awesome.me/webawesome/dist/components/divider/divider.js";
+import "@awesome.me/webawesome/dist/components/input/input.js";
 import "./webawesome";
 import "theme"; // our brand tokens, layered on Web Awesome's default theme (must come after it)
 
@@ -64,21 +66,64 @@ const runWrap = css({ "position": "relative", "display": "inline-flex" });
 // High z-indexes so the popover clears the editor iframe (which sits in a separate app-shell region).
 const runBackdrop = css({ "position": "fixed", "inset": 0, "zIndex": 2147482000 });
 const runMenu = css({
-	"position": "absolute", "top": "calc(100% + 4px)", "insetInlineStart": 0, "zIndex": 2147482001,
-	"minWidth": "240px", "maxHeight": "60vh", "overflowY": "auto",
-	"backgroundColor": "var(--wa-color-surface-raised)", "border": "1px solid var(--wa-color-surface-border)",
-	"borderRadius": "var(--wa-border-radius-m)", "boxShadow": "var(--wa-shadow-l)", "padding": "var(--wa-space-2xs)"
+	"position": "absolute",
+	"top": "calc(100% + 4px)",
+	"insetInlineStart": 0,
+	"zIndex": 2147482001,
+	"minWidth": "240px",
+	"maxHeight": "60vh",
+	"overflowY": "auto",
+	"backgroundColor": "var(--wa-color-surface-raised)",
+	"border": "1px solid var(--wa-color-surface-border)",
+	"borderRadius": "var(--wa-border-radius-m)",
+	"boxShadow": "var(--wa-shadow-l)",
+	"padding": "var(--wa-space-2xs)"
 });
 const runItem = css({
-	"display": "flex", "alignItems": "baseline", "gap": "var(--wa-space-s)", "width": "100%",
-	"padding": "var(--wa-space-2xs) var(--wa-space-xs)", "borderRadius": "var(--wa-border-radius-s)",
-	"cursor": "pointer", "textAlign": "start", "background": "transparent", "border": 0, "color": "inherit", "font": "inherit",
+	"display": "flex",
+	"alignItems": "baseline",
+	"gap": "var(--wa-space-s)",
+	"width": "100%",
+	"padding": "var(--wa-space-2xs) var(--wa-space-xs)",
+	"borderRadius": "var(--wa-border-radius-s)",
+	"cursor": "pointer",
+	"textAlign": "start",
+	"background": "transparent",
+	"border": 0,
+	"color": "inherit",
+	"font": "inherit",
 	"&:hover": { "backgroundColor": "var(--wa-color-neutral-fill-quiet)" },
 	"&:focus-visible": { "outline": "2px solid var(--wa-color-focus)", "outlineOffset": "-2px" }
 });
 const runItemName = css({ "fontWeight": "var(--wa-font-weight-semibold)" });
 const runItemMeta = css({ "marginInlineStart": "auto", "fontSize": "11px", "color": "var(--wa-color-text-quiet)" });
 const runEmpty = css({ "padding": "var(--wa-space-xs)", "fontSize": "12px", "color": "var(--wa-color-text-quiet)" });
+
+// GitHub connect popover — same anchored-popover pattern as the run picker, but right-aligned (the button sits on the
+// right of the header) and wider to hold the token field. The PAT is entered here, in the SHELL, and stays here.
+const githubMenu = css({
+	"position": "absolute",
+	"top": "calc(100% + 4px)",
+	"insetInlineEnd": 0,
+	"zIndex": 2147482001,
+	"width": "300px",
+	"maxWidth": "80vw",
+	"backgroundColor": "var(--wa-color-surface-raised)",
+	"border": "1px solid var(--wa-color-surface-border)",
+	"borderRadius": "var(--wa-border-radius-m)",
+	"boxShadow": "var(--wa-shadow-l)",
+	"padding": "var(--wa-space-s)",
+	"display": "flex",
+	"flexDirection": "column",
+	"gap": "var(--wa-space-xs)"
+});
+const ghTitle = css({ "fontWeight": "var(--wa-font-weight-semibold)", "fontSize": "13px" });
+const ghHint = css({ "fontSize": "11px", "color": "var(--wa-color-text-quiet)", "lineHeight": 1.45 });
+const ghLink = css({ "color": "var(--wa-color-brand-fill-loud)", "textDecoration": "none", "whiteSpace": "nowrap", "&:hover": { "textDecoration": "underline" } });
+const ghInput = css({ "width": "100%", "&::part(input)": { "fontFamily": "var(--wa-font-family-code, monospace)" } });
+const ghError = css({ "fontSize": "11px", "color": "var(--wa-color-danger-fill-loud, #d94040)", "lineHeight": 1.4 });
+const ghConnected = css({ "fontSize": "12px", "color": "var(--wa-color-text-normal)" });
+const ghActions = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-xs)", "marginBlockStart": "var(--wa-space-2xs)" });
 
 // The menu/aside regions are full-height flex columns: a fixed header strip, then a scrolling body — so the projects
 // list and the (kept) git-panel each fill their side and scroll internally. `--header-height` is published by wa-page.
@@ -92,7 +137,12 @@ const asidePane = css({ "position": "relative", "borderInlineStart": "1px solid 
 // layout, with a wider hit area than the 1px border and a hover/active accent. Pointer-capture drives the drag so
 // it keeps tracking even as the cursor passes over the editor iframe.
 const resizer = css({
-	"position": "absolute", "top": 0, "bottom": 0, "width": "7px", "zIndex": 5, "cursor": "col-resize",
+	"position": "absolute",
+	"top": 0,
+	"bottom": 0,
+	"width": "7px",
+	"zIndex": 5,
+	"cursor": "col-resize",
 	"touchAction": "none",
 	"&:hover": { "backgroundColor": "var(--wa-color-brand-fill-quiet)" },
 	"&:active": { "backgroundColor": "var(--wa-color-brand-fill-loud)" },
@@ -152,7 +202,11 @@ const projectDesc = css({ "display": "block", "fontSize": "11px", "color": "var(
 const appFrame = css({ "width": "100%", "height": "100%", "border": 0, "display": "block" });
 const mainWrap = css({ "position": "relative", "height": "100%" });
 const overlay = css({
-	"position": "absolute", "inset": 0, "zIndex": 20, "display": "none", "flexDirection": "column",
+	"position": "absolute",
+	"inset": 0,
+	"zIndex": 20,
+	"display": "none",
+	"flexDirection": "column",
 	"backgroundColor": "var(--wa-color-surface-default)",
 	"&.open": { "display": "flex" }
 });
@@ -189,6 +243,7 @@ function Picker({ samples, currentId, onOpen }: { "samples": SampleInfo[]; "curr
 					}}
 				>
 					<span class={projectName()}>{sample.name}</span>
+
 					<span class={projectDesc()}>{sample.description}</span>
 				</wa-card>
 			))}
@@ -212,6 +267,7 @@ function RailContent({ items }: { "items": RailItem[] }) {
 			{items.map((item) => (
 				<span key={item.label} class={railItem()}>
 					<wa-button appearance="plain" variant="neutral" size="small" pill title={item.title} aria-label={item.title} onClick={item.onClick}><Icon node={item.node} /></wa-button>
+
 					<span class={railCaption()}>{item.label}</span>
 				</span>
 			))}
@@ -231,6 +287,13 @@ function Shell() {
 	const [asideWidth, setAsideWidth] = useState(() => loadPaneWidth("asideWidth", PANE.asideDefault));
 	const [runOpen, setRunOpen] = useState(false);
 	const [targets, setTargets] = useState<RunTarget[]>([]);
+	// GitHub connection: `githubUser` is the logged-in login (undefined = not connected). The heavy client (fido) is
+	// only imported when we actually talk to GitHub, so it code-splits out of the cold-start bundle.
+	const [githubUser, setGithubUser] = useState<string | undefined>(undefined);
+	const [githubOpen, setGithubOpen] = useState(false);
+	const [githubBusy, setGithubBusy] = useState(false);
+	const [githubError, setGithubError] = useState<string | undefined>(undefined);
+	const [patInput, setPatInput] = useState("");
 
 	const rpcRef = useRef<ReturnType<typeof createRpcClient>>();
 	const pageRef = useRef<HTMLElement>(null);
@@ -256,7 +319,7 @@ function Shell() {
 		const shellHub = createHub({ "id": "shell" });
 
 		hubRef.current = shellHub;
-		shellHub.link(windowTransport(appFrame.contentWindow!));
+		shellHub.link(windowTransport(appFrame.contentWindow));
 
 		// The preview windows live in the top frame so they can roam beyond the editor — the app dev-server previews AND
 		// the tsval debugger's render surface, all managed here. See shell-preview.ts / debug-preview-view.ts.
@@ -272,11 +335,11 @@ function Shell() {
 		scheme.addEventListener("change", publishScheme);
 
 		// The RHS review panel — GitHub-Desktop-style changes + commit; the diff opens in the overlay over the editor.
-		renderGitPanel(gitPanelRef.current!, {
-			"el": overlayRef.current!,
-			"title": overlayTitleRef.current!,
-			"body": overlayBodyRef.current!,
-			"close": overlayCloseRef.current!
+		renderGitPanel(gitPanelRef.current, {
+			"el": overlayRef.current,
+			"title": overlayTitleRef.current,
+			"body": overlayBodyRef.current,
+			"close": overlayCloseRef.current
 		}, shellHub);
 
 		const rpc = createRpcClient(shellHub);
@@ -401,6 +464,67 @@ function Shell() {
 		setRunOpen(false);
 	};
 
+	// If a PAT was stored from a past session, quietly confirm it still works and show who we're connected as. A stale
+	// token just leaves us disconnected — no error surfaced until the user actively tries to connect.
+	useEffect(() => {
+		if (!hasPat()) {
+			return;
+		}
+
+		let cancelled = false;
+
+		void (async () => {
+			try {
+				const { createGitHub } = await import("./github");
+				const me = await createGitHub().viewer();
+
+				if (!cancelled) {
+					setGithubUser(me.login);
+				}
+			} catch {
+				/* stale / revoked token — stay disconnected; the user can reconnect from the popover */
+			}
+		})();
+
+		return () => { cancelled = true; };
+	}, []);
+
+	// Connect: store the pasted PAT, then verify it by fetching the viewer (the cheapest authed call). On failure the
+	// token is dropped again so we never keep a bad one. This is the ONLY place the token is read from the UI.
+	const connectGithub = async (): Promise<void> => {
+		const token = patInput.trim();
+
+		if (token === "") {
+			return;
+		}
+
+		setGithubBusy(true);
+		setGithubError(undefined);
+		setPat(token);
+
+		try {
+			const { createGitHub } = await import("./github");
+			const me = await createGitHub().viewer();
+
+			setGithubUser(me.login);
+			setPatInput("");
+			setGithubOpen(false);
+		} catch (error) {
+			setPat(undefined);
+			setGithubUser(undefined);
+			setGithubError(error instanceof Error ? error.message : "Could not connect");
+		} finally {
+			setGithubBusy(false);
+		}
+	};
+
+	const disconnectGithub = (): void => {
+		setPat(undefined);
+		setGithubUser(undefined);
+		setGithubError(undefined);
+		setGithubOpen(false);
+	};
+
 	const openProject = (id: string): void => {
 		setCurrentId(id);
 		setLhsCollapsed(true); // making a selection collapses the projects pane back to its rail
@@ -413,13 +537,18 @@ function Shell() {
 		<wa-page ref={pageRef} class={shellClass} mobile-breakpoint="0" disable-navigation-toggle>
 			<div slot="header" class={topBar()}>
 				<span class={brand()}>editor</span>
+
 				<wa-button appearance="plain" size="small" title="Toggle project panel" aria-label="Toggle project panel" onClick={() => { setLhsCollapsed((value) => !value); }}><Icon node={PanelLeft} /></wa-button>
+
 				<wa-button appearance="plain" size="small" title="Open project" aria-label="Open project"><Icon node={FolderOpen} /></wa-button>
+
 				<span class={runWrap()}>
 					<wa-button appearance="plain" size="small" title="Run" aria-label="Run" aria-expanded={runOpen} onClick={toggleRun}><Icon node={Play} /></wa-button>
+
 					{runOpen && (
 						<>
 							<div class={runBackdrop()} onClick={() => { setRunOpen(false); }} />
+
 							<div class={runMenu()} role="menu">
 								{targets.length === 0 ? (
 									<div class={runEmpty()}>No run targets found</div>
@@ -433,6 +562,7 @@ function Shell() {
 										onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); runTarget(target); } }}
 									>
 										<span class={runItemName()}>{target.name}</span>
+
 										<span class={runItemMeta()}>{target.kind === "bin" ? "bin" : target.package === "." ? "script" : target.package}</span>
 									</div>
 								))}
@@ -440,9 +570,75 @@ function Shell() {
 						</>
 					)}
 				</span>
+
 				<wa-button appearance="plain" size="small" title="Commit" aria-label="Commit"><Icon node={GitCommit} /></wa-button>
+
 				<span class={spacer()} />
+
+				<span class={runWrap()}>
+					<wa-button appearance="plain" size="small" title={githubUser !== undefined ? "GitHub · " + githubUser : "Connect GitHub"} aria-label="Connect GitHub" aria-expanded={githubOpen} onClick={() => { setGithubOpen((value) => !value); }}><Icon node={GitBranch} /></wa-button>
+
+					{githubOpen && (
+						<>
+							<div class={runBackdrop()} onClick={() => { setGithubOpen(false); }} />
+
+							<div class={githubMenu()} role="dialog" aria-label="GitHub connection">
+								{githubUser !== undefined ? (
+									<>
+										<span class={ghTitle()}>GitHub</span>
+
+										<span class={ghConnected()}>
+											Connected as
+											{" "}
+											<strong>{githubUser}</strong>
+										</span>
+
+										<div class={ghActions()}>
+											<wa-button appearance="outlined" size="small" onClick={disconnectGithub}>
+												<Icon node={LogOut} />
+
+												{" "}
+												Disconnect
+											</wa-button>
+										</div>
+									</>
+								) : (
+									<>
+										<span class={ghTitle()}>Connect GitHub</span>
+
+										<span class={ghHint()}>
+											Paste a fine-grained token with Contents read/write on your games repo. It stays in this browser and is sent only to GitHub.
+											{" "}
+											<a class={ghLink()} href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer noopener">Create one →</a>
+										</span>
+
+										<wa-input
+											class={ghInput()}
+											size="small"
+											type="password"
+											placeholder="github_pat_…"
+											value={patInput}
+											autocomplete="off"
+											spellcheck={false}
+											aria-label="GitHub personal access token"
+											onInput={(event: Event) => { setPatInput((event.currentTarget as HTMLInputElement).value); }}
+											onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter") { event.preventDefault(); void connectGithub(); } }}
+										/>
+
+										{githubError !== undefined && <span class={ghError()}>{githubError}</span>}
+
+										<div class={ghActions()}>
+											<wa-button variant="brand" size="small" disabled={githubBusy || patInput.trim() === ""} onClick={() => { void connectGithub(); }}>{githubBusy ? "Connecting…" : "Connect"}</wa-button>
+										</div>
+									</>
+								)}
+							</div>
+						</>
+					)}
+				</span>
+
 				<wa-button appearance="plain" size="small" title="History" aria-label="History"><Icon node={History} /></wa-button>
+
 				<wa-button appearance="plain" size="small" title="Toggle history panel" aria-label="Toggle history panel" onClick={() => { setRhsCollapsed((value) => !value); }}><Icon node={PanelRight} /></wa-button>
 			</div>
 
@@ -453,16 +649,20 @@ function Shell() {
 						// placeholders to preview the stacked look — settle final contents next
 						{ "node": FolderOpen, "label": "Open", "title": "Open project", "onClick": () => undefined },
 						{ "node": Play, "label": "Run", "title": "Run", "onClick": () => undefined }
-					]} />
+					]}
+					/>
 				) : (
 					<>
 						<div class={navHead()}>
 							<span class={navHeadLabel()}>Projects</span>
+
 							<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse project panel" onClick={() => { setLhsCollapsed(true); }}><Icon node={ChevronLeft} /></wa-button>
 						</div>
+
 						<div class={sideBody()}>
 							<Picker samples={samples} currentId={currentId} onOpen={openProject} />
 						</div>
+
 						<div
 							class={resizer() + " " + resizerRight()}
 							role="separator"
@@ -482,8 +682,10 @@ function Shell() {
 				<div ref={overlayRef} class={overlay()}>
 					<div class={overlayHead()}>
 						<span ref={overlayTitleRef} class={overlayTitle()} />
+
 						<wa-button ref={overlayCloseRef} appearance="plain" size="small" title="Close diff" aria-label="Close diff"><Icon node={ChevronRight} /></wa-button>
 					</div>
+
 					{/* `wa-diff-body` scopes the codehike diff grid CSS (git-panel.css). It MUST be declared here in JSX, not
 					    added imperatively by git-panel: preact owns this element's `class`, so any Shell re-render would
 					    otherwise reconcile it back and wipe an imperatively-added class — collapsing the diff grid. */}
@@ -500,14 +702,18 @@ function Shell() {
 						// placeholders to preview the stacked look — settle final contents next
 						{ "node": GitCommit, "label": "Commit", "title": "Commit", "onClick": () => undefined },
 						{ "node": History, "label": "History", "title": "History", "onClick": () => undefined }
-					]} />
+					]}
+					/>
 				) : (
 					<div class={navHead()}>
 						<span class={navHeadLabel()}>Changes</span>
+
 						<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse changes panel" onClick={() => { setRhsCollapsed(true); }}><Icon node={ChevronRight} /></wa-button>
 					</div>
 				)}
+
 				<div ref={gitPanelRef} class={rhsCollapsed ? hiddenBox() : sideHost()} />
+
 				{!rhsCollapsed && (
 					<div
 						class={resizer() + " " + resizerLeft()}

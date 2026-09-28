@@ -121,6 +121,13 @@ const esqueryCjs = createRequire(createRequire(import.meta.url).resolve("eslint"
  *  vscodePlugin (serves the entry dist/ + component under /__vscode__/). */
 export function hostPlugins(): Plugin[] {
 	return [
+		// The SHELL (main.tsx → shell.tsx) is built here, and it lazily imports the browser GitHub client
+		// (github.ts → fido → util/env, util/store), which pulls in node builtins: `env.ts` reads `process`/`path`/`url`
+		// at eval and `store.ts` (dynamic, browser-guarded) touches `fs`. `polyfillNode([...])` resolves these four AND
+		// injects the `process`/`Buffer` globals env.ts needs. Scoped to this list so it can't stub a builtin another
+		// chunk resolves itself. github.ts is dynamically imported, so fido + these polyfills land in a lazy chunk
+		// (docs/github-*.js), off the shell's cold-start path.
+		polyfillNode(["fs", "path", "url", "util"]),
 		{
 			"name": "coi-headers",
 			"configureServer": function(server) {
