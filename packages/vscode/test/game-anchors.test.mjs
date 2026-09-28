@@ -10,7 +10,7 @@ import ts from "typescript";
 import { anchorGame } from "../game-anchors.ts";
 import { recognizeGame } from "../game-recognizer.ts";
 
-const fixtureDir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "fixtures", "dozer");
+const fixtureDir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "fixtures", "example");
 
 function readGame(dir, base = dir, out = {}) {
 	for (const entry of readdirSync(dir, { "withFileTypes": true })) {

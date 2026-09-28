@@ -4,14 +4,14 @@
  * `generateGame` takes a block model (entities + their behaviors + which systems run + a painted level) and emits a
  * COMPLETE, runnable game: the constant infra (index.html, scene.ts, Tilemap.ts, package.json), the library files the
  * used behaviors provide (schemas + systems), the generated `levels/<level>.ts` (from the grid), and a thin generated
- * `game.ts` ASSEMBLY that wires it all. The heavy logic is never generated — it is VENDORED from the library (dozer's
- * reusable schemas + systems) — which is what makes a near-zero-typing, drag-and-drop build tractable (the
+ * `game.ts` ASSEMBLY that wires it all. The heavy logic is never generated — it is VENDORED from the maker's runtime
+ * library (its reusable schemas + systems) — which is what makes a near-zero-typing, drag-and-drop build tractable (the
  * GameMaker/Construct insight): the author composes behaviors and paints a grid; they never hand-write movement/push.
  *
- * SINGLE SOURCE OF TRUTH: the constant infra + library files are pulled from the `dozer` sample (samples.ts) rather than
- * re-embedded here, so they can't drift from the code the editor actually ships and runs. Only `game.ts` (assembly) and
- * the level file are generated. The sprites live inline in the sample's level as data URLs; we parse them back out as the
- * asset palette, so a rebuilt game needs no binary files either.
+ * SINGLE SOURCE OF TRUTH: the constant infra + library files come from the maker-owned runtime library (game-library.ts)
+ * rather than re-embedded here, so they can't drift from the code the maker actually generates and runs. Only `game.ts`
+ * (assembly) and the level file are generated. The sprites live inline in the library level as data URLs; we parse them
+ * back out as the asset palette, so a rebuilt game needs no binary files either.
  *
  * The generated code is designed to reverse-project cleanly: run recognizeGame over the output and you get the same map
  * the author assembled. That round-trip (author → generate → recognize → same map) is both the payoff and the test.
@@ -19,10 +19,10 @@
 
 import type { GameModel } from "./game-recognizer";
 import type { Behavior, Rule } from "./game-rules";
-import { behaviorsUsedBy, builtinBehaviors, compileGame, dozerBehaviors, dozerRules, fly } from "./game-rules";
-import { sampleById } from "./samples";
+import { libraryFiles } from "./game-library";
+import { behaviorsUsedBy, builtinBehaviors, compileGame, exampleBehaviors, exampleRules, fly } from "./game-rules";
 
-/** Import specifier + vendored-file path (relative to the game dir; also its subpath inside the dozer sample). */
+/** Import specifier + vendored-file path (relative to the game dir; also its subpath inside the runtime library). */
 interface ComponentMeta { "from": string; "path": string }
 interface SystemMeta { "from": string; "path": string; "needs": string[] }
 
@@ -63,31 +63,6 @@ const OBJECT_PRESETS: ObjectPreset[] = [
 	{ "type": "target", "sprite": "target", "components": ["Target"], "depth": 0 }
 ];
 
-// ── the vendored dozer files, pulled from the sample catalog (one source of truth) ──────────────────────────────
-const SAMPLE_PREFIX = "/workspace/samples/dozer/";
-let dozerFileCache: Record<string, string> | undefined;
-
-/** The dozer sample's files keyed by path RELATIVE to the game dir (e.g. "systems/input.ts"). */
-function dozerFiles(): Record<string, string> {
-	if (dozerFileCache === undefined) {
-		const sample = sampleById("dozer");
-
-		if (sample === undefined) {
-			throw new Error("dozer sample not found — the generator vendors its library from it");
-		}
-
-		dozerFileCache = {};
-
-		for (const file of sample.files) {
-			if (file.path.startsWith(SAMPLE_PREFIX)) {
-				dozerFileCache[file.path.slice(SAMPLE_PREFIX.length)] = file.contents;
-			}
-		}
-	}
-
-	return dozerFileCache;
-}
-
 let assetCache: Record<string, string> | undefined;
 
 /** The sprite palette — tileset name → inline data-URL, parsed out of the sample level's `addTileset(...)` calls. */
@@ -95,7 +70,7 @@ export function spriteDataUrls(): Record<string, string> {
 	if (assetCache === undefined) {
 		assetCache = {};
 
-		const source = dozerFiles()["levels/level1.ts"] ?? "";
+		const source = libraryFiles()["levels/level1.ts"] ?? "";
 		const pattern = /addTileset\("([^"]+)",\s*"(data:[^"]+)"\)/gu;
 		let match: RegExpExecArray | null;
 
@@ -170,8 +145,8 @@ export function blankGame(width = 20, height = 12, tile = 32): AuthoredGame {
 	return { "level": "level1", "entities": [], "systems": [], "map": { width, height, tile, "floor": [], "objects": [] } };
 }
 
-/** dozer, as a block model — the starter template. Assembling THIS and generating reproduces the dozer game. */
-export const dozerAuthored: AuthoredGame = {
+/** The maker's built-in example, as a block model — the starter template. Assembling THIS and generating reproduces the example game. */
+export const exampleAuthored: AuthoredGame = {
 	"level": "level1",
 	"entities": [
 		{ "name": "player", "components": ["MoveIntent", "Player"], "depth": 2 },
@@ -198,11 +173,11 @@ export const dozerAuthored: AuthoredGame = {
 	}
 };
 
-/** dozer, COMPOSED from primitives — the same game, but its systems are compiled from ECA rules + behaviors (game-rules)
- *  instead of vendored pre-made. Generating THIS produces a complete, runnable dozer whose push and win were built from
- *  the toolbox, not handed over: the honest end of the thesis. The player needs only the Player tag (input is folded into
- *  the compiled playerMove, which reads the cursors and queries [Player]); there is no MoveIntent/Direction. */
-export const dozerComposed: AuthoredGame = {
+/** The maker's built-in example, COMPOSED from primitives — the same game, but its systems are compiled from ECA rules +
+ *  behaviors (game-rules) instead of vendored pre-made. Generating THIS produces a complete, runnable game whose push and
+ *  win were built from the toolbox, not handed over: the honest end of the thesis. The player needs only the Player tag
+ *  (input is folded into the compiled playerMove, which reads the cursors and queries [Player]); there is no MoveIntent/Direction. */
+export const exampleGame: AuthoredGame = {
 	"level": "level1",
 	"entities": [
 		{ "name": "player", "components": ["Player"], "depth": 2 },
@@ -210,9 +185,9 @@ export const dozerComposed: AuthoredGame = {
 		{ "name": "target", "components": ["Target"], "depth": 0 }
 	],
 	"systems": [],
-	"map": dozerAuthored.map,
-	"rules": dozerRules,
-	"behaviors": dozerBehaviors
+	"map": exampleAuthored.map,
+	"rules": exampleRules,
+	"behaviors": exampleBehaviors
 };
 
 /** Seed an editable block model from a recognized game (read → write bridge): objects become entities, rules become the
@@ -433,7 +408,7 @@ ${objectLines}
  */
 export function generateGame(game: AuthoredGame): Record<string, string> {
 	const files: Record<string, string> = {};
-	const vendored = dozerFiles();
+	const vendored = libraryFiles();
 
 	// Infra — constant, vendored verbatim.
 	for (const path of INFRA_FILES) {
@@ -542,7 +517,7 @@ export function generateGame(game: AuthoredGame): Record<string, string> {
  */
 export function generateArcadeGame(): Record<string, string> {
 	const files: Record<string, string> = {};
-	const vendored = dozerFiles();
+	const vendored = libraryFiles();
 	const ship = spriteDataUrls().player;
 
 	// Infra is game-agnostic — reuse the sample's index.html / scene.ts / package.json (no Tilemap needed here).

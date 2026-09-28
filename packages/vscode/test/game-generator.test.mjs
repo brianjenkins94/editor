@@ -1,14 +1,14 @@
-// Generator round-trip spec — the AUTHOR direction, proven against the READ direction. Assembling dozer as a block
+// Generator round-trip spec — the AUTHOR direction, proven against the READ direction. Assembling the example game as a block
 // model and generating it must produce a COMPLETE runnable game whose code reverse-projects to the SAME map. That closes
 // the loop (author → generate → recognize → same map) and is the generator's correctness test. Run: node --test.
 import assert from "node:assert/strict";
 import test from "node:test";
 import ts from "typescript";
-import { blankGame, dozerAuthored, dozerComposed, generateArcadeGame, generateGame } from "../game-generator.ts";
+import { blankGame, exampleAuthored, exampleGame, generateArcadeGame, generateGame } from "../game-generator.ts";
 import { recognizeGame } from "../game-recognizer.ts";
 
-test("generating the dozer block model emits a complete runnable game", () => {
-	const files = generateGame(dozerAuthored);
+test("generating the example block model emits a complete runnable game", () => {
+	const files = generateGame(exampleAuthored);
 
 	// Infra is vendored verbatim so the game runs standalone.
 	for (const path of ["index.html", "scene.ts", "Tilemap.ts", "package.json"]) {
@@ -72,8 +72,8 @@ test("a blank game is a complete, runnable, empty scaffold", () => {
 	assert.equal(model.rules.length, 0, "a blank game has no rules");
 });
 
-test("the COMPOSED dozer generates a complete runnable game whose systems are compiled from primitives", () => {
-	const files = generateGame(dozerComposed);
+test("the COMPOSED example generates a complete runnable game whose systems are compiled from primitives", () => {
+	const files = generateGame(exampleGame);
 
 	// Complete + self-contained: infra, schemas, the compiled library + systems, the render engine glue, level, assembly.
 	for (const path of ["index.html", "scene.ts", "Tilemap.ts", "package.json", "schemas/player.ts", "schemas/pushable.ts", "schemas/target.ts", "schemas/position.ts", "behaviors/gridPush.ts", "systems/playerMove.ts", "systems/winSystem.ts", "systems/render.ts", "levels/level1.ts", "game.ts"]) {
@@ -89,7 +89,7 @@ test("the COMPOSED dozer generates a complete runnable game whose systems are co
 	assert.match(files["game.ts"], /import \{ playerMove \} from "\.\/systems\/playerMove"/u);
 	assert.doesNotMatch(files["game.ts"], /MoveIntent|Direction/u, "the composed player needs only the Player tag");
 
-	// Round-trip: the composed game reverse-projects to dozer's map, with the library recognized.
+	// Round-trip: the composed game reverse-projects to the example's map, with the library recognized.
 	const model = recognizeGame(files, ts);
 
 	assert.deepEqual(model.objects.map((object) => object.name).sort(), ["boulder", "player", "target"]);
@@ -120,8 +120,8 @@ test("the arcade game generates a complete, deterministic real-time game (fixed 
 
 test("adding an entity to the model shows up in the regenerated projection", () => {
 	const withCrate = {
-		...dozerAuthored,
-		"entities": [...dozerAuthored.entities, { "name": "crate", "components": ["Pushable"], "depth": 1 }]
+		...exampleAuthored,
+		"entities": [...exampleAuthored.entities, { "name": "crate", "components": ["Pushable"], "depth": 1 }]
 	};
 	const model = recognizeGame(generateGame(withCrate), ts);
 

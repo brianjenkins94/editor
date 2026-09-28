@@ -88,10 +88,10 @@ test("commitFiles runs the Git Data flow in order, inlining text and uploading b
 
 	const sha = await gh.commitFiles("me", "games", {
 		"branch": "main",
-		"message": "add dozer",
+		"message": "add example",
 		"files": [
-			{ "path": "games/dozer/game.ts", "content": "export const x = 1;\n" },
-			{ "path": "games/dozer/assets/sprites/boulder.png", "base64": "iVBORw0KGgo=" }
+			{ "path": "games/example/game.ts", "content": "export const x = 1;\n" },
+			{ "path": "games/example/assets/sprites/boulder.png", "base64": "iVBORw0KGgo=" }
 		]
 	});
 
@@ -116,10 +116,10 @@ test("commitFiles runs the Git Data flow in order, inlining text and uploading b
 
 	const byPath = new Map(treeCall.body.tree.map((entry) => [entry.path, entry]));
 
-	assert.equal(byPath.get("games/dozer/game.ts").content, "export const x = 1;\n", "text is inlined");
-	assert.equal(byPath.get("games/dozer/game.ts").sha, undefined, "text carries no blob sha");
-	assert.equal(byPath.get("games/dozer/assets/sprites/boulder.png").sha, "BLOB:base64", "binary references the base64 blob");
-	assert.equal(byPath.get("games/dozer/assets/sprites/boulder.png").content, undefined, "binary is not inlined");
+	assert.equal(byPath.get("games/example/game.ts").content, "export const x = 1;\n", "text is inlined");
+	assert.equal(byPath.get("games/example/game.ts").sha, undefined, "text carries no blob sha");
+	assert.equal(byPath.get("games/example/assets/sprites/boulder.png").sha, "BLOB:base64", "binary references the base64 blob");
+	assert.equal(byPath.get("games/example/assets/sprites/boulder.png").content, undefined, "binary is not inlined");
 
 	// The commit parents the old tip; the ref is moved to the new commit.
 	const commitCall = calls.find((call) => call.path.endsWith("/git/commits") && call.method === "POST");

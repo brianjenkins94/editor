@@ -1,11 +1,11 @@
-// The FIRST TEST of the Handmade author model, on paper then in code: dozer's push and win are COMPOSED from primitives
+// The FIRST TEST of the Handmade author model, on paper then in code: the example's push and win are COMPOSED from primitives
 // (nothing high-level pre-made), a built-in behavior is itself just a reusable function of those primitives, a rule
 // composes the behavior, and the compiled systems reverse-project back to the same rules (the round-trip). Run: tsx --test.
 import assert from "node:assert/strict";
 import test from "node:test";
 import ts from "typescript";
 import { anchorGame } from "../game-anchors.ts";
-import { compileGame, dozerBehaviors, dozerRules, fly } from "../game-rules.ts";
+import { compileGame, exampleBehaviors, exampleRules, fly } from "../game-rules.ts";
 import { recognizeGame } from "../game-recognizer.ts";
 
 // Minimal schemas + an entity config, so behaviors and objects recognize alongside the compiled rules.
@@ -31,7 +31,7 @@ const GAME = {
 };
 
 test("push and win compile from primitives to readable systems, and a built-in is a reusable function of primitives", () => {
-	const files = compileGame(dozerRules, dozerBehaviors);
+	const files = compileGame(exampleRules, exampleBehaviors);
 
 	// The built-in `gridPush` is a reusable FUNCTION composed only of primitives — no magic, and no input coupling.
 	const push = files["behaviors/gridPush.ts"];
@@ -58,8 +58,8 @@ test("push and win compile from primitives to readable systems, and a built-in i
 	assert.match(win, /world\.onWin/u);
 });
 
-test("the compiled game reverse-projects back to dozer's map (the round-trip)", () => {
-	const files = { ...SCHEMAS, ...GAME, ...compileGame(dozerRules, dozerBehaviors) };
+test("the compiled game reverse-projects back to the example's map (the round-trip)", () => {
+	const files = { ...SCHEMAS, ...GAME, ...compileGame(exampleRules, exampleBehaviors) };
 	const model = recognizeGame(files, ts);
 
 	// Behaviors (components) recovered — the game genuinely needs only these four.
@@ -118,7 +118,7 @@ test("arcade: continuous movement compiles to deterministic fixed-point code, no
 });
 
 test("composed behaviors get durable anchors (the library keeps its identity across edits)", () => {
-	const files = { ...SCHEMAS, ...GAME, ...compileGame(dozerRules, dozerBehaviors) };
+	const files = { ...SCHEMAS, ...GAME, ...compileGame(exampleRules, exampleBehaviors) };
 	const model = anchorGame(files, recognizeGame(files, ts));
 
 	const push = model.composites.find((composite) => composite.name === "gridPush");

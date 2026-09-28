@@ -1,5 +1,5 @@
-// Reverse-projection recognizer spec — proves the component→behavior matcher against the REAL dozer game (copied into
-// test/fixtures/dozer). "Strong" is measured concretely: every ECS component is recognized as a behavior with the right
+// Reverse-projection recognizer spec — proves the component→behavior matcher against the maker's example game (copied into
+// test/fixtures/example). "Strong" is measured concretely: every ECS component is recognized as a behavior with the right
 // kind/fields, and non-components (the Direction enum) are excluded. Run: node --test (needs bablr/dist built).
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -11,9 +11,9 @@ import ts from "typescript";
 // injects its `ts`; here the test injects node's, the way the editor injects its ambient tsserver instance.
 import { recognizeBehaviors, recognizeGame, recognizeObjects, recognizeRules } from "../game-recognizer.ts";
 
-const fixtureDir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "fixtures", "dozer");
+const fixtureDir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "fixtures", "example");
 
-// Fixtures are the REAL dozer files stored as `.ts.txt` so no TS tooling (type-aware lint / build) touches them — they're
+// Fixtures are the example game files stored as `.ts.txt` so no TS tooling (type-aware lint / build) touches them — they're
 // test data (source strings; BABLR parses the content, not the extension). The map key is the logical path (`.txt` stripped).
 function readGame(dir, base = dir, out = {}) {
 	for (const entry of readdirSync(dir, { "withFileTypes": true })) {
@@ -29,7 +29,7 @@ function readGame(dir, base = dir, out = {}) {
 	return out;
 }
 
-test("recognizes every dozer behavior (data + tag), cross-file, with correct kind and fields", () => {
+test("recognizes every example behavior (data + tag), cross-file, with correct kind and fields", () => {
 	const behaviors = recognizeBehaviors(readGame(fixtureDir), ts);
 	const byName = new Map(behaviors.map((behavior) => [behavior.name, behavior]));
 
@@ -117,7 +117,7 @@ test("recognizeGame composes all three into one JSON model (what the worker retu
 	assert.equal(model.behaviors.length, 5);
 	assert.equal(model.objects.length, 3);
 	assert.equal(model.rules.length, 4);
-	// No false-positive composites: dozer's systems all query (they're rules), and its scene lifecycle hooks
+	// No false-positive composites: the example's systems all query (they're rules), and its scene lifecycle hooks
 	// (preload/create/update) reference components but are not reusable behaviors — none should read as a composite.
 	assert.equal(model.composites.length, 0);
 	// Plain JSON — survives the worker boundary (structuredClone stands in for postMessage).

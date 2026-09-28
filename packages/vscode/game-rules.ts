@@ -15,7 +15,7 @@
  * The payoff and the test: `compileGame` lowers the composition to readable ECS (behaviors → `behaviors/`, rules →
  * `systems/`), and `recognizeGame` (game-recognizer.ts) reads the systems back into the same rules — so the blocks and the
  * code are two views of one thing (the round-trip). No UI here; this proves the model before any is built. The compiled
- * code mirrors the dozer sample's proven systems (walls on `world.walls`, cursors on `world.cursors`, bitECS `query`) so it
+ * code mirrors the maker's example's proven systems (walls on `world.walls`, cursors on `world.cursors`, bitECS `query`) so it
  * runs by construction, and uses string concatenation over template literals only so the strings embed cleanly, exactly as
  * game-generator.ts does.
  */
@@ -98,8 +98,8 @@ export const fly: Behavior = {
 	]
 };
 
-/** dozer's built-in library. */
-export const dozerBehaviors: Behavior[] = [gridPush];
+/** The maker's example's built-in library. */
+export const exampleBehaviors: Behavior[] = [gridPush];
 
 /** The built-in behavior library a rule can COMPOSE — reusable functions of primitives, each one a kid can open and fork.
  *  (Authoring a behavior's own primitive body in the UI is a later slice; for now the library provides them.) */
@@ -130,10 +130,10 @@ export function behaviorsUsedBy(rules: Rule[]): string[] {
 	return [...used];
 }
 
-// ── dozer, composed: rules that pick a subject + event and compose a behavior ────────────────────────────────────
+// ── the maker's example, composed: rules that pick a subject + event and compose a behavior ──────────────────────
 
 /** Move & push: the Player, on a pressed direction, composes the gridPush behavior. */
-export const dozerMove: PerEntityRule = {
+export const exampleMove: PerEntityRule = {
 	"kind": "perEntity",
 	"name": "playerMove",
 	"subject": "Player",
@@ -142,7 +142,7 @@ export const dozerMove: PerEntityRule = {
 };
 
 /** Win: on every tick, if every Pushable is on a Target, win. */
-export const dozerWin: AggregateRule = {
+export const exampleWin: AggregateRule = {
 	"kind": "aggregate",
 	"name": "winSystem",
 	"on": "step",
@@ -150,8 +150,8 @@ export const dozerWin: AggregateRule = {
 	"goal": "Target"
 };
 
-/** dozer as a rule-set — the input to the compiler (with dozerBehaviors as its library). */
-export const dozerRules: Rule[] = [dozerMove, dozerWin];
+/** The maker's example as a rule-set — the input to the compiler (with exampleBehaviors as its library). */
+export const exampleRules: Rule[] = [exampleMove, exampleWin];
 
 // ── the compiler ────────────────────────────────────────────────────────────────────────────────────────────────
 
