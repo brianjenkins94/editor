@@ -159,12 +159,21 @@ function runCommand(command: string): void {
 // They survive a `replace` (the editor needs them) and are never sent back to a repo on commit.
 const SCAFFOLDING = new Set(["ata-ambient.d.ts", "editor-ambient.d.ts", ".silo", "node_modules", ".git"]);
 
-// Root-level TS project configs are OVERRIDABLE DEFAULTS (see workspace-fs.ts): a loaded repo's own copy wins, and
-// when a repo ships none the read-only base (boot's priority-1 overlay) shows through. On `replace` we OVERWRITE
-// them in place when the repo provides one, and DELETE them (to fall through to the base) when it doesn't — never
-// delete-then-write, because the VS Code overlay has no copy-up: once the writable copy is gone the path resolves
-// to the read-only base and a fresh write there is rejected. Keep in sync with workspace-fs.ts OVERRIDABLE_DEFAULTS.
-const OVERRIDABLE_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json"]);
+// Root-level managed configs are OVERRIDABLE DEFAULTS (writable in zen-fs; see workspace-fs.ts). A loaded repo's own
+// copy always wins — it OVERWRITES in place, because clearWorkspace keeps these (never delete-then-write: the VS Code
+// overlay has no copy-up, so once the writable copy is gone the path resolves to the read-only base and a fresh write
+// there is rejected). When a repo ships NONE, the reconciliation differs by how the config is read:
+//   FALLTHROUGH_DEFAULTS — TS project configs, read by tsserver via the COMPOSITE file service: DELETE the writable
+//     copy so the read-only priority-1 base shows through.
+//   .gitignore — read straight off zen-fs by isomorphic-git (a priority-1 base would be invisible to it): MATERIALIZE
+//     the git default (gitEngine.DEFAULT_GITIGNORE) into zen-fs.
+//   ESLINT_CONFIGS — kept overridable so a repo's own is writable, but the eslint engine uses a fixed BUNDLED flat
+//     config (extensions/eslint/engine.ts) and does NOT read a workspace eslint.config, so there's nothing to
+//     materialize; on omit we just drop a stale one. Variants are one concept — a repo providing ANY counts.
+// Keep OVERRIDABLE_DEFAULTS in sync with workspace-fs.ts.
+const FALLTHROUGH_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json"]);
+const ESLINT_CONFIGS = ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs"];
+const OVERRIDABLE_DEFAULTS = new Set([...FALLTHROUGH_DEFAULTS, ...ESLINT_CONFIGS, ".gitignore"]);
 
 function workspaceRoot(): string {
 	return init?.workspaceFolder ?? "/workspace";
@@ -236,16 +245,31 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 	}
 
 	if (replace) {
-		// Prune overridable-default configs the loaded repo did NOT provide, so they fall through to the read-only
-		// base default (clearWorkspace kept them; the write loop above overwrote any the repo DID ship).
+		// Reconcile overridable-default configs the loaded repo did NOT provide (the write loop above already
+		// overwrote any it DID ship; clearWorkspace kept these so those were in-place overwrites).
 		const provided = new Set(files.map((file) => file.path));
 		const root = workspaceRoot();
+		const providedAtRoot = (name: string): boolean => provided.has(root + "/" + name);
+		const dropWritable = (name: string): Promise<void> => vscode.workspace.fs.delete(vscode.Uri.file(root + "/" + name), { "recursive": false, "useTrash": false }).then(undefined, () => { /* not present */ });
 
-		for (const name of OVERRIDABLE_DEFAULTS) {
-			const path = root + "/" + name;
+		// TS project configs: DELETE so tsserver falls through to the read-only base via the composite file service.
+		for (const name of FALLTHROUGH_DEFAULTS) {
+			if (!providedAtRoot(name)) {
+				await dropWritable(name);
+			}
+		}
 
-			if (!provided.has(path)) {
-				await vscode.workspace.fs.delete(vscode.Uri.file(path), { "recursive": false, "useTrash": false }).then(undefined, () => { /* not present */ });
+		// .gitignore: isomorphic-git reads zen-fs directly, so MATERIALIZE the git default when the repo omits it
+		// (in-place overwrite — clearWorkspace kept it). Matches ensureRepo's first-run default.
+		if (!providedAtRoot(".gitignore")) {
+			await vscode.workspace.fs.writeFile(vscode.Uri.file(root + "/.gitignore"), encoder.encode(gitEngine.DEFAULT_GITIGNORE));
+		}
+
+		// eslint: a repo's own config already overwrote in place; when it ships none, drop any stale variant. Nothing
+		// to materialize — the eslint engine uses a fixed bundled flat config and doesn't read a workspace eslint.config.
+		if (!ESLINT_CONFIGS.some((name) => providedAtRoot(name))) {
+			for (const name of ESLINT_CONFIGS) {
+				await dropWritable(name);
 			}
 		}
 	}

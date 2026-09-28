@@ -26,6 +26,11 @@ const AUTHOR = { "name": "editor", "email": "editor@localhost" };
 export interface GitChange { "path": string; "status": "A" | "M" | "D" }
 export interface GitStatus { "staged": GitChange[]; "unstaged": GitChange[] }
 
+/** The default `.gitignore` for a workspace that ships none — keeps the seeded dependency types under node_modules/
+ *  out of git status (statusMatrix honors .gitignore). Materialized into zen-fs on a repo load too (see
+ *  workbench-entry.tsx), since isomorphic-git reads it straight off the filesystem. */
+export const DEFAULT_GITIGNORE = "node_modules/\n";
+
 /** Ensure /workspace is a git repo — `git init` on first run (idempotent), with a default `.gitignore` so the seeded
  *  dependency types under node_modules/ don't flood the status (statusMatrix honors .gitignore). The Automerge
  *  edit-history sidecars need no ignore: they live inside `.git/`, off the working tree. */
@@ -35,7 +40,7 @@ export async function ensureRepo(): Promise<void> {
 	}
 
 	if (!fs.existsSync(DIR + "/.gitignore")) {
-		await fs.promises.writeFile(DIR + "/.gitignore", "node_modules/\n");
+		await fs.promises.writeFile(DIR + "/.gitignore", DEFAULT_GITIGNORE);
 	}
 }
 
