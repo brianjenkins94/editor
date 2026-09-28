@@ -549,7 +549,7 @@ workbenchHub.subscribe("workbench.openProject", (data) => {
 		pendingProject = undefined;
 
 		if (project !== undefined) {
-			void openProject(project.files ?? [], project.openEditors ?? [], project.replace ?? false).catch((error) => { paneLog.error("openProject failed", { "error": errText(error) }); });
+			void openProject(project.files ?? [], project.openEditors ?? [], project.replace ?? false).catch((error: unknown) => { paneLog.error("openProject failed", { "error": errText(error) }); });
 		}
 	}, 150);
 });
