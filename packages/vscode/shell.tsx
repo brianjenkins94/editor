@@ -17,6 +17,7 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { RunTarget } from "./targets";
 import { createHub, createRpcClient, windowTransport } from "@brianjenkins94/hub";
 import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play } from "lucide";
+import { logger } from "@brianjenkins94/util/logger";
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { renderGitPanel } from "./git-panel";
@@ -31,6 +32,13 @@ import "@awesome.me/webawesome/dist/components/divider/divider.js";
 import "@awesome.me/webawesome/dist/components/input/input.js";
 import "./webawesome";
 import "theme"; // our brand tokens, layered on Web Awesome's default theme (must come after it)
+
+// The GitHub data plane's logger — spans + records federate to the `$sys.log.>` observability plane (debug-mcp).
+// The shell owns the token and the network calls, so this is where load/commit/connect are traced.
+const githubLog = logger({ "source": "github" });
+
+const errText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const statusOf = (error: unknown): number | undefined => (typeof (error as { "status"?: unknown }).status === "number" ? (error as { "status": number }).status : undefined);
 
 interface SampleInfo { "id": string; "name": string; "description": string }
 
@@ -522,6 +530,8 @@ function Shell() {
 		setGithubError(undefined);
 		setPat(token);
 
+		const span = githubLog.span("github.connect");
+
 		try {
 			const { createGitHub } = await import("./github");
 			const me = await createGitHub().viewer();
@@ -529,11 +539,14 @@ function Shell() {
 			setGithubUser(me.login);
 			setPatInput("");
 			setGithubOpen(false);
+			span.info("connected", { "login": me.login });
 		} catch (error) {
 			setPat(undefined);
 			setGithubUser(undefined);
 			setGithubError(error instanceof Error ? error.message : "Could not connect");
+			span.error("connect failed", { "error": errText(error), "status": statusOf(error) });
 		} finally {
+			span.end();
 			setGithubBusy(false);
 		}
 	};
@@ -560,6 +573,8 @@ function Shell() {
 		setLoadingRepo(true);
 		setLoadError(undefined);
 
+		const span = githubLog.span("github.loadRepo", { "repo": repoInput.trim() });
+
 		try {
 			const [owner, repo] = [match[1], match[2]];
 			const { createGitHub } = await import("./github");
@@ -568,6 +583,7 @@ function Shell() {
 
 			if (meta === undefined) {
 				setLoadError("Repo not found, or your token can't see it");
+				span.error("repo not found or not visible");
 
 				return;
 			}
@@ -576,6 +592,7 @@ function Shell() {
 
 			if (files.length === 0) {
 				setLoadError("That repo has no files");
+				span.error("repo has no files", { "branch": meta.default_branch });
 
 				return;
 			}
@@ -591,9 +608,12 @@ function Shell() {
 			setBoundRepo(binding);
 			setGithubOpen(false);
 			setRepoInput("");
+			span.info("loaded", { "branch": meta.default_branch, "files": files.length, "bytes": files.reduce((total, file) => total + file.bytes.length, 0) });
 		} catch (error) {
 			setLoadError(error instanceof Error ? error.message : "Could not load the repo");
+			span.error("load failed", { "error": errText(error), "status": statusOf(error) });
 		} finally {
+			span.end();
 			setLoadingRepo(false);
 		}
 	};
@@ -621,6 +641,8 @@ function Shell() {
 		setCommitError(undefined);
 		setCommitResult(undefined);
 
+		const span = githubLog.span("github.commit", { "repo": binding.owner + "/" + binding.repo, "branch": binding.branch });
+
 		try {
 			const files = await rpcRef.current?.request("workspace.files", undefined, { "timeoutMs": 20000 }) as { "path": string; "bytes": Uint8Array }[];
 			const prefix = "/workspace/";
@@ -638,9 +660,12 @@ function Shell() {
 
 			setCommitResult(sha.slice(0, 7));
 			setCommitMessage("");
+			span.info("committed", { "files": writes.length, "bytes": files.reduce((total, file) => total + file.bytes.length, 0), "sha": sha.slice(0, 7) });
 		} catch (error) {
 			setCommitError(error instanceof Error ? error.message : "Commit failed");
+			span.error("commit failed", { "error": errText(error), "status": statusOf(error) });
 		} finally {
+			span.end();
 			setCommitting(false);
 		}
 	};
