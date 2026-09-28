@@ -1,8 +1,8 @@
 {
-  "name": "eslint",
-  "displayName": "ESLint (tsserver plugin)",
-  "description": "Lints JS/TS via a TypeScript Server Plugin that reuses tsserver's own typescript — no bundled copy.",
-  "publisher": "brianjenkins94",
+  "name": "vscode-eslint",
+  "displayName": "ESLint",
+  "description": "The web implementation of dbaeumer.vscode-eslint: lints JS/TS inside tsserver (reusing its typescript) and honors the same eslint.* settings, fix-all on save and formatter.",
+  "publisher": "dbaeumer",
   "version": "0.0.1",
   "engines": {
     "vscode": "*"
@@ -21,6 +21,51 @@
         "name": "eslint-ts-plugin",
         "enableForWorkspaceTypeScriptVersions": true
       }
-    ]
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "ESLint",
+      "properties": {
+        "eslint.enable": {
+          "scope": "resource",
+          "type": "boolean",
+          "default": true,
+          "description": "Controls whether eslint is enabled or not."
+        },
+        "eslint.format.enable": {
+          "scope": "resource",
+          "type": "boolean",
+          "default": false,
+          "description": "Enables ESLint as a formatter."
+        },
+        "eslint.validate": {
+          "scope": "resource",
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "default": null,
+          "description": "An array of language ids which should be validated by ESLint. In the browser, only JavaScript and TypeScript languages are linted."
+        },
+        "eslint.rules.customizations": {
+          "scope": "resource",
+          "type": "array",
+          "default": null,
+          "items": {
+            "type": "object",
+            "properties": {
+              "rule": { "type": "string" },
+              "severity": { "enum": ["downgrade", "error", "info", "default", "upgrade", "warn", "off"] },
+              "fixable": { "type": "boolean" }
+            }
+          },
+          "description": "Override the severity of one or more rules reported by this extension, regardless of the project's ESLint config. Use globs to apply default severities for multiple rules."
+        },
+        "eslint.workingDirectories": {
+          "scope": "resource",
+          "type": "array",
+          "default": null,
+          "description": "Specifies how the working directories ESLint is using are computed. In the browser the workspace root is always the working directory."
+        }
+      }
+    }
   }
 }

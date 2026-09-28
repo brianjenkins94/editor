@@ -4,7 +4,8 @@
  * plugin) instead of bundling its own ~6MB copy. This replaces the almostnode-hosted eslint LSP server: no
  * almostnode, no zen-fs, no separate worker — the linter runs where tsserver already loaded `ts`.
  *
- * Exposes ONE `lintText(text, filename)` the plugin calls from `getSemanticDiagnostics`. It uses eslint's
+ * Exposes `lintText(text, filename)`, which the plugin calls from `getSemanticDiagnostics`, and `fixText`, behind
+ * the plugin's `_eslint.fixAll` request (fix-all on save / the formatter). It uses eslint's
  * `universal` (browser-safe, no node builtins) `Linter` + `@typescript-eslint/parser` with NO `project` option
  * (syntactic parse, no type info, no fs) — the same fixed flat config the old server used. Built by
  * eslint.engine.config.ts to a served URL (/__vscode__/lsp/eslint-engine.js), loaded by the plugin via a
@@ -25,6 +26,8 @@ export interface LintMessage {
 	"message": string;
 	"severity": number;
 	"ruleId": string | null;
+	/** Whether eslint can autofix this problem (it carries a `fix`) — `eslint.rules.customizations` can target these. */
+	"fixable": boolean;
 }
 
 // The parser object eslint needs (has parseForESLint/parse). Bundlers differ on CJS/ESM default interop —
@@ -173,12 +176,26 @@ export async function applyWorkspaceConfig(text: string | undefined): Promise<vo
  *  are ordered errors-first (severity 2 before 1); the sort is stable, so source order is kept within a severity. */
 export function lintText(text: string, filename: string): LintMessage[] {
 	try {
-		const messages = linter.verify(text, activeConfig, { "filename": filename }) as LintMessage[];
+		const messages = linter.verify(text, activeConfig, { "filename": filename }).map((message) => ({ ...message, "fixable": message.fix !== undefined }));
 
 		return messages.sort((a, b) => b.severity - a.severity);
 	} catch (error) {
 		console.error("[eslint-engine] verify failed", error);
 
 		return [];
+	}
+}
+
+/** Apply every autofix eslint has for `text` (what the desktop extension's `source.fixAll.eslint` does), with the
+ *  same active config as `lintText`. Returns the input unchanged (`fixed: false`) on failure. */
+export function fixText(text: string, filename: string): { "output": string; "fixed": boolean } {
+	try {
+		const result = linter.verifyAndFix(text, activeConfig, { "filename": filename });
+
+		return { "output": result.output, "fixed": result.fixed };
+	} catch (error) {
+		console.error("[eslint-engine] verifyAndFix failed", error);
+
+		return { "output": text, "fixed": false };
 	}
 }
