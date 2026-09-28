@@ -72,6 +72,34 @@ export default function init(modules) {
 			applyConfig(info.config);
 
 			const ls = info.languageService;
+			const host = info.languageServiceHost;
+			const project = info.project;
+
+			// The workspace's own flat config, read through tsserver's host (so it sees the in-browser workspace FS).
+			// Checked at the workspace root; the engine caches by text, so re-reading each diagnostics pass is cheap.
+			const configNames = ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts", "eslint.config.mts", "eslint.config.cts"];
+
+			function readWorkspaceConfig() {
+				try {
+					const dir = (project && project.getCurrentDirectory && project.getCurrentDirectory()) || "/workspace";
+					const base = dir.replace(/\/+$/, "");
+
+					for (const name of configNames) {
+						const path = base + "/" + name;
+
+						if (host && host.fileExists && host.fileExists(path) && host.readFile) {
+							const text = host.readFile(path);
+
+							if (typeof text === "string") {
+								return text;
+							}
+						}
+					}
+				} catch (error) { /* fall back to the engine's built-in config */ }
+
+				return undefined;
+			}
+
 			const proxy = Object.create(null);
 
 			for (const key of Object.keys(ls)) {
@@ -96,6 +124,12 @@ export default function init(modules) {
 				}
 
 				try {
+					if (typeof engine.applyWorkspaceConfig === "function") {
+						// Fire-and-forget: the config is evaluated off-thread in a sandbox; the engine swaps its active
+						// config in when that resolves, so this lint pass uses whatever is current.
+						Promise.resolve(engine.applyWorkspaceConfig(readWorkspaceConfig())).catch(function() { /* never breaks linting */ });
+					}
+
 					const messages = engine.lintText(sourceFile.text, fileName);
 
 					for (const message of messages) {

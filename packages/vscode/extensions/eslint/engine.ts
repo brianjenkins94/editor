@@ -12,6 +12,7 @@
  */
 import * as tsParserModule from "@typescript-eslint/parser";
 import { Linter } from "eslint/universal";
+import { gatedEvalRealm } from "../../sandbox/gated-eval";
 
 const linter = new Linter();
 
@@ -45,7 +46,7 @@ const tsParser = resolveParser(tsParserModule);
 // `files` must match (relative to the cwd basePath) or eslint reports "No matching configuration found" instead
 // of linting. @typescript-eslint/parser (no `project` option → syntactic parsing, no type info, no fs) lets
 // these rules run on TypeScript as well as JavaScript.
-const config = [{
+const builtinConfig = [{
 	"files": ["**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"],
 	"languageOptions": { "parser": tsParser },
 	// A small set of rules that work on TS with only the parser (no type info): syntactic checks, no `no-undef`
@@ -59,11 +60,120 @@ const config = [{
 	}
 }] satisfies Linter.Config[];
 
+// Whether the bundled Linter can run a rule. A workspace config's rules are filtered against this so an unknown,
+// plugin, or type-aware rule can't abort `verify` (flat config throws when a rule/plugin is missing); such rules
+// just don't run in-browser. The `universal` Linter has no `getRules()`, so probe: a trivial `verify` throws for an
+// unknown rule and returns for a known one. Cached, since it runs per rule on each config change.
+const knownRuleCache = new Map<string, boolean>();
+
+function isKnownRule(id: string): boolean {
+	const cached = knownRuleCache.get(id);
+	if (cached !== undefined) {
+		return cached;
+	}
+
+	let known: boolean;
+	try {
+		linter.verify("x;", [{ "rules": { [id]: "error" } }], { "filename": "probe.js" });
+		known = true;
+	} catch (error) {
+		known = false;
+	}
+
+	knownRuleCache.set(id, known);
+
+	return known;
+}
+
+// The active config: the built-in set until a workspace `eslint.config.*` is applied. Keyed by its source text so
+// the (relatively expensive) transpile + evaluate only re-runs when the file actually changes.
+let activeConfig: Linter.Config[] = builtinConfig;
+let activeSource: string | undefined;
+
+// Normalize an evaluated flat config into blocks the bundled Linter can run: always use the bundled TS parser, and
+// keep only rules present in `coreRules`. Returns undefined when nothing usable survives (→ fall back to built-in).
+function normalizeConfig(raw: unknown): Linter.Config[] | undefined {
+	const blocks = Array.isArray(raw) ? raw : [raw];
+	const out: Linter.Config[] = [];
+
+	for (const block of blocks as Record<string, unknown>[]) {
+		if (block === null || typeof block !== "object") {
+			continue;
+		}
+
+		const rules: Record<string, unknown> = {};
+		if (block.rules !== null && typeof block.rules === "object") {
+			for (const [id, setting] of Object.entries(block.rules as Record<string, unknown>)) {
+				if (isKnownRule(id)) rules[id] = setting;
+			}
+		}
+
+		if (Object.keys(rules).length === 0) {
+			continue;
+		}
+
+		const languageOptions: Record<string, unknown> = { "parser": tsParser };
+		const source = block.languageOptions as Record<string, unknown> | undefined;
+		if (source !== undefined && source !== null) {
+			for (const key of ["parserOptions", "ecmaVersion", "sourceType", "globals"]) {
+				if (source[key] !== undefined) languageOptions[key] = source[key];
+			}
+		}
+
+		out.push({ "files": (block.files as string[]) ?? ["**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"], "languageOptions": languageOptions, "rules": rules } as Linter.Config);
+	}
+
+	return out.length > 0 ? out : undefined;
+}
+
+/** Apply the workspace `eslint.config.*`: transpile it, evaluate it in the capability-gated realm (no network/IO,
+ *  returns data only), then normalize. Falls back to the built-in config when `text` is empty or evaluation fails.
+ *  A no-op when `text` is unchanged. Async — the realm eval is off-thread; `activeConfig` swaps in when it resolves,
+ *  so `lintText` stays synchronous and uses the previous config until then. */
+export async function applyWorkspaceConfig(text: string | undefined): Promise<void> {
+	if (text === activeSource) {
+		return;
+	}
+
+	activeSource = text;
+
+	if (text === undefined || text === "") {
+		activeConfig = builtinConfig;
+
+		return;
+	}
+
+	const ts = (globalThis as { "__eslintTs"?: typeof import("typescript") }).__eslintTs;
+	const code = ts === undefined
+		? text
+		: ts.transpileModule(text, { "compilerOptions": { "module": ts.ModuleKind.CommonJS, "target": ts.ScriptTarget.ES2020 } }).outputText;
+
+	const result = await gatedEvalRealm(code);
+
+	// The config's source is untrusted; a capability attempt is an alarm, not a grant (well-behaved configs use none).
+	if (result.attempts.length > 0) {
+		console.warn("[eslint-engine] workspace eslint config attempted capabilities in the sandbox (denied):", result.attempts);
+	}
+
+	if (text !== activeSource) {
+		return; // the config changed again while we were evaluating; a later call owns the result
+	}
+
+	if (result.error !== undefined) {
+		console.error("[eslint-engine] workspace config evaluation failed, using built-in:", result.error);
+		activeConfig = builtinConfig;
+
+		return;
+	}
+
+	activeConfig = normalizeConfig(result.value) ?? builtinConfig;
+}
+
 /** Lint one document's text; returns [] on any failure so a bad file never breaks the checker pass. Messages
  *  are ordered errors-first (severity 2 before 1); the sort is stable, so source order is kept within a severity. */
 export function lintText(text: string, filename: string): LintMessage[] {
 	try {
-		const messages = linter.verify(text, config, { "filename": filename }) as LintMessage[];
+		const messages = linter.verify(text, activeConfig, { "filename": filename }) as LintMessage[];
 
 		return messages.sort((a, b) => b.severity - a.severity);
 	} catch (error) {
