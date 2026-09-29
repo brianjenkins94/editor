@@ -8,6 +8,7 @@
  * decoupling was for. The diff opens in a shell-owned overlay the codehike island mounts into (overlay.body).
  */
 import type { Hub } from "@brianjenkins94/hub";
+import type { ComponentChildren } from "preact";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { Fragment, render } from "preact";
 import { useEffect, useReducer, useRef, useState } from "preact/hooks";
@@ -289,7 +290,7 @@ function FileRow({ file, state, current, expanded, onPick, onOpen, onToggleExpan
 		<div class={"file" + (file.cosmetic ? " cosmetic" : "")} aria-current={current} onClick={(event) => { if ((event.target as HTMLElement).closest("wa-checkbox, .discard, .exp") === null) { onOpen(); } }}>
 			<wa-checkbox class="pick" checked={state !== "off"} indeterminate={state === "partial"} onChange={(event: Event) => { onPick((event.target as HTMLInputElement).checked); }} />
 			<span class={"st " + file.status}>{file.status}</span>
-			<span class="nm">{file.path}</span>
+			<span class="nm"><bdi dir="ltr">{file.path}</bdi></span>
 			<span class="tail">
 				{isCodeFile(file) && <wa-button class="exp" appearance="plain" size="small" title="Your edits" aria-label="Your edits" onClick={(event: MouseEvent) => { event.stopPropagation(); onToggleExpand(); }}>{expanded ? "▾" : "▸"}</wa-button>}
 				{file.cosmetic && <wa-badge class="cos" variant="neutral">cosmetic</wa-badge>}
@@ -300,7 +301,7 @@ function FileRow({ file, state, current, expanded, onPick, onOpen, onToggleExpan
 }
 
 /** The review panel: files list + commit box, driving the shell's diff overlay. */
-function GitPanel({ overlay, hub }: { "overlay": DiffOverlay; "hub": Hub }) {
+function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": Hub; "headerEnd"?: ComponentChildren }) {
 	const rpcRef = useRef<ReturnType<typeof createRpcClient>>();
 
 	rpcRef.current ??= createRpcClient(hub);
@@ -603,6 +604,8 @@ function GitPanel({ overlay, hub }: { "overlay": DiffOverlay; "hub": Hub }) {
 				<wa-checkbox checked={allChecked} indeterminate={someChecked} title="Select all changes" aria-label="Select all changes" onChange={(event: Event) => { toggleAll((event.target as HTMLInputElement).checked); }} />
 				<span>Changes</span>
 				<span class="count">{total}</span>
+				<span class="spacer" />
+				{headerEnd}
 			</div>
 
 			<div class="files">
@@ -637,6 +640,8 @@ function GitPanel({ overlay, hub }: { "overlay": DiffOverlay; "hub": Hub }) {
  * Mount the review panel into `container` (files list + commit box), driving the shell's diff `overlay` when a file is
  * opened, and talking to the git service over `hub`.
  */
-export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub: Hub): void {
-	render(<GitPanel overlay={overlay} hub={hub} />, container);
+/** `headerEnd` lands at the right of the panel's header row — the shell puts its collapse button there, so the pane
+ *  has ONE "Changes" header rather than the shell's plus the panel's own. */
+export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub: Hub, headerEnd?: ComponentChildren): void {
+	render(<GitPanel overlay={overlay} hub={hub} headerEnd={headerEnd} />, container);
 }

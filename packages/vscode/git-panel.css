@@ -11,8 +11,11 @@
 .gp .commit { padding: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px;
   flex: 0 0 auto; background: var(--chrome); }
 .gp .commit wa-textarea { width: 100%; }
-.gp .head { padding: 8px 10px; text-transform: uppercase; font-size: 11px; letter-spacing: .06em; color: var(--muted);
-  display: flex; gap: 8px; align-items: center; }
+/* The pane's only header (the shell's collapse button arrives as `headerEnd`, pushed right by .spacer) — sized like the
+   shell's LHS "Projects" header so the two sides line up. */
+.gp .head { padding: var(--wa-space-2xs) var(--wa-space-xs) var(--wa-space-2xs) 10px; text-transform: uppercase;
+  font-size: 11px; letter-spacing: .06em; color: var(--muted); display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
+.gp .head .spacer { flex: 1 1 auto; }
 .gp .head .count { color: var(--fg); font-weight: 600; }
 .gp .files { overflow: auto; flex: 1 1 0; min-height: 80px; }
 .gp .file { display: grid; grid-template-columns: auto 16px 1fr auto; gap: 8px; align-items: center; padding: 3px 10px;
@@ -21,6 +24,8 @@
 .gp .file[aria-current="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); border-left-color: var(--accent); }
 .gp .file .st { font: 600 12px "SF Mono", ui-monospace, monospace; text-align: center; }
 .gp .file .st.A { color: #4ec9b0; } .gp .file .st.M { color: #d7ba7d; } .gp .file .st.D { color: #f14c4c; }
+/* rtl so a long path truncates at its START (…/deep/file.ts); the path itself sits in a <bdi dir="ltr"> so rtl doesn't
+   reorder its neutral characters — without it ".gitignore" renders as "gitignore.". */
 .gp .file .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .gp .file .tail { display: flex; align-items: center; gap: 6px; }
 .gp .file.cosmetic .nm { opacity: .6; }

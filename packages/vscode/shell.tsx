@@ -92,6 +92,8 @@ const runItem = css({
 	"display": "flex",
 	"alignItems": "baseline",
 	"gap": "var(--wa-space-s)",
+	// border-box: at content-box, 100% + padding overflows the menu, whose overflowY:auto then clips the row's end.
+	"boxSizing": "border-box",
 	"width": "100%",
 	"padding": "var(--wa-space-2xs) var(--wa-space-xs)",
 	"borderRadius": "var(--wa-border-radius-s)",
@@ -237,10 +239,15 @@ function Icon({ node }: { "node": Parameters<typeof iconSvg>[0] }) {
 	return <span dangerouslySetInnerHTML={{ "__html": iconSvg(node, { "size": 17 }) }} />;
 }
 
-/** The projects picker — one Web Awesome button per sample, driven by the hub catalog. */
-function Picker({ samples, currentId, onOpen }: { "samples": SampleInfo[]; "currentId"?: string; "onOpen": (id: string) => void }) {
-	if (samples.length === 0) {
+/** The projects picker — one Web Awesome button per sample, driven by the hub catalog. `samples` is undefined until
+ *  the app answers `project.list`; an empty answer is a real state (no bundled samples), not "still connecting". */
+function Picker({ samples, currentId, onOpen }: { "samples"?: SampleInfo[]; "currentId"?: string; "onOpen": (id: string) => void }) {
+	if (samples === undefined) {
 		return <div class={picker()}>Connecting to editor…</div>;
+	}
+
+	if (samples.length === 0) {
+		return <div class={picker()}>No bundled projects. Load a GitHub repo from the top bar.</div>;
 	}
 
 	return (
@@ -299,7 +306,7 @@ function Shell() {
 	// Both panes start collapsed (as rails) so the editor gets the room by default; expand from the rail when needed.
 	const [lhsCollapsed, setLhsCollapsed] = useState(true);
 	const [rhsCollapsed, setRhsCollapsed] = useState(true);
-	const [samples, setSamples] = useState<SampleInfo[]>([]);
+	const [samples, setSamples] = useState<SampleInfo[]>();
 	const [currentId, setCurrentId] = useState<string | undefined>(undefined);
 	const [navWidth, setNavWidth] = useState(() => loadPaneWidth("navWidth", PANE.navDefault));
 	const [asideWidth, setAsideWidth] = useState(() => loadPaneWidth("asideWidth", PANE.asideDefault));
@@ -368,7 +375,9 @@ function Shell() {
 			"title": overlayTitleRef.current,
 			"body": overlayBodyRef.current,
 			"close": overlayCloseRef.current
-		}, shellHub);
+		}, shellHub, (
+			<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse changes panel" onClick={() => { setRhsCollapsed(true); }}><Icon node={ChevronRight} /></wa-button>
+		));
 
 		const rpc = createRpcClient(shellHub);
 
@@ -380,7 +389,7 @@ function Shell() {
 				try {
 					const list = await rpc.request("project.list", undefined, { "timeoutMs": 2000 }) as SampleInfo[];
 
-					if (Array.isArray(list) && list.length > 0) {
+					if (Array.isArray(list)) {
 						setSamples(list);
 
 						return;
@@ -909,28 +918,26 @@ function Shell() {
 			</div>
 
 			{/* The aside slot stays mounted across collapse so the imperatively-rendered git panel (mounted once, in
-			    the effect below) survives — collapsed just hides it and shows the rail. */}
+			    the effect below) survives — collapsed just hides it and shows the rail. Its header (with the collapse
+			    button, passed in above) is the panel's own. The children are KEYED: unkeyed, a sibling swapping in
+			    or out can make preact reuse the git panel's host <div> for another element, stamping that element's
+			    class and children onto it — the panel then renders inside it. */}
 			<div slot="aside" class={rhsCollapsed ? railRegion() : sideCol() + " " + asidePane()}>
-				{rhsCollapsed ? (
-					<RailContent items={[
+				{rhsCollapsed && (
+					<RailContent key="rail" items={[
 						{ "node": PanelRight, "label": "Changes", "title": "Expand changes panel", "onClick": () => { setRhsCollapsed(false); } },
 						// placeholders to preview the stacked look — settle final contents next
 						{ "node": GitCommit, "label": "Commit", "title": "Commit", "onClick": () => undefined },
 						{ "node": History, "label": "History", "title": "History", "onClick": () => undefined }
 					]}
 					/>
-				) : (
-					<div class={navHead()}>
-						<span class={navHeadLabel()}>Changes</span>
-
-						<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse changes panel" onClick={() => { setRhsCollapsed(true); }}><Icon node={ChevronRight} /></wa-button>
-					</div>
 				)}
 
-				<div ref={gitPanelRef} class={rhsCollapsed ? hiddenBox() : sideHost()} />
+				<div key="git-panel" ref={gitPanelRef} class={rhsCollapsed ? hiddenBox() : sideHost()} />
 
 				{!rhsCollapsed && (
 					<div
+						key="resizer"
 						class={resizer() + " " + resizerLeft()}
 						role="separator"
 						aria-orientation="vertical"
