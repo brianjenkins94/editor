@@ -280,6 +280,9 @@ function handleMainMessage(event) {
 	}
 }
 
+// The current hub link to the page (replaced on relink).
+let unlinkHub;
+
 // The in-page ServerBridge sends {type:"init"} (with a transferred MessagePort), plus server-registered/
 // -unregistered and keepalive pings (ignored — receipt alone keeps the worker warm).
 globalThis.addEventListener("message", (event) => {
@@ -295,10 +298,23 @@ globalThis.addEventListener("message", (event) => {
 	// Dedicated observability link: the page hands us a hub port (telemetry.ts linkServiceWorkerHub). Link our
 	// hub over it so `$sys.log.sw` records federate to the page's collector.
 	if (data && data.type === "hub" && event.ports && event.ports[0]) {
-		swHub.link(portTransport(event.ports[0]));
+		unlinkHub?.(); // a relink replaces the previous link rather than leaving a dead one behind
+		unlinkHub = swHub.link(portTransport(event.ports[0]));
 		swLog.info("hub linked");
 	}
 });
+
+// The browser stops an idle service worker and starts a FRESH one on the next event — a new global, whose hub no
+// page has linked (the page only relinks on controllerchange, which a restart doesn't fire). Unlinked, the SW
+// drops out of the tree: its logs and architecture reports vanish, and capability.decide can't reach the pod, so
+// the net gate and the fs/exec decide route fail OPEN. So on every start, ask the window clients for a hub port
+// (only the app realm's linkServiceWorkerHub answers; a first install gets linked twice, harmlessly).
+void globalThis.clients.matchAll({ "type": "window" }).then((clients) => {
+	for (const client of clients) {
+		client.postMessage({ "type": "sw-needs-hub" });
+	}
+});
+
 
 // The port drops when the worker is idle-terminated or replaced; ask clients to re-init and wait briefly.
 async function ensureMainPort() {

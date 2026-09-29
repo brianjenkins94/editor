@@ -200,6 +200,12 @@ export function linkServiceWorkerHub(rootHub: Hub): void {
 
 	wire();
 	navigator.serviceWorker.addEventListener("controllerchange", wire);
+	// A restarted service worker (the browser stops idle ones) is a fresh global with an unlinked hub: it asks.
+	navigator.serviceWorker.addEventListener("message", (event: MessageEvent) => {
+		if ((event.data as { "type"?: string } | null)?.type === "sw-needs-hub") {
+			wire();
+		}
+	});
 }
 
 /**
