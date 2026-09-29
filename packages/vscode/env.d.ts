@@ -1,15 +1,15 @@
-/** The hello extension bundled to a browser CommonJS string (see the plugin in entry.config.ts). */
+/** The hello extension, bundled to a browser CommonJS file served beside the entry: its path (see bundledExtension in build.ts). */
 declare module "hello:extension" {
-	const code: string;
+	const path: string;
 
-	export default code;
+	export default path;
 }
 
-/** The worker-pod extension bundled to a browser CommonJS string (see the plugin in entry.config.ts). */
+/** The worker-pod extension, bundled to a browser CommonJS file served beside the entry: its path (see bundledExtension in build.ts). */
 declare module "worker-pod:extension" {
-	const code: string;
+	const path: string;
 
-	export default code;
+	export default path;
 }
 
 /** The user's eslint preset as data (see extensions/eslint/preset-build.ts). */
@@ -33,12 +33,12 @@ declare module "editor:settings-defaults" {
 	export default defaults;
 }
 
-/** The eslint extension bundled to a browser CommonJS string (see bundledExtension("eslint") in build.ts) —
- *  a TS server plugin that lints inside tsserver, reusing tsserver's own typescript. */
+/** The eslint extension, bundled to a browser CommonJS file served beside the entry: its path (see bundledExtension
+ *  in build.ts) — a TS server plugin that lints inside tsserver, reusing tsserver's own typescript. */
 declare module "eslint:extension" {
-	const code: string;
+	const path: string;
 
-	export default code;
+	export default path;
 }
 
 /** The worker-pod cspell language server bundled to an ESM string (imported by server-host, run by almostnode). */

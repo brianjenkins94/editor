@@ -1,4 +1,5 @@
 import type { Plugin, RollupOutput } from "vite";
+import { createHash } from "node:crypto";
 // eslint-disable-next-line ts/no-restricted-imports -- build-time script; needs sync fs to read assets off disk
 import * as nodeFs from "node:fs";
 import { builtinModules, createRequire } from "node:module";
@@ -11,7 +12,7 @@ import stdlib from "node-stdlib-browser";
 import { build } from "vite";
 import { eslintPresetPlugin } from "./extensions/eslint/preset-build";
 import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./snapshot";
-import { nodeModulesCdnPlugin, vscodePlugin } from "./vite";
+import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./vite";
 
 /**
  * The whole packages/vscode build, in ONE file — the five vite passes that used to be separate `-c` configs
@@ -34,7 +35,7 @@ const nodeBuiltins = [...builtinModules, ...builtinModules.map((name) => `node:$
 
 /** Bundle `extensions/<name>/<file>.ts` (deps inlined) into a virtual module `<name>:<id>` exposing the built
  *  code as a default-export string. `externals` stay unbundled. `configFile:false` isolates the nested build. */
-function bundledModule(name: string, file: string, id: string, format: "cjs" | "es", externals: string[]): Plugin {
+function bundledModule(name: string, file: string, id: string, format: "cjs" | "es", externals: string[], served = false): Plugin {
 	const virtual = `${name}:${id}`;
 	const resolved = "\0" + virtual;
 	const dir = url.fileURLToPath(new URL(`./extensions/${name}/`, import.meta.url));
@@ -42,7 +43,7 @@ function bundledModule(name: string, file: string, id: string, format: "cjs" | "
 	return {
 		"name": `${name}-${id}`,
 		"resolveId": (source) => (source === virtual ? resolved : undefined),
-		"load": async (moduleId) => {
+		"load": async function(moduleId) {
 			if (moduleId !== resolved) {
 				return undefined;
 			}
@@ -64,14 +65,25 @@ function bundledModule(name: string, file: string, id: string, format: "cjs" | "
 
 			const code = output[0].output.find((chunk) => chunk.type === "chunk")?.code ?? "";
 
+			if (served) {
+				// Emitted beside the entry (content-hashed, so a deploy never pairs a new entry with a stale copy) and
+				// exported as its path: the code stays out of workbench.js, and whoever runs it fetches it.
+				const fileName = `extensions/${name}-${createHash("sha256").update(code).digest("hex").slice(0, 8)}.js`;
+
+				this.emitFile({ "type": "asset", "fileName": fileName, "source": code });
+
+				return `export default ${JSON.stringify("./" + fileName)};`;
+			}
+
 			return `export default ${JSON.stringify(code)};`;
 		}
 	};
 }
 
-/** An extension's `extension.ts` → browser CJS string (`<name>:extension`), `vscode` external. */
+/** An extension's `extension.ts` → a served browser CJS file (`<name>:extension` is its path), `vscode` external. The
+ *  extension host fetches it on activation, so none of it is on the workbench's boot path. */
 function bundledExtension(name: string): Plugin {
-	return bundledModule(name, "extension.ts", "extension", "cjs", ["vscode"]);
+	return bundledModule(name, "extension.ts", "extension", "cjs", ["vscode"], true);
 }
 
 /** A language server's `<file>` → ESM string (`<name>:<id>`) with ALL NODE BUILTINS EXTERNAL, run by almostnode
@@ -183,7 +195,8 @@ export function hostPlugins(): Plugin[] {
 		editorTypesPlugin(),
 		editorVersionsPlugin(),
 		nodeModulesCdnPlugin(),
-		vscodePlugin()
+		vscodePlugin(),
+		workbenchPreloadPlugin()
 	];
 }
 

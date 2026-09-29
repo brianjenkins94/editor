@@ -20,9 +20,6 @@ import type { TerminalProcess } from "@brianjenkins94/monaco-vscode-api/main";
 
 import type { NodeOutput, NodeRunner } from "./node-runner";
 import { createWorkspaceTerminalFs } from "./terminal-fs";
-import { createNodeCommand } from "./terminal-node";
-import { createNpmCommand } from "./terminal-npm";
-import { createViteCommand } from "./terminal-vite";
 
 type VscodeApi = typeof import("vscode");
 
@@ -66,7 +63,9 @@ function longestCommonPrefix(items: string[]): string {
 export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (data: string) => void, cwd0: string): TerminalProcess {
 	let sessionPromise: Promise<BashSession> | undefined;
 	const getSession = (): Promise<BashSession> => {
-		sessionPromise ??= import("just-bash/browser").then((module) => new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": [createNodeCommand(runner, writeLive), createNpmCommand(getSession), createViteCommand(runner, writeLive)] }) as unknown as BashSession);
+		// just-bash, and the custom commands (which build on its defineCommand), load with the first command run.
+		sessionPromise ??= Promise.all([import("just-bash/browser"), import("./terminal-node"), import("./terminal-npm"), import("./terminal-vite")])
+			.then(([module, { createNodeCommand }, { createNpmCommand }, { createViteCommand }]) => new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": [createNodeCommand(runner, writeLive), createNpmCommand(getSession), createViteCommand(runner, writeLive)] }) as unknown as BashSession);
 
 		return sessionPromise;
 	};

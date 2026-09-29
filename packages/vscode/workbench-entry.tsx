@@ -7,8 +7,8 @@
  * + contents back to the host. `boot`/`registerExtension`/`registerFileSystemOverlay` come from the
  * pre-built monaco-vscode-api bundle, kept external and mapped to the sibling `./main.js`.
  *
- * The hello extension (extensions/hello) is the product extension: registered as browser CJS via a
- * data: URL, it is also the default API context, so the activity bar can execute `workbench.view.*`
+ * The hello extension (extensions/hello) is the product extension: registered as browser CJS by the URL of its served
+ * bundle, it is also the default API context, so the activity bar can execute `workbench.view.*`
  * commands through its `vscode` API. Filesystem overlays (CDN node_modules now, real-disk FSA later) layer UNDER the seeded snapshot —
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
@@ -20,11 +20,11 @@ import { render } from "preact";
 // virtual module in entry.config.ts).
 import type { PodBridge } from "./extensions/worker-pod/extension";
 import type { WorkspaceFs } from "./workspace-fs";
-import capabilitiesExtensionCode from "capabilities:extension";
+import capabilitiesExtensionPath from "capabilities:extension";
 import settingsDefaults from "editor:settings-defaults";
-import eslintExtensionCode from "eslint:extension";
-import helloExtensionCode from "hello:extension";
-import workerPodExtensionCode from "worker-pod:extension";
+import eslintExtensionPath from "eslint:extension";
+import helloExtensionPath from "hello:extension";
+import workerPodExtensionPath from "worker-pod:extension";
 import { reportArchitecture } from "./architecture";
 import { classifyUrl, identifyWorker } from "./architecture-model";
 import { renderArchitectureView } from "./architecture-view";
@@ -475,13 +475,12 @@ function maybeBoot(): void {
 			});
 
 			// The hello extension — the default API context (so getApi()/runCommand work) + the hello world
-			// command. Registered as CJS via a data: URL (the bundled code from entry.config.ts).
+			// command. Registered as CJS by the URL of its bundle, served beside this entry (bundledExtension in
+			// build.ts), so its code is fetched on activation rather than carried in workbench.js. The other
+			// extensions below register the same way.
 			const ext = registerExtension(helloManifest, ExtensionHostKind.LocalProcess);
 
-			// encodeURIComponent, NOT base64: btoa throws on any non-Latin1 codepoint, which the UNMINIFIED code
-			// carries (comments/strings) in a local build — aborting boot before the pod even registers. The other
-			// extensions below register the same way; match them.
-			ext.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(helloExtensionCode));
+			ext.registerFileUrl("./extension.js", new URL(helloExtensionPath, location.href).href);
 			ext.setAsDefaultApi().catch((error: unknown) => {
 				bootSpan.error("setAsDefaultApi failed", { "error": errText(error) });
 			});
@@ -562,7 +561,7 @@ function maybeBoot(): void {
 			// server ships inside its own bundle and starts as a Blob-URL module worker (see its extension.ts).
 			const workerPodExt = registerExtension(workerPodManifest, ExtensionHostKind.LocalProcess);
 
-			workerPodExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(workerPodExtensionCode));
+			workerPodExt.registerFileUrl("./extension.js", new URL(workerPodExtensionPath, location.href).href);
 
 			// The eslint extension — a TS server plugin that lints inside tsserver, reusing tsserver's own `ts`
 			// (no bundled copy). Registered in the WEB-WORKER host (where tsserver runs) so the ext-host worker's
@@ -570,7 +569,7 @@ function maybeBoot(): void {
 			// which is what loads it into the in-browser tsserver. Mirrors the retired preflight ts-plugin wiring.
 			const eslintExt = registerExtension(eslintManifest, ExtensionHostKind.LocalWebWorker);
 
-			eslintExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(eslintExtensionCode));
+			eslintExt.registerFileUrl("./extension.js", new URL(eslintExtensionPath, location.href).href);
 
 			// The plugin files, named by the `typescriptServerPlugins` contribution in eslint's manifest. tsserver
 			// discovers `./node_modules/eslint-ts-plugin/` and imports its `browser` entry's default export.
@@ -591,7 +590,7 @@ function maybeBoot(): void {
 			// renders the "Capability calls" panel by READING those diagnostics back — no canary code in the ext host.
 			const capabilitiesExt = registerExtension(capabilitiesManifest, ExtensionHostKind.LocalWebWorker);
 
-			capabilitiesExt.registerFileUrl("./extension.js", "data:text/javascript," + encodeURIComponent(capabilitiesExtensionCode));
+			capabilitiesExt.registerFileUrl("./extension.js", new URL(capabilitiesExtensionPath, location.href).href);
 
 			const capabilitiesPluginPkg = JSON.stringify({ "name": "capabilities-ts-plugin", "version": "0.0.1", "browser": "index.js" });
 

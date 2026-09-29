@@ -13,8 +13,8 @@
  * (not the published lib tarball) — editor owns that component now.
  */
 import type { Plugin } from "vite";
-// eslint-disable-next-line ts/no-restricted-imports -- the dev-server middleware answers synchronously, so mapping a request to a file must stat synchronously
-import { statSync } from "node:fs";
+// eslint-disable-next-line ts/no-restricted-imports -- the dev-server middleware answers synchronously, so mapping a request to a file (and the host page listing the component chunks) must read synchronously
+import { readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import * as url from "node:url";
 import { find } from "@brianjenkins94/util/find";
@@ -24,25 +24,73 @@ const MOUNT = "/__vscode__/";
 
 // Minimal iframe host page: the grid/layout lives in the <Workbench/> component (stitches), so this
 // just resets the document and loads the workbench entry bundle.
-// eslint-disable-next-line webawesome/no-html-in-strings, webawesome/no-css-in-strings -- the iframe HOST DOCUMENT served to bootstrap the workbench (a full HTML page + its reset CSS, as text), not app chrome
-const HOST_HTML = `<!DOCTYPE html>
+/** The component chunks main.js imports statically (transitively): the browser only discovers them once main.js has
+ *  downloaded and parsed, so the host page preloads them alongside it. */
+function componentStaticChunks(componentDist: string): string[] {
+	const seen = new Set<string>();
+	const pending = ["main.js"];
+
+	while (pending.length > 0) {
+		const file = pending.pop()!;
+
+		if (seen.has(file) || !fs.existsSync(path.join(componentDist, file))) {
+			continue;
+		}
+
+		seen.add(file);
+
+		for (const match of readFileSync(path.join(componentDist, file), "utf8").matchAll(/(?:^|[;}\s])(?:import|export)\s*(?:[\w${}*,\s]+from\s*)?["'](\.\/[^"']+\.js)["']/gu)) {
+			pending.push(path.posix.normalize(match[1]));
+		}
+	}
+
+	seen.delete("main.js");
+
+	return [...seen].sort();
+}
+
+function hostHtml(componentDist: string): string {
+	// eslint-disable-next-line webawesome/no-html-in-strings -- one preload line of the host document (below)
+	const preloads = componentStaticChunks(componentDist).map((chunk) => `\t<link rel="modulepreload" href="./${chunk}" />\n`).join("");
+
+	// eslint-disable-next-line webawesome/no-html-in-strings, webawesome/no-css-in-strings -- the iframe HOST DOCUMENT served to bootstrap the workbench (a full HTML page + its reset CSS, as text), not app chrome
+	return `<!DOCTYPE html>
 <html lang="en">
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<title>monaco-vscode-api</title>
 	<style>html, body { height: 100%; margin: 0; overflow: hidden; }</style>
-	<!-- perf: start fetching the workbench entry AND its ~4.5MB main.js chunk in parallel the moment this
-	     document parses, instead of serially (workbench.js download+parse → discover the import → then main.js).
-	     modulepreload also kicks off parse/compile early, shaving the largest single item off the critical path. -->
+	<!-- perf: fetch the workbench entry, the component's main.js AND every chunk main.js imports statically, in
+	     parallel the moment this document parses — rather than serially (workbench.js → discover main.js → download
+	     and parse main.js → discover its chunks). modulepreload also starts their parse/compile early. -->
 	<link rel="modulepreload" href="./workbench.js" />
 	<link rel="modulepreload" href="./main.js" />
-</head>
+${preloads}</head>
 <body>
 	<script type="module" src="./workbench.js"></script>
 </body>
 </html>
 `;
+}
+
+/**
+ * Preload the workbench's boot chunks from the site's index.html, so they download while the shell and the app iframe
+ * are still starting — before the workbench iframe that imports them even exists. A plain `preload` (fetch only: no
+ * parse or compile in this document, which shares the iframes' main thread); the iframe then gets them from the HTTP
+ * cache. BUILD only: the dev server sends no cache headers, so the iframe couldn't reuse them there.
+ */
+export function workbenchPreloadPlugin(): Plugin {
+	return {
+		"name": "workbench-preload",
+		"apply": "build",
+		"transformIndexHtml": () => ["workbench.js", "main.js", ...componentStaticChunks(componentDistDirectory())].map((file) => ({
+			"tag": "link",
+			"attrs": { "rel": "preload", "as": "script", "crossorigin": "", "href": MOUNT.slice(1) + file },
+			"injectTo": "head" as const
+		}))
+	};
+}
 
 const CONTENT_TYPES: Record<string, string> = {
 	".js": "text/javascript",
@@ -163,7 +211,7 @@ export function vscodePlugin(): Plugin {
 
 				if (relative === "" || relative === "host.html") {
 					res.setHeader("content-type", "text/html");
-					res.end(HOST_HTML);
+					res.end(hostHtml(componentDist));
 
 					return;
 				}
@@ -182,7 +230,7 @@ export function vscodePlugin(): Plugin {
 		},
 
 		"generateBundle": async function() {
-			this.emitFile({ "type": "asset", "fileName": "__vscode__/host.html", "source": HOST_HTML });
+			this.emitFile({ "type": "asset", "fileName": "__vscode__/host.html", "source": hostHtml(componentDist) });
 
 			const emitted = new Set(["host.html"]);
 
