@@ -102,9 +102,33 @@ function capabilitySurface(): { "globals": Record<string, unknown>; "resolveModu
 	const standins = capabilityStandins();
 
 	return {
-		"globals": standins.globals,
+		"globals": { ...standins.globals, "console": guestConsole() },
 		"resolveModule": (specifier: string) => (Object.hasOwn(standins.modules, specifier) ? standins.modules[specifier] : inert())
 	};
+}
+
+/** A console argument the way node's console prints it: strings bare, everything else JSON-ish. */
+function formatLogArg(value: unknown): string {
+	if (typeof value === "string") {
+		return value;
+	}
+
+	if (typeof value === "function") {
+		return "[Function: " + ((value as { "name"?: string }).name || "(anonymous)") + "]";
+	}
+
+	try {
+		return JSON.stringify(value) ?? String(value);
+	} catch {
+		return String(value); // circular, or a BigInt
+	}
+}
+
+/** The program's console: what it logs goes to the Debug Console (warn/error as stderr), and nothing else happens. */
+function guestConsole(): Record<string, (...args: unknown[]) => void> {
+	const write = (stream: "stdout" | "stderr") => (...args: unknown[]): void => { post({ "type": "output", "text": args.map(formatLogArg).join(" "), "stream": stream }); };
+
+	return { "log": write("stdout"), "info": write("stdout"), "debug": write("stdout"), "dir": write("stdout"), "warn": write("stderr"), "error": write("stderr"), "trace": write("stderr") };
 }
 
 /** A readable one-line rendering of a runtime value for the Variables pane. */
@@ -259,7 +283,7 @@ function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): voi
 				default: break;
 			}
 		} catch (error) {
-			post({ "type": "output", "text": "Uncaught " + String(error) });
+			post({ "type": "output", "text": "Uncaught " + String(error), "stream": "stderr" });
 			post({ "type": "terminated" });
 			done = true;
 
@@ -356,7 +380,7 @@ function launchReact(message: Extract<Control, { "type": "launch" }>, trace: Tra
 	const loaded = createVM(message.source, {
 		"fileName": message.fileName,
 		"onBreakpoint": onBreakpointHook,
-		"globals": { "React": React, "ReactDOM": reactDom, "document": documentShim }
+		"globals": { "React": React, "ReactDOM": reactDom, "document": documentShim, "console": guestConsole() }
 	});
 
 	sourceFile = loaded.sourceFile;
@@ -371,7 +395,7 @@ function launchReact(message: Extract<Control, { "type": "launch" }>, trace: Tra
 	try {
 		loaded.vm.run(); // executes the module → guest render() → mount → mutations posted
 	} catch (error) {
-		post({ "type": "output", "text": "Uncaught " + String(error) });
+		post({ "type": "output", "text": "Uncaught " + String(error), "stream": "stderr" });
 	} finally {
 		span.end();
 	}

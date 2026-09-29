@@ -441,7 +441,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				break;
 
 			case "output":
-				this.event("output", { "category": "stdout", "output": message.text + "\n" });
+				this.event("output", { "category": message.stream ?? "stdout", "output": message.text + "\n" });
 
 				if (this.output.length < 200) {
 					this.output.push(message.text);

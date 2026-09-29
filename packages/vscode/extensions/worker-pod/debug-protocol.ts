@@ -41,7 +41,7 @@ export interface Snapshot {
 export type WorkerEvent =
 	| { "type": "stopped"; "reason": string; "snapshot": Snapshot; "atomic"?: boolean }
 	| { "type": "terminated" }
-	| { "type": "output"; "text": string }
+	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" }
 	| { "type": "rendered" }
 	| { "type": "history"; "length": number };
 
