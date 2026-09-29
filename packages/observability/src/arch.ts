@@ -68,7 +68,8 @@ export interface ArchSink {
 	"spawn": (spec: ArchNodeSpec) => void;
 	"terminate": (id: string) => void;
 	"state": (id: string, state: NodeState) => void;
-	"record": (from: string, to: string, kind: TrafficKind, label: string, bytes?: number) => void;
+	/** `count` messages of `bytes` in total (a probe that aggregates before reporting); default one. */
+	"record": (from: string, to: string, kind: TrafficKind, label: string, bytes?: number, count?: number) => void;
 }
 
 export interface ArchReporter extends ArchSink {
@@ -242,8 +243,8 @@ export function createArchReporter(hub: Hub): ArchReporter {
 		}
 	}
 
-	function record(from: string, to: string, kind: TrafficKind, label: string, bytes = 0, via?: "hub"): void {
-		const entry: TrafficCount = { "from": from, "to": to, "kind": kind, "label": label, "count": 1, "bytes": bytes };
+	function record(from: string, to: string, kind: TrafficKind, label: string, bytes = 0, via?: "hub", count = 1): void {
+		const entry: TrafficCount = { "from": from, "to": to, "kind": kind, "label": label, "count": count, "bytes": bytes };
 
 		if (via !== undefined) {
 			entry.via = via;
@@ -460,7 +461,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 
 			nodeOp({ "op": "state", "id": id, "state": state });
 		},
-		"record": record,
+		"record": (from, to, kind, label, bytes, count) => { record(from, to, kind, label, bytes, undefined, count); },
 		"dispose": () => {
 			disposed = true;
 			disposeTap();

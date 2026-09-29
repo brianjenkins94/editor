@@ -2,7 +2,8 @@
 /**
  * Probe running INSIDE a worker (the monaco editor workers, the web worker extension host): reports what the
  * workbench can't see from outside — the worker's own requests and the workers IT spawns (the extension host's
- * language servers) — through a MessagePort posted as the worker's first message.
+ * language servers), including the MessagePorts it talks to them over (tsserver: its protocol, the @vscode/sync-api
+ * file system bridge, the file watcher) — through a MessagePort posted as the worker's first message.
  */
 import type { ProbeMessage, ProbePeer, TrafficKind } from "./protocol";
 import { approxSize, describeMessage } from "./protocol";
@@ -15,26 +16,42 @@ const channel = new MessageChannel();
 self.postMessage(channel.port2, [channel.port2]);
 
 let queue: ProbeMessage[] = [];
+// Traffic is aggregated per batch: a language server's ports carry thousands of messages a second.
+let tallies = new Map<string, Extract<ProbeMessage, { "type": "traffic" }>>();
 let scheduled = false;
 
-function report(message: ProbeMessage): void {
-	queue.push(message);
-
+function schedule(): void {
 	if (!scheduled) {
 		scheduled = true;
 		setTimeout(() => {
 			scheduled = false;
 
-			const batch = queue;
+			const batch = [...queue, ...tallies.values()];
 
 			queue = [];
+			tallies = new Map();
 			channel.port1.postMessage(batch);
 		}, 100);
 	}
 }
 
+function report(message: ProbeMessage): void {
+	queue.push(message);
+	schedule();
+}
+
 function traffic(peer: ProbePeer, outgoing: boolean, kind: TrafficKind, label: string, bytes: number): void {
-	report({ "type": "traffic", "peer": peer, "outgoing": outgoing, "kind": kind, "label": label, "bytes": bytes });
+	const key = JSON.stringify([peer, outgoing, kind, label]);
+	const tally = tallies.get(key);
+
+	if (tally === undefined) {
+		tallies.set(key, { "type": "traffic", "peer": peer, "outgoing": outgoing, "kind": kind, "label": label, "bytes": bytes, "count": 1 });
+	} else {
+		tally.bytes += bytes;
+		tally.count = (tally.count ?? 1) + 1;
+	}
+
+	schedule();
 }
 
 report({ "type": "hello", "name": self.name });
@@ -64,6 +81,58 @@ self.fetch = async function(input: RequestInfo | URL, init?: RequestInit): Promi
 		throw error;
 	}
 };
+
+// Which MessageChannel ends pair up, so the end this worker KEEPS can be attributed to the worker the other end is
+// sent to. (The probe's own channel, created above, predates this.)
+const partners = new WeakMap<MessagePort, MessagePort>();
+const observedPorts = new WeakSet<MessagePort>();
+
+if (typeof globalThis.MessageChannel === "function") {
+	const NativeMessageChannel = globalThis.MessageChannel;
+
+	globalThis.MessageChannel = class extends NativeMessageChannel {
+		public constructor() {
+			super();
+			partners.set(this.port1, this.port2);
+			partners.set(this.port2, this.port1);
+		}
+	};
+}
+
+/** Count what goes over `port` (this worker's end of a channel whose other end went to `peer`). */
+function observePort(port: MessagePort, peer: ProbePeer): void {
+	if (observedPorts.has(port)) {
+		return;
+	}
+
+	observedPorts.add(port);
+
+	const postMessage = port.postMessage.bind(port) as (message: unknown, transfer?: unknown) => void;
+
+	port.postMessage = (message: unknown, transfer?: Transferable[] | StructuredSerializeOptions): void => {
+		const { kind, label } = describeMessage(message);
+
+		traffic(peer, true, kind, label, approxSize(message));
+		postMessage(message, transfer);
+	};
+	// A listener of our own doesn't start the port: it hears messages once the owner does.
+	port.addEventListener("message", (event) => {
+		const { kind, label } = describeMessage(event.data);
+
+		traffic(peer, false, kind, label, approxSize(event.data));
+	});
+}
+
+/** The kept ends of the channels whose other ends are in `transfer`. */
+function keptEnds(transfer: Transferable[] | StructuredSerializeOptions | undefined): MessagePort[] {
+	const list = Array.isArray(transfer) ? transfer : (transfer?.transfer ?? []);
+
+	return list.flatMap((item) => {
+		const partner = item instanceof MessagePort ? partners.get(item) : undefined;
+
+		return partner === undefined ? [] : [partner];
+	});
+}
 
 let workerIdPool = 0;
 
@@ -96,6 +165,11 @@ if (typeof globalThis.Worker === "function") {
 				const { kind, label } = describeMessage(message);
 
 				traffic(peer, true, kind, label, approxSize(message));
+
+				for (const port of keptEnds(transfer)) {
+					observePort(port, peer);
+				}
+
 				postMessage(message, transfer);
 			};
 

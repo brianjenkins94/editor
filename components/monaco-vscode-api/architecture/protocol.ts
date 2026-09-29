@@ -21,7 +21,7 @@ export interface ArchSink {
 	"spawn": (spec: ArchNodeSpec) => void;
 	"terminate": (id: string) => void;
 	"state": (id: string, state: NodeState) => void;
-	"record": (from: string, to: string, kind: TrafficKind, label: string, bytes?: number) => void;
+	"record": (from: string, to: string, kind: TrafficKind, label: string, bytes?: number, count?: number) => void;
 }
 
 /**
@@ -34,7 +34,7 @@ export type ProbeMessage =
 	| { "type": "hello"; "name": string }
 	| { "type": "spawn"; "id": string; "name": string; "url": string }
 	| { "type": "end"; "id": string }
-	| { "type": "traffic"; "peer": ProbePeer; "outgoing": boolean; "kind": TrafficKind; "label": string; "bytes": number };
+	| { "type": "traffic"; "peer": ProbePeer; "outgoing": boolean; "kind": TrafficKind; "label": string; "bytes": number; "count"?: number };
 
 export function approxSize(value: unknown, depth = 0): number {
 	if (value === null || value === undefined) {
@@ -86,6 +86,10 @@ export function describeMessage(message: unknown): { "kind": TrafficKind; "label
 		return { "kind": "lifecycle", "label": "MessagePort" };
 	}
 
+	if (Object.prototype.toString.call(message) === "[object SharedArrayBuffer]") {
+		return describeSyncApiRequest(message as SharedArrayBuffer);
+	}
+
 	const record = message as Record<string, unknown>;
 
 	if (typeof record["method"] === "string") {
@@ -113,6 +117,27 @@ export function describeMessage(message: unknown): { "kind": TrafficKind; "label
 	}
 
 	return { "kind": "message", "label": "message" };
+}
+
+const syncApiDecoder = new TextDecoder();
+
+/**
+ * A @vscode/sync-api request (tsserver's synchronous file system): the client posts the SharedArrayBuffer itself and
+ * blocks on it (Atomics.wait) until the service writes the result in. Its header (32 bytes at offset 4) locates the
+ * request's JSON — `{"id":…,"method":"fileSystem/stat",…}`.
+ */
+function describeSyncApiRequest(buffer: SharedArrayBuffer): { "kind": TrafficKind; "label": string } {
+	try {
+		const [offset, length] = new Uint32Array(buffer, 4, 2);
+		const json = syncApiDecoder.decode(new Uint8Array(buffer, offset, length).slice());
+		const method = /"method":"([^"]+)"/u.exec(json)?.[1];
+
+		if (method !== undefined) {
+			return { "kind": "request", "label": method };
+		}
+	} catch { /* not a sync-api request */ }
+
+	return { "kind": "message", "label": "SharedArrayBuffer" };
 }
 
 export function isMessagePort(value: unknown): value is MessagePort {

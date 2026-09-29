@@ -101,9 +101,9 @@ function attachChildProbe(sink: ArchSink, port: MessagePort, ownerId: string, co
 					}
 
 					if (message.outgoing) {
-						sink.record(ownerId, peer, message.kind, label, message.bytes);
+						sink.record(ownerId, peer, message.kind, label, message.bytes, message.count);
 					} else {
-						sink.record(peer, ownerId, message.kind, label, message.bytes);
+						sink.record(peer, ownerId, message.kind, label, message.bytes, message.count);
 					}
 
 					break;
