@@ -385,11 +385,12 @@ function Shell() {
 
 		rpcRef.current = rpc; // reused by the run picker
 
-		// Pull the catalog, retrying until the app iframe has linked (the hub's hello handshake reconciles interest).
+		// Pull the catalog once the app iframe's serve interest arrives (asked before it, the call only times out); the
+		// retry is a backstop.
 		void (async () => {
 			for (let attempt = 0; attempt < 20; attempt += 1) {
 				try {
-					const list = await rpc.request("project.list", undefined, { "timeoutMs": 2000 }) as SampleInfo[];
+					const list = await rpc.request("project.list", undefined, { "timeoutMs": 2000, "waitForResponderMs": 10_000 }) as SampleInfo[];
 
 					if (Array.isArray(list)) {
 						setSamples(list);

@@ -92,49 +92,24 @@ function cspellDict(): Plugin {
 	};
 }
 
-/** Builtin SUBPATHS (`node:assert/strict`, `node:util/types`, `node:path/posix`, …) → the matching property of the
- *  parent's browser POLYFILL (`assert.strict`, `util.types`, `path.posix`), with named exports generated from real Node's
- *  module at build time; empty where the polyfill genuinely lacks it. And `node:module`, which has no polyfill at all, →
- *  Node's "nothing installed" semantics. As aliases from a `config` hook placed AFTER polyfillNode():
- *  vite-plugin-node-polyfills aliases `node:util` etc. by PREFIX from its own config hook (so `node:util/types` would
- *  become the missing file `util/types`), aliases outrank resolveId, and a later config hook's aliases are merged in
- *  FRONT of earlier ones. The alias hands off to this plugin's virtual `node-subpath:` module. */
-function nodeSubpathStub(): Plugin {
+/** The eslint engine's `node:module` — no browser polyfill exists, so Node's "nothing installed" semantics (node-module.js)
+ *  — and what that module's runtime `require` can hand out, resolved from eslint's own install so they're the SAME
+ *  instances the bundle already carries: eslint-utils, and eslint's builtin rule registry (browser-safe; the rest of
+ *  `eslint/use-at-your-own-risk` is its Node API). Aliases, which outrank polyfillNode's stub for `module`. */
+function eslintNodeModule(): Plugin {
 	const eslintPackageJson = createRequire(import.meta.url).resolve("eslint/package.json");
-	const polyfilled = ["assert", "buffer", "crypto", "events", "path", "process", "stream", "string_decoder", "timers", "url", "util", "zlib"];
 
 	return {
-		"name": "node-subpath-stub",
+		"name": "eslint-node-module",
 		"config": () => ({
 			"resolve": {
 				"alias": [
-					{ "find": new RegExp(`^(?:node:)?((?:${polyfilled.join("|")})/.+)$`, "u"), "replacement": "node-subpath:$1" },
-					// No browser polyfill exists for `module`: Node's "nothing installed" semantics (see node-module.js).
 					{ "find": /^(node:)?module$/u, "replacement": resolvePath("./extensions/eslint/node-module.js") },
-					// What that module's runtime `require` can hand out, resolved from eslint's own install so they're the SAME
-					// instances the bundle already carries: eslint-utils, and eslint's builtin rule registry (browser-safe; the
-					// rest of `eslint/use-at-your-own-risk` is its Node API).
 					{ "find": /^eslint-registry:eslint-utils$/u, "replacement": createRequire(eslintPackageJson).resolve("@eslint-community/eslint-utils") },
 					{ "find": /^eslint-registry:builtin-rules$/u, "replacement": path.join(path.dirname(eslintPackageJson), "lib", "rules", "index.js") }
 				]
 			}
-		}),
-		"resolveId": (id) => (id.startsWith("node-subpath:") ? "\0" + id : undefined),
-		"load": async (id) => {
-			if (!id.startsWith("\0node-subpath:")) {
-				return undefined;
-			}
-
-			const subpath = id.slice("\0node-subpath:".length);
-			const [parent, ...rest] = subpath.split("/");
-			let names: string[] = [];
-
-			try {
-				names = Object.keys(await import(`node:${subpath}`) as Record<string, unknown>).filter((name) => name !== "default" && /^[A-Za-z_$][\w$]*$/u.test(name));
-			} catch { /* not a real Node subpath — default export only */ }
-
-			return `import parent from ${JSON.stringify(parent)};\nconst sub = (parent && parent[${JSON.stringify(rest.join("/"))}]) || {};\nexport default sub;\n${names.map((name) => `export const ${name} = sub[${JSON.stringify(name)}];`).join("\n")}\n`;
-		}
+		})
 	};
 }
 
@@ -181,24 +156,6 @@ function capabilitiesTsPlugin(): Plugin {
 
 // esquery's CJS build, resolved through eslint so it's found under npm's flat tree AND CI's pnpm workspace.
 const esqueryCjs = createRequire(createRequire(import.meta.url).resolve("eslint")).resolve("esquery");
-
-// vite-plugin-node-polyfills (used by @brianjenkins94/util's polyfillNode plugin) injects bare imports to its OWN
-// shims — e.g. `vite-plugin-node-polyfills/shims/buffer` when it polyfills Buffer — into the bundled graph (the
-// almostnode shims trip this). It's only a TRANSITIVE dep (via util), so CI's strict pnpm workspace install leaves
-// it unresolvable from the importer's real path, and `packages/vscode build failed` in cd (the local per-package
-// install hoists it to top-level, which masked this). Resolve each shim through the plugin file — util declares
-// vite-plugin-node-polyfills, so it's always reachable there — and alias the exact specifiers to absolute paths,
-// immune to node_modules layout. Used by hostBuild (below); NOT applied to the dev server, whose dep optimizer
-// rejects these absolute shim paths as entries ("cannot be external") — and local dev resolves them via the
-// per-package install's hoist anyway, so it doesn't hit the cd break.
-const requireFromPolyfillNode = createRequire(createRequire(import.meta.url).resolve("@brianjenkins94/util/vite/plugins/polyfillNode"));
-const nodePolyfillShimAlias: Record<string, string> = Object.fromEntries(
-	["shims/buffer", "shims/global", "shims/process"].map((sub) => {
-		const id = `vite-plugin-node-polyfills/${sub}`;
-
-		return [id, requireFromPolyfillNode.resolve(id)];
-	})
-);
 
 /** The host site's plugins — shared by the host BUILD (hostBuild) and the DEV server (dev.ts): cross-origin
  *  isolation headers, the baked workspace/types/versions snapshots, the CDN node_modules dev mirror, and
@@ -316,9 +273,9 @@ export async function preBuild(): Promise<void> {
 		},
 		// The user's preset (@brianjenkins94/util/eslint) as data + one chunk per plugin, loaded independently (see
 		// extensions/eslint/preset-build.ts). Plugins written for Node degrade PER PLUGIN rather than breaking the build or
-		// the engine: builtin subpaths map onto the parent polyfill, `node:module` gets Node's "nothing installed" semantics,
+		// the engine: builtin subpaths map onto the parent polyfill (polyfillNode), `node:module` gets Node's "nothing installed" semantics,
 		// missing named exports shim to undefined — a plugin that really needs something absent fails at load and is skipped.
-		"plugins": [polyfillNode(), nodeSubpathStub(), valueRequireToRegistry(), eslintTsPlugin(), eslintPresetPlugin()],
+		"plugins": [polyfillNode(), eslintNodeModule(), valueRequireToRegistry(), eslintTsPlugin(), eslintPresetPlugin()],
 		// CJS plugin builds compute `import.meta.url` from `__filename` when there's no `document` (a worker), and some
 		// call `require.resolve` at load (only ever to name files) — give both inert values rather than a ReferenceError.
 		// And vite's dynamic-import error handler announces a failed import with `window.dispatchEvent(...)` before
@@ -440,7 +397,7 @@ async function hostBuild(): Promise<void> {
 	await buildPackage(root, {
 		"base": "./",
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
-		"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", "@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { ...nodePolyfillShimAlias } },
+		"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
 		"build": { "outDir": "../../docs", "emptyOutDir": false },
 		"plugins": hostPlugins()
 	});

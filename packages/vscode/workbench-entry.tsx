@@ -52,6 +52,8 @@ import { createBashProcess } from "./terminal";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 import { installWorkspaceFs } from "./workspace-fs";
+// Boot milestones on the performance timeline (beside VS Code's own code/* marks), for load investigations.
+performance.mark("editor/entry");
 
 interface Init { "files": WorkbenchFile[]; "openEditors": string[]; "workspaceFolder"?: string; "moduleVersions"?: Record<string, string>; "tab"?: string }
 
@@ -385,6 +387,7 @@ function maybeBoot(): void {
 	}
 
 	booted = true;
+	performance.mark("editor/boot");
 	const { files, openEditors, workspaceFolder, moduleVersions, tab } = init;
 
 	// One timed span for the whole boot; its child logs (relayed to the host) read as an indented tree of
@@ -610,21 +613,25 @@ function maybeBoot(): void {
 		});
 }
 
-// Workspace from the host: request it over the hub (retried until the serve's interest has settled across the
-// freshly-linked window transport), then boot. Linking the hub above is itself the announce — the host retargets to
+// Workspace from the host: request it over the hub, then boot. The call waits for the host's serve interest to cross
+// the freshly-linked window transport (sent before it arrives, a request has nowhere to go and only times out: that
+// was 1.5s of every load); the retry is a backstop. Linking the hub above is itself the announce — the host retargets to
 // this window on the first frame — so there's no separate "ready" ping.
 const paneRpc = createRpcClient(workbenchHub);
 
 void (async () => {
 	for (;;) {
 		try {
-			const data = await paneRpc.request("workbench.init", undefined, { "timeoutMs": 1500 }) as Init;
+			performance.mark("editor/init-request");
+			const data = await paneRpc.request("workbench.init", undefined, { "timeoutMs": 1500, "waitForResponderMs": 10_000 }) as Init;
+			performance.mark("editor/init-received");
 
 			init = { "files": data.files ?? [], "openEditors": data.openEditors ?? [], "workspaceFolder": data.workspaceFolder, "moduleVersions": data.moduleVersions, "tab": data.tab };
 			maybeBoot();
 
 			return;
-		} catch {
+		} catch (error) {
+			performance.mark("editor/init-retry", { "detail": String(error) });
 			await new Promise((resolve) => { setTimeout(resolve, 250); });
 		}
 	}
@@ -664,6 +671,7 @@ installDebugBridge(() => vscodeApi);
 render(
 	<Workbench
 		onReady={(container) => {
+			performance.mark("editor/container");
 			workbenchContainer = container;
 			maybeBoot();
 		}}
