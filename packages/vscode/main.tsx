@@ -1,6 +1,6 @@
 /** @jsxImportSource preact */
 import type { Preview } from "./preview";
-import { createHub, serve, windowTransport } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
 import { installWindowMessageProbe } from "@brianjenkins94/observability";
 import types from "editor:types";
 import moduleVersions from "editor:versions";
@@ -52,14 +52,23 @@ if (isolated && window.parent === window) {
 	});
 	installHubCollector(rootHub, consoleCollector);
 	tapConsoleAndErrors(rootHub, "host"); // raw uncaught error/rejection on the page → the plane (errors-only: loop-safe on the collector context)
+	// This tab's id. The service worker is shared by every tab of the origin and links each tab's root separately, so
+	// what it asks on a tab's behalf is addressed to that tab: a preview's requests and capability decisions (its URL
+	// carries the tab, /__virtual__/<tab>/<port>/) and a node script's decisions (the node worker is told its tab).
+	// This root answers its tab's addresses by asking its own tree — never another tab's.
+	const tab = crypto.randomUUID().slice(0, 8);
+	const tabRpc = createRpcClient(rootHub);
+
+	serve(rootHub, "virtual.request." + tab, (args) => tabRpc.request("virtual.request", args, { "timeoutMs": 30000, "waitForResponderMs": 10000 }));
+	serve(rootHub, "capability.decide." + tab, (args) => tabRpc.request("capability.decide", args, { "timeoutMs": 300000, "waitForResponderMs": 10000 }));
 	linkServiceWorkerHub(rootHub);
 	linkDebugMcp(rootHub); // dev-only: federate the tree to a running @brianjenkins94/debug-mcp for MCP querying
 	servePageTools(rootHub); // dev-only: host live MCP tools (page_eval/page_query) the debug-mcp relay forwards to
 
-	// The live preview BACKEND: runs the demo (a Vite React app) through an in-browser dev server and hot-reloads on
-	// save. Display-free — the movable window + iframe live in the shell (top frame); this realm runs the dev server +
-	// ServerBridge and hands the shell the SW URL. Created lazily (dynamic import) so `typescript` — the preview's
-	// transpiler — stays out of the initial host bundle. Saves that arrive before it's ready are covered by the seed.
+	// The live preview BACKEND: runs the demo (a Vite React app) through an in-browser dev server in the node worker,
+	// which hot-reloads on workspace changes. Display-free — the movable window + iframe live in the shell (top
+	// frame); this realm starts the dev server and hands the shell the URL the service worker answers. Created lazily
+	// (dynamic import).
 	// Keyed by virtual port, so several previews (a multi-server app, a multiplayer game) run concurrently, each with
 	// its own dev server + shell window. The single-preview path is just the map with one entry on the default port.
 	const previews = new Map<number, Preview>();
@@ -83,6 +92,7 @@ if (isolated && window.parent === window) {
 		import("./preview").then(({ createPreview }) => createPreview({
 			"workspaceFolder": request?.root ?? "/workspace",
 			"swUrl": base + "coi-serviceworker.js",
+			"tab": tab,
 			"hub": rootHub,
 			"port": port
 		})).then((handle) => {
@@ -97,8 +107,7 @@ if (isolated && window.parent === window) {
 	rootHub.subscribe("preview.close", (data) => {
 		const port = typeof (data as { "port"?: number } | null)?.port === "number" ? (data as { "port": number }).port : DEFAULT_PREVIEW_PORT;
 
-		previews.get(port)?.close();
-		previews.delete(port);
+		previews.delete(port); // the node worker stops the dev server on the same message
 	});
 
 	// The app branch only runs inside the shell's iframe (top-level / renders the shell), so we're always embedded:
@@ -110,12 +119,11 @@ if (isolated && window.parent === window) {
 		"files": files,
 		"moduleVersions": moduleVersions,
 		"rootHub": rootHub,
+		"tab": tab,
 		"openEditors": ["/workspace/src/index.ts"],
+		// Previews hot-reload from the workspace's own change events (workspace.changed), not from saves.
 		"onSave": (path: string, contents: string) => {
 			hostLog.info("saved", { "path": path, "bytes": contents.length });
-			for (const preview of previews.values()) {
-				preview.update(path, contents); // every live preview re-reads the changed file (they share the zen-fs)
-			}
 		}
 	});
 

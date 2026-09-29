@@ -1,6 +1,6 @@
 /**
  * Main-thread side of the terminal's node runner: manages the node-worker (extensions/worker-pod/node-worker.ts),
- * hands it the shared workspace SharedArrayBuffer so it runs on the SAME zen-fs, federates its hub into the
+ * serves it the shared workspace SharedArrayBuffer (`workspace.buffer`) so it runs on the SAME zen-fs, federates its hub into the
  * workbench hub (one link carries the run lifecycle AND the worker's observability spans up to the page
  * collector), and exposes a streaming, interactive `run` the terminal's `node` command drives. See terminal-node.ts.
  *
@@ -14,7 +14,7 @@
  * after a (re)spawn can't out-race the worker's interest and be dropped by the router.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import { createRpcClient, portTransport } from "@brianjenkins94/hub";
+import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
 export type NodeOutput = (stream: "out" | "err", data: string) => void;
@@ -41,8 +41,6 @@ export interface NodeRunner {
 	"virtualRequest": (port: number, method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<VirtualResponse>;
 	/** Start a ViteDevServer in the worker on `root` of the shared workspace, reachable on `port` (preview, M1). */
 	"startPreview": (port: number, root: string) => Promise<void>;
-	/** Tell the worker's preview server a file changed (root-relative path), triggering an HMR update (M2). */
-	"notifyPreviewChange": (port: number, path: string) => void;
 	/** Subscribe to HMR updates the worker's preview server emits; `handler` relays them to the iframe. Returns
 	 *  an unsubscribe (M2). */
 	"onPreviewHmr": (port: number, handler: (message: unknown) => void) => () => void;
@@ -66,7 +64,9 @@ export interface NodeRunner {
 }
 
 /** Spawn/manage the node worker, wire it into `hub`, and return the streaming runner the terminal drives. */
-export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer): NodeRunner {
+/** `tab` (see main.tsx) is passed to the worker, which names it when it asks the shared service worker for a
+ *  capability decision, so this tab's pod answers. */
+export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, tab?: string): NodeRunner {
 	let worker: Worker | undefined;
 	let unlink: (() => void) | undefined;
 	let currentRunId: string | undefined;
@@ -75,6 +75,9 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 	let resolveReady: (() => void) | undefined;
 
 	hub.subscribe("node.ready", () => { resolveReady?.(); }); // kept for the runner's life (survives respawns)
+	// The worker asks for the shared workspace SAB over the hub (a respawned worker asks again) and mounts the SAME
+	// zen-fs at /workspace. Null without cross-origin isolation — it then runs on its own root.
+	serve(hub, "workspace.buffer", () => workspaceBuffer ?? null);
 	const rpc = createRpcClient(hub); // for request/reply calls into the worker (e.g. the preview bridge relay)
 
 	const ensureWorker = (): void => {
@@ -88,17 +91,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 			resolveReady = resolve;
 			setTimeout(resolve, 1500);
 		});
-		worker = new Worker(new URL("./lsp/node-worker.js", location.href), { "type": "module" });
-
-		// Hand the worker the shared workspace SAB over a dedicated control port (mirrors the pod), so it mounts
-		// the SAME zen-fs at /workspace. Without a buffer (no cross-origin isolation) it runs on its own root.
-		const channel = new MessageChannel();
-
-		worker.postMessage({ "type": "ws-control" }, [channel.port2]);
-
-		if (workspaceBuffer !== undefined) {
-			channel.port1.postMessage({ "buffer": workspaceBuffer });
-		}
+		worker = new Worker(new URL("./lsp/node-worker.js" + (tab === undefined ? "" : "?tab=" + tab), location.href), { "type": "module" });
 
 		// Federate the worker's hub into the workbench hub — run lifecycle (start/out/exit/stdin) and its spans
 		// ride the one link.
@@ -261,7 +254,6 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 
 			await rpc.request("preview.start", { "port": port, "root": root }, { "timeoutMs": 30000 });
 		},
-		"notifyPreviewChange": (port, path) => { hub.publish("preview.fileChanged", { "port": port, "path": path }); },
 		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); }),
 		"openPreview": (root, port) => { hub.publish("preview.open", { "root": root, "mode": "production", "port": port }); },
 		"closePreview": (port) => { hub.publish("preview.close", { "port": port }); },

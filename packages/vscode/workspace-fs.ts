@@ -21,13 +21,16 @@
  */
 import type { IFileSystemProviderWithFileReadWriteCapability, IStat } from "@brianjenkins94/monaco-vscode-api/main";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
+import type { Hub } from "@brianjenkins94/hub";
 import type { ArchSink } from "@brianjenkins94/observability";
 import type { Logger } from "@brianjenkins94/util/logger";
-import { FileChangeType, FileSystemProviderCapabilities, FileType, registerFileSystemOverlay } from "@brianjenkins94/monaco-vscode-api/main";
+import type { WorkspaceChange } from "./workspace-changes";
+import { FileChangeType, FileSystemProviderCapabilities, FileType, registerFileSystemOverlay, Uri } from "@brianjenkins94/monaco-vscode-api/main";
 import { configure, fs, InMemory, mounts, SingleBuffer } from "@zenfs/core";
 
 import { observeZenfs, reportZenfsUsage, ZENFS_NODE } from "./architecture-zenfs";
 import { createChangeEvent, notFound, readOnly } from "./provider-base";
+import { WORKSPACE_CHANGED, watchWorkspaceStore } from "./workspace-changes";
 
 /** VS Code's platform `FilePermission.Readonly` bit (vs/platform/files/common/files: `Readonly = 1 << 0`). Set in
  *  a file's `stat`, it makes the editor render the read-only lock, disable editing the buffer, and block Save. The
@@ -115,9 +118,17 @@ function persistLoadAll(db: IDBDatabase): Promise<[string, Uint8Array][]> {
 	});
 }
 
-/** `sink` puts the workspace on the live architecture diagram: every store operation, by caller (the vscode provider,
- *  the boot seed, or a direct zen-fs user), and every change batch the provider announces. */
-export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, sink?: ArchSink): Promise<WorkspaceFs> {
+export interface WorkspaceFsOptions {
+	/** The workbench hub: every realm reports its writes to the workspace as `workspace.changed` on it (see
+	 *  workspace-changes.ts), and they're all persisted and announced here. Without one, only this realm's are. */
+	"hub"?: Hub;
+	/** Puts the workspace on the live architecture diagram: every store operation, by caller (the vscode provider,
+	 *  the boot seed, persistence, or a direct zen-fs user), and every change batch announced to VS Code. */
+	"architecture"?: ArchSink;
+}
+
+export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, options: WorkspaceFsOptions = {}): Promise<WorkspaceFs> {
+	const { architecture: sink, hub } = options;
 	// A SharedArrayBuffer-backed store (zen-fs SingleBuffer) when cross-origin isolation is available — so the LSP
 	// workers + preview can later attach to the SAME filesystem via this buffer (M3b). Falls back to InMemory
 	// (single-realm) otherwise. COI is required for SharedArrayBuffer and is what the coi service worker provides.
@@ -208,43 +219,63 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, si
 		caller = undefined;
 	}
 
-	// Debounced write-back: batch dirty paths and flush in one transaction (null = delete).
-	const pending = new Map<string, Uint8Array | null>();
+	// Write-back, from the change stream: batch the paths that changed and, per flush, copy each one's CURRENT state
+	// from zen-fs into IndexedDB in one transaction — a file is put, a directory's files are put (a renamed or copied
+	// tree), and a missing path is deleted along with everything that was under it (a recursive delete, a renamed-away
+	// tree). Reading the state at flush time rather than capturing it per write means a burst of writes to one file
+	// costs one put, and it doesn't matter which realm wrote.
+	const dirty = new Set<string>();
 	let flushTimer: ReturnType<typeof setTimeout> | undefined;
+	const filesUnder = (path: string): string[] => {
+		if (!fs.statSync(path).isDirectory()) {
+			return [path];
+		}
+
+		return fs.readdirSync(path).flatMap((name) => filesUnder(path + "/" + name));
+	};
 	const flush = (): void => {
 		flushTimer = undefined;
 
-		if (db === undefined || pending.size === 0) {
+		if (db === undefined || dirty.size === 0) {
+			dirty.clear();
+
 			return;
 		}
 
-		const batch = [...pending];
+		const batch = [...dirty];
 
-		pending.clear();
+		dirty.clear();
+		caller = "persist";
 
 		try {
-			const store = db.transaction(PERSIST_STORE, "readwrite").objectStore(PERSIST_STORE);
+			const objects = db.transaction(PERSIST_STORE, "readwrite").objectStore(PERSIST_STORE);
 
-			for (const [path, contents] of batch) {
-				if (contents === null) {
-					store.delete(path);
+			for (const path of batch) {
+				if (fs.existsSync(path)) {
+					for (const file of filesUnder(path)) {
+						const contents = fs.readFileSync(file);
+
+						objects.put(typeof contents === "string" ? new TextEncoder().encode(contents) : contents, file);
+					}
 				} else {
-					store.put(contents, path);
+					objects.delete(path);
+					objects.delete(IDBKeyRange.bound(path + "/", path + "/\uffff"));
 				}
 			}
-		} catch { /* best-effort persistence */ }
-	};
-
-	const persist = (path: string, contents: Uint8Array | null): void => {
-		pending.set(path, contents);
-
-		if (flushTimer === undefined) {
-			flushTimer = setTimeout(flush, FLUSH_MS);
+		} catch (error) {
+			log.warn("workspace persistence failed", { "error": String(error) }); // best-effort: the store still has it
+		} finally {
+			caller = undefined;
 		}
 	};
 
+	const persist = (path: string): void => {
+		dirty.add(path);
+		flushTimer ??= setTimeout(flush, FLUSH_MS);
+	};
+
 	for (const path of retired) {
-		persist(path, null);
+		persist(path); // gone from zen-fs, so the flush deletes it
 	}
 
 	const { listeners, onDidChangeFile } = createChangeEvent();
@@ -292,6 +323,32 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, si
 		}
 	};
 
+	// THE change path: every write to the workspace, from any realm, arrives here once — persisted, and announced to
+	// VS Code (the explorer, tsserver, open editors) as if the provider had made it. Registered after the seed and the
+	// restore, which are neither.
+	const CHANGE_TYPES: Record<WorkspaceChange["type"], FileChangeType> = { "added": FileChangeType.ADDED, "changed": FileChangeType.UPDATED, "deleted": FileChangeType.DELETED };
+	// `.git/**` is persisted but not announced: the git SCM + service watch `**/*` and refresh, and a refresh writes
+	// .git (the index's stat cache, verdict caches) — announcing those would loop. (VS Code's own watcherExclude
+	// leaves .git out for the same reason.)
+	const inGit = (path: string): boolean => /\/\.git(?:\/|$)/u.test(path);
+	const apply = (changes: WorkspaceChange[]): void => {
+		for (const change of changes) {
+			if (change.path === "/workspace" || change.path.startsWith("/workspace/")) {
+				persist(change.path);
+
+				if (!inGit(change.path)) {
+					fire(Uri.file(change.path) as unknown as Change["resource"], CHANGE_TYPES[change.type]);
+				}
+			}
+		}
+	};
+
+	if (store !== undefined) {
+		watchWorkspaceStore(store, buffer !== undefined ? "/workspace" : "", hub === undefined ? apply : (changes) => { hub.publish(WORKSPACE_CHANGED, changes); });
+	}
+
+	hub?.subscribe(WORKSPACE_CHANGED, (data) => { apply(data as WorkspaceChange[]); });
+
 	const provider: IFileSystemProviderWithFileReadWriteCapability = {
 		"capabilities": FileSystemProviderCapabilities.FileReadWrite | FileSystemProviderCapabilities.PathCaseSensitive,
 		"onDidChangeCapabilities": (() => ({ "dispose": () => undefined })) as never,
@@ -337,13 +394,9 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, si
 				throw readOnly(); // managed/read-only — reject EVERY write path (editor Save, the vscode API, the terminal)
 			}
 
-			const existed = fs.existsSync(resource.path);
-
 			ensureParent(resource.path);
-			fs.writeFileSync(resource.path, content);
+			fs.writeFileSync(resource.path, content); // persisted + announced by the change stream (apply)
 			handle.writes += 1;
-			persist(resource.path, content);
-			fire(resource, existed ? FileChangeType.UPDATED : FileChangeType.ADDED);
 		},
 
 		"mkdir": async (resource): Promise<void> => {
@@ -356,8 +409,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, si
 			}
 
 			fs.rmSync(resource.path, { "recursive": options.recursive, "force": true });
-			persist(resource.path, null);
-			fire(resource, FileChangeType.DELETED);
 		},
 
 		"rename": async (from, to): Promise<void> => {
@@ -366,13 +417,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, si
 			}
 
 			ensureParent(to.path);
-			const data = fs.readFileSync(from.path);
-
-			fs.renameSync(from.path, to.path);
-			persist(from.path, null);
-			persist(to.path, typeof data === "string" ? new TextEncoder().encode(data) : data);
-			fire(from, FileChangeType.DELETED);
-			fire(to, FileChangeType.ADDED);
+			fs.renameSync(from.path, to.path); // a file or a whole directory — the change stream persists what moved
 		}
 	};
 

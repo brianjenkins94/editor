@@ -17,7 +17,9 @@ import type { VirtualFS } from "@brianjenkins94/almostnode";
 import type { ArchSink } from "@brianjenkins94/observability";
 import { configure, fs, InMemory, mounts, resolveMountConfig, SingleBuffer } from "@zenfs/core";
 
+import type { WorkspaceChange } from "../../workspace-changes";
 import { observeZenfs, ZENFS_NODE } from "../../architecture-zenfs";
+import { watchWorkspaceStore } from "../../workspace-changes";
 
 const noopWatcher = { "close": () => undefined };
 
@@ -59,16 +61,50 @@ let pendingBuffer: SharedArrayBuffer | undefined;
 // The workspace SAB, retained once received so a worker can HAND IT ON to a freshly-spawned child worker (the
 // preview.provoke hardReset path spawns a cold child per round; it mounts this same buffer). undefined without COI.
 let sharedWorkspaceBuffer: SharedArrayBuffer | undefined;
-// This realm's architecture reporter, if it has one: the mount and every store operation go on the diagram.
-let architecture: ArchSink | undefined;
+// What this realm does with its workspace mount beyond using it (see connectWorkspace).
+let connection: WorkspaceConnection = {};
 
-/** Put this realm's workspace mount on the live architecture diagram (now, or when the buffer arrives). */
-export function observeWorkspace(sink: ArchSink): void {
-	architecture = sink;
+export interface WorkspaceConnection {
+	/** Put the mount and every store operation on the live architecture diagram. */
+	"architecture"?: ArchSink;
+	/** Report every change this realm makes to the workspace (see workspace-changes.ts) — the node worker publishes
+	 *  them on its hub, so the workbench persists and announces them. */
+	"onChanges"?: (changes: WorkspaceChange[]) => void;
+}
+
+/** Wire this realm's workspace mount into the editor (now, or when the buffer arrives). */
+export function connectWorkspace(options: WorkspaceConnection): void {
+	connection = options;
 	const store = mounted ? mounts.get(WORKSPACE_MOUNT) : undefined;
 
 	if (store !== undefined) {
-		observeZenfs(sink, store);
+		connectStore(store);
+	}
+}
+
+function connectStore(store: object): void {
+	if (connection.architecture !== undefined) {
+		observeZenfs(connection.architecture, store);
+	}
+
+	if (connection.onChanges !== undefined) {
+		watchWorkspaceStore(store, WORKSPACE_MOUNT, connection.onChanges);
+	}
+}
+
+/** Hand this realm the workspace SharedArrayBuffer (from the hub, or a control port): mounted at /workspace once
+ *  zen-fs is configured. A non-shared value (no cross-origin isolation) is ignored — the realm keeps its own root. */
+export function attachSharedWorkspace(buffer: unknown): void {
+	if (typeof SharedArrayBuffer === "undefined" || !(buffer instanceof SharedArrayBuffer)) {
+		return;
+	}
+
+	sharedWorkspaceBuffer = buffer; // retained so we can hand it to a spawned child worker
+
+	if (configured) {
+		void mountSharedWorkspace(buffer);
+	} else {
+		pendingBuffer = buffer; // createZenfsVFS mounts it once configured
 	}
 }
 
@@ -98,10 +134,8 @@ async function mountSharedWorkspace(buffer: SharedArrayBuffer): Promise<void> {
 	mounted = true;
 	const store = await resolveMountConfig({ "backend": SingleBuffer, "buffer": buffer });
 
-	if (architecture !== undefined) {
-		observeZenfs(architecture, store);
-		architecture.record(architecture.self, ZENFS_NODE, "lifecycle", "mount " + WORKSPACE_MOUNT + " (shared " + Math.round(buffer.byteLength / 1048576) + " MB)");
-	}
+	connectStore(store);
+	connection.architecture?.record(connection.architecture.self, ZENFS_NODE, "lifecycle", "mount " + WORKSPACE_MOUNT + " (shared " + Math.round(buffer.byteLength / 1048576) + " MB)");
 
 	fs.mount(WORKSPACE_MOUNT, store);
 	console.log("[zenfs-vfs] shared workspace mounted at " + WORKSPACE_MOUNT + " — this worker now reads the editor's files");
@@ -139,17 +173,7 @@ export function receiveSharedWorkspace(): void {
 		const port = event.ports[0];
 
 		port.addEventListener("message", (message: MessageEvent) => {
-			const buffer = (message.data as { "buffer"?: unknown } | undefined)?.buffer;
-
-			if (typeof SharedArrayBuffer !== "undefined" && buffer instanceof SharedArrayBuffer) {
-				sharedWorkspaceBuffer = buffer; // retained so we can hand it to a spawned child worker
-
-				if (configured) {
-					void mountSharedWorkspace(buffer);
-				} else {
-					pendingBuffer = buffer; // createZenfsVFS mounts it once configured
-				}
-			}
+			attachSharedWorkspace((message.data as { "buffer"?: unknown } | undefined)?.buffer);
 		});
 		port.start();
 	};

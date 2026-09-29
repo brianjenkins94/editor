@@ -53,7 +53,7 @@ import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 import { installWorkspaceFs } from "./workspace-fs";
 
-interface Init { "files": WorkbenchFile[]; "openEditors": string[]; "workspaceFolder"?: string; "moduleVersions"?: Record<string, string> }
+interface Init { "files": WorkbenchFile[]; "openEditors": string[]; "workspaceFolder"?: string; "moduleVersions"?: Record<string, string>; "tab"?: string }
 
 // The host page we report to: our parent when nested in its iframe (in-page window), or our opener when
 // we've been popped out into our own standalone tab/window. One hub link (below) to it carries the boot
@@ -385,7 +385,7 @@ function maybeBoot(): void {
 	}
 
 	booted = true;
-	const { files, openEditors, workspaceFolder, moduleVersions } = init;
+	const { files, openEditors, workspaceFolder, moduleVersions, tab } = init;
 
 	// One timed span for the whole boot; its child logs (relayed to the host) read as an indented tree of
 	// what booting the workbench did and how long it took. Ended once monaco is online.
@@ -422,7 +422,7 @@ function maybeBoot(): void {
 			// above boot's now defaults-only priority-1 base). This is the SOLE store for source — it gets the FULL
 			// `files` (source + type surface), so the workers/type-checker that attach to this same zen-fs see them,
 			// and a repo load can clear/replace it. See workspace-fs.ts.
-			workspaceFs = await installWorkspaceFs(files, paneLog, architecture).catch((error: unknown) => {
+			workspaceFs = await installWorkspaceFs(files, paneLog, { "hub": workbenchHub, "architecture": architecture }).catch((error: unknown) => {
 				bootSpan.error("workspace zen-fs failed", { "error": errText(error) });
 
 				return undefined;
@@ -491,7 +491,7 @@ function maybeBoot(): void {
 				// backend's process factory (so every terminal is this one; no fake). `node` runs in a dedicated
 				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal.ts. One node runner
 				// (worker) is shared by every terminal.
-				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer);
+				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer, tab);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
 
@@ -608,7 +608,7 @@ void (async () => {
 		try {
 			const data = await paneRpc.request("workbench.init", undefined, { "timeoutMs": 1500 }) as Init;
 
-			init = { "files": data.files ?? [], "openEditors": data.openEditors ?? [], "workspaceFolder": data.workspaceFolder, "moduleVersions": data.moduleVersions };
+			init = { "files": data.files ?? [], "openEditors": data.openEditors ?? [], "workspaceFolder": data.workspaceFolder, "moduleVersions": data.moduleVersions, "tab": data.tab };
 			maybeBoot();
 
 			return;

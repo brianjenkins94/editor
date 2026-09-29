@@ -23,31 +23,33 @@
  * zero (this is what lets a one-shot script return the prompt while a server or an interactive reader stays up).
  *
  * Same almostnode-on-zen-fs pattern as server-host.ts: it runs on the SHARED workspace zen-fs (the SAB arrives
- * over a dedicated control port via receiveSharedWorkspace), so `node` sees exactly the files the editor,
- * type-checker and preview see — one filesystem. Observed over the hub: each run opens a span through
+ * over the hub, `workspace.buffer`), so `node` sees exactly the files the editor, type-checker and preview see — one
+ * filesystem — and every change it makes is reported back as `workspace.changed` (persisted + announced by the
+ * workbench; see workspace-changes.ts). Observed over the hub: each run opens a span through
  * relayLoggerToHub, so every execution shows in the observability plane (federated up to the page's collector /
  * debug-mcp). Mirrors debug-worker.ts's hub wiring.
  */
 import { getServer, Runtime } from "@brianjenkins94/almostnode";
-import { createHub, portTransport, serve } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { installWorkerProbe } from "@brianjenkins94/observability";
 
 import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
 import { reportArchitecture } from "../../architecture";
 import { identifyWorker } from "../../architecture-model";
 import { ZENFS_NODE } from "../../architecture-zenfs";
+import type { WorkspaceChange } from "../../workspace-changes";
+import { WORKSPACE_CHANGED } from "../../workspace-changes";
 
 import { installTimerKeepAlive } from "./node-keepalive";
-import { createZenfsVFS, getSharedWorkspaceBuffer, observeWorkspace, receiveSharedWorkspace } from "./zenfs-vfs.js";
-
-// Catch the shared workspace SAB from the spawner BEFORE anything runs (dedicated port; never the RPC channel).
-receiveSharedWorkspace();
+import { attachSharedWorkspace, connectWorkspace, createZenfsVFS, getSharedWorkspaceBuffer } from "./zenfs-vfs.js";
 
 // Own the worker's timers before any Runtime touches them, so keep-alive ref-counting sees every timer the script
 // schedules (almostnode skips its own timer patch when it finds ours already installed — the `__patched` guard).
 const keepAlive = installTimerKeepAlive();
 
 const hub = createHub({ "id": "node" });
+// The tab this worker belongs to (node-runner puts it in our URL), named when asking the shared service worker.
+const TAB = new URL(location.href).searchParams.get("tab");
 
 hub.link(portTransport(globalThis));
 const log = relayLoggerToHub(hub, "node");
@@ -55,13 +57,18 @@ const log = relayLoggerToHub(hub, "node");
 // hub + this worker's own requests on $sys.arch, its workspace mount, the workers it spawns (the provoke child)
 const architecture = reportArchitecture(hub);
 
-observeWorkspace(architecture);
 installWorkerProbe(architecture, identifyWorker);
+
+// The workspace: the shared buffer comes from the workbench over the hub, and every change this worker makes to it
+// (a script's fs writes, an install) goes back as `workspace.changed` — the workbench persists and announces it.
+connectWorkspace({ "architecture": architecture, "onChanges": (changes) => { hub.publish(WORKSPACE_CHANGED, changes); } });
+const workspaceReady = createRpcClient(hub).request("workspace.buffer", undefined, { "timeoutMs": 10000, "waitForResponderMs": 10000 })
+	.then(attachSharedWorkspace, (error: unknown) => { log.warn("no shared workspace — running on this worker's own filesystem", { "error": String(error) }); });
 
 tapConsoleAndErrors(hub, "node"); // raw uncaught error/rejection → the plane, beside the structured logs
 
 let vfsPromise: ReturnType<typeof createZenfsVFS> | undefined;
-const getVfs = (): ReturnType<typeof createZenfsVFS> => (vfsPromise ??= createZenfsVFS());
+const getVfs = (): ReturnType<typeof createZenfsVFS> => (vfsPromise ??= workspaceReady.then(createZenfsVFS));
 
 // The deploy base (this worker's served URL minus the "/__vscode__/…" tail), so a script's `file://` dynamic
 // import resolves under the base-scoped service worker. Same computation as server-host.
@@ -159,7 +166,8 @@ async function runNode(args: StartArgs): Promise<void> {
 	// instead a BLOCKING sync-XHR to the service worker's /__capability__/decide route lets this worker wait while
 	// the SW runs the async decision (the same "capability.decide" endpoint the net gate uses) and replies
 	// { allow }. No SharedArrayBuffer needed. Throw (EACCES) to deny → almostnode propagates it as the fs call's
-	// error. Fail OPEN on any transport error so a hiccup never bricks a run (the SW route fails closed on redline).
+	// error. The route names this worker's tab (the SW is shared by every tab), and the SW fails closed when no
+	// decider answers; only a missing SW (no cross-origin isolation — nothing to ask) lets the call through.
 	const gateFs = (op: "read" | "write", method: string, path: string): void => {
 		// Fast-path workspace READS (frequent + benign): no round-trip. Writes/deletes always gate (tamper axis),
 		// and reads OUTSIDE the workspace gate (exfiltration axis — e.g. secrets on a desktop CLI's real disk).
@@ -172,7 +180,7 @@ async function runNode(args: StartArgs): Promise<void> {
 		try {
 			const xhr = new XMLHttpRequest();
 
-			xhr.open("POST", new URL("__capability__/decide", location.href).href, false); // sync: blocks until the SW replies
+			xhr.open("POST", new URL("__capability__/decide" + (TAB === null ? "" : "?tab=" + TAB), location.href).href, false); // sync: blocks until the SW replies
 			xhr.send(JSON.stringify({ "kind": "fs", "op": op, "method": method, "args": [path], "runId": runId })); // runId → run-grain record
 
 			if (xhr.status === 200) {
@@ -256,8 +264,8 @@ hub.subscribe("node.stdin.>", (data) => {
 	}
 });
 
-// Preview bridge relay (M0): the main thread forwards a `/__virtual__/<port>/…` request here; we drive the
-// server listening on that port and return its response. The server is EITHER a preview dev server started in
+// Preview bridge relay (M0): the service worker's `/__virtual__/<tab>/<port>/…` request arrives here (relayed by
+// the tab's root); we drive the server listening on that port and return its response. The server is EITHER a preview dev server started in
 // this worker (M1, below) OR a raw http server the running script is listening with (almostnode's port
 // registry). Body crosses as a Uint8Array (structured-clone over the worker port).
 interface VirtualRequest { "port": number; "method": string; "url": string; "headers": Record<string, string>; "body"?: Uint8Array }
@@ -301,7 +309,7 @@ const OBS_TAP = `<script>
 	// error+close); RTCPeerConnection is built with its ICE servers STRIPPED and only restored (setConfiguration)
 	// on allow, closed on deny. Each decision round-trips to the shell (cap-decide → capability.decide → the TOFU
 	// overlay), tagged with this preview's port; it FAILS CLOSED (deny) if the shell can't be reached.
-	var vport = (function () { var m = /\\/__virtual__\\/(\\d+)\\//.exec(location.pathname); return m ? Number(m[1]) : undefined; })();
+	var vport = (function () { var m = /\\/__virtual__\\/[^\\/]+\\/(\\d+)\\//.exec(location.pathname); return m ? Number(m[1]) : undefined; })();
 	var capSeq = 0, capPending = {};
 	addEventListener("message", function (e) {
 		var d = e.data;
@@ -417,8 +425,10 @@ function injectObsTap(html: string): string {
 	return OBS_TAP + html;
 }
 
-// Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry.
+// Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry —
+// and the workspace root each serves.
 const previewServers = new Map<number, PreviewServer>();
+const previewRoots = new Map<number, string>();
 
 // The last preview.start config, so preview.provoke (the debug affordance below) can cold-restart on the same
 // port/root without the caller having to know them.
@@ -481,6 +491,7 @@ serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number
 	// fires the preview may show a one-load error that recovers on reload; a recurrence means the race is still live.
 	server.setTransformErrorReporter((info) => { log.warn("preview transform failed (served 500, recovers on reload)", info); });
 	previewServers.set(port, server);
+	previewRoots.set(port, root.replace(/\/$/u, ""));
 	architecture.spawn({ "id": "vite:" + port, "label": "Vite dev server :" + port, "container": "workers", "detail": root, "dynamic": true });
 	lastPreviewConfig = { "port": port, "root": root };
 
@@ -608,16 +619,23 @@ serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
 	return { "rounds": rounds, "modules": urls, "hardReset": hardReset, "provoked": failures.length > 0, "failures": failures, "transformErrors": transformErrors };
 });
 
-// M2: an editor save can't fire the worker's zen-fs watch (it's a no-op), so the main thread tells us which file
-// changed; we re-read it from the shared workspace and emit the HMR update (path is root-relative, e.g. /src/App.tsx).
-hub.subscribe("preview.fileChanged", (data) => {
-	const { port, path } = data as { "port": number; "path": string };
+// Hot reload: every change to the workspace — an editor save, a git checkout, a script's write, from any realm —
+// arrives as `workspace.changed` (see workspace-changes.ts); each dev server re-reads the files under its root and
+// emits the HMR update (notifyChange takes a root-relative path, e.g. /src/App.tsx). Like Vite's own watcher, it
+// ignores .git and node_modules (and the editor's .silo): the dev server full-reloads the page for any file outside
+// its module graph, and those change on nearly every save (the git index, acquired types, the capability ledger).
+const UNWATCHED = /\/(?:\.git|node_modules|\.silo)(?:\/|$)/u;
 
-	const server = previewServers.get(port);
+hub.subscribe(WORKSPACE_CHANGED, (data) => {
+	for (const [port, root] of previewRoots) {
+		const server = previewServers.get(port);
 
-	if (server !== undefined) {
-		architecture.record(architecture.self, "vite:" + port, "event", "file changed");
-		server.notifyChange(path);
+		for (const change of data as WorkspaceChange[]) {
+			if (server !== undefined && change.path.startsWith(root + "/") && !UNWATCHED.test(change.path.slice(root.length))) {
+				architecture.record(architecture.self, "vite:" + port, "event", "file " + change.type);
+				server.notifyChange(change.path.slice(root.length));
+			}
+		}
 	}
 });
 
@@ -633,6 +651,7 @@ hub.subscribe("preview.close", (data) => {
 
 		previewServers.get(port)?.stop();
 		previewServers.delete(port);
+		previewRoots.delete(port);
 
 		return;
 	}
@@ -643,4 +662,5 @@ hub.subscribe("preview.close", (data) => {
 	}
 
 	previewServers.clear();
+	previewRoots.clear();
 });

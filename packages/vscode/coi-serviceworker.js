@@ -15,11 +15,10 @@
  *     served here: the editor, type-checker and LSP workers read it through the zen-fs FileSystemProvider (and
  *     the shared SharedArrayBuffer, see workspace-fs.ts / zenfs-vfs.ts), and the preview runs its own in-page
  *     dev server — so the old IndexedDB "vfs store" serving path was retired.
- *   • Dev-server bridge — the preview pane runs a dev server (ViteDevServer) IN THE PAGE and hands us a
- *     MessagePort (ServerBridge protocol; see packages/almostnode/server-bridge.ts). We relay
- *     `/__virtual__/<port>/…` fetches to it as request/response messages, so the preview iframe reaches the
- *     in-page server over ordinary HTTP. Merged in from almostnode's standalone __sw__.js so this ONE worker
- *     also plays that role (rather than a second SW fighting for scope `/`).
+ *   • Dev-server bridge — a preview's dev server (almostnode's ViteDevServer) runs in the node worker; we answer
+ *     `/__virtual__/<port>/…` fetches by calling it over the hub (`virtual.request`), so the preview iframe
+ *     reaches it over ordinary HTTP. (This used to be almostnode's ServerBridge: a MessagePort to a relay in the
+ *     page. The hub already links us to the page, so the port and the relay are gone.)
  *   • COI stamping — every other response is passed through with the isolation headers added.
  *
  * Registered by coi.ts (in prod to provide isolation; in dev, additionally, for the resolver). Pattern
@@ -33,7 +32,15 @@ import { relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
 // The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,
 // errors) is recorded through a source-scoped logger whose records — timed SPANS included — ride the hub to
 // the page's `$sys.log.>` collector. It links to the page over a DEDICATED hub port (the {type:"hub"} message
-// below), separate from the ServerBridge data port. Standalone until linked — records just drop, by design.
+// below). Standalone until linked — records just drop, by design.
+//
+// The SW holds NO state worth keeping: the browser stops an idle one and starts a fresh global on the next event,
+// so everything it needs is asked for per request (over the hub) and nothing is remembered between them.
+//
+// One SW serves EVERY tab of the origin, and each tab's root hub links to it. Those links are non-transit — tabs are
+// never joined through the SW — and what the SW asks on a tab's behalf is ADDRESSED to that tab: a preview's URL
+// names its tab (/__virtual__/<tab>/<port>/), a node worker names its tab on the decide route, and the SW calls
+// `virtual.request.<tab>` / `capability.decide.<tab>`, which only that tab's root answers (from its own tree).
 const swHub = createHub({ "id": "sw" });
 const swLog = relayLoggerToHub(swHub, "sw");
 
@@ -42,20 +49,9 @@ const architecture = reportArchitecture(swHub);
 
 // The preview a request came from: its own /__virtual__/<port>/ URL, else the preview document that asked for it.
 async function previewOf(event, pathname) {
-	const direct = parseVirtual(pathname);
+	const preview = parseVirtual(pathname) || await previewClientOf(event);
 
-	if (direct !== null) {
-		return "preview:" + direct.port;
-	}
-
-	try {
-		const client = await globalThis.clients.get(event.clientId || event.resultingClientId);
-		const parsed = client ? parseVirtual(new URL(client.url).pathname) : null;
-
-		return parsed ? "preview:" + parsed.port : undefined;
-	} catch {
-		return undefined;
-	}
+	return preview === undefined ? undefined : "preview:" + preview.port;
 }
 
 // A preview's request, as `preview:<port> → sw`, and the SW's answer back to it.
@@ -76,96 +72,64 @@ function recordPreviewRequest(event, pathname, label, responsePromise) {
 
 tapConsoleAndErrors(swHub, "sw"); // raw uncaught error/rejection → the plane, beside the structured logs
 
-// The capability NET gate. A previewed app's outbound fetch/XHR full-round-trips to the ext-host decision
-// endpoint, but the SW reaches it through a TRUSTED editor client (the SW node doesn't do hub RPC): each
-// trusted window client gets its own MessageChannel port; the app realm (main.tsx) relays the call to
-// "capability.decide" over the hub and replies on the port. The SW holds NO policy — it only asks, then
-// allows (fetch) or blocks (403). The PREVIEW client is never asked (it's the untrusted app). Fail-OPEN on a
-// transport error / no editor realm, so a hiccup never bricks the preview (the endpoint fails closed itself).
-// The SW is a first-class hub node (swHub, linked to the page's root hub), so it asks the ext-host decision
-// endpoint DIRECTLY over the hub — swHub → root → workbench → podHub reaches worker-pod's "capability.decide"
-// serve, which owns the popup / grant store / redline. The SW holds NO policy; it only asks, then allows
-// (fetch) or blocks (403). A long timeout so a deliberating user isn't cut off; fail-OPEN past it / on any
-// transport error, so a hub hiccup never bricks the preview (the endpoint itself fails closed on redline / an
-// abstaining decider).
-const capabilityRpc = createRpcClient(swHub);
+// The capability gate. The SW holds NO policy: it asks the ext host's decision endpoint over the hub — swHub →
+// root → workbench → podHub reaches worker-pod's "capability.decide" serve, which owns the popup / grant store /
+// redline and resolves a preview's port to the run that owns it — then allows or blocks. It FAILS CLOSED: if no
+// decider can be reached (the hub isn't linked yet after a restart and doesn't link within RESPONDER_WAIT_MS, or the
+// call errors), the answer is deny. A long timeout, so a deliberating user isn't cut off.
+const rpc = createRpcClient(swHub);
+const RESPONDER_WAIT_MS = 10000;
+const DECIDE = { "timeoutMs": 300000, "waitForResponderMs": RESPONDER_WAIT_MS };
 
-// Attribute a previewed app's gated net calls to the RUN that owns its port — so multiple concurrent previews (a
-// multi-server app, a multiplayer game over WS/WebRTC) each record independently, instead of a single global run.
-// The shell mints {id, port} at launch (production.launch) and the run ends at production.exit.<id>; we key by
-// PORT because a fetch's preview client resolves to its virtual port. Empty → the net decision stays call-grain.
-const previewRunByPort = new Map();
-
-swHub.subscribe("production.launch", (data) => {
-	const id = data && data.id;
-	const port = data && data.port;
-
-	if (typeof id !== "string" || typeof port !== "number") {
-		return; // no port ⇒ not a preview run (e.g. a node fallback) — nothing to attribute by port
-	}
-
-	previewRunByPort.set(port, id);
-
-	const off = swHub.subscribe("production.exit." + id, () => {
-		off();
-
-		if (previewRunByPort.get(port) === id) {
-			previewRunByPort.delete(port);
-		}
-	});
-});
-
-async function decideNet(url, runId, port) {
+async function decide(call, tab) {
 	try {
-		return (await capabilityRpc.request("capability.decide", { "kind": "net", "args": [url], "runId": runId ?? undefined, "port": port }, { "timeoutMs": 300000 })) !== false;
-	} catch (rpcError) {
-		swLog.error("capability.decide failed — allowing (fail-open)", { "error": String(rpcError) });
+		return (await rpc.request(tab ? "capability.decide." + tab : "capability.decide", call, DECIDE)) !== false;
+	} catch (error) {
+		swLog.error("capability.decide unreachable — denying (fail-closed)", { "kind": call && call.kind, "error": String(error) });
 
-		return true;
+		return false;
 	}
 }
 
 // Capability decision route (fs/exec, from almostnode). A worker's SYNCHRONOUS XHR blocks on this request while
-// we run the async decision (same "capability.decide" endpoint the net gate uses) and reply — the sync-XHR ⇄ SW
-// trick that lets a synchronous shim (writeFileSync) await an async popup with no SharedArrayBuffer. Body is the
-// raw CapabilityCall; reply is `{ allow }`. Fail-OPEN on error so a hiccup never bricks a run.
+// we run the async decision and reply — the sync-XHR ⇄ SW trick that lets a synchronous shim (writeFileSync) await
+// an async popup with no SharedArrayBuffer. Body is the raw CapabilityCall; reply is `{ allow }`.
 async function handleCapabilityDecide(request) {
+	let call;
+
 	try {
-		const call = await request.json();
-		const allow = (await capabilityRpc.request("capability.decide", call, { "timeoutMs": 300000 })) !== false;
+		call = await request.json();
+	} catch (error) {
+		swLog.error("capability decide route: unreadable call — denying", { "error": String(error) });
+	}
 
-		return new Response(JSON.stringify({ "allow": allow }), { "headers": { "content-type": "application/json" } });
-	} catch (decideError) {
-		swLog.error("capability decide route failed — allowing (fail-open)", { "error": String(decideError) });
+	const allow = call !== undefined && await decide(call, new URL(request.url).searchParams.get("tab"));
 
-		return new Response(JSON.stringify({ "allow": true }), { "headers": { "content-type": "application/json" } });
+	return new Response(JSON.stringify({ "allow": allow }), { "headers": { "content-type": "application/json" } });
+}
+
+// The preview a request belongs to ({ tab, port }): the /__virtual__/<tab>/<port>/ document that made it (or is
+// being navigated to).
+async function previewClientOf(event) {
+	try {
+		const client = await globalThis.clients.get(event.clientId || event.resultingClientId);
+
+		return (client ? parseVirtual(new URL(client.url).pathname) : null) || undefined;
+	} catch {
+		return undefined;
 	}
 }
 
 // Gate a previewed app's DATA fetches (destination "" = fetch/XHR, not a subresource/module load) to http(s),
 // then fetch or block. Non-preview clients and non-data requests pass straight through — same as before.
 async function gateAndFetch(event, request, requestUrl) {
-	try {
-		if (request.destination === "" && (requestUrl.protocol === "https:" || requestUrl.protocol === "http:") && event.clientId) {
-			const client = await globalThis.clients.get(event.clientId);
-			let previewPort;
+	if (request.destination === "" && (requestUrl.protocol === "https:" || requestUrl.protocol === "http:") && event.clientId) {
+		const preview = await previewClientOf(event);
 
-			try {
-				const parsed = client ? parseVirtual(new URL(client.url).pathname) : null;
-
-				previewPort = parsed ? parsed.port : undefined;
-			} catch (clientError) {
-				previewPort = undefined;
-			}
-
-			// A preview client's fetch → gate it, attributed to the run that owns its port (undefined runId if the
-			// mapping hasn't arrived yet → recorded call-grain, still gated).
-			if (previewPort !== undefined && !(await decideNet(request.url, previewRunByPort.get(previewPort), previewPort))) {
-				return new Response("Blocked by capability policy: net " + requestUrl.host, { "status": 403, "statusText": "Capability denied" });
-			}
+		// A preview client's fetch → gate it, in its tab (the decider attributes it to the run that owns the port).
+		if (preview !== undefined && !(await decide({ "kind": "net", "args": [request.url], "port": preview.port }, preview.tab))) {
+			return new Response("Blocked by capability policy: net " + requestUrl.host, { "status": 403, "statusText": "Capability denied" });
 		}
-	} catch (gateError) {
-		swLog.error("capability net gate error — allowing", { "error": String(gateError) });
 	}
 
 	return fetch(request).then(stamp).catch((error) => {
@@ -255,176 +219,41 @@ async function serveWorkspace(request, requestUrl, pathname) {
 	return stamp(await fetch(request));   // non-node_modules /workspace/ → network, isolation-stamped
 }
 
-// ── Dev-server bridge (ServerBridge protocol; mirror of almostnode's __sw__.js) ───────────────────────────
-// The in-page ServerBridge transfers us a MessagePort via a {type:"init"} message; we relay /__virtual__/
-// fetches to the in-page dev server over it as {type:"request"} and await {type:"response"} / stream frames.
-let mainPort = null;
-const pendingRequests = new Map();
-let bridgeRequestId = 0;
+// The hub link to each tab's root, by window client id (a tab relinking replaces its own; a closed tab's is dropped).
+const tabLinks = new Map();
 
-function base64ToBytes(base64) {
-	const binary = atob(base64);
-	const bytes = new Uint8Array(binary.length);
+async function linkTab(clientId, port) {
+	tabLinks.get(clientId)?.();
+	tabLinks.set(clientId, swHub.link(portTransport(port), { "transit": false }));
 
-	for (let index = 0; index < binary.length; index += 1) {
-		bytes[index] = binary.charCodeAt(index);
-	}
-
-	return bytes;
-}
-
-// Responses (and stream frames) coming back from the in-page dev server, keyed by request id.
-function handleMainMessage(event) {
-	const { type, id, data, error } = event.data;
-	const pending = pendingRequests.get(id);
-
-	if (type === "response") {
-		if (pending === undefined) {
-			return;
-		}
-
-		pendingRequests.delete(id);
-		architecture.record("root", architecture.self, error === undefined ? "reply" : "error", "ServerBridge response");
-
-		if (error !== undefined) {
-			pending.reject(new Error(error));
-		} else {
-			pending.resolve(data);
-		}
-	} else if (type === "stream-start") {
-		architecture.record("root", architecture.self, "reply", "ServerBridge stream");
-
-		if (pending && pending.streamController) {
-			pending.resolveHeaders(data);
-		}
-	} else if (type === "stream-chunk") {
-		if (pending && pending.streamController && data.chunkBase64) {
-			try {
-				pending.streamController.enqueue(base64ToBytes(data.chunkBase64));
-			} catch (streamError) {
-				console.error("[coi-serviceworker] stream chunk", streamError);
-			}
-		}
-	} else if (type === "stream-end") {
-		if (pending && pending.streamController) {
-			try {
-				pending.streamController.close();
-			} catch (streamError) {
-				// already closed — ignore
-			}
-
-			pendingRequests.delete(id);
+	for (const id of [...tabLinks.keys()]) {
+		if (id !== clientId && !(await globalThis.clients.get(id))) {
+			tabLinks.get(id)();
+			tabLinks.delete(id);
 		}
 	}
 }
 
-// The current hub link to the page (replaced on relink).
-let unlinkHub;
-
-// The in-page ServerBridge sends {type:"init"} (with a transferred MessagePort), plus server-registered/
-// -unregistered and keepalive pings (ignored — receipt alone keeps the worker warm).
 globalThis.addEventListener("message", (event) => {
 	const data = event.data;
-
-	if (data && data.type === "init" && event.ports && event.ports[0]) {
-		mainPort = event.ports[0];
-		mainPort.onmessage = handleMainMessage;
-		// Re-claim so a preview page opened after activation is controlled.
-		globalThis.clients.claim();
-	}
 
 	// Dedicated observability link: the page hands us a hub port (telemetry.ts linkServiceWorkerHub). Link our
 	// hub over it so `$sys.log.sw` records federate to the page's collector.
 	if (data && data.type === "hub" && event.ports && event.ports[0]) {
-		unlinkHub?.(); // a relink replaces the previous link rather than leaving a dead one behind
-		unlinkHub = swHub.link(portTransport(event.ports[0]));
-		swLog.info("hub linked");
+		void linkTab(event.source && event.source.id, event.ports[0]).then(() => { swLog.info("hub linked", { "tabs": tabLinks.size }); });
 	}
 });
 
 // The browser stops an idle service worker and starts a FRESH one on the next event — a new global, whose hub no
 // page has linked (the page only relinks on controllerchange, which a restart doesn't fire). Unlinked, the SW
-// drops out of the tree: its logs and architecture reports vanish, and capability.decide can't reach the pod, so
-// the net gate and the fs/exec decide route fail OPEN. So on every start, ask the window clients for a hub port
+// drops out of the tree: its logs and architecture reports vanish, and neither capability.decide nor the preview's
+// dev servers can be reached (so every preview request fails and the gate denies). So on every start, ask the window clients for a hub port
 // (only the app realm's linkServiceWorkerHub answers; a first install gets linked twice, harmlessly).
 void globalThis.clients.matchAll({ "type": "window" }).then((clients) => {
 	for (const client of clients) {
 		client.postMessage({ "type": "sw-needs-hub" });
 	}
 });
-
-// The port drops when the worker is idle-terminated or replaced; ask clients to re-init and wait briefly.
-async function ensureMainPort() {
-	if (mainPort) {
-		return;
-	}
-
-	const clients = await globalThis.clients.matchAll({ "type": "window" });
-
-	for (const client of clients) {
-		client.postMessage({ "type": "sw-needs-init" });
-	}
-
-	await new Promise((resolve) => {
-		const check = setInterval(() => {
-			if (mainPort) {
-				clearInterval(check);
-				resolve();
-			}
-		}, 50);
-
-		setTimeout(() => {
-			clearInterval(check);
-			resolve();
-		}, 5000);
-	});
-
-	if (!mainPort) {
-		throw new Error("dev-server bridge not initialized");
-	}
-}
-
-async function sendRequest(port, method, url, headers, body) {
-	await ensureMainPort();
-
-	bridgeRequestId += 1;
-	const id = bridgeRequestId;
-
-	return new Promise((resolve, reject) => {
-		pendingRequests.set(id, { "resolve": resolve, "reject": reject });
-
-		setTimeout(() => {
-			if (pendingRequests.has(id)) {
-				pendingRequests.delete(id);
-				reject(new Error("dev-server bridge request timeout"));
-			}
-		}, 30000);
-
-		mainPort.postMessage({ "type": "request", "id": id, "data": { "port": port, "method": method, "url": url, "headers": headers, "body": body } });
-		architecture.record(architecture.self, "root", "request", "ServerBridge request", body ? body.byteLength : 0);
-	});
-}
-
-async function sendStreamingRequest(port, method, url, headers, body) {
-	await ensureMainPort();
-
-	bridgeRequestId += 1;
-	const id = bridgeRequestId;
-	let resolveHeaders;
-	const headersPromise = new Promise((resolve) => {
-		resolveHeaders = resolve;
-	});
-	const stream = new ReadableStream({
-		"start": function(controller) {
-			pendingRequests.set(id, { "resolve": () => undefined, "reject": (err) => controller.error(err), "streamController": controller, "resolveHeaders": resolveHeaders });
-			mainPort.postMessage({ "type": "request", "id": id, "data": { "port": port, "method": method, "url": url, "headers": headers, "body": body, "streaming": true } });
-			architecture.record(architecture.self, "root", "request", "ServerBridge request (streaming)", body ? body.byteLength : 0);
-		},
-		"cancel": function() { pendingRequests.delete(id); }
-	});
-
-	return { "stream": stream, "headersPromise": headersPromise };
-}
 
 // Add the isolation + iframe-embedding headers a virtual (dev-server) response needs.
 function virtualHeaders(source) {
@@ -438,11 +267,14 @@ function virtualHeaders(source) {
 	return headers;
 }
 
-// Relay one request to the in-page dev server on `port` and build a Response from its reply. A POST to /api/*
-// uses the streaming path (SSE / chunked API routes); everything else is a buffered request/response.
-async function handleVirtualRequest(request, port, path) {
-	// A timed span per relay — the collector shows each dev-server round-trip and its duration.
-	const span = swLog.span("bridge", { "port": port, "method": request.method, "path": path });
+// Statuses whose Response must not carry a body.
+const NULL_BODY = new Set([101, 103, 204, 205, 304]);
+
+// Answer one request from the dev server on `port` (in the node worker, over the hub). Buffered: the dev server
+// answers whole responses (an SSE / chunked API route arrives in one piece).
+async function handleVirtualRequest(request, tab, port, path) {
+	// A timed span per request — the collector shows each dev-server round-trip and its duration.
+	const span = swLog.span("virtual", { "tab": tab, "port": port, "method": request.method, "path": path });
 
 	try {
 		const headers = {};
@@ -451,36 +283,23 @@ async function handleVirtualRequest(request, port, path) {
 			headers[key] = value;
 		});
 
-		const body = request.method !== "GET" && request.method !== "HEAD" ? await request.arrayBuffer() : null;
+		const body = request.method !== "GET" && request.method !== "HEAD" ? new Uint8Array(await request.arrayBuffer()) : undefined;
+		const response = await rpc.request("virtual.request." + tab, { "port": port, "method": request.method, "url": path, "headers": headers, "body": body }, { "timeoutMs": 30000, "waitForResponderMs": RESPONDER_WAIT_MS });
+		const content = NULL_BODY.has(response.status) || request.method === "HEAD" ? null : response.body;
 
-		if (request.method === "POST" && path.startsWith("/api/")) {
-			const { stream, headersPromise } = await sendStreamingRequest(port, request.method, path, headers, body);
-			const responseData = await headersPromise;
+		span.end({ "status": response.status });
 
-			return new Response(stream, { "status": (responseData && responseData.statusCode) || 200, "statusText": (responseData && responseData.statusMessage) || "OK", "headers": virtualHeaders(responseData && responseData.headers) });
-		}
-
-		const response = await sendRequest(port, request.method, path, headers, body);
-		const headers2 = virtualHeaders(response.headers);
-
-		if (response.bodyBase64 && response.bodyBase64.length > 0) {
-			const blob = new Blob([base64ToBytes(response.bodyBase64)], { "type": (response.headers && response.headers["Content-Type"]) || "application/octet-stream" });
-
-			return new Response(blob, { "status": response.statusCode, "statusText": response.statusMessage, "headers": headers2 });
-		}
-
-		return new Response(null, { "status": response.statusCode, "statusText": response.statusMessage, "headers": headers2 });
+		return new Response(content, { "status": response.status, "statusText": response.statusText, "headers": virtualHeaders(response.headers) });
 	} catch (error) {
 		console.error("[coi-serviceworker] virtual", error);
-		span.error("bridge failed", { "error": String(error) });
-
-		return new Response("dev-server bridge error: " + error.message, { "status": 500, "headers": { "content-type": "text/plain" } });
-	} finally {
+		span.error("dev server unreachable", { "error": String(error) });
 		span.end();
+
+		return new Response("dev server unreachable: " + error.message, { "status": 502, "headers": { "content-type": "text/plain" } });
 	}
 }
 
-// Parse a `/__virtual__/<port>/<rest>` path — found ANYWHERE (under any deploy-base prefix) — into its parts.
+// Parse a `/__virtual__/<tab>/<port>/<rest>` path — found ANYWHERE (under any deploy-base prefix) — into its parts.
 function parseVirtual(pathname) {
 	const index = pathname.indexOf(VIRTUAL_MARKER);
 
@@ -488,20 +307,19 @@ function parseVirtual(pathname) {
 		return null;
 	}
 
-	const after = pathname.slice(index + VIRTUAL_MARKER.length);
-	const slash = after.indexOf("/");
-	const portStr = slash === -1 ? after : after.slice(0, slash);
+	const [tab, portStr, ...rest] = pathname.slice(index + VIRTUAL_MARKER.length).split("/");
 	const port = parseInt(portStr, 10);
 
-	if (!Number.isFinite(port)) {
+	if (!tab || !Number.isFinite(port)) {
 		return null;
 	}
 
 	return {
+		"tab": tab,
 		"port": port,
-		"rest": slash === -1 ? "" : after.slice(slash),
-		// The URL prefix up to and including the port (base + /__virtual__/<port>), for navigation redirects.
-		"prefix": pathname.slice(0, index + VIRTUAL_MARKER.length + portStr.length)
+		"rest": rest.length === 0 ? "" : "/" + rest.join("/"),
+		// The URL prefix up to and including the port (base + /__virtual__/<tab>/<port>), for navigation redirects.
+		"prefix": pathname.slice(0, index + VIRTUAL_MARKER.length + tab.length + 1 + portStr.length)
 	};
 }
 
@@ -518,11 +336,11 @@ globalThis.addEventListener("fetch", (event) => {
 		return;
 	}
 
-	// Dev-server bridge: <base>/__virtual__/<port>/…
+	// Dev-server bridge: <base>/__virtual__/<tab>/<port>/…
 	const virtual = parseVirtual(pathname);
 
 	if (virtual !== null) {
-		const response = handleVirtualRequest(request, virtual.port, (virtual.rest || "/") + requestUrl.search);
+		const response = handleVirtualRequest(request, virtual.tab, virtual.port, (virtual.rest || "/") + requestUrl.search);
 
 		recordPreviewRequest(event, pathname, virtual.rest || "/", response);
 		event.respondWith(response);
@@ -557,7 +375,7 @@ globalThis.addEventListener("fetch", (event) => {
 
 			const response = request.mode === "navigate"
 				? Promise.resolve(Response.redirect(requestUrl.origin + refVirtual.prefix + target, 302))
-				: handleVirtualRequest(request, refVirtual.port, target);
+				: handleVirtualRequest(request, refVirtual.tab, refVirtual.port, target);
 
 			recordPreviewRequest(event, refVirtual.prefix + pathname, pathname + " (referer relay)", response);
 			event.respondWith(response);

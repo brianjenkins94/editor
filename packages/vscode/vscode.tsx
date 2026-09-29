@@ -46,6 +46,8 @@ export interface VscodeWindowOptions {
 	 *  pane's hub (extension pod + workers) federates into it for spans. The link retargets to the pane's live
 	 *  window on popout. Typed optional only to keep the options bag ergonomic; omitting it throws. */
 	"rootHub"?: Hub;
+	/** This tab's id (see main.tsx), handed to the workbench so its workers address the shared service worker as this tab. */
+	"tab"?: string;
 }
 
 /** A file to write when opening a project into the live workbench. Text uses `contents`; binary (loaded from a
@@ -82,7 +84,7 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 		markReady = resolve;
 	});
 
-	const { files = [], openEditors = [], workspaceFolder, moduleVersions, onSave, mountInto = document.body, rootHub } = options;
+	const { files = [], openEditors = [], workspaceFolder, moduleVersions, onSave, mountInto = document.body, rootHub, tab } = options;
 	const base = (import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/";
 
 	const iframe = document.createElement("iframe");
@@ -113,7 +115,7 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 	paneHub.link(windowServerTransport(PANE_ID, () => iframe.contentWindow ?? undefined));
 
 	// The pane requests its workspace once linked (RPC, retried on its side until interest settles); serve it.
-	serve(paneHub, "workbench.init", () => ({ "files": files, "openEditors": openEditors, "workspaceFolder": workspaceFolder, "moduleVersions": moduleVersions }));
+	serve(paneHub, "workbench.init", () => ({ "files": files, "openEditors": openEditors, "workspaceFolder": workspaceFolder, "moduleVersions": moduleVersions, "tab": tab }));
 
 	// The pane announces it's up (→ whenReady) and streams saves back (→ onSave).
 	paneHub.subscribe("workbench.online", () => {

@@ -420,7 +420,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 				(event.source as Window | null)?.postMessage({ "channel": "cap-decision", "id": id, "allow": allow }, "*");
 			};
 
-			capRpc.request("capability.decide", { "kind": payload.kind, "args": [payload.resource ?? ""], "port": port }, { "timeoutMs": 300000 })
+			capRpc.request("capability.decide", { "kind": payload.kind, "args": [payload.resource ?? ""], "port": port }, { "timeoutMs": 300000, "waitForResponderMs": 10000 })
 				.then((allow) => { reply(allow !== false); })
 				.catch(() => { reply(false); }); // can't reach the decider ⇒ fail closed
 

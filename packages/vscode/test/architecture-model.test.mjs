@@ -11,10 +11,14 @@ test("a subject family may only cross the tree links between its hubs", () => {
 	assert.ok(patterns("shell", "root").includes("git.>"));
 	assert.ok(patterns("root", "workbench").includes("git.>"));
 	assert.ok(!patterns("workbench", "pod").includes("git.>"));
-	// capability.decide: pod serves, sw and shell call — so it crosses sw⇄root, root⇄workbench, workbench⇄pod
-	for (const [a, b] of [["sw", "root"], ["root", "workbench"], ["workbench", "pod"], ["shell", "root"]]) {
+	// capability.decide: pod serves, root (for the sw) and shell call — so it crosses root⇄workbench, workbench⇄pod,
+	// shell⇄root; the sw only ever asks its tab's root (capability.decide.<tab>), never the pod directly
+	for (const [a, b] of [["root", "workbench"], ["workbench", "pod"], ["shell", "root"]]) {
 		assert.ok(patterns(a, b).includes("capability.decide"), `${a}⇄${b}`);
 	}
+
+	assert.ok(!patterns("sw", "root").includes("capability.decide"));
+	assert.ok(patterns("sw", "root").includes("capability.decide.*"));
 
 	assert.ok(!patterns("workbench", "node").includes("capability.decide"));
 	// logs go everywhere

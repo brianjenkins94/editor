@@ -66,26 +66,62 @@ CDN `node_modules` overlay. Not a place you put feature code.
 ### The live preview, end to end
 
 `npm run dev` in the terminal runs the workspace's `vite` script → the terminal publishes `preview.open` → root
-(`preview.ts`) asks the node worker to `preview.start` almostnode's in-browser Vite dev server on that port, registers
-it with the ServerBridge, and publishes `preview.ready` → the shell (`shell-preview.ts`) opens a window whose iframe
-loads `<base>/__virtual__/<port>/`. Every request from that iframe is answered by the **service worker**, which
-relays it over the ServerBridge `MessagePort` to root, which asks the node worker (`virtual.request` over the hub).
-The previewed app's bare imports resolve to **esm.sh** and pass through the service worker. On save, the workbench
-publishes `preview.fileChanged` → the dev server emits an HMR update on `preview.hmr.<port>` → the shell posts it into
-the iframe. Back up the other way, the iframe's injected tap posts `obs-log` (console → `$sys.log.preview`) and
-`cap-decide` (WebSocket/WebRTC capability requests; the shell answers `cap-decision`). A node script's fs writes ask
-the service worker synchronously (`POST /__capability__/decide`). On the live diagram: `preview:<port>` (the iframe)
-and `vite:<port>` (its dev server) come and go with the preview.
+(`preview.ts`) asks the node worker to `preview.start` almostnode's in-browser Vite dev server on that port and
+publishes `preview.ready` → the shell (`shell-preview.ts`) opens a window whose iframe loads
+`<base>/__virtual__/<tab>/<port>/`. Every request from that iframe is answered by the **service worker**, which calls
+the dev server over the hub (`virtual.request.<tab>` to that tab's root, which asks its node worker). The previewed app's bare imports resolve to
+**esm.sh** and pass through the service worker. When anything changes the workspace (a save, a git checkout, a
+script), the dev server hears it on `workspace.changed` and emits an HMR update on `preview.hmr.<port>` → the shell
+posts it into the iframe. Back up the other way, the iframe's injected tap posts `obs-log` (console →
+`$sys.log.preview`) and `cap-decide` (WebSocket/WebRTC capability requests; the shell answers `cap-decision`). A node
+script's fs writes ask the service worker synchronously (`POST /__capability__/decide`). On the live diagram:
+`preview:<port>` (the iframe) and `vite:<port>` (its dev server) come and go with the preview.
+
+**The service worker keeps no state.** The browser stops an idle service worker and starts a fresh global on the
+next event, so it remembers nothing between requests: it asks the page for a hub link whenever it starts
+(`sw-needs-hub`), and asks the pod for every capability decision (the pod maps a preview's port to its run). Its
+calls wait for a responder (`waitForResponderMs`) instead of publishing into an unlinked hub, and the capability gate
+**fails closed**: with no decider reachable, a preview's data fetch gets a 403 and a node script's write is denied.
+
+**One service worker serves every tab.** It links each tab's root hub separately and **non-transit** (a hub link
+option: nothing passes between two non-transit links), so tabs are never joined through it, and it addresses what it
+asks to the tab it's for — `virtual.request.<tab>`, `capability.decide.<tab>`, which only that tab's root answers,
+from its own tree. The tab comes from the preview's URL, or, for a node script's decision, from the node worker (its
+URL carries the tab). debug-mcp links every open tab the same way (non-transit), for the same reason.
+
+**The preview is not a security boundary.** Its iframe is same-origin with the editor and unsandboxed, by necessity:
+a sandboxed (opaque-origin) frame isn't controlled by the service worker, so `/__virtual__/` would never reach the dev
+server (verified: `sandbox="allow-scripts"` renders nothing), and it would lose cross-origin isolation, so no
+`SharedArrayBuffer` for previewed apps. Adding `allow-same-origin` back makes the sandbox escapable. So a previewed app
+can reach `window.parent` (the editor's DOM, storage, hub), and the capability gate guards against accidents, not
+hostile code. A real boundary needs the preview on a separate origin with its own service worker.
 
 ### The workspace filesystem (zen-fs)
 
 The workbench creates a 64 MB `SharedArrayBuffer` zen-fs store (`workspace-fs.ts`) mounted at `/workspace` and hands
-the buffer (`ws-control` port) to the node worker and the cspell server host; the provoke child gets it directly. All
-of them read and write the same bytes under an Atomics lock — **nothing notifies another realm of a change**. In the
-workbench the store has two doors: the vscode `FileSystemProvider` (priority-2 overlay — the editor, tsserver, ATA,
-extensions), whose writes are persisted to IndexedDB (`workspace-fs`, 500 ms debounce) and announced as file-change
-events; and direct `@zenfs/core` callers (isomorphic-git, the terminal's path walk), which are neither. The live view
-labels workbench operations by door (`vscode ·`, `direct ·`, `seed ·`, `restore ·`).
+the buffer to the node worker (over the hub, `workspace.buffer`) and the cspell server host (a one-shot control port —
+it has no hub); the provoke child gets it directly. All of them read and write the same bytes under an Atomics lock.
+
+Shared memory tells nobody anything, so there is **one change stream** (`workspace-changes.ts`): each realm watches its
+own mount's mutating store operations and reports them, batched, as `workspace.changed`. The workbench persists every
+change to IndexedDB (`workspace-fs`, 500 ms debounce — it copies the path's current state, so a deleted or renamed tree
+goes with it) and announces it to VS Code as a file-change event (except `.git/**`, whose writes the git watchers
+cause); the node worker's dev servers hot-reload from it. So a write is saved and seen the same way whoever made it:
+the editor's provider, isomorphic-git, the terminal, a node script. The live view labels workbench operations by caller
+(`vscode ·`, `direct ·`, `seed ·`, `restore ·`, `persist ·`).
+
+### Side channels (off the hub, on purpose)
+
+Everything that can ride the hub does. What doesn't, and why:
+
+- **the capability decide route** — a node script's `writeFileSync` must block, so it asks with a synchronous XHR the
+  service worker answers; the SW then asks the pod over the hub.
+- **the cspell server host's control port** — it speaks LSP over its worker port and has no hub; the pod hands it the
+  workspace buffer once, at spawn (a respawned worker gets it again).
+- **the preview iframe's postMessages** (`obs-log`, `cap-decide`, HMR) — the previewed app is untrusted, so it gets a
+  narrow, validated message bridge, never the hub.
+- **the tsval render surface's port** — a `MessagePort` handed over in a `preview-ready` → `init` handshake, redone
+  whenever the surface reloads.
 
 ## Diagram — realms & channels
 
@@ -213,7 +249,6 @@ flowchart LR
   workbench <==>|hub| pod
   workbench <==>|hub| node
   pod <==>|hub| debug_worker
-  workbench <-.->|ws-control| node
   pod <-.->|debug adapter messages| debug_worker
   pod <-.->|LSP (JSON-RPC)| worker_server_host
   workbench <-.->|bootstrap handshake| exthost_iframe
