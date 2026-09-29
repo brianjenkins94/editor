@@ -33,6 +33,9 @@ export interface WorkerIdentity {
 export interface MonacoProbeOptions {
 	/** Identify a non-monaco worker from its url/options (default: `worker:<file name>`). */
 	"identifyWorker"?: (url: string, options?: WorkerOptions) => WorkerIdentity | undefined;
+	/** The node a nested worker's request goes to (default: `net:origin` / `net:<host>`) — e.g. the service worker, when
+	 *  it controls this page (and so the workers it spawns). */
+	"classifyUrl"?: (url: URL) => string;
 }
 
 export const EXT_HOST_IFRAME = "exthost-iframe";
@@ -62,6 +65,9 @@ function fileName(url: string): string {
 }
 
 // ── nested probes (workers reporting through a MessagePort) ──────────────────────────────────────────────────
+
+// Set once by installMonacoProbes: where a nested worker's request goes (see MonacoProbeOptions.classifyUrl).
+let classifyChildUrl: ((url: URL) => string) | undefined;
 
 function attachChildProbe(sink: ArchSink, port: MessagePort, ownerId: string, container: string): void {
 	const nested = new Map<string, string>();
@@ -96,7 +102,7 @@ function attachChildProbe(sink: ArchSink, port: MessagePort, ownerId: string, co
 					} else {
 						const url = new URL(message.peer.url, location.href);
 
-						peer = url.origin === location.origin ? "net:origin" : "net:" + url.host;
+						peer = classifyChildUrl?.(url) ?? (url.origin === location.origin ? "net:origin" : "net:" + url.host);
 						label = message.label + " " + fileName(url.pathname);
 					}
 
@@ -625,6 +631,7 @@ export function installMonacoProbes(sink: ArchSink, options: MonacoProbeOptions 
 	}
 
 	installed = true;
+	classifyChildUrl = options.classifyUrl;
 
 	for (const [label, name] of Object.entries(MONACO_WORKERS)) {
 		// Only the workers this build can actually start (the timer service's blob worker always can).
