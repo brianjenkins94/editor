@@ -1,7 +1,9 @@
 /**
- * Generic probes for the architecture plane — the channels a context has that its hub doesn't carry: HTTP, raw
- * WebSockets and IndexedDB. Work in a window or any worker scope (including a service worker). Install them early,
- * before the context starts talking, and only once per realm.
+ * Generic probes for the architecture plane — the channels a context has that its hub doesn't carry: HTTP (fetch
+ * and XMLHttpRequest, sync included), raw WebSockets and IndexedDB; plus, opt-in, the workers a realm spawns and the
+ * window messages it receives. Work in a window or any worker scope (including a service worker). Install them early,
+ * before the context starts talking, and only once per realm. Generic on purpose: a channel nobody modelled still
+ * shows up (and is flagged), which is how the diagram discovers what it wasn't told about.
  *
  * Hub traffic riding one of these (debug-mcp's WebSocket link) is skipped: the hub tap already counts it.
  */
@@ -13,6 +15,8 @@ export interface NetworkProbeOptions {
 	"classifyUrl"?: (url: URL) => string;
 	/** Node id of the context that opened a WebSocket (default: `sink.self`) — e.g. an extension host sharing the realm. */
 	"socketOwner"?: (url: URL) => string;
+	/** Node id that OWNS an IndexedDB database (default: this realm) — e.g. a filesystem persisting through it. */
+	"idbOwner"?: (database: string) => string | undefined;
 }
 
 const WIRE = "\0hub";
@@ -174,7 +178,7 @@ function installWebSocketProbe(sink: ArchSink, classify: (url: URL) => string, o
 	});
 }
 
-function installIndexedDBProbe(sink: ArchSink): void {
+function installIndexedDBProbe(sink: ArchSink, owner: (database: string) => string | undefined): void {
 	if (typeof IDBObjectStore === "undefined") {
 		return;
 	}
@@ -191,7 +195,9 @@ function installIndexedDBProbe(sink: ArchSink): void {
 
 		prototype[operation] = function(this: IDBObjectStore, ...args: unknown[]) {
 			try {
-				sink.record(sink.self, "idb", "request", this.transaction.db.name + " › " + this.name + "." + operation, operation === "put" || operation === "add" ? approxSize(args[0], 3) : 0);
+				const database = this.transaction.db.name;
+
+				sink.record(owner(database) ?? sink.self, "idb", "request", database + " › " + this.name + "." + operation, operation === "put" || operation === "add" ? approxSize(args[0], 3) : 0);
 			} catch { /* diagnostics only */ }
 
 			return original.apply(this, args);
@@ -212,6 +218,132 @@ export function installNetworkProbes(sink: ArchSink, options: NetworkProbeOption
 	const classify = options.classifyUrl ?? defaultClassify;
 
 	installFetchProbe(sink, classify);
+	installXhrProbe(sink, classify);
 	installWebSocketProbe(sink, classify, options.socketOwner ?? (() => sink.self));
-	installIndexedDBProbe(sink);
+	installIndexedDBProbe(sink, options.idbOwner ?? (() => undefined));
+}
+
+/** XMLHttpRequest, synchronous ones included (a worker asking the service worker for a capability decision). */
+function installXhrProbe(sink: ArchSink, classify: (url: URL) => string): void {
+	if (typeof XMLHttpRequest === "undefined") {
+		return;
+	}
+
+	const targets = new WeakMap<XMLHttpRequest, { "target": string; "label": string }>();
+	const { open, send } = XMLHttpRequest.prototype;
+
+	XMLHttpRequest.prototype.open = function(this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
+		try {
+			const parsed = new URL(String(url), globalThis.location?.href);
+
+			targets.set(this, { "target": classify(parsed), "label": method + " " + shortPath(parsed) });
+		} catch { /* unparseable: not recorded */ }
+
+		return (open as (...args: unknown[]) => void).call(this, method, url, ...rest);
+	} as typeof XMLHttpRequest.prototype.open;
+	XMLHttpRequest.prototype.send = function(this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
+		const info = targets.get(this);
+
+		if (info !== undefined) {
+			sink.record(sink.self, info.target, "request", info.label + " (XHR)", approxSize(body));
+			this.addEventListener("loadend", () => {
+				sink.record(info.target, sink.self, this.status >= 200 && this.status < 400 ? "reply" : "error", this.status + " " + info.label, approxSize(this.response));
+			});
+		}
+
+		send.call(this, body as XMLHttpRequestBodyInit | null);
+	};
+}
+
+export interface WorkerIdentity {
+	"id": string;
+	"label"?: string;
+	"container"?: string;
+}
+
+/**
+ * Observe the workers this realm spawns (the workbench realm has its own, monaco-aware probe — use this elsewhere,
+ * e.g. in a worker that spawns workers). Hub frames are left to the hub tap; the rest is described as JSON-RPC /
+ * DAP / `{ type }` messages.
+ */
+export function installWorkerProbe(sink: ArchSink, identify: (url: string, options?: WorkerOptions) => WorkerIdentity | undefined = () => undefined): void {
+	if (typeof globalThis.Worker !== "function") {
+		return;
+	}
+
+	globalThis.Worker = new Proxy(globalThis.Worker, {
+		"construct": function(target, args: [string | URL, WorkerOptions?], newTarget) {
+			const worker = Reflect.construct(target, args, newTarget) as Worker;
+
+			try {
+				const url = String(args[0]);
+				const identity = identify(url, args[1]) ?? { "id": "worker:" + (url.split(/[?#]/u)[0]!.split("/").pop() ?? "worker") };
+				const record = (outgoing: boolean, data: unknown): void => {
+					if (isHubFrame(data)) {
+						return;
+					}
+
+					const { kind, label } = describeJsonMessage(data);
+
+					if (outgoing) {
+						sink.record(sink.self, identity.id, kind, label, approxSize(data));
+					} else {
+						sink.record(identity.id, sink.self, kind, label, approxSize(data));
+					}
+				};
+
+				sink.spawn({ "id": identity.id, "label": identity.label, "container": identity.container, "role": "worker", "dynamic": true, "detail": "spawned by " + sink.self });
+
+				const postMessage = worker.postMessage.bind(worker) as (message: unknown, transfer?: unknown) => void;
+
+				worker.postMessage = (message: unknown, transfer?: Transferable[] | StructuredSerializeOptions): void => {
+					record(true, message);
+					postMessage(message, transfer);
+				};
+				worker.addEventListener("message", (event) => { record(false, event.data); });
+
+				const terminate = worker.terminate.bind(worker);
+
+				worker.terminate = () => {
+					sink.terminate(identity.id);
+					terminate();
+				};
+			} catch { /* never break a worker */ }
+
+			return worker;
+		}
+	});
+}
+
+/**
+ * Observe the messages this window receives from OTHER windows (iframes, popups, its parent) — everything but hub
+ * traffic (counted by the hub tap, including pane-link-wrapped frames). `identify` names the sending window (e.g. a
+ * preview iframe by its port); an unnamed one becomes `window:<its path>`, so an unexpected iframe still shows up.
+ */
+export function installWindowMessageProbe(sink: ArchSink, identify: (source: Window) => string | undefined = () => undefined): void {
+	if (typeof window === "undefined") {
+		return;
+	}
+
+	const frameOf = (source: Window): string => {
+		try {
+			return "window:" + source.location.pathname;
+		} catch {
+			return "window:cross-origin";
+		}
+	};
+
+	window.addEventListener("message", (event: MessageEvent) => {
+		const { data, source } = event;
+
+		if (source === null || source === window || !("postMessage" in source) || isHubFrame(data) || (typeof data === "object" && data !== null && "\0paneLink" in data)) {
+			return;
+		}
+
+		const record = data as { "channel"?: unknown; "type"?: unknown } | null;
+		const name = typeof record?.channel === "string" ? record.channel : typeof record?.type === "string" ? record.type : typeof data;
+		const from = identify(source as Window) ?? frameOf(source as Window);
+
+		sink.record(from, sink.self, "message", event.ports.length > 0 ? name + " (+MessagePort)" : name, approxSize(data));
+	}, true);
 }

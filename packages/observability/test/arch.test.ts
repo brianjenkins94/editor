@@ -219,3 +219,26 @@ test("a peer that boots slowly is still named; an older hub (hello without id) i
 	second();
 	reporter.dispose();
 });
+
+test("a link that closes before its peer says hello ends its placeholder instead of leaving it alive", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const reporter = createArchReporter(root);
+	const store = new ArchitectureStore();
+
+	collectArchReports(root, (report) => { store.apply(report); });
+	b.listen(() => undefined); // an outdated service worker: it receives, never answers
+	const unlink = root.link(a);
+
+	root.subscribe("anything", () => undefined);
+	await wait(400);
+	unlink(); // replaced (controllerchange) before it ever said who it was
+	await wait(400);
+
+	const placeholder = [...store.nodes.values()].find((node) => node.id.startsWith("root:link"));
+
+	assert.ok(placeholder !== undefined, [...store.nodes.keys()].join(","));
+	assert.equal(placeholder.state, "terminated");
+	assert.equal(placeholder.spec.dynamic, true);
+	reporter.dispose();
+});

@@ -289,10 +289,6 @@ export class ArchitectureStore {
 			}
 		}
 
-		if (report.topology !== undefined) {
-			this.applyTopology(reporter, report.topology);
-		}
-
 		let contribution = this.contributions.get(reporter);
 
 		if (contribution === undefined) {
@@ -335,6 +331,11 @@ export class ArchitectureStore {
 					previous.bytes += entry.bytes;
 				}
 			}
+		}
+
+		// After the traffic: a link this snapshot no longer lists may have carried some of it (see forget).
+		if (report.topology !== undefined) {
+			this.applyTopology(reporter, report.topology);
 		}
 
 		// Samples: the log and the animation — replayed at their original pace relative to the report.
@@ -404,11 +405,25 @@ export class ArchitectureStore {
 		}
 	}
 
-	/** Remove a placeholder peer and its link, if nothing was counted against them. */
+	/** Remove a placeholder peer and its link, if nothing was counted against them — else the peer has ENDED (the
+	 *  link closed before it ever said who it was, e.g. an outdated service worker replaced mid-boot): keep its
+	 *  traffic, but let it fade like any other context that ended. */
 	private forget(reporter: string, id: string): void {
 		const { channel } = this.channel(reporter, id);
 
 		if (channel.count > 0) {
+			const node = this.nodes.get(id);
+
+			channel.linked = false;
+
+			if (node !== undefined && node.state !== "terminated") {
+				node.spec = { ...node.spec, "dynamic": true };
+				node.state = "terminated";
+				node.endedAt = Date.now();
+			}
+
+			this.changed();
+
 			return;
 		}
 

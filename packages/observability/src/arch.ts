@@ -419,8 +419,12 @@ export function createArchReporter(hub: Hub): ArchReporter {
 	return {
 		"self": self,
 		"declare": (spec) => {
-			if (!nodes.has(spec.id)) {
+			const entry = nodes.get(spec.id);
+
+			if (entry === undefined) {
 				nodes.set(spec.id, { "spec": spec, "state": "declared", "alive": 0 });
+			} else {
+				entry.spec = { ...entry.spec, ...spec }; // a re-declare updates the spec (a gauge in `meta`)
 			}
 
 			nodeOp({ "op": "declare", "spec": spec });
