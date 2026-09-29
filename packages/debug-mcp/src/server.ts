@@ -13,6 +13,8 @@ import { createHub, createRpcClient, websocketTransport } from "@brianjenkins94/
 // From source (not a package dependency): the architecture plane's collector side has no runtime deps.
 import { collectArchReports, requestArchSync } from "../../observability/src/arch.ts";
 import { ArchitectureStore } from "../../observability/src/arch-store.ts";
+import type { TabInfo } from "../../observability/src/tabs.ts";
+import { discoverTabs } from "../../observability/src/tabs.ts";
 
 import { WebSocketServer } from "ws";
 import { RecordStore } from "./store.ts";
@@ -53,6 +55,8 @@ export interface DebugMcp {
 	"rpc": RpcClient;
 	/** How many pages are currently linked in (for tree-state health). */
 	"linkCount": () => number;
+	/** The editor tabs linked in right now, each answering with its id — the page tools are served under it. */
+	"tabs": (timeoutMs?: number) => Promise<TabInfo[]>;
 	/** Resolves once the WS server is bound and accepting connections; rejects if it fails to bind (typically
 	 *  EADDRINUSE — another debug-mcp already owns the port). Await before announcing "listening". */
 	"whenListening": Promise<void>;
@@ -127,6 +131,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		"arch": arch,
 		"rpc": rpc,
 		"linkCount": () => links.size,
+		"tabs": (timeoutMs) => discoverTabs(hub, links.size, timeoutMs),
 		"whenListening": whenListening,
 		"close": () => new Promise<void>((resolve) => {
 			for (const socket of links) {

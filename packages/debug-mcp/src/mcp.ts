@@ -14,6 +14,7 @@
 import type { DebugMcp } from "./server.ts";
 import type { QueryLogsInput, QuerySpansInput, WaitInput } from "./store.ts";
 import { registerDebugTools } from "./debug-tools.ts";
+import { callTab } from "./forward.ts";
 import { defineTool, fail, ok, registerTool } from "@brianjenkins94/util/mcp/tool";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -137,9 +138,21 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 	}));
 
 	// ── Live page tools ────────────────────────────────────────────────────────────────────────────--
-	// These do NOT read the store; they FORWARD to a tool the connected page hosts (page.ts `serve`s them) and
-	// return its live answer. This is "an MCP server hosted in the tab": the tab owns the logic + live app state,
-	// the relay is a pipe. If no page is connected the rpc times out and the tool reports it, not a crash.
+	// These do NOT read the store; they FORWARD to a tool the connected tab hosts (servePageTools `serve`s them, under
+	// the tab's id) and return its live answer. This is "an MCP server hosted in the tab": the tab owns the logic + live
+	// app state, the relay is a pipe. Each call goes to ONE tab: the one named, or the only one connected (forward.ts).
+
+	const TAB = z.string().optional().describe("The editor tab (from list_tabs). Omit when one tab is connected.");
+
+	registerTool(server, defineTool({
+		"name": "list_tabs",
+		"config": {
+			"title": "List editor tabs",
+			"description": "The editor tabs connected right now: [{ tab, url, title, visible, focused }]. The page and debugger tools act on one tab — pass its `tab` when several are connected.",
+			"inputSchema": {}
+		},
+		"handler": async () => ok(await debugMcp.tabs())
+	}));
 
 	registerTool(server, defineTool({
 		"name": "page_eval",
@@ -148,14 +161,15 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 			"description": "Evaluate a JavaScript expression IN THE LIVE editor page and return its result (JSON-serialized). A Promise result is awaited. Answers questions the log stream can't — current URL/title, element counts, localStorage, live app state. Requires a connected page (dev, localhost-gated).",
 			"inputSchema": {
 				"expression": z.string().describe("A JS expression, e.g. `document.title` or `document.querySelectorAll('.monaco-editor').length`. May evaluate to a Promise (e.g. an async IIFE), which is awaited."),
+				"tab": TAB,
 				"timeoutMs": z.number().optional().describe("How long to wait for the result, including an awaited Promise (default 5000).")
 			}
 		},
 		"handler": async (args) => {
-			const { expression, timeoutMs = 5000 } = args as { "expression": string; "timeoutMs"?: number };
+			const { expression, tab, timeoutMs = 5000 } = args as { "expression": string; "tab"?: string; "timeoutMs"?: number };
 
 			try {
-				return ok(await debugMcp.rpc.request("page_eval", { "expression": expression }, { "timeoutMs": timeoutMs }));
+				return ok(await callTab(debugMcp, "page_eval", tab, { "expression": expression }, timeoutMs));
 			} catch (error) {
 				return fail(error instanceof Error ? error.message : String(error));
 			}
@@ -169,14 +183,15 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 			"description": "Run a CSS selector in the LIVE editor page and return the match count plus a sample of each match's trimmed text. Requires a connected page.",
 			"inputSchema": {
 				"selector": z.string().describe("A CSS selector, e.g. '.monaco-editor' or '[role=tab]'."),
-				"limit": z.number().optional().describe("Max sample entries to return (default 10).")
+				"limit": z.number().optional().describe("Max sample entries to return (default 10)."),
+				"tab": TAB
 			}
 		},
 		"handler": async (args) => {
-			const { selector, limit } = args as { "selector": string; "limit"?: number };
+			const { selector, limit, tab } = args as { "selector": string; "limit"?: number; "tab"?: string };
 
 			try {
-				return ok(await debugMcp.rpc.request("page_query", { "selector": selector, "limit": limit ?? 10 }, { "timeoutMs": 5000 }));
+				return ok(await callTab(debugMcp, "page_query", tab, { "selector": selector, "limit": limit ?? 10 }, 5000));
 			} catch (error) {
 				return fail(error instanceof Error ? error.message : String(error));
 			}
@@ -191,14 +206,15 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 			"inputSchema": {
 				"rounds": z.number().optional().describe("Cold-restart + concurrent-transform cycles to run (default 10; use ~5 for hardReset, it's slower)."),
 				"modules": z.array(z.string()).optional().describe("Module URLs to hammer each round, e.g. ['/src/App.tsx']. Default: the whole src/ graph."),
-				"hardReset": z.boolean().optional().describe("Spawn a fresh cold child worker per round (cold ts realm — the true first-load race) instead of an in-process warm restart. Default false.")
+				"hardReset": z.boolean().optional().describe("Spawn a fresh cold child worker per round (cold ts realm — the true first-load race) instead of an in-process warm restart. Default false."),
+				"tab": TAB
 			}
 		},
 		"handler": async (args) => {
-			const { rounds, modules, hardReset } = args as { "rounds"?: number; "modules"?: string[]; "hardReset"?: boolean };
+			const { rounds, modules, hardReset, tab } = args as { "rounds"?: number; "modules"?: string[]; "hardReset"?: boolean; "tab"?: string };
 
 			try {
-				return ok(await debugMcp.rpc.request("preview_provoke", { "rounds": rounds ?? 10, "modules": modules, "hardReset": hardReset ?? false }, { "timeoutMs": 300000 }));
+				return ok(await callTab(debugMcp, "preview_provoke", tab, { "rounds": rounds ?? 10, "modules": modules, "hardReset": hardReset ?? false }, 300000));
 			} catch (error) {
 				return fail(error instanceof Error ? error.message : String(error));
 			}

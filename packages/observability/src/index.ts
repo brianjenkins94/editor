@@ -22,6 +22,9 @@ import type { Logger, LogRecord } from "@brianjenkins94/util/logger";
 import { createRpcClient, portTransport, serve, websocketTransport } from "@brianjenkins94/hub";
 import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
 
+import type { TabInfo } from "./tabs.ts";
+import { TAB_DISCOVER, TAB_HERE } from "./tabs.ts";
+
 /** Reserved observability namespace — records are published on `$sys.log.<source>`; app code must not use it.
  *  A separate-process sink (a Node collector) must use this same value; see @brianjenkins94/debug-mcp. */
 export const LOG_SUBJECT = "$sys.log";
@@ -251,20 +254,56 @@ function jsonSafe(value: unknown): unknown {
 	return value;
 }
 
+/** Answer tab discovery (tabs.ts) on `hub` as tab `tab`. Returns an unsubscribe. */
+export function answerTabDiscovery(hub: Hub, tab: string): () => void {
+	return hub.subscribe(TAB_DISCOVER, (data) => {
+		hub.publish(TAB_HERE, { "query": (data as { "query"?: string } | undefined)?.query, ...describeTab(tab) });
+	});
+}
+
+function describeTab(tab: string): TabInfo {
+	const info: TabInfo = { "tab": tab, "url": location.href, "title": document.title, "visible": document.visibilityState === "visible", "focused": document.hasFocus() };
+
+	try {
+		// A hub in a frame describes the tab it's in: the top window's address, title and focus.
+		const top = window.top;
+
+		if (top !== null && top !== window) {
+			info.url = top.location.href;
+			info.title = top.document.title || info.title;
+			info.focused = top.document.hasFocus();
+		}
+	} catch { /* a cross-origin top — keep this frame's own */ }
+
+	return info;
+}
+
+export interface PageToolsOptions {
+	/** This tab's id (default: minted here). Every tool is served as `<name>.<tab>`, so a relay linked to several tabs
+	 *  at once addresses one (see tabs.ts for how it learns the ids). */
+	"tab"?: string;
+	/** Host calls to expose the same way, each forwarded into THIS tab's own tree: `{ "preview_provoke": "preview.provoke" }`
+	 *  serves `preview_provoke.<tab>` by requesting `preview.provoke` here. The caller owns the timeout (and cancels). */
+	"forward"?: Record<string, string>;
+}
+
 /**
  * Host live MCP tools IN THIS TAB. When the debug-mcp link is enabled (see `debugEnabled`), register handlers the
  * debug-mcp relay forwards agent tool calls to — so an MCP client (Claude Code) can query the LIVE page, not just
- * the log stream: `page_eval` (evaluate an expression in page scope) and `page_query` (a CSS selector's count +
- * text sample). This is what makes the tab the de-facto MCP server; the relay is a pipe. Dev-only + gated, and
- * `eval` here is reachable only by a relay that passed its own Origin check — but it IS arbitrary in-page eval,
- * so keep it behind the opt-in.
+ * the log stream: `page_eval` (evaluate an expression in page scope), `page_query` (a CSS selector's count + text
+ * sample), and the host's `forward`ed calls — all under this tab's id, and it answers the relay's tab discovery. This
+ * is what makes the tab the de-facto MCP server; the relay is a pipe. Dev-only + gated, and `eval` here is reachable
+ * only by a relay that passed its own Origin check — but it IS arbitrary in-page eval, so keep it behind the opt-in.
+ * Returns the tab id, or undefined when disabled.
  */
-export function servePageTools(hub: Hub): void {
+export function servePageTools(hub: Hub, options: PageToolsOptions = {}): string | undefined {
 	if (!debugEnabled()) {
-		return;
+		return undefined;
 	}
 
-	serve(hub, "page_eval", async (args) => {
+	const tab = options.tab ?? crypto.randomUUID().slice(0, 8);
+
+	serve(hub, "page_eval." + tab, async (args) => {
 		const { expression } = args as { "expression": string };
 		// eslint-disable-next-line no-eval -- page_eval's whole purpose is to evaluate a caller-supplied expression in the tab; indirect eval runs it in global scope, not this closure.
 		const indirectEval = eval;
@@ -273,19 +312,24 @@ export function servePageTools(hub: Hub): void {
 		return jsonSafe(await indirectEval(expression));
 	});
 
-	serve(hub, "page_query", (args) => {
+	serve(hub, "page_query." + tab, (args) => {
 		const { selector, limit = 10 } = args as { "selector": string; "limit"?: number };
 		const nodes = Array.from(document.querySelectorAll(selector));
 
 		return { "count": nodes.length, "sample": nodes.slice(0, limit).map((node) => (node.textContent ?? "").trim().slice(0, 120)) };
 	});
 
-	// Forward `provoke_transform` down to the preview worker (which hosts `preview.provoke`). page_eval can't reach
-	// the worker's dev server, but an rpc request from this page routes to it — so this thin bridge lets an agent
-	// loop the cold-start transform race from debug-mcp instead of hand-driving cold boots. See node-worker.ts.
+	// A request from this hub reaches only this tab's tree (the relay links each tab as its own), so a forward is how a
+	// relay reaches a service deep in ONE tab — a worker's dev server, the debugger — that page_eval can't.
 	const rpc = createRpcClient(hub);
 
-	serve(hub, "preview_provoke", (args) => rpc.request("preview.provoke", args ?? {}, { "timeoutMs": 300000 }));
+	for (const [name, target] of Object.entries(options.forward ?? {})) {
+		serve(hub, name + "." + tab, (args, { signal }) => rpc.request(target, args ?? {}, { "timeoutMs": Infinity, "waitForResponderMs": 10000, "signal": signal }));
+	}
+
+	answerTabDiscovery(hub, tab);
+
+	return tab;
 }
 
 /**
@@ -331,3 +375,4 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 export * from "./arch.ts";
 export * from "./arch-probes.ts";
 export * from "./arch-store.ts";
+export * from "./tabs.ts";

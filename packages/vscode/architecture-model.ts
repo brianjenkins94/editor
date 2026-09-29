@@ -134,9 +134,12 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "recognizer.project", "hubs": ["workbench", "recognizer"], "description": "Project a game into the event sheet's model." },
 	{ "pattern": "provoke.round", "hubs": ["node", "provoke"], "description": "One cold transform round: the workspace buffer in, failures out." },
 	{ "pattern": "debug.>", "hubs": ["shell", "workbench", "pod"], "description": "Debug sessions and the toolbar." },
-	{ "pattern": "debug.sessions", "hubs": ["pod", "debug-mcp"], "description": "debug-mcp: the live tsval sessions." },
-	{ "pattern": "debug.start", "hubs": ["pod", "debug-mcp"], "description": "debug-mcp: start a tsval session, answered with its first stop." },
-	{ "pattern": "debug.breakpoints", "hubs": ["pod", "debug-mcp"], "description": "debug-mcp: replace a file's breakpoints." },
+	{ "pattern": "debug.sessions", "hubs": ["pod", "root"], "description": "The live tsval sessions (debug-mcp's, forwarded by this tab's root)." },
+	{ "pattern": "debug.start", "hubs": ["pod", "root"], "description": "Start a tsval session, answered with its first stop (debug-mcp's, forwarded by this tab's root)." },
+	{ "pattern": "debug.breakpoints", "hubs": ["pod", "root"], "description": "Replace a file's breakpoints (debug-mcp's, forwarded by this tab's root)." },
+	{ "pattern": "debug.sessions.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp: one tab's tsval sessions." },
+	{ "pattern": "debug.start.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp: start a tsval session in one tab." },
+	{ "pattern": "debug.breakpoints.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp: replace a file's breakpoints in one tab." },
 	{ "pattern": "debug.session.>", "hubs": ["pod", "debug-worker", "debug-mcp"], "description": "One tsval session: the adapter ⇄ worker protocol (control, events), and debug-mcp stepping, reading or stopping it." },
 	{ "pattern": "production.>", "hubs": ["workbench", "pod"], "description": "Production (server) runs." },
 	{ "pattern": "tsval.preview.>", "hubs": ["shell", "workbench", "pod", "debug-worker"], "description": "The tsval render surface." },
@@ -144,9 +147,10 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.prompt", "hubs": ["pod", "shell"], "description": "Ask the user about a capability, served by the shell." },
 	{ "pattern": "pod.ready", "hubs": ["pod", "debug-worker"], "description": "A debug worker is up." },
 	{ "pattern": "editor.ready", "hubs": ["pod"], "description": "Published by the pod — nothing subscribes yet." },
-	{ "pattern": "page_eval", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: evaluate in the page." },
-	{ "pattern": "page_query", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: query the DOM." },
-	{ "pattern": "preview_provoke", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: provoke the preview." }
+	{ "pattern": "tab.>", "hubs": ["root", "debug-mcp"], "description": "debug-mcp's tab discovery: which editor tabs are linked, by id." },
+	{ "pattern": "page_eval.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: evaluate in one tab's page." },
+	{ "pattern": "page_query.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: query the DOM." },
+	{ "pattern": "preview_provoke.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: provoke one tab's preview (forwarded to preview.provoke)." }
 ];
 
 export const channels: ChannelSpec[] = [

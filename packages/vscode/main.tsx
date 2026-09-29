@@ -63,7 +63,13 @@ if (isolated && window.parent === window) {
 	serve(rootHub, "capability.decide." + tab, (args) => tabRpc.request("capability.decide", args, { "timeoutMs": 300000, "waitForResponderMs": 10000 }));
 	linkServiceWorkerHub(rootHub);
 	linkDebugMcp(rootHub); // dev-only: federate the tree to a running @brianjenkins94/debug-mcp for MCP querying
-	servePageTools(rootHub); // dev-only: host live MCP tools (page_eval/page_query) the debug-mcp relay forwards to
+	// Dev-only: the live MCP tools debug-mcp forwards to, under this tab's id so it can address one tab of several —
+	// page_eval/page_query, plus calls into this tab's tree: the preview's cold-start provoke and the debugger's
+	// pod-level calls (a session's own calls are already addressed by its id).
+	servePageTools(rootHub, {
+		"tab": tab,
+		"forward": { "preview_provoke": "preview.provoke", "debug.sessions": "debug.sessions", "debug.start": "debug.start", "debug.breakpoints": "debug.breakpoints" }
+	});
 
 	// The live preview BACKEND: runs the demo (a Vite React app) through an in-browser dev server in the node worker,
 	// which hot-reloads on workspace changes. Display-free — the movable window + iframe live in the shell (top
