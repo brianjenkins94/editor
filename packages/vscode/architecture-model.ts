@@ -154,14 +154,10 @@ export const channels: ChannelSpec[] = [
 	{ "a": "exthost:LocalWebWorker:*", "b": "net:origin", "protocol": "HTTP", "transport": "fetch", "description": "Extensions loading their resources." },
 	{ "a": "exthost:LocalWebWorker:*", "b": "net:registry.npmjs.org", "protocol": "HTTP", "transport": "fetch", "description": "TypeScript's automatic type acquisition (package metadata)." },
 	{ "a": "workbench", "b": "net:open-vsx.org", "protocol": "HTTP", "transport": "fetch", "description": "Extension gallery." },
-	{ "a": "root", "b": "net:origin", "protocol": "HTTP", "transport": "fetch", "description": "The app's own requests." },
-	{ "a": "shell", "b": "net:origin", "protocol": "HTTP", "transport": "fetch", "description": "The shell's own requests." },
 	{ "a": "shell", "b": "net:api.github.com", "protocol": "HTTP", "transport": "fetch", "description": "GitHub repos and publishing." },
 	{ "a": "shell", "b": "net:lighter.codehike.org", "protocol": "HTTP", "transport": "fetch", "description": "Diff highlighting." },
 	{ "a": "sw", "b": "net:*", "protocol": "HTTP", "transport": "fetch", "description": "The service worker's upstream requests (CDN)." },
 	{ "a": "workbench", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "User data, logs, storage, workspace-fs." },
-	{ "a": "root", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "The app realm's storage." },
-	{ "a": "sw", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "The service worker's storage." },
 	// the preview pipeline
 	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "description": "Into the iframe: HMR updates (vite-hmr), capability decisions. Out of it: console/errors (obs-log → $sys.log.preview), WebSocket/WebRTC capability requests (cap-decide)." },
 	{ "a": "shell", "b": "tsval-preview", "protocol": "tsval render protocol", "transport": "window.postMessage + MessagePort", "description": "preview-ready → init (MessagePort); events and time travel up, the mutation stream down." },
@@ -313,6 +309,23 @@ export type Violation =
 /** `hub`: how many of a label's messages rode the hub — only those are subjects; the rest came from probes. */
 export interface ObservedChannel { "a": string; "b": string; "labels": Map<string, { "count": number; "hub"?: number }> }
 export interface ObservedTopology { "links": { "peerId"?: string }[] }
+
+/** How many observed pairs each declared channel covers. A channel declared on a hub-linked pair (the debug adapter's
+ *  messages beside the pod ⇄ debug-worker link) is seen only through probe traffic — the hub's own belongs to the link. */
+export function seenChannels(observed: ObservedChannel[]): Map<ChannelSpec, number> {
+	const seen = new Map<ChannelSpec, number>();
+
+	for (const channel of observed) {
+		const spec = findChannel(channel.a, channel.b);
+		const probed = !isHubLink(channel.a, channel.b) || [...channel.labels.values()].some((label) => label.count > (label.hub ?? 0));
+
+		if (spec !== undefined && probed) {
+			seen.set(spec, (seen.get(spec) ?? 0) + 1);
+		}
+	}
+
+	return seen;
+}
 
 /** Compare what's observed with the model. */
 export function checkConformance(observed: { "nodes": string[]; "channels": ObservedChannel[]; "topology": Map<string, ObservedTopology> }): Violation[] {

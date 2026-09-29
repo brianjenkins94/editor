@@ -254,13 +254,9 @@ flowchart LR
   workbench <-.->|bootstrap handshake| exthost_iframe
   workbench <-.->|HTTP| net_origin
   workbench <-.->|HTTP| net_open_vsx_org
-  root <-.->|HTTP| net_origin
-  shell <-.->|HTTP| net_origin
   shell <-.->|HTTP| net_api_github_com
   shell <-.->|HTTP| net_lighter_codehike_org
   workbench <-.->|IndexedDB| idb
-  root <-.->|IndexedDB| idb
-  sw <-.->|IndexedDB| idb
   shell <-.->|tsval render protocol| tsval_preview
   node <-.->|capability decision| sw
   node <-.->|provoke round| worker_provoke_worker

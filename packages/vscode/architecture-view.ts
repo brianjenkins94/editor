@@ -7,10 +7,11 @@
  * Plain DOM/SVG in the workbench realm (hosted by the component's editor pane), themed with VS Code's variables.
  */
 import type { Hub } from "@brianjenkins94/hub";
+import { createRpcClient } from "@brianjenkins94/hub";
 import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
 import type { ContainerSpec, Violation } from "./architecture-model";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
-import { checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, subjectMatches, subjectOfLabel } from "./architecture-model";
+import { checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -43,9 +44,38 @@ export function architectureStore(hub: Hub): ArchitectureStore {
 		collectArchReports(hub, (report) => { store.apply(report); });
 		// The subscription's interest has to reach the other hubs before they're asked to answer.
 		setTimeout(() => { requestArchSync(hub); }, 200);
+		// A handle for scripts (the architecture smoke test, a console): what the diagram knows, as data.
+		const rpc = createRpcClient(hub);
+
+		(globalThis as unknown as { "__architecture": ArchitectureHandle }).__architecture = {
+			"hub": hub,
+			"request": async (subject, data, timeoutMs) => rpc.request(subject, data, { "timeoutMs": timeoutMs, "waitForResponderMs": 5000 }),
+			"snapshot": () => store.snapshot(),
+			"conformance": () => conformanceOf(store)
+		};
 	}
 
 	return shared;
+}
+
+export interface ArchitectureHandle {
+	"hub": Hub;
+	/** An RPC into the hub tree (e.g. `preview.provoke` on the node worker), for a script driving the editor. */
+	"request": (subject: string, data?: unknown, timeoutMs?: number) => Promise<unknown>;
+	"snapshot": () => unknown;
+	"conformance": () => Violation[];
+}
+
+/** What needs review in what the diagram shows: a context that ended long ago (and its channels) no longer does. */
+function conformanceOf(store: ArchitectureStore): Violation[] {
+	const now = Date.now();
+	const shown = new Set([...store.nodes.values()].filter((node) => node.state !== "declared" && isVisible(node, now, false)).map((node) => node.id));
+
+	return checkConformance({
+		"nodes": [...shown],
+		"channels": [...store.channels.values()].filter((channel) => (channel.count > 0 || channel.linked) && shown.has(channel.a) && shown.has(channel.b)),
+		"topology": store.topology
+	});
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -731,15 +761,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 	// ── side panel
 	function conformance(): Violation[] {
-		// What the diagram shows: a context that ended long ago (and its channels) no longer needs review.
-		const now = Date.now();
-		const shown = new Set([...store.nodes.values()].filter((node) => node.state !== "declared" && isVisible(node, now, false)).map((node) => node.id));
-
-		return checkConformance({
-			"nodes": [...shown],
-			"channels": [...store.channels.values()].filter((channel) => (channel.count > 0 || channel.linked) && shown.has(channel.a) && shown.has(channel.b)),
-			"topology": store.topology
-		});
+		return conformanceOf(store);
 	}
 
 	function select(value: Selection): void {
@@ -938,18 +960,14 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		const violations = conformance();
 		const observed = [...store.channels.values()].filter((channel) => channel.count > 0 || channel.linked);
 		const seen = (a: string, b: string): boolean => observed.some((channel) => (channel.a === a && channel.b === b) || (channel.a === b && channel.b === a));
-		const seenPattern = (a: string, b: string): number => observed.filter((channel) => {
-			const declared = declaredBetween(channel.a, channel.b);
-
-			return declared?.type === "channel" && declared.spec.a === a && declared.spec.b === b;
-		}).length;
+		const seenByChannel = seenChannels(observed);
 
 		return [
 			section(
 				"Summary",
 				keyValues([
 					["Hub links", `${hubLinks.filter(([a, b]) => seen(a, b)).length} / ${hubLinks.length} seen`],
-					["Channels", `${declaredChannels.filter((channel) => seenPattern(channel.a, channel.b) > 0).length} / ${declaredChannels.length} seen`],
+					["Channels", `${declaredChannels.filter((channel) => seenByChannel.has(channel)).length} / ${declaredChannels.length} seen`],
 					["To review", String(violations.length)]
 				]),
 				h("p", { "class": "arch-muted" }, "The model: packages/vscode/architecture-model.ts. Change it with the architecture.")
@@ -963,7 +981,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			section("Channels", table(["Channel", "Protocol", "Seen"], declaredChannels.map((channel) => [
 				`${channel.a} ⇄ ${channel.b}`,
 				channel.protocol,
-				seenPattern(channel.a, channel.b) > 0 ? String(seenPattern(channel.a, channel.b)) : "no"
+				String(seenByChannel.get(channel) ?? "no")
 			])))
 		];
 	}
