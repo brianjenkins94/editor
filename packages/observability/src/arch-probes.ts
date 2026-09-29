@@ -199,7 +199,7 @@ function installIndexedDBProbe(sink: ArchSink): void {
 	}
 }
 
-const installed = new WeakSet<object>();
+const installed = new WeakSet();
 
 /** Observe this realm's HTTP, WebSocket and IndexedDB traffic. Idempotent per realm. */
 export function installNetworkProbes(sink: ArchSink, options: NetworkProbeOptions = {}): void {

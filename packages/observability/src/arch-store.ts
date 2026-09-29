@@ -21,7 +21,14 @@ export interface RuntimeNode {
 	"reporters": Set<string>;
 }
 
-export interface LabelStats { "count": number; "bytes": number; "forward": number; "backward": number }
+export interface LabelStats {
+	"count": number;
+	"bytes": number;
+	"forward": number;
+	"backward": number;
+	/** How many rode the hub (the label is then a subject) — the rest were observed by probes. */
+	"hub": number;
+}
 
 export interface ChannelStats {
 	"id": string;
@@ -63,6 +70,7 @@ export class ArchitectureStore {
 	public readonly reporters = new Map<string, number>();
 
 	private readonly contributions = new Map<string, Map<string, TrafficCount>>();
+	private readonly anonymous = new Map<string, Set<string>>();
 	private readonly topologyListeners = new Set<Listener>();
 	private readonly sampleListeners = new Set<SampleListener>();
 	private scheduled = false;
@@ -168,8 +176,21 @@ export class ArchitectureStore {
 
 		const now = Date.now();
 		const created: ChannelStats = {
-			"id": a + "|" + b, "a": a, "b": b, "count": 0, "bytes": 0, "forward": 0, "backward": 0, "errors": 0,
-			"linked": false, "interest": {}, "firstAt": now, "lastAt": now, "labels": new Map(), "recent": [], "window": []
+			"id": a + "|" + b,
+			"a": a,
+			"b": b,
+			"count": 0,
+			"bytes": 0,
+			"forward": 0,
+			"backward": 0,
+			"errors": 0,
+			"linked": false,
+			"interest": {},
+			"firstAt": now,
+			"lastAt": now,
+			"labels": new Map(),
+			"recent": [],
+			"window": []
 		};
 
 		this.channels.set(created.id, created);
@@ -195,12 +216,17 @@ export class ArchitectureStore {
 		let label = channel.labels.get(entry.label);
 
 		if (label === undefined) {
-			label = { "count": 0, "bytes": 0, "forward": 0, "backward": 0 };
+			label = { "count": 0, "bytes": 0, "forward": 0, "backward": 0, "hub": 0 };
 			channel.labels.set(entry.label, label);
 		}
 
 		label.count += count;
 		label.bytes += bytes;
+
+		if (entry.via === "hub") {
+			label.hub += count;
+		}
+
 		label[forward ? "forward" : "backward"] += count;
 
 		if (count > 0) {
@@ -210,7 +236,7 @@ export class ArchitectureStore {
 		if (inWindow && count > 0) {
 			channel.window.push([now, count]);
 
-			while (channel.window.length > 0 && now - channel.window[0]![0] > RATE_WINDOW_MS) {
+			while (channel.window.length > 0 && now - channel.window[0][0] > RATE_WINDOW_MS) {
 				channel.window.shift();
 			}
 		}
@@ -257,6 +283,9 @@ export class ArchitectureStore {
 
 					break;
 				}
+
+				default:
+					break;
 			}
 		}
 
@@ -313,9 +342,18 @@ export class ArchitectureStore {
 
 		for (const sample of report.samples ?? []) {
 			const { channel, reversed } = this.channel(sample.from, sample.to);
+
+			this.seq += 1;
+
 			const stored: StoredSample = {
-				"seq": ++this.seq, "t": sample.t + offset, "channel": channel.id, "forward": !reversed,
-				"kind": sample.kind, "label": sample.label, "bytes": sample.bytes, "reporter": reporter
+				"seq": this.seq,
+				"t": sample.t + offset,
+				"channel": channel.id,
+				"forward": !reversed,
+				"kind": sample.kind,
+				"label": sample.label,
+				"bytes": sample.bytes,
+				"reporter": reporter
 			};
 
 			channel.recent.push(stored);
@@ -339,6 +377,18 @@ export class ArchitectureStore {
 	private applyTopology(reporter: string, snapshot: NonNullable<ArchReport["topology"]>): void {
 		this.topology.set(reporter, snapshot);
 
+		// A link is anonymous until its peer's `hello` arrives: drop the placeholder once a later snapshot names
+		// the peer (or the link is gone), unless traffic was actually counted against it.
+		const anonymous = new Set(snapshot.links.filter((link) => link.peerId === undefined).map((link) => reporter + ":" + link.id));
+
+		for (const previous of this.anonymous.get(reporter) ?? []) {
+			if (!anonymous.has(previous)) {
+				this.forget(reporter, previous);
+			}
+		}
+
+		this.anonymous.set(reporter, anonymous);
+
 		for (const link of snapshot.links) {
 			const peer = link.peerId ?? reporter + ":" + link.id;
 			const { channel } = this.channel(reporter, peer);
@@ -352,6 +402,25 @@ export class ArchitectureStore {
 
 			channel.interest[reporter] = link.remoteInterest;
 		}
+	}
+
+	/** Remove a placeholder peer and its link, if nothing was counted against them. */
+	private forget(reporter: string, id: string): void {
+		const { channel } = this.channel(reporter, id);
+
+		if (channel.count > 0) {
+			return;
+		}
+
+		this.channels.delete(channel.id);
+
+		const node = this.nodes.get(id);
+
+		if (node !== undefined && ![...this.channels.values()].some((other) => other.a === id || other.b === id)) {
+			this.nodes.delete(id);
+		}
+
+		this.changed();
 	}
 
 	/** Forget the counts (not the topology). */
@@ -375,11 +444,11 @@ export class ArchitectureStore {
 			"reporters": Object.fromEntries(this.reporters),
 			"topology": Object.fromEntries(this.topology),
 			"nodes": [...this.nodes.values()].map((node) => ({ ...node, "reporters": [...node.reporters] })),
-			"channels": [...this.channels.values()].map(({ labels, window: _window, ...channel }) => ({ ...channel, "labels": Object.fromEntries(labels) }))
+			"channels": [...this.channels.values()].map(({ labels, "window": _window, ...channel }) => ({ ...channel, "labels": Object.fromEntries(labels) }))
 		};
 	}
 }
 
 function trafficKey(entry: TrafficCount): string {
-	return entry.from + "\0" + entry.to + "\0" + entry.kind + "\0" + entry.label;
+	return entry.from + "\0" + entry.to + "\0" + entry.kind + "\0" + entry.label + "\0" + (entry.via ?? "");
 }

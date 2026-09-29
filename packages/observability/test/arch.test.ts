@@ -5,24 +5,24 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 // From source: node won't strip types from the pnpm copy under node_modules (arch.ts only imports hub TYPES).
 import { createHub, createRpcClient, serve } from "../../hub/src/index.ts";
-import { collectArchReports, createArchReporter, requestArchSync } from "../src/arch.ts";
 import { ArchitectureStore } from "../src/arch-store.ts";
+import { collectArchReports, createArchReporter, requestArchSync } from "../src/arch.ts";
 
 function pipe(): [Transport, Transport] {
 	let left: ((message: unknown) => void) | undefined;
 	let right: ((message: unknown) => void) | undefined;
 
 	return [
-		{ "send": (message) => { setTimeout(() => right?.(message), 0); }, "listen": (onMessage) => {
-			left = onMessage;
+		{ "send": (message) => { setTimeout(() => { right?.(message); }, 0); },"listen": (onMessage) => {
+				left = onMessage;
 
-			return () => { left = undefined; };
-		} },
-		{ "send": (message) => { setTimeout(() => left?.(message), 0); }, "listen": (onMessage) => {
-			right = onMessage;
+				return () => { left = undefined; };
+			} },
+		{ "send": (message) => { setTimeout(() => { left?.(message); }, 0); },"listen": (onMessage) => {
+				right = onMessage;
 
-			return () => { right = undefined; };
-		} }
+				return () => { right = undefined; };
+			} }
 	];
 }
 
@@ -43,7 +43,7 @@ async function setup() {
 	collectArchReports(root, (report) => { reports.push(report); });
 	await wait(20);
 
-	return { root, pod, reports, "dispose": () => { reporters.forEach((reporter) => { reporter.dispose(); }); } };
+	return { "root": root, "pod": pod, "reports": reports, "dispose": () => { reporters.forEach((reporter) => { reporter.dispose(); }); } };
 }
 
 function trafficOf(reports: ArchReport[], reporter: string) {
@@ -148,5 +148,74 @@ test("a store opened mid-stream converges on the true counts — nothing counted
 	assert.equal(channel.linked, true); // the topology says they're linked
 	assert.ok(channel.interest["pod"]?.includes("git.changed")); // and what root asked pod for
 	assert.ok(store.log.some((sample) => sample.label === "git.changed"));
+	reporter.dispose();
+});
+
+test("traffic sent before the peer's hello is still attributed to the peer, never to a placeholder", async () => {
+	// A window-like transport: messages to a side that isn't listening yet are DROPPED.
+	let left: ((message: unknown) => void) | undefined;
+	let right: ((message: unknown) => void) | undefined;
+	const a: Transport = { "send": (message) => {
+		const to = right;
+
+		if (to !== undefined) { setTimeout(to, 0, message); }
+	}, "listen": (onMessage) => {
+		left = onMessage;
+
+		return () => { left = undefined; };
+	} };
+	const b: Transport = { "send": (message) => {
+		const to = left;
+
+		if (to !== undefined) { setTimeout(to, 0, message); }
+	}, "listen": (onMessage) => {
+		right = onMessage;
+
+		return () => { right = undefined; };
+	} };
+	const root = createHub({ "id": "root" });
+	const workbench = createHub({ "id": "workbench" });
+	const reporter = createArchReporter(root);
+	const store = new ArchitectureStore();
+
+	collectArchReports(root, (report) => { store.apply(report); });
+	root.link(a); // nobody listening yet: root's hello is lost, it doesn't know its peer
+	await wait(20);
+	workbench.link(b); // workbench's hello reaches root, root's reply reaches workbench
+	await wait(400);
+
+	assert.ok(![...store.nodes.keys()].some((id) => id.startsWith("root:link")), [...store.nodes.keys()].join(","));
+	assert.ok(store.channels.has("root|workbench"));
+	assert.ok((store.channels.get("root|workbench")?.labels.get("hello")?.hub ?? 0) > 0);
+	reporter.dispose();
+});
+
+test("a peer that boots slowly is still named; an older hub (hello without id) is anonymous", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const reporter = createArchReporter(root);
+	const store = new ArchitectureStore();
+
+	collectArchReports(root, (report) => { store.apply(report); });
+	root.link(a); // traffic starts flowing (interest, hello) long before the peer is up
+	root.subscribe("anything", () => undefined);
+	await wait(700); // several flushes while the peer is still booting
+
+	const late = createHub({ "id": "workbench" });
+
+	late.link(b);
+	await wait(400);
+	assert.ok(![...store.nodes.keys()].some((id) => id.includes(":link")), [...store.nodes.keys()].join(","));
+	assert.ok(store.channels.has("root|workbench"));
+
+	// An older hub: its hello carries no id.
+	const [c, d] = pipe();
+	const second = root.link(c);
+
+	d.listen(() => undefined);
+	d.send({ "\0hub": { "hub": "hello" } });
+	await wait(400);
+	assert.ok(store.nodes.has("root:link-2"));
+	second();
 	reporter.dispose();
 });
