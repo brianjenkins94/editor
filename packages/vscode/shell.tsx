@@ -21,6 +21,7 @@ import { logger } from "@brianjenkins94/util/logger";
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { renderGitPanel } from "./git-panel";
+import { reportArchitecture } from "./architecture";
 import { getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
 import type { RepoBinding } from "./github-auth";
 import { installShellPreview } from "./shell-preview";
@@ -353,6 +354,7 @@ function Shell() {
 
 		const shellHub = createHub({ "id": "shell" });
 
+		reportArchitecture(shellHub); // this realm's hub + network (GitHub, Code Hike) on $sys.arch
 		hubRef.current = shellHub;
 		shellHub.link(windowTransport(appFrame.contentWindow));
 

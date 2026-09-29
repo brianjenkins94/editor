@@ -7,6 +7,7 @@ import workspace from "editor:workspace";
 import { ensureCrossOriginIsolated } from "./coi";
 import { hostLog } from "./logging";
 import { consoleCollector, installHubCollector, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "./telemetry";
+import { reportArchitecture } from "./architecture";
 import { sampleById, sampleList } from "./samples";
 import { createVscodeWindow } from "./vscode";
 
@@ -37,6 +38,7 @@ if (isolated && window.parent === window) {
 	// dedicated port. See telemetry.ts / @brianjenkins94/hub.
 	const rootHub = createHub({ "id": "root" });
 
+	reportArchitecture(rootHub); // this realm's hub + network on $sys.arch, for the live architecture view
 	installHubCollector(rootHub, consoleCollector);
 	tapConsoleAndErrors(rootHub, "host"); // raw uncaught error/rejection on the page → the plane (errors-only: loop-safe on the collector context)
 	linkServiceWorkerHub(rootHub);

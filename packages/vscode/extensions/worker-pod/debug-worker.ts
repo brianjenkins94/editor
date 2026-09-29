@@ -27,6 +27,7 @@ import React from "react";
 import ts from "typescript";
 import { capabilityBreakLines } from "../capabilities/capability-breakpoints";
 import { capabilityStandins, inert } from "../capabilities/canary";
+import { reportArchitecture } from "../../architecture";
 import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
 import { createGuestRoot } from "./debug-react";
 
@@ -39,6 +40,8 @@ hub.link(portTransport(globalThis));
 // This worker's util/logger spans/records federate UP through the pod (which links our hub) to the root
 // collector — so a step's span shows up in the top-page timeline with no worker→page window path of its own.
 const workerLog = relayLoggerToHub(hub, "debug-worker");
+
+reportArchitecture(hub); // hub + this worker's own requests on $sys.arch
 
 tapConsoleAndErrors(hub, "debug-worker"); // raw uncaught error/rejection → the plane, beside the structured logs
 

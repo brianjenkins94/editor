@@ -32,6 +32,7 @@ import { getServer, Runtime } from "@brianjenkins94/almostnode";
 import { createHub, portTransport, serve } from "@brianjenkins94/hub";
 
 import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
+import { reportArchitecture } from "../../architecture";
 
 import { installTimerKeepAlive } from "./node-keepalive";
 import { createZenfsVFS, getSharedWorkspaceBuffer, receiveSharedWorkspace } from "./zenfs-vfs.js";
@@ -47,6 +48,8 @@ const hub = createHub({ "id": "node" });
 
 hub.link(portTransport(globalThis));
 const log = relayLoggerToHub(hub, "node");
+
+reportArchitecture(hub); // hub + this worker's own requests on $sys.arch
 
 tapConsoleAndErrors(hub, "node"); // raw uncaught error/rejection → the plane, beside the structured logs
 

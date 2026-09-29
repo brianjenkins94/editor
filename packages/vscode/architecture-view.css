@@ -1,0 +1,550 @@
+.arch-root {
+  --arch-bg: var(--vscode-editor-background, #1e1e1e);
+  --arch-fg: var(--vscode-foreground, #cccccc);
+  --arch-muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --arch-border: var(--vscode-panel-border, #80808059);
+  --arch-surface: var(--vscode-editorWidget-background, #252526);
+  --arch-accent: var(--vscode-focusBorder, #007fd4);
+  --arch-request: var(--vscode-charts-blue, #3794ff);
+  --arch-reply: var(--vscode-charts-green, #89d185);
+  --arch-event: var(--vscode-charts-purple, #b180d7);
+  --arch-message: var(--vscode-charts-yellow, #cca700);
+  --arch-error: var(--vscode-charts-red, #f14c4c);
+  --arch-other: var(--vscode-charts-foreground, #cccccc);
+  --arch-alive: var(--vscode-charts-green, #89d185);
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: var(--arch-bg);
+  color: var(--arch-fg);
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+  font-size: 12px;
+  overflow: hidden;
+  container-type: size;
+}
+
+.arch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--arch-border);
+  flex: none;
+  flex-wrap: wrap;
+}
+
+.arch-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.arch-summary {
+  color: var(--arch-muted);
+  margin-right: 8px;
+}
+
+.arch-spacer {
+  flex: 1;
+}
+
+.arch-legend {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.arch-button {
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #ffffff);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 2px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.arch-button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+.arch-button.checked {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #ffffff);
+}
+
+.arch-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.arch-canvas {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  position: relative;
+}
+
+.arch-warning {
+  padding: 8px 12px;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.arch-side {
+  width: 380px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--arch-border);
+  min-height: 0;
+}
+
+.arch-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--arch-border);
+  flex: none;
+}
+
+.arch-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--arch-muted);
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.arch-tab.active {
+  color: var(--arch-fg);
+  border-bottom-color: var(--arch-accent);
+}
+
+.arch-panel {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 12px 16px;
+}
+
+.arch-panel h2 {
+  font-size: 14px;
+  margin: 4px 0 6px;
+  word-break: break-word;
+}
+
+.arch-section h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--arch-muted);
+  margin: 14px 0 6px;
+}
+
+.arch-section p {
+  margin: 4px 0;
+  line-height: 1.45;
+}
+
+.arch-muted {
+  color: var(--arch-muted);
+}
+
+.arch-violations {
+  color: var(--arch-error);
+}
+
+.arch-dim {
+  opacity: 0.6;
+}
+
+.arch-mono {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.arch-link {
+  color: var(--vscode-textLink-foreground, #3794ff);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.arch-link:hover {
+  text-decoration: underline;
+}
+
+.arch-state {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  border: 1px solid currentColor;
+}
+
+.arch-state.state-alive {
+  color: var(--arch-alive);
+}
+
+.arch-state.state-unresponsive {
+  color: var(--arch-error);
+}
+
+.arch-state.state-declared,
+.arch-state.state-terminated {
+  color: var(--arch-muted);
+}
+
+.arch-kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+}
+
+.arch-kv dt {
+  color: var(--arch-muted);
+}
+
+.arch-kv dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.arch-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.arch-table th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--arch-muted);
+  border-bottom: 1px solid var(--arch-border);
+  padding: 2px 4px;
+}
+
+.arch-table th:not(:first-child),
+.arch-table td:not(:first-child) {
+  width: 64px;
+  text-align: right;
+}
+
+.arch-table td {
+  padding: 2px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arch-table tr:hover td {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+.arch-list {
+  margin: 0;
+  padding-left: 16px;
+  line-height: 1.6;
+}
+
+.arch-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #cccccc);
+  border: 1px solid var(--vscode-input-border, transparent);
+  padding: 4px 6px;
+  font: inherit;
+  margin-bottom: 6px;
+}
+
+.arch-input:focus {
+  outline: 1px solid var(--arch-accent);
+}
+
+.arch-event {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 1px 0;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.arch-log .arch-event {
+  cursor: pointer;
+}
+
+.arch-log .arch-event:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+.arch-event-time,
+.arch-event-bytes {
+  color: var(--arch-muted);
+  flex: none;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.arch-event-bytes {
+  margin-left: auto;
+}
+
+.arch-event-endpoints {
+  color: var(--arch-muted);
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.arch-event-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.arch-chip {
+  display: inline-block;
+  flex: none;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--arch-bg);
+  background: var(--arch-other);
+}
+
+.arch-chip.k-request,
+.arch-pulse.k-request {
+  background: var(--arch-request);
+  fill: var(--arch-request);
+}
+
+.arch-chip.k-reply,
+.arch-pulse.k-reply {
+  background: var(--arch-reply);
+  fill: var(--arch-reply);
+}
+
+.arch-chip.k-event,
+.arch-pulse.k-event {
+  background: var(--arch-event);
+  fill: var(--arch-event);
+}
+
+.arch-chip.k-message,
+.arch-pulse.k-message {
+  background: var(--arch-message);
+  fill: var(--arch-message);
+}
+
+.arch-chip.k-error,
+.arch-pulse.k-error {
+  background: var(--arch-error);
+  fill: var(--arch-error);
+}
+
+.arch-pulse {
+  fill: var(--arch-other);
+  pointer-events: none;
+}
+
+/* Narrow editors: the panel goes below the diagram */
+@container (max-width: 900px) {
+  .arch-body {
+    flex-direction: column;
+  }
+
+  .arch-side {
+    width: auto;
+    height: 45%;
+    border-left: none;
+    border-top: 1px solid var(--arch-border);
+  }
+}
+
+/* Diagram */
+
+.arch-svg {
+  display: block;
+  user-select: none;
+}
+
+.arch-container rect {
+  fill: color-mix(in srgb, var(--arch-surface) 55%, transparent);
+  stroke: var(--arch-border);
+  stroke-width: 1;
+}
+
+.arch-container.kind-origin rect,
+.arch-container.kind-remote rect {
+  stroke-dasharray: 5 3;
+}
+
+.arch-container.kind-group rect {
+  fill: none;
+}
+
+.arch-container-label {
+  fill: var(--arch-fg);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.arch-container-caption {
+  fill: var(--arch-muted);
+  font-size: 10px;
+}
+
+.arch-node {
+  cursor: pointer;
+}
+
+.arch-node rect {
+  fill: var(--arch-surface);
+  stroke: var(--arch-border);
+  stroke-width: 1;
+  transition: stroke 0.2s;
+}
+
+.arch-node rect.undeclared {
+  stroke: var(--arch-error);
+  stroke-dasharray: 4 2;
+}
+
+.arch-node.active rect {
+  stroke: var(--arch-accent);
+}
+
+.arch-node.selected rect {
+  stroke: var(--arch-accent);
+  stroke-width: 2;
+}
+
+.arch-node-label {
+  fill: var(--arch-fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.arch-node-detail {
+  fill: var(--arch-muted);
+  font-size: 10px;
+}
+
+.arch-node-badge {
+  fill: var(--arch-muted);
+  font-size: 10px;
+}
+
+.arch-node-dot {
+  fill: var(--arch-muted);
+}
+
+.arch-node.state-alive .arch-node-dot {
+  fill: var(--arch-alive);
+}
+
+.arch-node.state-unresponsive .arch-node-dot {
+  fill: var(--arch-error);
+}
+
+.arch-node.state-declared,
+.arch-node.state-terminated {
+  opacity: 0.45;
+}
+
+.arch-node.state-declared rect {
+  stroke-dasharray: 3 3;
+}
+
+.arch-edge {
+  fill: none;
+  stroke: var(--arch-request);
+  stroke-opacity: 0.45;
+  stroke-width: 1.5;
+}
+
+.arch-edge.status-undeclared {
+  stroke: var(--arch-error);
+  stroke-opacity: 0.8;
+}
+
+.arch-edge.status-ghost {
+  stroke: var(--arch-muted);
+  stroke-opacity: 0.35;
+  stroke-dasharray: 4 4;
+  stroke-width: 1 !important;
+}
+
+.arch-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  cursor: pointer;
+}
+
+.arch-edge-label {
+  fill: var(--arch-muted);
+  font-size: 10px;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--arch-bg);
+  stroke-width: 3px;
+  pointer-events: none;
+}
+
+g.hover > .arch-edge,
+g.focus > .arch-edge,
+g.selected > .arch-edge {
+  stroke-opacity: 1;
+}
+
+g.selected > .arch-edge {
+  stroke: var(--arch-accent);
+}
+
+.arch-svg.has-focus .arch-node:not(.focus) {
+  opacity: 0.35;
+}
+
+.arch-svg.has-focus g[data-edge]:not(.focus) {
+  opacity: 0.15;
+}
+
+.arch-svg.has-focus g.focus .arch-edge-label {
+  fill: var(--arch-fg);
+}
+
+/* Hub links: the tree the hubs federate over — drawn heavier than probed channels */
+.arch-edge.type-hub {
+  stroke: var(--arch-event);
+  stroke-opacity: 0.55;
+}
+
+.arch-edge.type-hub.status-ghost {
+  stroke: var(--arch-muted);
+}
+
+.arch-node.is-hub .arch-node-dot {
+  r: 5;
+}
+
+.arch-subjects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.arch-subject {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--vscode-badge-background, #4d4d4d);
+  color: var(--vscode-badge-foreground, #ffffff);
+}
+
+.arch-subject.unexpected {
+  background: var(--arch-error);
+}

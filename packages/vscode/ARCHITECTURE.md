@@ -97,7 +97,7 @@ flowchart TB
 
   W ==>|"node-runner spawns · hub"| NW
   EXT ==>|"spawns · hub (portTransport)"| DW
-  EXT ==>|"spawns · hub"| SH
+  EXT ==>|"spawns · LSP over postMessage"| SH
   COS ==>|"spawns · postMessage"| CW
   GIT -->|"uses"| COS
 
@@ -113,6 +113,86 @@ flowchart TB
 Edge styles: **solid arrows** = live message channels; **thick arrows** = a realm spawning a worker; **dotted arrows**
 = frame creation, shared-memory, service-worker serving, and build-time bundling. Nesting = iframe containment
 (shell ▸ app ▸ workbench).
+
+## Declared architecture (generated — the live view checks against it)
+
+The diagram above is the narrative. This one is **generated from `architecture-model.ts`** — the model the **live
+architecture view** compares everything it observes against (open it from the Welcome page walkthrough, or
+*Developer: Open Live Architecture Diagram*). Hub links are `<==>`, probed channels `<-.->`. When the architecture
+changes, change the model; `test/architecture-model.test.mjs` fails until this block is regenerated
+(`node -e` the model's `declaredMermaid()`, or the view's **Model** button).
+
+<!-- architecture-model:begin -->
+```mermaid
+flowchart LR
+  subgraph shell["Shell"]
+    shell["Shell"]
+  end
+  subgraph app["App iframe"]
+    root["Root"]
+  end
+  subgraph serviceWorker["Service worker"]
+    sw["Service worker"]
+  end
+  subgraph workbenchIframe["Workbench iframe"]
+    subgraph workbench["Main thread"]
+      workbench["Workbench"]
+      exthost_LocalProcess_0["Local extension host"]
+      pod["Pod"]
+    end
+    subgraph editorWorkers["Editor workers"]
+    end
+    subgraph workers["App workers"]
+      node["Node worker"]
+      debug_worker["Debug worker"]
+      worker_server_host["LSP server host"]
+      worker_classify_worker["Classify worker"]
+      worker_recognizer_worker["Recognizer worker"]
+    end
+    subgraph extHostIframe["Extension host iframe"]
+      exthost_iframe["Iframe relay"]
+      subgraph extHostWorker["Web worker extension host"]
+        exthost_LocalWebWorker_0["Worker extension host"]
+      end
+    end
+    subgraph webviews["Webviews"]
+      webview_sw["Webview service worker"]
+    end
+  end
+  subgraph browser["Browser"]
+    idb["IndexedDB"]
+  end
+  subgraph network["Network"]
+    net_origin["Page origin"]
+    net_unpkg_com["unpkg"]
+    net_registry_npmjs_org["npm registry"]
+    net_open_vsx_org["Open VSX"]
+    net_api_github_com["GitHub API"]
+    net_lighter_codehike_org["Code Hike"]
+    debug_mcp["debug-mcp"]
+  end
+  shell <==>|hub| root
+  root <==>|hub| workbench
+  root <==>|hub| sw
+  root <==>|hub| debug_mcp
+  workbench <==>|hub| pod
+  workbench <==>|hub| node
+  pod <==>|hub| debug_worker
+  workbench <-.->|ws-control| node
+  pod <-.->|debug adapter messages| debug_worker
+  pod <-.->|LSP (JSON-RPC)| worker_server_host
+  workbench <-.->|bootstrap handshake| exthost_iframe
+  workbench <-.->|HTTP| net_origin
+  workbench <-.->|HTTP| net_open_vsx_org
+  root <-.->|HTTP| net_origin
+  shell <-.->|HTTP| net_origin
+  shell <-.->|HTTP| net_api_github_com
+  shell <-.->|HTTP| net_lighter_codehike_org
+  workbench <-.->|IndexedDB| idb
+  root <-.->|IndexedDB| idb
+  sw <-.->|IndexedDB| idb
+```
+<!-- architecture-model:end -->
 
 ## Placement procedure
 

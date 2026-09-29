@@ -27,6 +27,7 @@
  * import the hub below; registered {type:module} (coi.ts / server-bridge.ts).
  */
 import { createHub, createRpcClient, portTransport } from "@brianjenkins94/hub";
+import { reportArchitecture } from "./architecture";
 import { relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
 
 // The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,
@@ -35,6 +36,8 @@ import { relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
 // below), separate from the ServerBridge data port. Standalone until linked — records just drop, by design.
 const swHub = createHub({ "id": "sw" });
 const swLog = relayLoggerToHub(swHub, "sw");
+
+reportArchitecture(swHub); // hub + the SW's upstream requests (CDN) on $sys.arch
 
 tapConsoleAndErrors(swHub, "sw"); // raw uncaught error/rejection → the plane, beside the structured logs
 

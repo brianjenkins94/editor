@@ -14,7 +14,7 @@
  */
 import type { WorkbenchFile, WorkbenchParts } from "@brianjenkins94/monaco-vscode-api/main";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
-import { boot, ExtensionHostKind, registerExtension, registerFileSystemOverlay, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
+import { boot, ExtensionHostKind, installMonacoProbes, registerExtension, registerFileSystemOverlay, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
 // The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
 // virtual module in entry.config.ts).
@@ -25,6 +25,9 @@ import settingsDefaults from "editor:settings-defaults";
 import eslintExtensionCode from "eslint:extension";
 import helloExtensionCode from "hello:extension";
 import workerPodExtensionCode from "worker-pod:extension";
+import { reportArchitecture } from "./architecture";
+import { identifyWorker } from "./architecture-model";
+import { renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
@@ -92,6 +95,12 @@ workbenchHub.link(windowClientTransport(paneId, host));
 const paneLog = relayLoggerToHub(workbenchHub, "workbench");
 
 tapConsoleAndErrors(workbenchHub, "workbench"); // raw uncaught error/rejection → the plane, beside the structured logs
+
+// The live architecture view: this realm's hub + network, and — installed before boot() creates anything — the
+// monaco probes (workers, extension host RPC, webviews). The diagram opens from the Welcome page walkthrough or
+// "Developer: Open Live Architecture Diagram".
+installMonacoProbes(reportArchitecture(workbenchHub), { "identifyWorker": identifyWorker });
+registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });
 
 window.addEventListener("error", (event) => {
 	// A benign ResizeObserver notice monaco triggers constantly — not a real fault; don't relay it as an error.

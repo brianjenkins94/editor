@@ -17,6 +17,7 @@ import { LanguageClient } from "vscode-languageclient/browser";
 import { type CapabilityCall, decideCapability } from "../capabilities/decide";
 import { flushRun } from "../capabilities/silo-store";
 import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
+import { reportArchitecture } from "../../architecture";
 import { registerTsvalDebug } from "./debug-adapter";
 import { registerDebugToolbar } from "./debug-toolbar";
 import { podHub } from "./pod";
@@ -116,6 +117,9 @@ function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 export function activate(context: vscode.ExtensionContext): PodBridge {
 	// The pod's own logger — its spans/records ride podHub.
 	const podLog = relayLoggerToHub(podHub, "pod");
+
+	// Hub topology/traffic only: this extension host shares the workbench realm, whose network is probed there.
+	reportArchitecture(podHub, { "network": false });
 
 	tapConsoleAndErrors(podHub, "pod"); // raw uncaught error/rejection → the plane, beside the structured logs
 
