@@ -250,6 +250,87 @@ test("request times out when nothing serves the tool", async () => {
 	await assert.rejects(rpc.request("missing", undefined, { "timeoutMs": 30 }), /timed out/);
 });
 
+test("aborting a request rejects it with the signal's reason and aborts the responder's handler, which never replies", async () => {
+	const [a, b] = pipe();
+	const caller = createHub({ "id": "caller" });
+	const server = createHub({ "id": "server" });
+
+	caller.link(a);
+	server.link(b);
+
+	let handlerSignal: AbortSignal | undefined;
+	let replies = 0;
+
+	// A slow tool that stops when told to.
+	serve(server, "slow", (_args, { signal }) => {
+		handlerSignal = signal;
+
+		return new Promise((resolve, reject) => {
+			const timer = setTimeout(() => { resolve("done"); }, 1000);
+
+			signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("stopped")); });
+		});
+	});
+	caller.tap((event) => {
+		if (event.type === "receive" && event.frame.subject?.startsWith("$rpc.reply.") === true) {
+			replies += 1;
+		}
+	});
+
+	const rpc = createRpcClient(caller);
+
+	await flush();
+
+	const controller = new AbortController();
+	const call = rpc.request("slow", undefined, { "signal": controller.signal });
+
+	await flush(); // the call reaches the server
+	controller.abort(new Error("superseded"));
+	await assert.rejects(call, /superseded/u);
+	await flush(); // the cancel reaches the server
+
+	assert.equal(handlerSignal?.aborted, true);
+	assert.equal(replies, 0); // a cancelled call sends no reply
+});
+
+test("an already-aborted signal rejects before anything is sent, and aborting while waiting for a responder stops the wait", async () => {
+	const caller = createHub({ "id": "early-caller" });
+	const rpc = createRpcClient(caller);
+	let published = 0;
+
+	caller.tap((event) => {
+		if (event.type === "publish" && event.envelope.subject.startsWith("$rpc.call.")) {
+			published += 1;
+		}
+	});
+
+	await assert.rejects(rpc.request("tool", undefined, { "signal": AbortSignal.abort(new Error("already")) }), /already/u);
+	assert.equal(published, 0);
+
+	const controller = new AbortController();
+	const started = Date.now();
+	const waiting = rpc.request("tool", undefined, { "waitForResponderMs": 5000, "signal": controller.signal });
+
+	setTimeout(() => { controller.abort(new Error("gave up")); }, 20);
+	await assert.rejects(waiting, /gave up/u);
+	assert.ok(Date.now() - started < 1000); // not the whole 5s wait
+});
+
+test("timeoutMs: Infinity never times out", async () => {
+	const [a, b] = pipe();
+	const caller = createHub({ "id": "patient-caller" });
+	const server = createHub({ "id": "late-server" });
+
+	caller.link(a);
+	server.link(b);
+	serve(server, "late", () => new Promise((resolve) => { setTimeout(() => { resolve("eventually"); }, 50); }));
+
+	const rpc = createRpcClient(caller);
+
+	await flush();
+	assert.equal(await rpc.request("late", undefined, { "timeoutMs": Infinity }), "eventually");
+});
+
 test("unlink stops federation and withdraws interest", async () => {
 	const [a, b] = pipe();
 	const root = createHub({ "id": "root" });
