@@ -521,6 +521,10 @@ export {
 	FileType
 } from "@codingame/monaco-vscode-files-service-override";
 
+// The workbench's URI class (monaco's `Uri` is the same class the file service uses), for providers that announce
+// changes to paths they weren't handed a URI for.
+export { Uri } from "monaco-editor";
+
 export type {
 	IFileChange,
 	IFileSystemProviderWithFileReadWriteCapability,
