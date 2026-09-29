@@ -530,6 +530,19 @@ g.selected > .arch-edge {
   r: 5;
 }
 
+/* A box that stands for a node (the service worker's Network box) shows that node's status dot. */
+.arch-container.is-node.state-alive .arch-node-dot {
+  fill: var(--arch-alive);
+}
+
+.arch-container.is-node.state-unresponsive .arch-node-dot {
+  fill: var(--arch-error);
+}
+
+.arch-container.is-node.is-hub .arch-node-dot {
+  r: 5;
+}
+
 .arch-subjects {
   display: flex;
   flex-wrap: wrap;
@@ -547,4 +560,25 @@ g.selected > .arch-edge {
 
 .arch-subject.unexpected {
   background: var(--arch-error);
+}
+
+/* A box that stands for a node (the service worker's Network box): its header is the node's hit target. */
+.arch-container-hit {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+  cursor: pointer;
+}
+
+/* A collapsible box's chevron; lines into a collapsed box overlap, so their numbers are hidden. */
+.arch-container-chevron {
+  fill: none;
+  stroke: var(--arch-muted);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.arch-edge-label:is(.into-collapsed *) {
+  display: none;
 }

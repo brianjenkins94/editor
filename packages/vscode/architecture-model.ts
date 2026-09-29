@@ -7,7 +7,11 @@
  * - `nodes`: the contexts we expect, by id — hub ids for hub-carrying contexts, probe ids for the rest.
  * - `hubLinks`: the hub TREE. `subjects`: which hubs publish/serve/subscribe each subject family — a family may only
  *   cross the tree links between its participants.
- * - `channels`: the non-hub channels (workers, extension hosts, webviews, network, storage).
+ * - `channels`: the non-hub channels (workers, extension hosts, network, storage).
+ *
+ * Deliberately absent: webviews. VS Code serves a webview's resources through its own service worker, by a
+ * per-webview subdomain a single-origin build can't provide, so nothing here uses them — one that opens anyway (e.g.
+ * Markdown: Open Preview) is flagged as undeclared, which is accurate.
  *
  * When the architecture changes, change this file with it: the view flags anything observed but not declared here.
  */
@@ -20,6 +24,11 @@ export interface ContainerSpec {
 	/** Column of a top-level container (left → right follows the hub tree). */
 	"column"?: number;
 	"kind": "realm" | "origin" | "group" | "process";
+	/** The node this box stands for: drawn as the box itself (its lines meet the box's header), not a box of its own. */
+	"node"?: string;
+	/** Collapsible, and whether it starts collapsed: collapsed, it's drawn as its header alone, and its nodes' lines meet
+	 *  that header (click the header to open or close it). */
+	"collapsed"?: boolean;
 }
 
 export interface NodeSpec {
@@ -56,47 +65,45 @@ export interface SubjectFamily {
 export const containers: ContainerSpec[] = [
 	{ "id": "shell", "label": "Shell", "caption": "top window · project picker, git review panel, previews", "column": 0, "kind": "realm" },
 	{ "id": "app", "label": "App iframe", "caption": "/ · root of the hub tree, preview backend", "column": 1, "kind": "realm" },
-	{ "id": "serviceWorker", "label": "Service worker", "caption": "one per origin · COOP/COEP, CDN, /__virtual__", "column": 1, "kind": "realm" },
 	{ "id": "workbenchIframe", "label": "Workbench iframe", "caption": "/__vscode__/host.html · monaco-vscode-api", "column": 2, "kind": "origin" },
 	{ "id": "workbench", "label": "Main thread", "caption": "workbench realm (shared with the LocalProcess extension host)", "parent": "workbenchIframe", "kind": "realm" },
-	{ "id": "editorWorkers", "label": "Editor workers", "caption": "monaco's dedicated workers", "parent": "workbenchIframe", "kind": "realm" },
-	{ "id": "workers", "label": "App workers", "caption": "spawned by the workbench realm and the pod", "parent": "workbenchIframe", "kind": "realm" },
+	{ "id": "editorWorkers", "label": "Editor workers", "caption": "monaco's dedicated workers", "parent": "workbenchIframe", "kind": "realm", "collapsed": true },
+	{ "id": "workers", "label": "App workers", "caption": "spawned by the workbench realm (and the node worker's child)", "parent": "workbenchIframe", "kind": "realm" },
+	{ "id": "podWorkers", "label": "Pod workers", "caption": "the worker-pod extension's: its language servers, and a debug worker per tsval session", "parent": "workbenchIframe", "kind": "realm" },
 	{ "id": "extHostIframe", "label": "Extension host iframe", "caption": "hidden iframe · relays its worker", "parent": "workbenchIframe", "kind": "origin" },
 	{ "id": "extHostWorker", "label": "Web worker extension host", "caption": "LocalWebWorker extensions, tsserver", "parent": "extHostIframe", "kind": "realm" },
-	{ "id": "webviews", "label": "Webviews", "caption": "an iframe per webview", "parent": "workbenchIframe", "kind": "origin" },
 	{ "id": "previews", "label": "Preview windows", "caption": "iframes in the shell · served from /__virtual__/<port>/ by the service worker", "parent": "shell", "kind": "origin" },
 	{ "id": "sharedMemory", "label": "Shared memory", "caption": "SharedArrayBuffer · Atomics locks", "column": 3, "kind": "group" },
 	{ "id": "browser", "label": "Browser", "caption": "storage", "column": 3, "kind": "group" },
-	{ "id": "network", "label": "Network", "caption": "HTTP and WebSockets", "column": 3, "kind": "group" }
+	{ "id": "network", "label": "Network (service worker)", "caption": "every HTTP request goes out through the service worker · debug-mcp's WebSocket connects directly", "column": 3, "kind": "group", "node": "sw" }
 ];
 
 export const nodes: NodeSpec[] = [
 	{ "id": "shell", "label": "Shell", "container": "shell", "hub": true, "detail": "hub · shell.tsx", "description": "The top window: project picker, top bar, the git review panel and the preview windows. Holds the GitHub token.", "observedBy": "its hub reporter + network probes" },
 	{ "id": "root", "label": "Root", "container": "app", "hub": true, "detail": "hub · main.tsx", "description": "The app iframe and the root of the hub tree: serves project.list / workbench.init, bridges the service worker and debug-mcp, hosts the log collector and the preview backend.", "observedBy": "its hub reporter + network probes" },
-	{ "id": "sw", "label": "Service worker", "container": "serviceWorker", "hub": true, "detail": "hub · coi-serviceworker.js", "description": "Stamps COOP/COEP, serves the CDN node_modules overlay and /__virtual__ previews, gates network access through capability.decide.", "observedBy": "its hub reporter + network probes" },
+	{ "id": "sw", "label": "Service worker", "container": "network", "hub": true, "detail": "hub · sw.js", "description": "One per origin, shared by every tab: takes every HTTP request of the pages and workers it controls and makes the upstream one itself — stamping COOP/COEP, serving the CDN node_modules overlay and /__virtual__ previews, gating network access through capability.decide.", "observedBy": "its hub reporter + network probes" },
 	{ "id": "workbench", "label": "Workbench", "container": "workbench", "hub": true, "detail": "hub · workbench-entry.tsx", "description": "The monaco-vscode-api boot: services, editors, the main side of every extension host, the git service, run targets.", "observedBy": "its hub reporter + the monaco probes + network probes" },
 	{ "id": "exthost:LocalProcess:0", "label": "Local extension host", "container": "workbench", "detail": "hello, worker-pod", "description": "Extension host sharing the workbench realm: the hello extension (the captured vscode API) and worker-pod.", "observedBy": "RPCProtocol logger on its ExtensionHostManager" },
 	{ "id": "pod", "label": "Pod", "container": "workbench", "hub": true, "detail": "hub · worker-pod extension", "description": "The worker-pod extension's hub (in the LocalProcess extension host): spawns the LSP and debug workers, serves capability.decide.", "observedBy": "its hub reporter" },
 	{ "id": "node", "label": "Node worker", "container": "workers", "hub": true, "detail": "hub · almostnode, preview dev server", "description": "Runs node (almostnode) for the terminal and the preview dev server; answers virtual.request.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)" },
-	{ "id": "debug-worker", "label": "Debug worker", "container": "workers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the pod's debug adapter: control and events over the hub on its session's subjects, the render stream straight to the tsval preview.", "observedBy": "its hub reporter + the Worker probe", "condition": "while debugging" },
-	{ "id": "worker:server-host", "label": "LSP server host", "container": "workers", "detail": "cspell (vscode-languageclient)", "description": "cspell language server, spawned by the pod — JSON-RPC over postMessage plus a ws-control port for the shared filesystem.", "observedBy": "the Worker probe" },
+	{ "id": "debug-worker", "label": "Debug worker", "container": "podWorkers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the pod's debug adapter: control and events over the hub on its session's subjects, the render stream straight to the tsval preview.", "observedBy": "its hub reporter + the Worker probe", "condition": "while debugging" },
+	{ "id": "worker:server-host", "label": "LSP server host", "container": "podWorkers", "detail": "cspell (vscode-languageclient)", "description": "cspell language server, spawned by the pod — JSON-RPC over postMessage plus a ws-control port for the shared filesystem.", "observedBy": "the Worker probe" },
 	{ "id": "classify", "label": "Classify worker", "container": "workers", "hub": true, "detail": "hub · BABLR cosmetic classifier", "description": "Classifies git changes as cosmetic or semantic, and groups edit bursts, for the git SCM and the review panel.", "observedBy": "its hub reporter + the Worker probe", "condition": "when git classifies a change" },
 	{ "id": "recognizer", "label": "Recognizer worker", "container": "workers", "hub": true, "detail": "hub · game recognizer", "description": "Recognizes a game's structure for the event sheet view.", "observedBy": "its hub reporter + the Worker probe", "condition": "when the event sheet opens" },
 	{ "id": "exthost-iframe", "label": "Iframe relay", "container": "extHostIframe", "detail": "webWorkerExtensionHostIframe.html", "description": "Boots the web worker extension host, relays its first messages and hands its MessagePort to the workbench.", "observedBy": "window message listener" },
 	{ "id": "exthost:LocalWebWorker:0", "label": "Worker extension host", "container": "extHostWorker", "detail": "eslint, capabilities, default extensions", "description": "Extension host in a web worker: the default extensions (typescript-language-features and its tsserver), eslint and capabilities.", "observedBy": "RPCProtocol logger + an in-worker probe (its fetches and the workers it spawns)" },
-	{ "id": "webview-sw", "label": "Webview service worker", "container": "webviews", "detail": "monaco's service-worker.js", "description": "Serves webview resources by asking the workbench (load-resource).", "observedBy": "the webviews' load-resource messages", "condition": "when a webview loads resources" },
 	{ "id": "idb", "label": "IndexedDB", "container": "browser", "detail": "user data, logs, workspace-fs", "description": "monaco's user data / logs / storage, and the workspace filesystem snapshot.", "observedBy": "IDBObjectStore probe" },
-	{ "id": "net:origin", "label": "Page origin", "container": "network", "detail": "app, node_modules overlay, ATA", "description": "The app's own server (dev server or Pages): bundles, the node_modules CDN overlay, type acquisition.", "observedBy": "fetch probes" },
+	{ "id": "net:origin", "label": "Page origin", "container": "network", "detail": "app, node_modules overlay, ATA", "description": "The app's own server (dev server or Pages): bundles, the node_modules CDN overlay, type acquisition.", "observedBy": "the service worker's fetch probe" },
 	{ "id": "net:unpkg.com", "label": "unpkg", "container": "network", "detail": "CDN node_modules", "description": "The service worker's upstream for the node_modules overlay.", "observedBy": "the service worker's fetch probe" },
-	{ "id": "net:registry.npmjs.org", "label": "npm registry", "container": "network", "detail": "type acquisition", "description": "typescript-language-features' automatic type acquisition, from the worker extension host (package metadata for @types lookups).", "observedBy": "the extension host worker's probe", "condition": "when a file imports a package" },
+	{ "id": "net:registry.npmjs.org", "label": "npm registry", "container": "network", "detail": "type acquisition", "description": "typescript-language-features' automatic type acquisition, from the worker extension host (package metadata for @types lookups).", "observedBy": "the service worker's fetch probe", "condition": "when a file imports a package" },
 	{ "id": "zenfs", "label": "Workspace (zen-fs)", "container": "sharedMemory", "detail": "SingleBuffer at /workspace", "description": "The workspace filesystem: a zen-fs SingleBuffer store in a SharedArrayBuffer the workbench creates and hands to the node worker (over the hub) and the cspell server (a control port), which mount it at /workspace. Same bytes in every realm, guarded by an Atomics lock. Shared memory notifies nobody, so each realm watches its own mount's writes and reports them as workspace.changed; the workbench persists every one to IndexedDB and announces it to VS Code, whoever wrote (the provider, isomorphic-git, the terminal, a node script).", "observedBy": "each realm's /workspace mount (zen-fs StoreFS operations), the provider's change events, the workspace-fs IndexedDB" },
 	{ "id": "tsval-preview", "label": "tsval preview", "container": "previews", "detail": "debug-preview.html", "description": "The tsval debugger's render surface: announces itself (preview-ready), gets a MessagePort from the shell, streams events up and renders the mutation stream the workbench sends.", "observedBy": "the shell's window message probe + the shell's preview bridge", "condition": "while debugging with tsval" },
 	{ "id": "provoke", "label": "Provoke worker", "container": "workers", "hub": true, "detail": "hub · cold-start transform repro", "description": "A throwaway child of the node worker (debug-mcp preview_provoke hardReset): mounts the workspace and transforms modules cold, once.", "observedBy": "its hub reporter + the node worker's Worker probe", "condition": "debug-mcp preview_provoke" },
 	{ "id": "net:esm.sh", "label": "esm.sh", "container": "network", "detail": "preview dependencies", "description": "The previewed app's bare imports (react, react-dom, react-refresh), mapped by the dev server's import map and fetched by the preview through the service worker.", "observedBy": "the service worker's fetch probe", "condition": "while a preview runs" },
 	{ "id": "net:ka-f.fontawesome.com", "label": "Font Awesome", "container": "network", "detail": "WebAwesome icons", "description": "WebAwesome's default icon library: the shell chrome's wa-icon elements load their SVGs from the Font Awesome kit CDN, through the service worker.", "observedBy": "the service worker's fetch probe" },
-	{ "id": "net:open-vsx.org", "label": "Open VSX", "container": "network", "detail": "extension gallery", "description": "The extension gallery.", "observedBy": "fetch probe", "condition": "when the gallery is queried" },
-	{ "id": "net:api.github.com", "label": "GitHub API", "container": "network", "detail": "shell only", "description": "Loading repos and publishing, from the shell (which holds the token).", "observedBy": "the shell's fetch probe", "condition": "when a GitHub repo is loaded" },
-	{ "id": "net:lighter.codehike.org", "label": "Code Hike", "container": "network", "detail": "diff highlighting", "description": "Syntax highlighting for the git review diffs.", "observedBy": "the shell's fetch probe", "condition": "when a diff opens" },
+	{ "id": "net:open-vsx.org", "label": "Open VSX", "container": "network", "detail": "extension gallery", "description": "The extension gallery.", "observedBy": "the service worker's fetch probe", "condition": "when the gallery is queried" },
+	{ "id": "net:api.github.com", "label": "GitHub API", "container": "network", "detail": "shell only", "description": "Loading repos and publishing, from the shell (which holds the token).", "observedBy": "the service worker's fetch probe", "condition": "when a GitHub repo is loaded" },
+	{ "id": "net:lighter.codehike.org", "label": "Code Hike", "container": "network", "detail": "diff highlighting", "description": "Syntax highlighting for the git review diffs.", "observedBy": "the service worker's fetch probe", "condition": "when a diff opens" },
 	{ "id": "debug-mcp", "label": "debug-mcp", "container": "network", "hub": true, "detail": "hub · Node, ws://localhost:7378", "description": "The Node collector + MCP server: receives $sys.log, serves tools (page_eval…) to an MCP client.", "observedBy": "root's topology (and its own reporter)", "condition": "npm run debug-mcp" }
 ];
 
@@ -160,22 +167,21 @@ export const channels: ChannelSpec[] = [
 	{ "a": "workbench", "b": "exthost-iframe", "protocol": "bootstrap handshake", "transport": "window.postMessage", "description": "NLS bootstrap, then the MessagePort handoff." },
 	{ "a": "workbench", "b": "exthost:LocalWebWorker:*", "protocol": "RPCProtocol", "transport": "MessagePort (transferred ArrayBuffers)", "description": "MainThread / ExtHost proxies." },
 	{ "a": "exthost:LocalWebWorker:*", "b": "nested:*", "protocol": "extension defined (LSP, tsserver)", "transport": "Worker.postMessage", "description": "Workers the web worker extension host's extensions spawn." },
-	{ "a": "workbench", "b": "webview:*", "protocol": "webview protocol", "transport": "MessagePort", "description": "Content, extension messages, resource loading, focus and keyboard." },
-	{ "a": "webview-sw", "b": "webview:*", "protocol": "resource loading", "transport": "ServiceWorker.postMessage", "description": "Resource requests relayed to the workbench." },
-	{ "a": "workbench", "b": "net:origin", "protocol": "HTTP", "transport": "fetch", "description": "node_modules overlay, type acquisition, extension files." },
-	{ "a": "worker:*", "b": "net:origin", "protocol": "HTTP", "transport": "fetch", "description": "Workers loading their assets (onig.wasm, models)." },
-	{ "a": "exthost:LocalWebWorker:*", "b": "net:origin", "protocol": "HTTP", "transport": "fetch", "description": "Extensions loading their resources." },
-	{ "a": "exthost:LocalWebWorker:*", "b": "net:registry.npmjs.org", "protocol": "HTTP", "transport": "fetch", "description": "TypeScript's automatic type acquisition (package metadata)." },
-	{ "a": "workbench", "b": "net:open-vsx.org", "protocol": "HTTP", "transport": "fetch", "description": "Extension gallery." },
-	{ "a": "shell", "b": "net:api.github.com", "protocol": "HTTP", "transport": "fetch", "description": "GitHub repos and publishing." },
-	{ "a": "shell", "b": "net:lighter.codehike.org", "protocol": "HTTP", "transport": "fetch", "description": "Diff highlighting." },
-	{ "a": "sw", "b": "net:*", "protocol": "HTTP", "transport": "fetch", "description": "The service worker's upstream requests (CDN)." },
+	// The service worker takes EVERY request from the pages and workers it controls (stamping cross-origin isolation,
+	// answering its own routes, resolving node_modules from the CDN, gating a preview's data fetches) and makes the
+	// upstream one itself — so each context's HTTP goes to `sw`, and only `sw` reaches the network. (WebSockets don't
+	// pass through it: debug-mcp.)
+	{ "a": "workbench", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "description": "The workbench bundle and its chunks, extension files, the node_modules overlay, type acquisition, the extension gallery." },
+	{ "a": "worker:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "description": "Workers loading their assets (onig.wasm, models)." },
+	{ "a": "exthost:LocalWebWorker:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "description": "Extensions loading their resources, and TypeScript's automatic type acquisition (npm package metadata)." },
+	{ "a": "shell", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "description": "GitHub repos and publishing, diff highlighting, WebAwesome's icons." },
+	{ "a": "sw", "b": "net:*", "protocol": "HTTP", "transport": "fetch", "description": "Every upstream request: the app's own server, the node_modules CDN, and the APIs the pages and workers call." },
 	{ "a": "workbench", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "User data, logs, storage, workspace-fs." },
 	// the preview pipeline
 	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "description": "Into the iframe: HMR updates (vite-hmr), capability decisions. Out of it: console/errors (obs-log → $sys.log.preview), WebSocket/WebRTC capability requests (cap-decide)." },
 	{ "a": "shell", "b": "tsval-preview", "protocol": "tsval render protocol", "transport": "window.postMessage + MessagePort", "description": "preview-ready → init (MessagePort); events and time travel up, the mutation stream down." },
 	{ "a": "preview:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, intercepted by the service worker", "description": "Everything under /__virtual__/<port>/ (answered by the dev server over the hub), plus the app's own requests (CDN imports pass through; data fetches are capability-gated, failing closed). Same origin and unsandboxed, by necessity — see ARCHITECTURE.md." },
-	{ "a": "node", "b": "sw", "protocol": "capability decision", "transport": "synchronous XMLHttpRequest (POST /__capability__/decide)", "description": "Every write/delete a node script makes asks the service worker, which asks the pod (capability.decide)." },
+	{ "a": "node", "b": "sw", "protocol": "capability decision, HTTP", "transport": "synchronous XMLHttpRequest (POST /__capability__/decide), fetch", "description": "Every write/delete a node script makes asks the service worker, which asks the pod (capability.decide); and the worker's own requests, like every controlled context's." },
 	{ "a": "node", "b": "vite:*", "protocol": "in-realm calls", "transport": "function calls", "description": "almostnode's in-browser Vite dev server: requests from virtual.request, file changes, HMR updates back." },
 	{ "a": "node", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "description": "A node script's own http.createServer, reached from a preview at /__virtual__/<port>/ like a dev server." },
 	// the workspace filesystem (shared memory)
@@ -401,7 +407,7 @@ export function isEndedPlaceholder(id: string, state: string): boolean {
 }
 
 /** Contexts created at runtime, by id prefix, and where they live. */
-export const DYNAMIC_PREFIXES = ["webview:", "nested:", "worker:", "preview:", "vite:", "server:"];
+export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "vite:", "server:"];
 
 export function dynamicContainer(id: string): string | undefined {
 	if (id.startsWith("preview:")) {
@@ -428,9 +434,9 @@ export function identifyWorker(url: string): { "id": string; "label"?: string; "
 		case "node-worker.js":
 			return { "id": "node", "container": "workers", "owner": "workbench" };
 		case "debug-worker.js":
-			return { "id": "debug-worker", "container": "workers", "owner": "pod" };
+			return { "id": "debug-worker", "container": "podWorkers", "owner": "pod" };
 		case "server-host.js":
-			return { "id": "worker:server-host", "container": "workers", "owner": "pod" };
+			return { "id": "worker:server-host", "container": "podWorkers", "owner": "pod" };
 		case "classify-worker.js":
 			return { "id": "classify", "container": "workers", "owner": "workbench" };
 		case "recognizer-worker.js":
@@ -443,9 +449,32 @@ export function identifyWorker(url: string): { "id": string; "label"?: string; "
 }
 
 /** Node id of an HTTP / WebSocket endpoint. */
+/**
+ * Does a request made here go through the service worker? It takes every request from the pages and workers it
+ * controls. A page can ask (`navigator.serviceWorker.controller`); a worker can't (no `navigator.serviceWorker`), and
+ * the workers here are controlled (their own imports arrive through it), so a worker counts as going through it. The
+ * service worker's own requests go straight out, and so does anything outside a browser (tests).
+ */
+function viaServiceWorker(): boolean {
+	const scope = globalThis as unknown as { "ServiceWorkerGlobalScope"?: new () => unknown; "WorkerGlobalScope"?: unknown; "navigator"?: { "serviceWorker"?: { "controller": unknown } } };
+
+	if (scope.ServiceWorkerGlobalScope !== undefined && globalThis instanceof scope.ServiceWorkerGlobalScope) {
+		return false;
+	}
+
+	const container = scope.navigator?.serviceWorker;
+
+	return container !== undefined ? container.controller !== null : scope.WorkerGlobalScope !== undefined;
+}
+
 export function classifyUrl(url: URL): string {
+	// A WebSocket never passes through the service worker.
 	if (url.port === "7378" && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) {
 		return "debug-mcp";
+	}
+
+	if (viaServiceWorker()) {
+		return "sw";
 	}
 
 	// Routes only the service worker answers (a capability decision, a preview's dev-server request).

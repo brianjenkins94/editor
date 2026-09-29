@@ -20,6 +20,12 @@ const NODE_WIDTH = 210;
 const GAP = 8;
 const PADDING = 10;
 const HEADER = 34;
+
+/** A box's header height: a box that stands for a node gets a node box's height, so its dot, label and caption sit as
+ *  a node's do. */
+function headerOf(container: ContainerSpec): number {
+	return container.node === undefined ? HEADER : NODE_HEIGHT;
+}
 const COLUMN_GAP = 150;
 const COLUMN_V_GAP = 22;
 const MARGIN = 16;
@@ -196,13 +202,59 @@ function isVisible(node: RuntimeNode, now: number, showDeclared: boolean): boole
 // ── layout ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 interface Rect { "x": number; "y": number; "width": number; "height": number }
-interface Layout { "width": number; "height": number; "nodes": Map<string, Rect>; "containers": Map<string, Rect> }
+interface Layout {
+	"width": number;
+	"height": number;
+	"nodes": Map<string, Rect>;
+	"containers": Map<string, Rect>;
+	/** Nodes inside a collapsed box (at any depth): node id → that box. Their rect is the box's header. */
+	"hidden": Map<string, string>;
+}
 
-function computeLayout(visible: RuntimeNode[]): Layout {
+const COLLAPSED_KEY = "architecture.collapsed";
+
+/** Which collapsible boxes are collapsed: each box's default (ContainerSpec.collapsed), then what this viewer toggled. */
+function loadCollapsed(): Set<string> {
+	const result = new Set(containers.filter((container) => container.collapsed === true).map((container) => container.id));
+
+	try {
+		const stored = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "{}") as Record<string, boolean>;
+
+		for (const [id, value] of Object.entries(stored)) {
+			if (value) {
+				result.add(id);
+			} else {
+				result.delete(id);
+			}
+		}
+	} catch {
+		// no storage: the defaults
+	}
+
+	return result;
+}
+
+function saveCollapsed(collapsed: ReadonlySet<string>): void {
+	try {
+		localStorage.setItem(COLLAPSED_KEY, JSON.stringify(Object.fromEntries(containers.filter((container) => container.collapsed !== undefined).map((container) => [container.id, collapsed.has(container.id)]))));
+	} catch {
+		// no storage: this viewer's toggles last until reload
+	}
+}
+
+/** Nodes drawn as a box of their own container (ContainerSpec.node) rather than a row inside it: node id → container. */
+const drawnAsContainer = new Map(containers.filter((container) => container.node !== undefined).map((container) => [container.node!, container.id]));
+
+function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>): Layout {
 	const order = new Map(declaredNodes.map((node, index) => [node.id, index]));
 	const byContainer = new Map<string, RuntimeNode[]>();
+	const visibleIds = new Set(visible.map((node) => node.id));
 
 	for (const node of visible) {
+		if (drawnAsContainer.has(node.id)) {
+			continue;
+		}
+
 		const list = byContainer.get(containerOf(node)) ?? [];
 
 		list.push(node);
@@ -216,12 +268,20 @@ function computeLayout(visible: RuntimeNode[]): Layout {
 	const children = (container: ContainerSpec): ContainerSpec[] => containers.filter((candidate) => candidate.parent === container.id);
 	const sizes = new Map<string, { "width": number; "height": number }>();
 	const measure = (container: ContainerSpec): { "width": number; "height": number } => {
+		if (collapsed.has(container.id)) {
+			const size = { "width": NODE_WIDTH + PADDING * 2, "height": HEADER };
+
+			sizes.set(container.id, size);
+
+			return size;
+		}
+
 		const items = [
 			...(byContainer.get(container.id) ?? []).map(() => ({ "width": NODE_WIDTH, "height": NODE_HEIGHT })),
 			...children(container).map(measure)
 		];
 		const width = Math.max(NODE_WIDTH, ...items.map((item) => item.width));
-		const height = HEADER + items.reduce((sum, item, index) => sum + item.height + (index > 0 ? GAP : 0), 0);
+		const height = headerOf(container) + items.reduce((sum, item, index) => sum + item.height + (index > 0 ? GAP : 0), 0);
 		const size = { "width": width + PADDING * 2, "height": height + PADDING };
 
 		sizes.set(container.id, size);
@@ -229,11 +289,33 @@ function computeLayout(visible: RuntimeNode[]): Layout {
 		return size;
 	};
 
-	const layout: Layout = { "width": 0, "height": 0, "nodes": new Map(), "containers": new Map() };
+	const layout: Layout = { "width": 0, "height": 0, "nodes": new Map(), "containers": new Map(), "hidden": new Map() };
+	// A collapsed box's nodes, and its nested boxes', all stand at its header.
+	const hide = (container: ContainerSpec, box: string, header: Rect): void => {
+		for (const node of byContainer.get(container.id) ?? []) {
+			layout.nodes.set(node.id, header);
+			layout.hidden.set(node.id, box);
+		}
+
+		for (const child of children(container)) {
+			hide(child, box, header);
+		}
+	};
 	const place = (container: ContainerSpec, x: number, y: number, width: number): void => {
 		layout.containers.set(container.id, { "x": x, "y": y, "width": width, "height": sizes.get(container.id).height });
 
-		let cursor = y + HEADER;
+		if (collapsed.has(container.id)) {
+			hide(container, container.id, { "x": x, "y": y, "width": width, "height": HEADER });
+
+			return;
+		}
+
+		// A box that stands for a node: the node's lines meet the box's header.
+		if (container.node !== undefined && visibleIds.has(container.node)) {
+			layout.nodes.set(container.node, { "x": x, "y": y, "width": width, "height": headerOf(container) });
+		}
+
+		let cursor = y + headerOf(container);
 		const inner = width - PADDING * 2;
 
 		for (const node of byContainer.get(container.id) ?? []) {
@@ -347,6 +429,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	let paused = false;
 	let showAcks = false;
 	let showDeclared = true;
+	const collapsed = loadCollapsed();
 	let zoom = 1;
 	let autoFit = true;
 	let logFilter = "";
@@ -494,7 +577,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		const from = layout.nodes.get(a);
 		const to = layout.nodes.get(b);
 
-		if (from === undefined || to === undefined) {
+		// Both ends inside one collapsed box: nothing to draw.
+		if (from === undefined || to === undefined || from === to) {
 			return;
 		}
 
@@ -504,7 +588,9 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		const d = edgePath(from, to);
 		const path = s("path", { "d": d, "class": `arch-edge type-${type} status-${type === "undeclared" ? "undeclared" : observed ? "declared" : "ghost"}` });
 		const hit = s("path", { "d": d, "class": "arch-edge-hit" });
-		const group = s("g", { "data-edge": id });
+		const intoCollapsed = layout.hidden.has(a) || layout.hidden.has(b);
+		// Into a collapsed box, a box's lines overlap: their numbers would too, so they go unlabelled.
+		const group = s("g", { "data-edge": id, "class": intoCollapsed ? "into-collapsed" : undefined });
 		let label: SVGTextElement | undefined;
 
 		group.append(path, hit);
@@ -528,7 +614,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 		edges.set(id, view);
 
-		for (const end of [a, b]) {
+		// A collapsed box's header highlights its nodes' lines: they're filed under the box too.
+		for (const end of [a, b, ...[a, b].map((node) => layout.hidden.get(node)).filter((box) => box !== undefined).map((box) => "box:" + box)]) {
 			edgesByNode.set(end, [...edgesByNode.get(end) ?? [], view]);
 		}
 	}
@@ -548,7 +635,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 		const visibleIds = new Set(visible.map((node) => node.id));
 
-		layout = computeLayout(visible);
+		layout = computeLayout(visible, collapsed);
 		svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
 		applyZoom();
 		clearPulses();
@@ -559,13 +646,43 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			const rect = layout.containers.get(container.id);
 
 			if (rect !== undefined) {
-				const group = s("g", { "class": "arch-container kind-" + (container.kind === "process" ? "remote" : container.kind) });
+				const standsFor = container.node !== undefined && visibleIds.has(container.node) ? visible.find((node) => node.id === container.node) : undefined;
+				// A box that stands for a node carries that node's status dot (and hub size) before its label.
+				const nodeClasses = standsFor === undefined ? "" : ` is-node state-${standsFor.state}${nodeSpec(standsFor.id)?.hub === true ? " is-hub" : ""}`;
+				const group = s("g", { "class": "arch-container kind-" + (container.kind === "process" ? "remote" : container.kind) + nodeClasses, "data-node": standsFor?.id });
+				// Standing for a node, the header lays out like that node's box: dot, label, then the caption as its detail line.
+				const text = standsFor === undefined ? { "x": rect.x + 10, "label": rect.y + 15, "caption": rect.y + 27 } : { "x": rect.x + 22, "label": rect.y + 19, "caption": rect.y + 34 };
+				const collapsible = container.collapsed !== undefined;
+
+				// A collapsible box's chevron sits where a node's dot would.
+				if (collapsible) {
+					text.x = rect.x + 22;
+				}
 
 				group.append(
 					s("rect", { "x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height, "rx": 8 }),
-					s("text", { "x": rect.x + 10, "y": rect.y + 15, "class": "arch-container-label" }, container.label),
-					s("text", { "x": rect.x + 10, "y": rect.y + 27, "class": "arch-container-caption" }, container.caption)
+					s("text", { "x": text.x, "y": text.label, "class": "arch-container-label" }, container.label),
+					// Standing for a node, the line beneath is that node's detail, as on a node's box (the caption is in the Inspector).
+					s("text", { "x": text.x, "y": text.caption, "class": "arch-container-caption" }, standsFor === undefined ? container.caption : detailOf(standsFor))
 				);
+
+				if (standsFor !== undefined) {
+					group.append(s("circle", { "cx": rect.x + 11, "cy": rect.y + 15, "r": 4, "class": "arch-node-dot" }));
+				}
+
+				if (collapsible) {
+					const isCollapsed = collapsed.has(container.id);
+
+					group.classList.toggle("is-collapsed", isCollapsed);
+					group.append(s("path", { "d": isCollapsed ? `M ${rect.x + 9} ${rect.y + 8} l 4 4 l -4 4` : `M ${rect.x + 7} ${rect.y + 10} l 4 4 l 4 -4`, "class": "arch-container-chevron" }));
+
+					if (isCollapsed) {
+						const count = [...layout.hidden.values()].filter((box) => box === container.id).length;
+
+						group.append(s("text", { "x": rect.x + rect.width - 8, "y": rect.y + 15, "class": "arch-node-badge", "text-anchor": "end" }, count === 0 ? "" : String(count)));
+					}
+				}
+
 				containerLayer.append(group);
 			}
 		}
@@ -599,9 +716,13 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		nodeElements.clear();
 
 		for (const node of visible) {
+			if (drawnAsContainer.has(node.id) || layout.hidden.has(node.id)) {
+				continue; // drawn as its container, or folded into a collapsed one (above)
+			}
+
 			const rect = layout.nodes.get(node.id);
 			const declared = nodeSpec(node.id);
-			const known = declared !== undefined || node.id.startsWith("webview:") || node.id.startsWith("nested:") || node.id.startsWith("worker:");
+			const known = declared !== undefined || node.id.startsWith("nested:") || node.id.startsWith("worker:");
 			const group = s("g", { "class": `arch-node state-${node.state}${declared?.hub === true ? " is-hub" : ""}`, "data-node": node.id });
 
 			group.append(
@@ -619,6 +740,55 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			group.addEventListener("mouseleave", () => { setHovered(undefined); });
 			nodeLayer.append(group);
 			nodeElements.set(node.id, group);
+		}
+
+		// A box that stands for a node: its header selects and highlights that node, like the node's own box would. On the
+		// node layer — above the lines, which all end at that header.
+		for (const container of containers) {
+			const rect = layout.containers.get(container.id);
+
+			if (container.node === undefined || rect === undefined || !visibleIds.has(container.node)) {
+				continue;
+			}
+
+			const standsFor = container.node;
+			const header = s("rect", { "x": rect.x, "y": rect.y, "width": rect.width, "height": headerOf(container), "rx": 8, "class": "arch-container-hit", "data-node": standsFor });
+
+			header.addEventListener("click", (event) => {
+				event.stopPropagation();
+				select({ "type": "node", "id": standsFor });
+			});
+			header.addEventListener("mouseenter", () => { setHovered(standsFor); });
+			header.addEventListener("mouseleave", () => { setHovered(undefined); });
+			nodeLayer.append(header);
+		}
+
+		// A collapsible box's header opens and closes it; hovering it highlights its nodes' lines.
+		for (const container of containers) {
+			const rect = layout.containers.get(container.id);
+
+			if (container.collapsed === undefined || rect === undefined) {
+				continue;
+			}
+
+			const header = s("rect", { "x": rect.x, "y": rect.y, "width": rect.width, "height": HEADER, "rx": 8, "class": "arch-container-hit" });
+			const box = "box:" + container.id;
+
+			header.append(s("title", {}, collapsed.has(container.id) ? "Expand" : "Collapse"));
+			header.addEventListener("click", (event) => {
+				event.stopPropagation();
+
+				if (!collapsed.delete(container.id)) {
+					collapsed.add(container.id);
+				}
+
+				saveCollapsed(collapsed);
+				setHovered(undefined);
+				scheduleRender();
+			});
+			header.addEventListener("mouseenter", () => { setHovered(box); });
+			header.addEventListener("mouseleave", () => { setHovered(undefined); });
+			nodeLayer.append(header);
 		}
 
 		applySelection();
@@ -818,7 +988,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		return [
 			section(
 				"How to read it",
-				h("p", null, "Boxes are where code runs: realms (windows, workers) and origins (iframes). Solid double lines are hub links — the tree every context's hub federates over; thin lines are channels the probes observe outside the hubs (workers, extension hosts, webviews, network). Dots are messages."),
+				h("p", null, "Boxes are where code runs: realms (windows, workers) and origins (iframes). Solid double lines are hub links — the tree every context's hub federates over; thin lines are channels the probes observe outside the hubs (workers, extension hosts, network). Dots are messages."),
 				h("p", null, "Dashed means declared in the model (", h("code", null, "packages/vscode/architecture-model.ts"), ") but not seen yet; red means seen but not declared — fix the model or the code."),
 				h("p", null, "Click a context or a line to inspect it.")
 			),

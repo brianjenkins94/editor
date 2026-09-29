@@ -200,9 +200,6 @@ flowchart LR
   subgraph app["App iframe"]
     root["Root"]
   end
-  subgraph serviceWorker["Service worker"]
-    sw["Service worker"]
-  end
   subgraph workbenchIframe["Workbench iframe"]
     subgraph workbench["Main thread"]
       workbench["Workbench"]
@@ -213,20 +210,19 @@ flowchart LR
     end
     subgraph workers["App workers"]
       node["Node worker"]
-      debug_worker["Debug worker"]
-      worker_server_host["LSP server host"]
       classify["Classify worker"]
       recognizer["Recognizer worker"]
       provoke["Provoke worker"]
+    end
+    subgraph podWorkers["Pod workers"]
+      debug_worker["Debug worker"]
+      worker_server_host["LSP server host"]
     end
     subgraph extHostIframe["Extension host iframe"]
       exthost_iframe["Iframe relay"]
       subgraph extHostWorker["Web worker extension host"]
         exthost_LocalWebWorker_0["Worker extension host"]
       end
-    end
-    subgraph webviews["Webviews"]
-      webview_sw["Webview service worker"]
     end
   end
   subgraph sharedMemory["Shared memory"]
@@ -235,7 +231,8 @@ flowchart LR
   subgraph browser["Browser"]
     idb["IndexedDB"]
   end
-  subgraph network["Network"]
+  subgraph network["Network (service worker)"]
+    sw["Service worker"]
     net_origin["Page origin"]
     net_unpkg_com["unpkg"]
     net_registry_npmjs_org["npm registry"]
@@ -258,13 +255,11 @@ flowchart LR
   pod <==>|hub| debug_worker
   pod <-.->|LSP (JSON-RPC)| worker_server_host
   workbench <-.->|bootstrap handshake| exthost_iframe
-  workbench <-.->|HTTP| net_origin
-  workbench <-.->|HTTP| net_open_vsx_org
-  shell <-.->|HTTP| net_api_github_com
-  shell <-.->|HTTP| net_lighter_codehike_org
+  workbench <-.->|HTTP| sw
+  shell <-.->|HTTP| sw
   workbench <-.->|IndexedDB| idb
   shell <-.->|tsval render protocol| tsval_preview
-  node <-.->|capability decision| sw
+  node <-.->|capability decision, HTTP| sw
   workbench <-.->|zen-fs| zenfs
   node <-.->|zen-fs| zenfs
   worker_server_host <-.->|zen-fs| zenfs

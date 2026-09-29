@@ -52,16 +52,19 @@ test("conformance flags undeclared channels, unexpected subjects, duplicate peer
 		{ "type": "unexpected-subject", "a": "workbench", "b": "pod", "subject": "git.commit", "count": 1 },
 		{ "type": "undeclared-channel", "a": "shell", "b": "node" },
 		{ "type": "duplicate-peer", "hub": "sw", "peer": "root", "links": 2 },
-		{ "type": "unknown-node", "id": "mystery" }
+		{ "type": "unknown-node", "id": "mystery" },
+		{ "type": "unknown-node", "id": "webview:1" } // webviews can't serve resources here, so one is never expected
 	]);
 });
 
 test("every declared channel endpoint and hub link names a declared node (or a pattern)", () => {
 	const ids = new Set(nodes.map((node) => node.id));
 
-	for (const pair of [["exthost:LocalWebWorker:0", "nested:tsserver"], ["webview-sw", "webview:abc"], ["pod", "worker:server-host"]]) {
+	for (const pair of [["exthost:LocalWebWorker:0", "nested:tsserver"], ["preview:5173", "sw"], ["pod", "worker:server-host"]]) {
 		assert.notEqual(declaredBetween(...pair), undefined, pair.join("⇄"));
 	}
+
+	assert.equal(declaredBetween("workbench", "webview:abc"), undefined); // deliberately undeclared (see the model's header)
 
 	for (const node of nodes) {
 		assert.ok(ids.has(node.id));
@@ -69,7 +72,7 @@ test("every declared channel endpoint and hub link names a declared node (or a p
 });
 
 test("workers and URLs map to model ids", () => {
-	assert.deepEqual(identifyWorker("https://x/lsp/debug-worker.js?v=1"), { "id": "debug-worker", "container": "workers", "owner": "pod" });
+	assert.deepEqual(identifyWorker("https://x/lsp/debug-worker.js?v=1"), { "id": "debug-worker", "container": "podWorkers", "owner": "pod" });
 	assert.equal(identifyWorker("blob:foo"), undefined);
 	assert.equal(classifyUrl(new URL("ws://localhost:7378")), "debug-mcp");
 	assert.equal(classifyUrl(new URL("https://unpkg.com/react")), "net:unpkg.com");

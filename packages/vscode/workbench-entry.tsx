@@ -26,7 +26,7 @@ import eslintExtensionCode from "eslint:extension";
 import helloExtensionCode from "hello:extension";
 import workerPodExtensionCode from "worker-pod:extension";
 import { reportArchitecture } from "./architecture";
-import { identifyWorker } from "./architecture-model";
+import { classifyUrl, identifyWorker } from "./architecture-model";
 import { renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
@@ -101,7 +101,7 @@ tapConsoleAndErrors(workbenchHub, "workbench"); // raw uncaught error/rejection 
 // after the initial editors, below), and reopens with "Developer: Open Live Architecture Diagram".
 const architecture = reportArchitecture(workbenchHub);
 
-installMonacoProbes(architecture, { "identifyWorker": identifyWorker });
+installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl });
 registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });
 
 window.addEventListener("error", (event) => {
