@@ -4,9 +4,12 @@ import type {
 } from "@codingame/monaco-vscode-api";
 import getAccessibilityServiceOverride from "@codingame/monaco-vscode-accessibility-service-override";
 import {
+	getService,
 	initialize as initializeMonacoService,
+	IStorageService,
 	LogLevel
 } from "@codingame/monaco-vscode-api";
+import { StorageScope, StorageTarget } from "@codingame/monaco-vscode-api/vscode/vs/platform/storage/common/storage";
 import getAuthenticationServiceOverride from "@codingame/monaco-vscode-authentication-service-override";
 import getConfigurationServiceOverride, { initUserConfiguration } from "@codingame/monaco-vscode-configuration-service-override";
 import getDebugServiceOverride from "@codingame/monaco-vscode-debug-service-override";
@@ -92,8 +95,6 @@ import { setUnexpectedErrorHandler } from "@codingame/monaco-vscode-api/monaco";
 // perf-trim: process explorer — dropped from the initial bundle.
 // import getProcessControllerServiceOverride from "@codingame/monaco-vscode-process-explorer-service-override";
 import getQuickAccessServiceOverride from "@codingame/monaco-vscode-quickaccess-service-override";
-import getViewsServiceOverride, { attachPart, isEditorPartVisible, isPartVisibile as isPartVisible, onDidChangeSideBarPosition, onPartVisibilityChange, Parts } from "@codingame/monaco-vscode-views-service-override";
-import { openNewCodeEditor } from "./demo/src/features/editor";
 import { Worker } from "./demo/src/tools/fakeWorker";
 import { TerminalBackend } from "./terminal-backend";
 import "vscode/localExtensionHost";
@@ -171,8 +172,20 @@ export interface WorkbenchParts {
 }
 
 export interface BootOptions {
-	/** Containers the workbench parts attach into (assembled by the consumer). */
-	"parts": WorkbenchParts;
+	/** Who lays out the workbench. "views" (default): the consumer does, and each part attaches into its container in
+	 *  `parts`. "workbench": VS Code does — its whole layout (activity bar, sidebar, editors, panel, auxiliary bar, status
+	 *  bar, with its own sashes, movable views and a remembered layout) renders into `container`; `parts` is unused. */
+	"layout"?: "views" | "workbench";
+	/** Containers the workbench parts attach into (assembled by the consumer). Required for the "views" layout. */
+	"parts"?: WorkbenchParts;
+	/** Default values for VS Code settings (e.g. hiding the menu bar), under the user's own settings. */
+	"configurationDefaults"?: Record<string, unknown>;
+	/** The status bar's window indicator (bottom left). Default: the product name, with no command. Keep `command` a
+	 *  string: VS Code falls back to its "remote window" menu only when it's missing, so "" leaves the item inert. */
+	"windowIndicator"?: { "label": string; "tooltip"?: string; "command"?: string };
+	/** "workbench" layout: view containers to keep off the activity bar (e.g. "workbench.view.scm"), as if each were
+	 *  hidden from its context menu. Reapplied on every boot. */
+	"hiddenViewContainers"?: string[];
 	/** Where the workbench itself mounts. Default: document.body. */
 	"container"?: HTMLElement;
 	/** Auto-trust the workspace, suppressing the trust prompt. Default: true. */
@@ -370,7 +383,11 @@ const commonServices: IEditorOverrideServices = {
  */
 export async function boot(options: BootOptions): Promise<void> {
 	const {
+		layout = "views",
 		parts,
+		configurationDefaults = {},
+		hiddenViewContainers = [],
+		windowIndicator,
 		container = document.body,
 		trusted = true,
 		files = [],
@@ -410,11 +427,7 @@ export async function boot(options: BootOptions): Promise<void> {
 	const constructOptions: IWorkbenchConstructionOptions = {
 		// trusted → disable the workspace-trust feature entirely (no prompt).
 		"enableWorkspaceTrust": !trusted,
-		"windowIndicator": {
-			"label": productName,
-			"tooltip": "",
-			"command": ""
-		},
+		"windowIndicator": { "label": productName, "tooltip": "", "command": "", ...windowIndicator },
 		"workspaceProvider": {
 			"trusted": trusted,
 			"open": async function() {
@@ -437,7 +450,8 @@ export async function boot(options: BootOptions): Promise<void> {
 			// The web default ("keyboardOnly") asks "Leave site?" on a keyboard reload/close (Cmd+R, Cmd+W). Nothing is
 			// lost by leaving — unsaved editors are backed up and the workspace persists — so don't ask. Set here, not in
 			// an extension's configurationDefaults: those can't override an application-scoped setting.
-			"window.confirmBeforeClose": "never"
+			"window.confirmBeforeClose": "never",
+			...configurationDefaults
 		},
 		"defaultLayout": {
 			"editors": openEditors.map((path, index) => ({
@@ -462,43 +476,66 @@ export async function boot(options: BootOptions): Promise<void> {
 		}
 	};
 
+	if (layout === "views" && parts === undefined) {
+		throw new Error("boot: the \"views\" layout needs `parts`");
+	}
+
+	// The two layouts are alternative service sets, and each is loaded only when chosen: a layout's module has import
+	// side effects (the views one builds its own hidden set of parts), so loading the views one under the full workbench
+	// creates a second editor part and the workbench's fails to restore ("group (1) has already a widget").
+	const views = layout === "views" ? await import("@codingame/monaco-vscode-views-service-override") : undefined;
+	const layoutServices = views === undefined
+		? (await import("@codingame/monaco-vscode-workbench-service-override")).default(undefined, undefined)
+		: views.default((await import("./demo/src/features/editor")).openNewCodeEditor, undefined);
+
 	await initializeMonacoService(
 		{
 			...commonServices,
-			...getViewsServiceOverride(openNewCodeEditor, undefined),
-			...getQuickAccessServiceOverride({
-				"isKeybindingConfigurationVisible": isEditorPartVisible,
-				"shouldUseGlobalPicker": (_editor, isStandalone) => !isStandalone && isEditorPartVisible()
-			})
+			...layoutServices,
+			...getQuickAccessServiceOverride(views === undefined
+				? { "isKeybindingConfigurationVisible": () => true, "shouldUseGlobalPicker": () => true }
+				: {
+					"isKeybindingConfigurationVisible": views.isEditorPartVisible,
+					"shouldUseGlobalPicker": (_editor, isStandalone) => !isStandalone && views.isEditorPartVisible()
+				})
 		},
 		container,
 		constructOptions,
 		envOptions
 	);
 
+	if (layout === "workbench" && hiddenViewContainers.length > 0) {
+		await hideViewContainers(hiddenViewContainers);
+	}
+
+
 	setUnexpectedErrorHandler((error) => {
-		console.info("Unexpected error", error);
+		console.info("Unexpected error", error instanceof Error ? (error.stack ?? error.message) : error);
 	});
 
-	for (const config of [
-		{ "part": Parts.SIDEBAR_PART, "element": parts.sidebar, "onDidElementChange": onDidChangeSideBarPosition },
-		{ "part": Parts.PANEL_PART, "element": parts.panel, "onDidElementChange": undefined },
-		{ "part": Parts.EDITOR_PART, "element": parts.editors, "onDidElementChange": undefined },
-		{ "part": Parts.STATUSBAR_PART, "element": parts.statusbar, "onDidElementChange": undefined },
-		{ "part": Parts.AUXILIARYBAR_PART, "element": parts.auxbar, "onDidElementChange": onDidChangeSideBarPosition }
-	]) {
-		attachPart(config.part, config.element);
+	const attached = views !== undefined && parts !== undefined
+		? [
+			{ "part": views.Parts.SIDEBAR_PART, "element": parts.sidebar, "onDidElementChange": views.onDidChangeSideBarPosition },
+			{ "part": views.Parts.PANEL_PART, "element": parts.panel, "onDidElementChange": undefined },
+			{ "part": views.Parts.EDITOR_PART, "element": parts.editors, "onDidElementChange": undefined },
+			{ "part": views.Parts.STATUSBAR_PART, "element": parts.statusbar, "onDidElementChange": undefined },
+			{ "part": views.Parts.AUXILIARYBAR_PART, "element": parts.auxbar, "onDidElementChange": views.onDidChangeSideBarPosition }
+		]
+		: [];
+
+	for (const config of attached) {
+		views!.attachPart(config.part, config.element);
 
 		config.onDidElementChange?.(() => {
-			attachPart(config.part, config.element);
+			views!.attachPart(config.part, config.element);
 		});
 
-		if (!isPartVisible(config.part)) {
+		if (!views!.isPartVisibile(config.part)) {
 			// eslint-disable-next-line webawesome/no-inline-styles -- toggling a workbench part's visibility (show/hide); intrinsic layout state, not themeable chrome
 			config.element.style.display = "none";
 		}
 
-		onPartVisibilityChange(config.part, (visible) => {
+		views!.onPartVisibilityChange(config.part, (visible) => {
 			// eslint-disable-next-line webawesome/no-inline-styles -- toggling a workbench part's visibility (show/hide); intrinsic layout state, not themeable chrome
 			config.element.style.display = visible ? "block" : "none";
 		});
@@ -509,6 +546,30 @@ export async function boot(options: BootOptions): Promise<void> {
 			onSave(document.uri.path, document.getText());
 		});
 	}
+}
+
+/**
+ * Keep view containers off the activity bar the way VS Code itself does when you hide one from its context menu: unpin
+ * and hide it in the stored activity-bar state. The activity bar follows that key live, so this applies right away (and
+ * from the first frame on later loads, since it's stored).
+ */
+async function hideViewContainers(ids: string[]): Promise<void> {
+	const key = "workbench.activity.pinnedViewlets2";
+	const storage = await getService(IStorageService);
+	const entries = JSON.parse(storage.get(key, StorageScope.PROFILE, "[]")) as { "id": string; "pinned": boolean; "visible"?: boolean; "order"?: number }[];
+
+	for (const id of ids) {
+		const entry = entries.find((candidate) => candidate.id === id);
+
+		if (entry === undefined) {
+			entries.push({ "id": id, "pinned": false, "visible": false });
+		} else {
+			entry.pinned = false;
+			entry.visible = false;
+		}
+	}
+
+	storage.store(key, JSON.stringify(entries), StorageScope.PROFILE, StorageTarget.USER);
 }
 
 // Re-exported so the consumer (games) can register its own extension(s) and set the default API:
@@ -537,7 +598,9 @@ export type {
 // Custom views re-exported so a consumer can render arbitrary DOM into a view (renderBody) placed in the
 // sidebar / panel / auxiliary bar (ViewContainerLocation) — real DOM, not a sandboxed webview iframe, so it
 // composites everywhere. (silo's review burndown; mirrors the @codingame demo's customView feature.)
-export { registerCustomView, ViewContainerLocation } from "@codingame/monaco-vscode-views-service-override";
+// From the modules both layouts share (each layout's override re-exports these), so importing them loads neither.
+export { registerCustomView } from "@codingame/monaco-vscode-api/service-override/tools/views";
+export { ViewContainerLocation } from "@codingame/monaco-vscode-api/vscode/vs/workbench/common/views";
 
 // The live architecture diagram: probes for the channels monaco-vscode-api opens (workers, extension host RPC,
 // webviews) — they patch VSCode internals, so they must come from THIS bundle — and its editor pane.

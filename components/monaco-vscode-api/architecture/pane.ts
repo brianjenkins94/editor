@@ -4,10 +4,10 @@
  */
 import type { IEditorGroup } from "@codingame/monaco-vscode-api";
 import type { IInstantiationService } from "@codingame/monaco-vscode-api";
-import type { IEditorSerializer } from "@codingame/monaco-vscode-views-service-override";
+import type { IEditorSerializer } from "@codingame/monaco-vscode-api/service-override/tools/views";
 import { createInstance, IEditorService } from "@codingame/monaco-vscode-api";
 import { CommandsRegistry, MenuId, MenuRegistry } from "@codingame/monaco-vscode-api/monaco";
-import { registerEditorPane, registerEditorSerializer, SimpleEditorInput, SimpleEditorPane } from "@codingame/monaco-vscode-views-service-override";
+import { registerEditorPane, registerEditorSerializer, SimpleEditorInput, SimpleEditorPane } from "@codingame/monaco-vscode-api/service-override/tools/views";
 
 export const OPEN_ARCHITECTURE_COMMAND = "architecture.open";
 
