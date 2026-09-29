@@ -14,7 +14,7 @@
  */
 import type { WorkbenchFile, WorkbenchParts } from "@brianjenkins94/monaco-vscode-api/main";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
-import { boot, ExtensionHostKind, installMonacoProbes, registerExtension, registerFileSystemOverlay, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
+import { boot, ExtensionHostKind, installMonacoProbes, registerExtension, OPEN_ARCHITECTURE_COMMAND, registerFileSystemOverlay, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
 // The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
 // virtual module in entry.config.ts).
@@ -97,8 +97,8 @@ const paneLog = relayLoggerToHub(workbenchHub, "workbench");
 tapConsoleAndErrors(workbenchHub, "workbench"); // raw uncaught error/rejection → the plane, beside the structured logs
 
 // The live architecture view: this realm's hub + network, and — installed before boot() creates anything — the
-// monaco probes (workers, extension host RPC, webviews). The diagram opens with "Developer: Open Live
-// Architecture Diagram".
+// monaco probes (workers, extension host RPC, webviews). The diagram is the tab a load lands on (opened
+// after the initial editors, below), and reopens with "Developer: Open Live Architecture Diagram".
 const architecture = reportArchitecture(workbenchHub);
 
 installMonacoProbes(architecture, { "identifyWorker": identifyWorker });
@@ -438,10 +438,11 @@ function maybeBoot(): void {
 			// Open the initial editors now — deferred from boot's defaultLayout because the source files no longer live
 			// in boot's priority-1 seed (that layer now carries only the read-only base). They're in the zen-fs overlay
 			// seeded just above, so the editor can read them. Empty `files` = open only, don't rewrite (already seeded).
-			// openProject self-gates on the vscode API being ready (apiReady, captured below).
-			if (openEditors.length > 0) {
-				void openProject([], openEditors, false).catch((error: unknown) => { bootSpan.error("initial open failed", { "error": errText(error) }); });
-			}
+			// openProject self-gates on the vscode API being ready (apiReady, captured below). Then the live architecture
+			// diagram, last, so a fresh load lands on it (the source editors sit beside it).
+			void (openEditors.length > 0 ? openProject([], openEditors, false) : apiReady)
+				.catch((error: unknown) => { bootSpan.error("initial open failed", { "error": errText(error) }); })
+				.then(() => { runCommand(OPEN_ARCHITECTURE_COMMAND); });
 
 			// The editor's settings DEFAULTS — settings-defaults.jsonc, registered as the lowest settings layer (a
 			// contributions-only extension: no code, no host). Layers merge per key, so a workspace `.vscode/settings.json`
