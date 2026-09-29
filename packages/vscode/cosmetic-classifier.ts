@@ -101,6 +101,22 @@ export function createCosmeticClassifier(store?: VerdictStore): CosmeticClassifi
 		pump();
 	});
 
+	// A worker that fails to load (or dies) never replies, which would leave `running` set and stall the queue for
+	// good — reject the in-flight and queued requests instead, and every later one.
+	let failure: Error | undefined;
+
+	worker.addEventListener("error", (event) => {
+		event.preventDefault();
+		failure = new Error("classify worker failed: " + (event.message || "could not load"));
+
+		for (const item of [...(running === undefined ? [] : [running]), ...queue]) {
+			item.reject(failure);
+		}
+
+		running = undefined;
+		queue.length = 0;
+	});
+
 	function pump(): void {
 		if (running !== undefined) {
 			return;
@@ -124,6 +140,10 @@ export function createCosmeticClassifier(store?: VerdictStore): CosmeticClassifi
 	const request = async (message: RequestMessage, signal: AbortSignal | undefined): Promise<WorkerResult> => {
 		if (signal?.aborted === true) {
 			throw new DOMException("classification aborted", "AbortError");
+		}
+
+		if (failure !== undefined) {
+			throw failure;
 		}
 
 		return new Promise<WorkerResult>((resolve, reject) => {

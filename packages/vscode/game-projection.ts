@@ -35,8 +35,28 @@ export function createGameProjection(): GameProjection {
 		}
 	});
 
+	// A worker that fails to load (or dies) never replies — reject everything pending instead of hanging, and every later call.
+	let failure: Error | undefined;
+
+	worker.addEventListener("error", (event) => {
+		event.preventDefault();
+		failure = new Error("recognizer worker failed: " + (event.message || "could not load"));
+
+		for (const request of pending.values()) {
+			request.reject(failure);
+		}
+
+		pending.clear();
+	});
+
 	return {
 		"project": (files) => new Promise<GameModel>((resolve, reject) => {
+			if (failure !== undefined) {
+				reject(failure);
+
+				return;
+			}
+
 			const id = nextId;
 
 			nextId += 1;
