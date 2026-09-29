@@ -2,7 +2,7 @@
 // doesn't declare. Run: node --test test/architecture-model.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkConformance, classifyUrl, declaredBetween, familiesOnLink, identifyWorker, nodes, subjectOfLabel } from "../architecture-model.ts";
+import { checkConformance, classifyUrl, declaredBetween, familiesOnLink, identifyWorker, isEndedPlaceholder, nodes, subjectOfLabel } from "../architecture-model.ts";
 
 const patterns = (a, b) => familiesOnLink(a, b).map((family) => family.pattern);
 
@@ -90,4 +90,11 @@ test("each pair of contexts is declared as one channel (a second one could never
 	const duplicates = pairs.filter((pair, index) => pairs.indexOf(pair) !== index);
 
 	assert.deepEqual(duplicates, []);
+});
+
+test("a link that closed before its peer answered was a transient; one still unanswered is not", () => {
+	assert.equal(isEndedPlaceholder("root:link-1", "terminated"), true);
+	assert.equal(isEndedPlaceholder("sw:link-12", "terminated"), true);
+	assert.equal(isEndedPlaceholder("root:link-1", "alive"), false); // a live link nothing answers stays a violation
+	assert.equal(isEndedPlaceholder("worker:classify-worker", "terminated"), false);
 });

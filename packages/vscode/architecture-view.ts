@@ -11,7 +11,7 @@ import { createRpcClient } from "@brianjenkins94/hub";
 import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
 import type { ContainerSpec, Violation } from "./architecture-model";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
-import { checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
+import { checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, isEndedPlaceholder, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -69,7 +69,8 @@ export interface ArchitectureHandle {
 /** What needs review in what the diagram shows: a context that ended long ago (and its channels) no longer does. */
 function conformanceOf(store: ArchitectureStore): Violation[] {
 	const now = Date.now();
-	const shown = new Set([...store.nodes.values()].filter((node) => node.state !== "declared" && isVisible(node, now, false)).map((node) => node.id));
+	// An ended placeholder (a link that closed before its peer answered) is a transient: shown fading, not a violation.
+	const shown = new Set([...store.nodes.values()].filter((node) => node.state !== "declared" && isVisible(node, now, false) && !isEndedPlaceholder(node.id, node.state)).map((node) => node.id));
 
 	return checkConformance({
 		"nodes": [...shown],

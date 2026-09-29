@@ -393,6 +393,13 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────
 
+/** A reporter names a hub link whose peer never said who it is `<hub>:link-<n>`. Once it has ENDED (the link closed
+ *  unanswered — a tab re-linking to a service worker replaced mid-boot), it was a transient, not a violation; one
+ *  still alive is a link nothing answers, and stays flagged. */
+export function isEndedPlaceholder(id: string, state: string): boolean {
+	return state === "terminated" && (/:link-\d+$/u).test(id);
+}
+
 /** Contexts created at runtime, by id prefix, and where they live. */
 export const DYNAMIC_PREFIXES = ["webview:", "nested:", "worker:", "preview:", "vite:", "server:"];
 
