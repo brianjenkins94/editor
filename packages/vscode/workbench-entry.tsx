@@ -31,7 +31,7 @@ import { renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { installDebugPreview } from "./debug-preview-view";
-import { eventSheetAugmentation } from "./event-sheet-view";
+import { createEventSheetAugmentation } from "./event-sheet-view";
 import { installFileAugmentations } from "./file-augmentations";
 import type { VerdictEntry } from "./cosmetic-classifier";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
@@ -483,7 +483,7 @@ function maybeBoot(): void {
 					// File augmentations: the auxpane shows a per-file-type projection of the active file. First one is
 					// the Event Sheet (a Construct-style projection of the CST) — a 3-column table whose rows jump the
 					// editor to the code they map to. See file-augmentations.ts / event-sheet-view.ts.
-					installFileAugmentations(() => vscodeApi, [eventSheetAugmentation]);
+					installFileAugmentations(() => vscodeApi, [createEventSheetAugmentation(workbenchHub)]);
 				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
 				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
 				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", moduleVersions ?? {}, (path) => workspaceFs?.has(path) ?? false, paneLog);
@@ -506,7 +506,7 @@ function maybeBoot(): void {
 					// One classifier, shared by both panes, with its verdict cache persisted through the engine's
 					// content-addressed `.git/bablr/` store — so cosmetic/semantic is derived once per content pair and
 					// re-read (not re-computed) across refreshes and reloads.
-					const cosmeticClassifier = createCosmeticClassifier({
+					const cosmeticClassifier = createCosmeticClassifier(workbenchHub, {
 						"read": async (before, after) => (await gitEngine.readVerdict(before, after)) as VerdictEntry | null,
 						"write": (before, after, entry) => gitEngine.writeVerdict(before, after, entry)
 					});

@@ -12,10 +12,13 @@
  * `.git/bablr/`, durable across reloads) — and BABLR (slow) runs only on a true miss. Both changes panes share this one
  * cache, so a file is classified once per content pair, not once per pane per refresh.
  *
- * ABORT: the worker yields between parse chunks, so its message loop can see an `{ abort }` message mid-run. The
- * classifier drives ONE request at a time (a serial queue); to cancel the running one it posts an abort for that id
- * and the worker bails cooperatively (worker stays warm — no termination). Aborting a still-queued request drops it.
+ * TRANSPORT: the worker serves `classify.verdict` / `classify.editGroups` on its own hub, linked to the workbench hub
+ * (so the calls are visible on the architecture view and callable from anywhere in the tree). ABORT: the worker yields
+ * between parse chunks, so a cancelled call's signal reaches it mid-run and it bails cooperatively (the worker stays
+ * warm). The classifier drives ONE call at a time (a serial queue); aborting a still-queued call drops it unsent.
  */
+import type { Hub } from "@brianjenkins94/hub";
+import { createRpcClient, portTransport } from "@brianjenkins94/hub";
 
 /** BABLR's verdict for a change (mirrors `@brianjenkins94/bablr`). */
 export type ChangeKind = "cosmetic" | "semantic" | "unparsable";
@@ -38,28 +41,13 @@ export interface CosmeticClassifier {
 	 *  `AbortSignal` to cancel a superseded request; the promise then rejects with an AbortError. */
 	"verdict": (before: string, after: string, signal?: AbortSignal) => Promise<VerdictEntry>;
 	/** Node-grouped chunks for the "your edits" timeline, over a burst chain [HEAD, …afters] → groups + burst count. */
-	"editGroups": (contents: string[], signal?: AbortSignal) => Promise<{ "groups": EditGroup[]; "bursts": number }>;
+	"editGroups": (chain: string[], signal?: AbortSignal) => Promise<{ "groups": EditGroup[]; "bursts": number }>;
 	/** Tear down the worker. */
 	"dispose": () => void;
 }
 
 /** One node-grouped chunk for the "your edits" timeline — mirrors bablr's EditGroup (kept local to avoid a type dep). */
 export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
-
-interface ClassifyResponse { "id": number; "verdict"?: ChangeKind | "none"; "changedNodeIds"?: string[]; "changedLines"?: number[]; "groups"?: EditGroup[]; "bursts"?: number; "aborted"?: true }
-
-interface RequestMessage { "contents"?: string[]; "editGroupsContents"?: string[] }
-
-/** The raw worker reply the queue resolves; each public method projects the fields it needs. */
-interface WorkerResult { "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[]; "groups": EditGroup[]; "bursts": number }
-
-interface QueueItem {
-	"id": number;
-	"message": RequestMessage;
-	"resolve": (result: WorkerResult) => void;
-	"reject": (error: unknown) => void;
-	"aborted": boolean;
-}
 
 /** FNV-1a 32-bit — a cheap key for the in-memory tier (the durable store keys by collision-free git blob oid). */
 function fnv32(text: string): number {
@@ -73,102 +61,37 @@ function fnv32(text: string): number {
 	return h >>> 0;
 }
 
-/** Create a classifier backed by the BABLR classify worker (served at `lsp/classify-worker.js`), optionally persisting
- *  verdicts through `store` for a durable, cross-reload cache. */
-export function createCosmeticClassifier(store?: VerdictStore): CosmeticClassifier {
-	const queue: QueueItem[] = [];
-	let running: QueueItem | undefined;
-	let nextId = 0;
-
+/** Create a classifier backed by the BABLR classify worker (served at `lsp/classify-worker.js`), linked into `hub`,
+ *  optionally persisting verdicts through `store` for a durable, cross-reload cache. */
+export function createCosmeticClassifier(hub: Hub, store?: VerdictStore): CosmeticClassifier {
 	const worker = new Worker(new URL("./lsp/classify-worker.js", location.href), { "type": "module" });
-
-	worker.addEventListener("message", (event: MessageEvent<ClassifyResponse>) => {
-		if (running === undefined || event.data.id !== running.id) {
-			return; // stale / already settled
-		}
-
-		const settled = running;
-
-		running = undefined;
-
-		// An editGroups reply carries no verdict — only `aborted` means "bailed"; otherwise resolve (verdict defaults).
-		if (event.data.aborted === true) {
-			settled.reject(new DOMException("classification aborted", "AbortError"));
-		} else {
-			settled.resolve({ "verdict": event.data.verdict ?? "none", "changedNodeIds": event.data.changedNodeIds ?? [], "changedLines": event.data.changedLines ?? [], "groups": event.data.groups ?? [], "bursts": event.data.bursts ?? 0 });
-		}
-
-		pump();
-	});
-
-	// A worker that fails to load (or dies) never replies, which would leave `running` set and stall the queue for
-	// good — reject the in-flight and queued requests instead, and every later one.
-	let failure: Error | undefined;
+	const unlink = hub.link(portTransport(worker));
+	const rpc = createRpcClient(hub);
+	// A worker that fails to load (or dies) never answers — fail the in-flight and queued calls, and every later one.
+	const dead = new AbortController();
 
 	worker.addEventListener("error", (event) => {
 		event.preventDefault();
-		failure = new Error("classify worker failed: " + (event.message || "could not load"));
-
-		for (const item of [...(running === undefined ? [] : [running]), ...queue]) {
-			item.reject(failure);
-		}
-
-		running = undefined;
-		queue.length = 0;
+		dead.abort(new Error("classify worker failed: " + (event.message || "could not load")));
 	});
 
-	function pump(): void {
-		if (running !== undefined) {
-			return;
-		}
+	// One call at a time: BABLR is slow, and the newest request is the one someone is waiting on.
+	let tail: Promise<unknown> = Promise.resolve();
 
-		// Drop any requests that were aborted while queued.
-		while (queue.length > 0 && queue[0].aborted) {
-			queue.shift();
-		}
+	const request = <T>(name: string, args: unknown, signal: AbortSignal | undefined): Promise<T> => {
+		const combined = signal === undefined ? dead.signal : AbortSignal.any([signal, dead.signal]);
+		// No timeout — the worker's first call waits out its (large) bundle loading, and a parse takes what it takes;
+		// cancellation and worker failure end a call instead. An already-aborted signal skips the call unsent.
+		const run = tail.then(() => rpc.request("classify." + name, args, { "timeoutMs": Infinity, "waitForResponderMs": 30000, "signal": combined }) as Promise<T>);
 
-		const next = queue.shift();
+		tail = run.catch(() => undefined);
 
-		if (next === undefined) {
-			return;
-		}
+		// Reject a queued call as soon as it's aborted, not when its turn comes.
+		return new Promise<T>((resolve, reject) => {
+			const onAbort = (): void => { reject(combined.reason); };
 
-		running = next;
-		worker.postMessage({ "id": next.id, ...next.message });
-	}
-
-	const request = async (message: RequestMessage, signal: AbortSignal | undefined): Promise<WorkerResult> => {
-		if (signal?.aborted === true) {
-			throw new DOMException("classification aborted", "AbortError");
-		}
-
-		if (failure !== undefined) {
-			throw failure;
-		}
-
-		return new Promise<WorkerResult>((resolve, reject) => {
-			const item: QueueItem = { "id": nextId, "message": message, "resolve": resolve, "reject": reject, "aborted": false };
-
-			nextId += 1;
-			queue.push(item);
-
-			signal?.addEventListener("abort", () => {
-				if (item.aborted) {
-					return;
-				}
-
-				item.aborted = true;
-
-				if (running === item) {
-					// Mid-flight: ask the worker to bail (it yields between parse chunks) — it posts `aborted`, which
-					// settles + pumps the next request, keeping the worker warm.
-					worker.postMessage({ "abort": true, "id": item.id });
-				} else {
-					item.reject(new DOMException("classification aborted", "AbortError")); // queued — pump() skips it
-				}
-			}, { "once": true });
-
-			pump();
+			combined.addEventListener("abort", onAbort, { "once": true });
+			run.then(resolve, reject).finally(() => { combined.removeEventListener("abort", onAbort); });
 		});
 	};
 
@@ -199,8 +122,7 @@ export function createCosmeticClassifier(store?: VerdictStore): CosmeticClassifi
 			}
 
 			// True miss — derive over [HEAD, working]: verdict + changed nodes + their working lines. Then cache both tiers.
-			const result = await request({ "contents": [before, after] }, signal);
-			const entry: VerdictEntry = { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": result.changedLines };
+			const entry = await request<VerdictEntry>("verdict", { "contents": [before, after] }, signal);
 
 			if (memo.size > 200) {
 				memo.clear();
@@ -211,7 +133,10 @@ export function createCosmeticClassifier(store?: VerdictStore): CosmeticClassifi
 
 			return entry;
 		},
-		"editGroups": async (contents, signal) => { const result = await request({ "editGroupsContents": contents }, signal); return { "groups": result.groups, "bursts": result.bursts }; },
-		"dispose": () => { worker.terminate(); }
+		"editGroups": (chain, signal) => request("editGroups", { "chain": chain }, signal),
+		"dispose": () => {
+			unlink();
+			worker.terminate();
+		}
 	};
 }

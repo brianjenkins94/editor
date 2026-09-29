@@ -6,29 +6,25 @@
  * that force ONE shared `lsp/typescript` chunk), this worker REFERENCES that same chunk — the editor's ts, not a second
  * bundled copy. ts is dynamic-imported LAZILY on the first request, so spawning the worker stays cheap.
  *
- * Protocol: `{ id, files }` in → `{ id, model }` (a plain-JSON GameModel) or `{ id, error }` out. Driven by
- * game-projection.ts in the workbench realm.
+ * Served over the hub: `recognizer.project` { files } → a plain-JSON GameModel. Driven by game-projection.ts in the
+ * workbench realm.
  */
+import { serve } from "@brianjenkins94/hub";
+
 import type { TsApi } from "./game-recognizer";
 import { anchorGame } from "./game-anchors";
 import { recognizeGame } from "./game-recognizer";
+import { createWorkerHub } from "./worker-hub";
 
-interface ProjectRequest { "id": number; "files": Record<string, string> }
-
+const hub = createWorkerHub("recognizer");
 let tsApi: TsApi | undefined;
 
-globalThis.onmessage = async (event: MessageEvent<ProjectRequest>): Promise<void> => {
-	const { id, files } = event.data;
+serve(hub, "recognizer.project", async (args) => {
+	const { files } = args as { "files": Record<string, string> };
 
-	try {
-		// The shared ts chunk — loaded once, on first use.
-		tsApi ??= ((await import("typescript")) as unknown as { "default": TsApi }).default;
+	// The shared ts chunk — loaded once, on first use.
+	tsApi ??= ((await import("typescript")) as unknown as { "default": TsApi }).default;
 
-		// Recognize with the TS AST, then attach durable BABLR anchors (game-anchors.ts).
-		const model = anchorGame(files, recognizeGame(files, tsApi));
-
-		(globalThis as unknown as Worker).postMessage({ "id": id, "model": model });
-	} catch (error) {
-		(globalThis as unknown as Worker).postMessage({ "id": id, "error": error instanceof Error ? error.message : String(error) });
-	}
-};
+	// Recognize with the TS AST, then attach durable BABLR anchors (game-anchors.ts).
+	return anchorGame(files, recognizeGame(files, tsApi));
+});

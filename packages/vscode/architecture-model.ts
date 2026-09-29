@@ -80,8 +80,8 @@ export const nodes: NodeSpec[] = [
 	{ "id": "node", "label": "Node worker", "container": "workers", "hub": true, "detail": "hub · almostnode, preview dev server", "description": "Runs node (almostnode) for the terminal and the preview dev server; answers virtual.request.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)" },
 	{ "id": "debug-worker", "label": "Debug worker", "container": "workers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the pod's debug adapter.", "observedBy": "its hub reporter + the Worker probe (DAP-ish messages)", "condition": "while debugging" },
 	{ "id": "worker:server-host", "label": "LSP server host", "container": "workers", "detail": "cspell (vscode-languageclient)", "description": "cspell language server, spawned by the pod — JSON-RPC over postMessage plus a ws-control port for the shared filesystem.", "observedBy": "the Worker probe" },
-	{ "id": "worker:classify-worker", "label": "Classify worker", "container": "workers", "detail": "BABLR cosmetic classifier", "description": "Classifies git changes as cosmetic or semantic, for the git SCM.", "observedBy": "the Worker probe", "condition": "when git classifies a change" },
-	{ "id": "worker:recognizer-worker", "label": "Recognizer worker", "container": "workers", "detail": "game recognizer", "description": "Recognizes a game's structure for the event sheet view.", "observedBy": "the Worker probe", "condition": "when the event sheet opens" },
+	{ "id": "classify", "label": "Classify worker", "container": "workers", "hub": true, "detail": "hub · BABLR cosmetic classifier", "description": "Classifies git changes as cosmetic or semantic, and groups edit bursts, for the git SCM and the review panel.", "observedBy": "its hub reporter + the Worker probe", "condition": "when git classifies a change" },
+	{ "id": "recognizer", "label": "Recognizer worker", "container": "workers", "hub": true, "detail": "hub · game recognizer", "description": "Recognizes a game's structure for the event sheet view.", "observedBy": "its hub reporter + the Worker probe", "condition": "when the event sheet opens" },
 	{ "id": "exthost-iframe", "label": "Iframe relay", "container": "extHostIframe", "detail": "webWorkerExtensionHostIframe.html", "description": "Boots the web worker extension host, relays its first messages and hands its MessagePort to the workbench.", "observedBy": "window message listener" },
 	{ "id": "exthost:LocalWebWorker:0", "label": "Worker extension host", "container": "extHostWorker", "detail": "eslint, capabilities, default extensions", "description": "Extension host in a web worker: the default extensions (typescript-language-features and its tsserver), eslint and capabilities.", "observedBy": "RPCProtocol logger + an in-worker probe (its fetches and the workers it spawns)" },
 	{ "id": "webview-sw", "label": "Webview service worker", "container": "webviews", "detail": "monaco's service-worker.js", "description": "Serves webview resources by asking the workbench (load-resource).", "observedBy": "the webviews' load-resource messages", "condition": "when a webview loads resources" },
@@ -91,7 +91,7 @@ export const nodes: NodeSpec[] = [
 	{ "id": "net:registry.npmjs.org", "label": "npm registry", "container": "network", "detail": "type acquisition", "description": "typescript-language-features' automatic type acquisition, from the worker extension host (package metadata for @types lookups).", "observedBy": "the extension host worker's probe", "condition": "when a file imports a package" },
 	{ "id": "zenfs", "label": "Workspace (zen-fs)", "container": "sharedMemory", "detail": "SingleBuffer at /workspace", "description": "The workspace filesystem: a zen-fs SingleBuffer store in a SharedArrayBuffer the workbench creates and hands to the node worker (over the hub) and the cspell server (a control port), which mount it at /workspace. Same bytes in every realm, guarded by an Atomics lock. Shared memory notifies nobody, so each realm watches its own mount's writes and reports them as workspace.changed; the workbench persists every one to IndexedDB and announces it to VS Code, whoever wrote (the provider, isomorphic-git, the terminal, a node script).", "observedBy": "each realm's /workspace mount (zen-fs StoreFS operations), the provider's change events, the workspace-fs IndexedDB" },
 	{ "id": "tsval-preview", "label": "tsval preview", "container": "previews", "detail": "debug-preview.html", "description": "The tsval debugger's render surface: announces itself (preview-ready), gets a MessagePort from the shell, streams events up and renders the mutation stream the workbench sends.", "observedBy": "the shell's window message probe + the shell's preview bridge", "condition": "while debugging with tsval" },
-	{ "id": "worker:provoke-worker", "label": "Provoke worker", "container": "workers", "detail": "cold-start transform repro", "description": "A throwaway child of the node worker (debug-mcp preview_provoke hardReset): mounts the workspace and transforms modules cold, once.", "observedBy": "the node worker's Worker probe", "condition": "debug-mcp preview_provoke" },
+	{ "id": "provoke", "label": "Provoke worker", "container": "workers", "hub": true, "detail": "hub · cold-start transform repro", "description": "A throwaway child of the node worker (debug-mcp preview_provoke hardReset): mounts the workspace and transforms modules cold, once.", "observedBy": "its hub reporter + the node worker's Worker probe", "condition": "debug-mcp preview_provoke" },
 	{ "id": "net:esm.sh", "label": "esm.sh", "container": "network", "detail": "preview dependencies", "description": "The previewed app's bare imports (react, react-dom, react-refresh), mapped by the dev server's import map and fetched by the preview through the service worker.", "observedBy": "the service worker's fetch probe", "condition": "while a preview runs" },
 	{ "id": "net:ka-f.fontawesome.com", "label": "Font Awesome", "container": "network", "detail": "WebAwesome icons", "description": "WebAwesome's default icon library: the shell chrome's wa-icon elements load their SVGs from the Font Awesome kit CDN, through the service worker.", "observedBy": "the service worker's fetch probe" },
 	{ "id": "net:open-vsx.org", "label": "Open VSX", "container": "network", "detail": "extension gallery", "description": "The extension gallery.", "observedBy": "fetch probe", "condition": "when the gallery is queried" },
@@ -107,6 +107,9 @@ export const hubLinks: [string, string][] = [
 	["root", "debug-mcp"],
 	["workbench", "pod"],
 	["workbench", "node"],
+	["workbench", "classify"],
+	["workbench", "recognizer"],
+	["node", "provoke"],
 	["pod", "debug-worker"]
 ];
 
@@ -127,6 +130,9 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "workspace.changed", "hubs": ["workbench", "node"], "description": "Every change a realm makes to the shared workspace — persisted and announced by the workbench; dev servers hot-reload from it." },
 	{ "pattern": "workspace.buffer", "hubs": ["workbench", "node"], "description": "The node worker asks for the shared workspace buffer." },
 	{ "pattern": "node.>", "hubs": ["workbench", "pod", "node"], "description": "Node runs: start, stdout, exit, stdin." },
+	{ "pattern": "classify.>", "hubs": ["workbench", "classify"], "description": "Cosmetic/semantic verdicts and edit-burst grouping (cancellable)." },
+	{ "pattern": "recognizer.project", "hubs": ["workbench", "recognizer"], "description": "Project a game into the event sheet's model." },
+	{ "pattern": "provoke.round", "hubs": ["node", "provoke"], "description": "One cold transform round: the workspace buffer in, failures out." },
 	{ "pattern": "debug.>", "hubs": ["shell", "workbench", "pod"], "description": "Debug sessions and the toolbar." },
 	{ "pattern": "production.>", "hubs": ["workbench", "pod"], "description": "Production (server) runs." },
 	{ "pattern": "tsval.preview.>", "hubs": ["shell", "workbench", "pod", "debug-worker"], "description": "The tsval render surface." },
@@ -165,12 +171,11 @@ export const channels: ChannelSpec[] = [
 	{ "a": "node", "b": "sw", "protocol": "capability decision", "transport": "synchronous XMLHttpRequest (POST /__capability__/decide)", "description": "Every write/delete a node script makes asks the service worker, which asks the pod (capability.decide)." },
 	{ "a": "node", "b": "vite:*", "protocol": "in-realm calls", "transport": "function calls", "description": "almostnode's in-browser Vite dev server: requests from virtual.request, file changes, HMR updates back." },
 	{ "a": "node", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "description": "A node script's own http.createServer, reached from a preview at /__virtual__/<port>/ like a dev server." },
-	{ "a": "node", "b": "worker:provoke-worker", "protocol": "provoke round", "transport": "Worker.postMessage", "description": "One cold transform round: the workspace buffer in, failures out." },
 	// the workspace filesystem (shared memory)
 	{ "a": "workbench", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (owner)", "description": "The vscode provider (editor, tsserver, ATA, terminal, extensions) and direct callers (isomorphic-git, the terminal's path walk). Back the other way: provider writes announced as file-change events (5ms batches) — writes from other realms, and direct writes, are NOT announced." },
 	{ "a": "node", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "almostnode: module loading, node scripts' fs, the preview dev server's transforms." },
 	{ "a": "worker:server-host", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "Mounted by the cspell server (documents arrive over LSP, so it's mostly idle)." },
-	{ "a": "worker:provoke-worker", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "A cold transform round reads the workspace." },
+	{ "a": "provoke", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "A cold transform round reads the workspace." },
 	{ "a": "zenfs", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (workspace-fs)", "description": "Provider writes, flushed every 500ms; restored at boot." }
 ];
 
@@ -413,11 +418,11 @@ export function identifyWorker(url: string): { "id": string; "label"?: string; "
 		case "server-host.js":
 			return { "id": "worker:server-host", "container": "workers", "owner": "pod" };
 		case "classify-worker.js":
-			return { "id": "worker:classify-worker", "container": "workers" };
+			return { "id": "classify", "container": "workers", "owner": "workbench" };
 		case "recognizer-worker.js":
-			return { "id": "worker:recognizer-worker", "container": "workers" };
+			return { "id": "recognizer", "container": "workers", "owner": "workbench" };
 		case "provoke-worker.js":
-			return { "id": "worker:provoke-worker", "container": "workers" };
+			return { "id": "provoke", "container": "workers", "owner": "node" };
 		default:
 			return undefined;
 	}

@@ -62,7 +62,8 @@ installWorkerProbe(architecture, identifyWorker);
 // The workspace: the shared buffer comes from the workbench over the hub, and every change this worker makes to it
 // (a script's fs writes, an install) goes back as `workspace.changed` — the workbench persists and announces it.
 connectWorkspace({ "architecture": architecture, "onChanges": (changes) => { hub.publish(WORKSPACE_CHANGED, changes); } });
-const workspaceReady = createRpcClient(hub).request("workspace.buffer", undefined, { "timeoutMs": 10000, "waitForResponderMs": 10000 })
+const rpc = createRpcClient(hub);
+const workspaceReady = rpc.request("workspace.buffer", undefined, { "timeoutMs": 10000, "waitForResponderMs": 10000 })
 	.then(attachSharedWorkspace, (error: unknown) => { log.warn("no shared workspace — running on this worker's own filesystem", { "error": String(error) }); });
 
 tapConsoleAndErrors(hub, "node"); // raw uncaught error/rejection → the plane, beside the structured logs
@@ -500,25 +501,27 @@ serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number
 
 // Run ONE hardReset round in a freshly-spawned child worker (provoke-worker.ts): a cold module realm where
 // almostnode + typescript are imported for the first time, so the FIRST transform reproduces the true cold-start
-// window that a warm in-process restart can't. We hand it the workspace SAB, await its one reply, then terminate.
-async function provokeColdChild(buffer: SharedArrayBuffer, root: string, port: number, urls: string[], timeoutMs: number): Promise<{ "failures": string[]; "transformErrors": Array<{ "url": string; "name": string; "message": string }>; "error"?: string }> {
+// window that a warm in-process restart can't. Its hub links into ours; we hand it the workspace SAB in one
+// `provoke.round` call, await the reply, then terminate it.
+async function provokeColdChild(buffer: SharedArrayBuffer, root: string, port: number, urls: string[], timeoutMs: number): Promise<{ "failures": Array<{ "url": string; "status": number }>; "transformErrors": Array<{ "url": string; "name": string; "message": string }>; "error"?: string }> {
 	const worker = new Worker(new URL("./provoke-worker.js", location.href), { "type": "module" });
+	const unlink = hub.link(portTransport(worker));
+	// One deadline for the whole round (the child's boot + its cold transforms), and a worker that fails ends it now.
+	const round = new AbortController();
+	const timer = setTimeout(() => { round.abort(new Error("provoke child timed out after " + timeoutMs + "ms")); }, timeoutMs);
+
+	worker.addEventListener("error", (event) => {
+		event.preventDefault();
+		round.abort(new Error(event.message || "provoke child worker error"));
+	});
 
 	try {
-		const reply = await new Promise<{ "failures": Array<{ "url": string; "status": number }>; "transformErrors": Array<{ "url": string; "name": string; "message": string }>; "error"?: string }>((resolve, reject) => {
-			const timer = setTimeout(() => { reject(new Error("provoke child timed out after " + timeoutMs + "ms")); }, timeoutMs);
+		architecture.record("provoke", ZENFS_NODE, "lifecycle", "mount /workspace (shared " + Math.round(buffer.byteLength / 1048576) + " MB)");
 
-			worker.addEventListener("message", (event: MessageEvent) => {
-				clearTimeout(timer);
-				resolve(event.data as { "failures": Array<{ "url": string; "status": number }>; "transformErrors": Array<{ "url": string; "name": string; "message": string }>; "error"?: string });
-			});
-			worker.addEventListener("error", (event: ErrorEvent) => { clearTimeout(timer); reject(new Error(event.message || "provoke child worker error")); });
-			worker.postMessage({ "buffer": buffer, "root": root, "port": port, "modules": urls });
-			architecture.record("worker:provoke-worker", ZENFS_NODE, "lifecycle", "mount /workspace (shared " + Math.round(buffer.byteLength / 1048576) + " MB)");
-		});
-
-		return { "failures": reply.failures.map((failure) => failure.url), "transformErrors": reply.transformErrors, "error": reply.error };
+		return await rpc.request("provoke.round", { "buffer": buffer, "root": root, "port": port, "modules": urls }, { "timeoutMs": Infinity, "waitForResponderMs": timeoutMs, "signal": round.signal }) as { "failures": Array<{ "url": string; "status": number }>; "transformErrors": Array<{ "url": string; "name": string; "message": string }>; "error"?: string };
 	} finally {
+		clearTimeout(timer);
+		unlink();
 		worker.terminate();
 	}
 }
@@ -574,8 +577,8 @@ serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
 		for (let round = 0; round < rounds; round += 1) {
 			const outcome = await provokeColdChild(buffer, root, port, urls, 30000);
 
-			for (const url of outcome.failures) {
-				failures.push({ "round": round, "url": url, "status": 500 });
+			for (const failure of outcome.failures) {
+				failures.push({ "round": round, "url": failure.url, "status": failure.status });
 			}
 
 			for (const info of outcome.transformErrors) {

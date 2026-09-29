@@ -48,8 +48,8 @@ test("previews: two dev servers side by side", async () => {
 
 test("provoke: a cold transform round in a child worker", async () => {
 	await session.request("preview.provoke", { "rounds": 1, "hardReset": true }, 90_000);
-	await session.until("node ⇄ provoke worker", hasLabel("node", "worker:provoke-worker", /./u));
-	await session.until("the provoke worker's mount", hasLabel("worker:provoke-worker", "zenfs", /^mount /u));
+	await session.until("node ⇄ provoke worker", hasLabel("node", "provoke", /./u));
+	await session.until("the provoke worker's mount", hasLabel("provoke", "zenfs", /^mount /u));
 });
 
 // `node <file>` in the terminal runs under the tsval debugger (the debug worker), and a capability-gated call pauses

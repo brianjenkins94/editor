@@ -41,7 +41,7 @@ also works over desktop's built-in git.
 | **App iframe** (`/`) | `main.tsx` app branch, `coi.ts`, `vscode.tsx`, `samples.ts`, `pane-link.ts` | DOM, `rootHub`, COI bootstrap | Boots the workbench iframe (the preview windows live in the shell; this realm runs their backend — see below) and links it into `rootHub` over the retargeting pane-link transport; serves `project.list` + `workbench.init`, routes `project.open` → `openProject`. Owns the top of the hub tree. |
 | **Workbench iframe** (`/__vscode__/host.html`) | `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal.ts`, `node-runner.ts`, `git-scm.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()`, mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(git SCM `git-scm.ts`/`git-engine.ts` install here too — legitimate browser parity for desktop's built-in git; the BABLR classifier welded into it is the part that should become a standalone extension.)* |
 | **Extension host** (`LocalProcess` / `LocalWebWorker`) | `extensions/*/extension.ts`, `extensions/*/ts-plugin.js` | the vscode API — **no DOM, no zen-fs singleton** | Extensions: `hello` (default API context), `worker-pod` (spawns the LSP/debug/node workers). `eslint` + `capabilities` run in the WebWorker host *inside tsserver*, reusing tsserver's own `ts` as TS-plugins. |
-| **Workers** (`dist/lsp/*`, spawned from the workbench realm) | only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `git-classify-worker` (BABLR classify). |
+| **Workers** (`dist/lsp/*`, spawned from the workbench realm) | only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `classify-worker` (BABLR classify), `recognizer-worker` (the event sheet's game recognizer). |
 | **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (`cstSpans`, `classifyChange`), `tsval`, `util/silo` (incl. `silo/policy` — the shared policy model), and the vscode-package-local pure module `capability-breakpoints`. Built/aliased into the realms above. |
 
 There is also a **service worker** (`coi-serviceworker.js`, registered by `coi.ts`): one per origin, it stamps the
@@ -59,7 +59,11 @@ CDN `node_modules` overlay. Not a place you put feature code.
   the pane requests `workbench.init` (RPC, retried until interest settles), then publishes `workbench.online` /
   `workbench.save`, and the host publishes `workbench.openProject`. (This folded the old separate `pane-bus` + a
   dedicated `MessagePort` into one hub link; hub's `hello` handshake covers the lossy-window race the port guarded.)
-- **plain postMessage** — fine for a single-purpose worker with one request/response shape (e.g. `classify-worker`).
+- **plain postMessage** — only where the hub can't or mustn't go: a protocol dictated by someone else (LSP to
+  `server-host`), or a realm that must stay bare (the capability-gated eval sandbox). Every other worker — even a
+  single-purpose one like `classify-worker` — joins the tree with its own hub (`worker-hub.ts`) and `serve`s its
+  methods: calls get timeouts, cancellation and worker-failure handling from the hub instead of a hand-rolled
+  id→pending map, show up by name on the live architecture view, and can be called from anywhere in the tree.
 - **shared memory** — the workspace filesystem (below). No messages at all, so the live view observes it by wrapping
   each realm's `/workspace` mount (`architecture-zenfs.ts`).
 
@@ -160,7 +164,7 @@ flowchart TB
   W ==>|"node-runner spawns · hub"| NW
   EXT ==>|"spawns · hub (portTransport)"| DW
   EXT ==>|"spawns · LSP over postMessage"| SH
-  COS ==>|"spawns · postMessage"| CW
+  COS ==>|"spawns · hub"| CW
   GIT -->|"uses"| COS
 
   W -.->|"SharedArrayBuffer — same zen-fs"| NW
@@ -211,9 +215,9 @@ flowchart LR
       node["Node worker"]
       debug_worker["Debug worker"]
       worker_server_host["LSP server host"]
-      worker_classify_worker["Classify worker"]
-      worker_recognizer_worker["Recognizer worker"]
-      worker_provoke_worker["Provoke worker"]
+      classify["Classify worker"]
+      recognizer["Recognizer worker"]
+      provoke["Provoke worker"]
     end
     subgraph extHostIframe["Extension host iframe"]
       exthost_iframe["Iframe relay"]
@@ -248,6 +252,9 @@ flowchart LR
   root <==>|hub| debug_mcp
   workbench <==>|hub| pod
   workbench <==>|hub| node
+  workbench <==>|hub| classify
+  workbench <==>|hub| recognizer
+  node <==>|hub| provoke
   pod <==>|hub| debug_worker
   pod <-.->|debug adapter messages| debug_worker
   pod <-.->|LSP (JSON-RPC)| worker_server_host
@@ -259,11 +266,10 @@ flowchart LR
   workbench <-.->|IndexedDB| idb
   shell <-.->|tsval render protocol| tsval_preview
   node <-.->|capability decision| sw
-  node <-.->|provoke round| worker_provoke_worker
   workbench <-.->|zen-fs| zenfs
   node <-.->|zen-fs| zenfs
   worker_server_host <-.->|zen-fs| zenfs
-  worker_provoke_worker <-.->|zen-fs| zenfs
+  provoke <-.->|zen-fs| zenfs
   zenfs <-.->|IndexedDB| idb
 ```
 <!-- architecture-model:end -->

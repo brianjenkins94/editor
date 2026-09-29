@@ -6,63 +6,45 @@
  * changed and the working lines they land on, so the diff pane can focus per node. `editGroups` decomposes an
  * edit-burst chain into node-grouped chunks for the "your edits" timeline.
  *
- * YIELDING + ABORT: the derivation paces the BABLR VM (yields as it parses), so an `{ abort }` message can land
- * mid-parse and trip this request's AbortController — the run bails cooperatively, no worker termination. One request
- * in flight at a time (the classifier drives it serially), correlated by id.
+ * Served over the hub (see cosmetic-classifier.ts for the client): `classify.verdict` and `classify.editGroups`.
+ * YIELDING + ABORT: the derivation paces the BABLR VM (yields as it parses), so a cancelled call's signal lands
+ * mid-parse and the run bails cooperatively, no worker termination. The classifier drives one call at a time.
  */
 import "./bablr-fast-freeze"; // MUST be first: neutralizes record freezing before the BABLR bundle captures Object.freeze
 import { deriveIdentityAsync, editGroups } from "@brianjenkins94/bablr";
+import { serve } from "@brianjenkins94/hub";
 
-interface ClassifyRequest { "id": number; "contents"?: string[]; "editGroupsContents"?: string[] }
-interface AbortRequest { "abort": true; "id": number }
+import { createWorkerHub } from "./worker-hub";
 
-let current: { "id": number; "controller": AbortController } | undefined;
+const hub = createWorkerHub("classify");
 
-globalThis.onmessage = async (event: MessageEvent<ClassifyRequest | AbortRequest>): Promise<void> => {
-	const data = event.data;
-
-	if ("abort" in data) {
-		if (current !== undefined && current.id === data.id) {
-			current.controller.abort();
-		}
-
-		return;
-	}
-
-	const { id, contents, editGroupsContents } = data;
-	const controller = new AbortController();
-
-	current = { "id": id, "controller": controller };
-
+// A content chain (in practice [HEAD, working]) ⇒ verdict + changed nodes + their working lines.
+serve(hub, "classify.verdict", async (args, { signal }) => {
 	try {
-		// `editGroupsContents` = a burst chain [HEAD, …afters] ⇒ node-grouped chunks for the "your edits" timeline.
-		if (editGroupsContents !== undefined) {
-			const grouped = await editGroups(editGroupsContents, { "signal": controller.signal });
+		const result = await deriveIdentityAsync((args as { "contents": string[] }).contents, { "signal": signal });
 
-			(globalThis as unknown as Worker).postMessage({ "id": id, "groups": grouped.groups, "bursts": grouped.bursts });
-
-			return;
-		}
-
-		// `contents` = a content chain (in practice [HEAD, working]) ⇒ verdict + changed nodes + their working lines.
-		const result = await deriveIdentityAsync(contents ?? [], { "signal": controller.signal });
-
-		(globalThis as unknown as Worker).postMessage({
-			"id": id,
-			"verdict": result.verdict,
-			"changedNodeIds": result.changedNodeIds,
-			"changedLines": "changedLines" in result ? result.changedLines : []
-		});
+		return { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": "changedLines" in result ? result.changedLines : [] };
 	} catch (error) {
-		if (error instanceof DOMException && error.name === "AbortError") {
-			(globalThis as unknown as Worker).postMessage({ "id": id, "aborted": true });
-		} else {
-			// never let a parse blow up the worker — the caller falls back to a plain diff
-			(globalThis as unknown as Worker).postMessage({ "id": id, "verdict": "unparsable" });
+		if (signal.aborted) {
+			throw error;
 		}
-	} finally {
-		if (current?.id === id) {
-			current = undefined;
-		}
+
+		// never let a parse blow up the worker — the caller falls back to a plain diff
+		return { "verdict": "unparsable", "changedNodeIds": [], "changedLines": [] };
 	}
-};
+});
+
+// A burst chain [HEAD, …afters] ⇒ node-grouped chunks for the "your edits" timeline.
+serve(hub, "classify.editGroups", async (args, { signal }) => {
+	try {
+		const { groups, bursts } = await editGroups((args as { "chain": string[] }).chain, { "signal": signal });
+
+		return { "groups": groups, "bursts": bursts };
+	} catch (error) {
+		if (signal.aborted) {
+			throw error;
+		}
+
+		return { "groups": [], "bursts": 0 };
+	}
+});

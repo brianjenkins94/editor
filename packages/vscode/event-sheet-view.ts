@@ -11,6 +11,7 @@
  */
 /* eslint-disable ts/no-explicit-any -- the vscode api is untyped here (captured from the hello extension) */
 /* eslint-disable webawesome/no-inline-styles, webawesome/no-css-in-strings -- a plain structural map in the aux-bar body; intrinsic layout, not themeable chrome */
+import type { Hub } from "@brianjenkins94/hub";
 import type { AugmentationContext, FileAugmentation } from "./file-augmentations";
 import type { AuthoredGame } from "./game-generator";
 import type { Behavior, Composite, GameModel, GameObject, Rule } from "./game-recognizer";
@@ -21,10 +22,6 @@ import { createGameProjection, type GameProjection } from "./game-projection";
 const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 const IGNORE = /(?:^|\/)(?:node_modules|\.git|\.silo|dist|assets)(?:\/|$)/u;
 const BORDER = "1px solid var(--vscode-panel-border,#2a2a2a)";
-
-// One recognizer worker for the session (spawned lazily; keeps ts out of the main bundle). See game-projection.ts.
-let projection: GameProjection | undefined;
-const getProjection = (): GameProjection => (projection ??= createGameProjection());
 
 // The auxpane has two faces of one model: Build (author) and Map (read). Mode is sticky across activations; the authored
 // block model is cached per game root so edits persist (and don't re-project on every keystroke).
@@ -308,152 +305,159 @@ function paint(container: HTMLElement, context: AugmentationContext, root: strin
 	renderComponents(container, context.api, root, model.behaviors);
 }
 
-/** The event-sheet augmentation: projects the active file's game into the auxpane, deep-linking every node. */
-export const eventSheetAugmentation: FileAugmentation = {
-	"id": "event-sheet",
-	"title": "Event Sheet",
-	"when": (document: any) => CODE_FILE.test(String(document.uri?.path ?? "")),
-	"render": (container, context) => {
-		const { api } = context;
-		let disposed = false;
+/** The event-sheet augmentation: projects the active file's game into the auxpane, deep-linking every node. The game
+ *  is recognized by a worker linked into `hub`. */
+export function createEventSheetAugmentation(hub: Hub): FileAugmentation {
+	// One recognizer worker for the session (spawned lazily; keeps ts out of the main bundle). See game-projection.ts.
+	let projection: GameProjection | undefined;
+	const getProjection = (): GameProjection => (projection ??= createGameProjection(hub));
 
-		// Fixed toggle bar on top; the body swaps between Build (author) and Map (read).
-		container.style.cssText = "height:100%;display:flex;flex-direction:column;overflow:hidden";
+	return {
+		"id": "event-sheet",
+		"title": "Event Sheet",
+		"when": (document: any) => CODE_FILE.test(String(document.uri?.path ?? "")),
+		"render": (container, context) => {
+			const { api } = context;
+			let disposed = false;
 
-		const bar = document.createElement("div");
+			// Fixed toggle bar on top; the body swaps between Build (author) and Map (read).
+			container.style.cssText = "height:100%;display:flex;flex-direction:column;overflow:hidden";
 
-		bar.style.cssText = "display:flex;gap:4px;padding:6px 10px;border-bottom:" + BORDER + ";flex:none";
+			const bar = document.createElement("div");
 
-		const body = document.createElement("div");
+			bar.style.cssText = "display:flex;gap:4px;padding:6px 10px;border-bottom:" + BORDER + ";flex:none";
 
-		body.style.cssText = "flex:1;overflow:auto;min-height:0";
-		container.replaceChildren(bar, body);
+			const body = document.createElement("div");
 
-		const showMessage = (text: string): void => {
-			const note = document.createElement("div");
+			body.style.cssText = "flex:1;overflow:auto;min-height:0";
+			container.replaceChildren(bar, body);
 
-			note.textContent = text;
-			note.style.cssText = "padding:12px;font-size:13px;opacity:0.6";
-			body.replaceChildren(note);
-		};
+			const showMessage = (text: string): void => {
+				const note = document.createElement("div");
 
-		// Declared out of the loop so the click handler doesn't close over the mutable `viewMode`.
-		const setMode = (mode: ViewMode): void => { viewMode = mode; void rebuild(); };
+				note.textContent = text;
+				note.style.cssText = "padding:12px;font-size:13px;opacity:0.6";
+				body.replaceChildren(note);
+			};
 
-		// Scaffold a blank, runnable game the user owns, then open it (its own augmentation instance renders in Build,
-		// reading the seeded block model — a paintable empty grid).
-		const createGame = async (name: string): Promise<void> => {
-			const dest = "/workspace/games/" + name.replace(/[^\w.-]+/gu, "-");
-			const game = blankGame();
+			// Declared out of the loop so the click handler doesn't close over the mutable `viewMode`.
+			const setMode = (mode: ViewMode): void => { viewMode = mode; void rebuild(); };
 
-			await writeGeneratedGame(api, dest, generateGame(game));
-			authoredByRoot.set(dest, game);
-			viewMode = "build";
-			await api.window.showTextDocument(api.Uri.file(dest + "/game.ts"));
-		};
+			// Scaffold a blank, runnable game the user owns, then open it (its own augmentation instance renders in Build,
+			// reading the seeded block model — a paintable empty grid).
+			const createGame = async (name: string): Promise<void> => {
+				const dest = "/workspace/games/" + name.replace(/[^\w.-]+/gu, "-");
+				const game = blankGame();
 
-		const renderToggle = (): void => {
-			bar.replaceChildren();
+				await writeGeneratedGame(api, dest, generateGame(game));
+				authoredByRoot.set(dest, game);
+				viewMode = "build";
+				await api.window.showTextDocument(api.Uri.file(dest + "/game.ts"));
+			};
 
-			for (const mode of ["build", "map"] as const) {
-				const toggle = document.createElement("wa-button");
+			const renderToggle = (): void => {
+				bar.replaceChildren();
 
-				toggle.setAttribute("size", "small");
-				toggle.setAttribute("appearance", "outlined");
+				for (const mode of ["build", "map"] as const) {
+					const toggle = document.createElement("wa-button");
 
-				if (viewMode === mode) {
-					toggle.setAttribute("variant", "brand");
-				}
+					toggle.setAttribute("size", "small");
+					toggle.setAttribute("appearance", "outlined");
 
-				toggle.textContent = mode === "build" ? "Build" : "Map";
-				toggle.addEventListener("click", () => { setMode(mode); });
-				bar.append(toggle);
-			}
-		};
-
-		const rebuild = async (): Promise<void> => {
-			renderToggle();
-
-			const root = await findGameRoot(api, context.document.uri);
-
-			if (disposed) {
-				return;
-			}
-
-			if (root === undefined) {
-				showMessage("No package.json above this file — can't locate a game.");
-
-				return;
-			}
-
-			if (viewMode === "build") {
-				// Author face: seed the block model from the recognized game once, then edit locally (no re-projection).
-				let authored = authoredByRoot.get(root);
-
-				if (authored === undefined) {
-					showMessage("Loading…");
-
-					try {
-						authored = authoredFromModel(await getProjection().project(await readGameFiles(api, root)));
-					} catch {
-						authored = { "level": "level1", "entities": [], "systems": [] };
+					if (viewMode === mode) {
+						toggle.setAttribute("variant", "brand");
 					}
 
-					if (disposed) {
-						return;
+					toggle.textContent = mode === "build" ? "Build" : "Map";
+					toggle.addEventListener("click", () => { setMode(mode); });
+					bar.append(toggle);
+				}
+			};
+
+			const rebuild = async (): Promise<void> => {
+				renderToggle();
+
+				const root = await findGameRoot(api, context.document.uri);
+
+				if (disposed) {
+					return;
+				}
+
+				if (root === undefined) {
+					showMessage("No package.json above this file — can't locate a game.");
+
+					return;
+				}
+
+				if (viewMode === "build") {
+					// Author face: seed the block model from the recognized game once, then edit locally (no re-projection).
+					let authored = authoredByRoot.get(root);
+
+					if (authored === undefined) {
+						showMessage("Loading…");
+
+						try {
+							authored = authoredFromModel(await getProjection().project(await readGameFiles(api, root)));
+						} catch {
+							authored = { "level": "level1", "entities": [], "systems": [] };
+						}
+
+						if (disposed) {
+							return;
+						}
+
+						authoredByRoot.set(root, authored);
 					}
 
-					authoredByRoot.set(root, authored);
+					renderAuthoring(body, api, root, authored, { "rerender": () => { void rebuild(); }, "createGame": createGame });
+
+					return;
 				}
 
-				renderAuthoring(body, api, root, authored, { "rerender": () => { void rebuild(); }, "createGame": createGame });
+				// Map face: reverse-project the current code.
+				showMessage("Projecting…");
 
-				return;
-			}
+				try {
+					const model = await getProjection().project(await readGameFiles(api, root));
 
-			// Map face: reverse-project the current code.
-			showMessage("Projecting…");
-
-			try {
-				const model = await getProjection().project(await readGameFiles(api, root));
-
-				if (!disposed) {
-					paint(body, context, root, model);
+					if (!disposed) {
+						paint(body, context, root, model);
+					}
+				} catch (error) {
+					if (!disposed) {
+						showMessage("Projection failed: " + (error instanceof Error ? error.message : String(error)));
+					}
 				}
-			} catch (error) {
-				if (!disposed) {
-					showMessage("Projection failed: " + (error instanceof Error ? error.message : String(error)));
+			};
+
+			// Re-project the Map on save (debounced), so it tracks the code.
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const sub = api.workspace.onDidSaveTextDocument(() => {
+				if (viewMode !== "map") {
+					return; // Build is driven by the in-memory model, not the files
 				}
-			}
-		};
-
-		// Re-project the Map on save (debounced), so it tracks the code.
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		const sub = api.workspace.onDidSaveTextDocument(() => {
-			if (viewMode !== "map") {
-				return; // Build is driven by the in-memory model, not the files
-			}
-
-			if (timer !== undefined) {
-				clearTimeout(timer);
-			}
-
-			timer = setTimeout(() => { void rebuild(); }, 300);
-		});
-
-		void rebuild();
-
-		return {
-			"dispose": (): void => {
-				disposed = true;
 
 				if (timer !== undefined) {
 					clearTimeout(timer);
 				}
 
-				sub.dispose();
-				container.replaceChildren();
-			}
-		};
-	}
-};
+				timer = setTimeout(() => { void rebuild(); }, 300);
+			});
+
+			void rebuild();
+
+			return {
+				"dispose": (): void => {
+					disposed = true;
+
+					if (timer !== undefined) {
+						clearTimeout(timer);
+					}
+
+					sub.dispose();
+					container.replaceChildren();
+				}
+			};
+		}
+	};
+}

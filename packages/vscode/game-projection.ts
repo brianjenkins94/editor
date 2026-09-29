@@ -2,9 +2,12 @@
  * Game projection client — the workbench-realm handle to the reverse-projection worker (recognizer-worker.ts).
  *
  * Keeps `typescript` OUT of the main bundle: the recognizer runs in the worker (where the shared ts chunk lives) and
- * only the plain-JSON GameModel crosses back. Mirrors cosmetic-classifier.ts's worker plumbing, but projection is
- * on-demand (a request/response keyed by id), so no serial queue / abort machinery.
+ * only the plain-JSON GameModel crosses back. The worker's hub links into the workbench's, and `project` is a
+ * `recognizer.project` call over it — on demand, so no serial queue / abort machinery.
  */
+import type { Hub } from "@brianjenkins94/hub";
+import { createRpcClient, portTransport } from "@brianjenkins94/hub";
+
 import type { GameModel } from "./game-recognizer";
 
 export interface GameProjection {
@@ -13,56 +16,25 @@ export interface GameProjection {
 	"dispose": () => void;
 }
 
-/** Create a projection client backed by the recognizer worker (served at `lsp/recognizer-worker.js`). */
-export function createGameProjection(): GameProjection {
+/** Create a projection client backed by the recognizer worker (served at `lsp/recognizer-worker.js`), linked into `hub`. */
+export function createGameProjection(hub: Hub): GameProjection {
 	const worker = new Worker(new URL("./lsp/recognizer-worker.js", location.href), { "type": "module" });
-	const pending = new Map<number, { "resolve": (model: GameModel) => void; "reject": (error: unknown) => void }>();
-	let nextId = 0;
-
-	worker.addEventListener("message", (event: MessageEvent<{ "id": number; "model"?: GameModel; "error"?: string }>) => {
-		const request = pending.get(event.data.id);
-
-		if (request === undefined) {
-			return;
-		}
-
-		pending.delete(event.data.id);
-
-		if (event.data.error !== undefined) {
-			request.reject(new Error(event.data.error));
-		} else {
-			request.resolve(event.data.model ?? { "behaviors": [], "composites": [], "objects": [], "rules": [] });
-		}
-	});
-
-	// A worker that fails to load (or dies) never replies — reject everything pending instead of hanging, and every later call.
-	let failure: Error | undefined;
+	const unlink = hub.link(portTransport(worker));
+	const rpc = createRpcClient(hub);
+	// A worker that fails to load (or dies) never answers — fail the in-flight calls, and every later one.
+	const dead = new AbortController();
 
 	worker.addEventListener("error", (event) => {
 		event.preventDefault();
-		failure = new Error("recognizer worker failed: " + (event.message || "could not load"));
-
-		for (const request of pending.values()) {
-			request.reject(failure);
-		}
-
-		pending.clear();
+		dead.abort(new Error("recognizer worker failed: " + (event.message || "could not load")));
 	});
 
 	return {
-		"project": (files) => new Promise<GameModel>((resolve, reject) => {
-			if (failure !== undefined) {
-				reject(failure);
-
-				return;
-			}
-
-			const id = nextId;
-
-			nextId += 1;
-			pending.set(id, { "resolve": resolve, "reject": reject });
-			worker.postMessage({ "id": id, "files": files });
-		}),
-		"dispose": () => { worker.terminate(); }
+		// Generous limits: the first call waits for the worker to come up and then loads the shared ts chunk.
+		"project": async (files) => (await rpc.request("recognizer.project", { "files": files }, { "timeoutMs": 120000, "waitForResponderMs": 30000, "signal": dead.signal })) as GameModel,
+		"dispose": () => {
+			unlink();
+			worker.terminate();
+		}
 	};
 }
