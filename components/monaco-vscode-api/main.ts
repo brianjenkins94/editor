@@ -49,8 +49,8 @@ import * as vscode from "vscode";
 import getUserDataProfileServiceOverride from "@codingame/monaco-vscode-user-data-profile-service-override";
 // perf-trim: cloud settings-sync — never surfaced here, dropped from the initial bundle.
 // import getUserDataSyncServiceOverride from "@codingame/monaco-vscode-user-data-sync-service-override";
-// Getting-started walkthroughs: the Welcome page hosts the live architecture walkthrough (architecture/pane.ts).
-import getWalkThroughServiceOverride from "@codingame/monaco-vscode-walkthrough-service-override";
+// perf-trim: getting-started walkthroughs — dropped from the initial bundle.
+// import getWalkThroughServiceOverride from "@codingame/monaco-vscode-walkthrough-service-override";
 // perf-trim: welcome page — dropped from the initial bundle.
 // import getWelcomeServiceOverride from "@codingame/monaco-vscode-welcome-service-override";
 // AI/chat disabled:
@@ -309,10 +309,9 @@ const commonServices: IEditorOverrideServices = {
 	// }),
 	// perf-trim: notebooks removed from the initial bundle (see import above).
 	// ...getNotebookServiceOverride(),
-	// perf-trim: welcome / cloud settings-sync removed from the initial bundle.
+	// perf-trim: welcome / walkthrough / cloud settings-sync removed from the initial bundle.
 	// ...getWelcomeServiceOverride(),
-	// The Welcome page (Getting Started) — its walkthrough opens the live architecture diagram.
-	...getWalkThroughServiceOverride(),
+	// ...getWalkThroughServiceOverride(),
 	...getUserDataProfileServiceOverride(),
 	// ...getUserDataSyncServiceOverride(),
 	// AI/chat disabled:
@@ -533,7 +532,7 @@ export type {
 export { registerCustomView, ViewContainerLocation } from "@codingame/monaco-vscode-views-service-override";
 
 // The live architecture diagram: probes for the channels monaco-vscode-api opens (workers, extension host RPC,
-// webviews) — they patch VSCode internals, so they must come from THIS bundle — and its editor pane + walkthrough.
+// webviews) — they patch VSCode internals, so they must come from THIS bundle — and its editor pane.
 export type { ArchNodeSpec, ArchSink, NodeState, TrafficKind } from "./architecture/protocol";
 export type { MonacoProbeOptions, WorkerIdentity } from "./architecture/probes";
 export { installMonacoProbes, monacoWorkerId, extensionHostId, EXT_HOST_IFRAME, WEBVIEW_SERVICE_WORKER } from "./architecture/probes";

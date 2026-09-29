@@ -143,7 +143,7 @@ Edge styles: **solid arrows** = live message channels; **thick arrows** = a real
 ## Declared architecture (generated — the live view checks against it)
 
 The diagram above is the narrative. This one is **generated from `architecture-model.ts`** — the model the **live
-architecture view** compares everything it observes against (open it from the Welcome page walkthrough, or
+architecture view** compares everything it observes against (open it with
 *Developer: Open Live Architecture Diagram*). Hub links are `<==>`, probed channels `<-.->`. When the architecture
 changes, change the model; `test/architecture-model.test.mjs` fails until this block is regenerated
 (`node -e` the model's `declaredMermaid()`, or the view's **Model** button).

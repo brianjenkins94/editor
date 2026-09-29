@@ -1,17 +1,13 @@
 /**
- * Hosting for the live architecture diagram: an editor pane (plain DOM in the workbench realm, not a webview),
- * the command that opens it, and a walkthrough on the Welcome page pointing at it. The diagram itself is the
- * consumer's (`render`) — this only wires it into the workbench.
+ * Hosting for the live architecture diagram: an editor pane (plain DOM in the workbench realm, not a webview) and
+ * the command that opens it. The diagram itself is the consumer's (`render`) — this only wires it into the workbench.
  */
 import type { IEditorGroup } from "@codingame/monaco-vscode-api";
 import type { IInstantiationService } from "@codingame/monaco-vscode-api";
 import type { IEditorSerializer } from "@codingame/monaco-vscode-views-service-override";
-import { createInstance, IEditorService, IWalkthroughsService } from "@codingame/monaco-vscode-api";
-import { registerServiceInitializePostParticipant } from "@codingame/monaco-vscode-api/lifecycle";
-import { CommandsRegistry, ContextKeyExpr, MenuId, MenuRegistry } from "@codingame/monaco-vscode-api/monaco";
+import { createInstance, IEditorService } from "@codingame/monaco-vscode-api";
+import { CommandsRegistry, MenuId, MenuRegistry } from "@codingame/monaco-vscode-api/monaco";
 import { registerEditorPane, registerEditorSerializer, SimpleEditorInput, SimpleEditorPane } from "@codingame/monaco-vscode-views-service-override";
-import * as monaco from "monaco-editor";
-import previewSvg from "./preview.svg?raw";
 
 export const OPEN_ARCHITECTURE_COMMAND = "architecture.open";
 
@@ -22,9 +18,6 @@ export interface LiveArchitectureOptions {
 
 const ICON = { "id": "type-hierarchy" };
 const PANE_ID = "workbench.editors.liveArchitecture";
-
-// The walkthrough's media: a tiny schematic, inlined as a data: URI (the build stubs walkthrough image FILES).
-const PREVIEW = "data:image/svg+xml," + encodeURIComponent(previewSvg);
 
 let options: LiveArchitectureOptions | undefined;
 
@@ -66,8 +59,8 @@ class LiveArchitectureInput extends SimpleEditorInput {
 
 let registered = false;
 
-/** Register the pane, its command ("Developer: Open Live Architecture Diagram") and the Welcome page walkthrough.
- *  Call before `boot()`: the walkthrough must exist before the Welcome page is first built. */
+/** Register the pane and its command ("Developer: Open Live Architecture Diagram"). Call before `boot()`, so a
+ *  restored diagram tab finds its serializer. */
 export function registerLiveArchitecture(liveArchitectureOptions: LiveArchitectureOptions): void {
 	options = liveArchitectureOptions;
 
@@ -99,40 +92,5 @@ export function registerLiveArchitecture(liveArchitectureOptions: LiveArchitectu
 	});
 	MenuRegistry.appendMenuItem(MenuId.CommandPalette, {
 		"command": { "id": OPEN_ARCHITECTURE_COMMAND, "title": "Open Live Architecture Diagram", "category": "Developer" }
-	});
-
-	// Registered once the services exist but BEFORE the workbench renders: a walkthrough registered through the
-	// service later doesn't refresh a Welcome page that's already built. (Not an extension `walkthroughs`
-	// contribution: monaco-vscode-api's build drops that extension point's handler — fixed upstream, not released.)
-	const preview = monaco.Uri.parse(PREVIEW);
-
-	registerServiceInitializePostParticipant(async (accessor) => {
-		accessor.get(IWalkthroughsService).registerWalkthrough({
-			"id": "editor.liveArchitecture",
-			"title": "Live architecture",
-			"description": "Every realm, hub, worker and connection of this editor, and the messages flowing between them.",
-			"order": 0,
-			"source": "editor",
-			"isFeatured": true,
-			"when": ContextKeyExpr.true(),
-			"icon": { "type": "icon", "icon": ICON },
-			"walkthroughPageTitle": "Live architecture",
-			"steps": [
-				{
-					"id": "editor.liveArchitecture.open",
-					"title": "Explore the live architecture diagram",
-					"description": [
-						"The shell, the app, the workbench and its extension hosts, the pod, the workers they spawn, the service worker, webviews, storage and the network — and every hub link and channel between them, observed live.",
-						"Check the architecture against its model, or debug who talks to whom.",
-						"[Open the diagram](command:" + OPEN_ARCHITECTURE_COMMAND + ")"
-					].join("\n"),
-					"category": "editor.liveArchitecture",
-					"when": ContextKeyExpr.true(),
-					"order": 0,
-					"completionEvents": ["onCommand:" + OPEN_ARCHITECTURE_COMMAND],
-					"media": { "type": "image", "altText": "Schema of the editor's realms", "path": { "light": preview, "dark": preview, "hcLight": preview, "hcDark": preview } }
-				}
-			]
-		});
 	});
 }

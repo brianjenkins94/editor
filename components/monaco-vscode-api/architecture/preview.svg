@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 200" font-family="system-ui,sans-serif" font-size="10">
-<style>.b{fill:#7f7f7f14;stroke:#7f7f7f80}.n{fill:#7f7f7f26;stroke:#7f7f7f99}.t{fill:#888;font-weight:600}.e{fill:none;stroke:#3794ff;stroke-width:1.5;stroke-opacity:.7}</style>
-<rect class="b" x="8" y="70" width="80" height="60" rx="6"/><text class="t" x="16" y="86">shell</text>
-<rect class="b" x="118" y="60" width="80" height="80" rx="6"/><text class="t" x="126" y="76">root</text><rect class="n" x="126" y="84" width="64" height="18" rx="3"/><rect class="n" x="126" y="108" width="64" height="18" rx="3"/>
-<rect class="b" x="228" y="10" width="124" height="180" rx="6"/><text class="t" x="236" y="26">workbench</text>
-<rect class="n" x="236" y="34" width="108" height="20" rx="3"/><rect class="n" x="236" y="60" width="108" height="20" rx="3"/><rect class="b" x="236" y="88" width="108" height="94" rx="4"/><text class="t" x="242" y="102">pod · workers</text>
-<rect class="n" x="244" y="110" width="92" height="18" rx="3"/><rect class="n" x="244" y="134" width="92" height="18" rx="3"/><rect class="n" x="244" y="158" width="92" height="18" rx="3"/>
-<path class="e" d="M88 100 C103 100 103 93 118 93"/><path class="e" d="M198 93 C213 93 213 44 236 44"/><path class="e" d="M198 117 C213 117 213 119 244 119"/><path class="e" d="M198 93 C216 93 216 143 244 143"/>
-<circle cx="103" cy="97" r="3" fill="#3794ff"/><circle cx="214" cy="70" r="3" fill="#89d185"/><circle cx="220" cy="130" r="3" fill="#b180d7"/></svg>

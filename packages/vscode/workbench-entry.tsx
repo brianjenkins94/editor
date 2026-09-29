@@ -97,8 +97,8 @@ const paneLog = relayLoggerToHub(workbenchHub, "workbench");
 tapConsoleAndErrors(workbenchHub, "workbench"); // raw uncaught error/rejection → the plane, beside the structured logs
 
 // The live architecture view: this realm's hub + network, and — installed before boot() creates anything — the
-// monaco probes (workers, extension host RPC, webviews). The diagram opens from the Welcome page walkthrough or
-// "Developer: Open Live Architecture Diagram".
+// monaco probes (workers, extension host RPC, webviews). The diagram opens with "Developer: Open Live
+// Architecture Diagram".
 const architecture = reportArchitecture(workbenchHub);
 
 installMonacoProbes(architecture, { "identifyWorker": identifyWorker });
