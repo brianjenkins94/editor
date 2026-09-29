@@ -6,7 +6,7 @@ import { test } from "node:test";
 // From source: node won't strip types from the pnpm copy under node_modules (arch.ts only imports hub TYPES).
 import { createHub, createRpcClient, serve } from "../../hub/src/index.ts";
 import { ArchitectureStore } from "../src/arch-store.ts";
-import { collectArchReports, createArchReporter, requestArchSync } from "../src/arch.ts";
+import { collectArchReports, createArchReporter, normalizeSubject, requestArchSync } from "../src/arch.ts";
 
 function pipe(): [Transport, Transport] {
 	let left: ((message: unknown) => void) | undefined;
@@ -265,5 +265,47 @@ test("a short-lived peer that says hello and is gone before the next flush is st
 
 	assert.ok(![...store.nodes.keys()].some((id) => id.startsWith("node:link")), [...store.nodes.keys()].join(","));
 	assert.ok(store.channels.has("node|provoke"));
+	reporter.dispose();
+});
+
+test("ids in subjects and RPC names collapse to *, words don't", () => {
+	assert.equal(normalizeSubject("node.out.k3j2h1g5f4d3s2a1"), "node.out.*");
+	assert.equal(normalizeSubject("debug.session.ebc89798-1504-4c3b-8191-25576a8ab225.control"), "debug.session.*.control");
+	assert.equal(normalizeSubject("preview.hmr.5173"), "preview.hmr.*");
+	assert.equal(normalizeSubject("virtual.request.3f9a1c2e"), "virtual.request.*");
+	assert.equal(normalizeSubject("$sys.log.capabilities"), "$sys.log.capabilities");
+	assert.equal(normalizeSubject("workbench.openProject"), "workbench.openProject");
+});
+
+test("an RPC whose name carries an id is labelled once, not once per id", async () => {
+	const [a, b] = pipe();
+	const caller = createHub({ "id": "caller" });
+	const server = createHub({ "id": "server" });
+	const reporter = createArchReporter(caller);
+	const store = new ArchitectureStore();
+
+	collectArchReports(caller, (report) => { store.apply(report); });
+	caller.link(a);
+	server.link(b);
+
+	const ids = ["ebc89798-1504-4c3b-8191-25576a8ab225", "3de96504-c2b4-4677-bf06-3ca5ea7105c7"];
+
+	for (const id of ids) {
+		serve(server, `debug.session.${id}.step`, () => ({ "state": "stopped" }));
+	}
+
+	await wait(20);
+
+	const rpc = createRpcClient(caller);
+
+	for (const id of ids) {
+		await rpc.request(`debug.session.${id}.step`, {}, { "timeoutMs": 1000 });
+	}
+
+	await wait(400);
+
+	const labels = [...(store.channels.get("caller|server")?.labels.keys() ?? [])].filter((label) => label.includes("debug.session"));
+
+	assert.deepEqual(labels, ["debug.session.*.step()"]);
 	reporter.dispose();
 });

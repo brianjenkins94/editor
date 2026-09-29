@@ -132,11 +132,12 @@ export function approxSize(value: unknown, depth = 0): number {
 	return size;
 }
 
-/** `node.out.12` → `node.out.*`: ids in subjects would make every run a new label. */
-function normalizeSubject(subject: string): string {
+/** `node.out.12` → `node.out.*`: ids in subjects (and in RPC names) would make every run a new label. An id is a
+ *  number, a UUID, 8+ hex digits, or 12+ lowercase letters and digits with at least one digit (a word isn't). */
+export function normalizeSubject(subject: string): string {
 	return subject
 		.split(".")
-		.map((token) => ((/^\d+$|^[\da-f]{8,}$|^[\da-z]{12,}$/u).test(token) ? "*" : token))
+		.map((token) => ((/^\d+$|^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$|^[\da-f]{8,}$|^(?=[a-z]*\d)[\da-z]{12,}$/u).test(token) ? "*" : token))
 		.join(".");
 }
 
@@ -313,7 +314,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 		const { subject, data } = envelope;
 
 		if (subject.startsWith(RPC_CALL)) {
-			const name = subject.slice(RPC_CALL.length);
+			const name = normalizeSubject(subject.slice(RPC_CALL.length));
 			const id = (data as { "id"?: unknown } | undefined)?.id;
 
 			if (typeof id === "string") {
