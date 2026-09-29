@@ -310,3 +310,29 @@ test("an RPC whose name carries an id is labelled once, not once per id — by t
 	assert.deepEqual(labels, ["debug.session.*.step()", "↩ debug.session.*.step()"]);
 	reporters.forEach((reporter) => { reporter.dispose(); });
 });
+
+test("a link linked and unlinked between two reports, never answered, is reported as an ended context", async () => {
+	const root = createHub({ "id": "root" });
+	const reporter = createArchReporter(root);
+	const store = new ArchitectureStore();
+
+	collectArchReports(root, (report) => { store.apply(report); });
+	await wait(300); // the reporter's first reports go out
+
+	// A tab re-linking to a service worker replaced mid-boot: the first port is dropped before anyone answers.
+	const [a, b] = pipe();
+
+	b.listen(() => undefined);
+	const unlink = root.link(a);
+
+	root.subscribe("anything", () => undefined);
+	unlink();
+	await wait(400);
+
+	const placeholder = store.nodes.get("root:link-1");
+
+	assert.ok(placeholder !== undefined, [...store.nodes.keys()].join(","));
+	assert.equal(placeholder.state, "terminated");
+	assert.equal(placeholder.spec.dynamic, true);
+	reporter.dispose();
+});

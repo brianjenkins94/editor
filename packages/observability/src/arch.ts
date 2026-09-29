@@ -165,6 +165,8 @@ export function createArchReporter(hub: Hub): ArchReporter {
 	const anonymousLinks = new Set<string>();
 	// every peer a hello named, by link — so a short-lived link (a worker done before the next flush) still resolves
 	const knownPeers = new Map<string, string>();
+	// placeholders already reported as ended (a link gone before its peer answered)
+	const endedPlaceholders = new Set<string>();
 
 	function schedule(): void {
 		if (timer === undefined && !disposed) {
@@ -264,7 +266,10 @@ export function createArchReporter(hub: Hub): ArchReporter {
 	}
 
 	/** Name the peers of links whose `hello` arrived since their traffic was recorded. A peer that said hello
-	 *  without an id, or a link that's gone, is named `<self>:<link id>`; otherwise the traffic stays pending. */
+	 *  without an id, or a link that's gone, is named `<self>:<link id>`; otherwise the traffic stays pending. A link
+	 *  gone before its peer ever answered is reported as a context that ENDED (dynamic, terminated): it can live and die
+	 *  between two reports — a tab re-linking to a service worker that was replaced mid-boot — so no topology report
+	 *  ever shows it, and without this its placeholder would look alive forever. */
 	function resolvePendingLinks(): void {
 		const links = new Map(hub.inspect().links.map((link) => [PENDING_LINK + link.id, link.peerId]));
 		const resolve = (id: string): string => {
@@ -279,7 +284,14 @@ export function createArchReporter(hub: Hub): ArchReporter {
 			}
 
 			if (!links.has(id) || anonymousLinks.has(id)) {
-				return self + ":" + id.slice(PENDING_LINK.length);
+				const named = self + ":" + id.slice(PENDING_LINK.length);
+
+				if (!links.has(id) && !anonymousLinks.has(id) && !endedPlaceholders.has(named)) {
+					endedPlaceholders.add(named);
+					nodeOps.push({ "op": "spawn", "spec": { "id": named, "dynamic": true } }, { "op": "terminate", "id": named });
+				}
+
+				return named;
 			}
 
 			return id;
