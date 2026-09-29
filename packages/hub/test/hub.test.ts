@@ -172,6 +172,9 @@ test("interest survives a late link on a LOSSY transport (hello handshake)", asy
 	await flush();
 
 	assert.deepEqual(atRoot, ["recovered"]);
+	// root's own hello was dropped, but it answers pod's — so BOTH ends know who is across the link
+	assert.equal(root.inspect().links[0]?.peerId, "pod");
+	assert.equal(pod.inspect().links[0]?.peerId, "root");
 });
 
 test("websocketTransport federates over a JSON-framed, EventTarget-shaped socket", async () => {
@@ -268,4 +271,91 @@ test("unlink stops federation and withdraws interest", async () => {
 	await flush();
 
 	assert.deepEqual(atPod, ["before"]);
+});
+
+test("inspect reports subscriptions, links, peers and interest", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+
+	root.link(a);
+	pod.link(b);
+	pod.subscribe("cmd.>", () => undefined);
+	await flush();
+
+	const atRoot = root.inspect();
+	const atPod = pod.inspect();
+
+	assert.equal(atRoot.id, "root");
+	assert.deepEqual(atRoot.subscriptions, []);
+	assert.equal(atRoot.links.length, 1);
+	assert.equal(atRoot.links[0]?.id, "link-1");
+	assert.equal(atRoot.links[0]?.peerId, "pod");
+	assert.deepEqual(atRoot.links[0]?.remoteInterest, ["cmd.>"]);
+	assert.deepEqual(atPod.subscriptions, ["cmd.>"]);
+	assert.equal(atPod.links[0]?.peerId, "root");
+	assert.deepEqual(atPod.links[0]?.advertised, ["cmd.>"]);
+	// the snapshot is plain data
+	assert.deepEqual(JSON.parse(JSON.stringify(atRoot)), atRoot);
+});
+
+test("a tap sees publish, send, receive and deliver — with the peer of each link", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	const rootEvents: string[] = [];
+	const podEvents: string[] = [];
+
+	root.link(a);
+	pod.link(b);
+	pod.subscribe("cmd.run", () => undefined);
+	await flush();
+
+	root.tap((event) => {
+		if (event.type === "publish") {
+			rootEvents.push("publish " + event.envelope.subject);
+		} else if ((event.type === "send" || event.type === "receive") && "subject" in event.frame) {
+			rootEvents.push(`${event.type} ${event.frame.subject} ${event.link.peerId}`);
+		}
+	});
+	pod.tap((event) => {
+		if (event.type === "deliver") {
+			podEvents.push(`deliver ${event.envelope.subject} from ${event.envelope.from} via ${event.link?.peerId} to ${event.handlers}`);
+		}
+	});
+	pod.tap(() => { throw new Error("a broken tap"); }); // must not break routing
+
+	root.publish("cmd.run", "go");
+	root.publish("cmd.other", "stays local");
+	await flush();
+
+	assert.deepEqual(rootEvents, ["publish cmd.run", "send cmd.run pod", "publish cmd.other"]);
+	assert.deepEqual(podEvents, ["deliver cmd.run from root via root to 1"]);
+});
+
+test("a tap is told when the topology changes, and can be disposed", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	let changes = 0;
+	const dispose = root.tap((event) => {
+		if (event.type === "topology") {
+			changes += 1;
+		}
+	});
+
+	const unlink = root.link(a); // link
+	pod.link(b);
+	await flush(); // peer learned
+
+	const afterLink = changes;
+
+	assert.ok(afterLink >= 2);
+	root.subscribe("x", () => undefined); // subscription
+	assert.equal(changes, afterLink + 1);
+	unlink(); // unlink
+	assert.equal(changes, afterLink + 2);
+	dispose();
+	root.subscribe("y", () => undefined);
+	assert.equal(changes, afterLink + 2);
 });
