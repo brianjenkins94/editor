@@ -8,10 +8,12 @@
  * every other tool in that ecosystem (same result shape, same MRTR confirm context). We mount them onto an
  * McpServer we own rather than going through `serveMcp`, because this process ALSO runs the WebSocket collector
  * — serveMcp owns the process (its own stdio / Vite dev bridge), which leaves no room for the WS server; here
- * the two share one process and one store. These tools are read-only, so no broker/run-ledger wiring is needed.
+ * the two share one process and one store. The store tools are read-only; the page tools and the debugger tools
+ * (debug-tools.ts) act on the live editor, which only links to debug-mcp in dev (localhost, or `?debug`).
  */
 import type { DebugMcp } from "./server.ts";
 import type { QueryLogsInput, QuerySpansInput, WaitInput } from "./store.ts";
+import { registerDebugTools } from "./debug-tools.ts";
 import { defineTool, fail, ok, registerTool } from "@brianjenkins94/util/mcp/tool";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -202,6 +204,8 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 			}
 		}
 	}));
+
+	registerDebugTools(server, debugMcp);
 
 	return server;
 }
