@@ -49,8 +49,8 @@ import * as vscode from "vscode";
 import getUserDataProfileServiceOverride from "@codingame/monaco-vscode-user-data-profile-service-override";
 // perf-trim: cloud settings-sync — never surfaced here, dropped from the initial bundle.
 // import getUserDataSyncServiceOverride from "@codingame/monaco-vscode-user-data-sync-service-override";
-// perf-trim: getting-started walkthroughs — dropped from the initial bundle.
-// import getWalkThroughServiceOverride from "@codingame/monaco-vscode-walkthrough-service-override";
+// Getting-started walkthroughs: the Welcome page hosts the live architecture walkthrough (architecture/pane.ts).
+import getWalkThroughServiceOverride from "@codingame/monaco-vscode-walkthrough-service-override";
 // perf-trim: welcome page — dropped from the initial bundle.
 // import getWelcomeServiceOverride from "@codingame/monaco-vscode-welcome-service-override";
 // AI/chat disabled:
@@ -309,9 +309,10 @@ const commonServices: IEditorOverrideServices = {
 	// }),
 	// perf-trim: notebooks removed from the initial bundle (see import above).
 	// ...getNotebookServiceOverride(),
-	// perf-trim: welcome / walkthrough / cloud settings-sync removed from the initial bundle.
+	// perf-trim: welcome / cloud settings-sync removed from the initial bundle.
 	// ...getWelcomeServiceOverride(),
-	// ...getWalkThroughServiceOverride(),
+	// The Welcome page (Getting Started) — its walkthrough opens the live architecture diagram.
+	...getWalkThroughServiceOverride(),
 	...getUserDataProfileServiceOverride(),
 	// ...getUserDataSyncServiceOverride(),
 	// AI/chat disabled:
@@ -530,3 +531,11 @@ export type {
 // sidebar / panel / auxiliary bar (ViewContainerLocation) — real DOM, not a sandboxed webview iframe, so it
 // composites everywhere. (silo's review burndown; mirrors the @codingame demo's customView feature.)
 export { registerCustomView, ViewContainerLocation } from "@codingame/monaco-vscode-views-service-override";
+
+// The live architecture diagram: probes for the channels monaco-vscode-api opens (workers, extension host RPC,
+// webviews) — they patch VSCode internals, so they must come from THIS bundle — and its editor pane + walkthrough.
+export type { ArchNodeSpec, ArchSink, NodeState, TrafficKind } from "./architecture/protocol";
+export type { MonacoProbeOptions, WorkerIdentity } from "./architecture/probes";
+export { installMonacoProbes, monacoWorkerId, extensionHostId, EXT_HOST_IFRAME, WEBVIEW_SERVICE_WORKER } from "./architecture/probes";
+export type { LiveArchitectureOptions } from "./architecture/pane";
+export { OPEN_ARCHITECTURE_COMMAND, registerLiveArchitecture } from "./architecture/pane";
