@@ -79,3 +79,11 @@ test("ARCHITECTURE.md's generated diagram is the model's", async () => {
 
 	assert.equal(block, declaredMermaid(), "ARCHITECTURE.md is stale: regenerate the block from architecture-model.ts");
 });
+
+test("each pair of contexts is declared as one channel (a second one could never be seen)", async () => {
+	const { channels } = await import("../architecture-model.ts");
+	const pairs = channels.map((channel) => [channel.a, channel.b].sort().join(" ⇄ "));
+	const duplicates = pairs.filter((pair, index) => pairs.indexOf(pair) !== index);
+
+	assert.deepEqual(duplicates, []);
+});

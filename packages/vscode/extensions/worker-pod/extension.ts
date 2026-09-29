@@ -18,6 +18,8 @@ import { type CapabilityCall, decideCapability } from "../capabilities/decide";
 import { flushRun } from "../capabilities/silo-store";
 import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
 import { reportArchitecture } from "../../architecture";
+import { identifyWorker } from "../../architecture-model";
+import { ZENFS_NODE } from "../../architecture-zenfs";
 import { registerTsvalDebug } from "./debug-adapter";
 import { registerDebugToolbar } from "./debug-toolbar";
 import { podHub } from "./pod";
@@ -67,8 +69,17 @@ const clients: LanguageClient[] = [];
 // One control port per spawned LSP worker (the workbench end of a MessageChannel), used only to hand the worker
 // the shared workspace SharedArrayBuffer (M3b) — separate from the LSP JSON-RPC channel. `workspaceBuffer` is
 // the SAB once the workbench provides it; a worker that spawns after gets it immediately.
-const controlPorts: MessagePort[] = [];
+const controlPorts: Array<{ "port": MessagePort; "worker": string }> = [];
 let workspaceBuffer: SharedArrayBuffer | undefined;
+// Hub topology/traffic only: this extension host shares the workbench realm, whose network is probed there.
+const architecture = reportArchitecture(podHub, { "network": false });
+
+/** Hand a server worker the workspace buffer; it mounts it at /workspace (a worker without a reporter of its own,
+ *  so the mount is put on the diagram from here). */
+function shareWorkspace(control: { "port": MessagePort; "worker": string }, buffer: SharedArrayBuffer): void {
+	control.port.postMessage({ "buffer": buffer }); // → the worker's receiveSharedWorkspace → mount at /workspace
+	architecture.record(control.worker, ZENFS_NODE, "lifecycle", "mount /workspace (shared " + Math.round(buffer.byteLength / 1048576) + " MB)");
+}
 
 // Nudge the host page to load the (heavy) live preview now that OUR extension is up — activated, wired, and its
 // server pod spinning. The page holds the preview import back until it hears this on the hub (main.tsx →
@@ -98,10 +109,12 @@ function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 	const channel = new MessageChannel();
 
 	worker.postMessage({ "type": "ws-control" }, [channel.port2]);
-	controlPorts.push(channel.port1);
+	const control = { "port": channel.port1, "worker": identifyWorker(spec.workerFile)?.id ?? "worker:" + spec.id };
+
+	controlPorts.push(control);
 
 	if (workspaceBuffer !== undefined) {
-		channel.port1.postMessage({ "buffer": workspaceBuffer });
+		shareWorkspace(control, workspaceBuffer);
 	}
 
 	const client = new LanguageClient(`lsp-${spec.id}`, spec.name, worker, { "documentSelector": spec.documentSelector });
@@ -117,9 +130,6 @@ function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 export function activate(context: vscode.ExtensionContext): PodBridge {
 	// The pod's own logger — its spans/records ride podHub.
 	const podLog = relayLoggerToHub(podHub, "pod");
-
-	// Hub topology/traffic only: this extension host shares the workbench realm, whose network is probed there.
-	reportArchitecture(podHub, { "network": false });
 
 	tapConsoleAndErrors(podHub, "pod"); // raw uncaught error/rejection → the plane, beside the structured logs
 
@@ -328,8 +338,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 		workspaceBuffer = buffer;
 
-		for (const port of controlPorts) {
-			port.postMessage({ "buffer": buffer }); // → the worker's receiveSharedWorkspace → mount at /workspace
+		for (const control of controlPorts) {
+			shareWorkspace(control, buffer);
 		}
 
 		podLog.info("workspace buffer shared with LSP workers", { "workers": controlPorts.length, "mb": Math.round(buffer.byteLength / 1048576) });

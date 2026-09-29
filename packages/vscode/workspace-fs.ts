@@ -21,10 +21,12 @@
  */
 import type { IFileSystemProviderWithFileReadWriteCapability, IStat } from "@brianjenkins94/monaco-vscode-api/main";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
+import type { ArchSink } from "@brianjenkins94/observability";
 import type { Logger } from "@brianjenkins94/util/logger";
 import { FileChangeType, FileSystemProviderCapabilities, FileType, registerFileSystemOverlay } from "@brianjenkins94/monaco-vscode-api/main";
-import { configure, fs, InMemory, SingleBuffer } from "@zenfs/core";
+import { configure, fs, InMemory, mounts, SingleBuffer } from "@zenfs/core";
 
+import { observeZenfs, reportZenfsUsage, ZENFS_NODE } from "./architecture-zenfs";
 import { createChangeEvent, notFound, readOnly } from "./provider-base";
 
 /** VS Code's platform `FilePermission.Readonly` bit (vs/platform/files/common/files: `Readonly = 1 << 0`). Set in
@@ -113,7 +115,9 @@ function persistLoadAll(db: IDBDatabase): Promise<[string, Uint8Array][]> {
 	});
 }
 
-export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): Promise<WorkspaceFs> {
+/** `sink` puts the workspace on the live architecture diagram: every store operation, by caller (the vscode provider,
+ *  the boot seed, or a direct zen-fs user), and every change batch the provider announces. */
+export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, sink?: ArchSink): Promise<WorkspaceFs> {
 	// A SharedArrayBuffer-backed store (zen-fs SingleBuffer) when cross-origin isolation is available — so the LSP
 	// workers + preview can later attach to the SAME filesystem via this buffer (M3b). Falls back to InMemory
 	// (single-realm) otherwise. COI is required for SharedArrayBuffer and is what the coi service worker provides.
@@ -128,6 +132,26 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		await configure({ "mounts": { "/": InMemory, "/workspace": { "backend": SingleBuffer, "buffer": buffer } } });
 	} else {
 		await configure({ "mounts": { "/": InMemory } });
+	}
+
+	// Who is calling the store right now: the provider and the boot seed say so; anyone else is a direct caller.
+	// Provider methods do all their zen-fs work synchronously (no await before it), so a plain variable is enough.
+	let caller: string | undefined;
+	const as = <Args extends unknown[], Result>(name: string, method: (...args: Args) => Result) => (...args: Args): Result => {
+		caller = name;
+
+		try {
+			return method(...args);
+		} finally {
+			caller = undefined;
+		}
+	};
+	const store = mounts.get(buffer !== undefined ? "/workspace" : "/");
+
+	if (sink !== undefined && store !== undefined) {
+		sink.declare({ "id": ZENFS_NODE, "meta": { "backend": buffer !== undefined ? "SingleBuffer (SharedArrayBuffer)" : "InMemory (this realm only)" } });
+		observeZenfs(sink, store, { "caller": () => caller });
+		reportZenfsUsage(sink, store);
 	}
 
 	// Paths seeded read-only (managed configs like tsconfig.json, the baked type surface, ambient files). The
@@ -149,6 +173,8 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 
 	// Seed the baked snapshot (not persisted — a rebuilt demo file stays fresh), then restore persisted writes
 	// (acquired types + edits) on top, so those override the seed for any overlapping path.
+	caller = "seed";
+
 	for (const file of files) {
 		ensureParent(file.path);
 		fs.writeFileSync(file.path, file.contents);
@@ -158,13 +184,18 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 		}
 	}
 
+	caller = undefined;
 	const db = await openPersist();
 	let restored = 0;
 
 	const retired: string[] = [];
 
 	if (db !== undefined) {
-		for (const [path, contents] of await persistLoadAll(db)) {
+		const persisted = await persistLoadAll(db);
+
+		caller = "restore";
+
+		for (const [path, contents] of persisted) {
 			if (RETIRED.has(path)) {
 				retired.push(path); // written by an older build; dropped below rather than brought back
 			} else {
@@ -173,6 +204,8 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 				restored += 1;
 			}
 		}
+
+		caller = undefined;
 	}
 
 	// Debounced write-back: batch dirty paths and flush in one transaction (null = delete).
@@ -235,6 +268,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 				const batch = changeBatch;
 
 				changeBatch = [];
+				sink?.record(ZENFS_NODE, sink.self, "event", "onDidChangeFile", batch.length);
 
 				for (const listener of listeners) {
 					listener(batch);
@@ -344,6 +378,10 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger): P
 
 	// Priority 2 — above boot's in-memory seed (1) and the CDN node_modules overlay (0). Reads for a path zen-fs
 	// holds are served here; genuine misses (a CDN dep) fall through to the lower overlays.
+	for (const method of ["stat", "readFile", "readdir", "writeFile", "mkdir", "delete", "rename"] as const) {
+		(provider as unknown as Record<string, unknown>)[method] = as("vscode", provider[method] as (...args: unknown[]) => unknown);
+	}
+
 	registerFileSystemOverlay(2, provider);
 
 	(globalThis as unknown as { "__workspaceFs": WorkspaceFs }).__workspaceFs = handle;

@@ -1,6 +1,7 @@
 /** @jsxImportSource preact */
 import type { Preview } from "./preview";
 import { createHub, serve, windowTransport } from "@brianjenkins94/hub";
+import { installWindowMessageProbe } from "@brianjenkins94/observability";
 import types from "editor:types";
 import moduleVersions from "editor:versions";
 import workspace from "editor:workspace";
@@ -38,7 +39,17 @@ if (isolated && window.parent === window) {
 	// dedicated port. See telemetry.ts / @brianjenkins94/hub.
 	const rootHub = createHub({ "id": "root" });
 
-	reportArchitecture(rootHub); // this realm's hub + network on $sys.arch, for the live architecture view
+	// This realm's hub + network on $sys.arch, for the live architecture view — plus every message another frame posts
+	// here that isn't hub traffic (the shell above, the workbench iframe below), so a new channel can't hide.
+	const architecture = reportArchitecture(rootHub);
+
+	installWindowMessageProbe(architecture, (source) => {
+		if (source === window.parent) {
+			return "shell";
+		}
+
+		return [...document.querySelectorAll("iframe")].some((frame) => frame.contentWindow === source && frame.src.includes("/__vscode__/host.html")) ? "workbench" : undefined;
+	});
 	installHubCollector(rootHub, consoleCollector);
 	tapConsoleAndErrors(rootHub, "host"); // raw uncaught error/rejection on the page → the plane (errors-only: loop-safe on the collector context)
 	linkServiceWorkerHub(rootHub);

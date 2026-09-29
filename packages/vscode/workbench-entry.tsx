@@ -99,7 +99,9 @@ tapConsoleAndErrors(workbenchHub, "workbench"); // raw uncaught error/rejection 
 // The live architecture view: this realm's hub + network, and — installed before boot() creates anything — the
 // monaco probes (workers, extension host RPC, webviews). The diagram opens from the Welcome page walkthrough or
 // "Developer: Open Live Architecture Diagram".
-installMonacoProbes(reportArchitecture(workbenchHub), { "identifyWorker": identifyWorker });
+const architecture = reportArchitecture(workbenchHub);
+
+installMonacoProbes(architecture, { "identifyWorker": identifyWorker });
 registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });
 
 window.addEventListener("error", (event) => {
@@ -420,7 +422,7 @@ function maybeBoot(): void {
 			// above boot's now defaults-only priority-1 base). This is the SOLE store for source — it gets the FULL
 			// `files` (source + type surface), so the workers/type-checker that attach to this same zen-fs see them,
 			// and a repo load can clear/replace it. See workspace-fs.ts.
-			workspaceFs = await installWorkspaceFs(files, paneLog).catch((error: unknown) => {
+			workspaceFs = await installWorkspaceFs(files, paneLog, architecture).catch((error: unknown) => {
 				bootSpan.error("workspace zen-fs failed", { "error": errText(error) });
 
 				return undefined;

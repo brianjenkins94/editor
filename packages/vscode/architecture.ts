@@ -6,13 +6,13 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { ArchReporter } from "@brianjenkins94/observability";
 import { createArchReporter, installNetworkProbes } from "@brianjenkins94/observability";
-import { classifyUrl } from "./architecture-model";
+import { classifyUrl, idbOwner } from "./architecture-model";
 
 export function reportArchitecture(hub: Hub, options: { "network"?: boolean } = {}): ArchReporter {
 	const reporter = createArchReporter(hub);
 
 	if (options.network !== false) {
-		installNetworkProbes(reporter, { "classifyUrl": classifyUrl });
+		installNetworkProbes(reporter, { "classifyUrl": classifyUrl, "idbOwner": idbOwner });
 	}
 
 	return reporter;

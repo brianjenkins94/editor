@@ -18,7 +18,9 @@
  * routing of those is a follow-up).
  */
 import type { Hub } from "@brianjenkins94/hub";
+import type { ArchSink } from "@brianjenkins94/observability";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
+import { installWindowMessageProbe } from "@brianjenkins94/observability";
 import { ArrowDownToLine, ArrowUpToLine, Pause, Play, Redo2, RotateCcw, Unplug } from "lucide";
 import { LOG_SUBJECT } from "./telemetry";
 import { css, iconSvg } from "./theme";
@@ -60,8 +62,10 @@ interface PreviewSurface {
 	"promptChain": Promise<unknown>;
 }
 
-/** Wire the preview windows to a hub that reaches the app realm (the shell hub). Idempotent per shell. */
-export function installShellPreview(hub: Hub): void {
+/** Wire the preview windows to a hub that reaches the app realm (the shell hub). Idempotent per shell. `sink` puts
+ *  the windows on the live architecture diagram: each iframe's lifetime, what the shell posts into it, and — through
+ *  a window message probe — everything any frame posts up to the shell, attributed to the iframe it came from. */
+export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	const surfaces = new Map<number, PreviewSurface>();
 	let primaryPort: number | undefined; // fallback window for prompts/toolbar not bound to a specific preview port
 	// The debug-run type shown in a window title. The live preview is the almostnode "production" run
@@ -74,6 +78,7 @@ export function installShellPreview(hub: Hub): void {
 	const capRpc = createRpcClient(hub);
 
 	const primary = (): PreviewSurface | undefined => (primaryPort === undefined ? undefined : surfaces.get(primaryPort));
+	const record = (to: string, label: string, bytes?: number): void => { sink?.record(sink.self, to, "message", label, bytes); };
 
 	// The tsval debugger's render surface (debug-preview.html) gets its OWN window too — a live runtime surface, like
 	// the app previews — but it's fed a mutation stream over the hub rather than a served URL, so it's tracked apart
@@ -166,10 +171,14 @@ export function installShellPreview(hub: Hub): void {
 		paneWindow.body.appendChild(promptEl);
 
 		// Each surface applies ITS port's HMR into ITS iframe (React Fast Refresh, state preserved).
-		const offHmr = hub.subscribe(`preview.hmr.${port}`, (message) => { frame.contentWindow?.postMessage(message, "*"); });
+		const offHmr = hub.subscribe(`preview.hmr.${port}`, (message) => {
+			record("preview:" + port, "hmr " + ((message as { "type"?: string } | null)?.type ?? "update"));
+			frame.contentWindow?.postMessage(message, "*");
+		});
 		const surface: PreviewSurface = { "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "offHmr": offHmr, "promptChain": Promise.resolve() };
 
 		surfaces.set(port, surface);
+		sink?.spawn({ "id": "preview:" + port, "label": "Preview :" + port, "container": "previews", "detail": "/__virtual__/" + port + "/", "dynamic": true });
 		primaryPort = port;
 		renderDebugToolbar(); // in case a session is already active when the window opens
 
@@ -206,6 +215,7 @@ export function installShellPreview(hub: Hub): void {
 		surface.offHmr();
 		surface.paneWindow.element.remove();
 		surfaces.delete(port);
+		sink?.terminate("preview:" + port);
 
 		if (primaryPort === port) {
 			primaryPort = [...surfaces.keys()].pop(); // fall back to another open preview, if any
@@ -224,6 +234,10 @@ export function installShellPreview(hub: Hub): void {
 	// The tsval render window — opened on session start, torn down on stop; the workbench bridge (debug-preview-view.ts)
 	// drives it over the hub. It reuses createPaneWindow + renderDebugToolbar, so the step controls land on THIS window.
 	const teardownTsval = (): void => {
+		if (tsvalSurface !== undefined) {
+			sink?.terminate("tsval-preview");
+		}
+
 		tsvalSurface?.port?.close();
 		tsvalSurface?.paneWindow.element.remove();
 		tsvalSurface = undefined;
@@ -250,13 +264,19 @@ export function installShellPreview(hub: Hub): void {
 		frame.src = tsvalUrl;
 		paneWindow.body.appendChild(frame);
 		tsvalSurface = { "paneWindow": paneWindow, "frame": frame };
+		sink?.spawn({ "id": "tsval-preview" });
 		paneWindow.show();
 		renderDebugToolbar(); // a tsval session may already be active when the window opens
 	};
 
 	hub.subscribe("tsval.preview.open", () => { ensureTsval(); });
 	hub.subscribe("tsval.preview.close", () => { teardownTsval(); });
-	hub.subscribe("tsval.preview.stream", (message) => { tsvalSurface?.port?.postMessage(message); });
+	hub.subscribe("tsval.preview.stream", (message) => {
+		if (tsvalSurface?.port !== undefined) {
+			record("tsval-preview", "stream " + ((message as { "type"?: string } | null)?.type ?? "message"));
+			tsvalSurface.port.postMessage(message);
+		}
+	});
 
 	/** Show ONE capability prompt as an overlay on `surface`'s preview window and resolve with the user's choice —
 	 *  the running app is dimmed behind it. */
@@ -343,6 +363,20 @@ export function installShellPreview(hub: Hub): void {
 	//     run + can prompt the TOFU overlay) and post the verdict back into the iframe. FAIL CLOSED (deny) on error.
 	//   • `obs-log` : each console call / uncaught error → reshape into a LogRecord on `$sys.log.preview`, so a
 	//     preview iframe (otherwise invisible to the plane — app code logs through raw console) reaches the collector.
+	if (sink !== undefined) {
+		// Every message a frame posts up to the shell, by the frame it came from — known surfaces by name, anything
+		// else by its path, so a new channel shows up on the diagram (and in conformance) without being declared here.
+		installWindowMessageProbe(sink, (source) => {
+			if (tsvalSurface?.frame.contentWindow === source) {
+				return "tsval-preview";
+			}
+
+			const match = [...surfaces.entries()].find(([, surface]) => surface.frame.contentWindow === source);
+
+			return match === undefined ? undefined : "preview:" + match[0];
+		});
+	}
+
 	globalThis.addEventListener("message", (event: MessageEvent) => {
 		// The tsval render surface announced itself → hand it a MessagePort and bridge that port to the hub (same-realm
 		// transfer here; the hub carries the cross-realm half to/from the workbench bridge).
@@ -352,6 +386,8 @@ export function installShellPreview(hub: Hub): void {
 			tsvalSurface.port = channel.port1;
 			channel.port1.onmessage = (message: MessageEvent): void => {
 				const data = message.data as { "type"?: string; "id"?: unknown; "event"?: unknown; "index"?: unknown } | null;
+
+				sink?.record("tsval-preview", sink.self, "message", (data?.type ?? typeof data) + " (port)");
 
 				if (data?.type === "event") {
 					hub.publish("tsval.preview.event", { "id": data.id, "event": data.event });
@@ -363,6 +399,7 @@ export function installShellPreview(hub: Hub): void {
 			};
 			channel.port1.start();
 			tsvalSurface.frame.contentWindow?.postMessage({ "type": "init" }, "*", [channel.port2]);
+			record("tsval-preview", "init (+MessagePort)");
 
 			return;
 		}
@@ -378,7 +415,10 @@ export function installShellPreview(hub: Hub): void {
 
 		if (payload?.channel === "cap-decide" && typeof payload.kind === "string") {
 			const id = payload.id;
-			const reply = (allow: boolean): void => { (event.source as Window | null)?.postMessage({ "channel": "cap-decision", "id": id, "allow": allow }, "*"); };
+			const reply = (allow: boolean): void => {
+				record("preview:" + port, "cap-decision");
+				(event.source as Window | null)?.postMessage({ "channel": "cap-decision", "id": id, "allow": allow }, "*");
+			};
 
 			capRpc.request("capability.decide", { "kind": payload.kind, "args": [payload.resource ?? ""], "port": port }, { "timeoutMs": 300000 })
 				.then((allow) => { reply(allow !== false); })

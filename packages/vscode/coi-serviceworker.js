@@ -37,7 +37,42 @@ import { relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
 const swHub = createHub({ "id": "sw" });
 const swLog = relayLoggerToHub(swHub, "sw");
 
-reportArchitecture(swHub); // hub + the SW's upstream requests (CDN) on $sys.arch
+// hub + the SW's upstream requests (CDN) on $sys.arch, plus what it serves previews and relays to the dev server
+const architecture = reportArchitecture(swHub);
+
+// The preview a request came from: its own /__virtual__/<port>/ URL, else the preview document that asked for it.
+async function previewOf(event, pathname) {
+	const direct = parseVirtual(pathname);
+
+	if (direct !== null) {
+		return "preview:" + direct.port;
+	}
+
+	try {
+		const client = await globalThis.clients.get(event.clientId || event.resultingClientId);
+		const parsed = client ? parseVirtual(new URL(client.url).pathname) : null;
+
+		return parsed ? "preview:" + parsed.port : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+// A preview's request, as `preview:<port> → sw`, and the SW's answer back to it.
+function recordPreviewRequest(event, pathname, label, responsePromise) {
+	void previewOf(event, pathname).then((preview) => {
+		if (preview === undefined) {
+			return;
+		}
+
+		architecture.record(preview, architecture.self, "request", event.request.method + " " + label);
+		responsePromise.then((response) => {
+			architecture.record(architecture.self, preview, response.status >= 400 ? "error" : "reply", response.status + " " + label);
+		}, () => {
+			architecture.record(architecture.self, preview, "error", "failed " + label);
+		});
+	});
+}
 
 tapConsoleAndErrors(swHub, "sw"); // raw uncaught error/rejection → the plane, beside the structured logs
 
@@ -249,6 +284,7 @@ function handleMainMessage(event) {
 		}
 
 		pendingRequests.delete(id);
+		architecture.record("root", architecture.self, error === undefined ? "reply" : "error", "ServerBridge response");
 
 		if (error !== undefined) {
 			pending.reject(new Error(error));
@@ -256,6 +292,8 @@ function handleMainMessage(event) {
 			pending.resolve(data);
 		}
 	} else if (type === "stream-start") {
+		architecture.record("root", architecture.self, "reply", "ServerBridge stream");
+
 		if (pending && pending.streamController) {
 			pending.resolveHeaders(data);
 		}
@@ -315,7 +353,6 @@ void globalThis.clients.matchAll({ "type": "window" }).then((clients) => {
 	}
 });
 
-
 // The port drops when the worker is idle-terminated or replaced; ask clients to re-init and wait briefly.
 async function ensureMainPort() {
 	if (mainPort) {
@@ -364,6 +401,7 @@ async function sendRequest(port, method, url, headers, body) {
 		}, 30000);
 
 		mainPort.postMessage({ "type": "request", "id": id, "data": { "port": port, "method": method, "url": url, "headers": headers, "body": body } });
+		architecture.record(architecture.self, "root", "request", "ServerBridge request", body ? body.byteLength : 0);
 	});
 }
 
@@ -380,6 +418,7 @@ async function sendStreamingRequest(port, method, url, headers, body) {
 		"start": function(controller) {
 			pendingRequests.set(id, { "resolve": () => undefined, "reject": (err) => controller.error(err), "streamController": controller, "resolveHeaders": resolveHeaders });
 			mainPort.postMessage({ "type": "request", "id": id, "data": { "port": port, "method": method, "url": url, "headers": headers, "body": body, "streaming": true } });
+			architecture.record(architecture.self, "root", "request", "ServerBridge request (streaming)", body ? body.byteLength : 0);
 		},
 		"cancel": function() { pendingRequests.delete(id); }
 	});
@@ -483,7 +522,10 @@ globalThis.addEventListener("fetch", (event) => {
 	const virtual = parseVirtual(pathname);
 
 	if (virtual !== null) {
-		event.respondWith(handleVirtualRequest(request, virtual.port, (virtual.rest || "/") + requestUrl.search));
+		const response = handleVirtualRequest(request, virtual.port, (virtual.rest || "/") + requestUrl.search);
+
+		recordPreviewRequest(event, pathname, virtual.rest || "/", response);
+		event.respondWith(response);
 
 		return;
 	}
@@ -513,11 +555,12 @@ globalThis.addEventListener("fetch", (event) => {
 		if (refVirtual) {
 			const target = pathname + requestUrl.search;
 
-			if (request.mode === "navigate") {
-				event.respondWith(Response.redirect(requestUrl.origin + refVirtual.prefix + target, 302));
-			} else {
-				event.respondWith(handleVirtualRequest(request, refVirtual.port, target));
-			}
+			const response = request.mode === "navigate"
+				? Promise.resolve(Response.redirect(requestUrl.origin + refVirtual.prefix + target, 302))
+				: handleVirtualRequest(request, refVirtual.port, target);
+
+			recordPreviewRequest(event, refVirtual.prefix + pathname, pathname + " (referer relay)", response);
+			event.respondWith(response);
 
 			return;
 		}
@@ -531,5 +574,8 @@ globalThis.addEventListener("fetch", (event) => {
 	// Fallback: everything not virtual/workspace/same-origin-relayed. A previewed app's outbound data fetch is
 	// gated here (gateAndFetch resolves the client to tell a preview request from editor/CDN infra); everything
 	// else passes straight through with COI stamping.
-	event.respondWith(gateAndFetch(event, request, requestUrl));
+	const response = gateAndFetch(event, request, requestUrl);
+
+	recordPreviewRequest(event, pathname, requestUrl.origin === globalThis.location.origin ? pathname : requestUrl.host + " (passthrough)", response);
+	event.respondWith(response);
 });

@@ -14,7 +14,10 @@
  * module-global `fs`.
  */
 import type { VirtualFS } from "@brianjenkins94/almostnode";
-import { configure, fs, InMemory, resolveMountConfig, SingleBuffer } from "@zenfs/core";
+import type { ArchSink } from "@brianjenkins94/observability";
+import { configure, fs, InMemory, mounts, resolveMountConfig, SingleBuffer } from "@zenfs/core";
+
+import { observeZenfs, ZENFS_NODE } from "../../architecture-zenfs";
 
 const noopWatcher = { "close": () => undefined };
 
@@ -56,6 +59,18 @@ let pendingBuffer: SharedArrayBuffer | undefined;
 // The workspace SAB, retained once received so a worker can HAND IT ON to a freshly-spawned child worker (the
 // preview.provoke hardReset path spawns a cold child per round; it mounts this same buffer). undefined without COI.
 let sharedWorkspaceBuffer: SharedArrayBuffer | undefined;
+// This realm's architecture reporter, if it has one: the mount and every store operation go on the diagram.
+let architecture: ArchSink | undefined;
+
+/** Put this realm's workspace mount on the live architecture diagram (now, or when the buffer arrives). */
+export function observeWorkspace(sink: ArchSink): void {
+	architecture = sink;
+	const store = mounted ? mounts.get(WORKSPACE_MOUNT) : undefined;
+
+	if (store !== undefined) {
+		observeZenfs(sink, store);
+	}
+}
 
 /** The received workspace SharedArrayBuffer, or undefined if none arrived (no cross-origin isolation / standalone). */
 export function getSharedWorkspaceBuffer(): SharedArrayBuffer | undefined {
@@ -81,7 +96,14 @@ async function mountSharedWorkspace(buffer: SharedArrayBuffer): Promise<void> {
 	}
 
 	mounted = true;
-	fs.mount(WORKSPACE_MOUNT, await resolveMountConfig({ "backend": SingleBuffer, "buffer": buffer }));
+	const store = await resolveMountConfig({ "backend": SingleBuffer, "buffer": buffer });
+
+	if (architecture !== undefined) {
+		observeZenfs(architecture, store);
+		architecture.record(architecture.self, ZENFS_NODE, "lifecycle", "mount " + WORKSPACE_MOUNT + " (shared " + Math.round(buffer.byteLength / 1048576) + " MB)");
+	}
+
+	fs.mount(WORKSPACE_MOUNT, store);
 	console.log("[zenfs-vfs] shared workspace mounted at " + WORKSPACE_MOUNT + " — this worker now reads the editor's files");
 }
 

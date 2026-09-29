@@ -30,12 +30,15 @@
  */
 import { getServer, Runtime } from "@brianjenkins94/almostnode";
 import { createHub, portTransport, serve } from "@brianjenkins94/hub";
+import { installWorkerProbe } from "@brianjenkins94/observability";
 
 import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
 import { reportArchitecture } from "../../architecture";
+import { identifyWorker } from "../../architecture-model";
+import { ZENFS_NODE } from "../../architecture-zenfs";
 
 import { installTimerKeepAlive } from "./node-keepalive";
-import { createZenfsVFS, getSharedWorkspaceBuffer, receiveSharedWorkspace } from "./zenfs-vfs.js";
+import { createZenfsVFS, getSharedWorkspaceBuffer, observeWorkspace, receiveSharedWorkspace } from "./zenfs-vfs.js";
 
 // Catch the shared workspace SAB from the spawner BEFORE anything runs (dedicated port; never the RPC channel).
 receiveSharedWorkspace();
@@ -49,7 +52,11 @@ const hub = createHub({ "id": "node" });
 hub.link(portTransport(globalThis));
 const log = relayLoggerToHub(hub, "node");
 
-reportArchitecture(hub); // hub + this worker's own requests on $sys.arch
+// hub + this worker's own requests on $sys.arch, its workspace mount, the workers it spawns (the provoke child)
+const architecture = reportArchitecture(hub);
+
+observeWorkspace(architecture);
+installWorkerProbe(architecture, identifyWorker);
 
 tapConsoleAndErrors(hub, "node"); // raw uncaught error/rejection → the plane, beside the structured logs
 
@@ -425,7 +432,12 @@ serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
 		return { "status": 503, "statusText": "Service Unavailable", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`No server listening on port ${port}`) };
 	}
 
+	const serverNode = (previewServers.has(port) ? "vite:" : "server:") + port;
+
+	architecture.record(architecture.self, serverNode, "request", method + " " + url.split("?")[0], body?.byteLength ?? 0);
 	const response = await server.handleRequest(method, url, headers, body);
+
+	architecture.record(serverNode, architecture.self, response.statusCode >= 400 ? "error" : "reply", String(response.statusCode) + " " + url.split("?")[0], response.body.length);
 
 	// HTML documents get the observability tap injected as their first script (see OBS_TAP). Re-encode and fix
 	// content-length; only touch text/html so assets/JS/JSON pass through untouched.
@@ -458,12 +470,18 @@ serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number
 	server.start();
 	// HMR delivery (M2): the worker has no Window to post updates to, so give the server a stand-in whose
 	// postMessage publishes the update over the hub; the main thread relays it to the preview iframe.
-	server.setHMRTarget({ "postMessage": (message) => { hub.publish(`preview.hmr.${port}`, message); } });
+	server.setHMRTarget({
+		"postMessage": (message) => {
+			architecture.record("vite:" + port, architecture.self, "event", "hmr " + ((message as { "type"?: string } | null)?.type ?? "update"));
+			hub.publish(`preview.hmr.${port}`, message);
+		}
+	});
 	// Surface a cold-start transform failure on the observability plane so it's queryable via debug-mcp — not just a
 	// worker console.warn we can't read. The server now returns a 500 (self-healing) instead of retrying, so if this
 	// fires the preview may show a one-load error that recovers on reload; a recurrence means the race is still live.
 	server.setTransformErrorReporter((info) => { log.warn("preview transform failed (served 500, recovers on reload)", info); });
 	previewServers.set(port, server);
+	architecture.spawn({ "id": "vite:" + port, "label": "Vite dev server :" + port, "container": "workers", "detail": root, "dynamic": true });
 	lastPreviewConfig = { "port": port, "root": root };
 
 	return { "ok": true, "port": port };
@@ -485,6 +503,7 @@ async function provokeColdChild(buffer: SharedArrayBuffer, root: string, port: n
 			});
 			worker.addEventListener("error", (event: ErrorEvent) => { clearTimeout(timer); reject(new Error(event.message || "provoke child worker error")); });
 			worker.postMessage({ "buffer": buffer, "root": root, "port": port, "modules": urls });
+			architecture.record("worker:provoke-worker", ZENFS_NODE, "lifecycle", "mount /workspace (shared " + Math.round(buffer.byteLength / 1048576) + " MB)");
 		});
 
 		return { "failures": reply.failures.map((failure) => failure.url), "transformErrors": reply.transformErrors, "error": reply.error };
@@ -594,7 +613,12 @@ serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
 hub.subscribe("preview.fileChanged", (data) => {
 	const { port, path } = data as { "port": number; "path": string };
 
-	previewServers.get(port)?.notifyChange(path);
+	const server = previewServers.get(port);
+
+	if (server !== undefined) {
+		architecture.record(architecture.self, "vite:" + port, "event", "file changed");
+		server.notifyChange(path);
+	}
 });
 
 // Ctrl-C on the terminal's `vite` command: stop that port's dev server so it's really gone (a later `npm run dev`
@@ -603,14 +627,19 @@ hub.subscribe("preview.close", (data) => {
 	const port = (data as { "port"?: number } | null)?.port;
 
 	if (typeof port === "number") {
+		if (previewServers.has(port)) {
+			architecture.terminate("vite:" + port);
+		}
+
 		previewServers.get(port)?.stop();
 		previewServers.delete(port);
 
 		return;
 	}
 
-	for (const server of previewServers.values()) {
+	for (const [running, server] of previewServers) {
 		server.stop();
+		architecture.terminate("vite:" + running);
 	}
 
 	previewServers.clear();

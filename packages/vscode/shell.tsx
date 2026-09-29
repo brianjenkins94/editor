@@ -354,13 +354,13 @@ function Shell() {
 
 		const shellHub = createHub({ "id": "shell" });
 
-		reportArchitecture(shellHub); // this realm's hub + network (GitHub, Code Hike) on $sys.arch
+		const architecture = reportArchitecture(shellHub); // this realm's hub + network (GitHub, Code Hike) on $sys.arch
 		hubRef.current = shellHub;
 		shellHub.link(windowTransport(appFrame.contentWindow));
 
 		// The preview windows live in the top frame so they can roam beyond the editor — the app dev-server previews AND
 		// the tsval debugger's render surface, all managed here. See shell-preview.ts / debug-preview-view.ts.
-		installShellPreview(shellHub);
+		installShellPreview(shellHub, architecture);
 
 		// The editor (workbench iframe) follows the OS theme too. The shell is the source of truth for the OS
 		// preference — it reliably gets prefers-color-scheme changes, whereas the iframe may not — so publish the

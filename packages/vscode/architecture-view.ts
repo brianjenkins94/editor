@@ -10,7 +10,7 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
 import type { ContainerSpec, Violation } from "./architecture-model";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
-import { checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, familiesOnLink, hubLinks, nodeSpec, subjectMatches, subjectOfLabel } from "./architecture-model";
+import { checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, subjectMatches, subjectOfLabel } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -130,7 +130,7 @@ function containerOf(node: RuntimeNode): string {
 		return nodeSpec(anonymous[1])?.container ?? "workbench";
 	}
 
-	return node.id.startsWith("worker:") ? "workers" : "workbench";
+	return dynamicContainer(node.id) ?? "workbench";
 }
 
 function labelOf(store: ArchitectureStore, id: string): string {
@@ -139,6 +139,15 @@ function labelOf(store: ArchitectureStore, id: string): string {
 
 function detailOf(node: RuntimeNode): string {
 	return nodeSpec(node.id)?.detail ?? node.spec.detail ?? node.spec.role ?? "";
+}
+
+/** A context the model doesn't list: created at runtime (its channels are declared by prefix), or a finding. */
+function undeclaredNote(id: string): HTMLElement {
+	const prefix = DYNAMIC_PREFIXES.find((candidate) => id.startsWith(candidate));
+
+	return prefix === undefined
+		? h("p", { "class": "arch-violations" }, "Not in the model.")
+		: h("p", { "class": "arch-muted" }, "Created at runtime — the model declares its channels as " + prefix + "*.");
 }
 
 function isVisible(node: RuntimeNode, now: number, showDeclared: boolean): boolean {
@@ -722,9 +731,13 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 	// ── side panel
 	function conformance(): Violation[] {
+		// What the diagram shows: a context that ended long ago (and its channels) no longer needs review.
+		const now = Date.now();
+		const shown = new Set([...store.nodes.values()].filter((node) => node.state !== "declared" && isVisible(node, now, false)).map((node) => node.id));
+
 		return checkConformance({
-			"nodes": [...store.nodes.values()].filter((node) => node.state !== "declared").map((node) => node.id),
-			"channels": [...store.channels.values()].filter((channel) => channel.count > 0 || channel.linked),
+			"nodes": [...shown],
+			"channels": [...store.channels.values()].filter((channel) => (channel.count > 0 || channel.linked) && shown.has(channel.a) && shown.has(channel.b)),
 			"topology": store.topology
 		});
 	}
@@ -820,7 +833,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 					...Object.entries(node?.spec.meta ?? {}).map(([key, value]): [string, string] => [key, value])
 				]),
 				h("p", null, declared?.description ?? ""),
-				declared === undefined ? h("p", { "class": "arch-violations" }, "Not in the model.") : h("p", { "class": "arch-muted" }, "Observed by: " + declared.observedBy)
+				declared === undefined ? undeclaredNote(id) : h("p", { "class": "arch-muted" }, "Observed by: " + declared.observedBy)
 			),
 			topology !== undefined && section(
 				"Hub",

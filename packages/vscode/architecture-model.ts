@@ -64,6 +64,8 @@ export const containers: ContainerSpec[] = [
 	{ "id": "extHostIframe", "label": "Extension host iframe", "caption": "hidden iframe · relays its worker", "parent": "workbenchIframe", "kind": "origin" },
 	{ "id": "extHostWorker", "label": "Web worker extension host", "caption": "LocalWebWorker extensions, tsserver", "parent": "extHostIframe", "kind": "realm" },
 	{ "id": "webviews", "label": "Webviews", "caption": "an iframe per webview", "parent": "workbenchIframe", "kind": "origin" },
+	{ "id": "previews", "label": "Preview windows", "caption": "iframes in the shell · served from /__virtual__/<port>/ by the service worker", "parent": "shell", "kind": "origin" },
+	{ "id": "sharedMemory", "label": "Shared memory", "caption": "SharedArrayBuffer · Atomics locks", "column": 3, "kind": "group" },
 	{ "id": "browser", "label": "Browser", "caption": "storage", "column": 3, "kind": "group" },
 	{ "id": "network", "label": "Network", "caption": "HTTP and WebSockets", "column": 3, "kind": "group" }
 ];
@@ -87,6 +89,11 @@ export const nodes: NodeSpec[] = [
 	{ "id": "net:origin", "label": "Page origin", "container": "network", "detail": "app, node_modules overlay, ATA", "description": "The app's own server (dev server or Pages): bundles, the node_modules CDN overlay, type acquisition.", "observedBy": "fetch probes" },
 	{ "id": "net:unpkg.com", "label": "unpkg", "container": "network", "detail": "CDN node_modules", "description": "The service worker's upstream for the node_modules overlay.", "observedBy": "the service worker's fetch probe" },
 	{ "id": "net:registry.npmjs.org", "label": "npm registry", "container": "network", "detail": "type acquisition", "description": "typescript-language-features' automatic type acquisition, from the worker extension host (package metadata for @types lookups).", "observedBy": "the extension host worker's probe", "condition": "when a file imports a package" },
+	{ "id": "zenfs", "label": "Workspace (zen-fs)", "container": "sharedMemory", "detail": "SingleBuffer at /workspace", "description": "The workspace filesystem: a zen-fs SingleBuffer store in a SharedArrayBuffer the workbench creates and hands (ws-control MessagePort) to the node worker and the cspell server, which mount it at /workspace. Same bytes in every realm, guarded by an Atomics lock — no messages, and NO change notification between realms. The workbench reaches it through the vscode FileSystemProvider (priority-2 overlay) and directly (isomorphic-git, the terminal's path walk); only provider writes are persisted to IndexedDB and announced as file changes.", "observedBy": "each realm's /workspace mount (zen-fs StoreFS operations), the provider's change events, the workspace-fs IndexedDB" },
+	{ "id": "tsval-preview", "label": "tsval preview", "container": "previews", "detail": "debug-preview.html", "description": "The tsval debugger's render surface: announces itself (preview-ready), gets a MessagePort from the shell, streams events up and renders the mutation stream the workbench sends.", "observedBy": "the shell's window message probe + the shell's preview bridge", "condition": "while debugging with tsval" },
+	{ "id": "worker:provoke-worker", "label": "Provoke worker", "container": "workers", "detail": "cold-start transform repro", "description": "A throwaway child of the node worker (debug-mcp preview_provoke hardReset): mounts the workspace and transforms modules cold, once.", "observedBy": "the node worker's Worker probe", "condition": "debug-mcp preview_provoke" },
+	{ "id": "net:esm.sh", "label": "esm.sh", "container": "network", "detail": "preview dependencies", "description": "The previewed app's bare imports (react, react-dom, react-refresh), mapped by the dev server's import map and fetched by the preview through the service worker.", "observedBy": "the service worker's fetch probe", "condition": "while a preview runs" },
+	{ "id": "net:ka-f.fontawesome.com", "label": "Font Awesome", "container": "network", "detail": "WebAwesome icons", "description": "WebAwesome's default icon library: the shell chrome's wa-icon elements load their SVGs from the Font Awesome kit CDN, through the service worker.", "observedBy": "the service worker's fetch probe" },
 	{ "id": "net:open-vsx.org", "label": "Open VSX", "container": "network", "detail": "extension gallery", "description": "The extension gallery.", "observedBy": "fetch probe", "condition": "when the gallery is queried" },
 	{ "id": "net:api.github.com", "label": "GitHub API", "container": "network", "detail": "shell only", "description": "Loading repos and publishing, from the shell (which holds the token).", "observedBy": "the shell's fetch probe", "condition": "when a GitHub repo is loaded" },
 	{ "id": "net:lighter.codehike.org", "label": "Code Hike", "container": "network", "detail": "diff highlighting", "description": "Syntax highlighting for the git review diffs.", "observedBy": "the shell's fetch probe", "condition": "when a diff opens" },
@@ -114,7 +121,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "run.target", "hubs": ["shell", "workbench"], "description": "Run a target." },
 	{ "pattern": "theme.colorScheme", "hubs": ["shell", "workbench"], "description": "Theme sync." },
 	{ "pattern": "preview.>", "hubs": ["shell", "root", "workbench", "node"], "description": "Preview windows, the dev server, HMR." },
-	{ "pattern": "virtual.request", "hubs": ["sw", "root", "workbench", "node"], "description": "/__virtual__ requests served by the node worker." },
+	{ "pattern": "virtual.request", "hubs": ["root", "workbench", "node"], "description": "/__virtual__ requests (relayed by the service worker over the ServerBridge port) served by the node worker's dev server." },
 	{ "pattern": "node.>", "hubs": ["workbench", "pod", "node"], "description": "Node runs: start, stdout, exit, stdin." },
 	{ "pattern": "debug.>", "hubs": ["shell", "workbench", "pod"], "description": "Debug sessions and the toolbar." },
 	{ "pattern": "production.>", "hubs": ["workbench", "pod", "sw"], "description": "Production (server) runs." },
@@ -151,7 +158,21 @@ export const channels: ChannelSpec[] = [
 	{ "a": "sw", "b": "net:*", "protocol": "HTTP", "transport": "fetch", "description": "The service worker's upstream requests (CDN)." },
 	{ "a": "workbench", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "User data, logs, storage, workspace-fs." },
 	{ "a": "root", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "The app realm's storage." },
-	{ "a": "sw", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "The service worker's storage." }
+	{ "a": "sw", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "The service worker's storage." },
+	// the preview pipeline
+	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "description": "Into the iframe: HMR updates (vite-hmr), capability decisions. Out of it: console/errors (obs-log → $sys.log.preview), WebSocket/WebRTC capability requests (cap-decide)." },
+	{ "a": "shell", "b": "tsval-preview", "protocol": "tsval render protocol", "transport": "window.postMessage + MessagePort", "description": "preview-ready → init (MessagePort); events and time travel up, the mutation stream down." },
+	{ "a": "preview:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, intercepted by the service worker", "description": "Everything under /__virtual__/<port>/ (relayed to the dev server), plus the app's own requests (CDN imports pass through; data fetches are capability-gated)." },
+	{ "a": "node", "b": "sw", "protocol": "capability decision", "transport": "synchronous XMLHttpRequest (POST /__capability__/decide)", "description": "Every write/delete a node script makes asks the service worker, which asks the pod (capability.decide)." },
+	{ "a": "node", "b": "vite:*", "protocol": "in-realm calls", "transport": "function calls", "description": "almostnode's in-browser Vite dev server: requests from virtual.request, file changes, HMR updates back." },
+	{ "a": "node", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "description": "A node script's own http.createServer, reached from a preview at /__virtual__/<port>/ like a dev server." },
+	{ "a": "node", "b": "worker:provoke-worker", "protocol": "provoke round", "transport": "Worker.postMessage", "description": "One cold transform round: the workspace buffer in, failures out." },
+	// the workspace filesystem (shared memory)
+	{ "a": "workbench", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (owner)", "description": "The vscode provider (editor, tsserver, ATA, terminal, extensions) and direct callers (isomorphic-git, the terminal's path walk). Back the other way: provider writes announced as file-change events (5ms batches) — writes from other realms, and direct writes, are NOT announced." },
+	{ "a": "node", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "almostnode: module loading, node scripts' fs, the preview dev server's transforms." },
+	{ "a": "worker:server-host", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "Mounted by the cspell server (documents arrive over LSP, so it's mostly idle)." },
+	{ "a": "worker:provoke-worker", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "A cold transform round reads the workspace." },
+	{ "a": "zenfs", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (workspace-fs)", "description": "Provider writes, flushed every 500ms; restored at boot." }
 ];
 
 // ── lookups ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -332,7 +353,7 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 	}
 
 	for (const id of observed.nodes) {
-		const dynamic = id.startsWith("webview:") || id.startsWith("nested:") || id.startsWith("worker:");
+		const dynamic = DYNAMIC_PREFIXES.some((prefix) => id.startsWith(prefix));
 
 		if (!dynamic && nodeSpec(id) === undefined) {
 			violations.push({ "type": "unknown-node", "id": id });
@@ -343,6 +364,26 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 }
 
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────
+
+/** Contexts created at runtime, by id prefix, and where they live. */
+export const DYNAMIC_PREFIXES = ["webview:", "nested:", "worker:", "preview:", "vite:", "server:"];
+
+export function dynamicContainer(id: string): string | undefined {
+	if (id.startsWith("preview:")) {
+		return "previews";
+	}
+
+	if (id.startsWith("vite:") || id.startsWith("server:") || id.startsWith("worker:")) {
+		return "workers";
+	}
+
+	return undefined;
+}
+
+/** Node id owning an IndexedDB database, when it isn't the realm that opens it. */
+export function idbOwner(database: string): string | undefined {
+	return database === "workspace-fs" ? "zenfs" : undefined;
+}
 
 /** Identity of a worker created in the workbench realm, by file name (see the monaco probes' `identifyWorker`). */
 export function identifyWorker(url: string): { "id": string; "label"?: string; "container": string; "owner"?: string } | undefined {
@@ -359,6 +400,8 @@ export function identifyWorker(url: string): { "id": string; "label"?: string; "
 			return { "id": "worker:classify-worker", "container": "workers" };
 		case "recognizer-worker.js":
 			return { "id": "worker:recognizer-worker", "container": "workers" };
+		case "provoke-worker.js":
+			return { "id": "worker:provoke-worker", "container": "workers" };
 		default:
 			return undefined;
 	}
@@ -368,6 +411,11 @@ export function identifyWorker(url: string): { "id": string; "label"?: string; "
 export function classifyUrl(url: URL): string {
 	if (url.port === "7378" && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) {
 		return "debug-mcp";
+	}
+
+	// Routes only the service worker answers (a capability decision, a preview's dev-server request).
+	if (url.origin === globalThis.location?.origin && (url.pathname.includes("/__capability__/") || url.pathname.includes("/__virtual__/"))) {
+		return "sw";
 	}
 
 	return url.origin === globalThis.location?.origin ? "net:origin" : "net:" + url.host;
