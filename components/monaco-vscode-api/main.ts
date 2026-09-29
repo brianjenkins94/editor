@@ -433,7 +433,11 @@ export async function boot(options: BootOptions): Promise<void> {
 		},
 		"configurationDefaults": {
 			// eslint-disable-next-line no-template-curly-in-string -- VS Code title-bar template syntax, not a JS interpolation
-			"window.title": productName + "${separator}${dirty}${activeEditorShort}"
+			"window.title": productName + "${separator}${dirty}${activeEditorShort}",
+			// The web default ("keyboardOnly") asks "Leave site?" on a keyboard reload/close (Cmd+R, Cmd+W). Nothing is
+			// lost by leaving — unsaved editors are backed up and the workspace persists — so don't ask. Set here, not in
+			// an extension's configurationDefaults: those can't override an application-scoped setting.
+			"window.confirmBeforeClose": "never"
 		},
 		"defaultLayout": {
 			"editors": openEditors.map((path, index) => ({
