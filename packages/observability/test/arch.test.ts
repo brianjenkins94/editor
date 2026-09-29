@@ -242,3 +242,28 @@ test("a link that closes before its peer says hello ends its placeholder instead
 	assert.equal(placeholder.spec.dynamic, true);
 	reporter.dispose();
 });
+
+test("a short-lived peer that says hello and is gone before the next flush is still named, never left as a placeholder", async () => {
+	const [a, b] = pipe();
+	const node = createHub({ "id": "node" });
+	const reporter = createArchReporter(node);
+	const store = new ArchitectureStore();
+
+	collectArchReports(node, (report) => { store.apply(report); });
+	await wait(20);
+
+	// A throwaway child worker: linked, one round of traffic, unlinked — all well inside one flush interval.
+	const child = createHub({ "id": "provoke" });
+	const unlinkNode = node.link(a); // node's hello + interest go out before the child is known
+
+	child.link(b);
+	serve(child, "provoke.round", () => ({ "failures": [] }));
+	await wait(20);
+	await createRpcClient(node).request("provoke.round", {}, { "timeoutMs": 1000 });
+	unlinkNode();
+	await wait(400);
+
+	assert.ok(![...store.nodes.keys()].some((id) => id.startsWith("node:link")), [...store.nodes.keys()].join(","));
+	assert.ok(store.channels.has("node|provoke"));
+	reporter.dispose();
+});

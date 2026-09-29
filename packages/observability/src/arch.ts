@@ -162,6 +162,8 @@ export function createArchReporter(hub: Hub): ArchReporter {
 	const rpcNames = new Map<string, string>();
 	// links whose peer said hello WITHOUT an id: they'll stay anonymous
 	const anonymousLinks = new Set<string>();
+	// every peer a hello named, by link — so a short-lived link (a worker done before the next flush) still resolves
+	const knownPeers = new Map<string, string>();
 
 	function schedule(): void {
 		if (timer === undefined && !disposed) {
@@ -269,7 +271,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 				return id;
 			}
 
-			const peer = links.get(id);
+			const peer = links.get(id) ?? knownPeers.get(id);
 
 			if (peer !== undefined) {
 				return peer;
@@ -368,6 +370,8 @@ export function createArchReporter(hub: Hub): ArchReporter {
 				if ("hub" in frame && frame.hub === "hello" && frame.id === undefined) {
 					anonymousLinks.add(PENDING_LINK + event.link.id);
 					schedule();
+				} else if ("hub" in frame && frame.hub === "hello" && frame.id !== undefined) {
+					knownPeers.set(PENDING_LINK + event.link.id, frame.id);
 				}
 
 				if (!("hub" in frame) && frame.subject.startsWith(RPC_CALL)) {
