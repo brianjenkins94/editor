@@ -39,6 +39,7 @@ test("reading is not a change", async () => {
 	fs.writeFileSync("/workspace/a.txt", "read me");
 	await changesOf(() => undefined);
 	assert.deepEqual(await changesOf(() => { fs.readFileSync("/workspace/a.txt", "utf8"); fs.statSync("/workspace/a.txt"); fs.readdirSync("/workspace"); }), []);
+	assert.equal(batches.length, 0, "a read publishes nothing, not even an empty batch");
 });
 
 test("a recursive delete reports every file and directory under it", async () => {
