@@ -230,6 +230,28 @@ function onBreakpointHook(vm: Vm): void {
 	Atomics.wait(control, 0, 0);
 }
 
+/** Guest call depth: the `call`/`construct` frames on the control stack (the rest are expression/statement frames). */
+function callDepth(vm: Vm): number {
+	let depth = 0;
+
+	for (const frame of vm.frames) {
+		if (frame.kind === "call" || frame.kind === "construct") {
+			depth += 1;
+		}
+	}
+
+	return depth;
+}
+
+/** Run until the current guest function has returned and the caller reaches its next statement, stopping early at a
+ *  breakpoint. At top level (depth 0) nothing can return, so this runs to the next breakpoint or the end, as in VS Code. */
+function stepOut(vm: Vm): void {
+	const depth = callDepth(vm);
+
+	vm.step();
+	vm.runUntil((current) => current.atBreakpoint() || (current.atStatementBoundary() && callDepth(current) < depth));
+}
+
 /** Advance `base` (a VM we own) by a forward action, then record the new stop or terminate. When the action
  *  carried a `trace` (the adapter's action span), the step span CONTINUES that trace, so a debug step is one
  *  cross-context trace (adapter action → worker step) rather than an unrelated root. */
@@ -242,7 +264,7 @@ function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): voi
 				case "continue": base.runToBreakpoint(); break;
 				case "next": base.stepStatement(); break;
 				case "stepIn": base.step(); break;
-				case "stepOut": base.stepStatement(); break; // TODO: true step-out (run to caller) in a later pass
+				case "stepOut": stepOut(base); break;
 				default: break;
 			}
 		} catch (error) {
@@ -272,7 +294,8 @@ function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): voi
 		// A "continue" that landed on a capability line is a capability stop (the policy gated it); steps stay "step".
 		const location = base.location();
 		const stopLine = location !== null ? location.line + 1 : undefined;
-		const reason = action === "continue" ? (stopLine !== undefined && capabilityLines.has(stopLine) ? "capability" : "breakpoint") : "step";
+		// A step-out cut short by a breakpoint reports it as one, like a continue would.
+		const reason = action === "continue" || (action === "stepOut" && base.atBreakpoint()) ? (stopLine !== undefined && capabilityLines.has(stopLine) ? "capability" : "breakpoint") : "step";
 
 		emitStopped(base, reason);
 	} finally {
