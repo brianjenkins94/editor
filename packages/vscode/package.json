@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsx build.ts",
     "dev": "tsx dev.ts",
-    "lint": "util-lint"
+    "lint": "util-lint",
+    "postinstall": "node patches/apply.mjs"
   },
   "dependencies": {
     "@automerge/automerge": "^3.5.0",
@@ -17,7 +18,7 @@
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@stitches/core": "latest",
     "@typescript-eslint/parser": "^8.70.0",
-    "@zenfs/core": "^2.7.4",
+    "@zenfs/core": "2.7.6",
     "codehike": "^1.1.0",
     "cspell-lib": "^10.3.0",
     "eslint": "^10.10.0",

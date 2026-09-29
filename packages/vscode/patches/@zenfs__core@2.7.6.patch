@@ -1,0 +1,210 @@
+diff --git a/dist/backends/single_buffer.js b/dist/backends/single_buffer.js
+index 119eb77..0ecf102 100644
+--- a/dist/backends/single_buffer.js
++++ b/dist/backends/single_buffer.js
+@@ -574,7 +574,9 @@ const kMetadataOffset = offsetof(SuperBlock, 'metadata_offset') / Uint32Array.BY
+  */
+ function checksum(value) {
+     let length = sizeof(value) - 4;
+-    if (value instanceof MetadataBlock)
++    // Both blocks reserve a trailing Int32 as an Atomics lock word (MetadataBlock.locked; SuperBlock's
++    // cross-realm FS-operation lock in its padding) — exclude it so lock writes don't invalidate the checksum.
++    if (value instanceof MetadataBlock || value instanceof SuperBlock)
+         length -= Int32Array.BYTES_PER_ELEMENT;
+     return crc32c(new Uint8Array(value.buffer, value.byteOffset + 4, length));
+ }
+@@ -611,6 +613,43 @@ export class SingleBufferStore extends BufferView {
+         this._view = new DataView(this.buffer, this.byteOffset, this.byteLength);
+         this._u8 = new Uint8Array(this.buffer, this.byteOffset, this.byteLength);
+         this.superblock = new SuperBlock(this.buffer, this.byteOffset);
++        // Cross-realm FS-operation lock: an Int32 in the SuperBlock's trailing padding (excluded from the checksum,
++        // like MetadataBlock.locked). A zero-initialized SharedArrayBuffer starts unlocked. Only meaningful across
++        // realms — a private ArrayBuffer has a single realm, so locking is a no-op there.
++        this._shared = typeof SharedArrayBuffer !== 'undefined' && this.buffer instanceof SharedArrayBuffer;
++        this._fsLockView = new Int32Array(this.buffer, this.byteOffset + sizeof(SuperBlock) - Int32Array.BYTES_PER_ELEMENT, 1);
++        this._fsLockDepth = 0;
++    }
++    /**
++     * Acquire the cross-realm FS-operation lock (exclusive). Reentrant within a realm via a depth counter, so
++     * nested transactions don't self-deadlock. Uses `Atomics.wait` in workers; on the main thread (where wait
++     * throws) it falls back to spinning. Held for the duration of one filesystem operation (one transaction).
++     */
++    fsLock() {
++        if (!this._shared)
++            return;
++        if (this._fsLockDepth++ > 0)
++            return;
++        const lock = this._fsLockView;
++        while (Atomics.compareExchange(lock, 0, 0, 1) !== 0) {
++            try {
++                Atomics.wait(lock, 0, 1, 50);
++            }
++            catch {
++                /* main thread: Atomics.wait is disallowed, so busy-spin until the holder releases */
++            }
++        }
++    }
++    /** Release the cross-realm FS-operation lock (once the reentrancy depth returns to zero). */
++    fsUnlock() {
++        if (!this._shared)
++            return;
++        if (--this._fsLockDepth > 0)
++            return;
++        if (this._fsLockDepth < 0)
++            this._fsLockDepth = 0;
++        Atomics.store(this._fsLockView, 0, 0);
++        Atomics.notify(this._fsLockView, 0, 1);
+     }
+     *keys() {
+         const keys = new Set();
+@@ -658,11 +697,22 @@ export class SingleBufferStore extends BufferView {
+                             _update(block);
+                             return;
+                         }
+-                        entry.offset = Number(Atomics.add(this.superblock, kUsedBytes, BigInt(data.length)));
+-                        entry.size = data.length;
+-                        this._u8.set(data, entry.offset);
+-                        _update(block);
+-                        _update(this.superblock);
++                        {
++                            const head = this.superblock.metadata;
++                            const headLock = block !== head ? head.lock() : undefined;
++                            try {
++                                const newOffset = this._allocate(data.length);
++                                this._u8.set(data, newOffset);
++                                entry.offset = newOffset;
++                                entry.size = data.length;
++                                _update(block);
++                                _update(this.superblock);
++                            }
++                            finally {
++                                if (headLock)
++                                    headLock();
++                            }
++                        }
+                         return;
+                     }
+                     catch (e_1) {
+@@ -680,7 +730,7 @@ export class SingleBufferStore extends BufferView {
+                 entry = this.superblock.metadata.items[0];
+             }
+             const lock = __addDisposableResource(env_1, this.superblock.metadata.lock(), false);
+-            const offset = Number(Atomics.add(this.superblock, kUsedBytes, BigInt(data.length)));
++            const offset = this._allocate(data.length);
+             entry.id = id;
+             entry.offset = offset;
+             entry.size = data.length;
+@@ -710,6 +760,36 @@ export class SingleBufferStore extends BufferView {
+             }
+         }
+     }
++    /**
++     * Reclaiming allocator: return the lowest free region of `length` bytes, REUSING space freed by
++     * deletes/overwrites instead of only bumping the high-water (`kUsedBytes`), which never decreased and
++     * caused `RangeError: offset is out of bounds` under churn. Callers must hold the head metadata block
++     * lock so allocations are serialized. Occupied set mirrors `SuperBlock.isUnused`.
++     */
++    _allocate(length) {
++        const total = Number(this.superblock.total_bytes);
++        const intervals = [];
++        for (let block = this.superblock.metadata; block; block = block.previous) {
++            intervals.push([block.byteOffset, block.byteOffset + sizeof(MetadataBlock)]);
++            for (const entry of block.items) {
++                if (entry.offset)
++                    intervals.push([entry.offset, entry.offset + entry.size]);
++            }
++        }
++        intervals.sort((a, b) => a[0] - b[0]);
++        let cursor = sizeof(SuperBlock);
++        for (const [start, end] of intervals) {
++            if (start > cursor && start - cursor >= length)
++                break;
++            if (end > cursor)
++                cursor = end;
++        }
++        if (cursor + length > total)
++            throw withErrno('ENOSPC', 'sbfs: no space left on device');
++        if (BigInt(cursor + length) > Atomics.load(this.superblock, kUsedBytes))
++            Atomics.store(this.superblock, kUsedBytes, BigInt(cursor + length));
++        return cursor;
++    }
+     _fs;
+     get fs() {
+         return this._fs;
+diff --git a/dist/backends/store/fs.js b/dist/backends/store/fs.js
+index 1e20478..2588e70 100644
+--- a/dist/backends/store/fs.js
++++ b/dist/backends/store/fs.js
+@@ -918,7 +918,19 @@ export class StoreFS extends FileSystem {
+     /** Allocates a new ID and adds the ID/path */
+     allocNew(path) {
+         // @todo use `Iterator` helper #296
+-        this._lastID ||= Array.from(this._paths.keys()).reduce((max, ino) => Math.max(max, ino), 0);
++        // On a SHARED (multi-realm) store we hold the cross-realm FS lock here, so derive the next id from the
++        // shared store itself every time — a per-realm high-water (`_lastID` from `_paths`) drifts between realms
++        // and hands out colliding inode ids. Non-shared stores keep the original per-instance behavior.
++        if (this.store._shared) {
++            let max = 0;
++            for (const ino of this.store.keys())
++                if (ino > max)
++                    max = ino;
++            this._lastID = Math.max(this._lastID ?? 0, max);
++        }
++        else {
++            this._lastID ||= Array.from(this._paths.keys()).reduce((max, ino) => Math.max(max, ino), 0);
++        }
+         this._lastID += 2;
+         const id = this._lastID;
+         if (id > size_max)
+diff --git a/dist/backends/store/store.js b/dist/backends/store/store.js
+index 6a307f3..ac9b550 100644
+--- a/dist/backends/store/store.js
++++ b/dist/backends/store/store.js
+@@ -103,6 +103,18 @@ export class WrappedTransaction {
+     constructor(raw, fs) {
+         this.raw = raw;
+         this.fs = fs;
++        // Serialize the entire filesystem operation across realms. Shared-buffer stores expose fsLock/fsUnlock;
++        // other stores don't, so this is a no-op there. Held until the transaction is disposed (commit or abort).
++        this._locked = false;
++        raw.store.fsLock?.();
++        this._locked = true;
++    }
++    /** Release the cross-realm FS-operation lock exactly once. */
++    _releaseLock() {
++        if (this._locked) {
++            this._locked = false;
++            this.raw.store.fsUnlock?.();
++        }
+     }
+     /**
+      * Stores data in the keys we modify prior to modifying them.
+@@ -186,14 +198,22 @@ export class WrappedTransaction {
+         this.done = true;
+     }
+     async [Symbol.asyncDispose]() {
+-        if (this.done)
+-            return;
+-        await this.abort();
++        try {
++            if (!this.done)
++                await this.abort();
++        }
++        finally {
++            this._releaseLock();
++        }
+     }
+     [Symbol.dispose]() {
+-        if (this.done)
+-            return;
+-        this.abortSync();
++        try {
++            if (!this.done)
++                this.abortSync();
++        }
++        finally {
++            this._releaseLock();
++        }
+     }
+     /**
+      * Stashes given key value pair into `originalData` if it doesn't already exist.
