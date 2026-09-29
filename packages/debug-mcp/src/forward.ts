@@ -32,7 +32,7 @@ export async function callFor(rpc: RpcClient, name: string, args: unknown, timeo
 		return await rpc.request(name, args, { "timeoutMs": Infinity, "waitForResponderMs": RESPONDER_MS, "signal": AbortSignal.timeout(timeoutMs) });
 	} catch (error) {
 		if (error instanceof DOMException && error.name === "TimeoutError") {
-			throw new Error(timeoutMessage);
+			throw new Error(timeoutMessage, { "cause": error });
 		}
 
 		throw error;

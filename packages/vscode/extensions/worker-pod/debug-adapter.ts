@@ -78,7 +78,10 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	/** React mode: the program renders via ReactDOM, so run it through the M3c reconciler and stream mutations. */
 	private reactMode = false;
 
-	public constructor(private readonly session: vscode.DebugSession) {
+	private readonly session: vscode.DebugSession;
+
+	public constructor(session: vscode.DebugSession) {
+		this.session = session;
 		this.id = session.id;
 		this.launchId = session.configuration["__launchId"] as string | undefined;
 		this.unregister = registerSession(podHub, this);

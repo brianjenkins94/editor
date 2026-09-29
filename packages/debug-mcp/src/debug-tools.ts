@@ -35,11 +35,11 @@ export async function resolveSession(debugMcp: DebugMcp, session: string | undef
 }
 
 /** The tool result for `run`: its value, or its error as a failed result. */
-async function answer(run: () => Promise<unknown>): Promise<Awaited<ReturnType<typeof ok>>> {
+async function answer(run: () => Promise<unknown>): Promise<ReturnType<typeof fail>> {
 	try {
 		return await ok(await run());
 	} catch (error) {
-		return await fail(error instanceof Error ? error.message : String(error));
+		return fail(error instanceof Error ? error.message : String(error));
 	}
 }
 
