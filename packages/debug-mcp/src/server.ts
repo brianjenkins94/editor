@@ -108,7 +108,9 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 
 		// A ws socket is EventTarget-shaped (addEventListener + readyState), so websocketTransport drives it
 		// unchanged — the same transport the browser end uses. Unlink on close so interest is withdrawn cleanly.
-		const unlink = hub.link(websocketTransport(socket));
+		// Non-transit: every connected page is its OWN tree. Joined, a request in one tab (a preview's
+		// virtual.request, a capability.decide) could be answered by another tab's node worker or pod.
+		const unlink = hub.link(websocketTransport(socket), { "transit": false });
 
 		// Once our $sys.arch interest has reached the page's hubs, ask them for their full state.
 		setTimeout(() => { requestArchSync(hub); }, 500);

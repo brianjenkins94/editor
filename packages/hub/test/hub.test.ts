@@ -359,3 +359,60 @@ test("a tap is told when the topology changes, and can be disposed", async () =>
 	root.subscribe("y", () => undefined);
 	assert.equal(changes, afterLink + 2);
 });
+
+test("waitForResponderMs: a call waits for a responder still linking in, and fails fast when none comes", async () => {
+	const caller = createHub({ "id": "caller" });
+	const rpc = createRpcClient(caller);
+
+	// No responder anywhere: rejects after the wait, not the (much longer) call timeout.
+	const started = Date.now();
+
+	await assert.rejects(rpc.request("tool", {}, { "timeoutMs": 60000, "waitForResponderMs": 50 }), /no responder/u);
+	assert.ok(Date.now() - started < 1000);
+
+	// A responder that links in during the wait is reached.
+	const server = createHub({ "id": "server" });
+
+	serve(server, "tool", (args) => ({ "echo": args }));
+	const pending = rpc.request("tool", 7, { "timeoutMs": 1000, "waitForResponderMs": 1000 });
+	const [a, b] = pipe();
+
+	setTimeout(() => {
+		caller.link(a);
+		server.link(b);
+	}, 30);
+	assert.deepEqual(await pending, { "echo": 7 });
+	assert.ok(caller.interested("$rpc.call.tool"));
+});
+
+test("non-transit links: a hub above several trees reaches each, but never joins them", async () => {
+	const center = createHub({ "id": "center" });
+	const tabA = createHub({ "id": "tab-a" });
+	const tabB = createHub({ "id": "tab-b" });
+	const [a1, a2] = pipe();
+	const [b1, b2] = pipe();
+
+	center.link(a1, { "transit": false });
+	tabA.link(a2);
+	center.link(b1, { "transit": false });
+	tabB.link(b2);
+
+	const inB: unknown[] = [];
+	const inCenter: unknown[] = [];
+
+	serve(tabB, "tool", () => "from tab B");
+	tabB.subscribe("event", (data) => { inB.push(data); });
+	center.subscribe("event", (data) => { inCenter.push(data); });
+	await flush();
+
+	// Tab A can't reach tab B — not its tool (a request in one tab isn't answered by another), not its events.
+	assert.ok(!tabA.interested("$rpc.call.tool"));
+	await assert.rejects(createRpcClient(tabA).request("tool", {}, { "waitForResponderMs": 50 }), /no responder/u);
+	tabA.publish("event", 1);
+	await flush();
+	assert.deepEqual(inB, []);
+	assert.deepEqual(inCenter, [1]); // …but the center still hears it
+
+	// The center reaches tab B.
+	assert.equal(await createRpcClient(center).request("tool", {}, { "timeoutMs": 1000 }), "from tab B");
+});
