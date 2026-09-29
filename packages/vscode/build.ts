@@ -9,6 +9,7 @@ import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import stdlib from "node-stdlib-browser";
 import { build } from "vite";
+import { eslintPresetPlugin } from "./extensions/eslint/preset-build";
 import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./snapshot";
 import { nodeModulesCdnPlugin, vscodePlugin } from "./vite";
 
@@ -87,6 +88,71 @@ function cspellDict(): Plugin {
 			const dictDir = path.dirname(createRequire(import.meta.url).resolve("@cspell/dict-en_us/cspell-ext.json"));
 
 			this.emitFile({ "type": "asset", "fileName": "lsp/dicts/en_US.trie.gz", "source": nodeFs.readFileSync(path.join(dictDir, "en_US.trie.gz")) });
+		}
+	};
+}
+
+/** Builtin SUBPATHS (`node:assert/strict`, `node:util/types`, `node:path/posix`, …) → the matching property of the
+ *  parent's browser POLYFILL (`assert.strict`, `util.types`, `path.posix`), with named exports generated from real Node's
+ *  module at build time; empty where the polyfill genuinely lacks it. And `node:module`, which has no polyfill at all, →
+ *  Node's "nothing installed" semantics. As aliases from a `config` hook placed AFTER polyfillNode():
+ *  vite-plugin-node-polyfills aliases `node:util` etc. by PREFIX from its own config hook (so `node:util/types` would
+ *  become the missing file `util/types`), aliases outrank resolveId, and a later config hook's aliases are merged in
+ *  FRONT of earlier ones. The alias hands off to this plugin's virtual `node-subpath:` module. */
+function nodeSubpathStub(): Plugin {
+	const eslintPackageJson = createRequire(import.meta.url).resolve("eslint/package.json");
+	const polyfilled = ["assert", "buffer", "crypto", "events", "path", "process", "stream", "string_decoder", "timers", "url", "util", "zlib"];
+
+	return {
+		"name": "node-subpath-stub",
+		"config": () => ({
+			"resolve": {
+				"alias": [
+					{ "find": new RegExp(`^(?:node:)?((?:${polyfilled.join("|")})/.+)$`, "u"), "replacement": "node-subpath:$1" },
+					// No browser polyfill exists for `module`: Node's "nothing installed" semantics (see node-module.js).
+					{ "find": /^(node:)?module$/u, "replacement": resolvePath("./extensions/eslint/node-module.js") },
+					// What that module's runtime `require` can hand out, resolved from eslint's own install so they're the SAME
+					// instances the bundle already carries: eslint-utils, and eslint's builtin rule registry (browser-safe; the
+					// rest of `eslint/use-at-your-own-risk` is its Node API).
+					{ "find": /^eslint-registry:eslint-utils$/u, "replacement": createRequire(eslintPackageJson).resolve("@eslint-community/eslint-utils") },
+					{ "find": /^eslint-registry:builtin-rules$/u, "replacement": path.join(path.dirname(eslintPackageJson), "lib", "rules", "index.js") }
+				]
+			}
+		}),
+		"resolveId": (id) => (id.startsWith("node-subpath:") ? "\0" + id : undefined),
+		"load": async (id) => {
+			if (!id.startsWith("\0node-subpath:")) {
+				return undefined;
+			}
+
+			const subpath = id.slice("\0node-subpath:".length);
+			const [parent, ...rest] = subpath.split("/");
+			let names: string[] = [];
+
+			try {
+				names = Object.keys(await import(`node:${subpath}`) as Record<string, unknown>).filter((name) => name !== "default" && /^[A-Za-z_$][\w$]*$/u.test(name));
+			} catch { /* not a real Node subpath — default export only */ }
+
+			return `import parent from ${JSON.stringify(parent)};\nconst sub = (parent && parent[${JSON.stringify(rest.join("/"))}]) || {};\nexport default sub;\n${names.map((name) => `export const ${name} = sub[${JSON.stringify(name)}];`).join("\n")}\n`;
+		}
+	};
+}
+
+/** Plugin code that passes `require` around as a VALUE — `optionalRequire(require, "typescript")` — hides the module id
+ *  from the bundler, which leaves its runtime `require` (it throws in a worker). Rewrite `require` in argument position
+ *  to the engine's registry-backed require (`globalThis.__eslintRequire`, see engine.ts / node-module.js). */
+function valueRequireToRegistry(): Plugin {
+	return {
+		"name": "value-require-to-registry",
+		"enforce": "pre",
+		"transform": (code, id) => {
+			if (!id.includes("/node_modules/") || !code.includes("require")) {
+				return undefined;
+			}
+
+			const rewritten = code.replace(/([(,]\s*)require(\s*[,)])/gu, "$1globalThis.__eslintRequire$2");
+
+			return rewritten === code ? undefined : { "code": rewritten, "map": null };
 		}
 	};
 }
@@ -248,15 +314,28 @@ export async function preBuild(): Promise<void> {
 			],
 			"conditions": ["browser", "import", "default"]
 		},
-		"plugins": [polyfillNode(), eslintTsPlugin()],
+		// The user's preset (@brianjenkins94/util/eslint) as data + one chunk per plugin, loaded independently (see
+		// extensions/eslint/preset-build.ts). Plugins written for Node degrade PER PLUGIN rather than breaking the build or
+		// the engine: builtin subpaths map onto the parent polyfill, `node:module` gets Node's "nothing installed" semantics,
+		// missing named exports shim to undefined — a plugin that really needs something absent fails at load and is skipped.
+		"plugins": [polyfillNode(), nodeSubpathStub(), valueRequireToRegistry(), eslintTsPlugin(), eslintPresetPlugin()],
+		// CJS plugin builds compute `import.meta.url` from `__filename` when there's no `document` (a worker), and some
+		// call `require.resolve` at load (only ever to name files) — give both inert values rather than a ReferenceError.
+		// And vite's dynamic-import error handler announces a failed import with `window.dispatchEvent(...)` before
+		// rethrowing — in a worker that throws "window is not defined" and MASKS the plugin's real load error.
+		"define": { "__filename": JSON.stringify("/lsp/eslint-engine.js"), "__dirname": JSON.stringify("/lsp"), "require.resolve": "((id) => id)", "window.dispatchEvent": "(() => true)" },
 		"build": {
 			"outDir": "dist",
 			"emptyOutDir": false,
 			// Sourcemap locally only (the ~7MB .map is debug-only, never fetched at runtime) — never in CI.
 			"sourcemap": !isCI,
 			"assetsInlineLimit": 0,
+			// The plugin chunks are dynamic imports; vite's preload helper injects <link rel=modulepreload> via `document`,
+			// which the tsserver worker doesn't have ("document is not defined").
+			"modulePreload": false,
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
+				"shimMissingExports": true,
 				"input": { "lsp/eslint-engine": resolvePath("./extensions/eslint/engine.ts") },
 				"output": { "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
 			}

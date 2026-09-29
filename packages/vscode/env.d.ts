@@ -12,6 +12,20 @@ declare module "worker-pod:extension" {
 	export default code;
 }
 
+/** The user's eslint preset as data (see extensions/eslint/preset-build.ts). */
+declare module "eslint:preset" {
+	const preset: { "source": string; "version": string; "blocks": unknown[] };
+
+	export default preset;
+}
+
+/** One loader per eslint preset plugin, each its own chunk (see extensions/eslint/preset-build.ts). */
+declare module "eslint:preset-plugins" {
+	const loaders: Record<string, () => Promise<{ "rules": Record<string, unknown> }>>;
+
+	export default loaders;
+}
+
 /** settings-defaults.jsonc, parsed — registered as the editor's configuration defaults (see snapshot.ts). */
 declare module "editor:settings-defaults" {
 	const defaults: Record<string, unknown>;
