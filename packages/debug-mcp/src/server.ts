@@ -10,6 +10,9 @@ import type { WebSocket } from "ws";
 
 import type { HubLogRecord } from "./store.ts";
 import { createHub, createRpcClient, websocketTransport } from "@brianjenkins94/hub";
+// From source (not a package dependency): the architecture plane's collector side has no runtime deps.
+import { collectArchReports, requestArchSync } from "../../observability/src/arch.ts";
+import { ArchitectureStore } from "../../observability/src/arch-store.ts";
 
 import { WebSocketServer } from "ws";
 import { RecordStore } from "./store.ts";
@@ -44,6 +47,8 @@ function originAllowed(origin: string | undefined, extra: string[]): boolean {
 export interface DebugMcp {
 	"hub": Hub;
 	"store": RecordStore;
+	/** The live architecture — every context's `$sys.arch` reports (see get_architecture). */
+	"arch": ArchitectureStore;
 	/** Call tools SERVED BY A CONNECTED PAGE (the tab hosts them via `serve`); the MCP layer forwards here. */
 	"rpc": RpcClient;
 	/** How many pages are currently linked in (for tree-state health). */
@@ -83,6 +88,11 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 	// The collector leaf. Its interest in `$sys.log.>` is what pulls each context's records across the links.
 	hub.subscribe(LOG_SUBJECT + ".>", (data) => { store.add(data as HubLogRecord); });
 
+	// The architecture collector: every context reports its hub topology/traffic + probed channels on $sys.arch.
+	const arch = new ArchitectureStore();
+
+	collectArchReports(hub, (report) => { arch.apply(report); });
+
 	// Request client, created eagerly so its reply channel ($rpc.reply.debug-mcp) is advertised to every page as it
 	// links in — a page-hosted tool call then never races interest. This is the relay half of "MCP server in the tab".
 	const rpc = createRpcClient(hub);
@@ -100,6 +110,9 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		// unchanged — the same transport the browser end uses. Unlink on close so interest is withdrawn cleanly.
 		const unlink = hub.link(websocketTransport(socket));
 
+		// Once our $sys.arch interest has reached the page's hubs, ask them for their full state.
+		setTimeout(() => { requestArchSync(hub); }, 500);
+
 		socket.addEventListener("close", () => {
 			unlink();
 			links.delete(socket);
@@ -109,6 +122,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 	return {
 		"hub": hub,
 		"store": store,
+		"arch": arch,
 		"rpc": rpc,
 		"linkCount": () => links.size,
 		"whenListening": whenListening,

@@ -72,6 +72,47 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 	}));
 
 	registerTool(server, defineTool({
+		"name": "get_architecture",
+		"config": {
+			"title": "Get architecture",
+			"description": "The live architecture of the editor: every context (hubs, workers, extension hosts, webviews, network endpoints) with its state, every channel between two of them (hub links and probed channels) with message counts, rates and top messages, and each hub's topology (links and the peer at the other end). Pass `channel` (a node id or 'a|b') for one channel's full message breakdown and recent traffic.",
+			"inputSchema": {
+				"channel": z.string().optional().describe("Node id (e.g. 'workbench') or 'a|b' pair to detail; omit for the overview."),
+				"limit": z.number().int().positive().optional().describe("Max channels in the overview (default 40).")
+			}
+		},
+		"handler": ({ channel, limit = 40 }: { "channel"?: string; "limit"?: number }) => {
+			const { arch } = debugMcp;
+			const now = Date.now();
+			const channels = [...arch.channels.values()]
+				.filter((candidate) => channel === undefined || candidate.id === channel || candidate.a === channel || candidate.b === channel || candidate.b + "|" + candidate.a === channel)
+				.sort((x, y) => y.count - x.count);
+			const labelsOf = (candidate: (typeof channels)[number], max: number) => [...candidate.labels.entries()]
+				.sort(([, x], [, y]) => y.count - x.count)
+				.slice(0, max)
+				.map(([label, stats]) => ({ "label": label, ...stats }));
+
+			if (channel !== undefined) {
+				return ok(channels.map((candidate) => ({
+					"a": candidate.a, "b": candidate.b, "count": candidate.count, "bytes": candidate.bytes, "rate": arch.rate(candidate, now),
+					"linked": candidate.linked, "interest": candidate.interest, "labels": labelsOf(candidate, 200),
+					"recent": candidate.recent.slice(-50).map((sample) => ({ "ago": now - sample.t, "forward": sample.forward, "kind": sample.kind, "label": sample.label, "bytes": sample.bytes }))
+				})));
+			}
+
+			return ok({
+				"reporters": Object.fromEntries([...arch.reporters].map(([id, seen]) => [id, { "lastReportMsAgo": now - seen }])),
+				"nodes": [...arch.nodes.values()].map((node) => ({ "id": node.id, "state": node.state, "instances": node.instances, "spawnCount": node.spawnCount, "label": node.spec.label, "container": node.spec.container, "reporters": [...node.reporters] })),
+				"channels": channels.slice(0, limit).map((candidate) => ({
+					"a": candidate.a, "b": candidate.b, "count": candidate.count, "bytes": candidate.bytes, "rate": arch.rate(candidate, now),
+					"linked": candidate.linked, "errors": candidate.errors, "top": labelsOf(candidate, 8)
+				})),
+				"topology": Object.fromEntries([...arch.topology].map(([id, snapshot]) => [id, { "subscriptions": snapshot.subscriptions.length, "links": snapshot.links.map((link) => ({ "id": link.id, "peer": link.peerId ?? null })) }]))
+			});
+		}
+	}));
+
+	registerTool(server, defineTool({
 		"name": "wait_for",
 		"config": {
 			"title": "Wait for a record",
