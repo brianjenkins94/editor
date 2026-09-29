@@ -277,11 +277,11 @@ test("ids in subjects and RPC names collapse to *, words don't", () => {
 	assert.equal(normalizeSubject("workbench.openProject"), "workbench.openProject");
 });
 
-test("an RPC whose name carries an id is labelled once, not once per id", async () => {
+test("an RPC whose name carries an id is labelled once, not once per id — by the caller and by the server replying", async () => {
 	const [a, b] = pipe();
 	const caller = createHub({ "id": "caller" });
 	const server = createHub({ "id": "server" });
-	const reporter = createArchReporter(caller);
+	const reporters = [createArchReporter(caller), createArchReporter(server)];
 	const store = new ArchitectureStore();
 
 	collectArchReports(caller, (report) => { store.apply(report); });
@@ -304,8 +304,9 @@ test("an RPC whose name carries an id is labelled once, not once per id", async 
 
 	await wait(400);
 
-	const labels = [...(store.channels.get("caller|server")?.labels.keys() ?? [])].filter((label) => label.includes("debug.session"));
+	const labels = [...(store.channels.get("caller|server")?.labels.keys() ?? [])].filter((label) => label.includes("debug.session")).sort();
 
-	assert.deepEqual(labels, ["debug.session.*.step()"]);
-	reporter.dispose();
+	// The server learns the name from the call arriving, and labels its reply with it.
+	assert.deepEqual(labels, ["debug.session.*.step()", "↩ debug.session.*.step()"]);
+	reporters.forEach((reporter) => { reporter.dispose(); });
 });

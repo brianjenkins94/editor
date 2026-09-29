@@ -379,7 +379,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 					const id = (frame.data as { "id"?: unknown } | undefined)?.id;
 
 					if (typeof id === "string") {
-						rpcNames.set(id, frame.subject.slice(RPC_CALL.length));
+						rpcNames.set(id, normalizeSubject(frame.subject.slice(RPC_CALL.length)));
 					}
 				}
 
