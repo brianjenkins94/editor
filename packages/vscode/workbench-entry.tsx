@@ -12,7 +12,7 @@
  * commands through its `vscode` API. Filesystem overlays (CDN node_modules now, real-disk FSA later) layer UNDER the seeded snapshot —
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
-import type { WorkbenchFile, WorkbenchParts } from "@brianjenkins94/monaco-vscode-api/main";
+import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
 import { boot, ExtensionHostKind, installMonacoProbes, registerExtension, OPEN_ARCHITECTURE_COMMAND, registerFileSystemOverlay, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
@@ -139,13 +139,13 @@ function errText(error: unknown): string {
 	}
 }
 
-let parts: WorkbenchParts | undefined;
+// The element VS Code renders its whole workbench into (see Workbench.tsx).
+let workbenchContainer: HTMLElement | undefined;
 let init: Init | undefined;
 let booted = false;
 
-// The per-extension VS Code API, captured once the hello extension resolves. The activity bar drives
-// the workbench through it (view-switch commands); `runCommand` reads the latest api so the bar —
-// rendered before boot — works on clicks made after boot.
+// The per-extension VS Code API, captured once the hello extension resolves. `runCommand` drives the workbench
+// through it and reads the latest api, so a command issued early still runs once it's captured.
 // eslint-disable-next-line ts/no-explicit-any
 let vscodeApi: any = null;
 
@@ -380,7 +380,7 @@ function bootWithFallbackViewport(root: HTMLElement): void {
 }
 
 function maybeBoot(): void {
-	if (booted || parts === undefined || init === undefined) {
+	if (booted || workbenchContainer === undefined || init === undefined) {
 		return;
 	}
 
@@ -405,7 +405,22 @@ function maybeBoot(): void {
 	const baseFiles = files.filter((file) => file.readonly === true);
 
 	boot({
-		"parts": parts,
+		// VS Code lays out the whole workbench — minus the menu bar and title bar: the shell around this iframe is the
+		// app's chrome, and the menus are in the command palette (and on Alt).
+		"layout": "workbench",
+		"container": workbenchContainer,
+		"configurationDefaults": {
+			"window.menuBarVisibility": "hidden",
+			"window.customTitleBarVisibility": "never",
+			"window.commandCenter": false,
+			"workbench.layoutControl.enabled": false
+		},
+		// Source Control and Extensions stay off the activity bar: the shell's changes panel is the git UI, and there's no
+		// extension management to do. (The Manage menu is hidden too, in Workbench.tsx.)
+		"hiddenViewContainers": ["workbench.view.scm", "workbench.view.extensions"],
+		// No product name in the status bar's bottom-left corner. The indicator stays, inert: its command stays "" (without
+		// one, VS Code would make it a button for a "remote window" menu there's no use for here).
+		"windowIndicator": { "label": "", "command": "" },
 		"files": baseFiles,
 		"openEditors": [],
 		"workspaceFolder": workspaceFolder,
@@ -537,9 +552,6 @@ function maybeBoot(): void {
 					workbenchHub.subscribe("theme.colorScheme", (data) => { applyEditorTheme((data as { "dark"?: boolean } | null)?.dark ?? themeMq.matches); });
 					themeMq.addEventListener("change", () => { applyEditorTheme(themeMq.matches); });
 					bootSpan.info("hello extension api captured");
-				// Boot into the Explorer viewlet (matching the activity bar's default). Deferred so it runs
-				// AFTER the workbench restores its last-active viewlet (which would otherwise win).
-				setTimeout(runCommand, 0, "workbench.view.explorer");
 			}).catch((error: unknown) => { bootSpan.error("hello extension setup failed", { "error": errText(error) }); });
 
 			// The LSP host — the manager extension that runs language servers in workers (LSP spine). Registered
@@ -651,11 +663,10 @@ installDebugBridge(() => vscodeApi);
 
 render(
 	<Workbench
-		onReady={(resolved) => {
-			parts = resolved;
+		onReady={(container) => {
+			workbenchContainer = container;
 			maybeBoot();
 		}}
-		runCommand={runCommand}
 	/>,
 	document.body
 );
