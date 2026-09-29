@@ -321,3 +321,7 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 
 	connect();
 }
+
+export * from "./arch.ts";
+export * from "./arch-probes.ts";
+export * from "./arch-store.ts";
