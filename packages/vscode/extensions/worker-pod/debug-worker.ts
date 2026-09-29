@@ -1,9 +1,12 @@
 /**
- * tsval debug worker (M2) — runs the target program under tsval's stepping VM and adds TIME TRAVEL.
+ * tsval debug worker — runs the target program under tsval's stepping VM and adds TIME TRAVEL. It speaks
+ * debug-protocol.ts over the pod hub: control arrives on its session's control subject, stops and output go out on its
+ * event subject, and a React app's render stream goes straight to the render surface.
  *
- * Pausing is ASYNC, not Atomics-blocked: the whole program is driven by THIS worker's own loop
- * (`runToBreakpoint`/`stepStatement`/`step`), so to "pause" the loop simply awaits the next control message.
- * Atomics.wait only becomes necessary in M3, when native React synchronously invokes guest code.
+ * Pausing is ASYNC: the whole program is driven by THIS worker's own loop (`runToBreakpoint`/`stepStatement`/`step`),
+ * so to "pause" the loop simply awaits the next control message. The exception is a breakpoint inside a guest call the
+ * host makes synchronously (native React calling a handler): that blocks the worker on Atomics.wait until the adapter
+ * resumes it through the shared control word (see onBreakpointHook).
  *
  * Time travel is tsval's `fork()` — a full, independent snapshot of the machine (frames are plain data, so
  * the whole state clones). We keep a HISTORY of forks, one per stop: forward actions fork the current stop and
@@ -16,9 +19,8 @@
  * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
 import type { LoadedVM } from "@brianjenkins94/tsval";
+import type { Control, PreviewMessage, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
 import type { GuestRoot } from "./debug-react";
-
-import type { Policy } from "@brianjenkins94/util/silo/policy";
 
 import { createHub, portTransport } from "@brianjenkins94/hub";
 import { createVM } from "@brianjenkins94/tsval";
@@ -29,11 +31,13 @@ import { capabilityBreakLines } from "../capabilities/capability-breakpoints";
 import { capabilityStandins, inert } from "../capabilities/canary";
 import { reportArchitecture } from "../../architecture";
 import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
+import { controlSubject, eventSubject, PREVIEW_STREAM } from "./debug-protocol";
 import { createGuestRoot } from "./debug-react";
 
-// This worker's own hub, linked UP to the pod hub over its own channel (hub messages are `\0hub`-wrapped, so
-// they ride alongside the raw {type} debug protocol without collision). It announces `pod.ready` after launch.
+// This worker's own hub, linked UP to the pod hub. The whole debug protocol rides it (debug-protocol.ts), on its
+// session's subjects — the adapter puts the session id in our URL. It announces `pod.ready` after launch.
 const hub = createHub({ "id": "debug-worker" });
+const SESSION = new URL(location.href).searchParams.get("session") ?? "";
 
 hub.link(portTransport(globalThis));
 
@@ -47,31 +51,18 @@ tapConsoleAndErrors(hub, "debug-worker"); // raw uncaught error/rejection → th
 
 type Vm = LoadedVM["vm"];
 
-/** A span's cross-context trace context (from @brianjenkins94/hub's envelope shape), carried on the control
- *  messages that trigger work here so this worker's span continues the adapter's trace (see continueSpan). */
+/** A span's cross-context trace context: the hub envelope of a control message that triggers work carries the
+ *  adapter action's, so this worker's span continues the adapter's trace (see continueSpan). */
 interface TraceContext { "traceId": string; "parentSpanId": string }
-
-/** Control messages from the adapter. */
-type Incoming =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control": SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "traceContext"?: TraceContext }
-	| { "type": "setBreakpoints"; "lines": number[] }
-	| { "type": "dispatch"; "id": number; "event": string; "traceContext"?: TraceContext }
-	| { "type": "timeTravel"; "index": number }
-	| { "type": "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect"; "traceContext"?: TraceContext };
 
 type Action = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" | "disconnect";
 type ForwardAction = "continue" | "next" | "stepIn" | "stepOut";
 
-interface Variable { "name": string; "value": string; "type": string; "variablesReference": number }
-interface Snapshot {
-	"frames": { "id": number; "name": string; "line": number; "column": number }[];
-	"scopes": Record<number, { "name": string; "variablesReference": number; "expensive": boolean }[]>;
-	"variables": Record<number, Variable[]>;
-	/** True when this stop is an earlier point in history (a time-travel view), for the stop reason. */
-	"traveled"?: boolean;
-}
+/** An event for the adapter, on this session's event subject. */
+function post(message: WorkerEvent): void { hub.publish(eventSubject(SESSION), message); }
 
-function post(message: Record<string, unknown>): void { (globalThis as unknown as Worker).postMessage(message); }
+/** Straight to the render surface — the render stream doesn't pass through the adapter. */
+function toPreview(message: PreviewMessage): void { hub.publish(PREVIEW_STREAM, message); }
 
 let sourceFile: ts.SourceFile | undefined;
 /** 1-based lines pre-armed as capability breakpoints (policy said stop) — so a stop there reports reason
@@ -351,8 +342,8 @@ async function session(initial: Vm, launchTrace?: TraceContext): Promise<void> {
  * (the reconciler invokes them synchronously). After mount the worker is idle, servicing `dispatch` (DOM
  * events routed back from the iframe) — each re-renders and streams more mutations.
  */
-function launchReact(message: Extract<Incoming, { "type": "launch" }>): void {
-	guestRoot = createGuestRoot(React, (mutation) => { post({ "type": "mutation", "mutation": mutation }); });
+function launchReact(message: Extract<Control, { "type": "launch" }>, trace: TraceContext | undefined): void {
+	guestRoot = createGuestRoot(React, (mutation) => { toPreview({ "type": "mutation", "mutation": mutation }); });
 
 	const reactDom = {
 		"createRoot": () => ({ "render": (element: unknown) => { guestRoot?.render(element); }, "unmount": () => { guestRoot?.unmount(); } }),
@@ -373,8 +364,8 @@ function launchReact(message: Extract<Incoming, { "type": "launch" }>): void {
 
 	// The initial mount is the launch's work — span it as a continuation of the adapter's launch trace, so the
 	// React app coming up is part of the same trace as `debug.launch` (see debug-adapter startAction).
-	const span = message.traceContext !== undefined
-		? workerLog.continueSpan(message.traceContext, "render", { "react": true })
+	const span = trace !== undefined
+		? workerLog.continueSpan(trace, "render", { "react": true })
 		: workerLog.span("render", { "react": true });
 
 	try {
@@ -386,21 +377,24 @@ function launchReact(message: Extract<Incoming, { "type": "launch" }>): void {
 	}
 
 	post({ "type": "rendered" });
+	toPreview({ "type": "rendered" });
 }
 
-globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
-	const message = event.data;
+hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
+	const message = data as Control;
+	const trace = envelope.traceContext;
 
 	switch (message.type) {
 		case "launch": {
-			control = new Int32Array(message.control);
+			// Absent without cross-origin isolation: then a breakpoint inside a React handler can't pause (see onBreakpointHook).
+			control = message.control === undefined ? undefined : new Int32Array(message.control);
 			// Announce membership to the pod hub. Safe here (not at module load): the pod's interest sub-control
 			// precedes `launch` on this ordered channel, so by now the pod is known to want `pod.ready`.
 			hub.publish("pod.ready", { "worker": hub.id, "react": message.react === true });
 			workerLog.info("launch", { "file": message.fileName, "react": message.react === true, "breakpoints": message.lines.length });
 
 			if (message.react === true) {
-				launchReact(message);
+				launchReact(message, trace);
 				break;
 			}
 
@@ -419,15 +413,15 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 			history = [];
 			index = -1;
 			done = false;
-			void session(loaded.vm, message.traceContext);
+			void session(loaded.vm, trace);
 			break;
 		}
 
 		case "dispatch": {
 			// A DOM event routed back from the render pane → re-render. Span it (continuing the dispatch action's
 			// trace when present) so an interaction and the re-render it causes read as one operation.
-			const span = message.traceContext !== undefined
-				? workerLog.continueSpan(message.traceContext, "render", { "event": message.event })
+			const span = trace !== undefined
+				? workerLog.continueSpan(trace, "render", { "event": message.event })
 				: workerLog.span("render", { "event": message.event });
 
 			try {
@@ -436,7 +430,10 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 				span.end();
 			}
 
-			post({ "type": "history", "length": guestRoot?.historyLength() ?? 0 });
+			const history = guestRoot?.historyLength() ?? 0;
+
+			post({ "type": "history", "length": history });
+			toPreview({ "type": "history", "length": history });
 			break;
 		}
 
@@ -461,7 +458,7 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 		case "reverseContinue":
 		case "disconnect":
 			if (awaitAction !== undefined) {
-				actionTrace = message.traceContext; // continue the adapter action's trace in the step it drives
+				actionTrace = trace; // continue the adapter action's trace in the step it drives
 				const resolve = awaitAction;
 
 				awaitAction = undefined;
@@ -473,4 +470,4 @@ globalThis.onmessage = (event: MessageEvent<Incoming>): void => {
 		default:
 			break;
 	}
-};
+});

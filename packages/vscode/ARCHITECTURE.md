@@ -256,7 +256,6 @@ flowchart LR
   workbench <==>|hub| recognizer
   node <==>|hub| provoke
   pod <==>|hub| debug_worker
-  pod <-.->|debug adapter messages| debug_worker
   pod <-.->|LSP (JSON-RPC)| worker_server_host
   workbench <-.->|bootstrap handshake| exthost_iframe
   workbench <-.->|HTTP| net_origin

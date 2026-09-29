@@ -4,21 +4,16 @@
  * The render surface (public/debug-preview.html) now lives in a SHELL pane window (managed by shell-preview.ts), like the
  * app preview — a live runtime surface belongs in a floating window you can place, not an auxbar tab. This module stays
  * in the workbench realm (it needs the vscode `api` + debug events) and BRIDGES the debugger to that surface over the
- * hub (which spans realms): it forwards the adapter's DAP custom events as `tsval.preview.*`, opens/closes the shell
- * window on session start/stop, and routes the surface's DOM events / time-travel requests back to the adapter. A
- * per-session buffer is replayed when the surface (re)connects, so a window opened mid-session catches up.
+ * hub (which spans realms): the debug worker publishes the render stream straight to the surface on
+ * `tsval.preview.stream`; this opens/closes the shell window on session start/stop, resets the surface, keeps a
+ * per-session buffer of the stream to replay when the surface (re)connects (so a window opened mid-session catches up),
+ * and routes the surface's DOM events / time-travel requests back to the adapter.
  */
 /* eslint-disable ts/no-explicit-any -- the vscode api is untyped here (captured from the hello extension) */
 import type { Hub } from "@brianjenkins94/hub";
+import type { PreviewMessage as ToPreview } from "./extensions/worker-pod/debug-protocol";
 
 type Api = any;
-
-/** Host→surface messages (mirrors debug-preview.html). `mutation` carries one debug-react.ts Mutation. */
-type ToPreview =
-	| { "type": "mutation"; "mutation": unknown }
-	| { "type": "rendered" }
-	| { "type": "history"; "length": number }
-	| { "type": "reset" };
 
 export function installDebugPreview(getApi: () => Api, hub: Hub): void {
 	// Mutations since the last reset, replayed to a surface that connects mid-session.
@@ -30,18 +25,18 @@ export function installDebugPreview(getApi: () => Api, hub: Hub): void {
 
 	const api = getApi();
 
-	// Debugger → surface: forward the adapter's DAP custom events, buffering for replay.
-	api.debug.onDidReceiveDebugSessionCustomEvent((event: { "event": string; "body": any }) => {
-		if (event.event === "tsvalMutation") {
-			const message: ToPreview = { "type": "mutation", "mutation": event.body.mutation };
+	// The worker's render stream, on its way to the surface: keep it for replay (not what we re-emit ourselves).
+	hub.subscribe("tsval.preview.stream", (data, envelope) => {
+		const message = data as ToPreview;
 
+		if (envelope.from === hub.id) {
+			return;
+		}
+
+		if (message.type === "mutation") {
 			buffer.push(message);
-			emit(message);
-		} else if (event.event === "tsvalRendered") {
-			emit({ "type": "rendered" });
-		} else if (event.event === "tsvalHistory") {
-			historyLength = event.body.length;
-			emit({ "type": "history", "length": historyLength });
+		} else if (message.type === "history") {
+			historyLength = message.length;
 		}
 	});
 

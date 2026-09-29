@@ -1,0 +1,163 @@
+/**
+ * The tsval debugger as hub RPC — so anything on the hub tree (debug-mcp's debug_* tools, and so an agent) can drive a
+ * debug session the way VS Code's debug UI does, and read where it stopped.
+ *
+ *   pod     `debug.sessions`                       → every live session's summary
+ *   pod     `debug.start` { program?, breakpoints? } → starts a session and answers with its first stop
+ *   pod     `debug.breakpoints` { program?, lines }  → replaces a file's breakpoints (VS Code's own, so the UI shows them)
+ *   session `debug.session.<id>.step` { action }   → resumes, and answers with the NEXT stop (or the end)
+ *   session `debug.session.<id>.state`             → where it is now
+ *   session `debug.session.<id>.stop`              → ends it
+ *
+ * The session methods are served by the ADAPTER (debug-adapter.ts), not the worker: a breakpoint inside a React handler
+ * blocks the worker in Atomics.wait, where only the adapter (which holds the shared control word) can resume it — and
+ * the adapter owns the VS Code session, so a step from here shows in VS Code's UI too. Per-session subjects route each
+ * action to exactly the pod that owns the session, even with several editor tabs linked to debug-mcp.
+ */
+import type { Hub } from "@brianjenkins94/hub";
+import { serve } from "@brianjenkins94/hub";
+import * as vscode from "vscode";
+
+import type { StepAction } from "./debug-protocol";
+
+export type DebugAction = StepAction;
+const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
+
+/** `starting` until the first stop; `idle` = a React app mounted and waiting for events (no stop to step from). */
+export type DebugState = "starting" | "running" | "stopped" | "idle" | "terminated";
+
+/** Where a session is — the answer to every session call. Location, code and locals only while stopped. */
+export interface DebugOutcome {
+	"session": string;
+	"name": string;
+	"program": string;
+	"state": DebugState;
+	/** Why it stopped: breakpoint, step, capability (a policy-gated call), … */
+	"reason"?: string;
+	"line"?: number;
+	"column"?: number;
+	"function"?: string;
+	/** The source line it stopped on. */
+	"code"?: string;
+	"locals"?: { "name": string; "value": string; "type": string }[];
+	/** What the program printed since the action began. */
+	"output": string[];
+}
+
+/** What debug-adapter.ts's session exposes to the hub. */
+export interface ControllableSession {
+	"id": string;
+	/** The `__launchId` a `debug.start` put in the launch config, to find the session it started. */
+	"launchId"?: string;
+	"outcome": () => DebugOutcome;
+	/** Resume with `action` and resolve on the next stop, idle or end. Throws unless stopped. */
+	"act": (action: DebugAction, signal: AbortSignal) => Promise<DebugOutcome>;
+	/** Resolve once the session has left `starting`/`running` (now, if it already has). */
+	"settled": (signal: AbortSignal) => Promise<DebugOutcome>;
+	"stop": () => Promise<DebugOutcome>;
+}
+
+const sessions = new Map<string, ControllableSession>();
+/** `debug.start` calls waiting for the session their launch config marks. */
+const pendingLaunches = new Map<string, (session: ControllableSession) => void>();
+
+/** Serve `session`'s methods on `hub` until the returned disposer runs (when the session ends). */
+export function registerSession(hub: Hub, session: ControllableSession): () => void {
+	const prefix = "debug.session." + session.id + ".";
+	const unserve = [
+		serve(hub, prefix + "step", (args, { signal }) => {
+			const action = (args as { "action"?: string } | undefined)?.action ?? "";
+
+			if (!ACTIONS.has(action)) {
+				throw new Error(`unknown action "${action}" — one of ${[...ACTIONS].join(", ")}`);
+			}
+
+			return session.act(action as DebugAction, signal);
+		}),
+		serve(hub, prefix + "state", () => session.outcome()),
+		serve(hub, prefix + "stop", () => session.stop())
+	];
+
+	sessions.set(session.id, session);
+
+	if (session.launchId !== undefined) {
+		pendingLaunches.get(session.launchId)?.(session);
+		pendingLaunches.delete(session.launchId);
+	}
+
+	return () => {
+		sessions.delete(session.id);
+		unserve.forEach((dispose) => { dispose(); });
+	};
+}
+
+/** A path as the launch config wants it: absolute, relative ones under the first workspace folder; the active editor's
+ *  file when omitted. */
+function resolveProgram(program: string | undefined): string {
+	const path = program ?? vscode.window.activeTextEditor?.document.uri.path;
+
+	if (path === undefined || path === "") {
+		throw new Error("no program — pass one (e.g. src/index.ts), or open the file in the editor");
+	}
+
+	if (path.startsWith("/")) {
+		return path;
+	}
+
+	return (vscode.workspace.workspaceFolders?.[0]?.uri.path ?? "/workspace").replace(/\/$/u, "") + "/" + path;
+}
+
+/** Replace `program`'s breakpoints with `lines` (1-based), through VS Code so its UI and every session see them. */
+function setBreakpoints(program: string, lines: number[]): void {
+	const uri = vscode.Uri.file(program);
+	const existing = vscode.debug.breakpoints.filter((breakpoint) => breakpoint instanceof vscode.SourceBreakpoint && breakpoint.location.uri.toString() === uri.toString());
+
+	vscode.debug.removeBreakpoints(existing);
+	vscode.debug.addBreakpoints(lines.map((line) => new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(line - 1, 0)))));
+}
+
+/** Serve the pod-level calls (list, start, breakpoints) on `hub`. */
+export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): void {
+	context.subscriptions.push(
+		{ "dispose": serve(hub, "debug.sessions", () => [...sessions.values()].map((session) => {
+			const { output: _output, locals: _locals, ...summary } = session.outcome();
+
+			return summary;
+		})) },
+		{ "dispose": serve(hub, "debug.breakpoints", (args) => {
+			const { program, lines } = (args ?? {}) as { "program"?: string; "lines"?: number[] };
+			const path = resolveProgram(program);
+
+			setBreakpoints(path, lines ?? []);
+
+			return { "program": path, "lines": lines ?? [] };
+		}) },
+		{ "dispose": serve(hub, "debug.start", async (args, { signal }) => {
+			const { program, breakpoints } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[] };
+			const path = resolveProgram(program);
+			const launchId = Math.random().toString(36).slice(2);
+
+			// Before the launch, so they're registered by the time the session starts running.
+			if (breakpoints !== undefined) {
+				setBreakpoints(path, breakpoints);
+			}
+
+			const launched = new Promise<ControllableSession>((resolve, reject) => {
+				pendingLaunches.set(launchId, resolve);
+				signal.addEventListener("abort", () => {
+					pendingLaunches.delete(launchId);
+					reject(signal.reason);
+				}, { "once": true });
+			});
+			const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "debug " + path.split("/").pop(), "program": path, "__launchId": launchId });
+
+			if (!started) {
+				pendingLaunches.delete(launchId);
+
+				throw new Error("VS Code didn't start the debug session");
+			}
+
+			return (await launched).settled(signal);
+		}) }
+	);
+}

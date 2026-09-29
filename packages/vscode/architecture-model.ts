@@ -78,7 +78,7 @@ export const nodes: NodeSpec[] = [
 	{ "id": "exthost:LocalProcess:0", "label": "Local extension host", "container": "workbench", "detail": "hello, worker-pod", "description": "Extension host sharing the workbench realm: the hello extension (the captured vscode API) and worker-pod.", "observedBy": "RPCProtocol logger on its ExtensionHostManager" },
 	{ "id": "pod", "label": "Pod", "container": "workbench", "hub": true, "detail": "hub · worker-pod extension", "description": "The worker-pod extension's hub (in the LocalProcess extension host): spawns the LSP and debug workers, serves capability.decide.", "observedBy": "its hub reporter" },
 	{ "id": "node", "label": "Node worker", "container": "workers", "hub": true, "detail": "hub · almostnode, preview dev server", "description": "Runs node (almostnode) for the terminal and the preview dev server; answers virtual.request.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)" },
-	{ "id": "debug-worker", "label": "Debug worker", "container": "workers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the pod's debug adapter.", "observedBy": "its hub reporter + the Worker probe (DAP-ish messages)", "condition": "while debugging" },
+	{ "id": "debug-worker", "label": "Debug worker", "container": "workers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the pod's debug adapter: control and events over the hub on its session's subjects, the render stream straight to the tsval preview.", "observedBy": "its hub reporter + the Worker probe", "condition": "while debugging" },
 	{ "id": "worker:server-host", "label": "LSP server host", "container": "workers", "detail": "cspell (vscode-languageclient)", "description": "cspell language server, spawned by the pod — JSON-RPC over postMessage plus a ws-control port for the shared filesystem.", "observedBy": "the Worker probe" },
 	{ "id": "classify", "label": "Classify worker", "container": "workers", "hub": true, "detail": "hub · BABLR cosmetic classifier", "description": "Classifies git changes as cosmetic or semantic, and groups edit bursts, for the git SCM and the review panel.", "observedBy": "its hub reporter + the Worker probe", "condition": "when git classifies a change" },
 	{ "id": "recognizer", "label": "Recognizer worker", "container": "workers", "hub": true, "detail": "hub · game recognizer", "description": "Recognizes a game's structure for the event sheet view.", "observedBy": "its hub reporter + the Worker probe", "condition": "when the event sheet opens" },
@@ -134,6 +134,10 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "recognizer.project", "hubs": ["workbench", "recognizer"], "description": "Project a game into the event sheet's model." },
 	{ "pattern": "provoke.round", "hubs": ["node", "provoke"], "description": "One cold transform round: the workspace buffer in, failures out." },
 	{ "pattern": "debug.>", "hubs": ["shell", "workbench", "pod"], "description": "Debug sessions and the toolbar." },
+	{ "pattern": "debug.sessions", "hubs": ["pod", "debug-mcp"], "description": "debug-mcp: the live tsval sessions." },
+	{ "pattern": "debug.start", "hubs": ["pod", "debug-mcp"], "description": "debug-mcp: start a tsval session, answered with its first stop." },
+	{ "pattern": "debug.breakpoints", "hubs": ["pod", "debug-mcp"], "description": "debug-mcp: replace a file's breakpoints." },
+	{ "pattern": "debug.session.>", "hubs": ["pod", "debug-worker", "debug-mcp"], "description": "One tsval session: the adapter ⇄ worker protocol (control, events), and debug-mcp stepping, reading or stopping it." },
 	{ "pattern": "production.>", "hubs": ["workbench", "pod"], "description": "Production (server) runs." },
 	{ "pattern": "tsval.preview.>", "hubs": ["shell", "workbench", "pod", "debug-worker"], "description": "The tsval render surface." },
 	{ "pattern": "capability.decide", "hubs": ["pod", "root", "shell"], "description": "Network/IO capability decisions, served by the pod." },
@@ -147,7 +151,6 @@ export const subjects: SubjectFamily[] = [
 
 export const channels: ChannelSpec[] = [
 	{ "a": "workbench", "b": "worker:*", "protocol": "WebWorker protocol / postMessage", "transport": "Worker.postMessage", "description": "monaco's editor workers (request/reply/events) and the workbench's own workers." },
-	{ "a": "pod", "b": "debug-worker", "protocol": "debug adapter messages", "transport": "Worker.postMessage", "description": "The tsval debug adapter's raw messages (the rest rides the hub)." },
 	{ "a": "pod", "b": "worker:server-host", "protocol": "LSP (JSON-RPC)", "transport": "Worker.postMessage", "description": "vscode-languageclient to the cspell server, plus a one-shot control port (ws-control) that hands it the shared workspace buffer — the server host has no hub." },
 	{ "a": "workbench", "b": "exthost:LocalProcess:*", "protocol": "RPCProtocol", "transport": "in-memory buffers", "description": "MainThread / ExtHost proxies, serialized even in the same realm." },
 	{ "a": "workbench", "b": "exthost-iframe", "protocol": "bootstrap handshake", "transport": "window.postMessage", "description": "NLS bootstrap, then the MessagePort handoff." },
@@ -315,8 +318,8 @@ export type Violation =
 export interface ObservedChannel { "a": string; "b": string; "labels": Map<string, { "count": number; "hub"?: number }> }
 export interface ObservedTopology { "links": { "peerId"?: string }[] }
 
-/** How many observed pairs each declared channel covers. A channel declared on a hub-linked pair (the debug adapter's
- *  messages beside the pod ⇄ debug-worker link) is seen only through probe traffic — the hub's own belongs to the link. */
+/** How many observed pairs each declared channel covers. A channel declared on a hub-linked pair (raw messages beside
+ *  the hub link, on the same worker) is seen only through probe traffic — the hub's own belongs to the link. */
 export function seenChannels(observed: ObservedChannel[]): Map<ChannelSpec, number> {
 	const seen = new Map<ChannelSpec, number>();
 
