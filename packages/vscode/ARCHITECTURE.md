@@ -195,6 +195,8 @@ flowchart LR
     shell["Shell"]
     subgraph previews["Preview windows"]
       tsval_preview["tsval preview"]
+      subgraph previewApp["App"]
+      end
     end
   end
   subgraph app["App iframe"]
@@ -236,6 +238,7 @@ flowchart LR
     net_origin["Page origin"]
     net_unpkg_com["unpkg"]
     net_registry_npmjs_org["npm registry"]
+    net_brianjenkins94_github_io["GitHub Pages"]
     net_esm_sh["esm.sh"]
     net_cdn_jsdelivr_net["jsDelivr"]
     net_ka_f_fontawesome_com["Font Awesome"]

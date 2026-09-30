@@ -2,7 +2,7 @@
 // doesn't declare. Run: node --test test/architecture-model.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkConformance, classifyUrl, declaredBetween, familiesOnLink, identifyWorker, isEndedPlaceholder, nodes, subjectOfLabel } from "../architecture-model.ts";
+import { appLayout, appNodes, checkConformance, classifyUrl, declaredBetween, familiesOnLink, identifyWorker, isEndedPlaceholder, nodes, subjectOfLabel } from "../architecture-model.ts";
 
 const patterns = (a, b) => familiesOnLink(a, b).map((family) => family.pattern);
 
@@ -100,4 +100,53 @@ test("a link that closed before its peer answered was a transient; one still una
 	assert.equal(isEndedPlaceholder("sw:link-12", "terminated"), true);
 	assert.equal(isEndedPlaceholder("root:link-1", "alive"), false); // a live link nothing answers stays a violation
 	assert.equal(isEndedPlaceholder("worker:classify-worker", "terminated"), false);
+});
+
+test("a previewed app's contexts are its own: found from its page's link to the shell, and not checked against the model", () => {
+	const topology = new Map([
+		["shell", { "links": [{ "peerId": "root" }, { "peerId": "preview:5173" }] }],
+		["root", { "links": [{ "peerId": "shell" }, { "peerId": "mystery" }] }],
+		// the app: its page hub (linked to the shell), a worker, and a worker's frame
+		["page", { "links": [{ "peerId": "shell" }, { "peerId": "referee" }] }],
+		["referee", { "links": [{ "peerId": "page" }, { "peerId": "client-0" }] }],
+		["client-0", { "links": [{ "peerId": "referee" }, { "peerId": "client-0.ui" }] }]
+	]);
+	const channels = [
+		{ "a": "shell", "b": "page", "labels": new Map([["tab.here", { "count": 1, "hub": 1 }]]) },
+		{ "a": "page", "b": "referee", "labels": new Map([["netsim.local.join()", { "count": 1, "hub": 1 }]]) },
+		{ "a": "client-0", "b": "client-0.ui", "labels": new Map([["netsim.local.view.client-0", { "count": 9, "hub": 9 }]]) },
+		{ "a": "root", "b": "mystery", "labels": new Map() }
+	];
+
+	assert.deepEqual([...appNodes({ "channels": channels, "topology": topology })].sort(), ["client-0", "client-0.ui", "page", "referee"]);
+
+	// Without the shell's link to a preview, an undeclared hub linked to the shell isn't an app.
+	const noPreview = new Map([...topology, ["shell", { "links": [{ "peerId": "root" }] }]]);
+
+	assert.deepEqual([...appNodes({ "channels": channels, "topology": noPreview })], []);
+
+	const violations = checkConformance({ "nodes": ["shell", "root", "page", "referee", "client-0", "client-0.ui", "mystery"], "channels": channels, "topology": topology });
+
+	assert.deepEqual(violations.map((violation) => violation.type === "unknown-node" ? "unknown " + violation.id : violation.type + " " + violation.a + "⇄" + violation.b).sort(), ["undeclared-channel root⇄mystery", "unknown mystery"], "the editor's own unknowns are still flagged");
+});
+
+test("a previewed app's layout: its page is its preview, frames sit in their windows, workers under the window they link", () => {
+	const base = "http://localhost:5173/__virtual__/t1/5173/";
+	const topology = new Map([
+		["shell", { "links": [{ "peerId": "root" }, { "peerId": "preview:5173" }] }],
+		["page", { "links": [{ "peerId": "shell" }, { "peerId": "referee" }] }],
+		["referee", { "links": [{ "peerId": "page" }, { "peerId": "client-0" }] }],
+		["client-0", { "links": [{ "peerId": "referee" }, { "peerId": "client-0.ui" }] }],
+		["client-0.ui", { "links": [{ "peerId": "client-0" }] }]
+	]);
+	const realms = new Map([
+		["page", { "kind": "window", "url": base }],
+		["client-0.ui", { "kind": "window", "url": base + "instance.html?id=client-0", "parent": base }],
+		["referee", { "kind": "worker", "url": base + "src/browser/referee.worker.ts" }],
+		["client-0", { "kind": "worker", "url": base + "src/browser/client.worker.ts" }]
+	]);
+	const layout = appLayout({ "channels": [], "topology": topology, "realms": realms });
+
+	assert.deepEqual([...layout.alias], [["page", "preview:5173"]], "the page in the preview's top frame IS the preview");
+	assert.deepEqual(Object.fromEntries(layout.parent), { "client-0.ui": "preview:5173", "referee": "preview:5173", "client-0": "client-0.ui" });
 });

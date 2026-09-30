@@ -73,6 +73,7 @@ export const containers: ContainerSpec[] = [
 	{ "id": "extHostIframe", "label": "Extension host iframe", "caption": "hidden iframe · relays its worker", "parent": "workbenchIframe", "kind": "origin" },
 	{ "id": "extHostWorker", "label": "Web worker extension host", "caption": "LocalWebWorker extensions, tsserver", "parent": "extHostIframe", "kind": "realm" },
 	{ "id": "previews", "label": "Preview windows", "caption": "iframes in the shell · served from /__virtual__/<port>/ by the service worker", "parent": "shell", "kind": "origin" },
+	{ "id": "previewApp", "label": "App", "caption": "the previewed app's own hubs, workers and frames (joined through the shell) · its architecture, not the editor's", "parent": "previews", "kind": "group" },
 	{ "id": "sharedMemory", "label": "Shared memory", "caption": "SharedArrayBuffer · Atomics locks", "column": 3, "kind": "group" },
 	{ "id": "browser", "label": "Browser", "caption": "storage", "column": 3, "kind": "group" },
 	{ "id": "network", "label": "Network (service worker)", "caption": "every HTTP request goes out through the service worker · debug-mcp's WebSocket connects directly", "column": 3, "kind": "group", "node": "sw" }
@@ -99,6 +100,7 @@ export const nodes: NodeSpec[] = [
 	{ "id": "zenfs", "label": "Workspace (zen-fs)", "container": "sharedMemory", "detail": "SingleBuffer at /workspace", "description": "The workspace filesystem: a zen-fs SingleBuffer store in a SharedArrayBuffer the workbench creates and hands to the node worker (over the hub) and the cspell server (a control port), which mount it at /workspace. Same bytes in every realm, guarded by an Atomics lock. Shared memory notifies nobody, so each realm watches its own mount's writes and reports them as workspace.changed; the workbench persists every one to IndexedDB and announces it to VS Code, whoever wrote (the provider, isomorphic-git, the terminal, a node script).", "observedBy": "each realm's /workspace mount (zen-fs StoreFS operations), the provider's change events, the workspace-fs IndexedDB" },
 	{ "id": "tsval-preview", "label": "tsval preview", "container": "previews", "detail": "debug-preview.html", "description": "The tsval debugger's render surface: announces itself (preview-ready), gets a MessagePort from the shell, streams events up and renders the mutation stream the workbench sends.", "observedBy": "the shell's window message probe + the shell's preview bridge", "condition": "while debugging with tsval" },
 	{ "id": "provoke", "label": "Provoke worker", "container": "workers", "hub": true, "detail": "hub · cold-start transform repro", "description": "A throwaway child of the node worker (debug-mcp preview_provoke hardReset): mounts the workspace and transforms modules cold, once.", "observedBy": "its hub reporter + the node worker's Worker probe", "condition": "debug-mcp preview_provoke" },
+	{ "id": "net:brianjenkins94.github.io", "label": "GitHub Pages", "container": "network", "detail": "preview packages", "description": "A previewed app's tarball dependencies (a URL in its package.json — e.g. @brianjenkins94/hub), fetched once by the node worker's dev server and served from /@pkg/.", "observedBy": "the service worker's fetch probe", "condition": "when a previewed app depends on a tarball" },
 	{ "id": "net:esm.sh", "label": "esm.sh", "container": "network", "detail": "preview dependencies", "description": "The previewed app's bare imports (react, react-dom, react-refresh), mapped by the dev server's import map and fetched by the preview through the service worker.", "observedBy": "the service worker's fetch probe", "condition": "while a preview runs" },
 	{ "id": "net:cdn.jsdelivr.net", "label": "jsDelivr", "container": "network", "detail": "preview DevTools", "description": "A preview's DevTools: chobitsu (the CDP implementation added to the previewed page) and Chrome's DevTools frontend (chii's build).", "observedBy": "the service worker's fetch probe", "condition": "while a preview's DevTools is open" },
 	{ "id": "net:ka-f.fontawesome.com", "label": "Font Awesome", "container": "network", "detail": "WebAwesome icons", "description": "WebAwesome's default icon library: the shell chrome's wa-icon elements load their SVGs from the Font Awesome kit CDN, through the service worker.", "observedBy": "the service worker's fetch probe" },
@@ -125,6 +127,7 @@ export const hubLinks: [string, string][] = [
 
 export const subjects: SubjectFamily[] = [
 	{ "pattern": "$sys.log.>", "hubs": ["*"], "description": "Structured logs, to the root collector and debug-mcp." },
+	{ "pattern": "$sys.backlog.log", "hubs": ["root", "debug-mcp", "preview:*"], "description": "A page's startup records, sent once its debug-mcp link can carry them (observability's logBacklog): the editor root's, and a previewed app's through the shell." },
 	{ "pattern": "project.>", "hubs": ["shell", "root"], "description": "Project catalog and opening." },
 	{ "pattern": "workspace.files", "hubs": ["shell", "root"], "description": "The current project's files." },
 	{ "pattern": "workbench.>", "hubs": ["root", "workbench"], "description": "Boot handshake (init, online), saves, project switches, files." },
@@ -356,8 +359,10 @@ export function seenChannels(observed: ObservedChannel[]): Map<ChannelSpec, numb
 /** Compare what's observed with the model. */
 export function checkConformance(observed: { "nodes": string[]; "channels": ObservedChannel[]; "topology": Map<string, ObservedTopology> }): Violation[] {
 	const violations: Violation[] = [];
+	// A previewed app's own contexts are its architecture, not the editor's: nothing to check them against.
+	const app = appNodes(observed);
 
-	for (const channel of observed.channels) {
+	for (const channel of observed.channels.filter((candidate) => !app.has(candidate.a) && !app.has(candidate.b))) {
 		const declared = declaredBetween(channel.a, channel.b);
 
 		if (declared === undefined) {
@@ -378,7 +383,7 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 		}
 	}
 
-	for (const [hub, snapshot] of observed.topology) {
+	for (const [hub, snapshot] of [...observed.topology].filter(([id]) => !app.has(id))) {
 		const peers = new Map<string, number>();
 
 		for (const link of snapshot.links) {
@@ -394,7 +399,7 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 		}
 	}
 
-	for (const id of observed.nodes) {
+	for (const id of observed.nodes.filter((candidate) => !app.has(candidate))) {
 		const dynamic = DYNAMIC_PREFIXES.some((prefix) => id.startsWith(prefix));
 
 		if (!dynamic && nodeSpec(id) === undefined) {
@@ -403,6 +408,101 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 	}
 
 	return violations;
+}
+
+/**
+ * A previewed app's own contexts, among what's observed. An app joins the editor's tree through the shell's link to
+ * its preview (`preview:<port>`; observability's linkPreviewHost): its page is a hub the model doesn't declare, linked
+ * to the shell — and every other undeclared context reachable from it, by hub link or channel, is the app's too (its
+ * workers, the frames it nests). None of it is the editor's architecture.
+ */
+export function appNodes(observed: { "channels": { "a": string; "b": string }[]; "topology": Map<string, ObservedTopology> }): Set<string> {
+	const app = new Set<string>();
+
+	if (!(observed.topology.get("shell")?.links ?? []).some((link) => link.peerId?.startsWith("preview:") === true)) {
+		return app;
+	}
+
+	const undeclared = (id: string): boolean => nodeSpec(id) === undefined && !id.startsWith("net:") && !DYNAMIC_PREFIXES.some((prefix) => id.startsWith(prefix)) && !(/:link-\d+$/u).test(id);
+	const queue = [...observed.topology].filter(([hub, snapshot]) => undeclared(hub) && snapshot.links.some((link) => link.peerId === "shell")).map(([hub]) => hub);
+
+	while (queue.length > 0) {
+		const id = queue.shift()!;
+
+		if (app.has(id)) {
+			continue;
+		}
+
+		app.add(id);
+
+		const neighbours = [
+			...(observed.topology.get(id)?.links ?? []).map((link) => link.peerId),
+			...observed.channels.filter((channel) => channel.a === id || channel.b === id).map((channel) => (channel.a === id ? channel.b : channel.a))
+		];
+
+		queue.push(...neighbours.filter((neighbour): neighbour is string => neighbour !== undefined && undeclared(neighbour) && !app.has(neighbour)));
+	}
+
+	return app;
+}
+
+/** Where a reporting hub runs (observability's ArchRealm). */
+export interface ObservedRealm { "kind": "window" | "worker"; "url": string; "parent"?: string }
+
+export interface AppLayout {
+	/** The previewed app's contexts (appNodes). */
+	"nodes": Set<string>;
+	/** An app context that IS a declared one: the page in a preview's top frame is that preview (`preview:<port>`). */
+	"alias": Map<string, string>;
+	/** Where each app context runs, when known: a frame in the window that holds it, a worker under the one window it's
+	 *  linked to (in alias terms — a child of the page is a child of its preview). */
+	"parent": Map<string, string>;
+}
+
+/**
+ * How a previewed app's contexts nest, from where each says it runs (its realm): the window at a preview's address
+ * (`/__virtual__/<tab>/<port>/`, no app window above it) is that preview itself; a frame sits in the window its parent
+ * address names; a worker, under the one app window it's linked to (by hub link or channel).
+ */
+export function appLayout(observed: { "channels": { "a": string; "b": string }[]; "topology": Map<string, ObservedTopology>; "realms": Map<string, ObservedRealm> }): AppLayout {
+	const nodes = appNodes(observed);
+	const alias = new Map<string, string>();
+	const parent = new Map<string, string>();
+	const windows = [...nodes].filter((id) => observed.realms.get(id)?.kind === "window");
+	const byUrl = new Map(windows.map((id) => [observed.realms.get(id)!.url, id]));
+	const named = (id: string): string => alias.get(id) ?? id;
+
+	for (const id of windows) {
+		const realm = observed.realms.get(id)!;
+		const port = /\/__virtual__\/[^/]+\/(\d+)\//u.exec(realm.url)?.[1];
+		const holder = realm.parent === undefined ? undefined : byUrl.get(realm.parent);
+
+		if (holder === undefined && port !== undefined) {
+			alias.set(id, "preview:" + port);
+		}
+	}
+
+	for (const id of windows) {
+		const holder = observed.realms.get(id)!.parent;
+		const window = holder === undefined ? undefined : byUrl.get(holder);
+
+		if (window !== undefined && window !== id) {
+			parent.set(id, named(window));
+		}
+	}
+
+	for (const id of [...nodes].filter((candidate) => observed.realms.get(candidate)?.kind === "worker")) {
+		const linked = new Set([
+			...(observed.topology.get(id)?.links ?? []).map((link) => link.peerId),
+			...observed.channels.filter((channel) => channel.a === id || channel.b === id).map((channel) => (channel.a === id ? channel.b : channel.a))
+		].filter((neighbour): neighbour is string => neighbour !== undefined && windows.includes(neighbour)));
+
+		if (linked.size === 1) {
+			parent.set(id, named([...linked][0]));
+		}
+	}
+
+	return { "nodes": nodes, "alias": alias, "parent": parent };
 }
 
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────

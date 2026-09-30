@@ -25,8 +25,8 @@ const FILES = {
 	"frame.html": "<!doctype html>\n<html><head><title>wired frame</title></head><body><script type=\"module\" src=\"./frame.ts\"></script></body></html>\n",
 	// The page: starts the worker, adds the frame, and hands each one end of a channel between them.
 	"main.ts": [
-		"import { createHub } from \"@brianjenkins94/hub\";",
-		"import { linkPreviewHost, relayLoggerToHub, servePageTools } from \"@brianjenkins94/observability\";",
+		"import { createHub, portTransport } from \"@brianjenkins94/hub\";",
+		"import { createArchReporter, linkPreviewHost, relayLoggerToHub, servePageTools } from \"@brianjenkins94/observability\";",
 		"",
 		"const hub = createHub({ \"id\": \"page\" });",
 		"const state: { \"hub\": string; \"results\": unknown[]; \"stray\": number; \"startedAt\": number } = { \"hub\": hub.id, \"results\": [], \"stray\": 0, \"startedAt\": performance.timeOrigin };",
@@ -34,9 +34,12 @@ const FILES = {
 		"// The app's own observability, joining the editor's tree: a tool of its own, and its logs.",
 		"servePageTools(hub, { \"tools\": [{ \"name\": \"wired_status\", \"description\": \"The wired app's state.\", \"inputSchema\": { \"type\": \"object\" }, \"handler\": () => ({ \"results\": state.results, \"stray\": state.stray }) }] });",
 		"linkPreviewHost(hub);",
+		"createArchReporter(hub);",
 		"relayLoggerToHub(hub, \"wired-page\").info(\"wired page up\");",
 		"(globalThis as unknown as { \"__wiredHub\": typeof hub }).__wiredHub = hub;",
 		"const worker = new Worker(new URL(\"./worker.ts\", import.meta.url), { \"type\": \"module\" });",
+		"",
+		"hub.link(portTransport(worker));",
 		"const frame = document.createElement(\"iframe\");",
 		"",
 		"(globalThis as unknown as { \"__wired\": typeof state }).__wired = state;",
@@ -60,16 +63,19 @@ const FILES = {
 		"document.body.append(frame);",
 		""
 	].join("\n"),
-	// The worker: serves an RPC on its end of the channel.
+	// The worker: in the page's tree, and serving an RPC on its end of the channel to the frame.
 	"worker.ts": [
 		"import { createHub, portTransport, serve } from \"@brianjenkins94/hub\";",
+		"import { createArchReporter } from \"@brianjenkins94/observability\";",
 		"",
+		"const hub = createHub({ \"id\": \"worker\" });",
+		"",
+		"hub.link(portTransport(globalThis));",
+		"createArchReporter(hub);",
+		"serve(hub, \"wired.echo\", (args) => ({ \"echoed\": args, \"from\": hub.id }));",
 		"addEventListener(\"message\", (event: MessageEvent) => {",
 		"\tif (event.data?.port instanceof MessagePort) {",
-		"\t\tconst hub = createHub({ \"id\": \"worker\" });",
-		"",
 		"\t\thub.link(portTransport(event.data.port));",
-		"\t\tserve(hub, \"wired.echo\", (args) => ({ \"echoed\": args, \"from\": hub.id }));",
 		"\t}",
 		"});",
 		""
@@ -77,6 +83,7 @@ const FILES = {
 	// The frame: calls the worker over its end, and reports the answer to the page.
 	"frame.ts": [
 		"import { createHub, createRpcClient, portTransport } from \"@brianjenkins94/hub\";",
+		"import { createArchReporter } from \"@brianjenkins94/observability\";",
 		"",
 		"document.title = \"wired frame v1\";",
 		"",
@@ -85,6 +92,7 @@ const FILES = {
 		"\t\tconst hub = createHub({ \"id\": \"frame\" });",
 		"",
 		"\t\thub.link(portTransport(event.data.port));",
+		"\t\tcreateArchReporter(hub);",
 		"",
 		"\t\tconst answer = await createRpcClient(hub).request(\"wired.echo\", \"hi\", { \"timeoutMs\": 10_000, \"waitForResponderMs\": 10_000 });",
 		"",
@@ -227,4 +235,26 @@ test("the app's link is confined: an editor subject it publishes doesn't cross i
 	await previewPage().evaluate((closing) => { globalThis.__wiredHub.publish("preview.close", { "port": closing }); }, port);
 	await session.page.waitForTimeout(1500);
 	assert.ok(previewPage() !== undefined, "the preview is still open");
+});
+
+test("the editor's architecture view takes the app's contexts as the app's: none of it needs review", async () => {
+	// The app's hubs, workers and frames are reported into the editor's view (they joined its tree), but they're not
+	// the editor's architecture: nothing to check them against, and nothing flagged.
+	const snapshot = await session.until("the app's hubs in the view", (current) => ["page", "worker"].every((id) => current.nodes.some((node) => node.id === id)));
+
+	assert.ok(snapshot.nodes.some((node) => node.id === "frame"), "its nested frame's hub too");
+
+	// (A locally served observability tarball — ARCH_OBSERVABILITY_TGZ — is a network endpoint only this run uses.)
+	const override = process.env.ARCH_OBSERVABILITY_TGZ === undefined ? undefined : "net:" + new URL(process.env.ARCH_OBSERVABILITY_TGZ).host;
+
+	assert.deepEqual((await session.conformance()).filter((violation) => violation.id !== override), []);
+
+	// And where they run, from the realms they report: the page is its preview; the frame sits in it.
+	const { appLayout } = await import("../architecture-model.ts");
+	const port = /\/__virtual__\/[^/]+\/(\d+)\//u.exec(previewPage().url())?.[1];
+	const current = await session.until("the app's realms", (latest) => ["page", "frame"].every((id) => latest.realms?.[id] !== undefined));
+	const layout = appLayout({ "channels": current.channels, "topology": new Map(Object.entries(current.topology)), "realms": new Map(Object.entries(current.realms)) });
+
+	assert.equal(layout.alias.get("page"), "preview:" + port);
+	assert.equal(layout.parent.get("frame"), "preview:" + port);
 });

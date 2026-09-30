@@ -11,7 +11,8 @@ import { createRpcClient } from "@brianjenkins94/hub";
 import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
 import type { ContainerSpec, Violation } from "./architecture-model";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
-import { checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, isEndedPlaceholder, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
+import type { AppLayout } from "./architecture-model";
+import { appLayout, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, isEndedPlaceholder, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -149,7 +150,12 @@ function formatTime(t: number): string {
 	return date.toLocaleTimeString([], { "hour12": false }) + "." + String(date.getMilliseconds()).padStart(3, "0");
 }
 
-function containerOf(node: RuntimeNode): string {
+function containerOf(node: RuntimeNode, app: ReadonlySet<string> = new Set()): string {
+	// A previewed app's own context (see appNodes): in its preview, not wherever an unknown context would land.
+	if (app.has(node.id)) {
+		return "previewApp";
+	}
+
 	const declared = nodeSpec(node.id)?.container ?? node.spec.container;
 
 	if (declared !== undefined && containers.some((container) => container.id === declared)) {
@@ -178,8 +184,13 @@ function detailOf(node: RuntimeNode): string {
 	return nodeSpec(node.id)?.detail ?? node.spec.detail ?? node.spec.role ?? "";
 }
 
-/** A context the model doesn't list: created at runtime (its channels are declared by prefix), or a finding. */
-function undeclaredNote(id: string): HTMLElement {
+/** A context the model doesn't list: a previewed app's own, created at runtime (its channels are declared by prefix),
+ *  or a finding. */
+function undeclaredNote(id: string, app: ReadonlySet<string>): HTMLElement {
+	if (app.has(id)) {
+		return h("p", { "class": "arch-muted" }, "The previewed app's own context — its hubs joined the editor's tree through the shell's preview link. Its architecture, not the editor's: nothing in the model to check it against.");
+	}
+
 	const prefix = DYNAMIC_PREFIXES.find((candidate) => id.startsWith(candidate));
 
 	return prefix === undefined
@@ -245,7 +256,11 @@ function saveCollapsed(collapsed: ReadonlySet<string>): void {
 /** Nodes drawn as a box of their own container (ContainerSpec.node) rather than a row inside it: node id → container. */
 const drawnAsContainer = new Map(containers.filter((container) => container.node !== undefined).map((container) => [container.node!, container.id]));
 
-function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>): Layout {
+/** How far a previewed app's context is indented in its box, per level it's nested (see appLayout). */
+const APP_INDENT = 14;
+
+function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>, appInfo: AppLayout): Layout {
+	const app = appInfo.nodes;
 	const order = new Map(declaredNodes.map((node, index) => [node.id, index]));
 	const byContainer = new Map<string, RuntimeNode[]>();
 	const visibleIds = new Set(visible.map((node) => node.id));
@@ -255,14 +270,41 @@ function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>): 
 			continue;
 		}
 
-		const list = byContainer.get(containerOf(node)) ?? [];
+		const list = byContainer.get(containerOf(node, app)) ?? [];
 
 		list.push(node);
-		byContainer.set(containerOf(node), list);
+		byContainer.set(containerOf(node, app), list);
 	}
 
 	for (const list of byContainer.values()) {
 		list.sort((a, b) => ((order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity)) || a.id.localeCompare(b.id));
+	}
+
+	// A previewed app's contexts, as the tree they run in: each under the window (or preview) holding it, indented.
+	const depth = new Map<string, number>();
+	const appList = byContainer.get("previewApp");
+
+	if (appList !== undefined) {
+		const inBox = new Set(appList.map((node) => node.id));
+		const childrenOf = (id: string | undefined): RuntimeNode[] => appList.filter((node) => {
+			const holder = appInfo.parent.get(node.id);
+
+			return id === undefined ? holder === undefined || !inBox.has(holder) : holder === id;
+		});
+		const ordered: RuntimeNode[] = [];
+		const walk = (list: RuntimeNode[], level: number): void => {
+			// Workers before frames, each by id.
+			for (const node of list.toSorted((a, b) => Number(a.id.includes(".")) - Number(b.id.includes(".")) || a.id.localeCompare(b.id))) {
+				if (!depth.has(node.id)) {
+					depth.set(node.id, level);
+					ordered.push(node);
+					walk(childrenOf(node.id), level + 1);
+				}
+			}
+		};
+
+		walk(childrenOf(undefined), 0);
+		byContainer.set("previewApp", [...ordered, ...appList.filter((node) => !depth.has(node.id))]);
 	}
 
 	const children = (container: ContainerSpec): ContainerSpec[] => containers.filter((candidate) => candidate.parent === container.id);
@@ -319,7 +361,9 @@ function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>): 
 		const inner = width - PADDING * 2;
 
 		for (const node of byContainer.get(container.id) ?? []) {
-			layout.nodes.set(node.id, { "x": x + PADDING, "y": cursor, "width": inner, "height": NODE_HEIGHT });
+			const indent = (depth.get(node.id) ?? 0) * APP_INDENT;
+
+			layout.nodes.set(node.id, { "x": x + PADDING + indent, "y": cursor, "width": inner - indent, "height": NODE_HEIGHT });
 			cursor += NODE_HEIGHT + GAP;
 		}
 
@@ -536,6 +580,9 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 	// ── diagram
 	let layout: Layout | undefined;
+	/** A previewed app's own contexts, and how they nest, as of the last render (see appLayout). */
+	let appInfo: AppLayout = { "nodes": new Set(), "alias": new Map(), "parent": new Map() };
+	let app: ReadonlySet<string> = appInfo.nodes;
 	let edges = new Map<string, EdgeView>();
 	let edgesByNode = new Map<string, EdgeView[]>();
 	const nodeElements = new Map<string, SVGGElement>();
@@ -583,7 +630,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		}
 
 		const declared = declaredBetween(a, b);
-		const type = declared === undefined ? "undeclared" : declared.type;
+		// A previewed app's own lines are its business, not undeclared editor traffic.
+		const type = declared === undefined ? (app.has(a) || app.has(b) ? "channel" : "undeclared") : declared.type;
 		const observed = channel !== undefined && (channel.count > 0 || channel.linked);
 		const d = edgePath(from, to);
 		const path = s("path", { "d": d, "class": `arch-edge type-${type} status-${type === "undeclared" ? "undeclared" : observed ? "declared" : "ghost"}` });
@@ -633,9 +681,14 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			}
 		}
 
-		const visibleIds = new Set(visible.map((node) => node.id));
+		appInfo = appLayout({ "channels": [...store.channels.values()], "topology": store.topology, "realms": store.realms });
+		app = appInfo.nodes;
 
-		layout = computeLayout(visible, collapsed);
+		// An app context that IS a declared one (its page is its preview) is drawn as that one.
+		const drawn = visible.filter((node) => !appInfo.alias.has(node.id));
+		const visibleIds = new Set(drawn.map((node) => node.id));
+
+		layout = computeLayout(drawn, collapsed, appInfo);
 		svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
 		applyZoom();
 		clearPulses();
@@ -691,9 +744,18 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		edges = new Map();
 		edgesByNode = new Map();
 
+		// An aliased end is drawn as what it aliases: a line onto it, once (the shell's link to a preview, seen from both
+		// ends, is one line).
+		const drawnPairs = new Set<string>();
+
 		for (const channel of store.channels.values()) {
-			if (visibleIds.has(channel.a) && visibleIds.has(channel.b)) {
-				addEdge(channel.id, channel.a, channel.b, channel);
+			const a = appInfo.alias.get(channel.a) ?? channel.a;
+			const b = appInfo.alias.get(channel.b) ?? channel.b;
+			const pair = [a, b].sort().join("|");
+
+			if (a !== b && visibleIds.has(a) && visibleIds.has(b) && !drawnPairs.has(pair)) {
+				drawnPairs.add(pair);
+				addEdge(channel.id, a, b, channel);
 			}
 		}
 
@@ -715,14 +777,16 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		nodeLayer.replaceChildren();
 		nodeElements.clear();
 
-		for (const node of visible) {
+		for (const node of drawn) {
 			if (drawnAsContainer.has(node.id) || layout.hidden.has(node.id)) {
 				continue; // drawn as its container, or folded into a collapsed one (above)
 			}
 
 			const rect = layout.nodes.get(node.id);
 			const declared = nodeSpec(node.id);
-			const known = declared !== undefined || node.id.startsWith("nested:") || node.id.startsWith("worker:");
+			// Declared by id, created at runtime under a prefix the model declares (preview:, vite:, worker: …), or the
+			// previewed app's own.
+			const known = declared !== undefined || DYNAMIC_PREFIXES.some((prefix) => node.id.startsWith(prefix)) || app.has(node.id);
 			const group = s("g", { "class": `arch-node state-${node.state}${declared?.hub === true ? " is-hub" : ""}`, "data-node": node.id });
 
 			group.append(
@@ -1003,10 +1067,12 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	function renderNode(id: string): Child[] {
 		const node = store.nodes.get(id);
 		const declared = nodeSpec(id);
-		const container = containers.find((candidate) => candidate.id === (node === undefined ? declared?.container : containerOf(node)));
+		const container = containers.find((candidate) => candidate.id === (node === undefined ? declared?.container : containerOf(node, app)));
 		const now = Date.now();
-		const channels = [...store.channels.values()].filter((channel) => channel.a === id || channel.b === id).sort((a, b) => b.count - a.count);
-		const topology = store.topology.get(id);
+		// A preview whose app joined the tree is drawn as one node with the app's page hub (appLayout's alias).
+		const page = [...appInfo.alias].find(([, target]) => target === id)?.[0];
+		const channels = [...store.channels.values()].filter((channel) => [channel.a, channel.b].some((end) => end === id || (page !== undefined && end === page))).sort((a, b) => b.count - a.count);
+		const topology = store.topology.get(id) ?? (page === undefined ? undefined : store.topology.get(page));
 
 		return [
 			h("h2", null, labelOf(store, id)),
@@ -1017,6 +1083,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 					["Id", id],
 					["Runs in", container === undefined ? undefined : container.label + " — " + container.caption],
 					["Detail", declared?.detail ?? node?.spec.detail],
+					["App page hub", page],
 					["Only", declared?.condition],
 					["Instances", node !== undefined && node.instances > 0 ? String(node.instances) : undefined],
 					["Started", node !== undefined && node.spawnCount > 1 ? node.spawnCount + " times" : undefined],
@@ -1026,7 +1093,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 					...Object.entries(node?.spec.meta ?? {}).map(([key, value]): [string, string] => [key, value])
 				]),
 				h("p", null, declared?.description ?? ""),
-				declared === undefined ? undeclaredNote(id) : h("p", { "class": "arch-muted" }, "Observed by: " + declared.observedBy)
+				declared === undefined ? undeclaredNote(id, app) : h("p", { "class": "arch-muted" }, "Observed by: " + declared.observedBy)
 			),
 			topology !== undefined && section(
 				"Hub",
@@ -1057,7 +1124,9 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		const families = declared?.type === "hub" ? familiesOnLink(a, b) : [];
 		const header: Child[] = [
 			h("h2", null, link(labelOf(store, a), { "type": "node", "id": a }), " ⇄ ", link(labelOf(store, b), { "type": "node", "id": b })),
-			declared === undefined
+			declared === undefined && (app.has(a) || app.has(b))
+				? h("div", { "class": "arch-state state-alive" }, "the previewed app's own — not in the editor's model")
+				: declared === undefined
 				? h("div", { "class": "arch-state state-unresponsive" }, "undeclared: neither a hub link nor a channel in the model")
 				: h("div", { "class": "arch-state " + (channel === undefined ? "state-declared" : "state-alive") }, (declared.type === "hub" ? "hub link" : "declared channel") + (channel === undefined ? ", not seen yet" : "")),
 			declared?.type === "channel" && section(declared.spec.protocol, keyValues([["Transport", declared.spec.transport]]), h("p", null, declared.spec.description)),
