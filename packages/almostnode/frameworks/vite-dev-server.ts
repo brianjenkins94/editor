@@ -60,14 +60,26 @@ export interface TransformErrorInfo {
 }
 
 /**
- * React Refresh preamble - MUST run before React is loaded
- * This script is blocking to ensure injectIntoGlobalHook runs first
+ * React Refresh preamble — MUST run before React is loaded, and before any app module runs.
+ *
+ * The runtime is a STATIC import. The browser runs deferred module scripts in document order and won't start the
+ * app's until this one's whole import graph has loaded, so the app can't run before `$RefreshReg$` exists. (It does
+ * NOT wait for a top-level `await`: an `await import(runtime)` here let the app run first whenever the CDN was slow —
+ * a blank preview on a cold cache.)
+ *
+ * The classic script before it defines no-op stubs, run during parsing ahead of every module: if the runtime can't
+ * load at all, the transformed modules' `$RefreshReg$` calls still succeed and the app renders, just without Fast
+ * Refresh. The module replaces them once the runtime is in.
  */
 const REACT_REFRESH_PREAMBLE = `
+<script>
+window.$RefreshReg$ = () => {};
+window.$RefreshSig$ = () => (type) => type;
+</script>
 <script type="module">
-// Block until React Refresh is loaded and initialized
-// This MUST happen before React is imported
-const RefreshRuntime = await import('${REACT_REFRESH_CDN}').then(m => m.default || m);
+import * as RefreshRuntimeModule from '${REACT_REFRESH_CDN}';
+
+const RefreshRuntime = RefreshRuntimeModule.default || RefreshRuntimeModule;
 
 // Hook into React BEFORE it's loaded
 RefreshRuntime.injectIntoGlobalHook(window);
@@ -657,10 +669,9 @@ export default css;
   /**
    * Serve HTML file with HMR client script injected
    *
-   * IMPORTANT: React Refresh preamble MUST be injected before any module scripts.
-   * The preamble uses top-level await to block until React Refresh is loaded
-   * and injectIntoGlobalHook is called. This ensures React Refresh hooks into
-   * React BEFORE React is imported by any module.
+   * IMPORTANT: React Refresh preamble MUST be injected before any module scripts: its static import of the
+   * runtime holds back every later module script until injectIntoGlobalHook has run, so React Refresh hooks into
+   * React BEFORE React is imported by any module (see REACT_REFRESH_PREAMBLE).
    */
   /**
    * Build the import map from the workspace package.json dependencies — every declared dep resolves from esm.sh
