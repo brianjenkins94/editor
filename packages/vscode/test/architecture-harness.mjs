@@ -29,7 +29,9 @@ async function reachable(url) {
 
 /** Spawn `command` and resolve once its output contains `ready`. */
 async function startProcess(command, args, cwd, ready) {
-	const child = spawn(command, args, { "cwd": cwd, "stdio": ["pipe", "pipe", "pipe"] });
+	// Its own process group, so close() can stop what npx starts under it (tsx → the dev server), not just npx: an
+	// orphaned dev server keeps :5173, and the next session's starts beside it on another port.
+	const child = spawn(command, args, { "cwd": cwd, "stdio": ["pipe", "pipe", "pipe"], "detached": true });
 
 	// In CI there's no one to watch it: what the dev server / debug-mcp says is the only clue when a session won't boot.
 	if (process.env.CI !== undefined) {
@@ -231,6 +233,12 @@ export async function startSession(options = {}) {
 			await workbench().getByRole("treeitem", { "name": name, "exact": true }).first().dblclick();
 			await page.waitForTimeout(1000);
 		},
+		/** Append a line to the end of the open editor. (Typed at the cursor — the top of the file — a comment would
+		 *  land in front of the first import, and the newline after it accept a suggestion instead.) */
+		"append": async (line) => {
+			await page.keyboard.press("ControlOrMeta+End");
+			await page.keyboard.type("\n" + line);
+		},
 		/** Run a command from the command palette by its title. */
 		"command": async (title) => {
 			await focusWorkbench();
@@ -244,7 +252,11 @@ export async function startSession(options = {}) {
 			await browser.close();
 
 			for (const child of processes) {
-				child.kill();
+				try {
+					process.kill(-child.pid);
+				} catch {
+					// already gone
+				}
 			}
 		}
 	};

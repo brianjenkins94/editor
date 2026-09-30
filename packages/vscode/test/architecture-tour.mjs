@@ -73,7 +73,7 @@ test("webview: a markdown preview", async () => {
 
 test("git review: a diff in the shell", async () => {
 	await session.open("App.tsx");
-	await session.page.keyboard.type("\n// architecture tour\n");
+	await session.append("// architecture tour");
 	await session.page.keyboard.press("ControlOrMeta+s");
 	await session.page.getByTitle("Expand changes panel").click();
 	await session.page.waitForTimeout(1500);

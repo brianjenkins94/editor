@@ -75,7 +75,7 @@ test("preview: npm run dev in the terminal serves the demo", async () => {
 
 test("hmr: a save reaches the preview", async () => {
 	await session.open("App.tsx");
-	await session.page.keyboard.type("\n// architecture smoke\n");
+	await session.append("// architecture smoke");
 	await session.page.keyboard.press("ControlOrMeta+s");
 	await session.until("an HMR update in the preview", hasLabel(PREVIEW, "shell", /^hmr /u));
 });
