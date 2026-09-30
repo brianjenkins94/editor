@@ -2,27 +2,7 @@ import type { Transport, WebSocketLike } from "../src/index.ts";
 import * as assert from "node:assert/strict";
 
 import { test } from "node:test";
-import { createHub, createRpcClient, matches, serve, websocketTransport } from "../src/index.ts";
-
-/** A connected pair of in-memory transports — delivery is async (a macrotask) to mirror postMessage, so tests
- *  `await flush()` to let interest control and messages settle across hops. */
-function pipe(): [Transport, Transport] {
-	let left: ((message: unknown) => void) | undefined;
-	let right: ((message: unknown) => void) | undefined;
-
-	return [
-		{ "send": (message) => { setTimeout(() => right?.(message), 0); }, "listen": (onMessage) => {
-			left = onMessage;
-
-			return () => { left = undefined; };
-		} },
-		{ "send": (message) => { setTimeout(() => left?.(message), 0); }, "listen": (onMessage) => {
-			right = onMessage;
-
-			return () => { right = undefined; };
-		} }
-	];
-}
+import { createHub, createRpcClient, frameOf, matches, pipe, serve, websocketTransport } from "../src/index.ts";
 
 /** Let queued deliveries (across several hops) drain. */
 function flush(): Promise<void> {
@@ -130,30 +110,7 @@ test("three-level tree: interest propagates up, messages route down", async () =
 test("interest survives a late link on a LOSSY transport (hello handshake)", async () => {
 	// A window-like transport: a message is DROPPED if the peer isn't listening at send time (no queue, unlike
 	// a MessagePort). The hub's `hello` handshake must recover from an interest advertisement lost to the race.
-	let left: ((message: unknown) => void) | undefined;
-	let right: ((message: unknown) => void) | undefined;
-	const a: Transport = { "send": (message) => {
-		if (right !== undefined) {
-			const to = right;
-
-			setTimeout(to, 0, message);
-		}
-	}, "listen": (onMessage) => {
-		left = onMessage;
-
-		return () => { left = undefined; };
-	} };
-	const b: Transport = { "send": (message) => {
-		if (left !== undefined) {
-			const to = left;
-
-			setTimeout(to, 0, message);
-		}
-	}, "listen": (onMessage) => {
-		right = onMessage;
-
-		return () => { right = undefined; };
-	} };
+	const [a, b] = pipe({ "lossy": true });
 
 	const root = createHub({ "id": "root" });
 	const pod = createHub({ "id": "pod" });
@@ -633,4 +590,120 @@ test("serve handlers see the caller's authenticated `from` and the link the call
 	await flush();
 	assert.equal(await createRpcClient(peer).request("whoami", undefined, { "timeoutMs": 1000 }), "seat-7");
 	assert.deepEqual(context, { "from": "seat-7", "link": { "id": "link-1", "peerId": "seat-7" } });
+});
+
+test("a link is ready once the peer's hello has arrived — and with it, the peer's interest", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+
+	pod.subscribe("x", () => undefined);
+
+	const link = root.link(a);
+
+	assert.equal(root.interested("x"), false, "nothing known yet");
+	pod.link(b);
+	assert.equal(await link.ready, true);
+	assert.equal(root.interested("x"), true, "the pod's interest is known the moment the link is ready");
+});
+
+test("ready means the interest is known even when the peer's first hello was lost (it re-sends interest before answering)", async () => {
+	const [a, b] = pipe({ "lossy": true });
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+
+	pod.subscribe("x", () => undefined);
+	// The pod links first: its interest and hello are dropped (root isn't listening yet).
+	pod.link(b);
+	await flush();
+
+	// Root links: its hello reaches the pod, which re-sends its interest and answers. Ready must not come first.
+	const link = root.link(a);
+
+	assert.equal(await link.ready, true);
+	assert.equal(root.interested("x"), true);
+});
+
+test("a link that goes before the peer ever answers isn't ready", async () => {
+	const [a] = pipe();
+	const root = createHub({ "id": "root" });
+	const link = root.link(a);
+
+	link();
+	assert.equal(await link.ready, false);
+});
+
+test("publishWhenInterested holds a one-off message until someone wants it — or gives up", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	const seen: unknown[] = [];
+
+	pod.subscribe("seat", (data) => { seen.push(data); });
+	root.link(a);
+	pod.link(b);
+
+	// Published at once, it would go nowhere: root doesn't know the pod wants it yet.
+	const sent = root.publishWhenInterested("seat", "token", 1000);
+
+	assert.equal(await sent, true);
+	await flush();
+	assert.deepEqual(seen, ["token"]);
+	assert.equal(await root.publishWhenInterested("nobody", 1, 30), false);
+});
+
+test("pipe: held until the other end listens (MessagePort-like), or dropped (window-like, `lossy`)", async () => {
+	const [held, heldOther] = pipe();
+	const [dropped, droppedOther] = pipe({ "lossy": true });
+	const seen: unknown[] = [];
+
+	held.send("early");
+	dropped.send("early");
+	await flush();
+	heldOther.listen((message) => { seen.push(["held", message]); });
+	droppedOther.listen((message) => { seen.push(["lossy", message]); });
+	await flush();
+	dropped.send("late");
+	await flush();
+
+	assert.deepEqual(seen, [["held", "early"], ["lossy", "late"]]);
+});
+
+test("pipe's schedule decides how each message travels — fault injection by subject, control frames untouched", async () => {
+	const decided: string[] = [];
+	// Drop game traffic, duplicate chat, deliver everything else (control frames included) as is.
+	const [a, b] = pipe({ "schedule": (deliver, message) => {
+		const frame = frameOf(message);
+		const subject = frame !== undefined && "hub" in frame ? "control:" + frame.hub : frame?.subject;
+
+		decided.push(String(subject));
+
+		if (subject === "game.state") {
+			return;
+		}
+
+		setTimeout(deliver, 0);
+
+		if (subject === "chat") {
+			setTimeout(deliver, 0);
+		}
+	} });
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	const seen: unknown[] = [];
+
+	pod.subscribe("game.state", (data) => { seen.push(["state", data]); });
+	pod.subscribe("chat", (data) => { seen.push(["chat", data]); });
+	const links = [root.link(a), pod.link(b)];
+
+	assert.deepEqual(await Promise.all(links.map(async (link) => link.ready)), [true, true]);
+	await flush();
+	root.publish("game.state", 1);
+	root.publish("chat", "hi");
+	await flush();
+
+	assert.deepEqual(seen, [["chat", "hi"], ["chat", "hi"]]);
+	assert.ok(decided.includes("control:hello") && decided.includes("control:sub"), "control frames were seen, and delivered");
+	assert.equal(frameOf("not a hub message"), undefined);
+	assert.equal(frameOf({ "subject": "x" }), undefined, "a bare envelope-shaped object isn't a hub frame");
 });

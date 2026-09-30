@@ -114,7 +114,15 @@ interface Link {
 	"assigned": boolean;
 	"permissions"?: LinkPermissions;
 	"detach": () => void;
+	/** Settles `link()`'s `ready`: true on the peer's first hello, false if unlinked before. */
+	"settle": (ready: boolean) => void;
 }
+
+/** What `link()` returns: the unlink function, plus `ready` — resolves true once the peer's hello has arrived, and
+ *  with it the peer's interest (a hub advertises its interest before every hello it sends), or false if the link is
+ *  gone first. A message published before then can go nowhere: a hub forwards only what it knows the far side wants.
+ *  So `await ready` before a one-off publish across a new link (or use `publishWhenInterested`). */
+export type LinkHandle = (() => void) & { readonly "ready": Promise<boolean> };
 
 /** One link as `inspect()` / taps report it. */
 export interface LinkInfo {
@@ -258,6 +266,19 @@ export class Hub {
 		return false;
 	}
 
+	/** Publish once `subject` would reach someone (see `interested`) — for a one-off message that mustn't be lost to a
+	 *  link whose interest hasn't arrived yet. Resolves true once published, or false (not published) after
+	 *  `timeoutMs`. Fine for events; for state, publishing on every change is simpler and self-healing. */
+	public async publishWhenInterested(subject: string, data: unknown, timeoutMs: number, options: { "traceContext"?: Envelope["traceContext"] } = {}): Promise<boolean> {
+		if (!await this.whenInterested(subject, timeoutMs)) {
+			return false;
+		}
+
+		this.publish(subject, data, options);
+
+		return true;
+	}
+
 	/** Resolve true once `subject` would reach someone (see `interested`), or false after `timeoutMs`. */
 	public whenInterested(subject: string, timeoutMs: number): Promise<boolean> {
 		if (this.interested(subject)) {
@@ -331,10 +352,14 @@ export class Hub {
 	}
 
 	/** Link another hub over `transport` (both ends call `link`, one per channel end). The two hubs now
-	 *  federate: interest and matching messages flow across. Returns an unlink function. Wire a TREE. */
-	public link(transport: Transport, options: LinkOptions = {}): () => void {
+	 *  federate: interest and matching messages flow across. Returns an unlink function, with `ready` (see
+	 *  LinkHandle). Wire a TREE. */
+	public link(transport: Transport, options: LinkOptions = {}): LinkHandle {
 		this.linkIdPool += 1;
-		const link: Link = { "id": "link-" + this.linkIdPool, "peerId": options.peer, "transport": transport, "remoteInterest": new Set(), "advertised": new Set(), "transit": options.transit !== false, "assigned": options.peer !== undefined, "permissions": options.permissions, "detach": () => undefined };
+
+		let settle: (ready: boolean) => void = () => undefined;
+		const ready = new Promise<boolean>((resolve) => { settle = resolve; });
+		const link: Link = { "id": "link-" + this.linkIdPool, "peerId": options.peer, "transport": transport, "remoteInterest": new Set(), "advertised": new Set(), "transit": options.transit !== false, "assigned": options.peer !== undefined, "permissions": options.permissions, "detach": () => undefined, "settle": settle };
 
 		link.detach = transport.listen((raw) => { this.receive(link, raw); });
 		this.links.add(link);
@@ -343,7 +368,7 @@ export class Hub {
 		// ask it to (re-)send its interest, in case ours/theirs raced a lossy transport — and say who we are
 		this.wire(link, { "hub": "hello", "id": this.id });
 
-		return () => { this.unlink(link); };
+		return Object.assign(() => { this.unlink(link); }, { "ready": ready });
 	}
 
 	private unlink(link: Link): void {
@@ -352,6 +377,7 @@ export class Hub {
 		}
 
 		link.detach();
+		link.settle(false);
 		this.emit({ "type": "topology" });
 		this.readvertise(); // our aggregate interest may have shrunk for the remaining links
 	}
@@ -370,14 +396,18 @@ export class Hub {
 					this.emit({ "type": "topology" });
 				}
 
+				// Peer (re)connected and may have missed our interest (a lossy transport can drop what we sent
+				// before it was listening). Forget what we think it knows and re-send our full interest — BEFORE
+				// answering, so every hello we send follows our interest: a peer that has our hello knows what we want.
+				link.advertised.clear();
+				this.readvertise();
+
 				if (message.reply !== true) {
 					this.wire(link, { "hub": "hello", "id": this.id, "reply": true });
 				}
 
-				// Peer (re)connected and may have missed our interest (a lossy transport can drop what we sent
-				// before it was listening). Forget what we think it knows and re-send our full interest.
-				link.advertised.clear();
-				this.readvertise();
+				// The peer's interest came ahead of its hello (the same rule, on its side): it's known now.
+				link.settle(true);
 
 				return;
 			}
@@ -496,6 +526,65 @@ export class Hub {
 /** Create a hub. */
 export function createHub(options?: HubOptions): Hub {
 	return new Hub(options);
+}
+
+/** The hub frame a transport message carries — a data Envelope or a Control frame — or undefined for anything else.
+ *  For transports that treat traffic differently: fault injection (drop game traffic, keep control), priorities,
+ *  metrics by subject. */
+export function frameOf(message: unknown): Envelope | Control | undefined {
+	const frame = (message as Record<string, unknown> | null | undefined)?.[WIRE];
+
+	return isControl(frame) || isEnvelope(frame) ? frame : undefined;
+}
+
+export interface PipeOptions {
+	/** Drop a message sent while the other end isn't listening, like a window's postMessage. Default false: hold it
+	 *  until the other end listens, like a MessagePort. */
+	"lossy"?: boolean;
+	/** How each message travels: call `deliver` — now, later, twice, or never — to hand it to the other end. Default:
+	 *  on the next macrotask (like postMessage). With `frameOf(message)` this is all fault injection needs, on a real
+	 *  or a simulated clock. */
+	"schedule"?: (deliver: () => void, message: unknown) => void;
+}
+
+/** Two connected in-memory transports: link one hub to each end. For tests and single-process simulations — nothing
+ *  to close afterwards, and nothing keeps the process alive. */
+export function pipe({ lossy = false, schedule = (deliver) => { setTimeout(deliver, 0); } }: PipeOptions = {}): [Transport, Transport] {
+	interface End { "listener"?: (message: unknown) => void; "held": unknown[] }
+
+	const left: End = { "held": [] };
+	const right: End = { "held": [] };
+	const transport = (self: End, other: End): Transport => ({
+		"send": (message) => {
+			if (lossy && other.listener === undefined) {
+				return;
+			}
+
+			schedule(() => {
+				if (other.listener !== undefined) {
+					other.listener(message);
+				} else if (!lossy) {
+					other.held.push(message);
+				}
+			}, message);
+		},
+		"listen": (onMessage) => {
+			self.listener = onMessage;
+
+			// Not synchronously: a hub listens before it has registered the link the messages are for.
+			for (const message of self.held.splice(0)) {
+				queueMicrotask(() => { onMessage(message); });
+			}
+
+			return () => {
+				if (self.listener === onMessage) {
+					self.listener = undefined;
+				}
+			};
+		}
+	});
+
+	return [transport(left, right), transport(right, left)];
 }
 
 /**
