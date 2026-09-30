@@ -336,7 +336,7 @@ async function appLayoutOnce(ready) {
 		last = latest;
 
 		return ready(latest);
-	}).catch((error) => { throw new Error(error.message + " — realms reported: " + Object.keys(last?.realms ?? {}).join(", ")); });
+	}).catch((error) => { throw new Error(error.message + " — realms reported: " + Object.keys(last?.realms ?? {}).join(", ") + "; topology reported: " + Object.keys(last?.topology ?? {}).join(", ")); });
 
 	return appLayout({ "channels": current.channels, "topology": new Map(Object.entries(current.topology)), "realms": new Map(Object.entries(current.realms)) });
 }

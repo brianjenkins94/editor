@@ -14,25 +14,17 @@
  * round-trips via the result (`BashExecResult.env` — the only state just-bash returns); cwd is read back with a
  * `$PWD` probe appended to each command — the same technique VS Code's own shell integration uses (emit `$PWD`
  * after each command), and semantically correct (it captures the top-level shell's final dir and respects
- * subshell isolation, which intercepting `cd` would not). One line editor, one prompt, sync input handling.
+ * subshell isolation, which intercepting `cd` would not) — see terminal-session.ts. One line editor, one prompt, sync
+ * input handling.
  */
 import type { TerminalProcess } from "@brianjenkins94/monaco-vscode-api/main";
 
 import type { NodeOutput, NodeRunner } from "./node-runner";
+import type { BashSession, SessionState } from "./terminal-session";
 import { createWorkspaceTerminalFs } from "./terminal-fs";
+import { execInSession } from "./terminal-session";
 
 type VscodeApi = typeof import("vscode");
-
-/** The persistent bits of just-bash's Bash we use (loaded lazily so its bundle stays off the boot path). */
-interface BashSession {
-	"exec": (commandLine: string, options: { "cwd": string; "env": Record<string, string> }) => Promise<{ "stdout": string; "stderr": string; "exitCode": number; "env": Record<string, string> }>;
-}
-
-const RS = ""; // record separator — frames the cwd/exit-code probe; ~never appears in real shell output
-// Appended to every command: capture the user command's exit code, then emit `<RS>cwd<RS>rc<RS>` so we can read
-// the working directory back (a `cd` has no other way to reach us) and the real exit code (printf would clobber $?).
-const PROBE = `\n__jbrc=$?\nprintf '${RS}%s${RS}%s${RS}' "$PWD" "$__jbrc"`;
-const PROBE_RE = new RegExp(`${RS}([^${RS}]*)${RS}([^${RS}]*)${RS}$`, "u");
 
 /** Build the just-bash terminal process for one terminal. `fire` writes to the terminal; `cwd0` is the start dir. */
 // Tab-completion candidates for the first word (command position): the custom commands (node/npm/vite) plus the
@@ -70,8 +62,8 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 		return sessionPromise;
 	};
 
-	let cwd = cwd0;
-	let env: Record<string, string> = {};
+	// The session: cwd + env, carried from command to command (terminal-session.ts).
+	const state: SessionState = { "cwd": cwd0, "env": {} };
 	let line = "";
 	let pos = 0; // cursor position within `line`
 	let running = false;
@@ -92,7 +84,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 		fire(stream === "err" ? `[31m${text}[0m` : text);
 	};
 
-	const prompt = (): void => { fire(`\r\n[1;36m${cwd}[0m $ `); };
+	const prompt = (): void => { fire(`\r\n[1;36m${state.cwd}[0m $ `); };
 
 	const runLine = async (input: string): Promise<void> => {
 		running = true;
@@ -103,17 +95,8 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 			const session = await getSession();
 			// `signal` is the shell's Ctrl-C: just-bash stops at the next statement boundary and forwards it to a
 			// custom command's `ctx.signal` (so `node` kills its worker). An interrupted run may not reach the PROBE.
-			const result = await session.exec(input + PROBE, { "cwd": cwd, "env": env, "signal": signal });
-
-			let { stdout } = result;
-			const match = PROBE_RE.exec(stdout);
-
-			if (match !== null) {
-				cwd = match[1] === "" ? cwd : match[1];
-				stdout = stdout.slice(0, match.index);
-			}
-
-			env = result.env;
+			const result = await execInSession(session, state, input, signal);
+			const { stdout } = result;
 
 			// stdout then stderr, each with its trailing newline trimmed (the prompt supplies one), joined so the
 			// two streams land on separate lines rather than run together. (A streamed `node` wrote its output
@@ -251,7 +234,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 
 	// Resolve a (possibly relative) directory path against cwd, collapsing "." and ".." — for path completion.
 	const resolveDir = (part: string): string => {
-		const raw = part.startsWith("/") ? part : cwd.replace(/\/+$/u, "") + "/" + part;
+		const raw = part.startsWith("/") ? part : state.cwd.replace(/\/+$/u, "") + "/" + part;
 		const segments: string[] = [];
 
 		for (const segment of raw.split("/")) {
