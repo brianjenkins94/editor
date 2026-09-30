@@ -44,12 +44,13 @@ const FILES = {
 		"",
 		"(globalThis as unknown as { \"__wired\": typeof state }).__wired = state;",
 		"frame.src = \"frame.html\";",
+		"// On every load: a reloaded frame (an edit to frame.ts) is a new page, and needs a new channel.",
 		"frame.addEventListener(\"load\", () => {",
 		"\tconst channel = new MessageChannel();",
 		"",
 		"\tworker.postMessage({ \"port\": channel.port1 }, [channel.port1]);",
 		"\tframe.contentWindow!.postMessage({ \"port\": channel.port2 }, location.origin, [channel.port2]);",
-		"}, { \"once\": true });",
+		"});",
 		"addEventListener(\"message\", (event) => {",
 		"\tif (event.source === frame.contentWindow && event.data?.wired !== undefined) {",
 		"\t\tstate.results.push(event.data.wired);",
@@ -141,6 +142,11 @@ function nestedFrame() {
 	return previewPage()?.childFrames().find((frame) => frame.url().includes("frame.html"));
 }
 
+/** The frame's answers so far — one per load of it (an edit reloads it): each must be the worker's echo. */
+function assertEchoes(results, message) {
+	assert.ok(results.length > 0 && results.every((result) => result.echoed === "hi" && result.from === "worker"), (message ?? "the frame reached the worker") + ": " + JSON.stringify(results));
+}
+
 /** Every preview window's top page (not their nested frames), in the order the windows opened. */
 function previewPages() {
 	return session.page.frames().filter((frame) => /\/__virtual__\/[^/]+\/\d+\/(?:index\.html)?(?:\?.*)?$/u.test(frame.url()));
@@ -221,7 +227,9 @@ test("an edit to a module only the nested frame loaded reloads that frame, and l
 
 	assert.equal(page.startedAt, before.startedAt, "the page wasn't reloaded");
 	assert.equal(page.title, before.title, "nor frame.ts run in it (it sets the title)");
-	assert.deepEqual(page.results, [{ "echoed": "hi", "from": "worker" }]);
+	// The reloaded frame got a new channel from the page, and reached the worker again.
+	await eventually("the reloaded frame's answer", async () => (await previewPage().evaluate(() => globalThis.__wired.results.length)) === 2);
+	assertEchoes((await previewPage().evaluate(() => globalThis.__wired)).results);
 });
 
 test("the app's own hubs join the editor's tree: its startup log, its tab and its tools reach debug-mcp through it", async () => {
@@ -237,7 +245,7 @@ test("the app's own hubs join the editor's tree: its startup log, its tab and it
 	const app = await eventually("the app's tab", async () => (await debugMcp.tabs(2000)).find((tab) => tab.preview === true));
 	const answer = await debugMcp.rpc.request("tool.wired_status." + app.tab, {}, { "timeoutMs": 5000, "waitForResponderMs": 5000 });
 
-	assert.deepEqual(answer.results, [{ "echoed": "hi", "from": "worker" }], "its tool answered, through the editor's tree");
+	assertEchoes(answer.results, "its tool answered, through the editor's tree");
 	assert.ok((await debugMcp.tabs(2000)).some((tab) => tab.preview !== true), "beside the editor's own tab");
 });
 
@@ -320,7 +328,7 @@ test("the app opens its own page as a new window: a second preview window onto t
 	await eventually("one window again", async () => previewPages().length === 1);
 	await session.page.waitForTimeout(1000);
 	assert.equal(previewPages().length, 1, "the first window stays");
-	assert.deepEqual((await previewPage().evaluate(() => globalThis.__wired)).results, [{ "echoed": "hi", "from": "worker" }]);
+	assertEchoes((await previewPage().evaluate(() => globalThis.__wired)).results);
 });
 
 /** A locally served observability tarball (ARCH_OBSERVABILITY_TGZ) is a network endpoint only this run uses. */
