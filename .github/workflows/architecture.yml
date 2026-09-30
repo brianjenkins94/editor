@@ -1,0 +1,40 @@
+{
+  "name": "architecture",
+  "on": {
+    "pull_request": {
+      "branches": ["main"]
+    },
+    "push": {
+      "branches": ["main"]
+    },
+    "workflow_dispatch": null
+  },
+  "concurrency": {
+    "group": "${{ github.workflow }}-${{ github.ref }}",
+    "cancel-in-progress": true
+  },
+  # The live architecture view's end-to-end suites (packages/vscode/test/architecture-*.mjs): a real editor session in
+  # headless Chromium — boot, a preview + HMR, two dev servers, a cold provoke round, a node script under the tsval
+  # debugger, a webview, the git review diff, this checkout's debug-mcp — checked against the declared model. They catch
+  # a wiring regression or an upstream monaco-vscode-api release (the component installs the latest) before it ships.
+  # Its own workflow, not a job in `ci`, so it doesn't gate the deploy until it has proven stable there.
+  "jobs": {
+    "architecture": {
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        { "uses": "actions/checkout@v4" },
+        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*" } },
+        # The dev server the suites start (dev.ts) needs the component's dist and the built sibling packages.
+        { "run": "pnpm run build" },
+        { "run": "pnpm --filter ./packages/vscode exec playwright install --with-deps chromium" },
+        { "run": "pnpm --filter ./packages/vscode run test:architecture" },
+        {
+          "if": "${{ failure() }}",
+          "uses": "actions/upload-artifact@v4",
+          "with": { "name": "architecture-snapshots", "path": "/tmp/architecture-*.json", "if-no-files-found": "ignore" }
+        }
+      ],
+      "timeout-minutes": 30
+    }
+  }
+}
