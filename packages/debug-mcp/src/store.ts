@@ -49,6 +49,8 @@ type Level = keyof typeof LEVELS;
 /** A reconstructed span (an open matched with its close, or still open). */
 export interface SpanRow {
 	"source": string;
+	/** The link (tab) its records arrived on. */
+	"link"?: string;
 	"name"?: string;
 	"spanId"?: string;
 	"parentSpanId"?: string;
@@ -83,6 +85,8 @@ export interface QueryLogsInput {
 
 export interface QuerySpansInput {
 	"source"?: string;
+	/** Only spans from this link (one tab's). */
+	"link"?: string;
 	"name"?: string;
 	"minDurationMs"?: number;
 	"onlyOpen"?: boolean;
@@ -92,6 +96,8 @@ export interface QuerySpansInput {
 
 export interface WaitInput {
 	"source"?: string;
+	/** Only records arriving on this link (one tab's). */
+	"link"?: string;
 	"minLevel"?: Level;
 	"textIncludes"?: string;
 	"kind"?: HubLogRecord["kind"];
@@ -106,10 +112,15 @@ interface Waiter {
 	"timer"?: ReturnType<typeof setTimeout>;
 }
 
-/** Compose the per-record source id and span id into one map key (span ids are per-context in the pre-W3C era,
- *  so the source disambiguates them; harmless once ids are globally unique). */
-function spanKey(source: string, spanId: string): string {
-	return source + "\0" + spanId;
+/** Compose the link, the per-record source id and the span id into one map key (span ids are per-context in the
+ *  pre-W3C era, so the source disambiguates them — and two tabs have same-named sources, so the link does too). */
+function spanKey(link: string | undefined, source: string, spanId: string): string {
+	return (link ?? "") + "\0" + source + "\0" + spanId;
+}
+
+/** One context in one tab: tabs' contexts can share a name (every editor tab has a `root`). */
+function sourceKey(link: string | undefined, source: string): string {
+	return (link ?? "") + "\0" + source;
 }
 
 export class RecordStore {
@@ -117,9 +128,9 @@ export class RecordStore {
 	private readonly max: number;
 	private seq = 0;
 
-	private readonly sources = new Set<string>();
+	/** Each context's latest record, per tab (sourceKey). */
 	private readonly lastBySource = new Map<string, StoredRecord>();
-	/** Spans opened but not yet closed — key `source\0spanId` → the opening record. */
+	/** Spans opened but not yet closed — spanKey → the opening record. */
 	private readonly open = new Map<string, StoredRecord>();
 	private readonly waiters = new Set<Waiter>();
 
@@ -143,11 +154,10 @@ export class RecordStore {
 			this.ring.shift();
 		}
 
-		this.sources.add(source);
-		this.lastBySource.set(source, stored);
+		this.lastBySource.set(sourceKey(link, source), stored);
 
 		if (record.spanId !== undefined) {
-			const key = spanKey(source, record.spanId);
+			const key = spanKey(link, source, record.spanId);
 
 			if (record.kind === "span-open") {
 				this.open.set(key, stored);
@@ -190,8 +200,12 @@ export class RecordStore {
 				continue;
 			}
 
-			const key = spanKey(record.source, record.spanId);
-			const row = byKey.get(key) ?? { "source": record.source, "spanId": record.spanId, "startTime": record.time, "open": true };
+			if (input.link !== undefined && record.link !== input.link) {
+				continue;
+			}
+
+			const key = spanKey(record.link, record.source, record.spanId);
+			const row = byKey.get(key) ?? { "source": record.source, "spanId": record.spanId, "startTime": record.time, "open": true, ...record.link === undefined ? {} : { "link": record.link } };
 
 			if (record.kind === "span-open") {
 				row.name = record.span;
@@ -230,40 +244,47 @@ export class RecordStore {
 	}
 
 	/** A health snapshot of the whole tree: which contexts are alive, and what's still running. */
-	public treeState(links = 0): {
+	/** The tree's health: every context seen (per tab) with its last message, and the spans still open. `link` narrows
+	 *  it to one tab's; `links` is how many are connected. */
+	public treeState(links = 0, link?: string): {
 		"links": number;
 		"totalRecords": number;
-		"sources": { "source": string; "records": number; "lastMessage": string; "lastLevel": Level; "lastAgoMs": number }[];
-		"openSpans": { "source": string; "name"?: string; "spanId"?: string; "ageMs": number; "attrs"?: Record<string, unknown> }[];
+		"sources": { "source": string; "link"?: string; "records": number; "lastMessage": string; "lastLevel": Level; "lastAgoMs": number }[];
+		"openSpans": { "source": string; "link"?: string; "name"?: string; "spanId"?: string; "ageMs": number; "attrs"?: Record<string, unknown> }[];
 	} {
 		const now = Date.now();
 		const counts = new Map<string, number>();
+		const mine = (record: StoredRecord): boolean => link === undefined || record.link === link;
+		let total = 0;
 
 		for (const record of this.ring) {
-			counts.set(record.source, (counts.get(record.source) ?? 0) + 1);
+			if (mine(record)) {
+				const key = sourceKey(record.link, record.source);
+
+				counts.set(key, (counts.get(key) ?? 0) + 1);
+				total += 1;
+			}
 		}
 
-		const sources = [...this.sources].map((source) => {
-			const last = this.lastBySource.get(source);
+		const sources = [...this.lastBySource].filter(([, last]) => mine(last)).map(([key, last]) => ({
+			"source": last.source,
+			...last.link === undefined ? {} : { "link": last.link },
+			"records": counts.get(key) ?? 0,
+			"lastMessage": last.message,
+			"lastLevel": last.level,
+			"lastAgoMs": now - last.receivedAt
+		}));
 
-			return {
-				"source": source,
-				"records": counts.get(source) ?? 0,
-				"lastMessage": last?.message ?? "",
-				"lastLevel": last?.level ?? "trace",
-				"lastAgoMs": last === undefined ? -1 : now - last.receivedAt
-			};
-		});
-
-		const openSpans = [...this.open.values()].map((record) => ({
+		const openSpans = [...this.open.values()].filter(mine).map((record) => ({
 			"source": record.source,
+			...record.link === undefined ? {} : { "link": record.link },
 			"name": record.span,
 			"spanId": record.spanId,
 			"ageMs": now - record.time,
 			"attrs": record.attrs
 		}));
 
-		return { "links": links, "totalRecords": this.ring.length, "sources": sources, "openSpans": openSpans };
+		return { "links": links, "totalRecords": total, "sources": sources, "openSpans": openSpans };
 	}
 
 	/** Resolve with the FIRST record received AFTER this call that matches, or null on timeout. */
@@ -302,6 +323,7 @@ export class RecordStore {
 
 	private waiterMatches(input: WaitInput, record: StoredRecord): boolean {
 		if (input.source !== undefined && record.source !== input.source) { return false; }
+		if (input.link !== undefined && record.link !== input.link) { return false; }
 		if (input.kind !== undefined && record.kind !== input.kind) { return false; }
 		if (input.spanName !== undefined && record.span !== input.spanName) { return false; }
 		if (input.minLevel !== undefined && LEVELS[record.level] < LEVELS[input.minLevel]) { return false; }

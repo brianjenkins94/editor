@@ -23,6 +23,7 @@ let client: Client;
 const sockets = new Map<string, WebSocket>();
 const channels: MessageChannel[] = [];
 const disposers: (() => void)[] = [];
+const roots = new Map<string, Hub>();
 
 /** A stand-in tab `tab`: a `root` hub (the same id in every tab) with a worker hub `worker` under it, both reporting
  *  their architecture, and a log line from `root`. */
@@ -43,7 +44,10 @@ async function openTab(tab: string, worker: string): Promise<void> {
 		root.publish(TAB_HERE, { "query": (data as { "query": string }).query, "tab": tab, "url": "http://localhost:5180/" + tab, "title": tab, "visible": true, "focused": false });
 	});
 	await connect(root, tab);
+	roots.set(tab, root);
 	root.publish("$sys.log.root", { "kind": "log", "level": "info", "message": "hello from " + tab, "context": { "source": "root" }, "time": Date.now(), "depth": 0 });
+	// A span still open — with the same span id in both tabs (ids are per context, and the contexts share a name).
+	root.publish("$sys.log.root", { "kind": "span-open", "level": "info", "message": "load", "span": "load", "spanId": "s1", "context": { "source": "root" }, "time": Date.now(), "depth": 0 });
 }
 
 async function connect(hub: Hub, tab: string): Promise<void> {
@@ -157,6 +161,44 @@ test("get_architecture shows one tab's contexts, never the two merged — and as
 		assert.ok(ids.includes("root"), `${tab}: ${ids.join(", ")}`);
 		assert.ok(!ids.includes(theirs), `${tab} shows the other tab's ${theirs}: ${ids.join(", ")}`);
 	}
+});
+
+test("query_spans keeps two tabs' same-id spans apart, and takes one tab's", async () => {
+	type Span = { "name"?: string; "open": boolean; "tab"?: string };
+	const spans = await eventually("both tabs' spans", async () => {
+		const value = (await call("query_spans", { "name": "load" })).value as Span[];
+
+		return value.length === 2 ? value : undefined;
+	});
+
+	assert.deepEqual(spans.map((span) => [span.tab, span.open]).sort(([left], [right]) => String(left).localeCompare(String(right))), [["t1", true], ["t2", true]]);
+	assert.deepEqual(((await call("query_spans", { "name": "load", "tab": "t2" })).value as Span[]).map((span) => span.tab), ["t2"]);
+});
+
+test("get_tree_state shows each tab's contexts separately, or one tab's", async () => {
+	type Tree = { "sources": { "source": string; "tab"?: string }[]; "openSpans": { "name"?: string; "tab"?: string }[] };
+	const all = (await call("get_tree_state")).value as Tree;
+
+	assert.deepEqual(all.sources.filter((row) => row.source === "root").map((row) => row.tab ?? "").sort((left, right) => left.localeCompare(right)), ["t1", "t2"], "one `root` per tab, not one merged");
+
+	const one = (await call("get_tree_state", { "tab": "t1" })).value as Tree;
+
+	assert.deepEqual([...new Set(one.sources.map((row) => row.tab))], ["t1"]);
+	assert.deepEqual(one.openSpans.map((span) => [span.name, span.tab]), [["load", "t1"]]);
+});
+
+test("wait_for with a tab waits for that tab's record, not the other's", async () => {
+	const waiting = call("wait_for", { "textIncludes": "ping", "tab": "t2", "timeoutMs": 5000 });
+
+	await new Promise((resolve) => { setTimeout(resolve, 100); });
+
+	for (const tab of ["t1", "t2"]) {
+		roots.get(tab)!.publish("$sys.log.root", { "kind": "log", "level": "info", "message": "ping from " + tab, "context": { "source": "root" }, "time": Date.now(), "depth": 0 });
+	}
+
+	const { value } = await waiting;
+
+	assert.deepEqual([(value as Row).message, (value as Row).tab], ["ping from t2", "t2"]);
 });
 
 test("once a tab goes, its architecture goes with it, and the one left needs no `tab`", async () => {

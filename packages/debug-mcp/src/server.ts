@@ -154,10 +154,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		// unchanged — the same transport the browser end uses. Unlink on close so interest is withdrawn cleanly.
 		// Non-transit: every connected page is its OWN tree. Joined, a request in one tab (a preview's
 		// virtual.request, a capability.decide) could be answered by another tab's node worker or pod.
-		const before = new Set(hub.inspect().links.map((link) => link.id));
 		const unlink = hub.link(websocketTransport(socket), { "transit": false });
-		// (link() doesn't return the new link's id; it's registered synchronously, so it's the one that's new.)
-		const linkId = hub.inspect().links.find((link) => !before.has(link.id))?.id;
 
 		// Once our $sys.arch interest has reached the page's hubs, ask them for their full state.
 		setTimeout(() => { requestArchSync(hub); }, 500);
@@ -168,9 +165,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 			unlink();
 
 			// Its architecture goes with it (its records stay, still filed under the link, and its tab id).
-			if (linkId !== undefined) {
-				archByLink.delete(linkId);
-			}
+			archByLink.delete(unlink.id);
 		});
 	});
 

@@ -28,6 +28,49 @@ const KIND = z.enum(["log", "span-open", "span-close"]);
 export function createMcpServer(debugMcp: DebugMcp): McpServer {
 	const server = new McpServer({ "name": "debug-mcp", "version": "0.0.0" });
 	const { store } = debugMcp;
+	const TAB_FILTER = z.string().optional().describe("Only this tab's (from list_tabs). Each row names its tab: several tabs can have contexts of the same name.");
+
+	/** The link a tab's records arrive on — asking the tabs if it isn't known yet. Throws for a tab that never connected. */
+	async function linkFor(tab: string | undefined): Promise<string | undefined> {
+		if (tab === undefined) {
+			return undefined;
+		}
+
+		if (debugMcp.linkOf(tab) === undefined) {
+			// Not learned yet (tabs map to links as they answer discovery): ask.
+			await debugMcp.tabs();
+		}
+
+		const link = debugMcp.linkOf(tab);
+
+		if (link === undefined) {
+			throw new Error(`no tab "${tab}" has connected (list_tabs shows the ones that are)`);
+		}
+
+		return link;
+	}
+
+	/** Swap each row's link for its tab's id (asking the tabs once if a link's tab isn't known yet). */
+	async function named<T extends { "link"?: string }>(rows: T[]): Promise<(Omit<T, "link"> & { "tab"?: string })[]> {
+		if (rows.some((row) => row.link !== undefined && debugMcp.tabOf(row.link) === undefined)) {
+			await debugMcp.tabs();
+		}
+
+		return rows.map(({ link, ...row }) => ({ ...row, ...link === undefined ? {} : { "tab": debugMcp.tabOf(link) ?? link } }));
+	}
+
+	/** Run a tool body that takes a `tab`, answering an unknown tab as the tool's error. */
+	async function withTab(tab: string | undefined, body: (link: string | undefined) => ReturnType<typeof ok>): ReturnType<typeof ok> {
+		let link: string | undefined;
+
+		try {
+			link = await linkFor(tab);
+		} catch (error) {
+			return fail(error instanceof Error ? error.message : String(error));
+		}
+
+		return body(link);
+	}
 
 	registerTool(server, defineTool({
 		"name": "query_logs",
@@ -43,31 +86,13 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 				"until": z.number().optional().describe("Absolute upper bound (unix ms)."),
 				"kind": KIND.optional().describe("Restrict to one record kind; default returns all."),
 				"limit": z.number().optional().describe("Max rows (most recent), default 200."),
-				"tab": z.string().optional().describe("Only this tab's records (from list_tabs). Each record names its tab: several tabs can have contexts of the same name.")
+				"tab": TAB_FILTER
 			}
 		},
 		"handler": async (args) => {
 			const { tab, ...input } = args as QueryLogsInput & { "tab"?: string };
-			let link = tab === undefined ? undefined : debugMcp.linkOf(tab);
 
-			if (tab !== undefined && link === undefined) {
-				// Not learned yet (tabs map to links as they answer discovery): ask.
-				await debugMcp.tabs();
-				link = debugMcp.linkOf(tab);
-			}
-
-			if (tab !== undefined && link === undefined) {
-				return fail(`no tab "${tab}" has connected (list_tabs shows the ones that are)`);
-			}
-
-			const rows = store.queryLogs({ ...input, ...link === undefined ? {} : { "link": link } });
-
-			// Name each record's tab. A link whose tab hasn't answered discovery yet: ask, once.
-			if (rows.some((row) => row.link !== undefined && debugMcp.tabOf(row.link) === undefined)) {
-				await debugMcp.tabs();
-			}
-
-			return ok(rows.map(({ link: from, ...record }) => ({ ...record, ...from === undefined ? {} : { "tab": debugMcp.tabOf(from) ?? from } })));
+			return withTab(tab, async (link) => ok(await named(store.queryLogs({ ...input, ...link === undefined ? {} : { "link": link } }))));
 		}
 	}));
 
@@ -82,20 +107,31 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 				"minDurationMs": z.number().optional().describe("Only spans that took at least this long."),
 				"onlyOpen": z.boolean().optional().describe("Only spans with no close yet (in progress)."),
 				"sinceMs": z.number().optional().describe("Only spans that started in the last N milliseconds."),
-				"limit": z.number().optional().describe("Max rows, default 200.")
+				"limit": z.number().optional().describe("Max rows, default 200."),
+				"tab": TAB_FILTER
 			}
 		},
-		"handler": (args) => ok(store.querySpans(args as QuerySpansInput))
+		"handler": async (args) => {
+			const { tab, ...input } = args as QuerySpansInput & { "tab"?: string };
+
+			return withTab(tab, async (link) => ok(await named(store.querySpans({ ...input, ...link === undefined ? {} : { "link": link } }))));
+		}
 	}));
 
 	registerTool(server, defineTool({
 		"name": "get_tree_state",
 		"config": {
 			"title": "Get tree state",
-			"description": "Health snapshot of the whole hub tree: how many pages are linked, every context (source) seen with its last message and how long ago, and all currently-open spans. The one-call answer to 'what is the editor doing right now?'.",
-			"inputSchema": {}
+			"description": "Health snapshot of the hub tree: how many pages are linked, every context (source) seen — per tab — with its last message and how long ago, and all currently-open spans. Pass `tab` for one tab's. The one-call answer to 'what is the editor doing right now?'.",
+			"inputSchema": {
+				"tab": TAB_FILTER
+			}
 		},
-		"handler": () => ok(store.treeState(debugMcp.linkCount()))
+		"handler": async ({ tab }: { "tab"?: string }) => withTab(tab, async (link) => {
+			const state = store.treeState(debugMcp.linkCount(), link);
+
+			return ok({ ...state, "sources": await named(state.sources), "openSpans": await named(state.openSpans) });
+		})
 	}));
 
 	registerTool(server, defineTool({
@@ -164,14 +200,18 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 				"textIncludes": z.string().optional().describe("Substring the message must contain."),
 				"kind": KIND.optional().describe("Match only this record kind."),
 				"spanName": z.string().optional().describe("Match a span by name."),
-				"timeoutMs": z.number().optional().describe("Give up after this long (default 30000).")
+				"timeoutMs": z.number().optional().describe("Give up after this long (default 30000)."),
+				"tab": TAB_FILTER
 			}
 		},
 		"handler": async (args) => {
-			const input = args as WaitInput;
-			const record = await store.waitFor({ ...input, "timeoutMs": input.timeoutMs ?? 30000 });
+			const { tab, ...input } = args as WaitInput & { "tab"?: string };
 
-			return ok(record ?? { "timedOut": true });
+			return withTab(tab, async (link) => {
+				const record = await store.waitFor({ ...input, ...link === undefined ? {} : { "link": link }, "timeoutMs": input.timeoutMs ?? 30000 });
+
+				return ok(record === null ? { "timedOut": true } : (await named([record]))[0]);
+			});
 		}
 	}));
 
