@@ -165,6 +165,15 @@ function publishRecord(hub: Hub, source: string, level: LogRecord["level"], mess
 }
 
 /**
+ * A rejection that only says an operation was called off: VS Code's `CancellationError` (its own global handler
+ * ignores these — e.g. a debug session's in-flight requests, cancelled as it stops) or the platform's `AbortError`.
+ * Someone chose to stop the work, so it isn't a fault to report.
+ */
+export function isCancellation(reason: unknown): boolean {
+	return reason instanceof Error && ((reason.name === "Canceled" && reason.message === "Canceled") || reason.name === "AbortError");
+}
+
+/**
  * Capture the RAW failures that `relayLoggerToHub` misses — uncaught `error` + `unhandledrejection` on this
  * context's global — and publish them onto the plane as `$sys.log.<source>` records, so every boundary's crashes
  * (not just its intentional, structured logs) show up in the one collected stream. Loop-free everywhere: an error
@@ -192,6 +201,10 @@ export function tapConsoleAndErrors(hub: Hub, source: string, options: { "captur
 		};
 		const onRejection = (event: Event): void => {
 			const reason = (event as PromiseRejectionEvent).reason;
+
+			if (isCancellation(reason)) {
+				return;
+			}
 
 			publishRecord(hub, source, "error", "unhandledrejection: " + (reason instanceof Error ? reason.message : String(reason)), {
 				"stack": reason instanceof Error ? reason.stack : undefined

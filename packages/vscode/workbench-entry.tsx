@@ -47,7 +47,7 @@ import workerPodManifest from "./extensions/worker-pod/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { windowClientTransport } from "./pane-link";
-import { relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
+import { isCancellation, relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
 import { createBashProcess } from "./terminal";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
@@ -114,6 +114,14 @@ window.addEventListener("error", (event) => {
 });
 window.addEventListener("unhandledrejection", (event) => {
 	const { reason } = event;
+
+	// A cancellation isn't a fault — e.g. VS Code's own unawaited `fetchThreads()` as a debug session stops, which its
+	// own error handler ignores. Mark it handled, so the browser doesn't print it as an uncaught error either.
+	if (isCancellation(reason)) {
+		event.preventDefault();
+
+		return;
+	}
 
 	// Capture the STACK, not just the message — a bare message is rarely enough to place a boot-time rejection.
 	// Relays to the $sys.log.> collector (debug-mcp). (This is how the workspace-fs fake-URI `e.with` was traced.)
