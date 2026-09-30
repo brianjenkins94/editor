@@ -9,11 +9,12 @@
     },
     "workflow_dispatch": null
   },
-  # Every push to main runs to completion (a newer push would otherwise cancel it partway, and pushes come often);
-  # only a pull request's superseded run is cancelled.
+  # One run per branch at a time. On main a run always finishes (a newer push would otherwise cut it off partway, and
+  # pushes come often), and only the latest push waits behind it — a burst of pushes is tested once, together. A pull
+  # request's superseded run is cancelled.
   "concurrency": {
-    "group": "${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}",
-    "cancel-in-progress": true
+    "group": "${{ github.workflow }}-${{ github.ref }}",
+    "cancel-in-progress": "${{ github.event_name == 'pull_request' }}"
   },
   # The live architecture view's end-to-end suites (packages/vscode/test/architecture-*.mjs): a real editor session in
   # headless Chromium — boot, a preview + HMR, two dev servers, a cold provoke round, a node script under the tsval
