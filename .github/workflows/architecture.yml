@@ -24,8 +24,9 @@
       "steps": [
         { "uses": "actions/checkout@v4" },
         { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*" } },
-        # The dev server the suites start (dev.ts) needs the component's dist and the built sibling packages.
-        { "run": "pnpm run build" },
+        # The dev server the suites start (dev.ts) needs the monaco-vscode-api component's dist and the built sibling
+        # packages; it prebuilds packages/vscode itself (whose full build would need the component first anyway).
+        { "run": "pnpm --recursive --if-present --filter '!./packages/vscode' run build" },
         { "run": "pnpm --filter ./packages/vscode exec playwright install --with-deps chromium" },
         { "run": "pnpm --filter ./packages/vscode run test:architecture" },
         {

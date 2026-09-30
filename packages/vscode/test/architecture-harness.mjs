@@ -31,6 +31,12 @@ async function reachable(url) {
 async function startProcess(command, args, cwd, ready) {
 	const child = spawn(command, args, { "cwd": cwd, "stdio": ["pipe", "pipe", "pipe"] });
 
+	// In CI there's no one to watch it: what the dev server / debug-mcp says is the only clue when a session won't boot.
+	if (process.env.CI !== undefined) {
+		child.stdout.pipe(process.stderr);
+		child.stderr.pipe(process.stderr);
+	}
+
 	await new Promise((resolve, reject) => {
 		const timer = setTimeout(() => { reject(new Error(command + " didn't start")); }, TIMEOUT_MS);
 		const onData = (chunk) => {
@@ -143,6 +149,15 @@ export async function startSession(options = {}) {
 	}
 
 	const page = await context.newPage();
+
+	if (process.env.CI !== undefined) {
+		page.on("pageerror", (error) => { console.error("[page error]", error.message); });
+		page.on("console", (message) => {
+			if (message.type() === "error") {
+				console.error("[page console]", message.text());
+			}
+		});
+	}
 
 	await page.goto(URL_UNDER_TEST);
 
