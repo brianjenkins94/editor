@@ -17,6 +17,9 @@ export interface RuntimeNode {
 	"spawnCount": number;
 	"createdAt"?: number;
 	"endedAt"?: number;
+	/** When it last ended — kept when it comes back (a page reloaded under the same id), so whatever ran under it before
+	 *  (its workers, which can't say they went) can be told from what runs under it now (appEnded). */
+	"lastEndedAt"?: number;
 	/** Which reporters mention it. */
 	"reporters": Set<string>;
 }
@@ -263,6 +266,25 @@ export class ArchitectureStore {
 
 		this.reporters.set(reporter, Date.now());
 		this.markUsed(reporter, reporter);
+
+		// Its page went (arch.ts, on pagehide): ended — fading like any context that ended. Any other report from it is
+		// it back (a reloaded page).
+		const self = this.nodes.get(reporter)!;
+
+		if (report.ended === true) {
+			self.state = "terminated";
+			self.endedAt = Date.now();
+			self.lastEndedAt = self.endedAt;
+			this.changed();
+
+			return;
+		}
+
+		if (self.state === "terminated" && self.lastEndedAt !== undefined) {
+			self.state = "alive";
+			self.endedAt = undefined;
+			this.changed();
+		}
 
 		for (const op of report.nodes ?? []) {
 			switch (op.op) {

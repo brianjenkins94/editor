@@ -1,0 +1,162 @@
+/**
+ * Who a record is from (tagBySubject), what an untrusted peer may publish (observabilityPermissions), and owning a
+ * worker's errors once (ownWorker).
+ */
+import type { LogRecord } from "@brianjenkins94/util/logger";
+import * as assert from "node:assert/strict";
+
+import { test } from "node:test";
+// From source: node won't strip types from the pnpm copy under node_modules.
+import { createHub, pipe } from "../../hub/src/index.ts";
+import { installHubCollector, observabilityPermissions, ownWorker } from "../src/index.ts";
+import { sourceOfLogSubject, tagBySubject } from "../src/log-subject.ts";
+
+async function flush(): Promise<void> {
+	for (let round = 0; round < 5; round += 1) {
+		await new Promise((resolve) => { setTimeout(resolve, 0); });
+	}
+}
+
+test("a record is tagged with the source its subject names, whatever it claims", () => {
+	assert.equal(sourceOfLogSubject("$sys.log.client-0"), "client-0");
+	assert.equal(sourceOfLogSubject("$sys.log."), undefined);
+	assert.equal(sourceOfLogSubject("$sys.arch.page"), undefined);
+	assert.deepEqual(tagBySubject({ "message": "m", "context": { "source": "referee", "tab": "t" } }, "$sys.log.client-0"), { "message": "m", "context": { "source": "client-0", "tab": "t" } });
+	assert.deepEqual(tagBySubject({ "message": "no context" }, "$sys.log.client-0"), { "message": "no context", "context": { "source": "client-0" } });
+
+	const honest = { "context": { "source": "page" } };
+
+	assert.equal(tagBySubject(honest, "$sys.log.page"), honest, "an honest record passes as it is");
+	assert.equal(tagBySubject("text", "$sys.log.page"), "text");
+});
+
+test("the collector tags by subject: a peer confined to its own subject can't pass as another source", async () => {
+	const [up, down] = pipe();
+	const root = createHub({ "id": "root" });
+	const client = createHub({ "id": "client-0" });
+	const records: LogRecord[] = [];
+
+	installHubCollector(root, (record) => { records.push(record); });
+	await Promise.all([root.link(up, { "peer": "client-0", "permissions": observabilityPermissions("client-0") }).ready, client.link(down).ready]);
+	await flush();
+
+	const record = (source: string, message: string) => ({ "kind": "log", "level": "info", "message": message, "context": { "source": source }, "time": 0, "depth": 0 });
+
+	// On its own subject, claiming to be the referee: filed as what it is.
+	client.publish("$sys.log.client-0", record("referee", "lying"));
+	// On its instance page's subject (a context behind it): allowed, and filed as that.
+	client.publish("$sys.log.client-0.ui", record("client-0.ui", "its page"));
+	// On another's subject: refused by the link.
+	client.publish("$sys.log.referee", record("referee", "spoofed"));
+	await flush();
+
+	assert.deepEqual(records.map((entry) => [entry.context?.["source"], entry.message]), [["client-0", "lying"], ["client-0.ui", "its page"]]);
+});
+
+test("observabilityPermissions: its own logs and reports out, the viewers' sync in — nobody else's", async () => {
+	const [up, down] = pipe();
+	const root = createHub({ "id": "root" });
+	const peer = createHub({ "id": "p" });
+	const heard: string[] = [];
+	let synced = 0;
+
+	root.subscribe("$sys.>", (_data, envelope) => { heard.push(envelope.subject); });
+	peer.subscribe("$sys.arch.sync", (_data, envelope) => { synced += envelope.from === "root" ? 1 : 0; });
+	await Promise.all([root.link(up, { "peer": "p", "permissions": observabilityPermissions("p") }).ready, peer.link(down).ready]);
+	await flush();
+
+	for (const subject of ["$sys.log.p", "$sys.log.p.ui", "$sys.arch.p", "$sys.arch.p.ui", "$sys.log.q", "$sys.arch.q", "$sys.arch.sync", "$sys.log.pq"]) {
+		peer.publish(subject, {});
+	}
+
+	root.publish("$sys.arch.sync");
+	await flush();
+
+	assert.deepEqual(heard.filter((subject) => subject !== "$sys.arch.sync"), ["$sys.log.p", "$sys.log.p.ui", "$sys.arch.p", "$sys.arch.p.ui"]);
+	assert.equal(synced, 1);
+});
+
+test("ownWorker marks a worker's re-raised error handled, and reports one that couldn't load", () => {
+	class FakeErrorEvent extends Event {}
+	const globals = globalThis as { "ErrorEvent"?: unknown };
+	const saved = globals.ErrorEvent;
+
+	globals.ErrorEvent = FakeErrorEvent;
+
+	try {
+		const worker = new EventTarget() as unknown as Worker;
+		let failed = 0;
+		const dispose = ownWorker(worker, () => { failed += 1; });
+		const reraised = new FakeErrorEvent("error", { "cancelable": true });
+
+		worker.dispatchEvent(reraised);
+		assert.equal(reraised.defaultPrevented, true, "the owner won't report the worker's error again");
+		worker.dispatchEvent(new Event("error"));
+		assert.equal(failed, 1, "a load failure is reported");
+		dispose();
+		worker.dispatchEvent(new Event("error"));
+		assert.equal(failed, 1);
+	} finally {
+		globals.ErrorEvent = saved;
+	}
+});
+
+test("a relay marks a page that speaks a newer protocol than it knows — and only that", async () => {
+	const { markOutdated, OBSERVABILITY_PROTOCOL } = await import("../src/tabs.ts");
+	const tab = { "tab": "t", "url": "", "title": "", "visible": true, "focused": false };
+
+	assert.equal(markOutdated({ ...tab, "protocol": OBSERVABILITY_PROTOCOL }).outdated, undefined);
+	assert.equal(markOutdated(tab).outdated, undefined, "a page older than the protocol says nothing");
+	assert.match(markOutdated({ ...tab, "protocol": OBSERVABILITY_PROTOCOL + 1 }).outdated ?? "", /restart it/u);
+});
+
+test("a page that goes says so, and the store ends it — until a reload brings it back under the same id", async () => {
+	const { ArchitectureStore } = await import("../src/arch-store.ts");
+	const { createArchReporter } = await import("../src/arch.ts");
+	const globals = globalThis as { "window"?: unknown; "location"?: unknown; "addEventListener"?: unknown; "removeEventListener"?: unknown };
+	const saved = { "window": globals.window, "location": globals.location, "addEventListener": globals.addEventListener, "removeEventListener": globals.removeEventListener };
+	const listeners = new Map<string, () => void>();
+
+	// A window realm (a page), with its pagehide.
+	globals.window = { "parent": undefined };
+	(globals.window as { "parent": unknown }).parent = globals.window;
+	globals.location = { "href": "http://localhost/__virtual__/t/5173/" };
+	globals.addEventListener = (type: string, handler: () => void) => { listeners.set(type, handler); };
+	globals.removeEventListener = (type: string) => { listeners.delete(type); };
+
+	try {
+		const root = createHub({ "id": "root" });
+		const page = createHub({ "id": "page" });
+		const [up, down] = pipe();
+		const store = new ArchitectureStore();
+		const { collectArchReports } = await import("../src/arch.ts");
+
+		collectArchReports(root, (report) => { store.apply(report); });
+		await Promise.all([root.link(up).ready, page.link(down).ready]);
+
+		const reporter = createArchReporter(page);
+
+		await new Promise((resolve) => { setTimeout(resolve, 400); });
+		assert.equal(store.nodes.get("page")?.state, "alive");
+
+		listeners.get("pagehide")!();
+		await flush();
+
+		const gone = store.nodes.get("page")!;
+
+		assert.equal(gone.state, "terminated", "its last word ended it");
+		assert.equal(typeof gone.lastEndedAt, "number");
+
+		const endedAt = gone.lastEndedAt;
+
+		reporter.dispose();
+		assert.equal(listeners.has("pagehide"), false, "disposing the reporter stops listening");
+
+		// The reloaded page: same id, reporting again.
+		store.apply({ "reporter": "page", "time": Date.now() });
+		assert.equal(store.nodes.get("page")?.state, "alive");
+		assert.equal(store.nodes.get("page")?.lastEndedAt, endedAt, "and when it last ended is kept (appEnded tells old workers from new)");
+	} finally {
+		Object.assign(globals, saved);
+	}
+});

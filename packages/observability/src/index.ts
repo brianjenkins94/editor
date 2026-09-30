@@ -17,15 +17,16 @@
  * `LogRecord` carries `span/spanId/parentSpanId/traceId/depth/durationMs` as W3C-shaped ids, so spans survive the
  * trip intact and stitch across contexts; the collector tags each by `context.source`.
  */
-import type { Hub } from "@brianjenkins94/hub";
+import type { Hub, LinkPermissions } from "@brianjenkins94/hub";
 import type { Logger, LogRecord } from "@brianjenkins94/util/logger";
 import { createRpcClient, portTransport, serve, websocketTransport, windowTransport } from "@brianjenkins94/hub";
 import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
 
 import type { PageTool } from "./page-tools.ts";
 import type { TabInfo } from "./tabs.ts";
+import { tagBySubject } from "./log-subject.ts";
 import { PAGE_TOOLS_CHANGED, servePageToolSet } from "./page-tools.ts";
-import { TAB_DISCOVER, TAB_HERE } from "./tabs.ts";
+import { OBSERVABILITY_PROTOCOL, TAB_DISCOVER, TAB_HERE } from "./tabs.ts";
 
 /** Reserved observability namespace — records are published on `$sys.log.<source>`; app code must not use it.
  *  A separate-process sink (a Node collector) must use this same value; see @brianjenkins94/debug-mcp. */
@@ -103,9 +104,43 @@ export function logBacklog(hub: Hub, { max = 1000 } = {}): { "flushWhenReady": (
 	};
 }
 
-/** Root side: subscribe to every context's records on `$sys.log.>` and hand each to `onRecord`. */
+/** Root side: subscribe to every context's records on `$sys.log.>` and hand each to `onRecord` — tagged with the source
+ *  its subject names (the part link permissions enforce), not whatever source the record claims (tagBySubject). */
 export function installHubCollector(hub: Hub, onRecord: (record: LogRecord) => void): () => void {
-	return hub.subscribe(LOG_SUBJECT + ".>", (data) => { onRecord(data as LogRecord); });
+	return hub.subscribe(LOG_SUBJECT + ".>", (data, envelope) => { onRecord(tagBySubject(data as LogRecord, envelope.subject)); });
+}
+
+/**
+ * What a link lets an untrusted peer (hub id `peer`) do for observability: publish its own logs (`$sys.log.<peer>`) and
+ * architecture reports (`$sys.arch.<peer>`) — or a context's behind it, `<peer>.<suffix>` (its instance page, say) —
+ * and hear the viewers' `$sys.arch.sync`. So it can't log or report as anyone else. Merge it into the link's own
+ * permissions.
+ */
+export function observabilityPermissions(peer: string): Required<LinkPermissions> {
+	return {
+		"publish": [`${LOG_SUBJECT}.${peer}`, `${LOG_SUBJECT}.${peer}.>`, `$sys.arch.${peer}`, `$sys.arch.${peer}.>`],
+		"subscribe": ["$sys.arch.sync"]
+	};
+}
+
+/**
+ * Own a worker's errors once. A worker reports its own uncaught errors over its hub (tapConsoleAndErrors), but the
+ * browser then re-raises an unhandled one in the page that owns the worker — whose tap would report it again, as the
+ * page's. Mark those handled here. A worker that failed to LOAD can't report anything: that arrives as a plain Event,
+ * and `onLoadFailure` hears it (log it where the worker would have).
+ */
+export function ownWorker(worker: Worker, onLoadFailure: () => void = () => undefined): () => void {
+	const onError = (event: Event): void => {
+		if (typeof ErrorEvent !== "undefined" && event instanceof ErrorEvent) {
+			event.preventDefault();
+		} else {
+			onLoadFailure();
+		}
+	};
+
+	worker.addEventListener("error", onError);
+
+	return () => { worker.removeEventListener("error", onError); };
 }
 
 // Set true only while the collector (or another observability path) writes to console, so a same-realm console
@@ -334,7 +369,7 @@ export function answerTabDiscovery(hub: Hub, tab: string): () => void {
 }
 
 function describeTab(tab: string): TabInfo {
-	const info: TabInfo = { "tab": tab, "url": location.href, "title": document.title, "visible": document.visibilityState === "visible", "focused": document.hasFocus() };
+	const info: TabInfo = { "tab": tab, "url": location.href, "title": document.title, "visible": document.visibilityState === "visible", "focused": document.hasFocus(), "protocol": OBSERVABILITY_PROTOCOL };
 
 	// An app in an editor preview is its own page, inside the editor's tab: describe it, not the editor around it.
 	if (previewHost() !== undefined) {
@@ -440,8 +475,11 @@ export function servePageTools(hub: Hub, options: PageToolsOptions = {}): string
 
 	serve(hub, "page_eval." + tab, async (args) => {
 		const { expression } = args as { "expression": string };
-		// eslint-disable-next-line no-eval -- page_eval's whole purpose is to evaluate a caller-supplied expression in the tab; indirect eval runs it in global scope, not this closure.
-		const indirectEval = eval;
+		// page_eval's whole purpose is to evaluate a caller-supplied expression in the tab: indirect eval runs it in global
+		// scope, not this closure. Through `globalThis` — an `eval` alias gets inlined back into a direct eval by the
+		// consumer's bundler (Rolldown's [EVAL] warning, in every app that bundles this).
+		// eslint-disable-next-line no-eval -- see above
+		const indirectEval = globalThis.eval;
 
 		// Await a thenable result: a Promise JSON-serializes to `{}`, which would hide every async answer.
 		return jsonSafe(await indirectEval(expression));
@@ -515,6 +553,7 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 	connect();
 }
 
+export * from "./log-subject.ts";
 export * from "./arch.ts";
 export * from "./arch-probes.ts";
 export * from "./arch-store.ts";

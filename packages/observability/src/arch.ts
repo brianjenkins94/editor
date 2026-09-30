@@ -61,6 +61,9 @@ export interface ArchReport {
 	"nodes"?: NodeOp[];
 	"traffic"?: TrafficCount[];
 	"samples"?: TrafficSample[];
+	/** The reporter's page is going (pagehide): its last word. A viewer takes it as ended — until it reports again (a
+	 *  reloaded page, under the same id). Only a window can say so; a worker ends with its page, silently. */
+	"ended"?: true;
 }
 
 /** Where a hub runs: a window (a page or a frame — `parent` is its parent frame's address, when it has a same-origin
@@ -470,6 +473,18 @@ export function createArchReporter(hub: Hub): ArchReporter {
 		}, 0);
 	});
 
+
+	// A page that goes says so — a viewer would otherwise keep its hubs as if alive (a navigated preview window, a
+	// reloaded frame). Sent as it goes: the links carry it synchronously (a window's postMessage, a port's).
+	const onPagehide = (): void => { publish({ "reporter": self, "time": Date.now(), "ended": true }); };
+	const target = globalThis as { "addEventListener"?: (type: string, handler: () => void) => void; "removeEventListener"?: (type: string, handler: () => void) => void };
+
+	if (realm?.kind === "window") {
+		target.addEventListener?.("pagehide", onPagehide);
+	}
+
+	const disposePagehide = (): void => { target.removeEventListener?.("pagehide", onPagehide); };
+
 	return {
 		"self": self,
 		"declare": (spec) => {
@@ -519,6 +534,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 			disposed = true;
 			disposeTap();
 			disposeSync();
+			disposePagehide();
 
 			if (timer !== undefined) {
 				clearTimeout(timer);

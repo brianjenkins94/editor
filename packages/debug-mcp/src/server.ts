@@ -12,10 +12,11 @@ import type { HubLogRecord } from "./store.ts";
 import { createHub, createRpcClient, websocketTransport } from "@brianjenkins94/hub";
 // From source (not a package dependency): the architecture plane's collector side has no runtime deps.
 import type { ArchReport } from "../../observability/src/arch.ts";
+import { tagBySubject } from "../../observability/src/log-subject.ts";
 import { ARCH_SUBJECT, requestArchSync } from "../../observability/src/arch.ts";
 import { ArchitectureStore } from "../../observability/src/arch-store.ts";
 import type { TabInfo } from "../../observability/src/tabs.ts";
-import { discoverTabs, TAB_HERE } from "../../observability/src/tabs.ts";
+import { discoverTabs, markOutdated, TAB_HERE } from "../../observability/src/tabs.ts";
 
 import { WebSocketServer } from "ws";
 import { RecordStore } from "./store.ts";
@@ -76,6 +77,8 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 	const store = new RecordStore({ "max": options.max });
 	const server = new WebSocketServer({ "port": options.port });
 	const links = new Set<WebSocket>();
+	/** Tabs already warned about being newer than this debug-mcp. */
+	const warnedOutdated = new Set<string>();
 
 	// Surface bind success/failure. WebSocketServer emits 'listening' once bound, or 'error' if it can't bind
 	// (usually EADDRINUSE: a second debug-mcp on the same port). An 'error' event with NO listener is thrown as
@@ -121,7 +124,8 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 	});
 
 	// The collector leaf. Its interest in `$sys.log.>` is what pulls each context's records across the links.
-	hub.subscribe(LOG_SUBJECT + ".>", (data, _envelope, origin) => { store.add(data as HubLogRecord, origin.link?.id); });
+	// Tagged with the source its subject names (the part link permissions enforce), not the one the record claims.
+	hub.subscribe(LOG_SUBJECT + ".>", (data, envelope, origin) => { store.add(tagBySubject(data as HubLogRecord, envelope.subject), origin.link?.id); });
 	// And what each page logged before this link could carry it (observability's logBacklog).
 	hub.subscribe(LOG_BACKLOG, (data, _envelope, origin) => {
 		for (const record of Array.isArray(data) ? data as HubLogRecord[] : []) {
@@ -190,7 +194,17 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		"rpc": rpc,
 		"linkCount": () => links.size,
 		// (A short grace after every link's editor tab has answered, for the apps in its previews.)
-		"tabs": (timeoutMs) => discoverTabs(hub, links.size, timeoutMs, 150),
+		// A page newer than this debug-mcp says so (list_tabs shows `outdated`), once on stderr too.
+		"tabs": async (timeoutMs) => (await discoverTabs(hub, links.size, timeoutMs, 150)).map((tab) => {
+			const marked = markOutdated(tab);
+
+			if (marked.outdated !== undefined && !warnedOutdated.has(tab.tab)) {
+				warnedOutdated.add(tab.tab);
+				console.error("[debug-mcp] tab " + tab.tab + ": " + marked.outdated);
+			}
+
+			return marked;
+		}),
 		"whenListening": whenListening,
 		"close": () => new Promise<void>((resolve) => {
 			for (const socket of links) {

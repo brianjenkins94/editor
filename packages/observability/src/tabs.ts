@@ -14,6 +14,14 @@ import type { Hub } from "@brianjenkins94/hub";
 export const TAB_DISCOVER = "tab.discover";
 export const TAB_HERE = "tab.here";
 
+/**
+ * What a page expects of the relay it's linked to, as one number, sent with every tab answer. Bump it when pages start
+ * relying on something an older debug-mcp doesn't do (page tools, preview apps as tabs, preview windows were each such
+ * a step): a debug-mcp keeps running across upgrades, and an older one would otherwise ignore what it doesn't know
+ * silently. It compares a page's number with its own and says when it's behind.
+ */
+export const OBSERVABILITY_PROTOCOL = 1;
+
 export interface TabInfo {
 	"tab": string;
 	/** The address bar's URL (the top window's, when this tab's hub lives in a frame). */
@@ -23,6 +31,17 @@ export interface TabInfo {
 	"focused": boolean;
 	/** An app running in an editor preview: its own page (these are its URL and title), riding the editor tab's link. */
 	"preview"?: boolean;
+	/** The observability protocol the page speaks (OBSERVABILITY_PROTOCOL); absent from pages older than it. */
+	"protocol"?: number;
+	/** Set by the relay when the page speaks a newer protocol than it knows: what to do about it. */
+	"outdated"?: string;
+}
+
+/** `tab`, marked `outdated` when it speaks a newer protocol than `known` (the relay's own). */
+export function markOutdated(tab: TabInfo, known = OBSERVABILITY_PROTOCOL): TabInfo {
+	return (tab.protocol ?? 0) > known
+		? { ...tab, "outdated": `this page speaks observability protocol ${tab.protocol}; this debug-mcp knows ${known} — restart it (Claude Code restarts the one it runs) to see all the page offers` }
+		: tab;
 }
 
 /**
