@@ -294,7 +294,15 @@ const OBS_TAP = `<script>
 	if (window.__obsTap) { return; }
 	window.__obsTap = true;
 	var fmt = function (x) { if (typeof x === "string") { return x; } try { return JSON.stringify(x); } catch (e) { return String(x); } };
-	var send = function (rec) { try { parent.postMessage({ channel: "obs-log", record: rec }, "*"); } catch (e) {} };
+	// The editor window hosting this preview: its top frame's parent — above every frame the app nests in it (a game's
+	// instance iframes), each a /__virtual__/ page too. Posting to plain \`parent\` from a nested frame would hand the
+	// record to the app's own page (and its message listeners) instead.
+	var host = (function () { var w = window; try { while (w.parent !== w && w.parent.location.pathname.indexOf("/__virtual__/") !== -1) { w = w.parent; } } catch (e) {} return w.parent; })();
+	var nested = host !== parent ? "/" + location.pathname.split("/__virtual__/")[1].split("/").slice(2).join("/") : undefined;
+	var send = function (rec) {
+		if (nested !== undefined) { rec.attrs = Object.assign({ frame: nested }, rec.attrs); }
+		try { host.postMessage({ channel: "obs-log", record: rec }, "*"); } catch (e) {}
+	};
 	var wrap = function (method, level) {
 		var orig = typeof console[method] === "function" ? console[method].bind(console) : function () {};
 		console[method] = function () {
@@ -327,7 +335,7 @@ const OBS_TAP = `<script>
 		return new Promise(function (resolve) {
 			var id = ++capSeq;
 			capPending[id] = resolve;
-			try { parent.postMessage({ channel: "cap-decide", id: id, kind: kind, resource: resource, port: vport }, "*"); } catch (err) { delete capPending[id]; resolve(false); return; }
+			try { host.postMessage({ channel: "cap-decide", id: id, kind: kind, resource: resource, port: vport }, "*"); } catch (err) { delete capPending[id]; resolve(false); return; }
 			setTimeout(function () { if (capPending[id]) { delete capPending[id]; resolve(false); } }, 300000); // unanswered ⇒ fail closed
 		});
 	};

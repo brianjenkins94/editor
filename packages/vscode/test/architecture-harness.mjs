@@ -17,7 +17,9 @@ const { chromium } = require("playwright");
 
 export const URL_UNDER_TEST = process.env.ARCH_URL ?? "http://localhost:5173/";
 export const TIMEOUT_MS = 120_000;
-const DEBUG_MCP_PORT = 7399;
+/** Where the page's debug-mcp socket (:7378) is relayed to: this checkout's debug-mcp (`debugMcp: true` starts one; with
+ *  `debugMcp: "external"` the test runs its own there — e.g. in-process, to read its store). */
+export const DEBUG_MCP_PORT = 7399;
 
 async function reachable(url) {
 	try {
@@ -145,7 +147,7 @@ export async function startSession(options = {}) {
 	const browser = await launch();
 	const context = await browser.newContext({ "viewport": { "width": 1400, "height": 900 } });
 
-	if (options.debugMcp === true) {
+	if (options.debugMcp === true || options.debugMcp === "external") {
 		await bridgeDebugMcp(context);
 	} else {
 		await context.routeWebSocket(/:7378/u, (route) => { route.close(); });

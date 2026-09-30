@@ -170,10 +170,17 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		promptEl.className = promptLayer();
 		paneWindow.body.appendChild(promptEl);
 
-		// Each surface applies ITS port's HMR into ITS iframe (React Fast Refresh, state preserved).
+		// Each surface applies ITS port's HMR into ITS iframe — and every frame the app nests in it (a game's instance
+		// iframes), each with its own HMR client, which acts only on modules it loaded (React Fast Refresh, state
+		// preserved; anything else reloads that frame).
 		const offHmr = hub.subscribe(`preview.hmr.${port}`, (message) => {
 			record("preview:" + port, "hmr " + ((message as { "type"?: string } | null)?.type ?? "update"));
-			frame.contentWindow?.postMessage(message, "*");
+
+			if (frame.contentWindow !== null) {
+				for (const target of framesUnder(frame.contentWindow)) {
+					target.postMessage(message, "*");
+				}
+			}
 		});
 		const surface: PreviewSurface = { "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "offHmr": offHmr, "promptChain": Promise.resolve() };
 
@@ -371,10 +378,21 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 				return "tsval-preview";
 			}
 
-			const match = [...surfaces.entries()].find(([, surface]) => surface.frame.contentWindow === source);
+			const match = surfaceOf(source);
 
 			return match === undefined ? undefined : "preview:" + match[0];
 		});
+	}
+
+	/** The preview a message came from: its iframe's window, or any frame nested in it (the app's own iframes). */
+	function surfaceOf(source: MessageEventSource | null): [number, PreviewSurface] | undefined {
+		for (const entry of surfaces) {
+			if (isWithin(source, entry[1].frame.contentWindow)) {
+				return entry;
+			}
+		}
+
+		return undefined;
 	}
 
 	globalThis.addEventListener("message", (event: MessageEvent) => {
@@ -404,10 +422,10 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 			return;
 		}
 
-		const source = [...surfaces.entries()].find(([, surface]) => surface.frame.contentWindow === event.source);
+		const source = surfaceOf(event.source);
 
 		if (source === undefined) {
-			return; // only our preview iframes
+			return; // only our preview iframes (and the frames nested in them)
 		}
 
 		const port = source[0];
@@ -443,4 +461,48 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 			"depth": 0
 		});
 	});
+}
+
+/** `root` and every frame nested in it, depth first — cross-origin ones included (postMessage reaches them). */
+function framesUnder(root: Window): Window[] {
+	const found: Window[] = [root];
+
+	try {
+		for (const child of Array.from({ "length": root.frames.length }, (_, index) => root.frames[index])) {
+			found.push(...framesUnder(child));
+		}
+	} catch { /* a frame we can't enumerate */ }
+
+	return found;
+}
+
+/** Is `source` the window `root`, or a frame nested (at any depth) inside it? */
+function isWithin(source: MessageEventSource | null, root: Window | null): boolean {
+	if (root === null) {
+		return false;
+	}
+
+	let current = source as Window | null;
+
+	while (current !== null) {
+		if (current === root) {
+			return true;
+		}
+
+		let parent: Window;
+
+		try {
+			parent = current.parent;
+		} catch {
+			return false;
+		}
+
+		if (parent === current) {
+			return false;
+		}
+
+		current = parent;
+	}
+
+	return false;
 }

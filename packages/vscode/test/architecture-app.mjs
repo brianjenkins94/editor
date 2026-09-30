@@ -10,7 +10,9 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 
-import { hasLabel, startSession } from "./architecture-harness.mjs";
+import { DEBUG_MCP_PORT, hasLabel, startSession } from "./architecture-harness.mjs";
+
+const { createDebugMcp } = await import("../../debug-mcp/src/server.ts");
 
 const HUB = "https://brianjenkins94.github.io/editor/packages/hub@latest.tgz";
 
@@ -22,7 +24,7 @@ const FILES = {
 	"main.ts": [
 		"import { createHub } from \"@brianjenkins94/hub\";",
 		"",
-		"const state: { \"hub\": string; \"results\": unknown[] } = { \"hub\": createHub({ \"id\": \"page\" }).id, \"results\": [] };",
+		"const state: { \"hub\": string; \"results\": unknown[]; \"stray\": number; \"startedAt\": number } = { \"hub\": createHub({ \"id\": \"page\" }).id, \"results\": [], \"stray\": 0, \"startedAt\": performance.timeOrigin };",
 		"const worker = new Worker(new URL(\"./worker.ts\", import.meta.url), { \"type\": \"module\" });",
 		"const frame = document.createElement(\"iframe\");",
 		"",
@@ -37,6 +39,11 @@ const FILES = {
 		"addEventListener(\"message\", (event) => {",
 		"\tif (event.source === frame.contentWindow && event.data?.wired !== undefined) {",
 		"\t\tstate.results.push(event.data.wired);",
+		"\t}",
+		"",
+		"\t// The editor's tap must report the frame's console to the editor, not to this page.",
+		"\tif (event.data?.channel === \"obs-log\" || event.data?.channel === \"cap-decide\") {",
+		"\t\tstate.stray += 1;",
 		"\t}",
 		"});",
 		"document.body.append(frame);",
@@ -60,6 +67,8 @@ const FILES = {
 	"frame.ts": [
 		"import { createHub, createRpcClient, portTransport } from \"@brianjenkins94/hub\";",
 		"",
+		"document.title = \"wired frame v1\";",
+		"",
 		"addEventListener(\"message\", async (event: MessageEvent) => {",
 		"\tif (event.source === parent && event.data?.port instanceof MessagePort) {",
 		"\t\tconst hub = createHub({ \"id\": \"frame\" });",
@@ -69,6 +78,7 @@ const FILES = {
 		"\t\tconst answer = await createRpcClient(hub).request(\"wired.echo\", \"hi\", { \"timeoutMs\": 10_000, \"waitForResponderMs\": 10_000 });",
 		"",
 		"\t\tparent.postMessage({ \"wired\": answer }, location.origin);",
+		"\t\tconsole.log(\"wired frame says hi\");",
 		"\t}",
 		"});",
 		""
@@ -76,9 +86,41 @@ const FILES = {
 };
 
 let session;
+let debugMcp;
 
-before(async () => { session = await startSession(); });
-after(async () => { await session?.close("architecture-app"); });
+before(async () => {
+	// Our own debug-mcp, in this process, so a test can read what reached it; the page's socket is relayed here.
+	debugMcp = createDebugMcp({ "port": DEBUG_MCP_PORT });
+	await debugMcp.whenListening;
+	session = await startSession({ "debugMcp": "external" });
+});
+after(async () => {
+	await session?.close("architecture-app");
+	await debugMcp?.close();
+});
+
+async function eventually(what, probe, timeoutMs = 60_000) {
+	const deadline = Date.now() + timeoutMs;
+
+	for (;;) {
+		const value = await probe().catch(() => undefined);
+
+		if (value) {
+			return value;
+		}
+
+		if (Date.now() > deadline) {
+			throw new Error("timed out waiting for " + what);
+		}
+
+		await session.page.waitForTimeout(250);
+	}
+}
+
+/** The frame the app nests in its page. */
+function nestedFrame() {
+	return previewPage()?.childFrames().find((frame) => frame.url().includes("frame.html"));
+}
 
 /** The preview's top page (not its nested frame). */
 function previewPage() {
@@ -115,4 +157,39 @@ test("an app with a tarball dependency, a module worker, a nested iframe and a M
 
 	assert.equal(state?.hub, "page", "the page's hub (from the tarball) is up: " + JSON.stringify(state));
 	assert.deepEqual(state.results, [{ "echoed": "hi", "from": "worker" }], "the frame reached the worker across the channel, over hub");
+});
+
+test("a nested frame's console reaches the editor's log plane — tagged with its frame — and never the app's own page", async () => {
+	const [record] = await eventually("the frame's log in debug-mcp", async () => {
+		const found = debugMcp.store.queryLogs({ "source": "preview", "textIncludes": "wired frame says hi" });
+
+		return found.length > 0 ? found : undefined;
+	});
+
+	assert.equal(record.attrs?.frame, "/frame.html");
+	assert.equal((await previewPage().evaluate(() => globalThis.__wired)).stray, 0, "the app's page saw none of the tap's messages");
+});
+
+test("an edit to a module only the nested frame loaded reloads that frame, and leaves the page alone", async () => {
+	const before = await previewPage().evaluate(() => ({ "startedAt": globalThis.__wired.startedAt, "title": document.title }));
+
+	assert.equal(await nestedFrame()?.evaluate(() => document.title), "wired frame v1");
+	await session.workbench().evaluate(async () => {
+		const api = globalThis.__editor.api;
+		const uri = api.Uri.file("/workspace/apps/wired/frame.ts");
+		const text = new TextDecoder().decode(await api.workspace.fs.readFile(uri)).replace("wired frame v1", "wired frame v2");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
+	});
+
+	await eventually("the frame reloaded with the edit", async () => (await nestedFrame()?.evaluate(() => document.title)) === "wired frame v2");
+
+	// Give a stray update to the page (an import of frame.ts there, or a reload) time to happen.
+	await session.page.waitForTimeout(1000);
+
+	const page = await previewPage().evaluate(() => ({ ...globalThis.__wired, "title": document.title }));
+
+	assert.equal(page.startedAt, before.startedAt, "the page wasn't reloaded");
+	assert.equal(page.title, before.title, "nor frame.ts run in it (it sets the title)");
+	assert.deepEqual(page.results, [{ "echoed": "hi", "from": "worker" }]);
 });

@@ -77,6 +77,9 @@ const REACT_REFRESH_PREAMBLE = `
 <script>
 window.$RefreshReg$ = () => {};
 window.$RefreshSig$ = () => (type) => type;
+// The HMR client tells which modules THIS window loaded from resource timing: keep every entry (the default buffer
+// holds 250).
+try { performance.setResourceTimingBufferSize(100000); } catch (e) {}
 </script>
 <script type="module">
 import * as RefreshRuntimeModule from '${REACT_REFRESH_CDN}';
@@ -198,11 +201,35 @@ const HMR_CLIENT_SCRIPT = `
     }
   });
 
+  // Did THIS window load the module? (A module fetch lands in its realm's resource timing.) An update to a module only
+  // a sibling frame or a worker loaded isn't this window's to apply.
+  function loadedHere(path) {
+    return performance.getEntriesByType('resource').some((entry) => {
+      try {
+        return new URL(entry.name).pathname.endsWith(path);
+      } catch (error) {
+        return false;
+      }
+    });
+  }
+
   // Handle JS/JSX module updates
   async function handleJSUpdate(path, timestamp) {
     // Normalize path to match module keys
     const normalizedPath = path.startsWith('/') ? path : '/' + path;
     const hot = hotModules.get(normalizedPath);
+
+    if (!hot && !loadedHere(normalizedPath)) {
+      return;
+    }
+
+    // Only a module with a hot context (a React module, via React Refresh) can be swapped in place. Any other module's
+    // importers still hold its old exports, so re-importing it would only run it twice — reload this frame instead.
+    if (!hot) {
+      console.log('[HMR] ' + normalizedPath + ' has no hot boundary: reloading');
+      location.reload();
+      return;
+    }
 
     try {
       // Call dispose callback if registered
