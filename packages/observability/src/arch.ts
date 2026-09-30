@@ -186,9 +186,11 @@ const RPC_REPLY = "$rpc.reply.";
  * Create the reporter for the context `hub` lives in: taps the hub (its topology, and every message it SENDS on a
  * link — each hop has exactly one sender, so nothing is counted twice) and gives probes an `ArchSink` for the
  * channels the hub doesn't carry. Reports are batched every 250ms, published only when something changed.
+ *
+ * `self` names the context in its reports (default: the hub's id) — for a hub its link knows by another id (one an
+ * edge assigned: `hub.knownAs()`), which is the only `$sys.arch.<id>` that link lets it publish.
  */
-export function createArchReporter(hub: Hub): ArchReporter {
-	const self = hub.id;
+export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: string } = {}): ArchReporter {
 	const realm = describeRealm();
 	const counts = new Map<string, TrafficCount>();
 	const totals = new Map<string, TrafficCount>();

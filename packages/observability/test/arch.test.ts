@@ -360,3 +360,22 @@ test("a report nobody could hear yet is held, not lost: the viewer that links la
 	assert.ok(mine.some((report) => report.topology?.links.some((link) => link.peerId === "viewer")), "and its topology");
 	reporter.dispose();
 });
+
+test("a reporter can name itself by the id its link knows it by", async () => {
+	const [a, b] = pipe();
+	const edge = createHub({ "id": "edge" });
+	const client = createHub({ "id": "client" });
+	const reports: ArchReport[] = [];
+
+	collectArchReports(edge, (report) => { reports.push(report); });
+	edge.link(a, { "peer": "seat-2" });
+	client.link(b);
+	await wait(50);
+
+	const reporter = createArchReporter(client, { "self": client.knownAs()[0] });
+
+	await wait(400);
+	assert.equal(reporter.self, "seat-2");
+	assert.ok(reports.some((report) => report.reporter === "seat-2" && report.topology !== undefined), JSON.stringify(reports.map((report) => report.reporter)));
+	reporter.dispose();
+});
