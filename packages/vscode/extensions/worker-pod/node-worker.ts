@@ -168,7 +168,12 @@ async function runNode(args: StartArgs): Promise<void> {
 	// the SW runs the async decision (the same "capability.decide" endpoint the net gate uses) and replies
 	// { allow }. No SharedArrayBuffer needed. Throw (EACCES) to deny → almostnode propagates it as the fs call's
 	// error. The route names this worker's tab (the SW is shared by every tab), and the SW fails closed when no
-	// decider answers; only a missing SW (no cross-origin isolation — nothing to ask) lets the call through.
+	// decider answers.
+	//
+	// What's at stake is the SHARED workspace, so that's what decides failure: attached, anything short of an
+	// explicit allow (no SW route, a stale SW, an error page) denies. Not attached (no cross-origin isolation — so no
+	// SW to ask either) this run only has its own scratch filesystem, and the network isn't gated without the SW
+	// anyway, so there's nothing a denial would protect and the call goes through.
 	const gateFs = (op: "read" | "write", method: string, path: string): void => {
 		// Fast-path workspace READS (frequent + benign): no round-trip. Writes/deletes always gate (tamper axis),
 		// and reads OUTSIDE the workspace gate (exfiltration axis — e.g. secrets on a desktop CLI's real disk).
@@ -176,7 +181,11 @@ async function runNode(args: StartArgs): Promise<void> {
 			return;
 		}
 
-		let allow = true;
+		if (getSharedWorkspaceBuffer() === undefined) {
+			return;
+		}
+
+		let allow = false;
 
 		try {
 			const xhr = new XMLHttpRequest();
@@ -184,11 +193,9 @@ async function runNode(args: StartArgs): Promise<void> {
 			xhr.open("POST", new URL("__capability__/decide" + (TAB === null ? "" : "?tab=" + TAB), location.href).href, false); // sync: blocks until the SW replies
 			xhr.send(JSON.stringify({ "kind": "fs", "op": op, "method": method, "args": [path], "runId": runId })); // runId → run-grain record
 
-			if (xhr.status === 200) {
-				allow = (JSON.parse(xhr.responseText) as { "allow"?: boolean }).allow !== false;
-			}
+			allow = xhr.status === 200 && (JSON.parse(xhr.responseText) as { "allow"?: boolean }).allow === true;
 		} catch {
-			allow = true; // transport/parse error → fail open
+			// transport/parse error → fail closed (allow stays false)
 		}
 
 		if (!allow) {
