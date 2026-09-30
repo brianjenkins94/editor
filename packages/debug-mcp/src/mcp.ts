@@ -307,15 +307,16 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 			"inputSchema": {
 				"method": z.string().describe("The CDP method, e.g. 'Runtime.evaluate' or 'DOM.getDocument'."),
 				"params": z.record(z.string(), z.unknown()).optional().describe("The method's params, e.g. { expression: 'document.title', returnByValue: true }."),
-				"port": z.number().optional().describe("The preview's port (default 5173, the demo's)."),
+				"port": z.number().optional().describe("The preview's port (default 5173, the demo's) — its first window."),
+				"window": z.string().optional().describe("A preview window by its key, when a port has several: '5173' (its first), '5173~2' (its second), … Overrides port."),
 				"tab": TAB
 			}
 		},
 		"handler": async (args) => {
-			const { method, params, port, tab } = args as { "method": string; "params"?: Record<string, unknown>; "port"?: number; "tab"?: string };
+			const { method, params, port, window, tab } = args as { "method": string; "params"?: Record<string, unknown>; "port"?: number; "window"?: string; "tab"?: string };
 
 			try {
-				const reply = await callTab(debugMcp, "preview_cdp", tab, { "port": port ?? 5173, "message": JSON.stringify({ "id": 1, "method": method, "params": params ?? {} }) }, 30000);
+				const reply = await callTab(debugMcp, "preview_cdp", tab, { ...window === undefined ? { "port": port ?? 5173 } : { "window": window }, "message": JSON.stringify({ "id": 1, "method": method, "params": params ?? {} }) }, 30000);
 				const { result, error } = JSON.parse(String(reply)) as { "result"?: unknown; "error"?: { "message"?: string } };
 
 				return error === undefined ? ok(result) : fail(method + ": " + (error.message ?? JSON.stringify(error)));

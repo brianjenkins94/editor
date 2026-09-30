@@ -42,12 +42,12 @@ function tabHub(tab: string): Hub {
 	serve(root, "debug.sessions." + tab, () => (tab === "t1" ? sessions : []));
 	// The preview's CDP endpoint (the shell's preview.cdp, forwarded): a raw reply, with the command's id.
 	serve(root, "preview_cdp." + tab, (args) => {
-		const { port: previewPort, message } = args as { "port": number; "message": string };
+		const { port: previewPort, window, message } = args as { "port"?: number; "window"?: string; "message": string };
 		const command = JSON.parse(message) as { "id": number; "method": string; "params": unknown };
 
 		return JSON.stringify(command.method === "Nope.nope"
 			? { "id": command.id, "error": { "code": -32601, "message": "unknown method" } }
-			: { "id": command.id, "result": { "port": previewPort, "method": command.method, "params": command.params } });
+			: { "id": command.id, "result": { ...window === undefined ? { "port": previewPort } : { "window": window }, "method": command.method, "params": command.params } });
 	});
 	serve(root, "debug.start." + tab, (args) => {
 		started.push(tab);
@@ -140,6 +140,8 @@ test("preview_cdp sends one CDP command to a preview's page and returns its resu
 	assert.notEqual(isError, true, JSON.stringify(value));
 	assert.deepEqual(value, { "port": 5173, "method": "Runtime.evaluate", "params": { "expression": "1 + 1" } });
 	assert.equal(((await call("preview_cdp", { "method": "DOM.getDocument", "port": 5174 })).value as { "port": number }).port, 5174);
+	// A port's second window, by its key.
+	assert.deepEqual(((await call("preview_cdp", { "method": "DOM.getDocument", "window": "5173~2" })).value as { "window": string }).window, "5173~2");
 
 	const failed = await call("preview_cdp", { "method": "Nope.nope" });
 
