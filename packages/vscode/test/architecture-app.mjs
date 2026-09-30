@@ -15,16 +15,27 @@ import { DEBUG_MCP_PORT, hasLabel, startSession } from "./architecture-harness.m
 const { createDebugMcp } = await import("../../debug-mcp/src/server.ts");
 
 const HUB = "https://brianjenkins94.github.io/editor/packages/hub@latest.tgz";
+// (ARCH_OBSERVABILITY_TGZ: test against a locally built observability tarball before it's published.)
+const OBSERVABILITY = process.env.ARCH_OBSERVABILITY_TGZ ?? "https://brianjenkins94.github.io/editor/packages/observability@latest.tgz";
+const UTIL = "https://brianjenkins94.github.io/lib/util@latest.tgz";
 
 const FILES = {
-	"package.json": JSON.stringify({ "name": "wired", "private": true, "type": "module", "dependencies": { "@brianjenkins94/hub": HUB } }, null, "\t"),
+	"package.json": JSON.stringify({ "name": "wired", "private": true, "type": "module", "dependencies": { "@brianjenkins94/hub": HUB, "@brianjenkins94/observability": OBSERVABILITY, "@brianjenkins94/util": UTIL } }, null, "\t"),
 	"index.html": "<!doctype html>\n<html><head><title>wired</title></head><body><script type=\"module\" src=\"./main.ts\"></script></body></html>\n",
 	"frame.html": "<!doctype html>\n<html><head><title>wired frame</title></head><body><script type=\"module\" src=\"./frame.ts\"></script></body></html>\n",
 	// The page: starts the worker, adds the frame, and hands each one end of a channel between them.
 	"main.ts": [
 		"import { createHub } from \"@brianjenkins94/hub\";",
+		"import { linkPreviewHost, relayLoggerToHub, servePageTools } from \"@brianjenkins94/observability\";",
 		"",
-		"const state: { \"hub\": string; \"results\": unknown[]; \"stray\": number; \"startedAt\": number } = { \"hub\": createHub({ \"id\": \"page\" }).id, \"results\": [], \"stray\": 0, \"startedAt\": performance.timeOrigin };",
+		"const hub = createHub({ \"id\": \"page\" });",
+		"const state: { \"hub\": string; \"results\": unknown[]; \"stray\": number; \"startedAt\": number } = { \"hub\": hub.id, \"results\": [], \"stray\": 0, \"startedAt\": performance.timeOrigin };",
+		"",
+		"// The app's own observability, joining the editor's tree: a tool of its own, and its logs.",
+		"servePageTools(hub, { \"tools\": [{ \"name\": \"wired_status\", \"description\": \"The wired app's state.\", \"inputSchema\": { \"type\": \"object\" }, \"handler\": () => ({ \"results\": state.results, \"stray\": state.stray }) }] });",
+		"linkPreviewHost(hub);",
+		"relayLoggerToHub(hub, \"wired-page\").info(\"wired page up\");",
+		"(globalThis as unknown as { \"__wiredHub\": typeof hub }).__wiredHub = hub;",
 		"const worker = new Worker(new URL(\"./worker.ts\", import.meta.url), { \"type\": \"module\" });",
 		"const frame = document.createElement(\"iframe\");",
 		"",
@@ -192,4 +203,28 @@ test("an edit to a module only the nested frame loaded reloads that frame, and l
 	assert.equal(page.startedAt, before.startedAt, "the page wasn't reloaded");
 	assert.equal(page.title, before.title, "nor frame.ts run in it (it sets the title)");
 	assert.deepEqual(page.results, [{ "echoed": "hi", "from": "worker" }]);
+});
+
+test("the app's own hubs join the editor's tree: its startup log, its tab and its tools reach debug-mcp through it", async () => {
+	const logs = await eventually("the app's startup log", async () => {
+		const found = debugMcp.store.queryLogs({ "source": "wired-page", "textIncludes": "wired page up" });
+
+		return found.length > 0 ? found : undefined;
+	});
+
+	assert.equal(logs.length, 1, "logged before the link was up, and delivered once");
+
+	const app = await eventually("the app's tab", async () => (await debugMcp.tabs(2000)).find((tab) => tab.preview === true));
+	const answer = await debugMcp.rpc.request("tool.wired_status." + app.tab, {}, { "timeoutMs": 5000, "waitForResponderMs": 5000 });
+
+	assert.deepEqual(answer.results, [{ "echoed": "hi", "from": "worker" }], "its tool answered, through the editor's tree");
+	assert.ok((await debugMcp.tabs(2000)).some((tab) => tab.preview !== true), "beside the editor's own tab");
+});
+
+test("the app's link is confined: an editor subject it publishes doesn't cross into the editor", async () => {
+	const port = Number(/\/__virtual__\/[^/]+\/(\d+)\//u.exec(previewPage().url())?.[1]);
+
+	await previewPage().evaluate((closing) => { globalThis.__wiredHub.publish("preview.close", { "port": closing }); }, port);
+	await session.page.waitForTimeout(1500);
+	assert.ok(previewPage() !== undefined, "the preview is still open");
 });

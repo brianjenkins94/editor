@@ -109,6 +109,8 @@ export const nodes: NodeSpec[] = [
 
 export const hubLinks: [string, string][] = [
 	["shell", "root"],
+	// An app's own hubs, in a preview (observability's linkPreviewHost; permissioned, non-transit — shell-preview.ts).
+	["shell", "preview:*"],
 	["root", "workbench"],
 	["root", "sw"],
 	["root", "debug-mcp"],
@@ -154,10 +156,11 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.prompt", "hubs": ["pod", "shell"], "description": "Ask the user about a capability, served by the shell." },
 	{ "pattern": "pod.ready", "hubs": ["pod", "debug-worker"], "description": "A debug worker is up." },
 	{ "pattern": "editor.ready", "hubs": ["pod"], "description": "Published by the pod — nothing subscribes yet." },
-	{ "pattern": "tab.>", "hubs": ["root", "debug-mcp"], "description": "debug-mcp's tab discovery: which editor tabs are linked, by id." },
-	{ "pattern": "page_tools.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp reads one tab's page-tool manifest (and hears when it changes)." },
-	{ "pattern": "page_eval.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: evaluate in one tab's page." },
-	{ "pattern": "page_query.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: query the DOM." },
+	{ "pattern": "tab.>", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp's tab discovery: which editor tabs are linked, by id." },
+	{ "pattern": "page_tools.*", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp reads one tab's page-tool manifest (and hears when it changes)." },
+	{ "pattern": "tool.>", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp calls a page's own tools (an app in a preview serves them under its tab id)." },
+	{ "pattern": "page_eval.*", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp tool: evaluate in one tab's page." },
+	{ "pattern": "page_query.*", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp tool: query the DOM." },
 	{ "pattern": "preview_provoke.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: provoke one tab's preview (forwarded to preview.provoke)." }
 ];
 

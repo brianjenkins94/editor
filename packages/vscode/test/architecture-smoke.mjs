@@ -86,8 +86,9 @@ test("coverage: every must-see hub link, channel and message was observed", asyn
 	const missing = [];
 
 	for (const [a, b] of hubLinks) {
-		// Links to contexts that exist only under a condition (debug-mcp running, a debug session) aren't required.
-		const conditional = [a, b].some((id) => nodes.find((node) => node.id === id)?.condition !== undefined);
+		// Links to contexts that exist only under a condition (debug-mcp running, a debug session) aren't required — nor
+		// to dynamic ones (`preview:*`: the shell links an app's hubs only when a previewed app links up).
+		const conditional = [a, b].some((id) => id.endsWith("*") || nodes.find((node) => node.id === id)?.condition !== undefined);
 
 		if (!conditional && between(current, a, b).length === 0) {
 			missing.push(`hub link ${a} ⇄ ${b}`);

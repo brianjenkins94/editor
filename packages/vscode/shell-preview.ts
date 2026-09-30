@@ -19,6 +19,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { ArchSink } from "@brianjenkins94/observability";
+import type { LinkPermissions, Transport } from "@brianjenkins94/hub";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { installWindowMessageProbe } from "@brianjenkins94/observability";
 import { ArrowDownToLine, ArrowUpToLine, Pause, Play, Redo2, RotateCcw, Unplug } from "lucide";
@@ -52,11 +53,25 @@ type PromptChoice = "allow-once" | "allow-always" | "deny" | "authorize";
 interface PromptRequest { "kind"?: string; "scope"?: string; "resource"?: string; "dangerous"?: boolean; "redline"?: boolean }
 
 /** One preview surface: its window, the iframe, the capability-prompt overlay, and its HMR unsubscribe. */
+/**
+ * What may cross the link an app in a preview joins the editor's tree through. Out of the app: its observability
+ * (`$sys.log`, its startup backlog, `$sys.arch`), tab discovery answers, page-tool announcements, and RPC replies. Into it: architecture
+ * sync, tab discovery, and calls to the tools it serves under its tab id (see observability's servePageTools). The
+ * preview isn't a security boundary (same origin, unsandboxed — see ARCHITECTURE.md): this keeps an app's traffic
+ * and the editor's apart, and nothing else of the app's leaves it.
+ */
+const PREVIEW_APP_PERMISSIONS: LinkPermissions = {
+	"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "tab.here", "page_tools.changed", "$rpc.reply.>"],
+	"subscribe": ["$sys.arch.sync", "tab.discover", "$rpc.call.page_tools.*", "$rpc.call.tool.>", "$rpc.call.page_eval.*", "$rpc.call.page_query.*"]
+};
+
 interface PreviewSurface {
 	"paneWindow": PaneWindow;
 	"frame": HTMLIFrameElement;
 	"promptEl": HTMLDivElement;
 	"offHmr": () => void;
+	/** The link an app's own hubs join the editor's tree through (see PREVIEW_APP_PERMISSIONS). */
+	"unlinkApp": () => void;
 	/** Serializes THIS window's capability prompts through its overlay, one at a time (another window's prompt can
 	 *  show concurrently on its own overlay). */
 	"promptChain": Promise<unknown>;
@@ -182,7 +197,15 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 				}
 			}
 		});
-		const surface: PreviewSurface = { "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "offHmr": offHmr, "promptChain": Promise.resolve() };
+		// The app's own hubs join the editor's tree here — its page's root hub links to us (observability's
+		// linkPreviewHost) — so its logs, architecture and page tools reach the log plane and debug-mcp, as part of this
+		// tab. Non-transit (two previews never reach each other), known as `preview:<port>`, and confined to what an app
+		// needs to be observed. A new page (a reload) re-reads its tools: announce the change for debug-mcp.
+		const unlinkApp = hub.link(frameTransport(frame), { "transit": false, "peer": "preview:" + port, "permissions": PREVIEW_APP_PERMISSIONS });
+
+		frame.addEventListener("load", () => { hub.publish("page_tools.changed", { "preview": port }); });
+
+		const surface: PreviewSurface = { "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "offHmr": offHmr, "unlinkApp": unlinkApp, "promptChain": Promise.resolve() };
 
 		surfaces.set(port, surface);
 		sink?.spawn({ "id": "preview:" + port, "label": "Preview :" + port, "container": "previews", "detail": "/__virtual__/" + port + "/", "dynamic": true });
@@ -220,8 +243,10 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		}
 
 		surface.offHmr();
+		surface.unlinkApp();
 		surface.paneWindow.element.remove();
 		surfaces.delete(port);
+		hub.publish("page_tools.changed", { "preview": port }); // its app's tools went with it
 		sink?.terminate("preview:" + port);
 
 		if (primaryPort === port) {
@@ -505,4 +530,24 @@ function isWithin(source: MessageEventSource | null, root: Window | null): boole
 	}
 
 	return false;
+}
+
+/** A hub transport to whatever page `frame` holds: its window is looked up on every use — it's null until the frame is
+ *  in the document, and a new page (a reload) is a new realm behind the same frame. What's sent while there's no
+ *  window is dropped; hub's hello handshake recovers (the app's hub says hello when it links, and we answer). */
+function frameTransport(frame: HTMLIFrameElement): Transport {
+	return {
+		"send": (message) => { frame.contentWindow?.postMessage(message, location.origin); },
+		"listen": (onMessage) => {
+			const handler = (event: MessageEvent): void => {
+				if (event.source !== null && event.source === frame.contentWindow && event.origin === location.origin) {
+					onMessage(event.data);
+				}
+			};
+
+			globalThis.addEventListener("message", handler);
+
+			return () => { globalThis.removeEventListener("message", handler); };
+		}
+	};
 }
