@@ -61,6 +61,9 @@ export interface Control {
 	/** Set on the `hello` sent back in answer to a peer's `hello` — so an end whose first `hello` was lost still
 	 *  learns our id. Never answered itself, so hellos can't ping-pong. */
 	"reply"?: boolean;
+	/** On a `hello`, from a hub that ASSIGNED the peer its id (LinkOptions.peer): that id — who the peer is to it,
+	 *  and to everything past it (it stamps `from` with it, and permits the peer only `$rpc.reply.<it>`). */
+	"you"?: string;
 }
 
 function isControl(message: unknown): message is Control {
@@ -112,6 +115,9 @@ interface Link {
 	"transit": boolean;
 	/** True when `peerId` was assigned by this hub (LinkOptions.peer) rather than learned from the peer's hello. */
 	"assigned": boolean;
+	/** The id the hub at the other end assigned US (its hello's `you`) — who we are to it. Taken only from a link we
+	 *  didn't assign: a peer we named can't rename us. */
+	"knownAs"?: string;
 	"permissions"?: LinkPermissions;
 	"detach": () => void;
 	/** Settles `link()`'s `ready`: true on the peer's first hello, false if unlinked before. */
@@ -181,7 +187,8 @@ export interface LinkOptions {
 	/** The id this hub knows the peer by. It overrides whatever the peer claims in its hello, and every message
 	 *  arriving over the link is stamped `from` it — so, past this hub, `from` is authenticated (as far as the hubs in
 	 *  between are trusted). Assign it when this hub decides who the peer is (it created the iframe, seated the
-	 *  player); leave it out to take the peer's word. */
+	 *  player); leave it out to take the peer's word. The peer is told (its `hello` says `you`, Hub.knownAs), so its RPC
+	 *  replies come back under this id, the only one the link lets through to it. */
 	"peer"?: string;
 	"permissions"?: LinkPermissions;
 }
@@ -304,6 +311,12 @@ export class Hub {
 	}
 
 	/** This hub's topology right now: subscriptions, links, their peers and the interest in each direction. */
+	/** The ids hubs we're linked to know us by, where one assigned ours (LinkOptions.peer, told in its hello) — an
+	 *  untrusted child under an edge is its assigned id there, whatever it calls itself. In link order; usually one. */
+	public knownAs(): string[] {
+		return [...new Set([...this.links].map((link) => link.knownAs).filter((id): id is string => id !== undefined))];
+	}
+
 	public inspect(): HubSnapshot {
 		return {
 			"id": this.id,
@@ -369,7 +382,7 @@ export class Hub {
 		this.emit({ "type": "topology" });
 		this.readvertise(); // tell the new link everything we (and our other links) want
 		// ask it to (re-)send its interest, in case ours/theirs raced a lossy transport — and say who we are
-		this.wire(link, { "hub": "hello", "id": this.id });
+		this.wire(link, { "hub": "hello", "id": this.id, ...link.assigned ? { "you": link.peerId } : {} });
 
 		return Object.assign(() => { this.unlink(link); }, { "id": link.id, "ready": ready });
 	}
@@ -399,6 +412,13 @@ export class Hub {
 					this.emit({ "type": "topology" });
 				}
 
+				// Who we are to the hub that assigned our id — only from a link where we didn't assign ITS: a peer we
+				// named can't rename us (and so pull our RPC replies its way).
+				if (!link.assigned && typeof message.you === "string" && message.you !== link.knownAs) {
+					link.knownAs = message.you;
+					this.emit({ "type": "topology" });
+				}
+
 				// Peer (re)connected and may have missed our interest (a lossy transport can drop what we sent
 				// before it was listening). Forget what we think it knows and re-send our full interest — BEFORE
 				// answering, so every hello we send follows our interest: a peer that has our hello knows what we want.
@@ -406,7 +426,7 @@ export class Hub {
 				this.readvertise();
 
 				if (message.reply !== true) {
-					this.wire(link, { "hub": "hello", "id": this.id, "reply": true });
+					this.wire(link, { "hub": "hello", "id": this.id, "reply": true, ...link.assigned ? { "you": link.peerId } : {} });
 				}
 
 				// The peer's interest came ahead of its hello (the same rule, on its side): it's known now.
@@ -747,8 +767,18 @@ function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Pro
  *  interest. One client per hub is plenty; each call is correlated by id. */
 export function createRpcClient(hub: Hub): RpcClient {
 	const pending = new Map<string, Pending>();
+	// Replies come to the id we're addressed by: ours — or, under an edge that assigned us one (a hub's `hello` says
+	// so: Hub.knownAs), that one, the only reply subject the edge lets through to us. Listen on each, as it's learned.
+	const listening = new Set<string>();
+	const replyTo = (): string => hub.knownAs()[0] ?? hub.id;
+	const listen = (id: string): void => {
+		if (!listening.has(id)) {
+			listening.add(id);
+			hub.subscribe(RPC_REPLY + "." + id, onReply);
+		}
+	};
 
-	hub.subscribe(RPC_REPLY + "." + hub.id, (data) => {
+	function onReply(data: unknown): void {
 		if (!isRpcReply(data)) {
 			return;
 		}
@@ -766,6 +796,20 @@ export function createRpcClient(hub: Hub): RpcClient {
 			entry.reject(new Error(data.error));
 		} else {
 			entry.resolve(data.result);
+		}
+	}
+
+	listen(hub.id);
+
+	for (const id of hub.knownAs()) {
+		listen(id);
+	}
+
+	hub.tap((event) => {
+		if (event.type === "topology") {
+			for (const id of hub.knownAs()) {
+				listen(id);
+			}
 		}
 	});
 
@@ -790,7 +834,7 @@ export function createRpcClient(hub: Hub): RpcClient {
 			const onAbort = (): void => {
 				pending.delete(id);
 				entry.cleanup?.();
-				hub.publish(RPC_CALL + "." + name, { "id": id, "replyTo": hub.id, "cancel": true } satisfies RpcCall);
+				hub.publish(RPC_CALL + "." + name, { "id": id, "replyTo": replyTo(), "cancel": true } satisfies RpcCall);
 				reject(signal!.reason);
 			};
 
@@ -808,7 +852,7 @@ export function createRpcClient(hub: Hub): RpcClient {
 			};
 			signal?.addEventListener("abort", onAbort, { "once": true });
 			pending.set(id, entry);
-			hub.publish(RPC_CALL + "." + name, { "id": id, "replyTo": hub.id, "args": args } satisfies RpcCall);
+			hub.publish(RPC_CALL + "." + name, { "id": id, "replyTo": replyTo(), "args": args } satisfies RpcCall);
 		});
 	}
 }

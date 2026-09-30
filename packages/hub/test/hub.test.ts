@@ -592,6 +592,39 @@ test("serve handlers see the caller's authenticated `from` and the link the call
 	assert.deepEqual(context, { "from": "seat-7", "link": { "id": "link-1", "peerId": "seat-7" } });
 });
 
+test("a peer learns the id its edge assigned it — and its RPC calls come back through an edge that permits only that", async () => {
+	// The peer calls itself "worker"; the edge knows it as "seat-3", stamps that, and lets through only its replies.
+	const { hub, peer } = await edge({ "peer": "seat-3", "permissions": { "publish": ["$rpc.call.>"], "subscribe": ["$rpc.reply.seat-3"] } });
+
+	serve(hub, "whoami", (_args, { from }) => from);
+	await flush();
+	assert.deepEqual(peer.knownAs(), ["seat-3"], "told in the edge's hello");
+	assert.deepEqual(hub.knownAs(), [], "and the edge isn't renamed by anything");
+	assert.equal(await createRpcClient(peer).request("whoami", undefined, { "timeoutMs": 1000 }), "seat-3", "the reply reached it under the assigned id");
+});
+
+test("a child can't rename the hub that assigned its id (and so pull that hub's replies its way)", async () => {
+	const [a, b] = pipe();
+	const parent = createHub({ "id": "parent" });
+
+	parent.link(a, { "peer": "child" });
+	// A hostile child, speaking the wire directly: its hello claims the parent is someone else.
+	b.listen(() => undefined);
+	b.send({ "\u0000hub": { "hub": "hello", "id": "child", "you": "victim" } });
+	await flush();
+	assert.deepEqual(parent.knownAs(), []);
+
+	// Where the parent didn't assign the child's id, it's a peer, not a child — and its word is taken.
+	const [c, d] = pipe();
+	const peer = createHub({ "id": "peer" });
+
+	peer.link(c);
+	d.listen(() => undefined);
+	d.send({ "\u0000hub": { "hub": "hello", "id": "edge", "you": "seat-9" } });
+	await flush();
+	assert.deepEqual(peer.knownAs(), ["seat-9"]);
+});
+
 test("a link is ready once the peer's hello has arrived — and with it, the peer's interest", async () => {
 	const [a, b] = pipe();
 	const root = createHub({ "id": "root" });
