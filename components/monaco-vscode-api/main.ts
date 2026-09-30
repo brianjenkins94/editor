@@ -83,6 +83,7 @@ import getTelemetryServiceOverride from "@codingame/monaco-vscode-telemetry-serv
 import getTimelineServiceOverride from "@codingame/monaco-vscode-timeline-service-override";
 import getTreeSitterServiceOverride from "@codingame/monaco-vscode-treesitter-service-override";
 import getUpdateServiceOverride from "@codingame/monaco-vscode-update-service-override";
+import getMeteredConnectionServiceOverride from "@codingame/monaco-vscode-metered-connection-service-override";
 // AI/chat disabled (MCP = Model Context Protocol, AI tooling):
 // import getMcpServiceOverride from '@codingame/monaco-vscode-mcp-service-override'
 import type { EnvironmentOverride } from "@codingame/monaco-vscode-api/workbench";
@@ -345,6 +346,9 @@ const commonServices: IEditorOverrideServices = {
 	// ...getSpeechServiceOverride(),
 	// ...getSurveyServiceOverride(),
 	...getUpdateServiceOverride(),
+	// Metered connections (data saver): extension update checks pause on them. Bundled in the base override until
+	// 37.3.0 split it out; without it the stub reports every connection as unmetered.
+	...getMeteredConnectionServiceOverride(),
 	...getExplorerServiceOverride(),
 	...getLocalizationServiceOverride({
 		"clearLocale": async function() {
