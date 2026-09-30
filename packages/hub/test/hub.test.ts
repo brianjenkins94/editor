@@ -707,3 +707,22 @@ test("pipe's schedule decides how each message travels — fault injection by su
 	assert.equal(frameOf("not a hub message"), undefined);
 	assert.equal(frameOf({ "subject": "x" }), undefined, "a bare envelope-shaped object isn't a hub frame");
 });
+
+test("a link's handle carries its id — the one handlers' origin.link and inspect() use", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	const arrived: (string | undefined)[] = [];
+
+	root.subscribe("hello.root", (_data, _envelope, origin) => { arrived.push(origin.link?.id); });
+
+	const link = root.link(a);
+
+	pod.link(b);
+	await link.ready;
+	pod.publish("hello.root");
+	await flush();
+
+	assert.deepEqual(arrived, [link.id]);
+	assert.deepEqual(root.inspect().links.map((entry) => entry.id), [link.id]);
+});

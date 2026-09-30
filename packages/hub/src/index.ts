@@ -118,11 +118,14 @@ interface Link {
 	"settle": (ready: boolean) => void;
 }
 
-/** What `link()` returns: the unlink function, plus `ready` — resolves true once the peer's hello has arrived, and
- *  with it the peer's interest (a hub advertises its interest before every hello it sends), or false if the link is
- *  gone first. A message published before then can go nowhere: a hub forwards only what it knows the far side wants.
- *  So `await ready` before a one-off publish across a new link (or use `publishWhenInterested`). */
-export type LinkHandle = (() => void) & { readonly "ready": Promise<boolean> };
+/** What `link()` returns: the unlink function, plus
+ * - `id`: the link's id in this hub — what taps, `inspect()` and handlers' `origin.link` call it — so a caller can tell
+ *   which messages arrived over the link it made;
+ * - `ready`: resolves true once the peer's hello has arrived, and with it the peer's interest (a hub advertises its
+ *   interest before every hello it sends), or false if the link is gone first. A message published before then can go
+ *   nowhere: a hub forwards only what it knows the far side wants. So `await ready` before a one-off publish across a
+ *   new link (or use `publishWhenInterested`). */
+export type LinkHandle = (() => void) & { readonly "id": string; readonly "ready": Promise<boolean> };
 
 /** One link as `inspect()` / taps report it. */
 export interface LinkInfo {
@@ -368,7 +371,7 @@ export class Hub {
 		// ask it to (re-)send its interest, in case ours/theirs raced a lossy transport — and say who we are
 		this.wire(link, { "hub": "hello", "id": this.id });
 
-		return Object.assign(() => { this.unlink(link); }, { "ready": ready });
+		return Object.assign(() => { this.unlink(link); }, { "id": link.id, "ready": ready });
 	}
 
 	private unlink(link: Link): void {
