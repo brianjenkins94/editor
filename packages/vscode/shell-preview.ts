@@ -22,7 +22,9 @@ import type { ArchSink } from "@brianjenkins94/observability";
 import type { LinkPermissions, Transport } from "@brianjenkins94/hub";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { installWindowMessageProbe } from "@brianjenkins94/observability";
-import { ArrowDownToLine, ArrowUpToLine, Pause, Play, Redo2, RotateCcw, Unplug } from "lucide";
+import { ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, RotateCcw, Unplug } from "lucide";
+import type { DevtoolsPanel } from "./preview-devtools";
+import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import { LOG_SUBJECT } from "./telemetry";
 import { css, iconSvg } from "./theme";
 import { createPaneWindow, type PaneWindow } from "./window";
@@ -36,6 +38,10 @@ const DEFAULT_PORT = 5173;
 // shell): a TOFU decision clearly interrupts just the running app. Shown on `capability.prompt` (served below),
 // resolved by the user's click.
 const bodyRelative = css({ "position": "relative" });
+// With DevTools open, the body splits: the app on top, DevTools docked below it (preview-devtools.ts).
+const bodySplit = css({ "display": "flex", "flexDirection": "column", "& > iframe": { "flex": "1 1 0", "height": "auto", "minHeight": 0 } });
+/** How much taller a preview window gets while DevTools is docked in it, so the app keeps its room. */
+const DEVTOOLS_HEIGHT = 340;
 const promptLayer = css({
 	"position": "absolute", "inset": 0, "zIndex": 5,
 	"display": "none", "alignItems": "center", "justifyContent": "center", "padding": "var(--wa-space-l)",
@@ -72,6 +78,10 @@ interface PreviewSurface {
 	"offHmr": () => void;
 	/** The link an app's own hubs join the editor's tree through (see PREVIEW_APP_PERMISSIONS). */
 	"unlinkApp": () => void;
+	/** The window body's height without DevTools. */
+	"height": number;
+	/** Chrome DevTools, docked under the app while open. */
+	"devtools"?: DevtoolsPanel;
 	/** Serializes THIS window's capability prompts through its overlay, one at a time (another window's prompt can
 	 *  show concurrently on its own overlay). */
 	"promptChain": Promise<unknown>;
@@ -107,8 +117,8 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	// active session at a time, so the toolbar lives on ONE window; clear every window first so it never lingers on
 	// a previously-active one. pause/step show only for a stepping session (tsval); restart + stop always.
 	const renderDebugToolbar = (): void => {
-		for (const surface of surfaces.values()) {
-			surface.paneWindow.headerActions.replaceChildren();
+		for (const [port, surface] of surfaces) {
+			surface.paneWindow.headerActions.replaceChildren(devtoolsButton(port, surface)); // every app preview has one
 		}
 
 		tsvalSurface?.paneWindow.headerActions.replaceChildren();
@@ -158,6 +168,44 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		host.append(button(RotateCcw, "restart", "Restart"), button(Unplug, "stop", "Stop"));
 	};
 
+	/** Dock DevTools under the app in `surface`'s window, or undock it. */
+	const toggleDevtools = (port: number, surface: PreviewSurface): void => {
+		if (surface.devtools === undefined) {
+			surface.devtools = openDevtoolsPanel(hub, port, surface.frame);
+			surface.paneWindow.body.append(surface.devtools.element);
+			surface.paneWindow.body.classList.add(bodySplit());
+			// Taller by the panel, as far as the viewport below the window allows.
+			const room = window.innerHeight - surface.paneWindow.body.getBoundingClientRect().top - 12;
+
+			surface.paneWindow.setBodyHeight(Math.max(surface.height, Math.min(surface.height + DEVTOOLS_HEIGHT, room)));
+			sink?.spawn({ "id": "devtools:" + port, "label": "DevTools :" + port, "container": "previews", "detail": "Chrome DevTools frontend (chii)", "dynamic": true });
+		} else {
+			surface.devtools.dispose();
+			surface.devtools = undefined;
+			surface.paneWindow.body.classList.remove(bodySplit());
+			surface.paneWindow.setBodyHeight(surface.height);
+			sink?.terminate("devtools:" + port);
+		}
+
+		renderDebugToolbar();
+	};
+
+	const devtoolsButton = (port: number, surface: PreviewSurface): HTMLElement => {
+		const open = surface.devtools !== undefined;
+		const element = document.createElement("wa-button");
+
+		element.setAttribute("appearance", "plain");
+		element.setAttribute("size", "small");
+		element.setAttribute("variant", open ? "brand" : "neutral");
+		element.title = open ? "Close DevTools" : "DevTools";
+		element.setAttribute("aria-label", element.title);
+		element.setAttribute("aria-pressed", String(open));
+		element.innerHTML = iconSvg(Bug, { "size": 15 });
+		element.addEventListener("click", () => { toggleDevtools(port, surface); });
+
+		return element;
+	};
+
 	/** Create (or resurface) the window for `port`, and make it the primary (overlay/toolbar target). */
 	const ensureSurface = (port: number): PreviewSurface => {
 		const existing = surfaces.get(port);
@@ -168,11 +216,12 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 			return existing;
 		}
 
+		const height = Math.min(600, window.innerHeight - 120);
 		const paneWindow = createPaneWindow({
 			"title": `Preview :${port} · ${previewMode}`, // titlebar states the port + which debug run type drives it
 			"storageKey": `preview:${port}`,
 			"width": Math.min(520, window.innerWidth - 80),
-			"height": Math.min(600, window.innerHeight - 120),
+			"height": height,
 			"onClose": () => { hub.publish("preview.close", { "port": port }); }
 		});
 		const frame = document.createElement("iframe");
@@ -205,7 +254,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 
 		frame.addEventListener("load", () => { hub.publish("page_tools.changed", { "preview": port }); });
 
-		const surface: PreviewSurface = { "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "offHmr": offHmr, "unlinkApp": unlinkApp, "promptChain": Promise.resolve() };
+		const surface: PreviewSurface = { "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "offHmr": offHmr, "unlinkApp": unlinkApp, "height": height, "promptChain": Promise.resolve() };
 
 		surfaces.set(port, surface);
 		sink?.spawn({ "id": "preview:" + port, "label": "Preview :" + port, "container": "previews", "detail": "/__virtual__/" + port + "/", "dynamic": true });
@@ -244,6 +293,12 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 
 		surface.offHmr();
 		surface.unlinkApp();
+
+		if (surface.devtools !== undefined) {
+			surface.devtools.dispose();
+			sink?.terminate("devtools:" + port);
+		}
+
 		surface.paneWindow.element.remove();
 		surfaces.delete(port);
 		hub.publish("page_tools.changed", { "preview": port }); // its app's tools went with it
@@ -309,6 +364,9 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 			tsvalSurface.port.postMessage(message);
 		}
 	});
+
+	// Chrome DevTools Protocol for each preview's page, over the hub — the docked DevTools is one client of it.
+	installPreviewCdp(hub, (port) => surfaces.get(port)?.frame);
 
 	/** Show ONE capability prompt as an overlay on `surface`'s preview window and resolve with the user's choice —
 	 *  the running app is dimmed behind it. */
@@ -401,6 +459,12 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		installWindowMessageProbe(sink, (source) => {
 			if (tsvalSurface?.frame.contentWindow === source) {
 				return "tsval-preview";
+			}
+
+			for (const [port, surface] of surfaces) {
+				if (surface.devtools !== undefined && surface.devtools.frame.contentWindow === source) {
+					return "devtools:" + port;
+				}
 			}
 
 			const match = surfaceOf(source);

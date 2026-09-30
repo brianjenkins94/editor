@@ -237,6 +237,7 @@ flowchart LR
     net_unpkg_com["unpkg"]
     net_registry_npmjs_org["npm registry"]
     net_esm_sh["esm.sh"]
+    net_cdn_jsdelivr_net["jsDelivr"]
     net_ka_f_fontawesome_com["Font Awesome"]
     net_open_vsx_org["Open VSX"]
     net_api_github_com["GitHub API"]
@@ -244,6 +245,7 @@ flowchart LR
     debug_mcp["debug-mcp"]
   end
   shell <==>|hub| root
+  shell <==>|hub| preview__
   root <==>|hub| workbench
   root <==>|hub| sw
   root <==>|hub| debug_mcp

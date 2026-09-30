@@ -100,6 +100,7 @@ export const nodes: NodeSpec[] = [
 	{ "id": "tsval-preview", "label": "tsval preview", "container": "previews", "detail": "debug-preview.html", "description": "The tsval debugger's render surface: announces itself (preview-ready), gets a MessagePort from the shell, streams events up and renders the mutation stream the workbench sends.", "observedBy": "the shell's window message probe + the shell's preview bridge", "condition": "while debugging with tsval" },
 	{ "id": "provoke", "label": "Provoke worker", "container": "workers", "hub": true, "detail": "hub · cold-start transform repro", "description": "A throwaway child of the node worker (debug-mcp preview_provoke hardReset): mounts the workspace and transforms modules cold, once.", "observedBy": "its hub reporter + the node worker's Worker probe", "condition": "debug-mcp preview_provoke" },
 	{ "id": "net:esm.sh", "label": "esm.sh", "container": "network", "detail": "preview dependencies", "description": "The previewed app's bare imports (react, react-dom, react-refresh), mapped by the dev server's import map and fetched by the preview through the service worker.", "observedBy": "the service worker's fetch probe", "condition": "while a preview runs" },
+	{ "id": "net:cdn.jsdelivr.net", "label": "jsDelivr", "container": "network", "detail": "preview DevTools", "description": "A preview's DevTools: chobitsu (the CDP implementation added to the previewed page) and Chrome's DevTools frontend (chii's build).", "observedBy": "the service worker's fetch probe", "condition": "while a preview's DevTools is open" },
 	{ "id": "net:ka-f.fontawesome.com", "label": "Font Awesome", "container": "network", "detail": "WebAwesome icons", "description": "WebAwesome's default icon library: the shell chrome's wa-icon elements load their SVGs from the Font Awesome kit CDN, through the service worker.", "observedBy": "the service worker's fetch probe" },
 	{ "id": "net:open-vsx.org", "label": "Open VSX", "container": "network", "detail": "extension gallery", "description": "The extension gallery.", "observedBy": "the service worker's fetch probe", "condition": "when the gallery is queried" },
 	{ "id": "net:api.github.com", "label": "GitHub API", "container": "network", "detail": "shell only", "description": "Loading repos and publishing, from the shell (which holds the token).", "observedBy": "the service worker's fetch probe", "condition": "when a GitHub repo is loaded" },
@@ -184,6 +185,7 @@ export const channels: ChannelSpec[] = [
 	{ "a": "workbench", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "User data, logs, storage, workspace-fs." },
 	// the preview pipeline
 	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "description": "Into the iframe: HMR updates (vite-hmr), capability decisions. Out of it: console/errors (obs-log → $sys.log.preview), WebSocket/WebRTC capability requests (cap-decide)." },
+	{ "a": "shell", "b": "devtools:*", "protocol": "CDP (Chrome DevTools Protocol)", "transport": "window.postMessage", "description": "A preview's docked DevTools frontend: raw CDP commands up, replies and events down — the shell relays them over the hub (preview.cdp / preview.cdp.event.<port>) to chobitsu in the preview's page (preview-devtools.ts)." },
 	{ "a": "shell", "b": "tsval-preview", "protocol": "tsval render protocol", "transport": "window.postMessage + MessagePort", "description": "preview-ready → init (MessagePort); events and time travel up, the mutation stream down." },
 	{ "a": "preview:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, intercepted by the service worker", "description": "Everything under /__virtual__/<port>/ (answered by the dev server over the hub), plus the app's own requests (CDN imports pass through; data fetches are capability-gated, failing closed). Same origin and unsandboxed, by necessity — see ARCHITECTURE.md." },
 	{ "a": "node", "b": "sw", "protocol": "capability decision, HTTP", "transport": "synchronous XMLHttpRequest (POST /__capability__/decide), fetch", "description": "Every write/delete a node script makes asks the service worker, which asks the pod (capability.decide); and the worker's own requests, like every controlled context's." },
@@ -412,10 +414,10 @@ export function isEndedPlaceholder(id: string, state: string): boolean {
 }
 
 /** Contexts created at runtime, by id prefix, and where they live. */
-export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "vite:", "server:"];
+export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:"];
 
 export function dynamicContainer(id: string): string | undefined {
-	if (id.startsWith("preview:")) {
+	if (id.startsWith("preview:") || id.startsWith("devtools:")) {
 		return "previews";
 	}
 

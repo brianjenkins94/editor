@@ -25,6 +25,8 @@ export interface PaneWindow {
 	 *  actions (e.g. the preview's debug toolbar). */
 	readonly "headerActions": HTMLElement;
 	"setCollapsed": (collapsed: boolean) => void;
+	/** Resize the body (the window follows it). */
+	"setBodyHeight": (height: number) => void;
 	/** Append to <body> if not already shown. */
 	"show": () => void;
 }
@@ -179,6 +181,7 @@ export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
 		"body": body,
 		"headerActions": headerExtras,
 		"setCollapsed": setCollapsed,
+		"setBodyHeight": (next: number) => { body.style.height = next + "px"; },
 		"show": show
 	};
 }
