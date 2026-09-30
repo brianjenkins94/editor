@@ -144,3 +144,12 @@ test("with several tabs connected, a call names its tab", async () => {
 	assert.match(String(ambiguous.value), /several editor tabs/u);
 	assert.deepEqual((await call("game_status", { "client": "client-0", "tab": "t1" })).value, { "client": "client-0", "state": "in sync" });
 });
+
+test("a tool no connected tab serves any more is removed from the list", async () => {
+	// t2 (the only one serving game_step) goes; t1 (game_status) stays.
+	sockets[1].close();
+
+	const tools = await toolsWhen((names) => !names.includes("game_step"));
+
+	assert.ok(tools.some((tool) => tool.name === "game_status"), "the other tab's tool stays");
+});
