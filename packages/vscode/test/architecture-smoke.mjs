@@ -25,7 +25,7 @@ const MUST_SEE_CHANNELS = [
 	"workbench ⇄ exthost-iframe",
 	"workbench ⇄ exthost:LocalWebWorker:*",
 	"exthost:LocalWebWorker:* ⇄ nested:*",
-	"workbench ⇄ net:origin",
+	"workbench ⇄ sw",
 	"sw ⇄ net:*",
 	"workbench ⇄ idb",
 	"shell ⇄ preview:*",
@@ -41,7 +41,7 @@ const MUST_SEE_CHANNELS = [
 const MUST_SEE_LABELS = [
 	["node", "workbench", /^workspace\.buffer\(\)$/u],
 	["workbench", "node", /^workspace\.changed$/u],
-	["sw", "root", /^virtual\.request(\.\w+)?\(\)$/u],
+	["sw", "root", /^virtual\.request\.[\w*]+\(\)$/u], // addressed to its tab (the id folds to `*`)
 	[PREVIEW, "sw", /^GET \/src\/main\.tsx$/u],
 	["sw", "net:esm.sh", /^GET /u],
 	["node", "vite:5173", /^file changed$/u], // the save, as workspace.changed

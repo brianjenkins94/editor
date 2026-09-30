@@ -195,7 +195,10 @@ export async function startSession(options = {}) {
 		"request": async (subject, data, timeoutMs) => workbench().evaluate(([s, d, t]) => globalThis.__architecture.request(s, d, t), [subject, data, timeoutMs]),
 		/** Type a command into a terminal: the current one, or a new one (the current may be busy with a server). */
 		"terminal": async (command, { fresh = false } = {}) => {
-			if (fresh) {
+			// The terminal is created on demand (it's off the boot path), so a session starts without one.
+			const exists = await workbench().locator(".xterm").first().isVisible().catch(() => false);
+
+			if (fresh || !exists) {
 				await focusWorkbench();
 				await runCommand("Terminal: Create New Terminal");
 				await page.waitForTimeout(1500); // the new terminal takes focus

@@ -176,6 +176,7 @@ export const channels: ChannelSpec[] = [
 	{ "a": "exthost:LocalWebWorker:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "description": "Extensions loading their resources, and TypeScript's automatic type acquisition (npm package metadata)." },
 	{ "a": "shell", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "description": "GitHub repos and publishing, diff highlighting, WebAwesome's icons." },
 	{ "a": "sw", "b": "net:*", "protocol": "HTTP", "transport": "fetch", "description": "Every upstream request: the app's own server, the node_modules CDN, and the APIs the pages and workers call." },
+	{ "a": "shell", "b": "net:*", "protocol": "HTTP", "transport": "fetch, before the service worker controls the page", "description": "A first visit on the dev server: the shell renders (its WebAwesome icons, …) before the newly registered service worker claims the page, so those requests go straight out. Once it's controlled, they go through the service worker." },
 	{ "a": "workbench", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "User data, logs, storage, workspace-fs." },
 	// the preview pipeline
 	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "description": "Into the iframe: HMR updates (vite-hmr), capability decisions. Out of it: console/errors (obs-log → $sys.log.preview), WebSocket/WebRTC capability requests (cap-decide)." },
