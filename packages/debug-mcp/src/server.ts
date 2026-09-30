@@ -120,8 +120,9 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		setTimeout(() => { requestArchSync(hub); }, 500);
 
 		socket.addEventListener("close", () => {
-			unlink();
+			// Count it gone first, so whoever watches the topology change sees the new link count.
 			links.delete(socket);
+			unlink();
 		});
 	});
 

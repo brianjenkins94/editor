@@ -22,7 +22,9 @@ import type { Logger, LogRecord } from "@brianjenkins94/util/logger";
 import { createRpcClient, portTransport, serve, websocketTransport } from "@brianjenkins94/hub";
 import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
 
+import type { PageTool } from "./page-tools.ts";
 import type { TabInfo } from "./tabs.ts";
+import { servePageToolSet } from "./page-tools.ts";
 import { TAB_DISCOVER, TAB_HERE } from "./tabs.ts";
 
 /** Reserved observability namespace — records are published on `$sys.log.<source>`; app code must not use it.
@@ -285,6 +287,9 @@ export interface PageToolsOptions {
 	/** Host calls to expose the same way, each forwarded into THIS tab's own tree: `{ "preview_provoke": "preview.provoke" }`
 	 *  serves `preview_provoke.<tab>` by requesting `preview.provoke` here. The caller owns the timeout (and cancels). */
 	"forward"?: Record<string, string>;
+	/** Tools this page defines (see page-tools.ts): debug-mcp registers each as a real MCP tool while this tab is
+	 *  connected, and forwards calls here. */
+	"tools"?: PageTool[];
 }
 
 /**
@@ -327,6 +332,7 @@ export function servePageTools(hub: Hub, options: PageToolsOptions = {}): string
 		serve(hub, name + "." + tab, (args, { signal }) => rpc.request(target, args ?? {}, { "timeoutMs": Infinity, "waitForResponderMs": 10000, "signal": signal }));
 	}
 
+	servePageToolSet(hub, tab, options.tools ?? []);
 	answerTabDiscovery(hub, tab);
 
 	return tab;
@@ -375,4 +381,5 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 export * from "./arch.ts";
 export * from "./arch-probes.ts";
 export * from "./arch-store.ts";
+export * from "./page-tools.ts";
 export * from "./tabs.ts";

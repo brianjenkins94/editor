@@ -14,6 +14,7 @@
 import type { DebugMcp } from "./server.ts";
 import type { QueryLogsInput, QuerySpansInput, WaitInput } from "./store.ts";
 import { registerDebugTools } from "./debug-tools.ts";
+import { syncPageTools } from "./page-tools.ts";
 import { callTab } from "./forward.ts";
 import { defineTool, fail, ok, registerTool } from "@brianjenkins94/util/mcp/tool";
 
@@ -222,6 +223,8 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 	}));
 
 	registerDebugTools(server, debugMcp);
+	// Last, so a page can't take over any of the tools above.
+	syncPageTools(server, debugMcp);
 
 	return server;
 }
