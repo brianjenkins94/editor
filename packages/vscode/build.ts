@@ -208,6 +208,11 @@ export function hostPlugins(): Plugin[] {
 export async function preBuild(): Promise<void> {
 	// 1. Workbench iframe entry (workbench-entry.tsx → dist/workbench.js). monaco kept external → ./main.js.
 	await buildPackage(root, {
+		// Relative, like every other build here: the workbench is served under /__vscode__/, and with the default "/"
+		// Vite's dynamic-import preload helper asked for a lazy chunk's dependencies at the SITE root (the terminal's
+		// just-bash chunk as /browser.js → index.html, "Failed to load module script") — the import itself, relative,
+		// still worked.
+		"base": "./",
 		"plugins": [bundledExtension("hello"), bundledExtension("worker-pod"), bundledExtension("eslint"), bundledExtension("capabilities"), editorSettingsDefaultsPlugin()],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
