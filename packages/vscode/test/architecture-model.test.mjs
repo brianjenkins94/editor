@@ -102,51 +102,87 @@ test("a link that closed before its peer answered was a transient; one still una
 	assert.equal(isEndedPlaceholder("worker:classify-worker", "terminated"), false);
 });
 
-test("a previewed app's contexts are its own: found from its page's link to the shell, and not checked against the model", () => {
+/** One preview window's worth of a netsim-shaped app, as the editor observes it: its hubs scoped under `window` (the
+ *  shell scopes an app's observability as it enters — observability's scopeObservability). */
+function appWindow(window) {
+	const at = (id) => window + "/" + id;
+	const base = "http://localhost:5173/__virtual__/t1/5173/";
+
+	return {
+		"topology": [
+			[at("page"), { "links": [{ "peerId": "shell" }, { "peerId": at("referee") }] }],
+			[at("referee"), { "links": [{ "peerId": at("page") }, { "peerId": at("client-0") }] }],
+			[at("client-0"), { "links": [{ "peerId": at("referee") }, { "peerId": at("client-0.ui") }] }],
+			[at("client-0.ui"), { "links": [{ "peerId": at("client-0") }] }]
+		],
+		"channels": [
+			{ "a": "shell", "b": at("page"), "labels": new Map([["tab.here", { "count": 1, "hub": 1 }]]) },
+			{ "a": at("page"), "b": at("referee"), "labels": new Map([["netsim.local.join()", { "count": 1, "hub": 1 }]]) },
+			{ "a": at("client-0"), "b": at("client-0.ui"), "labels": new Map([["netsim.local.view.client-0", { "count": 9, "hub": 9 }]]) }
+		],
+		// Both windows of one port load the same addresses.
+		"realms": [
+			[at("page"), { "kind": "window", "url": base }],
+			[at("client-0.ui"), { "kind": "window", "url": base + "instance.html?id=client-0", "parent": base }],
+			[at("referee"), { "kind": "worker", "url": base + "src/browser/referee.worker.ts" }],
+			[at("client-0"), { "kind": "worker", "url": base + "src/browser/client.worker.ts" }]
+		]
+	};
+}
+
+test("a previewed app's contexts are its own: scoped under their preview window, and not checked against the model", () => {
+	const app = appWindow("preview:5173");
 	const topology = new Map([
 		["shell", { "links": [{ "peerId": "root" }, { "peerId": "preview:5173" }] }],
 		["root", { "links": [{ "peerId": "shell" }, { "peerId": "mystery" }] }],
-		// the app: its page hub (linked to the shell), a worker, and a worker's frame
-		["page", { "links": [{ "peerId": "shell" }, { "peerId": "referee" }] }],
-		["referee", { "links": [{ "peerId": "page" }, { "peerId": "client-0" }] }],
-		["client-0", { "links": [{ "peerId": "referee" }, { "peerId": "client-0.ui" }] }]
+		...app.topology
 	]);
-	const channels = [
-		{ "a": "shell", "b": "page", "labels": new Map([["tab.here", { "count": 1, "hub": 1 }]]) },
-		{ "a": "page", "b": "referee", "labels": new Map([["netsim.local.join()", { "count": 1, "hub": 1 }]]) },
-		{ "a": "client-0", "b": "client-0.ui", "labels": new Map([["netsim.local.view.client-0", { "count": 9, "hub": 9 }]]) },
-		{ "a": "root", "b": "mystery", "labels": new Map() }
-	];
+	const channels = [...app.channels, { "a": "root", "b": "mystery", "labels": new Map() }];
 
-	assert.deepEqual([...appNodes({ "channels": channels, "topology": topology })].sort(), ["client-0", "client-0.ui", "page", "referee"]);
+	assert.deepEqual([...appNodes({ "channels": channels, "topology": topology })].sort(), ["preview:5173/client-0", "preview:5173/client-0.ui", "preview:5173/page", "preview:5173/referee"]);
 
-	// Without the shell's link to a preview, an undeclared hub linked to the shell isn't an app.
-	const noPreview = new Map([...topology, ["shell", { "links": [{ "peerId": "root" }] }]]);
-
-	assert.deepEqual([...appNodes({ "channels": channels, "topology": noPreview })], []);
-
-	const violations = checkConformance({ "nodes": ["shell", "root", "page", "referee", "client-0", "client-0.ui", "mystery"], "channels": channels, "topology": topology });
+	const violations = checkConformance({ "nodes": ["shell", "root", "preview:5173", ...app.topology.map(([id]) => id), "mystery"], "channels": channels, "topology": topology });
 
 	assert.deepEqual(violations.map((violation) => violation.type === "unknown-node" ? "unknown " + violation.id : violation.type + " " + violation.a + "⇄" + violation.b).sort(), ["undeclared-channel root⇄mystery", "unknown mystery"], "the editor's own unknowns are still flagged");
+	// An unscoped undeclared hub linked to the shell is a finding, not an app.
+	assert.ok(checkConformance({ "nodes": ["page"], "channels": [{ "a": "shell", "b": "page", "labels": new Map() }], "topology": new Map([["page", { "links": [{ "peerId": "shell" }] }]]) }).some((violation) => violation.type === "unknown-node" && violation.id === "page"));
 });
 
-test("a previewed app's layout: its page is its preview, frames sit in their windows, workers under the window they link", () => {
-	const base = "http://localhost:5173/__virtual__/t1/5173/";
-	const topology = new Map([
-		["shell", { "links": [{ "peerId": "root" }, { "peerId": "preview:5173" }] }],
-		["page", { "links": [{ "peerId": "shell" }, { "peerId": "referee" }] }],
-		["referee", { "links": [{ "peerId": "page" }, { "peerId": "client-0" }] }],
-		["client-0", { "links": [{ "peerId": "referee" }, { "peerId": "client-0.ui" }] }],
-		["client-0.ui", { "links": [{ "peerId": "client-0" }] }]
-	]);
-	const realms = new Map([
-		["page", { "kind": "window", "url": base }],
-		["client-0.ui", { "kind": "window", "url": base + "instance.html?id=client-0", "parent": base }],
-		["referee", { "kind": "worker", "url": base + "src/browser/referee.worker.ts" }],
-		["client-0", { "kind": "worker", "url": base + "src/browser/client.worker.ts" }]
-	]);
-	const layout = appLayout({ "channels": [], "topology": topology, "realms": realms });
+test("a previewed app's layout: its page is its preview window, frames sit in their windows, workers under the window they link", () => {
+	const app = appWindow("preview:5173");
+	const layout = appLayout({ "channels": app.channels, "topology": new Map(app.topology), "realms": new Map(app.realms) });
 
-	assert.deepEqual([...layout.alias], [["page", "preview:5173"]], "the page in the preview's top frame IS the preview");
-	assert.deepEqual(Object.fromEntries(layout.parent), { "client-0.ui": "preview:5173", "referee": "preview:5173", "client-0": "client-0.ui" });
+	assert.deepEqual([...layout.alias], [["preview:5173/page", "preview:5173"]], "the hub linked to the shell IS the preview window");
+	assert.deepEqual(Object.fromEntries(layout.parent), { "preview:5173/client-0.ui": "preview:5173", "preview:5173/referee": "preview:5173", "preview:5173/client-0": "preview:5173/client-0.ui" });
+});
+
+test("two windows on one port: each window's contexts apart, nested within that window only, none flagged", () => {
+	const first = appWindow("preview:5173");
+	const second = appWindow("preview:5173~2");
+	const topology = new Map([["shell", { "links": [{ "peerId": "root" }, { "peerId": "preview:5173" }, { "peerId": "preview:5173~2" }] }], ["root", { "links": [{ "peerId": "shell" }] }], ...first.topology, ...second.topology]);
+	const channels = [...first.channels, ...second.channels];
+	const layout = appLayout({ "channels": channels, "topology": topology, "realms": new Map([...first.realms, ...second.realms]) });
+
+	assert.equal(layout.nodes.size, 8);
+	assert.deepEqual(Object.fromEntries(layout.alias), { "preview:5173/page": "preview:5173", "preview:5173~2/page": "preview:5173~2" });
+	// Same addresses in both windows, yet each frame sits in its own window's page.
+	assert.equal(layout.parent.get("preview:5173/client-0.ui"), "preview:5173");
+	assert.equal(layout.parent.get("preview:5173~2/client-0.ui"), "preview:5173~2");
+	assert.equal(layout.parent.get("preview:5173~2/client-0"), "preview:5173~2/client-0.ui");
+	assert.deepEqual(checkConformance({ "nodes": ["shell", "root", "preview:5173", "preview:5173~2", ...layout.nodes], "channels": channels, "topology": topology }), []);
+});
+
+test("a hub linked across windows (not through the editor) is the other window's, not a context of its own", () => {
+	// netsim's players: the host window runs the referee; the player window's client links to it over a BroadcastChannel,
+	// so its link's peer is named under the player's window.
+	const topology = new Map([
+		["preview:5173/page", { "links": [{ "peerId": "shell" }, { "peerId": "preview:5173/referee" }] }],
+		["preview:5173/referee", { "links": [{ "peerId": "preview:5173/page" }] }],
+		["preview:5173~2/page", { "links": [{ "peerId": "shell" }, { "peerId": "preview:5173~2/player-1" }] }],
+		["preview:5173~2/player-1", { "links": [{ "peerId": "preview:5173~2/page" }, { "peerId": "preview:5173~2/referee" }] }]
+	]);
+	const layout = appLayout({ "channels": [{ "a": "preview:5173~2/player-1", "b": "preview:5173~2/referee" }], "topology": topology, "realms": new Map() });
+
+	assert.equal(layout.alias.get("preview:5173~2/referee"), "preview:5173/referee");
+	assert.equal(layout.alias.get("preview:5173~2/page"), "preview:5173~2", "and a window's own page still is its window");
 });

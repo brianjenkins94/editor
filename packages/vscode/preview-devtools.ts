@@ -2,9 +2,10 @@
  * Chrome DevTools for the app previews, over the hub.
  *
  * Two halves:
- *  - the CDP endpoint (`installPreviewCdp`): the shell serves `preview.cdp` — `{ port, message }`, one raw Chrome
- *    DevTools Protocol command for that preview's page, answered with the raw reply — and publishes the page's events
- *    on `preview.cdp.event.<port>`. It reaches the page through chobitsu (a JavaScript implementation of CDP, the engine
+ *  - the CDP endpoint (`installPreviewCdp`): the shell serves `preview.cdp` — `{ window, message }`, one raw Chrome
+ *    DevTools Protocol command for that preview window's page (`window` is its key: `5173`, or `5173~2` for the port's
+ *    second window; `{ port }` means the port's first), answered with the raw reply — and publishes the page's events
+ *    on `preview.cdp.event.<key>`. It reaches the page through chobitsu (a JavaScript implementation of CDP, the engine
  *    under eruda, chii and CodeSandbox's DevTools), which it adds to the page on first use: the preview is same origin
  *    and unsandboxed (see ARCHITECTURE.md), so nothing is injected until something asks. Each caller's ids are swapped
  *    for the endpoint's own, so several clients can share a page.
@@ -26,9 +27,9 @@ import { css } from "./theme";
 const CHOBITSU_URL = "https://cdn.jsdelivr.net/npm/chobitsu@1.8.6/dist/chobitsu.js";
 const FRONTEND_URL = "https://cdn.jsdelivr.net/npm/chii@1.15.5/public/front_end";
 
-/** RPC: `{ port, message }` → the raw reply. */
+/** RPC: `{ window, message }` (or `{ port, message }`) → the raw reply. */
 export const PREVIEW_CDP = "preview.cdp";
-/** Event subject prefix: `preview.cdp.event.<port>` carries each raw event of that preview's page. */
+/** Event subject prefix: `preview.cdp.event.<key>` carries each raw event of that preview window's page. */
 export const PREVIEW_CDP_EVENT = "preview.cdp.event.";
 
 const panelClass = css({ "flex": "0 0 45%", "minHeight": 0, "borderBlockStart": "1px solid var(--wa-color-surface-border)", "& > iframe": { "display": "block", "border": 0, "width": "100%", "height": "100%" } });
@@ -73,11 +74,11 @@ async function chobitsuIn(page: Window): Promise<Chobitsu> {
 
 /** Serve `preview.cdp` for the preview on each port — `frameOf` finds its iframe. A page is a session: a reload is a new
  *  page, which gets its own chobitsu on the next command. */
-export function installPreviewCdp(hub: Hub, frameOf: (port: number) => HTMLIFrameElement | undefined): void {
+export function installPreviewCdp(hub: Hub, frameOf: (key: string) => HTMLIFrameElement | undefined): void {
 	const sessions = new WeakMap<Window, Promise<PageSession>>();
 	let nextId = 0;
 
-	const sessionFor = (port: number, page: Window): Promise<PageSession> => {
+	const sessionFor = (key: string, page: Window): Promise<PageSession> => {
 		const existing = sessions.get(page);
 
 		if (existing !== undefined) {
@@ -91,7 +92,7 @@ export function installPreviewCdp(hub: Hub, frameOf: (port: number) => HTMLIFram
 				const { id } = JSON.parse(message) as { "id"?: unknown };
 
 				if (id === undefined) {
-					hub.publish(PREVIEW_CDP_EVENT + port, message);
+					hub.publish(PREVIEW_CDP_EVENT + key, message);
 				} else if (typeof id === "string") {
 					pending.get(id)?.(message);
 					pending.delete(id);
@@ -108,19 +109,21 @@ export function installPreviewCdp(hub: Hub, frameOf: (port: number) => HTMLIFram
 	};
 
 	serve(hub, PREVIEW_CDP, async (args) => {
-		const { port, message } = (args ?? {}) as { "port"?: unknown; "message"?: unknown };
+		const { window: named, port, message } = (args ?? {}) as { "window"?: unknown; "port"?: unknown; "message"?: unknown };
+		// A window by its key (`5173`, `5173~2` — a port's second window), or a port (its first window).
+		const key = typeof named === "string" ? named : typeof port === "number" ? String(port) : undefined;
 
-		if (typeof port !== "number" || typeof message !== "string") {
-			throw new Error("preview.cdp takes { port, message }");
+		if (key === undefined || typeof message !== "string") {
+			throw new Error("preview.cdp takes { window or port, message }");
 		}
 
-		const page = frameOf(port)?.contentWindow;
+		const page = frameOf(key)?.contentWindow;
 
 		if (page === undefined || page === null) {
-			throw new Error("no preview page on port " + port);
+			throw new Error("no preview window " + key);
 		}
 
-		const { chobitsu, pending } = await sessionFor(port, page);
+		const { chobitsu, pending } = await sessionFor(key, page);
 		const command = JSON.parse(message) as Record<string, unknown>;
 		const own = "hub:" + String(nextId += 1);
 
@@ -169,9 +172,9 @@ export interface DevtoolsPanel {
 	"dispose": () => void;
 }
 
-/** Chrome's DevTools frontend for the preview on `port`, talking to it through `preview.cdp`. A new page in the preview
- *  (a reload) starts the frontend over: it holds the old page's state. */
-export function openDevtoolsPanel(hub: Hub, port: number, preview: HTMLIFrameElement): DevtoolsPanel {
+/** Chrome's DevTools frontend for the preview window `key` (its key: `5173`, `5173~2`), talking to it through
+ *  `preview.cdp`. A new page in the preview (a reload) starts the frontend over: it holds the old page's state. */
+export function openDevtoolsPanel(hub: Hub, key: string, preview: HTMLIFrameElement): DevtoolsPanel {
 	const rpc = createRpcClient(hub);
 	const element = document.createElement("div");
 	const frame = document.createElement("iframe");
@@ -206,7 +209,7 @@ export function openDevtoolsPanel(hub: Hub, port: number, preview: HTMLIFrameEle
 
 		const sentFor = generation;
 
-		rpc.request(PREVIEW_CDP, { "port": port, "message": event.data }, { "timeoutMs": 30000 }).then(
+		rpc.request(PREVIEW_CDP, { "window": key, "message": event.data }, { "timeoutMs": 30000 }).then(
 			(reply) => {
 				if (sentFor === generation && typeof reply === "string") {
 					toFrontend(reply);
@@ -216,7 +219,7 @@ export function openDevtoolsPanel(hub: Hub, port: number, preview: HTMLIFrameEle
 		);
 	};
 
-	const offEvents = hub.subscribe(PREVIEW_CDP_EVENT + port, (message) => {
+	const offEvents = hub.subscribe(PREVIEW_CDP_EVENT + key, (message) => {
 		if (typeof message === "string") {
 			toFrontend(message);
 		}

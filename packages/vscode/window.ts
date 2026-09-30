@@ -56,6 +56,9 @@ export interface PaneWindowOptions {
 	"width"?: number;
 	/** Body height in px (the header sits above it). Default 640. */
 	"height"?: number;
+	/** Where it opens when it has no position of its own saved (under `storageKey`). Default: centred. */
+	"left"?: number;
+	"top"?: number;
 	"onClose"?: () => void;
 }
 
@@ -125,8 +128,8 @@ export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
 	const clampLeft = (left: number): number => Math.max(4, Math.min(left, window.innerWidth - win.offsetWidth - 4));
 	const clampTop = (top: number): number => Math.max(4, Math.min(top, window.innerHeight - 40));
 
-	win.style.left = clampLeft(state.left ?? Math.max(8, (window.innerWidth - width) / 2)) + "px";
-	win.style.top = clampTop(state.top ?? Math.max(8, (window.innerHeight - height) / 2 - 24)) + "px";
+	win.style.left = clampLeft(state.left ?? options.left ?? Math.max(8, (window.innerWidth - width) / 2)) + "px";
+	win.style.top = clampTop(state.top ?? options.top ?? Math.max(8, (window.innerHeight - height) / 2 - 24)) + "px";
 
 	function setCollapsed(collapsed: boolean): void {
 		win.toggleAttribute("data-collapsed", collapsed);

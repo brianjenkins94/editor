@@ -53,9 +53,11 @@ export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput): Cu
 			writeLive("out", `  [2m${stamp()}[0m [36m[vite][0m ${kind} [2m${update.path ?? ""}[0m\n`);
 		});
 
-		// Block like a real dev server until EITHER the shell's Ctrl-C (ctx.signal, also forwarded through
-		// `npm run dev` — see terminal-npm.ts) OR the debug session's Stop button (production.stop) fires.
+		// Block like a real dev server until the shell's Ctrl-C (ctx.signal, also forwarded through `npm run dev` — see
+		// terminal-npm.ts), the debug session's Stop button (production.stop), or the server's last preview window
+		// closing (which stops the server) — whichever comes first.
 		let offStop = (): void => { /* set below */ };
+		let offClosed = (): void => { /* set below */ };
 
 		await new Promise<void>((resolve) => {
 			if (ctx.signal?.aborted === true) {
@@ -66,10 +68,12 @@ export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput): Cu
 
 			ctx.signal?.addEventListener("abort", () => { resolve(); }, { "once": true });
 			offStop = runner.onProductionStop(sessionId, () => { resolve(); });
+			offClosed = runner.onPreviewClose(port, () => { resolve(); });
 		});
 
 		off();
 		offStop();
+		offClosed();
 		runner.endProductionSession(sessionId);
 		runner.closePreview(port);
 		inUsePorts.delete(port); // free it for the next run

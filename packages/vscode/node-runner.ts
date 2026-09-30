@@ -50,6 +50,8 @@ export interface NodeRunner {
 	"openPreview": (root: string, port?: number) => void;
 	/** Stop the preview on `port`: the host closes that window and the worker stops its dev server (Ctrl-C on `vite`). */
 	"closePreview": (port?: number) => void;
+	/** When the preview on `port` is stopped from anywhere — Ctrl-C, or its last window closed. */
+	"onPreviewClose": (port: number, handler: () => void) => () => void;
 	/** Present a long-running production run (the vite preview) as a VS Code debug session: publishes
 	 *  `production.launch` (the ext host starts a `production` attach session) and returns its id. `port`, when the
 	 *  run binds one (a preview server), is carried so the SW can attribute that port's net to this run. `target`
@@ -257,6 +259,11 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); }),
 		"openPreview": (root, port) => { hub.publish("preview.open", { "root": root, "mode": "production", "port": port }); },
 		"closePreview": (port) => { hub.publish("preview.close", { "port": port }); },
+		"onPreviewClose": (port, handler) => hub.subscribe("preview.close", (data) => {
+			if ((data as { "port"?: number } | null)?.port === port) {
+				handler();
+			}
+		}),
 		"startProductionSession": (name, port, target) => {
 			const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
 

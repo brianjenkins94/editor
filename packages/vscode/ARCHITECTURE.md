@@ -77,9 +77,20 @@ the dev server over the hub (`virtual.request.<tab>` to that tab's root, which a
 **esm.sh** and pass through the service worker. When anything changes the workspace (a save, a git checkout, a
 script), the dev server hears it on `workspace.changed` and emits an HMR update on `preview.hmr.<port>` → the shell
 posts it into the iframe. Back up the other way, the iframe's injected tap posts `obs-log` (console →
-`$sys.log.preview`) and `cap-decide` (WebSocket/WebRTC capability requests; the shell answers `cap-decision`). A node
-script's fs writes ask the service worker synchronously (`POST /__capability__/decide`). On the live diagram:
-`preview:<port>` (the iframe) and `vite:<port>` (its dev server) come and go with the preview.
+`$sys.log.<window>`), `cap-decide` (WebSocket/WebRTC capability requests; the shell answers `cap-decision`) and
+`open-window` (below). A node script's fs writes ask the service worker synchronously (`POST /__capability__/decide`).
+On the live diagram: `preview:<port>` (the iframe) and `vite:<port>` (its dev server) come and go with the preview.
+
+**A server has as many windows as the user opens**, like browser tabs onto one dev server — and no address bar. A
+window's "new window" button opens another onto the same server; so does the app itself, opening one of its pages as
+a new window (`window.open`, a `target="_blank"` link): the tap hands that up as `open-window` instead of letting it
+leave the editor as a browser tab. Each window is its own page — its own reload, DevTools, capability prompts and hub
+link — named `preview:<port>` (the port's first) or `preview:<port>~<n>`; HMR reaches all of them; closing one closes
+just it, and closing a server's last window (or Ctrl-C on `vite`) stops the server. An app's hubs name themselves (every
+window of one app has a `page`), so the shell scopes each window's observability as it enters the editor's tree
+(observability's `scopeObservability`): the view and debug-mcp see `preview:<port>~<n>/page`, never two `page`s merged.
+Two ports are two servers; in the editor they share one origin (ports are paths under `/__virtual__/`), which a desktop
+wouldn't — so an app can't rely on origin-scoped state crossing ports.
 
 **The service worker keeps no state.** The browser stops an idle service worker and starts a fresh global on the
 next event, so it remembers nothing between requests: it asks the page for a hub link whenever it starts

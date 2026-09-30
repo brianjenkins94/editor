@@ -72,8 +72,8 @@ export const containers: ContainerSpec[] = [
 	{ "id": "podWorkers", "label": "Pod workers", "caption": "the worker-pod extension's: its language servers, and a debug worker per tsval session", "parent": "workbenchIframe", "kind": "realm" },
 	{ "id": "extHostIframe", "label": "Extension host iframe", "caption": "hidden iframe · relays its worker", "parent": "workbenchIframe", "kind": "origin" },
 	{ "id": "extHostWorker", "label": "Web worker extension host", "caption": "LocalWebWorker extensions, tsserver", "parent": "extHostIframe", "kind": "realm" },
-	{ "id": "previews", "label": "Preview windows", "caption": "iframes in the shell · served from /__virtual__/<port>/ by the service worker", "parent": "shell", "kind": "origin" },
-	{ "id": "previewApp", "label": "App", "caption": "the previewed app's own hubs, workers and frames (joined through the shell) · its architecture, not the editor's", "parent": "previews", "kind": "group" },
+	{ "id": "previews", "label": "Preview windows", "caption": "iframes in the shell, any number per server (preview:<port>, preview:<port>~<n>) · served from /__virtual__/<port>/ by the service worker", "parent": "shell", "kind": "origin" },
+	{ "id": "previewApp", "label": "App", "caption": "the previewed app's own hubs, workers and frames, per window (joined through the shell, named <window>/<hub>) · its architecture, not the editor's", "parent": "previews", "kind": "group" },
 	{ "id": "sharedMemory", "label": "Shared memory", "caption": "SharedArrayBuffer · Atomics locks", "column": 3, "kind": "group" },
 	{ "id": "browser", "label": "Browser", "caption": "storage", "column": 3, "kind": "group" },
 	{ "id": "network", "label": "Network (service worker)", "caption": "every HTTP request goes out through the service worker · debug-mcp's WebSocket connects directly", "column": 3, "kind": "group", "node": "sw" }
@@ -188,8 +188,8 @@ export const channels: ChannelSpec[] = [
 	{ "a": "shell", "b": "net:*", "protocol": "HTTP", "transport": "fetch, before the service worker controls the page", "description": "A first visit on the dev server: the shell renders (its WebAwesome icons, …) before the newly registered service worker claims the page, so those requests go straight out. Once it's controlled, they go through the service worker." },
 	{ "a": "workbench", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "User data, logs, storage, workspace-fs." },
 	// the preview pipeline
-	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "description": "Into the iframe: HMR updates (vite-hmr), capability decisions. Out of it: console/errors (obs-log → $sys.log.preview), WebSocket/WebRTC capability requests (cap-decide)." },
-	{ "a": "shell", "b": "devtools:*", "protocol": "CDP (Chrome DevTools Protocol)", "transport": "window.postMessage", "description": "A preview's docked DevTools frontend: raw CDP commands up, replies and events down — the shell relays them over the hub (preview.cdp / preview.cdp.event.<port>) to chobitsu in the preview's page (preview-devtools.ts)." },
+	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "description": "Into the iframe: HMR updates (vite-hmr), capability decisions. Out of it: console/errors (obs-log → $sys.log.<window>), WebSocket/WebRTC capability requests (cap-decide), and pages the app opens as new windows (open-window → another preview window)." },
+	{ "a": "shell", "b": "devtools:*", "protocol": "CDP (Chrome DevTools Protocol)", "transport": "window.postMessage", "description": "A preview's docked DevTools frontend: raw CDP commands up, replies and events down — the shell relays them over the hub (preview.cdp / preview.cdp.event.<window>) to chobitsu in the preview window's page (preview-devtools.ts)." },
 	{ "a": "shell", "b": "tsval-preview", "protocol": "tsval render protocol", "transport": "window.postMessage + MessagePort", "description": "preview-ready → init (MessagePort); events and time travel up, the mutation stream down." },
 	{ "a": "preview:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, intercepted by the service worker", "description": "Everything under /__virtual__/<port>/ (answered by the dev server over the hub), plus the app's own requests (CDN imports pass through; data fetches are capability-gated, failing closed). Same origin and unsandboxed, by necessity — see ARCHITECTURE.md." },
 	{ "a": "node", "b": "sw", "protocol": "capability decision, HTTP", "transport": "synchronous XMLHttpRequest (POST /__capability__/decide), fetch", "description": "Every write/delete a node script makes asks the service worker, which asks the pod (capability.decide); and the worker's own requests, like every controlled context's." },
@@ -411,82 +411,90 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 }
 
 /**
- * A previewed app's own contexts, among what's observed. An app joins the editor's tree through the shell's link to
- * its preview (`preview:<port>`; observability's linkPreviewHost): its page is a hub the model doesn't declare, linked
- * to the shell — and every other undeclared context reachable from it, by hub link or channel, is the app's too (its
- * workers, the frames it nests). None of it is the editor's architecture.
+ * A previewed app's own context: `<window>/<hub>` — the hub's own id, under the preview window it runs in. An app's hub
+ * ids are its own choice (every window of one app has a `page`), so the shell scopes an app's observability as it
+ * enters the editor's tree, per window (shell-preview.ts, observability's scopeObservability): its reports and records
+ * name its contexts `preview:<port>/<id>` (or `preview:<port>~<n>/<id>` for the port's n-th window).
  */
-export function appNodes(observed: { "channels": { "a": string; "b": string }[]; "topology": Map<string, ObservedTopology> }): Set<string> {
-	const app = new Set<string>();
+export function isAppNode(id: string): boolean {
+	return /^preview:[^/]+\/./u.test(id);
+}
 
-	if (!(observed.topology.get("shell")?.links ?? []).some((link) => link.peerId?.startsWith("preview:") === true)) {
-		return app;
-	}
+/** The preview window an app context runs in (`preview:<port>` or `preview:<port>~<n>`). */
+export function appWindowOf(id: string): string | undefined {
+	return isAppNode(id) ? id.slice(0, id.indexOf("/")) : undefined;
+}
 
-	const undeclared = (id: string): boolean => nodeSpec(id) === undefined && !id.startsWith("net:") && !DYNAMIC_PREFIXES.some((prefix) => id.startsWith(prefix)) && !(/:link-\d+$/u).test(id);
-	const queue = [...observed.topology].filter(([hub, snapshot]) => undeclared(hub) && snapshot.links.some((link) => link.peerId === "shell")).map(([hub]) => hub);
-
-	while (queue.length > 0) {
-		const id = queue.shift()!;
-
-		if (app.has(id)) {
-			continue;
-		}
-
-		app.add(id);
-
-		const neighbours = [
-			...(observed.topology.get(id)?.links ?? []).map((link) => link.peerId),
-			...observed.channels.filter((channel) => channel.a === id || channel.b === id).map((channel) => (channel.a === id ? channel.b : channel.a))
-		];
-
-		queue.push(...neighbours.filter((neighbour): neighbour is string => neighbour !== undefined && undeclared(neighbour) && !app.has(neighbour)));
-	}
-
-	return app;
+/** A previewed app's own contexts, among what's observed (isAppNode). None of it is the editor's architecture. */
+export function appNodes(observed: { "nodes"?: string[]; "channels": { "a": string; "b": string }[]; "topology": Map<string, ObservedTopology> }): Set<string> {
+	return new Set([...observed.nodes ?? [], ...observed.topology.keys(), ...observed.channels.flatMap((channel) => [channel.a, channel.b])].filter(isAppNode));
 }
 
 /** Where a reporting hub runs (observability's ArchRealm). */
 export interface ObservedRealm { "kind": "window" | "worker"; "url": string; "parent"?: string }
 
 export interface AppLayout {
-	/** The previewed app's contexts (appNodes). */
+	/** The previewed apps' contexts (appNodes). */
 	"nodes": Set<string>;
-	/** An app context that IS a declared one: the page in a preview's top frame is that preview (`preview:<port>`). */
+	/** An app context that IS another: the page in a preview window — the hub linked to the shell — is that window
+	 *  (`preview:<port>`, `preview:<port>~<n>`); a hub linked across windows, named under the linking window, is the one
+	 *  reporting in the other. */
 	"alias": Map<string, string>;
 	/** Where each app context runs, when known: a frame in the window that holds it, a worker under the one window it's
-	 *  linked to (in alias terms — a child of the page is a child of its preview). */
+	 *  linked to (in alias terms — a child of the page is a child of its preview window). */
 	"parent": Map<string, string>;
 }
 
 /**
- * How a previewed app's contexts nest, from where each says it runs (its realm): the window at a preview's address
- * (`/__virtual__/<tab>/<port>/`, no app window above it) is that preview itself; a frame sits in the window its parent
- * address names; a worker, under the one app window it's linked to (by hub link or channel).
+ * How a previewed app's contexts nest, per preview window: the hub linked to the shell is that window's page (so, the
+ * window itself); a frame sits in the window its parent address names (within the same preview window — two windows
+ * of one app have the same addresses); a worker, under the one app window it's linked to (by hub link or channel).
  */
 export function appLayout(observed: { "channels": { "a": string; "b": string }[]; "topology": Map<string, ObservedTopology>; "realms": Map<string, ObservedRealm> }): AppLayout {
 	const nodes = appNodes(observed);
 	const alias = new Map<string, string>();
 	const parent = new Map<string, string>();
 	const windows = [...nodes].filter((id) => observed.realms.get(id)?.kind === "window");
-	const byUrl = new Map(windows.map((id) => [observed.realms.get(id)!.url, id]));
 	const named = (id: string): string => alias.get(id) ?? id;
 
-	for (const id of windows) {
-		const realm = observed.realms.get(id)!;
-		const port = /\/__virtual__\/[^/]+\/(\d+)\//u.exec(realm.url)?.[1];
-		const holder = realm.parent === undefined ? undefined : byUrl.get(realm.parent);
+	for (const id of nodes) {
+		if ((observed.topology.get(id)?.links ?? []).some((link) => link.peerId === "shell")) {
+			alias.set(id, appWindowOf(id)!);
+		}
+	}
 
-		if (holder === undefined && port !== undefined) {
-			alias.set(id, "preview:" + port);
+	// A hub linked across windows — not through the editor (a BroadcastChannel between two windows of one origin, say) —
+	// is named under the window that links to it, though it runs in another. One that never reports under that window,
+	// whose own id reports in exactly one other window, is that one.
+	const reporters = [...observed.topology.keys()].filter(isAppNode);
+	const bare = (id: string): string => id.slice(appWindowOf(id)!.length + 1);
+
+	for (const id of nodes) {
+		if (!observed.topology.has(id) && !alias.has(id)) {
+			const elsewhere = reporters.filter((reporter) => appWindowOf(reporter) !== appWindowOf(id) && bare(reporter) === bare(id));
+
+			if (elsewhere.length === 1) {
+				alias.set(id, named(elsewhere[0]));
+			}
+		}
+	}
+
+	// A window by its address, per preview window — the page (the aliased hub) first, where a realm holds several hubs.
+	const byUrl = new Map<string, string>();
+
+	for (const id of windows.toSorted((a, b) => Number(alias.has(b)) - Number(alias.has(a)))) {
+		const key = appWindowOf(id) + "\0" + observed.realms.get(id)!.url;
+
+		if (!byUrl.has(key)) {
+			byUrl.set(key, id);
 		}
 	}
 
 	for (const id of windows) {
 		const holder = observed.realms.get(id)!.parent;
-		const window = holder === undefined ? undefined : byUrl.get(holder);
+		const window = holder === undefined ? undefined : byUrl.get(appWindowOf(id) + "\0" + holder);
 
-		if (window !== undefined && window !== id) {
+		if (window !== undefined && window !== id && !alias.has(id)) {
 			parent.set(id, named(window));
 		}
 	}
@@ -518,6 +526,10 @@ export function isEndedPlaceholder(id: string, state: string): boolean {
 export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:"];
 
 export function dynamicContainer(id: string): string | undefined {
+	if (isAppNode(id)) {
+		return "previewApp";
+	}
+
 	if (id.startsWith("preview:") || id.startsWith("devtools:")) {
 		return "previews";
 	}

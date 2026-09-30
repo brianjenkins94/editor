@@ -318,6 +318,27 @@ const OBS_TAP = `<script>
 		var r = e && e.reason;
 		send({ level: "error", message: "unhandledrejection: " + ((r && r.message) || String(r)), attrs: { stack: r && r.stack } });
 	});
+	// New windows stay in the editor: the app opening one of its server's pages as a new window — \`window.open\`, a
+	// \`target="_blank"\` link, a modifier-click on a link — gets another preview window onto that page (the shell opens
+	// it: \`open-window\`), not a browser tab outside the editor. Anything else (another site, a named target) is the
+	// browser's, as always. There's no window to hand back, so such a \`window.open\` returns null (as a blocked popup does).
+	var pageOf = function (url) {
+		try { var u = new URL(String(url), location.href); return u.origin === location.origin && /^\\/__virtual__\\/[^\\/]+\\/\\d+\\//.test(u.pathname) ? u.href : undefined; } catch (e) { return undefined; }
+	};
+	var openWindow = function (href) { try { host.postMessage({ channel: "open-window", url: href }, "*"); } catch (e) {} };
+	var origOpen = window.open;
+	window.open = function (url, target) {
+		var href = url === undefined || url === "" ? undefined : pageOf(url);
+		if (href !== undefined && (target === undefined || target === "" || target === "_blank")) { openWindow(href); return null; }
+		return origOpen.apply(window, arguments);
+	};
+	addEventListener("click", function (e) {
+		if (e.defaultPrevented || e.button !== 0) { return; }
+		var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+		if (!a || a.hasAttribute("download") || !(a.target === "_blank" || e.metaKey || e.ctrlKey || e.shiftKey)) { return; }
+		var href = pageOf(a.href);
+		if (href !== undefined) { e.preventDefault(); openWindow(href); }
+	});
 	// Capability ENFORCEMENT (Phase 2): the service worker's net gate only sees HTTP(S) — WebSocket (excluded from
 	// SW fetch by spec) and WebRTC (P2P over UDP) slip past it. Gate them HERE, in the preview realm, before app
 	// code runs. A sync constructor can't await a decision on the main thread (no Atomics.wait), so WebSocket

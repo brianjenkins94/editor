@@ -12,7 +12,7 @@ import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@bria
 import type { ContainerSpec, Violation } from "./architecture-model";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
 import type { AppLayout } from "./architecture-model";
-import { appLayout, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, isEndedPlaceholder, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
+import { appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, isEndedPlaceholder, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -177,11 +177,23 @@ function containerOf(node: RuntimeNode, app: ReadonlySet<string> = new Set()): s
 }
 
 function labelOf(store: ArchitectureStore, id: string): string {
-	return nodeSpec(id)?.label ?? store.nodes.get(id)?.spec.label ?? id;
+	const window = appWindowOf(id);
+
+	// A previewed app's context by its own name — its window says which preview it's in (detailOf).
+	return nodeSpec(id)?.label ?? store.nodes.get(id)?.spec.label ?? (window === undefined ? id : id.slice(window.length + 1));
 }
 
 function detailOf(node: RuntimeNode): string {
-	return nodeSpec(node.id)?.detail ?? node.spec.detail ?? node.spec.role ?? "";
+	const window = appWindowOf(node.id);
+
+	return nodeSpec(node.id)?.detail ?? node.spec.detail ?? node.spec.role ?? (window === undefined ? "" : "in " + windowLabel(window));
+}
+
+/** `preview:5173` → "Preview :5173"; `preview:5173~2` → "Preview :5173 (2)". */
+function windowLabel(window: string): string {
+	const [port, index] = window.slice("preview:".length).split("~");
+
+	return "Preview :" + port + (index === undefined ? "" : " (" + index + ")");
 }
 
 /** A context the model doesn't list: a previewed app's own, created at runtime (its channels are declared by prefix),
