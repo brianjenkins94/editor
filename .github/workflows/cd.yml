@@ -14,8 +14,8 @@
     "group": "${{ github.workflow }}-${{ github.ref }}"
   },
   # Must grant at least what the reusable deploy workflow needs (its token is the intersection).
-  # contents:write lets the reusable deploy's opt-in release step cut GitHub releases (util-release) — see
-  # `release: true` below; pages + id-token are for the Pages deploy.
+  # contents:write lets util-publish cut + publish the `release` workspaces' GitHub releases; pages + id-token
+  # are for the Pages deploy.
   "permissions": {
     "contents": "write",
     "pages": "write",
@@ -27,13 +27,13 @@
       "if": "${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}",
       # lib's reusable app-deploy workflow: setup → run → pages-deploy(docs). workspace-packages makes CI an
       # ephemeral pnpm workspace so sibling packages link (bablr → its bablr-language-ts sibling). util-publish
-      # builds every workspace (the private workbench app → docs/) then publishes tarballs for packages with a
-      # GitHub release (others just build), so it's safe on every push.
+      # builds every workspace (the private workbench app → docs/), then publishes the `release` workspaces'
+      # tarballs, each onto its own GitHub release series (one draft; bump its package.json.version to publish).
       "uses": "brianjenkins94/lib/.github/workflows/deploy.yml@main",
       "with": {
         "run": "npx util-publish",
         "workspace-packages": "packages/*,components/*",
-        "release": true
+        "release": "packages/*,components/*"
       },
       "secrets": {
         "NPM_TOKEN": "${{ secrets.NPM_TOKEN }}"
