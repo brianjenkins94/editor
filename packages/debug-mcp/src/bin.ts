@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * debug-mcp entry — starts the WebSocket collector and serves the MCP tools over stdio.
  *
