@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@brianjenkins94/hub": "file:../hub"
+    "@brianjenkins94/hub": "https://brianjenkins94.github.io/editor/packages/hub@latest.tgz"
   },
   "peerDependencies": {
     "@brianjenkins94/util": "*"
