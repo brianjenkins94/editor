@@ -404,6 +404,34 @@ export async function preBuild(): Promise<void> {
 	});
 }
 
+/** Preload the shell's chunk (and its imports + CSS) from index.html. main.tsx imports it dynamically (so its
+ *  WebAwesome chrome stays out of the app iframe), which otherwise starts the fetch only once index.js has run —
+ *  and the app iframe, and so the workbench iframe, waits on the shell rendering. Fetch only (`preload`, not
+ *  `modulepreload`): the app iframe loads this same index.html and never runs the shell. */
+function shellPreloadPlugin(): Plugin {
+	return {
+		"name": "shell-preload",
+		"apply": "build",
+		"transformIndexHtml": {
+			"order": "post",
+			"handler": (_html, context) => {
+				const shell = Object.values(context.bundle ?? {}).find((chunk) => chunk.type === "chunk" && chunk.facadeModuleId?.endsWith("/shell.tsx") === true);
+
+				if (shell?.type !== "chunk") {
+					return [];
+				}
+
+				const css = [...shell.viteMetadata?.importedCss ?? []];
+
+				return [
+					...[shell.fileName, ...shell.imports].map((file) => ({ "tag": "link", "attrs": { "rel": "preload", "as": "script", "crossorigin": "", "href": file }, "injectTo": "head" as const })),
+					...css.map((file) => ({ "tag": "link", "attrs": { "rel": "preload", "as": "style", "href": file }, "injectTo": "head" as const }))
+				];
+			}
+		}
+	};
+}
+
 /** The host site (→ repo docs/), serving the pre-built dist/ + component under /__vscode__/. emptyOutDir FALSE
  *  so it lays down alongside the published package tarballs (docs/*.tgz). */
 async function hostBuild(): Promise<void> {
@@ -412,7 +440,7 @@ async function hostBuild(): Promise<void> {
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		"resolve": { "dedupe": ["preact", "preact/hooks", "preact/jsx-runtime", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
 		"build": { "outDir": "../../docs", "emptyOutDir": false },
-		"plugins": hostPlugins()
+		"plugins": [...hostPlugins(), shellPreloadPlugin()]
 	});
 }
 

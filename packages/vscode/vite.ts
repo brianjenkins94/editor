@@ -86,7 +86,8 @@ export function workbenchPreloadPlugin(): Plugin {
 		"apply": "build",
 		"transformIndexHtml": () => ["workbench.js", "main.js", ...componentStaticChunks(componentDistDirectory())].map((file) => ({
 			"tag": "link",
-			"attrs": { "rel": "preload", "as": "script", "crossorigin": "", "href": MOUNT.slice(1) + file },
+			// Low priority: on a warm load these are ~14MB of cache reads that would otherwise delay the shell's own files.
+			"attrs": { "rel": "preload", "as": "script", "crossorigin": "", "fetchpriority": "low", "href": MOUNT.slice(1) + file },
 			"injectTo": "head" as const
 		}))
 	};

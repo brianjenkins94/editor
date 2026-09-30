@@ -2,9 +2,7 @@
 import type { Preview } from "./preview";
 import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
 import { installWindowMessageProbe } from "@brianjenkins94/observability";
-import types from "editor:types";
 import moduleVersions from "editor:versions";
-import workspace from "editor:workspace";
 import { ensureCrossOriginIsolated } from "./coi";
 import { hostLog } from "./logging";
 import { consoleCollector, installHubCollector, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "./telemetry";
@@ -24,14 +22,17 @@ if (isolated && window.parent === window) {
 	// branch below, booting the workbench into the middle (fill mode). One entry, one bundle, one COI bootstrap.
 	// DYNAMIC import so the shell's WebAwesome chrome (wa-page, wa-button, the theme) lands in a shell-only chunk and
 	// never loads in the app iframe — the editor realm stays WA-free.
+	performance.mark("shell/import");
 	void import("./shell.tsx").then(({ renderShell }) => { renderShell(); });
 } else if (isolated) {
 	// The workbench opens on the bundled demo workspace (snapshot.ts bakes `demo/` in at build time as
 	// `editor:workspace`). The dependency type surface (`editor:types`) is seeded alongside so the
 	// in-browser TS server resolves the demo's imports, and `editor:versions` drives the CDN node_modules
 	// overlay for go-to-definition into real dependency source. A real on-disk folder (File System Access)
-	// becomes an additional source mode later.
-	const files = [...workspace, ...types];
+	// becomes an additional source mode later. Both load DYNAMICALLY: the type surface is ~480KB the shell (top
+	// level) never uses, and the app only needs them to answer the workbench's `workbench.init`, well after it
+	// creates the workbench iframe — so neither is on the path to that.
+	const files = Promise.all([import("editor:workspace"), import("editor:types")]).then(([workspace, types]) => [...workspace.default, ...types.default]);
 	const base = (import.meta as unknown as { "env"?: Record<string, string | undefined> }).env?.BASE_URL ?? "/";
 
 	// The root hub — top of the composable-hub tree. A collector renders every context's spans/records off the

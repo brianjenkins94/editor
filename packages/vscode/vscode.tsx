@@ -29,8 +29,8 @@ import { windowServerTransport } from "./pane-link";
 const PANE_ID = "editor";
 
 export interface VscodeWindowOptions {
-	/** Files to seed the workbench with. */
-	"files"?: WorkbenchFile[];
+	/** Files to seed the workbench with — awaited only when the workbench asks for them (`workbench.init`). */
+	"files"?: WorkbenchFile[] | Promise<WorkbenchFile[]>;
 	/** Files (by path) opened on first layout. */
 	"openEditors"?: string[];
 	/** Workspace folder the files live under (shown as the explorer root, e.g. "/workspace"). */
@@ -115,7 +115,7 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 	paneHub.link(windowServerTransport(PANE_ID, () => iframe.contentWindow ?? undefined));
 
 	// The pane requests its workspace once linked (RPC, retried on its side until interest settles); serve it.
-	serve(paneHub, "workbench.init", () => ({ "files": files, "openEditors": openEditors, "workspaceFolder": workspaceFolder, "moduleVersions": moduleVersions, "tab": tab }));
+	serve(paneHub, "workbench.init", async () => ({ "files": await files, "openEditors": openEditors, "workspaceFolder": workspaceFolder, "moduleVersions": moduleVersions, "tab": tab }));
 
 	// The pane announces it's up (→ whenReady) and streams saves back (→ onSave).
 	paneHub.subscribe("workbench.online", () => {

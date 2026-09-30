@@ -19,7 +19,7 @@ import { createHub, createRpcClient, windowTransport } from "@brianjenkins94/hub
 import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play } from "lucide";
 import { logger } from "@brianjenkins94/util/logger";
 import { render } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { renderGitPanel } from "./git-panel";
 import { reportArchitecture } from "./architecture";
 import { getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
@@ -341,8 +341,11 @@ function Shell() {
 	const overlayCloseRef = useRef<HTMLElement>(null);
 	const hubRef = useRef<Hub>();
 
-	// Mount-once wiring: the shell hub linked to the app iframe, the review panel, and the preview window.
-	useEffect(() => {
+	// Mount-once wiring: the shell hub linked to the app iframe, the review panel, and the preview window. A LAYOUT
+	// effect, so it runs right after the first render: a plain effect waits for the first paint, which a page opened
+	// in a background tab doesn't get (its timers are throttled to about once a second), and everything the editor
+	// loads waits on this iframe.
+	useLayoutEffect(() => {
 		const appFrame = appFrameRef.current;
 
 		if (appFrame === null) {
@@ -350,6 +353,7 @@ function Shell() {
 		}
 
 		// Load the SAME page into the iframe; that instance sees `window.parent !== window` → main.tsx boots the app.
+		performance.mark("shell/app-iframe");
 		appFrame.src = location.href;
 
 		const shellHub = createHub({ "id": "shell" });
@@ -966,6 +970,8 @@ function applySystemColorScheme(): void {
 
 /** Build the shell chrome, iframe the app, and wire the LHS picker over the hub. */
 export function renderShell(): void {
+	// Load milestones (with main.tsx's shell/import and the app iframe's own), for load investigations.
+	performance.mark("shell/render");
 	document.documentElement.classList.add("wa-theme-default");
 	applySystemColorScheme();
 	window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applySystemColorScheme);
