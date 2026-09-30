@@ -40,7 +40,8 @@ async function startProcess(command, args, cwd, ready) {
 	await new Promise((resolve, reject) => {
 		const timer = setTimeout(() => { reject(new Error(command + " didn't start")); }, TIMEOUT_MS);
 		const onData = (chunk) => {
-			if (String(chunk).includes(ready)) {
+			// Without colors stripped, Vite's "Local:" never matches where CI turns them on ("\e[1mLocal\e[22m:").
+			if (String(chunk).replaceAll(/\u001B\[[\d;]*m/gu, "").includes(ready)) {
 				clearTimeout(timer);
 				resolve();
 			}

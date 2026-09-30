@@ -9,8 +9,10 @@
     },
     "workflow_dispatch": null
   },
+  # Every push to main runs to completion (a newer push would otherwise cancel it partway, and pushes come often);
+  # only a pull request's superseded run is cancelled.
   "concurrency": {
-    "group": "${{ github.workflow }}-${{ github.ref }}",
+    "group": "${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}",
     "cancel-in-progress": true
   },
   # The live architecture view's end-to-end suites (packages/vscode/test/architecture-*.mjs): a real editor session in
