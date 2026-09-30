@@ -46,6 +46,63 @@ export function relayLoggerToHub(hub: Hub, source: string): Logger {
 	return logger({ "source": source });
 }
 
+/** Where a root sends a linking collector the records it logged before it could receive them (see `logBacklog`) —
+ *  one message, an array of LogRecords. Outside `$sys.log.>`, so the root's own collectors never see it. */
+export const LOG_BACKLOG = "$sys.backlog.log";
+
+/**
+ * Hold a root's records for a collector that isn't linked yet (debug-mcp, before its socket opens and its interest
+ * arrives), then send them to it as one backlog (`LOG_BACKLOG`) — so it sees startup too.
+ *
+ * No record is both sent live and in the backlog: a record published once the collector's interest is known went
+ * out live, so the first one to see that interest flushes the backlog instead of joining it (the collector's
+ * `$sys.log.>` and `LOG_BACKLOG` interest arrive together, in its hello). Holds at most `max` (the newest).
+ */
+export function logBacklog(hub: Hub, { max = 1000 } = {}): { "flushWhenReady": (timeoutMs?: number) => Promise<void>; "rearm": () => void; "dispose": () => void } {
+	let held: LogRecord[] | undefined = [];
+
+	const flush = (): void => {
+		const records = held ?? [];
+
+		held = undefined;
+
+		if (records.length > 0) {
+			hub.publish(LOG_BACKLOG, records);
+		}
+	};
+	const unsubscribe = hub.subscribe(LOG_SUBJECT + ".>", (data) => {
+		if (held === undefined) {
+			return;
+		}
+
+		if (hub.interested(LOG_BACKLOG)) {
+			flush();
+
+			return;
+		}
+
+		held.push(data as LogRecord);
+
+		if (held.length > max) {
+			held.shift();
+		}
+	});
+
+	return {
+		/** A collector is linking: send the backlog once it can receive it (or give up after `timeoutMs`). */
+		"flushWhenReady": async (timeoutMs = 5000) => {
+			if (held !== undefined && await hub.whenInterested(LOG_BACKLOG, timeoutMs)) {
+				flush();
+			}
+		},
+		/** The collector went away: hold records again, for the next one. */
+		"rearm": () => {
+			held ??= [];
+		},
+		"dispose": unsubscribe
+	};
+}
+
 /** Root side: subscribe to every context's records on `$sys.log.>` and hand each to `onRecord`. */
 export function installHubCollector(hub: Hub, onRecord: (record: LogRecord) => void): () => void {
 	return hub.subscribe(LOG_SUBJECT + ".>", (data) => { onRecord(data as LogRecord); });
@@ -353,6 +410,8 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 
 	let everConnected = false;
 	let unlink: (() => void) | undefined;
+	// What's logged before the socket is up (and its interest has arrived) — startup, mostly — would never reach it.
+	const backlog = logBacklog(rootHub);
 
 	const connect = (): void => {
 		const ws = new WebSocket(url);
@@ -360,11 +419,13 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 		ws.addEventListener("open", () => {
 			everConnected = true;
 			unlink = rootHub.link(websocketTransport(ws));
+			void backlog.flushWhenReady();
 		});
 
 		ws.addEventListener("close", () => {
 			unlink?.();
 			unlink = undefined;
+			backlog.rearm();
 
 			if (everConnected) {
 				setTimeout(connect, 2000); // debug-mcp restarted — rejoin

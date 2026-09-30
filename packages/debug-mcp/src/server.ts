@@ -22,6 +22,8 @@ import { RecordStore } from "./store.ts";
 /** Reserved observability namespace — must match `@brianjenkins94/observability`'s `LOG_SUBJECT` (kept as its
  *  own constant so this Node collector doesn't pull the browser-oriented observability package). */
 const LOG_SUBJECT = "$sys.log";
+/** Must match observability's `LOG_BACKLOG`: a page's records from before this link could carry them, as one array. */
+const LOG_BACKLOG = "$sys.backlog.log";
 
 /** Origins allowed to connect. Loopback (any port) for local dev, plus the deployed Pages origin — so the
  *  PUBLIC site can still reach a debug-mcp on YOUR machine over `ws://localhost` (loopback is exempt from
@@ -91,6 +93,12 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 
 	// The collector leaf. Its interest in `$sys.log.>` is what pulls each context's records across the links.
 	hub.subscribe(LOG_SUBJECT + ".>", (data) => { store.add(data as HubLogRecord); });
+	// And what each page logged before this link could carry it (observability's logBacklog).
+	hub.subscribe(LOG_BACKLOG, (data) => {
+		for (const record of Array.isArray(data) ? data as HubLogRecord[] : []) {
+			store.add(record);
+		}
+	});
 
 	// The architecture collector: every context reports its hub topology/traffic + probed channels on $sys.arch.
 	const arch = new ArchitectureStore();
