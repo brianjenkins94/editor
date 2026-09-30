@@ -131,18 +131,23 @@ test("a tool a tab adds later is registered live", async () => {
 	});
 	await connectTab(hub);
 	await new Promise((resolve) => { setTimeout(resolve, 300); });
-	servePageToolSet(hub, "t2", [{ "name": "game_step", "description": "Step the match.", "inputSchema": { "type": "object", "properties": { "ticks": { "type": "integer" } } }, "handler": (args) => ({ "stepped": args["ticks"] ?? 1 }) }]);
+	servePageToolSet(hub, "t2", [
+		{ "name": "game_step", "description": "Step the match.", "inputSchema": { "type": "object", "properties": { "ticks": { "type": "integer" } } }, "handler": (args) => ({ "stepped": args["ticks"] ?? 1 }) },
+		{ ...status, "handler": (args) => ({ "client": args["client"], "state": "t2's" }) }
+	]);
 	await toolsWhen((names) => names.includes("game_step"));
 	assert.deepEqual((await call("game_step", { "ticks": 3, "tab": "t2" })).value, { "stepped": 3 });
 });
 
-test("with several tabs connected, a call names its tab", async () => {
-	// t1 and t2 are both connected now.
+test("with several tabs connected, a tool both serve needs a tab; a tool only one serves goes to it", async () => {
+	// t1 and t2 are both connected now, and both serve game_status; only t2 serves game_step.
 	const ambiguous = await call("game_status", { "client": "client-0" });
 
 	assert.equal(ambiguous.isError, true);
 	assert.match(String(ambiguous.value), /several editor tabs/u);
 	assert.deepEqual((await call("game_status", { "client": "client-0", "tab": "t1" })).value, { "client": "client-0", "state": "in sync" });
+	assert.deepEqual((await call("game_status", { "client": "client-0", "tab": "t2" })).value, { "client": "client-0", "state": "t2's" });
+	assert.deepEqual((await call("game_step", { "ticks": 2 })).value, { "stepped": 2 }, "no tab needed: only t2 serves it");
 });
 
 test("a tool no connected tab serves any more is removed from the list", async () => {

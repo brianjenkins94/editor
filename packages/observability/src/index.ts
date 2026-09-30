@@ -19,12 +19,12 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger, LogRecord } from "@brianjenkins94/util/logger";
-import { createRpcClient, portTransport, serve, websocketTransport } from "@brianjenkins94/hub";
+import { createRpcClient, portTransport, serve, websocketTransport, windowTransport } from "@brianjenkins94/hub";
 import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
 
 import type { PageTool } from "./page-tools.ts";
 import type { TabInfo } from "./tabs.ts";
-import { servePageToolSet } from "./page-tools.ts";
+import { PAGE_TOOLS_CHANGED, servePageToolSet } from "./page-tools.ts";
 import { TAB_DISCOVER, TAB_HERE } from "./tabs.ts";
 
 /** Reserved observability namespace — records are published on `$sys.log.<source>`; app code must not use it.
@@ -336,6 +336,11 @@ export function answerTabDiscovery(hub: Hub, tab: string): () => void {
 function describeTab(tab: string): TabInfo {
 	const info: TabInfo = { "tab": tab, "url": location.href, "title": document.title, "visible": document.visibilityState === "visible", "focused": document.hasFocus() };
 
+	// An app in an editor preview is its own page, inside the editor's tab: describe it, not the editor around it.
+	if (previewHost() !== undefined) {
+		return { ...info, "preview": true };
+	}
+
 	try {
 		// A hub in a frame describes the tab it's in: the top window's address, title and focus.
 		const top = window.top;
@@ -349,6 +354,61 @@ function describeTab(tab: string): TabInfo {
 
 	return info;
 }
+
+/**
+ * The editor window hosting this page, when it's the TOP frame of an editor preview (served under `/__virtual__/`);
+ * undefined otherwise — including in a frame the app nests inside its page, which reaches the editor through the
+ * app's own hub tree (linking it too would make a cycle).
+ */
+export function previewHost(): Window | undefined {
+	if (typeof window === "undefined" || window.parent === window || !location.pathname.includes("/__virtual__/")) {
+		return undefined;
+	}
+
+	try {
+		return window.parent.location.pathname.includes("/__virtual__/") ? undefined : window.parent;
+	} catch {
+		return undefined; // a cross-origin parent: not the editor
+	}
+}
+
+/**
+ * Inside an editor preview, link `hub` — the app page's root hub — into the editor's hub tree, through the shell: the
+ * app's logs, architecture and page tools then reach the editor's observability plane and its debug-mcp, as part of
+ * the editor's tab (the shell confines what crosses). Returns the link, or undefined when this page isn't a preview's
+ * top frame (then link debug-mcp directly: `linkPreviewHost(hub) ?? linkDebugMcp(hub)`).
+ */
+export function linkPreviewHost(hub: Hub): PreviewLink | undefined {
+	const host = previewHost();
+
+	if (host === undefined) {
+		return undefined;
+	}
+
+	// What the app logs while it boots — before this link is up — would never reach the editor: hold it, send it once
+	// the collector can hear it (as linkDebugMcp does).
+	const backlog = logBacklog(hub);
+	const link = hub.link(windowTransport(host, location.origin)) as PreviewLink;
+
+	void backlog.flushWhenReady();
+	announceWhenReady(hub, link);
+
+	return link;
+}
+
+/** Once `link` is up, tell whoever's across it to (re-)read this page's tools: announcing them when they were first
+ *  served happened before this link could carry it (a one-off publish before a link's interest has arrived goes
+ *  nowhere), so a relay linking later would otherwise never learn them. */
+function announceWhenReady(hub: Hub, link: () => void): void {
+	void (link as { "ready"?: Promise<boolean> }).ready?.then((ready) => {
+		if (ready) {
+			hub.publish(PAGE_TOOLS_CHANGED, {});
+		}
+	});
+}
+
+/** The link `linkPreviewHost` makes (hub's link handle): call it to unlink; `ready` resolves once the editor answered. */
+export type PreviewLink = (() => void) & { readonly "ready": Promise<boolean> };
 
 export interface PageToolsOptions {
 	/** This tab's id (default: minted here). Every tool is served as `<name>.<tab>`, so a relay linked to several tabs
@@ -431,8 +491,11 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 
 		ws.addEventListener("open", () => {
 			everConnected = true;
-			unlink = rootHub.link(websocketTransport(ws));
+			const link = rootHub.link(websocketTransport(ws));
+
+			unlink = link;
 			void backlog.flushWhenReady();
+			announceWhenReady(rootHub, link);
 		});
 
 		ws.addEventListener("close", () => {

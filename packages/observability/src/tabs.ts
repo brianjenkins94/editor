@@ -21,13 +21,17 @@ export interface TabInfo {
 	"title": string;
 	"visible": boolean;
 	"focused": boolean;
+	/** An app running in an editor preview: its own page (these are its URL and title), riding the editor tab's link. */
+	"preview"?: boolean;
 }
 
 /**
  * The relay side: collect the tabs linked to `hub`. Resolves once `expected` tabs have answered (the relay knows how
- * many it's linked to), or after `timeoutMs` with whoever did — a linked page that isn't a tab never answers.
+ * many it's linked to), or after `timeoutMs` with whoever did — a linked page that isn't a tab never answers. Apps in
+ * editor previews (`preview: true`) ride their editor tab's link, so they don't count towards `expected`; once it's
+ * met, answers keep being collected for `graceMs` more, for them.
  */
-export function discoverTabs(hub: Hub, expected: number, timeoutMs = 1000): Promise<TabInfo[]> {
+export function discoverTabs(hub: Hub, expected: number, timeoutMs = 1000, graceMs = 0): Promise<TabInfo[]> {
 	const query = Math.random().toString(36).slice(2);
 	const found = new Map<string, TabInfo>();
 
@@ -37,15 +41,16 @@ export function discoverTabs(hub: Hub, expected: number, timeoutMs = 1000): Prom
 			unsubscribe();
 			resolve([...found.values()]);
 		};
-		const timer = setTimeout(finish, timeoutMs);
+		let timer = setTimeout(finish, timeoutMs);
 		const unsubscribe = hub.subscribe(TAB_HERE, (data) => {
 			const { query: answering, ...info } = data as TabInfo & { "query"?: string };
 
 			if (answering === query) {
 				found.set(info.tab, info);
 
-				if (found.size >= expected) {
-					finish();
+				if ([...found.values()].filter((tab) => tab.preview !== true).length >= expected) {
+					clearTimeout(timer);
+					timer = setTimeout(finish, graceMs);
 				}
 			}
 		});

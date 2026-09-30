@@ -44,17 +44,33 @@ export function syncPageTools(server: McpServer, debugMcp: DebugMcp): PageToolSy
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let links = debugMcp.linkCount();
 
+	/** Which tabs serve each tool: a call that names no tab goes to the one that does (an app's tools, in a preview,
+	 *  alongside its editor tab). */
+	const servedBy = new Map<string, string[]>();
+
 	async function refresh(): Promise<void> {
 		const specs = new Map<string, PageToolSpec>();
+		// Built on the side and swapped in at once (synchronously): a call during a refresh sees the last complete picture.
+		const serving = new Map<string, string[]>();
 
 		for (const { tab } of await debugMcp.tabs(1000).catch(() => [])) {
 			const served = await debugMcp.rpc.request(PAGE_TOOLS + "." + tab, undefined, { "timeoutMs": 2000, "waitForResponderMs": 300 }).catch(() => []) as PageToolSpec[];
 
 			for (const spec of Array.isArray(served) ? served : []) {
-				if (typeof spec?.name === "string" && PAGE_TOOL_NAME.test(spec.name) && !reserved.has(spec.name) && !specs.has(spec.name)) {
-					specs.set(spec.name, spec);
+				if (typeof spec?.name === "string" && PAGE_TOOL_NAME.test(spec.name) && !reserved.has(spec.name)) {
+					if (!specs.has(spec.name)) {
+						specs.set(spec.name, spec);
+					}
+
+					serving.set(spec.name, [...serving.get(spec.name) ?? [], tab]);
 				}
 			}
+		}
+
+		servedBy.clear();
+
+		for (const [name, tabs] of serving) {
+			servedBy.set(name, tabs);
 		}
 
 		for (const name of [...registered.keys()]) {
@@ -76,14 +92,15 @@ export function syncPageTools(server: McpServer, debugMcp: DebugMcp): PageToolSy
 				"name": name,
 				"config": {
 					"title": name,
-					"description": `${String(spec.description)} (Served by the connected page; pass \`tab\` when several are connected.)`,
-					"inputSchema": { ...shapeOf(spec.inputSchema ?? {}), "tab": z.string().optional().describe("The tab (from list_tabs) serving this tool. Omit when one tab is connected.") }
+					"description": `${String(spec.description)} (Served by a connected page; pass \`tab\` when several serve it.)`,
+					"inputSchema": { ...shapeOf(spec.inputSchema ?? {}), "tab": z.string().optional().describe("The tab (from list_tabs) serving this tool. Omit when only one serves it.") }
 				},
 				"handler": async (args) => {
 					const { tab, _approved: _ignored, ...rest } = (args ?? {}) as Record<string, unknown> & { "tab"?: string };
+					const tabs = servedBy.get(name) ?? [];
 
 					try {
-						return await ok(await callTab(debugMcp, PAGE_TOOL + "." + name, tab, rest, CALL_MS));
+						return await ok(await callTab(debugMcp, PAGE_TOOL + "." + name, tab ?? (tabs.length === 1 ? tabs[0] : undefined), rest, CALL_MS));
 					} catch (error) {
 						return fail(error instanceof Error ? error.message : String(error));
 					}

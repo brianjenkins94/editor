@@ -101,14 +101,22 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 	const tabByLink = new Map<string, string>();
 	const archByLink = new Map<string, ArchitectureStore>();
 
+	// An app in one of a tab's previews answers too, over the same link: it maps to the link (its logs and architecture
+	// are part of its editor tab's), but the link keeps its editor tab's name.
+	const previewTabs = new Map<string, string>();
+
 	/** A tab's latest link (a tab that reconnects — debug-mcp restarted — arrives on a new one). */
-	const linkOf = (tab: string): string | undefined => [...tabByLink].reverse().find(([, candidate]) => candidate === tab)?.[0];
+	const linkOf = (tab: string): string | undefined => [...tabByLink].reverse().find(([, candidate]) => candidate === tab)?.[0] ?? previewTabs.get(tab);
 
 	hub.subscribe(TAB_HERE, (data, _envelope, origin) => {
-		const tab = (data as { "tab"?: unknown } | undefined)?.tab;
+		const { tab, preview } = (data ?? {}) as { "tab"?: unknown; "preview"?: unknown };
 
 		if (origin.link !== undefined && typeof tab === "string") {
-			tabByLink.set(origin.link.id, tab);
+			if (preview === true) {
+				previewTabs.set(tab, origin.link.id);
+			} else {
+				tabByLink.set(origin.link.id, tab);
+			}
 		}
 	});
 
@@ -181,7 +189,8 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		"tabOf": (link) => tabByLink.get(link),
 		"rpc": rpc,
 		"linkCount": () => links.size,
-		"tabs": (timeoutMs) => discoverTabs(hub, links.size, timeoutMs),
+		// (A short grace after every link's editor tab has answered, for the apps in its previews.)
+		"tabs": (timeoutMs) => discoverTabs(hub, links.size, timeoutMs, 150),
 		"whenListening": whenListening,
 		"close": () => new Promise<void>((resolve) => {
 			for (const socket of links) {
