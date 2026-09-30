@@ -55,6 +55,11 @@ export class TerminalBackend extends SimpleTerminalBackend {
 		let buffered = "";
 
 		class WorkspaceTerminalProcess extends SimpleTerminalProcess {
+			// The base answers undefined for every property, but VS Code asks for the cwd as each terminal starts and
+			// rejects anything but a string ("cwd is not a string", an unhandled rejection on every load). The shell
+			// doesn't report `cd`s, so this is where it started.
+			override refreshProperty = async (property?: string): Promise<never> => (property === "cwd" || property === "initialCwd" ? cwd : undefined) as never;
+
 			async start(): Promise<undefined> {
 				const factory = await whenFactory(); // may resolve after boot creates this process
 
