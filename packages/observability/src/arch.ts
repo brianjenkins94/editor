@@ -118,6 +118,8 @@ const FLUSH_MS = 250;
 // first, is published as `<self>:<link id>`.
 const PENDING_LINK = "\0link:";
 const MAX_SAMPLES_PER_FLUSH = 120;
+/** Node ops held while nobody listens (see flush), past which they're collapsed into the nodes' current state. */
+const MAX_HELD_NODE_OPS = 200;
 
 /** Cheap estimate of a structured-cloned value's size — good enough to compare channels, never exact. */
 export function approxSize(value: unknown, depth = 0): number {
@@ -224,6 +226,17 @@ export function createArchReporter(hub: Hub): ArchReporter {
 			return;
 		}
 
+		// Nobody's listening yet — a viewer's interest hasn't reached this hub (it's booting, or the link that carries
+		// it is): a report published now would go nowhere, and with it what nothing re-sends by itself (the realm, the
+		// traffic so far). Hold it. The interest's arrival is a topology change, which flushes again.
+		if (!hub.interested(ARCH_SUBJECT + "." + self)) {
+			if (nodeOps.length > MAX_HELD_NODE_OPS) {
+				nodeOps = currentNodeOps();
+			}
+
+			return;
+		}
+
 		resolvePendingLinks();
 
 		const report: ArchReport = { "reporter": self, "time": Date.now() };
@@ -284,6 +297,19 @@ export function createArchReporter(hub: Hub): ArchReporter {
 			existing.count += entry.count;
 			existing.bytes += entry.bytes;
 		}
+	}
+
+	/** The nodes this reporter knows, as the ops that bring a viewer to their current state. */
+	function currentNodeOps(): NodeOp[] {
+		return [...nodes.values()].flatMap(({ spec, state, alive }): NodeOp[] => {
+			const ops: NodeOp[] = [{ "op": alive > 0 ? "spawn" : "declare", "spec": spec }];
+
+			if (state === "terminated" || state === "unresponsive") {
+				ops.push(state === "terminated" ? { "op": "terminate", "id": spec.id } : { "op": "state", "id": spec.id, "state": state });
+			}
+
+			return ops;
+		});
 	}
 
 	function record(from: string, to: string, kind: TrafficKind, label: string, bytes = 0, via?: "hub", count = 1): void {
@@ -458,15 +484,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 				"full": true,
 				"topology": hub.inspect(),
 				"realm": realm,
-				"nodes": [...nodes.values()].flatMap(({ spec, state, alive }): NodeOp[] => {
-					const ops: NodeOp[] = [{ "op": alive > 0 ? "spawn" : "declare", "spec": spec }];
-
-					if (state === "terminated" || state === "unresponsive") {
-						ops.push(state === "terminated" ? { "op": "terminate", "id": spec.id } : { "op": "state", "id": spec.id, "state": state });
-					}
-
-					return ops;
-				}),
+				"nodes": currentNodeOps(),
 				// Still-pending traffic isn't in the totals yet: it arrives as a delta once its link is named.
 				"traffic": [...totals.values()].filter((entry) => !isPending(entry))
 			});

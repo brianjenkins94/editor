@@ -336,3 +336,27 @@ test("a link linked and unlinked between two reports, never answered, is reporte
 	assert.equal(placeholder.spec.dynamic, true);
 	reporter.dispose();
 });
+
+test("a report nobody could hear yet is held, not lost: the viewer that links later gets the traffic and topology", async () => {
+	const frame = createHub({ "id": "frame" });
+	const reporter = createArchReporter(frame);
+
+	// Traffic before any viewer's interest can have reached this hub (a frame that's just started).
+	reporter.record("frame", "worker", "request", "wired.echo()", 10);
+	await wait(400);
+
+	const [a, b] = pipe();
+	const viewer = createHub({ "id": "viewer" });
+	const reports: ArchReport[] = [];
+
+	collectArchReports(viewer, (report) => { reports.push(report); });
+	viewer.link(a);
+	frame.link(b);
+	await wait(600);
+
+	const mine = reports.filter((report) => report.reporter === "frame");
+
+	assert.ok(mine.some((report) => (report.traffic ?? []).some((count) => count.label === "wired.echo()" && count.count === 1)), "the traffic from before it had a listener: " + JSON.stringify(mine));
+	assert.ok(mine.some((report) => report.topology?.links.some((link) => link.peerId === "viewer")), "and its topology");
+	reporter.dispose();
+});
