@@ -2,7 +2,7 @@ import type { Transport, WebSocketLike } from "../src/index.ts";
 import * as assert from "node:assert/strict";
 
 import { test } from "node:test";
-import { createHub, createRpcClient, frameOf, matches, pipe, serve, websocketTransport } from "../src/index.ts";
+import { createHub, createRpcClient, frameOf, mapFrame, matches, pipe, serve, websocketTransport } from "../src/index.ts";
 
 /** Let queued deliveries (across several hops) drain. */
 function flush(): Promise<void> {
@@ -706,6 +706,27 @@ test("pipe's schedule decides how each message travels — fault injection by su
 	assert.ok(decided.includes("control:hello") && decided.includes("control:sub"), "control frames were seen, and delivered");
 	assert.equal(frameOf("not a hub message"), undefined);
 	assert.equal(frameOf({ "subject": "x" }), undefined, "a bare envelope-shaped object isn't a hub frame");
+});
+
+test("mapFrame rewrites the frame a message carries, so a transport can rename what crosses it", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	const seen: [string, unknown][] = [];
+	// root's end renames the pod's `status.*` to `pod.status.*`; everything else crosses as is.
+	const renaming = { "send": a.send, "listen": (onMessage: (message: unknown) => void) => a.listen((message) => {
+		onMessage(mapFrame(message, (frame) => ("subject" in frame && frame.subject.startsWith("status.") ? { ...frame, "subject": "pod." + frame.subject } : frame)));
+	}) };
+
+	root.subscribe(">", (data, envelope) => { seen.push([envelope.subject, data]); });
+	await Promise.all([root.link(renaming).ready, pod.link(b).ready]);
+	await flush();
+	pod.publish("status.up", 1);
+	pod.publish("other", 2);
+	await flush();
+
+	assert.deepEqual(seen, [["pod.status.up", 1], ["other", 2]]);
+	assert.equal(mapFrame("not a hub message", () => { throw new Error("not called"); }), "not a hub message");
 });
 
 test("a link's handle carries its id — the one handlers' origin.link and inspect() use", async () => {

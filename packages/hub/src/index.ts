@@ -540,6 +540,14 @@ export function frameOf(message: unknown): Envelope | Control | undefined {
 	return isControl(frame) || isEnvelope(frame) ? frame : undefined;
 }
 
+/** `message` with the hub frame it carries replaced by `map(frame)`; anything that isn't a hub frame passes as it is.
+ *  For a transport that rewrites what crosses it — the hub where another tree joins renaming that tree's ids, say. */
+export function mapFrame(message: unknown, map: (frame: Envelope | Control) => Envelope | Control): unknown {
+	const frame = frameOf(message);
+
+	return frame === undefined ? message : { [WIRE]: map(frame) };
+}
+
 export interface PipeOptions {
 	/** Drop a message sent while the other end isn't listening, like a window's postMessage. Default false: hold it
 	 *  until the other end listens, like a MessagePort. */
