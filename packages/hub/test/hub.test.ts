@@ -497,3 +497,140 @@ test("non-transit links: a hub above several trees reaches each, but never joins
 	// The center reaches tab B.
 	assert.equal(await createRpcClient(center).request("tool", {}, { "timeoutMs": 1000 }), "from tab B");
 });
+
+/** An edge hub with one untrusted peer linked under `options` (and the peer's hub). */
+async function edge(options: Parameters<ReturnType<typeof createHub>["link"]>[1]) {
+	const hub = createHub({ "id": "edge" });
+	const peer = createHub({ "id": "claims-to-be-someone" });
+	const [a, b] = pipe();
+
+	hub.link(a, options);
+	peer.link(b);
+	await flush();
+
+	return { "hub": hub, "peer": peer };
+}
+
+test("an assigned peer id overrides the peer's hello and stamps `from` on everything it sends", async () => {
+	const { hub, peer } = await edge({ "peer": "seat-1" });
+	const seen: (string | undefined)[] = [];
+
+	hub.subscribe("game.cmd", (_data, envelope) => { seen.push(envelope.from); });
+	await flush();
+	peer.publish("game.cmd", 1);
+	await flush();
+	assert.deepEqual(seen, ["seat-1"]);
+	assert.equal(hub.inspect().links[0].peerId, "seat-1", "the hello's claim didn't replace it");
+});
+
+test("a stamped `from` stays authenticated across trusted hops", async () => {
+	const { hub, peer } = await edge({ "peer": "seat-1" });
+	const inner = createHub({ "id": "inner" });
+	const [a, b] = pipe();
+	const seen: (string | undefined)[] = [];
+
+	hub.link(a);
+	inner.link(b);
+	inner.subscribe("game.cmd", (_data, envelope) => { seen.push(envelope.from); });
+	await flush();
+	peer.publish("game.cmd", 1);
+	await flush();
+	assert.deepEqual(seen, ["seat-1"]);
+});
+
+test("handlers learn the link a message arrived on; a local publish has none", async () => {
+	const { hub, peer } = await edge({ "peer": "seat-1" });
+	const origins: unknown[] = [];
+
+	hub.subscribe("x", (_data, _envelope, origin) => { origins.push(origin.link); });
+	await flush();
+	peer.publish("x");
+	hub.publish("x");
+	await flush();
+	assert.deepEqual(origins, [undefined, { "id": "link-1", "peerId": "seat-1" }]);
+});
+
+test("publish permissions drop what a peer may not send, and a tap sees the deny", async () => {
+	const { hub, peer } = await edge({ "peer": "seat-1", "permissions": { "publish": ["game.cmd"] } });
+	const received: unknown[] = [];
+	const denied: unknown[] = [];
+
+	hub.subscribe("game.>", (data) => { received.push(data); });
+	hub.tap((event) => {
+		if (event.type === "deny") {
+			denied.push([event.direction, event.envelope.subject, event.link.peerId]);
+		}
+	});
+	await flush();
+	peer.publish("game.cmd", "ok");
+	peer.publish("game.admin", "nope");
+	await flush();
+	assert.deepEqual(received, ["ok"]);
+	assert.deepEqual(denied, [["publish", "game.admin", "seat-1"]]);
+});
+
+test("subscribe permissions confine what a peer receives, even under a broad wildcard", async () => {
+	const { hub, peer } = await edge({ "peer": "seat-1", "permissions": { "subscribe": ["game.state.1"] } });
+	const received: unknown[] = [];
+	const denied: string[] = [];
+
+	hub.tap((event) => {
+		if (event.type === "deny") {
+			denied.push(event.envelope.subject);
+		}
+	});
+	peer.subscribe("game.state.*", (data, envelope) => { received.push([envelope.subject, data]); });
+	await flush();
+	hub.publish("game.state.0", "team 0's view");
+	hub.publish("game.state.1", "team 1's view");
+	await flush();
+	assert.deepEqual(received, [["game.state.1", "team 1's view"]]);
+	assert.deepEqual(denied, ["game.state.0"]);
+});
+
+test("permissions also stop a peer snooping another caller's RPC replies", async () => {
+	const { hub, peer } = await edge({ "peer": "rogue", "permissions": { "subscribe": ["$rpc.reply.rogue"] } });
+	const victim = createHub({ "id": "victim" });
+	const [a, b] = pipe();
+	const snooped: unknown[] = [];
+
+	hub.link(a, { "peer": "victim" });
+	victim.link(b);
+	serve(hub, "secret", () => "for the victim only");
+	peer.subscribe("$rpc.reply.victim", (data) => { snooped.push(data); });
+	await flush();
+	assert.equal(await createRpcClient(victim).request("secret", undefined, { "timeoutMs": 1000 }), "for the victim only");
+	await flush();
+	assert.deepEqual(snooped, []);
+});
+
+test("permit() changes a link's permissions later (e.g. once a player is seated)", async () => {
+	const { hub, peer } = await edge({ "peer": "seat-1", "permissions": { "subscribe": [] } });
+	const received: unknown[] = [];
+
+	peer.subscribe("game.state.1", (data) => { received.push(data); });
+	await flush();
+	hub.publish("game.state.1", "before");
+	assert.equal(hub.permit("seat-1", { "subscribe": ["game.state.1"] }), true);
+	assert.deepEqual(hub.inspect().links[0].permissions, { "subscribe": ["game.state.1"] });
+	hub.publish("game.state.1", "after");
+	await flush();
+	assert.deepEqual(received, ["after"]);
+	assert.equal(hub.permit("nobody", undefined), false);
+	assert.equal(hub.permit("seat-1", undefined), true);
+	assert.equal(hub.inspect().links[0].permissions, undefined, "lifted");
+});
+
+test("serve handlers see the caller's authenticated `from` and the link the call came in on", async () => {
+	const { hub, peer } = await edge({ "peer": "seat-7" });
+	let context: unknown;
+
+	serve(hub, "whoami", (_args, { from, link }) => {
+		context = { "from": from, "link": link };
+
+		return from;
+	});
+	await flush();
+	assert.equal(await createRpcClient(peer).request("whoami", undefined, { "timeoutMs": 1000 }), "seat-7");
+	assert.deepEqual(context, { "from": "seat-7", "link": { "id": "link-1", "peerId": "seat-7" } });
+});
