@@ -13,6 +13,8 @@ import { DevServer } from "../dev-server";
 import { Buffer } from "../shims/stream";
 import { simpleHash } from "../utils/hash";
 import { addReactRefresh as _addReactRefresh } from "./code-transforms";
+import type { Manifest } from "./packages";
+import { isRegistrySpec, PACKAGE_PREFIX, PackageResolver } from "./packages";
 
 // Check if we're in a real runtime that should transpile (not jsdom or a Node test).
 // A real browser has window + navigator.serviceWorker (jsdom has window but not that); a Web Worker (where the
@@ -250,15 +252,30 @@ const HMR_CLIENT_SCRIPT = `
 </script>
 `;
 
+/**
+ * The esm.sh URL for a registry dependency's `subpath` ("" or "/sub"). One definition for the import map and for
+ * rewritten imports, so a module loads once whichever way it's reached: react/react-dom get the `?dev` build the
+ * React-Refresh preamble hooks; other deps get `?external=react,react-dom`, so a component library shares the app's
+ * single React copy rather than pulling its own.
+ */
+function registryUrl(name: string, version: string, subpath: string): string {
+	const query = name === "react" || name === "react-dom" ? "dev" : "external=react,react-dom";
+
+	return `https://esm.sh/${name}@${version}` + (subpath === "" ? `?${query}` : `&${query}${subpath}`);
+}
+
 export class ViteDevServer extends DevServer {
 	private watcherCleanup: (() => void) | null = null;
 	private readonly options: ViteDevServerOptions;
 	private hmrTargetWindow: Window | null = null;
 	private transformErrorReporter: ((info: TransformErrorInfo) => void) | null = null;
 	private readonly transformCache = new Map<string, { "code": string; "hash": string }>();
+	/** Bare imports → esm.sh (registry deps) or /@pkg/ (URL/tarball deps, fetched and served here). See packages.ts. */
+	private readonly packages: PackageResolver;
 
 	constructor(vfs: VirtualFS, options: ViteDevServerOptions) {
 		super(vfs, options);
+		this.packages = new PackageResolver({ "manifest": () => this.readManifest(), "registryUrl": registryUrl });
 		this.options = {
 			"jsx": true,
 			"jsxFactory": "React.createElement",
@@ -305,6 +322,11 @@ export class ViteDevServer extends DevServer {
     // Parse URL
 		const urlObj = new URL(url, "http://localhost");
 		let { pathname } = urlObj;
+
+		// A file of a URL/tarball dependency (see packages.ts).
+		if (pathname.startsWith(PACKAGE_PREFIX)) {
+			return this.servePackageFile(pathname);
+		}
 
     // Handle root path - serve index.html
 		if (pathname === "/") {
@@ -383,8 +405,64 @@ export class ViteDevServer extends DevServer {
 			return this.serveHtmlWithHMR(filePath);
 		}
 
-    // Serve static file
+    // Plain JS modules get their bare imports rewritten too (see packages.ts); anything else is served as is.
+		if (/\.m?js$/u.test(pathname)) {
+			return this.serveRewrittenJs(filePath, pathname);
+		}
+
 		return this.serveFile(filePath);
+	}
+
+	/** The app's package.json (at the server root), or undefined. */
+	private readManifest(): Manifest | undefined {
+		try {
+			return JSON.parse(this.vfs.readFileSync(this.root === "/" ? "/package.json" : `${this.root}/package.json`, "utf8") as string) as Manifest;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private javascript(code: string, headers: Record<string, string> = {}): ResponseData {
+		const buffer = Buffer.from(code);
+
+		return {
+			"statusCode": 200,
+			"statusMessage": "OK",
+			"headers": { "Content-Type": "application/javascript; charset=utf-8", "Content-Length": String(buffer.length), "Cache-Control": "no-cache", ...headers },
+			"body": buffer
+		};
+	}
+
+	private async serveRewrittenJs(filePath: string, urlPath: string): Promise<ResponseData> {
+		try {
+			return this.javascript(await this.packages.rewriteImports(this.vfs.readFileSync(filePath, "utf8") as string, urlPath, ts));
+		} catch (error) {
+			return this.serverError(error);
+		}
+	}
+
+	/** A file of a URL/tarball dependency; JS gets its own bare imports rewritten. */
+	private async servePackageFile(pathname: string): Promise<ResponseData> {
+		let body: Uint8Array | undefined;
+
+		try {
+			body = await this.packages.file(pathname);
+		} catch (error) {
+			return this.serverError(error);
+		}
+
+		if (body === undefined) {
+			return this.notFound(pathname);
+		}
+
+		if (/\.m?js$/u.test(pathname)) {
+			return this.javascript(await this.packages.rewriteImports(new TextDecoder().decode(body), pathname, ts));
+		}
+
+		const buffer = Buffer.from(body);
+		const type = pathname.endsWith(".json") ? "application/json" : pathname.endsWith(".css") ? "text/css" : "application/octet-stream";
+
+		return { "statusCode": 200, "statusMessage": "OK", "headers": { "Content-Type": type, "Content-Length": String(buffer.length), "Cache-Control": "no-cache" }, "body": buffer };
 	}
 
   /** Resolve an extensionless import to a real VFS file: try source extensions, then /index.<ext>. */
@@ -519,7 +597,7 @@ export class ViteDevServer extends DevServer {
 			const cached = this.transformCache.get(filePath);
 
 			if (cached && cached.hash === hash) {
-				const buffer = Buffer.from(cached.code);
+				const buffer = Buffer.from(await this.packages.rewriteImports(cached.code, urlPath, ts));
 
 				return {
 					"statusCode": 200,
@@ -537,10 +615,10 @@ export class ViteDevServer extends DevServer {
 
 			const transformed = await this.transformCode(content, urlPath);
 
-			// Cache the transform result
+			// Cache the transform result (before rewriting its bare imports: where they resolve follows package.json).
 			this.transformCache.set(filePath, { "code": transformed, "hash": hash });
 
-			const buffer = Buffer.from(transformed);
+			const buffer = Buffer.from(await this.packages.rewriteImports(transformed, urlPath, ts));
 
 			return {
 				"statusCode": 200,
@@ -680,36 +758,27 @@ export default css;
    * rather than pulling its own. A missing/unparseable package.json still yields a working plain-React map.
    */
 	private buildImportMap(): string {
-		let deps: Record<string, string> = {};
+		// The same declared deps rewritten imports resolve against (dependencies and devDependencies), so the two agree
+		// on every version. No / invalid package.json: the react defaults below still let a plain React app run.
+		const deps = this.packages.appDependencies();
 
-		try {
-			const pkgPath = this.root === "/" ? "/package.json" : `${this.root}/package.json`;
-			const parsed = JSON.parse(this.vfs.readFileSync(pkgPath, "utf8") as string) as { "dependencies"?: Record<string, string> };
-
-			deps = { ...parsed.dependencies };
-		} catch {
-      // No / invalid package.json — the react defaults below still let a plain React app run.
-		}
-
-		const base = (name: string, version: string): string => `https://esm.sh/${name}@${version}`;
 		const reactVersion = deps.react ?? REACT_VERSION;
 		const reactDomVersion = deps["react-dom"] ?? reactVersion;
-		const reactUrl = base("react", reactVersion);
-		const reactDomUrl = base("react-dom", reactDomVersion);
 		const imports: Record<string, string> = {
-			"react": `${reactUrl}?dev`,
-			"react/": `${reactUrl}&dev/`,
-			"react-dom": `${reactDomUrl}?dev`,
-			"react-dom/": `${reactDomUrl}&dev/`
+			"react": registryUrl("react", reactVersion, ""),
+			"react/": registryUrl("react", reactVersion, "/"),
+			"react-dom": registryUrl("react-dom", reactDomVersion, ""),
+			"react-dom/": registryUrl("react-dom", reactDomVersion, "/")
 		};
 
 		for (const [name, version] of Object.entries(deps)) {
-			if (name === "react" || name === "react-dom") {
+			// URL / tarball / file: / git deps aren't esm.sh's: bare imports of them are rewritten (see packages.ts).
+			if (name === "react" || name === "react-dom" || !isRegistrySpec(version)) {
 				continue;
 			}
 
-			imports[name] = `${base(name, version)}?external=react,react-dom`;
-			imports[`${name}/`] = `${base(name, version)}&external=react,react-dom/`;
+			imports[name] = registryUrl(name, version, "");
+			imports[`${name}/`] = registryUrl(name, version, "/");
 		}
 
 		return `<script type="importmap">\n${JSON.stringify({ "imports": imports }, null, 2)}\n</script>`;
