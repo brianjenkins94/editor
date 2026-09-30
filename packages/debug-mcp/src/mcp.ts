@@ -60,6 +60,14 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 	}
 
 	/** Run a tool body that takes a `tab`, answering an unknown tab as the tool's error. */
+	/** A preview app's tab rides its editor tab's link, so the link alone would give the editor's records too: narrow
+	 *  to the app's own, by the scope it named (its window). */
+	function scoped(tab: string | undefined): { "scope"?: string } {
+		const scope = tab === undefined ? undefined : debugMcp.scopeOf(tab);
+
+		return scope === undefined ? {} : { "scope": scope };
+	}
+
 	async function withTab(tab: string | undefined, body: (link: string | undefined) => ReturnType<typeof ok>): ReturnType<typeof ok> {
 		let link: string | undefined;
 
@@ -92,7 +100,7 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 		"handler": async (args) => {
 			const { tab, ...input } = args as QueryLogsInput & { "tab"?: string };
 
-			return withTab(tab, async (link) => ok(await named(store.queryLogs({ ...input, ...link === undefined ? {} : { "link": link } }))));
+			return withTab(tab, async (link) => ok(await named(store.queryLogs({ ...input, ...link === undefined ? {} : { "link": link }, ...scoped(tab) }))));
 		}
 	}));
 
@@ -114,7 +122,7 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 		"handler": async (args) => {
 			const { tab, ...input } = args as QuerySpansInput & { "tab"?: string };
 
-			return withTab(tab, async (link) => ok(await named(store.querySpans({ ...input, ...link === undefined ? {} : { "link": link } }))));
+			return withTab(tab, async (link) => ok(await named(store.querySpans({ ...input, ...link === undefined ? {} : { "link": link }, ...scoped(tab) }))));
 		}
 	}));
 

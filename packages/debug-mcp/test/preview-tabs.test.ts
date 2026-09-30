@@ -26,7 +26,7 @@ let app: Hub;
 /** Answer tab discovery as `tab` (a preview's app says so). */
 function answersAs(hub: Hub, tab: string, preview: boolean): void {
 	hub.subscribe(TAB_DISCOVER, (data) => {
-		hub.publish(TAB_HERE, { "query": (data as { "query": string }).query, "tab": tab, "url": preview ? "http://localhost:5173/__virtual__/ed/5173/" : "http://localhost:5173/", "title": tab, "visible": true, "focused": false, ...preview ? { "preview": true } : {} });
+		hub.publish(TAB_HERE, { "query": (data as { "query": string }).query, "tab": tab, "url": preview ? "http://localhost:5173/__virtual__/ed/5173/" : "http://localhost:5173/", "title": tab, "visible": true, "focused": false, ...preview ? { "preview": true, "scope": "preview:5173" } : {} });
 	});
 }
 
@@ -125,4 +125,25 @@ test("the app's logs arrive over its editor tab's link, filed under that tab", a
 	});
 
 	assert.equal(records[0].tab, "ed");
+});
+
+test("a query for the app's tab returns the app's records — its window's scope — not the editor tab's around it", async () => {
+	const record = (source: string, message: string) => ({ "kind": "log", "level": "info", "message": message, "context": { "source": source }, "time": Date.now(), "depth": 0 });
+
+	// As the editor's shell scopes them: the app's page under its window, and the window's own console records.
+	app.publish("$sys.log.preview:5173/page", record("preview:5173/page", "the app's page"));
+	app.publish("$sys.log.preview:5173", record("preview:5173", "the app's console"));
+
+	const messages = await eventually("the app's scoped records", async () => {
+		const { value } = await call("query_logs", { "tab": "app1", "textIncludes": "the app" });
+
+		return Array.isArray(value) && value.length === 2 ? (value as { "message": string }[]).map((entry) => entry.message).sort() : undefined;
+	});
+
+	assert.deepEqual(messages, ["the app's console", "the app's page"]);
+
+	const { value } = await call("query_logs", { "tab": "app1" });
+
+	assert.ok((value as { "source": string }[]).every((entry) => entry.source === "preview:5173" || entry.source.startsWith("preview:5173/")), "nothing of the editor tab's");
+	assert.ok(((await call("query_logs", { "tab": "ed", "textIncludes": "the app" })).value as unknown[]).length >= 2, "while the editor tab's query still has everything on its link");
 });

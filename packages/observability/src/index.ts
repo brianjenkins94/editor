@@ -364,16 +364,20 @@ function jsonSafe(value: unknown): unknown {
 /** Answer tab discovery (tabs.ts) on `hub` as tab `tab`. Returns an unsubscribe. */
 export function answerTabDiscovery(hub: Hub, tab: string): () => void {
 	return hub.subscribe(TAB_DISCOVER, (data) => {
-		hub.publish(TAB_HERE, { "query": (data as { "query"?: string } | undefined)?.query, ...describeTab(tab) });
+		hub.publish(TAB_HERE, { "query": (data as { "query"?: string } | undefined)?.query, ...describeTab(tab, hub) });
 	});
 }
 
-function describeTab(tab: string): TabInfo {
+function describeTab(tab: string, hub: Hub): TabInfo {
 	const info: TabInfo = { "tab": tab, "url": location.href, "title": document.title, "visible": document.visibilityState === "visible", "focused": document.hasFocus(), "protocol": OBSERVABILITY_PROTOCOL };
 
-	// An app in an editor preview is its own page, inside the editor's tab: describe it, not the editor around it.
+	// An app in an editor preview is its own page, inside the editor's tab: describe it, not the editor around it —
+	// and say which preview window it is (the id the editor's shell assigned its page: Hub.knownAs), the scope the
+	// editor files its records under, so a relay can tell its records from the editor's.
 	if (previewHost() !== undefined) {
-		return { ...info, "preview": true };
+		const scope = hub.knownAs()[0];
+
+		return { ...info, "preview": true, ...scope === undefined ? {} : { "scope": scope } };
 	}
 
 	try {

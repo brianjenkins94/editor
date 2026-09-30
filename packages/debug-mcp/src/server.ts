@@ -59,6 +59,8 @@ export interface DebugMcp {
 	/** The link a tab's traffic arrives on (records carry it), and back — learned as tabs answer discovery. */
 	"linkOf": (tab: string) => string | undefined;
 	"tabOf": (link: string) => string | undefined;
+	/** A preview app's tab's scope (its window — its records are filed under it), when it named one. */
+	"scopeOf": (tab: string) => string | undefined;
 	/** Call tools SERVED BY A CONNECTED PAGE (the tab hosts them via `serve`); the MCP layer forwards here. */
 	"rpc": RpcClient;
 	/** How many pages are currently linked in (for tree-state health). */
@@ -107,16 +109,22 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 	// An app in one of a tab's previews answers too, over the same link: it maps to the link (its logs and architecture
 	// are part of its editor tab's), but the link keeps its editor tab's name.
 	const previewTabs = new Map<string, string>();
+	/** A preview app's tab → the scope the editor files its records under (its window: TabInfo.scope). */
+	const previewScopes = new Map<string, string>();
 
 	/** A tab's latest link (a tab that reconnects — debug-mcp restarted — arrives on a new one). */
 	const linkOf = (tab: string): string | undefined => [...tabByLink].reverse().find(([, candidate]) => candidate === tab)?.[0] ?? previewTabs.get(tab);
 
 	hub.subscribe(TAB_HERE, (data, _envelope, origin) => {
-		const { tab, preview } = (data ?? {}) as { "tab"?: unknown; "preview"?: unknown };
+		const { tab, preview, scope } = (data ?? {}) as { "tab"?: unknown; "preview"?: unknown; "scope"?: unknown };
 
 		if (origin.link !== undefined && typeof tab === "string") {
 			if (preview === true) {
 				previewTabs.set(tab, origin.link.id);
+
+				if (typeof scope === "string") {
+					previewScopes.set(tab, scope);
+				}
 			} else {
 				tabByLink.set(origin.link.id, tab);
 			}
@@ -191,6 +199,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		},
 		"linkOf": linkOf,
 		"tabOf": (link) => tabByLink.get(link),
+		"scopeOf": (tab) => previewScopes.get(tab),
 		"rpc": rpc,
 		"linkCount": () => links.size,
 		// (A short grace after every link's editor tab has answered, for the apps in its previews.)

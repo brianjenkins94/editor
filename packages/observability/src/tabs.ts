@@ -19,8 +19,11 @@ export const TAB_HERE = "tab.here";
  * relying on something an older debug-mcp doesn't do (page tools, preview apps as tabs, preview windows were each such
  * a step): a debug-mcp keeps running across upgrades, and an older one would otherwise ignore what it doesn't know
  * silently. It compares a page's number with its own and says when it's behind.
+ *
+ *   1 — the handshake itself.
+ *   2 — a preview app's tab names its `scope` (its records are filed by window).
  */
-export const OBSERVABILITY_PROTOCOL = 1;
+export const OBSERVABILITY_PROTOCOL = 2;
 
 export interface TabInfo {
 	"tab": string;
@@ -31,6 +34,9 @@ export interface TabInfo {
 	"focused": boolean;
 	/** An app running in an editor preview: its own page (these are its URL and title), riding the editor tab's link. */
 	"preview"?: boolean;
+	/** For a preview app: the scope the editor files its records under — its preview window's id (`preview:5173~2`;
+	 *  records from `preview:5173~2` and `preview:5173~2/<hub>`). Protocol 2. */
+	"scope"?: string;
 	/** The observability protocol the page speaks (OBSERVABILITY_PROTOCOL); absent from pages older than it. */
 	"protocol"?: number;
 	/** Set by the relay when the page speaks a newer protocol than it knows: what to do about it. */

@@ -160,3 +160,36 @@ test("a page that goes says so, and the store ends it — until a reload brings 
 		Object.assign(globals, saved);
 	}
 });
+
+test("a preview app's tab answer names its window — the id the editor's shell assigned its page", async () => {
+	const { answerTabDiscovery } = await import("../src/index.ts");
+	const { TAB_DISCOVER, TAB_HERE } = await import("../src/tabs.ts");
+	const globals = globalThis as { "window"?: unknown; "location"?: unknown; "document"?: unknown };
+	const saved = { "window": globals.window, "location": globals.location, "document": globals.document };
+	const editor = { "location": { "pathname": "/" } };
+
+	// A preview's top frame: its parent is the editor window.
+	globals.window = { "parent": editor };
+	globals.location = { "pathname": "/__virtual__/t1/5173/play.html", "href": "http://localhost/__virtual__/t1/5173/play.html" };
+	globals.document = { "title": "netsim", "visibilityState": "visible", "hasFocus": () => true };
+
+	try {
+		const [up, down] = pipe();
+		const shell = createHub({ "id": "shell" });
+		const page = createHub({ "id": "page" });
+		const answers: { "scope"?: string; "preview"?: boolean }[] = [];
+
+		// The shell links the window's page as `preview:5173~2` — and its hello says so.
+		await Promise.all([shell.link(up, { "peer": "preview:5173~2", "transit": false }).ready, page.link(down).ready]);
+		answerTabDiscovery(page, "app");
+		shell.subscribe(TAB_HERE, (data) => { answers.push(data as { "scope"?: string; "preview"?: boolean }); });
+		await flush();
+		shell.publish(TAB_DISCOVER, { "query": "q" });
+		await flush();
+
+		assert.equal(answers[0]?.preview, true);
+		assert.equal(answers[0]?.scope, "preview:5173~2");
+	} finally {
+		Object.assign(globals, saved);
+	}
+});

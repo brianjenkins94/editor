@@ -66,8 +66,15 @@ export interface SpanRow {
 	"open": boolean;
 }
 
+/** Is `source` the scope itself or a context under it (`<scope>/…`)? */
+function inScope(source: string, scope: string): boolean {
+	return source === scope || source.startsWith(scope + "/");
+}
+
 export interface QueryLogsInput {
 	"source"?: string;
+	/** Only records from this scope: the source itself, or `<scope>/…` (a preview window's app — TabInfo.scope). */
+	"scope"?: string;
 	/** Only records that arrived on this link (one tab's). */
 	"link"?: string;
 	"minLevel"?: Level;
@@ -85,6 +92,8 @@ export interface QueryLogsInput {
 
 export interface QuerySpansInput {
 	"source"?: string;
+	/** As QueryLogsInput's. */
+	"scope"?: string;
 	/** Only spans from this link (one tab's). */
 	"link"?: string;
 	"name"?: string;
@@ -176,6 +185,7 @@ export class RecordStore {
 
 		const matched = this.ring.filter((record) => {
 			if (input.source !== undefined && record.source !== input.source) { return false; }
+			if (input.scope !== undefined && !inScope(record.source, input.scope)) { return false; }
 			if (input.link !== undefined && record.link !== input.link) { return false; }
 			if (input.kind !== undefined && record.kind !== input.kind) { return false; }
 			if (LEVELS[record.level] < min) { return false; }
@@ -230,6 +240,7 @@ export class RecordStore {
 
 		const rows = [...byKey.values()].filter((row) => {
 			if (input.source !== undefined && row.source !== input.source) { return false; }
+			if (input.scope !== undefined && !inScope(row.source, input.scope)) { return false; }
 			if (input.name !== undefined && row.name !== input.name) { return false; }
 			if (input.onlyOpen === true && !row.open) { return false; }
 			if (input.minDurationMs !== undefined && (row.durationMs ?? 0) < input.minDurationMs) { return false; }

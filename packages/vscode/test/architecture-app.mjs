@@ -14,8 +14,8 @@ import { DEBUG_MCP_PORT, hasLabel, startSession } from "./architecture-harness.m
 
 const { createDebugMcp } = await import("../../debug-mcp/src/server.ts");
 
-const HUB = "https://brianjenkins94.github.io/editor/packages/hub@latest.tgz";
-// (ARCH_OBSERVABILITY_TGZ: test against a locally built observability tarball before it's published.)
+// (ARCH_HUB_TGZ / ARCH_OBSERVABILITY_TGZ: test against locally built tarballs before they're published.)
+const HUB = process.env.ARCH_HUB_TGZ ?? "https://brianjenkins94.github.io/editor/packages/hub@latest.tgz";
 const OBSERVABILITY = process.env.ARCH_OBSERVABILITY_TGZ ?? "https://brianjenkins94.github.io/editor/packages/observability@latest.tgz";
 const UTIL = "https://brianjenkins94.github.io/lib/util@latest.tgz";
 
@@ -117,6 +117,8 @@ const FILES = {
 		"addEventListener(\"message\", async (event: MessageEvent) => {",
 		"\tif (event.source === parent && event.data?.port instanceof MessagePort) {",
 		"\t\tconst hub = createHub({ \"id\": \"frame\" });",
+		"",
+		"\t\t(globalThis as unknown as { \"__wiredFrame\": typeof hub }).__wiredFrame = hub; // (for a failing test to say what the frame saw)",
 		"",
 		"\t\thub.link(portTransport(event.data.port));",
 		"\t\tcreateArchReporter(hub);",
@@ -345,8 +347,17 @@ test("the app opens its own page as a new window: a second preview window onto t
 	assert.equal(layout.alias.get(second + "/page"), second);
 	assert.equal(layout.parent.get(second + "/frame"), second, "its frame in its own window, though both windows' frames have one address");
 
-	// Its own tab in debug-mcp.
-	await eventually("two preview tabs", async () => (await debugMcp.tabs(2000)).filter((tab) => tab.preview === true).length === 2);
+	// Its own tab in debug-mcp — each naming its window, the scope its records are filed under (protocol 2: a page on
+	// an older observability doesn't say).
+	const previews = await eventually("two preview tabs", async () => {
+		const tabs = (await debugMcp.tabs(2000)).filter((tab) => tab.preview === true);
+
+		return tabs.length === 2 ? tabs : undefined;
+	});
+
+	if (previews.every((tab) => (tab.protocol ?? 0) >= 2)) {
+		assert.deepEqual(previews.map((tab) => tab.scope).sort(), ["preview:" + port, second].sort());
+	}
 
 	// An edit reaches both windows' frames.
 	await session.workbench().evaluate(async () => {
@@ -387,7 +398,16 @@ async function appLayoutOnce(ready) {
 		last = latest;
 
 		return ready(latest);
-	}).catch((error) => { throw new Error(error.message + " — realms reported: " + Object.keys(last?.realms ?? {}).join(", ") + "; topology reported: " + Object.keys(last?.topology ?? {}).join(", ")); });
+	}).catch(async (error) => {
+		// What the frame itself saw: whether its reports had anyone to go to, and its links.
+		const frame = await nestedFrame()?.evaluate(() => {
+			const hub = globalThis.__wiredFrame;
+
+			return hub === undefined ? "no hub" : JSON.stringify({ "listened": hub.interested("$sys.arch.frame"), "links": hub.inspect().links.map((link) => ({ "peer": link.peerId, "interest": link.remoteInterest })) });
+		}).catch((cause) => "unreachable: " + cause.message);
+
+		throw new Error(error.message + " — realms reported: " + Object.keys(last?.realms ?? {}).join(", ") + "; topology reported: " + Object.keys(last?.topology ?? {}).join(", ") + "; the frame saw: " + frame);
+	});
 
 	return appLayout({ "channels": current.channels, "topology": new Map(Object.entries(current.topology)), "realms": new Map(Object.entries(current.realms)) });
 }
