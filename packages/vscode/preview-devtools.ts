@@ -10,8 +10,11 @@
  *    for the endpoint's own, so several clients can share a page.
  *  - the panel (`openDevtoolsPanel`): Chrome's own DevTools frontend, docked under the preview — one client of that
  *    endpoint. It's chii's CDN mode: a tiny host page, made here as a blob: URL, loads the frontend's modules from
- *    jsDelivr. A blob: document has this page's origin and cross-origin isolation, and jsDelivr serves CORS + CORP, so
- *    it loads under COEP without a proxy. Its "embedded" mode speaks CDP to its parent by postMessage.
+ *    jsDelivr (CORS + CORP, so it loads under COEP without a proxy). Its "embedded" mode speaks CDP to its parent by
+ *    postMessage. The frame is sandboxed (`allow-scripts` only), so the frontend — 12 MB of someone else's code —
+ *    runs in an opaque origin: it can't reach this page, the editor's storage or the hub, only post CDP to us (its web
+ *    storage, which throws there, is kept in memory). That bounds what it can touch directly, not what CDP lets it
+ *    ask for: Runtime.evaluate runs in the preview's page, which is no boundary (see ARCHITECTURE.md).
  *
  * What chobitsu can't do: pause. Its Debugger domain lists scripts and their source, but a page can't stop itself at a
  * breakpoint — Console, Elements, Network, Application and evaluation work; stepping is the tsval debugger's.
@@ -137,6 +140,21 @@ function frontendUrl(): string {
 <title>DevTools</title>
 <style>@media (prefers-color-scheme: dark) { body { background-color: rgb(41 42 45); } }</style>
 <meta name="referrer" content="no-referrer">
+<script>
+// Sandboxed (an opaque origin), web storage throws on access: DevTools keeps its settings there, so give it memory.
+for (const name of ["localStorage", "sessionStorage"]) {
+	const items = new Map();
+	const storage = {
+		get length() { return items.size; },
+		key: (index) => [...items.keys()][index] ?? null,
+		getItem: (key) => (items.has(String(key)) ? items.get(String(key)) : null),
+		setItem: (key, value) => { items.set(String(key), String(value)); },
+		removeItem: (key) => { items.delete(String(key)); },
+		clear: () => { items.clear(); }
+	};
+	Object.defineProperty(window, name, { value: storage, configurable: true });
+}
+</script>
 <script type="module" src="${FRONTEND_URL}/entrypoints/chii_app/chii_app.js"></script>
 <body class="undocked" id="-blink-dev-tools">`;
 
@@ -164,9 +182,11 @@ export function openDevtoolsPanel(hub: Hub, port: number, preview: HTMLIFrameEle
 
 	element.className = panelClass();
 	frame.title = "DevTools";
+	// An opaque origin: whatever the frontend runs can't reach this page, its storage or the hub — only post CDP to us.
+	frame.setAttribute("sandbox", "allow-scripts");
 	element.append(frame);
 
-	const toFrontend = (message: string): void => { frame.contentWindow?.postMessage(message, location.origin); };
+	const toFrontend = (message: string): void => { frame.contentWindow?.postMessage(message, "*"); }; // an opaque origin has no name to target
 
 	const start = (): void => {
 		generation += 1;
@@ -180,7 +200,7 @@ export function openDevtoolsPanel(hub: Hub, port: number, preview: HTMLIFrameEle
 	};
 
 	const onMessage = (event: MessageEvent): void => {
-		if (event.source !== frame.contentWindow || event.origin !== location.origin || typeof event.data !== "string") {
+		if (event.source !== frame.contentWindow || event.origin !== "null" || typeof event.data !== "string") {
 			return;
 		}
 
