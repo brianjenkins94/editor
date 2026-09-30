@@ -15,7 +15,7 @@ import type { DebugMcp } from "./server.ts";
 import type { QueryLogsInput, QuerySpansInput, WaitInput } from "./store.ts";
 import { registerDebugTools } from "./debug-tools.ts";
 import { syncPageTools } from "./page-tools.ts";
-import { callTab } from "./forward.ts";
+import { callTab, resolveTab } from "./forward.ts";
 import { defineTool, fail, ok, registerTool } from "@brianjenkins94/util/mcp/tool";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -42,10 +42,33 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 				"since": z.number().optional().describe("Absolute lower bound (unix ms); overrides sinceMs."),
 				"until": z.number().optional().describe("Absolute upper bound (unix ms)."),
 				"kind": KIND.optional().describe("Restrict to one record kind; default returns all."),
-				"limit": z.number().optional().describe("Max rows (most recent), default 200.")
+				"limit": z.number().optional().describe("Max rows (most recent), default 200."),
+				"tab": z.string().optional().describe("Only this tab's records (from list_tabs). Each record names its tab: several tabs can have contexts of the same name.")
 			}
 		},
-		"handler": (args) => ok(store.queryLogs(args as QueryLogsInput))
+		"handler": async (args) => {
+			const { tab, ...input } = args as QueryLogsInput & { "tab"?: string };
+			let link = tab === undefined ? undefined : debugMcp.linkOf(tab);
+
+			if (tab !== undefined && link === undefined) {
+				// Not learned yet (tabs map to links as they answer discovery): ask.
+				await debugMcp.tabs();
+				link = debugMcp.linkOf(tab);
+			}
+
+			if (tab !== undefined && link === undefined) {
+				return fail(`no tab "${tab}" has connected (list_tabs shows the ones that are)`);
+			}
+
+			const rows = store.queryLogs({ ...input, ...link === undefined ? {} : { "link": link } });
+
+			// Name each record's tab. A link whose tab hasn't answered discovery yet: ask, once.
+			if (rows.some((row) => row.link !== undefined && debugMcp.tabOf(row.link) === undefined)) {
+				await debugMcp.tabs();
+			}
+
+			return ok(rows.map(({ link: from, ...record }) => ({ ...record, ...from === undefined ? {} : { "tab": debugMcp.tabOf(from) ?? from } })));
+		}
 	}));
 
 	registerTool(server, defineTool({
@@ -79,14 +102,28 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 		"name": "get_architecture",
 		"config": {
 			"title": "Get architecture",
-			"description": "The live architecture of the editor: every context (hubs, workers, extension hosts, webviews, network endpoints) with its state, every channel between two of them (hub links and probed channels) with message counts, rates and top messages, and each hub's topology (links and the peer at the other end). Pass `channel` (a node id or 'a|b') for one channel's full message breakdown and recent traffic.",
+			"description": "The live architecture of one tab: every context (hubs, workers, extension hosts, webviews, network endpoints) with its state, every channel between two of them (hub links and probed channels) with message counts, rates and top messages, and each hub's topology (links and the peer at the other end). Pass `channel` (a node id or 'a|b') for one channel's full message breakdown and recent traffic.",
 			"inputSchema": {
 				"channel": z.string().optional().describe("Node id (e.g. 'workbench') or 'a|b' pair to detail; omit for the overview."),
-				"limit": z.number().int().positive().optional().describe("Max channels in the overview (default 40).")
+				"limit": z.number().int().positive().optional().describe("Max channels in the overview (default 40)."),
+				"tab": z.string().optional().describe("The tab (from list_tabs). Omit when one tab is connected.")
 			}
 		},
-		"handler": ({ channel, limit = 40 }: { "channel"?: string; "limit"?: number }) => {
-			const { arch } = debugMcp;
+		"handler": async ({ channel, limit = 40, tab }: { "channel"?: string; "limit"?: number; "tab"?: string }) => {
+			let resolved: string;
+
+			try {
+				resolved = await resolveTab(debugMcp, tab);
+			} catch (error) {
+				return fail(error instanceof Error ? error.message : String(error));
+			}
+
+			const arch = debugMcp.archOf(resolved);
+
+			if (arch === undefined) {
+				return fail(`tab ${resolved} hasn't reported its architecture yet`);
+			}
+
 			const now = Date.now();
 			const channels = [...arch.channels.values()]
 				.filter((candidate) => channel === undefined || candidate.id === channel || candidate.a === channel || candidate.b === channel || candidate.b + "|" + candidate.a === channel)

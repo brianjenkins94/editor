@@ -11,10 +11,11 @@ import type { WebSocket } from "ws";
 import type { HubLogRecord } from "./store.ts";
 import { createHub, createRpcClient, websocketTransport } from "@brianjenkins94/hub";
 // From source (not a package dependency): the architecture plane's collector side has no runtime deps.
-import { collectArchReports, requestArchSync } from "../../observability/src/arch.ts";
+import type { ArchReport } from "../../observability/src/arch.ts";
+import { ARCH_SUBJECT, requestArchSync } from "../../observability/src/arch.ts";
 import { ArchitectureStore } from "../../observability/src/arch-store.ts";
 import type { TabInfo } from "../../observability/src/tabs.ts";
-import { discoverTabs } from "../../observability/src/tabs.ts";
+import { discoverTabs, TAB_HERE } from "../../observability/src/tabs.ts";
 
 import { WebSocketServer } from "ws";
 import { RecordStore } from "./store.ts";
@@ -51,8 +52,12 @@ function originAllowed(origin: string | undefined, extra: string[]): boolean {
 export interface DebugMcp {
 	"hub": Hub;
 	"store": RecordStore;
-	/** The live architecture — every context's `$sys.arch` reports (see get_architecture). */
-	"arch": ArchitectureStore;
+	/** A tab's live architecture — its contexts' `$sys.arch` reports (see get_architecture). Per tab: each tab is its
+	 *  own tree, and their hubs' ids collide (every editor tab has a `root`, every netsim tab a `referee`). */
+	"archOf": (tab: string) => ArchitectureStore | undefined;
+	/** The link a tab's traffic arrives on (records carry it), and back — learned as tabs answer discovery. */
+	"linkOf": (tab: string) => string | undefined;
+	"tabOf": (link: string) => string | undefined;
 	/** Call tools SERVED BY A CONNECTED PAGE (the tab hosts them via `serve`); the MCP layer forwards here. */
 	"rpc": RpcClient;
 	/** How many pages are currently linked in (for tree-state health). */
@@ -91,19 +96,46 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		}
 	});
 
+	// Everything is filed by the link it arrived on — each connected tab is one — so two tabs' same-named contexts
+	// stay apart. A tab's id (what the tools take) maps to its link once it answers discovery.
+	const tabByLink = new Map<string, string>();
+	const archByLink = new Map<string, ArchitectureStore>();
+
+	/** A tab's latest link (a tab that reconnects — debug-mcp restarted — arrives on a new one). */
+	const linkOf = (tab: string): string | undefined => [...tabByLink].reverse().find(([, candidate]) => candidate === tab)?.[0];
+
+	hub.subscribe(TAB_HERE, (data, _envelope, origin) => {
+		const tab = (data as { "tab"?: unknown } | undefined)?.tab;
+
+		if (origin.link !== undefined && typeof tab === "string") {
+			tabByLink.set(origin.link.id, tab);
+		}
+	});
+
 	// The collector leaf. Its interest in `$sys.log.>` is what pulls each context's records across the links.
-	hub.subscribe(LOG_SUBJECT + ".>", (data) => { store.add(data as HubLogRecord); });
+	hub.subscribe(LOG_SUBJECT + ".>", (data, _envelope, origin) => { store.add(data as HubLogRecord, origin.link?.id); });
 	// And what each page logged before this link could carry it (observability's logBacklog).
-	hub.subscribe(LOG_BACKLOG, (data) => {
+	hub.subscribe(LOG_BACKLOG, (data, _envelope, origin) => {
 		for (const record of Array.isArray(data) ? data as HubLogRecord[] : []) {
-			store.add(record);
+			store.add(record, origin.link?.id);
 		}
 	});
 
 	// The architecture collector: every context reports its hub topology/traffic + probed channels on $sys.arch.
-	const arch = new ArchitectureStore();
+	hub.subscribe(ARCH_SUBJECT + ".>", (data, envelope, origin) => {
+		if (origin.link === undefined || envelope.subject === ARCH_SUBJECT + ".sync") {
+			return;
+		}
 
-	collectArchReports(hub, (report) => { arch.apply(report); });
+		let arch = archByLink.get(origin.link.id);
+
+		if (arch === undefined) {
+			arch = new ArchitectureStore();
+			archByLink.set(origin.link.id, arch);
+		}
+
+		arch.apply(data as ArchReport);
+	});
 
 	// Request client, created eagerly so its reply channel ($rpc.reply.debug-mcp) is advertised to every page as it
 	// links in — a page-hosted tool call then never races interest. This is the relay half of "MCP server in the tab".
@@ -122,7 +154,10 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		// unchanged — the same transport the browser end uses. Unlink on close so interest is withdrawn cleanly.
 		// Non-transit: every connected page is its OWN tree. Joined, a request in one tab (a preview's
 		// virtual.request, a capability.decide) could be answered by another tab's node worker or pod.
+		const before = new Set(hub.inspect().links.map((link) => link.id));
 		const unlink = hub.link(websocketTransport(socket), { "transit": false });
+		// (link() doesn't return the new link's id; it's registered synchronously, so it's the one that's new.)
+		const linkId = hub.inspect().links.find((link) => !before.has(link.id))?.id;
 
 		// Once our $sys.arch interest has reached the page's hubs, ask them for their full state.
 		setTimeout(() => { requestArchSync(hub); }, 500);
@@ -131,13 +166,24 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 			// Count it gone first, so whoever watches the topology change sees the new link count.
 			links.delete(socket);
 			unlink();
+
+			// Its architecture goes with it (its records stay, still filed under the link, and its tab id).
+			if (linkId !== undefined) {
+				archByLink.delete(linkId);
+			}
 		});
 	});
 
 	return {
 		"hub": hub,
 		"store": store,
-		"arch": arch,
+		"archOf": (tab) => {
+			const link = linkOf(tab);
+
+			return link === undefined ? undefined : archByLink.get(link);
+		},
+		"linkOf": linkOf,
+		"tabOf": (link) => tabByLink.get(link),
 		"rpc": rpc,
 		"linkCount": () => links.size,
 		"tabs": (timeoutMs) => discoverTabs(hub, links.size, timeoutMs),

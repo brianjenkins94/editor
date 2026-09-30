@@ -37,6 +37,9 @@ export interface StoredRecord extends HubLogRecord {
 	"source": string;
 	/** Unix ms this collector received it. */
 	"receivedAt": number;
+	/** The collector's link it arrived on — one per connected tab, which tells two tabs' same-named contexts apart
+	 *  (every editor tab has a `root`). Undefined for a record published on the collector's own hub. */
+	"link"?: string;
 }
 
 const LEVELS = { "trace": 10, "debug": 20, "info": 30, "warn": 40, "error": 50, "fatal": 60 } as const;
@@ -63,6 +66,8 @@ export interface SpanRow {
 
 export interface QueryLogsInput {
 	"source"?: string;
+	/** Only records that arrived on this link (one tab's). */
+	"link"?: string;
 	"minLevel"?: Level;
 	"textIncludes"?: string;
 	/** Relative window: only records from the last N ms. Ignored when `since` is given. */
@@ -123,13 +128,13 @@ export class RecordStore {
 	}
 
 	/** Ingest one federated record. Never throws — a malformed record is dropped, telemetry must not crash. */
-	public add(record: HubLogRecord): void {
+	public add(record: HubLogRecord, link?: string): void {
 		if (record === null || typeof record !== "object" || typeof record.message !== "string") {
 			return;
 		}
 
 		const source = typeof record.context?.["source"] === "string" ? record.context["source"] : "?";
-		const stored: StoredRecord = { ...record, "seq": this.seq, "source": source, "receivedAt": Date.now() };
+		const stored: StoredRecord = { ...record, "seq": this.seq, "source": source, "receivedAt": Date.now(), ...link === undefined ? {} : { "link": link } };
 
 		this.seq += 1;
 		this.ring.push(stored);
@@ -161,6 +166,7 @@ export class RecordStore {
 
 		const matched = this.ring.filter((record) => {
 			if (input.source !== undefined && record.source !== input.source) { return false; }
+			if (input.link !== undefined && record.link !== input.link) { return false; }
 			if (input.kind !== undefined && record.kind !== input.kind) { return false; }
 			if (LEVELS[record.level] < min) { return false; }
 			if (since !== undefined && record.time < since) { return false; }
