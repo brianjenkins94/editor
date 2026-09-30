@@ -66,6 +66,8 @@ export class ArchitectureStore {
 	public readonly channels = new Map<string, ChannelStats>();
 	public readonly log: StoredSample[] = [];
 	public readonly topology = new Map<string, NonNullable<ArchReport["topology"]>>();
+	/** Where each reporting hub runs (ArchRealm), by reporter. */
+	public readonly realms = new Map<string, NonNullable<ArchReport["realm"]>>();
 	/** Reporters seen, with when they last reported. */
 	public readonly reporters = new Map<string, number>();
 
@@ -334,6 +336,10 @@ export class ArchitectureStore {
 		}
 
 		// After the traffic: a link this snapshot no longer lists may have carried some of it (see forget).
+		if (report.realm !== undefined) {
+			this.realms.set(reporter, report.realm);
+		}
+
 		if (report.topology !== undefined) {
 			this.applyTopology(reporter, report.topology);
 		}
@@ -458,6 +464,7 @@ export class ArchitectureStore {
 			"takenAt": new Date().toISOString(),
 			"reporters": Object.fromEntries(this.reporters),
 			"topology": Object.fromEntries(this.topology),
+			"realms": Object.fromEntries(this.realms),
 			"nodes": [...this.nodes.values()].map((node) => ({ ...node, "reporters": [...node.reporters] })),
 			"channels": [...this.channels.values()].map(({ labels, "window": _window, ...channel }) => ({ ...channel, "labels": Object.fromEntries(labels) }))
 		};

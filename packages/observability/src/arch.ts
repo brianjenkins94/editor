@@ -55,10 +55,43 @@ export interface ArchReport {
 	"time": number;
 	/** A full-state answer to `$sys.arch.sync`: `traffic` holds totals rather than deltas. */
 	"full"?: boolean;
+	/** Where the reporting hub runs (sent with its topology): so a viewer can place a context it doesn't know. */
+	"realm"?: ArchRealm;
 	"topology"?: HubSnapshot;
 	"nodes"?: NodeOp[];
 	"traffic"?: TrafficCount[];
 	"samples"?: TrafficSample[];
+}
+
+/** Where a hub runs: a window (a page or a frame — `parent` is its parent frame's address, when it has a same-origin
+ *  one) or a worker (`url` is its script). */
+export interface ArchRealm {
+	"kind": "window" | "worker";
+	"url": string;
+	"parent"?: string;
+}
+
+/** This realm, or undefined outside a browser (Node — debug-mcp, tests). */
+export function describeRealm(): ArchRealm | undefined {
+	const scope = globalThis as { "window"?: Window; "location"?: Location; "importScripts"?: unknown };
+
+	if (scope.location === undefined) {
+		return undefined;
+	}
+
+	if (scope.window === undefined) {
+		return typeof scope.importScripts === "function" ? { "kind": "worker", "url": scope.location.href } : undefined;
+	}
+
+	const realm: ArchRealm = { "kind": "window", "url": scope.location.href };
+
+	try {
+		if (scope.window.parent !== scope.window) {
+			realm.parent = scope.window.parent.location.href;
+		}
+	} catch { /* a cross-origin parent: unknown */ }
+
+	return realm;
 }
 
 /** What probes feed. `self` is the node id of the reporting context (its hub id). */
@@ -151,6 +184,7 @@ const RPC_REPLY = "$rpc.reply.";
  */
 export function createArchReporter(hub: Hub): ArchReporter {
 	const self = hub.id;
+	const realm = describeRealm();
 	const counts = new Map<string, TrafficCount>();
 	const totals = new Map<string, TrafficCount>();
 	const nodes = new Map<string, { "spec": ArchNodeSpec; "state": NodeState; "alive": number }>();
@@ -193,6 +227,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 
 		if (topologyDirty) {
 			report.topology = hub.inspect();
+			report.realm = realm;
 			topologyDirty = false;
 		}
 
@@ -419,6 +454,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 				"time": Date.now(),
 				"full": true,
 				"topology": hub.inspect(),
+				"realm": realm,
 				"nodes": [...nodes.values()].flatMap(({ spec, state, alive }): NodeOp[] => {
 					const ops: NodeOp[] = [{ "op": alive > 0 ? "spawn" : "declare", "spec": spec }];
 
