@@ -40,6 +40,9 @@ export interface CapabilityCall {
 	/** The preview port a shell-forwarded call (the WS/WebRTC shim) originates from — the ext host resolves it to
 	 *  the run that owns the port (mirroring the SW's runId for net), since the shim can't know the runId itself. */
 	"port"?: number;
+	/** The preview window it came from, when the caller knows (the WS/WebRTC shim's requests arrive from one): the
+	 *  prompt shows there. The service worker's net gate knows only the port — every window of a server has its address. */
+	"window"?: string;
 }
 
 /** Turn a raw interceptor call into the canonical silo request (scope string + context), or undefined if it
@@ -102,12 +105,19 @@ function createSessionStore(): GrantStore {
 	};
 }
 
+/** Where a prompt shows: the request's preview window and port, as far as they're known. */
+function windowOf(request: object): { "port"?: number; "window"?: string } {
+	const { port, window } = request as { "port"?: number; "window"?: string };
+
+	return { ...typeof port === "number" ? { "port": port } : {}, ...typeof window === "string" ? { "window": window } : {} };
+}
+
 const shellRpc = createRpcClient(podHub);
 
 /** The TOFU prompt: OUR WebAwesome overlay INSIDE the preview window (shell-preview.ts), reached over the hub —
  *  never a VS Code notification. Returns the user's choice, or undefined if the shell can't be reached at all
  *  (then we fail CLOSED: if we can't ask, we don't allow — an unreachable shell is a bigger problem anyway). */
-async function promptViaShell(request: { "kind": string; "scope": string; "resource": string; "dangerous"?: boolean; "redline"?: boolean; "port"?: number }): Promise<string | undefined> {
+async function promptViaShell(request: { "kind": string; "scope": string; "resource": string; "dangerous"?: boolean; "redline"?: boolean; "port"?: number; "window"?: string }): Promise<string | undefined> {
 	try {
 		const reply = await shellRpc.request("capability.prompt", request, { "timeoutMs": 300000 });
 
@@ -136,7 +146,7 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 		return { "behavior": "deny", "message": "denied by .silo policy" };
 	}
 
-	const choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), "port": (request as { "port"?: number }).port });
+	const choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request) });
 
 	if (choice === "allow-always") {
 		await persistOverride(capability, resource, "allow");
@@ -154,7 +164,7 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 /** BERNARD break-glass for redline scopes — the preview overlay's redline variant (a deliberate one-time
  *  "Authorize once"); never persisted. Fail closed if the shell can't be reached. */
 async function breakGlass(request: CapabilityRequest): Promise<boolean> {
-	return (await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": request.resource ?? "", "redline": true, "port": (request as { "port"?: number }).port })) === "authorize";
+	return (await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": request.resource ?? "", "redline": true, ...windowOf(request) })) === "authorize";
 }
 
 const store = createSessionStore();
@@ -171,10 +181,14 @@ export async function decideCapability(call: CapabilityCall): Promise<boolean> {
 		return true;
 	}
 
-	// Carry the originating preview port onto the request so the decider can route the TOFU overlay to that
-	// window (the shell forwards the SW net gate + the WS/WebRTC shim with a port).
+	// Carry where it came from onto the request so the decider can route the TOFU overlay there: the preview window
+	// when known (the WS/WebRTC shim), else its port (the SW net gate — any window of that server).
 	if (typeof call.port === "number") {
 		(request as { "port"?: number }).port = call.port;
+	}
+
+	if (typeof call.window === "string") {
+		(request as { "window"?: string }).window = call.window;
 	}
 
 	try {

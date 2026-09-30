@@ -284,7 +284,9 @@ async function handleVirtualRequest(request, tab, port, path) {
 		});
 
 		const body = request.method !== "GET" && request.method !== "HEAD" ? new Uint8Array(await request.arrayBuffer()) : undefined;
-		const response = await rpc.request("virtual.request." + tab, { "port": port, "method": request.method, "url": path, "headers": headers, "body": body }, { "timeoutMs": 30000, "waitForResponderMs": RESPONDER_WAIT_MS });
+		// A worker's ENTRY script (its imports are mode "cors"): the dev server puts the editor's worker tap first.
+		const entry = (request.destination === "worker" || request.destination === "sharedworker") && request.mode === "same-origin" ? request.destination : undefined;
+		const response = await rpc.request("virtual.request." + tab, { "port": port, "method": request.method, "url": path, "headers": headers, "body": body, "entry": entry }, { "timeoutMs": 30000, "waitForResponderMs": RESPONDER_WAIT_MS });
 		const content = NULL_BODY.has(response.status) || request.method === "HEAD" ? null : response.body;
 
 		span.end({ "status": response.status });

@@ -62,6 +62,31 @@ const FILES = {
 		"\t}",
 		"});",
 		"document.body.append(frame);",
+		"",
+		"// A lobby like netsim's: the first window of this app to take the lock hosts, a later one is a guest; they talk",
+		"// over a BroadcastChannel — what netsim's players rest on across windows of one server.",
+		"const lobby = new BroadcastChannel(\"wired.lobby\");",
+		"const lobbyState: { \"role\"?: string; \"heard\": string[] } = { \"heard\": [] };",
+		"",
+		"(globalThis as unknown as { \"__wiredLobby\": typeof lobbyState }).__wiredLobby = lobbyState;",
+		"lobby.addEventListener(\"message\", (event) => {",
+		"\tlobbyState.heard.push(String(event.data));",
+		"",
+		"\tif (lobbyState.role === \"host\" && event.data === \"hello from a guest\") {",
+		"\t\tlobby.postMessage(\"welcome from the host\");",
+		"\t}",
+		"});",
+		"void navigator.locks.request(\"wired.host\", { \"ifAvailable\": true }, async (lock) => {",
+		"\tlobbyState.role = lock === null ? \"guest\" : \"host\";",
+		"",
+		"\tif (lock === null) {",
+		"\t\tlobby.postMessage(\"hello from a guest\");",
+		"",
+		"\t\treturn;",
+		"\t}",
+		"",
+		"\tawait new Promise(() => undefined); // hold it while this page lives",
+		"});",
 		""
 	].join("\n"),
 	// The worker: in the page's tree, and serving an RPC on its end of the channel to the frame.
@@ -74,6 +99,7 @@ const FILES = {
 		"hub.link(portTransport(globalThis));",
 		"createArchReporter(hub);",
 		"serve(hub, \"wired.echo\", (args) => ({ \"echoed\": args, \"from\": hub.id }));",
+		"console.log(\"wired worker says hi\");",
 		"addEventListener(\"message\", (event: MessageEvent) => {",
 		"\tif (event.data?.port instanceof MessagePort) {",
 		"\t\thub.link(portTransport(event.data.port));",
@@ -206,6 +232,16 @@ test("a nested frame's console reaches the editor's log plane — tagged with it
 	assert.equal((await previewPage().evaluate(() => globalThis.__wired)).stray, 0, "the app's page saw none of the tap's messages");
 });
 
+test("a worker's console reaches the editor's log plane too — through the worker tap, tagged with its worker", async () => {
+	const [record] = await eventually("the worker's log in debug-mcp", async () => {
+		const found = debugMcp.store.queryLogs({ "source": "preview:" + previewPort(), "textIncludes": "wired worker says hi" });
+
+		return found.length > 0 ? found : undefined;
+	});
+
+	assert.equal(record.attrs?.worker, "/worker.ts");
+});
+
 test("an edit to a module only the nested frame loaded reloads that frame, and leaves the page alone", async () => {
 	const before = await previewPage().evaluate(() => ({ "startedAt": globalThis.__wired.startedAt, "title": document.title }));
 
@@ -289,6 +325,13 @@ test("the app opens its own page as a new window: a second preview window onto t
 	});
 
 	assert.deepEqual(state.results, [{ "echoed": "hi", "from": "worker" }], "its own worker, frame and channel");
+
+	// Both windows are one origin (one server), as tabs of it would be on a desktop: the first took the host lock, the
+	// second is a guest, and they reach each other over a BroadcastChannel — what netsim's lobby rests on.
+	assert.equal(await previewPage().evaluate(() => globalThis.__wiredLobby.role), "host");
+	assert.equal(await page.evaluate(() => globalThis.__wiredLobby.role), "guest");
+	await eventually("the host's welcome", async () => (await page.evaluate(() => globalThis.__wiredLobby.heard)).includes("welcome from the host"));
+	assert.ok((await previewPage().evaluate(() => globalThis.__wiredLobby.heard)).includes("hello from a guest"));
 	assert.notEqual(state.startedAt, (await previewPage().evaluate(() => globalThis.__wired)).startedAt, "its own page");
 
 	// Its own hubs in the architecture, apart from the first window's (the same ids, scoped), and nothing flagged.

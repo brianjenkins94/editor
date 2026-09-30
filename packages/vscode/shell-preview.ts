@@ -512,14 +512,14 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	};
 
 	// The ext-host decider (extensions/capabilities/decide.ts) round-trips here for every TOFU decision — the prompt
-	// is OUR WebAwesome overlay, never a VS Code notification. It shows on a window of the app that triggered it: the
-	// request's `port` (threaded from the SW net gate / the WS-WebRTC shim — a port, not a window: the SW sees only
-	// the address, the same in every window of it), on that port's last used window; or the last used window of all
-	// for a decision not bound to a preview (a node/fs run). Serialized PER WINDOW so held requests queue on their own
-	// overlay without blocking another window's.
+	// is OUR WebAwesome overlay, never a VS Code notification. It shows on the window whose app triggered it: the
+	// request's `window` when known (the WS/WebRTC shim's requests come from one), else a window of its `port` (the SW
+	// net gate sees only the address, the same in every window of a server — so that port's last used window), else
+	// the last used window of all (a decision not bound to a preview: a node/fs run). Serialized PER WINDOW so held
+	// requests queue on their own overlay without blocking another window's.
 	serve(hub, "capability.prompt", (request) => {
-		const port = (request as { "port"?: number }).port;
-		const surface = windowFor(typeof port === "number" ? port : undefined) ?? windowFor(undefined) ?? openWindow(DEFAULT_PORT);
+		const { port, window: named } = request as { "port"?: number; "window"?: string };
+		const surface = (typeof named === "string" ? surfaces.get(named) : undefined) ?? windowFor(typeof port === "number" ? port : undefined) ?? windowFor(undefined) ?? openWindow(DEFAULT_PORT);
 		const result = surface.promptChain.then(() => runOnePrompt(surface, request as PromptRequest));
 
 		surface.promptChain = result.catch(() => undefined);
@@ -556,6 +556,49 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	function surfaceOf(source: MessageEventSource | null): PreviewSurface | undefined {
 		return [...surfaces.values()].find((surface) => isWithin(source, surface.frame.contentWindow));
 	}
+
+	/** One record from a preview's page or worker tap, onto the log plane under `source` (the window it's from). */
+	const publishTapRecord = (source: string, record: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> }): void => {
+		const { level, message, attrs } = record;
+
+		hub.publish(`${LOG_SUBJECT}.${source}`, {
+			"kind": "log",
+			"level": typeof level === "string" && OBS_LEVELS.has(level) ? level : "info",
+			"message": typeof message === "string" ? message : String(message),
+			"attrs": attrs ?? {},
+			"context": { "source": source },
+			"time": Date.now(),
+			"depth": 0
+		});
+	};
+
+	// A previewed app's WORKERS can't post to this window; their tap (node-worker.ts WORKER_TAP) reports on a
+	// same-origin BroadcastChannel instead — every editor tab of this origin hears it, so each takes only its own tab's
+	// (the tab and port are in the worker's address). Its records go under a window of that server (which one isn't
+	// known: a worker can't tell — the last used), and its WebSocket decisions round-trip like a page's.
+	const tapChannel = typeof BroadcastChannel === "function" ? new BroadcastChannel("__editor_preview_tap__") : undefined;
+	const tabOf = (url: string | undefined): string | undefined => (url === undefined ? undefined : /\/__virtual__\/([^/]+)\//u.exec(url)?.[1]);
+
+	tapChannel?.addEventListener("message", (event: MessageEvent) => {
+		const data = event.data as { "channel"?: string; "tab"?: string; "port"?: number; "from"?: string; "id"?: number; "kind"?: string; "resource"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;
+		const port = data?.port;
+
+		if (typeof port !== "number" || data?.tab === undefined || data.tab !== tabOf(servers.get(port)?.url)) {
+			return; // another editor tab's worker, or a server this tab doesn't run
+		}
+
+		const surface = windowFor(port);
+
+		if (data.channel === "obs-log" && data.record !== undefined && surface !== undefined) {
+			publishTapRecord(surface.id, data.record);
+		} else if (data.channel === "cap-decide" && typeof data.kind === "string") {
+			const reply = (allow: boolean): void => { tapChannel.postMessage({ "channel": "cap-decision", "to": data.from, "id": data.id, "allow": allow }); };
+
+			capRpc.request("capability.decide", { "kind": data.kind, "args": [data.resource ?? ""], "port": port }, { "timeoutMs": 300000, "waitForResponderMs": 10000 })
+				.then((allow) => { reply(allow !== false); })
+				.catch(() => { reply(false); }); // can't reach the decider ⇒ fail closed
+		}
+	});
 
 	globalThis.addEventListener("message", (event: MessageEvent) => {
 		// The tsval render surface announced itself → hand it a MessagePort and bridge that port to the hub (same-realm
@@ -613,7 +656,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 				(event.source as Window | null)?.postMessage({ "channel": "cap-decision", "id": id, "allow": allow }, "*");
 			};
 
-			capRpc.request("capability.decide", { "kind": payload.kind, "args": [payload.resource ?? ""], "port": port }, { "timeoutMs": 300000, "waitForResponderMs": 10000 })
+			capRpc.request("capability.decide", { "kind": payload.kind, "args": [payload.resource ?? ""], "port": port, "window": source.id }, { "timeoutMs": 300000, "waitForResponderMs": 10000 })
 				.then((allow) => { reply(allow !== false); })
 				.catch(() => { reply(false); }); // can't reach the decider ⇒ fail closed
 
@@ -624,17 +667,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 			return;
 		}
 
-		const { level, message, attrs } = payload.record;
-
-		hub.publish(`${LOG_SUBJECT}.${source.id}`, {
-			"kind": "log",
-			"level": typeof level === "string" && OBS_LEVELS.has(level) ? level : "info",
-			"message": typeof message === "string" ? message : String(message),
-			"attrs": attrs ?? {},
-			"context": { "source": source.id },
-			"time": Date.now(),
-			"depth": 0
-		});
+		publishTapRecord(source.id, payload.record);
 	});
 }
 
