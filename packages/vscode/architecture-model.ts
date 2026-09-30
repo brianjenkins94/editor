@@ -513,6 +513,43 @@ export function appLayout(observed: { "channels": { "a": string; "b": string }[]
 	return { "nodes": nodes, "alias": alias, "parent": parent };
 }
 
+/**
+ * Which of a previewed app's contexts are gone, and since when. A page (or frame) that goes says so as it goes (its
+ * reporter's last word — the store ends it, and keeps `lastEndedAt` when a reload brings it back under the same id);
+ * what ran under it — its workers, which can't say so — is gone with it: any context last heard from before something
+ * it ran under (its window, or the page that IS its window) ended. Stateless: a reloaded page's new workers report
+ * after it came back, so they aren't.
+ */
+export function appEnded(layout: AppLayout, nodes: ReadonlyMap<string, { "state": string; "lastEndedAt"?: number }>, lastReport: ReadonlyMap<string, number>): Map<string, number> {
+	const ended = new Map<string, number>();
+	const source = new Map([...layout.alias].map(([id, target]) => [target, id]));
+
+	for (const id of layout.nodes) {
+		const own = nodes.get(id);
+
+		if (own?.state === "terminated" && own.lastEndedAt !== undefined) {
+			ended.set(id, own.lastEndedAt);
+			continue;
+		}
+
+		const heard = lastReport.get(id) ?? 0;
+		const seen = new Set<string>();
+
+		for (let holder = layout.parent.get(id); holder !== undefined && !seen.has(holder); holder = layout.parent.get(holder) ?? layout.parent.get(source.get(holder) ?? "")) {
+			seen.add(holder);
+
+			const at = Math.max(nodes.get(holder)?.lastEndedAt ?? 0, nodes.get(source.get(holder) ?? "")?.lastEndedAt ?? 0);
+
+			if (at > heard) {
+				ended.set(id, at);
+				break;
+			}
+		}
+	}
+
+	return ended;
+}
+
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────
 
 /** A reporter names a hub link whose peer never said who it is `<hub>:link-<n>`. Once it has ENDED (the link closed

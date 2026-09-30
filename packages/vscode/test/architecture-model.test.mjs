@@ -186,3 +186,26 @@ test("a hub linked across windows (not through the editor) is the other window's
 	assert.equal(layout.alias.get("preview:5173~2/referee"), "preview:5173/referee");
 	assert.equal(layout.alias.get("preview:5173~2/page"), "preview:5173~2", "and a window's own page still is its window");
 });
+
+test("a gone page's contexts are gone with it: its frames say so, its workers (which can't) go with what they ran under", async () => {
+	const { appEnded } = await import("../architecture-model.ts");
+	// preview:5173's page ran referee (a worker) and client-0.ui (a frame) running client-0 (a worker); then the window
+	// navigated: the page and the frame ended, and a new page (same id) came back — with a new referee.
+	const layout = {
+		"nodes": new Set(["preview:5173/page", "preview:5173/referee", "preview:5173/client-0.ui", "preview:5173/client-0", "preview:5173/lobby"]),
+		"alias": new Map([["preview:5173/page", "preview:5173"]]),
+		"parent": new Map([["preview:5173/referee", "preview:5173"], ["preview:5173/client-0.ui", "preview:5173"], ["preview:5173/client-0", "preview:5173/client-0.ui"], ["preview:5173/lobby", "preview:5173"]])
+	};
+	const nodes = new Map([
+		["preview:5173/page", { "state": "alive", "lastEndedAt": 100 }],
+		["preview:5173/client-0.ui", { "state": "terminated", "lastEndedAt": 100 }],
+		["preview:5173/client-0", { "state": "alive" }],
+		["preview:5173/referee", { "state": "alive" }],
+		["preview:5173/lobby", { "state": "alive" }]
+	]);
+	// referee reported after the page came back (the new page's); lobby last before it went (the old page's only).
+	const lastReport = new Map([["preview:5173/referee", 150], ["preview:5173/client-0", 90], ["preview:5173/lobby", 90], ["preview:5173/page", 150]]);
+	const ended = appEnded(layout, nodes, lastReport);
+
+	assert.deepEqual(Object.fromEntries(ended), { "preview:5173/client-0.ui": 100, "preview:5173/client-0": 100, "preview:5173/lobby": 100 });
+});

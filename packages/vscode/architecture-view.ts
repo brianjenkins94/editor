@@ -12,7 +12,7 @@ import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@bria
 import type { ContainerSpec, Violation } from "./architecture-model";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
 import type { AppLayout } from "./architecture-model";
-import { appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, isEndedPlaceholder, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
+import { appEnded, appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, isEndedPlaceholder, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -696,8 +696,10 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		appInfo = appLayout({ "channels": [...store.channels.values()], "topology": store.topology, "realms": store.realms });
 		app = appInfo.nodes;
 
-		// An app context that IS a declared one (its page is its preview) is drawn as that one.
-		const drawn = visible.filter((node) => !appInfo.alias.has(node.id));
+		// An app context that IS a declared one (its page is its preview) is drawn as that one; one that's gone (its page
+		// went — appEnded) fades like any context that ended.
+		const ended = appEnded(appInfo, store.nodes, store.reporters);
+		const drawn = visible.filter((node) => !appInfo.alias.has(node.id) && !(ended.has(node.id) && now - ended.get(node.id)! > HIDE_ENDED_AFTER_MS));
 		const visibleIds = new Set(drawn.map((node) => node.id));
 
 		layout = computeLayout(drawn, collapsed, appInfo);
