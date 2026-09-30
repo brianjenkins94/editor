@@ -14,13 +14,12 @@
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "@brianjenkins94/hub": "https://brianjenkins94.github.io/editor/packages/hub@latest.tgz"
-  },
   "peerDependencies": {
+    "@brianjenkins94/hub": "*",
     "@brianjenkins94/util": "*"
   },
   "devDependencies": {
+    "@brianjenkins94/hub": "https://brianjenkins94.github.io/editor/packages/hub@latest.tgz",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@types/node": "^24.13.3"
   }
