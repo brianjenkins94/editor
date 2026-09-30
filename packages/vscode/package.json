@@ -45,7 +45,8 @@
     "playwright": "^1.63.0",
     "tsx": "latest",
     "typescript": "^5.9.3",
-    "vite": "latest"
+    "vite": "latest",
+    "vite-plugin-node-polyfills": "^0.28.0"
   },
   "exports": {
     ".": {
