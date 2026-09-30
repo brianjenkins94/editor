@@ -299,6 +299,32 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 		}
 	}));
 
+	registerTool(server, defineTool({
+		"name": "preview_cdp",
+		"config": {
+			"title": "Chrome DevTools Protocol in a preview",
+			"description": "Send one Chrome DevTools Protocol command to the PREVIEWED APP's page (not the editor's — that's page_eval) and return its result. The editor answers through chobitsu, a JavaScript CDP implementation it adds to the preview's page on first use, so it runs in the app's own realm: Runtime.evaluate (params { expression, returnByValue: true }), DOM.getDocument / DOM.querySelector / DOM.getOuterHTML, CSS.*, DOMStorage.*, Storage.*, Page.*. Events (console messages, network activity) aren't returned — only the command's reply. The Debugger domain lists scripts but can't pause. Requires a connected page with that preview open (run the app first).",
+			"inputSchema": {
+				"method": z.string().describe("The CDP method, e.g. 'Runtime.evaluate' or 'DOM.getDocument'."),
+				"params": z.record(z.string(), z.unknown()).optional().describe("The method's params, e.g. { expression: 'document.title', returnByValue: true }."),
+				"port": z.number().optional().describe("The preview's port (default 5173, the demo's)."),
+				"tab": TAB
+			}
+		},
+		"handler": async (args) => {
+			const { method, params, port, tab } = args as { "method": string; "params"?: Record<string, unknown>; "port"?: number; "tab"?: string };
+
+			try {
+				const reply = await callTab(debugMcp, "preview_cdp", tab, { "port": port ?? 5173, "message": JSON.stringify({ "id": 1, "method": method, "params": params ?? {} }) }, 30000);
+				const { result, error } = JSON.parse(String(reply)) as { "result"?: unknown; "error"?: { "message"?: string } };
+
+				return error === undefined ? ok(result) : fail(method + ": " + (error.message ?? JSON.stringify(error)));
+			} catch (error) {
+				return fail(error instanceof Error ? error.message : String(error));
+			}
+		}
+	}));
+
 	registerDebugTools(server, debugMcp);
 	// Last, so a page can't take over any of the tools above.
 	syncPageTools(server, debugMcp);

@@ -40,6 +40,15 @@ function tabHub(tab: string): Hub {
 		return tab;
 	});
 	serve(root, "debug.sessions." + tab, () => (tab === "t1" ? sessions : []));
+	// The preview's CDP endpoint (the shell's preview.cdp, forwarded): a raw reply, with the command's id.
+	serve(root, "preview_cdp." + tab, (args) => {
+		const { port: previewPort, message } = args as { "port": number; "message": string };
+		const command = JSON.parse(message) as { "id": number; "method": string; "params": unknown };
+
+		return JSON.stringify(command.method === "Nope.nope"
+			? { "id": command.id, "error": { "code": -32601, "message": "unknown method" } }
+			: { "id": command.id, "result": { "port": previewPort, "method": command.method, "params": command.params } });
+	});
 	serve(root, "debug.start." + tab, (args) => {
 		started.push(tab);
 
@@ -108,7 +117,7 @@ async function call(name: string, args: Record<string, unknown> = {}): Promise<{
 test("the page and debugger tools are listed", async () => {
 	const names = (await client.listTools()).tools.map((tool) => tool.name);
 
-	for (const name of ["list_tabs", "page_eval", "debug_start", "debug_sessions", "debug_step", "debug_state", "debug_breakpoints", "debug_stop"]) {
+	for (const name of ["list_tabs", "page_eval", "preview_cdp", "debug_start", "debug_sessions", "debug_step", "debug_state", "debug_breakpoints", "debug_stop"]) {
 		assert.ok(names.includes(name), name);
 	}
 });
@@ -123,6 +132,19 @@ test("with one tab connected, tools act on it without being told which", async (
 	assert.deepEqual(stepped.at(-1), { "session": "s1", "action": "next" });
 	assert.equal((value as { "code": string }).code, "return a + b;");
 	assert.equal(((await call("debug_start", { "program": "src/index.ts", "breakpoints": [7] })).value as { "line": number }).line, 7);
+});
+
+test("preview_cdp sends one CDP command to a preview's page and returns its result, or its error", async () => {
+	const { isError, value } = await call("preview_cdp", { "method": "Runtime.evaluate", "params": { "expression": "1 + 1" } });
+
+	assert.notEqual(isError, true, JSON.stringify(value));
+	assert.deepEqual(value, { "port": 5173, "method": "Runtime.evaluate", "params": { "expression": "1 + 1" } });
+	assert.equal(((await call("preview_cdp", { "method": "DOM.getDocument", "port": 5174 })).value as { "port": number }).port, 5174);
+
+	const failed = await call("preview_cdp", { "method": "Nope.nope" });
+
+	assert.equal(failed.isError, true);
+	assert.match(String(failed.value), /Nope\.nope: unknown method/u);
 });
 
 test("with several sessions, debug_state asks which one instead of guessing", async () => {

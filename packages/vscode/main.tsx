@@ -65,11 +65,12 @@ if (isolated && window.parent === window) {
 	linkServiceWorkerHub(rootHub);
 	linkDebugMcp(rootHub); // dev-only: federate the tree to a running @brianjenkins94/debug-mcp for MCP querying
 	// Dev-only: the live MCP tools debug-mcp forwards to, under this tab's id so it can address one tab of several —
-	// page_eval/page_query, plus calls into this tab's tree: the preview's cold-start provoke and the debugger's
-	// pod-level calls (a session's own calls are already addressed by its id).
+	// page_eval/page_query, plus calls into this tab's tree: the preview's cold-start provoke, a preview page's Chrome
+	// DevTools Protocol (the shell's preview.cdp — see preview-devtools.ts) and the debugger's pod-level calls (a
+	// session's own calls are already addressed by its id).
 	servePageTools(rootHub, {
 		"tab": tab,
-		"forward": { "preview_provoke": "preview.provoke", "debug.sessions": "debug.sessions", "debug.start": "debug.start", "debug.breakpoints": "debug.breakpoints" }
+		"forward": { "preview_provoke": "preview.provoke", "preview_cdp": "preview.cdp", "debug.sessions": "debug.sessions", "debug.start": "debug.start", "debug.breakpoints": "debug.breakpoints" }
 	});
 
 	// The live preview BACKEND: runs the demo (a Vite React app) through an in-browser dev server in the node worker,

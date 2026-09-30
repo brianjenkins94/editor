@@ -162,7 +162,8 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "tool.>", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp calls a page's own tools (an app in a preview serves them under its tab id)." },
 	{ "pattern": "page_eval.*", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp tool: evaluate in one tab's page." },
 	{ "pattern": "page_query.*", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp tool: query the DOM." },
-	{ "pattern": "preview_provoke.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: provoke one tab's preview (forwarded to preview.provoke)." }
+	{ "pattern": "preview_provoke.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: provoke one tab's preview (forwarded to preview.provoke)." },
+	{ "pattern": "preview_cdp.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: one Chrome DevTools Protocol command to a preview's page in one tab (forwarded to preview.cdp)." }
 ];
 
 export const channels: ChannelSpec[] = [
