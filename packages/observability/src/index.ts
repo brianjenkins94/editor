@@ -520,3 +520,4 @@ export * from "./arch-probes.ts";
 export * from "./arch-store.ts";
 export * from "./page-tools.ts";
 export * from "./tabs.ts";
+export * from "./scope.ts";
