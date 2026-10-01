@@ -287,6 +287,9 @@ test("the app's own hubs join the editor's tree: its startup log, its tab and it
 	});
 
 	assert.equal(logs.length, 1, "logged before the link was up, and delivered once");
+	// …and not again as console text: the page's tap leaves what observability echoes to the console to the hub.
+	await session.page.waitForTimeout(1000);
+	assert.deepEqual(debugMcp.store.queryLogs({ "textIncludes": "wired page up" }).map((record) => record.context?.source), ["preview:" + previewPort() + "/wired-page"], "one copy, from the hub");
 
 	const app = await eventually("the app's tab", async () => (await debugMcp.tabs(2000)).find((tab) => tab.preview === true));
 	const answer = await debugMcp.rpc.request("tool.wired_status." + app.tab, {}, { "timeoutMs": 5000, "waitForResponderMs": 5000 });

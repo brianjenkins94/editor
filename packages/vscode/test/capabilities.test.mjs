@@ -47,3 +47,30 @@ test("the canary stands in for every gated method, inertly", async () => {
 	assert.equal(await fs.rm("/p"), undefined);
 	assert.equal(fs.copyFileSync("/a", "/b"), undefined);
 });
+
+test("identical decisions asked at once share one answer — one prompt, not one per request", async () => {
+	const { coalesce } = await import("../extensions/capabilities/coalesce.ts");
+	const answers = new Map();
+	let asked = 0;
+	const decide = coalesce((request) => request.scope, (request) => {
+		asked += 1;
+
+		return new Promise((resolve) => { answers.set(request.scope, resolve); });
+	});
+	// Six peer connections asking for net.webrtc:peer before the first answer, and one asking something else.
+	const same = Array.from({ "length": 6 }, () => decide({ "scope": "net.webrtc:peer" }));
+	const other = decide({ "scope": "net.ws:example.com" });
+
+	assert.equal(asked, 2, "one decision per distinct question");
+	answers.get("net.webrtc:peer")("allow");
+	answers.get("net.ws:example.com")("deny");
+	assert.deepEqual(await Promise.all(same), Array(6).fill("allow"));
+	assert.equal(await other, "deny");
+
+	// Answered, it's asked afresh next time (an "Allow once" is the broker's to remember, not this).
+	const again = decide({ "scope": "net.webrtc:peer" });
+
+	assert.equal(asked, 3);
+	answers.get("net.webrtc:peer")("allow");
+	assert.equal(await again, "allow");
+});

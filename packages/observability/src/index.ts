@@ -38,12 +38,51 @@ import { OBSERVABILITY_PROTOCOL, TAB_DISCOVER, TAB_HERE } from "./tabs.ts";
 export const LOG_SUBJECT = "$sys.log";
 
 /**
+ * Set (on `globalThis`) while a record that rides the hub is being echoed to the console by the context's own console
+ * sink (util's logger prints each record, so the context stays debuggable standalone). A tap that captures console
+ * calls (the editor's preview tap) skips what's printed under it: that record reaches the collector through the hub
+ * already, structured — captured again, it would arrive twice. A registered symbol, so a tap names it without
+ * importing this: `Symbol.for("@brianjenkins94/observability.consoleEcho")`.
+ */
+export const CONSOLE_ECHO = Symbol.for("@brianjenkins94/observability.consoleEcho");
+
+/** The console sinks already marked (see CONSOLE_ECHO). */
+const echoing = new WeakSet<object>();
+
+/** Mark what every sink but the relays prints as an echo of a relayed record (see CONSOLE_ECHO). */
+function markConsoleEchoes(relays: WeakSet<object>): void {
+	for (const [index, sink] of sinks.entries()) {
+		if (relays.has(sink) || echoing.has(sink)) {
+			continue;
+		}
+
+		const echo = (record: LogRecord): void => {
+			const scope = globalThis as Record<symbol, unknown>;
+
+			scope[CONSOLE_ECHO] = true;
+
+			try {
+				sink(record);
+			} finally {
+				scope[CONSOLE_ECHO] = false;
+			}
+		};
+
+		echoing.add(echo);
+		sinks[index] = echo;
+	}
+}
+
+/** The relays' own sinks (they publish; they don't print). */
+const relaySinks = new WeakSet<object>();
+
+/**
  * Source side: return a source-scoped logger (open spans off it — `const span = log.span("cdn")`) whose every
  * record is published onto `hub`. Keeps the context's own console sink, so it's still debuggable standalone.
  *
  * Records logged while nobody listens yet — a worker logging as it starts, before its link's interest has arrived —
  * are held (the newest `max`), and sent, in order, as soon as someone does: a hub forwards only what it knows is
- * wanted, so they'd otherwise be gone.
+ * wanted, so they'd otherwise be gone. What the console sink prints of them is marked an echo (CONSOLE_ECHO).
  */
 export function relayLoggerToHub(hub: Hub, source: string, { max = 1000 } = {}): Logger {
 	const subject = LOG_SUBJECT + "." + source;
@@ -66,7 +105,7 @@ export function relayLoggerToHub(hub: Hub, source: string, { max = 1000 } = {}):
 		}
 	};
 
-	sinks.push((record: LogRecord) => {
+	const relay = (record: LogRecord): void => {
 		if (held.length === 0 && hub.interested(subject)) {
 			publish(record);
 
@@ -85,7 +124,12 @@ export function relayLoggerToHub(hub: Hub, source: string, { max = 1000 } = {}):
 				queueMicrotask(flush);
 			}
 		});
-	});
+	};
+
+	relaySinks.add(relay);
+	sinks.push(relay);
+	// Its records ride the hub now: what the console sink prints of them is an echo (CONSOLE_ECHO).
+	markConsoleEchoes(relaySinks);
 
 	return logger({ "source": source });
 }

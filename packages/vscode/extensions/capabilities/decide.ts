@@ -18,6 +18,7 @@ import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker
 import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
 import { effectiveDisposition, isDangerous } from "@brianjenkins94/util/silo/policy";
 import { podHub } from "../worker-pod/pod";
+import { coalesce } from "./coalesce";
 import { loadEffectivePolicy, persistOverride, recordObservation } from "./silo-store";
 
 /**
@@ -169,7 +170,10 @@ async function breakGlass(request: CapabilityRequest): Promise<boolean> {
 }
 
 const store = createSessionStore();
-const options: BrokerOptions = { "store": store, "decide": policyDecider, "breakGlass": breakGlass };
+// The same question from the same window, asked while it's still waiting (six peer connections opened at once), gets
+// one prompt and one answer — "Allow always" written once. (Redline break-glass stays one deliberate answer per call.)
+const decide = coalesce((request: CapabilityRequest) => JSON.stringify([capabilityOf(request), request.scope, request.resource ?? "", windowOf(request)]), policyDecider);
+const options: BrokerOptions = { "store": store, "decide": decide, "breakGlass": breakGlass };
 
 /**
  * Decide one raw capability call. Resolves `true` to allow, `false` to deny. This is the endpoint every

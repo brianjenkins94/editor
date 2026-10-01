@@ -3,11 +3,12 @@
  * logging as it starts): held until someone listens, then sent in order.
  */
 import type { LogRecord } from "@brianjenkins94/util/logger";
+import { sinks } from "@brianjenkins94/util/logger";
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
 // From source: node won't strip types from the pnpm copy under node_modules.
 import { createHub, pipe } from "../../hub/src/index.ts";
-import { installHubCollector, relayLoggerToHub } from "../src/index.ts";
+import { CONSOLE_ECHO, installHubCollector, relayLoggerToHub } from "../src/index.ts";
 
 async function flush(): Promise<void> {
 	for (let round = 0; round < 5; round += 1) {
@@ -34,3 +35,19 @@ test("records logged before anyone listens are held, and sent in order once some
 
 	assert.deepEqual(records.map((record) => record.message).filter((message) => ["first", "second", "third"].includes(String(message))), ["first", "second", "third"]);
 });
+
+test("while a relayed record is echoed to the console, CONSOLE_ECHO says so — so a console tap can leave it to the hub", () => {
+	const flag = (): unknown => (globalThis as Record<symbol, unknown>)[CONSOLE_ECHO];
+	const seen: unknown[] = [];
+
+	// A console sink (util's default prints each record): the relay marks what it prints as an echo.
+	sinks.unshift(() => { seen.push(flag()); });
+
+	const log = relayLoggerToHub(createHub({ "id": "echoed" }), "echoed");
+
+	log.info("relayed, and echoed");
+	assert.equal(seen.at(-1), true, "marked while the console sink prints it");
+	assert.notEqual(flag(), true, "and only then");
+	assert.equal(Symbol.for("@brianjenkins94/observability.consoleEcho"), CONSOLE_ECHO, "a registered symbol: a tap can name it without importing this");
+});
+

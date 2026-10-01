@@ -25,7 +25,12 @@ function format(value: unknown): string {
 	}
 }
 
-/** Console calls, and uncaught errors and rejections, → `send` (the console still prints). */
+/** Set while observability's console sink echoes a record that already rides the hub (its CONSOLE_ECHO — named by its
+ *  registered key, so the taps don't import observability). */
+const CONSOLE_ECHO = Symbol.for("@brianjenkins94/observability.consoleEcho");
+
+/** Console calls, and uncaught errors and rejections, → `send` (the console still prints). Not what observability
+ *  echoes of a record it relays: that one reaches the editor through the hub already, structured. */
 export function installConsoleTap(send: Send): void {
 	const levels: [keyof Console, TapRecord["level"]][] = [["log", "info"], ["info", "info"], ["warn", "warn"], ["error", "error"], ["debug", "debug"]];
 
@@ -34,7 +39,9 @@ export function installConsoleTap(send: Send): void {
 
 		(console as unknown as Record<string, unknown>)[method] = (...args: unknown[]): void => {
 			try {
-				send({ "level": level, "message": args.map(format).join(" ") });
+				if ((globalThis as Record<symbol, unknown>)[CONSOLE_ECHO] !== true) {
+					send({ "level": level, "message": args.map(format).join(" ") });
+				}
 			} catch { /* a tap never breaks the app */ }
 
 			original(...args);
