@@ -137,6 +137,8 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "run.target", "hubs": ["shell", "workbench"], "description": "Run a target." },
 	{ "pattern": "theme.colorScheme", "hubs": ["shell", "workbench"], "description": "Theme sync." },
 	{ "pattern": "preview.>", "hubs": ["shell", "root", "workbench", "node"], "description": "Preview windows, the dev server, HMR." },
+	{ "pattern": "preview.decide", "hubs": ["shell", "preview:*"], "description": "A preview window's page tap asks for a capability the service worker can't see (WebSocket, WebRTC) — prompted in that window." },
+	{ "pattern": "preview.open", "hubs": ["shell", "preview:*"], "description": "A preview window's page tap hands up a page the app opened as a new window: another preview window." },
 	{ "pattern": "virtual.request.*", "hubs": ["sw", "root"], "description": "The service worker's /__virtual__/<tab>/<port>/ requests, addressed to the tab whose root relays them." },
 	{ "pattern": "virtual.request", "hubs": ["root", "workbench", "node"], "description": "A preview's requests, answered by the node worker's dev servers." },
 	{ "pattern": "capability.decide.*", "hubs": ["sw", "root"], "description": "The service worker's capability decisions, addressed to the tab whose root relays them to its pod." },
@@ -180,7 +182,7 @@ export const channels: ChannelSpec[] = [
 	{ "a": "shell", "b": "net:*", "protocol": "HTTP", "transport": "fetch, before the service worker controls the page", "description": "A first visit on the dev server: the shell renders (its WebAwesome icons, …) before the newly registered service worker claims the page, so those requests go straight out. Once it's controlled, they go through the service worker." },
 	{ "a": "workbench", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "User data, logs, storage, workspace-fs." },
 	// the preview pipeline
-	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "description": "Into the iframe: HMR updates (vite-hmr), capability decisions. Out of it: console/errors (obs-log → $sys.log.<window>), WebSocket/WebRTC capability requests (cap-decide), and pages the app opens as new windows (open-window → another preview window)." },
+	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "description": "Into the iframe: HMR updates (vite-hmr). Everything else of a window rides its hub link (the page tap's hub: its console and errors, capability requests and new windows — preview.decide, preview.open)." },
 	{ "a": "shell", "b": "devtools:*", "protocol": "CDP (Chrome DevTools Protocol)", "transport": "window.postMessage", "description": "A preview's docked DevTools frontend: raw CDP commands up, replies and events down — the shell relays them over the hub (preview.cdp / preview.cdp.event.<window>) to chobitsu in the preview window's page (preview-devtools.ts)." },
 	{ "a": "shell", "b": "tsval-preview", "protocol": "tsval render protocol", "transport": "window.postMessage + MessagePort", "description": "preview-ready → init (MessagePort); events and time travel up, the mutation stream down." },
 	{ "a": "preview:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, intercepted by the service worker", "description": "Everything under /__virtual__/<tab>/<port>/ (answered by the dev server over the hub), plus the app's own requests (CDN imports pass through; data fetches are capability-gated, failing closed). Same origin and unsandboxed, by necessity — see ARCHITECTURE.md." },

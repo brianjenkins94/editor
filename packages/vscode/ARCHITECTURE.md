@@ -76,20 +76,25 @@ publishes `preview.ready` → the shell (`shell-preview.ts`) opens a window whos
 the dev server over the hub (`virtual.request.<tab>` to that tab's root, which asks its node worker). The previewed app's bare imports resolve to
 **esm.sh** and pass through the service worker. When anything changes the workspace (a save, a git checkout, a
 script), the dev server hears it on `workspace.changed` and emits an HMR update on `preview.hmr.<port>` → the shell
-posts it into the iframe. Back up the other way, the iframe's injected tap posts `obs-log` (console →
-`$sys.log.<window>`), `cap-decide` (WebSocket/WebRTC capability requests; the shell answers `cap-decision`) and
-`open-window` (below). A node script's fs writes ask the service worker synchronously (`POST /__capability__/decide`).
+posts it into the iframe. Back up the other way, everything rides the window's hub: the dev server inlines a tap as
+each page's first script (`page-tap.ts`), and a window's top frame holds its one hub into the editor — the tap's, which
+the shell links (confined: `previewAppPermissions`) and names as the window. Its console and errors go out on
+`$sys.log`, WebSocket/WebRTC capability requests as `preview.decide` and new windows as `preview.open` (the shell knows
+the window from the link, never from what the page says); frames nested in the window use the top frame's tap
+directly, and the app's own hub, if it has one, joins through it (observability's `linkPreviewHost`). A worker can't
+reach the editor's window, so its tap (`worker-tap.ts`) reports over a BroadcastChannel instead. A node script's fs
+writes ask the service worker synchronously (`POST /__capability__/decide`).
 On the live diagram: `preview:<port>` (the iframe) and `vite:<port>` (its dev server) come and go with the preview.
 
 **A server has as many windows as the user opens**, like browser tabs onto one dev server — and no address bar. A
 window's "new window" button opens another onto the same server; so does the app itself, opening one of its pages as
-a new window (`window.open`, a `target="_blank"` link): the tap hands that up as `open-window` instead of letting it
+a new window (`window.open`, a `target="_blank"` link): the tap hands that up (`preview.open`) instead of letting it
 leave the editor as a browser tab. Each window is its own page — its own reload, DevTools, capability prompts and hub
 link — named `preview:<port>` (the port's first) or `preview:<port>~<n>`; HMR reaches all of them; closing one closes
 just it, and closing a server's last window (or Ctrl-C on `vite`) stops the server. An app's hubs name themselves (every
 window of one app has a `page`), so the edge names them: the shell renames each window's observability as it enters
-the editor's tree (observability's `scopedTransport`) — the window's page IS `preview:<port>~<n>`, its other hubs
-`preview:<port>~<n>/<hub>` — never two `page`s merged. Where each runs is reported, not guessed: a frame's realm names
+the editor's tree (observability's `scopedTransport`) — the window's hub (its tap's) IS `preview:<port>~<n>`, the app's
+hubs `preview:<port>~<n>/<hub>` — never two `page`s merged. Where each runs is reported, not guessed: a frame's realm names
 its parent's address, and the page's tap tags each worker it starts with its page and window (its URL's hash), so a
 worker sits under the realm that started it and its logs and capability requests go to its window.
 Two ports are two servers; in the editor they share one origin (ports are paths under `/__virtual__/`), which a desktop
@@ -136,8 +141,9 @@ Everything that can ride the hub does. What doesn't, and why:
   service worker answers; the SW then asks the pod over the hub.
 - **the cspell server host's control port** — it speaks LSP over its worker port and has no hub; the pod hands it the
   workspace buffer once, at spawn (a respawned worker gets it again).
-- **the preview iframe's postMessages** (`obs-log`, `cap-decide`, HMR) — the previewed app is untrusted, so it gets a
-  narrow, validated message bridge, never the hub.
+- **a preview's HMR posts and its workers' tap** — HMR updates go into the iframe as plain posts; a preview's workers,
+  which can't reach the editor's window, report over a BroadcastChannel (`worker-tap.ts`). Everything else of a preview
+  window rides its hub link, confined (the previewed app is untrusted: `previewAppPermissions`).
 - **the tsval render surface's port** — a `MessagePort` handed over in a `preview-ready` → `init` handshake, redone
   whenever the surface reloads.
 

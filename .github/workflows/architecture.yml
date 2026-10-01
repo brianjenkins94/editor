@@ -31,7 +31,17 @@
         # packages; it prebuilds packages/vscode itself (whose full build would need the component first anyway).
         { "run": "pnpm --recursive --if-present --filter '!./packages/vscode' run build" },
         { "run": "pnpm --filter ./packages/vscode exec playwright install --with-deps chromium" },
-        { "run": "pnpm --filter ./packages/vscode run test:architecture" },
+        # The fixture app installs hub and observability as tarballs: this commit's, not the published ones (a change to
+        # either publishes only after ci passes, so @latest would race it). util-publish with CI unset just packs them
+        # into docs/packages (no release); a static server hands them to the editor in the browser.
+        {
+          "run": "CI= npx util-publish packages/hub packages/observability\n(npx -y http-server docs/packages -p 5198 --cors -c-1 --silent &)\nnpx -y wait-on -t 30000 http-get://localhost:5198/hub@0.0.0.tgz\npnpm --filter ./packages/vscode run test:architecture",
+          "env": {
+            "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}",
+            "ARCH_HUB_TGZ": "http://localhost:5198/hub@0.0.0.tgz",
+            "ARCH_OBSERVABILITY_TGZ": "http://localhost:5198/observability@0.0.0.tgz"
+          }
+        },
         {
           "if": "${{ failure() }}",
           "uses": "actions/upload-artifact@v4",

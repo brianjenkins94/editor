@@ -62,17 +62,20 @@ type PromptChoice = "allow-once" | "allow-always" | "deny" | "authorize";
 interface PromptRequest { "kind"?: string; "scope"?: string; "resource"?: string; "dangerous"?: boolean; "redline"?: boolean }
 
 /**
- * What may cross the link an app in a preview joins the editor's tree through. Out of the app: its observability
- * (`$sys.log`, its startup backlog, `$sys.arch`), tab discovery answers, page-tool announcements, and its replies to
- * debug-mcp (the one caller of its tools). Into it: architecture
- * sync, tab discovery, and calls to the tools it serves under its tab id (see observability's servePageTools). The
- * preview isn't a security boundary (same origin, unsandboxed — see ARCHITECTURE.md): this keeps an app's traffic
+ * What may cross the link a preview window `id` joins the editor's tree through — its page tap's hub, and the app's
+ * own behind it. Out of the window: its observability (`$sys.log`, its startup backlog, `$sys.arch`), tab discovery
+ * answers, page-tool announcements, its replies to debug-mcp (the one caller of its tools), and its tap's calls (a
+ * capability decision, a new window — `preview.decide`, `preview.open`). Into it: architecture sync, tab discovery,
+ * calls to the tools it serves under its tab id (see observability's servePageTools), and the replies to its calls.
+ * The preview isn't a security boundary (same origin, unsandboxed — see ARCHITECTURE.md): this keeps an app's traffic
  * and the editor's apart, and nothing else of the app's leaves it.
  */
-const PREVIEW_APP_PERMISSIONS: LinkPermissions = {
-	"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "tab.here", "page_tools.changed", rpcReplySubject("debug-mcp")],
-	"subscribe": ["$sys.arch.sync", "tab.discover", ...["page_tools.*", "tool.>"].map((name) => rpcCallSubject(name))]
-};
+function previewAppPermissions(id: string): LinkPermissions {
+	return {
+		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "tab.here", "page_tools.changed", rpcReplySubject("debug-mcp"), rpcCallSubject("preview.decide"), rpcCallSubject("preview.open")],
+		"subscribe": ["$sys.arch.sync", "tab.discover", ...["page_tools.*", "tool.>"].map((name) => rpcCallSubject(name)), rpcReplySubject(id)]
+	};
+}
 
 /** One preview window: which server it shows, its window, the iframe, and the capability-prompt overlay. */
 interface PreviewSurface {
@@ -89,7 +92,7 @@ interface PreviewSurface {
 	"paneWindow": PaneWindow;
 	"frame": HTMLIFrameElement;
 	"promptEl": HTMLDivElement;
-	/** The link an app's own hubs join the editor's tree through (see PREVIEW_APP_PERMISSIONS). */
+	/** The link the window's hubs join the editor's tree through (see previewAppPermissions). */
 	"unlinkApp": () => void;
 	/** The (scoped) ids of the app's contexts that have reported through this window: ended when it closes. */
 	"reporters": Set<string>;
@@ -340,7 +343,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 					reporters.add(reporter);
 				}
 			}
-		}), { "transit": false, "peer": id, "permissions": PREVIEW_APP_PERMISSIONS });
+		}), { "transit": false, "peer": id, "permissions": previewAppPermissions(id) });
 
 		frame.addEventListener("load", () => { hub.publish("page_tools.changed", { "preview": port, "window": id }); });
 
@@ -631,7 +634,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	const tabOf = (url: string | undefined): string | undefined => (url === undefined ? undefined : parseVirtual(new URL(url, location.href).pathname)?.tab);
 
 	tapChannel?.addEventListener("message", (event: MessageEvent) => {
-		const data = event.data as { "channel"?: string; "tab"?: string; "port"?: number; "window"?: string; "from"?: string; "id"?: number; "kind"?: string; "resource"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;
+		const data = event.data as { "channel"?: string; "tab"?: string; "port"?: number; "window"?: string; "from"?: string; "id"?: string; "kind"?: string; "resource"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;
 		const port = data?.port;
 
 		if (typeof port !== "number" || data?.tab === undefined || data.tab !== tabOf(servers.get(port)?.url)) {
@@ -680,50 +683,37 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 
 			return;
 		}
+	});
 
-		const source = surfaceOf(event.source);
+	// A preview window's page tap asks over its window's link (page-tap.ts) — so the window is the one the link was
+	// opened for, never one the page names.
+	const windowOfCall = (from: string | undefined): PreviewSurface | undefined => (from === undefined ? undefined : surfaces.get(from));
 
-		// Only our preview iframes and the frames nested in them — and of those, only the app's own pages (same origin):
-		// a third-party frame the app embeds can't ask for capabilities, open windows or log as the app.
-		if (source === undefined || event.origin !== location.origin) {
-			return;
+	// A capability the service worker can't see (WebSocket, WebRTC), decided like any other — prompted in this window.
+	serve(hub, "preview.decide", async (args, { from }) => {
+		const surface = windowOfCall(from);
+		const { kind, resource } = (args ?? {}) as { "kind"?: unknown; "resource"?: unknown };
+
+		if (surface === undefined || typeof kind !== "string") {
+			return false;
 		}
 
-		const { port } = source;
-		const payload = event.data as { "channel"?: string; "id"?: number; "kind"?: string; "resource"?: string; "url"?: unknown; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;
+		record(surface.id, "preview.decide");
 
-		// The app opened a page of a server as a new window (`window.open`, a `target="_blank"` link — the tap hands it
-		// up instead of opening a browser tab): another preview window, onto that page. Only a page of a server that's
-		// running here (this origin's `/__virtual__/<tab>/<port>/…`); anything else was left to the browser.
-		if (payload?.channel === "open-window" && typeof payload.url === "string") {
-			const target = previewPageOf(payload.url);
+		return capRpc.request("capability.decide", { "kind": kind, "args": [typeof resource === "string" ? resource : ""], "port": surface.port, "window": surface.id }, { "timeoutMs": 300000, "waitForResponderMs": 10000 })
+			.then((allow) => allow !== false, () => false); // can't reach the decider ⇒ fail closed
+	});
 
-			if (target !== undefined && servers.has(target.port)) {
-				openWindow(target.port, { "url": target.url, "from": source });
-			}
+	// The app opened a page of a server as a new window (`window.open`, a `target="_blank"` link — the tap hands it up
+	// instead of opening a browser tab): another preview window, onto that page. Only a page of a server that's running
+	// here (this origin's `/__virtual__/<tab>/<port>/…`); anything else was left to the browser.
+	serve(hub, "preview.open", (args, { from }) => {
+		const surface = windowOfCall(from);
+		const target = previewPageOf(String((args as { "url"?: unknown } | undefined)?.url));
 
-			return;
+		if (surface !== undefined && target !== undefined && servers.has(target.port)) {
+			openWindow(target.port, { "url": target.url, "from": surface });
 		}
-
-		if (payload?.channel === "cap-decide" && typeof payload.kind === "string") {
-			const id = payload.id;
-			const reply = (allow: boolean): void => {
-				record(source.id, "cap-decision");
-				(event.source as Window | null)?.postMessage({ "channel": "cap-decision", "id": id, "allow": allow }, "*");
-			};
-
-			capRpc.request("capability.decide", { "kind": payload.kind, "args": [payload.resource ?? ""], "port": port, "window": source.id }, { "timeoutMs": 300000, "waitForResponderMs": 10000 })
-				.then((allow) => { reply(allow !== false); })
-				.catch(() => { reply(false); }); // can't reach the decider ⇒ fail closed
-
-			return;
-		}
-
-		if (payload?.channel !== "obs-log" || payload.record === undefined) {
-			return;
-		}
-
-		publishTapRecord(source.id, payload.record);
 	});
 }
 

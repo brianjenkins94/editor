@@ -34,7 +34,7 @@ const nodeBuiltins = [...builtinModules, ...builtinModules.map((name) => `node:$
 
 /** Bundle `extensions/<name>/<file>.ts` (deps inlined) into a virtual module `<name>:<id>` exposing the built
  *  code as a default-export string. `externals` stay unbundled. `configFile:false` isolates the nested build. */
-function bundledModule(name: string, file: string, id: string, format: "cjs" | "es", externals: string[], served = false): Plugin {
+function bundledModule(name: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[], served = false): Plugin {
 	const virtual = `${name}:${id}`;
 	const resolved = "\0" + virtual;
 	const dir = url.fileURLToPath(new URL(`./extensions/${name}/`, import.meta.url));
@@ -55,7 +55,7 @@ function bundledModule(name: string, file: string, id: string, format: "cjs" | "
 					"write": false,
 					"minify": isCI,
 					"target": "esnext",
-					"lib": { "entry": dir + file, "formats": [format], "fileName": id },
+					"lib": { "entry": dir + file, "formats": [format], "fileName": id, ...format === "iife" ? { "name": id.replaceAll("-", "_") } : {} },
 					// One self-contained chunk: large servers have dynamic imports that would otherwise code-split
 					// into siblings we don't capture (we grab only the entry chunk as a string).
 					"rollupOptions": { "external": externals, "output": { "inlineDynamicImports": true } }
@@ -241,7 +241,8 @@ export async function preBuild(): Promise<void> {
 		// `@brianjenkins94/bablr` → its BUILT, browser-safe dist (the classify worker's CST engine): the alias uses
 		// the fresh dist directly, sidestepping the pnpm file:-dep store staleness that bites workspace packages.
 		"resolve": { "alias": { "@brianjenkins94/tsval": resolvePath("../tsval/src/index.ts"), "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript"] },
-		"plugins": [bundledNodeServer("worker-pod"), cspellDict()],
+		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
+		"plugins": [bundledNodeServer("worker-pod"), bundledModule("worker-pod", "page-tap.ts", "page-tap", "iife", []), bundledModule("worker-pod", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
 		"build": {
 			"outDir": "dist",
 			"emptyOutDir": false,

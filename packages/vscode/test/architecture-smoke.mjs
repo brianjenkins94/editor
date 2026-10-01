@@ -47,7 +47,7 @@ const MUST_SEE_LABELS = [
 	["node", "vite:5173", /^file changed$/u], // the save, as workspace.changed
 	["node", "vite:5173", /^hmr /u],
 	[PREVIEW, "shell", /^hmr /u],
-	[PREVIEW, "shell", /^obs-log$/u],
+	[PREVIEW, "shell", /^\$sys\.log\./u],
 	["workbench", "zenfs", /^vscode · write$/u],
 	["zenfs", "workbench", /^onDidChangeFile$/u],
 	["node", "zenfs", /^mount \/workspace/u],

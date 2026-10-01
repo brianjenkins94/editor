@@ -31,12 +31,13 @@
  */
 import { getServer, Runtime } from "@brianjenkins94/almostnode";
 import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
-import { installWorkerProbe, observe, REALM_PARENT } from "@brianjenkins94/observability";
+import { installWorkerProbe, observe } from "@brianjenkins94/observability";
+import pageTap from "worker-pod:page-tap";
+import workerTap from "worker-pod:worker-tap";
 
 import { NETWORK_PROBES } from "../../architecture";
 import { identifyWorker } from "../../architecture-model";
 import { ZENFS_NODE } from "../../architecture-zenfs";
-import { VIRTUAL_MARKER, VIRTUAL_RE, WINDOW_PARAM } from "../../virtual-path";
 import type { WorkspaceChange } from "../../workspace-changes";
 import { WORKSPACE_CHANGED } from "../../workspace-changes";
 
@@ -279,125 +280,14 @@ interface ServerResponse { "statusCode": number; "statusMessage": string; "heade
 type RequestHandler = { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> };
 type PreviewServer = RequestHandler & { "start": () => void; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "stop": () => void };
 
-// Observability tap injected as the FIRST script of every previewed HTML document, so it patches console +
-// captures uncaught error/rejection BEFORE the app's (deferred module) code runs — the errors thrown during the
-// app's own module eval are exactly the ones we were previously blind to. It's a classic (non-module) inline
-// script with zero imports; it just posts each record to the embedding host (`channel:"obs-log"`), which bridges
-// it onto the rootHub as `$sys.log.preview` (see preview.ts). This lights up the preview iframe — the one
-// boundary the observability plane couldn't see, because app code logs through raw console, not util/logger.
-// The tap's parts every preview realm shares — a page's (OBS_TAP) and a worker's (WORKER_TAP) — as script text, each
-// relying on the wrapper around it for \`send(record)\` (to the editor) and \`decide(kind, resource)\` (a capability
-// decision, a Promise of allow).
-// Console calls and uncaught errors / rejections → \`send\`.
-const CONSOLE_TAP = `	var fmt = function (x) { if (typeof x === "string") { return x; } try { return JSON.stringify(x); } catch (e) { return String(x); } };
-	var wrap = function (method, level) {
-		var orig = typeof console[method] === "function" ? console[method].bind(console) : function () {};
-		console[method] = function () {
-			try { send({ level: level, message: Array.prototype.map.call(arguments, fmt).join(" ") }); } catch (e) {}
-			return orig.apply(console, arguments);
-		};
-	};
-	wrap("log", "info"); wrap("info", "info"); wrap("warn", "warn"); wrap("error", "error"); wrap("debug", "debug");
-	addEventListener("error", function (e) {
-		send({ level: "error", message: (e && e.message) || "uncaught error", attrs: { src: e && e.filename, line: e && e.lineno, col: e && e.colno, stack: e && e.error && e.error.stack } });
-	});
-	addEventListener("unhandledrejection", function (e) {
-		var r = e && e.reason;
-		send({ level: "error", message: "unhandledrejection: " + ((r && r.message) || String(r)), attrs: { stack: r && r.stack } });
-	});
-`;
-// WebSocket, which the service worker's net gate can't see (excluded from SW fetch by spec): a DEFERRED PROXY that
-// buffers send()/listeners and only opens the real socket once \`decide\` allows it (else fires error+close).
-const WS_GATE = `	var OrigWS = self.WebSocket;
-	if (OrigWS) {
-		// Rebuild a fresh event to redispatch on the proxy — an Event can be dispatched only once.
-		var relayWs = function (ev) {
-			if (ev.type === "message") { return new MessageEvent("message", { data: ev.data, origin: ev.origin, lastEventId: ev.lastEventId }); }
-			if (ev.type === "close") { try { return new CloseEvent("close", { code: ev.code, reason: ev.reason, wasClean: ev.wasClean }); } catch (e) { return new Event("close"); } }
-			return new Event(ev.type);
-		};
-		class GatedWebSocket extends EventTarget {
-			constructor(url, protocols) {
-				super();
-				this.url = String(url); this.protocol = ""; this.extensions = ""; this.binaryType = "blob";
-				this.readyState = OrigWS.CONNECTING; this.bufferedAmount = 0;
-				this._real = null; this._queue = []; this._closed = false; this._closeArgs = null;
-				var self = this;
-				decide("net.ws", this.url).then(function (allow) { if (allow) { self._open(url, protocols); } else { self._deny(); } });
-			}
-			_open(url, protocols) {
-				var self = this, real = protocols === undefined ? new OrigWS(url) : new OrigWS(url, protocols);
-				this._real = real;
-				try { real.binaryType = this.binaryType; } catch (e) {}
-				["open", "message", "error", "close"].forEach(function (type) {
-					real.addEventListener(type, function (ev) {
-						if (type === "open") { self.readyState = OrigWS.OPEN; self.protocol = real.protocol; self.extensions = real.extensions; self._flush(); }
-						else if (type === "close") { self.readyState = OrigWS.CLOSED; }
-						self.dispatchEvent(relayWs(ev));
-					});
-				});
-				if (this._closed) { try { real.close.apply(real, this._closeArgs || []); } catch (e) {} }
-			}
-			_flush() { var q = this._queue; this._queue = []; for (var i = 0; i < q.length; i++) { try { this._real.send(q[i]); } catch (e) {} } }
-			_deny() {
-				this.readyState = OrigWS.CLOSED;
-				this.dispatchEvent(new Event("error"));
-				var ce; try { ce = new CloseEvent("close", { code: 4403, reason: "Blocked by capability policy", wasClean: false }); } catch (e) { ce = new Event("close"); }
-				this.dispatchEvent(ce);
-			}
-			send(data) { if (this._closed) { return; } if (this._real && this.readyState === OrigWS.OPEN) { this._real.send(data); } else { this._queue.push(data); } }
-			close(code, reason) { this._closed = true; this._closeArgs = [code, reason]; if (this._real) { try { this._real.close(code, reason); } catch (e) {} } else { this.readyState = OrigWS.CLOSING; } }
-		}
-		// on* handlers as accessors, so dispatchEvent alone delivers to BOTH addEventListener and the on* handler.
-		["onopen", "onmessage", "onerror", "onclose"].forEach(function (name) {
-			var type = name.slice(2), key = "_" + name;
-			Object.defineProperty(GatedWebSocket.prototype, name, {
-				configurable: true,
-				get: function () { return this[key] || null; },
-				set: function (fn) { if (this[key]) { this.removeEventListener(type, this[key]); } this[key] = typeof fn === "function" ? fn : null; if (this[key]) { this.addEventListener(type, this[key]); } }
-			});
-		});
-		GatedWebSocket.CONNECTING = OrigWS.CONNECTING; GatedWebSocket.OPEN = OrigWS.OPEN; GatedWebSocket.CLOSING = OrigWS.CLOSING; GatedWebSocket.CLOSED = OrigWS.CLOSED;
-		self.WebSocket = GatedWebSocket;
-	}
-`;
-
-/** The BroadcastChannel a preview's workers reach the editor on (they can't post to its window; the shell listens). */
-const WORKER_TAP_CHANNEL = "__editor_preview_tap__";
-/** Where the dev server serves the worker tap as a module (see WORKER_TAP): under the preview's own address. */
+// The preview taps (page-tap.ts, worker-tap.ts — bundled to script text at build time): the dev server puts one first
+// in every page it serves (inline, so it runs before the app's own code — the errors thrown during the app's module
+// eval are exactly the ones we'd otherwise miss) and in every worker's entry script.
+/** Where the dev server serves the worker tap as a module: under the preview's own address. */
 const WORKER_TAP_PATH = "/@editor/worker-tap.js";
-
-// The tap for a previewed app's WORKERS: the same console / error capture and WebSocket gate as a page's, reporting
-// over a same-origin BroadcastChannel (a worker can't reach the editor's window) — tagged with its tab and port (from
-// its own address), so only its editor's shell takes it. The dev server puts it first in a worker's entry script:
-// imported (a module worker — so it runs before the app's own imports) or inline (a classic one).
-const WORKER_TAP = `(function () {
-	if (self.__obsTap) { return; }
-	self.__obsTap = true;
-	var m = /${VIRTUAL_RE.source}/.exec(location.pathname);
-	var tab = m ? m[1] : undefined, vport = m ? Number(m[2]) : undefined, worker = m && m[3] ? m[3] : location.pathname;
-	var win = new URLSearchParams(location.hash.slice(1)).get(${JSON.stringify(WINDOW_PARAM)}) || undefined; // tagged by its page's tap
-	var bc; try { bc = new BroadcastChannel("${WORKER_TAP_CHANNEL}"); } catch (e) { return; }
-	var me = Math.random().toString(36).slice(2);
-	var send = function (rec) {
-		rec.attrs = Object.assign({ worker: worker }, rec.attrs);
-		try { bc.postMessage({ channel: "obs-log", tab: tab, port: vport, window: win, record: rec }); } catch (e) {}
-	};
-${CONSOLE_TAP}	var capSeq = 0, capPending = {};
-	bc.addEventListener("message", function (e) {
-		var d = e.data;
-		if (d && d.channel === "cap-decision" && d.to === me && capPending[d.id]) { var cb = capPending[d.id]; delete capPending[d.id]; cb(d.allow === true); }
-	});
-	var decide = function (kind, resource) {
-		return new Promise(function (resolve) {
-			var id = Math.random().toString(36).slice(2) + "-" + (++capSeq); // unguessable: only the shell can answer it
-			capPending[id] = resolve;
-			try { bc.postMessage({ channel: "cap-decide", tab: tab, port: vport, window: win, from: me, id: id, kind: kind, resource: resource }); } catch (err) { delete capPending[id]; resolve(false); return; }
-			setTimeout(function () { if (capPending[id]) { delete capPending[id]; resolve(false); } }, 300000); // unanswered ⇒ fail closed
-		});
-	};
-${WS_GATE}})();
-`;
+// (Inlined in a <script>: nothing in it may close the element early.)
+// eslint-disable-next-line webawesome/no-html-in-strings -- the page tap SCRIPT injected into a preview page as text, not app chrome
+const PAGE_TAP_SCRIPT = "<script>" + pageTap.replaceAll("</script", "<\\/script") + "</script>";
 
 /** A worker's entry script (`body`, served at `url`) with the worker tap put first — on its FIRST LINE, no newline added,
  *  so the script's own lines (and its inline source map) don't move: a module worker imports it (the first import runs
@@ -406,115 +296,11 @@ ${WS_GATE}})();
 function injectWorkerTap(body: string, url: string): string {
 	const isModule = /^\s*(?:import\b|export\b)/mu.test(body);
 	const depth = url.split(/[?#]/u)[0]!.split("/").length - 2;
-	const tap = isModule ? `import "./${"../".repeat(Math.max(0, depth))}${WORKER_TAP_PATH.slice(1)}";` : `(0, eval)(${JSON.stringify(WORKER_TAP)});`;
+	const tap = isModule ? `import "./${"../".repeat(Math.max(0, depth))}${WORKER_TAP_PATH.slice(1)}";` : `(0, eval)(${JSON.stringify(workerTap)});`;
 	const directive = /^\s*(["'])use strict\1;?/u.exec(body)?.[0] ?? "";
 
 	return directive + tap + body.slice(directive.length);
 }
-
-// eslint-disable-next-line webawesome/no-html-in-strings -- an observability tap SCRIPT injected into the preview page as text, not app chrome
-const OBS_TAP = `<script>
-(function () {
-	if (window.__obsTap) { return; }
-	window.__obsTap = true;
-	// The editor window hosting this preview: its top frame's parent — above every frame the app nests in it (a game's
-	// instance iframes), each a /__virtual__/ page too. Posting to plain \`parent\` from a nested frame would hand the
-	// record to the app's own page (and its message listeners) instead.
-	var host = (function () { var w = window; try { while (w.parent !== w && w.parent.location.pathname.indexOf(${JSON.stringify(VIRTUAL_MARKER)}) !== -1) { w = w.parent; } } catch (e) {} return w.parent; })();
-	var nested = host !== parent ? "/" + location.pathname.split(${JSON.stringify(VIRTUAL_MARKER)})[1].split("/").slice(2).join("/") : undefined;
-	// This preview's window id: the shell names its frame after it.
-	var win = (function () { var w = window; try { while (w.parent !== host) { w = w.parent; } return w.name || undefined; } catch (e) { return undefined; } })();
-	// The workers this page starts are told where they came from — this page (their realm's parent) and its preview
-	// window — in their URL's hash, which never reaches the server.
-	if (typeof window.Worker === "function" && win !== undefined) {
-		var tagged = function (url) {
-			try {
-				var u = new URL(String(url), location.href);
-				if (u.origin !== location.origin || (u.protocol !== "http:" && u.protocol !== "https:")) { return url; }
-				var params = new URLSearchParams(u.hash.slice(1));
-				params.set(${JSON.stringify(REALM_PARENT)}, location.href);
-				params.set(${JSON.stringify(WINDOW_PARAM)}, win);
-				u.hash = params.toString();
-				return u.href;
-			} catch (e) { return url; }
-		};
-		var OrigWorker = window.Worker;
-		window.Worker = class extends OrigWorker { constructor(url, options) { super(tagged(url), options); } };
-	}
-	var send = function (rec) {
-		if (nested !== undefined) { rec.attrs = Object.assign({ frame: nested }, rec.attrs); }
-		try { host.postMessage({ channel: "obs-log", record: rec }, "*"); } catch (e) {}
-	};
-${CONSOLE_TAP}	// New windows stay in the editor: the app opening one of its server's pages as a new window — \`window.open\`, a
-	// \`target="_blank"\` link, a modifier-click on a link — gets another preview window onto that page (the shell opens
-	// it: \`open-window\`), not a browser tab outside the editor. Anything else (another site, a named target) is the
-	// browser's, as always. There's no window to hand back, so such a \`window.open\` returns null (as a blocked popup does).
-	var pageOf = function (url) {
-		try { var u = new URL(String(url), location.href); return u.origin === location.origin && /${VIRTUAL_RE.source}/.test(u.pathname) ? u.href : undefined; } catch (e) { return undefined; }
-	};
-	var openWindow = function (href) { try { host.postMessage({ channel: "open-window", url: href }, "*"); } catch (e) {} };
-	var origOpen = window.open;
-	window.open = function (url, target) {
-		var href = url === undefined || url === "" ? undefined : pageOf(url);
-		if (href !== undefined && (target === undefined || target === "" || target === "_blank")) { openWindow(href); return null; }
-		return origOpen.apply(window, arguments);
-	};
-	addEventListener("click", function (e) {
-		if (e.defaultPrevented || e.button !== 0) { return; }
-		var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
-		if (!a || a.hasAttribute("download") || !(a.target === "_blank" || e.metaKey || e.ctrlKey || e.shiftKey)) { return; }
-		var href = pageOf(a.href);
-		if (href !== undefined) { e.preventDefault(); openWindow(href); }
-	});
-	// Capability ENFORCEMENT (Phase 2): the service worker's net gate only sees HTTP(S) — WebSocket (excluded from
-	// SW fetch by spec) and WebRTC (P2P over UDP) slip past it. Gate them HERE, in the preview realm, before app
-	// code runs. A sync constructor can't await a decision on the main thread (no Atomics.wait), so WebSocket
-	// returns a DEFERRED PROXY that buffers send()/listeners and only opens the real socket on allow (else fires
-	// error+close); RTCPeerConnection is built with its ICE servers STRIPPED and only restored (setConfiguration)
-	// on allow, closed on deny. Each decision round-trips to the shell (cap-decide → capability.decide → the TOFU
-	// overlay), tagged with this preview's port; it FAILS CLOSED (deny) if the shell can't be reached.
-	var vport = (function () { var m = /${VIRTUAL_RE.source}/.exec(location.pathname); return m ? Number(m[2]) : undefined; })();
-	var capSeq = 0, capPending = {};
-	addEventListener("message", function (e) {
-		var d = e.data;
-		if (e.source === host && d && d.channel === "cap-decision" && capPending[d.id]) { var cb = capPending[d.id]; delete capPending[d.id]; cb(d.allow === true); }
-	});
-	var decide = function (kind, resource) {
-		return new Promise(function (resolve) {
-			var id = Math.random().toString(36).slice(2) + "-" + (++capSeq); // unguessable: only the shell can answer it
-			capPending[id] = resolve;
-			try { host.postMessage({ channel: "cap-decide", id: id, kind: kind, resource: resource, port: vport }, "*"); } catch (err) { delete capPending[id]; resolve(false); return; }
-			setTimeout(function () { if (capPending[id]) { delete capPending[id]; resolve(false); } }, 300000); // unanswered ⇒ fail closed
-		});
-	};
-${WS_GATE}	var OrigRTC = window.RTCPeerConnection;
-	if (OrigRTC) {
-		var RTC = function (config) {
-			config = config || {};
-			var servers = config.iceServers || [], urls = [];
-			for (var i = 0; i < servers.length; i++) {
-				var u = servers[i] && servers[i].urls;
-				if (typeof u === "string") { urls.push(u); } else if (u) { for (var j = 0; j < u.length; j++) { urls.push(u[j]); } }
-			}
-			// Give the app a REAL peer connection (full API) but with NO reachable ICE relays until allowed.
-			var stripped = {};
-			for (var key in config) { if (Object.prototype.hasOwnProperty.call(config, key)) { stripped[key] = config[key]; } }
-			stripped.iceServers = [];
-			var pc = new OrigRTC(stripped);
-			decide("net.webrtc", urls.length ? urls.join(",") : "peer").then(function (allow) {
-				try {
-					if (pc.signalingState === "closed") { return; }
-					if (allow) { if (urls.length) { pc.setConfiguration(config); } } else { pc.close(); }
-				} catch (e) {}
-			});
-			return pc;
-		};
-		RTC.prototype = OrigRTC.prototype;
-		window.RTCPeerConnection = RTC;
-	}
-})();
-</script>
-`;
 
 /** Inject the observability tap as the first thing inside <head> (fallback: after <html>, else prepend). */
 function injectObsTap(html: string): string {
@@ -523,7 +309,7 @@ function injectObsTap(html: string): string {
 	if (headMatch !== null) {
 		const at = headMatch.index + headMatch[0].length;
 
-		return html.slice(0, at) + "\n" + OBS_TAP + html.slice(at);
+		return html.slice(0, at) + "\n" + PAGE_TAP_SCRIPT + html.slice(at);
 	}
 
 	const htmlMatch = /<html[^>]*>/iu.exec(html);
@@ -531,10 +317,10 @@ function injectObsTap(html: string): string {
 	if (htmlMatch !== null) {
 		const at = htmlMatch.index + htmlMatch[0].length;
 
-		return html.slice(0, at) + "\n" + OBS_TAP + html.slice(at);
+		return html.slice(0, at) + "\n" + PAGE_TAP_SCRIPT + html.slice(at);
 	}
 
-	return OBS_TAP + html;
+	return PAGE_TAP_SCRIPT + html;
 }
 
 // Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry —
@@ -552,7 +338,7 @@ serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
 
 	// The worker tap, as a module (injectWorkerTap imports it from a worker's entry).
 	if (url.split("?")[0] === WORKER_TAP_PATH) {
-		return { "status": 200, "statusText": "OK", "headers": { "content-type": "text/javascript", "cache-control": "no-cache" }, "body": new TextEncoder().encode(WORKER_TAP) };
+		return { "status": 200, "statusText": "OK", "headers": { "content-type": "text/javascript", "cache-control": "no-cache" }, "body": new TextEncoder().encode(workerTap) };
 	}
 
 	if (server === undefined) {
@@ -566,11 +352,11 @@ serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
 
 	architecture.record(serverNode, architecture.self, response.statusCode >= 400 ? "error" : "reply", String(response.statusCode) + " " + url.split("?")[0], response.body.length);
 
-	// HTML documents get the observability tap injected as their first script (see OBS_TAP). Re-encode and fix
+	// HTML documents get the observability tap injected as their first script (page-tap.ts). Re-encode and fix
 	// content-length; only touch text/html so assets/JS/JSON pass through untouched.
 	const contentType = response.headers["content-type"] ?? response.headers["Content-Type"] ?? "";
 
-	// A worker's entry script gets the worker tap first (see WORKER_TAP) — console, errors and sockets there too.
+	// A worker's entry script gets the worker tap first (worker-tap.ts) — console, errors and sockets there too.
 	if (entry !== undefined && response.statusCode < 300 && /javascript|typescript/u.test(contentType)) {
 		const bytes = new TextEncoder().encode(injectWorkerTap(new TextDecoder().decode(new Uint8Array(response.body)), url));
 		const nextHeaders = { ...response.headers };

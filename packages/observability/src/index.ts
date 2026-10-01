@@ -17,7 +17,7 @@
  * `LogRecord` carries `span/spanId/parentSpanId/traceId/depth/durationMs` as W3C-shaped ids, so spans survive the
  * trip intact and stitch across contexts; the collector tags each by `context.source`.
  */
-import type { Hub, LinkPermissions } from "@brianjenkins94/hub";
+import type { Hub, LinkPermissions, Transport } from "@brianjenkins94/hub";
 import type { Logger, LogRecord } from "@brianjenkins94/util/logger";
 import { portTransport, websocketTransport, windowTransport } from "@brianjenkins94/hub";
 import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
@@ -381,10 +381,10 @@ function describeTab(tab: string, hub: Hub): TabInfo {
 	const info: TabInfo = { "tab": tab, "url": location.href, "title": document.title, "visible": document.visibilityState === "visible", "focused": document.hasFocus(), "protocol": OBSERVABILITY_PROTOCOL };
 
 	// An app in an editor preview is its own page, inside the editor's tab: describe it, not the editor around it —
-	// and say which preview window it is (the id the editor's shell assigned its page: Hub.knownAs), the scope the
-	// editor files its records under, so a relay can tell its records from the editor's.
+	// and say which preview window it is (its page tap knows; an older editor's shell assigned the page that id:
+	// Hub.knownAs), the scope the editor files its records under, so a relay can tell its records from the editor's.
 	if (previewHost() !== undefined) {
-		const scope = hub.knownAs()[0];
+		const scope = editorTap()?.window ?? hub.knownAs()[0];
 
 		return { ...info, "preview": true, ...scope === undefined ? {} : { "scope": scope } };
 	}
@@ -420,8 +420,20 @@ export function previewHost(): Window | undefined {
 	}
 }
 
+/** What the editor's page tap offers in a preview window's top frame (its `page-tap.ts`): the window's id, and a
+ *  transport onto the window's hub — the one hub of the window the editor's shell links. */
+interface EditorTap {
+	"window": string;
+	"connect": () => Transport;
+}
+
+function editorTap(): EditorTap | undefined {
+	return (globalThis as { "__editorTap"?: EditorTap }).__editorTap;
+}
+
 /**
- * Inside an editor preview, link `hub` — the app page's root hub — into the editor's hub tree, through the shell: the
+ * Inside an editor preview, link `hub` — the app page's root hub — into the editor's hub tree: through the window's
+ * page tap, which holds the window's one hub into the editor (an older editor without one: the shell directly). The
  * app's logs, architecture and page tools then reach the editor's observability plane and its debug-mcp, as part of
  * the editor's tab (the shell confines what crosses). Returns the link, or undefined when this page isn't a preview's
  * top frame (then link debug-mcp directly: `linkPreviewHost(hub) ?? linkDebugMcp(hub)`).
@@ -436,8 +448,7 @@ export function linkPreviewHost(hub: Hub): PreviewLink | undefined {
 	// What the app logs while it boots — before this link is up — would never reach the editor: hold it, send it once
 	// the collector can hear it (as linkDebugMcp does).
 	const backlog = logBacklog(hub);
-	// The shell is this page's uplink: the id it assigns the page (its window) is who the page is to the editor.
-	const link = hub.link(windowTransport(host, location.origin), { "uplink": true }) as PreviewLink;
+	const link = hub.link(editorTap()?.connect() ?? windowTransport(host, location.origin), { "uplink": true }) as PreviewLink;
 
 	void backlog.flushWhenReady();
 	announceWhenReady(hub, link);

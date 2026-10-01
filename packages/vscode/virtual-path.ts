@@ -62,6 +62,10 @@ export const PREVIEW_WINDOW_PREFIX = "preview:";
  *  the window it runs in. */
 export const WINDOW_PARAM = "preview-window";
 
+/** The BroadcastChannel a preview's workers reach the editor on: a worker can't post to the editor's window, so its tap
+ *  reports here, tagged with its tab, port and window (worker-tap.ts), and the shell listens. */
+export const WORKER_TAP_CHANNEL = "__editor_preview_tap__";
+
 /** The id of `port`'s `index`-th preview window (counted from 1) — no dots: ids become subject tokens (`$sys.log.<id>`). */
 export function windowId(port: number, index: number): string {
 	return PREVIEW_WINDOW_PREFIX + port + (index === 1 ? "" : "~" + index);

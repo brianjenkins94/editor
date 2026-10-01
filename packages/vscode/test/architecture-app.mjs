@@ -223,6 +223,23 @@ test("a nested frame's console reaches the editor's log plane — tagged with it
 	assert.equal((await previewPage().evaluate(() => globalThis.__wired)).stray, 0, "the app's page saw none of the tap's messages");
 });
 
+test("a page's capability request (WebSocket, WebRTC) is decided by the editor, for its window — over the window's hub", async () => {
+	const window = "preview:" + previewPort();
+	// What the tap's WebSocket gate does with a new socket: ask (page-tap.ts → the shell's preview.decide → the decider).
+	const decision = previewPage().evaluate((resource) => globalThis.__editorTap.decide("net.ws", resource), "ws://localhost:1/decide-test");
+	const deny = session.page.locator("wa-button", { "hasText": "Deny" }).first();
+	// The decider may prompt (in this window's pane) or know the answer already.
+	const settled = await Promise.race([decision.then((allow) => ({ "allow": allow })), deny.waitFor({ "timeout": 60_000 }).then(() => undefined)]);
+
+	if (settled === undefined) {
+		await deny.click();
+		assert.equal(await decision, false, "denied in the prompt, and the page heard it");
+	}
+
+	// Answered by the shell (not failed closed for want of a route): its reply crossed the window's link.
+	await session.until("the shell's answer to the window", hasLabel("shell", window, /^↩ preview\.decide\(\)$/u));
+});
+
 test("a worker's console reaches the editor's log plane too — through the worker tap, tagged with its worker", async () => {
 	const [record] = await eventually("the worker's log in debug-mcp", async () => {
 		const found = debugMcp.store.queryLogs({ "source": "preview:" + previewPort(), "textIncludes": "wired worker says hi" });
@@ -285,14 +302,15 @@ test("the app's link is confined: an editor subject it publishes doesn't cross i
 });
 
 test("the editor's architecture view takes the app's contexts as the app's: none of it needs review", async () => {
-	// The app's hubs, workers and frames are reported into the editor's view (they joined its tree), named by the shell
-	// as they enter: its page IS its preview window (`preview:<port>`), the rest under it (`preview:<port>/<hub>`). But
-	// they're not the editor's architecture: nothing to check them against, and nothing flagged.
+	// The app's hubs, workers and frames are reported into the editor's view (they joined its tree through the window's
+	// page tap, whose hub the shell links), named by the shell as they enter: the tap's hub IS the preview window
+	// (`preview:<port>`), the app's under it (`preview:<port>/<hub>`). But they're not the editor's architecture: nothing
+	// to check them against, and nothing flagged.
 	const window = "preview:" + previewPort();
-	const snapshot = await session.until("the app's hubs in the view", (current) => [window, window + "/worker"].every((id) => current.topology?.[id] !== undefined));
+	const snapshot = await session.until("the app's hubs in the view", (current) => [window, window + "/page", window + "/worker"].every((id) => current.topology?.[id] !== undefined));
 
 	assert.ok(snapshot.nodes.some((node) => node.id === window + "/frame"), "its nested frame's hub too");
-	assert.ok(!snapshot.nodes.some((node) => node.id === window + "/page"), "its page is the window, not a context under it");
+	assert.deepEqual(snapshot.topology[window].links.map((link) => link.peerId).sort(), [window + "/page", "shell"], "the app's page joined through the tap — one link from the window to the shell");
 	assert.deepEqual((await session.conformance()).filter((violation) => violation.id !== override()), []);
 
 	// And where they run, as each says: the frame in the page (the window); the worker under the page that started it.

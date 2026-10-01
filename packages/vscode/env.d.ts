@@ -42,6 +42,18 @@ declare module "eslint:extension" {
 }
 
 /** The worker-pod cspell language server bundled to an ESM string (imported by server-host, run by almostnode). */
+declare module "worker-pod:page-tap" {
+	const code: string;
+
+	export default code;
+}
+
+declare module "worker-pod:worker-tap" {
+	const code: string;
+
+	export default code;
+}
+
 declare module "worker-pod:server-node" {
 	const code: string;
 
