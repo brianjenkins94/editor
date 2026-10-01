@@ -2,7 +2,7 @@ import type { Transport, WebSocketLike } from "../src/index.ts";
 import * as assert from "node:assert/strict";
 
 import { test } from "node:test";
-import { createHub, createRpcClient, frameOf, mapFrame, matches, pipe, serve, websocketTransport } from "../src/index.ts";
+import { channelTransport, createHub, createRpcClient, frameOf, mapFrame, matches, pipe, serve, websocketTransport } from "../src/index.ts";
 
 /** Let queued deliveries (across several hops) drain. */
 function flush(): Promise<void> {
@@ -845,4 +845,20 @@ test("a disposed rpc client stops listening for replies and fails what it was st
 	await flush();
 	assert.equal(server.interested("$rpc.reply.caller"), false, "its reply subject is no longer advertised");
 	assert.equal(caller.interested("$rpc.reply.caller"), false);
+});
+
+test("channelTransport: two hubs meet over a BroadcastChannel by name, and close lets it go", async () => {
+	const name = "hub-test-" + crypto.randomUUID();
+	const [left, right] = [channelTransport(name), channelTransport(name)];
+	const a = createHub({ "id": "a" });
+	const b = createHub({ "id": "b" });
+	const seen: unknown[] = [];
+
+	b.subscribe("hi", (data) => { seen.push(data); });
+	await Promise.all([a.link(left).ready, b.link(right).ready]);
+	a.publish("hi", 1);
+	await new Promise((resolve) => { setTimeout(resolve, 50); });
+	assert.deepEqual(seen, [1]);
+	left.close();
+	right.close();
 });

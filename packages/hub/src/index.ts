@@ -615,9 +615,9 @@ export function pipe({ lossy = false, schedule = (deliver) => { setTimeout(deliv
 
 /**
  * Transport over anything with `postMessage` + `addEventListener("message")`: a `MessagePort`, a `Worker`
- * (from the page side), or a worker's own global scope (`self`, from inside the worker).
+ * (from the page side), a worker's own global scope (`self`, from inside the worker), or a `BroadcastChannel`.
  */
-export function portTransport(target: MessagePort | Worker | Window | typeof globalThis): Transport {
+export function portTransport(target: MessagePort | Worker | Window | BroadcastChannel | typeof globalThis): Transport {
 	return {
 		"send": (message) => { (target as MessagePort).postMessage(message); },
 		"listen": (onMessage) => {
@@ -682,15 +682,29 @@ export function websocketTransport(ws: WebSocketLike): Transport {
 }
 
 /**
- * Transport between two windows (iframe ⇄ parent, opener ⇄ popup). Filtered by source window and, unless
- * `origin` is "*", by origin — so only the intended peer's messages are accepted.
+ * Transport over the BroadcastChannel named `name`, from anywhere — a page, a worker, another tab of the origin. Every
+ * same-origin context that opens the same name hears it, so it's private only in that its name is unguessable.
+ * `close` closes the channel.
  */
-export function windowTransport(target: Window, origin = "*"): Transport {
+export function channelTransport(name: string): Transport & { "close": () => void } {
+	const channel = new BroadcastChannel(name);
+
+	return { ...portTransport(channel), "close": () => { channel.close(); } };
+}
+
+/**
+ * Transport between two windows (iframe ⇄ parent, opener ⇄ popup). Filtered by source window and, unless
+ * `origin` is "*", by origin — so only the intended peer's messages are accepted. `target` may be a function, looked
+ * up on each message: an iframe's window, before it's in the document.
+ */
+export function windowTransport(target: Window | (() => Window | null | undefined), origin = "*"): Transport {
+	const peer = typeof target === "function" ? target : () => target;
+
 	return {
-		"send": (message) => { target.postMessage(message, origin); },
+		"send": (message) => { peer()?.postMessage(message, origin); },
 		"listen": (onMessage) => {
 			const handler = (event: MessageEvent): void => {
-				if (event.source === target && (origin === "*" || event.origin === origin)) {
+				if (event.source !== null && event.source === peer() && (origin === "*" || event.origin === origin)) {
 					onMessage(event.data);
 				}
 			};
