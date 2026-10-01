@@ -352,7 +352,8 @@ test("a tap sees publish, send, receive and deliver — with the peer of each li
 	root.tap((event) => {
 		if (event.type === "publish") {
 			rootEvents.push("publish " + event.envelope.subject);
-		} else if ((event.type === "send" || event.type === "receive") && "subject" in event.frame) {
+		} else if ((event.type === "send" || event.type === "receive") && !("hub" in event.frame)) {
+			// (Messages only: the handshake's interest frames may still be settling on a slow machine.)
 			rootEvents.push(`${event.type} ${event.frame.subject} ${event.link.peerId}`);
 		}
 	});
