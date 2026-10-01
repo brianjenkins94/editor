@@ -2,7 +2,7 @@ import type { Transport, WebSocketLike } from "../src/index.ts";
 import * as assert from "node:assert/strict";
 
 import { test } from "node:test";
-import { channelTransport, createHub, createRpcClient, frameOf, mapFrame, matches, pipe, serve, websocketTransport } from "../src/index.ts";
+import { channelTransport, createHub, createRpcClient, dataChannelTransport, frameOf, mapFrame, matches, pipe, serve, websocketTransport } from "../src/index.ts";
 
 /** Let queued deliveries (across several hops) drain. */
 function flush(): Promise<void> {
@@ -1157,4 +1157,83 @@ test("subjects, patterns, ids and permissions are validated: thrown at locally, 
 	assert.equal(hub.inspect().links[0]?.peerId, undefined, "an invalid id is no name");
 	assert.deepEqual(interestOf(hub), []);
 	assert.equal(reported.filter((fault) => fault.kind === "frame").length, 4);
+});
+
+/** A connected pair of RTCDataChannel stand-ins: "connecting" until `open()`, text only, async delivery. */
+function dataChannelPair() {
+	class FakeChannel extends EventTarget {
+		public readyState: RTCDataChannelState = "connecting";
+		public bufferedAmount = 0;
+		public peer: FakeChannel | undefined;
+		public readonly sent: string[] = [];
+
+		public send(data: string): void {
+			if (this.readyState !== "open") {
+				throw new Error("InvalidStateError: not open");
+			}
+
+			this.sent.push(data);
+			setTimeout(() => { this.peer?.dispatchEvent(Object.assign(new Event("message"), { "data": data })); }, 0);
+		}
+
+		public close(): void {
+			for (const end of [this, this.peer!]) {
+				end.readyState = "closed";
+				end.dispatchEvent(new Event("close"));
+			}
+		}
+	}
+
+	const [a, b] = [new FakeChannel(), new FakeChannel()];
+
+	a.peer = b;
+	b.peer = a;
+
+	const open = (): void => {
+		for (const end of [a, b]) {
+			end.readyState = "open";
+			end.dispatchEvent(new Event("open"));
+		}
+	};
+
+	return { "a": a, "b": b, "open": open, "channels": [a as unknown as RTCDataChannel, b as unknown as RTCDataChannel] as const };
+}
+
+test("dataChannelTransport: hubs link over an RTCDataChannel — held until it opens, JSON-framed, unlinked when it closes", async () => {
+	const { a, open, channels } = dataChannelPair();
+	const referee = createHub({ "id": "referee" });
+	const client = createHub({ "id": "client" });
+	const seen: unknown[] = [];
+
+	referee.subscribe("game.state", (data) => { seen.push(data); });
+
+	// Linked while still connecting (a channel handed to a worker on creation): nothing sent yet, nothing lost.
+	const ready = Promise.all([referee.link(dataChannelTransport(channels[0])).ready, client.link(dataChannelTransport(channels[1])).ready]);
+
+	await flush();
+	assert.equal(a.sent.length, 0, "nothing goes out on a channel that isn't open");
+	open();
+	await ready;
+
+	client.publish("game.state", { "tick": 1, "units": [[1, 2, 3]] });
+	await flush();
+	assert.deepEqual(seen, [{ "tick": 1, "units": [[1, 2, 3]] }]);
+	assert.ok(a.sent.every((text) => typeof text === "string"), "text frames: a data channel carries no structured clone");
+
+	a.close();
+	await flush();
+	assert.equal(referee.inspect().links.length, 0);
+	assert.equal(client.inspect().links.length, 0);
+});
+
+test("dataChannelTransport's backlog is the channel's buffered amount, plus what it holds until open", () => {
+	const { a, channels } = dataChannelPair();
+	const transport = dataChannelTransport(channels[0]);
+
+	transport.send({ "x": 1 });
+	assert.ok((transport.backlog?.() ?? 0) > 0, "held while connecting");
+	a.readyState = "open";
+	a.dispatchEvent(new Event("open"));
+	a.bufferedAmount = 500;
+	assert.equal(transport.backlog?.(), 500);
 });

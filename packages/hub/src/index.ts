@@ -35,7 +35,8 @@ export interface Envelope {
 }
 
 /**
- * A duplex channel to one other hub. Transport-agnostic so window/MessagePort/Worker, WebSocket and WebRTC all plug in.
+ * A duplex channel to one other hub. Transport-agnostic so window/MessagePort/Worker, WebSocket and WebRTC
+ * (dataChannelTransport) all plug in.
  * `listen` registers the sink and returns a disposer.
  *
  * The contract: once both ends listen, a transport is RELIABLE and ORDERED — what's sent arrives, once, in the order
@@ -1062,6 +1063,57 @@ export function websocketTransport(ws: WebSocketLike): Transport {
 
 			return () => { ws.removeEventListener("message", handler); };
 		}
+	};
+}
+
+/**
+ * Transport over a WebRTC data channel — the link between browsers (or, handed to a worker as it's created, between
+ * two workers in different tabs). Open it reliable and ordered (the default: no `maxRetransmits` /
+ * `maxPacketLifeTime`), per the Transport contract. A data channel carries text, not structured clones, so frames are
+ * JSON (plain data only, as over a WebSocket; a frame JSON can't encode throws — the hub drops it, a `send` fault).
+ * Frames sent while it's still connecting are held until it opens, so it can be linked straight away; its `close`
+ * unlinks; its backlog is its `bufferedAmount` (LinkOptions.maxBacklog).
+ */
+export function dataChannelTransport(channel: RTCDataChannel): Transport {
+	const held: string[] = [];
+
+	channel.addEventListener("open", () => {
+		for (const text of held.splice(0)) {
+			channel.send(text);
+		}
+	});
+
+	return {
+		"send": (message) => {
+			const text = JSON.stringify(message);
+
+			if (channel.readyState === "connecting") {
+				held.push(text);
+			} else if (channel.readyState === "open") {
+				channel.send(text);
+			} // closing or closed: gone (its close unlinks)
+		},
+		"listen": (onMessage) => {
+			const handler = (event: MessageEvent): void => {
+				if (typeof event.data === "string") {
+					try {
+						onMessage(JSON.parse(event.data));
+					} catch { /* not a JSON frame — not ours */ }
+				}
+			};
+
+			channel.addEventListener("message", handler);
+
+			return () => { channel.removeEventListener("message", handler); };
+		},
+		"onClose": (onClose) => {
+			const handler = (): void => { onClose(); };
+
+			channel.addEventListener("close", handler);
+
+			return () => { channel.removeEventListener("close", handler); };
+		},
+		"backlog": () => channel.bufferedAmount + held.reduce((total, text) => total + text.length, 0)
 	};
 }
 

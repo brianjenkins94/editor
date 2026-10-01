@@ -6,9 +6,10 @@
  * Counts are kept PER REPORTER: a reporter's full-state answer to a sync REPLACES its contribution (its totals
  * already include every delta it sent before), so a viewer opened late never counts anything twice.
  *
- * A MEDIUM only two contexts use — a BroadcastChannel between a client and its referee — is drawn as one edge between
- * them, marked with it (`medium`), rather than as a node of its own: what the probes see physically (client → channel
- * → referee), read as what it is. `channels` is that picture; the channels as reported stay underneath it.
+ * A MEDIUM only two contexts use — a BroadcastChannel or a WebRTC data channel between a client and its referee — is
+ * drawn as one edge between them, marked with it (`medium`), rather than as a node of its own: what the probes see
+ * physically (client → channel → referee), read as what it is. `channels` is that picture; the channels as reported
+ * stay underneath it.
  */
 import type { ArchNodeSpec, ArchReport, NodeState, TrafficCount, TrafficKind } from "./arch.ts";
 import { SILENCE_MS } from "./arch.ts";
@@ -66,8 +67,9 @@ export interface ChannelStats {
 export interface StoredSample { "seq": number; "t": number; "channel": string; "forward": boolean; "kind": TrafficKind; "label": string; "bytes": number; "reporter": string; "payload"?: string }
 
 const RECENT_PER_CHANNEL = 200;
-/** The roles of nodes that carry messages between contexts rather than being one: drawn as an edge when two use them. */
-const MEDIUM_ROLES = new Set(["channel"]);
+/** The roles of nodes that carry messages between contexts rather than being one: drawn as an edge when two use them —
+ *  a BroadcastChannel, a WebRTC data channel, a peer connection (the probes' roles: arch-probes.ts). */
+const MEDIUM_ROLES = new Set(["channel", "data channel", "peer connection"]);
 const LOG_SIZE = 3000;
 const RATE_WINDOW_MS = 2000;
 

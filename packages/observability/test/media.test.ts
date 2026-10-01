@@ -82,3 +82,15 @@ test("a channel with one context on it, or three, stays a node", () => {
 	assert.equal(store.media().size, 0, "a third: it's a meeting place, not a wire");
 	assert.equal([...store.channels.values()].filter((channel) => channel.a === CHANNEL || channel.b === CHANNEL).length, 3);
 });
+
+test("a WebRTC data channel, and a peer connection, are media too", () => {
+	for (const role of ["data channel", "peer connection"]) {
+		const store = new ArchitectureStore();
+		const medium = { "op": "spawn" as const, "spec": { "id": "rtc:link", "role": role } };
+
+		store.apply({ "reporter": "referee", "time": Date.now(), "nodes": [medium], "traffic": [traffic("referee", "rtc:link", "game.state", 4)] });
+		store.apply({ "reporter": "client", "time": Date.now(), "nodes": [medium], "traffic": [traffic("client", "rtc:link", "game.cmd", 2)] });
+
+		assert.deepEqual([...store.media()], [["rtc:link", ["referee", "client"]]], role);
+	}
+});

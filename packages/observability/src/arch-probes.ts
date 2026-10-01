@@ -390,9 +390,18 @@ function installLocksProbe(sink: ArchSink): void {
 	};
 }
 
-/** WebRTC: each peer connection a node (`rtc:<n>`) — its signaling (offers, answers, candidates: their payloads are
- *  the SDP), its states, and every data channel's messages, by channel label. */
+/**
+ * WebRTC, in two parts — both media: two realms on one are drawn as the edge between them (ArchitectureStore).
+ * - Each peer connection a node, `rtc:<its first data channel's label>` (else `rtc:<n>`), so both ends of a connection
+ *   name it alike: its signaling (offers, answers, candidates — their payloads are the SDP) and its states, as the realm
+ *   managing it records them. An answering end learns the label only when the channel arrives: what it signaled before
+ *   then is recorded under it then.
+ * - Each data channel a node, `datachannel:<label>`, and its messages, wherever it's used: RTCDataChannel's prototype
+ *   is hooked, so a channel handed to a worker as it's created (there's no RTCPeerConnection in a worker) is seen there.
+ */
 function installRtcProbe(sink: ArchSink, skip: (data: unknown) => boolean): void {
+	installDataChannelProbe(sink, skip);
+
 	const Original = globalThis.RTCPeerConnection as typeof RTCPeerConnection | undefined;
 
 	if (Original === undefined) {
@@ -408,52 +417,51 @@ function installRtcProbe(sink: ArchSink, skip: (data: unknown) => boolean): void
 			try {
 				count += 1;
 
-				const id = "rtc:" + count;
-				const state = (what: string, value: string): void => { sink.record(sink.self, id, "lifecycle", what + ": " + value); };
-				const watch = (channel: RTCDataChannel): void => {
-					const name = channel.label || "data";
-					const record = (outgoing: boolean, data: unknown): void => {
-						if (skip(data)) {
-							return;
-						}
+				const n = count;
+				let id: string | undefined;
+				const pending: ((named: string) => void)[] = [];
+				// Named by its first data channel — or, with none after a while, by its number.
+				const name = (label?: string): void => {
+					if (id !== undefined) {
+						return;
+					}
 
-						const { kind, label } = typeof data === "string" ? describeAny(data) : { "kind": "message" as const, "label": "binary" };
+					clearTimeout(fallback);
+					id = "rtc:" + (label === undefined || label === "" ? String(n) : normalizeSubject(label));
+					sink.spawn({ "id": id, "label": "Peer connection " + (label ?? n), "role": "peer connection", "dynamic": true, "detail": "RTCPeerConnection" });
 
-						if (outgoing) {
-							sink.record(sink.self, id, kind, name + ": " + label, frameSize(data), 1, data);
-						} else {
-							sink.record(id, sink.self, kind, name + ": " + label, frameSize(data), 1, data);
-						}
-					};
-
-					channel.addEventListener("open", () => { state("channel " + name, "open"); });
-					channel.addEventListener("close", () => { state("channel " + name, "closed"); });
-					channel.addEventListener("message", (event) => { record(false, event.data); });
-
-					const send = channel.send.bind(channel) as (data: unknown) => void;
-
-					channel.send = (data: string & Blob & ArrayBuffer & ArrayBufferView<ArrayBuffer>) => {
-						record(true, data);
-						send(data);
-					};
+					for (const record of pending.splice(0)) {
+						record(id);
+					}
 				};
+				const fallback = setTimeout(name, 5000);
+				const record = (write: (named: string) => void): void => {
+					if (id === undefined) {
+						pending.push(write);
+					} else {
+						write(id);
+					}
+				};
+				const state = (what: string, value: string): void => { record((named) => { sink.record(sink.self, named, "lifecycle", what + ": " + value); }); };
 
-				sink.spawn({ "id": id, "label": "Peer connection " + count, "role": "peer connection", "dynamic": true, "detail": "RTCPeerConnection" });
+				(fallback as { "unref"?: () => void }).unref?.();
 				connection.addEventListener("signalingstatechange", () => { state("signaling", connection.signalingState); });
 				connection.addEventListener("iceconnectionstatechange", () => { state("ice", connection.iceConnectionState); });
 				connection.addEventListener("connectionstatechange", () => {
 					state("connection", connection.connectionState);
 
 					if (connection.connectionState === "closed" || connection.connectionState === "failed") {
-						sink.terminate(id);
+						record((named) => { sink.terminate(named); });
 					}
 				});
 				connection.addEventListener("icecandidate", (event) => {
 					if (event.candidate !== null) {
-						sink.record(sink.self, id, "event", "local candidate", approxSize(event.candidate.candidate), 1, event.candidate.toJSON());
+						const { candidate } = event;
+
+						record((named) => { sink.record(sink.self, named, "event", "local candidate", approxSize(candidate.candidate), 1, candidate.toJSON()); });
 					}
 				});
-				connection.addEventListener("datachannel", (event) => { watch(event.channel); });
+				connection.addEventListener("datachannel", (event) => { name(event.channel.label); });
 
 				// The signaling steps, with what they carry (an offer's or answer's SDP, a remote candidate).
 				const methods = connection as unknown as Record<string, (...rest: unknown[]) => unknown>;
@@ -465,7 +473,7 @@ function installRtcProbe(sink: ArchSink, skip: (data: unknown) => boolean): void
 						const description = rest[0] as { "type"?: string } | undefined;
 						const result = original(...rest);
 
-						sink.record(sink.self, id, "request", method + (typeof description?.type === "string" ? " (" + description.type + ")" : ""), approxSize(rest[0]), 1, rest[0]);
+						record((named) => { sink.record(sink.self, named, "request", method + (typeof description?.type === "string" ? " (" + description.type + ")" : ""), approxSize(rest[0]), 1, rest[0]); });
 
 						return result;
 					};
@@ -476,7 +484,7 @@ function installRtcProbe(sink: ArchSink, skip: (data: unknown) => boolean): void
 				connection.createDataChannel = (label: string, init?: RTCDataChannelInit) => {
 					const channel = createDataChannel(label, init);
 
-					watch(channel);
+					name(label);
 
 					return channel;
 				};
@@ -485,6 +493,78 @@ function installRtcProbe(sink: ArchSink, skip: (data: unknown) => boolean): void
 			return connection;
 		}
 	});
+}
+
+/** Data channels, by their prototype (see installRtcProbe): what's sent, and — once the app listens — what arrives. */
+function installDataChannelProbe(sink: ArchSink, skip: (data: unknown) => boolean): void {
+	const Channel = globalThis.RTCDataChannel as typeof RTCDataChannel | undefined;
+
+	if (Channel === undefined) {
+		return;
+	}
+
+	const prototype = Channel.prototype as unknown as Record<string, unknown> & RTCDataChannel;
+	const seen = new Set<string>();
+	const watched = new WeakSet<object>();
+	const add = prototype.addEventListener as (this: RTCDataChannel, type: string, ...rest: unknown[]) => void;
+	const record = (channel: RTCDataChannel, outgoing: boolean, data: unknown): void => {
+		if (skip(data)) {
+			return;
+		}
+
+		const id = "datachannel:" + normalizeSubject(channel.label || "data");
+
+		if (!seen.has(id)) {
+			seen.add(id);
+			sink.spawn({ "id": id, "label": channel.label || "data", "role": "data channel", "dynamic": true, "detail": "RTCDataChannel" });
+		}
+
+		const { kind, label } = typeof data === "string" ? describeAny(data) : { "kind": "message" as const, "label": "binary" };
+
+		if (outgoing) {
+			sink.record(sink.self, id, kind, label, frameSize(data), 1, data);
+		} else {
+			sink.record(id, sink.self, kind, label, frameSize(data), 1, data);
+		}
+	};
+	const watch = (channel: RTCDataChannel): void => {
+		if (!watched.has(channel)) {
+			watched.add(channel);
+			add.call(channel, "message", (event: MessageEvent) => {
+				try {
+					record(channel, false, event.data);
+				} catch { /* diagnostics only */ }
+			});
+		}
+	};
+	const send = prototype.send as (this: RTCDataChannel, data: unknown) => void;
+
+	prototype.send = function(this: RTCDataChannel, data: unknown) {
+		try {
+			record(this, true, data);
+		} catch { /* diagnostics only */ }
+
+		send.call(this, data);
+	} as RTCDataChannel["send"];
+	prototype.addEventListener = function(this: RTCDataChannel, type: string, ...rest: unknown[]) {
+		if (type === "message") {
+			watch(this);
+		}
+
+		add.call(this, type, ...rest);
+	} as RTCDataChannel["addEventListener"];
+
+	const onmessage = Object.getOwnPropertyDescriptor(Channel.prototype, "onmessage");
+
+	if (onmessage?.set !== undefined) {
+		Object.defineProperty(Channel.prototype, "onmessage", {
+			...onmessage,
+			"set": function(this: RTCDataChannel, handler: unknown) {
+				watch(this);
+				onmessage.set!.call(this, handler);
+			}
+		});
+	}
 }
 
 /** XMLHttpRequest, synchronous ones included (a worker asking the service worker for a capability decision). */

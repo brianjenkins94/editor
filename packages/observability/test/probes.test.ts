@@ -33,6 +33,18 @@ class FakeDataChannel extends EventTarget {
 		this.label = label;
 	}
 
+	private handler: ((event: MessageEvent) => void) | undefined;
+
+	// An event-handler attribute, as the real one has: on the prototype.
+	public get onmessage(): ((event: MessageEvent) => void) | undefined {
+		return this.handler;
+	}
+
+	public set onmessage(handler: (event: MessageEvent) => void) {
+		this.handler = handler;
+		this.addEventListener("message", handler as EventListener);
+	}
+
 	public send(data: unknown): void {
 		this.sent.push(data);
 	}
@@ -60,6 +72,7 @@ class FakePeerConnection extends EventTarget {
 }
 
 (globalThis as { "RTCPeerConnection"?: unknown }).RTCPeerConnection = FakePeerConnection;
+(globalThis as { "RTCDataChannel"?: unknown }).RTCDataChannel = FakeDataChannel;
 installNetworkProbes(sink);
 
 function wait(ms: number): Promise<void> {
@@ -100,7 +113,7 @@ test("a Web Lock asked for, granted, released — and one that's taken, unavaila
 	assert.ok(recorded.every((entry) => [entry.from, entry.to].includes("lock:netsim.*.host")), "one node per lock, its id folded: " + JSON.stringify(recorded));
 });
 
-test("a WebRTC peer connection: its signaling (with the SDP), its states, its data channels' messages", async () => {
+test("a WebRTC peer connection: its signaling (with the SDP) and states, named by its data channel; the channel's messages on it", async () => {
 	recorded.length = 0;
 
 	const connection = new RTCPeerConnection();
@@ -108,20 +121,48 @@ test("a WebRTC peer connection: its signaling (with the SDP), its states, its da
 	const offer = await connection.createOffer();
 
 	await connection.setLocalDescription(offer);
+	channel.addEventListener("message", () => undefined); // the app listens: the probe hears what it hears
 	channel.send(JSON.stringify({ "type": "commands", "seq": 1 }));
 	channel.dispatchEvent(new MessageEvent("message", { "data": JSON.stringify({ "type": "state" }) }));
 	(connection as unknown as FakePeerConnection).signalingState = "have-local-offer";
 	connection.dispatchEvent(new Event("signalingstatechange"));
 
 	assert.deepEqual(recorded.map(({ from, to, label }) => [from, to, label]), [
-		["page", "rtc:1", "createOffer"],
-		["page", "rtc:1", "setLocalDescription (offer)"],
-		["page", "rtc:1", "game: commands"],
-		["rtc:1", "page", "game: state"],
-		["page", "rtc:1", "signaling: have-local-offer"]
+		["page", "rtc:game", "createOffer"],
+		["page", "rtc:game", "setLocalDescription (offer)"],
+		["page", "datachannel:game", "commands"],
+		["datachannel:game", "page", "state"],
+		["page", "rtc:game", "signaling: have-local-offer"]
 	]);
 	assert.deepEqual(recorded[1]?.payload, { "type": "offer", "sdp": "v=0" }, "the offer's SDP, for capture");
 	assert.deepEqual((channel as unknown as FakeDataChannel).sent, [JSON.stringify({ "type": "commands", "seq": 1 })], "the message still went");
+	assert.ok(spawned.some((spec) => spec.id === "rtc:game" && spec.role === "peer connection") && spawned.some((spec) => spec.id === "datachannel:game" && spec.role === "data channel"));
+});
+
+test("the answering end names its connection by the channel it receives — what it signaled before that, under it too", async () => {
+	recorded.length = 0;
+
+	const connection = new RTCPeerConnection();
+
+	await connection.setRemoteDescription({ "type": "offer", "sdp": "v=0" });
+	await connection.createAnswer();
+	connection.dispatchEvent(Object.assign(new Event("datachannel"), { "channel": new FakeDataChannel("link.player-1") }));
+
+	assert.deepEqual(recorded.map(({ from, to, label }) => [from, to, label]), [["page", "rtc:link.player-1", "setRemoteDescription (offer)"], ["page", "rtc:link.player-1", "createAnswer"]]);
+});
+
+test("a data channel is observed wherever it's used — one handed to a worker, with no peer connection there", () => {
+	recorded.length = 0;
+
+	// As a worker gets it: transferred, no RTCPeerConnection in sight.
+	const channel = new FakeDataChannel("netsim.local.link.client-0") as unknown as RTCDataChannel;
+
+	channel.onmessage = () => undefined;
+	channel.send(JSON.stringify({ "subject": "game.cmd" }));
+	channel.dispatchEvent(new MessageEvent("message", { "data": JSON.stringify({ "subject": "game.state.7" }) }));
+	channel.send("{\"\\u0000hub\":{}}"); // a hub frame: the hub tap counts it
+
+	assert.deepEqual(recorded.map(({ from, to, label }) => [from, to, label]), [["page", "datachannel:netsim.local.link.client-0", "game.cmd"], ["datachannel:netsim.local.link.client-0", "page", "game.state.*"]]);
 });
 
 test("payload capture is opt-in: off, samples carry no payload; on (a viewer asks), a size-capped preview", async () => {
