@@ -1,5 +1,6 @@
 /**
- * Insights — what a program did when it ran, shown with VS Code's own UI.
+ * Insights — what a program did when it ran, and what the editor is doing, shown with VS Code's own UI. The monitor (the
+ * metrics plane in the status bar and a view of sparkline cards) is monitor.ts; coverage is here.
  *
  * Coverage (this half): "Run File with Coverage" runs the file under the tsval debugger without stopping at
  * breakpoints (`noDebug`), and reports the coverage it ends with through a TestController's coverage run — so VS Code
@@ -11,6 +12,7 @@
  */
 import type { CoverageReport } from "../worker-pod/debug-protocol";
 import * as vscode from "vscode";
+import { registerMonitor } from "./monitor";
 
 /** A debug session started for a coverage run carries this in its configuration, so its events find their run. */
 const RUN_KEY = "__insightsCoverageRun";
@@ -19,6 +21,8 @@ const RUN_KEY = "__insightsCoverageRun";
 const details = new WeakMap<vscode.FileCoverage, vscode.StatementCoverage[]>();
 
 export function activate(context: vscode.ExtensionContext): void {
+	registerMonitor(context);
+
 	const controller = vscode.tests.createTestController("insights.coverage", "Insights");
 	const profile = controller.createRunProfile("Run with Coverage", vscode.TestRunProfileKind.Coverage, () => undefined, true);
 

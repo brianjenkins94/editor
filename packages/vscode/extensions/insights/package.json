@@ -1,7 +1,7 @@
 {
   "name": "insights",
   "displayName": "Insights",
-  "description": "What a program did when it ran: statement coverage through VS Code's own test-coverage UI, from any debug session that reports it (the tsval debugger does) \u2014 with profiles and live metrics to follow.",
+  "description": "What a program did when it ran, and what the editor is doing: statement coverage through VS Code's own test-coverage UI (from any debug session that reports it \u2014 the tsval debugger does), and a monitor of the metrics plane (memory by realm, workspace fill, long frames, hub traffic, storage) in the status bar and a view of sparkline cards.",
   "publisher": "brianjenkins94",
   "version": "0.0.1",
   "engines": {
@@ -42,6 +42,24 @@
         {
           "command": "insights.showSessionCoverage",
           "when": "inDebugMode"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "insights",
+          "title": "Insights",
+          "icon": "$(pulse)"
+        }
+      ]
+    },
+    "views": {
+      "insights": [
+        {
+          "type": "webview",
+          "id": "insights.monitor",
+          "name": "Monitor"
         }
       ]
     }

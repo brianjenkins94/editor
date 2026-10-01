@@ -21,6 +21,7 @@ import { identifyWorker } from "../../architecture-model";
 import { ZENFS_NODE } from "../../architecture-zenfs";
 import { registerTsvalDebug } from "./debug-adapter";
 import { registerDebugToolbar } from "./debug-toolbar";
+import { registerMetricsBridge } from "./metrics-bridge";
 import { podHub } from "./pod";
 import { registerProductionDebug } from "./production-adapter";
 
@@ -137,6 +138,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// Workers link UP to podHub and announce themselves on `pod.ready`; log each join so pod membership shows
 	// up in the collector (as a `[pod]` record).
 	context.subscriptions.push({ "dispose": podHub.subscribe("pod.ready", (data) => { podLog.info("worker joined", data as Record<string, unknown>); }) });
+	// The metrics plane's samples, for VS Code's side (the insights monitor reads them by command).
+	registerMetricsBridge(context);
 
 	// port → preview run id, so a shell-forwarded WS/WebRTC decision (keyed by the preview's port, which is all the
 	// shim knows) attributes to the run that owns that port — the same port→run attribution the SW does for net.

@@ -9,9 +9,10 @@
  *   cross the tree links between its participants.
  * - `channels`: the non-hub channels (workers, extension hosts, network, storage).
  *
- * Deliberately absent: webviews. VS Code serves a webview's resources through its own service worker, by a
- * per-webview subdomain a single-origin build can't provide, so nothing here uses them — one that opens anyway (e.g.
- * Markdown: Open Preview) is flagged as undeclared, which is accurate.
+ * Webviews (`webview:<id>`, in the workbench iframe) are declared for what works here: a document set inline and VS Code's
+ * webview messages — the insights Monitor, a Markdown preview. What doesn't: resources a webview loads by URL
+ * (asWebviewUri), which VS Code serves through its own service worker by a per-webview subdomain a single-origin build
+ * can't provide; ours load none.
  *
  * When the architecture changes, change this file with it: the view flags anything observed but not declared here.
  */
@@ -129,6 +130,7 @@ export const hubLinks: [string, string][] = [
 
 export const subjects: SubjectFamily[] = [
 	{ "pattern": "$sys.log.>", "hubs": ["*"], "description": "Structured logs, to the root collector and debug-mcp." },
+	{ "pattern": "$sys.metrics.>", "hubs": ["*"], "description": "The metrics plane: each context's gauges, sampled once a second (editor-metrics.ts), to the pod's bridge for the insights monitor." },
 	{ "pattern": "$sys.backlog.log", "hubs": ["root", "debug-mcp", "preview:*"], "description": "A page's startup records, sent once its debug-mcp link can carry them (observability's logBacklog): the editor root's, and a previewed app's through the shell." },
 	{ "pattern": "project.>", "hubs": ["shell", "root"], "description": "Project catalog and opening." },
 	{ "pattern": "workspace.files", "hubs": ["shell", "root"], "description": "The current project's files." },
@@ -185,6 +187,7 @@ export const channels: ChannelSpec[] = [
 	{ "a": "workbench", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "User data, logs, storage, workspace-fs." },
 	// the preview pipeline
 	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "description": "Into the iframe: HMR updates (vite-hmr). Everything else of a window rides its hub link (the page tap's hub: its console and errors, capability requests and new windows — preview.decide, preview.open)." },
+	{ "a": "workbench", "b": "webview:*", "protocol": "VS Code webview protocol", "transport": "window.postMessage", "description": "A webview's iframe — the insights Monitor, a Markdown preview: its document set inline, its messages VS Code's webview postMessage (an extension's postMessage/onDidReceiveMessage ride it)." },
 	{ "a": "shell", "b": "devtools:*", "protocol": "CDP (Chrome DevTools Protocol)", "transport": "window.postMessage", "description": "A preview's docked DevTools frontend: raw CDP commands up, replies and events down — the shell relays them over the hub (preview.cdp / preview.cdp.event.<window>) to chobitsu in the preview window's page (preview-devtools.ts)." },
 	{ "a": "shell", "b": "tsval-preview", "protocol": "tsval render protocol", "transport": "window.postMessage + MessagePort", "description": "preview-ready → init (MessagePort); events and time travel up, the mutation stream down." },
 	{ "a": "preview:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, intercepted by the service worker", "description": "Everything under /__virtual__/<tab>/<port>/ (answered by the dev server over the hub), plus the app's own requests (CDN imports pass through; data fetches are capability-gated, failing closed). Same origin and unsandboxed, by necessity — see ARCHITECTURE.md." },
@@ -491,7 +494,7 @@ export function appLayout(observed: { "channels": { "a": string; "b": string }[]
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────
 
 /** Contexts created at runtime, by id prefix, and where they live. */
-export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:", "channel:", "lock:", "rtc:"];
+export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:", "channel:", "lock:", "rtc:", "webview:"];
 
 export function dynamicContainer(id: string): string | undefined {
 	if (isAppNode(id)) {
@@ -500,6 +503,10 @@ export function dynamicContainer(id: string): string | undefined {
 
 	if (id.startsWith("preview:") || id.startsWith("devtools:")) {
 		return "previews";
+	}
+
+	if (id.startsWith("webview:")) {
+		return "workbenchIframe";
 	}
 
 	if (id.startsWith("vite:") || id.startsWith("server:") || id.startsWith("worker:")) {

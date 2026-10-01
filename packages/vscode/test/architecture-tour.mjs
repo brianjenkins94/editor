@@ -81,10 +81,6 @@ test("git review: a diff in the shell", async () => {
 	await session.until("Code Hike", hasLabel("sw", "net:lighter.codehike.org", /./u), 30_000);
 });
 
-// The model leaves webviews out on purpose (nothing here can serve them), so the Markdown preview the tour opens is
-// flagged — accurately. Anything else needs review.
-test("conformance: nothing observed needs review, beyond the webview the tour opened", async () => {
-	const webview = (violation) => [violation.id, violation.a, violation.b].some((id) => id?.startsWith("webview") === true);
-
-	assert.deepEqual((await session.conformance()).filter((violation) => !webview(violation)), []);
+test("conformance: nothing observed needs review", async () => {
+	assert.deepEqual(await session.conformance(), []);
 });

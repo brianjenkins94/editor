@@ -24,6 +24,7 @@ import { renderGitPanel } from "./git-panel";
 import { reportArchitecture } from "./architecture";
 import { getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
 import type { RepoBinding } from "./github-auth";
+import { reportShellMetrics } from "./editor-metrics";
 import { installShellPreview } from "./shell-preview";
 import { css, globalCss, iconSvg } from "./theme";
 import "@awesome.me/webawesome/dist/components/page/page.js";
@@ -365,6 +366,7 @@ function Shell() {
 		// The preview windows live in the top frame so they can roam beyond the editor — the app dev-server previews AND
 		// the tsval debugger's render surface, all managed here. See shell-preview.ts / debug-preview-view.ts.
 		installShellPreview(shellHub, architecture);
+		reportShellMetrics(shellHub); // its long frames, on the metrics plane (editor-metrics.ts)
 
 		// The editor (workbench iframe) follows the OS theme too. The shell is the source of truth for the OS
 		// preference — it reliably gets prefers-color-scheme changes, whereas the iframe may not — so publish the
