@@ -709,7 +709,7 @@ test("a link that goes before the peer ever answers isn't ready", async () => {
 	assert.equal(await link.ready, false);
 });
 
-test("publishWhenInterested holds a one-off message until someone wants it — or gives up", async () => {
+test("whenInterested waits until someone wants a subject — or gives up", async () => {
 	const [a, b] = pipe();
 	const root = createHub({ "id": "root" });
 	const pod = createHub({ "id": "pod" });
@@ -720,12 +720,12 @@ test("publishWhenInterested holds a one-off message until someone wants it — o
 	pod.link(b);
 
 	// Published at once, it would go nowhere: root doesn't know the pod wants it yet.
-	const sent = root.publishWhenInterested("seat", "token", 1000);
-
-	assert.equal(await sent, true);
+	assert.equal(root.interested("seat"), false);
+	assert.equal(await root.whenInterested("seat", 1000), true);
+	root.publish("seat", "token");
 	await flush();
 	assert.deepEqual(seen, ["token"]);
-	assert.equal(await root.publishWhenInterested("nobody", 1, 30), false);
+	assert.equal(await root.whenInterested("nobody", 30), false);
 });
 
 test("pipe: held until the other end listens (MessagePort-like), or dropped (window-like, `lossy`)", async () => {

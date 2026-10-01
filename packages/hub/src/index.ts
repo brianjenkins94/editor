@@ -130,7 +130,7 @@ interface Link {
  * - `ready`: resolves true once the peer's hello has arrived, and with it the peer's interest (a hub advertises its
  *   interest before every hello it sends), or false if the link is gone first. A message published before then can go
  *   nowhere: a hub forwards only what it knows the far side wants. So `await ready` before a one-off publish across a
- *   new link (or use `publishWhenInterested`). */
+ *   new link (or wait for `whenInterested`). */
 export type LinkHandle = (() => void) & { readonly "id": string; readonly "ready": Promise<boolean> };
 
 /** One link as `inspect()` / taps report it. */
@@ -283,20 +283,9 @@ export class Hub {
 		return false;
 	}
 
-	/** Publish once `subject` would reach someone (see `interested`) — for a one-off message that mustn't be lost to a
-	 *  link whose interest hasn't arrived yet. Resolves true once published, or false (not published) after
-	 *  `timeoutMs`. Fine for events; for state, publishing on every change is simpler and self-healing. */
-	public async publishWhenInterested(subject: string, data: unknown, timeoutMs: number, options: { "traceContext"?: Envelope["traceContext"] } = {}): Promise<boolean> {
-		if (!await this.whenInterested(subject, timeoutMs)) {
-			return false;
-		}
-
-		this.publish(subject, data, options);
-
-		return true;
-	}
-
-	/** Resolve true once `subject` would reach someone (see `interested`), or false after `timeoutMs`. */
+	/** Resolve true once `subject` would reach someone (see `interested`), or false after `timeoutMs` — for a one-off
+	 *  message that mustn't be lost to a link whose interest hasn't arrived yet. (For state, publishing on every change
+	 *  is simpler and self-healing.) */
 	public whenInterested(subject: string, timeoutMs: number): Promise<boolean> {
 		if (this.interested(subject)) {
 			return Promise.resolve(true);
@@ -721,6 +710,17 @@ export function windowTransport(target: Window, origin = "*"): Transport {
 
 const RPC_CALL = "$rpc.call"; // requests: `$rpc.call.<name>`; a responder subscribes the ones it serves
 const RPC_REPLY = "$rpc.reply"; // replies: `$rpc.reply.<requester id>`, correlated by `id`
+
+/** The subject a call to `name` travels on — what a link's permissions name to let calls to it through (a pattern
+ *  works too: `rpcCallSubject("tool.>")`). */
+export function rpcCallSubject(name: string): string {
+	return RPC_CALL + "." + name;
+}
+
+/** The subject replies to the hub known as `id` travel on (what serve replies to: the call's `from`). */
+export function rpcReplySubject(id: string): string {
+	return RPC_REPLY + "." + id;
+}
 
 // A cancel rides the call's own subject (`cancel: true`, same id), so it reaches exactly the responder the call did.
 interface RpcCall { "id": string; "replyTo": string; "args"?: unknown; "cancel"?: true }

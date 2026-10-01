@@ -8,12 +8,13 @@
  * answers `$sys.arch.sync` with its full state, so a viewer opened late still sees what already happened.
  */
 import type { Envelope, Hub, HubSnapshot, LinkInfo, TapEvent } from "@brianjenkins94/hub";
+import { rpcCallSubject, rpcReplySubject } from "@brianjenkins94/hub";
 
 /** Reserved architecture namespace — reports ride `$sys.arch.<reporter id>`; `$sys.arch.sync` asks for full state. */
 export const ARCH_SUBJECT = "$sys.arch";
 const SYNC_SUBJECT = ARCH_SUBJECT + ".sync";
 
-export type TrafficKind = "request" | "reply" | "error" | "event" | "message" | "ack" | "cancel" | "lifecycle" | "transport";
+export type TrafficKind = "request" | "reply" | "error" | "event" | "message" | "ack" | "cancel" | "lifecycle";
 export type NodeState = "declared" | "alive" | "unresponsive" | "terminated";
 
 /** A runtime context (a hub, a worker, an extension host, a webview, a network endpoint…). Only `id` is required:
@@ -179,8 +180,8 @@ export function normalizeSubject(subject: string): string {
 		.join(".");
 }
 
-const RPC_CALL = "$rpc.call.";
-const RPC_REPLY = "$rpc.reply.";
+const RPC_CALL = rpcCallSubject("");
+const RPC_REPLY = rpcReplySubject("");
 
 /**
  * Create the reporter for the context `hub` lives in: taps the hub (its topology, and every message it SENDS on a

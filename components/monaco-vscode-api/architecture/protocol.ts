@@ -2,7 +2,7 @@
  * Shapes shared by the architecture probes of this component. The component doesn't depend on
  * @brianjenkins94/observability: `ArchSink` is structurally its sink, handed in by the consumer (the workbench).
  */
-export type TrafficKind = "request" | "reply" | "error" | "event" | "message" | "ack" | "cancel" | "lifecycle" | "transport";
+export type TrafficKind = "request" | "reply" | "error" | "event" | "message" | "ack" | "cancel" | "lifecycle";
 export type NodeState = "declared" | "alive" | "unresponsive" | "terminated";
 
 export interface ArchNodeSpec {
