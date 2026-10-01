@@ -28,7 +28,7 @@ import helloExtensionPath from "hello:extension";
 import workerPodExtensionPath from "worker-pod:extension";
 import { NETWORK_PROBES } from "./architecture";
 import { classifyUrl, identifyWorker } from "./architecture-model";
-import { renderArchitectureView } from "./architecture-view";
+import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { reportWorkbenchMetrics } from "./editor-metrics";
@@ -526,7 +526,7 @@ function maybeBoot(): void {
 				// window. pod/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.
 				wireWorkbenchHub(workspaceFs?.buffer);
 				// The metrics plane: memory by realm, workspace fill, long frames, hub traffic, storage (editor-metrics.ts).
-				reportWorkbenchMetrics(workbenchHub, workspaceFs?.buffer);
+				reportWorkbenchMetrics(workbenchHub, workspaceFs?.buffer, architectureStore(workbenchHub));
 				// Source Control: browser-git (isomorphic-git over the zen-fs workspace). ONE cosmetic classifier is
 					// shared by the vscode SCM viewlet (git-scm) AND the hub git service (git-service) the shell's
 					// review panel consumes. Wired here in the workbench realm — BOTH zen-fs and the vscode API live

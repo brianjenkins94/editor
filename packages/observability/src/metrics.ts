@@ -107,8 +107,9 @@ interface MemoryMeasurement { "bytes": number; "breakdown": { "bytes": number; "
 /**
  * Memory (MB) for this page's whole agent — every frame and worker it runs — as `total` plus one entry per realm, named by
  * `name(url, scope)` (realms that share a name add up). It's `performance.measureUserAgentSpecificMemory`, which needs
- * cross-origin isolation and takes seconds, so it's refreshed every `everyMs` in the background and each read reports the
- * latest. Undefined until the first measurement, or where it isn't supported.
+ * cross-origin isolation and resolves only at the next garbage collection — up to ~20 s — so it's refreshed in the
+ * background, `everyMs` after each measurement lands, and each read reports the latest. Undefined until the first
+ * measurement, or where it isn't supported.
  */
 export function memoryGauge({ everyMs = 20000, name = (url: string) => url }: { "everyMs"?: number; "name"?: (url: string, scope: string) => string } = {}): Gauge {
 	const measure = (performance as Performance & { "measureUserAgentSpecificMemory"?: () => Promise<MemoryMeasurement> }).measureUserAgentSpecificMemory?.bind(performance);

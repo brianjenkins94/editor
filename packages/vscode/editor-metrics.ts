@@ -1,9 +1,11 @@
 /**
  * The editor's gauges on the metrics plane (observability's metrics.ts): what a monitor shows about the editor itself.
  *
- *  - `memory` (MB): the whole tab, by realm (measureUserAgentSpecificMemory, every 20 s). Realms are named from their URL;
- *    the `blob:` workers — TypeScript's servers and the web worker extension host — run no hub, so nothing names them
- *    yet, and they're counted together as `unnamed workers`.
+ *  - `memory` (MB): the whole tab, by realm (measureUserAgentSpecificMemory: a reading about every 30 s — the measurement
+ *    itself waits for a garbage collection, ~20 s). A realm is named from its URL:
+ *    the editor's own by path, and the `blob:` workers — the web worker extension host, TypeScript's servers, the
+ *    language servers, monaco's workers — by the architecture probes, which put each worker's URL on its node. Any
+ *    that's still unknown counts toward `unnamed workers`.
  *  - `workspace` (MB, %): how full the shared workspace (zen-fs, one fixed-size SharedArrayBuffer) is — read from its
  *    superblock, the numbers zen-fs's own usage() reports.
  *  - `longFrames` (%): the share of the time the workbench spent in long animation frames.
@@ -15,15 +17,50 @@
  * The shell reports its own `longFrames` (it hosts the preview windows): `reportShellMetrics`.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import type { Gauge } from "@brianjenkins94/observability";
+import type { ArchitectureStore, Gauge } from "@brianjenkins94/observability";
 import { longFrameGauge, memoryGauge, reportMetrics } from "@brianjenkins94/observability";
 
 /** zen-fs SingleBuffer's superblock: magic (u32 at 4), used_bytes and total_bytes (u64 at 16 and 24), little-endian. */
 const SUPERBLOCK_MAGIC = 0x62732e7a;
 
-/** A realm's name for the memory breakdown, from its URL (as measureUserAgentSpecificMemory attributes it). */
-export function realmName(url: string, scope: string): string {
+/** A URL without its fragment: a worker loaded through the probe bootstrap carries its target there, and a memory
+ *  attribution may not. */
+const withoutFragment = (url: string): string => url.split("#")[0];
+
+/** A worker's short, reload-stable name from its architecture node: `nested:TS semantic server #1` → `TS semantic
+ *  server`, `worker:TextMateWorker` → its label, the web worker extension host → `extension host`. */
+function workerName(id: string, label: string | undefined): string {
+	if (id.startsWith("exthost:LocalWebWorker")) {
+		return "extension host";
+	}
+
+	return (label ?? id.replace(/^(?:nested|worker):/u, "")).replace(/\s+#\d+$/u, "").replace(/\.js$/u, "");
+}
+
+/** Each worker's URL → its name, from the architecture store (the probes put a worker's URL on its node). */
+export function workerNames(store: ArchitectureStore): Map<string, string> {
+	const names = new Map<string, string>();
+
+	for (const [id, node] of store.nodes) {
+		const url = node.spec.meta?.["url"];
+
+		if (typeof url === "string") {
+			names.set(withoutFragment(url), workerName(id, node.spec.label));
+		}
+	}
+
+	return names;
+}
+
+/** A realm's name for the memory breakdown, from its URL (as measureUserAgentSpecificMemory attributes it) — a worker the
+ *  probes named first (`workers`: URL → name). */
+export function realmName(url: string, scope: string, workers = new Map<string, string>()): string {
+	const known = workers.get(withoutFragment(url));
 	let path: string;
+
+	if (known !== undefined) {
+		return known;
+	}
 
 	try {
 		path = new URL(url).pathname;
@@ -87,8 +124,9 @@ function refreshed(read: () => Promise<number | undefined>, everyMs: number): Ga
 	return () => latest;
 }
 
-/** The workbench's gauges, published on `$sys.metrics.workbench`. Returns their removal. */
-export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuffer | undefined): () => void {
+/** The workbench's gauges, published on `$sys.metrics.workbench`; `store` (its architecture store) names the workers.
+ *  Returns their removal. (The store is handed in so this module stays free of the workbench's: the shell imports it.) */
+export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuffer | undefined, store?: ArchitectureStore): () => void {
 	const metrics = reportMetrics(hub);
 	// Messages this hub handles: those it originates and those that arrive on its links (not the links' control frames).
 	let handled = 0;
@@ -99,7 +137,7 @@ export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuf
 		}
 	});
 
-	metrics.gauge("memory", memoryGauge({ "name": realmName }));
+	metrics.gauge("memory", memoryGauge({ "everyMs": 10000, "name": (url, scope) => realmName(url, scope, store === undefined ? undefined : workerNames(store)) }));
 	metrics.gauge("longFrames", longFrameGauge(window));
 	metrics.gauge("hub", () => {
 		const now = performance.now();

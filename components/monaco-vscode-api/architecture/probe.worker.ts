@@ -54,7 +54,7 @@ function traffic(peer: ProbePeer, outgoing: boolean, kind: TrafficKind, label: s
 	schedule();
 }
 
-report({ "type": "hello", "name": self.name });
+report({ "type": "hello", "name": self.name, "url": self.location.href });
 
 const nativeFetch = self.fetch;
 

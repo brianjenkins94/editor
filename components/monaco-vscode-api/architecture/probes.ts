@@ -115,7 +115,14 @@ function attachChildProbe(sink: ArchSink, port: MessagePort, ownerId: string, co
 					break;
 				}
 
+				// The worker's own URL, on its node — so a measurement that attributes memory by URL can name it.
 				case "hello":
+					if (message.url !== undefined) {
+						sink.spawn({ "id": ownerId, "meta": { "url": message.url } });
+					}
+
+					break;
+
 				default:
 					break;
 			}
@@ -229,7 +236,7 @@ function instrumentWorker(sink: ArchSink, worker: Worker, url: string, workerOpt
 	const decode = isMonaco ? monacoWorkerDecoder() : (data: unknown) => ({ ...describeMessage(data), "bytes": approxSize(data) });
 	const owner = identity.owner ?? sink.self;
 
-	sink.spawn({ "id": id, "role": identity.role, "label": identity.label, "container": identity.container, "detail": label ?? fileName(url) });
+	sink.spawn({ "id": id, "role": identity.role, "label": identity.label, "container": identity.container, "detail": label ?? fileName(url), "meta": { "url": url } });
 
 	const onMessage = (data: unknown, outgoing: boolean): void => {
 		// A worker carrying a hub reports its hub traffic itself.

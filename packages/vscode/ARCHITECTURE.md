@@ -137,13 +137,14 @@ the editor's provider, isomorphic-git, the terminal, a node script. The live vie
 
 Beside the logs (`$sys.log`) and the architecture (`$sys.arch`), each context can publish numbers once a second on
 `$sys.metrics.<source>` (observability's `reportMetrics`: named gauges, read at each sample). The workbench reports
-memory by realm (`measureUserAgentSpecificMemory`, every 20 s), the workspace's fill (read from the zen-fs superblock),
+memory by realm (`measureUserAgentSpecificMemory`, about every 30 s: it waits for a garbage collection), the workspace's fill (read from the zen-fs superblock),
 its time in long animation frames, hub traffic and the origin's storage; the shell reports its own long frames
 (`editor-metrics.ts`). The pod keeps the last five minutes of each and serves them to VS Code as the
 `editor.metrics.read` command, which the insights extension's monitor (status bar + a view of sparkline cards) reads —
-so the monitor, like the rest of insights, uses nothing but VS Code's API. A realm without a hub (the `blob:` workers:
-TypeScript's servers, the web worker extension host) can't be named from its URL yet, so its memory counts as
-`unnamed workers`.
+so the monitor, like the rest of insights, uses nothing but VS Code's API. Memory is named by realm: the editor's own by
+path, and the `blob:` workers (the web worker extension host, TypeScript's servers, the language servers, monaco's
+workers) by the architecture probes, which put each worker's URL on its node — a probed worker reports its own in its
+`hello`.
 
 ### Side channels (off the hub, on purpose)
 

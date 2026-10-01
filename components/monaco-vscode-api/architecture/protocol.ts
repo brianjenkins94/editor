@@ -31,7 +31,8 @@ export interface ArchSink {
 export type ProbePeer = { "type": "worker"; "id": string } | { "type": "http"; "url": string };
 
 export type ProbeMessage =
-	| { "type": "hello"; "name": string }
+	/** A probed worker's greeting: its name, and its own URL (a `blob:` one for most — what memory attribution reports). */
+	| { "type": "hello"; "name": string; "url"?: string }
 	| { "type": "spawn"; "id": string; "name": string; "url": string }
 	| { "type": "end"; "id": string }
 	| { "type": "traffic"; "peer": ProbePeer; "outgoing": boolean; "kind": TrafficKind; "label": string; "bytes": number; "count"?: number };
