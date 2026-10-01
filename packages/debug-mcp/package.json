@@ -10,6 +10,7 @@
     ".": "./src/server.ts",
     "./store": "./src/store.ts",
     "./mcp": "./src/mcp.ts",
+    "./testing": "./src/testing.ts",
     "./bin": "./src/bin.ts"
   },
   "license": "MIT",

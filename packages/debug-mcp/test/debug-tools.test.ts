@@ -4,23 +4,22 @@
  * `debug.*.<tab>`, and a session's own `debug.session.<id>.*`). Runs under tsx (`node --import tsx`), since server.ts
  * imports the hub's TS source from node_modules, which node won't type-strip.
  */
-import type { AddressInfo } from "node:net";
 import * as assert from "node:assert/strict";
-import { createServer } from "node:net";
 
 import { after, before, test } from "node:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Hub } from "@brianjenkins94/hub";
 import { createHub, serve, websocketTransport } from "@brianjenkins94/hub";
 
 import { TAB_DISCOVER, TAB_HERE } from "../../observability/src/tabs.ts";
-import { createMcpServer } from "../src/mcp.ts";
 import { createDebugMcp } from "../src/server.ts";
+import type { TestClient } from "../src/testing.ts";
+import { connectTestClient } from "../src/testing.ts";
 
 let debugMcp: ReturnType<typeof createDebugMcp>;
 let port: number;
 let client: Client;
+let call: TestClient["call"];
 const sockets: WebSocket[] = [];
 const stepped: { "session": string; "action": string }[] = [];
 const started: string[] = [];
@@ -78,16 +77,11 @@ async function connectTab(tab: string): Promise<void> {
 }
 
 before(async () => {
-	port = await freePort();
-	debugMcp = createDebugMcp({ "port": port });
-	await debugMcp.whenListening;
+	debugMcp = createDebugMcp({ "port": 0 });
+	port = await debugMcp.whenListening;
 	await connectTab("t1");
 
-	const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-
-	await createMcpServer(debugMcp).connect(serverSide);
-	client = new Client({ "name": "test", "version": "0.0.0" });
-	await client.connect(clientSide);
+	({ client, call } = await connectTestClient(debugMcp));
 });
 
 after(async () => {
@@ -95,24 +89,6 @@ after(async () => {
 	await client.close();
 	await debugMcp.close();
 });
-
-/** A port nothing is listening on (debug-mcp doesn't report the one it bound). */
-function freePort(): Promise<number> {
-	return new Promise((resolve) => {
-		const probe = createServer().listen(0, () => {
-			const { port: free } = probe.address() as AddressInfo;
-
-			probe.close(() => { resolve(free); });
-		});
-	});
-}
-
-async function call(name: string, args: Record<string, unknown> = {}): Promise<{ "isError"?: boolean; "value": unknown }> {
-	const result = await client.callTool({ "name": name, "arguments": args }) as { "isError"?: boolean; "content": { "type": string; "text": string }[] };
-	const text = result.content[0]?.text ?? "";
-
-	return { "isError": result.isError, "value": ((): unknown => { try { return JSON.parse(text); } catch { return text; } })() };
-}
 
 test("the page and debugger tools are listed", async () => {
 	const names = (await client.listTools()).tools.map((tool) => tool.name);

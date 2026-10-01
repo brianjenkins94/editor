@@ -2,40 +2,26 @@
  * A page newer than the debug-mcp it's linked to: list_tabs says so, instead of the debug-mcp silently ignoring what it
  * doesn't know. One stand-in tab over a real WebSocket. Runs under tsx.
  */
-import type { AddressInfo } from "node:net";
 import * as assert from "node:assert/strict";
-import { createServer } from "node:net";
 
 import { after, before, test } from "node:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { createHub, websocketTransport } from "@brianjenkins94/hub";
 
 import { OBSERVABILITY_PROTOCOL, TAB_DISCOVER, TAB_HERE } from "../../observability/src/tabs.ts";
-import { createMcpServer } from "../src/mcp.ts";
 import { createDebugMcp } from "../src/server.ts";
+import { connectTestClient } from "../src/testing.ts";
 
 let debugMcp: ReturnType<typeof createDebugMcp>;
 let client: Client;
 let socket: WebSocket;
 
 before(async () => {
-	const port = await new Promise<number>((resolve) => {
-		const probe = createServer().listen(0, () => {
-			const { port: free } = probe.address() as AddressInfo;
+	debugMcp = createDebugMcp({ "port": 0 });
 
-			probe.close(() => { resolve(free); });
-		});
-	});
+	const port = await debugMcp.whenListening;
 
-	debugMcp = createDebugMcp({ "port": port });
-	await debugMcp.whenListening;
-
-	const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-
-	await createMcpServer(debugMcp).connect(serverSide);
-	client = new Client({ "name": "test", "version": "0.0.0" });
-	await client.connect(clientSide);
+	({ client } = await connectTestClient(debugMcp));
 
 	const root = createHub({ "id": "root" });
 

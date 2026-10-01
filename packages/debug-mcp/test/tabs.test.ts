@@ -2,24 +2,24 @@
  * Two tabs whose hubs have the same ids (every editor tab has a `root`): debug-mcp must keep their logs and their
  * architecture apart, filed by the tab they came from. Real WebSockets, stand-in tabs. Runs under tsx.
  */
-import type { AddressInfo } from "node:net";
 import type { Hub } from "@brianjenkins94/hub";
 import * as assert from "node:assert/strict";
-import { createServer } from "node:net";
 
 import { after, before, test } from "node:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { until } from "@brianjenkins94/util/until";
 import { createHub, portTransport, websocketTransport } from "@brianjenkins94/hub";
 
 import { createArchReporter } from "../../observability/src/arch.ts";
 import { TAB_DISCOVER, TAB_HERE } from "../../observability/src/tabs.ts";
-import { createMcpServer } from "../src/mcp.ts";
 import { createDebugMcp } from "../src/server.ts";
+import type { TestClient } from "../src/testing.ts";
+import { connectTestClient } from "../src/testing.ts";
 
 let debugMcp: ReturnType<typeof createDebugMcp>;
 let port: number;
 let client: Client;
+let call: TestClient["call"];
 const sockets = new Map<string, WebSocket>();
 const channels: MessageChannel[] = [];
 const disposers: (() => void)[] = [];
@@ -58,23 +58,6 @@ async function connect(hub: Hub, tab: string): Promise<void> {
 	sockets.set(tab, socket);
 }
 
-function freePort(): Promise<number> {
-	return new Promise((resolve) => {
-		const probe = createServer().listen(0, () => {
-			const { port: free } = probe.address() as AddressInfo;
-
-			probe.close(() => { resolve(free); });
-		});
-	});
-}
-
-async function call(name: string, args: Record<string, unknown> = {}): Promise<{ "isError"?: boolean; "value": unknown }> {
-	const result = await client.callTool({ "name": name, "arguments": args }) as { "isError"?: boolean; "content": { "text": string }[] };
-	const text = result.content[0]?.text ?? "";
-
-	return { "isError": result.isError, "value": ((): unknown => { try { return JSON.parse(text); } catch { return text; } })() };
-}
-
 type Row = { "message": string; "source": string; "tab"?: string };
 type Architecture = { "nodes": { "id": string }[] };
 
@@ -88,30 +71,11 @@ async function architecture(args: Record<string, unknown> = {}): Promise<{ "isEr
 	return { "isError": isError, "value": value as Architecture };
 }
 
-async function eventually<T>(what: string, probe: () => Promise<T | undefined>): Promise<T> {
-	for (let attempt = 0; attempt < 60; attempt += 1) {
-		const value = await probe();
-
-		if (value !== undefined) {
-			return value;
-		}
-
-		await new Promise((resolve) => { setTimeout(resolve, 100); });
-	}
-
-	throw new Error("timed out waiting for " + what);
-}
-
 before(async () => {
-	port = await freePort();
-	debugMcp = createDebugMcp({ "port": port });
-	await debugMcp.whenListening;
+	debugMcp = createDebugMcp({ "port": 0 });
+	port = await debugMcp.whenListening;
 
-	const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-
-	await createMcpServer(debugMcp).connect(serverSide);
-	client = new Client({ "name": "test", "version": "0.0.0" });
-	await client.connect(clientSide);
+	({ client, call } = await connectTestClient(debugMcp));
 	await openTab("t1", "worker-a");
 	await openTab("t2", "worker-b");
 });
@@ -130,7 +94,7 @@ after(async () => {
 });
 
 test("each record names the tab it came from, and query_logs can take one tab's", async () => {
-	const rows = await eventually("both tabs' records", async () => {
+	const rows = await until("both tabs' records", async () => {
 		const value = await queryLogs({ "source": "root", "textIncludes": "hello from" });
 
 		return value.length === 2 ? value : undefined;
@@ -151,7 +115,7 @@ test("get_architecture shows one tab's contexts, never the two merged — and as
 	assert.match(String(ambiguous.value), /several editor tabs/u);
 
 	for (const [tab, mine, theirs] of [["t1", "worker-a", "worker-b"], ["t2", "worker-b", "worker-a"]]) {
-		const snapshot = await eventually(`${tab}'s architecture`, async () => {
+		const snapshot = await until(`${tab}'s architecture`, async () => {
 			const { isError, value } = await architecture({ "tab": tab });
 
 			return isError !== true && value.nodes.some((node) => node.id === mine) ? value : undefined;
@@ -165,7 +129,7 @@ test("get_architecture shows one tab's contexts, never the two merged — and as
 
 test("query_spans keeps two tabs' same-id spans apart, and takes one tab's", async () => {
 	type Span = { "name"?: string; "open": boolean; "tab"?: string };
-	const spans = await eventually("both tabs' spans", async () => {
+	const spans = await until("both tabs' spans", async () => {
 		const value = (await call("query_spans", { "name": "load" })).value as Span[];
 
 		return value.length === 2 ? value : undefined;
@@ -203,7 +167,7 @@ test("wait_for with a tab waits for that tab's record, not the other's", async (
 
 test("once a tab goes, its architecture goes with it, and the one left needs no `tab`", async () => {
 	sockets.get("t1")?.close();
-	await eventually("one tab left", async () => (debugMcp.linkCount() === 1 ? true : undefined));
+	await until("one tab left", async () => (debugMcp.linkCount() === 1 ? true : undefined));
 
 	const { isError, value } = await architecture();
 

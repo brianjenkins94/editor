@@ -7,13 +7,12 @@
  * own debug-mcp on :7378 is kept out (it may be an older build); `debugMcp: true` starts this checkout's instead.
  */
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { homedir, tmpdir } from "node:os";
 import * as path from "node:path";
-
-const require = createRequire(import.meta.url);
-const { chromium } = require("playwright");
+import { stripVTControlCharacters } from "node:util";
+import * as fs from "@brianjenkins94/util/fs";
+import { launchChromium } from "@brianjenkins94/util/playwright/chromium";
+import { relayWebSocket } from "@brianjenkins94/util/playwright/relay";
+import { until } from "@brianjenkins94/util/until";
 
 export const URL_UNDER_TEST = process.env.ARCH_URL ?? "http://localhost:5173/";
 export const TIMEOUT_MS = 120_000;
@@ -45,7 +44,7 @@ async function startProcess(command, args, cwd, ready) {
 		const timer = setTimeout(() => { reject(new Error(command + " didn't start")); }, TIMEOUT_MS);
 		const onData = (chunk) => {
 			// Without colors stripped, Vite's "Local:" never matches where CI turns them on ("\e[1mLocal\e[22m:").
-			if (String(chunk).replaceAll(/\u001B\[[\d;]*m/gu, "").includes(ready)) {
+			if (stripVTControlCharacters(String(chunk)).includes(ready)) {
 				clearTimeout(timer);
 				resolve();
 			}
@@ -57,66 +56,6 @@ async function startProcess(command, args, cwd, ready) {
 	});
 
 	return child;
-}
-
-function cachedChromium() {
-	const cache = path.join(homedir(), process.platform === "darwin" ? "Library/Caches/ms-playwright" : ".cache/ms-playwright");
-	const candidates = existsSync(cache) ? readdirSync(cache).filter((name) => /^chromium-\d+$/u.test(name)).sort((a, b) => Number(b.split("-")[1]) - Number(a.split("-")[1])) : [];
-
-	for (const name of candidates) {
-		for (const executable of [
-			"chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-			"chrome-mac/Chromium.app/Contents/MacOS/Chromium",
-			"chrome-linux/chrome",
-			"chrome-linux64/chrome"
-		]) {
-			const candidate = path.join(cache, name, executable);
-
-			if (existsSync(candidate)) {
-				return candidate;
-			}
-		}
-	}
-
-	return undefined;
-}
-
-async function launch() {
-	try {
-		return await chromium.launch(process.env.CHROME_PATH === undefined ? {} : { "executablePath": process.env.CHROME_PATH });
-	} catch (error) {
-		const executablePath = cachedChromium();
-
-		if (executablePath === undefined) {
-			throw error;
-		}
-
-		return chromium.launch({ "executablePath": executablePath });
-	}
-}
-
-/** Relay the page's debug-mcp socket (:7378) to this checkout's debug-mcp. */
-async function bridgeDebugMcp(context) {
-	await context.routeWebSocket(/:7378/u, (route) => {
-		const upstream = new WebSocket(`ws://localhost:${DEBUG_MCP_PORT}`);
-		const queued = [];
-
-		upstream.addEventListener("open", () => {
-			for (const message of queued.splice(0)) {
-				upstream.send(message);
-			}
-		});
-		upstream.addEventListener("message", (event) => { route.send(event.data); });
-		upstream.addEventListener("close", () => { route.close(); });
-		route.onMessage((message) => {
-			if (upstream.readyState === WebSocket.OPEN) {
-				upstream.send(message);
-			} else {
-				queued.push(message);
-			}
-		});
-		route.onClose(() => { upstream.close(); });
-	});
 }
 
 // ── snapshot queries ──────────────────────────────────────────────────────────────────────────────────────────
@@ -144,11 +83,12 @@ export async function startSession(options = {}) {
 		processes.push(await startProcess("npx", ["tsx", "src/bin.ts", "--port", String(DEBUG_MCP_PORT)], new URL("../../debug-mcp/", import.meta.url), "listening"));
 	}
 
-	const browser = await launch();
+	const browser = await launchChromium();
 	const context = await browser.newContext({ "viewport": { "width": 1400, "height": 900 } });
 
 	if (options.debugMcp === true || options.debugMcp === "external") {
-		await bridgeDebugMcp(context);
+		// The page's debug-mcp socket (:7378), relayed to this checkout's debug-mcp.
+		await relayWebSocket(context, /:7378/u, `ws://localhost:${DEBUG_MCP_PORT}`);
 	} else {
 		await context.routeWebSocket(/:7378/u, (route) => { route.close(); });
 	}
@@ -170,26 +110,18 @@ export async function startSession(options = {}) {
 	const workbench = () => page.frames().find((frame) => frame.url().includes("/__vscode__/host.html"));
 
 	/** Poll what the view observed until `ready(snapshot)` holds. */
-	async function until(what, ready, timeoutMs = TIMEOUT_MS) {
-		const deadline = Date.now() + timeoutMs;
-
-		for (;;) {
+	async function observed(what, ready, timeoutMs = TIMEOUT_MS) {
+		return until(what, async () => {
 			const frame = workbench();
 
-			if (frame !== undefined && await frame.evaluate(() => globalThis.__architecture !== undefined).catch(() => false)) {
-				snapshot = await frame.evaluate(() => globalThis.__architecture.snapshot());
-
-				if (ready(snapshot)) {
-					return snapshot;
-				}
+			if (frame === undefined || !await frame.evaluate(() => globalThis.__architecture !== undefined)) {
+				return undefined;
 			}
 
-			if (Date.now() > deadline) {
-				throw new Error("timed out waiting for " + what);
-			}
+			snapshot = await frame.evaluate(() => globalThis.__architecture.snapshot());
 
-			await page.waitForTimeout(500);
-		}
+			return ready(snapshot) ? snapshot : undefined;
+		}, { "timeoutMs": timeoutMs, "intervalMs": 500, "sleep": (ms) => page.waitForTimeout(ms) });
 	}
 
 	// Preview windows float over the workbench (they live in the shell), so drive it by keyboard from a spot they
@@ -208,7 +140,7 @@ export async function startSession(options = {}) {
 	return {
 		"page": page,
 		"workbench": workbench,
-		"until": until,
+		"until": observed,
 		"snapshot": () => snapshot,
 		"conformance": async () => workbench().evaluate(() => globalThis.__architecture.conformance()),
 		/** An RPC into the hub tree, from the workbench realm. */
@@ -248,7 +180,7 @@ export async function startSession(options = {}) {
 		},
 		"close": async (name) => {
 			if (snapshot !== undefined) {
-				writeFileSync(path.join(tmpdir(), name + ".json"), JSON.stringify(snapshot, null, "\t"));
+				fs.writeFileSync(path.join(fs.tmpdir(), name + ".json"), JSON.stringify(snapshot, null, "\t"));
 			}
 
 			await browser.close();

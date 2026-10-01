@@ -2,25 +2,25 @@
  * Page tools end to end: an MCP client → debug-mcp → WebSockets → stand-in tabs that define their own tools
  * (observability's servePageToolSet). Runs under tsx, like debug-tools.test.ts.
  */
-import type { AddressInfo } from "node:net";
 import * as assert from "node:assert/strict";
-import { createServer } from "node:net";
 
 import { after, before, test } from "node:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { until } from "@brianjenkins94/util/until";
 import type { Hub } from "@brianjenkins94/hub";
 import { createHub, websocketTransport } from "@brianjenkins94/hub";
 
 import type { PageTool } from "../../observability/src/page-tools.ts";
 import { servePageToolSet } from "../../observability/src/page-tools.ts";
 import { TAB_DISCOVER, TAB_HERE } from "../../observability/src/tabs.ts";
-import { createMcpServer } from "../src/mcp.ts";
 import { createDebugMcp } from "../src/server.ts";
+import type { TestClient } from "../src/testing.ts";
+import { connectTestClient } from "../src/testing.ts";
 
 let debugMcp: ReturnType<typeof createDebugMcp>;
 let port: number;
 let client: Client;
+let call: TestClient["call"];
 const sockets: WebSocket[] = [];
 
 const status: PageTool = {
@@ -50,48 +50,20 @@ async function connectTab(hub: Hub): Promise<void> {
 	sockets.push(socket);
 }
 
-function freePort(): Promise<number> {
-	return new Promise((resolve) => {
-		const probe = createServer().listen(0, () => {
-			const { port: free } = probe.address() as AddressInfo;
-
-			probe.close(() => { resolve(free); });
-		});
-	});
-}
-
 /** The client's tool list once `predicate` holds (tools register asynchronously, as tabs are read). */
 async function toolsWhen(predicate: (names: string[]) => boolean): Promise<Awaited<ReturnType<Client["listTools"]>>["tools"]> {
-	for (let attempt = 0; attempt < 60; attempt += 1) {
+	return until("the tools to change", async () => {
 		const { tools } = await client.listTools();
 
-		if (predicate(tools.map((tool) => tool.name))) {
-			return tools;
-		}
-
-		await new Promise((resolve) => { setTimeout(resolve, 100); });
-	}
-
-	throw new Error("tools never appeared: " + (await client.listTools()).tools.map((tool) => tool.name).join(", "));
-}
-
-async function call(name: string, args: Record<string, unknown> = {}): Promise<{ "isError"?: boolean; "value": unknown }> {
-	const result = await client.callTool({ "name": name, "arguments": args }) as { "isError"?: boolean; "content": { "type": string; "text": string }[] };
-	const text = result.content[0]?.text ?? "";
-
-	return { "isError": result.isError, "value": ((): unknown => { try { return JSON.parse(text); } catch { return text; } })() };
+		return predicate(tools.map((tool) => tool.name)) ? tools : undefined;
+	}, { "timeoutMs": 6000 });
 }
 
 before(async () => {
-	port = await freePort();
-	debugMcp = createDebugMcp({ "port": port });
-	await debugMcp.whenListening;
+	debugMcp = createDebugMcp({ "port": 0 });
+	port = await debugMcp.whenListening;
 
-	const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-
-	await createMcpServer(debugMcp).connect(serverSide);
-	client = new Client({ "name": "test", "version": "0.0.0" });
-	await client.connect(clientSide);
+	({ client, call } = await connectTestClient(debugMcp));
 });
 
 after(async () => {

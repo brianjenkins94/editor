@@ -5,6 +5,7 @@
  * observability namespace and files every record into the store. Because routing is interest-based, the pages
  * forward their span/log traffic here precisely because this collector subscribed to it, and nothing else.
  */
+import type { AddressInfo } from "node:net";
 import type { Hub, RpcClient } from "@brianjenkins94/hub";
 import type { WebSocket } from "ws";
 
@@ -67,9 +68,10 @@ export interface DebugMcp {
 	"linkCount": () => number;
 	/** The editor tabs linked in right now, each answering with its id — the page tools are served under it. */
 	"tabs": (timeoutMs?: number) => Promise<TabInfo[]>;
-	/** Resolves once the WS server is bound and accepting connections; rejects if it fails to bind (typically
-	 *  EADDRINUSE — another debug-mcp already owns the port). Await before announcing "listening". */
-	"whenListening": Promise<void>;
+	/** Resolves with the port once the WS server is bound and accepting connections (`port: 0` binds any free one);
+	 *  rejects if it fails to bind (typically EADDRINUSE — another debug-mcp already owns the port). Await before
+	 *  announcing "listening". */
+	"whenListening": Promise<number>;
 	"close": () => Promise<void>;
 }
 
@@ -87,12 +89,15 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 	// an unhandled exception and takes the whole process down — which is exactly how a port collision killed this
 	// server. Attach a listener always: reject `whenListening` on a pre-bind failure so the caller can report it
 	// and exit cleanly, and merely log any post-bind socket error rather than crash.
-	let markListening: () => void;
+	let markListening: (port: number) => void;
 	let failListening: (error: Error) => void;
-	const whenListening = new Promise<void>((resolve, reject) => { markListening = resolve; failListening = reject; });
+	const whenListening = new Promise<number>((resolve, reject) => { markListening = resolve; failListening = reject; });
 	let bound = false;
 
-	server.on("listening", () => { bound = true; markListening(); });
+	server.on("listening", () => {
+		bound = true;
+		markListening((server.address() as AddressInfo).port);
+	});
 	server.on("error", (error: Error) => {
 		if (bound) {
 			console.error("[debug-mcp] server error:", error.message);
@@ -178,8 +183,13 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		// virtual.request, a capability.decide) could be answered by another tab's node worker or pod.
 		const unlink = hub.link(websocketTransport(socket), { "transit": false });
 
-		// Once our $sys.arch interest has reached the page's hubs, ask them for their full state.
-		setTimeout(() => { requestArchSync(hub); }, 500);
+		// Once the page's hello is in, so is its tree's interest in the sync: ask its hubs for their full state. (Their
+		// answers wait for our $sys.arch interest to reach them — a reporter holds its reports until someone listens.)
+		void unlink.ready.then((ready) => {
+			if (ready) {
+				requestArchSync(hub);
+			}
+		});
 
 		socket.addEventListener("close", () => {
 			// Count it gone first, so whoever watches the topology change sees the new link count.
