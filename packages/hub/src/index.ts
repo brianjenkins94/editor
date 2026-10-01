@@ -201,6 +201,34 @@ function permits(patterns: string[] | undefined, subject: string): boolean {
 	return patterns === undefined || patterns.some((pattern) => matches(pattern, subject));
 }
 
+/** Could some subject match both patterns? (`*` is any one token, `>` one or more — on either side.) */
+function overlaps(left: string, right: string): boolean {
+	const a = left.split(".");
+	const b = right.split(".");
+
+	for (let index = 0; ; index += 1) {
+		const x = a[index];
+		const y = b[index];
+
+		if (x === ">" || y === ">") {
+			return (x === ">" || x !== undefined) && (y === ">" || y !== undefined);
+		}
+
+		if (x === undefined || y === undefined) {
+			return x === y;
+		}
+
+		if (x !== "*" && y !== "*" && x !== y) {
+			return false;
+		}
+	}
+}
+
+/** Could `patterns` allow anything `pattern` matches? An omitted list allows everything. */
+function permitsAny(patterns: string[] | undefined, pattern: string): boolean {
+	return patterns === undefined || patterns.some((allowed) => overlaps(allowed, pattern));
+}
+
 /** May a message (or interest) from link `from` pass on to link `to`? Never between two non-transit links. */
 function crosses(from: Link | undefined, to: Link): boolean {
 	return from === undefined || from.transit || to.transit;
@@ -341,6 +369,7 @@ export class Hub {
 
 		if (found) {
 			this.emit({ "type": "topology" });
+			this.readvertise(); // what may cross changed → what it's worth telling each link may have too
 		}
 
 		return found;
@@ -503,15 +532,21 @@ export class Hub {
 
 	/** Recompute, per link, the interest we should advertise to it — our own handlers plus every OTHER link's
 	 *  interest (never a link's own, so interest never echoes back) — and send only the sub/unsub deltas. This
-	 *  is what keeps traffic local: a link hears about a subject only when something on THIS side wants it. */
+	 *  is what keeps traffic local: a link hears about a subject only when something on THIS side wants it. And only
+	 *  what it could deliver: what the link may send us (its publish permissions), and of another link's interest, only
+	 *  what that link may receive (its subscribe permissions) — a confined link isn't told of interest it couldn't serve,
+	 *  so nobody past it takes it for a listener. */
 	private readvertise(): void {
 		for (const link of this.links) {
-			const desired = new Set<string>(this.handlers.keys());
+			const sendable = (pattern: string): boolean => permitsAny(link.permissions?.publish, pattern);
+			const desired = new Set<string>([...this.handlers.keys()].filter(sendable));
 
 			for (const other of this.links) {
 				if (other !== link && crosses(other, link)) {
 					for (const pattern of other.remoteInterest) {
-						desired.add(pattern);
+						if (sendable(pattern) && permitsAny(other.permissions?.subscribe, pattern)) {
+							desired.add(pattern);
+						}
 					}
 				}
 			}

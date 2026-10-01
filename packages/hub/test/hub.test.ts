@@ -862,3 +862,45 @@ test("channelTransport: two hubs meet over a BroadcastChannel by name, and close
 	left.close();
 	right.close();
 });
+
+test("a confined link is told only of interest it could serve — so nobody past it takes it for a listener", async () => {
+	// page ─ referee ─ client: the client serves a debug call, but its link lets the referee send it only the game.
+	const [pageEnd, refereeUp] = pipe();
+	const [refereeDown, clientEnd] = pipe();
+	const page = createHub({ "id": "page" });
+	const referee = createHub({ "id": "referee" });
+	const client = createHub({ "id": "client-0" });
+
+	serve(client, "debug.client-0.inspect", () => "reached");
+	client.subscribe("game.state", () => undefined);
+	await Promise.all([page.link(pageEnd).ready, referee.link(refereeUp).ready, referee.link(refereeDown, { "peer": "client-0" }).ready, client.link(clientEnd, { "uplink": true, "transit": false, "permissions": { "publish": ["game.*"], "subscribe": [] } }).ready]);
+	await flush();
+
+	assert.equal(referee.interested("game.state"), true, "what the client may be sent, it asks for");
+	assert.equal(referee.interested("$rpc.call.debug.client-0.inspect"), false, "what it may not, it never mentions");
+	assert.equal(page.interested("$rpc.call.debug.client-0.inspect"), false, "so the page doesn't wait on an answer that can't come");
+
+	// Permitted later (the client learns it may be debugged), its interest follows.
+	client.permit("referee", { "publish": ["game.*", "$rpc.call.debug.>"], "subscribe": ["$rpc.reply.>"] });
+	await flush();
+	assert.equal(page.interested("$rpc.call.debug.client-0.inspect"), true);
+	assert.equal(await createRpcClient(page).request("debug.client-0.inspect", undefined, { "timeoutMs": 1000 }), "reached");
+});
+
+test("interest passes on only as far as each link may receive it", async () => {
+	// root ─ hub ─ peer, the peer allowed only $sys.log.p: a root subscribing to all of $sys.log still gets it asked
+	// for (the patterns overlap), but a subject the peer may not receive isn't asked of it.
+	const [rootEnd, up] = pipe();
+	const [down, peerEnd] = pipe();
+	const root = createHub({ "id": "root" });
+	const hub = createHub({ "id": "hub" });
+	const peer = createHub({ "id": "p" });
+
+	root.subscribe("$sys.log.>", () => undefined);
+	root.subscribe("game.secret", () => undefined);
+	await Promise.all([root.link(rootEnd).ready, hub.link(up).ready, hub.link(down, { "peer": "p", "permissions": { "publish": ["$sys.log.p"] } }).ready, peer.link(peerEnd).ready]);
+	await flush();
+
+	assert.equal(peer.interested("$sys.log.p"), true);
+	assert.equal(peer.interested("game.secret"), false);
+});
