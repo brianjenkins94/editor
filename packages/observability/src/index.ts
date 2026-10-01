@@ -40,13 +40,51 @@ export const LOG_SUBJECT = "$sys.log";
 /**
  * Source side: return a source-scoped logger (open spans off it — `const span = log.span("cdn")`) whose every
  * record is published onto `hub`. Keeps the context's own console sink, so it's still debuggable standalone.
+ *
+ * Records logged while nobody listens yet — a worker logging as it starts, before its link's interest has arrived —
+ * are held (the newest `max`), and sent, in order, as soon as someone does: a hub forwards only what it knows is
+ * wanted, so they'd otherwise be gone.
  */
-export function relayLoggerToHub(hub: Hub, source: string): Logger {
-	sinks.push((record: LogRecord) => {
+export function relayLoggerToHub(hub: Hub, source: string, { max = 1000 } = {}): Logger {
+	const subject = LOG_SUBJECT + "." + source;
+	const held: LogRecord[] = [];
+	let untap: (() => void) | undefined;
+	const publish = (record: LogRecord): void => {
 		// Telemetry must never break the context it observes.
 		try {
-			hub.publish(LOG_SUBJECT + "." + source, record);
-		} catch { /* no subscriber / clone failure — the local console sink still has it */ }
+			hub.publish(subject, record);
+		} catch { /* a clone failure — the local console sink still has it */ }
+	};
+	const flush = (): void => {
+		if (held.length > 0 && hub.interested(subject)) {
+			untap?.();
+			untap = undefined;
+
+			for (const record of held.splice(0)) {
+				publish(record);
+			}
+		}
+	};
+
+	sinks.push((record: LogRecord) => {
+		if (held.length === 0 && hub.interested(subject)) {
+			publish(record);
+
+			return;
+		}
+
+		held.push(record);
+
+		if (held.length > max) {
+			held.shift();
+		}
+
+		// Interest arriving is a topology change. (Not from inside the tap: a tap mustn't publish synchronously.)
+		untap ??= hub.tap((event) => {
+			if (event.type === "topology") {
+				queueMicrotask(flush);
+			}
+		});
 	});
 
 	return logger({ "source": source });

@@ -159,3 +159,24 @@ test("a tool no connected tab serves any more is removed from the list", async (
 
 	assert.ok(tools.some((tool) => tool.name === "game_status"), "the other tab's tool stays");
 });
+
+test("a tab that's slow to answer the first time still gets its tools registered — debug-mcp looks again", async () => {
+	// Busy starting up (a page making its WebRTC connections on a slow machine): its first answer to discovery comes after
+	// debug-mcp's wait for it. Nothing else would ask again — its tools were announced before it linked.
+	const hub = createHub({ "id": "busy" });
+	let asked = 0;
+
+	hub.subscribe(TAB_DISCOVER, (data) => {
+		asked += 1;
+		setTimeout(() => {
+			hub.publish(TAB_HERE, { "query": (data as { "query": string }).query, "tab": "t5", "url": "", "title": "", "visible": true, "focused": false });
+		}, asked === 1 ? 1500 : 0);
+	});
+	servePageToolSet(hub, "t5", [{ "name": "busy_tool", "description": "From a busy tab.", "inputSchema": { "type": "object" }, "handler": () => "done" }]);
+	await connectTab(hub);
+	await toolsWhen((names) => names.includes("busy_tool"));
+	assert.ok(asked > 1, "it was asked again");
+	sockets.pop()?.close();
+	await toolsWhen((names) => !names.includes("busy_tool"));
+});
+

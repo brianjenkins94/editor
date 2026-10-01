@@ -6,8 +6,9 @@
  * for when several tabs serve it. A call waits as long as the call (`timeoutMs`) or the tool says (PageToolSpec), and
  * cancels the page's work when it gives up.
  *
- * Re-read when a tab announces a change (`page_tools.changed`) and when tabs come or go. A tool no connected tab serves
- * any more is removed (the client is told: tools/list_changed).
+ * Re-read when a tab announces a change (`page_tools.changed`) and when tabs come or go — and again shortly after when a
+ * linked tab didn't answer in time (a page busy starting up), until it does. A tool no connected tab serves any more is
+ * removed (the client is told: tools/list_changed).
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PageToolSpec } from "../../observability/src/page-tools.ts";
@@ -18,6 +19,9 @@ import { PAGE_TOOL, PAGE_TOOL_NAME, PAGE_TOOLS, PAGE_TOOLS_CHANGED } from "../..
 import { callTab } from "./forward.ts";
 
 const REFRESH_MS = 200;
+/** A read that missed a tab is tried again after this long, up to RETRIES times in a row. */
+const RETRY_MS = 1000;
+const RETRIES = 10;
 const CALL_MS = 30_000;
 const GRACE_MS = 1000;
 
@@ -45,6 +49,7 @@ export function syncPageTools(server: McpServer, debugMcp: DebugMcp): PageToolSy
 	const registered = new Map<string, string>();
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let links = debugMcp.linkCount();
+	let retries = 0;
 
 	/** Which tabs serve each tool: a call that names no tab goes to the one that does (an app's tools, in a preview,
 	 *  alongside its editor tab). */
@@ -54,9 +59,15 @@ export function syncPageTools(server: McpServer, debugMcp: DebugMcp): PageToolSy
 		const specs = new Map<string, PageToolSpec>();
 		// Built on the side and swapped in at once (synchronously): a call during a refresh sees the last complete picture.
 		const serving = new Map<string, string[]>();
+		const tabs = await debugMcp.tabs(1000).catch(() => []);
+		// A linked tab that didn't answer discovery, or whose manifest didn't come: read again shortly.
+		let missed = tabs.length < debugMcp.linkCount();
 
-		for (const { tab } of await debugMcp.tabs(1000).catch(() => [])) {
-			const served = await debugMcp.rpc.request(PAGE_TOOLS + "." + tab, undefined, { "timeoutMs": 2000, "waitForResponderMs": 300 }).catch(() => []) as PageToolSpec[];
+		for (const { tab } of tabs) {
+			const answer = await debugMcp.rpc.request(PAGE_TOOLS + "." + tab, undefined, { "timeoutMs": 2000, "waitForResponderMs": 300 }).catch(() => undefined);
+			const served = (answer ?? []) as PageToolSpec[];
+
+			missed ||= answer === undefined;
 
 			for (const spec of Array.isArray(served) ? served : []) {
 				if (typeof spec?.name === "string" && PAGE_TOOL_NAME.test(spec.name) && !reserved.has(spec.name)) {
@@ -67,6 +78,13 @@ export function syncPageTools(server: McpServer, debugMcp: DebugMcp): PageToolSy
 					serving.set(spec.name, [...serving.get(spec.name) ?? [], tab]);
 				}
 			}
+		}
+
+		if (missed && retries < RETRIES) {
+			retries += 1;
+			schedule(RETRY_MS);
+		} else if (!missed) {
+			retries = 0;
 		}
 
 		servedBy.clear();
@@ -114,18 +132,23 @@ export function syncPageTools(server: McpServer, debugMcp: DebugMcp): PageToolSy
 		}
 	}
 
-	function schedule(): void {
+	function schedule(delay = REFRESH_MS): void {
 		clearTimeout(timer);
-		timer = setTimeout(() => { void refresh(); }, REFRESH_MS);
+		timer = setTimeout(() => { void refresh(); }, delay);
 		timer.unref?.();
 	}
 
-	const unsubscribe = debugMcp.hub.subscribe(PAGE_TOOLS_CHANGED, schedule);
+	// A new reason to read starts a fresh run of retries.
+	const unsubscribe = debugMcp.hub.subscribe(PAGE_TOOLS_CHANGED, () => {
+		retries = 0;
+		schedule();
+	});
 	// Tabs coming or going. Only a change in how many are linked: discovering tabs itself changes subscriptions (and so
 	// the topology), so reacting to every topology event would loop.
 	const untap = debugMcp.hub.tap((event) => {
 		if (event.type === "topology" && debugMcp.linkCount() !== links) {
 			links = debugMcp.linkCount();
+			retries = 0;
 			schedule();
 		}
 	});
