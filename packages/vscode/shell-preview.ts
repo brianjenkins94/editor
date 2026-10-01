@@ -21,12 +21,11 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { ArchSink } from "@brianjenkins94/observability";
 import type { LinkPermissions, Transport } from "@brianjenkins94/hub";
-import { createRpcClient, mapFrame, rpcCallSubject, rpcReplySubject, serve } from "@brianjenkins94/hub";
-import { installWindowMessageProbe, scopeObservability } from "@brianjenkins94/observability";
+import { createRpcClient, rpcCallSubject, rpcReplySubject, serve, windowTransport } from "@brianjenkins94/hub";
+import { installWindowMessageProbe, LOG_SUBJECT, scopedTransport } from "@brianjenkins94/observability";
 import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, RotateCcw, Unplug } from "lucide";
 import type { DevtoolsPanel } from "./preview-devtools";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
-import { LOG_SUBJECT } from "./telemetry";
 import { css, iconSvg } from "./theme";
 import { parseVirtual, PREVIEW_WINDOW_PREFIX, previewPageOf, windowId, windowTitle } from "./virtual-path";
 import { createPaneWindow, type PaneWindow } from "./window";
@@ -72,7 +71,7 @@ interface PromptRequest { "kind"?: string; "scope"?: string; "resource"?: string
  */
 const PREVIEW_APP_PERMISSIONS: LinkPermissions = {
 	"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "tab.here", "page_tools.changed", rpcReplySubject("debug-mcp")],
-	"subscribe": ["$sys.arch.sync", "tab.discover", ...["page_tools.*", "tool.>", "page_eval.*", "page_query.*"].map((name) => rpcCallSubject(name))]
+	"subscribe": ["$sys.arch.sync", "tab.discover", ...["page_tools.*", "tool.>"].map((name) => rpcCallSubject(name))]
 };
 
 /** One preview window: which server it shows, its window, the iframe, and the capability-prompt overlay. */
@@ -326,7 +325,18 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		// hubs alike (`page`, …), and two windows' must not merge. A new page (a reload) re-reads its tools: announce the
 		// change for debug-mcp.
 		const reporters = new Set<string>();
-		const unlinkApp = hub.link(frameTransport(frame, id, reporters), { "transit": false, "peer": id, "permissions": PREVIEW_APP_PERMISSIONS });
+		// (Its window looked up on each message: null until the frame is in the document. What's sent while there's none
+		// is dropped; hub's hello handshake recovers.)
+		const unlinkApp = hub.link(scopedTransport(windowTransport(() => frame.contentWindow, location.origin), id, {
+			// Who reported, so closing the window can end them all (see closeWindow).
+			"onFrame": (scoped) => {
+				const reporter = !("hub" in scoped) && scoped.subject.startsWith("$sys.arch.") ? (scoped.data as { "reporter"?: unknown } | undefined)?.reporter : undefined;
+
+				if (typeof reporter === "string") {
+					reporters.add(reporter);
+				}
+			}
+		}), { "transit": false, "peer": id, "permissions": PREVIEW_APP_PERMISSIONS });
 
 		frame.addEventListener("load", () => { hub.publish("page_tools.changed", { "preview": port, "window": id }); });
 
@@ -755,34 +765,3 @@ function isWithin(source: MessageEventSource | null, root: Window | null): boole
 }
 
 
-/** A hub transport to whatever page `frame` holds: its window is looked up on every use — it's null until the frame is
- *  in the document, and a new page (a reload) is a new realm behind the same frame. What's sent while there's no
- *  window is dropped; hub's hello handshake recovers (the app's hub says hello when it links, and we answer). What
- *  arrives has its observability scoped under `scope` (the window's id — observability's scopeObservability), and
- *  each reporter's (scoped) id is added to `reporters`. */
-function frameTransport(frame: HTMLIFrameElement, scope: string, reporters: Set<string>): Transport {
-	return {
-		"send": (message) => { frame.contentWindow?.postMessage(message, location.origin); },
-		"listen": (onMessage) => {
-			const handler = (event: MessageEvent): void => {
-				if (event.source !== null && event.source === frame.contentWindow && event.origin === location.origin) {
-					onMessage(mapFrame(event.data, (hubFrame) => {
-						const scoped = scopeObservability(hubFrame, scope) as typeof hubFrame;
-						const reporter = !("hub" in scoped) && scoped.subject.startsWith("$sys.arch.") ? (scoped.data as { "reporter"?: unknown } | undefined)?.reporter : undefined;
-
-						// Who reported, so closing the window can end them all (see closeWindow).
-						if (typeof reporter === "string") {
-							reporters.add(reporter);
-						}
-
-						return scoped;
-					}));
-				}
-			};
-
-			globalThis.addEventListener("message", handler);
-
-			return () => { globalThis.removeEventListener("message", handler); };
-		}
-	};
-}

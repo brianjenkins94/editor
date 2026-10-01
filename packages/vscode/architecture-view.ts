@@ -12,7 +12,7 @@ import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@bria
 import type { ContainerSpec, Violation } from "./architecture-model";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
 import type { AppLayout } from "./architecture-model";
-import { appEnded, appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, isEndedPlaceholder, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
+import { appEnded, appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 import { windowTitle } from "./virtual-path";
 
@@ -78,7 +78,7 @@ export interface ArchitectureHandle {
 function conformanceOf(store: ArchitectureStore): Violation[] {
 	const now = Date.now();
 	// An ended placeholder (a link that closed before its peer answered) is a transient: shown fading, not a violation.
-	const shown = new Set([...store.nodes.values()].filter((node) => node.state !== "declared" && isVisible(node, now, false) && !isEndedPlaceholder(node.id, node.state)).map((node) => node.id));
+	const shown = new Set([...store.nodes.values()].filter((node) => node.state !== "declared" && isVisible(node, now, false)).map((node) => node.id));
 
 	return checkConformance({
 		"nodes": [...shown],
@@ -165,13 +165,6 @@ function containerOf(node: RuntimeNode, app: ReadonlySet<string> = new Set()): s
 
 	if (node.id.startsWith("net:")) {
 		return "network";
-	}
-
-	// An anonymous hub peer (`<hub>:link-N` — a hub that didn't say who it is): next to the hub reporting it.
-	const anonymous = /^(.+):link-\d+$/u.exec(node.id);
-
-	if (anonymous !== null) {
-		return nodeSpec(anonymous[1])?.container ?? "workbench";
 	}
 
 	return dynamicContainer(node.id) ?? "workbench";

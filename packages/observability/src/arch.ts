@@ -7,7 +7,7 @@
  * A reporter never draws anything: it batches (so observing traffic doesn't flood the bus with more traffic) and
  * answers `$sys.arch.sync` with its full state, so a viewer opened late still sees what already happened.
  */
-import type { Envelope, Hub, HubSnapshot, LinkInfo, TapEvent } from "@brianjenkins94/hub";
+import type { Envelope, Hub, HubSnapshot, TapEvent } from "@brianjenkins94/hub";
 
 /** Reserved architecture namespace — reports ride `$sys.arch.<reporter id>`; `$sys.arch.sync` asks for full state. */
 export const ARCH_SUBJECT = "$sys.arch";
@@ -113,10 +113,6 @@ export interface ArchReporter extends ArchSink {
 }
 
 const FLUSH_MS = 250;
-// A link whose peer isn't known yet (its `hello` hasn't arrived — the peer may still be booting): its traffic is
-// held back until the peer says who it is. A peer whose `hello` carries no id (an older hub), or a link that closed
-// first, is published as `<self>:<link id>`.
-const PENDING_LINK = "\0link:";
 const MAX_SAMPLES_PER_FLUSH = 120;
 /** Node ops held while nobody listens (see flush), past which they're collapsed into the nodes' current state. */
 const MAX_HELD_NODE_OPS = 200;
@@ -204,12 +200,27 @@ export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: strin
 	let disposed = false;
 	// rpc call id → name, to label the replies
 	const rpcNames = new Map<string, string>();
-	// links whose peer said hello WITHOUT an id: they'll stay anonymous
-	const anonymousLinks = new Set<string>();
-	// every peer a hello named, by link — so a short-lived link (a worker done before the next flush) still resolves
-	const knownPeers = new Map<string, string>();
-	// placeholders already reported as ended (a link gone before its peer answered)
-	const endedPlaceholders = new Set<string>();
+	// A hub sends its interest before its hello, so a call can go out on a link whose peer hasn't said who it is yet (a
+	// worker's first request at boot). Held by link until the hello names it; dropped if the link goes first.
+	const unnamed = new Map<string, { "kind": TrafficKind; "label": string; "bytes": number }[]>();
+
+	function nameHeldTraffic(): void {
+		const links = new Map(hub.inspect().links.map((link) => [link.id, link.peerId]));
+
+		for (const [link, held] of unnamed) {
+			const peer = links.get(link);
+
+			if (peer !== undefined) {
+				for (const { kind, label, bytes } of held) {
+					record(self, peer, kind, label, bytes, "hub");
+				}
+			}
+
+			if (peer !== undefined || !links.has(link)) {
+				unnamed.delete(link);
+			}
+		}
+	}
 
 	function schedule(): void {
 		if (timer === undefined && !disposed) {
@@ -241,8 +252,6 @@ export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: strin
 			return;
 		}
 
-		resolvePendingLinks();
-
 		const report: ArchReport = { "reporter": self, "time": Date.now() };
 
 		if (topologyDirty) {
@@ -256,35 +265,17 @@ export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: strin
 			nodeOps = [];
 		}
 
-		// Traffic on links still waiting for their peer's `hello` waits for the next flush.
-		const ready = [...counts].filter(([, entry]) => !isPending(entry));
-
-		if (ready.length > 0) {
-			report.traffic = ready.map(([, entry]) => entry);
-
-			for (const [key] of ready) {
-				counts.delete(key);
-			}
+		if (counts.size > 0) {
+			report.traffic = [...counts.values()];
+			counts.clear();
 		}
 
-		const readySamples = samples.filter((sample) => !isPending(sample));
-
-		if (readySamples.length > 0) {
-			report.samples = readySamples;
-		}
-
-		// (only the latest few: a peer can take seconds to boot, and samples are for the animation, not the counts)
-		samples = samples.filter((sample) => isPending(sample)).slice(-40);
-
-		if (counts.size > 0 || samples.length > 0) {
-			schedule();
+		if (samples.length > 0) {
+			report.samples = samples;
+			samples = [];
 		}
 
 		publish(report);
-	}
-
-	function isPending(entry: { "from": string; "to": string }): boolean {
-		return entry.from.startsWith(PENDING_LINK) || entry.to.startsWith(PENDING_LINK);
 	}
 
 	function keyOf(entry: Omit<TrafficCount, "count" | "bytes">): string {
@@ -333,60 +324,9 @@ export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: strin
 		schedule();
 	}
 
-	/** Name the peers of links whose `hello` arrived since their traffic was recorded. A peer that said hello
-	 *  without an id, or a link that's gone, is named `<self>:<link id>`; otherwise the traffic stays pending. A link
-	 *  gone before its peer ever answered is reported as a context that ENDED (dynamic, terminated): it can live and die
-	 *  between two reports — a tab re-linking to a service worker that was replaced mid-boot — so no topology report
-	 *  ever shows it, and without this its placeholder would look alive forever. */
-	function resolvePendingLinks(): void {
-		const links = new Map(hub.inspect().links.map((link) => [PENDING_LINK + link.id, link.peerId]));
-		const resolve = (id: string): string => {
-			if (!id.startsWith(PENDING_LINK)) {
-				return id;
-			}
-
-			const peer = links.get(id) ?? knownPeers.get(id);
-
-			if (peer !== undefined) {
-				return peer;
-			}
-
-			if (!links.has(id) || anonymousLinks.has(id)) {
-				const named = self + ":" + id.slice(PENDING_LINK.length);
-
-				if (!links.has(id) && !anonymousLinks.has(id) && !endedPlaceholders.has(named)) {
-					endedPlaceholders.add(named);
-					nodeOps.push({ "op": "spawn", "spec": { "id": named, "dynamic": true } }, { "op": "terminate", "id": named });
-				}
-
-				return named;
-			}
-
-			return id;
-		};
-
-		for (const map of [counts, totals]) {
-			for (const [key, entry] of [...map]) {
-				if (entry.from.startsWith(PENDING_LINK) || entry.to.startsWith(PENDING_LINK)) {
-					map.delete(key);
-					add(map, { ...entry, "from": resolve(entry.from), "to": resolve(entry.to) });
-				}
-			}
-		}
-
-		for (const sample of samples) {
-			sample.from = resolve(sample.from);
-			sample.to = resolve(sample.to);
-		}
-	}
-
 	function nodeOp(op: NodeOp): void {
 		nodeOps.push(op);
 		schedule();
-	}
-
-	function peerOf(link: LinkInfo): string {
-		return link.peerId ?? PENDING_LINK + link.id;
 	}
 
 	/** Describe a hub envelope the way the diagram labels it: RPC by method, replies after their call. */
@@ -422,22 +362,25 @@ export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: strin
 		switch (event.type) {
 			case "topology":
 				topologyDirty = true;
+				nameHeldTraffic();
 				schedule();
 				break;
 			case "send": {
 				const { frame } = event;
 
-				if (!("hub" in frame)) {
-					// Our own reports (and everyone's, passing through) are the observer, not the observed.
-					if (frame.subject.startsWith(ARCH_SUBJECT)) {
-						return;
-					}
+				// Our own reports (and everyone's, passing through) are the observer, not the observed.
+				if (!("hub" in frame) && frame.subject.startsWith(ARCH_SUBJECT)) {
+					return;
+				}
 
-					const { kind, label } = describe(frame);
+				const { kind, label } = "hub" in frame ? { "kind": "lifecycle" as const, "label": frame.hub === "hello" ? "hello" : "interest (" + frame.hub + ")" } : describe(frame);
+				const bytes = "hub" in frame ? 0 : approxSize(frame.data);
+				const peer = event.link.peerId;
 
-					record(self, peerOf(event.link), kind, label, approxSize(frame.data), "hub");
-				} else {
-					record(self, peerOf(event.link), "lifecycle", frame.hub === "hello" ? "hello" : "interest (" + frame.hub + ")", 0, "hub");
+				if (peer !== undefined) {
+					record(self, peer, kind, label, bytes, "hub");
+				} else if ((unnamed.get(event.link.id)?.length ?? 0) < MAX_SAMPLES_PER_FLUSH) {
+					unnamed.set(event.link.id, [...unnamed.get(event.link.id) ?? [], { "kind": kind, "label": label, "bytes": bytes }]);
 				}
 
 				break;
@@ -446,14 +389,6 @@ export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: strin
 			case "receive": {
 				// Replies are labelled from the call we saw going out; learn calls arriving too.
 				const { frame } = event;
-
-				// A hello without an id: an older hub that will never say who it is.
-				if ("hub" in frame && frame.hub === "hello" && frame.id === undefined) {
-					anonymousLinks.add(PENDING_LINK + event.link.id);
-					schedule();
-				} else if ("hub" in frame && frame.hub === "hello" && frame.id !== undefined) {
-					knownPeers.set(PENDING_LINK + event.link.id, frame.id);
-				}
 
 				if (!("hub" in frame) && frame.subject.startsWith(RPC_CALL)) {
 					const id = (frame.data as { "id"?: unknown } | undefined)?.id;
@@ -481,7 +416,6 @@ export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: strin
 			}
 
 			flush();
-			resolvePendingLinks();
 			publish({
 				"reporter": self,
 				"time": Date.now(),
@@ -489,8 +423,7 @@ export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: strin
 				"topology": hub.inspect(),
 				"realm": realm,
 				"nodes": currentNodeOps(),
-				// Still-pending traffic isn't in the totals yet: it arrives as a delta once its link is named.
-				"traffic": [...totals.values()].filter((entry) => !isPending(entry))
+				"traffic": [...totals.values()]
 			});
 		}, 0);
 	});

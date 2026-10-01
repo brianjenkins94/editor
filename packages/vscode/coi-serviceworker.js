@@ -26,8 +26,8 @@
  * import the hub below; registered {type:module} (coi.ts / server-bridge.ts).
  */
 import { createHub, createRpcClient, portTransport } from "@brianjenkins94/hub";
-import { reportArchitecture } from "./architecture";
-import { relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
+import { observe } from "@brianjenkins94/observability";
+import { NETWORK_PROBES } from "./architecture";
 import { parseVirtual } from "./virtual-path";
 
 // The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,
@@ -43,10 +43,9 @@ import { parseVirtual } from "./virtual-path";
 // names its tab (/__virtual__/<tab>/<port>/), a node worker names its tab on the decide route, and the SW calls
 // `virtual.request.<tab>` / `capability.decide.<tab>`, which only that tab's root answers (from its own tree).
 const swHub = createHub({ "id": "sw" });
-const swLog = relayLoggerToHub(swHub, "sw");
-
-// hub + the SW's upstream requests (CDN) on $sys.arch, plus what it serves previews and relays to the dev server
-const architecture = reportArchitecture(swHub);
+// Its logs and uncaught errors, and its hub + upstream requests (CDN) on $sys.arch, plus what it serves previews and
+// relays to the dev server.
+const { "log": swLog, architecture } = observe(swHub, { "network": NETWORK_PROBES });
 
 // The preview a request came from: its own /__virtual__/<tab>/<port>/ URL, else the preview document that asked for it.
 async function previewOf(event, pathname) {
@@ -70,8 +69,6 @@ function recordPreviewRequest(event, pathname, label, responsePromise) {
 		});
 	});
 }
-
-tapConsoleAndErrors(swHub, "sw"); // raw uncaught error/rejection → the plane, beside the structured logs
 
 // The capability gate. The SW holds NO policy: it asks the ext host's decision endpoint over the hub — swHub →
 // root → workbench → podHub reaches worker-pod's "capability.decide" serve, which owns the popup / grant store /
@@ -236,7 +233,7 @@ async function linkTab(clientId, port) {
 globalThis.addEventListener("message", (event) => {
 	const data = event.data;
 
-	// Dedicated observability link: the page hands us a hub port (telemetry.ts linkServiceWorkerHub). Link our
+	// Dedicated observability link: the page hands us a hub port (observability's linkServiceWorkerHub). Link our
 	// hub over it so `$sys.log.sw` records federate to the page's collector.
 	if (data && data.type === "hub" && event.ports && event.ports[0]) {
 		void linkTab(event.source && event.source.id, event.ports[0]).then(() => { swLog.info("hub linked", { "tabs": tabLinks.size }); });

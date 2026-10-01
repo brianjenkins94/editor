@@ -16,8 +16,7 @@ import { LanguageClient } from "vscode-languageclient/browser";
 
 import { type CapabilityCall, decideCapability } from "../capabilities/decide";
 import { flushRun } from "../capabilities/silo-store";
-import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
-import { reportArchitecture } from "../../architecture";
+import { observe } from "@brianjenkins94/observability";
 import { identifyWorker } from "../../architecture-model";
 import { ZENFS_NODE } from "../../architecture-zenfs";
 import { registerTsvalDebug } from "./debug-adapter";
@@ -71,8 +70,9 @@ const clients: LanguageClient[] = [];
 // the SAB once the workbench provides it; a worker that spawns after gets it immediately.
 const controlPorts: Array<{ "port": MessagePort; "worker": string }> = [];
 let workspaceBuffer: SharedArrayBuffer | undefined;
-// Hub topology/traffic only: this extension host shares the workbench realm, whose network is probed there.
-const architecture = reportArchitecture(podHub, { "network": false });
+// The pod's logger (its spans/records ride podHub), its uncaught errors, and its hub's topology/traffic — not its
+// network: this extension host shares the workbench realm, whose network is probed there.
+const { "log": podLog, architecture } = observe(podHub);
 
 /** Hand a server worker the workspace buffer; it mounts it at /workspace (a worker without a reporter of its own,
  *  so the mount is put on the diagram from here). */
@@ -114,11 +114,6 @@ function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 }
 
 export function activate(context: vscode.ExtensionContext): PodBridge {
-	// The pod's own logger — its spans/records ride podHub.
-	const podLog = relayLoggerToHub(podHub, "pod");
-
-	tapConsoleAndErrors(podHub, "pod"); // raw uncaught error/rejection → the plane, beside the structured logs
-
 	// The pod->root UPLINK. The ext host is an isolated `extension-file://` realm with no window path to the
 	// page, so podHub can't use windowTransport. Instead it rides the extension's EXPORTED API (spike-verified:
 	// ext-host EventEmitter events + functions marshal bidirectionally to the workbench): podHub links a

@@ -1,6 +1,6 @@
 /**
  * Tab discovery — so a relay linked to several tabs at once (debug-mcp links every open tab, each as its own tree) can
- * learn which tabs are there and address one. A tab serves its page tools under its id (`page_eval.<tab>`, see
+ * learn which tabs are there and address one. A tab serves its page tools under its id (`tool.<name>.<tab>`, see
  * servePageTools), and answers a discovery query with who it is:
  *
  *   relay → `tab.discover` { query }
@@ -22,8 +22,10 @@ export const TAB_HERE = "tab.here";
  *
  *   1 — the handshake itself.
  *   2 — a preview app's tab names its `scope` (its records are filed by window).
+ *   3 — everything a tab exposes is a page tool (`page_eval`, `page_query` and the editor's debugger tools too): an
+ *       older debug-mcp, with those as its own tools, can't reach them.
  */
-export const OBSERVABILITY_PROTOCOL = 2;
+export const OBSERVABILITY_PROTOCOL = 3;
 
 export interface TabInfo {
 	"tab": string;

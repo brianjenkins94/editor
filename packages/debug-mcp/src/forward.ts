@@ -1,7 +1,7 @@
 /**
- * Forwarding a tool call to ONE editor tab. Every connected tab serves its page tools under its own id
- * (`page_eval.<tab>`, see servePageTools), so a call reaches exactly the tab it names — debug-mcp links every open tab,
- * and a call to a bare name would run in each of them.
+ * Forwarding a tool call to ONE tab. Every connected tab serves its page tools under its own id (`tool.<name>.<tab>`,
+ * see observability's servePageTools), so a call reaches exactly the tab it names — debug-mcp links every open tab, and
+ * a call to a bare name would run in each of them.
  */
 import type { RpcClient } from "@brianjenkins94/hub";
 import type { DebugMcp } from "./server.ts";

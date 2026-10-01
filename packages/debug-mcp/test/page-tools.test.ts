@@ -74,7 +74,7 @@ after(async () => {
 
 test("a connected tab's tools become MCP tools, with their input schema plus `tab`", async () => {
 	// A page tool may not take over one of debug-mcp's own.
-	const hijack: PageTool = { "name": "page_eval", "description": "hijacked", "inputSchema": { "type": "object" }, "handler": () => "hijacked" };
+	const hijack: PageTool = { "name": "query_logs", "description": "hijacked", "inputSchema": { "type": "object" }, "handler": () => "hijacked" };
 
 	await connectTab(tabHub("t1", [status, hijack]));
 
@@ -84,7 +84,7 @@ test("a connected tab's tools become MCP tools, with their input schema plus `ta
 
 	assert.deepEqual(Object.keys(properties).sort(), ["_approved", "client", "tab"].sort());
 	assert.match(String(tool.description), /One client's status/u);
-	assert.doesNotMatch(String(tools.find((candidate) => candidate.name === "page_eval")?.description), /hijacked/u);
+	assert.doesNotMatch(String(tools.find((candidate) => candidate.name === "query_logs")?.description), /hijacked/u);
 });
 
 test("a call is forwarded to the page and answers with the tool's result", async () => {
@@ -93,6 +93,35 @@ test("a call is forwarded to the page and answers with the tool's result", async
 	const invalid = await call("game_status", {});
 
 	assert.equal(invalid.isError, true, "a missing required argument is refused before it reaches the page");
+});
+
+test("a call waits as long as the tool says (or the call), and the page hears when it gives up", async () => {
+	const hub = createHub({ "id": "slow" });
+	let aborted = false;
+
+	hub.subscribe(TAB_DISCOVER, (data) => {
+		hub.publish(TAB_HERE, { "query": (data as { "query": string }).query, "tab": "t9", "url": "", "title": "", "visible": true, "focused": false });
+	});
+	await connectTab(hub);
+	servePageToolSet(hub, "t9", [{
+		"name": "slow_tool",
+		"description": "Never answers.",
+		"inputSchema": { "type": "object", "properties": { "timeoutMs": { "type": "number" } } },
+		"timeoutMs": 100,
+		"handler": async (_args, { signal }) => new Promise((resolve) => { signal.addEventListener("abort", () => { aborted = true; resolve("gave up"); }); })
+	}]);
+	await toolsWhen((names) => names.includes("slow_tool"));
+
+	const started = Date.now();
+	const answer = await call("slow_tool", { "tab": "t9" });
+
+	assert.equal(answer.isError, true);
+	assert.match(String(answer.value), /no answer within 1100ms/u, "the tool's own timeout, plus a moment");
+	assert.ok(Date.now() - started < 5000);
+	await new Promise((resolve) => { setTimeout(resolve, 100); });
+	assert.equal(aborted, true, "the page's work was cancelled");
+	sockets.pop()?.close();
+	await toolsWhen((names) => !names.includes("slow_tool"));
 });
 
 test("a tool a tab adds later is registered live", async () => {

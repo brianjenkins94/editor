@@ -75,7 +75,6 @@ export class ArchitectureStore {
 	public readonly reporters = new Map<string, number>();
 
 	private readonly contributions = new Map<string, Map<string, TrafficCount>>();
-	private readonly anonymous = new Map<string, Set<string>>();
 	private readonly topologyListeners = new Set<Listener>();
 	private readonly sampleListeners = new Set<SampleListener>();
 	private scheduled = false;
@@ -406,20 +405,15 @@ export class ArchitectureStore {
 	private applyTopology(reporter: string, snapshot: NonNullable<ArchReport["topology"]>): void {
 		this.topology.set(reporter, snapshot);
 
-		// A link is anonymous until its peer's `hello` arrives: drop the placeholder once a later snapshot names
-		// the peer (or the link is gone), unless traffic was actually counted against it.
-		const anonymous = new Set(snapshot.links.filter((link) => link.peerId === undefined).map((link) => reporter + ":" + link.id));
-
-		for (const previous of this.anonymous.get(reporter) ?? []) {
-			if (!anonymous.has(previous)) {
-				this.forget(reporter, previous);
-			}
-		}
-
-		this.anonymous.set(reporter, anonymous);
-
+		// (A link whose peer hasn't said hello yet has no channel: who's across it is unknown until it does. It's in
+		// the topology all the same.)
 		for (const link of snapshot.links) {
-			const peer = link.peerId ?? reporter + ":" + link.id;
+			const peer = link.peerId;
+
+			if (peer === undefined) {
+				continue;
+			}
+
 			const { channel } = this.channel(reporter, peer);
 
 			this.markUsed(peer);
@@ -431,39 +425,6 @@ export class ArchitectureStore {
 
 			channel.interest[reporter] = link.remoteInterest;
 		}
-	}
-
-	/** Remove a placeholder peer and its link, if nothing was counted against them — else the peer has ENDED (the
-	 *  link closed before it ever said who it was, e.g. an outdated service worker replaced mid-boot): keep its
-	 *  traffic, but let it fade like any other context that ended. */
-	private forget(reporter: string, id: string): void {
-		const { channel } = this.channel(reporter, id);
-
-		if (channel.count > 0) {
-			const node = this.nodes.get(id);
-
-			channel.linked = false;
-
-			if (node !== undefined && node.state !== "terminated") {
-				node.spec = { ...node.spec, "dynamic": true };
-				node.state = "terminated";
-				node.endedAt = Date.now();
-			}
-
-			this.changed();
-
-			return;
-		}
-
-		this.channels.delete(channel.id);
-
-		const node = this.nodes.get(id);
-
-		if (node !== undefined && ![...this.channels.values()].some((other) => other.a === id || other.b === id)) {
-			this.nodes.delete(id);
-		}
-
-		this.changed();
 	}
 
 	/** Forget the counts (not the topology). */

@@ -8,15 +8,14 @@
 import type { Hub } from "@brianjenkins94/hub";
 import { createHub, portTransport } from "@brianjenkins94/hub";
 
-import { reportArchitecture } from "./architecture";
-import { tapConsoleAndErrors } from "./telemetry";
+import { observe } from "@brianjenkins94/observability";
+import { NETWORK_PROBES } from "./architecture";
 
 export function createWorkerHub(id: string): Hub {
 	const hub = createHub({ "id": id });
 
 	hub.link(portTransport(globalThis));
-	reportArchitecture(hub);
-	tapConsoleAndErrors(hub, id);
+	observe(hub, { "network": NETWORK_PROBES });
 
 	return hub;
 }

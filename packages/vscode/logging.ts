@@ -2,7 +2,7 @@
  * The host page's logger.
  *
  * The workbench (and preview) run in their own iframes/windows (see vscode.tsx), each a separate JS realm
- * with its own console. Cross-window log federation is handled by the hub/observability plane (telemetry.ts →
+ * with its own console. Cross-window log federation is handled by the hub/observability plane (@brianjenkins94/observability →
  * `installHubCollector` / `linkDebugMcp`), which funnels every pane's structured records back to the host. This
  * module is only the host page's own `logger({ source: "host" })`, so host and pane logs share one format.
  *

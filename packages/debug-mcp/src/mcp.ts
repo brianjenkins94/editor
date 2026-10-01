@@ -13,9 +13,8 @@
  */
 import type { DebugMcp } from "./server.ts";
 import type { QueryLogsInput, QuerySpansInput, WaitInput } from "./store.ts";
-import { registerDebugTools } from "./debug-tools.ts";
 import { syncPageTools } from "./page-tools.ts";
-import { callTab, resolveTab } from "./forward.ts";
+import { resolveTab } from "./forward.ts";
 import { defineTool, fail, ok, registerTool } from "@brianjenkins94/util/mcp/tool";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -228,7 +227,6 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 	// the tab's id) and return its live answer. This is "an MCP server hosted in the tab": the tab owns the logic + live
 	// app state, the relay is a pipe. Each call goes to ONE tab: the one named, or the only one connected (forward.ts).
 
-	const TAB = z.string().optional().describe("The editor tab (from list_tabs). Omit when one tab is connected.");
 
 	registerTool(server, defineTool({
 		"name": "list_tabs",
@@ -240,102 +238,8 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 		"handler": async () => ok(await debugMcp.tabs())
 	}));
 
-	registerTool(server, defineTool({
-		"name": "page_eval",
-		"config": {
-			"title": "Evaluate in the page",
-			"description": "Evaluate a JavaScript expression IN THE LIVE editor page and return its result (JSON-serialized). A Promise result is awaited. Answers questions the log stream can't — current URL/title, element counts, localStorage, live app state. Requires a connected page (dev, localhost-gated).",
-			"inputSchema": {
-				"expression": z.string().describe("A JS expression, e.g. `document.title` or `document.querySelectorAll('.monaco-editor').length`. May evaluate to a Promise (e.g. an async IIFE), which is awaited."),
-				"tab": TAB,
-				"timeoutMs": z.number().optional().describe("How long to wait for the result, including an awaited Promise (default 5000).")
-			}
-		},
-		"handler": async (args) => {
-			const { expression, tab, timeoutMs = 5000 } = args as { "expression": string; "tab"?: string; "timeoutMs"?: number };
-
-			try {
-				return ok(await callTab(debugMcp, "page_eval", tab, { "expression": expression }, timeoutMs));
-			} catch (error) {
-				return fail(error instanceof Error ? error.message : String(error));
-			}
-		}
-	}));
-
-	registerTool(server, defineTool({
-		"name": "page_query",
-		"config": {
-			"title": "Query the page DOM",
-			"description": "Run a CSS selector in the LIVE editor page and return the match count plus a sample of each match's trimmed text. Requires a connected page.",
-			"inputSchema": {
-				"selector": z.string().describe("A CSS selector, e.g. '.monaco-editor' or '[role=tab]'."),
-				"limit": z.number().optional().describe("Max sample entries to return (default 10)."),
-				"tab": TAB
-			}
-		},
-		"handler": async (args) => {
-			const { selector, limit, tab } = args as { "selector": string; "limit"?: number; "tab"?: string };
-
-			try {
-				return ok(await callTab(debugMcp, "page_query", tab, { "selector": selector, "limit": limit ?? 10 }, 5000));
-			} catch (error) {
-				return fail(error instanceof Error ? error.message : String(error));
-			}
-		}
-	}));
-
-	registerTool(server, defineTool({
-		"name": "provoke_transform",
-		"config": {
-			"title": "Provoke the preview transform race",
-			"description": "Force the preview's in-browser Vite dev server through the cold-start transform race on demand, and report any transform that lost (came back 500). Requires a connected page with a preview already started (run the terminal `vite` command once). Two modes: default (warm) restarts the in-process server each round — fast, but the worker's typescript stays hot; hardReset spawns a fresh CHILD worker per round (cold almostnode + ts) to reproduce the true first-load window — slower (a cold ts chunk per round, so use fewer rounds), needs cross-origin isolation. Returns { rounds, hardReset, provoked, failures[], transformErrors[] }. Use this instead of hand-driving cold boots to hunt the race.",
-			"inputSchema": {
-				"rounds": z.number().optional().describe("Cold-restart + concurrent-transform cycles to run (default 10; use ~5 for hardReset, it's slower)."),
-				"modules": z.array(z.string()).optional().describe("Module URLs to hammer each round, e.g. ['/src/App.tsx']. Default: the whole src/ graph."),
-				"hardReset": z.boolean().optional().describe("Spawn a fresh cold child worker per round (cold ts realm — the true first-load race) instead of an in-process warm restart. Default false."),
-				"tab": TAB
-			}
-		},
-		"handler": async (args) => {
-			const { rounds, modules, hardReset, tab } = args as { "rounds"?: number; "modules"?: string[]; "hardReset"?: boolean; "tab"?: string };
-
-			try {
-				return ok(await callTab(debugMcp, "preview_provoke", tab, { "rounds": rounds ?? 10, "modules": modules, "hardReset": hardReset ?? false }, 300000));
-			} catch (error) {
-				return fail(error instanceof Error ? error.message : String(error));
-			}
-		}
-	}));
-
-	registerTool(server, defineTool({
-		"name": "preview_cdp",
-		"config": {
-			"title": "Chrome DevTools Protocol in a preview",
-			"description": "Send one Chrome DevTools Protocol command to the PREVIEWED APP's page (not the editor's — that's page_eval) and return its result. The editor answers through chobitsu, a JavaScript CDP implementation it adds to the preview's page on first use, so it runs in the app's own realm: Runtime.evaluate (params { expression, returnByValue: true }), DOM.getDocument / DOM.querySelector / DOM.getOuterHTML, CSS.*, DOMStorage.*, Storage.*, Page.*. Events (console messages, network activity) aren't returned — only the command's reply. The Debugger domain lists scripts but can't pause. Requires a connected page with that preview open (run the app first).",
-			"inputSchema": {
-				"method": z.string().describe("The CDP method, e.g. 'Runtime.evaluate' or 'DOM.getDocument'."),
-				"params": z.record(z.string(), z.unknown()).optional().describe("The method's params, e.g. { expression: 'document.title', returnByValue: true }."),
-				"port": z.number().optional().describe("The preview's port (default 5173, the demo's) — its first window."),
-				"window": z.string().optional().describe("A preview window by its key, when a port has several: '5173' (its first), '5173~2' (its second), … Overrides port."),
-				"tab": TAB
-			}
-		},
-		"handler": async (args) => {
-			const { method, params, port, window, tab } = args as { "method": string; "params"?: Record<string, unknown>; "port"?: number; "window"?: string; "tab"?: string };
-
-			try {
-				const reply = await callTab(debugMcp, "preview_cdp", tab, { ...window === undefined ? { "port": port ?? 5173 } : { "window": window }, "message": JSON.stringify({ "id": 1, "method": method, "params": params ?? {} }) }, 30000);
-				const { result, error } = JSON.parse(String(reply)) as { "result"?: unknown; "error"?: { "message"?: string } };
-
-				return error === undefined ? ok(result) : fail(method + ": " + (error.message ?? JSON.stringify(error)));
-			} catch (error) {
-				return fail(error instanceof Error ? error.message : String(error));
-			}
-		}
-	}));
-
-	registerDebugTools(server, debugMcp);
-	// Last, so a page can't take over any of the tools above.
+	// Everything a tab exposes — page_eval, page_query, the editor's debugger, a game's own — is a page tool, registered
+	// while a tab serving it is connected. Last, so a page can't take over any of the tools above.
 	syncPageTools(server, debugMcp);
 
 	return server;

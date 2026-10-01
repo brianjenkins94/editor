@@ -4,27 +4,9 @@ import * as assert from "node:assert/strict";
 
 import { test } from "node:test";
 // From source: node won't strip types from the pnpm copy under node_modules (arch.ts only imports hub TYPES).
-import { createHub, createRpcClient, serve } from "../../hub/src/index.ts";
+import { createHub, createRpcClient, pipe, serve } from "../../hub/src/index.ts";
 import { ArchitectureStore } from "../src/arch-store.ts";
 import { collectArchReports, createArchReporter, normalizeSubject, requestArchSync } from "../src/arch.ts";
-
-function pipe(): [Transport, Transport] {
-	let left: ((message: unknown) => void) | undefined;
-	let right: ((message: unknown) => void) | undefined;
-
-	return [
-		{ "send": (message) => { setTimeout(() => { right?.(message); }, 0); },"listen": (onMessage) => {
-				left = onMessage;
-
-				return () => { left = undefined; };
-			} },
-		{ "send": (message) => { setTimeout(() => { left?.(message); }, 0); },"listen": (onMessage) => {
-				right = onMessage;
-
-				return () => { right = undefined; };
-			} }
-	];
-}
 
 function wait(ms: number): Promise<void> {
 	return new Promise((resolve) => { setTimeout(resolve, ms); });
@@ -32,7 +14,7 @@ function wait(ms: number): Promise<void> {
 
 /** root ⇄ pod, each with a reporter; the collector sits on root. */
 async function setup() {
-	const [a, b] = pipe();
+	const [a, b] = pipe({ "lossy": true });
 	const root = createHub({ "id": "root" });
 	const pod = createHub({ "id": "pod" });
 	const reporters = [createArchReporter(root), createArchReporter(pod)];
@@ -86,7 +68,7 @@ test("traffic is counted once, by the sender, with RPC labelled by method", asyn
 });
 
 test("probe-fed nodes and channels, and a full-state answer to sync", async () => {
-	const [a, b] = pipe();
+	const [a, b] = pipe({ "lossy": true });
 	const root = createHub({ "id": "root" });
 	const workbench = createHub({ "id": "workbench" });
 	const reporter = createArchReporter(workbench);
@@ -114,7 +96,7 @@ test("probe-fed nodes and channels, and a full-state answer to sync", async () =
 });
 
 test("a store opened mid-stream converges on the true counts — nothing counted twice", async () => {
-	const [a, b] = pipe();
+	const [a, b] = pipe({ "lossy": true });
 	const root = createHub({ "id": "root" });
 	const pod = createHub({ "id": "pod" });
 	const reporter = createArchReporter(pod);
@@ -190,8 +172,8 @@ test("traffic sent before the peer's hello is still attributed to the peer, neve
 	reporter.dispose();
 });
 
-test("a peer that boots slowly is still named; an older hub (hello without id) is anonymous", async () => {
-	const [a, b] = pipe();
+test("a peer that boots slowly is named once it says hello; a link nothing answers is in the topology, with no channel", async () => {
+	const [a, b] = pipe({ "lossy": true });
 	const root = createHub({ "id": "root" });
 	const reporter = createArchReporter(root);
 	const store = new ArchitectureStore();
@@ -206,45 +188,23 @@ test("a peer that boots slowly is still named; an older hub (hello without id) i
 	late.link(b);
 	await wait(400);
 	assert.ok(![...store.nodes.keys()].some((id) => id.includes(":link")), [...store.nodes.keys()].join(","));
-	assert.ok(store.channels.has("root|workbench"));
+	// What root sent before the peer said who it is (its hello, its interest) was held, and counted once it did.
+	assert.ok(store.channels.get("root|workbench")?.labels.has("hello"), [...store.channels.get("root|workbench")?.labels.keys() ?? []].join(","));
 
-	// An older hub: its hello carries no id.
-	const [c, d] = pipe();
+	// Something that receives and never answers (an outdated service worker): no peer to draw a channel to.
+	const [c, d] = pipe({ "lossy": true });
 	const second = root.link(c);
 
 	d.listen(() => undefined);
-	d.send({ "\0hub": { "hub": "hello" } });
 	await wait(400);
-	assert.ok(store.nodes.has("root:link-2"));
+	assert.equal(store.topology.get("root")?.links.filter((link) => link.peerId === undefined).length, 1);
+	assert.deepEqual([...store.channels.keys()].filter((key) => key.startsWith("root|")), ["root|workbench"]);
 	second();
 	reporter.dispose();
 });
 
-test("a link that closes before its peer says hello ends its placeholder instead of leaving it alive", async () => {
-	const [a, b] = pipe();
-	const root = createHub({ "id": "root" });
-	const reporter = createArchReporter(root);
-	const store = new ArchitectureStore();
-
-	collectArchReports(root, (report) => { store.apply(report); });
-	b.listen(() => undefined); // an outdated service worker: it receives, never answers
-	const unlink = root.link(a);
-
-	root.subscribe("anything", () => undefined);
-	await wait(400);
-	unlink(); // replaced (controllerchange) before it ever said who it was
-	await wait(400);
-
-	const placeholder = [...store.nodes.values()].find((node) => node.id.startsWith("root:link"));
-
-	assert.ok(placeholder !== undefined, [...store.nodes.keys()].join(","));
-	assert.equal(placeholder.state, "terminated");
-	assert.equal(placeholder.spec.dynamic, true);
-	reporter.dispose();
-});
-
 test("a short-lived peer that says hello and is gone before the next flush is still named, never left as a placeholder", async () => {
-	const [a, b] = pipe();
+	const [a, b] = pipe({ "lossy": true });
 	const node = createHub({ "id": "node" });
 	const reporter = createArchReporter(node);
 	const store = new ArchitectureStore();
@@ -278,7 +238,7 @@ test("ids in subjects and RPC names collapse to *, words don't", () => {
 });
 
 test("an RPC whose name carries an id is labelled once, not once per id — by the caller and by the server replying", async () => {
-	const [a, b] = pipe();
+	const [a, b] = pipe({ "lossy": true });
 	const caller = createHub({ "id": "caller" });
 	const server = createHub({ "id": "server" });
 	const reporters = [createArchReporter(caller), createArchReporter(server)];
@@ -311,32 +271,6 @@ test("an RPC whose name carries an id is labelled once, not once per id — by t
 	reporters.forEach((reporter) => { reporter.dispose(); });
 });
 
-test("a link linked and unlinked between two reports, never answered, is reported as an ended context", async () => {
-	const root = createHub({ "id": "root" });
-	const reporter = createArchReporter(root);
-	const store = new ArchitectureStore();
-
-	collectArchReports(root, (report) => { store.apply(report); });
-	await wait(300); // the reporter's first reports go out
-
-	// A tab re-linking to a service worker replaced mid-boot: the first port is dropped before anyone answers.
-	const [a, b] = pipe();
-
-	b.listen(() => undefined);
-	const unlink = root.link(a);
-
-	root.subscribe("anything", () => undefined);
-	unlink();
-	await wait(400);
-
-	const placeholder = store.nodes.get("root:link-1");
-
-	assert.ok(placeholder !== undefined, [...store.nodes.keys()].join(","));
-	assert.equal(placeholder.state, "terminated");
-	assert.equal(placeholder.spec.dynamic, true);
-	reporter.dispose();
-});
-
 test("a report nobody could hear yet is held, not lost: the viewer that links later gets the traffic and topology", async () => {
 	const frame = createHub({ "id": "frame" });
 	const reporter = createArchReporter(frame);
@@ -345,7 +279,7 @@ test("a report nobody could hear yet is held, not lost: the viewer that links la
 	reporter.record("frame", "worker", "request", "wired.echo()", 10);
 	await wait(400);
 
-	const [a, b] = pipe();
+	const [a, b] = pipe({ "lossy": true });
 	const viewer = createHub({ "id": "viewer" });
 	const reports: ArchReport[] = [];
 
@@ -362,7 +296,7 @@ test("a report nobody could hear yet is held, not lost: the viewer that links la
 });
 
 test("a reporter can name itself by the id its link knows it by", async () => {
-	const [a, b] = pipe();
+	const [a, b] = pipe({ "lossy": true });
 	const edge = createHub({ "id": "edge" });
 	const client = createHub({ "id": "client" });
 	const reports: ArchReport[] = [];

@@ -99,7 +99,7 @@ export const nodes: NodeSpec[] = [
 	{ "id": "net:registry.npmjs.org", "label": "npm registry", "container": "network", "detail": "type acquisition", "description": "typescript-language-features' automatic type acquisition, from the worker extension host (package metadata for @types lookups).", "observedBy": "the service worker's fetch probe", "condition": "when a file imports a package" },
 	{ "id": "zenfs", "label": "Workspace (zen-fs)", "container": "sharedMemory", "detail": "SingleBuffer at /workspace", "description": "The workspace filesystem: a zen-fs SingleBuffer store in a SharedArrayBuffer the workbench creates and hands to the node worker (over the hub) and the cspell server (a control port), which mount it at /workspace. Same bytes in every realm, guarded by an Atomics lock. Shared memory notifies nobody, so each realm watches its own mount's writes and reports them as workspace.changed; the workbench persists every one to IndexedDB and announces it to VS Code, whoever wrote (the provider, isomorphic-git, the terminal, a node script).", "observedBy": "each realm's /workspace mount (zen-fs StoreFS operations), the provider's change events, the workspace-fs IndexedDB" },
 	{ "id": "tsval-preview", "label": "tsval preview", "container": "previews", "detail": "debug-preview.html", "description": "The tsval debugger's render surface: announces itself (preview-ready), gets a MessagePort from the shell, streams events up and renders the mutation stream the workbench sends.", "observedBy": "the shell's window message probe + the shell's preview bridge", "condition": "while debugging with tsval" },
-	{ "id": "provoke", "label": "Provoke worker", "container": "workers", "hub": true, "detail": "hub · cold-start transform repro", "description": "A throwaway child of the node worker (debug-mcp preview_provoke hardReset): mounts the workspace and transforms modules cold, once.", "observedBy": "its hub reporter + the node worker's Worker probe", "condition": "debug-mcp preview_provoke" },
+	{ "id": "provoke", "label": "Provoke worker", "container": "workers", "hub": true, "detail": "hub · cold-start transform repro", "description": "A throwaway child of the node worker (debug-mcp provoke_transform hardReset): mounts the workspace and transforms modules cold, once.", "observedBy": "its hub reporter + the node worker's Worker probe", "condition": "debug-mcp provoke_transform" },
 	{ "id": "net:brianjenkins94.github.io", "label": "GitHub Pages", "container": "network", "detail": "preview packages", "description": "A previewed app's tarball dependencies (a URL in its package.json — e.g. @brianjenkins94/hub), fetched once by the node worker's dev server and served from /@pkg/.", "observedBy": "the service worker's fetch probe", "condition": "when a previewed app depends on a tarball" },
 	{ "id": "net:esm.sh", "label": "esm.sh", "container": "network", "detail": "preview dependencies", "description": "The previewed app's bare imports (react, react-dom, react-refresh), mapped by the dev server's import map and fetched by the preview through the service worker.", "observedBy": "the service worker's fetch probe", "condition": "while a preview runs" },
 	{ "id": "net:cdn.jsdelivr.net", "label": "jsDelivr", "container": "network", "detail": "preview DevTools", "description": "A preview's DevTools: chobitsu (the CDP implementation added to the previewed page) and Chrome's DevTools frontend (chii's build).", "observedBy": "the service worker's fetch probe", "condition": "while a preview's DevTools is open" },
@@ -107,7 +107,7 @@ export const nodes: NodeSpec[] = [
 	{ "id": "net:open-vsx.org", "label": "Open VSX", "container": "network", "detail": "extension gallery", "description": "The extension gallery.", "observedBy": "the service worker's fetch probe", "condition": "when the gallery is queried" },
 	{ "id": "net:api.github.com", "label": "GitHub API", "container": "network", "detail": "shell only", "description": "Loading repos and publishing, from the shell (which holds the token).", "observedBy": "the service worker's fetch probe", "condition": "when a GitHub repo is loaded" },
 	{ "id": "net:lighter.codehike.org", "label": "Code Hike", "container": "network", "detail": "diff highlighting", "description": "Syntax highlighting for the git review diffs.", "observedBy": "the service worker's fetch probe", "condition": "when a diff opens" },
-	{ "id": "debug-mcp", "label": "debug-mcp", "container": "network", "hub": true, "detail": "hub · Node, ws://localhost:7378", "description": "The Node collector + MCP server: receives $sys.log, serves tools (page_eval…) to an MCP client.", "observedBy": "root's topology (and its own reporter)", "condition": "npm run debug-mcp" }
+	{ "id": "debug-mcp", "label": "debug-mcp", "container": "network", "hub": true, "detail": "hub · Node, ws://localhost:7378", "description": "The Node collector + MCP server: receives $sys.log, serves its own tools and every connected tab's page tools to an MCP client.", "observedBy": "root's topology (and its own reporter)", "condition": "npm run debug-mcp" }
 ];
 
 export const hubLinks: [string, string][] = [
@@ -147,13 +147,10 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "recognizer.project", "hubs": ["workbench", "recognizer"], "description": "Project a game into the event sheet's model." },
 	{ "pattern": "provoke.round", "hubs": ["node", "provoke"], "description": "One cold transform round: the workspace buffer in, failures out." },
 	{ "pattern": "debug.>", "hubs": ["shell", "workbench", "pod"], "description": "Debug sessions and the toolbar." },
-	{ "pattern": "debug.sessions", "hubs": ["pod", "root"], "description": "The live tsval sessions (debug-mcp's, forwarded by this tab's root)." },
-	{ "pattern": "debug.start", "hubs": ["pod", "root"], "description": "Start a tsval session, answered with its first stop (debug-mcp's, forwarded by this tab's root)." },
-	{ "pattern": "debug.breakpoints", "hubs": ["pod", "root"], "description": "Replace a file's breakpoints (debug-mcp's, forwarded by this tab's root)." },
-	{ "pattern": "debug.sessions.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp: one tab's tsval sessions." },
-	{ "pattern": "debug.start.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp: start a tsval session in one tab." },
-	{ "pattern": "debug.breakpoints.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp: replace a file's breakpoints in one tab." },
-	{ "pattern": "debug.session.>", "hubs": ["pod", "debug-worker", "debug-mcp"], "description": "One tsval session: the adapter ⇄ worker protocol (control, events), and debug-mcp stepping, reading or stopping it." },
+	{ "pattern": "debug.sessions", "hubs": ["pod", "root"], "description": "The live tsval sessions (for this tab's debug_* page tools, served by its root)." },
+	{ "pattern": "debug.start", "hubs": ["pod", "root"], "description": "Start a tsval session, answered with its first stop (this tab's debug_start page tool)." },
+	{ "pattern": "debug.breakpoints", "hubs": ["pod", "root"], "description": "Replace a file's breakpoints (this tab's debug_breakpoints page tool)." },
+	{ "pattern": "debug.session.>", "hubs": ["pod", "debug-worker", "root"], "description": "One tsval session: the adapter ⇄ worker protocol (control, events), and this tab's debug_* page tools stepping, reading or stopping it." },
 	{ "pattern": "production.>", "hubs": ["workbench", "pod"], "description": "Production (server) runs." },
 	{ "pattern": "tsval.preview.>", "hubs": ["shell", "workbench", "pod", "debug-worker"], "description": "The tsval render surface." },
 	{ "pattern": "capability.decide", "hubs": ["pod", "root", "shell"], "description": "Network/IO capability decisions, served by the pod." },
@@ -161,11 +158,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "pod.ready", "hubs": ["pod", "debug-worker"], "description": "A debug worker is up." },
 	{ "pattern": "tab.>", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp's tab discovery: which editor tabs are linked, by id." },
 	{ "pattern": "page_tools.*", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp reads one tab's page-tool manifest (and hears when it changes)." },
-	{ "pattern": "tool.>", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp calls a page's own tools (an app in a preview serves them under its tab id)." },
-	{ "pattern": "page_eval.*", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp tool: evaluate in one tab's page." },
-	{ "pattern": "page_query.*", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp tool: query the DOM." },
-	{ "pattern": "preview_provoke.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: provoke one tab's preview (forwarded to preview.provoke)." },
-	{ "pattern": "preview_cdp.*", "hubs": ["root", "debug-mcp"], "description": "debug-mcp tool: one Chrome DevTools Protocol command to a preview's page in one tab (forwarded to preview.cdp)." }
+	{ "pattern": "tool.>", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp calls a tab's page tools — every page's page_eval / page_query, the editor's debugger, provoke and CDP tools (page-tools.ts), an app's own (served under its tab id)." }
 ];
 
 export const channels: ChannelSpec[] = [
@@ -550,13 +543,6 @@ export function appEnded(layout: AppLayout, nodes: ReadonlyMap<string, { "state"
 }
 
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────
-
-/** A reporter names a hub link whose peer never said who it is `<hub>:link-<n>`. Once it has ENDED (the link closed
- *  unanswered — a tab re-linking to a service worker replaced mid-boot), it was a transient, not a violation; one
- *  still alive is a link nothing answers, and stays flagged. */
-export function isEndedPlaceholder(id: string, state: string): boolean {
-	return state === "terminated" && (/:link-\d+$/u).test(id);
-}
 
 /** Contexts created at runtime, by id prefix, and where they live. */
 export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:"];

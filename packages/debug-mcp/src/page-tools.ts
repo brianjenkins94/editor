@@ -2,8 +2,9 @@
  * Page tools, live: a connected tab can define its own MCP tools (observability's page-tools.ts — a game's "state",
  * "divergence", "step"). This keeps the MCP server's tool list in step with them: it reads every tab's
  * `page_tools.<tab>` manifest and registers each tool with util/mcp's `updateTool` (which adds it to the live server
- * and notifies the client, tools/list_changed), forwarding calls to `tool.<name>.<tab>`. Each gets a `tab` argument,
- * like page_eval, for when several tabs are connected.
+ * and notifies the client, tools/list_changed), forwarding calls to `tool.<name>.<tab>`. Each gets a `tab` argument
+ * for when several tabs serve it. A call waits as long as the call (`timeoutMs`) or the tool says (PageToolSpec), and
+ * cancels the page's work when it gives up.
  *
  * Re-read when a tab announces a change (`page_tools.changed`) and when tabs come or go. A tool no connected tab serves
  * any more is removed (the client is told: tools/list_changed).
@@ -18,6 +19,7 @@ import { callTab } from "./forward.ts";
 
 const REFRESH_MS = 200;
 const CALL_MS = 30_000;
+const GRACE_MS = 1000;
 
 /** The raw zod shape for a tool's JSON Schema input (util's tools take a shape). An unusable schema: no arguments. */
 function shapeOf(schema: Record<string, unknown>): Record<string, z.ZodType> {
@@ -98,9 +100,12 @@ export function syncPageTools(server: McpServer, debugMcp: DebugMcp): PageToolSy
 				"handler": async (args) => {
 					const { tab, _approved: _ignored, ...rest } = (args ?? {}) as Record<string, unknown> & { "tab"?: string };
 					const tabs = servedBy.get(name) ?? [];
+					// The call's own timeout, else the tool's, else ours — and a moment more, so a tool that times out its own
+					// work says so itself.
+					const timeoutMs = (typeof rest["timeoutMs"] === "number" ? rest["timeoutMs"] : spec.timeoutMs ?? CALL_MS) + GRACE_MS;
 
 					try {
-						return await ok(await callTab(debugMcp, PAGE_TOOL + "." + name, tab ?? (tabs.length === 1 ? tabs[0] : undefined), rest, CALL_MS));
+						return await ok(await callTab(debugMcp, PAGE_TOOL + "." + name, tab ?? (tabs.length === 1 ? tabs[0] : undefined), rest, timeoutMs));
 					} catch (error) {
 						return fail(error instanceof Error ? error.message : String(error));
 					}

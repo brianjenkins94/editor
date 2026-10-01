@@ -25,7 +25,7 @@ import settingsDefaults from "editor:settings-defaults";
 import eslintExtensionPath from "eslint:extension";
 import helloExtensionPath from "hello:extension";
 import workerPodExtensionPath from "worker-pod:extension";
-import { reportArchitecture } from "./architecture";
+import { NETWORK_PROBES } from "./architecture";
 import { classifyUrl, identifyWorker } from "./architecture-model";
 import { renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
@@ -47,7 +47,7 @@ import workerPodManifest from "./extensions/worker-pod/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { windowClientTransport } from "./pane-link";
-import { isCancellation, relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
+import { isCancellation, observe } from "@brianjenkins94/observability";
 import { createBashProcess } from "./terminal";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
@@ -94,14 +94,12 @@ workbenchHub.link(windowClientTransport(paneId, host));
 // bespoke window log relay onto the hub). Uncaught errors/rejections go through the same logger so they reach
 // the collector too. Records published before the port links simply don't federate (the boot span may be an
 // early casualty); everything after — saves, diagnostics, errors — arrives.
-const paneLog = relayLoggerToHub(workbenchHub, "workbench");
-
-tapConsoleAndErrors(workbenchHub, "workbench"); // raw uncaught error/rejection → the plane, beside the structured logs
+// Its uncaught errors and its hub + network on $sys.arch ride along (observe).
+const { "log": paneLog, architecture } = observe(workbenchHub, { "network": NETWORK_PROBES });
 
 // The live architecture view: this realm's hub + network, and — installed before boot() creates anything — the
 // monaco probes (workers, extension host RPC, webviews). The diagram is the tab a load lands on (opened
 // after the initial editors, below), and reopens with "Developer: Open Live Architecture Diagram".
-const architecture = reportArchitecture(workbenchHub);
 
 installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl });
 registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });

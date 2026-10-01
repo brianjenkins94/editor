@@ -4,16 +4,18 @@
  * with URLs classified by the declared model. Reports ride `$sys.arch` to the live architecture view.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import type { ArchReporter } from "@brianjenkins94/observability";
+import type { ArchReporter, NetworkProbeOptions } from "@brianjenkins94/observability";
 import { createArchReporter, installNetworkProbes } from "@brianjenkins94/observability";
 import { classifyUrl, idbOwner } from "./architecture-model";
 
-export function reportArchitecture(hub: Hub, options: { "network"?: boolean } = {}): ArchReporter {
+/** How the editor's realms probe their network: URLs classified by the declared model (`observe(hub, { network })`). */
+export const NETWORK_PROBES: NetworkProbeOptions = { "classifyUrl": classifyUrl, "idbOwner": idbOwner };
+
+/** Just the architecture reporter, for a context that collects logs rather than relaying them (the root, the shell). */
+export function reportArchitecture(hub: Hub): ArchReporter {
 	const reporter = createArchReporter(hub);
 
-	if (options.network !== false) {
-		installNetworkProbes(reporter, { "classifyUrl": classifyUrl, "idbOwner": idbOwner });
-	}
+	installNetworkProbes(reporter, NETWORK_PROBES);
 
 	return reporter;
 }

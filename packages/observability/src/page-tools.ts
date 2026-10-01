@@ -1,6 +1,7 @@
 /**
- * Page tools: MCP tools a page defines and serves itself — a game's "state", "divergence", "step" — which debug-mcp
- * registers as real MCP tools while a tab serving them is connected.
+ * Page tools: MCP tools a page defines and serves itself — a game's "state", "divergence", "step", the editor's
+ * debugger, every page's `page_eval` — which debug-mcp registers as real MCP tools while a tab serving them is
+ * connected. Everything a tab exposes to an agent is one of these.
  *
  * The wire, all on the tab's hub and addressed by its tab id (so a relay linked to several tabs reaches one):
  * - `page_tools.<tab>` (RPC) → the tab's `PageToolSpec[]`: name, description, JSON Schema input.
@@ -21,11 +22,14 @@ export interface PageToolSpec {
 	"description": string;
 	/** JSON Schema for the arguments — an object schema (`{ type: "object", properties, required }`). */
 	"inputSchema": Record<string, unknown>;
+	/** How long a caller waits for the answer (ms) unless the call passes its own `timeoutMs`. Default 30000. */
+	"timeoutMs"?: number;
 }
 
 export interface PageTool extends PageToolSpec {
-	/** Runs in the page; its result must be structured-clonable / JSON-safe. */
-	"handler": (args: Record<string, unknown>) => unknown;
+	/** Runs in the page; its result must be structured-clonable / JSON-safe. `signal` aborts when the caller gives up
+	 *  (its timeout, or it cancelled) — pass it on to anything the tool waits for. */
+	"handler": (args: Record<string, unknown>, context: { "signal": AbortSignal }) => unknown;
 }
 
 /** Serve `tools` on `hub` as tab `tab`'s page tools, and announce them. Returns an unsubscribe for all of it. */
@@ -36,10 +40,10 @@ export function servePageToolSet(hub: Hub, tab: string, tools: PageTool[]): () =
 		}
 	}
 
-	const specs: PageToolSpec[] = tools.map(({ name, description, inputSchema }) => ({ "name": name, "description": description, "inputSchema": inputSchema }));
+	const specs: PageToolSpec[] = tools.map(({ name, description, inputSchema, timeoutMs }) => ({ "name": name, "description": description, "inputSchema": inputSchema, ...timeoutMs === undefined ? {} : { "timeoutMs": timeoutMs } }));
 	const disposers = [
 		serve(hub, PAGE_TOOLS + "." + tab, () => specs),
-		...tools.map((tool) => serve(hub, PAGE_TOOL + "." + tool.name + "." + tab, async (args) => tool.handler((args ?? {}) as Record<string, unknown>)))
+		...tools.map((tool) => serve(hub, PAGE_TOOL + "." + tool.name + "." + tab, async (args, { signal }) => tool.handler((args ?? {}) as Record<string, unknown>, { "signal": signal })))
 	];
 
 	hub.publish(PAGE_TOOLS_CHANGED, { "tab": tab });

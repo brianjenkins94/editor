@@ -8,26 +8,11 @@ import * as assert from "node:assert/strict";
 
 import { test } from "node:test";
 // From source: node won't strip types from the pnpm copy under node_modules.
-import { createHub, mapFrame } from "../../hub/src/index.ts";
+import { createHub, pipe } from "../../hub/src/index.ts";
 import { ArchitectureStore } from "../src/arch-store.ts";
 import { collectArchReports, createArchReporter, requestArchSync } from "../src/arch.ts";
 import { installHubCollector, LOG_BACKLOG } from "../src/index.ts";
-import { scopeArchReport, scopedId, scopeObservability, scopeOf } from "../src/scope.ts";
-
-function pipe(): [Transport, Transport] {
-	let left: ((message: unknown) => void) | undefined;
-	let right: ((message: unknown) => void) | undefined;
-
-	return [
-		{ "send": (message) => { setTimeout(() => { right?.(message); }, 0); }, "listen": (onMessage) => { left = onMessage; return () => { left = undefined; }; } },
-		{ "send": (message) => { setTimeout(() => { left?.(message); }, 0); }, "listen": (onMessage) => { right = onMessage; return () => { right = undefined; }; } }
-	];
-}
-
-/** `transport`, with what arrives over it scoped (the joining hub's side of an app's link). */
-function scoped(transport: Transport, scope: string): Transport {
-	return { "send": transport.send, "listen": (onMessage) => transport.listen((message) => { onMessage(mapFrame(message, (frame) => scopeObservability(frame, scope) as typeof frame)); }) };
-}
+import { scopeArchReport, scopedId, scopedTransport, scopeObservability, scopeOf } from "../src/scope.ts";
 
 function wait(ms: number): Promise<void> {
 	return new Promise((resolve) => { setTimeout(resolve, ms); });
@@ -47,10 +32,10 @@ test("two windows of one app keep apart in the viewer: each window's hubs under 
 		// One window: its page, and a worker under it — the same ids in both.
 		const page = createHub({ "id": "page" });
 		const worker = createHub({ "id": "worker" });
-		const [toShell, fromPage] = pipe();
-		const [toWorker, fromWorker] = pipe();
+		const [toShell, fromPage] = pipe({ "lossy": true });
+		const [toWorker, fromWorker] = pipe({ "lossy": true });
 
-		shell.link(scoped(fromPage, scope), { "peer": scope, "transit": false });
+		shell.link(scopedTransport(fromPage, scope), { "peer": scope, "transit": false });
 		page.link(toShell);
 		page.link(toWorker);
 		worker.link(fromWorker);

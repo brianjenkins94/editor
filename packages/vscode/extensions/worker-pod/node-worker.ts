@@ -31,10 +31,9 @@
  */
 import { getServer, Runtime } from "@brianjenkins94/almostnode";
 import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
-import { installWorkerProbe } from "@brianjenkins94/observability";
+import { installWorkerProbe, observe } from "@brianjenkins94/observability";
 
-import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
-import { reportArchitecture } from "../../architecture";
+import { NETWORK_PROBES } from "../../architecture";
 import { identifyWorker } from "../../architecture-model";
 import { ZENFS_NODE } from "../../architecture-zenfs";
 import { VIRTUAL_MARKER, VIRTUAL_RE } from "../../virtual-path";
@@ -53,10 +52,9 @@ const hub = createHub({ "id": "node" });
 const TAB = new URL(location.href).searchParams.get("tab");
 
 hub.link(portTransport(globalThis));
-const log = relayLoggerToHub(hub, "node");
-
-// hub + this worker's own requests on $sys.arch, its workspace mount, the workers it spawns (the provoke child)
-const architecture = reportArchitecture(hub);
+// Its logs, its uncaught errors, and its hub + own requests on $sys.arch — plus its workspace mount and the workers it
+// spawns (the provoke child).
+const { log, architecture } = observe(hub, { "network": NETWORK_PROBES });
 
 installWorkerProbe(architecture, identifyWorker);
 
@@ -66,8 +64,6 @@ connectWorkspace({ "architecture": architecture, "onChanges": (changes) => { hub
 const rpc = createRpcClient(hub);
 const workspaceReady = rpc.request("workspace.buffer", undefined, { "timeoutMs": 10000, "waitForResponderMs": 10000 })
 	.then(attachSharedWorkspace, (error: unknown) => { log.warn("no shared workspace — running on this worker's own filesystem", { "error": String(error) }); });
-
-tapConsoleAndErrors(hub, "node"); // raw uncaught error/rejection → the plane, beside the structured logs
 
 let vfsPromise: ReturnType<typeof createZenfsVFS> | undefined;
 const getVfs = (): ReturnType<typeof createZenfsVFS> => (vfsPromise ??= workspaceReady.then(createZenfsVFS));

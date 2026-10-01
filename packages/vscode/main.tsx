@@ -1,12 +1,12 @@
 /** @jsxImportSource preact */
 import type { Preview } from "./preview";
 import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
-import { installWindowMessageProbe } from "@brianjenkins94/observability";
 import moduleVersions from "editor:versions";
 import { ensureCrossOriginIsolated } from "./coi";
 import { hostLog } from "./logging";
-import { consoleCollector, installHubCollector, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "./telemetry";
+import { consoleCollector, installHubCollector, installWindowMessageProbe, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "@brianjenkins94/observability";
 import { reportArchitecture } from "./architecture";
+import { editorPageTools } from "./page-tools";
 import { sampleById, sampleList } from "./samples";
 import { createVscodeWindow } from "./vscode";
 
@@ -37,7 +37,7 @@ if (isolated && window.parent === window) {
 
 	// The root hub — top of the composable-hub tree. A collector renders every context's spans/records off the
 	// `$sys.log.>` observability plane (the service worker now, the pod + workers next); the SW links in over a
-	// dedicated port. See telemetry.ts / @brianjenkins94/hub.
+	// dedicated port. See @brianjenkins94/observability / @brianjenkins94/hub.
 	const rootHub = createHub({ "id": "root" });
 
 	// This realm's hub + network on $sys.arch, for the live architecture view — plus every message another frame posts
@@ -64,14 +64,10 @@ if (isolated && window.parent === window) {
 	serve(rootHub, "capability.decide." + tab, (args) => tabRpc.request("capability.decide", args, { "timeoutMs": 300000, "waitForResponderMs": 10000 }));
 	linkServiceWorkerHub(rootHub);
 	linkDebugMcp(rootHub); // dev-only: federate the tree to a running @brianjenkins94/debug-mcp for MCP querying
-	// Dev-only: the live MCP tools debug-mcp forwards to, under this tab's id so it can address one tab of several —
-	// page_eval/page_query, plus calls into this tab's tree: the preview's cold-start provoke, a preview page's Chrome
-	// DevTools Protocol (the shell's preview.cdp — see preview-devtools.ts) and the debugger's pod-level calls (a
-	// session's own calls are already addressed by its id).
-	servePageTools(rootHub, {
-		"tab": tab,
-		"forward": { "preview_provoke": "preview.provoke", "preview_cdp": "preview.cdp", "debug.sessions": "debug.sessions", "debug.start": "debug.start", "debug.breakpoints": "debug.breakpoints" }
-	});
+	// Dev-only: this tab's MCP tools, which debug-mcp registers while it's connected — under this tab's id, so it can
+	// address one tab of several: every page's page_eval / page_query, and the editor's own (the debugger, the preview's
+	// cold-start provoke, a preview page's Chrome DevTools Protocol — see page-tools.ts).
+	servePageTools(rootHub, { "tab": tab, "tools": editorPageTools(rootHub) });
 
 	// The live preview BACKEND: runs the demo (a Vite React app) through an in-browser dev server in the node worker,
 	// which hot-reloads on workspace changes. Display-free — the movable window + iframe live in the shell (top

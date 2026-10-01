@@ -7,7 +7,9 @@
  * ends) on `$sys.arch.<id>`, log records on `$sys.log.<source>`, and startup backlogs. Ids on the joining side (`keep`
  * — the shell, which the app's page links to) stay as they are; everything else of the app's moves under the scope.
  */
+import type { Control, Envelope, Transport } from "@brianjenkins94/hub";
 import type { ArchReport, NodeOp } from "./arch.ts";
+import { mapFrame } from "@brianjenkins94/hub";
 import { ARCH_SUBJECT } from "./arch.ts";
 import { LOG_BACKLOG, LOG_SUBJECT } from "./index.ts";
 
@@ -58,8 +60,7 @@ export function scopeArchReport(report: ArchReport, scope: string, keep: (id: st
 
 /**
  * One hub frame from an app, with its observability scoped (anything else — control frames, RPC, the app's own
- * traffic — as it came). Apply it where the app's frames arrive, before the hub sees them: a transport wrapper, with
- * hub's `mapFrame` (`listen((message) => onMessage(mapFrame(message, (frame) => scopeObservability(frame, scope))))`).
+ * traffic — as it came). Apply it where the app's frames arrive, before the hub sees them: `scopedTransport`.
  */
 export function scopeObservability(frame: unknown, scope: string, keep: (id: string) => boolean = (id) => id === "shell"): unknown {
 	const subject = (frame as Frame | null)?.subject;
@@ -88,4 +89,23 @@ export function scopeObservability(frame: unknown, scope: string, keep: (id: str
 	}
 
 	return frame;
+}
+
+/**
+ * `transport` — an app's link into this tree — with the observability of every frame arriving on it scoped under
+ * `scope` (scopeObservability). `onFrame` sees each frame as scoped (to note who reported, say).
+ */
+export function scopedTransport(transport: Transport, scope: string, { keep, onFrame }: { "keep"?: (id: string) => boolean; "onFrame"?: (frame: Envelope | Control) => void } = {}): Transport {
+	return {
+		...transport,
+		"listen": (onMessage) => transport.listen((message) => {
+			onMessage(mapFrame(message, (frame) => {
+				const scoped = scopeObservability(frame, scope, keep) as typeof frame;
+
+				onFrame?.(scoped);
+
+				return scoped;
+			}));
+		})
+	};
 }

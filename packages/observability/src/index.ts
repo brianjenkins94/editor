@@ -19,11 +19,16 @@
  */
 import type { Hub, LinkPermissions } from "@brianjenkins94/hub";
 import type { Logger, LogRecord } from "@brianjenkins94/util/logger";
-import { createRpcClient, portTransport, serve, websocketTransport, windowTransport } from "@brianjenkins94/hub";
+import { portTransport, websocketTransport, windowTransport } from "@brianjenkins94/hub";
 import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
 
+import type { ArchReporter } from "./arch.ts";
+import type { NetworkProbeOptions } from "./arch-probes.ts";
 import type { PageTool } from "./page-tools.ts";
 import type { TabInfo } from "./tabs.ts";
+import { collectArchReports, createArchReporter } from "./arch.ts";
+import { installNetworkProbes } from "./arch-probes.ts";
+import { ArchitectureStore } from "./arch-store.ts";
 import { tagBySubject } from "./log-subject.ts";
 import { PAGE_TOOLS_CHANGED, servePageToolSet } from "./page-tools.ts";
 import { OBSERVABILITY_PROTOCOL, TAB_DISCOVER, TAB_HERE } from "./tabs.ts";
@@ -324,6 +329,10 @@ export function linkServiceWorkerHub(rootHub: Hub): void {
  * a debug-mcp on YOUR machine when you ask, and a random visitor's tab never probes their localhost or serves tools.
  */
 function debugEnabled(): boolean {
+	if (typeof location === "undefined") {
+		return false; // not a page (Node): nothing to link from
+	}
+
 	const host = location.hostname;
 
 	if (host === "localhost" || host === "127.0.0.1") {
@@ -451,25 +460,67 @@ function announceWhenReady(hub: Hub, link: () => void): void {
 export type PreviewLink = (() => void) & { readonly "ready": Promise<boolean> };
 
 export interface PageToolsOptions {
-	/** This tab's id (default: minted here). Every tool is served as `<name>.<tab>`, so a relay linked to several tabs
-	 *  at once addresses one (see tabs.ts for how it learns the ids). */
+	/** This tab's id (default: minted here). Every tool is served as `tool.<name>.<tab>`, so a relay linked to several
+	 *  tabs at once addresses one (see tabs.ts for how it learns the ids). */
 	"tab"?: string;
-	/** Host calls to expose the same way, each forwarded into THIS tab's own tree: `{ "preview_provoke": "preview.provoke" }`
-	 *  serves `preview_provoke.<tab>` by requesting `preview.provoke` here. The caller owns the timeout (and cancels). */
-	"forward"?: Record<string, string>;
-	/** Tools this page defines (see page-tools.ts): debug-mcp registers each as a real MCP tool while this tab is
-	 *  connected, and forwards calls here. */
+	/** Tools this page defines (see page-tools.ts), beside the built-in `page_eval` and `page_query`: debug-mcp registers
+	 *  each as a real MCP tool while this tab is connected, and forwards calls here. A tool that reaches a service deep
+	 *  in this tab's own tree (a worker's dev server, the debugger) requests it from this hub. */
 	"tools"?: PageTool[];
 }
 
+/** The tools every page serves: evaluate an expression in it, and query its DOM. */
+function builtinPageTools(): PageTool[] {
+	return [{
+		"name": "page_eval",
+		"description": "Evaluate a JavaScript expression IN THE LIVE page and return its result (JSON-serialized). A Promise result is awaited. Answers questions the log stream can't — current URL/title, element counts, localStorage, live app state.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"expression": { "type": "string", "description": "A JS expression, e.g. `document.title` or `document.querySelectorAll('.monaco-editor').length`. May evaluate to a Promise (e.g. an async IIFE), which is awaited." },
+				"timeoutMs": { "type": "number", "description": "How long to wait for the result, including an awaited Promise (default 5000)." }
+			},
+			"required": ["expression"]
+		},
+		"timeoutMs": 5000,
+		"handler": async (args) => {
+			// page_eval's whole purpose is to evaluate a caller-supplied expression in the tab: indirect eval runs it in global
+			// scope, not this closure. Through `globalThis` — an `eval` alias gets inlined back into a direct eval by the
+			// consumer's bundler (Rolldown's [EVAL] warning, in every app that bundles this).
+			// eslint-disable-next-line no-eval -- see above
+			const indirectEval = globalThis.eval;
+
+			// Await a thenable result: a Promise JSON-serializes to `{}`, which would hide every async answer.
+			return jsonSafe(await indirectEval(String(args["expression"])));
+		}
+	}, {
+		"name": "page_query",
+		"description": "Run a CSS selector in the LIVE page and return the match count plus a sample of each match's trimmed text.",
+		"inputSchema": {
+			"type": "object",
+			"properties": {
+				"selector": { "type": "string", "description": "A CSS selector, e.g. '.monaco-editor' or '[role=tab]'." },
+				"limit": { "type": "number", "description": "Max sample entries to return (default 10)." }
+			},
+			"required": ["selector"]
+		},
+		"timeoutMs": 5000,
+		"handler": (args) => {
+			const nodes = Array.from(document.querySelectorAll(String(args["selector"])));
+			const limit = typeof args["limit"] === "number" ? args["limit"] : 10;
+
+			return { "count": nodes.length, "sample": nodes.slice(0, limit).map((node) => (node.textContent ?? "").trim().slice(0, 120)) };
+		}
+	}];
+}
+
 /**
- * Host live MCP tools IN THIS TAB. When the debug-mcp link is enabled (see `debugEnabled`), register handlers the
- * debug-mcp relay forwards agent tool calls to — so an MCP client (Claude Code) can query the LIVE page, not just
- * the log stream: `page_eval` (evaluate an expression in page scope), `page_query` (a CSS selector's count + text
- * sample), and the host's `forward`ed calls — all under this tab's id, and it answers the relay's tab discovery. This
- * is what makes the tab the de-facto MCP server; the relay is a pipe. Dev-only + gated, and `eval` here is reachable
- * only by a relay that passed its own Origin check — but it IS arbitrary in-page eval, so keep it behind the opt-in.
- * Returns the tab id, or undefined when disabled.
+ * Host live MCP tools IN THIS TAB. When the debug-mcp link is enabled (see `debugEnabled`), serve this page's tools —
+ * the built-in `page_eval` (evaluate an expression in page scope) and `page_query` (a CSS selector's count + text
+ * sample), and the host's own — under this tab's id, and answer the relay's tab discovery. So an MCP client (Claude
+ * Code) can query the LIVE page, not just the log stream: the tab is the de-facto MCP server; the relay is a pipe.
+ * Dev-only + gated, and `eval` here is reachable only by a relay that passed its own Origin check — but it IS arbitrary
+ * in-page eval, so keep it behind the opt-in. Returns the tab id, or undefined when disabled.
  */
 export function servePageTools(hub: Hub, options: PageToolsOptions = {}): string | undefined {
 	if (!debugEnabled()) {
@@ -478,34 +529,7 @@ export function servePageTools(hub: Hub, options: PageToolsOptions = {}): string
 
 	const tab = options.tab ?? crypto.randomUUID().slice(0, 8);
 
-	serve(hub, "page_eval." + tab, async (args) => {
-		const { expression } = args as { "expression": string };
-		// page_eval's whole purpose is to evaluate a caller-supplied expression in the tab: indirect eval runs it in global
-		// scope, not this closure. Through `globalThis` — an `eval` alias gets inlined back into a direct eval by the
-		// consumer's bundler (Rolldown's [EVAL] warning, in every app that bundles this).
-		// eslint-disable-next-line no-eval -- see above
-		const indirectEval = globalThis.eval;
-
-		// Await a thenable result: a Promise JSON-serializes to `{}`, which would hide every async answer.
-		return jsonSafe(await indirectEval(expression));
-	});
-
-	serve(hub, "page_query." + tab, (args) => {
-		const { selector, limit = 10 } = args as { "selector": string; "limit"?: number };
-		const nodes = Array.from(document.querySelectorAll(selector));
-
-		return { "count": nodes.length, "sample": nodes.slice(0, limit).map((node) => (node.textContent ?? "").trim().slice(0, 120)) };
-	});
-
-	// A request from this hub reaches only this tab's tree (the relay links each tab as its own), so a forward is how a
-	// relay reaches a service deep in ONE tab — a worker's dev server, the debugger — that page_eval can't.
-	const rpc = createRpcClient(hub);
-
-	for (const [name, target] of Object.entries(options.forward ?? {})) {
-		serve(hub, name + "." + tab, (args, { signal }) => rpc.request(target, args ?? {}, { "timeoutMs": Infinity, "waitForResponderMs": 10000, "signal": signal }));
-	}
-
-	servePageToolSet(hub, tab, options.tools ?? []);
+	servePageToolSet(hub, tab, [...builtinPageTools(), ...options.tools ?? []]);
 	answerTabDiscovery(hub, tab);
 
 	return tab;
@@ -556,6 +580,81 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 	};
 
 	connect();
+}
+
+export interface ObserveOptions {
+	/** The name this context logs and reports as (default: its hub's id) — the id its link knows it by, the only one
+	 *  that link lets it log and report as. */
+	"source"?: string;
+	/** Observe this realm's HTTP, WebSocket and IndexedDB traffic too (installNetworkProbes): `true`, or the probes'
+	 *  options. Off by default — one context per realm should (two would count the realm's traffic twice). */
+	"network"?: boolean | NetworkProbeOptions;
+}
+
+export interface Observed {
+	/** This context's logger: its records ride the hub on `$sys.log.<source>`. */
+	"log": Logger;
+	/** Its architecture reporter (`$sys.arch.<source>`), for probes to record what the hub doesn't carry. */
+	"architecture": ArchReporter;
+	"dispose": () => void;
+}
+
+/**
+ * Observe a context: its structured logs, its uncaught errors and its place in the hub tree (links, peers, traffic)
+ * all ride its hub, up the tree to whoever collects them. One call per context — a page, a frame, a worker.
+ */
+export function observe(hub: Hub, { source = hub.id, network = false }: ObserveOptions = {}): Observed {
+	const log = relayLoggerToHub(hub, source);
+	const untap = tapConsoleAndErrors(hub, source);
+	const architecture = createArchReporter(hub, { "self": source });
+
+	if (network !== false) {
+		installNetworkProbes(architecture, network === true ? {} : network);
+	}
+
+	return {
+		"log": log,
+		"architecture": architecture,
+		"dispose": () => {
+			untap();
+			architecture.dispose();
+		}
+	};
+}
+
+export interface ObserveAppOptions extends Pick<ObserveOptions, "network"> {
+	/** Tools this page serves as its own MCP tools (see page-tools.ts). */
+	"tools"?: PageTool[];
+	/** How many of the tree's records to keep (`records`), newest last. Default 1000. */
+	"keep"?: number;
+}
+
+/**
+ * Observe an app's top page — its root: observe it, collect every context's records and architecture reports, and
+ * hand them on: in the editor's preview, to the editor (its debug-mcp sees the app through the editor's tab);
+ * standalone, to a running debug-mcp, serving `tools` there. `tab` is undefined when debugging is off (not localhost,
+ * no `?debug`).
+ */
+export function observeApp(hub: Hub, { tools = [], keep = 1000, network }: ObserveAppOptions = {}): Observed & { "records": LogRecord[]; "store": ArchitectureStore; "tab": string | undefined } {
+	const context = observe(hub, { "network": network });
+	const records: LogRecord[] = [];
+	const store = new ArchitectureStore();
+
+	installHubCollector(hub, (record) => {
+		records.push(record);
+
+		if (records.length > keep) {
+			records.shift();
+		}
+	});
+	// (Every reporter holds its reports until someone listens, so the tree's arrive as this interest reaches them.)
+	collectArchReports(hub, (report) => { store.apply(report); });
+
+	if (linkPreviewHost(hub) === undefined) {
+		linkDebugMcp(hub);
+	}
+
+	return { ...context, "records": records, "store": store, "tab": servePageTools(hub, { "tools": tools }) };
 }
 
 export * from "./log-subject.ts";
