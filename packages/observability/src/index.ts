@@ -239,7 +239,8 @@ let observabilityWriting = false;
  *  `renderRecord`, routed to the matching console method so levels survive in devtools. */
 export function consoleCollector(record: LogRecord): void {
 	const tag = typeof record.context?.["source"] === "string" ? record.context["source"] : "?";
-	const line = `[${tag}] ${renderRecord(record)}`;
+	// Records come from other realms (and their taps): one without attrs is still printed, not thrown on.
+	const line = `[${tag}] ${renderRecord({ ...record, "attrs": record.attrs ?? {} })}`;
 	const attrs = record.attrs !== undefined && Object.keys(record.attrs).length > 0 ? [record.attrs] : [];
 
 	observabilityWriting = true;

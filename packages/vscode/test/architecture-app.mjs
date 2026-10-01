@@ -166,7 +166,8 @@ function assertEchoes(results, message) {
 
 /** Every preview window's top page (not their nested frames), in the order the windows opened. */
 function previewPages() {
-	return session.page.frames().filter((frame) => ["/", "/index.html"].includes(parseVirtual(new URL(frame.url()).pathname)?.rest));
+	// (A frame can be without a URL for a moment, as it's made: not a preview page yet.)
+	return session.page.frames().filter((frame) => URL.canParse(frame.url()) && ["/", "/index.html"].includes(parseVirtual(new URL(frame.url()).pathname)?.rest));
 }
 
 /** The preview's (first window's) top page. */

@@ -8,7 +8,7 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 // From source: node won't strip types from the pnpm copy under node_modules.
 import { createHub, pipe } from "../../hub/src/index.ts";
-import { CONSOLE_ECHO, installHubCollector, relayLoggerToHub } from "../src/index.ts";
+import { CONSOLE_ECHO, consoleCollector, installHubCollector, relayLoggerToHub } from "../src/index.ts";
 
 async function flush(): Promise<void> {
 	for (let round = 0; round < 5; round += 1) {
@@ -49,5 +49,20 @@ test("while a relayed record is echoed to the console, CONSOLE_ECHO says so — 
 	assert.equal(seen.at(-1), true, "marked while the console sink prints it");
 	assert.notEqual(flag(), true, "and only then");
 	assert.equal(Symbol.for("@brianjenkins94/observability.consoleEcho"), CONSOLE_ECHO, "a registered symbol: a tap can name it without importing this");
+});
+
+test("the console collector prints a record from another realm that carries no attrs — it doesn't throw on it", () => {
+	const printed: unknown[][] = [];
+	const original = console.log;
+
+	console.log = (...args: unknown[]) => { printed.push(args); };
+
+	try {
+		consoleCollector({ "kind": "log", "level": "info", "message": "from a tap", "context": { "source": "preview:5173" }, "time": 0, "depth": 0 } as unknown as LogRecord);
+	} finally {
+		console.log = original;
+	}
+
+	assert.equal(printed[0]?.[0], "[preview:5173] from a tap");
 });
 
