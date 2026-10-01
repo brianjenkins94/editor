@@ -7,7 +7,7 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 // From source: node won't strip types from the pnpm copy under node_modules.
 import { createHub, pipe } from "../../hub/src/index.ts";
-import { installNetworkProbes } from "../src/arch-probes.ts";
+import { describeJsonMessage, installNetworkProbes, windowName } from "../src/arch-probes.ts";
 import { collectArchReports, createArchReporter, previewPayload, requestArchSync } from "../src/arch.ts";
 
 interface Recorded { "from": string; "to": string; "kind": TrafficKind; "label": string; "payload"?: unknown }
@@ -161,4 +161,31 @@ test("a captured payload's preview: JSON, binary as its size, capped", () => {
 	assert.equal(previewPayload({ "bytes": new Uint8Array(4) }), "{\"bytes\":\"<Uint8Array 4 bytes>\"}");
 	assert.equal(previewPayload("x".repeat(10), 4), "xxxx…");
 	assert.equal(previewPayload(undefined), "undefined");
+});
+
+test("a message is named by what it says it is — through a one-key wrapper, by the usual fields", () => {
+	const label = (message: unknown): string => describeJsonMessage(message).label;
+
+	// A hub frame, as a probe that knows nothing of hub sees it: a one-key wrapper around a subject.
+	assert.equal(label({ "\0hub": { "subject": "netsim.local.state.42", "data": {}, "from": "client-0" } }), "netsim.local.state.*");
+	assert.equal(label({ "topic": "chat.room" }), "chat.room");
+	assert.equal(label({ "event": "ready" }), "ready");
+	assert.equal(label({ "channel": "status" }), "status");
+	assert.equal(label({ "payload": { "type": "move" } }), "move");
+	// What already had a name keeps it.
+	assert.equal(label({ "type": "netsim-port", "channel": "x" }), "netsim-port");
+	assert.deepEqual(describeJsonMessage({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }), { "kind": "request", "label": "initialize" });
+	// Data with nothing to go on stays anonymous: a one-key array, a scalar wrapper.
+	assert.equal(label({ "items": [1, 2] }), "message");
+	assert.equal(label({ "count": 3 }), "message");
+});
+
+test("a window is named by what its embedder calls it, else by its URL with ids folded", () => {
+	const frame = (attributes: Record<string, string>, href: string) => ({ "frameElement": { "getAttribute": (name: string) => attributes[name] ?? null, "id": attributes["id"] ?? "" }, "location": { "href": href } }) as unknown as Window;
+
+	assert.equal(windowName(frame({ "title": "client-0" }, "http://x/instance.html?id=client-0&match=1600cfd7")), "window:client-0");
+	assert.equal(windowName(frame({ "name": "preview" }, "http://x/a.html")), "window:preview");
+	assert.equal(windowName(frame({ "id": "editor-frame" }, "http://x/a.html")), "window:editor-frame");
+	assert.equal(windowName({ "frameElement": null, "location": { "href": "http://x/games/netsim/?clients=3&match=1600cfd7&mode=fast" } } as unknown as Window), "window:/games/netsim/?clients=*&match=*&mode=fast");
+	assert.equal(windowName({ get "frameElement"(): never { throw new Error("cross-origin"); }, "location": {} } as unknown as Window), "window:cross-origin");
 });

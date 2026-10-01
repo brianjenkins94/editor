@@ -6,12 +6,18 @@
  * before the context starts talking, and only once per realm. Generic on purpose: a channel nobody modelled still
  * shows up (and is flagged), which is how the diagram discovers what it wasn't told about.
  *
- * Hub traffic riding one of these (debug-mcp's WebSocket link) is skipped: the hub tap already counts it.
+ * Hub traffic riding one of these (debug-mcp's WebSocket link) is skipped: the hub tap already counts it — unless
+ * `hubFrames: "record"`, for a realm observed by probes alone (no hub tap: an app the observer knows nothing about).
  */
 import type { ArchSink, TrafficKind } from "./arch.ts";
 import { approxSize, normalizeSubject } from "./arch.ts";
 
-export interface NetworkProbeOptions {
+export interface ProbeOptions {
+	/** Hub frames: "skip" (default — the hub tap counts them) or "record" like any other message (probes alone). */
+	"hubFrames"?: "skip" | "record";
+}
+
+export interface NetworkProbeOptions extends ProbeOptions {
 	/** Node id of the endpoint a URL belongs to. Default: `net:origin` for this origin, `net:<host>` otherwise. */
 	"classifyUrl"?: (url: URL) => string;
 	/** Node id of the context that opened a WebSocket (default: `sink.self`) — e.g. an extension host sharing the realm. */
@@ -53,13 +59,30 @@ function frameSize(data: unknown): number {
 	return approxSize(data);
 }
 
-/** JSON-RPC / DAP message → kind + label, for sockets and workers speaking them. */
-export function describeJsonMessage(message: unknown): { "kind": TrafficKind; "label": string } {
+/** Fields that name a message, when it has no JSON-RPC / DAP / `type` shape — the usual ones, whatever the protocol. */
+const NAME_FIELDS = ["subject", "topic", "event", "channel"];
+
+/**
+ * A message's kind and label, from what it says it is: JSON-RPC, DAP, a `type` — else the usual naming fields (a
+ * `subject`, `topic`, `event` or `channel`; ids folded, as in subjects). A one-key wrapper (`{ "\0hub": frame }`,
+ * `{ "payload": … }`) is described by what it wraps. Knows no protocol in particular: it's how the diagram names the
+ * messages of an app it was told nothing about.
+ */
+export function describeJsonMessage(message: unknown, depth = 0): { "kind": TrafficKind; "label": string } {
 	if (typeof message !== "object" || message === null) {
 		return { "kind": "message", "label": typeof message };
 	}
 
 	const record = message as Record<string, unknown>;
+	const keys = Object.keys(record);
+
+	if (keys.length === 1 && depth < 3) {
+		const inner = record[keys[0]!];
+
+		if (typeof inner === "object" && inner !== null && !Array.isArray(inner)) {
+			return describeJsonMessage(inner, depth + 1);
+		}
+	}
 
 	if (typeof record["method"] === "string") {
 		return { "kind": record["id"] === undefined ? "event" : "request", "label": record["method"] };
@@ -85,7 +108,31 @@ export function describeJsonMessage(message: unknown): { "kind": TrafficKind; "l
 		return { "kind": "message", "label": record["type"] };
 	}
 
-	return { "kind": "message", "label": "message" };
+	const name = NAME_FIELDS.map((field) => record[field]).find((value) => typeof value === "string" && value !== "");
+
+	return { "kind": "message", "label": typeof name === "string" ? normalizeSubject(name) : "message" };
+}
+
+/** A same-origin window's name, from what the platform says of it: what the page embedding it calls its frame (the
+ *  `<iframe>`'s `title`, `name` or `id`), else its URL — path and query, id-like query values folded (`match=*`). One
+ *  we can't read (cross-origin) is `window:cross-origin`. The same for a window naming itself and for the windows that
+ *  message it, so both ends agree. */
+export function windowName(target: Window): string {
+	try {
+		const frame = target.frameElement;
+		const given = frame?.getAttribute("title") || frame?.getAttribute("name") || frame?.id;
+
+		if (typeof given === "string" && given !== "") {
+			return "window:" + given;
+		}
+
+		const url = new URL(target.location.href);
+		const query = [...url.searchParams].map(([key, value]) => key + "=" + (normalizeSubject(value) === "*" ? "*" : value)).join("&");
+
+		return "window:" + (url.protocol === "about:" ? url.href : url.pathname) + (query === "" ? "" : "?" + query);
+	} catch {
+		return "window:cross-origin";
+	}
 }
 
 function installFetchProbe(sink: ArchSink, classify: (url: URL) => string): void {
@@ -129,7 +176,12 @@ function installFetchProbe(sink: ArchSink, classify: (url: URL) => string): void
 	};
 }
 
-function installWebSocketProbe(sink: ArchSink, classify: (url: URL) => string, owner: (url: URL) => string): void {
+/** Whether a probe passes over this message (see ProbeOptions.hubFrames). */
+function skipper({ hubFrames = "skip" }: ProbeOptions): (data: unknown) => boolean {
+	return hubFrames === "record" ? () => false : isHubFrame;
+}
+
+function installWebSocketProbe(sink: ArchSink, classify: (url: URL) => string, owner: (url: URL) => string, skip: (data: unknown) => boolean): void {
 	if (typeof globalThis.WebSocket !== "function") {
 		return;
 	}
@@ -143,7 +195,7 @@ function installWebSocketProbe(sink: ArchSink, classify: (url: URL) => string, o
 				const remote = classify(url);
 				const local = owner(url);
 				const onFrame = (outgoing: boolean, data: unknown): void => {
-					if (isHubFrame(data)) {
+					if (skip(data)) {
 						return;
 					}
 
@@ -221,14 +273,16 @@ export function installNetworkProbes(sink: ArchSink, options: NetworkProbeOption
 
 	installFetchProbe(sink, classify);
 	installXhrProbe(sink, classify);
-	installWebSocketProbe(sink, classify, options.socketOwner ?? (() => sink.self));
+	const skip = skipper(options);
+
+	installWebSocketProbe(sink, classify, options.socketOwner ?? (() => sink.self), skip);
 	installIndexedDBProbe(sink, options.idbOwner ?? (() => undefined));
-	installBroadcastChannelProbe(sink);
+	installBroadcastChannelProbe(sink, skip);
 	installLocksProbe(sink);
-	installRtcProbe(sink);
+	installRtcProbe(sink, skip);
 }
 
-/** A message's kind and label: JSON-RPC / DAP / `{ type }` shapes, from an object or its JSON text. */
+/** A message's kind and label (describeJsonMessage), from an object or its JSON text. */
 function describeAny(data: unknown): { "kind": TrafficKind; "label": string } {
 	if (typeof data === "string") {
 		try {
@@ -238,19 +292,12 @@ function describeAny(data: unknown): { "kind": TrafficKind; "label": string } {
 		}
 	}
 
-	// A message's own kind first (`type`, JSON-RPC, DAP); a `channel` field only names one that has none.
-	const described = describeJsonMessage(data);
-
-	if (described.label === "message" && typeof data === "object" && data !== null && "channel" in data && typeof data.channel === "string") {
-		return { "kind": "message", "label": data.channel };
-	}
-
-	return described;
+	return describeJsonMessage(data);
 }
 
 /** BroadcastChannels: each name a node (`channel:<name>`, ids folded to `*`), its messages to and from it — once one
  *  that isn't a hub frame crosses (a hub link over a channel is counted by the hub tap; its medium isn't news). */
-function installBroadcastChannelProbe(sink: ArchSink): void {
+function installBroadcastChannelProbe(sink: ArchSink, skip: (data: unknown) => boolean): void {
 	const Original = globalThis.BroadcastChannel as typeof BroadcastChannel | undefined;
 
 	if (Original === undefined) {
@@ -259,7 +306,7 @@ function installBroadcastChannelProbe(sink: ArchSink): void {
 
 	const seen = new Set<string>();
 	const record = (id: string, name: string, outgoing: boolean, data: unknown): void => {
-		if (isHubFrame(data)) {
+		if (skip(data)) {
 			return;
 		}
 
@@ -345,7 +392,7 @@ function installLocksProbe(sink: ArchSink): void {
 
 /** WebRTC: each peer connection a node (`rtc:<n>`) — its signaling (offers, answers, candidates: their payloads are
  *  the SDP), its states, and every data channel's messages, by channel label. */
-function installRtcProbe(sink: ArchSink): void {
+function installRtcProbe(sink: ArchSink, skip: (data: unknown) => boolean): void {
 	const Original = globalThis.RTCPeerConnection as typeof RTCPeerConnection | undefined;
 
 	if (Original === undefined) {
@@ -366,7 +413,7 @@ function installRtcProbe(sink: ArchSink): void {
 				const watch = (channel: RTCDataChannel): void => {
 					const name = channel.label || "data";
 					const record = (outgoing: boolean, data: unknown): void => {
-						if (isHubFrame(data)) {
+						if (skip(data)) {
 							return;
 						}
 
@@ -483,10 +530,12 @@ export interface WorkerIdentity {
  * e.g. in a worker that spawns workers). Hub frames are left to the hub tap; the rest is described as JSON-RPC /
  * DAP / `{ type }` messages.
  */
-export function installWorkerProbe(sink: ArchSink, identify: (url: string, options?: WorkerOptions) => WorkerIdentity | undefined = () => undefined): void {
+export function installWorkerProbe(sink: ArchSink, identify: (url: string, options?: WorkerOptions) => WorkerIdentity | undefined = () => undefined, options: ProbeOptions = {}): void {
 	if (typeof globalThis.Worker !== "function") {
 		return;
 	}
+
+	const skip = skipper(options);
 
 	globalThis.Worker = new Proxy(globalThis.Worker, {
 		"construct": function(target, args: [string | URL, WorkerOptions?], newTarget) {
@@ -497,11 +546,11 @@ export function installWorkerProbe(sink: ArchSink, identify: (url: string, optio
 				// By its name when it has one (often the id its own hub goes by), else its script.
 				const identity = identify(url, args[1]) ?? { "id": args[1]?.name || "worker:" + (url.split(/[?#]/u)[0]!.split("/").pop() ?? "worker") };
 				const record = (outgoing: boolean, data: unknown): void => {
-					if (isHubFrame(data)) {
+					if (skip(data)) {
 						return;
 					}
 
-					const { kind, label } = describeJsonMessage(data);
+					const { kind, label } = describeAny(data);
 
 					if (outgoing) {
 						sink.record(sink.self, identity.id, kind, label, approxSize(data), 1, data);
@@ -536,33 +585,26 @@ export function installWorkerProbe(sink: ArchSink, identify: (url: string, optio
 /**
  * Observe the messages this window receives from OTHER windows (iframes, popups, its parent) — everything but hub
  * traffic (counted by the hub tap, including pane-link-wrapped frames). `identify` names the sending window (e.g. a
- * preview iframe by its port); an unnamed one becomes `window:<its path>`, so an unexpected iframe still shows up.
+ * preview iframe by its port); an unnamed one is named by windowName (its frame's title, else its URL), so an
+ * unexpected iframe still shows up.
  */
-export function installWindowMessageProbe(sink: ArchSink, identify: (source: Window) => string | undefined = () => undefined): void {
+export function installWindowMessageProbe(sink: ArchSink, identify: (source: Window) => string | undefined = () => undefined, options: ProbeOptions = {}): void {
 	if (typeof window === "undefined") {
 		return;
 	}
 
-	const frameOf = (source: Window): string => {
-		try {
-			return "window:" + source.location.pathname;
-		} catch {
-			return "window:cross-origin";
-		}
-	};
+	const skip = skipper(options);
 
 	window.addEventListener("message", (event: MessageEvent) => {
 		const { data, source } = event;
 
-		if (source === null || source === window || !("postMessage" in source) || isHubFrame(data) || (typeof data === "object" && data !== null && "\0paneLink" in data)) {
+		if (source === null || source === window || !("postMessage" in source) || skip(data) || (typeof data === "object" && data !== null && "\0paneLink" in data)) {
 			return;
 		}
 
-		const record = data as { "channel"?: unknown; "type"?: unknown } | null;
-		// Its own kind (`type`) first; a `channel` field only names a message that has none.
-		const name = typeof record?.type === "string" ? record.type : typeof record?.channel === "string" ? record.channel : typeof data;
-		const from = identify(source as Window) ?? frameOf(source as Window);
+		const { kind, label } = describeAny(data);
+		const from = identify(source as Window) ?? windowName(source as Window);
 
-		sink.record(from, sink.self, "message", event.ports.length > 0 ? name + " (+MessagePort)" : name, approxSize(data), 1, data);
+		sink.record(from, sink.self, kind, event.ports.length > 0 ? label + " (+MessagePort)" : label, approxSize(data), 1, data);
 	}, true);
 }

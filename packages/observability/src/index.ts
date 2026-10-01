@@ -605,7 +605,7 @@ export interface ObserveOptions {
 	"network"?: boolean | NetworkProbeOptions;
 	/** Observe the workers this realm starts and the window messages it receives, outside the hub (installWorkerProbe,
 	 *  installWindowMessageProbe): `true`, or how to name the windows that message it (`window`: a node id, e.g. the
-	 *  parent page's hub id — default `window:<its path>`). A worker is named by its `name` option when it has one.
+	 *  parent page's hub id — default windowName: its frame's title, else its URL). A worker is named by its `name` option when it has one.
 	 *  Off by default; one context per realm. */
 	"messages"?: boolean | { "window"?: (source: Window) => string | undefined };
 }
