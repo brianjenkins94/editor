@@ -8,7 +8,6 @@
  * answers `$sys.arch.sync` with its full state, so a viewer opened late still sees what already happened.
  */
 import type { Envelope, Hub, HubSnapshot, LinkInfo, TapEvent } from "@brianjenkins94/hub";
-import { rpcCallSubject, rpcReplySubject } from "@brianjenkins94/hub";
 
 /** Reserved architecture namespace — reports ride `$sys.arch.<reporter id>`; `$sys.arch.sync` asks for full state. */
 export const ARCH_SUBJECT = "$sys.arch";
@@ -180,8 +179,10 @@ export function normalizeSubject(subject: string): string {
 		.join(".");
 }
 
-const RPC_CALL = rpcCallSubject("");
-const RPC_REPLY = rpcReplySubject("");
+// hub's RPC subjects (its rpcCallSubject / rpcReplySubject) — spelled out: this package tests against hub's
+// published release, which a new hub export reaches only after this package's CI passes.
+const RPC_CALL = "$rpc.call.";
+const RPC_REPLY = "$rpc.reply.";
 
 /**
  * Create the reporter for the context `hub` lives in: taps the hub (its topology, and every message it SENDS on a
