@@ -11,10 +11,10 @@
  *
  * Addressing is NATS-style dotted subjects: `render.mutation`, `log.editor`, `peer.<id>` for point-to-point.
  * Patterns use `*` (one token) and `>` (the rest): `log.>`, `peer.*`. No delivery guarantees, no persistence —
- * this is a router, not a broker; wire hubs as a TREE (no cycles) so a message never loops. A cycle made by mistake
- * is found and cut: every hub advertises interest in its own `$sys.lds.<session>` subject, which can only come back to
- * it round a loop (NATS's loop detection). Every hub in the loop reports a `loop` fault; the one with the least session
- * cuts the link its subject came back on (telling the far end, so it lets go too) — one cut per loop.
+ * this is a router, not a broker; wire hubs as a TREE (no cycles): a message never goes back the way it came, and
+ * that is all the loop prevention there is — a cycle wired by mistake would carry a message round it forever.
+ *
+ * What it promises, what it assumes and what it doesn't do, each promise with the test that checks it: README.md.
  *
  * Whatever goes wrong at one link or handler stays there, reported as a `fault` (see TapEvent): a throwing handler
  * doesn't stop the others or the forwarding (HubOptions.onError hears it), a frame a transport can't send is dropped,
@@ -42,7 +42,7 @@ export interface Envelope {
  * sent (a MessagePort, a WebSocket, an `ordered` RTCDataChannel with no `maxRetransmits`/`maxPacketLifeTime`). Interest
  * is sent as deltas, so a frame lost or reordered later would leave the two ends disagreeing about who wants what. The
  * one loss tolerated is at the start, before the other end listens (a window's postMessage): the `hello` handshake
- * recovers it — and `heartbeatMs` (LinkOptions) checks for, and repairs, any drift after that.
+ * recovers it.
  */
 export interface Transport {
 	"send": (message: unknown) => void;
@@ -80,17 +80,13 @@ const WIRE = "\0hub"; // a NUL-prefixed key no ordinary postMessage payload uses
  *  Kept off the Envelope shape so data and control never collide. `hello` also carries the sender's hub `id`, so
  *  each end knows WHICH hub sits across a link (optional on the wire: an older peer simply stays anonymous). */
 export interface Control {
-	/** `ping`/`pong`: a heartbeat (LinkOptions.heartbeatMs) and its answer — every hub answers a ping. `bye`: the
-	 *  sender has cut this link (to break a loop) — the receiver unlinks its end too. */
-	"hub": "sub" | "unsub" | "hello" | "ping" | "pong" | "bye";
+	/** `ping`/`pong`: a heartbeat (LinkOptions.heartbeatMs) and its answer — every hub answers a ping. */
+	"hub": "sub" | "unsub" | "hello" | "ping" | "pong";
 	"subject"?: string;
 	"id"?: string;
 	/** On every control frame: the sending hub's session — random, per Hub instance. A new one on a link means a new
 	 *  hub at the other end (a reloaded frame on the same transport): what we knew of the old one is dropped. */
 	"session"?: string;
-	/** On a ping or pong: a digest of the interest the sender has advertised over this link — if it isn't what the
-	 *  receiver holds, a frame went missing, and the receiver asks for it all again. */
-	"digest"?: string;
 	/** Set on the `hello` sent back in answer to a peer's `hello` — so an end whose first `hello` was lost still
 	 *  learns our id. Never answered itself, so hellos can't ping-pong. */
 	"reply"?: boolean;
@@ -102,7 +98,7 @@ export interface Control {
 function isControl(message: unknown): message is Control {
 	const hub = (message as Control | null)?.hub;
 
-	return typeof message === "object" && message !== null && (hub === "sub" || hub === "unsub" || hub === "hello" || hub === "ping" || hub === "pong" || hub === "bye");
+	return typeof message === "object" && message !== null && (hub === "sub" || hub === "unsub" || hub === "hello" || hub === "ping" || hub === "pong");
 }
 
 function isEnvelope(message: unknown): message is Envelope {
@@ -166,12 +162,6 @@ function assertPermissions(permissions: LinkPermissions | undefined): void {
 	}
 }
 
-/** Loop detection: each hub's own subject under this prefix (see the header). */
-const LDS = "$sys.lds.";
-/** After cutting a loop, how long a hub lets the cut settle (the withdrawn interest travel round) before its subject
- *  coming back again counts as another loop. */
-const LOOP_SETTLE_MS = 1000;
-
 /** A connected transport plus the interest tracked in each direction. */
 interface Link {
 	/** Stable id of this link within its hub (`link-1`, `link-2`, …) — links are otherwise anonymous objects. */
@@ -193,14 +183,9 @@ interface Link {
 	"permissions"?: LinkPermissions;
 	/** The peer hub's session (Control.session), once it has sent one. */
 	"session"?: string;
-	/** Interest the peer asked for that we refused (malformed, over `maxInterest`) — it still counts toward the digest
-	 *  of what it advertised, so a refusal isn't mistaken for a lost frame. */
-	"refused": Set<string>;
 	/** When the peer last sent us anything (for the heartbeat). */
 	"lastSeen": number;
-	/** We've asked the peer to re-send its interest (its digest didn't match), and await its answering hello. */
-	"resyncing": boolean;
-	"limits": Pick<LinkOptions, "maxPayload" | "maxBacklog" | "maxInterest">;
+	"limits": Pick<LinkOptions, "maxPayload" | "maxBacklog">;
 	"detach": () => void;
 	/** Settles `link()`'s `ready`: true on the peer's first hello, false if unlinked before. */
 	"settle": (ready: boolean) => void;
@@ -251,12 +236,10 @@ export type TapEvent =
  * - `handler`: a local handler threw (the others still ran; HubOptions.onError has the error);
  * - `send`: a transport threw sending a frame (an unclonable payload) — dropped; a control frame unlinks;
  * - `frame`: a peer sent something malformed — an invalid subject, pattern or id — ignored;
- * - `payload` / `backlog` / `limit`: past a link's maxPayload, maxBacklog or maxInterest — dropped or refused;
- * - `drift`: a heartbeat showed the peer's interest and ours disagree (a frame was lost) — resynced;
- * - `closed` / `stale` / `loop`: the link was unlinked — its transport closed, its heartbeat went unanswered, or it
- *   closed a cycle.
+ * - `payload` / `backlog`: past a link's maxPayload or maxBacklog — dropped;
+ * - `closed` / `stale`: the link was unlinked — its transport closed, or its heartbeat went unanswered.
  */
-export type FaultKind = "handler" | "send" | "frame" | "payload" | "backlog" | "limit" | "drift" | "closed" | "stale" | "loop";
+export type FaultKind = "handler" | "send" | "frame" | "payload" | "backlog" | "closed" | "stale";
 
 export type Tap = (event: TapEvent) => void;
 
@@ -300,9 +283,6 @@ export interface LinkOptions {
 	/** While the transport's backlog (Transport.backlog) is past this many bytes, drop messages to it — a `backlog`
 	 *  fault — rather than queue without bound behind a slow peer. Control frames still go. */
 	"maxBacklog"?: number;
-	/** The most subjects the peer may ask for (its whole subtree's interest, so leave headroom); more are refused — a
-	 *  `limit` fault. */
-	"maxInterest"?: number;
 }
 
 /** A payload's approximate size in bytes, or undefined if it can't be measured. */
@@ -324,19 +304,6 @@ function payloadSize(data: unknown): number | undefined {
 	} catch {
 		return undefined;
 	}
-}
-
-/** An order-independent digest of a set of subjects: its size and a hash of its sorted members (FNV-1a). */
-function digestOf(subjects: Iterable<string>): string {
-	const sorted = [...subjects].sort();
-	let hash = 0x811c9dc5;
-
-	for (const char of sorted.join("\n")) {
-		hash ^= char.codePointAt(0)!;
-		hash = Math.imul(hash, 0x01000193) >>> 0;
-	}
-
-	return sorted.length + ":" + hash.toString(36);
 }
 
 /** Does `patterns` allow `subject`? An omitted list allows everything. */
@@ -402,11 +369,7 @@ export class Hub {
 	private linkIdPool = 0;
 	/** This Hub instance, as its peers tell it from another that took its place (Control.session). */
 	private readonly session = Math.random().toString(36).slice(2, 12);
-	/** Our loop-detection subject: if it ever comes back to us, the hubs are wired in a loop. */
-	private readonly lds = LDS + this.session;
 	private readonly onError: (error: unknown, envelope: Envelope) => void;
-	/** When we last cut a link to break a loop. */
-	private loopCut = -Infinity;
 
 	public constructor(options: HubOptions = {}) {
 		this.id = options.id ?? "hub-" + Math.random().toString(36).slice(2, 10);
@@ -519,19 +482,16 @@ export class Hub {
 		return [...new Set([...this.links].map((link) => link.knownAs).filter((id): id is string => id !== undefined))];
 	}
 
-	/** This hub's topology right now: subscriptions, links, their peers and the interest in each direction (less the
-	 *  loop-detection subjects, `$sys.lds.*`, every link carries). */
+	/** This hub's topology right now: subscriptions, links, their peers and the interest in each direction. */
 	public inspect(): HubSnapshot {
-		const visible = (subjects: Set<string>): string[] => [...subjects].filter((subject) => !subject.startsWith(LDS));
-
 		return {
 			"id": this.id,
 			"subscriptions": [...this.handlers.keys()],
 			"links": [...this.links].map((link) => ({
 				"id": link.id,
 				"peerId": link.peerId,
-				"remoteInterest": visible(link.remoteInterest),
-				"advertised": visible(link.advertised),
+				"remoteInterest": [...link.remoteInterest],
+				"advertised": [...link.advertised],
 				...link.permissions === undefined ? {} : { "permissions": link.permissions }
 			}))
 		};
@@ -603,10 +563,8 @@ export class Hub {
 			"assigned": options.peer !== undefined,
 			"uplink": options.uplink === true,
 			"permissions": options.permissions,
-			"refused": new Set(),
 			"lastSeen": Date.now(),
-			"resyncing": false,
-			"limits": { "maxPayload": options.maxPayload, "maxBacklog": options.maxBacklog, "maxInterest": options.maxInterest },
+			"limits": { "maxPayload": options.maxPayload, "maxBacklog": options.maxBacklog },
 			"detach": () => undefined,
 			"settle": settle
 		};
@@ -628,7 +586,7 @@ export class Hub {
 					this.fault("stale", `nothing from the peer for ${Date.now() - link.lastSeen}ms`, link);
 					this.unlink(link);
 				} else {
-					this.wire(link, { "hub": "ping", "digest": digestOf(link.advertised) });
+					this.wire(link, { "hub": "ping" });
 				}
 			}, interval);
 
@@ -714,7 +672,6 @@ export class Hub {
 		if (typeof message.session === "string" && message.session !== link.session) {
 			if (link.session !== undefined) {
 				link.remoteInterest.clear();
-				link.refused.clear();
 				link.advertised.clear();
 				this.emit({ "type": "topology" });
 				this.readvertise();
@@ -727,29 +684,11 @@ export class Hub {
 			case "hello":
 				this.hello(link, message);
 				break;
-			case "bye":
-				this.fault("closed", "the peer cut the link", link);
-				this.unlink(link);
-				break;
 			case "ping":
-			case "pong":
-				if (message.hub === "ping") {
-					this.wire(link, { "hub": "pong", "digest": digestOf(link.advertised) });
-				}
-
-				if (typeof message.digest === "string" && !link.resyncing && message.digest !== digestOf([...link.remoteInterest, ...link.refused])) {
-					// A frame of its interest went missing: forget what we hold, and ask for it all again (its hello's
-					// answer comes after the lot).
-					this.fault("drift", "the peer's interest and ours disagree — resyncing", link);
-					link.remoteInterest.clear();
-					link.refused.clear();
-					link.resyncing = true;
-					this.emit({ "type": "topology" });
-					this.readvertise();
-					this.wire(link, { "hub": "hello", "id": this.id, ...link.assigned ? { "you": link.peerId } : {} });
-				}
-
+				this.wire(link, { "hub": "pong" });
 				break;
+			case "pong":
+				break; // (it counted as hearing from the peer: lastSeen)
 			default:
 				this.interest(link, message);
 		}
@@ -777,8 +716,6 @@ export class Hub {
 
 		if (message.reply !== true) {
 			this.wire(link, { "hub": "hello", "id": this.id, "reply": true, ...link.assigned ? { "you": link.peerId } : {} });
-		} else {
-			link.resyncing = false; // its interest has all come again, ahead of this
 		}
 
 		// The peer's interest came ahead of its hello (the same rule, on its side): it's known now.
@@ -793,8 +730,6 @@ export class Hub {
 		}
 
 		if (message.hub === "unsub") {
-			link.refused.delete(subject);
-
 			if (link.remoteInterest.delete(subject)) {
 				this.emit({ "type": "topology" });
 				this.readvertise(); // a link's interest changed → what we advertise to OTHER links may change
@@ -803,15 +738,7 @@ export class Hub {
 			return;
 		}
 
-		if (subject === this.lds && !link.remoteInterest.has(subject)) {
-			link.remoteInterest.add(subject);
-			this.loop(link);
-
-			return;
-		}
-
 		if (!isPattern(subject)) {
-			link.refused.add(subject);
 			this.fault("frame", `interest in ${JSON.stringify(subject)}`, link);
 
 			return;
@@ -821,53 +748,9 @@ export class Hub {
 			return;
 		}
 
-		if (link.limits.maxInterest !== undefined && link.remoteInterest.size >= link.limits.maxInterest) {
-			link.refused.add(subject);
-			this.fault("limit", `interest in ${subject} past maxInterest (${link.limits.maxInterest})`, link);
-
-			return;
-		}
-
 		link.remoteInterest.add(subject);
 		this.emit({ "type": "topology" });
 		this.readvertise(); // a link's interest changed → what we advertise to OTHER links may change
-	}
-
-	/** Our loop-detection subject came back over `link`: the hubs are wired in a loop. Every hub in it sees its own come
-	 *  back; only the one with the least session — the loop's subjects all reach `link` well before ours has gone the
-	 *  whole way round — cuts it, so a loop loses one link, not one per hub. Ours coming back the other way round the
-	 *  same loop, just after the cut, is the cut still settling, not another loop: looked at again once it has. */
-	private loop(link: Link): void {
-		this.fault("loop", "our loop-detection subject came back: the hubs are wired in a loop", link);
-
-		const least = [...link.remoteInterest].every((subject) => !subject.startsWith(LDS) || subject >= this.lds);
-
-		if (!least) {
-			return; // a hub round the loop with a lesser session cuts it
-		}
-
-		const settling = this.loopCut + LOOP_SETTLE_MS - Date.now();
-
-		if (settling > 0) {
-			const timer = setTimeout(() => {
-				if (this.links.has(link) && link.remoteInterest.has(this.lds)) {
-					this.cut(link);
-				}
-			}, settling);
-
-			(timer as { "unref"?: () => void }).unref?.();
-
-			return;
-		}
-
-		this.cut(link);
-	}
-
-	private cut(link: Link): void {
-		this.loopCut = Date.now();
-		this.fault("loop", "cutting this link to break the loop", link);
-		this.wire(link, { "hub": "bye" });
-		this.unlink(link);
 	}
 
 	/** Deliver `envelope` to local handlers and forward it to interested links — never back to `from` (a tree
@@ -928,16 +811,10 @@ export class Hub {
 	 *  what it could deliver, narrowed to it: what the link may send us (its publish permissions), and of another link's
 	 *  interest, what that link may receive (its subscribe permissions) — a confined link isn't told of interest it
 	 *  couldn't serve, so nobody past it takes it for a listener, and a broad subscription behind a narrow allowance is
-	 *  asked for as the allowance. Loop-detection subjects travel only between unconfined links: a confined peer is a
-	 *  leaf we don't trust (it could echo a hub's subject back to have a link cut), never part of a loop worth finding. */
+	 *  asked for as the allowance. */
 	private readvertise(): void {
 		for (const link of this.links) {
-			const confined = link.permissions !== undefined;
 			const desired = new Set<string>(narrow([...this.handlers.keys()], link.permissions?.publish));
-
-			if (!confined) {
-				desired.add(this.lds);
-			}
 
 			for (const other of this.links) {
 				if (other === link || !crosses(other, link)) {
@@ -945,14 +822,8 @@ export class Hub {
 				}
 
 				for (const pattern of other.remoteInterest) {
-					if (pattern.startsWith(LDS)) {
-						if (!confined && other.permissions === undefined) {
-							desired.add(pattern);
-						}
-					} else {
-						for (const narrowed of narrow(narrow([pattern], other.permissions?.subscribe), link.permissions?.publish)) {
-							desired.add(narrowed);
-						}
+					for (const narrowed of narrow(narrow([pattern], other.permissions?.subscribe), link.permissions?.publish)) {
+						desired.add(narrowed);
 					}
 				}
 			}

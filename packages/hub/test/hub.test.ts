@@ -933,7 +933,7 @@ function faults(hub: ReturnType<typeof createHub>): { "kind": string; "detail": 
 	return seen;
 }
 
-/** A link's interest, less the loop-detection subjects every hub advertises. */
+/** A link's interest. */
 function interestOf(hub: ReturnType<typeof createHub>, index = 0): string[] {
 	return hub.inspect().links[index]?.remoteInterest ?? [];
 }
@@ -1022,32 +1022,6 @@ test("heartbeat: a link that goes silent is unlinked; a live one stays", async (
 	assert.equal(reported.at(-1)?.kind, "stale");
 });
 
-test("heartbeat repairs interest a lossy transport dropped", async () => {
-	let dropped = false;
-	const [a, b] = pipe({ "schedule": (deliver, message) => {
-		const frame = frameOf(message) as { "hub"?: string; "subject"?: string } | undefined;
-
-		if (!dropped && frame?.hub === "sub" && frame.subject === "game.lost") {
-			dropped = true;
-
-			return;
-		}
-
-		setTimeout(deliver, 0);
-	} });
-	const root = createHub({ "id": "root" });
-	const pod = createHub({ "id": "pod" });
-
-	await Promise.all([root.link(a, { "heartbeatMs": 60 }).ready, pod.link(b).ready]);
-	await flush(); // the handshake's answering hellos, which re-send interest, are done
-	pod.subscribe("game.lost", () => undefined);
-	await flush();
-	assert.equal(dropped, true);
-	assert.equal(root.interested("game.lost"), false, "the sub frame was lost");
-
-	assert.equal(await root.whenInterested("game.lost", 1000), true, "the ping's digest showed the drift, and a resync fixed it");
-});
-
 test("a peer that restarts on the same transport leaves no ghost interest behind", async () => {
 	const [a, b] = pipe();
 	const root = createHub({ "id": "root" });
@@ -1069,28 +1043,6 @@ test("a peer that restarts on the same transport leaves no ghost interest behind
 
 	assert.equal(root.interested("new"), true);
 	assert.equal(root.interested("old"), false, "the old page's interest went with it");
-});
-
-test("a cycle is detected and cut, so a message can't loop", async () => {
-	// a ─ b ─ c ─ a: a wiring mistake. Every hub's loop-detection subject comes back to it round the ring.
-	const hubs = ["a", "b", "c"].map((id) => createHub({ "id": id }));
-	const reported = hubs.map(faults);
-	const ends = [pipe(), pipe(), pipe()];
-	let delivered = 0;
-
-	hubs[2]!.subscribe("x", () => { delivered += 1; });
-	hubs[0]!.link(ends[0]![0]);
-	hubs[1]!.link(ends[0]![1]);
-	hubs[1]!.link(ends[1]![0]);
-	hubs[2]!.link(ends[1]![1]);
-	hubs[2]!.link(ends[2]![0]);
-	hubs[0]!.link(ends[2]![1]);
-	await new Promise((resolve) => { setTimeout(resolve, 50); });
-
-	assert.ok(reported.flat().some((fault) => fault.kind === "loop"), "the loop was reported");
-	hubs[0]!.publish("x");
-	await new Promise((resolve) => { setTimeout(resolve, 50); });
-	assert.equal(delivered, 1);
 });
 
 test("maxPayload: an oversized message is dropped at the link, in either direction", async () => {
@@ -1154,7 +1106,7 @@ test("permissions intersect interest: a broad subscription behind a narrow allow
 
 	assert.equal(page.interested("game.state.client-0"), true);
 	assert.equal(page.interested("game.state.client-1"), false, "the page isn't told the client wants what it can't have");
-	assert.deepEqual(interestOf(page).filter((subject) => !subject.startsWith("$sys.lds.")), ["game.state.client-0"]);
+	assert.deepEqual(interestOf(page), ["game.state.client-0"]);
 });
 
 test("interest is narrowed to what a link may send, too", async () => {
@@ -1205,21 +1157,4 @@ test("subjects, patterns, ids and permissions are validated: thrown at locally, 
 	assert.equal(hub.inspect().links[0]?.peerId, undefined, "an invalid id is no name");
 	assert.deepEqual(interestOf(hub), []);
 	assert.equal(reported.filter((fault) => fault.kind === "frame").length, 4);
-});
-
-test("maxInterest caps how many subjects a link may ask for", async () => {
-	const [a, b] = pipe();
-	const root = createHub({ "id": "root" });
-	const pod = createHub({ "id": "pod" });
-	const reported = faults(root);
-
-	for (const subject of ["s1", "s2", "s3", "s4", "s5"]) {
-		pod.subscribe(subject, () => undefined);
-	}
-
-	await Promise.all([root.link(a, { "maxInterest": 3 }).ready, pod.link(b, { "permissions": {} }).ready]);
-	await flush();
-
-	assert.equal(interestOf(root).length, 3);
-	assert.ok(reported.some((fault) => fault.kind === "limit"));
 });

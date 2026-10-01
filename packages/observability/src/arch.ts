@@ -136,7 +136,7 @@ export const SILENCE_MS = 15_000;
 export const REALM_PARENT = "realm-parent";
 const MAX_SAMPLES_PER_FLUSH = 120;
 /** How each kind of hub control frame reads in the traffic. */
-const LIFECYCLE_LABELS: Record<string, string> = { "hello": "hello", "sub": "interest (sub)", "unsub": "interest (unsub)", "ping": "heartbeat", "pong": "heartbeat", "bye": "bye" };
+const LIFECYCLE_LABELS: Record<string, string> = { "hello": "hello", "sub": "interest (sub)", "unsub": "interest (unsub)", "ping": "heartbeat", "pong": "heartbeat" };
 /** Node ops held while nobody listens (see flush), past which they're collapsed into the nodes' current state. */
 const MAX_HELD_NODE_OPS = 200;
 
