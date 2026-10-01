@@ -369,7 +369,7 @@ test("a reporter can name itself by the id its link knows it by", async () => {
 
 	collectArchReports(edge, (report) => { reports.push(report); });
 	edge.link(a, { "peer": "seat-2" });
-	client.link(b);
+	client.link(b, { "uplink": true });
 	await wait(50);
 
 	const reporter = createArchReporter(client, { "self": client.knownAs()[0] });

@@ -121,3 +121,19 @@ test("scopedId and scopeOf", () => {
 	assert.equal(scopeOf("preview:5173~2/client-0.ui"), "preview:5173~2");
 	assert.equal(scopeOf("preview:5173"), undefined);
 });
+
+test("an app hub that calls itself `shell` is still the app's — reports and records — while its link to the editor's shell keeps the name", () => {
+	const report = scopeArchReport({
+		"reporter": "shell",
+		"time": 1,
+		"ended": true,
+		"topology": { "id": "shell", "subscriptions": [], "links": [{ "id": "link-1", "peerId": "shell", "remoteInterest": [], "advertised": [] }] },
+		"traffic": [{ "from": "shell", "to": "shell", "kind": "message", "label": "x", "count": 1, "bytes": 1 }]
+	}, "preview:5173");
+
+	assert.equal(report.reporter, "preview:5173/shell");
+	assert.equal(report.topology!.id, "preview:5173/shell");
+	assert.equal(report.topology!.links[0]!.peerId, "preview:5173/shell", "an id equal to the reporter is the reporter");
+	assert.deepEqual(scopeObservability({ "subject": "$sys.log.shell", "data": { "context": { "source": "shell" } } }, "preview:5173"), { "subject": "$sys.log.preview:5173/shell", "data": { "context": { "source": "preview:5173/shell" } } });
+	assert.deepEqual(scopeObservability({ "subject": "$sys.arch.shell", "data": { "reporter": "shell", "time": 1, "ended": true } }, "preview:5173"), { "subject": "$sys.arch.preview:5173/shell", "data": { "reporter": "preview:5173/shell", "time": 1, "ended": true } });
+});

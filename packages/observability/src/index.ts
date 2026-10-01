@@ -427,7 +427,8 @@ export function linkPreviewHost(hub: Hub): PreviewLink | undefined {
 	// What the app logs while it boots — before this link is up — would never reach the editor: hold it, send it once
 	// the collector can hear it (as linkDebugMcp does).
 	const backlog = logBacklog(hub);
-	const link = hub.link(windowTransport(host, location.origin)) as PreviewLink;
+	// The shell is this page's uplink: the id it assigns the page (its window) is who the page is to the editor.
+	const link = hub.link(windowTransport(host, location.origin), { "uplink": true }) as PreviewLink;
 
 	void backlog.flushWhenReady();
 	announceWhenReady(hub, link);

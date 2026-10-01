@@ -40,9 +40,11 @@ function scopeOp(op: NodeOp, rename: (id: string) => string): NodeOp {
 	return { ...op, "id": rename(op.id) };
 }
 
-/** `report`, its app's hub ids renamed under `scope`. */
+/** `report`, its app's hub ids renamed under `scope`. The reporter is always the app's — even one that calls itself by
+ *  a kept name (an app hub named `shell` must not pass as the editor's) — so it, and any id equal to it, is always
+ *  scoped; `keep` spares only the OTHER ids it mentions (the joining side it links to). */
 export function scopeArchReport(report: ArchReport, scope: string, keep: (id: string) => boolean = (id) => id === "shell"): ArchReport {
-	const rename = (id: string): string => (keep(id) ? id : scopedId(scope, id));
+	const rename = (id: string): string => (id !== report.reporter && keep(id) ? id : scopedId(scope, id));
 
 	return {
 		...report,
@@ -66,7 +68,6 @@ export function scopeObservability(frame: unknown, scope: string, keep: (id: str
 		return frame;
 	}
 
-	const rename = (id: string): string => (keep(id) ? id : scopedId(scope, id));
 	const { data } = frame as Frame;
 
 	if (subject.startsWith(ARCH_SUBJECT + ".") && subject !== ARCH_SUBJECT + ".sync" && typeof data === "object" && data !== null) {
@@ -75,12 +76,15 @@ export function scopeObservability(frame: unknown, scope: string, keep: (id: str
 		return { ...(frame as object), "subject": ARCH_SUBJECT + "." + report.reporter, "data": report };
 	}
 
+	// A record is always the app's (nothing of the joining side's comes from the app): scoped whatever its source.
+	const always = (id: string): string => scopedId(scope, id);
+
 	if (subject.startsWith(LOG_SUBJECT + ".")) {
-		return { ...(frame as object), "subject": LOG_SUBJECT + "." + rename(subject.slice(LOG_SUBJECT.length + 1)), "data": scopeRecord(data, rename) };
+		return { ...(frame as object), "subject": LOG_SUBJECT + "." + always(subject.slice(LOG_SUBJECT.length + 1)), "data": scopeRecord(data, always) };
 	}
 
 	if (subject === LOG_BACKLOG && Array.isArray(data)) {
-		return { ...(frame as object), "data": data.map((record) => scopeRecord(record, rename)) };
+		return { ...(frame as object), "data": data.map((record) => scopeRecord(record, always)) };
 	}
 
 	return frame;

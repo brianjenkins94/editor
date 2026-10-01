@@ -180,7 +180,7 @@ test("a preview app's tab answer names its window — the id the editor's shell 
 		const answers: { "scope"?: string; "preview"?: boolean }[] = [];
 
 		// The shell links the window's page as `preview:5173~2` — and its hello says so.
-		await Promise.all([shell.link(up, { "peer": "preview:5173~2", "transit": false }).ready, page.link(down).ready]);
+		await Promise.all([shell.link(up, { "peer": "preview:5173~2", "transit": false }).ready, page.link(down, { "uplink": true }).ready]);
 		answerTabDiscovery(page, "app");
 		shell.subscribe(TAB_HERE, (data) => { answers.push(data as { "scope"?: string; "preview"?: boolean }); });
 		await flush();

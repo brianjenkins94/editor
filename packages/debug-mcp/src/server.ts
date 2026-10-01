@@ -103,6 +103,8 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 
 	// Everything is filed by the link it arrived on — each connected tab is one — so two tabs' same-named contexts
 	// stay apart. A tab's id (what the tools take) maps to its link once it answers discovery.
+	// These maps outlive the link on purpose: a gone tab's records stay in the store, reachable by its id. (They grow
+	// by one entry per tab ever connected — as the store's records do, which `max` bounds instead.)
 	const tabByLink = new Map<string, string>();
 	const archByLink = new Map<string, ArchitectureStore>();
 
