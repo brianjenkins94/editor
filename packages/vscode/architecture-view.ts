@@ -12,7 +12,7 @@ import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@bria
 import type { ContainerSpec, Violation } from "./architecture-model";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
 import type { AppLayout } from "./architecture-model";
-import { appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
+import { appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredOn, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 import { windowTitle } from "./virtual-path";
 
@@ -90,7 +90,8 @@ function conformanceOf(store: ArchitectureStore): Violation[] {
 
 	store.sweep(now);
 
-	const shown = new Set([...store.nodes.values()].filter((node) => node.state !== "declared" && isVisible(node, now, false)).map((node) => node.id));
+	// (A medium drawn as an edge isn't a context: its edge is checked against the medium's declaration instead.)
+	const shown = new Set([...store.nodes.values()].filter((node) => node.state !== "declared" && !store.media().has(node.id) && isVisible(node, now, false)).map((node) => node.id));
 
 	return checkConformance({
 		"nodes": [...shown],
@@ -442,14 +443,14 @@ function observedMermaid(store: ArchitectureStore): string {
 	const lines = ["flowchart LR"];
 
 	for (const node of store.nodes.values()) {
-		if (node.state !== "declared") {
+		if (node.state !== "declared" && !store.media().has(node.id)) {
 			lines.push(`  ${id(node.id)}["${labelOf(store, node.id).replaceAll("\"", "'")}"]`);
 		}
 	}
 
 	for (const channel of store.channels.values()) {
-		const declared = declaredBetween(channel.a, channel.b);
-		const label = (declared === undefined ? "UNDECLARED" : declared.type === "hub" ? "hub" : declared.spec.protocol) + " · " + formatCount(channel.count);
+		const declared = declaredOn(channel);
+		const label = (declared === undefined ? "UNDECLARED" : declared.type === "hub" ? "hub" : declared.spec.protocol) + (channel.medium === undefined ? "" : " via " + channel.medium) + " · " + formatCount(channel.count);
 
 		lines.push(`  ${id(channel.a)} ${declared?.type === "hub" ? "<==>" : "<-->"}|${label}| ${id(channel.b)}`);
 	}
@@ -645,7 +646,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			return;
 		}
 
-		const declared = declaredBetween(a, b);
+		const declared = channel === undefined ? declaredBetween(a, b) : declaredOn(channel);
 		// A previewed app's own lines are its business, not undeclared editor traffic.
 		const type = declared === undefined ? (app.has(a) || app.has(b) ? "channel" : "undeclared") : declared.type;
 		const observed = channel !== undefined && (channel.count > 0 || channel.linked);
@@ -686,12 +687,14 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 	function render(): void {
 		const now = Date.now();
-		const visible = [...store.nodes.values()].filter((node) => isVisible(node, now, showDeclared));
+		// A medium only two contexts use is drawn as the edge between them (its channel's `medium`), not as a box.
+		const media = store.media();
+		const visible = [...store.nodes.values()].filter((node) => !media.has(node.id) && isVisible(node, now, showDeclared));
 
 		// Declared nodes nobody reported yet are drawn idle.
 		if (showDeclared) {
 			for (const declared of declaredNodes) {
-				if (!store.nodes.has(declared.id)) {
+				if (!store.nodes.has(declared.id) && !media.has(declared.id)) {
 					visible.push({ "id": declared.id, "spec": { "id": declared.id }, "state": "declared", "instances": 0, "spawnCount": 0, "reporters": new Set() });
 				}
 			}
@@ -773,7 +776,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		}
 
 		// Declared but not observed: the hub tree, then fixed-endpoint channels.
-		const present = (a: string, b: string): boolean => store.channels.has(a + "|" + b) || store.channels.has(b + "|" + a);
+		const present = (a: string, b: string): boolean => store.between(a, b) !== undefined || media.get(a)?.includes(b) === true || media.get(b)?.includes(a) === true;
 
 		for (const [a, b] of hubLinks) {
 			if (!present(a, b) && visibleIds.has(a) && visibleIds.has(b)) {
@@ -1117,7 +1120,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 				table(["Link", "Peer"], topology.links.map((entry) => [entry.id, entry.peerId === undefined ? "anonymous" : link(labelOf(store, entry.peerId), { "type": "node", "id": entry.peerId })]))
 			),
 			section("Channels", channels.length === 0 ? h("p", { "class": "arch-muted" }, "No traffic observed yet.") : table(["With", "Messages", "Bytes", "Rate"], channels.map((channel) => [
-				h("span", null, link(labelOf(store, channel.a === id ? channel.b : channel.a), { "type": "edge", "id": channel.id }), declaredBetween(channel.a, channel.b) === undefined ? h("span", { "class": "arch-violations" }, " undeclared") : null),
+				h("span", null, link(labelOf(store, channel.a === id ? channel.b : channel.a), { "type": "edge", "id": channel.id }), declaredOn(channel) === undefined ? h("span", { "class": "arch-violations" }, " undeclared") : null),
 				formatCount(channel.count),
 				formatBytes(channel.bytes),
 				formatRate(store.rate(channel, now))
@@ -1127,7 +1130,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 	function renderEdge(id: string): Child[] {
 		const edge = edges.get(id);
-		const channel = edge?.channel ?? store.channels.get(id);
+		const channel = edge?.channel ?? store.channelById(id);
 		const a = edge?.a ?? channel?.a;
 		const b = edge?.b ?? channel?.b;
 
@@ -1135,10 +1138,11 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			return [h("p", null, "This channel is gone.")];
 		}
 
-		const declared = declaredBetween(a, b);
+		const declared = channel === undefined ? declaredBetween(a, b) : declaredOn(channel);
 		const families = declared?.type === "hub" ? familiesOnLink(a, b) : [];
 		const header: Child[] = [
 			h("h2", null, link(labelOf(store, a), { "type": "node", "id": a }), " ⇄ ", link(labelOf(store, b), { "type": "node", "id": b })),
+			channel?.medium !== undefined && h("p", { "class": "arch-muted" }, "Through ", h("code", null, labelOf(store, channel.medium)), ` (${store.nodes.get(channel.medium)?.spec.detail ?? "a channel"}) — only these two use it.`),
 			declared === undefined && (app.has(a) || app.has(b))
 				? h("div", { "class": "arch-state state-alive" }, "the previewed app's own — not in the editor's model")
 				: declared === undefined
@@ -1200,9 +1204,9 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	function describeViolation(violation: Violation): Child {
 		switch (violation.type) {
 			case "undeclared-channel":
-				return h("span", null, link(labelOf(store, violation.a) + " ⇄ " + labelOf(store, violation.b), { "type": "edge", "id": store.channel(violation.a, violation.b).channel.id }, "arch-link arch-violations"), " — no hub link or channel in the model");
+				return h("span", null, link(labelOf(store, violation.a) + " ⇄ " + labelOf(store, violation.b), { "type": "edge", "id": store.between(violation.a, violation.b)?.id ?? violation.a + "|" + violation.b }, "arch-link arch-violations"), " — no hub link or channel in the model");
 			case "unexpected-subject":
-				return h("span", null, h("code", null, violation.subject), ` × ${formatCount(violation.count)} across `, link(labelOf(store, violation.a) + " ⇄ " + labelOf(store, violation.b), { "type": "edge", "id": store.channel(violation.a, violation.b).channel.id }), " — not among the hubs of any family that may cross it");
+				return h("span", null, h("code", null, violation.subject), ` × ${formatCount(violation.count)} across `, link(labelOf(store, violation.a) + " ⇄ " + labelOf(store, violation.b), { "type": "edge", "id": store.between(violation.a, violation.b)?.id ?? violation.a + "|" + violation.b }), " — not among the hubs of any family that may cross it");
 			case "duplicate-peer":
 				return h("span", null, link(labelOf(store, violation.hub), { "type": "node", "id": violation.hub }), ` has ${violation.links} links to "${violation.peer}" — duplicate hub ids, or stale links`);
 			case "unknown-node":
@@ -1259,7 +1263,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 				continue;
 			}
 
-			const channel = store.channels.get(sample.channel);
+			const channel = store.channelById(sample.channel);
 
 			if (logFilter.length > 0 && !`${sample.label} ${sample.kind} ${channel === undefined ? "" : labelOf(store, channel.a) + " " + labelOf(store, channel.b)}`.toLowerCase().includes(logFilter)) {
 				continue;

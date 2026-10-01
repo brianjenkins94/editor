@@ -5,6 +5,10 @@
  *
  * Counts are kept PER REPORTER: a reporter's full-state answer to a sync REPLACES its contribution (its totals
  * already include every delta it sent before), so a viewer opened late never counts anything twice.
+ *
+ * A MEDIUM only two contexts use — a BroadcastChannel between a client and its referee — is drawn as one edge between
+ * them, marked with it (`medium`), rather than as a node of its own: what the probes see physically (client → channel
+ * → referee), read as what it is. `channels` is that picture; the channels as reported stay underneath it.
  */
 import type { ArchNodeSpec, ArchReport, NodeState, TrafficCount, TrafficKind } from "./arch.ts";
 import { SILENCE_MS } from "./arch.ts";
@@ -46,6 +50,8 @@ export interface ChannelStats {
 	"errors": number;
 	/** A hub link joins the two (both ends' hubs saw each other), whether or not traffic flowed. */
 	"linked": boolean;
+	/** The medium between the two, when they meet through one only they use (a BroadcastChannel's node id). */
+	"medium"?: string;
 	/** Per hub end: the subjects the far side has asked it for (the link's remote interest). */
 	"interest": Record<string, string[]>;
 	"firstAt": number;
@@ -60,15 +66,24 @@ export interface ChannelStats {
 export interface StoredSample { "seq": number; "t": number; "channel": string; "forward": boolean; "kind": TrafficKind; "label": string; "bytes": number; "reporter": string; "payload"?: string }
 
 const RECENT_PER_CHANNEL = 200;
+/** The roles of nodes that carry messages between contexts rather than being one: drawn as an edge when two use them. */
+const MEDIUM_ROLES = new Set(["channel"]);
 const LOG_SIZE = 3000;
 const RATE_WINDOW_MS = 2000;
 
 type Listener = () => void;
 type SampleListener = (sample: StoredSample, channel: ChannelStats) => void;
 
+interface Picture {
+	"channels": Map<string, ChannelStats>;
+	/** Each medium drawn as an edge, with the two contexts on it. */
+	"media": Map<string, [string, string]>;
+	/** A reported channel folded into a medium's edge → that edge's id. */
+	"folded": Map<string, string>;
+}
+
 export class ArchitectureStore {
 	public readonly nodes = new Map<string, RuntimeNode>();
-	public readonly channels = new Map<string, ChannelStats>();
 	public readonly log: StoredSample[] = [];
 	public readonly topology = new Map<string, NonNullable<ArchReport["topology"]>>();
 	/** Where each reporting hub runs (ArchRealm), by reporter. */
@@ -76,6 +91,9 @@ export class ArchitectureStore {
 	/** Reporters seen, with when they last reported. */
 	public readonly reporters = new Map<string, number>();
 
+	/** The channels as reported, between whatever ends the probes named. */
+	private readonly reported = new Map<string, ChannelStats>();
+	private picture: Picture | undefined;
 	private readonly contributions = new Map<string, Map<string, TrafficCount>>();
 	private readonly topologyListeners = new Set<Listener>();
 	private readonly sampleListeners = new Set<SampleListener>();
@@ -167,14 +185,35 @@ export class ArchitectureStore {
 		}
 	}
 
+	/** The channels to draw: every reported one, except that a medium two contexts share is one edge between them. */
+	public get channels(): Map<string, ChannelStats> {
+		return this.draw().channels;
+	}
+
+	/** Each medium drawn as an edge, with the two contexts on it. */
+	public media(): Map<string, [string, string]> {
+		return this.draw().media;
+	}
+
+	/** A channel by id: one drawn, or one as reported (a sample's `channel`, folded into a medium's edge or not). */
+	public channelById(id: string): ChannelStats | undefined {
+		return this.draw().channels.get(id) ?? this.reported.get(id);
+	}
+
+	/** The channel drawn between two contexts, if any. */
+	public between(a: string, b: string): ChannelStats | undefined {
+		return [...this.channels.values()].find((channel) => (channel.a === a && channel.b === b) || (channel.a === b && channel.b === a));
+	}
+
+	/** The channel as reported between `a` and `b` (created if new); `reversed` when it runs b → a. */
 	public channel(a: string, b: string): { "channel": ChannelStats; "reversed": boolean } {
-		const direct = this.channels.get(a + "|" + b);
+		const direct = this.reported.get(a + "|" + b);
 
 		if (direct !== undefined) {
 			return { "channel": direct, "reversed": false };
 		}
 
-		const reverse = this.channels.get(b + "|" + a);
+		const reverse = this.reported.get(b + "|" + a);
 
 		if (reverse !== undefined) {
 			return { "channel": reverse, "reversed": true };
@@ -199,7 +238,8 @@ export class ArchitectureStore {
 			"window": []
 		};
 
-		this.channels.set(created.id, created);
+		this.reported.set(created.id, created);
+		this.picture = undefined;
 		this.changed();
 
 		return { "channel": created, "reversed": false };
@@ -367,6 +407,8 @@ export class ArchitectureStore {
 			this.applyTopology(reporter, report.topology);
 		}
 
+		this.picture = undefined;
+
 		// Samples: the log and the animation — replayed at their original pace relative to the report.
 		const offset = Date.now() - report.time;
 
@@ -395,10 +437,16 @@ export class ArchitectureStore {
 
 			this.log.push(stored);
 
-			for (const listener of this.sampleListeners) {
-				listener(stored, channel);
+			const drawn = this.drawnSample(stored, channel);
+
+			if (drawn !== undefined) {
+				for (const listener of this.sampleListeners) {
+					listener(drawn.sample, drawn.channel);
+				}
 			}
 		}
+
+		this.picture = undefined;
 
 		if (this.log.length > LOG_SIZE) {
 			this.log.splice(0, this.log.length - LOG_SIZE);
@@ -430,9 +478,82 @@ export class ArchitectureStore {
 		}
 	}
 
+	/** A sample as the picture shows it: on its medium's edge, the way it went — or not at all, for the receiving end's
+	 *  sighting of a message the sending end already showed. */
+	private drawnSample(sample: StoredSample, channel: ChannelStats): { "sample": StoredSample; "channel": ChannelStats } | undefined {
+		const picture = this.draw();
+		const edgeId = picture.folded.get(channel.id);
+
+		if (edgeId === undefined) {
+			return { "sample": sample, "channel": channel };
+		}
+
+		const edge = picture.channels.get(edgeId)!;
+		const from = sample.forward ? channel.a : channel.b;
+
+		if (from === edge.medium) {
+			return undefined;
+		}
+
+		return { "sample": { ...sample, "channel": edge.id, "forward": from === edge.a }, "channel": edge };
+	}
+
+	private isMedium(id: string): boolean {
+		return MEDIUM_ROLES.has(this.nodes.get(id)?.spec.role ?? "");
+	}
+
+	/** The picture: the reported channels, with each medium only two contexts use folded into one edge between them. */
+	private draw(): Picture {
+		if (this.picture !== undefined) {
+			return this.picture;
+		}
+
+		// Each medium's contexts, and the reported channel to each.
+		const onMedium = new Map<string, Map<string, ChannelStats>>();
+
+		for (const channel of this.reported.values()) {
+			for (const [end, other] of [[channel.a, channel.b], [channel.b, channel.a]] as const) {
+				if (this.isMedium(end) && !this.isMedium(other)) {
+					onMedium.set(end, (onMedium.get(end) ?? new Map<string, ChannelStats>()).set(other, channel));
+				}
+			}
+		}
+
+		const picture: Picture = { "channels": new Map(), "media": new Map(), "folded": new Map() };
+		const edges: ChannelStats[] = [];
+
+		for (const [medium, ends] of onMedium) {
+			if (ends.size === 2) {
+				const [[a, toA], [b, toB]] = [...ends] as [[string, ChannelStats], [string, ChannelStats]];
+				const edge = mediumEdge(medium, a, toA, b, toB);
+
+				picture.media.set(medium, [a, b]);
+				picture.folded.set(toA.id, edge.id);
+				picture.folded.set(toB.id, edge.id);
+				edges.push(edge);
+			}
+		}
+
+		for (const channel of this.reported.values()) {
+			if (!picture.folded.has(channel.id)) {
+				picture.channels.set(channel.id, channel);
+			}
+		}
+
+		for (const edge of edges) {
+			picture.channels.set(edge.id, edge);
+		}
+
+		this.picture = picture;
+
+		return picture;
+	}
+
 	/** Forget the counts (not the topology). */
 	public resetCounters(): void {
-		for (const channel of this.channels.values()) {
+		this.picture = undefined;
+
+		for (const channel of this.reported.values()) {
 			Object.assign(channel, { "count": 0, "bytes": 0, "forward": 0, "backward": 0, "errors": 0 });
 			channel.labels.clear();
 			channel.recent.length = 0;
@@ -468,10 +589,73 @@ export class ArchitectureStore {
 			"reporters": Object.fromEntries(this.reporters),
 			"topology": Object.fromEntries(this.topology),
 			"realms": Object.fromEntries(this.realms),
-			"nodes": [...this.nodes.values()].map((node) => ({ ...node, "reporters": [...node.reporters] })),
+			"nodes": [...this.nodes.values()].filter((node) => !this.media().has(node.id)).map((node) => ({ ...node, "reporters": [...node.reporters] })),
+			"media": [...this.media()].map(([id, between]) => ({ "id": id, "between": between })),
 			"channels": [...this.channels.values()].map(({ labels, "window": _window, ...channel }) => ({ ...channel, "labels": Object.fromEntries(labels) }))
 		};
 	}
+}
+
+/**
+ * The edge `a ⇄ b` through `medium`, from the channels each has to it as reported (`toA`: a ⇄ medium). Each message is
+ * seen at both ends — sent by one, received by the other — so it's counted from the senders' side alone: a → b is what
+ * a sent into the medium. (Bytes and errors aren't kept by direction: split in proportion, and halved.)
+ */
+function mediumEdge(medium: string, a: string, toA: ChannelStats, b: string, toB: ChannelStats): ChannelStats {
+	const sentBy = (end: string, channel: ChannelStats): number => (channel.a === end ? channel.forward : channel.backward);
+	const forward = sentBy(a, toA);
+	const backward = sentBy(b, toB);
+	const share = (channel: ChannelStats, sent: number): number => (channel.count === 0 ? 0 : sent / channel.count);
+	const labels = new Map<string, LabelStats>();
+
+	for (const [end, channel, way] of [[a, toA, "forward"], [b, toB, "backward"]] as const) {
+		for (const [label, stats] of channel.labels) {
+			const sent = channel.a === end ? stats.forward : stats.backward;
+
+			if (sent === 0) {
+				continue;
+			}
+
+			const entry = labels.get(label) ?? { "count": 0, "bytes": 0, "forward": 0, "backward": 0, "hub": 0 };
+
+			entry.count += sent;
+			entry[way] += sent;
+			entry.bytes += stats.bytes * share({ ...channel, "count": stats.count }, sent);
+			entry.hub += stats.hub * share({ ...channel, "count": stats.count }, sent);
+			labels.set(label, entry);
+		}
+	}
+
+	// The senders' sightings, each pointed the way it went on the edge.
+	const recent = [...toA.recent, ...toB.recent]
+		.map((sample) => {
+			const channel = sample.channel === toA.id ? toA : toB;
+			const from = sample.forward ? channel.a : channel.b;
+
+			return from === medium ? undefined : { ...sample, "channel": a + "|" + b + "~" + medium, "forward": from === a };
+		})
+		.filter((sample) => sample !== undefined)
+		.sort((left, right) => left.seq - right.seq)
+		.slice(-RECENT_PER_CHANNEL);
+
+	return {
+		"id": a + "|" + b + "~" + medium,
+		"a": a,
+		"b": b,
+		"medium": medium,
+		"count": forward + backward,
+		"bytes": toA.bytes * share(toA, forward) + toB.bytes * share(toB, backward),
+		"forward": forward,
+		"backward": backward,
+		"errors": Math.round((toA.errors + toB.errors) / 2),
+		"linked": false,
+		"interest": {},
+		"firstAt": Math.min(toA.firstAt, toB.firstAt),
+		"lastAt": Math.max(toA.lastAt, toB.lastAt),
+		"labels": labels,
+		"recent": recent,
+		"window": [...toA.window, ...toB.window].map(([time, count]): [number, number] => [time, count / 2]).sort(([left], [right]) => left - right)
+	};
 }
 
 function trafficKey(entry: TrafficCount): string {

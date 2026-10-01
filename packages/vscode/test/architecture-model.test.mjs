@@ -2,7 +2,7 @@
 // doesn't declare. Run: node --test test/architecture-model.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appLayout, appNodes, checkConformance, classifyUrl, declaredBetween, familiesOnLink, identifyWorker, nodes, subjectOfLabel } from "../architecture-model.ts";
+import { appLayout, appNodes, checkConformance, classifyUrl, declaredBetween, declaredOn, familiesOnLink, identifyWorker, nodes, subjectOfLabel } from "../architecture-model.ts";
 
 const patterns = (a, b) => familiesOnLink(a, b).map((family) => family.pattern);
 
@@ -175,4 +175,18 @@ test("nothing is guessed: a context that doesn't say where it runs sits in its w
 
 	assert.deepEqual([...layout.nodes].sort(), ["preview:5173~2/player-1", "preview:5173~2/player-1/referee"]);
 	assert.equal(layout.parent.size, 0);
+});
+
+test("a pair meeting through a medium only they use is judged by the medium's declaration", () => {
+	// The model declares node ⇄ channel:vite-ws-channel; drawn as one edge, node ⇄ its client through that channel.
+	const throughDeclared = { "a": "node", "b": "worker:ws-client.js", "medium": "channel:vite-ws-channel", "labels": new Map() };
+	const throughUnknown = { "a": "workbench", "b": "node", "medium": "channel:mystery", "labels": new Map() };
+
+	assert.equal(declaredOn(throughDeclared)?.type, "channel");
+	assert.equal(declaredOn(throughUnknown), undefined);
+	assert.equal(declaredOn({ "a": "shell", "b": "root" })?.type, "hub", "no medium: the pair itself");
+
+	const violations = checkConformance({ "nodes": [], "channels": [throughDeclared, throughUnknown], "topology": new Map() });
+
+	assert.deepEqual(violations, [{ "type": "undeclared-channel", "a": "workbench", "b": "node" }]);
 });

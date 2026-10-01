@@ -180,7 +180,7 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 
 			if (channel !== undefined) {
 				return ok(channels.map((candidate) => ({
-					"a": candidate.a, "b": candidate.b, "count": candidate.count, "bytes": candidate.bytes, "rate": arch.rate(candidate, now),
+					"a": candidate.a, "b": candidate.b, ...candidate.medium === undefined ? {} : { "medium": candidate.medium }, "count": candidate.count, "bytes": candidate.bytes, "rate": arch.rate(candidate, now),
 					"linked": candidate.linked, "interest": candidate.interest, "labels": labelsOf(candidate, 200),
 					"recent": candidate.recent.slice(-50).map((sample) => ({ "ago": now - sample.t, "forward": sample.forward, "kind": sample.kind, "label": sample.label, "bytes": sample.bytes, ...sample.payload === undefined ? {} : { "payload": sample.payload } }))
 				})));
@@ -188,9 +188,10 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 
 			return ok({
 				"reporters": Object.fromEntries([...arch.reporters].map(([id, seen]) => [id, { "lastReportMsAgo": now - seen }])),
-				"nodes": [...arch.nodes.values()].map((node) => ({ "id": node.id, "state": node.state, "instances": node.instances, "spawnCount": node.spawnCount, "label": node.spec.label, "container": node.spec.container, "reporters": [...node.reporters] })),
+				// A medium only two contexts use is the edge between them (its `medium`), not a node.
+				"nodes": [...arch.nodes.values()].filter((node) => !arch.media().has(node.id)).map((node) => ({ "id": node.id, "state": node.state, "instances": node.instances, "spawnCount": node.spawnCount, "label": node.spec.label, "container": node.spec.container, "reporters": [...node.reporters] })),
 				"channels": channels.slice(0, limit).map((candidate) => ({
-					"a": candidate.a, "b": candidate.b, "count": candidate.count, "bytes": candidate.bytes, "rate": arch.rate(candidate, now),
+					"a": candidate.a, "b": candidate.b, ...candidate.medium === undefined ? {} : { "medium": candidate.medium }, "count": candidate.count, "bytes": candidate.bytes, "rate": arch.rate(candidate, now),
 					"linked": candidate.linked, "errors": candidate.errors, "top": labelsOf(candidate, 8)
 				})),
 				"topology": Object.fromEntries([...arch.topology].map(([id, snapshot]) => [id, { "subscriptions": snapshot.subscriptions.length, "links": snapshot.links.map((link) => ({ "id": link.id, "peer": link.peerId ?? null })) }]))

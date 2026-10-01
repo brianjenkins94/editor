@@ -337,7 +337,14 @@ export type Violation =
 	| { "type": "unknown-node"; "id": string };
 
 /** `hub`: how many of a label's messages rode the hub — only those are subjects; the rest came from probes. */
-export interface ObservedChannel { "a": string; "b": string; "labels": Map<string, { "count": number; "hub"?: number }> }
+export interface ObservedChannel { "a": string; "b": string; "labels": Map<string, { "count": number; "hub"?: number }>; "medium"?: string }
+
+/** What the model says of an observed channel: of the pair it joins — or, for a pair meeting through a medium only they
+ *  use (observability draws that as one edge, `medium`), of either end's channel to the medium: the model declares a
+ *  BroadcastChannel as a node each end talks to. */
+export function declaredOn(channel: { "a": string; "b": string; "medium"?: string }): ReturnType<typeof declaredBetween> {
+	return channel.medium === undefined ? declaredBetween(channel.a, channel.b) : declaredBetween(channel.a, channel.medium) ?? declaredBetween(channel.b, channel.medium);
+}
 export interface ObservedTopology { "links": { "peerId"?: string }[] }
 
 /** How many observed pairs each declared channel covers. A channel declared on a hub-linked pair (raw messages beside
@@ -346,7 +353,7 @@ export function seenChannels(observed: ObservedChannel[]): Map<ChannelSpec, numb
 	const seen = new Map<ChannelSpec, number>();
 
 	for (const channel of observed) {
-		const spec = findChannel(channel.a, channel.b);
+		const spec = channel.medium === undefined ? findChannel(channel.a, channel.b) : findChannel(channel.a, channel.medium) ?? findChannel(channel.b, channel.medium);
 		const probed = !isHubLink(channel.a, channel.b) || [...channel.labels.values()].some((label) => label.count > (label.hub ?? 0));
 
 		if (spec !== undefined && probed) {
@@ -364,7 +371,7 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 	const app = appNodes(observed);
 
 	for (const channel of observed.channels.filter((candidate) => !app.has(candidate.a) && !app.has(candidate.b))) {
-		const declared = declaredBetween(channel.a, channel.b);
+		const declared = declaredOn(channel);
 
 		if (declared === undefined) {
 			violations.push({ "type": "undeclared-channel", "a": channel.a, "b": channel.b });
