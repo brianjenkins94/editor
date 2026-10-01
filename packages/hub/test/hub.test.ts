@@ -882,8 +882,8 @@ test("a confined link is told only of interest it could serve — so nobody past
 
 	// Permitted later (the client learns it may be debugged), its interest follows.
 	client.permit("referee", { "publish": ["game.*", "$rpc.call.debug.>"], "subscribe": ["$rpc.reply.>"] });
-	await flush();
-	assert.equal(page.interested("$rpc.call.debug.client-0.inspect"), true);
+	// (Two hops to travel — client → referee → page: wait for it rather than a fixed while.)
+	assert.equal(await page.whenInterested("$rpc.call.debug.client-0.inspect", 2000), true);
 	assert.equal(await createRpcClient(page).request("debug.client-0.inspect", undefined, { "timeoutMs": 1000 }), "reached");
 });
 

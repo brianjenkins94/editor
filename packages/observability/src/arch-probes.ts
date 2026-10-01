@@ -265,7 +265,7 @@ function installBroadcastChannelProbe(sink: ArchSink): void {
 
 		if (!seen.has(id)) {
 			seen.add(id);
-			sink.spawn({ "id": id, "role": "channel", "dynamic": true, "detail": "BroadcastChannel " + name });
+			sink.spawn({ "id": id, "label": id.slice("channel:".length), "role": "channel", "dynamic": true, "detail": "BroadcastChannel" });
 		}
 
 		const { kind, label } = describeAny(data);
@@ -319,7 +319,7 @@ function installLocksProbe(sink: ArchSink): void {
 		try {
 			if (!seen.has(id)) {
 				seen.add(id);
-				sink.spawn({ "id": id, "role": "lock", "dynamic": true, "detail": "Web Lock " + name });
+				sink.spawn({ "id": id, "label": id.slice("lock:".length), "role": "lock", "dynamic": true, "detail": "Web Lock" });
 			}
 
 			sink.record(sink.self, id, "request", "request (" + (options.mode ?? "exclusive") + (options.ifAvailable === true ? ", if available" : "") + ")");
@@ -391,7 +391,7 @@ function installRtcProbe(sink: ArchSink): void {
 					};
 				};
 
-				sink.spawn({ "id": id, "role": "peer connection", "dynamic": true, "detail": "RTCPeerConnection" });
+				sink.spawn({ "id": id, "label": "Peer connection " + count, "role": "peer connection", "dynamic": true, "detail": "RTCPeerConnection" });
 				connection.addEventListener("signalingstatechange", () => { state("signaling", connection.signalingState); });
 				connection.addEventListener("iceconnectionstatechange", () => { state("ice", connection.iceConnectionState); });
 				connection.addEventListener("connectionstatechange", () => {

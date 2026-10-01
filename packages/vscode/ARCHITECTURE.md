@@ -267,6 +267,10 @@ flowchart LR
     net_lighter_codehike_org["Code Hike"]
     debug_mcp["debug-mcp"]
   end
+  subgraph browserChannels["Browser channels"]
+  end
+  subgraph peers["Peer connections"]
+  end
   shell <==>|hub| root
   shell <==>|hub| preview__
   root <==>|hub| workbench

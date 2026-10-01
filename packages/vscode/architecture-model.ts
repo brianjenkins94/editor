@@ -76,7 +76,9 @@ export const containers: ContainerSpec[] = [
 	{ "id": "previewApp", "label": "App", "caption": "the previewed app's own hubs, workers and frames, per window (joined through the shell, named <window>/<hub>) · its architecture, not the editor's", "parent": "previews", "kind": "group" },
 	{ "id": "sharedMemory", "label": "Shared memory", "caption": "SharedArrayBuffer · Atomics locks", "column": 3, "kind": "group" },
 	{ "id": "browser", "label": "Browser", "caption": "storage", "column": 3, "kind": "group" },
-	{ "id": "network", "label": "Network (service worker)", "caption": "every HTTP request goes out through the service worker · debug-mcp's WebSocket connects directly", "column": 3, "kind": "group", "node": "sw" }
+	{ "id": "network", "label": "Network (service worker)", "caption": "every HTTP request goes out through the service worker · debug-mcp's WebSocket connects directly", "column": 3, "kind": "group", "node": "sw" },
+	{ "id": "browserChannels", "label": "Browser channels", "caption": "BroadcastChannels and Web Locks — shared by every tab and worker of the origin, past the hub", "column": 3, "kind": "group" },
+	{ "id": "peers", "label": "Peer connections", "caption": "WebRTC — straight to another browser, past the service worker", "column": 3, "kind": "group" }
 ];
 
 export const nodes: NodeSpec[] = [
@@ -497,9 +499,14 @@ export function dynamicContainer(id: string): string | undefined {
 		return "workers";
 	}
 
-	// A realm's channels past its hub (observability's network probes): a BroadcastChannel, a Web Lock, a peer connection.
-	if (id.startsWith("channel:") || id.startsWith("lock:") || id.startsWith("rtc:")) {
-		return "network";
+	// A realm's channels past its hub (observability's network probes): a BroadcastChannel or a Web Lock, shared within
+	// the origin; a peer connection, to another browser.
+	if (id.startsWith("channel:") || id.startsWith("lock:")) {
+		return "browserChannels";
+	}
+
+	if (id.startsWith("rtc:")) {
+		return "peers";
 	}
 
 	return undefined;
