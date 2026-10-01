@@ -33,6 +33,7 @@ export function createGameProjection(hub: Hub): GameProjection {
 		// Generous limits: the first call waits for the worker to come up and then loads the shared ts chunk.
 		"project": async (files) => (await rpc.request("recognizer.project", { "files": files }, { "timeoutMs": 120000, "waitForResponderMs": 30000, "signal": dead.signal })) as GameModel,
 		"dispose": () => {
+			rpc.dispose();
 			unlink();
 			worker.terminate();
 		}

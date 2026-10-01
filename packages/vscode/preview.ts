@@ -47,7 +47,13 @@ export async function createPreview(options: PreviewOptions): Promise<Preview> {
 	const port = options.port ?? DEFAULT_PREVIEW_PORT;
 
 	// Start the dev server in the node worker, rooted at the workspace on the shared zen-fs.
-	await createRpcClient(hub).request("preview.start", { "port": port, "root": options.workspaceFolder ?? "/workspace" }, { "timeoutMs": 30000 });
+	const rpc = createRpcClient(hub);
+
+	try {
+		await rpc.request("preview.start", { "port": port, "root": options.workspaceFolder ?? "/workspace" }, { "timeoutMs": 30000 });
+	} finally {
+		rpc.dispose();
+	}
 
 	// Serve UNDER the deploy base (e.g. /editor/__virtual__/…), not root — the SW is scoped to the base, so a
 	// root-absolute /__virtual__/ URL would fall outside its scope and never be intercepted.

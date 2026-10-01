@@ -115,8 +115,8 @@ interface Link {
 	"transit": boolean;
 	/** True when `peerId` was assigned by this hub (LinkOptions.peer) rather than learned from the peer's hello. */
 	"assigned": boolean;
-	/** The id the hub at the other end assigned US (its hello's `you`) — who we are to it. Taken only from a link we
-	 *  didn't assign: a peer we named can't rename us. */
+	/** On an uplink (LinkOptions.uplink): the id the hub at the other end assigned US (its hello's `you`). */
+	"uplink": boolean;
 	"knownAs"?: string;
 	"permissions"?: LinkPermissions;
 	"detach": () => void;
@@ -184,6 +184,9 @@ export interface LinkOptions {
 	 *  another (each tree still reaches this hub, and this hub reaches each tree), so a request in one tab can't be
 	 *  answered by another tab. */
 	"transit"?: boolean;
+	/** This link goes UP, to the hub that decides who we are: the id it assigned us (its hello's `you`) is taken as ours
+	 *  there (Hub.knownAs). Only an uplink's word counts — a child, or any other peer, can't rename this hub. */
+	"uplink"?: boolean;
 	/** The id this hub knows the peer by. It overrides whatever the peer claims in its hello, and every message
 	 *  arriving over the link is stamped `from` it — so, past this hub, `from` is authenticated (as far as the hubs in
 	 *  between are trusted). Assign it when this hub decides who the peer is (it created the iframe, seated the
@@ -257,7 +260,7 @@ export class Hub {
 	}
 
 	/** Would a message on `subject` published HERE reach anyone right now — a local handler, or a link whose subtree
-	 *  wants it? */
+	 *  wants it AND whose permissions let it through (an interested link that would refuse it is no listener)? */
 	public interested(subject: string): boolean {
 		for (const pattern of this.handlers.keys()) {
 			if (matches(pattern, subject)) {
@@ -266,6 +269,10 @@ export class Hub {
 		}
 
 		for (const link of this.links) {
+			if (!permits(link.permissions?.subscribe, subject)) {
+				continue;
+			}
+
 			for (const pattern of link.remoteInterest) {
 				if (matches(pattern, subject)) {
 					return true;
@@ -311,8 +318,8 @@ export class Hub {
 	}
 
 	/** This hub's topology right now: subscriptions, links, their peers and the interest in each direction. */
-	/** The ids hubs we're linked to know us by, where one assigned ours (LinkOptions.peer, told in its hello) — an
-	 *  untrusted child under an edge is its assigned id there, whatever it calls itself. In link order; usually one. */
+	/** The id our uplink (LinkOptions.uplink) assigned us, if it did (LinkOptions.peer, told in its hello) — an untrusted
+	 *  child under an edge is its assigned id there, whatever it calls itself. Usually one, or none. */
 	public knownAs(): string[] {
 		return [...new Set([...this.links].map((link) => link.knownAs).filter((id): id is string => id !== undefined))];
 	}
@@ -375,7 +382,7 @@ export class Hub {
 
 		let settle: (ready: boolean) => void = () => undefined;
 		const ready = new Promise<boolean>((resolve) => { settle = resolve; });
-		const link: Link = { "id": "link-" + this.linkIdPool, "peerId": options.peer, "transport": transport, "remoteInterest": new Set(), "advertised": new Set(), "transit": options.transit !== false, "assigned": options.peer !== undefined, "permissions": options.permissions, "detach": () => undefined, "settle": settle };
+		const link: Link = { "id": "link-" + this.linkIdPool, "peerId": options.peer, "transport": transport, "remoteInterest": new Set(), "advertised": new Set(), "transit": options.transit !== false, "assigned": options.peer !== undefined, "uplink": options.uplink === true, "permissions": options.permissions, "detach": () => undefined, "settle": settle };
 
 		link.detach = transport.listen((raw) => { this.receive(link, raw); });
 		this.links.add(link);
@@ -412,9 +419,8 @@ export class Hub {
 					this.emit({ "type": "topology" });
 				}
 
-				// Who we are to the hub that assigned our id — only from a link where we didn't assign ITS: a peer we
-				// named can't rename us (and so pull our RPC replies its way).
-				if (!link.assigned && typeof message.you === "string" && message.you !== link.knownAs) {
+				// Who we are to the hub that assigned our id — only from our uplink: no other peer can rename us.
+				if (link.uplink && typeof message.you === "string" && message.you !== link.knownAs) {
 					link.knownAs = message.you;
 					this.emit({ "type": "topology" });
 				}
@@ -746,6 +752,8 @@ export interface RpcClient {
 	/** Call `name` on whatever hub serves it and await the reply. Rejects on timeout, abort, or a served error. If
 	 *  nothing serves `name`, the request goes nowhere and the call times out (see `waitForResponderMs`). */
 	"request": (name: string, args?: unknown, options?: RpcRequestOptions) => Promise<unknown>;
+	/** Stop listening for replies, and reject the calls still waiting on one. */
+	"dispose": () => void;
 }
 
 /** `promise`, or `signal.reason` as soon as `signal` aborts. */
@@ -767,14 +775,14 @@ function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Pro
  *  interest. One client per hub is plenty; each call is correlated by id. */
 export function createRpcClient(hub: Hub): RpcClient {
 	const pending = new Map<string, Pending>();
-	// Replies come to the id we're addressed by: ours — or, under an edge that assigned us one (a hub's `hello` says
-	// so: Hub.knownAs), that one, the only reply subject the edge lets through to us. Listen on each, as it's learned.
-	const listening = new Set<string>();
-	const replyTo = (): string => hub.knownAs()[0] ?? hub.id;
+	// Replies come to who we are to the responder (serve replies to the call's `from`): our own id — or, past an edge
+	// that assigned us one (our uplink's hello says so: Hub.knownAs), that one, the only reply subject the edge lets
+	// through to us. Listen on each, as it's learned. (`replyTo` declares our own id, for a responder that reads it.)
+	const listening = new Map<string, () => void>();
+	const replyTo = (): string => hub.id;
 	const listen = (id: string): void => {
 		if (!listening.has(id)) {
-			listening.add(id);
-			hub.subscribe(RPC_REPLY + "." + id, onReply);
+			listening.set(id, hub.subscribe(RPC_REPLY + "." + id, onReply));
 		}
 	};
 
@@ -805,7 +813,7 @@ export function createRpcClient(hub: Hub): RpcClient {
 		listen(id);
 	}
 
-	hub.tap((event) => {
+	const untap = hub.tap((event) => {
 		if (event.type === "topology") {
 			for (const id of hub.knownAs()) {
 				listen(id);
@@ -824,6 +832,21 @@ export function createRpcClient(hub: Hub): RpcClient {
 			}
 
 			return call(name, args, options.timeoutMs, signal);
+		},
+		"dispose": () => {
+			untap();
+
+			for (const unsubscribe of listening.values()) {
+				unsubscribe();
+			}
+
+			listening.clear();
+
+			for (const [id, entry] of pending) {
+				pending.delete(id);
+				entry.cleanup?.();
+				entry.reject(new Error("rpc client disposed"));
+			}
 		}
 	};
 
@@ -880,7 +903,11 @@ export function serve(hub: Hub, name: string, handler: (args: unknown, context: 
 			return;
 		}
 
-		const { id, replyTo, args } = data;
+		// Reply to who the caller IS — its `from`, stamped by the edge that assigned its id, or its own id where no edge
+		// did — not to the address it declares: an edge lets an assigned peer receive only `$rpc.reply.<assigned>`, and
+		// the caller listens on its own id and on the one its uplink gave it. (`replyTo` for a caller without a `from`.)
+		const { id, args } = data;
+		const replyTo = envelope.from ?? data.replyTo;
 		const key = replyTo + " " + id;
 
 		if (data.cancel === true) {

@@ -462,7 +462,8 @@ async function edge(options: Parameters<ReturnType<typeof createHub>["link"]>[1]
 	const [a, b] = pipe();
 
 	hub.link(a, options);
-	peer.link(b);
+	// The edge is the peer's uplink: the hub that decides who it is.
+	peer.link(b, { "uplink": true });
 	await flush();
 
 	return { "hub": hub, "peer": peer };
@@ -603,7 +604,7 @@ test("a peer learns the id its edge assigned it — and its RPC calls come back 
 	assert.equal(await createRpcClient(peer).request("whoami", undefined, { "timeoutMs": 1000 }), "seat-3", "the reply reached it under the assigned id");
 });
 
-test("a child can't rename the hub that assigned its id (and so pull that hub's replies its way)", async () => {
+test("only a hub's uplink can name it: not a child, nor any other peer, whatever order they linked in", async () => {
 	const [a, b] = pipe();
 	const parent = createHub({ "id": "parent" });
 
@@ -612,17 +613,59 @@ test("a child can't rename the hub that assigned its id (and so pull that hub's 
 	b.listen(() => undefined);
 	b.send({ "\u0000hub": { "hub": "hello", "id": "child", "you": "victim" } });
 	await flush();
-	assert.deepEqual(parent.knownAs(), []);
+	assert.deepEqual(parent.knownAs(), [], "a child it named");
 
-	// Where the parent didn't assign the child's id, it's a peer, not a child — and its word is taken.
+	// A child it didn't name, linked BEFORE its uplink — then the uplink, which does name it.
+	const page = createHub({ "id": "page" });
 	const [c, d] = pipe();
+	const [e, f] = pipe();
+
+	page.link(c);
+	d.listen(() => undefined);
+	d.send({ "\u0000hub": { "hub": "hello", "id": "frame", "you": "whatever-evil" } });
+	page.link(e, { "uplink": true });
+	f.listen(() => undefined);
+	f.send({ "\u0000hub": { "hub": "hello", "id": "shell", "you": "preview:5173" } });
+	await flush();
+	assert.deepEqual(page.knownAs(), ["preview:5173"], "only the uplink's word");
+});
+
+test("a hub named by its uplink still calls down its tree and gets its replies — a reply goes to the caller's `from`", async () => {
+	// The editor's shape: shell ─(names it preview:5173)─ page ─ referee ─(names it client-0, lets it answer only
+	// the page)─ client. The page's call to the client must come back, though the page is preview:5173 to the shell.
+	const shell = createHub({ "id": "shell" });
+	const page = createHub({ "id": "page" });
+	const referee = createHub({ "id": "referee" });
+	const client = createHub({ "id": "client" });
+	const [s1, s2] = pipe();
+	const [r1, r2] = pipe();
+	const [c1, c2] = pipe();
+
+	shell.link(s1, { "peer": "preview:5173", "transit": false });
+	page.link(s2, { "uplink": true });
+	page.link(r1);
+	referee.link(r2);
+	referee.link(c1, { "peer": "client-0", "permissions": { "publish": ["$rpc.reply.page"], "subscribe": ["$rpc.call.inspect"] } });
+	client.link(c2, { "uplink": true });
+	serve(client, "inspect", (_args, { from }) => ({ "from": from }));
+	await flush();
+	assert.deepEqual(page.knownAs(), ["preview:5173"]);
+	assert.deepEqual(await createRpcClient(page).request("inspect", undefined, { "timeoutMs": 1000 }), { "from": "page" });
+});
+
+test("interested() counts a link only if its permissions would let the message through", async () => {
+	const [a, b] = pipe();
+	const hub = createHub({ "id": "hub" });
 	const peer = createHub({ "id": "peer" });
 
-	peer.link(c);
-	d.listen(() => undefined);
-	d.send({ "\u0000hub": { "hub": "hello", "id": "edge", "you": "seat-9" } });
+	hub.link(a, { "peer": "peer", "permissions": { "subscribe": ["allowed"] } });
+	peer.link(b);
+	peer.subscribe("allowed", () => undefined);
+	peer.subscribe("denied", () => undefined);
 	await flush();
-	assert.deepEqual(peer.knownAs(), ["seat-9"]);
+	assert.equal(hub.interested("allowed"), true);
+	assert.equal(hub.interested("denied"), false, "interested, but the link would refuse it");
+	assert.equal(await hub.whenInterested("denied", 50), false);
 });
 
 test("a link is ready once the peer's hello has arrived — and with it, the peer's interest", async () => {
@@ -779,4 +822,27 @@ test("a link's handle carries its id — the one handlers' origin.link and inspe
 
 	assert.deepEqual(arrived, [link.id]);
 	assert.deepEqual(root.inspect().links.map((entry) => entry.id), [link.id]);
+});
+
+test("a disposed rpc client stops listening for replies and fails what it was still waiting on", async () => {
+	const [up, down] = pipe();
+	const server = createHub({ "id": "server" });
+	const caller = createHub({ "id": "caller" });
+
+	await Promise.all([server.link(up).ready, caller.link(down).ready]);
+	serve(server, "slow", () => new Promise(() => { /* never answers */ }));
+
+	const rpc = createRpcClient(caller);
+
+	await caller.whenInterested("$rpc.call.slow", 1000);
+
+	const waiting = rpc.request("slow", {}, { "timeoutMs": 60_000 });
+
+	await flush();
+	assert.equal(server.interested("$rpc.reply.caller"), true);
+	rpc.dispose();
+	await assert.rejects(waiting, /disposed/u);
+	await flush();
+	assert.equal(server.interested("$rpc.reply.caller"), false, "its reply subject is no longer advertised");
+	assert.equal(caller.interested("$rpc.reply.caller"), false);
 });
