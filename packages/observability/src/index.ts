@@ -24,10 +24,10 @@ import { logger, renderRecord, sinks } from "@brianjenkins94/util/logger";
 
 import type { ArchReporter } from "./arch.ts";
 import type { NetworkProbeOptions } from "./arch-probes.ts";
-import type { PageTool } from "./page-tools.ts";
+import type { PageTool, PageToolSet } from "./page-tools.ts";
 import type { TabInfo } from "./tabs.ts";
 import { collectArchReports, createArchReporter } from "./arch.ts";
-import { installNetworkProbes } from "./arch-probes.ts";
+import { installNetworkProbes, installWindowMessageProbe, installWorkerProbe } from "./arch-probes.ts";
 import { ArchitectureStore } from "./arch-store.ts";
 import { tagBySubject } from "./log-subject.ts";
 import { PAGE_TOOLS_CHANGED, servePageToolSet } from "./page-tools.ts";
@@ -534,16 +534,21 @@ function builtinPageTools(): PageTool[] {
  * in-page eval, so keep it behind the opt-in. Returns the tab id, or undefined when disabled.
  */
 export function servePageTools(hub: Hub, options: PageToolsOptions = {}): string | undefined {
+	return serveTools(hub, options)?.tab;
+}
+
+/** servePageTools, with the set it serves (to add to). */
+function serveTools(hub: Hub, options: PageToolsOptions): { "tab": string; "set": PageToolSet } | undefined {
 	if (!debugEnabled()) {
 		return undefined;
 	}
 
 	const tab = options.tab ?? crypto.randomUUID().slice(0, 8);
+	const set = servePageToolSet(hub, tab, [...builtinPageTools(), ...options.tools ?? []]);
 
-	servePageToolSet(hub, tab, [...builtinPageTools(), ...options.tools ?? []]);
 	answerTabDiscovery(hub, tab);
 
-	return tab;
+	return { "tab": tab, "set": set };
 }
 
 /**
@@ -594,9 +599,15 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 }
 
 export interface ObserveOptions {
-	/** Observe this realm's HTTP, WebSocket and IndexedDB traffic too (installNetworkProbes): `true`, or the probes'
-	 *  options. Off by default — one context per realm should (two would count the realm's traffic twice). */
+	/** Observe this realm's HTTP, WebSocket, IndexedDB, BroadcastChannel, Web Locks and WebRTC traffic too
+	 *  (installNetworkProbes): `true`, or the probes' options. Off by default — one context per realm should (two
+	 *  would count the realm's traffic twice). */
 	"network"?: boolean | NetworkProbeOptions;
+	/** Observe the workers this realm starts and the window messages it receives, outside the hub (installWorkerProbe,
+	 *  installWindowMessageProbe): `true`, or how to name the windows that message it (`window`: a node id, e.g. the
+	 *  parent page's hub id — default `window:<its path>`). A worker is named by its `name` option when it has one.
+	 *  Off by default; one context per realm. */
+	"messages"?: boolean | { "window"?: (source: Window) => string | undefined };
 }
 
 export interface Observed {
@@ -611,13 +622,18 @@ export interface Observed {
  * Observe a context: its structured logs, its uncaught errors and its place in the hub tree (links, peers, traffic)
  * all ride its hub, up the tree to whoever collects them. One call per context — a page, a frame, a worker.
  */
-export function observe(hub: Hub, { network = false }: ObserveOptions = {}): Observed {
+export function observe(hub: Hub, { network = false, messages = false }: ObserveOptions = {}): Observed {
 	const log = relayLoggerToHub(hub, hub.id);
 	const untap = tapConsoleAndErrors(hub, hub.id);
 	const architecture = createArchReporter(hub);
 
 	if (network !== false) {
 		installNetworkProbes(architecture, network === true ? {} : network);
+	}
+
+	if (messages !== false) {
+		installWorkerProbe(architecture);
+		installWindowMessageProbe(architecture, messages === true ? undefined : messages.window);
 	}
 
 	return {
@@ -630,7 +646,7 @@ export function observe(hub: Hub, { network = false }: ObserveOptions = {}): Obs
 	};
 }
 
-export interface ObserveAppOptions extends Pick<ObserveOptions, "network"> {
+export interface ObserveAppOptions extends Pick<ObserveOptions, "network" | "messages"> {
 	/** Tools this page serves as its own MCP tools (see page-tools.ts). */
 	"tools"?: PageTool[];
 	/** How many of the tree's records to keep (`records`), newest last. Default 1000. */
@@ -643,8 +659,8 @@ export interface ObserveAppOptions extends Pick<ObserveOptions, "network"> {
  * standalone, to a running debug-mcp, serving `tools` there. `tab` is undefined when debugging is off (not localhost,
  * no `?debug`).
  */
-export function observeApp(hub: Hub, { tools = [], keep = 1000, network }: ObserveAppOptions = {}): Observed & { "records": LogRecord[]; "store": ArchitectureStore; "tab": string | undefined } {
-	const context = observe(hub, { "network": network });
+export function observeApp(hub: Hub, { tools = [], keep = 1000, network, messages }: ObserveAppOptions = {}): Observed & { "records": LogRecord[]; "store": ArchitectureStore; "tab": string | undefined; "addTools": (tools: PageTool[]) => void } {
+	const context = observe(hub, { "network": network, "messages": messages });
 	const records: LogRecord[] = [];
 	const store = new ArchitectureStore();
 
@@ -662,7 +678,9 @@ export function observeApp(hub: Hub, { tools = [], keep = 1000, network }: Obser
 		linkDebugMcp(hub);
 	}
 
-	return { ...context, "records": records, "store": store, "tab": servePageTools(hub, { "tools": tools }) };
+	const served = serveTools(hub, { "tools": tools });
+
+	return { ...context, "records": records, "store": store, "tab": served?.tab, "addTools": (more) => { served?.set.add(more); } };
 }
 
 export * from "./log-subject.ts";

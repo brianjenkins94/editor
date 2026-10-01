@@ -182,7 +182,7 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 				return ok(channels.map((candidate) => ({
 					"a": candidate.a, "b": candidate.b, "count": candidate.count, "bytes": candidate.bytes, "rate": arch.rate(candidate, now),
 					"linked": candidate.linked, "interest": candidate.interest, "labels": labelsOf(candidate, 200),
-					"recent": candidate.recent.slice(-50).map((sample) => ({ "ago": now - sample.t, "forward": sample.forward, "kind": sample.kind, "label": sample.label, "bytes": sample.bytes }))
+					"recent": candidate.recent.slice(-50).map((sample) => ({ "ago": now - sample.t, "forward": sample.forward, "kind": sample.kind, "label": sample.label, "bytes": sample.bytes, ...sample.payload === undefined ? {} : { "payload": sample.payload } }))
 				})));
 			}
 
@@ -195,6 +195,20 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 				})),
 				"topology": Object.fromEntries([...arch.topology].map(([id, snapshot]) => [id, { "subscriptions": snapshot.subscriptions.length, "links": snapshot.links.map((link) => ({ "id": link.id, "peer": link.peerId ?? null })) }]))
 			});
+		}
+	}));
+
+	registerTool(server, defineTool({
+		"name": "capture_payloads",
+		"config": {
+			"title": "Capture message payloads",
+			"description": "Turn payload capture on or off in every connected tab: while on, each sampled message on every channel (hub links, workers, window messages, sockets, BroadcastChannels, Web Locks, WebRTC signaling and data channels) keeps a size-capped preview of what it carried — get_architecture with `channel` shows them in its recent traffic. Off by default: it records the app's data. Answers whether it's on.",
+			"inputSchema": { "on": z.boolean().describe("true to capture, false to stop.") }
+		},
+		"handler": ({ on }: { "on": boolean }) => {
+			debugMcp.capture(on);
+
+			return ok({ "capturing": debugMcp.capturing() });
 		}
 	}));
 

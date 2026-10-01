@@ -64,6 +64,10 @@ export interface DebugMcp {
 	"scopeOf": (tab: string) => string | undefined;
 	/** Call tools SERVED BY A CONNECTED PAGE (the tab hosts them via `serve`); the MCP layer forwards here. */
 	"rpc": RpcClient;
+	/** Payload capture (opt-in — it records app data): on, every connected tab's sampled messages keep a preview of what
+	 *  they carried (get_architecture's channel detail shows it); a tab that links later is told too. */
+	"capture": (on: boolean) => void;
+	"capturing": () => boolean;
 	/** How many pages are currently linked in (for tree-state health). */
 	"linkCount": () => number;
 	/** The editor tabs linked in right now, each answering with its id — the page tools are served under it. */
@@ -83,6 +87,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 	const links = new Set<WebSocket>();
 	/** Tabs already warned about being newer than this debug-mcp. */
 	const warnedOutdated = new Set<string>();
+	let capturing = false;
 
 	// Surface bind success/failure. WebSocketServer emits 'listening' once bound, or 'error' if it can't bind
 	// (usually EADDRINUSE: a second debug-mcp on the same port). An 'error' event with NO listener is thrown as
@@ -161,6 +166,11 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 			archByLink.set(origin.link.id, arch);
 		}
 
+		// While capturing, a reporter that's new to us (a worker just started) is told too.
+		if (capturing && !arch.reporters.has((data as ArchReport).reporter)) {
+			requestArchSync(hub, { "capture": true });
+		}
+
 		arch.apply(data as ArchReport);
 	});
 
@@ -187,7 +197,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		// answers wait for our $sys.arch interest to reach them — a reporter holds its reports until someone listens.)
 		void unlink.ready.then((ready) => {
 			if (ready) {
-				requestArchSync(hub);
+				requestArchSync(hub, capturing ? { "capture": true } : {});
 			}
 		});
 
@@ -213,6 +223,11 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		"tabOf": (link) => tabByLink.get(link),
 		"scopeOf": (tab) => previewScopes.get(tab),
 		"rpc": rpc,
+		"capture": (on) => {
+			capturing = on;
+			requestArchSync(hub, { "capture": on });
+		},
+		"capturing": () => capturing,
 		"linkCount": () => links.size,
 		// (A short grace after every link's editor tab has answered, for the apps in its previews.)
 		// A page newer than this debug-mcp says so (list_tabs shows `outdated`), once on stderr too.

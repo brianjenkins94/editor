@@ -42,3 +42,19 @@ test("tool names must be safe MCP names and single subject tokens", () => {
 		assert.throws(() => servePageToolSet(createHub(), "t3", [{ "name": name, "description": "", "inputSchema": {}, "handler": () => undefined }]), /page tool/u, name);
 	}
 });
+
+test("a page can add tools after it's served its first — announced, and in its manifest", async () => {
+	const hub = createHub({ "id": "page" });
+	const announced: unknown[] = [];
+
+	hub.subscribe(PAGE_TOOLS_CHANGED, (data) => { announced.push(data); });
+
+	const set = servePageToolSet(hub, "t1", []);
+	const rpc = createRpcClient(hub);
+
+	set.add([{ "name": "game_step", "description": "Step.", "inputSchema": { "type": "object" }, "handler": () => "stepped" }]);
+	assert.deepEqual(announced, [{ "tab": "t1" }, { "tab": "t1" }]);
+	assert.deepEqual((await rpc.request("page_tools.t1", undefined, { "timeoutMs": 1000 }) as { "name": string }[]).map((spec) => spec.name), ["game_step"]);
+	assert.equal(await rpc.request("tool.game_step.t1", undefined, { "timeoutMs": 1000 }), "stepped");
+	set();
+});

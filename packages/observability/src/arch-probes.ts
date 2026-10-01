@@ -1,14 +1,15 @@
 /**
  * Generic probes for the architecture plane — the channels a context has that its hub doesn't carry: HTTP (fetch
- * and XMLHttpRequest, sync included), raw WebSockets and IndexedDB; plus, opt-in, the workers a realm spawns and the
- * window messages it receives. Work in a window or any worker scope (including a service worker). Install them early,
+ * and XMLHttpRequest, sync included), raw WebSockets, IndexedDB, BroadcastChannels, Web Locks and WebRTC peer
+ * connections (their signaling, state and data channels); plus, opt-in, the workers a realm spawns and the window
+ * messages it receives. Message-carrying probes hand the sink each payload too, kept only while capture is on. Work in a window or any worker scope (including a service worker). Install them early,
  * before the context starts talking, and only once per realm. Generic on purpose: a channel nobody modelled still
  * shows up (and is flagged), which is how the diagram discovers what it wasn't told about.
  *
  * Hub traffic riding one of these (debug-mcp's WebSocket link) is skipped: the hub tap already counts it.
  */
 import type { ArchSink, TrafficKind } from "./arch.ts";
-import { approxSize } from "./arch.ts";
+import { approxSize, normalizeSubject } from "./arch.ts";
 
 export interface NetworkProbeOptions {
 	/** Node id of the endpoint a URL belongs to. Default: `net:origin` for this origin, `net:<host>` otherwise. */
@@ -155,9 +156,9 @@ function installWebSocketProbe(sink: ArchSink, classify: (url: URL) => string, o
 					}
 
 					if (outgoing) {
-						sink.record(local, remote, described.kind, described.label, frameSize(data));
+						sink.record(local, remote, described.kind, described.label, frameSize(data), 1, data);
 					} else {
-						sink.record(remote, local, described.kind, described.label, frameSize(data));
+						sink.record(remote, local, described.kind, described.label, frameSize(data), 1, data);
 					}
 				};
 
@@ -207,7 +208,8 @@ function installIndexedDBProbe(sink: ArchSink, owner: (database: string) => stri
 
 const installed = new WeakSet();
 
-/** Observe this realm's HTTP, WebSocket and IndexedDB traffic. Idempotent per realm. */
+/** Observe this realm's HTTP, WebSocket, IndexedDB, BroadcastChannel, Web Locks and WebRTC traffic. Idempotent per
+ *  realm. */
 export function installNetworkProbes(sink: ArchSink, options: NetworkProbeOptions = {}): void {
 	if (installed.has(globalThis)) {
 		return;
@@ -221,6 +223,221 @@ export function installNetworkProbes(sink: ArchSink, options: NetworkProbeOption
 	installXhrProbe(sink, classify);
 	installWebSocketProbe(sink, classify, options.socketOwner ?? (() => sink.self));
 	installIndexedDBProbe(sink, options.idbOwner ?? (() => undefined));
+	installBroadcastChannelProbe(sink);
+	installLocksProbe(sink);
+	installRtcProbe(sink);
+}
+
+/** A message's kind and label: JSON-RPC / DAP / `{ type }` shapes, from an object or its JSON text. */
+function describeAny(data: unknown): { "kind": TrafficKind; "label": string } {
+	if (typeof data === "string") {
+		try {
+			return describeJsonMessage(JSON.parse(data));
+		} catch {
+			return { "kind": "message", "label": "text" };
+		}
+	}
+
+	// A message's own kind first (`type`, JSON-RPC, DAP); a `channel` field only names one that has none.
+	const described = describeJsonMessage(data);
+
+	if (described.label === "message" && typeof data === "object" && data !== null && "channel" in data && typeof data.channel === "string") {
+		return { "kind": "message", "label": data.channel };
+	}
+
+	return described;
+}
+
+/** BroadcastChannels: each name a node (`channel:<name>`, ids folded to `*`), its messages to and from it — once one
+ *  that isn't a hub frame crosses (a hub link over a channel is counted by the hub tap; its medium isn't news). */
+function installBroadcastChannelProbe(sink: ArchSink): void {
+	const Original = globalThis.BroadcastChannel as typeof BroadcastChannel | undefined;
+
+	if (Original === undefined) {
+		return;
+	}
+
+	const seen = new Set<string>();
+	const record = (id: string, name: string, outgoing: boolean, data: unknown): void => {
+		if (isHubFrame(data)) {
+			return;
+		}
+
+		if (!seen.has(id)) {
+			seen.add(id);
+			sink.spawn({ "id": id, "role": "channel", "dynamic": true, "detail": "BroadcastChannel " + name });
+		}
+
+		const { kind, label } = describeAny(data);
+
+		if (outgoing) {
+			sink.record(sink.self, id, kind, label, approxSize(data), 1, data);
+		} else {
+			sink.record(id, sink.self, kind, label, approxSize(data), 1, data);
+		}
+	};
+
+	globalThis.BroadcastChannel = class extends Original {
+		private readonly probeId: string;
+
+		public constructor(name: string) {
+			super(name);
+			this.probeId = "channel:" + normalizeSubject(String(name));
+			super.addEventListener("message", (event) => {
+				try {
+					record(this.probeId, this.name, false, (event as MessageEvent).data);
+				} catch { /* diagnostics only */ }
+			});
+		}
+
+		public override postMessage(message: unknown): void {
+			try {
+				record(this.probeId, this.name, true, message);
+			} catch { /* diagnostics only */ }
+
+			super.postMessage(message);
+		}
+	};
+}
+
+/** Web Locks: each lock a node (`lock:<name>`), asked for, granted (or unavailable) and released. */
+function installLocksProbe(sink: ArchSink): void {
+	const locks = (globalThis.navigator as { "locks"?: LockManager } | undefined)?.locks;
+
+	if (locks === undefined || typeof locks.request !== "function") {
+		return;
+	}
+
+	const seen = new Set<string>();
+	const request = locks.request.bind(locks) as (name: string, options: LockOptions, callback: (lock: Lock | null) => unknown) => Promise<unknown>;
+
+	(locks as { "request": unknown }).request = (name: string, ...rest: unknown[]): Promise<unknown> => {
+		const callback = rest.pop() as (lock: Lock | null) => unknown;
+		const options = (rest[0] ?? {}) as LockOptions;
+		const id = "lock:" + normalizeSubject(String(name));
+
+		try {
+			if (!seen.has(id)) {
+				seen.add(id);
+				sink.spawn({ "id": id, "role": "lock", "dynamic": true, "detail": "Web Lock " + name });
+			}
+
+			sink.record(sink.self, id, "request", "request (" + (options.mode ?? "exclusive") + (options.ifAvailable === true ? ", if available" : "") + ")");
+		} catch { /* diagnostics only */ }
+
+		return request(name, options, async (lock) => {
+			try {
+				sink.record(id, sink.self, lock === null ? "error" : "reply", lock === null ? "unavailable" : "granted");
+			} catch { /* diagnostics only */ }
+
+			try {
+				return await callback(lock);
+			} finally {
+				if (lock !== null) {
+					try {
+						sink.record(sink.self, id, "lifecycle", "released");
+					} catch { /* diagnostics only */ }
+				}
+			}
+		});
+	};
+}
+
+/** WebRTC: each peer connection a node (`rtc:<n>`) — its signaling (offers, answers, candidates: their payloads are
+ *  the SDP), its states, and every data channel's messages, by channel label. */
+function installRtcProbe(sink: ArchSink): void {
+	const Original = globalThis.RTCPeerConnection as typeof RTCPeerConnection | undefined;
+
+	if (Original === undefined) {
+		return;
+	}
+
+	let count = 0;
+
+	globalThis.RTCPeerConnection = new Proxy(Original, {
+		"construct": function(target, args: [RTCConfiguration?], newTarget) {
+			const connection = Reflect.construct(target, args, newTarget) as RTCPeerConnection;
+
+			try {
+				count += 1;
+
+				const id = "rtc:" + count;
+				const state = (what: string, value: string): void => { sink.record(sink.self, id, "lifecycle", what + ": " + value); };
+				const watch = (channel: RTCDataChannel): void => {
+					const name = channel.label || "data";
+					const record = (outgoing: boolean, data: unknown): void => {
+						if (isHubFrame(data)) {
+							return;
+						}
+
+						const { kind, label } = typeof data === "string" ? describeAny(data) : { "kind": "message" as const, "label": "binary" };
+
+						if (outgoing) {
+							sink.record(sink.self, id, kind, name + ": " + label, frameSize(data), 1, data);
+						} else {
+							sink.record(id, sink.self, kind, name + ": " + label, frameSize(data), 1, data);
+						}
+					};
+
+					channel.addEventListener("open", () => { state("channel " + name, "open"); });
+					channel.addEventListener("close", () => { state("channel " + name, "closed"); });
+					channel.addEventListener("message", (event) => { record(false, event.data); });
+
+					const send = channel.send.bind(channel) as (data: unknown) => void;
+
+					channel.send = (data: string & Blob & ArrayBuffer & ArrayBufferView<ArrayBuffer>) => {
+						record(true, data);
+						send(data);
+					};
+				};
+
+				sink.spawn({ "id": id, "role": "peer connection", "dynamic": true, "detail": "RTCPeerConnection" });
+				connection.addEventListener("signalingstatechange", () => { state("signaling", connection.signalingState); });
+				connection.addEventListener("iceconnectionstatechange", () => { state("ice", connection.iceConnectionState); });
+				connection.addEventListener("connectionstatechange", () => {
+					state("connection", connection.connectionState);
+
+					if (connection.connectionState === "closed" || connection.connectionState === "failed") {
+						sink.terminate(id);
+					}
+				});
+				connection.addEventListener("icecandidate", (event) => {
+					if (event.candidate !== null) {
+						sink.record(sink.self, id, "event", "local candidate", approxSize(event.candidate.candidate), 1, event.candidate.toJSON());
+					}
+				});
+				connection.addEventListener("datachannel", (event) => { watch(event.channel); });
+
+				// The signaling steps, with what they carry (an offer's or answer's SDP, a remote candidate).
+				const methods = connection as unknown as Record<string, (...rest: unknown[]) => unknown>;
+
+				for (const method of ["createOffer", "createAnswer", "setLocalDescription", "setRemoteDescription", "addIceCandidate"]) {
+					const original = methods[method]!.bind(connection);
+
+					methods[method] = (...rest: unknown[]) => {
+						const description = rest[0] as { "type"?: string } | undefined;
+						const result = original(...rest);
+
+						sink.record(sink.self, id, "request", method + (typeof description?.type === "string" ? " (" + description.type + ")" : ""), approxSize(rest[0]), 1, rest[0]);
+
+						return result;
+					};
+				}
+
+				const createDataChannel = connection.createDataChannel.bind(connection);
+
+				connection.createDataChannel = (label: string, init?: RTCDataChannelInit) => {
+					const channel = createDataChannel(label, init);
+
+					watch(channel);
+
+					return channel;
+				};
+			} catch { /* never break the connection */ }
+
+			return connection;
+		}
+	});
 }
 
 /** XMLHttpRequest, synchronous ones included (a worker asking the service worker for a capability decision). */
@@ -277,7 +494,8 @@ export function installWorkerProbe(sink: ArchSink, identify: (url: string, optio
 
 			try {
 				const url = String(args[0]);
-				const identity = identify(url, args[1]) ?? { "id": "worker:" + (url.split(/[?#]/u)[0]!.split("/").pop() ?? "worker") };
+				// By its name when it has one (often the id its own hub goes by), else its script.
+				const identity = identify(url, args[1]) ?? { "id": args[1]?.name || "worker:" + (url.split(/[?#]/u)[0]!.split("/").pop() ?? "worker") };
 				const record = (outgoing: boolean, data: unknown): void => {
 					if (isHubFrame(data)) {
 						return;
@@ -286,9 +504,9 @@ export function installWorkerProbe(sink: ArchSink, identify: (url: string, optio
 					const { kind, label } = describeJsonMessage(data);
 
 					if (outgoing) {
-						sink.record(sink.self, identity.id, kind, label, approxSize(data));
+						sink.record(sink.self, identity.id, kind, label, approxSize(data), 1, data);
 					} else {
-						sink.record(identity.id, sink.self, kind, label, approxSize(data));
+						sink.record(identity.id, sink.self, kind, label, approxSize(data), 1, data);
 					}
 				};
 
@@ -341,9 +559,10 @@ export function installWindowMessageProbe(sink: ArchSink, identify: (source: Win
 		}
 
 		const record = data as { "channel"?: unknown; "type"?: unknown } | null;
-		const name = typeof record?.channel === "string" ? record.channel : typeof record?.type === "string" ? record.type : typeof data;
+		// Its own kind (`type`) first; a `channel` field only names a message that has none.
+		const name = typeof record?.type === "string" ? record.type : typeof record?.channel === "string" ? record.channel : typeof data;
 		const from = identify(source as Window) ?? frameOf(source as Window);
 
-		sink.record(from, sink.self, "message", event.ports.length > 0 ? name + " (+MessagePort)" : name, approxSize(data));
+		sink.record(from, sink.self, "message", event.ports.length > 0 ? name + " (+MessagePort)" : name, approxSize(data), 1, data);
 	}, true);
 }

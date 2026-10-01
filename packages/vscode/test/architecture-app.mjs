@@ -248,6 +248,8 @@ test("a worker's console reaches the editor's log plane too — through the work
 	});
 
 	assert.equal(record.attrs?.worker, "/worker.ts");
+	// And the channel it came over is in the architecture: the shell's end of the workers' BroadcastChannel.
+	await session.until("the worker tap's channel", hasLabel("shell", "channel:__editor_preview_tap__", /^obs-log$/u));
 });
 
 test("an edit to a module only the nested frame loaded reloads that frame, and leaves the page alone", async () => {

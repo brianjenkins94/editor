@@ -56,7 +56,8 @@ export interface ChannelStats {
 	"window": [number, number][];
 }
 
-export interface StoredSample { "seq": number; "t": number; "channel": string; "forward": boolean; "kind": TrafficKind; "label": string; "bytes": number; "reporter": string }
+/** A sampled message, as kept per channel (`payload`: its captured preview, when payload capture was on). */
+export interface StoredSample { "seq": number; "t": number; "channel": string; "forward": boolean; "kind": TrafficKind; "label": string; "bytes": number; "reporter": string; "payload"?: string }
 
 const RECENT_PER_CHANNEL = 200;
 const LOG_SIZE = 3000;
@@ -382,7 +383,8 @@ export class ArchitectureStore {
 				"kind": sample.kind,
 				"label": sample.label,
 				"bytes": sample.bytes,
-				"reporter": reporter
+				"reporter": reporter,
+				...sample.payload === undefined ? {} : { "payload": sample.payload }
 			};
 
 			channel.recent.push(stored);

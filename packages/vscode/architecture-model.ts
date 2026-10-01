@@ -189,6 +189,11 @@ export const channels: ChannelSpec[] = [
 	{ "a": "node", "b": "sw", "protocol": "capability decision, HTTP", "transport": "synchronous XMLHttpRequest (POST /__capability__/decide), fetch", "description": "Every write/delete a node script makes asks the service worker, which asks the pod (capability.decide); and the worker's own requests, like every controlled context's." },
 	{ "a": "node", "b": "vite:*", "protocol": "in-realm calls", "transport": "function calls", "description": "almostnode's in-browser Vite dev server: requests from virtual.request, file changes, HMR updates back." },
 	{ "a": "node", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "description": "A node script's own http.createServer, reached from a preview at /__virtual__/<tab>/<port>/ like a dev server." },
+	{ "a": "workbench", "b": "channel:vscode-web-state-db-global", "protocol": "VS Code storage sync", "transport": "BroadcastChannel", "description": "VS Code's global web storage (IndexedDB-backed) telling the editor's other tabs what changed." },
+	{ "a": "workbench", "b": "channel:vscode-web-state-db-global-shared", "protocol": "VS Code storage sync", "transport": "BroadcastChannel", "description": "VS Code's shared global web storage, the same across tabs." },
+	{ "a": "workbench", "b": "channel:vscode.indexedDB.vscode-userdata.changes", "protocol": "VS Code user-data sync", "transport": "BroadcastChannel", "description": "The user-data filesystem (settings, keybindings, snippets) announcing its changes to the editor's other tabs." },
+	{ "a": "shell", "b": "channel:__editor_preview_tap__", "protocol": "preview worker tap", "transport": "BroadcastChannel", "description": "A preview's workers' console, errors and capability requests (worker-tap.ts) — a worker can't reach the editor's window — and the shell's answers to them." },
+	{ "a": "node", "b": "channel:vite-ws-channel", "protocol": "WebSocket shim", "transport": "BroadcastChannel", "description": "almostnode's ws shim: a node script's WebSocket server and its clients, within the origin." },
 	// the workspace filesystem (shared memory)
 	{ "a": "workbench", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (owner)", "description": "The vscode provider (editor, tsserver, ATA, terminal, extensions) and direct callers (isomorphic-git, the terminal's path walk). Back the other way: provider writes announced as file-change events (5ms batches) — writes from other realms, and direct writes, are NOT announced." },
 	{ "a": "node", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "almostnode: module loading, node scripts' fs, the preview dev server's transforms." },
@@ -477,7 +482,7 @@ export function appLayout(observed: { "channels": { "a": string; "b": string }[]
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────
 
 /** Contexts created at runtime, by id prefix, and where they live. */
-export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:"];
+export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:", "channel:", "lock:", "rtc:"];
 
 export function dynamicContainer(id: string): string | undefined {
 	if (isAppNode(id)) {
@@ -490,6 +495,11 @@ export function dynamicContainer(id: string): string | undefined {
 
 	if (id.startsWith("vite:") || id.startsWith("server:") || id.startsWith("worker:")) {
 		return "workers";
+	}
+
+	// A realm's channels past its hub (observability's network probes): a BroadcastChannel, a Web Lock, a peer connection.
+	if (id.startsWith("channel:") || id.startsWith("lock:") || id.startsWith("rtc:")) {
+		return "network";
 	}
 
 	return undefined;

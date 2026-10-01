@@ -289,6 +289,21 @@
   margin-left: auto;
 }
 
+.arch-event:has(.arch-event-payload) {
+  flex-wrap: wrap;
+}
+
+.arch-event-payload {
+  flex-basis: 100%;
+  margin: 0 0 2px 12px;
+  color: var(--arch-muted);
+  font-family: var(--vscode-editor-font-family, monospace);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 8em;
+  overflow: auto;
+}
+
 .arch-event-endpoints {
   color: var(--arch-muted);
   flex: none;

@@ -46,8 +46,9 @@ export interface TrafficCount {
 	"via"?: "hub";
 }
 
-/** One observed message, sampled for the log and the animation (counts come from `traffic`, not from samples). */
-export interface TrafficSample { "t": number; "from": string; "to": string; "kind": TrafficKind; "label": string; "bytes": number; "via"?: "hub" }
+/** One observed message, sampled for the log and the animation (counts come from `traffic`, not from samples).
+ *  `payload` is what it carried — a preview, size-capped — only while a viewer has payload capture on. */
+export interface TrafficSample { "t": number; "from": string; "to": string; "kind": TrafficKind; "label": string; "bytes": number; "via"?: "hub"; "payload"?: string }
 
 export interface ArchReport {
 	"reporter": string;
@@ -115,7 +116,9 @@ export interface ArchSink {
 	"terminate": (id: string) => void;
 	"state": (id: string, state: NodeState) => void;
 	/** `count` messages of `bytes` in total (a probe that aggregates before reporting); default one. */
-	"record": (from: string, to: string, kind: TrafficKind, label: string, bytes?: number, count?: number) => void;
+	/** Count a message (or `count` of them) from → to. `payload` is what it carried: kept, as a preview, only while
+	 *  payload capture is on (see requestArchSync). */
+	"record": (from: string, to: string, kind: TrafficKind, label: string, bytes?: number, count?: number, payload?: unknown) => void;
 }
 
 export interface ArchReporter extends ArchSink {
@@ -219,9 +222,11 @@ export function createArchReporter(hub: Hub): ArchReporter {
 	let disposed = false;
 	// rpc call id → name, to label the replies
 	const rpcNames = new Map<string, string>();
+	// Payload capture (a viewer's opt-in, via requestArchSync): samples keep what each message carried.
+	let capturing = false;
 	// A hub sends its interest before its hello, so a call can go out on a link whose peer hasn't said who it is yet (a
 	// worker's first request at boot). Held by link until the hello names it; dropped if the link goes first.
-	const unnamed = new Map<string, { "kind": TrafficKind; "label": string; "bytes": number }[]>();
+	const unnamed = new Map<string, { "kind": TrafficKind; "label": string; "bytes": number; "payload"?: unknown }[]>();
 
 	function nameHeldTraffic(): void {
 		const links = new Map(hub.inspect().links.map((link) => [link.id, link.peerId]));
@@ -230,8 +235,8 @@ export function createArchReporter(hub: Hub): ArchReporter {
 			const peer = links.get(link);
 
 			if (peer !== undefined) {
-				for (const { kind, label, bytes } of held) {
-					record(self, peer, kind, label, bytes, "hub");
+				for (const { kind, label, bytes, payload } of held) {
+					record(self, peer, kind, label, bytes, "hub", 1, payload);
 				}
 			}
 
@@ -338,7 +343,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 		});
 	}
 
-	function record(from: string, to: string, kind: TrafficKind, label: string, bytes = 0, via?: "hub", count = 1): void {
+	function record(from: string, to: string, kind: TrafficKind, label: string, bytes = 0, via?: "hub", count = 1, payload?: unknown): void {
 		const entry: TrafficCount = { "from": from, "to": to, "kind": kind, "label": label, "count": count, "bytes": bytes };
 
 		if (via !== undefined) {
@@ -349,7 +354,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 		add(totals, entry);
 
 		if (samples.length < MAX_SAMPLES_PER_FLUSH) {
-			samples.push({ "t": Date.now(), "from": from, "to": to, "kind": kind, "label": label, "bytes": bytes, "via": via });
+			samples.push({ "t": Date.now(), "from": from, "to": to, "kind": kind, "label": label, "bytes": bytes, "via": via, ...capturing && payload !== undefined ? { "payload": previewPayload(payload) } : {} });
 		}
 
 		schedule();
@@ -406,12 +411,13 @@ export function createArchReporter(hub: Hub): ArchReporter {
 
 				const { kind, label } = "hub" in frame ? { "kind": "lifecycle" as const, "label": frame.hub === "hello" ? "hello" : "interest (" + frame.hub + ")" } : describe(frame);
 				const bytes = "hub" in frame ? 0 : approxSize(frame.data);
+				const payload = "hub" in frame ? undefined : frame.data;
 				const peer = event.link.peerId;
 
 				if (peer !== undefined) {
-					record(self, peer, kind, label, bytes, "hub");
+					record(self, peer, kind, label, bytes, "hub", 1, payload);
 				} else if ((unnamed.get(event.link.id)?.length ?? 0) < MAX_SAMPLES_PER_FLUSH) {
-					unnamed.set(event.link.id, [...unnamed.get(event.link.id) ?? [], { "kind": kind, "label": label, "bytes": bytes }]);
+					unnamed.set(event.link.id, [...unnamed.get(event.link.id) ?? [], { "kind": kind, "label": label, "bytes": bytes, "payload": payload }]);
 				}
 
 				break;
@@ -438,7 +444,13 @@ export function createArchReporter(hub: Hub): ArchReporter {
 	});
 
 	// A viewer opened late asks everyone for their full state.
-	const disposeSync = hub.subscribe(SYNC_SUBJECT, () => {
+	const disposeSync = hub.subscribe(SYNC_SUBJECT, (data) => {
+		const capture = (data as { "capture"?: unknown } | undefined)?.capture;
+
+		if (typeof capture === "boolean") {
+			capturing = capture;
+		}
+
 		setTimeout(() => {
 			// Deltas still pending are part of the totals below: send them FIRST so they reach a viewer before the
 			// full state (which then replaces this reporter's counts) — never after it, where they'd count twice.
@@ -515,7 +527,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 
 			nodeOp({ "op": "state", "id": id, "state": state });
 		},
-		"record": (from, to, kind, label, bytes, count) => { record(from, to, kind, label, bytes, undefined, count); },
+		"record": (from, to, kind, label, bytes, count, payload) => { record(from, to, kind, label, bytes, undefined, count, payload); },
 		"dispose": () => {
 			disposed = true;
 			clearInterval(heartbeat);
@@ -530,9 +542,39 @@ export function createArchReporter(hub: Hub): ArchReporter {
 	};
 }
 
-/** Ask every reporter in the tree for its full state (a viewer does this when it opens). */
-export function requestArchSync(hub: Hub): void {
-	hub.publish(SYNC_SUBJECT);
+/**
+ * Ask every reporter in the tree for its full state (a viewer does this when it opens). `capture` turns payload capture
+ * on or off everywhere: while on, each sampled message keeps a size-capped preview of what it carried (opt-in — it
+ * records app data). Left out, each reporter keeps its setting.
+ */
+export function requestArchSync(hub: Hub, { capture }: { "capture"?: boolean } = {}): void {
+	hub.publish(SYNC_SUBJECT, capture === undefined ? undefined : { "capture": capture });
+}
+
+/** How much of a captured payload a sample keeps. */
+export const PAYLOAD_PREVIEW_CHARS = 1000;
+
+/** A message's payload as a sample keeps it: JSON (binary as its size), size-capped. */
+export function previewPayload(value: unknown, max = PAYLOAD_PREVIEW_CHARS): string {
+	let text: string;
+
+	try {
+		text = typeof value === "string" ? value : JSON.stringify(value, (_key, item: unknown) => {
+			if (item instanceof ArrayBuffer || ArrayBuffer.isView(item)) {
+				return `<${item.constructor.name} ${item.byteLength} bytes>`;
+			}
+
+			if (typeof item === "bigint") {
+				return String(item) + "n";
+			}
+
+			return item;
+		}) ?? String(value);
+	} catch {
+		text = String(value);
+	}
+
+	return text.length > max ? text.slice(0, max) + "…" : text;
 }
 
 /** Subscribe to every reporter's reports. */

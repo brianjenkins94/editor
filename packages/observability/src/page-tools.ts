@@ -32,27 +32,36 @@ export interface PageTool extends PageToolSpec {
 	"handler": (args: Record<string, unknown>, context: { "signal": AbortSignal }) => unknown;
 }
 
-/** Serve `tools` on `hub` as tab `tab`'s page tools, and announce them. Returns an unsubscribe for all of it. */
-export function servePageToolSet(hub: Hub, tab: string, tools: PageTool[]): () => void {
-	for (const tool of tools) {
-		if (!PAGE_TOOL_NAME.test(tool.name)) {
-			throw new Error(`page tool "${tool.name}": names are lowercase letters, digits and _ (starting with a letter)`);
+/** A tab's served page tools: unsubscribe all of it by calling it; `add` serves more (a page that learns what it is
+ *  after it's observed — netsim's host, once its lobby says so). */
+export type PageToolSet = (() => void) & { readonly "add": (tools: PageTool[]) => void };
+
+/** Serve `tools` on `hub` as tab `tab`'s page tools, and announce them (and every change). */
+export function servePageToolSet(hub: Hub, tab: string, tools: PageTool[]): PageToolSet {
+	const specs: PageToolSpec[] = [];
+	const disposers = [serve(hub, PAGE_TOOLS + "." + tab, () => specs)];
+	const add = (more: PageTool[]): void => {
+		for (const tool of more) {
+			if (!PAGE_TOOL_NAME.test(tool.name)) {
+				throw new Error(`page tool "${tool.name}": names are lowercase letters, digits and _ (starting with a letter)`);
+			}
 		}
-	}
 
-	const specs: PageToolSpec[] = tools.map(({ name, description, inputSchema, timeoutMs }) => ({ "name": name, "description": description, "inputSchema": inputSchema, ...timeoutMs === undefined ? {} : { "timeoutMs": timeoutMs } }));
-	const disposers = [
-		serve(hub, PAGE_TOOLS + "." + tab, () => specs),
-		...tools.map((tool) => serve(hub, PAGE_TOOL + "." + tool.name + "." + tab, async (args, { signal }) => tool.handler((args ?? {}) as Record<string, unknown>, { "signal": signal })))
-	];
+		for (const { name, description, inputSchema, timeoutMs, handler } of more) {
+			specs.push({ "name": name, "description": description, "inputSchema": inputSchema, ...timeoutMs === undefined ? {} : { "timeoutMs": timeoutMs } });
+			disposers.push(serve(hub, PAGE_TOOL + "." + name + "." + tab, async (args, { signal }) => handler((args ?? {}) as Record<string, unknown>, { "signal": signal })));
+		}
 
-	hub.publish(PAGE_TOOLS_CHANGED, { "tab": tab });
+		hub.publish(PAGE_TOOLS_CHANGED, { "tab": tab });
+	};
 
-	return () => {
+	add(tools);
+
+	return Object.assign(() => {
 		for (const dispose of disposers) {
 			dispose();
 		}
 
 		hub.publish(PAGE_TOOLS_CHANGED, { "tab": tab });
-	};
+	}, { "add": add });
 }

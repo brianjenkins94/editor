@@ -42,6 +42,9 @@ const KINDS: TrafficKind[] = ["request", "reply", "event", "message", "error"];
 // ── the store: one per workbench, kept across pane close/reopen so history survives ──────────────────────────
 
 let shared: ArchitectureStore | undefined;
+// Payload capture (opt-in: it records the app's data) — every reporter's sampled messages keep what they carried. The
+// reporters' setting, so one for every view of it.
+let capturing = false;
 
 /** The workbench's architecture store — created on first use: subscribes to every reporter and asks for a sync. */
 export function architectureStore(hub: Hub): ArchitectureStore {
@@ -49,7 +52,14 @@ export function architectureStore(hub: Hub): ArchitectureStore {
 		const store = new ArchitectureStore();
 
 		shared = store;
-		collectArchReports(hub, (report) => { store.apply(report); });
+		collectArchReports(hub, (report) => {
+			// While capturing, a reporter that's new to us (a worker just started) is told too.
+			if (capturing && !store.reporters.has(report.reporter)) {
+				requestArchSync(hub, { "capture": true });
+			}
+
+			store.apply(report);
+		});
 		// The subscription's interest has to reach the other hubs before they're asked to answer.
 		setTimeout(() => { requestArchSync(hub); }, 200);
 		// A handle for scripts (the architecture smoke test, a console): what the diagram knows, as data.
@@ -531,6 +541,10 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			}
 		}),
 		toggle("Acks", "Show RPC acknowledgements", showAcks, (value) => { showAcks = value; refreshPanel(); }),
+		toggle("Payloads", "Capture what each message carries, everywhere (it records the app's data) — shown in a channel's recent traffic", capturing, (value) => {
+			capturing = value;
+			requestArchSync(hub, { "capture": value });
+		}),
 		toggle("Idle", "Show declared contexts that aren't running", showDeclared, (value) => { showDeclared = value; scheduleRender(); }),
 		button("−", "Zoom out", () => { setZoom(zoom / 1.2); }),
 		button("Fit", "Fit the width", () => { autoFit = true; fit(); }),
@@ -1036,6 +1050,11 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			h("span", { "class": "arch-event-label", "title": sample.label }, sample.label),
 			h("span", { "class": "arch-event-bytes" }, sample.bytes > 0 ? formatBytes(sample.bytes) : "")
 		);
+
+		// What it carried, when payload capture was on.
+		if (sample.payload !== undefined) {
+			row.append(h("pre", { "class": "arch-event-payload" }, sample.payload));
+		}
 
 		if (channel !== undefined && withEndpoints) {
 			row.addEventListener("click", () => { select({ "type": "edge", "id": channel.id }); });
