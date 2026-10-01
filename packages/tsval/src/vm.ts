@@ -154,6 +154,8 @@ export interface VMOptions {
 	 *  can't swallow it). Lets a host run untrusted code with a bounded cost — e.g. a language-server-resident
 	 *  driver that must never hang on a `while (true)`. Default undefined = unlimited (existing behavior). */
 	"maxSteps"?: number;
+	/** Count how often each statement runs (see `VM.coverage`). Off by default: it's one map update per statement. */
+	"coverage"?: boolean;
 }
 
 /**
@@ -219,6 +221,11 @@ export interface VM {
 	"addBreakpointsByLine": (...lines: number[]) => void;
 	"atBreakpoint": () => boolean;
 	"runToBreakpoint": () => void;
+
+	/** How often each statement has run, when created with `coverage: true` (undefined otherwise) — exact, not
+	 *  sampled: every statement execution passes through `step()`. A fork carries its own copy, so a fork's counts
+	 *  are its own timeline's. Statements that never ran are absent. */
+	readonly "coverage": ReadonlyMap<ts.Node, number> | undefined;
 
 	/** An independent copy of the machine state (mid-expression if need be); host objects are shared. */
 	"fork": () => VM;
@@ -286,6 +293,8 @@ export class Machine implements VM {
 	public onBreakpoint: ((vm: VM) => void) | undefined;
 	/** Fuel limit (see VMOptions.maxSteps): once `steps` passes it, `step()` throws uncatchably. */
 	public maxSteps: number | undefined;
+	/** Statement execution counts (VMOptions.coverage). */
+	public coverage: Map<ts.Node, number> | undefined;
 
 	/** The guest realm's Error constructors, so errors tsval itself throws (ReferenceError on an
 	 *  unbound name, TypeError on a bad call, …) are instances of the *guest's* classes. Resolved
@@ -340,6 +349,7 @@ export class Machine implements VM {
 		this.onAsyncFiber = options.onAsyncFiber;
 		this.onBreakpoint = options.onBreakpoint;
 		this.maxSteps = options.maxSteps;
+		this.coverage = options.coverage === true ? new Map() : undefined;
 	}
 
 	public get top(): Frame | undefined {
@@ -474,6 +484,11 @@ export class Machine implements VM {
 			this.unwind(frame, this.signal);
 
 			return;
+		}
+
+		// A statement's first step (phase 0) is the statement starting — the same test a breakpoint uses.
+		if (this.coverage !== undefined && frame.kind === undefined && frame.phase === 0 && isStatement(frame.node)) {
+			this.coverage.set(frame.node, (this.coverage.get(frame.node) ?? 0) + 1);
 		}
 
 		// (each synthetic handler is typed for its own frame; the union is dispatched on `kind` here)
@@ -827,6 +842,7 @@ export class Machine implements VM {
 		forked.hostGuard = this.hostGuard;
 		forked.onAsyncFiber = this.onAsyncFiber;
 		forked.onBreakpoint = this.onBreakpoint;
+		forked.coverage = this.coverage === undefined ? undefined : new Map(this.coverage);
 		forked.callSite = undefined;
 		forked.values = this.values.map(clone);
 		forked.frames = this.frames.map(cloneFrame);
