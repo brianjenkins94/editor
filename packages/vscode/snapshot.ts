@@ -11,8 +11,6 @@
  * in-browser TS language service resolves the demo's imports and reports no phantom errors.
  */
 import type { Plugin } from "vite";
-// eslint-disable-next-line ts/no-restricted-imports -- the snapshot is built synchronously at vite config-load time; the @brianjenkins94/util/fs wrapper is async-only
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import * as url from "node:url";
 import * as utilFs from "@brianjenkins94/util/fs";
@@ -58,16 +56,16 @@ function nodeModulesRoot(): string | undefined {
 /** `readFileSync` as UTF-8, or undefined when the file can't be read. */
 function readText(abs: string): string | undefined {
 	try {
-		return readFileSync(abs, "utf8");
+		return utilFs.readFileSync(abs);
 	} catch {
 		return undefined;
 	}
 }
 
 /** `statSync`, or undefined when the path can't be stat'd. */
-function statOf(abs: string): ReturnType<typeof statSync> | undefined {
+function statOf(abs: string): ReturnType<typeof utilFs.statSync> | undefined {
 	try {
-		return statSync(abs);
+		return utilFs.statSync(abs);
 	} catch {
 		return undefined;
 	}
@@ -81,7 +79,7 @@ function walk(dir: string): string[] {
 		let entries;
 
 		try {
-			entries = readdirSync(current, { "withFileTypes": true });
+			entries = utilFs.readdirSync(current, { "withFileTypes": true });
 		} catch {
 			return;
 		}
@@ -109,7 +107,7 @@ function walk(dir: string): string[] {
 function snapshot(): SnapshotFile[] {
 	const demo = demoDir();
 
-	if (!existsSync(demo)) {
+	if (!utilFs.existsSync(demo)) {
 		return [];   // no demo yet → the workbench opens on an empty folder
 	}
 
@@ -124,7 +122,7 @@ function snapshot(): SnapshotFile[] {
 			const stat = statOf(abs);
 
 			if (stat !== undefined && stat.isFile() && stat.size <= MAX_BYTES) {
-				files.push({ "path": `${FOLDER}/${rel}`, "contents": readFileSync(abs, "utf8"), "readonly": MANAGED_CONFIGS.has(rel) });
+				files.push({ "path": `${FOLDER}/${rel}`, "contents": utilFs.readFileSync(abs), "readonly": MANAGED_CONFIGS.has(rel) });
 			}
 		}
 	}
@@ -206,7 +204,7 @@ function declFiles(dir: string): string[] {
 		let entries;
 
 		try {
-			entries = readdirSync(current, { "withFileTypes": true });
+			entries = utilFs.readdirSync(current, { "withFileTypes": true });
 		} catch {
 			return;
 		}
@@ -272,7 +270,7 @@ function typeSurface(): SnapshotFile[] {
 	const seedPackage = (pkg: string): boolean => {
 		const dir = path.join(nm, pkg);
 
-		if (!existsSync(dir)) {
+		if (!utilFs.existsSync(dir)) {
 			return false;   // not installed (or a bogus match) — nothing to seed
 		}
 
@@ -296,8 +294,8 @@ function typeSurface(): SnapshotFile[] {
 	const seedManifest = (pkg: string): void => {
 		const manifest = path.join(nm, pkg, "package.json");
 
-		if (existsSync(manifest)) {
-			files.push({ "path": `${FOLDER}/` + path.relative(root, manifest).split(path.sep).join("/"), "contents": readFileSync(manifest, "utf8"), "readonly": true });
+		if (utilFs.existsSync(manifest)) {
+			files.push({ "path": `${FOLDER}/` + path.relative(root, manifest).split(path.sep).join("/"), "contents": utilFs.readFileSync(manifest), "readonly": true });
 		}
 	};
 
@@ -328,13 +326,13 @@ function typeSurface(): SnapshotFile[] {
 	// The tsconfig `extends` base(s): seed the whole (tiny) @tsconfig scope so the extends chain resolves.
 	const tsconfigDir = path.join(nm, "@tsconfig");
 
-	if (existsSync(tsconfigDir)) {
-		for (const name of readdirSync(tsconfigDir)) {
+	if (utilFs.existsSync(tsconfigDir)) {
+		for (const name of utilFs.readdirSync(tsconfigDir)) {
 			for (const file of ["package.json", "tsconfig.json"]) {
 				const abs = path.join(tsconfigDir, name, file);
 
-				if (existsSync(abs)) {
-					files.push({ "path": `${FOLDER}/node_modules/@tsconfig/${name}/${file}`, "contents": readFileSync(abs, "utf8"), "readonly": true });
+				if (utilFs.existsSync(abs)) {
+					files.push({ "path": `${FOLDER}/node_modules/@tsconfig/${name}/${file}`, "contents": utilFs.readFileSync(abs), "readonly": true });
 				}
 			}
 		}
@@ -373,7 +371,7 @@ function moduleVersions(): Record<string, string> {
 		// Skip packages not on unpkg (@brianjenkins94/*) or shimmed to any.
 		if (!pkg.startsWith("@brianjenkins94/") && !ALWAYS_SHIM.has(pkg)) {
 			try {
-				const meta = JSON.parse(readFileSync(path.join(nm, pkg, "package.json"), "utf8")) as { "version"?: string };
+				const meta = JSON.parse(utilFs.readFileSync(path.join(nm, pkg, "package.json"), "utf8")) as { "version"?: string };
 
 				if (typeof meta.version === "string" && /^\d/u.test(meta.version)) {
 					versions[pkg] = meta.version;

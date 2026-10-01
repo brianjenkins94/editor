@@ -135,7 +135,7 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 		{ "dispose": serve(hub, "debug.start", async (args, { signal }) => {
 			const { program, breakpoints } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[] };
 			const path = resolveProgram(program);
-			const launchId = Math.random().toString(36).slice(2);
+			const launchId = crypto.randomUUID();
 
 			// Before the launch, so they're registered by the time the session starts running.
 			if (breakpoints !== undefined) {

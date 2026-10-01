@@ -1,11 +1,10 @@
 import type { Plugin, RollupOutput } from "vite";
 import { createHash } from "node:crypto";
-// eslint-disable-next-line ts/no-restricted-imports -- build-time script; needs sync fs to read assets off disk
-import * as nodeFs from "node:fs";
 import { builtinModules, createRequire } from "node:module";
 import * as path from "node:path";
 import * as url from "node:url";
 import { isCI, isEntry } from "@brianjenkins94/util/env";
+import * as fs from "@brianjenkins94/util/fs";
 import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import stdlib from "node-stdlib-browser";
@@ -99,7 +98,7 @@ function cspellDict(): Plugin {
 		"generateBundle": function() {
 			const dictDir = path.dirname(createRequire(import.meta.url).resolve("@cspell/dict-en_us/cspell-ext.json"));
 
-			this.emitFile({ "type": "asset", "fileName": "lsp/dicts/en_US.trie.gz", "source": nodeFs.readFileSync(path.join(dictDir, "en_US.trie.gz")) });
+			this.emitFile({ "type": "asset", "fileName": "lsp/dicts/en_US.trie.gz", "source": fs.readFileSync(path.join(dictDir, "en_US.trie.gz"), { "encoding": null }) });
 		}
 	};
 }
@@ -150,7 +149,7 @@ function eslintTsPlugin(): Plugin {
 	return {
 		"name": "eslint-ts-plugin-asset",
 		"generateBundle": function() {
-			this.emitFile({ "type": "asset", "fileName": "lsp/eslint-ts-plugin.js", "source": nodeFs.readFileSync(resolvePath("./extensions/eslint/ts-plugin.js")) });
+			this.emitFile({ "type": "asset", "fileName": "lsp/eslint-ts-plugin.js", "source": fs.readFileSync(resolvePath("./extensions/eslint/ts-plugin.js"), { "encoding": null }) });
 		}
 	};
 }
@@ -161,7 +160,7 @@ function capabilitiesTsPlugin(): Plugin {
 	return {
 		"name": "capabilities-ts-plugin-asset",
 		"generateBundle": function() {
-			this.emitFile({ "type": "asset", "fileName": "lsp/capabilities-ts-plugin.js", "source": nodeFs.readFileSync(resolvePath("./extensions/capabilities/ts-plugin.js")) });
+			this.emitFile({ "type": "asset", "fileName": "lsp/capabilities-ts-plugin.js", "source": fs.readFileSync(resolvePath("./extensions/capabilities/ts-plugin.js"), { "encoding": null }) });
 		}
 	};
 }

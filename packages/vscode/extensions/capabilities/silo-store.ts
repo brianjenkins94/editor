@@ -29,6 +29,7 @@
 import type { CapabilityRequest } from "@brianjenkins94/util/silo/enforce/broker";
 import type { Disposition, Policy } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
+import { shortHash } from "@brianjenkins94/util/hash";
 import { EMPTY_POLICY, parsePolicy, withRule } from "@brianjenkins94/util/silo/policy";
 
 // ── paths ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -433,9 +434,7 @@ async function hashFile(entry: string): Promise<string> {
 
 		const rel = entry.startsWith("/workspace/") ? entry.slice("/workspace/".length) : entry.replace(/^\/+/, "");
 		const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(folder.uri, rel));
-		const digest = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
-
-		return [...new Uint8Array(digest)].slice(0, 6).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+		return await shortHash(bytes, 12);
 	} catch {
 		return "";
 	}

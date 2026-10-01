@@ -111,7 +111,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 	ensureWorker(); // warm at construction so it's subscribed well before the first command
 
 	const startRun = (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks): Promise<{ "exitCode": number }> => new Promise((resolve) => {
-		const runId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+		const runId = crypto.randomUUID();
 
 		currentRunId = runId;
 		let settled = false;
@@ -170,7 +170,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 	// `node.out/exit.<runId>` channels — the adapter (or its terminate) relays onto them — so the terminal drives a
 	// debug run exactly like a plain one. No node worker needed; the adapter spawns its own debug worker.
 	const startDebug = (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks): Promise<{ "attached": boolean; "exitCode": number }> => new Promise((resolve) => {
-		const runId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+		const runId = crypto.randomUUID();
 
 		currentRunId = runId; // so the terminal treats it as running (routes Ctrl-C to the abort signal below)
 		let settled = false;
@@ -265,7 +265,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 			}
 		}),
 		"startProductionSession": (name, port, target) => {
-			const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+			const id = crypto.randomUUID();
 
 			hub.publish("production.launch", { "id": id, "name": name, "port": port, "target": target });
 

@@ -13,8 +13,6 @@
  * (not the published lib tarball) — editor owns that component now.
  */
 import type { Plugin } from "vite";
-// eslint-disable-next-line ts/no-restricted-imports -- the dev-server middleware answers synchronously, so mapping a request to a file (and the host page listing the component chunks) must read synchronously
-import { readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import * as url from "node:url";
 import { find } from "@brianjenkins94/util/find";
@@ -39,7 +37,7 @@ function componentStaticChunks(componentDist: string): string[] {
 
 		seen.add(file);
 
-		for (const match of readFileSync(path.join(componentDist, file), "utf8").matchAll(/(?:^|[;}\s])(?:import|export)\s*(?:[\w${}*,\s]+from\s*)?["'](\.\/[^"']+\.js)["']/gu)) {
+		for (const match of fs.readFileSync(path.join(componentDist, file)).matchAll(/(?:^|[;}\s])(?:import|export)\s*(?:[\w${}*,\s]+from\s*)?["'](\.\/[^"']+\.js)["']/gu)) {
 			pending.push(path.posix.normalize(match[1]));
 		}
 	}
@@ -180,7 +178,7 @@ export function vscodePlugin(): Plugin {
 		for (const root of roots) {
 			const file = path.join(root, relative);
 
-			if (file.startsWith(root) && fs.existsSync(file) && statSync(file).isFile()) {
+			if (file.startsWith(root) && fs.existsSync(file) && fs.statSync(file).isFile()) {
 				return file;
 			}
 		}
