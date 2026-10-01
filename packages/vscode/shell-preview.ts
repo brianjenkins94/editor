@@ -90,6 +90,8 @@ interface PreviewSurface {
 	"promptEl": HTMLDivElement;
 	/** The link an app's own hubs join the editor's tree through (see PREVIEW_APP_PERMISSIONS). */
 	"unlinkApp": () => void;
+	/** The (scoped) ids of the app's contexts that have reported through this window: ended when it closes. */
+	"reporters": Set<string>;
 	/** The window body's height without DevTools. */
 	"height": number;
 	/** Chrome DevTools, docked under the app while open. */
@@ -105,6 +107,8 @@ interface PreviewSurface {
 export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	/** Every window, by id. */
 	const surfaces = new Map<string, PreviewSurface>();
+	/** Each port's next window number — only ever counts up (see openWindow). */
+	const nextIndex = new Map<number, number>();
 	/** Each running server (by port): where it serves, once it's up, and its one HMR subscription. */
 	const servers = new Map<number, { "url"?: string; "offHmr": () => void }>();
 	// The debug-run type shown in a window title. The live preview is the almostnode "production" run
@@ -252,6 +256,12 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 
 	/** Close one window. Its server keeps running while it has another; closing the last stops it (`preview.close`). */
 	const closeWindow = (surface: PreviewSurface, { stopServer = true } = {}): void => {
+		// Its app's contexts end with it — they can't say so themselves (the frame goes, and the page's pagehide with
+		// it): end every one that reported through this window.
+		for (const reporter of surface.reporters) {
+			hub.publish("$sys.arch." + reporter, { "reporter": reporter, "time": Date.now(), "ended": true });
+		}
+
 		surface.unlinkApp();
 
 		if (surface.devtools !== undefined) {
@@ -274,11 +284,10 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	 *  serves (once it's up). `from`: the window it was opened from, which it cascades from. */
 	const openWindow = (port: number, { url, from }: { "url"?: string; "from"?: PreviewSurface } = {}): PreviewSurface => {
 		const server = ensureServer(port);
-		let index = 1;
+		// Never reused: a window that closed keeps its id to itself, so its records never merge with a later window's.
+		const index = nextIndex.get(port) ?? 1;
 
-		while (surfaces.has(windowId(port, index))) {
-			index += 1;
-		}
+		nextIndex.set(port, index + 1);
 
 		const id = windowId(port, index);
 		const height = Math.min(600, window.innerHeight - 120);
@@ -314,11 +323,12 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		// to be observed — and its observability scoped under that id as it arrives: every window of an app names its
 		// hubs alike (`page`, …), and two windows' must not merge. A new page (a reload) re-reads its tools: announce the
 		// change for debug-mcp.
-		const unlinkApp = hub.link(frameTransport(frame, id), { "transit": false, "peer": id, "permissions": PREVIEW_APP_PERMISSIONS });
+		const reporters = new Set<string>();
+		const unlinkApp = hub.link(frameTransport(frame, id, reporters), { "transit": false, "peer": id, "permissions": PREVIEW_APP_PERMISSIONS });
 
 		frame.addEventListener("load", () => { hub.publish("page_tools.changed", { "preview": port, "window": id }); });
 
-		const surface: PreviewSurface = { "id": id, "key": id.slice("preview:".length), "port": port, "index": index, "usedAt": Date.now(), "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "unlinkApp": unlinkApp, "height": height, "promptChain": Promise.resolve() };
+		const surface: PreviewSurface = { "id": id, "key": id.slice("preview:".length), "port": port, "index": index, "usedAt": Date.now(), "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "unlinkApp": unlinkApp, "reporters": reporters, "height": height, "promptChain": Promise.resolve() };
 
 		// The window last touched is the port's for prompts and the debug toolbar.
 		paneWindow.element.addEventListener("pointerdown", () => { surface.usedAt = Date.now(); }, { "capture": true });
@@ -365,8 +375,16 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 
 		ensureServer(port).url = info.url;
 
+		// A window that already shows one of this server's pages keeps it (a player's `play.html?match=…`, across a dev
+		// server restart or a resurface); only one with nothing to show yet goes to where the server serves.
+		const base = new URL(info.url, location.href);
+
 		for (const surface of windowsOf(port)) {
-			surface.frame.src = info.url;
+			const showing = surface.frame.src === "" ? undefined : new URL(surface.frame.src, location.href);
+
+			if (showing === undefined || showing.origin !== base.origin || !showing.pathname.startsWith(base.pathname)) {
+				surface.frame.src = info.url;
+			}
 		}
 	});
 
@@ -449,7 +467,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 
 	/** Show ONE capability prompt as an overlay on `surface`'s preview window and resolve with the user's choice —
 	 *  the running app is dimmed behind it. */
-	const runOnePrompt = (surface: PreviewSurface, request: PromptRequest): Promise<PromptChoice> => {
+	const runOnePrompt = (surface: Pick<PreviewSurface, "paneWindow" | "promptEl">, request: PromptRequest): Promise<PromptChoice> => {
 		surface.paneWindow.show();
 
 		return new Promise<PromptChoice>((resolve) => {
@@ -517,9 +535,26 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	// net gate sees only the address, the same in every window of a server — so that port's last used window), else
 	// the last used window of all (a decision not bound to a preview: a node/fs run). Serialized PER WINDOW so held
 	// requests queue on their own overlay without blocking another window's.
+	// With no preview window at all (a node script's decision, nothing previewed): a window of its own, holding just the
+	// prompt — not a preview window onto a server nobody started.
+	let promptOnly: { "paneWindow": PaneWindow; "promptEl": HTMLDivElement; "promptChain": Promise<unknown> } | undefined;
+	const promptWindow = (): NonNullable<typeof promptOnly> => {
+		if (promptOnly === undefined) {
+			const paneWindow = createPaneWindow({ "title": "Capability request", "storageKey": "capability-prompt", "width": Math.min(460, window.innerWidth - 80), "height": 220, "onClose": () => { paneWindow.element.remove(); } });
+			const promptEl = document.createElement("div");
+
+			promptEl.className = promptLayer();
+			paneWindow.body.classList.add(bodyRelative());
+			paneWindow.body.appendChild(promptEl);
+			promptOnly = { "paneWindow": paneWindow, "promptEl": promptEl, "promptChain": Promise.resolve() };
+		}
+
+		return promptOnly;
+	};
+
 	serve(hub, "capability.prompt", (request) => {
 		const { port, window: named } = request as { "port"?: number; "window"?: string };
-		const surface = (typeof named === "string" ? surfaces.get(named) : undefined) ?? windowFor(typeof port === "number" ? port : undefined) ?? windowFor(undefined) ?? openWindow(DEFAULT_PORT);
+		const surface = (typeof named === "string" ? surfaces.get(named) : undefined) ?? windowFor(typeof port === "number" ? port : undefined) ?? windowFor(undefined) ?? promptWindow();
 		const result = surface.promptChain.then(() => runOnePrompt(surface, request as PromptRequest));
 
 		surface.promptChain = result.catch(() => undefined);
@@ -629,8 +664,10 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 
 		const source = surfaceOf(event.source);
 
-		if (source === undefined) {
-			return; // only our preview iframes (and the frames nested in them)
+		// Only our preview iframes and the frames nested in them — and of those, only the app's own pages (same origin):
+		// a third-party frame the app embeds can't ask for capabilities, open windows or log as the app.
+		if (source === undefined || event.origin !== location.origin) {
+			return;
 		}
 
 		const { port } = source;
@@ -728,11 +765,12 @@ function windowTitle(id: string): string {
 	return "Preview :" + port + (index === undefined ? "" : " (" + index + ")");
 }
 
-/** A page of a server this editor runs: an address of this origin under `/__virtual__/<tab>/<port>/`. */
+/** A page of a server this editor runs: an address of this origin under `<base>/__virtual__/<tab>/<port>/` (under the
+ *  deploy base too — Pages serves the editor at /editor/). */
 function previewPageOf(url: string): { "url": string; "port": number } | undefined {
 	try {
 		const parsed = new URL(url, location.href);
-		const port = /^\/__virtual__\/[^/]+\/(\d+)\//u.exec(parsed.pathname)?.[1];
+		const port = /\/__virtual__\/[^/]+\/(\d+)\//u.exec(parsed.pathname)?.[1];
 
 		return parsed.origin === location.origin && port !== undefined ? { "url": parsed.href, "port": Number(port) } : undefined;
 	} catch {
@@ -743,14 +781,25 @@ function previewPageOf(url: string): { "url": string; "port": number } | undefin
 /** A hub transport to whatever page `frame` holds: its window is looked up on every use — it's null until the frame is
  *  in the document, and a new page (a reload) is a new realm behind the same frame. What's sent while there's no
  *  window is dropped; hub's hello handshake recovers (the app's hub says hello when it links, and we answer). What
- *  arrives has its observability scoped under `scope` (the window's id — observability's scopeObservability). */
-function frameTransport(frame: HTMLIFrameElement, scope: string): Transport {
+ *  arrives has its observability scoped under `scope` (the window's id — observability's scopeObservability), and
+ *  each reporter's (scoped) id is added to `reporters`. */
+function frameTransport(frame: HTMLIFrameElement, scope: string, reporters: Set<string>): Transport {
 	return {
 		"send": (message) => { frame.contentWindow?.postMessage(message, location.origin); },
 		"listen": (onMessage) => {
 			const handler = (event: MessageEvent): void => {
 				if (event.source !== null && event.source === frame.contentWindow && event.origin === location.origin) {
-					onMessage(mapFrame(event.data, (hubFrame) => scopeObservability(hubFrame, scope) as typeof hubFrame));
+					onMessage(mapFrame(event.data, (hubFrame) => {
+						const scoped = scopeObservability(hubFrame, scope) as typeof hubFrame;
+						const reporter = !("hub" in scoped) && scoped.subject.startsWith("$sys.arch.") ? (scoped.data as { "reporter"?: unknown } | undefined)?.reporter : undefined;
+
+						// Who reported, so closing the window can end them all (see closeWindow).
+						if (typeof reporter === "string") {
+							reporters.add(reporter);
+						}
+
+						return scoped;
+					}));
 				}
 			};
 

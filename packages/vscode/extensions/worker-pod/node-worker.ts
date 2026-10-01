@@ -392,7 +392,7 @@ ${CONSOLE_TAP}	var capSeq = 0, capPending = {};
 	});
 	var decide = function (kind, resource) {
 		return new Promise(function (resolve) {
-			var id = ++capSeq;
+			var id = Math.random().toString(36).slice(2) + "-" + (++capSeq); // unguessable: only the shell can answer it
 			capPending[id] = resolve;
 			try { bc.postMessage({ channel: "cap-decide", tab: tab, port: vport, from: me, id: id, kind: kind, resource: resource }); } catch (err) { delete capPending[id]; resolve(false); return; }
 			setTimeout(function () { if (capPending[id]) { delete capPending[id]; resolve(false); } }, 300000); // unanswered ⇒ fail closed
@@ -401,18 +401,17 @@ ${CONSOLE_TAP}	var capSeq = 0, capPending = {};
 ${WS_GATE}})();
 `;
 
-/** A worker's entry script (`body`, served at `url`) with the worker tap put first: a module worker imports it (the
- *  first import runs first; a relative path, so it stays under the preview's address), a classic one runs it inline. */
+/** A worker's entry script (`body`, served at `url`) with the worker tap put first — on its FIRST LINE, no newline added,
+ *  so the script's own lines (and its inline source map) don't move: a module worker imports it (the first import runs
+ *  first; a relative path, so it stays under the preview's address), a classic one evaluates it inline. After a leading
+ *  "use strict" directive, which must stay the script's first statement. */
 function injectWorkerTap(body: string, url: string): string {
 	const isModule = /^\s*(?:import\b|export\b)/mu.test(body);
-
-	if (!isModule) {
-		return WORKER_TAP + body;
-	}
-
 	const depth = url.split(/[?#]/u)[0]!.split("/").length - 2;
+	const tap = isModule ? `import "./${"../".repeat(Math.max(0, depth))}${WORKER_TAP_PATH.slice(1)}";` : `(0, eval)(${JSON.stringify(WORKER_TAP)});`;
+	const directive = /^\s*(["'])use strict\1;?/u.exec(body)?.[0] ?? "";
 
-	return `import "./${"../".repeat(Math.max(0, depth))}${WORKER_TAP_PATH.slice(1)}";\n` + body;
+	return directive + tap + body.slice(directive.length);
 }
 
 // eslint-disable-next-line webawesome/no-html-in-strings -- an observability tap SCRIPT injected into the preview page as text, not app chrome
@@ -434,7 +433,7 @@ ${CONSOLE_TAP}	// New windows stay in the editor: the app opening one of its ser
 	// it: \`open-window\`), not a browser tab outside the editor. Anything else (another site, a named target) is the
 	// browser's, as always. There's no window to hand back, so such a \`window.open\` returns null (as a blocked popup does).
 	var pageOf = function (url) {
-		try { var u = new URL(String(url), location.href); return u.origin === location.origin && /^\\/__virtual__\\/[^\\/]+\\/\\d+\\//.test(u.pathname) ? u.href : undefined; } catch (e) { return undefined; }
+		try { var u = new URL(String(url), location.href); return u.origin === location.origin && /\\/__virtual__\\/[^\\/]+\\/\\d+\\//.test(u.pathname) ? u.href : undefined; } catch (e) { return undefined; }
 	};
 	var openWindow = function (href) { try { host.postMessage({ channel: "open-window", url: href }, "*"); } catch (e) {} };
 	var origOpen = window.open;
@@ -461,11 +460,11 @@ ${CONSOLE_TAP}	// New windows stay in the editor: the app opening one of its ser
 	var capSeq = 0, capPending = {};
 	addEventListener("message", function (e) {
 		var d = e.data;
-		if (d && d.channel === "cap-decision" && capPending[d.id]) { var cb = capPending[d.id]; delete capPending[d.id]; cb(d.allow === true); }
+		if (e.source === host && d && d.channel === "cap-decision" && capPending[d.id]) { var cb = capPending[d.id]; delete capPending[d.id]; cb(d.allow === true); }
 	});
 	var decide = function (kind, resource) {
 		return new Promise(function (resolve) {
-			var id = ++capSeq;
+			var id = Math.random().toString(36).slice(2) + "-" + (++capSeq); // unguessable: only the shell can answer it
 			capPending[id] = resolve;
 			try { host.postMessage({ channel: "cap-decide", id: id, kind: kind, resource: resource, port: vport }, "*"); } catch (err) { delete capPending[id]; resolve(false); return; }
 			setTimeout(function () { if (capPending[id]) { delete capPending[id]; resolve(false); } }, 300000); // unanswered ⇒ fail closed
