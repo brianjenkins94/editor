@@ -16,7 +16,7 @@
  *     the shared SharedArrayBuffer, see workspace-fs.ts / zenfs-vfs.ts), and the preview runs its own in-page
  *     dev server — so the old IndexedDB "vfs store" serving path was retired.
  *   • Dev-server bridge — a preview's dev server (almostnode's ViteDevServer) runs in the node worker; we answer
- *     `/__virtual__/<port>/…` fetches by calling it over the hub (`virtual.request`), so the preview iframe
+ *     `/__virtual__/<tab>/<port>/…` fetches by calling it over the hub (`virtual.request`), so the preview iframe
  *     reaches it over ordinary HTTP. (This used to be almostnode's ServerBridge: a MessagePort to a relay in the
  *     page. The hub already links us to the page, so the port and the relay are gone.)
  *   • COI stamping — every other response is passed through with the isolation headers added.
@@ -28,6 +28,7 @@
 import { createHub, createRpcClient, portTransport } from "@brianjenkins94/hub";
 import { reportArchitecture } from "./architecture";
 import { relayLoggerToHub, tapConsoleAndErrors } from "./telemetry";
+import { parseVirtual } from "./virtual-path";
 
 // The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,
 // errors) is recorded through a source-scoped logger whose records — timed SPANS included — ride the hub to
@@ -47,7 +48,7 @@ const swLog = relayLoggerToHub(swHub, "sw");
 // hub + the SW's upstream requests (CDN) on $sys.arch, plus what it serves previews and relays to the dev server
 const architecture = reportArchitecture(swHub);
 
-// The preview a request came from: its own /__virtual__/<port>/ URL, else the preview document that asked for it.
+// The preview a request came from: its own /__virtual__/<tab>/<port>/ URL, else the preview document that asked for it.
 async function previewOf(event, pathname) {
 	const preview = parseVirtual(pathname) || await previewClientOf(event);
 
@@ -146,11 +147,9 @@ globalThis.addEventListener("activate", (event) => event.waitUntil(globalThis.cl
 const WORKSPACE_ROOT = "/workspace/";                 // requests here resolve deps against node_modules → CDN
 const NODE_MODULES = "/workspace/node_modules/";      // where bare specifiers resolve; CDN-fallback on a miss
 const CDN = "https://unpkg.com";                      // node_modules miss → fetched here, served same-origin
-// Dev-server bridge route marker. Matched by indexOf (not anchored) so it's recognised under ANY deploy-base
-// prefix: on GitHub Pages the app is served at /editor/, the SW is scoped to /editor/, and requests arrive as
-// /editor/__virtual__/<port>/… — same reason the old __proxy__ matched by substring. /workspace/ (WORKSPACE_ROOT)
-// is matched the same way below.
-const VIRTUAL_MARKER = "/__virtual__/";
+// Dev-server bridge routes (<base>/__virtual__/<tab>/<port>/…) are recognised under ANY deploy-base prefix — on GitHub
+// Pages the SW is scoped to /editor/ — by virtual-path.ts's parseVirtual. /workspace/ (WORKSPACE_ROOT) is matched the
+// same way below.
 
 // Split a node_modules-relative path ("<pkg>/<sub>" or "<pkg>") into package + subpath, honouring scopes.
 function splitPackage(rel) {
@@ -301,30 +300,6 @@ async function handleVirtualRequest(request, tab, port, path) {
 	}
 }
 
-// Parse a `/__virtual__/<tab>/<port>/<rest>` path — found ANYWHERE (under any deploy-base prefix) — into its parts.
-function parseVirtual(pathname) {
-	const index = pathname.indexOf(VIRTUAL_MARKER);
-
-	if (index === -1) {
-		return null;
-	}
-
-	const [tab, portStr, ...rest] = pathname.slice(index + VIRTUAL_MARKER.length).split("/");
-	const port = parseInt(portStr, 10);
-
-	if (!tab || !Number.isFinite(port)) {
-		return null;
-	}
-
-	return {
-		"tab": tab,
-		"port": port,
-		"rest": rest.length === 0 ? "" : "/" + rest.join("/"),
-		// The URL prefix up to and including the port (base + /__virtual__/<tab>/<port>), for navigation redirects.
-		"prefix": pathname.slice(0, index + VIRTUAL_MARKER.length + tab.length + 1 + portStr.length)
-	};
-}
-
 globalThis.addEventListener("fetch", (event) => {
 	const request = event.request;
 	const requestUrl = new URL(request.url);
@@ -341,7 +316,7 @@ globalThis.addEventListener("fetch", (event) => {
 	// Dev-server bridge: <base>/__virtual__/<tab>/<port>/…
 	const virtual = parseVirtual(pathname);
 
-	if (virtual !== null) {
+	if (virtual !== undefined) {
 		const response = handleVirtualRequest(request, virtual.tab, virtual.port, (virtual.rest || "/") + requestUrl.search);
 
 		recordPreviewRequest(event, pathname, virtual.rest || "/", response);

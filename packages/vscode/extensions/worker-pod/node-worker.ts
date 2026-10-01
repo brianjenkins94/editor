@@ -37,6 +37,7 @@ import { relayLoggerToHub, tapConsoleAndErrors } from "../../telemetry";
 import { reportArchitecture } from "../../architecture";
 import { identifyWorker } from "../../architecture-model";
 import { ZENFS_NODE } from "../../architecture-zenfs";
+import { VIRTUAL_MARKER, VIRTUAL_RE } from "../../virtual-path";
 import type { WorkspaceChange } from "../../workspace-changes";
 import { WORKSPACE_CHANGED } from "../../workspace-changes";
 
@@ -377,7 +378,7 @@ const WORKER_TAP_PATH = "/@editor/worker-tap.js";
 const WORKER_TAP = `(function () {
 	if (self.__obsTap) { return; }
 	self.__obsTap = true;
-	var m = /\\/__virtual__\\/([^\\/]+)\\/(\\d+)(\\/[^?#]*)?/.exec(location.pathname);
+	var m = /${VIRTUAL_RE.source}/.exec(location.pathname);
 	var tab = m ? m[1] : undefined, vport = m ? Number(m[2]) : undefined, worker = m && m[3] ? m[3] : location.pathname;
 	var bc; try { bc = new BroadcastChannel("${WORKER_TAP_CHANNEL}"); } catch (e) { return; }
 	var me = Math.random().toString(36).slice(2);
@@ -422,8 +423,8 @@ const OBS_TAP = `<script>
 	// The editor window hosting this preview: its top frame's parent — above every frame the app nests in it (a game's
 	// instance iframes), each a /__virtual__/ page too. Posting to plain \`parent\` from a nested frame would hand the
 	// record to the app's own page (and its message listeners) instead.
-	var host = (function () { var w = window; try { while (w.parent !== w && w.parent.location.pathname.indexOf("/__virtual__/") !== -1) { w = w.parent; } } catch (e) {} return w.parent; })();
-	var nested = host !== parent ? "/" + location.pathname.split("/__virtual__/")[1].split("/").slice(2).join("/") : undefined;
+	var host = (function () { var w = window; try { while (w.parent !== w && w.parent.location.pathname.indexOf(${JSON.stringify(VIRTUAL_MARKER)}) !== -1) { w = w.parent; } } catch (e) {} return w.parent; })();
+	var nested = host !== parent ? "/" + location.pathname.split(${JSON.stringify(VIRTUAL_MARKER)})[1].split("/").slice(2).join("/") : undefined;
 	var send = function (rec) {
 		if (nested !== undefined) { rec.attrs = Object.assign({ frame: nested }, rec.attrs); }
 		try { host.postMessage({ channel: "obs-log", record: rec }, "*"); } catch (e) {}
@@ -433,7 +434,7 @@ ${CONSOLE_TAP}	// New windows stay in the editor: the app opening one of its ser
 	// it: \`open-window\`), not a browser tab outside the editor. Anything else (another site, a named target) is the
 	// browser's, as always. There's no window to hand back, so such a \`window.open\` returns null (as a blocked popup does).
 	var pageOf = function (url) {
-		try { var u = new URL(String(url), location.href); return u.origin === location.origin && /\\/__virtual__\\/[^\\/]+\\/\\d+\\//.test(u.pathname) ? u.href : undefined; } catch (e) { return undefined; }
+		try { var u = new URL(String(url), location.href); return u.origin === location.origin && /${VIRTUAL_RE.source}/.test(u.pathname) ? u.href : undefined; } catch (e) { return undefined; }
 	};
 	var openWindow = function (href) { try { host.postMessage({ channel: "open-window", url: href }, "*"); } catch (e) {} };
 	var origOpen = window.open;
@@ -456,7 +457,7 @@ ${CONSOLE_TAP}	// New windows stay in the editor: the app opening one of its ser
 	// error+close); RTCPeerConnection is built with its ICE servers STRIPPED and only restored (setConfiguration)
 	// on allow, closed on deny. Each decision round-trips to the shell (cap-decide → capability.decide → the TOFU
 	// overlay), tagged with this preview's port; it FAILS CLOSED (deny) if the shell can't be reached.
-	var vport = (function () { var m = /\\/__virtual__\\/[^\\/]+\\/(\\d+)\\//.exec(location.pathname); return m ? Number(m[1]) : undefined; })();
+	var vport = (function () { var m = /${VIRTUAL_RE.source}/.exec(location.pathname); return m ? Number(m[2]) : undefined; })();
 	var capSeq = 0, capPending = {};
 	addEventListener("message", function (e) {
 		var d = e.data;

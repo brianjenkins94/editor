@@ -36,8 +36,7 @@ export interface VirtualServer {
 }
 
 export interface BridgeOptions {
-	"baseUrl"?: string;
-	"onServerReady"?: (port: number, url: string) => void;
+	"onServerReady"?: (port: number) => void;
 }
 
 export interface InitServiceWorkerOptions {
@@ -54,7 +53,6 @@ export interface InitServiceWorkerOptions {
 export class ServerBridge extends EventEmitter {
 	static DEBUG = false;
 	private readonly servers = new Map<number, VirtualServer>();
-	private readonly baseUrl: string;
 	private readonly options: BridgeOptions;
 	private messageChannel: MessageChannel | null = null;
 	private serviceWorkerReady = false;
@@ -63,13 +61,6 @@ export class ServerBridge extends EventEmitter {
 	constructor(options: BridgeOptions = {}) {
 		super();
 		this.options = options;
-
-    // Handle browser vs Node.js environment
-		if (typeof location !== "undefined") {
-			this.baseUrl = options.baseUrl || `${location.protocol}//${location.host}`;
-		} else {
-			this.baseUrl = options.baseUrl || "http://localhost";
-		}
 
     // Set up auto-registration from http module
 		setServerListenCallback((port, server) => {
@@ -88,13 +79,8 @@ export class ServerBridge extends EventEmitter {
 		this.servers.set(port, { "server": server, "port": port, "hostname": hostname });
 
     // Emit server-ready event
-		const url = this.getServerUrl(port);
-
-		this.emit("server-ready", port, url);
-
-		if (this.options.onServerReady) {
-			this.options.onServerReady(port, url);
-		}
+		this.emit("server-ready", port);
+		this.options.onServerReady?.(port);
 
     // Notify service worker if connected
 		this.notifyServiceWorker("server-registered", { "port": port, "hostname": hostname });
@@ -106,13 +92,6 @@ export class ServerBridge extends EventEmitter {
 	unregisterServer(port: number): void {
 		this.servers.delete(port);
 		this.notifyServiceWorker("server-unregistered", { "port": port });
-	}
-
-  /**
-   * Get server URL for a port
-   */
-	getServerUrl(port: number): string {
-		return `${this.baseUrl}/__virtual__/${port}`;
 	}
 
   /**
@@ -416,54 +395,6 @@ export class ServerBridge extends EventEmitter {
 		}
 	}
 
-  /**
-   * Create a mock request handler for testing without Service Worker
-   */
-	createFetchHandler(): (request: Request) => Promise<Response> {
-		return async (request: Request): Promise<Response> => {
-			const url = new URL(request.url);
-
-      // Check if this is a virtual server request
-			const match = /^\/__virtual__\/(\d+)(\/.*)?$/.exec(url.pathname);
-
-			if (!match) {
-				throw new Error("Not a virtual server request");
-			}
-
-			const port = parseInt(match[1], 10);
-			const path = match[2] || "/";
-
-      // Build headers object
-			const headers: Record<string, string> = {};
-
-			request.headers.forEach((value, key) => {
-				headers[key] = value;
-			});
-
-      // Get body if present
-			let body: ArrayBuffer | undefined;
-
-			if (request.method !== "GET" && request.method !== "HEAD") {
-				body = await request.arrayBuffer();
-			}
-
-      // Handle request
-			const response = await this.handleRequest(
-				port,
-				request.method,
-				path + url.search,
-				headers,
-				body
-			);
-
-      // Convert to fetch Response
-			return new Response(response.body, {
-				"status": response.statusCode,
-				"statusText": response.statusMessage,
-				"headers": response.headers
-			});
-		};
-	}
 }
 
 // Global bridge instance

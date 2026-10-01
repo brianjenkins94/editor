@@ -9,7 +9,9 @@
  */
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
+import { until } from "@brianjenkins94/util/until";
 
+import { parseVirtual } from "../virtual-path.ts";
 import { DEBUG_MCP_PORT, hasLabel, startSession } from "./architecture-harness.mjs";
 
 const { createDebugMcp } = await import("../../debug-mcp/src/server.ts");
@@ -147,22 +149,9 @@ after(async () => {
 	await debugMcp?.close();
 });
 
-async function eventually(what, probe, timeoutMs = 60_000) {
-	const deadline = Date.now() + timeoutMs;
-
-	for (;;) {
-		const value = await probe().catch(() => undefined);
-
-		if (value) {
-			return value;
-		}
-
-		if (Date.now() > deadline) {
-			throw new Error("timed out waiting for " + what);
-		}
-
-		await session.page.waitForTimeout(250);
-	}
+/** Poll `probe` (in this process) until it's truthy, waiting the way the page does. */
+function eventually(what, probe, timeoutMs = 60_000) {
+	return until(what, probe, { "timeoutMs": timeoutMs, "intervalMs": 250, "sleep": (ms) => session.page.waitForTimeout(ms) });
 }
 
 /** The frame the app nests in its page. */
@@ -177,7 +166,7 @@ function assertEchoes(results, message) {
 
 /** Every preview window's top page (not their nested frames), in the order the windows opened. */
 function previewPages() {
-	return session.page.frames().filter((frame) => /\/__virtual__\/[^/]+\/\d+\/(?:index\.html)?(?:\?.*)?$/u.test(frame.url()));
+	return session.page.frames().filter((frame) => ["/", "/index.html"].includes(parseVirtual(new URL(frame.url()).pathname)?.rest));
 }
 
 /** The preview's (first window's) top page. */
@@ -187,7 +176,7 @@ function previewPage() {
 
 /** The preview's port. */
 function previewPort() {
-	return Number(/\/__virtual__\/[^/]+\/(\d+)\//u.exec(previewPage().url())?.[1]);
+	return parseVirtual(new URL(previewPage().url()).pathname).port;
 }
 
 test("an app with a tarball dependency, a module worker, a nested iframe and a MessageChannel runs in the preview", async () => {

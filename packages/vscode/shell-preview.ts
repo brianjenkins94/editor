@@ -4,7 +4,7 @@
  * inside it).
  *
  * The dev-server BACKEND stays in the app realm (preview.ts): it runs each dev server in the node worker and
- * registers the ServerBridge so the coi-serviceworker serves `/__virtual__/<port>/`. This module shows movable
+ * registers the ServerBridge so the coi-serviceworker serves `/__virtual__/<tab>/<port>/`. This module shows movable
  * WebAwesome windows (window.ts), each an iframe onto a server — as many per server as the user opens, like browser
  * tabs onto one dev server: each its own page (its own reload, DevTools, capability prompts, hub link). There's no
  * address bar: a window opens on the server's page, and another opens from the "new window" button or from the app
@@ -21,13 +21,14 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { ArchSink } from "@brianjenkins94/observability";
 import type { LinkPermissions, Transport } from "@brianjenkins94/hub";
-import { createRpcClient, mapFrame, serve } from "@brianjenkins94/hub";
+import { createRpcClient, mapFrame, rpcCallSubject, rpcReplySubject, serve } from "@brianjenkins94/hub";
 import { installWindowMessageProbe, scopeObservability } from "@brianjenkins94/observability";
 import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, RotateCcw, Unplug } from "lucide";
 import type { DevtoolsPanel } from "./preview-devtools";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import { LOG_SUBJECT } from "./telemetry";
 import { css, iconSvg } from "./theme";
+import { parseVirtual, PREVIEW_WINDOW_PREFIX, previewPageOf, windowId, windowTitle } from "./virtual-path";
 import { createPaneWindow, type PaneWindow } from "./window";
 
 /** Levels the preview tap emits — anything else is coerced to "info". */
@@ -63,14 +64,15 @@ interface PromptRequest { "kind"?: string; "scope"?: string; "resource"?: string
 
 /**
  * What may cross the link an app in a preview joins the editor's tree through. Out of the app: its observability
- * (`$sys.log`, its startup backlog, `$sys.arch`), tab discovery answers, page-tool announcements, and RPC replies. Into it: architecture
+ * (`$sys.log`, its startup backlog, `$sys.arch`), tab discovery answers, page-tool announcements, and its replies to
+ * debug-mcp (the one caller of its tools). Into it: architecture
  * sync, tab discovery, and calls to the tools it serves under its tab id (see observability's servePageTools). The
  * preview isn't a security boundary (same origin, unsandboxed — see ARCHITECTURE.md): this keeps an app's traffic
  * and the editor's apart, and nothing else of the app's leaves it.
  */
 const PREVIEW_APP_PERMISSIONS: LinkPermissions = {
-	"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "tab.here", "page_tools.changed", "$rpc.reply.>"],
-	"subscribe": ["$sys.arch.sync", "tab.discover", "$rpc.call.page_tools.*", "$rpc.call.tool.>", "$rpc.call.page_eval.*", "$rpc.call.page_query.*"]
+	"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "tab.here", "page_tools.changed", rpcReplySubject("debug-mcp")],
+	"subscribe": ["$sys.arch.sync", "tab.discover", ...["page_tools.*", "tool.>", "page_eval.*", "page_query.*"].map((name) => rpcCallSubject(name))]
 };
 
 /** One preview window: which server it shows, its window, the iframe, and the capability-prompt overlay. */
@@ -328,12 +330,12 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 
 		frame.addEventListener("load", () => { hub.publish("page_tools.changed", { "preview": port, "window": id }); });
 
-		const surface: PreviewSurface = { "id": id, "key": id.slice("preview:".length), "port": port, "index": index, "usedAt": Date.now(), "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "unlinkApp": unlinkApp, "reporters": reporters, "height": height, "promptChain": Promise.resolve() };
+		const surface: PreviewSurface = { "id": id, "key": id.slice(PREVIEW_WINDOW_PREFIX.length), "port": port, "index": index, "usedAt": Date.now(), "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "unlinkApp": unlinkApp, "reporters": reporters, "height": height, "promptChain": Promise.resolve() };
 
 		// The window last touched is the port's for prompts and the debug toolbar.
 		paneWindow.element.addEventListener("pointerdown", () => { surface.usedAt = Date.now(); }, { "capture": true });
 		surfaces.set(id, surface);
-		sink?.spawn({ "id": id, "label": windowTitle(id), "container": "previews", "detail": "/__virtual__/" + port + "/", "dynamic": true });
+		sink?.spawn({ "id": id, "label": windowTitle(id), "container": "previews", "detail": server.url, "dynamic": true });
 
 		const src = url ?? server.url;
 
@@ -612,7 +614,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	// (the tab and port are in the worker's address). Its records go under a window of that server (which one isn't
 	// known: a worker can't tell — the last used), and its WebSocket decisions round-trip like a page's.
 	const tapChannel = typeof BroadcastChannel === "function" ? new BroadcastChannel("__editor_preview_tap__") : undefined;
-	const tabOf = (url: string | undefined): string | undefined => (url === undefined ? undefined : /\/__virtual__\/([^/]+)\//u.exec(url)?.[1]);
+	const tabOf = (url: string | undefined): string | undefined => (url === undefined ? undefined : parseVirtual(new URL(url, location.href).pathname)?.tab);
 
 	tapChannel?.addEventListener("message", (event: MessageEvent) => {
 		const data = event.data as { "channel"?: string; "tab"?: string; "port"?: number; "from"?: string; "id"?: number; "kind"?: string; "resource"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;
@@ -752,31 +754,6 @@ function isWithin(source: MessageEventSource | null, root: Window | null): boole
 	return false;
 }
 
-/** A server's `index`-th window: `preview:<port>` for the first, `preview:<port>~<n>` after it (no dots — ids become
- *  subject tokens, `$sys.log.<id>`). */
-function windowId(port: number, index: number): string {
-	return "preview:" + port + (index === 1 ? "" : "~" + index);
-}
-
-/** `preview:5173` → "Preview :5173"; `preview:5173~2` → "Preview :5173 (2)". */
-function windowTitle(id: string): string {
-	const [port, index] = id.slice("preview:".length).split("~");
-
-	return "Preview :" + port + (index === undefined ? "" : " (" + index + ")");
-}
-
-/** A page of a server this editor runs: an address of this origin under `<base>/__virtual__/<tab>/<port>/` (under the
- *  deploy base too — Pages serves the editor at /editor/). */
-function previewPageOf(url: string): { "url": string; "port": number } | undefined {
-	try {
-		const parsed = new URL(url, location.href);
-		const port = /\/__virtual__\/[^/]+\/(\d+)\//u.exec(parsed.pathname)?.[1];
-
-		return parsed.origin === location.origin && port !== undefined ? { "url": parsed.href, "port": Number(port) } : undefined;
-	} catch {
-		return undefined;
-	}
-}
 
 /** A hub transport to whatever page `frame` holds: its window is looked up on every use — it's null until the frame is
  *  in the document, and a new page (a reload) is a new realm behind the same frame. What's sent while there's no

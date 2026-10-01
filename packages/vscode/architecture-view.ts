@@ -14,6 +14,7 @@ import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianje
 import type { AppLayout } from "./architecture-model";
 import { appEnded, appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, isEndedPlaceholder, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
 import css from "./architecture-view.css?raw";
+import { windowTitle } from "./virtual-path";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const NODE_HEIGHT = 44;
@@ -186,15 +187,9 @@ function labelOf(store: ArchitectureStore, id: string): string {
 function detailOf(node: RuntimeNode): string {
 	const window = appWindowOf(node.id);
 
-	return nodeSpec(node.id)?.detail ?? node.spec.detail ?? node.spec.role ?? (window === undefined ? "" : "in " + windowLabel(window));
+	return nodeSpec(node.id)?.detail ?? node.spec.detail ?? node.spec.role ?? (window === undefined ? "" : "in " + windowTitle(window));
 }
 
-/** `preview:5173` → "Preview :5173"; `preview:5173~2` → "Preview :5173 (2)". */
-function windowLabel(window: string): string {
-	const [port, index] = window.slice("preview:".length).split("~");
-
-	return "Preview :" + port + (index === undefined ? "" : " (" + index + ")");
-}
 
 /** A context the model doesn't list: a previewed app's own, created at runtime (its channels are declared by prefix),
  *  or a finding. */

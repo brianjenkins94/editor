@@ -18,6 +18,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { createRpcClient } from "@brianjenkins94/hub";
+import { virtualUrl } from "./virtual-path";
 
 /** The default virtual port when none is given (single-preview back-compat); the value only namespaces the URL. */
 const DEFAULT_PREVIEW_PORT = 5173;
@@ -59,5 +60,5 @@ export async function createPreview(options: PreviewOptions): Promise<Preview> {
 	// root-absolute /__virtual__/ URL would fall outside its scope and never be intercepted.
 	const base = swUrl.slice(0, swUrl.lastIndexOf("/") + 1);
 
-	return { "port": port, "url": base + "__virtual__/" + options.tab + "/" + port + "/" };
+	return { "port": port, "url": virtualUrl(base, options.tab, port) };
 }

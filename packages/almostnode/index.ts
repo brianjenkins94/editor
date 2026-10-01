@@ -1,7 +1,7 @@
 export { createRuntime } from "./create-runtime";
 // Preview dev server (Path B): a Vite-compatible dev server that runs in the page, serves the VirtualFS with
 // `ts.transpileModule` JSX/TS transforms + React-Refresh HMR, and is reached from the preview iframe through
-// the ServerBridge service worker (`/__virtual__/<port>/`). See frameworks/vite-dev-server.ts.
+// the ServerBridge service worker (`/__virtual__/<tab>/<port>/`). See frameworks/vite-dev-server.ts.
 export { DevServer } from "./dev-server";
 export type { DevServerOptions, HMRUpdate, ResponseData } from "./dev-server";
 export { ViteDevServer } from "./frameworks/vite-dev-server";
