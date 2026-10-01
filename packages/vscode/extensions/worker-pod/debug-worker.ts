@@ -19,7 +19,7 @@
  * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
 import type { LoadedVM } from "@brianjenkins94/tsval";
-import type { Control, PreviewMessage, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
+import type { Control, CoverageReport, PreviewMessage, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
 import type { GuestRoot } from "./debug-react";
 
 import { createHub, portTransport } from "@brianjenkins94/hub";
@@ -83,6 +83,9 @@ let actionTrace: TraceContext | undefined;
 let control: Int32Array | undefined;
 /** In React mode, the reconciler root the guest app renders into (see launchReact). */
 let guestRoot: GuestRoot | undefined;
+/** The VM on the timeline being shown — what coverage reports on. A forward step advances a fork; a step back
+ *  returns to an earlier stop. */
+let current: Vm | undefined;
 
 function nextAction(): Promise<Action> {
 	return new Promise((resolve) => { awaitAction = resolve; });
@@ -242,6 +245,39 @@ function onBreakpointHook(vm: Vm): void {
 	Atomics.wait(control, 0, 0);
 }
 
+/** Every statement tsval can run (see its isStatement: blocks and declarations never take a step of their own), with
+ *  how often `current` has run each — 0 for the ones it hasn't. */
+function coverageReport(): CoverageReport {
+	const file = sourceFile;
+	const counts = current?.coverage;
+	const statements: CoverageReport["statements"] = [];
+
+	if (file === undefined) {
+		return { "file": "", "statements": statements };
+	}
+
+	const visit = (node: ts.Node): void => {
+		if (node.kind >= ts.SyntaxKind.FirstStatement && node.kind <= ts.SyntaxKind.LastStatement) {
+			const start = file.getLineAndCharacterOfPosition(node.getStart(file));
+			const end = file.getLineAndCharacterOfPosition(node.getEnd());
+
+			statements.push({ "start": [start.line, start.character], "end": [end.line, end.character], "count": counts?.get(node) ?? 0 });
+		}
+
+		node.forEachChild(visit);
+	};
+
+	file.forEachChild(visit);
+
+	return { "file": file.fileName, "statements": statements };
+}
+
+/** The program is over: report its coverage, then end the session. */
+function finish(): void {
+	post({ "type": "coverage", "report": coverageReport(), "final": true });
+	post({ "type": "terminated" });
+}
+
 /** Guest call depth: the `call`/`construct` frames on the control stack (the rest are expression/statement frames). */
 function callDepth(vm: Vm): number {
 	let depth = 0;
@@ -268,6 +304,7 @@ function stepOut(vm: Vm): void {
  *  carried a `trace` (the adapter's action span), the step span CONTINUES that trace, so a debug step is one
  *  cross-context trace (adapter action → worker step) rather than an unrelated root. */
 function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): void {
+	current = base;
 	const span = trace !== undefined ? workerLog.continueSpan(trace, "step", { "action": action }) : workerLog.span("step", { "action": action });
 
 	try {
@@ -281,7 +318,7 @@ function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): voi
 			}
 		} catch (error) {
 			post({ "type": "output", "text": "Uncaught " + String(error), "stream": "stderr" });
-			post({ "type": "terminated" });
+			finish();
 			done = true;
 
 			return;
@@ -292,7 +329,7 @@ function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): voi
 				post({ "type": "output", "text": "→ " + format(base.completion) });
 			}
 
-			post({ "type": "terminated" });
+			finish();
 			done = true;
 
 			return;
@@ -322,6 +359,7 @@ function handle(action: Action): void {
 				index -= 1;
 			}
 
+			current = history[index];
 			emitStopped(history[index], "step", true);
 			break;
 
@@ -331,11 +369,13 @@ function handle(action: Action): void {
 				index -= 1;
 			}
 
+			current = history[index];
+
 			emitStopped(history[index], "breakpoint", true);
 			break;
 
 		case "disconnect":
-			post({ "type": "terminated" });
+			finish();
 			done = true;
 			break;
 
@@ -377,10 +417,12 @@ function launchReact(message: Extract<Control, { "type": "launch" }>, trace: Tra
 	const loaded = createVM(message.source, {
 		"fileName": message.fileName,
 		"onBreakpoint": onBreakpointHook,
+		"coverage": true,
 		"globals": { "React": React, "ReactDOM": reactDom, "document": documentShim, "console": guestConsole() }
 	});
 
 	sourceFile = loaded.sourceFile;
+	current = loaded.vm;
 	loaded.vm.addBreakpointsByLine(...message.lines);
 
 	// The initial mount is the launch's work — span it as a continuation of the adapter's launch trace, so the
@@ -419,7 +461,7 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 				break;
 			}
 
-			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, ...capabilitySurface() });
+			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, ...capabilitySurface() });
 
 			sourceFile = loaded.sourceFile;
 			loaded.vm.addBreakpointsByLine(...message.lines);
@@ -460,6 +502,10 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 
 		case "timeTravel":
 			guestRoot?.timeTravel(message.index);
+			break;
+
+		case "coverage":
+			post({ "type": "coverage", "report": coverageReport() });
 			break;
 
 		case "setBreakpoints":

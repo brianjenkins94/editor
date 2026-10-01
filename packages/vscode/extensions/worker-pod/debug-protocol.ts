@@ -24,6 +24,8 @@ export type Control =
 	| { "type": "setBreakpoints"; "lines": number[] }
 	| { "type": "dispatch"; "id": number; "event": string }
 	| { "type": "timeTravel"; "index": number }
+	/** Report the coverage so far (answered with a `coverage` event). */
+	| { "type": "coverage" }
 	| { "type": StepAction | "disconnect" };
 
 export interface Variable { "name": string; "value": string; "type": string; "variablesReference": number }
@@ -43,7 +45,16 @@ export type WorkerEvent =
 	| { "type": "terminated" }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" }
 	| { "type": "rendered" }
-	| { "type": "history"; "length": number };
+	| { "type": "history"; "length": number }
+	/** The program's statement coverage — asked for, or `final` just before `terminated`. */
+	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean };
+
+/** One statement's coverage: its range (0-based line and character, as VS Code's Position) and how often it ran. */
+export interface StatementCoverage { "start": [number, number]; "end": [number, number]; "count": number }
+
+/** Every statement tsval can run in the program, with how often each ran — 0 for the ones that never did. The body
+ *  of the adapter's `getCoverage` reply and of its `coverage` event. */
+export interface CoverageReport { "file": string; "statements": StatementCoverage[] }
 
 /** Worker → render surface (`PREVIEW_STREAM`); `reset` comes from the workbench bridge at session start. */
 export type PreviewMessage =

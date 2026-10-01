@@ -18,7 +18,7 @@ import { EMPTY_POLICY, type Policy } from "@brianjenkins94/util/silo/policy";
 import { loadEffectivePolicy } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
-import type { Control, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
+import type { Control, CoverageReport, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
 import { controlSubject, eventSubject } from "./debug-protocol";
 import { podHub } from "./pod";
 
@@ -77,6 +77,13 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private started = false;
 	/** React mode: the program renders via ReactDOM, so run it through the M3c reconciler and stream mutations. */
 	private reactMode = false;
+	/** Run Without Debugging (or a coverage run): breakpoints don't stop it. Capability breakpoints still do — they're
+	 *  the policy gate, not a debugging aid. */
+	private noDebug = false;
+	/** The latest coverage the worker reported, and whether the final one has gone out as the `coverage` event. */
+	private coverage: CoverageReport | undefined;
+	private coverageSent = false;
+	private readonly coverageWaiters = new Set<(report: CoverageReport) => void>();
 
 	private readonly session: vscode.DebugSession;
 
@@ -219,7 +226,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				const applies = this.program === "" || path === this.program;
 
 				this.breakpointLines.set(path, points.map((point) => point.line));
-				this.lines = this.breakpointLines.get(this.program) ?? [];
+				this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
 
 				if (path === this.program) {
 					this.control({ "type": "setBreakpoints", "lines": this.lines });
@@ -254,9 +261,15 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.respond(request);
 				break;
 
+			// The program's statement coverage so far (a CoverageReport); once it has ended, its final coverage.
+			case "getCoverage":
+				void this.currentCoverage(5000).then((report) => { this.respond(request, report as unknown as Dap); });
+				break;
+
 			case "launch":
 				this.program = String(args["program"] ?? "");
-				this.lines = this.breakpointLines.get(this.program) ?? [];
+				this.noDebug = args["noDebug"] === true;
+				this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
 				this.respond(request);
 				void this.loadSource();
 				break;
@@ -312,13 +325,17 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 			case "disconnect":
 			case "terminate":
-				// Hard-stop: terminate() kills the worker even while it's blocked in Atomics.wait (an in-handler
-				// pause), which a postMessage could not reach.
-				this.endAction();
-				this.closeWorker();
-				this.respond(request);
-				this.event("terminated");
-				this.settle("terminated");
+				// Stopped early: ask for the coverage so far first, briefly — a worker blocked in Atomics.wait (an
+				// in-handler pause) can't answer, and then the last report stands. Then hard-stop: terminate() kills
+				// the worker even while it's blocked, which a postMessage could not reach.
+				void this.currentCoverage(500).then((report) => {
+					this.sendFinalCoverage(report);
+					this.endAction();
+					this.closeWorker();
+					this.respond(request);
+					this.event("terminated");
+					this.settle("terminated");
+				});
 				break;
 
 			default:
@@ -399,6 +416,38 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		}
 	}
 
+	/** The worker's coverage now, or — when it's gone or doesn't answer within `timeoutMs` — the last it reported. */
+	private currentCoverage(timeoutMs: number): Promise<CoverageReport> {
+		const fallback = (): CoverageReport => this.coverage ?? { "file": this.program, "statements": [] };
+
+		if (this.worker === undefined) {
+			return Promise.resolve(fallback());
+		}
+
+		return new Promise((resolve) => {
+			const timer = setTimeout(() => {
+				this.coverageWaiters.delete(answer);
+				resolve(fallback());
+			}, timeoutMs);
+			const answer = (report: CoverageReport): void => {
+				clearTimeout(timer);
+				resolve(report);
+			};
+
+			this.coverageWaiters.add(answer);
+			this.control({ "type": "coverage" });
+		});
+	}
+
+	/** Once per session, before `terminated`: the final coverage as a custom `coverage` event — the session is gone
+	 *  after, so this is how a coverage run (or anyone else) gets it (vscode.debug.onDidReceiveDebugSessionCustomEvent). */
+	private sendFinalCoverage(report: CoverageReport): void {
+		if (!this.coverageSent) {
+			this.coverageSent = true;
+			this.event("coverage", report as unknown as Dap);
+		}
+	}
+
 	private closeWorker(): void {
 		this.offEvents?.();
 		this.offEvents = undefined;
@@ -434,6 +483,21 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.stopReason = message.reason;
 				this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
 				this.settle("stopped");
+				break;
+
+			case "coverage":
+				this.coverage = message.report;
+
+				for (const waiter of [...this.coverageWaiters]) {
+					waiter(message.report);
+				}
+
+				this.coverageWaiters.clear();
+
+				if (message.final === true) {
+					this.sendFinalCoverage(message.report);
+				}
+
 				break;
 
 			case "terminated":

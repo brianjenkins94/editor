@@ -41,6 +41,13 @@ declare module "eslint:extension" {
 	export default path;
 }
 
+/** The insights extension (coverage through VS Code's test-coverage UI), bundled like the others: its path. */
+declare module "insights:extension" {
+	const path: string;
+
+	export default path;
+}
+
 /** The worker-pod cspell language server bundled to an ESM string (imported by server-host, run by almostnode). */
 declare module "worker-pod:page-tap" {
 	const code: string;

@@ -21,6 +21,7 @@ import { render } from "preact";
 import type { PodBridge } from "./extensions/worker-pod/extension";
 import type { WorkspaceFs } from "./workspace-fs";
 import capabilitiesExtensionPath from "capabilities:extension";
+import insightsExtensionPath from "insights:extension";
 import settingsDefaults from "editor:settings-defaults";
 import eslintExtensionPath from "eslint:extension";
 import helloExtensionPath from "hello:extension";
@@ -43,6 +44,7 @@ import { installRunTargets } from "./targets";
 import capabilitiesManifest from "./extensions/capabilities/package.json";
 import eslintManifest from "./extensions/eslint/package.json";
 import helloManifest from "./extensions/hello/package.json";
+import insightsManifest from "./extensions/insights/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
@@ -606,7 +608,13 @@ function maybeBoot(): void {
 
 			capabilitiesExt.registerFileUrl("./node_modules/capabilities-ts-plugin/index.js", capabilitiesPluginUrl);
 
-			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod", "eslint", "capabilities"] });
+			// Insights: coverage (and, to come, profiles and live metrics) through VS Code's own UI, from whatever the debug
+			// sessions report — public API only, so it runs in the web worker host.
+			const insightsExt = registerExtension(insightsManifest, ExtensionHostKind.LocalWebWorker);
+
+			insightsExt.registerFileUrl("./extension.js", new URL(insightsExtensionPath, location.href).href);
+
+			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod", "eslint", "capabilities", "insights"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");

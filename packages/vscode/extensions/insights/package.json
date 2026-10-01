@@ -1,0 +1,49 @@
+{
+  "name": "insights",
+  "displayName": "Insights",
+  "description": "What a program did when it ran: statement coverage through VS Code's own test-coverage UI, from any debug session that reports it (the tsval debugger does) \u2014 with profiles and live metrics to follow.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "insights.runFileWithCoverage",
+        "title": "Run File with Coverage",
+        "category": "Insights",
+        "icon": "$(debug-coverage)"
+      },
+      {
+        "command": "insights.showSessionCoverage",
+        "title": "Show Coverage So Far",
+        "category": "Insights",
+        "icon": "$(debug-coverage)"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "insights.runFileWithCoverage",
+          "when": "resourceLangId =~ /^(type|java)script(react)?$/",
+          "group": "navigation@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "insights.runFileWithCoverage",
+          "when": "editorLangId =~ /^(type|java)script(react)?$/"
+        },
+        {
+          "command": "insights.showSessionCoverage",
+          "when": "inDebugMode"
+        }
+      ]
+    }
+  }
+}
