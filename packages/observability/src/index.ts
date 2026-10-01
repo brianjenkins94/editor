@@ -767,6 +767,7 @@ export function observeApp(hub: Hub, { tools = [], keep = 1000, network, message
 }
 
 export * from "./log-subject.ts";
+export * from "./metrics.ts";
 export * from "./arch.ts";
 export * from "./arch-probes.ts";
 export * from "./arch-store.ts";
