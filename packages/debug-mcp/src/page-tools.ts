@@ -87,16 +87,24 @@ export function syncPageTools(server: McpServer, debugMcp: DebugMcp): PageToolSy
 			retries = 0;
 		}
 
-		servedBy.clear();
+		// A read that missed a tab can't tell its tools from gone ones: it keeps what was there, and adds what it read. Only
+		// a complete read takes away a tool no tab serves any more.
+		if (missed) {
+			for (const [name, tabs] of serving) {
+				servedBy.set(name, [...new Set([...servedBy.get(name) ?? [], ...tabs])]);
+			}
+		} else {
+			servedBy.clear();
 
-		for (const [name, tabs] of serving) {
-			servedBy.set(name, tabs);
-		}
+			for (const [name, tabs] of serving) {
+				servedBy.set(name, tabs);
+			}
 
-		for (const name of [...registered.keys()]) {
-			if (!specs.has(name)) {
-				removeTool(server, name);
-				registered.delete(name);
+			for (const name of [...registered.keys()]) {
+				if (!specs.has(name)) {
+					removeTool(server, name);
+					registered.delete(name);
+				}
 			}
 		}
 

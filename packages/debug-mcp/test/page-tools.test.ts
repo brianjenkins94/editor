@@ -8,10 +8,10 @@ import { after, before, test } from "node:test";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { until } from "@brianjenkins94/util/until";
 import type { Hub } from "@brianjenkins94/hub";
-import { createHub, websocketTransport } from "@brianjenkins94/hub";
+import { createHub, serve, websocketTransport } from "@brianjenkins94/hub";
 
 import type { PageTool } from "../../observability/src/page-tools.ts";
-import { servePageToolSet } from "../../observability/src/page-tools.ts";
+import { PAGE_TOOLS, PAGE_TOOLS_CHANGED, servePageToolSet } from "../../observability/src/page-tools.ts";
 import { TAB_DISCOVER, TAB_HERE } from "../../observability/src/tabs.ts";
 import { createDebugMcp } from "../src/server.ts";
 import type { TestClient } from "../src/testing.ts";
@@ -178,5 +178,35 @@ test("a tab that's slow to answer the first time still gets its tools registered
 	assert.ok(asked > 1, "it was asked again");
 	sockets.pop()?.close();
 	await toolsWhen((names) => !names.includes("busy_tool"));
+});
+
+test("a read that misses a tab leaves its tools alone — only a tab that's gone takes its tools with it", async () => {
+	// A tab whose manifest answers in time at first, then too slowly (busy): the slow read mustn't unregister its tools.
+	const hub = createHub({ "id": "flaky" });
+	let slow = false;
+
+	hub.subscribe(TAB_DISCOVER, (data) => {
+		hub.publish(TAB_HERE, { "query": (data as { "query": string }).query, "tab": "t6", "url": "", "title": "", "visible": true, "focused": false });
+	});
+	serve(hub, PAGE_TOOLS + ".t6", async () => {
+		if (slow) {
+			await new Promise((resolve) => { setTimeout(resolve, 2500); });
+		}
+
+		return [{ "name": "flaky_tool", "description": "From a busy tab.", "inputSchema": { "type": "object" } }];
+	});
+	await connectTab(hub);
+	await toolsWhen((names) => names.includes("flaky_tool"));
+
+	slow = true;
+	hub.publish(PAGE_TOOLS_CHANGED, { "tab": "t6" });
+
+	for (let check = 0; check < 6; check += 1) {
+		await new Promise((resolve) => { setTimeout(resolve, 500); });
+		assert.ok((await client.listTools()).tools.some((tool) => tool.name === "flaky_tool"), `still listed after ${(check + 1) * 500}ms`);
+	}
+
+	sockets.pop()?.close();
+	await toolsWhen((names) => !names.includes("flaky_tool"));
 });
 
