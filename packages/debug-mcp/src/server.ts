@@ -187,8 +187,18 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 
 		links.add(socket);
 
+		// Listening for close BEFORE linking, so this runs first: the hub unlinks on close too (websocketTransport's
+		// onClose), and whoever watches that topology change must already see the new link count.
+		socket.addEventListener("close", () => {
+			links.delete(socket);
+			unlink();
+
+			// Its architecture goes with it (its records stay, still filed under the link, and its tab id).
+			archByLink.delete(unlink.id);
+		});
+
 		// A ws socket is EventTarget-shaped (addEventListener + readyState), so websocketTransport drives it
-		// unchanged — the same transport the browser end uses. Unlink on close so interest is withdrawn cleanly.
+		// unchanged — the same transport the browser end uses; it unlinks on close, so interest is withdrawn cleanly.
 		// Non-transit: every connected page is its OWN tree. Joined, a request in one tab (a preview's
 		// virtual.request, a capability.decide) could be answered by another tab's node worker or pod.
 		const unlink = hub.link(websocketTransport(socket), { "transit": false });
@@ -201,14 +211,6 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 			}
 		});
 
-		socket.addEventListener("close", () => {
-			// Count it gone first, so whoever watches the topology change sees the new link count.
-			links.delete(socket);
-			unlink();
-
-			// Its architecture goes with it (its records stay, still filed under the link, and its tab id).
-			archByLink.delete(unlink.id);
-		});
 	});
 
 	return {

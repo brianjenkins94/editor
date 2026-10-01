@@ -509,9 +509,12 @@ test("handlers learn the link a message arrived on; a local publish has none", a
 });
 
 test("publish permissions drop what a peer may not send, and a tap sees the deny", async () => {
-	const { hub, peer } = await edge({ "peer": "seat-1", "permissions": { "publish": ["game.cmd"] } });
+	// The peer is asked only for what it may send (game.cmd, not all of game.>); one that sends more anyway is denied.
+	const hub = createHub({ "id": "edge" });
+	const [a, b] = pipe();
 	const received: unknown[] = [];
 	const denied: unknown[] = [];
+	const asked: string[] = [];
 
 	hub.subscribe("game.>", (data) => { received.push(data); });
 	hub.tap((event) => {
@@ -519,10 +522,19 @@ test("publish permissions drop what a peer may not send, and a tap sees the deny
 			denied.push([event.direction, event.envelope.subject, event.link.peerId]);
 		}
 	});
+	hub.link(a, { "peer": "seat-1", "permissions": { "publish": ["game.cmd"] } });
+	b.listen((message) => {
+		const frame = frameOf(message);
+
+		if (frame !== undefined && "hub" in frame && frame.hub === "sub") {
+			asked.push(frame.subject!);
+		}
+	});
 	await flush();
-	peer.publish("game.cmd", "ok");
-	peer.publish("game.admin", "nope");
+	b.send({ "\0hub": { "subject": "game.cmd", "data": "ok" } });
+	b.send({ "\0hub": { "subject": "game.admin", "data": "nope" } });
 	await flush();
+	assert.deepEqual(asked, ["game.cmd"]);
 	assert.deepEqual(received, ["ok"]);
 	assert.deepEqual(denied, [["publish", "game.admin", "seat-1"]]);
 });
@@ -791,7 +803,7 @@ test("mapFrame rewrites the frame a message carries, so a transport can rename w
 	const seen: [string, unknown][] = [];
 	// root's end renames the pod's `status.*` to `pod.status.*`; everything else crosses as is.
 	const renaming = { "send": a.send, "listen": (onMessage: (message: unknown) => void) => a.listen((message) => {
-		onMessage(mapFrame(message, (frame) => ("subject" in frame && frame.subject.startsWith("status.") ? { ...frame, "subject": "pod." + frame.subject } : frame)));
+		onMessage(mapFrame(message, (frame) => (!("hub" in frame) && frame.subject.startsWith("status.") ? { ...frame, "subject": "pod." + frame.subject } : frame)));
 	}) };
 
 	root.subscribe(">", (data, envelope) => { seen.push([envelope.subject, data]); });
@@ -903,4 +915,310 @@ test("interest passes on only as far as each link may receive it", async () => {
 
 	assert.equal(peer.interested("$sys.log.p"), true);
 	assert.equal(peer.interested("game.secret"), false);
+});
+
+// ── Hardening (the NATS audit) ──────────────────────────────────────────────────────────────────────────────────────
+
+/** Every fault a hub's tap reports. */
+function faults(hub: ReturnType<typeof createHub>): { "kind": string; "detail": string }[] {
+	const seen: { "kind": string; "detail": string }[] = [];
+
+	hub.tap((event) => {
+		if (event.type === "fault") {
+			seen.push({ "kind": event.kind, "detail": event.detail });
+		}
+	});
+
+	return seen;
+}
+
+/** A link's interest, less the loop-detection subjects every hub advertises. */
+function interestOf(hub: ReturnType<typeof createHub>, index = 0): string[] {
+	return hub.inspect().links[index]?.remoteInterest ?? [];
+}
+
+test("a throwing handler doesn't stop the other handlers, or the message going on across links", async () => {
+	const errors: unknown[] = [];
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root", "onError": (error) => { errors.push(error); } });
+	const pod = createHub({ "id": "pod" });
+	const seen: string[] = [];
+	const reported = faults(root);
+
+	root.subscribe("x", () => { throw new Error("handler bug"); });
+	root.subscribe("x", () => { seen.push("root"); });
+	pod.subscribe("x", () => { seen.push("pod"); });
+	await Promise.all([root.link(a).ready, pod.link(b).ready]);
+
+	assert.doesNotThrow(() => { root.publish("x"); });
+	await flush();
+
+	assert.deepEqual(seen, ["root", "pod"]);
+	assert.equal((errors[0] as Error).message, "handler bug");
+	assert.equal(reported[0]?.kind, "handler");
+});
+
+test("a frame the transport can't send is dropped — the publisher isn't thrown at, and the link carries on", async () => {
+	const [a, b] = pipe();
+	const fussy: Transport = { ...a, "send": (message) => {
+		if ((frameOf(message) as { "data"?: unknown } | undefined)?.data === "unclonable") {
+			throw new Error("DataCloneError");
+		}
+
+		a.send(message);
+	} };
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	const seen: unknown[] = [];
+	const reported = faults(root);
+
+	pod.subscribe("x", (data) => { seen.push(data); });
+	await Promise.all([root.link(fussy).ready, pod.link(b).ready]);
+
+	assert.doesNotThrow(() => { root.publish("x", "unclonable"); });
+	root.publish("x", "fine");
+	await flush();
+
+	assert.deepEqual(seen, ["fine"]);
+	assert.equal(reported[0]?.kind, "send");
+	assert.equal(root.inspect().links.length, 1);
+});
+
+test("a link whose transport closes is unlinked at both ends", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	const reported = faults(root);
+
+	pod.subscribe("x", () => undefined);
+	await Promise.all([root.link(a).ready, pod.link(b).ready]);
+	assert.equal(root.interested("x"), true);
+
+	a.close();
+	await flush();
+
+	assert.equal(root.inspect().links.length, 0);
+	assert.equal(pod.inspect().links.length, 0);
+	assert.equal(root.interested("x"), false, "a closed link's interest goes with it");
+	assert.equal(reported[0]?.kind, "closed");
+});
+
+test("heartbeat: a link that goes silent is unlinked; a live one stays", async () => {
+	let cut = false;
+	const [a, b] = pipe({ "schedule": (deliver) => { setTimeout(() => { if (!cut) { deliver(); } }, 0); } });
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	const reported = faults(root);
+
+	await Promise.all([root.link(a, { "heartbeatMs": 20 }).ready, pod.link(b).ready]);
+	await new Promise((resolve) => { setTimeout(resolve, 120); });
+	assert.equal(root.inspect().links.length, 1, "pings answered: still linked");
+
+	cut = true; // the peer vanishes without a word (a tab killed, a network gone)
+	await new Promise((resolve) => { setTimeout(resolve, 150); });
+
+	assert.equal(root.inspect().links.length, 0);
+	assert.equal(reported.at(-1)?.kind, "stale");
+});
+
+test("heartbeat repairs interest a lossy transport dropped", async () => {
+	let dropped = false;
+	const [a, b] = pipe({ "schedule": (deliver, message) => {
+		const frame = frameOf(message) as { "hub"?: string; "subject"?: string } | undefined;
+
+		if (!dropped && frame?.hub === "sub" && frame.subject === "game.lost") {
+			dropped = true;
+
+			return;
+		}
+
+		setTimeout(deliver, 0);
+	} });
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+
+	await Promise.all([root.link(a, { "heartbeatMs": 60 }).ready, pod.link(b).ready]);
+	await flush(); // the handshake's answering hellos, which re-send interest, are done
+	pod.subscribe("game.lost", () => undefined);
+	await flush();
+	assert.equal(dropped, true);
+	assert.equal(root.interested("game.lost"), false, "the sub frame was lost");
+
+	assert.equal(await root.whenInterested("game.lost", 1000), true, "the ping's digest showed the drift, and a resync fixed it");
+});
+
+test("a peer that restarts on the same transport leaves no ghost interest behind", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const before = createHub({ "id": "frame" });
+
+	before.subscribe("old", () => undefined);
+	const unlinkBefore = before.link(b);
+
+	await Promise.all([root.link(a).ready, unlinkBefore.ready]);
+	assert.equal(root.interested("old"), true);
+
+	// The frame reloads: its hub is gone without a word, and a new one links the same transport.
+	unlinkBefore();
+	const after = createHub({ "id": "frame" });
+
+	after.subscribe("new", () => undefined);
+	await after.link(b).ready;
+	await flush();
+
+	assert.equal(root.interested("new"), true);
+	assert.equal(root.interested("old"), false, "the old page's interest went with it");
+});
+
+test("a cycle is detected and cut, so a message can't loop", async () => {
+	// a ─ b ─ c ─ a: a wiring mistake. Every hub's loop-detection subject comes back to it round the ring.
+	const hubs = ["a", "b", "c"].map((id) => createHub({ "id": id }));
+	const reported = hubs.map(faults);
+	const ends = [pipe(), pipe(), pipe()];
+	let delivered = 0;
+
+	hubs[2]!.subscribe("x", () => { delivered += 1; });
+	hubs[0]!.link(ends[0]![0]);
+	hubs[1]!.link(ends[0]![1]);
+	hubs[1]!.link(ends[1]![0]);
+	hubs[2]!.link(ends[1]![1]);
+	hubs[2]!.link(ends[2]![0]);
+	hubs[0]!.link(ends[2]![1]);
+	await new Promise((resolve) => { setTimeout(resolve, 50); });
+
+	assert.ok(reported.flat().some((fault) => fault.kind === "loop"), "the loop was reported");
+	hubs[0]!.publish("x");
+	await new Promise((resolve) => { setTimeout(resolve, 50); });
+	assert.equal(delivered, 1);
+});
+
+test("maxPayload: an oversized message is dropped at the link, in either direction", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	const atRoot: unknown[] = [];
+	const atPod: unknown[] = [];
+	const reported = faults(root);
+
+	root.subscribe("up", (data) => { atRoot.push(data); });
+	pod.subscribe("down", (data) => { atPod.push(data); });
+	await Promise.all([root.link(a, { "maxPayload": 100 }).ready, pod.link(b).ready]);
+
+	root.publish("down", "x".repeat(1000));
+	root.publish("down", "small");
+	pod.publish("up", "y".repeat(1000));
+	pod.publish("up", "small");
+	await flush();
+
+	assert.deepEqual(atPod, ["small"]);
+	assert.deepEqual(atRoot, ["small"]);
+	assert.deepEqual(reported.map((fault) => fault.kind), ["payload", "payload"]);
+});
+
+test("backpressure: while a transport's backlog is past maxBacklog, messages are dropped — control still goes", async () => {
+	const [a, b] = pipe();
+	let backlog = 0;
+	const slow: Transport = { ...a, "backlog": () => backlog };
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	const seen: unknown[] = [];
+	const reported = faults(root);
+
+	pod.subscribe("x", (data) => { seen.push(data); });
+	await Promise.all([root.link(slow, { "maxBacklog": 10 }).ready, pod.link(b).ready]);
+
+	backlog = 100;
+	root.publish("x", 1);
+	root.subscribe("interest.still.flows", () => undefined);
+	backlog = 0;
+	root.publish("x", 2);
+	await flush();
+
+	assert.deepEqual(seen, [2]);
+	assert.equal(reported[0]?.kind, "backlog");
+	assert.equal(pod.interested("interest.still.flows"), true);
+});
+
+test("permissions intersect interest: a broad subscription behind a narrow allowance is asked for as the allowance", async () => {
+	// page ─ referee ─ client: the client subscribes to everything, but may receive only its own state.
+	const [pageEnd, refereeUp] = pipe();
+	const [refereeDown, clientEnd] = pipe();
+	const page = createHub({ "id": "page" });
+	const referee = createHub({ "id": "referee" });
+	const client = createHub({ "id": "client-0" });
+
+	client.subscribe(">", () => undefined);
+	await Promise.all([page.link(pageEnd).ready, referee.link(refereeUp).ready, referee.link(refereeDown, { "peer": "client-0", "permissions": { "subscribe": ["game.state.client-0"] } }).ready, client.link(clientEnd, { "uplink": true }).ready]);
+	await flush();
+
+	assert.equal(page.interested("game.state.client-0"), true);
+	assert.equal(page.interested("game.state.client-1"), false, "the page isn't told the client wants what it can't have");
+	assert.deepEqual(interestOf(page).filter((subject) => !subject.startsWith("$sys.lds.")), ["game.state.client-0"]);
+});
+
+test("interest is narrowed to what a link may send, too", async () => {
+	const [rootEnd, up] = pipe();
+	const [down, peerEnd] = pipe();
+	const root = createHub({ "id": "root" });
+	const hub = createHub({ "id": "hub" });
+	const peer = createHub({ "id": "p" });
+
+	root.subscribe("$sys.log.>", () => undefined);
+	await Promise.all([root.link(rootEnd).ready, hub.link(up).ready, hub.link(down, { "peer": "p", "permissions": { "publish": ["$sys.log.p"] } }).ready, peer.link(peerEnd).ready]);
+	await flush();
+
+	assert.equal(peer.interested("$sys.log.p"), true);
+	assert.equal(peer.interested("$sys.log.q"), false);
+});
+
+test("subjects, patterns, ids and permissions are validated: thrown at locally, dropped from a peer", async () => {
+	const hub = createHub({ "id": "hub" });
+
+	assert.ok(!matches("a.>.c", "a.b.c"), "`>` only ends a pattern");
+	assert.throws(() => hub.subscribe("a..b", () => undefined), TypeError);
+	assert.throws(() => hub.subscribe("a.>.b", () => undefined), TypeError);
+	assert.throws(() => hub.subscribe("", () => undefined), TypeError);
+	assert.throws(() => { hub.publish("a.*"); }, TypeError);
+	assert.throws(() => { hub.publish("a.b."); }, TypeError);
+	assert.throws(() => createHub({ "id": "has.a.dot" }), TypeError);
+	assert.throws(() => hub.link(pipe()[0], { "peer": "a.b" }), TypeError);
+	assert.throws(() => hub.link(pipe()[0], { "permissions": { "publish": ["a.>.b"] } }), TypeError);
+	assert.throws(() => hub.permit("anyone", { "subscribe": ["a..b"] }), TypeError);
+
+	// From a peer: raw frames, as a hostile or buggy hub might send them.
+	const [a, b] = pipe();
+	const seen: unknown[] = [];
+	const reported = faults(hub);
+
+	hub.subscribe(">", (data) => { seen.push(data); });
+	hub.link(a);
+	b.listen(() => undefined);
+	b.send({ "\0hub": { "hub": "hello", "id": "bad.id" } });
+	b.send({ "\0hub": { "hub": "sub", "subject": "a.>.b" } });
+	b.send({ "\0hub": { "subject": "a..b", "data": "bad" } });
+	b.send({ "\0hub": { "subject": "a.*", "data": "wild" } });
+	b.send({ "\0hub": { "subject": "ok", "data": "good" } });
+	await flush();
+
+	assert.deepEqual(seen, ["good"]);
+	assert.equal(hub.inspect().links[0]?.peerId, undefined, "an invalid id is no name");
+	assert.deepEqual(interestOf(hub), []);
+	assert.equal(reported.filter((fault) => fault.kind === "frame").length, 4);
+});
+
+test("maxInterest caps how many subjects a link may ask for", async () => {
+	const [a, b] = pipe();
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	const reported = faults(root);
+
+	for (const subject of ["s1", "s2", "s3", "s4", "s5"]) {
+		pod.subscribe(subject, () => undefined);
+	}
+
+	await Promise.all([root.link(a, { "maxInterest": 3 }).ready, pod.link(b, { "permissions": {} }).ready]);
+	await flush();
+
+	assert.equal(interestOf(root).length, 3);
+	assert.ok(reported.some((fault) => fault.kind === "limit"));
 });

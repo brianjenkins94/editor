@@ -135,6 +135,8 @@ export const SILENCE_MS = 15_000;
  *  `Worker` there (the editor's preview tap), and read by the worker's reporter (describeRealm). */
 export const REALM_PARENT = "realm-parent";
 const MAX_SAMPLES_PER_FLUSH = 120;
+/** How each kind of hub control frame reads in the traffic. */
+const LIFECYCLE_LABELS: Record<string, string> = { "hello": "hello", "sub": "interest (sub)", "unsub": "interest (unsub)", "ping": "heartbeat", "pong": "heartbeat", "bye": "bye" };
 /** Node ops held while nobody listens (see flush), past which they're collapsed into the nodes' current state. */
 const MAX_HELD_NODE_OPS = 200;
 
@@ -409,7 +411,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 					return;
 				}
 
-				const { kind, label } = "hub" in frame ? { "kind": "lifecycle" as const, "label": frame.hub === "hello" ? "hello" : "interest (" + frame.hub + ")" } : describe(frame);
+				const { kind, label } = "hub" in frame ? { "kind": "lifecycle" as const, "label": LIFECYCLE_LABELS[frame.hub] ?? frame.hub } : describe(frame);
 				const bytes = "hub" in frame ? 0 : approxSize(frame.data);
 				const payload = "hub" in frame ? undefined : frame.data;
 				const peer = event.link.peerId;

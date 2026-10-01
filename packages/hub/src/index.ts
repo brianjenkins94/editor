@@ -11,7 +11,15 @@
  *
  * Addressing is NATS-style dotted subjects: `render.mutation`, `log.editor`, `peer.<id>` for point-to-point.
  * Patterns use `*` (one token) and `>` (the rest): `log.>`, `peer.*`. No delivery guarantees, no persistence —
- * this is a router, not a broker; wire hubs as a TREE (no cycles) so a message never loops.
+ * this is a router, not a broker; wire hubs as a TREE (no cycles) so a message never loops. A cycle made by mistake
+ * is found and cut: every hub advertises interest in its own `$sys.lds.<session>` subject, which can only come back to
+ * it round a loop (NATS's loop detection). Every hub in the loop reports a `loop` fault; the one with the least session
+ * cuts the link its subject came back on (telling the far end, so it lets go too) — one cut per loop.
+ *
+ * Whatever goes wrong at one link or handler stays there, reported as a `fault` (see TapEvent): a throwing handler
+ * doesn't stop the others or the forwarding (HubOptions.onError hears it), a frame a transport can't send is dropped,
+ * a malformed frame from a peer is ignored, and a link whose transport closes — or, with `heartbeatMs`, goes silent —
+ * is unlinked.
  */
 
 /** A message on the bus. `subject` is the address; `data` is the payload. */
@@ -26,11 +34,24 @@ export interface Envelope {
 	"traceContext"?: { "traceId": string; "parentSpanId": string };
 }
 
-/** A duplex channel to one other hub. Transport-agnostic so window/MessagePort/Worker (and later WebSocket,
- *  WebRTC) all plug in. `listen` registers the sink and returns a disposer. */
+/**
+ * A duplex channel to one other hub. Transport-agnostic so window/MessagePort/Worker, WebSocket and WebRTC all plug in.
+ * `listen` registers the sink and returns a disposer.
+ *
+ * The contract: once both ends listen, a transport is RELIABLE and ORDERED — what's sent arrives, once, in the order
+ * sent (a MessagePort, a WebSocket, an `ordered` RTCDataChannel with no `maxRetransmits`/`maxPacketLifeTime`). Interest
+ * is sent as deltas, so a frame lost or reordered later would leave the two ends disagreeing about who wants what. The
+ * one loss tolerated is at the start, before the other end listens (a window's postMessage): the `hello` handshake
+ * recovers it — and `heartbeatMs` (LinkOptions) checks for, and repairs, any drift after that.
+ */
 export interface Transport {
 	"send": (message: unknown) => void;
 	"listen": (onMessage: (message: unknown) => void) => () => void;
+	/** Call `onClose` when the channel is gone for good (a socket closed, a peer connection failed); returns a disposer.
+	 *  The hub unlinks. Without it, only a heartbeat (LinkOptions.heartbeatMs) notices a dead peer. */
+	"onClose"?: (onClose: () => void) => () => void;
+	/** Bytes queued and not yet sent (a WebSocket's or RTCDataChannel's `bufferedAmount`) — for LinkOptions.maxBacklog. */
+	"backlog"?: () => number;
 }
 
 /** Where a delivered message came from: the adjacent link it arrived on, or undefined for a publish on this hub. */
@@ -41,8 +62,12 @@ export interface Origin {
 export type Handler = (data: unknown, envelope: Envelope, origin: Origin) => void;
 
 export interface HubOptions {
-	/** Stable id (used for `peer.<id>` addressing and diagnostics). Auto-generated when omitted. */
+	/** Stable id (used for `peer.<id>` addressing and diagnostics) — one subject token: no `.`. Auto-generated when
+	 *  omitted. */
 	"id"?: string;
+	/** Hears what a handler threw (after a `handler` fault). Default: `reportError` where there is one (a browser: the
+	 *  page's uncaught-error handling sees it), else `console.error`. */
+	"onError"?: (error: unknown, envelope: Envelope) => void;
 }
 
 // Every hub message is wrapped under this key before it hits a transport, so a shared channel (a window with
@@ -55,9 +80,17 @@ const WIRE = "\0hub"; // a NUL-prefixed key no ordinary postMessage payload uses
  *  Kept off the Envelope shape so data and control never collide. `hello` also carries the sender's hub `id`, so
  *  each end knows WHICH hub sits across a link (optional on the wire: an older peer simply stays anonymous). */
 export interface Control {
-	"hub": "sub" | "unsub" | "hello";
+	/** `ping`/`pong`: a heartbeat (LinkOptions.heartbeatMs) and its answer — every hub answers a ping. `bye`: the
+	 *  sender has cut this link (to break a loop) — the receiver unlinks its end too. */
+	"hub": "sub" | "unsub" | "hello" | "ping" | "pong" | "bye";
 	"subject"?: string;
 	"id"?: string;
+	/** On every control frame: the sending hub's session — random, per Hub instance. A new one on a link means a new
+	 *  hub at the other end (a reloaded frame on the same transport): what we knew of the old one is dropped. */
+	"session"?: string;
+	/** On a ping or pong: a digest of the interest the sender has advertised over this link — if it isn't what the
+	 *  receiver holds, a frame went missing, and the receiver asks for it all again. */
+	"digest"?: string;
 	/** Set on the `hello` sent back in answer to a peer's `hello` — so an end whose first `hello` was lost still
 	 *  learns our id. Never answered itself, so hellos can't ping-pong. */
 	"reply"?: boolean;
@@ -69,7 +102,7 @@ export interface Control {
 function isControl(message: unknown): message is Control {
 	const hub = (message as Control | null)?.hub;
 
-	return typeof message === "object" && message !== null && (hub === "sub" || hub === "unsub" || hub === "hello");
+	return typeof message === "object" && message !== null && (hub === "sub" || hub === "unsub" || hub === "hello" || hub === "ping" || hub === "pong" || hub === "bye");
 }
 
 function isEnvelope(message: unknown): message is Envelope {
@@ -89,7 +122,7 @@ export function matches(pattern: string, subject: string): boolean {
 		const token = patternTokens[index];
 
 		if (token === ">") {
-			return subjectTokens.length > index;
+			return index === patternTokens.length - 1 && subjectTokens.length > index;
 		}
 
 		if (index >= subjectTokens.length || (token !== "*" && token !== subjectTokens[index])) {
@@ -99,6 +132,45 @@ export function matches(pattern: string, subject: string): boolean {
 
 	return patternTokens.length === subjectTokens.length;
 }
+
+/** A subject a message may be published on: dot-separated, no empty token, no wildcard token. */
+function isSubject(value: unknown): value is string {
+	return typeof value === "string" && value !== "" && value.split(".").every((token) => token !== "" && token !== "*" && token !== ">");
+}
+
+/** A subscription pattern: dot-separated, no empty token, `>` only as the last token. */
+function isPattern(value: unknown): value is string {
+	if (typeof value !== "string" || value === "") {
+		return false;
+	}
+
+	const tokens = value.split(".");
+
+	return tokens.every((token, index) => token !== "" && (token !== ">" || index === tokens.length - 1));
+}
+
+/** A hub id: one subject token (it's addressed as one — `$rpc.reply.<id>`). */
+function isId(value: unknown): value is string {
+	return typeof value === "string" && value !== "" && !value.includes(".") && value !== "*" && value !== ">";
+}
+
+function assertValid(valid: boolean, what: string, value: unknown): void {
+	if (!valid) {
+		throw new TypeError(`hub: invalid ${what}: ${JSON.stringify(value)}`);
+	}
+}
+
+function assertPermissions(permissions: LinkPermissions | undefined): void {
+	for (const pattern of [...permissions?.publish ?? [], ...permissions?.subscribe ?? []]) {
+		assertValid(isPattern(pattern), "permission pattern", pattern);
+	}
+}
+
+/** Loop detection: each hub's own subject under this prefix (see the header). */
+const LDS = "$sys.lds.";
+/** After cutting a loop, how long a hub lets the cut settle (the withdrawn interest travel round) before its subject
+ *  coming back again counts as another loop. */
+const LOOP_SETTLE_MS = 1000;
 
 /** A connected transport plus the interest tracked in each direction. */
 interface Link {
@@ -119,6 +191,16 @@ interface Link {
 	"uplink": boolean;
 	"knownAs"?: string;
 	"permissions"?: LinkPermissions;
+	/** The peer hub's session (Control.session), once it has sent one. */
+	"session"?: string;
+	/** Interest the peer asked for that we refused (malformed, over `maxInterest`) — it still counts toward the digest
+	 *  of what it advertised, so a refusal isn't mistaken for a lost frame. */
+	"refused": Set<string>;
+	/** When the peer last sent us anything (for the heartbeat). */
+	"lastSeen": number;
+	/** We've asked the peer to re-send its interest (its digest didn't match), and await its answering hello. */
+	"resyncing": boolean;
+	"limits": Pick<LinkOptions, "maxPayload" | "maxBacklog" | "maxInterest">;
 	"detach": () => void;
 	/** Settles `link()`'s `ready`: true on the peer's first hello, false if unlinked before. */
 	"settle": (ready: boolean) => void;
@@ -161,7 +243,20 @@ export type TapEvent =
 	| { "type": "deliver"; "envelope": Envelope; "handlers": number; "link"?: LinkInfo }
 	| { "type": "send" | "receive"; "link": LinkInfo; "frame": Envelope | Control }
 	| { "type": "deny"; "link": LinkInfo; "envelope": Envelope; "direction": "publish" | "subscribe" }
+	| { "type": "fault"; "kind": FaultKind; "detail": string; "link"?: LinkInfo; "error"?: unknown }
 	| { "type": "topology" };
+
+/**
+ * Something went wrong, and was contained:
+ * - `handler`: a local handler threw (the others still ran; HubOptions.onError has the error);
+ * - `send`: a transport threw sending a frame (an unclonable payload) — dropped; a control frame unlinks;
+ * - `frame`: a peer sent something malformed — an invalid subject, pattern or id — ignored;
+ * - `payload` / `backlog` / `limit`: past a link's maxPayload, maxBacklog or maxInterest — dropped or refused;
+ * - `drift`: a heartbeat showed the peer's interest and ours disagree (a frame was lost) — resynced;
+ * - `closed` / `stale` / `loop`: the link was unlinked — its transport closed, its heartbeat went unanswered, or it
+ *   closed a cycle.
+ */
+export type FaultKind = "handler" | "send" | "frame" | "payload" | "backlog" | "limit" | "drift" | "closed" | "stale" | "loop";
 
 export type Tap = (event: TapEvent) => void;
 
@@ -194,6 +289,54 @@ export interface LinkOptions {
 	 *  replies come back under this id, the only one the link lets through to it. */
 	"peer"?: string;
 	"permissions"?: LinkPermissions;
+	/** Ping the peer every this many ms, and unlink if nothing at all has come from it for three times that (a `stale`
+	 *  fault) — for a transport that can die without telling us (a killed tab, a dropped network). Each ping also
+	 *  checks the two ends still agree on interest, and repairs it if not. Only one end needs it: every hub answers. */
+	"heartbeatMs"?: number;
+	/** Drop a message whose payload is larger than this (approximate bytes: a string's length, a buffer's byteLength,
+	 *  else its JSON's length), either way across the link — a `payload` fault. For a transport with a message size
+	 *  limit (an RTCDataChannel's), or a peer that mustn't flood us. */
+	"maxPayload"?: number;
+	/** While the transport's backlog (Transport.backlog) is past this many bytes, drop messages to it — a `backlog`
+	 *  fault — rather than queue without bound behind a slow peer. Control frames still go. */
+	"maxBacklog"?: number;
+	/** The most subjects the peer may ask for (its whole subtree's interest, so leave headroom); more are refused — a
+	 *  `limit` fault. */
+	"maxInterest"?: number;
+}
+
+/** A payload's approximate size in bytes, or undefined if it can't be measured. */
+function payloadSize(data: unknown): number | undefined {
+	if (data === undefined) {
+		return 0;
+	}
+
+	if (typeof data === "string") {
+		return data.length;
+	}
+
+	if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+		return data.byteLength;
+	}
+
+	try {
+		return JSON.stringify(data)?.length ?? 0;
+	} catch {
+		return undefined;
+	}
+}
+
+/** An order-independent digest of a set of subjects: its size and a hash of its sorted members (FNV-1a). */
+function digestOf(subjects: Iterable<string>): string {
+	const sorted = [...subjects].sort();
+	let hash = 0x811c9dc5;
+
+	for (const char of sorted.join("\n")) {
+		hash ^= char.codePointAt(0)!;
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+
+	return sorted.length + ":" + hash.toString(36);
 }
 
 /** Does `patterns` allow `subject`? An omitted list allows everything. */
@@ -201,32 +344,47 @@ function permits(patterns: string[] | undefined, subject: string): boolean {
 	return patterns === undefined || patterns.some((pattern) => matches(pattern, subject));
 }
 
-/** Could some subject match both patterns? (`*` is any one token, `>` one or more — on either side.) */
-function overlaps(left: string, right: string): boolean {
+/** The pattern matching exactly the subjects both patterns match, or undefined if none do. (`*` is any one token, `>`
+ *  one or more — on either side.) `a.>` ∩ `a.*.c` is `a.*.c`; `>` ∩ `game.state.1` is `game.state.1`. */
+function intersect(left: string, right: string): string | undefined {
 	const a = left.split(".");
 	const b = right.split(".");
+	const tokens: string[] = [];
 
 	for (let index = 0; ; index += 1) {
 		const x = a[index];
 		const y = b[index];
 
-		if (x === ">" || y === ">") {
-			return (x === ">" || x !== undefined) && (y === ">" || y !== undefined);
+		if (x === ">") {
+			return y === undefined ? undefined : [...tokens, ...b.slice(index)].join(".");
+		}
+
+		if (y === ">") {
+			return x === undefined ? undefined : [...tokens, ...a.slice(index)].join(".");
 		}
 
 		if (x === undefined || y === undefined) {
-			return x === y;
+			return x === y ? tokens.join(".") : undefined;
 		}
 
-		if (x !== "*" && y !== "*" && x !== y) {
-			return false;
+		if (x === "*") {
+			tokens.push(y);
+		} else if (y === "*" || x === y) {
+			tokens.push(x);
+		} else {
+			return undefined;
 		}
 	}
 }
 
-/** Could `patterns` allow anything `pattern` matches? An omitted list allows everything. */
-function permitsAny(patterns: string[] | undefined, pattern: string): boolean {
-	return patterns === undefined || patterns.some((allowed) => overlaps(allowed, pattern));
+/** What of `patterns` the `allowed` list lets through, as patterns — each narrowed to its intersection with each
+ *  allowance. An omitted list lets everything through. */
+function narrow(patterns: string[], allowed: string[] | undefined): string[] {
+	if (allowed === undefined) {
+		return patterns;
+	}
+
+	return [...new Set(patterns.flatMap((pattern) => allowed.map((allowance) => intersect(pattern, allowance)).filter((narrowed) => narrowed !== undefined)))];
 }
 
 /** May a message (or interest) from link `from` pass on to link `to`? Never between two non-transit links. */
@@ -242,13 +400,32 @@ export class Hub {
 	private readonly handlers = new Map<string, Set<Handler>>();
 	private readonly taps = new Set<Tap>();
 	private linkIdPool = 0;
+	/** This Hub instance, as its peers tell it from another that took its place (Control.session). */
+	private readonly session = Math.random().toString(36).slice(2, 12);
+	/** Our loop-detection subject: if it ever comes back to us, the hubs are wired in a loop. */
+	private readonly lds = LDS + this.session;
+	private readonly onError: (error: unknown, envelope: Envelope) => void;
+	/** When we last cut a link to break a loop. */
+	private loopCut = -Infinity;
 
 	public constructor(options: HubOptions = {}) {
 		this.id = options.id ?? "hub-" + Math.random().toString(36).slice(2, 10);
+		assertValid(isId(this.id), "hub id", this.id);
+		this.onError = options.onError ?? ((error) => {
+			const report = (globalThis as { "reportError"?: (error: unknown) => void }).reportError;
+
+			if (report === undefined) {
+				console.error(error);
+			} else {
+				report(error);
+			}
+		});
 	}
 
 	/** Subscribe a local handler to a subject (or pattern). Returns an unsubscribe function. */
 	public subscribe(subject: string, handler: Handler): () => void {
+		assertValid(isPattern(subject), "subscription pattern", subject);
+
 		let set = this.handlers.get(subject);
 
 		if (set === undefined) {
@@ -281,6 +458,8 @@ export class Hub {
 	/** Publish a message. It reaches every local handler and every linked subtree that wants the subject.
 	 *  Pass `traceContext` (the caller's active span) when this message causes work a receiver should trace. */
 	public publish(subject: string, data?: unknown, options: { "traceContext"?: Envelope["traceContext"] } = {}): void {
+		assertValid(isSubject(subject), "subject", subject);
+
 		const envelope: Envelope = { "subject": subject, "data": data, "from": this.id, "traceContext": options.traceContext };
 
 		this.emit({ "type": "publish", "envelope": envelope });
@@ -334,22 +513,25 @@ export class Hub {
 		});
 	}
 
-	/** This hub's topology right now: subscriptions, links, their peers and the interest in each direction. */
 	/** The id our uplink (LinkOptions.uplink) assigned us, if it did (LinkOptions.peer, told in its hello) — an untrusted
 	 *  child under an edge is its assigned id there, whatever it calls itself. Usually one, or none. */
 	public knownAs(): string[] {
 		return [...new Set([...this.links].map((link) => link.knownAs).filter((id): id is string => id !== undefined))];
 	}
 
+	/** This hub's topology right now: subscriptions, links, their peers and the interest in each direction (less the
+	 *  loop-detection subjects, `$sys.lds.*`, every link carries). */
 	public inspect(): HubSnapshot {
+		const visible = (subjects: Set<string>): string[] => [...subjects].filter((subject) => !subject.startsWith(LDS));
+
 		return {
 			"id": this.id,
 			"subscriptions": [...this.handlers.keys()],
 			"links": [...this.links].map((link) => ({
 				"id": link.id,
 				"peerId": link.peerId,
-				"remoteInterest": [...link.remoteInterest],
-				"advertised": [...link.advertised],
+				"remoteInterest": visible(link.remoteInterest),
+				"advertised": visible(link.advertised),
 				...link.permissions === undefined ? {} : { "permissions": link.permissions }
 			}))
 		};
@@ -358,6 +540,8 @@ export class Hub {
 	/** Replace the permissions of the link(s) to `peer` (see LinkPermissions) — e.g. once a client is seated and its
 	 *  team known. `undefined` lifts them. Returns whether any link matched. */
 	public permit(peer: string, permissions: LinkPermissions | undefined): boolean {
+		assertPermissions(permissions);
+
 		let found = false;
 
 		for (const link of this.links) {
@@ -392,17 +576,71 @@ export class Hub {
 		}
 	}
 
+	private fault(kind: FaultKind, detail: string, link?: Link, error?: unknown): void {
+		this.emit({ "type": "fault", "kind": kind, "detail": detail, ...link === undefined ? {} : { "link": { "id": link.id, "peerId": link.peerId } }, ...error === undefined ? {} : { "error": error } });
+	}
+
 	/** Link another hub over `transport` (both ends call `link`, one per channel end). The two hubs now
 	 *  federate: interest and matching messages flow across. Returns an unlink function, with `ready` (see
 	 *  LinkHandle). Wire a TREE. */
 	public link(transport: Transport, options: LinkOptions = {}): LinkHandle {
+		if (options.peer !== undefined) {
+			assertValid(isId(options.peer), "peer id", options.peer);
+		}
+
+		assertPermissions(options.permissions);
 		this.linkIdPool += 1;
 
 		let settle: (ready: boolean) => void = () => undefined;
 		const ready = new Promise<boolean>((resolve) => { settle = resolve; });
-		const link: Link = { "id": "link-" + this.linkIdPool, "peerId": options.peer, "transport": transport, "remoteInterest": new Set(), "advertised": new Set(), "transit": options.transit !== false, "assigned": options.peer !== undefined, "uplink": options.uplink === true, "permissions": options.permissions, "detach": () => undefined, "settle": settle };
+		const link: Link = {
+			"id": "link-" + this.linkIdPool,
+			"peerId": options.peer,
+			"transport": transport,
+			"remoteInterest": new Set(),
+			"advertised": new Set(),
+			"transit": options.transit !== false,
+			"assigned": options.peer !== undefined,
+			"uplink": options.uplink === true,
+			"permissions": options.permissions,
+			"refused": new Set(),
+			"lastSeen": Date.now(),
+			"resyncing": false,
+			"limits": { "maxPayload": options.maxPayload, "maxBacklog": options.maxBacklog, "maxInterest": options.maxInterest },
+			"detach": () => undefined,
+			"settle": settle
+		};
+		const disposers = [transport.listen((raw) => { this.receive(link, raw); })];
 
-		link.detach = transport.listen((raw) => { this.receive(link, raw); });
+		if (transport.onClose !== undefined) {
+			disposers.push(transport.onClose(() => {
+				if (this.links.has(link)) {
+					this.fault("closed", "the transport closed", link);
+					this.unlink(link);
+				}
+			}));
+		}
+
+		if (options.heartbeatMs !== undefined) {
+			const interval = options.heartbeatMs;
+			const timer = setInterval(() => {
+				if (Date.now() - link.lastSeen > 3 * interval) {
+					this.fault("stale", `nothing from the peer for ${Date.now() - link.lastSeen}ms`, link);
+					this.unlink(link);
+				} else {
+					this.wire(link, { "hub": "ping", "digest": digestOf(link.advertised) });
+				}
+			}, interval);
+
+			(timer as { "unref"?: () => void }).unref?.(); // a heartbeat never keeps a process alive by itself
+			disposers.push(() => { clearInterval(timer); });
+		}
+
+		link.detach = () => {
+			for (const dispose of disposers) {
+				dispose();
+			}
+		};
 		this.links.add(link);
 		this.emit({ "type": "topology" });
 		this.readvertise(); // tell the new link everything we (and our other links) want
@@ -424,48 +662,140 @@ export class Hub {
 	}
 
 	private receive(link: Link, raw: unknown): void {
+		if (!this.links.has(link)) {
+			return; // unlinked while this frame was on its way
+		}
+
 		const message = (raw as Record<string, unknown> | null | undefined)?.[WIRE];
 
-		if (this.taps.size > 0 && (isControl(message) || isEnvelope(message))) {
+		if (!isControl(message) && !isEnvelope(message)) {
+			return; // not hub traffic (a shared channel), or not a frame we know
+		}
+
+		link.lastSeen = Date.now();
+
+		if (this.taps.size > 0) {
 			this.emit({ "type": "receive", "link": { "id": link.id, "peerId": link.peerId }, "frame": message });
 		}
 
 		if (isControl(message)) {
-			if (message.hub === "hello") {
-				if (!link.assigned && message.id !== undefined && message.id !== link.peerId) {
-					link.peerId = message.id;
-					this.emit({ "type": "topology" });
-				}
+			this.control(link, message);
 
-				// Who we are to the hub that assigned our id — only from our uplink: no other peer can rename us.
-				if (link.uplink && typeof message.you === "string" && message.you !== link.knownAs) {
-					link.knownAs = message.you;
-					this.emit({ "type": "topology" });
-				}
+			return;
+		}
 
-				// Peer (re)connected and may have missed our interest (a lossy transport can drop what we sent
-				// before it was listening). Forget what we think it knows and re-send our full interest — BEFORE
-				// answering, so every hello we send follows our interest: a peer that has our hello knows what we want.
+		if (!isSubject(message.subject) || (message.from !== undefined && !isId(message.from))) {
+			this.fault("frame", `a message on ${JSON.stringify(message.subject)} from ${JSON.stringify(message.from)}`, link);
+
+			return;
+		}
+
+		if (link.limits.maxPayload !== undefined && (payloadSize(message.data) ?? 0) > link.limits.maxPayload) {
+			this.fault("payload", `a message on ${message.subject} over ${link.limits.maxPayload} bytes, from the peer`, link);
+
+			return;
+		}
+
+		// An assigned peer is who it is: stamp that, whatever the frame claims.
+		const envelope = link.assigned && message.from !== link.peerId ? { ...message, "from": link.peerId } : message;
+
+		if (!permits(link.permissions?.publish, envelope.subject)) {
+			this.emit({ "type": "deny", "link": { "id": link.id, "peerId": link.peerId }, "envelope": envelope, "direction": "publish" });
+
+			return;
+		}
+
+		this.route(envelope, link);
+	}
+
+	private control(link: Link, message: Control): void {
+		// A new session is a new hub at the other end (the old one gone without a word — a frame reloaded on the same
+		// transport): the interest it held, and what we told it, went with it. The new one's interest follows.
+		if (typeof message.session === "string" && message.session !== link.session) {
+			if (link.session !== undefined) {
+				link.remoteInterest.clear();
+				link.refused.clear();
 				link.advertised.clear();
+				this.emit({ "type": "topology" });
 				this.readvertise();
-
-				if (message.reply !== true) {
-					this.wire(link, { "hub": "hello", "id": this.id, "reply": true, ...link.assigned ? { "you": link.peerId } : {} });
-				}
-
-				// The peer's interest came ahead of its hello (the same rule, on its side): it's known now.
-				link.settle(true);
-
-				return;
 			}
 
-			if (message.subject !== undefined) {
-				if (message.hub === "sub") {
-					link.remoteInterest.add(message.subject);
-				} else {
-					link.remoteInterest.delete(message.subject);
+			link.session = message.session;
+		}
+
+		switch (message.hub) {
+			case "hello":
+				this.hello(link, message);
+				break;
+			case "bye":
+				this.fault("closed", "the peer cut the link", link);
+				this.unlink(link);
+				break;
+			case "ping":
+			case "pong":
+				if (message.hub === "ping") {
+					this.wire(link, { "hub": "pong", "digest": digestOf(link.advertised) });
 				}
 
+				if (typeof message.digest === "string" && !link.resyncing && message.digest !== digestOf([...link.remoteInterest, ...link.refused])) {
+					// A frame of its interest went missing: forget what we hold, and ask for it all again (its hello's
+					// answer comes after the lot).
+					this.fault("drift", "the peer's interest and ours disagree — resyncing", link);
+					link.remoteInterest.clear();
+					link.refused.clear();
+					link.resyncing = true;
+					this.emit({ "type": "topology" });
+					this.readvertise();
+					this.wire(link, { "hub": "hello", "id": this.id, ...link.assigned ? { "you": link.peerId } : {} });
+				}
+
+				break;
+			default:
+				this.interest(link, message);
+		}
+	}
+
+	private hello(link: Link, message: Control): void {
+		if (message.id !== undefined && !isId(message.id)) {
+			this.fault("frame", `a hello naming the peer ${JSON.stringify(message.id)}`, link);
+		} else if (!link.assigned && message.id !== undefined && message.id !== link.peerId) {
+			link.peerId = message.id;
+			this.emit({ "type": "topology" });
+		}
+
+		// Who we are to the hub that assigned our id — only from our uplink: no other peer can rename us.
+		if (link.uplink && isId(message.you) && message.you !== link.knownAs) {
+			link.knownAs = message.you;
+			this.emit({ "type": "topology" });
+		}
+
+		// Peer (re)connected and may have missed our interest (a lossy transport can drop what we sent before it was
+		// listening). Forget what we think it knows and re-send our full interest — BEFORE answering, so every hello we
+		// send follows our interest: a peer that has our hello knows what we want.
+		link.advertised.clear();
+		this.readvertise();
+
+		if (message.reply !== true) {
+			this.wire(link, { "hub": "hello", "id": this.id, "reply": true, ...link.assigned ? { "you": link.peerId } : {} });
+		} else {
+			link.resyncing = false; // its interest has all come again, ahead of this
+		}
+
+		// The peer's interest came ahead of its hello (the same rule, on its side): it's known now.
+		link.settle(true);
+	}
+
+	private interest(link: Link, message: Control): void {
+		const subject = message.subject;
+
+		if (subject === undefined) {
+			return;
+		}
+
+		if (message.hub === "unsub") {
+			link.refused.delete(subject);
+
+			if (link.remoteInterest.delete(subject)) {
 				this.emit({ "type": "topology" });
 				this.readvertise(); // a link's interest changed → what we advertise to OTHER links may change
 			}
@@ -473,18 +803,71 @@ export class Hub {
 			return;
 		}
 
-		if (isEnvelope(message)) {
-			// An assigned peer is who it is: stamp that, whatever the frame claims.
-			const envelope = link.assigned && message.from !== link.peerId ? { ...message, "from": link.peerId } : message;
+		if (subject === this.lds && !link.remoteInterest.has(subject)) {
+			link.remoteInterest.add(subject);
+			this.loop(link);
 
-			if (!permits(link.permissions?.publish, envelope.subject)) {
-				this.emit({ "type": "deny", "link": { "id": link.id, "peerId": link.peerId }, "envelope": envelope, "direction": "publish" });
-
-				return;
-			}
-
-			this.route(envelope, link);
+			return;
 		}
+
+		if (!isPattern(subject)) {
+			link.refused.add(subject);
+			this.fault("frame", `interest in ${JSON.stringify(subject)}`, link);
+
+			return;
+		}
+
+		if (link.remoteInterest.has(subject)) {
+			return;
+		}
+
+		if (link.limits.maxInterest !== undefined && link.remoteInterest.size >= link.limits.maxInterest) {
+			link.refused.add(subject);
+			this.fault("limit", `interest in ${subject} past maxInterest (${link.limits.maxInterest})`, link);
+
+			return;
+		}
+
+		link.remoteInterest.add(subject);
+		this.emit({ "type": "topology" });
+		this.readvertise(); // a link's interest changed → what we advertise to OTHER links may change
+	}
+
+	/** Our loop-detection subject came back over `link`: the hubs are wired in a loop. Every hub in it sees its own come
+	 *  back; only the one with the least session — the loop's subjects all reach `link` well before ours has gone the
+	 *  whole way round — cuts it, so a loop loses one link, not one per hub. Ours coming back the other way round the
+	 *  same loop, just after the cut, is the cut still settling, not another loop: looked at again once it has. */
+	private loop(link: Link): void {
+		this.fault("loop", "our loop-detection subject came back: the hubs are wired in a loop", link);
+
+		const least = [...link.remoteInterest].every((subject) => !subject.startsWith(LDS) || subject >= this.lds);
+
+		if (!least) {
+			return; // a hub round the loop with a lesser session cuts it
+		}
+
+		const settling = this.loopCut + LOOP_SETTLE_MS - Date.now();
+
+		if (settling > 0) {
+			const timer = setTimeout(() => {
+				if (this.links.has(link) && link.remoteInterest.has(this.lds)) {
+					this.cut(link);
+				}
+			}, settling);
+
+			(timer as { "unref"?: () => void }).unref?.();
+
+			return;
+		}
+
+		this.cut(link);
+	}
+
+	private cut(link: Link): void {
+		this.loopCut = Date.now();
+		this.fault("loop", "cutting this link to break the loop", link);
+		this.wire(link, { "hub": "bye" });
+		this.unlink(link);
 	}
 
 	/** Deliver `envelope` to local handlers and forward it to interested links — never back to `from` (a tree
@@ -508,7 +891,16 @@ export class Hub {
 		const origin: Origin = { "link": from === undefined ? undefined : { "id": from.id, "peerId": from.peerId } };
 
 		for (const handler of toInvoke) {
-			handler(envelope.data, envelope, origin);
+			try {
+				handler(envelope.data, envelope, origin);
+			} catch (error) {
+				// One handler's bug is its own: the others still run, and the message still goes on.
+				this.fault("handler", `a handler of ${envelope.subject} threw`, from, error);
+
+				try {
+					this.onError(error, envelope);
+				} catch { /* nor may the error handler break routing */ }
+			}
 		}
 
 		for (const link of this.links) {
@@ -533,19 +925,33 @@ export class Hub {
 	/** Recompute, per link, the interest we should advertise to it — our own handlers plus every OTHER link's
 	 *  interest (never a link's own, so interest never echoes back) — and send only the sub/unsub deltas. This
 	 *  is what keeps traffic local: a link hears about a subject only when something on THIS side wants it. And only
-	 *  what it could deliver: what the link may send us (its publish permissions), and of another link's interest, only
-	 *  what that link may receive (its subscribe permissions) — a confined link isn't told of interest it couldn't serve,
-	 *  so nobody past it takes it for a listener. */
+	 *  what it could deliver, narrowed to it: what the link may send us (its publish permissions), and of another link's
+	 *  interest, what that link may receive (its subscribe permissions) — a confined link isn't told of interest it
+	 *  couldn't serve, so nobody past it takes it for a listener, and a broad subscription behind a narrow allowance is
+	 *  asked for as the allowance. Loop-detection subjects travel only between unconfined links: a confined peer is a
+	 *  leaf we don't trust (it could echo a hub's subject back to have a link cut), never part of a loop worth finding. */
 	private readvertise(): void {
 		for (const link of this.links) {
-			const sendable = (pattern: string): boolean => permitsAny(link.permissions?.publish, pattern);
-			const desired = new Set<string>([...this.handlers.keys()].filter(sendable));
+			const confined = link.permissions !== undefined;
+			const desired = new Set<string>(narrow([...this.handlers.keys()], link.permissions?.publish));
+
+			if (!confined) {
+				desired.add(this.lds);
+			}
 
 			for (const other of this.links) {
-				if (other !== link && crosses(other, link)) {
-					for (const pattern of other.remoteInterest) {
-						if (sendable(pattern) && permitsAny(other.permissions?.subscribe, pattern)) {
+				if (other === link || !crosses(other, link)) {
+					continue;
+				}
+
+				for (const pattern of other.remoteInterest) {
+					if (pattern.startsWith(LDS)) {
+						if (!confined && other.permissions === undefined) {
 							desired.add(pattern);
+						}
+					} else {
+						for (const narrowed of narrow(narrow([pattern], other.permissions?.subscribe), link.permissions?.publish)) {
+							desired.add(narrowed);
 						}
 					}
 				}
@@ -568,11 +974,39 @@ export class Hub {
 	}
 
 	private wire(link: Link, message: Envelope | Control): void {
-		if (this.taps.size > 0) {
-			this.emit({ "type": "send", "link": { "id": link.id, "peerId": link.peerId }, "frame": message });
+		const control = isControl(message);
+
+		if (!control) {
+			if (link.limits.maxPayload !== undefined && (payloadSize(message.data) ?? 0) > link.limits.maxPayload) {
+				this.fault("payload", `a message on ${message.subject} over ${link.limits.maxPayload} bytes, to the peer`, link);
+
+				return;
+			}
+
+			if (link.limits.maxBacklog !== undefined && (link.transport.backlog?.() ?? 0) > link.limits.maxBacklog) {
+				this.fault("backlog", `a message on ${message.subject} dropped: the transport's backlog is past ${link.limits.maxBacklog} bytes`, link);
+
+				return;
+			}
 		}
 
-		link.transport.send({ [WIRE]: message });
+		const frame = control ? { ...message, "session": this.session } : message;
+
+		if (this.taps.size > 0) {
+			this.emit({ "type": "send", "link": { "id": link.id, "peerId": link.peerId }, "frame": frame });
+		}
+
+		try {
+			link.transport.send({ [WIRE]: frame });
+		} catch (error) {
+			// A message that can't be sent (an unclonable payload) is dropped; a control frame that can't be, means the
+			// transport is broken — interest would drift — so the link goes (after this frame's caller is done with it).
+			this.fault("send", `the transport threw sending ${control ? "a " + message.hub : "a message on " + message.subject}`, link, error);
+
+			if (control) {
+				queueMicrotask(() => { this.unlink(link); });
+			}
+		}
 	}
 }
 
@@ -608,20 +1042,39 @@ export interface PipeOptions {
 	"schedule"?: (deliver: () => void, message: unknown) => void;
 }
 
+/** One end of a `pipe`. `close` closes the pipe: both ends' `onClose` fire, and nothing more is delivered. */
+export type PipeEnd = Transport & { "close": () => void };
+
 /** Two connected in-memory transports: link one hub to each end. For tests and single-process simulations — nothing
  *  to close afterwards, and nothing keeps the process alive. */
-export function pipe({ lossy = false, schedule = (deliver) => { setTimeout(deliver, 0); } }: PipeOptions = {}): [Transport, Transport] {
-	interface End { "listener"?: (message: unknown) => void; "held": unknown[] }
+export function pipe({ lossy = false, schedule = (deliver) => { setTimeout(deliver, 0); } }: PipeOptions = {}): [PipeEnd, PipeEnd] {
+	interface End { "listener"?: (message: unknown) => void; "held": unknown[]; "onClose": Set<() => void> }
 
-	const left: End = { "held": [] };
-	const right: End = { "held": [] };
-	const transport = (self: End, other: End): Transport => ({
+	const left: End = { "held": [], "onClose": new Set() };
+	const right: End = { "held": [], "onClose": new Set() };
+	let closed = false;
+	const close = (): void => {
+		if (closed) {
+			return;
+		}
+
+		closed = true;
+
+		for (const onClose of [...left.onClose, ...right.onClose]) {
+			queueMicrotask(onClose);
+		}
+	};
+	const transport = (self: End, other: End): PipeEnd => ({
 		"send": (message) => {
-			if (lossy && other.listener === undefined) {
+			if (closed || (lossy && other.listener === undefined)) {
 				return;
 			}
 
 			schedule(() => {
+				if (closed) {
+					return;
+				}
+
 				if (other.listener !== undefined) {
 					other.listener(message);
 				} else if (!lossy) {
@@ -642,7 +1095,13 @@ export function pipe({ lossy = false, schedule = (deliver) => { setTimeout(deliv
 					self.listener = undefined;
 				}
 			};
-		}
+		},
+		"onClose": (onClose) => {
+			self.onClose.add(onClose);
+
+			return () => { self.onClose.delete(onClose); };
+		},
+		"close": close
 	});
 
 	return [transport(left, right), transport(right, left)];
@@ -673,6 +1132,8 @@ export interface WebSocketLike {
 	"addEventListener": (type: "message", handler: (event: { "data": unknown }) => void) => void;
 	"removeEventListener": (type: "message", handler: (event: { "data": unknown }) => void) => void;
 	"readyState"?: number;
+	/** Bytes queued, not yet sent (Transport.backlog). */
+	"bufferedAmount"?: number;
 }
 
 /**
@@ -680,10 +1141,27 @@ export interface WebSocketLike {
  * can join the page's hub tree. A WS carries text, so hub messages (objects) are JSON-framed on the wire; this
  * is also why records that ride it must be plain data. Link only once the socket is OPEN — interest lost to a
  * not-yet-open socket is recovered by the `hello` handshake on (re)connect. An unserializable payload (e.g. an
- * Error in a log attr) is dropped rather than thrown, so telemetry never breaks the socket.
+ * Error in a log attr) is dropped rather than thrown, so telemetry never breaks the socket. The socket's `close`
+ * event (where it has one) unlinks.
  */
 export function websocketTransport(ws: WebSocketLike): Transport {
+	// Its `close` event, if it's an EventTarget that has one (WebSocketLike asks only for `message`).
+	const events = ws as unknown as { "addEventListener": (type: string, handler: (event?: { "type"?: string }) => void) => void; "removeEventListener": (type: string, handler: (event?: { "type"?: string }) => void) => void };
+
 	return {
+		"onClose": (onClose) => {
+			// Only a real close event: a socket-shaped stand-in may hand every listener every event.
+			const handler = (event?: { "type"?: string }): void => {
+				if (event?.type === "close") {
+					onClose();
+				}
+			};
+
+			events.addEventListener("close", handler);
+
+			return () => { events.removeEventListener("close", handler); };
+		},
+		"backlog": () => ws.bufferedAmount ?? 0,
 		"send": (message) => {
 			if (ws.readyState !== undefined && ws.readyState !== 1) {
 				return; // not OPEN — drop; `hello` re-advertises our interest once the peer connects
@@ -719,12 +1197,27 @@ export function websocketTransport(ws: WebSocketLike): Transport {
 /**
  * Transport over the BroadcastChannel named `name`, from anywhere — a page, a worker, another tab of the origin. Every
  * same-origin context that opens the same name hears it, so it's private only in that its name is unguessable.
- * `close` closes the channel.
+ * `close` closes the channel (and unlinks this end — a BroadcastChannel can't tell the other).
  */
 export function channelTransport(name: string): Transport & { "close": () => void } {
 	const channel = new BroadcastChannel(name);
+	const onClose = new Set<() => void>();
 
-	return { ...portTransport(channel), "close": () => { channel.close(); } };
+	return {
+		...portTransport(channel),
+		"onClose": (callback) => {
+			onClose.add(callback);
+
+			return () => { onClose.delete(callback); };
+		},
+		"close": () => {
+			channel.close();
+
+			for (const callback of onClose) {
+				callback();
+			}
+		}
+	};
 }
 
 /**
@@ -958,6 +1451,10 @@ export function serve(hub: Hub, name: string, handler: (args: unknown, context: 
 		const { id, args } = data;
 		const replyTo = envelope.from ?? data.replyTo;
 		const key = replyTo + " " + id;
+
+		if (!isId(replyTo)) {
+			return; // nowhere a reply could go
+		}
 
 		if (data.cancel === true) {
 			inFlight.get(key)?.abort();
