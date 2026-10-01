@@ -67,7 +67,8 @@ export interface ArchReport {
 }
 
 /** Where a hub runs: a window (a page or a frame — `parent` is its parent frame's address, when it has a same-origin
- *  one) or a worker (`url` is its script). */
+ *  one) or a worker (`url` is its script; `parent`, the address of the realm that spawned it, when it was told —
+ *  REALM_PARENT). */
 export interface ArchRealm {
 	"kind": "window" | "worker";
 	"url": string;
@@ -83,7 +84,16 @@ export function describeRealm(): ArchRealm | undefined {
 	}
 
 	if (scope.window === undefined) {
-		return typeof scope.importScripts === "function" ? { "kind": "worker", "url": scope.location.href } : undefined;
+		if (typeof scope.importScripts !== "function") {
+			return undefined;
+		}
+
+		const url = new URL(scope.location.href);
+		const parent = new URLSearchParams(url.hash.slice(1)).get(REALM_PARENT);
+
+		url.hash = "";
+
+		return { "kind": "worker", "url": url.href, ...parent === null ? {} : { "parent": parent } };
 	}
 
 	const realm: ArchRealm = { "kind": "window", "url": scope.location.href };
@@ -113,6 +123,14 @@ export interface ArchReporter extends ArchSink {
 }
 
 const FLUSH_MS = 250;
+/** A reporter with nothing new still reports this often while someone listens — so a viewer can tell a quiet context
+ *  from a gone one (SILENCE_MS). */
+const HEARTBEAT_MS = 5000;
+/** How long a viewer waits on a reporter's silence before taking it as gone: a few missed heartbeats. */
+export const SILENCE_MS = 15_000;
+/** A worker's realm parent, in its URL's hash (`#realm-parent=<address>`): who spawned it — set by whoever wraps
+ *  `Worker` there (the editor's preview tap), and read by the worker's reporter (describeRealm). */
+export const REALM_PARENT = "realm-parent";
 const MAX_SAMPLES_PER_FLUSH = 120;
 /** Node ops held while nobody listens (see flush), past which they're collapsed into the nodes' current state. */
 const MAX_HELD_NODE_OPS = 200;
@@ -183,12 +201,13 @@ const RPC_REPLY = "$rpc.reply.";
 /**
  * Create the reporter for the context `hub` lives in: taps the hub (its topology, and every message it SENDS on a
  * link — each hop has exactly one sender, so nothing is counted twice) and gives probes an `ArchSink` for the
- * channels the hub doesn't carry. Reports are batched every 250ms, published only when something changed.
+ * channels the hub doesn't carry. Reports are batched every 250ms, published only when something changed — and at
+ * least every few seconds while someone listens (a heartbeat: SILENCE_MS).
  *
- * `self` names the context in its reports (default: the hub's id) — for a hub its link knows by another id (one an
- * edge assigned: `hub.knownAs()`), which is the only `$sys.arch.<id>` that link lets it publish.
+ * It reports under its hub's id; the edge it joins another tree through renames it there (scope.ts).
  */
-export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: string } = {}): ArchReporter {
+export function createArchReporter(hub: Hub): ArchReporter {
+	const self = hub.id;
 	const realm = describeRealm();
 	const counts = new Map<string, TrafficCount>();
 	const totals = new Map<string, TrafficCount>();
@@ -222,6 +241,16 @@ export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: strin
 		}
 	}
 
+	let lastPublished = 0;
+	// Nothing new for a while, and someone listening: say so (see SILENCE_MS).
+	const heartbeat = setInterval(() => {
+		if (!disposed && timer === undefined && Date.now() - lastPublished >= HEARTBEAT_MS && hub.interested(ARCH_SUBJECT + "." + self)) {
+			publish({ "reporter": self, "time": Date.now() });
+		}
+	}, HEARTBEAT_MS);
+
+	(heartbeat as { "unref"?: () => void }).unref?.(); // (Node: never what keeps a process alive)
+
 	function schedule(): void {
 		if (timer === undefined && !disposed) {
 			timer = setTimeout(flush, FLUSH_MS);
@@ -229,6 +258,8 @@ export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: strin
 	}
 
 	function publish(report: ArchReport): void {
+		lastPublished = Date.now();
+
 		try {
 			hub.publish(ARCH_SUBJECT + "." + self, report);
 		} catch { /* telemetry must never break the context it observes */ }
@@ -487,6 +518,7 @@ export function createArchReporter(hub: Hub, { self = hub.id }: { "self"?: strin
 		"record": (from, to, kind, label, bytes, count) => { record(from, to, kind, label, bytes, undefined, count); },
 		"dispose": () => {
 			disposed = true;
+			clearInterval(heartbeat);
 			disposeTap();
 			disposeSync();
 			disposePagehide();

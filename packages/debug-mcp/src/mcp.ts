@@ -168,6 +168,8 @@ export function createMcpServer(debugMcp: DebugMcp): McpServer {
 			}
 
 			const now = Date.now();
+
+			arch.sweep(now); // reporters gone silent are gone
 			const channels = [...arch.channels.values()]
 				.filter((candidate) => channel === undefined || candidate.id === channel || candidate.a === channel || candidate.b === channel || candidate.b + "|" + candidate.a === channel)
 				.sort((x, y) => y.count - x.count);

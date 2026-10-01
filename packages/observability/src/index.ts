@@ -116,14 +116,14 @@ export function installHubCollector(hub: Hub, onRecord: (record: LogRecord) => v
 }
 
 /**
- * What a link lets an untrusted peer (hub id `peer`) do for observability: publish its own logs (`$sys.log.<peer>`) and
- * architecture reports (`$sys.arch.<peer>`) — or a context's behind it, `<peer>.<suffix>` (its instance page, say) —
- * and hear the viewers' `$sys.arch.sync`. So it can't log or report as anyone else. Merge it into the link's own
+ * What a link lets a peer do for observability: publish logs (`$sys.log`, its startup backlog) and architecture reports
+ * (`$sys.arch`), and hear the viewers' `$sys.arch.sync`. For a link the edge names (scopedTransport): whatever id the
+ * peer logs or reports under is renamed under its scope, so it can't pass as anyone else. Merge it into the link's own
  * permissions.
  */
-export function observabilityPermissions(peer: string): Required<LinkPermissions> {
+export function observabilityPermissions(): Required<LinkPermissions> {
 	return {
-		"publish": [`${LOG_SUBJECT}.${peer}`, `${LOG_SUBJECT}.${peer}.>`, `$sys.arch.${peer}`, `$sys.arch.${peer}.>`],
+		"publish": [`${LOG_SUBJECT}.>`, LOG_BACKLOG, "$sys.arch.>"],
 		"subscribe": ["$sys.arch.sync"]
 	};
 }
@@ -583,18 +583,15 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 }
 
 export interface ObserveOptions {
-	/** The name this context logs and reports as (default: its hub's id) — the id its link knows it by, the only one
-	 *  that link lets it log and report as. */
-	"source"?: string;
 	/** Observe this realm's HTTP, WebSocket and IndexedDB traffic too (installNetworkProbes): `true`, or the probes'
 	 *  options. Off by default — one context per realm should (two would count the realm's traffic twice). */
 	"network"?: boolean | NetworkProbeOptions;
 }
 
 export interface Observed {
-	/** This context's logger: its records ride the hub on `$sys.log.<source>`. */
+	/** This context's logger: its records ride the hub on `$sys.log.<hub id>` (renamed by the edge it joins through). */
 	"log": Logger;
-	/** Its architecture reporter (`$sys.arch.<source>`), for probes to record what the hub doesn't carry. */
+	/** Its architecture reporter (`$sys.arch.<hub id>`), for probes to record what the hub doesn't carry. */
 	"architecture": ArchReporter;
 	"dispose": () => void;
 }
@@ -603,10 +600,10 @@ export interface Observed {
  * Observe a context: its structured logs, its uncaught errors and its place in the hub tree (links, peers, traffic)
  * all ride its hub, up the tree to whoever collects them. One call per context — a page, a frame, a worker.
  */
-export function observe(hub: Hub, { source = hub.id, network = false }: ObserveOptions = {}): Observed {
-	const log = relayLoggerToHub(hub, source);
-	const untap = tapConsoleAndErrors(hub, source);
-	const architecture = createArchReporter(hub, { "self": source });
+export function observe(hub: Hub, { network = false }: ObserveOptions = {}): Observed {
+	const log = relayLoggerToHub(hub, hub.id);
+	const untap = tapConsoleAndErrors(hub, hub.id);
+	const architecture = createArchReporter(hub);
 
 	if (network !== false) {
 		installNetworkProbes(architecture, network === true ? {} : network);

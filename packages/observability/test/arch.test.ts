@@ -1,4 +1,3 @@
-import type { Transport } from "@brianjenkins94/hub";
 import type { ArchReport } from "../src/arch.ts";
 import * as assert from "node:assert/strict";
 
@@ -6,7 +5,8 @@ import { test } from "node:test";
 // From source: node won't strip types from the pnpm copy under node_modules (arch.ts only imports hub TYPES).
 import { createHub, createRpcClient, pipe, serve } from "../../hub/src/index.ts";
 import { ArchitectureStore } from "../src/arch-store.ts";
-import { collectArchReports, createArchReporter, normalizeSubject, requestArchSync } from "../src/arch.ts";
+import { collectArchReports, createArchReporter, normalizeSubject, requestArchSync, SILENCE_MS } from "../src/arch.ts";
+import { scopedTransport } from "../src/scope.ts";
 
 function wait(ms: number): Promise<void> {
 	return new Promise((resolve) => { setTimeout(resolve, ms); });
@@ -295,21 +295,36 @@ test("a report nobody could hear yet is held, not lost: the viewer that links la
 	reporter.dispose();
 });
 
-test("a reporter can name itself by the id its link knows it by", async () => {
+test("the edge names: a hub that calls itself `client` reports, beyond its link, as the id the link gave it", async () => {
 	const [a, b] = pipe({ "lossy": true });
 	const edge = createHub({ "id": "edge" });
 	const client = createHub({ "id": "client" });
 	const reports: ArchReport[] = [];
 
 	collectArchReports(edge, (report) => { reports.push(report); });
-	edge.link(a, { "peer": "seat-2" });
+	edge.link(scopedTransport(a, "seat-2", { "keep": (id) => id === "edge" }), { "peer": "seat-2" });
 	client.link(b, { "uplink": true });
-	await wait(50);
 
-	const reporter = createArchReporter(client, { "self": client.knownAs()[0] });
+	const reporter = createArchReporter(client);
 
 	await wait(400);
-	assert.equal(reporter.self, "seat-2");
-	assert.ok(reports.some((report) => report.reporter === "seat-2" && report.topology !== undefined), JSON.stringify(reports.map((report) => report.reporter)));
+	assert.equal(reporter.self, "client", "it reports as itself");
+
+	const named = reports.find((report) => report.reporter === "seat-2" && report.topology !== undefined);
+
+	assert.ok(named !== undefined, JSON.stringify(reports.map((report) => report.reporter)));
+	assert.deepEqual(named.topology?.links.map((link) => link.peerId), ["edge"], "the edge's own id is kept");
 	reporter.dispose();
+});
+
+test("a viewer times out a reporter gone silent, and takes it back when it reports again", () => {
+	const store = new ArchitectureStore();
+
+	store.apply({ "reporter": "quiet", "time": Date.now() });
+	store.sweep(Date.now() + SILENCE_MS - 1);
+	assert.equal(store.nodes.get("quiet")?.state, "alive");
+	store.sweep(Date.now() + SILENCE_MS + 1);
+	assert.equal(store.nodes.get("quiet")?.state, "terminated", "silent past SILENCE_MS: gone");
+	store.apply({ "reporter": "quiet", "time": Date.now() });
+	assert.equal(store.nodes.get("quiet")?.state, "alive", "and back when it reports again");
 });

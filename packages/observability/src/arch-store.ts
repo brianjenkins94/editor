@@ -7,6 +7,7 @@
  * already include every delta it sent before), so a viewer opened late never counts anything twice.
  */
 import type { ArchNodeSpec, ArchReport, NodeState, TrafficCount, TrafficKind } from "./arch.ts";
+import { SILENCE_MS } from "./arch.ts";
 
 export interface RuntimeNode {
 	"id": string;
@@ -441,8 +442,25 @@ export class ArchitectureStore {
 		this.changed();
 	}
 
-	/** Everything, as JSON-safe data (export, debug-mcp). */
+	/** End every reporter silent for over SILENCE_MS (a reporter heartbeats while anyone listens, so one that stops has
+	 *  gone — a worker whose page went, a realm that crashed). Call before reading; a report brings it back. */
+	public sweep(now = Date.now()): void {
+		for (const [reporter, heard] of this.reporters) {
+			const node = this.nodes.get(reporter);
+
+			if (node !== undefined && node.state !== "terminated" && now - heard > SILENCE_MS) {
+				node.state = "terminated";
+				node.endedAt = now;
+				node.lastEndedAt = now;
+				this.changed();
+			}
+		}
+	}
+
+	/** Everything, as JSON-safe data (export, debug-mcp) — silent reporters swept first. */
 	public snapshot(): unknown {
+		this.sweep();
+
 		return {
 			"takenAt": new Date().toISOString(),
 			"reporters": Object.fromEntries(this.reporters),

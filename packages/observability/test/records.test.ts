@@ -8,7 +8,7 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 // From source: node won't strip types from the pnpm copy under node_modules.
 import { createHub, pipe } from "../../hub/src/index.ts";
-import { installHubCollector, observabilityPermissions, ownWorker } from "../src/index.ts";
+import { installHubCollector, observabilityPermissions, ownWorker, scopedTransport } from "../src/index.ts";
 import { sourceOfLogSubject, tagBySubject } from "../src/log-subject.ts";
 
 async function flush(): Promise<void> {
@@ -30,50 +30,53 @@ test("a record is tagged with the source its subject names, whatever it claims",
 	assert.equal(tagBySubject("text", "$sys.log.page"), "text");
 });
 
-test("the collector tags by subject: a peer confined to its own subject can't pass as another source", async () => {
+test("the edge names: whatever subject or source a peer logs under, it's filed under its scope", async () => {
 	const [up, down] = pipe();
 	const root = createHub({ "id": "root" });
-	const client = createHub({ "id": "client-0" });
+	const client = createHub({ "id": "client" });
 	const records: LogRecord[] = [];
 
 	installHubCollector(root, (record) => { records.push(record); });
-	await Promise.all([root.link(up, { "peer": "client-0", "permissions": observabilityPermissions("client-0") }).ready, client.link(down).ready]);
+	await Promise.all([root.link(scopedTransport(up, "client-0", { "keep": (id) => id === "root" }), { "peer": "client-0", "permissions": observabilityPermissions() }).ready, client.link(down).ready]);
 	await flush();
 
 	const record = (source: string, message: string) => ({ "kind": "log", "level": "info", "message": message, "context": { "source": source }, "time": 0, "depth": 0 });
 
-	// On its own subject, claiming to be the referee: filed as what it is.
-	client.publish("$sys.log.client-0", record("referee", "lying"));
-	// On its instance page's subject (a context behind it): allowed, and filed as that.
-	client.publish("$sys.log.client-0.ui", record("client-0.ui", "its page"));
-	// On another's subject: refused by the link.
+	// On its own subject, claiming to be the referee: it's the scope itself.
+	client.publish("$sys.log.client", record("referee", "lying"));
+	// On a subject already under its scope (its instance page names itself so): as it is.
+	client.publish("$sys.log.client-0/ui", record("client-0/ui", "its page"));
+	// On another's subject: under its scope all the same — never the referee's.
 	client.publish("$sys.log.referee", record("referee", "spoofed"));
 	await flush();
 
-	assert.deepEqual(records.map((entry) => [entry.context?.["source"], entry.message]), [["client-0", "lying"], ["client-0.ui", "its page"]]);
+	assert.deepEqual(records.map((entry) => [entry.context?.["source"], entry.message]), [["client-0", "lying"], ["client-0/ui", "its page"], ["client-0/referee", "spoofed"]]);
 });
 
-test("observabilityPermissions: its own logs and reports out, the viewers' sync in — nobody else's", async () => {
+test("observabilityPermissions: logs, backlogs and reports out, the viewers' sync in — nothing else either way", async () => {
 	const [up, down] = pipe();
 	const root = createHub({ "id": "root" });
 	const peer = createHub({ "id": "p" });
 	const heard: string[] = [];
-	let synced = 0;
+	const told: string[] = [];
 
-	root.subscribe("$sys.>", (_data, envelope) => { heard.push(envelope.subject); });
-	peer.subscribe("$sys.arch.sync", (_data, envelope) => { synced += envelope.from === "root" ? 1 : 0; });
-	await Promise.all([root.link(up, { "peer": "p", "permissions": observabilityPermissions("p") }).ready, peer.link(down).ready]);
+	root.subscribe(">", (_data, envelope) => { heard.push(envelope.subject); });
+	peer.subscribe(">", (_data, envelope) => { told.push(envelope.subject); });
+	await Promise.all([root.link(up, { "peer": "p", "permissions": observabilityPermissions() }).ready, peer.link(down).ready]);
 	await flush();
 
-	for (const subject of ["$sys.log.p", "$sys.log.p.ui", "$sys.arch.p", "$sys.arch.p.ui", "$sys.log.q", "$sys.arch.q", "$sys.arch.sync", "$sys.log.pq"]) {
+	for (const subject of ["$sys.log.p", "$sys.log.p/ui", "$sys.arch.p", "$sys.backlog.log", "$sys.other", "game.move"]) {
 		peer.publish(subject, {});
 	}
 
-	root.publish("$sys.arch.sync");
+	for (const subject of ["$sys.arch.sync", "$sys.log.root", "game.state"]) {
+		root.publish(subject, {});
+	}
+
 	await flush();
 
-	assert.deepEqual(heard.filter((subject) => subject !== "$sys.arch.sync"), ["$sys.log.p", "$sys.log.p.ui", "$sys.arch.p", "$sys.arch.p.ui"]);
-	assert.equal(synced, 1);
+	assert.deepEqual(heard.filter((subject) => !["$sys.arch.sync", "$sys.log.root", "game.state"].includes(subject)), ["$sys.log.p", "$sys.log.p/ui", "$sys.arch.p", "$sys.backlog.log"]);
+	assert.deepEqual(told.filter((subject) => !["$sys.log.p", "$sys.log.p/ui", "$sys.arch.p", "$sys.backlog.log", "$sys.other", "game.move"].includes(subject)), ["$sys.arch.sync"]);
 });
 
 test("ownWorker marks a worker's re-raised error handled, and reports one that couldn't load", () => {

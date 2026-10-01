@@ -36,6 +36,10 @@ test("a hub's realm: a page, a frame (with its parent's address), a worker, or n
 	withGlobals({ "window": undefined, "location": { "href": "http://localhost/__virtual__/t/5173/src/browser/referee.worker.ts" }, "importScripts": () => undefined }, () => {
 		assert.deepEqual(describeRealm(), { "kind": "worker", "url": "http://localhost/__virtual__/t/5173/src/browser/referee.worker.ts" });
 	});
+	// A worker told who spawned it (the editor's preview tap tags the URL it's created with).
+	withGlobals({ "window": undefined, "location": { "href": "http://localhost/__virtual__/t/5173/src/browser/client.worker.ts#realm-parent=" + encodeURIComponent(frame.location.href) }, "importScripts": () => undefined }, () => {
+		assert.deepEqual(describeRealm(), { "kind": "worker", "url": "http://localhost/__virtual__/t/5173/src/browser/client.worker.ts", "parent": frame.location.href });
+	});
 });
 
 test("the store keeps where each reporter runs", () => {
