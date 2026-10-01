@@ -267,6 +267,7 @@ flowchart LR
   end
   subgraph network["Network (service worker)"]
     sw["Service worker"]
+    webview_sw["Webview service worker"]
     net_origin["Page origin"]
     net_unpkg_com["unpkg"]
     net_registry_npmjs_org["npm registry"]
