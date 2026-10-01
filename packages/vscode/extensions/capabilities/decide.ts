@@ -11,6 +11,7 @@
  * Deny); an external program or AI can replace it later behind the same seam. All `.silo/` I/O — the base+override
  * policy merge, the observed-capability rollup, the run firehose — lives in silo-store.ts.
  */
+import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import type { BrokerOptions, CapabilityRequest, GrantStore, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
@@ -46,7 +47,7 @@ export interface CapabilityCall {
 }
 
 /** Turn a raw interceptor call into the canonical silo request (scope string + context), or undefined if it
- *  isn't a gated capability (e.g. an fs method not in CAP_FS). */
+ *  isn't a gated capability (e.g. an fs method neither almostnode nor CAP_FS gates). */
 function classify(call: CapabilityCall): CapabilityRequest | undefined {
 	const arg0 = call.args?.[0];
 
@@ -65,7 +66,7 @@ function classify(call: CapabilityCall): CapabilityRequest | undefined {
 	}
 
 	if (call.kind === "fs") {
-		const op = call.op ?? (call.method !== undefined ? CAP_FS[call.method] : undefined);
+		const op = call.op ?? (call.method !== undefined ? FS_SYNC[call.method] ?? FS_ASYNC[call.method] ?? CAP_FS[call.method] : undefined);
 
 		if (op === undefined) {
 			return undefined; // not a gated fs method

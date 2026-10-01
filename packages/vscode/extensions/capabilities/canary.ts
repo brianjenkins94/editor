@@ -21,6 +21,7 @@
  */
 import type { HostCallSite } from "@brianjenkins94/tsval";
 import { createVM } from "@brianjenkins94/tsval";
+import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
 import { type CapabilityHit, classifyCall, renderCallee } from "./capability-breakpoints";
 import ts from "typescript";
@@ -116,18 +117,12 @@ export function inert(): unknown {
  *  effects are the almostnode "production" path's job, not tsval's.) */
 export function capabilityStandins(): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
 	const noop = (): void => { /* inert */ };
-	const fsMock = {
-		"readFile": tag("fs:read", async () => ""),
-		"readFileSync": tag("fs:read", () => ""),
-		"writeFile": tag("fs:write", async () => undefined),
-		"writeFileSync": tag("fs:write", noop),
-		"appendFile": tag("fs:write", async () => undefined),
-		"appendFileSync": tag("fs:write", noop),
-		"unlink": tag("fs:write", async () => undefined),
-		"unlinkSync": tag("fs:write", noop),
-		"mkdir": tag("fs:write", async () => undefined),
-		"mkdirSync": tag("fs:write", noop)
-	};
+	// Every method almostnode gates, as an inert stand-in: reads find nothing, writes do nothing.
+	const fsResults: Record<string, () => unknown> = { "readdir": () => [], "readdirSync": () => [], "existsSync": () => false, "createReadStream": inert, "createWriteStream": inert };
+	const fsMock = Object.fromEntries([
+		...Object.entries(FS_SYNC).map(([method, op]) => [method, tag("fs:" + op, fsResults[method] ?? (op === "read" ? () => "" : noop))]),
+		...Object.entries(FS_ASYNC).map(([method, op]) => [method, tag("fs:" + op, async () => (fsResults[method] ?? (op === "read" ? () => "" : noop))())])
+	]);
 	const childProcessMock = {
 		"spawn": tag("exec", () => ({ "on": noop, "stdout": { "on": noop }, "stderr": { "on": noop }, "kill": noop })),
 		"spawnSync": tag("exec", () => ({ "status": 0, "stdout": "", "stderr": "" })),

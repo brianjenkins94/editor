@@ -14,6 +14,7 @@
  * mocks, so there are no tags to read — the call node is what we have. (Aliasing like `const f = fetch` isn't
  * caught here, unlike the canary; a later refinement can resolve it.)
  */
+import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
 import { effectiveDisposition, type Policy } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
@@ -41,17 +42,10 @@ const IDENTIFIER_MATCHERS: Record<string, Matcher> = {
 };
 
 /** Method callees (`fs.writeFile(...)`, `child_process.spawn(...)`, or a destructured `writeFile(...)`), keyed by
- *  the method/function name — the node fs + child_process capability surface. */
+ *  the method/function name — the node fs surface (almostnode's own gate table, so the squiggles see every method the
+ *  runtime gates) + child_process. */
 const NAME_MATCHERS: Record<string, Matcher> = {
-	"fetch": { "capability": "net", "arg": 0 },
-	"readFile": { "capability": "fs:read", "arg": 0 },
-	"readFileSync": { "capability": "fs:read", "arg": 0 },
-	"writeFile": { "capability": "fs:write", "arg": 0 },
-	"writeFileSync": { "capability": "fs:write", "arg": 0 },
-	"appendFile": { "capability": "fs:write", "arg": 0 },
-	"appendFileSync": { "capability": "fs:write", "arg": 0 },
-	"unlink": { "capability": "fs:write", "arg": 0 },
-	"unlinkSync": { "capability": "fs:write", "arg": 0 },
+	...Object.fromEntries(Object.entries({ ...FS_SYNC, ...FS_ASYNC }).map(([method, op]) => [method, { "capability": "fs:" + op, "arg": 0 }])),
 	"spawn": { "capability": "exec", "arg": 0 },
 	"spawnSync": { "capability": "exec", "arg": 0 },
 	"exec": { "capability": "exec", "arg": 0 },

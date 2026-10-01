@@ -83,6 +83,10 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
 - **One classifier.** `capability-breakpoints.classifyCall` is THE way to decide "is this a capability, what
   resource." The canary uses it (AST-primary); its injected stand-ins carry tags only as an *aliasing fallback*
   (`const f = fetch; f(url)`), never as a second classifier. A new runtime uses `classifyCall` too.
+- **One fs table.** Which `fs` methods read and which write is `@brianjenkins94/almostnode/fs-capabilities` — the
+  table the runtime shim gates by. `classifyCall`'s matchers, the canary's stand-ins and `decide.ts`'s lookup all
+  derive from it, so the editor never misses a method the runtime asks about (as `rm` / `rename` / `copyFile` once
+  were).
 - **One policy model.** `@brianjenkins94/util/silo/policy` is the single source of dispositions + matching (shared
   with silo, no longer a local fork); `silo-store` is the single source of `.silo/` I/O (base+override merge,
   observed facts). `policy.ts` only adds the panel's base-file I/O.

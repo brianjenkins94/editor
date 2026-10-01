@@ -6,7 +6,8 @@
   "license": "MIT",
   "exports": {
     ".": "./index.ts",
-    "./bridge": "./server-bridge.ts"
+    "./bridge": "./server-bridge.ts",
+    "./fs-capabilities": "./shims/fs-capabilities.ts"
   },
   "main": "./index.ts",
   "types": "./index.ts",

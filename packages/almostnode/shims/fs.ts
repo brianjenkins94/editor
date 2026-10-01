@@ -4,6 +4,7 @@
  * Wraps VirtualFS to provide Node.js compatible API
  */
 
+import { FS_ASYNC, FS_SYNC } from "./fs-capabilities";
 import type { FSWatcher, Stats, VirtualFS, WatchEventType, WatchListener } from "../virtual-fs";
 import { uint8ToBase64, uint8ToHex } from "../utils/binary-encoding";
 import { createNodeError } from "../virtual-fs";
@@ -879,17 +880,9 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 	// reads OUTSIDE the workspace (e.g. ~/.ssh) are the exfiltration axis, writes/deletes the tamper axis. The
 	// host is expected to fast-path workspace reads so this stays cheap (reads are frequent).
 	if (beforeFs !== undefined) {
-		const SYNC: Record<string, "read" | "write"> = {
-			"readFileSync": "read", "existsSync": "read", "statSync": "read", "lstatSync": "read", "readdirSync": "read", "realpathSync": "read", "accessSync": "read", "createReadStream": "read",
-			"writeFileSync": "write", "appendFileSync": "write", "mkdirSync": "write", "unlinkSync": "write", "rmSync": "write", "rmdirSync": "write", "renameSync": "write", "copyFileSync": "write", "createWriteStream": "write", "truncateSync": "write"
-		};
-		const PROMISE: Record<string, "read" | "write"> = {
-			"readFile": "read", "stat": "read", "lstat": "read", "readdir": "read", "realpath": "read", "access": "read",
-			"writeFile": "write", "appendFile": "write", "mkdir": "write", "unlink": "write", "rm": "write", "rmdir": "write", "rename": "write", "copyFile": "write", "truncate": "write"
-		};
 		const record = shim as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
 
-		for (const [method, op] of Object.entries(SYNC)) {
+		for (const [method, op] of Object.entries(FS_SYNC)) {
 			const original = record[method];
 
 			if (typeof original === "function") {
@@ -903,7 +896,7 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 
 		const promisesRecord = promises as unknown as Record<string, ((...args: unknown[]) => Promise<unknown>) | undefined>;
 
-		for (const [method, op] of Object.entries(PROMISE)) {
+		for (const [method, op] of Object.entries(FS_ASYNC)) {
 			const original = promisesRecord[method];
 
 			if (typeof original === "function") {
