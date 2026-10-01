@@ -428,118 +428,48 @@ export interface ObservedRealm { "kind": "window" | "worker"; "url": string; "pa
 export interface AppLayout {
 	/** The previewed apps' contexts (appNodes). */
 	"nodes": Set<string>;
-	/** An app context that IS another: the page in a preview window — the hub linked to the shell — is that window
-	 *  (`preview:<port>`, `preview:<port>~<n>`); a hub linked across windows, named under the linking window, is the one
-	 *  reporting in the other. */
-	"alias": Map<string, string>;
-	/** Where each app context runs, when known: a frame in the window that holds it, a worker under the one window it's
-	 *  linked to (in alias terms — a child of the page is a child of its preview window). */
+	/** Where each app context runs, as its realm says: a frame in the window (or frame) at its parent address, a worker
+	 *  under the realm that started it (observability's REALM_PARENT, which the preview's tap sets) — within its own
+	 *  preview window, whose page reports as the window itself (`preview:<port>`: the edge names it). */
 	"parent": Map<string, string>;
 }
 
+/** A preview window's id (`preview:<port>`, `preview:<port>~<n>`): the shell's name for it, and its page's. */
+function isWindowNode(id: string): boolean {
+	return /^preview:[^/]+$/u.test(id);
+}
+
 /**
- * How a previewed app's contexts nest, per preview window: the hub linked to the shell is that window's page (so, the
- * window itself); a frame sits in the window its parent address names (within the same preview window — two windows
- * of one app have the same addresses); a worker, under the one app window it's linked to (by hub link or channel).
+ * How a previewed app's contexts nest, per preview window — read off what each realm reports, nothing inferred: its
+ * parent address names the realm holding (or that started) it, looked up among the realms of the same preview window
+ * (two windows of one app have the same addresses). An app context whose parent isn't known sits in its window.
  */
 export function appLayout(observed: { "channels": { "a": string; "b": string }[]; "topology": Map<string, ObservedTopology>; "realms": Map<string, ObservedRealm> }): AppLayout {
 	const nodes = appNodes(observed);
-	const alias = new Map<string, string>();
 	const parent = new Map<string, string>();
-	const windows = [...nodes].filter((id) => observed.realms.get(id)?.kind === "window");
-	const named = (id: string): string => alias.get(id) ?? id;
-
-	for (const id of nodes) {
-		if ((observed.topology.get(id)?.links ?? []).some((link) => link.peerId === "shell")) {
-			alias.set(id, appWindowOf(id)!);
-		}
-	}
-
-	// A hub linked across windows — not through the editor (a BroadcastChannel between two windows of one origin, say) —
-	// is named under the window that links to it, though it runs in another. One that never reports under that window,
-	// whose own id reports in exactly one other window, is that one.
-	const reporters = [...observed.topology.keys()].filter(isAppNode);
-	const bare = (id: string): string => id.slice(appWindowOf(id)!.length + 1);
-
-	for (const id of nodes) {
-		if (!observed.topology.has(id) && !alias.has(id)) {
-			const elsewhere = reporters.filter((reporter) => appWindowOf(reporter) !== appWindowOf(id) && bare(reporter) === bare(id));
-
-			if (elsewhere.length === 1) {
-				alias.set(id, named(elsewhere[0]));
-			}
-		}
-	}
-
-	// A window by its address, per preview window — the page (the aliased hub) first, where a realm holds several hubs.
+	const windowOf = (id: string): string => (isWindowNode(id) ? id : appWindowOf(id)!);
+	// Each window realm by its address, per preview window — the window itself first, where a realm holds several hubs.
 	const byUrl = new Map<string, string>();
+	const holders = [...observed.realms].filter(([id, realm]) => realm.kind === "window" && (nodes.has(id) || isWindowNode(id)));
 
-	for (const id of windows.toSorted((a, b) => Number(alias.has(b)) - Number(alias.has(a)))) {
-		const key = appWindowOf(id) + "\0" + observed.realms.get(id)!.url;
+	for (const [id, realm] of holders.toSorted(([a], [b]) => Number(isWindowNode(b)) - Number(isWindowNode(a)))) {
+		const key = windowOf(id) + "\0" + realm.url;
 
 		if (!byUrl.has(key)) {
 			byUrl.set(key, id);
 		}
 	}
 
-	for (const id of windows) {
-		const holder = observed.realms.get(id)!.parent;
-		const window = holder === undefined ? undefined : byUrl.get(appWindowOf(id) + "\0" + holder);
+	for (const id of nodes) {
+		const holder = observed.realms.get(id)?.parent;
+		const at = holder === undefined ? undefined : byUrl.get(windowOf(id) + "\0" + holder);
 
-		if (window !== undefined && window !== id && !alias.has(id)) {
-			parent.set(id, named(window));
+		if (at !== undefined && at !== id) {
+			parent.set(id, at);
 		}
 	}
 
-	for (const id of [...nodes].filter((candidate) => observed.realms.get(candidate)?.kind === "worker")) {
-		const linked = new Set([
-			...(observed.topology.get(id)?.links ?? []).map((link) => link.peerId),
-			...observed.channels.filter((channel) => channel.a === id || channel.b === id).map((channel) => (channel.a === id ? channel.b : channel.a))
-		].filter((neighbour): neighbour is string => neighbour !== undefined && windows.includes(neighbour)));
-
-		if (linked.size === 1) {
-			parent.set(id, named([...linked][0]));
-		}
-	}
-
-	return { "nodes": nodes, "alias": alias, "parent": parent };
-}
-
-/**
- * Which of a previewed app's contexts are gone, and since when. A page (or frame) that goes says so as it goes (its
- * reporter's last word — the store ends it, and keeps `lastEndedAt` when a reload brings it back under the same id);
- * what ran under it — its workers, which can't say so — is gone with it: any context last heard from before something
- * it ran under (its window, or the page that IS its window) ended. Stateless: a reloaded page's new workers report
- * after it came back, so they aren't.
- */
-export function appEnded(layout: AppLayout, nodes: ReadonlyMap<string, { "state": string; "lastEndedAt"?: number }>, lastReport: ReadonlyMap<string, number>): Map<string, number> {
-	const ended = new Map<string, number>();
-	const source = new Map([...layout.alias].map(([id, target]) => [target, id]));
-
-	for (const id of layout.nodes) {
-		const own = nodes.get(id);
-
-		if (own?.state === "terminated" && own.lastEndedAt !== undefined) {
-			ended.set(id, own.lastEndedAt);
-			continue;
-		}
-
-		const heard = lastReport.get(id) ?? 0;
-		const seen = new Set<string>();
-
-		for (let holder = layout.parent.get(id); holder !== undefined && !seen.has(holder); holder = layout.parent.get(holder) ?? layout.parent.get(source.get(holder) ?? "")) {
-			seen.add(holder);
-
-			const at = Math.max(nodes.get(holder)?.lastEndedAt ?? 0, nodes.get(source.get(holder) ?? "")?.lastEndedAt ?? 0);
-
-			if (at > heard) {
-				ended.set(id, at);
-				break;
-			}
-		}
-	}
-
-	return ended;
+	return { "nodes": nodes, "parent": parent };
 }
 
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────

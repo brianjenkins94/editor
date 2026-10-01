@@ -12,7 +12,7 @@ import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@bria
 import type { ContainerSpec, Violation } from "./architecture-model";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
 import type { AppLayout } from "./architecture-model";
-import { appEnded, appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
+import { appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 import { windowTitle } from "./virtual-path";
 
@@ -77,7 +77,9 @@ export interface ArchitectureHandle {
 /** What needs review in what the diagram shows: a context that ended long ago (and its channels) no longer does. */
 function conformanceOf(store: ArchitectureStore): Violation[] {
 	const now = Date.now();
-	// An ended placeholder (a link that closed before its peer answered) is a transient: shown fading, not a violation.
+
+	store.sweep(now);
+
 	const shown = new Set([...store.nodes.values()].filter((node) => node.state !== "declared" && isVisible(node, now, false)).map((node) => node.id));
 
 	return checkConformance({
@@ -581,7 +583,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	// ── diagram
 	let layout: Layout | undefined;
 	/** A previewed app's own contexts, and how they nest, as of the last render (see appLayout). */
-	let appInfo: AppLayout = { "nodes": new Set(), "alias": new Map(), "parent": new Map() };
+	let appInfo: AppLayout = { "nodes": new Set(), "parent": new Map() };
 	let app: ReadonlySet<string> = appInfo.nodes;
 	let edges = new Map<string, EdgeView>();
 	let edgesByNode = new Map<string, EdgeView[]>();
@@ -684,10 +686,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		appInfo = appLayout({ "channels": [...store.channels.values()], "topology": store.topology, "realms": store.realms });
 		app = appInfo.nodes;
 
-		// An app context that IS a declared one (its page is its preview) is drawn as that one; one that's gone (its page
-		// went — appEnded) fades like any context that ended.
-		const ended = appEnded(appInfo, store.nodes, store.reporters);
-		const drawn = visible.filter((node) => !appInfo.alias.has(node.id) && !(ended.has(node.id) && now - ended.get(node.id)! > HIDE_ENDED_AFTER_MS));
+		const drawn = visible;
 		const visibleIds = new Set(drawn.map((node) => node.id));
 
 		layout = computeLayout(drawn, collapsed, appInfo);
@@ -746,13 +745,11 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		edges = new Map();
 		edgesByNode = new Map();
 
-		// An aliased end is drawn as what it aliases: a line onto it, once (the shell's link to a preview, seen from both
-		// ends, is one line).
+		// One line per pair of ends, whichever side reported it.
 		const drawnPairs = new Set<string>();
 
 		for (const channel of store.channels.values()) {
-			const a = appInfo.alias.get(channel.a) ?? channel.a;
-			const b = appInfo.alias.get(channel.b) ?? channel.b;
+			const { a, b } = channel;
 			const pair = [a, b].sort().join("|");
 
 			if (a !== b && visibleIds.has(a) && visibleIds.has(b) && !drawnPairs.has(pair)) {
@@ -1071,10 +1068,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		const declared = nodeSpec(id);
 		const container = containers.find((candidate) => candidate.id === (node === undefined ? declared?.container : containerOf(node, app)));
 		const now = Date.now();
-		// A preview whose app joined the tree is drawn as one node with the app's page hub (appLayout's alias).
-		const page = [...appInfo.alias].find(([, target]) => target === id)?.[0];
-		const channels = [...store.channels.values()].filter((channel) => [channel.a, channel.b].some((end) => end === id || (page !== undefined && end === page))).sort((a, b) => b.count - a.count);
-		const topology = store.topology.get(id) ?? (page === undefined ? undefined : store.topology.get(page));
+		const channels = [...store.channels.values()].filter((channel) => channel.a === id || channel.b === id).sort((a, b) => b.count - a.count);
+		const topology = store.topology.get(id);
 
 		return [
 			h("h2", null, labelOf(store, id)),
@@ -1085,7 +1080,6 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 					["Id", id],
 					["Runs in", container === undefined ? undefined : container.label + " — " + container.caption],
 					["Detail", declared?.detail ?? node?.spec.detail],
-					["App page hub", page],
 					["Only", declared?.condition],
 					["Instances", node !== undefined && node.instances > 0 ? String(node.instances) : undefined],
 					["Started", node !== undefined && node.spawnCount > 1 ? node.spawnCount + " times" : undefined],
@@ -1304,6 +1298,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 	const interval = setInterval(() => {
 		const now = Date.now();
+
+		store.sweep(now); // a reporter gone silent ends (re-rendering through the store's change)
 
 		if ([...nodeElements.keys()].some((id) => {
 			const node = store.nodes.get(id);

@@ -87,8 +87,11 @@ a new window (`window.open`, a `target="_blank"` link): the tap hands that up as
 leave the editor as a browser tab. Each window is its own page — its own reload, DevTools, capability prompts and hub
 link — named `preview:<port>` (the port's first) or `preview:<port>~<n>`; HMR reaches all of them; closing one closes
 just it, and closing a server's last window (or Ctrl-C on `vite`) stops the server. An app's hubs name themselves (every
-window of one app has a `page`), so the shell scopes each window's observability as it enters the editor's tree
-(observability's `scopeObservability`): the view and debug-mcp see `preview:<port>~<n>/page`, never two `page`s merged.
+window of one app has a `page`), so the edge names them: the shell renames each window's observability as it enters
+the editor's tree (observability's `scopedTransport`) — the window's page IS `preview:<port>~<n>`, its other hubs
+`preview:<port>~<n>/<hub>` — never two `page`s merged. Where each runs is reported, not guessed: a frame's realm names
+its parent's address, and the page's tap tags each worker it starts with its page and window (its URL's hash), so a
+worker sits under the realm that started it and its logs and capability requests go to its window.
 Two ports are two servers; in the editor they share one origin (ports are paths under `/__virtual__/`), which a desktop
 wouldn't — so an app can't rely on origin-scoped state crossing ports.
 

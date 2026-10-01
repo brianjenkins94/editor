@@ -310,6 +310,8 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		});
 		const frame = document.createElement("iframe");
 
+		// Its window's id, for the page's tap to tag the workers it starts with (see node-worker.ts's OBS_TAP).
+		frame.name = id;
 		paneWindow.body.appendChild(frame);
 		paneWindow.body.classList.add(bodyRelative());
 
@@ -328,6 +330,8 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		// (Its window looked up on each message: null until the frame is in the document. What's sent while there's none
 		// is dropped; hub's hello handshake recovers.)
 		const unlinkApp = hub.link(scopedTransport(windowTransport(() => frame.contentWindow, location.origin), id, {
+			// The edge names the app's contexts: its page IS this window, the rest under it; the shell keeps its name.
+			"keep": (other) => other === hub.id,
 			// Who reported, so closing the window can end them all (see closeWindow).
 			"onFrame": (scoped) => {
 				const reporter = !("hub" in scoped) && scoped.subject.startsWith("$sys.arch.") ? (scoped.data as { "reporter"?: unknown } | undefined)?.reporter : undefined;
@@ -627,21 +631,24 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	const tabOf = (url: string | undefined): string | undefined => (url === undefined ? undefined : parseVirtual(new URL(url, location.href).pathname)?.tab);
 
 	tapChannel?.addEventListener("message", (event: MessageEvent) => {
-		const data = event.data as { "channel"?: string; "tab"?: string; "port"?: number; "from"?: string; "id"?: number; "kind"?: string; "resource"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;
+		const data = event.data as { "channel"?: string; "tab"?: string; "port"?: number; "window"?: string; "from"?: string; "id"?: number; "kind"?: string; "resource"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;
 		const port = data?.port;
 
 		if (typeof port !== "number" || data?.tab === undefined || data.tab !== tabOf(servers.get(port)?.url)) {
 			return; // another editor tab's worker, or a server this tab doesn't run
 		}
 
-		const surface = windowFor(port);
+		// The window the worker was started in (its page's tap tagged it), if it's still open on this server; else the
+		// port's last used one (a worker the tap didn't start — an app's worker of a worker).
+		const tagged = typeof data.window === "string" ? surfaces.get(data.window) : undefined;
+		const surface = tagged?.port === port ? tagged : windowFor(port);
 
 		if (data.channel === "obs-log" && data.record !== undefined && surface !== undefined) {
 			publishTapRecord(surface.id, data.record);
 		} else if (data.channel === "cap-decide" && typeof data.kind === "string") {
 			const reply = (allow: boolean): void => { tapChannel.postMessage({ "channel": "cap-decision", "to": data.from, "id": data.id, "allow": allow }); };
 
-			capRpc.request("capability.decide", { "kind": data.kind, "args": [data.resource ?? ""], "port": port }, { "timeoutMs": 300000, "waitForResponderMs": 10000 })
+			capRpc.request("capability.decide", { "kind": data.kind, "args": [data.resource ?? ""], "port": port, ...surface === undefined ? {} : { "window": surface.id } }, { "timeoutMs": 300000, "waitForResponderMs": 10000 })
 				.then((allow) => { reply(allow !== false); })
 				.catch(() => { reply(false); }); // can't reach the decider ⇒ fail closed
 		}

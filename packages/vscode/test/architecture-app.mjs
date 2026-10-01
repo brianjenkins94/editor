@@ -285,20 +285,21 @@ test("the app's link is confined: an editor subject it publishes doesn't cross i
 });
 
 test("the editor's architecture view takes the app's contexts as the app's: none of it needs review", async () => {
-	// The app's hubs, workers and frames are reported into the editor's view (they joined its tree) under their window
-	// (`preview:<port>/<hub>`), but they're not the editor's architecture: nothing to check them against, and nothing
-	// flagged.
+	// The app's hubs, workers and frames are reported into the editor's view (they joined its tree), named by the shell
+	// as they enter: its page IS its preview window (`preview:<port>`), the rest under it (`preview:<port>/<hub>`). But
+	// they're not the editor's architecture: nothing to check them against, and nothing flagged.
 	const window = "preview:" + previewPort();
-	const snapshot = await session.until("the app's hubs in the view", (current) => ["page", "worker"].every((id) => current.nodes.some((node) => node.id === window + "/" + id)));
+	const snapshot = await session.until("the app's hubs in the view", (current) => [window, window + "/worker"].every((id) => current.topology?.[id] !== undefined));
 
 	assert.ok(snapshot.nodes.some((node) => node.id === window + "/frame"), "its nested frame's hub too");
+	assert.ok(!snapshot.nodes.some((node) => node.id === window + "/page"), "its page is the window, not a context under it");
 	assert.deepEqual((await session.conformance()).filter((violation) => violation.id !== override()), []);
 
-	// And where they run: the page is its preview window; the frame sits in it.
-	const layout = await appLayoutOnce((latest) => ["page", "frame"].every((id) => latest.realms?.[window + "/" + id] !== undefined));
+	// And where they run, as each says: the frame in the page (the window); the worker under the page that started it.
+	const layout = await appLayoutOnce((latest) => [window, window + "/frame", window + "/worker"].every((id) => latest.realms?.[id] !== undefined));
 
-	assert.equal(layout.alias.get(window + "/page"), window);
 	assert.equal(layout.parent.get(window + "/frame"), window);
+	assert.equal(layout.parent.get(window + "/worker"), window, "the page's tap told the worker who started it");
 });
 
 test("the app opens its own page as a new window: a second preview window onto the same server, its own page in every way", async () => {
@@ -326,15 +327,15 @@ test("the app opens its own page as a new window: a second preview window onto t
 	assert.notEqual(state.startedAt, (await previewPage().evaluate(() => globalThis.__wired)).startedAt, "its own page");
 
 	// Its own hubs in the architecture, apart from the first window's (the same ids, scoped), and nothing flagged.
-	const snapshot = await session.until("the second window's hubs", (current) => ["page", "worker", "frame"].every((id) => current.nodes.some((node) => node.id === second + "/" + id)));
+	const snapshot = await session.until("the second window's hubs", (current) => [second, second + "/worker", second + "/frame"].every((id) => current.topology?.[id] !== undefined));
 
-	assert.ok(snapshot.nodes.some((node) => node.id === "preview:" + port + "/page"), "the first window's still there");
+	assert.ok(snapshot.topology?.["preview:" + port] !== undefined, "the first window's still there");
 	assert.deepEqual((await session.conformance()).filter((violation) => violation.id !== override()), []);
 
 	const layout = await appLayoutOnce((latest) => latest.realms?.[second + "/frame"] !== undefined);
 
-	assert.equal(layout.alias.get(second + "/page"), second);
 	assert.equal(layout.parent.get(second + "/frame"), second, "its frame in its own window, though both windows' frames have one address");
+	assert.equal(layout.parent.get(second + "/worker"), second);
 
 	// Its own tab in debug-mcp — each naming its window, the scope its records are filed under (protocol 2: a page on
 	// an older observability doesn't say).

@@ -31,12 +31,12 @@
  */
 import { getServer, Runtime } from "@brianjenkins94/almostnode";
 import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
-import { installWorkerProbe, observe } from "@brianjenkins94/observability";
+import { installWorkerProbe, observe, REALM_PARENT } from "@brianjenkins94/observability";
 
 import { NETWORK_PROBES } from "../../architecture";
 import { identifyWorker } from "../../architecture-model";
 import { ZENFS_NODE } from "../../architecture-zenfs";
-import { VIRTUAL_MARKER, VIRTUAL_RE } from "../../virtual-path";
+import { VIRTUAL_MARKER, VIRTUAL_RE, WINDOW_PARAM } from "../../virtual-path";
 import type { WorkspaceChange } from "../../workspace-changes";
 import { WORKSPACE_CHANGED } from "../../workspace-changes";
 
@@ -376,11 +376,12 @@ const WORKER_TAP = `(function () {
 	self.__obsTap = true;
 	var m = /${VIRTUAL_RE.source}/.exec(location.pathname);
 	var tab = m ? m[1] : undefined, vport = m ? Number(m[2]) : undefined, worker = m && m[3] ? m[3] : location.pathname;
+	var win = new URLSearchParams(location.hash.slice(1)).get(${JSON.stringify(WINDOW_PARAM)}) || undefined; // tagged by its page's tap
 	var bc; try { bc = new BroadcastChannel("${WORKER_TAP_CHANNEL}"); } catch (e) { return; }
 	var me = Math.random().toString(36).slice(2);
 	var send = function (rec) {
 		rec.attrs = Object.assign({ worker: worker }, rec.attrs);
-		try { bc.postMessage({ channel: "obs-log", tab: tab, port: vport, record: rec }); } catch (e) {}
+		try { bc.postMessage({ channel: "obs-log", tab: tab, port: vport, window: win, record: rec }); } catch (e) {}
 	};
 ${CONSOLE_TAP}	var capSeq = 0, capPending = {};
 	bc.addEventListener("message", function (e) {
@@ -391,7 +392,7 @@ ${CONSOLE_TAP}	var capSeq = 0, capPending = {};
 		return new Promise(function (resolve) {
 			var id = Math.random().toString(36).slice(2) + "-" + (++capSeq); // unguessable: only the shell can answer it
 			capPending[id] = resolve;
-			try { bc.postMessage({ channel: "cap-decide", tab: tab, port: vport, from: me, id: id, kind: kind, resource: resource }); } catch (err) { delete capPending[id]; resolve(false); return; }
+			try { bc.postMessage({ channel: "cap-decide", tab: tab, port: vport, window: win, from: me, id: id, kind: kind, resource: resource }); } catch (err) { delete capPending[id]; resolve(false); return; }
 			setTimeout(function () { if (capPending[id]) { delete capPending[id]; resolve(false); } }, 300000); // unanswered ⇒ fail closed
 		});
 	};
@@ -421,6 +422,25 @@ const OBS_TAP = `<script>
 	// record to the app's own page (and its message listeners) instead.
 	var host = (function () { var w = window; try { while (w.parent !== w && w.parent.location.pathname.indexOf(${JSON.stringify(VIRTUAL_MARKER)}) !== -1) { w = w.parent; } } catch (e) {} return w.parent; })();
 	var nested = host !== parent ? "/" + location.pathname.split(${JSON.stringify(VIRTUAL_MARKER)})[1].split("/").slice(2).join("/") : undefined;
+	// This preview's window id: the shell names its frame after it.
+	var win = (function () { var w = window; try { while (w.parent !== host) { w = w.parent; } return w.name || undefined; } catch (e) { return undefined; } })();
+	// The workers this page starts are told where they came from — this page (their realm's parent) and its preview
+	// window — in their URL's hash, which never reaches the server.
+	if (typeof window.Worker === "function" && win !== undefined) {
+		var tagged = function (url) {
+			try {
+				var u = new URL(String(url), location.href);
+				if (u.origin !== location.origin || (u.protocol !== "http:" && u.protocol !== "https:")) { return url; }
+				var params = new URLSearchParams(u.hash.slice(1));
+				params.set(${JSON.stringify(REALM_PARENT)}, location.href);
+				params.set(${JSON.stringify(WINDOW_PARAM)}, win);
+				u.hash = params.toString();
+				return u.href;
+			} catch (e) { return url; }
+		};
+		var OrigWorker = window.Worker;
+		window.Worker = class extends OrigWorker { constructor(url, options) { super(tagged(url), options); } };
+	}
 	var send = function (rec) {
 		if (nested !== undefined) { rec.attrs = Object.assign({ frame: nested }, rec.attrs); }
 		try { host.postMessage({ channel: "obs-log", record: rec }, "*"); } catch (e) {}

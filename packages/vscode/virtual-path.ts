@@ -57,6 +57,11 @@ export function previewPageOf(url: string): { "url": string; "port": number } | 
 
 export const PREVIEW_WINDOW_PREFIX = "preview:";
 
+/** A worker's preview window, in its URL's hash (`#preview-window=<id>`): set by its page's tap as it starts it (the
+ *  page knows its window from its frame's name), read by the worker's tap — so its logs and capability requests go to
+ *  the window it runs in. */
+export const WINDOW_PARAM = "preview-window";
+
 /** The id of `port`'s `index`-th preview window (counted from 1) — no dots: ids become subject tokens (`$sys.log.<id>`). */
 export function windowId(port: number, index: number): string {
 	return PREVIEW_WINDOW_PREFIX + port + (index === 1 ? "" : "~" + index);
