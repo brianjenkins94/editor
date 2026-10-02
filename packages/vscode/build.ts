@@ -124,6 +124,14 @@ function eslintNodeModule(): Plugin {
 	};
 }
 
+/** `buffer` → the node-stdlib-browser polyfill, for the SHELL: its repo load clones with isomorphic-git (git-clone.ts),
+ *  which uses the `Buffer` global, and the shell's bundle otherwise has no `buffer` to resolve (the package isn't a
+ *  direct dependency). As the workbench pass's alias does for git-engine.ts; in dev, Vite pre-bundles it (it resolves
+ *  into node_modules) into ESM. */
+function shellBuffer(): Plugin {
+	return { "name": "shell-buffer", "config": () => ({ "resolve": { "alias": { "buffer": stdlib["buffer"] as string } } }) };
+}
+
 /** Plugin code that passes `require` around as a VALUE — `optionalRequire(require, "typescript")` — hides the module id
  *  from the bundler, which leaves its runtime `require` (it throws in a worker). Rewrite `require` in argument position
  *  to the engine's registry-backed require (`globalThis.__eslintRequire`, see engine.ts / node-module.js). */
@@ -180,6 +188,7 @@ export function hostPlugins(): Plugin[] {
 		// chunk resolves itself. github.ts is dynamically imported, so fido + these polyfills land in a lazy chunk
 		// (docs/github-*.js), off the shell's cold-start path.
 		polyfillNode(["fs", "path", "url", "util"]),
+		shellBuffer(),
 		{
 			"name": "coi-headers",
 			"configureServer": function(server) {

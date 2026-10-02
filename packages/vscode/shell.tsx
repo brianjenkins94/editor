@@ -22,7 +22,7 @@ import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { renderGitPanel } from "./git-panel";
 import { reportArchitecture } from "./architecture";
-import { getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
+import { getPat, getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
 import type { RepoBinding } from "./github-auth";
 import { reportShellMetrics } from "./editor-metrics";
 import { createShellDock } from "./shell-dock";
@@ -612,7 +612,19 @@ function Shell() {
 				return;
 			}
 
-			const files = await gh.readRepo(owner, repo);
+			// Clone it — one shallow pack through isomorphic-git's proxy, the PAT along (git-clone.ts) — rather than read
+			// it blob by blob through the API, which fido's limiter holds to 100 requests a minute. The API is the fallback.
+			let files: { "path": string; "bytes": Uint8Array }[];
+
+			try {
+				const { cloneRepo } = await import("./git-clone");
+
+				files = (await cloneRepo(owner, repo, getPat())).files;
+				span.info("cloned", { "files": files.length });
+			} catch (error) {
+				span.warn("clone failed — reading through the API", { "error": errText(error) });
+				files = await gh.readRepo(owner, repo);
+			}
 
 			if (files.length === 0) {
 				setLoadError("That repo has no files");
