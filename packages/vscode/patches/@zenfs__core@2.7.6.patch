@@ -1,19 +1,22 @@
 diff --git a/dist/backends/single_buffer.js b/dist/backends/single_buffer.js
-index 119eb77..0ecf102 100644
+index 119eb77..04c6505 100644
 --- a/dist/backends/single_buffer.js
 +++ b/dist/backends/single_buffer.js
-@@ -574,7 +574,9 @@ const kMetadataOffset = offsetof(SuperBlock, 'metadata_offset') / Uint32Array.BY
+@@ -574,8 +574,13 @@ const kMetadataOffset = offsetof(SuperBlock, 'metadata_offset') / Uint32Array.BY
   */
  function checksum(value) {
      let length = sizeof(value) - 4;
--    if (value instanceof MetadataBlock)
-+    // Both blocks reserve a trailing Int32 as an Atomics lock word (MetadataBlock.locked; SuperBlock's
-+    // cross-realm FS-operation lock in its padding) — exclude it so lock writes don't invalidate the checksum.
-+    if (value instanceof MetadataBlock || value instanceof SuperBlock)
++    // Both blocks reserve trailing Int32s that change outside a checksum update — MetadataBlock.locked; and in the
++    // SuperBlock's padding the cross-realm FS-operation lock, the metadata generation and the next inode id — so
++    // exclude them.
+     if (value instanceof MetadataBlock)
          length -= Int32Array.BYTES_PER_ELEMENT;
++    else if (value instanceof SuperBlock)
++        length -= 3 * Int32Array.BYTES_PER_ELEMENT;
      return crc32c(new Uint8Array(value.buffer, value.byteOffset + 4, length));
  }
-@@ -611,6 +613,43 @@ export class SingleBufferStore extends BufferView {
+ /**
+@@ -611,6 +616,109 @@ export class SingleBufferStore extends BufferView {
          this._view = new DataView(this.buffer, this.byteOffset, this.byteLength);
          this._u8 = new Uint8Array(this.buffer, this.byteOffset, this.byteLength);
          this.superblock = new SuperBlock(this.buffer, this.byteOffset);
@@ -23,6 +26,72 @@ index 119eb77..0ecf102 100644
 +        this._shared = typeof SharedArrayBuffer !== 'undefined' && this.buffer instanceof SharedArrayBuffer;
 +        this._fsLockView = new Int32Array(this.buffer, this.byteOffset + sizeof(SuperBlock) - Int32Array.BYTES_PER_ELEMENT, 1);
 +        this._fsLockDepth = 0;
++        // Two more shared Int32s in the padding: the metadata GENERATION (bumped whenever an id gains or loses its slot)
++        // and the next inode id (StoreFS.allocNew). A zeroed buffer starts both at 0.
++        this._genView = new Int32Array(this.buffer, this.byteOffset + sizeof(SuperBlock) - 2 * Int32Array.BYTES_PER_ELEMENT, 1);
++        this._idView = new Int32Array(this.buffer, this.byteOffset + sizeof(SuperBlock) - 3 * Int32Array.BYTES_PER_ELEMENT, 1);
++        // This realm's index of where each id's entry is (id → { block, i }), valid for `_indexGen`. Finding an entry
++        // by scanning every block made each operation cost the whole store, and so a bulk load cost its square.
++        this._index = new Map();
++        this._indexGen = -1;
++    }
++    /** Re-read the head metadata block (another realm may have rotated in a new one) and rebuild the index. */
++    _reindex() {
++        const offsets = new Uint32Array(this.buffer, this.byteOffset, sizeof(SuperBlock) / Uint32Array.BYTES_PER_ELEMENT);
++        const head = Atomics.load(offsets, kMetadataOffset);
++        if (this.superblock.metadata.byteOffset !== head)
++            this.superblock.metadata = new MetadataBlock(this.buffer, head);
++        const index = new Map();
++        for (let block = this.superblock.metadata; block; block = block.previous) {
++            block.waitUnlocked();
++            const items = block.items;
++            for (let i = 0; i < entries_per_block; i++) {
++                const entry = items[i];
++                if (entry.offset && !index.has(entry.id))
++                    index.set(entry.id, { block, i });
++            }
++        }
++        this._index = index;
++    }
++    /** The live entry for `id` (and its block), or undefined. Rebuilds the index when another realm has changed slot
++     *  assignments since it was built; a hit is checked against the entry, and a mismatch falls back to a scan. */
++    _lookup(id) {
++        const gen = Atomics.load(this._genView, 0);
++        if (gen !== this._indexGen) {
++            this._reindex();
++            this._indexGen = gen;
++        }
++        const at = this._index.get(id);
++        if (at !== undefined) {
++            const entry = at.block.items[at.i];
++            if (entry.offset && entry.id == id)
++                return { block: at.block, entry };
++        }
++        // Not indexed, or the index is wrong: be sure, by scanning (and rebuild next time).
++        for (let block = this.superblock.metadata; block; block = block.previous) {
++            block.waitUnlocked();
++            for (const entry of block.items) {
++                if (entry.offset && entry.id == id) {
++                    this._indexGen = -1;
++                    return { block, entry };
++                }
++            }
++        }
++        return undefined;
++    }
++    /** `id` gained (`at`) or lost (undefined) its slot: bump the shared generation, so other realms reindex — and keep
++     *  this realm's index current when nobody else changed anything since it was built. */
++    _slotChanged(id, at) {
++        const before = Atomics.add(this._genView, 0, 1);
++        if (before !== this._indexGen) {
++            this._indexGen = -1;
++            return;
++        }
++        if (at === undefined)
++            this._index.delete(id);
++        else
++            this._index.set(id, at);
++        this._indexGen = before + 1;
 +    }
 +    /**
 +     * Acquire the cross-realm FS-operation lock (exclusive). Reentrant within a realm via a depth counter, so
@@ -57,7 +126,53 @@ index 119eb77..0ecf102 100644
      }
      *keys() {
          const keys = new Set();
-@@ -658,11 +697,22 @@ export class SingleBufferStore extends BufferView {
+@@ -625,44 +733,54 @@ export class SingleBufferStore extends BufferView {
+         }
+     }
+     get(id) {
+-        for (let block = this.superblock.metadata; block; block = block.previous) {
+-            block.waitUnlocked();
+-            for (const entry of block.items) {
+-                if (!entry.offset || entry.id != id)
+-                    continue;
+-                const off = this.byteOffset + entry.offset;
+-                return new Uint8Array(this.buffer.slice(off, off + entry.size));
+-            }
+-        }
++        const found = this._lookup(id);
++        if (found === undefined)
++            return undefined;
++        found.block.waitUnlocked();
++        const off = this.byteOffset + found.entry.offset;
++        return new Uint8Array(this.buffer.slice(off, off + found.entry.size));
+     }
+     set(id, data) {
+         const env_1 = { stack: [], error: void 0, hasError: false };
+         try {
+             if (id === 0 && data.length < sizeof(Inode))
+                 throw alert(withErrno('EIO', `sbfs: tried to set ${data.length} bytes for id 0!`));
+-            for (let block = this.superblock.metadata; block; block = block.previous) {
++            const found = this._lookup(id);
++            if (found !== undefined) {
++                const { block, entry } = found;
+                 block.waitUnlocked();
+-                for (const entry of block.items) {
++                {
+                     const env_2 = { stack: [], error: void 0, hasError: false };
+                     try {
+-                        if (!entry.offset || entry.id != id)
+-                            continue;
+                         const lock = __addDisposableResource(env_2, block.lock(), false);
+                         if (data.length == entry.size) {
+                             this._u8.set(data, entry.offset);
+                             return;
+                         }
+-                        if (data.length < entry.size || this.superblock.isUnused(entry.offset, data.length)) {
++                        // Shrinking stays put. Growing moves (below) — checking whether the bytes after it are free walked
++                        // every entry, on every grow (a directory listing grows with each file added to it).
++                        if (data.length < entry.size) {
+                             this._u8.set(data, entry.offset);
+                             entry.size = data.length;
                              _update(block);
                              return;
                          }
@@ -85,19 +200,60 @@ index 119eb77..0ecf102 100644
                          return;
                      }
                      catch (e_1) {
-@@ -680,7 +730,7 @@ export class SingleBufferStore extends BufferView {
-                 entry = this.superblock.metadata.items[0];
+@@ -674,19 +792,32 @@ export class SingleBufferStore extends BufferView {
+                     }
+                 }
              }
-             const lock = __addDisposableResource(env_1, this.superblock.metadata.lock(), false);
+-            let entry = Array.from(this.superblock.metadata.items).find(e => !e.offset);
+-            if (!entry) {
++            // A new id: the first free slot in the head block (a new head block when it's full).
++            let slot = -1;
++            {
++                const items = this.superblock.metadata.items;
++                for (let i = 0; i < entries_per_block; i++) {
++                    if (!items[i].offset) {
++                        slot = i;
++                        break;
++                    }
++                }
++            }
++            if (slot < 0) {
+                 this.superblock.rotateMetadata();
+-                entry = this.superblock.metadata.items[0];
++                slot = 0;
+             }
+-            const lock = __addDisposableResource(env_1, this.superblock.metadata.lock(), false);
 -            const offset = Number(Atomics.add(this.superblock, kUsedBytes, BigInt(data.length)));
++            const head = this.superblock.metadata;
++            const entry = head.items[slot];
++            const lock = __addDisposableResource(env_1, head.lock(), false);
 +            const offset = this._allocate(data.length);
              entry.id = id;
              entry.offset = offset;
              entry.size = data.length;
-@@ -710,6 +760,36 @@ export class SingleBufferStore extends BufferView {
-             }
+             this._u8.set(data, offset);
+-            _update(this.superblock.metadata);
++            _update(head);
+             _update(this.superblock);
++            this._slotChanged(id, { block: head, i: slot });
+         }
+         catch (e_2) {
+             env_1.error = e_2;
+@@ -697,18 +828,58 @@ export class SingleBufferStore extends BufferView {
          }
      }
+     delete(id) {
++        const found = this._lookup(id);
++        if (found === undefined)
++            return;
++        const { block, entry } = found;
++        block.waitUnlocked();
++        entry.offset = 0;
++        entry.size = 0;
++        entry.id = 0;
++        _update(block);
++        this._slotChanged(id, undefined);
++    }
 +    /**
 +     * Reclaiming allocator: return the lowest free region of `length` bytes, REUSING space freed by
 +     * deletes/overwrites instead of only bumping the high-water (`kUsedBytes`), which never decreased and
@@ -106,14 +262,34 @@ index 119eb77..0ecf102 100644
 +     */
 +    _allocate(length) {
 +        const total = Number(this.superblock.total_bytes);
++        // Bump while there's room (O(1); a compare-and-swap, as rotateMetadata reserves its blocks), and only reclaim —
++        // scan for the lowest freed gap — once the buffer is full. Everything live ends at or below the high-water.
++        let used = Atomics.load(this.superblock, kUsedBytes);
++        for (;;) {
++            const next = used + BigInt(length);
++            if (next > BigInt(total))
++                break;
++            const observed = Atomics.compareExchange(this.superblock, kUsedBytes, used, next);
++            if (observed === used)
++                return Number(used);
++            used = observed;
++        }
 +        const intervals = [];
-+        for (let block = this.superblock.metadata; block; block = block.previous) {
+         for (let block = this.superblock.metadata; block; block = block.previous) {
+-            block.waitUnlocked();
 +            intervals.push([block.byteOffset, block.byteOffset + sizeof(MetadataBlock)]);
-+            for (const entry of block.items) {
+             for (const entry of block.items) {
+-                if (entry.id != id)
+-                    continue;
+-                entry.offset = 0;
+-                entry.size = 0;
+-                entry.id = 0;
+-                _update(block);
+-                return;
 +                if (entry.offset)
 +                    intervals.push([entry.offset, entry.offset + entry.size]);
-+            }
-+        }
+             }
+         }
 +        intervals.sort((a, b) => a[0] - b[0]);
 +        let cursor = sizeof(SuperBlock);
 +        for (const [start, end] of intervals) {
@@ -127,15 +303,14 @@ index 119eb77..0ecf102 100644
 +        if (BigInt(cursor + length) > Atomics.load(this.superblock, kUsedBytes))
 +            Atomics.store(this.superblock, kUsedBytes, BigInt(cursor + length));
 +        return cursor;
-+    }
+     }
      _fs;
      get fs() {
-         return this._fs;
 diff --git a/dist/backends/store/fs.js b/dist/backends/store/fs.js
-index 1e20478..2588e70 100644
+index 1e20478..4ab059c 100644
 --- a/dist/backends/store/fs.js
 +++ b/dist/backends/store/fs.js
-@@ -918,7 +918,19 @@ export class StoreFS extends FileSystem {
+@@ -918,7 +918,37 @@ export class StoreFS extends FileSystem {
      /** Allocates a new ID and adds the ID/path */
      allocNew(path) {
          // @todo use `Iterator` helper #296
@@ -143,6 +318,24 @@ index 1e20478..2588e70 100644
 +        // On a SHARED (multi-realm) store we hold the cross-realm FS lock here, so derive the next id from the
 +        // shared store itself every time — a per-realm high-water (`_lastID` from `_paths`) drifts between realms
 +        // and hands out colliding inode ids. Non-shared stores keep the original per-instance behavior.
++        if (this.store._shared && this.store._idView) {
++            // The next id is a shared counter in the store's superblock: seeded once from the ids already there, then
++            // one atomic add per allocation (scanning every key per allocation made a bulk load cost its square).
++            const counter = this.store._idView;
++            if (Atomics.load(counter, 0) === 0) {
++                let max = this._lastID ?? 0;
++                for (const ino of this.store.keys())
++                    if (ino > max)
++                        max = ino;
++                Atomics.compareExchange(counter, 0, 0, max);
++            }
++            const id = Atomics.add(counter, 0, 2) + 2;
++            if (id > size_max)
++                throw err(withErrno('ENOSPC', 'No IDs available'));
++            this._lastID = id;
++            this._add(id, path);
++            return id;
++        }
 +        if (this.store._shared) {
 +            let max = 0;
 +            for (const ino of this.store.keys())
@@ -208,3 +401,63 @@ index 6a307f3..ac9b550 100644
      }
      /**
       * Stashes given key value pair into `originalData` if it doesn't already exist.
+diff --git a/dist/vfs/async.js b/dist/vfs/async.js
+index f2aa3b9..92d7048 100644
+--- a/dist/vfs/async.js
++++ b/dist/vfs/async.js
+@@ -211,13 +211,23 @@ export async function mkdir(path, options = {}) {
+             }
+             if (checkAccess && !hasAccess(this, parent, constants.W_OK))
+                 throw UV('EACCES', 'mkdir', path);
++            let raced;
+             const inode = await fs
+                 .mkdir(resolved, {
+                 mode,
+                 uid: parent.mode & constants.S_ISUID ? parent.uid : uid,
+                 gid: parent.mode & constants.S_ISGID ? parent.gid : gid,
+             })
+-                .catch(rethrow({ syscall: 'mkdir', path }));
++                .catch(async (e) => {
++                // Another realm sharing this store created it between the check above and here: recursive means that's fine
++                raced = recursive && e?.code == 'EEXIST' ? await fs.stat(resolved).catch(() => undefined) : undefined;
++                if (raced && isDirectory(raced))
++                    return raced;
++                raced = undefined;
++                return rethrow({ syscall: 'mkdir', path })(e);
++            });
++            if (raced)
++                return inode;
+             if (recursive)
+                 firstCreated ??= path;
+             emitChange(this, 'rename', path);
+diff --git a/dist/vfs/sync.js b/dist/vfs/sync.js
+index 75c93e7..457fe06 100644
+--- a/dist/vfs/sync.js
++++ b/dist/vfs/sync.js
+@@ -224,11 +224,21 @@ export function mkdir(path, options = {}) {
+             if (checkAccess && !hasAccess(this, parent, constants.W_OK))
+                 throw UV('EACCES', 'mkdir', path);
+             const _ = __addDisposableResource(env_2, lockPathSync(fs, parentPath, 'rw', parent), false);
+-            const inode = wrap(fs, 'mkdirSync', { path, syscall: 'mkdir' })(resolved, {
+-                mode,
+-                uid: parent.mode & constants.S_ISUID ? parent.uid : uid,
+-                gid: parent.mode & constants.S_ISGID ? parent.gid : gid,
+-            });
++            let inode;
++            try {
++                inode = wrap(fs, 'mkdirSync', { path, syscall: 'mkdir' })(resolved, {
++                    mode,
++                    uid: parent.mode & constants.S_ISUID ? parent.uid : uid,
++                    gid: parent.mode & constants.S_ISGID ? parent.gid : gid,
++                });
++            }
++            catch (e) {
++                // Another realm sharing this store created it between the check above and here: recursive means that's fine
++                const raced = recursive && e?.code == 'EEXIST' ? fs.statSync(resolved) : undefined;
++                if (!raced || !isDirectory(raced))
++                    throw e;
++                return raced;
++            }
+             if (recursive)
+                 firstCreated ??= path;
+             emitChange(this, 'rename', path);
