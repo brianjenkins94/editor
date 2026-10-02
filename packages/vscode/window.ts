@@ -31,6 +31,8 @@ export interface PaneWindow {
 	"show": () => void;
 	/** Take the window away (without calling its `onClose`: that's for the user closing it). */
 	"close": () => void;
+	/** A dock window shown in a VS Code editor: bring it back into the dock, where its own chrome is. */
+	"dock"?: () => void;
 }
 
 /** Makes a window — a floating one (createPaneWindow) or a panel of the shell's dock (shell-dock.ts). */

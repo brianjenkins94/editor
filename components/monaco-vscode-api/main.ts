@@ -639,3 +639,7 @@ export type { MonacoProbeOptions, WorkerIdentity } from "./architecture/probes";
 export { installMonacoProbes, monacoWorkerId, extensionHostId, EXT_HOST_IFRAME, WEBVIEW_SERVICE_WORKER } from "./architecture/probes";
 export type { LiveArchitectureOptions } from "./architecture/pane";
 export { OPEN_ARCHITECTURE_COMMAND, registerLiveArchitecture } from "./architecture/pane";
+
+// Editor tabs whose content is the consumer's own DOM, by slot — a panel of the page around the workbench, dropped in.
+export type { HostedEditorOptions } from "./hosted-editor";
+export { closeHostedEditor, openHostedEditor, registerHostedEditors } from "./hosted-editor";

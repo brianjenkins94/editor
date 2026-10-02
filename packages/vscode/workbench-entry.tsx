@@ -14,10 +14,11 @@
  */
 import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
-import { boot, ExtensionHostKind, installMonacoProbes, registerExtension, OPEN_ARCHITECTURE_COMMAND, registerFileSystemOverlay, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
+import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, openHostedEditor, registerExtension, OPEN_ARCHITECTURE_COMMAND, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
 // The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
 // virtual module in entry.config.ts).
+import type { ShellDockHost } from "./dock-host";
 import type { PodBridge } from "./extensions/worker-pod/extension";
 import type { WorkspaceFs } from "./workspace-fs";
 import capabilitiesExtensionPath from "capabilities:extension";
@@ -27,6 +28,7 @@ import eslintExtensionPath from "eslint:extension";
 import helloExtensionPath from "hello:extension";
 import workerPodExtensionPath from "worker-pod:extension";
 import { NETWORK_PROBES } from "./architecture";
+import { SHELL_DOCK_HOST } from "./dock-host";
 import { classifyUrl, identifyWorker } from "./architecture-model";
 import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
@@ -106,6 +108,29 @@ const { "log": paneLog, architecture } = observe(workbenchHub, { "network": NETW
 
 installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl });
 registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });
+
+// A dock panel of the shell dropped into the editor area (shell-dock.ts): an editor per panel, whose content the shell
+// moves in — through its host on the top window, as element references can't cross the hub.
+const shellDock = (): ShellDockHost | undefined => {
+	try {
+		return (window.top as unknown as Record<string, ShellDockHost | undefined> | null)?.[SHELL_DOCK_HOST];
+	} catch {
+		return undefined; // a top window that isn't ours
+	}
+};
+
+registerHostedEditors({
+	"render": (slot, container) => shellDock()?.attach(slot, container) ?? { "dispose": () => undefined },
+	"onClose": (slot) => { shellDock()?.closed(slot); }
+});
+serve(workbenchHub, "dock.hostEditor", async (args) => {
+	const { slot, title } = args as { "slot": string; "title": string };
+
+	await openHostedEditor(slot, title);
+});
+serve(workbenchHub, "dock.closeEditor", async (args) => {
+	await closeHostedEditor((args as { "slot": string }).slot);
+});
 
 window.addEventListener("error", (event) => {
 	// A benign ResizeObserver notice monaco triggers constantly — not a real fault; don't relay it as an error.

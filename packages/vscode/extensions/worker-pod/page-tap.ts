@@ -14,7 +14,7 @@ import type { Transport } from "@brianjenkins94/hub";
 import type { TapRecord } from "./tap-shared";
 import { createHub, createRpcClient, pipe, windowTransport } from "@brianjenkins94/hub";
 import { createArchReporter, REALM_PARENT } from "@brianjenkins94/observability";
-import { VIRTUAL_MARKER, VIRTUAL_RE, WINDOW_PARAM } from "../../virtual-path";
+import { PREVIEW_HOST_MARK, VIRTUAL_MARKER, VIRTUAL_RE, WINDOW_PARAM } from "../../virtual-path";
 import { installConsoleTap, installSocketGate } from "./tap-shared";
 
 /** What a preview window's top frame offers the frames in it and the app (`window.__editorTap`). */
@@ -30,8 +30,10 @@ export interface EditorTap {
 
 type TapWindow = Window & { "__editorTap"?: EditorTap; "__obsTap"?: true };
 
-/** The editor window hosting this preview: above every frame the app nests in it, each a preview page too — or, for a
- *  preview popped out into a browser window of its own, the editor that opened it. */
+/** The editor window hosting this preview: above every frame the app nests in it, each a preview page too — the window
+ *  marked as the preview host, its parent in the dock and further up when it's shown in a VS Code editor (else the
+ *  parent, for an editor without the mark) — or, for a preview popped out into a browser window of its own, the
+ *  editor that opened it. */
 function findHost(): { "host": Window; "top": TapWindow } {
 	let current: Window = window;
 
@@ -41,9 +43,19 @@ function findHost(): { "host": Window; "top": TapWindow } {
 		}
 	} catch { /* a parent we can't read: the top we have */ }
 
-	const opener = current.parent === current ? (current.opener as Window | null) : null;
+	if (current.parent === current) {
+		return { "host": (current.opener as Window | null) ?? current, "top": current as TapWindow };
+	}
 
-	return { "host": opener ?? current.parent, "top": current as TapWindow };
+	let host: Window = current.parent;
+
+	try {
+		while (host.parent !== host && (host as unknown as Record<string, unknown>)[PREVIEW_HOST_MARK] !== true) {
+			host = host.parent;
+		}
+	} catch { /* an ancestor we can't read */ }
+
+	return { "host": (host as unknown as Record<string, unknown>)[PREVIEW_HOST_MARK] === true ? host : current.parent, "top": current as TapWindow };
 }
 
 /** The top frame's tap: the window's hub, and what it offers. */

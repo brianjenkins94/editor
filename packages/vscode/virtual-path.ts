@@ -57,6 +57,10 @@ export function previewPageOf(url: string): { "url": string; "port": number } | 
 
 export const PREVIEW_WINDOW_PREFIX = "preview:";
 
+/** Marks the window hosting the preview windows (the shell: `window[PREVIEW_HOST_MARK] === true`) — a preview's tap
+ *  links to it, wherever above the preview's frame it is (its parent in the dock, further up in a VS Code editor). */
+export const PREVIEW_HOST_MARK = "__previewHost";
+
 /** A worker's preview window, in its URL's hash (`#preview-window=<id>`): set by its page's tap as it starts it (the
  *  page knows its window from its frame's name), read by the worker's tap — so its logs and capability requests go to
  *  the window it runs in. */

@@ -27,7 +27,7 @@ import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, Rot
 import type { DevtoolsPanel } from "./preview-devtools";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import { css, iconSvg } from "./theme";
-import { parseVirtual, PREVIEW_WINDOW_PREFIX, previewPageOf, windowId, windowTitle } from "./virtual-path";
+import { parseVirtual, PREVIEW_HOST_MARK, PREVIEW_WINDOW_PREFIX, previewPageOf, windowId, windowTitle } from "./virtual-path";
 import { createPaneWindow, type PaneWindow, type PaneWindowFactory } from "./window";
 
 /** Levels the preview tap emits — anything else is coerced to "info". */
@@ -120,6 +120,9 @@ interface PreviewSurface {
  *  the windows on the live architecture diagram: each iframe's lifetime, what the shell posts into it, and — through
  *  a window message probe — everything any frame posts up to the shell, attributed to the iframe it came from. */
 export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneWindowFactory = createPaneWindow): void {
+	// The preview pages' taps link here, however deep their frame is (see page-tap.ts's findHost).
+	(window as unknown as Record<string, unknown>)[PREVIEW_HOST_MARK] = true;
+
 	/** Every window, by id. */
 	const surfaces = new Map<string, PreviewSurface>();
 	/** Each port's next window number — only ever counts up (see openWindow). */
@@ -610,6 +613,8 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	/** Show ONE capability prompt as an overlay on `surface`'s preview window and resolve with the user's choice —
 	 *  the running app is dimmed behind it. */
 	const runOnePrompt = (surface: Pick<PreviewSurface, "paneWindow" | "promptEl">, request: PromptRequest): Promise<PromptChoice> => {
+		// A window shown in a VS Code editor comes back into the dock first: the prompt is this page's own overlay.
+		surface.paneWindow.dock?.();
 		surface.paneWindow.show();
 
 		return new Promise<PromptChoice>((resolve) => {
