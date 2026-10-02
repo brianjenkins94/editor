@@ -16,6 +16,7 @@ import type { ArchReport } from "../../observability/src/arch.ts";
 import { tagBySubject } from "../../observability/src/log-subject.ts";
 import { ARCH_SUBJECT, requestArchSync } from "../../observability/src/arch.ts";
 import { ArchitectureStore } from "../../observability/src/arch-store.ts";
+import { METRICS_SUBJECT, MetricsHistory } from "../../observability/src/metrics.ts";
 import type { TabInfo } from "../../observability/src/tabs.ts";
 import { discoverTabs, markOutdated, TAB_HERE } from "../../observability/src/tabs.ts";
 
@@ -57,6 +58,8 @@ export interface DebugMcp {
 	/** A tab's live architecture — its contexts' `$sys.arch` reports (see get_architecture). Per tab: each tab is its
 	 *  own tree, and their hubs' ids collide (every editor tab has a `root`, every netsim tab a `referee`). */
 	"archOf": (tab: string) => ArchitectureStore | undefined;
+	/** A tab's metrics plane — the last five minutes of each context's `$sys.metrics` samples (see query_metrics). */
+	"metricsOf": (tab: string) => MetricsHistory | undefined;
 	/** The link a tab's traffic arrives on (records carry it), and back — learned as tabs answer discovery. */
 	"linkOf": (tab: string) => string | undefined;
 	"tabOf": (link: string) => string | undefined;
@@ -117,6 +120,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 	// by one entry per tab ever connected — as the store's records do, which `max` bounds instead.)
 	const tabByLink = new Map<string, string>();
 	const archByLink = new Map<string, ArchitectureStore>();
+	const metricsByLink = new Map<string, MetricsHistory>();
 
 	// An app in one of a tab's previews answers too, over the same link: it maps to the link (its logs and architecture
 	// are part of its editor tab's), but the link keeps its editor tab's name.
@@ -174,6 +178,22 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		arch.apply(data as ArchReport);
 	});
 
+	// The metrics collector: every context's gauges, sampled once a second on $sys.metrics (observability's metrics.ts).
+	hub.subscribe(METRICS_SUBJECT + ".>", (data, _envelope, origin) => {
+		if (origin.link === undefined) {
+			return;
+		}
+
+		let metrics = metricsByLink.get(origin.link.id);
+
+		if (metrics === undefined) {
+			metrics = new MetricsHistory();
+			metricsByLink.set(origin.link.id, metrics);
+		}
+
+		metrics.add(data);
+	});
+
 	// Request client, created eagerly so its reply channel ($rpc.reply.debug-mcp) is advertised to every page as it
 	// links in — a page-hosted tool call then never races interest. This is the relay half of "MCP server in the tab".
 	const rpc = createRpcClient(hub);
@@ -193,7 +213,8 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 			links.delete(socket);
 			unlink();
 
-			// Its architecture goes with it (its records stay, still filed under the link, and its tab id).
+			// Its architecture goes with it (its records stay, still filed under the link, and its tab id); its metrics stay
+			// too, as its records do — the last minutes of a tab that crashed are the interesting ones.
 			archByLink.delete(unlink.id);
 		});
 
@@ -220,6 +241,11 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 			const link = linkOf(tab);
 
 			return link === undefined ? undefined : archByLink.get(link);
+		},
+		"metricsOf": (tab) => {
+			const link = linkOf(tab);
+
+			return link === undefined ? undefined : metricsByLink.get(link);
 		},
 		"linkOf": linkOf,
 		"tabOf": (link) => tabByLink.get(link),

@@ -20,8 +20,9 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 	const memory = vscode.window.createStatusBarItem("insights.memory", vscode.StatusBarAlignment.Right, 100);
 	const workspace = vscode.window.createStatusBarItem("insights.workspace", vscode.StatusBarAlignment.Right, 99);
 	const longFrames = vscode.window.createStatusBarItem("insights.longFrames", vscode.StatusBarAlignment.Right, 98);
+	const spanErrors = vscode.window.createStatusBarItem("insights.spanErrors", vscode.StatusBarAlignment.Right, 97);
 
-	for (const [item, name] of [[memory, "Memory"], [workspace, "Workspace"], [longFrames, "Long frames"]] as const) {
+	for (const [item, name] of [[memory, "Memory"], [workspace, "Workspace"], [longFrames, "Long frames"], [spanErrors, "Span errors"]] as const) {
 		item.name = "Insights: " + name;
 		item.command = "insights.monitor.focus";
 	}
@@ -55,6 +56,20 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 		longFrames.text = "$(watch) " + busy.toFixed(0) + "%";
 		longFrames.tooltip = "Time in long animation frames (over 50 ms) in the last second — workbench " + (latest("workbench:longFrames") ?? 0).toFixed(0) + "%, shell " + (latest("shell:longFrames") ?? 0).toFixed(0) + "%";
 		longFrames.show();
+
+		// Failing operations — a CDN fetch, a type acquisition, an LSP request — show up here only while they fail.
+		const failing = [...series.keys()].filter((key) => key.startsWith("root:spans.") && key.endsWith(".errors"))
+			.map((key) => [key.slice("root:spans.".length, -".errors".length), latest(key) ?? 0] as const)
+			.filter(([, count]) => count > 0)
+			.sort((a, b) => b[1] - a[1]);
+
+		if (failing.length > 0) {
+			spanErrors.text = "$(error) " + failing.reduce((sum, [, count]) => sum + count, 0);
+			spanErrors.tooltip = "Spans that ended with an error, last 10 s\n\n" + failing.map(([name, count]) => `${name}: ${count}`).join("\n");
+			spanErrors.show();
+		} else {
+			spanErrors.hide();
+		}
 	};
 
 	const poll = async (): Promise<void> => {
@@ -64,6 +79,13 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 			fresh = await vscode.commands.executeCommand<Record<string, MetricsSample[]>>("editor.metrics.read", since);
 		} catch {
 			return; // nothing on the hub serves it (yet)
+		}
+
+		// A series with no reading in the window has gone (a span name idles out of the span metrics).
+		for (const [key, points] of series) {
+			if ((points.at(-1)?.[0] ?? 0) < Date.now() - KEEP * 1000) {
+				series.delete(key);
+			}
 		}
 
 		for (const samples of Object.values(fresh ?? {})) {
@@ -91,7 +113,7 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 
 	const timer = setInterval(() => { void poll(); }, 1000);
 
-	context.subscriptions.push(memory, workspace, longFrames, { "dispose": () => { clearInterval(timer); } }, vscode.window.registerWebviewViewProvider("insights.monitor", {
+	context.subscriptions.push(memory, workspace, longFrames, spanErrors, { "dispose": () => { clearInterval(timer); } }, vscode.window.registerWebviewViewProvider("insights.monitor", {
 		"resolveWebviewView": (resolved) => {
 			view = resolved;
 			resolved.webview.options = { "enableScripts": true };
@@ -130,7 +152,10 @@ const CARDS = [
 	{ "title": "Workspace · MB used", "match": /^workbench:workspace\\.(usedMB)$/, "name": () => "used" },
 	{ "title": "Long frames · %", "match": /^(\\w+):longFrames$/, "max": 100 },
 	{ "title": "Hub · messages/s", "match": /^workbench:(hub)$/, "name": () => "workbench hub" },
-	{ "title": "Storage · MB", "match": /^workbench:(storage)$/, "name": () => "origin" }
+	{ "title": "Storage · MB", "match": /^workbench:(storage)$/, "name": () => "origin" },
+	{ "title": "Spans · p95 ms", "match": /^root:spans\\.(.+)\\.p95$/, "top": 6 },
+	{ "title": "Spans · ended/s", "match": /^root:spans\\.(.+)\\.rate$/, "top": 6 },
+	{ "title": "Span errors · last 10 s", "match": /^root:spans\\.(.+)\\.errors$/, "top": 6, "nonzero": true }
 ];
 const fmt = (v) => v >= 100 ? v.toFixed(0) : v.toFixed(1);
 function render(series) {
@@ -139,6 +164,7 @@ function render(series) {
 	const html = CARDS.map((card) => {
 		let lines = Object.entries(series).flatMap(([key, points]) => { const m = card.match.exec(key); return m ? [{ "name": card.name ? card.name(m[1]) : m[1], points }] : []; });
 		lines.sort((a, b) => (b.points.at(-1)?.[1] ?? 0) - (a.points.at(-1)?.[1] ?? 0));
+		if (card.nonzero) lines = lines.filter((line) => line.points.some((p) => p[1] > 0));
 		if (card.top) lines = lines.slice(0, card.top);
 		if (lines.length === 0) return "";
 		const max = card.max ?? Math.max(1, ...lines.flatMap((l) => l.points.map((p) => p[1]))) * 1.1;

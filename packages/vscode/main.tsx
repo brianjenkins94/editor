@@ -6,6 +6,7 @@ import { ensureCrossOriginIsolated } from "./coi";
 import { hostLog } from "./logging";
 import { consoleCollector, installHubCollector, installWindowMessageProbe, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "@brianjenkins94/observability";
 import { reportArchitecture } from "./architecture";
+import { reportSpanMetrics } from "./editor-metrics";
 import { editorPageTools } from "./page-tools";
 import { sampleById, sampleList } from "./samples";
 import { createVscodeWindow } from "./vscode";
@@ -51,7 +52,14 @@ if (isolated && window.parent === window) {
 
 		return [...document.querySelectorAll("iframe")].some((frame) => frame.contentWindow === source && frame.src.includes("/__vscode__/host.html")) ? "workbench" : undefined;
 	});
-	installHubCollector(rootHub, consoleCollector);
+	// Every context's records arrive here: to the console, and — their spans — onto the metrics plane as rates, errors and
+	// latencies (editor-metrics.ts).
+	const spans = reportSpanMetrics(rootHub);
+
+	installHubCollector(rootHub, (record) => {
+		consoleCollector(record);
+		spans.record(record);
+	});
 	tapConsoleAndErrors(rootHub, "host"); // raw uncaught error/rejection on the page → the plane (errors-only: loop-safe on the collector context)
 	// This tab's id. The service worker is shared by every tab of the origin and links each tab's root separately, so
 	// what it asks on a tab's behalf is addressed to that tab: a preview's requests and capability decisions (its URL

@@ -29,7 +29,7 @@ export interface MetricsReporter {
 }
 
 /** Sample this context's gauges every `intervalMs` and publish each reading on `$sys.metrics.<source>`. A gauge that
- *  throws is left out of that reading: telemetry never breaks the context it observes. */
+ *  throws is left out of that reading: telemetry never breaks the context it observes. An empty reading isn't published. */
 export function reportMetrics(hub: Hub, { source = hub.id, intervalMs = 1000 }: { "source"?: string; "intervalMs"?: number } = {}): MetricsReporter {
 	const gauges = new Map<string, Gauge>();
 
@@ -53,9 +53,12 @@ export function reportMetrics(hub: Hub, { source = hub.id, intervalMs = 1000 }: 
 		return { "source": source, "t": Date.now(), "values": values };
 	};
 
+	// A reading with nothing in it (no gauges, or none with a reading — a span metric with no spans this window) isn't sent.
 	const timer = setInterval(() => {
-		if (gauges.size > 0) {
-			hub.publish(METRICS_SUBJECT + "." + source, sample());
+		const reading = sample();
+
+		if (Object.keys(reading.values).length > 0) {
+			hub.publish(METRICS_SUBJECT + "." + source, reading);
 		}
 	}, intervalMs);
 
@@ -137,4 +140,219 @@ export function memoryGauge({ everyMs = 20000, name = (url: string) => url }: { 
 	refresh();
 
 	return () => latest;
+}
+
+/** A series over a window, summarized: `source:gauge`, its latest reading (and how long ago), its range and mean, and —
+ *  when asked — the readings themselves, thinned to at most that many (`[msAgo, value]`, oldest first). */
+export interface SeriesSummary {
+	"series": string;
+	"latest": number;
+	"agoMs": number;
+	"min": number;
+	"max": number;
+	"mean": number;
+	"samples": number;
+	"points"?: [number, number][];
+}
+
+/** A few minutes of every source's samples, oldest first — what a monitor or an agent reads back. */
+export class MetricsHistory {
+	readonly #bySource = new Map<string, MetricsSample[]>();
+	readonly #keep: number;
+
+	/** `keep`: samples per source (five minutes at one a second). */
+	constructor(keep = 300) {
+		this.#keep = keep;
+	}
+
+	/** File a sample as it arrives off `$sys.metrics.>` (anything that isn't one is ignored). */
+	add(data: unknown): void {
+		const sample = data as MetricsSample | null;
+
+		if (typeof sample?.source !== "string" || typeof sample.t !== "number" || typeof sample.values !== "object") {
+			return;
+		}
+
+		const kept = this.#bySource.get(sample.source) ?? [];
+
+		kept.push(sample);
+
+		if (kept.length > this.#keep) {
+			kept.shift();
+		}
+
+		this.#bySource.set(sample.source, kept);
+	}
+
+	/** Every source's samples, only those after `since` when it's given. */
+	read(since?: number): Record<string, MetricsSample[]> {
+		const out: Record<string, MetricsSample[]> = {};
+
+		for (const [source, kept] of this.#bySource) {
+			out[source] = since === undefined ? kept : kept.filter((sample) => sample.t > since);
+		}
+
+		return out;
+	}
+
+	/** Each series (`source:gauge`) with a reading in the last `sinceMs`, summarized — narrowed to one `source`, and to
+	 *  series whose name contains `match` (case-insensitive). Sorted by name. */
+	summarize({ source, match, sinceMs = 60000, points = 0, now = Date.now() }: { "source"?: string; "match"?: string; "sinceMs"?: number; "points"?: number; "now"?: number } = {}): SeriesSummary[] {
+		const series = new Map<string, [number, number][]>();
+		const needle = match?.toLowerCase();
+
+		for (const [from, kept] of this.#bySource) {
+			if (source !== undefined && from !== source) {
+				continue;
+			}
+
+			for (const sample of kept) {
+				if (sample.t < now - sinceMs) {
+					continue;
+				}
+
+				for (const [name, value] of Object.entries(sample.values)) {
+					const key = from + ":" + name;
+
+					if (needle === undefined || key.toLowerCase().includes(needle)) {
+						const list = series.get(key) ?? [];
+
+						list.push([sample.t, value]);
+						series.set(key, list);
+					}
+				}
+			}
+		}
+
+		return [...series].sort(([a], [b]) => a.localeCompare(b)).map(([key, readings]) => {
+			const values = readings.map(([, value]) => value);
+			const [lastT, latest] = readings.at(-1) as [number, number];
+			const summary: SeriesSummary = {
+				"series": key,
+				"latest": round(latest),
+				"agoMs": now - lastT,
+				"min": round(Math.min(...values)),
+				"max": round(Math.max(...values)),
+				"mean": round(values.reduce((sum, value) => sum + value, 0) / values.length),
+				"samples": readings.length
+			};
+
+			if (points > 0) {
+				const step = Math.max(1, Math.ceil(readings.length / points));
+
+				summary.points = readings.filter((_, index) => index % step === 0 || index === readings.length - 1).map(([t, value]) => [now - t, round(value)]);
+			}
+
+			return summary;
+		});
+	}
+}
+
+function round(value: number): number {
+	return Math.round(value * 100) / 100;
+}
+
+/** What spanMetrics reads of a record: util/logger's LogRecord, structurally. */
+interface SpanRecord { "kind"?: string; "level"?: string; "span"?: string; "spanId"?: string; "durationMs"?: number; "context"?: Record<string, unknown> }
+
+/**
+ * Metrics from the timed spans every context already logs (`→ cdn` / `← cdn (12ms)`), with no code in the subsystems
+ * that open them. Per `source/name` over the last `windowMs`: `rate` (ended per second), `errors` (ended with an error
+ * logged inside them), `p50` and `p95` (ms), and `open` (begun, not yet ended). Hand it every record a collector sees
+ * (`record`) and register `gauge`. A name idle for the whole window drops out; `top` keeps the busiest.
+ */
+export function spanMetrics({ windowMs = 10000, top = 30 }: { "windowMs"?: number; "top"?: number } = {}): { "record": (record: unknown) => void; "gauge": Gauge } {
+	/** Begun and not yet ended, by span id: which series, and whether an error was logged inside. Bounded, for spans
+	 *  that never end (their context went away). */
+	const open = new Map<string, { "key": string; "errored": boolean }>();
+	const ended = new Map<string, { "t": number; "ms"?: number; "errored": boolean }[]>();
+	const keyOf = (record: SpanRecord): string => String(record.context?.["source"] ?? "?") + "/" + (record.span ?? "?");
+
+	return {
+		"record": (data) => {
+			const record = data as SpanRecord | null;
+
+			if (record?.spanId === undefined) {
+				return;
+			}
+
+			if (record.kind === "span-open") {
+				open.set(record.spanId, { "key": keyOf(record), "errored": false });
+
+				if (open.size > 2000) {
+					open.delete(open.keys().next().value as string);
+				}
+			} else if (record.kind === "span-close") {
+				const begun = open.get(record.spanId);
+				const key = begun?.key ?? keyOf(record);
+				const list = ended.get(key) ?? [];
+
+				open.delete(record.spanId);
+				list.push({ "t": Date.now(), "ms": record.durationMs, "errored": begun?.errored === true || record.level === "error" || record.level === "fatal" });
+				ended.set(key, list);
+			} else if (record.level === "error" || record.level === "fatal") {
+				const begun = open.get(record.spanId);
+
+				if (begun !== undefined) {
+					begun.errored = true;
+				}
+			}
+		},
+		"gauge": () => {
+			const since = Date.now() - windowMs;
+			const openCount = new Map<string, number>();
+
+			for (const { key } of open.values()) {
+				openCount.set(key, (openCount.get(key) ?? 0) + 1);
+			}
+
+			const rows: [string, Record<string, number>, number][] = [];
+
+			for (const key of new Set([...ended.keys(), ...openCount.keys()])) {
+				const recent = (ended.get(key) ?? []).filter((entry) => entry.t >= since);
+
+				if (recent.length === 0) {
+					ended.delete(key);
+				} else {
+					ended.set(key, recent);
+				}
+
+				const durations = recent.flatMap((entry) => entry.ms === undefined ? [] : [entry.ms]).sort((a, b) => a - b);
+				const at = (q: number): number => round(durations[Math.min(durations.length - 1, Math.floor(q * durations.length))]);
+				const values: Record<string, number> = {};
+
+				if (recent.length > 0) {
+					values["rate"] = round(recent.length / (windowMs / 1000));
+					values["errors"] = recent.filter((entry) => entry.errored).length;
+				}
+
+				if (durations.length > 0) {
+					values["p50"] = at(0.5);
+					values["p95"] = at(0.95);
+				}
+
+				if ((openCount.get(key) ?? 0) > 0) {
+					values["open"] = openCount.get(key) as number;
+				}
+
+				if (Object.keys(values).length > 0) {
+					rows.push([key, values, recent.length + (openCount.get(key) ?? 0)]);
+				}
+			}
+
+			if (rows.length === 0) {
+				return undefined;
+			}
+
+			const out: Record<string, number> = {};
+
+			for (const [key, values] of rows.sort((a, b) => b[2] - a[2]).slice(0, top)) {
+				for (const [stat, value] of Object.entries(values)) {
+					out[key + "." + stat] = value;
+				}
+			}
+
+			return out;
+		}
+	};
 }

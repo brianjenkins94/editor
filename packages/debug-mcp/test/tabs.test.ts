@@ -165,6 +165,29 @@ test("wait_for with a tab waits for that tab's record, not the other's", async (
 	assert.deepEqual([(value as Row).message, (value as Row).tab], ["ping from t2", "t2"]);
 });
 
+test("query_metrics summarizes one tab's metrics plane — two tabs' same-named sources kept apart", async () => {
+	type Series = { "series": string; "latest": number; "samples": number; "points"?: [number, number][] };
+	const ambiguous = await call("query_metrics");
+
+	assert.equal(ambiguous.isError, true, "several tabs: which?");
+
+	// Each tab's root samples its gauges once a second; here, a few readings each (until debug-mcp's interest reaches them).
+	const series = await until("both tabs' samples", async () => {
+		for (const [tab, root] of roots) {
+			root.publish("$sys.metrics.root", { "source": "root", "t": Date.now(), "values": { "memory.total": tab === "t1" ? 100 : 200, "spans.sw/cdn.errors": 0 } });
+		}
+
+		const [t1, t2] = await Promise.all(["t1", "t2"].map(async (tab) => (await call("query_metrics", { "tab": tab, "match": "memory", "points": 5 })).value as Series[]));
+
+		return Array.isArray(t1) && Array.isArray(t2) && t1[0]?.samples >= 2 && t2[0]?.samples >= 2 ? { t1, t2 } : undefined;
+	});
+
+	assert.deepEqual(series.t1.map((row) => [row.series, row.latest]), [["root:memory.total", 100]]);
+	assert.deepEqual(series.t2.map((row) => [row.series, row.latest]), [["root:memory.total", 200]]);
+	assert.ok((series.t1[0].points?.length ?? 0) >= 2, "points when asked");
+	assert.deepEqual(((await call("query_metrics", { "tab": "t1", "match": "spans" })).value as Series[]).map((row) => row.series), ["root:spans.sw/cdn.errors"]);
+});
+
 test("once a tab goes, its architecture goes with it, and the one left needs no `tab`", async () => {
 	sockets.get("t1")?.close();
 	await until("one tab left", async () => (debugMcp.linkCount() === 1 ? true : undefined));

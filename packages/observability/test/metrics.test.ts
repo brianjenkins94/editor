@@ -3,7 +3,7 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 import { createHub } from "@brianjenkins94/hub";
 import type { MetricsSample } from "../src/metrics.ts";
-import { METRICS_SUBJECT, reportMetrics } from "../src/metrics.ts";
+import { METRICS_SUBJECT, MetricsHistory, reportMetrics, spanMetrics } from "../src/metrics.ts";
 
 test("a reporter publishes each gauge's reading on $sys.metrics under its source, a group's as name.key", async () => {
 	const hub = createHub({ "id": "page" });
@@ -25,7 +25,7 @@ test("a reporter publishes each gauge's reading on $sys.metrics under its source
 	assert.ok(seen[1].values["count"] > seen[0].values["count"], "each sample reads the gauge again");
 });
 
-test("a gauge with no reading, or one that throws, is left out of that sample; nothing is published without gauges", async () => {
+test("a gauge with no reading, or one that throws, is left out of that sample; an empty reading isn't published", async () => {
 	const hub = createHub({ "id": "page" });
 	const seen: MetricsSample[] = [];
 
@@ -45,5 +45,59 @@ test("a gauge with no reading, or one that throws, is left out of that sample; n
 	remove();
 	assert.deepEqual(metrics.sample().values, {});
 	assert.equal(metrics.sample().source, "shell");
+	seen.length = 0;
+	await new Promise((resolve) => { setTimeout(resolve, 50); });
+	assert.equal(seen.length, 0, "gauges with nothing to report: no samples");
 	metrics.dispose();
+});
+
+test("history keeps the last samples per source and summarizes each series over a window", () => {
+	const history = new MetricsHistory(3);
+	const now = 100_000;
+
+	for (let i = 0; i < 5; i++) {
+		history.add({ "source": "workbench", "t": now - 4000 + i * 1000, "values": { "memory.total": 10 + i, "longFrames": i % 2 } });
+	}
+
+	history.add({ "source": "shell", "t": now, "values": { "longFrames": 7 } });
+	history.add({ "not": "a sample" });
+
+	assert.equal(history.read()["workbench"].length, 3, "only the last `keep` per source");
+	assert.deepEqual(history.read(now - 1500)["workbench"].map((sample) => sample.t), [now - 1000, now]);
+
+	const memory = history.summarize({ "match": "MEMORY", "now": now, "points": 2 });
+
+	assert.deepEqual(memory.map((series) => series.series), ["workbench:memory.total"]);
+	assert.deepEqual({ ...memory[0], "points": undefined }, { "series": "workbench:memory.total", "latest": 14, "agoMs": 0, "min": 12, "max": 14, "mean": 13, "samples": 3, "points": undefined });
+	assert.deepEqual(memory[0].points, [[2000, 12], [0, 14]], "thinned, keeping the latest");
+	assert.deepEqual(history.summarize({ "source": "shell", "now": now }).map((series) => series.series), ["shell:longFrames"]);
+	assert.equal(history.summarize({ "sinceMs": 500, "now": now }).length, 3, "only readings inside the window");
+});
+
+test("span metrics: rate, errors, p50/p95 and open per source/name, from the records alone", () => {
+	const spans = spanMetrics({ "windowMs": 10000 });
+	const record = (kind: string, spanId: string, extra: Record<string, unknown> = {}) => spans.record({ "kind": kind, "level": kind === "span-open" ? "trace" : "info", "span": "cdn", "spanId": spanId, "context": { "source": "sw" }, ...extra });
+
+	assert.equal(spans.gauge(), undefined, "nothing to report yet");
+
+	for (let i = 0; i < 10; i++) {
+		record("span-open", "s" + i);
+		record("span-close", "s" + i, { "durationMs": (i + 1) * 10 });
+	}
+
+	record("span-open", "bad");
+	record("log", "bad", { "level": "error", "message": "cdn failed" });
+	record("span-close", "bad", { "durationMs": 500 });
+	record("span-open", "hung");
+	spans.record({ "kind": "span-open", "level": "trace", "span": "ata", "spanId": "a1", "context": { "source": "workbench" } });
+
+	const values = spans.gauge() as Record<string, number>;
+
+	assert.equal(values["sw/cdn.rate"], 1.1, "11 ended in a 10 s window");
+	assert.equal(values["sw/cdn.errors"], 1, "the one with an error logged inside it");
+	assert.equal(values["sw/cdn.p50"], 60);
+	assert.equal(values["sw/cdn.p95"], 500);
+	assert.equal(values["sw/cdn.open"], 1, "the one still running");
+	assert.equal(values["workbench/ata.open"], 1);
+	assert.equal(values["workbench/ata.rate"], undefined, "none of it has ended");
 });

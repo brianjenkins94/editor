@@ -146,6 +146,13 @@ path, and the `blob:` workers (the web worker extension host, TypeScript's serve
 workers) by the architecture probes, which put each worker's URL on its node — a probed worker reports its own in its
 `hello`.
 
+The host page reports `spans`: every context's timed spans (`→ cdn` / `← cdn (12ms)`) as rates, errors and latencies per
+`source/name` — ended per second over the last 10 s, how many had an error logged inside them, p50/p95, and how many are
+open — computed from the records its collector already receives, so no subsystem does anything to be measured. A
+failing operation (a CDN fetch, a type acquisition) shows in the monitor's status bar while it fails. debug-mcp keeps
+five minutes of each tab's plane too: `query_metrics` summarizes any series over a window (latest, min, max, mean, and
+the readings when asked), the same numbers the monitor draws.
+
 ### Side channels (off the hub, on purpose)
 
 Everything that can ride the hub does. What doesn't, and why:

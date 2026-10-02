@@ -14,11 +14,13 @@
  *    traffic since it started as one delta, which reads as a burst).
  *  - `storage` (MB): what the origin keeps (IndexedDB, the service worker's caches), every 15 s.
  *
- * The shell reports its own `longFrames` (it hosts the preview windows): `reportShellMetrics`.
+ * The shell reports its own `longFrames` (it hosts the preview windows): `reportShellMetrics`. The host page reports
+ * `spans` — every context's timed spans as rates, errors and latencies (`reportSpanMetrics`), from the records its
+ * collector already receives.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { ArchitectureStore, Gauge } from "@brianjenkins94/observability";
-import { longFrameGauge, memoryGauge, reportMetrics } from "@brianjenkins94/observability";
+import { longFrameGauge, memoryGauge, reportMetrics, spanMetrics } from "@brianjenkins94/observability";
 
 /** zen-fs SingleBuffer's superblock: magic (u32 at 4), used_bytes and total_bytes (u64 at 16 and 24), little-endian. */
 const SUPERBLOCK_MAGIC = 0x62732e7a;
@@ -158,6 +160,18 @@ export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuf
 		untap();
 		metrics.dispose();
 	};
+}
+
+/** The host page's gauge, `spans`: per `source/name` — `sw/cdn`, `workbench/ata`, … — how many of every context's spans
+ *  ended per second over the last 10 s, how many of those had an error logged inside them, their p50/p95 (ms), and how
+ *  many are open now. Fed by the root's collector (`record` each record it receives), so it costs no extra traffic. */
+export function reportSpanMetrics(hub: Hub): { "record": (record: unknown) => void; "dispose": () => void } {
+	const metrics = reportMetrics(hub);
+	const spans = spanMetrics();
+
+	metrics.gauge("spans", spans.gauge);
+
+	return { "record": spans.record, "dispose": () => { metrics.dispose(); } };
 }
 
 /** The shell's own gauge: the share of time it spent in long animation frames (it hosts the preview windows). */
