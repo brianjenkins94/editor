@@ -283,10 +283,13 @@ void globalThis.clients.matchAll({ "type": "window" }).then((clients) => {
 	}
 });
 
-// Add the isolation + iframe-embedding headers a virtual (dev-server) response needs.
+// Add the isolation + iframe-embedding headers a virtual (dev-server) response needs — and the JS Self-Profiling policy,
+// so the editor can profile a preview's page (preview-profile.ts): a Profiler can be made only in a document served
+// with it.
 function virtualHeaders(source) {
 	const headers = new Headers(source || {});
 
+	headers.set("Document-Policy", "js-profiling");
 	headers.set("Cross-Origin-Embedder-Policy", "credentialless");
 	headers.set("Cross-Origin-Opener-Policy", "same-origin");
 	headers.set("Cross-Origin-Resource-Policy", "cross-origin");

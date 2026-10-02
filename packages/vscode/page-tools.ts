@@ -142,5 +142,23 @@ export function editorPageTools(hub: Hub): PageTool[] {
 
 			return result;
 		}
+	}, {
+		"name": "preview_profile",
+		"description": "CPU-profile the PREVIEWED APP's page for a while (the JS Self-Profiling API, in that page's own realm) and return where its time went: the busiest functions by self time (selfMs) and with what they called (totalMs), each with its script url and line, plus idleMs and durationMs. A docked preview shares the editor's thread, so editor functions can appear too — the app's are the ones whose url is under /__virtual__/. Set `full` for the whole Chrome .cpuprofile as well (it can be large). Requires that preview to be open (run the app first); a page from before the editor served the profiling policy needs a reload.",
+		"inputSchema": schema({
+			"durationMs": { "type": "number", "description": "How long to sample (default 5000, at most 60000)." },
+			"sampleIntervalMs": { "type": "number", "description": "How often to sample, in ms (default 10; the browser may round it up)." },
+			"top": { "type": "number", "description": "How many functions to list (default 25)." },
+			"full": { "type": "boolean", "description": "Include the whole .cpuprofile (Chrome DevTools' format) in the result." },
+			"port": { "type": "number", "description": "The preview's port (default 5173, the demo's) — its first window." },
+			"window": { "type": "string", "description": "A preview window by its key, when a port has several: '5173' (its first), '5173~2' (its second), … Overrides port." }
+		}),
+		"timeoutMs": 120000,
+		"handler": async ({ durationMs, sampleIntervalMs, top, full, port, window }, { signal }) => {
+			const target = window === undefined ? { "port": port ?? 5173 } : { "window": window };
+			const result = await request("preview.profile", { ...target, "durationMs": durationMs, "sampleIntervalMs": sampleIntervalMs, "top": top }, signal, (Number(durationMs) || 5000) + 30_000) as { "profile": unknown; "summary": unknown };
+
+			return full === true ? result : result.summary;
+		}
 	}];
 }
