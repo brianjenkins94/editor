@@ -83,7 +83,8 @@ export async function startSession(options = {}) {
 		processes.push(await startProcess("npx", ["tsx", "src/bin.ts", "--port", String(DEBUG_MCP_PORT)], new URL("../../debug-mcp/", import.meta.url), "listening"));
 	}
 
-	const browser = await launchChromium();
+	// (`chromiumArgs`: extra command-line switches for the browser — the performance suite's eager memory measurement.)
+	const browser = await launchChromium({ "args": options.chromiumArgs ?? [] });
 	const context = await browser.newContext({ "viewport": { "width": 1400, "height": 900 } });
 
 	if (options.debugMcp === true || options.debugMcp === "external") {

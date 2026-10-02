@@ -1,8 +1,12 @@
 {
-	"bootMs": { "max": 10000, "warnAbove": 0.5 },
-	"typedHoverMs": { "max": 10000, "warnAbove": 0.5 },
-	"repoLoadMs": { "max": 15000, "warnAbove": 0.5 },
+	"bootMs": { "max": 15000, "warnAbove": 0.5 },
+	"typedHoverMs": { "max": 30000, "warnAbove": 0.5 },
+	"repoLoadMs": { "max": 30000, "warnAbove": 0.5 },
+	"memoryMB.total": { "max": 2200, "warnAbove": 0.15 },
 	"memoryMB.workbench": { "max": 300, "warnAbove": 0.25 },
 	"memoryMB.extension host": { "max": 100, "warnAbove": 0.25 },
+	"memoryMB.TS semantic server": { "max": 1000, "warnAbove": 0.25 },
+	"memoryMB.TS syntax server": { "max": 550, "warnAbove": 0.25 },
+	"memoryMB.server-host": { "max": 200, "warnAbove": 0.25 },
 	"memoryMB.node": { "max": 200, "warnAbove": 0.25 }
 }

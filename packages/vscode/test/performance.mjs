@@ -4,7 +4,7 @@
  *  - `bootMs`: the page's start to the editor being ready;
  *  - `typedHoverMs`: opening the demo's App.tsx to a hover on `useState` that has its type;
  *  - `memoryMB.<realm>`: the tab's memory by realm at idle, from the metrics plane (the workbench's memory gauge, a
- *    reading taken after the hover);
+ *    reading taken after the hover — measured eagerly, so it's immediate and has every realm, TypeScript's servers too);
  *  - `repoLoadMs`: delivering a fixed, generated 1000-file project until its last file is in the workspace (generated,
  *    not this checkout's files, so the number doesn't drift as the repo grows).
  *
@@ -28,11 +28,14 @@ const budgets = JSON.parse(fs.readFileSync(new URL("performance-budgets.json", i
 const results = {};
 let session;
 
-before(async () => { session = await startSession(); });
+// measureUserAgentSpecificMemory resolves only at a garbage collection — an idle editor on a CI runner went two minutes
+// without one — and a reading taken early misses workers started since (TypeScript's servers, under the extension host:
+// 10 realms one time, 16 the next). Eager, every reading is immediate and has every realm.
+before(async () => { session = await startSession({ "chromiumArgs": ["--enable-blink-features=ForceEagerMeasureMemory"] }); });
 
 after(async () => {
 	report();
-	await session?.close("performance");
+	await session?.close("architecture-performance"); // its architecture snapshot, beside the other suites' (not performance.json)
 });
 
 /** The workbench realm, once the editor is ready. */
@@ -102,17 +105,14 @@ test("memory by realm, at idle", async () => {
 	const workbench = await editor();
 	const read = async () => ((await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.metrics.read")))["workbench"] ?? []).filter((sample) => sample.values["memory.total"] !== undefined).at(-1)?.values;
 	const before = (await read())?.["memory.total"];
-	// A new reading: the gauge's measurement resolves at a garbage collection (~20 s), so one that lands from now on was
-	// taken after the hover.
+	// A new reading — the gauge takes one every 10 s — so one taken after the hover.
 	const values = await until("a memory reading taken after the hover", async () => {
 		const latest = await read();
 
 		return latest !== undefined && latest["memory.total"] !== before ? latest : undefined;
 	}, { "timeoutMs": 120_000, "intervalMs": 1000, "sleep": (ms) => session.page.waitForTimeout(ms) });
 
-	// Every realm the reading has is recorded; only those every reading has are budgeted. Workers that a worker starts —
-	// TypeScript's servers, under the extension host — are in a headless Chromium's breakdown on some runs and not others,
-	// so `total` swings by a gigabyte from run to run: recorded, not budgeted.
+	// Every realm the reading has is recorded (the artifact shows them all); those with a budget are held to it.
 	for (const [key, value] of Object.entries(values).filter(([key]) => key.startsWith("memory."))) {
 		recorded("memoryMB." + key.slice("memory.".length), value);
 	}
