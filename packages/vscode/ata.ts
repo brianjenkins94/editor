@@ -78,8 +78,8 @@ function extendsTargets(tsconfig: Record<string, unknown> | undefined): [string,
 
 /** The package root of a bare specifier or node_modules-relative path (scope-aware); undefined for relative/node. */
 function packageRootOf(spec: string): string | undefined {
-	if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("node:")) {
-		return undefined;
+	if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("node:") || spec.startsWith("#")) {
+		return undefined; // relative, absolute, a builtin, or a package's own `imports` alias — not a package
 	}
 
 	const parts = spec.split("/");
@@ -101,7 +101,15 @@ function typesEntry(meta: Record<string, unknown>): string | undefined {
 		return classic;
 	}
 
-	return pickTypes((meta["exports"] as Record<string, unknown> | undefined)?.["."]);
+	const exportsField = meta["exports"];
+
+	return pickTypes(typeof exportsField === "string" ? exportsField : (exportsField as Record<string, unknown> | undefined)?.["."]) ?? declarationBeside(meta["main"]);
+}
+
+/** The declaration TS looks for beside a JS file, for a package that names only its JS (vite's `exports: { ".":
+ *  "./dist/node/index.js" }`): `.js` → `.d.ts`, `.mjs` → `.d.mts`, `.cjs` → `.d.cts`. */
+function declarationBeside(js: unknown): string | undefined {
+	return typeof js === "string" && (/\.[mc]?js$/u).test(js) ? js.replace(/\.([mc]?)js$/u, ".d.$1ts") : undefined;
 }
 
 /** The types entries of a package's named `exports` subpaths (`./jsx-runtime` → its `.d.ts`). TS resolves these
@@ -132,7 +140,7 @@ function subpathTypes(meta: Record<string, unknown>): string[] {
 /** Pull a `.d.ts` path out of an exports subtree: `{types}`, `{types:{default}}`, or a condition's own `types`. */
 function pickTypes(node: unknown): string | undefined {
 	if (node === null || typeof node !== "object") {
-		return undefined; // a string here is the JS entry, not types
+		return declarationBeside(node); // a string here is the JS entry: its types sit beside it, if anywhere
 	}
 
 	const record = node as Record<string, unknown>;
@@ -157,6 +165,14 @@ function pickTypes(node: unknown): string | undefined {
 		}
 	}
 
+	for (const condition of ["import", "require", "default"]) {
+		const beside = declarationBeside(record[condition]);
+
+		if (beside !== undefined) {
+			return beside;
+		}
+	}
+
 	return undefined;
 }
 
@@ -171,10 +187,12 @@ function collectFiles(node: MetaNode, out: Set<string>): void {
 	}
 }
 
-/** Module specifiers + triple-slash references in a `.d.ts` — the graph to crawl. */
-function references(dts: string): { "relative": string[]; "packages": string[] } {
+/** Module specifiers + triple-slash references in a `.d.ts` — the graph to crawl: relative paths, other packages, and
+ *  `#` aliases from the package's own `imports` map. */
+function references(dts: string): { "relative": string[]; "packages": string[]; "imports": string[] } {
 	const relative = new Set<string>();
 	const packages = new Set<string>();
+	const imports = new Set<string>();
 
 	for (const match of dts.matchAll(/(?:from|import|require)\s*(?:\(\s*)?["']([^"']+)["']|\/\/\/\s*<reference\s+(path|types)\s*=\s*["']([^"']+)["']/gu)) {
 		const spec = match[1] ?? match[3];
@@ -188,6 +206,8 @@ function references(dts: string): { "relative": string[]; "packages": string[] }
 			packages.add(spec); // /// <reference types="node"> → a package
 		} else if (spec.startsWith(".") || kind === "path") {
 			relative.add(spec);
+		} else if (spec.startsWith("#")) {
+			imports.add(spec);
 		} else {
 			const pkg = packageRootOf(spec);
 
@@ -197,15 +217,38 @@ function references(dts: string): { "relative": string[]; "packages": string[] }
 		}
 	}
 
-	return { "relative": [...relative], "packages": [...packages] };
+	return { "relative": [...relative], "packages": [...packages], "imports": [...imports] };
+}
+
+/** A `#` alias through a package's `imports` map (vite's `"#types/*": "./types/*.d.ts"`) → the package-relative path
+ *  it names, for resolveInMeta. */
+function resolveImport(spec: string, imports: unknown): string | undefined {
+	if (imports === null || typeof imports !== "object") {
+		return undefined;
+	}
+
+	for (const [key, target] of Object.entries(imports as Record<string, unknown>)) {
+		const star = key.indexOf("*");
+		const [before, after] = star === -1 ? [key, ""] : [key.slice(0, star), key.slice(star + 1)];
+		const matches = star === -1 ? spec === key : spec.startsWith(before) && spec.endsWith(after) && spec.length >= key.length - 1;
+		const chosen = typeof target === "string" ? target : pickTypes(target);
+
+		if (matches && chosen !== undefined) {
+			return chosen.replace("*", spec.slice(before.length, spec.length - after.length));
+		}
+	}
+
+	return undefined;
 }
 
 /** Resolve a relative reference to an EXISTING package file (from `?meta`) — no blind probing, no escaping. */
 function resolveInMeta(fromSub: string, ref: string, files: Set<string>): string | undefined {
 	const dir = fromSub.includes("/") ? fromSub.slice(0, fromSub.lastIndexOf("/")) : "";
 	const joined = new URL(ref, "file:///" + (dir === "" ? "" : dir + "/")).pathname.slice(1); // package-relative, normalized (a root file's base is file:///, not file:////)
+	// A `.js` specifier in a declaration means the `.d.ts` beside it (as TS reads it) — the JS itself types nothing.
+	const beside = declarationBeside(joined);
 
-	for (const candidate of [joined, joined + ".d.ts", joined + ".d.mts", joined + ".d.cts", joined + "/index.d.ts"]) {
+	for (const candidate of beside === undefined ? [joined, joined + ".d.ts", joined + ".d.mts", joined + ".d.cts", joined + "/index.d.ts"] : [beside]) {
 		if (files.has(candidate)) {
 			return candidate;
 		}
@@ -237,9 +280,15 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 	const fetchedPath = new Set<string>();          // node_modules-relative paths already handled this session
 	const seenPackage = new Set<string>();          // packages already acquired this session
 	const metaCache = new Map<string, Set<string>>(); // pkg → its file set (from ?meta)
+	const importsOf = new Map<string, unknown>();      // pkg → its package.json `imports` map
 
 	/** Absolute workspace path for a node_modules-relative path. */
 	const abs = (rel: string): string => `${nodeModules}/${rel}`;
+	// A store written before the crawl could read unpkg's listings holds packages with little more than their entry
+	// file, and a stored package is taken to be whole. Until this marker is written, re-crawl what's stored — local
+	// reads, plus the listing and any missing file from the network — so one session heals it.
+	const HEALED = ".ata-crawl-2";
+	const healing = !has(abs(HEALED));
 	/** Read a file already in the workspace store as text — no network. */
 	const readLocal = async (rel: string): Promise<string | undefined> => {
 		try {
@@ -313,27 +362,35 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 		fetchedPath.add(rel);
 
-		if (has(abs(rel))) {
+		const stored = has(abs(rel));
+
+		if (stored && !healing) {
 			return true; // already in the store (seed / persisted / earlier session) — its subtree is too
 		}
 
-		const code = await cdnText(rel, false, budget);
+		const code = stored ? await readLocal(rel) : await cdnText(rel, false, budget);
 
 		if (code === undefined) {
 			return false;
 		}
 
-		await write(rel, code);
+		if (!stored) {
+			await write(rel, code);
+		}
 
 		if (!DECL.test(sub)) {
 			return true;
 		}
 
-		const { relative, packages } = references(code);
+		const { relative, packages, imports } = references(code);
+		const targets = [
+			...relative.map((ref) => resolveInMeta(sub, ref, files)),
+			...imports.map((spec) => resolveImport(spec, importsOf.get(pkg))).filter((path) => path !== undefined).map((path) => resolveInMeta("", path, files))
+		];
 
 		// Siblings in parallel: @types/node's index.d.ts alone references ~80 files, one round trip each.
 		await Promise.all([
-			...relative.map((ref) => resolveInMeta(sub, ref, files)).filter((target) => target !== undefined).map((target) => acquireFile(pkg, target, files, budget)),
+			...targets.filter((target) => target !== undefined).map((target) => acquireFile(pkg, target, files, budget)),
 			...packages.map((dep) => acquirePackage(dep, budget))
 		]);
 
@@ -350,8 +407,9 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		const pkgJsonRel = pkg + "/package.json";
 		// Present → acquired in a prior session (the store persists): read package.json LOCALLY, no network, and
 		// its whole subtree is already stored (so acquireFile below short-circuits and no ?meta fetch is needed).
-		const present = has(abs(pkgJsonRel));
-		const pkgJson = present ? await readLocal(pkgJsonRel) : await cdnText(pkgJsonRel, false, budget);
+		const stored = has(abs(pkgJsonRel));
+		const present = stored && !healing;
+		const pkgJson = stored ? await readLocal(pkgJsonRel) : await cdnText(pkgJsonRel, false, budget);
 
 		if (pkgJson === undefined) {
 			// Not published under this name → try the DefinitelyTyped counterpart (react → @types/react).
@@ -362,7 +420,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			return;
 		}
 
-		if (!present) {
+		if (!stored) {
 			fetchedPath.add(pkgJsonRel);
 			await write(pkgJsonRel, pkgJson);
 		}
@@ -374,6 +432,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			const meta = JSON.parse(pkgJson) as Record<string, unknown>;
 
 			entry = typesEntry(meta);
+			importsOf.set(pkg, meta["imports"]);
 			subpaths = subpathTypes(meta).map((sub) => sub.replace(/^\.\//u, "")).filter((sub) => DECL.test(sub) && sub !== entry?.replace(/^\.\//u, ""));
 		} catch { /* malformed package.json */ }
 
@@ -386,13 +445,16 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			entry = "index.d.ts"; // no declared types but a conventional index.d.ts exists
 		}
 
-		if (entry !== undefined && DECL.test(entry)) {
+		// A declaration guessed beside a JS entry may not exist: with the listing in hand, don't fetch one that isn't there.
+		const listed = (sub: string): boolean => files.size === 0 || files.has(sub);
+
+		if (entry !== undefined && DECL.test(entry) && listed(entry)) {
 			await acquireFile(pkg, entry, files, budget);
 		} else if (!pkg.startsWith("@types/")) {
 			await acquirePackage(typesCounterpart(pkg), budget); // ships no types → DefinitelyTyped counterpart
 		}
 
-		for (const sub of subpaths) {
+		for (const sub of subpaths.filter(listed)) {
 			await acquireFile(pkg, sub, files, budget);
 		}
 	}
@@ -425,6 +487,10 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 				// (NOT restartTsServer — killing the server mid-open orphans the "Analyzing…" progress) so resolution
 				// reruns against files that are now present. Nothing new written → nothing to pick up → no reload.
 				const added = written - writtenBefore;
+
+				if (healing && !has(abs(HEALED))) {
+					await write(HEALED, "");
+				}
 
 				if (added > 0) {
 					await api.commands.executeCommand("typescript.reloadProjects");
