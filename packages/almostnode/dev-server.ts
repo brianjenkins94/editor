@@ -130,13 +130,13 @@ export abstract class DevServer extends EventEmitter {
 	}
 
   /**
-   * Serve a static file from the virtual filesystem
+   * Serve a static file from the virtual filesystem. `filePath` is a filesystem path — callers resolve the URL against
+   * the root first (resolvePath); resolving it again here doubled a non-"/" root, and every plain file (JSON, images)
+   * of an app rooted below the workspace was a 404.
    */
 	protected serveFile(filePath: string): ResponseData {
 		try {
-      // Normalize path
-			const normalizedPath = this.resolvePath(filePath);
-			const content = this.vfs.readFileSync(normalizedPath);
+			const content = this.vfs.readFileSync(filePath);
       // Ensure we have a Buffer
 			const buffer = typeof content === "string"
 				? Buffer.from(content)
