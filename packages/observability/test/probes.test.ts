@@ -79,21 +79,32 @@ function wait(ms: number): Promise<void> {
 	return new Promise((resolve) => { setTimeout(resolve, ms); });
 }
 
-test("a BroadcastChannel's messages, each way — not a hub link riding one (the hub tap counts that)", async () => {
+/** Until `done()`, or `timeoutMs` — a loaded runner can take longer than any fixed wait to deliver. */
+async function until(done: () => boolean, timeoutMs = 2000): Promise<void> {
+	for (const start = Date.now(); !done() && Date.now() - start < timeoutMs;) {
+		await wait(5);
+	}
+}
+
+test("a BroadcastChannel's messages, each way — not a hub link riding one (the hub tap counts that)", async (t) => {
 	recorded.length = 0;
 
 	const name = "netsim.m.lobby";
 	const [a, b] = [new BroadcastChannel(name), new BroadcastChannel(name)];
 
+	// Open channels keep the process alive: closed whatever the assertions say, or a failure hangs the file instead.
+	t.after(() => {
+		a.close();
+		b.close();
+	});
 	a.postMessage({ "type": "connect", "peer": "player-1" });
 	a.postMessage({ "\0hub": { "hub": "hello", "id": "x" } });
-	await wait(20);
+	await until(() => recorded.length >= 2);
+	await wait(20); // and the hub frame, which must not be recorded, had its chance to be
 
 	assert.deepEqual(recorded.map(({ from, to, label }) => [from, to, label]), [["page", "channel:netsim.m.lobby", "connect"], ["channel:netsim.m.lobby", "page", "connect"]]);
 	assert.deepEqual(recorded[0]?.payload, { "type": "connect", "peer": "player-1" }, "what it carried, for capture");
 	assert.equal(spawned.filter((spec) => spec.id === "channel:netsim.m.lobby").length, 1, "one node per channel name");
-	a.close();
-	b.close();
 });
 
 test("a Web Lock asked for, granted, released — and one that's taken, unavailable", async () => {
@@ -102,12 +113,19 @@ test("a Web Lock asked for, granted, released — and one that's taken, unavaila
 	const name = "netsim." + crypto.randomUUID() + ".host";
 	let release = (): void => undefined;
 	const held = new Promise<void>((resolve) => { release = resolve; });
-	const first = navigator.locks.request(name, async () => held);
+	let granted = false;
+	const first = navigator.locks.request(name, async () => {
+		granted = true;
+		await held;
+	});
 
-	await wait(10);
-	await navigator.locks.request(name, { "ifAvailable": true }, async (lock) => { assert.equal(lock, null); });
-	release();
-	await first;
+	try {
+		await until(() => granted);
+		await navigator.locks.request(name, { "ifAvailable": true }, async (lock) => { assert.equal(lock, null); });
+	} finally {
+		release();
+		await first;
+	}
 
 	assert.deepEqual(recorded.map(({ label }) => label), ["request (exclusive)", "granted", "request (exclusive, if available)", "unavailable", "released"]);
 	assert.ok(recorded.every((entry) => [entry.from, entry.to].includes("lock:netsim.*.host")), "one node per lock, its id folded: " + JSON.stringify(recorded));
@@ -165,7 +183,7 @@ test("a data channel is observed wherever it's used — one handed to a worker, 
 	assert.deepEqual(recorded.map(({ from, to, label }) => [from, to, label]), [["page", "datachannel:netsim.local.link.client-0", "game.cmd"], ["datachannel:netsim.local.link.client-0", "page", "game.state.*"]]);
 });
 
-test("payload capture is opt-in: off, samples carry no payload; on (a viewer asks), a size-capped preview", async () => {
+test("payload capture is opt-in: off, samples carry no payload; on (a viewer asks), a size-capped preview", async (t) => {
 	const [up, down] = pipe();
 	const viewer = createHub({ "id": "viewer" });
 	const page = createHub({ "id": "page" });
@@ -175,6 +193,9 @@ test("payload capture is opt-in: off, samples carry no payload; on (a viewer ask
 	await Promise.all([viewer.link(up).ready, page.link(down).ready]);
 
 	const reporter = createArchReporter(page);
+
+	t.after(() => { reporter.dispose(); });
+
 	const payloads = () => reports.flatMap((report) => report.samples ?? []).filter((sample) => sample.label === "game.move").map((sample) => sample.payload);
 
 	viewer.subscribe("game.move", () => undefined);
@@ -194,7 +215,6 @@ test("payload capture is opt-in: off, samples carry no payload; on (a viewer ask
 	page.publish("game.move", { "x": 3 });
 	await wait(400);
 	assert.deepEqual(payloads(), [undefined, "{\"x\":2}", undefined], "and off again");
-	reporter.dispose();
 });
 
 test("a captured payload's preview: JSON, binary as its size, capped", () => {

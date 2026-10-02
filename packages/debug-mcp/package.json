@@ -19,7 +19,7 @@
   },
   "scripts": {
     "start": "tsx src/bin.ts",
-    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "test": "node --import tsx --test --test-force-exit \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

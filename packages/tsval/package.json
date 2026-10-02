@@ -12,7 +12,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "node --test --test-isolation=none \"test/**/*.test.ts\"",
+    "test": "node --test --test-force-exit --test-isolation=none \"test/**/*.test.ts\"",
     "test:diff": "node --test --test-isolation=none \"test/differential/**/*.test.ts\"",
     "test:corpus": "node --test --test-isolation=none test/differential/ts-evaluator.test.ts",
     "test:test262": "node --test --test-isolation=none test/differential/test262.test.ts",
