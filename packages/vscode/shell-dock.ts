@@ -279,16 +279,16 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 	};
 
 	const dockHost: ShellDockHost = {
-		"attach": (slot, container) => {
+		"attach": (slot, element) => {
 			const pane = panes.get(slot);
 
 			if (pane?.hosted !== true || pane.frame === undefined) {
-				return { "dispose": () => undefined };
+				return;
 			}
 
 			// Built in the editor's own document, styled inline with VS Code's theme variables: none of this page's
 			// classes exist there.
-			const doc = container.ownerDocument;
+			const doc = element.ownerDocument;
 			const bar = doc.createElement("div");
 			// eslint-disable-next-line webawesome/prefer-components -- in VS Code's document, where Web Awesome's styles don't reach (a component moved between documents loses its shadow styles)
 			const back = doc.createElement("button");
@@ -297,14 +297,13 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 			Object.assign(bar.style, { "display": "flex", "alignItems": "center", "gap": "6px", "flex": "0 0 auto", "padding": "4px 8px", "borderBottom": "1px solid var(--vscode-editorGroup-border, transparent)", "font": "12px var(--vscode-font-family, system-ui)" });
 			Object.assign(back.style, { "font": "inherit", "padding": "2px 8px", "border": "0", "borderRadius": "2px", "cursor": "pointer", "color": "var(--vscode-button-secondaryForeground)", "background": "var(--vscode-button-secondaryBackground)" });
 			Object.assign(pane.frame.style, { "display": "block", "flex": "1 1 auto", "minHeight": "0", "width": "100%", "border": "0" });
+			element.style.background = "var(--vscode-editor-background)";
 			/* eslint-enable webawesome/no-inline-styles */
 			back.textContent = "Move to dock";
 			back.title = "Move " + pane.title + " back into the dock";
 			back.addEventListener("click", () => { void dockPane(slot); });
 			bar.append(back);
-			container.replaceChildren(bar, pane.frame);
-
-			return { "dispose": () => undefined };
+			element.replaceChildren(bar, pane.frame);
 		},
 		"closed": (slot) => {
 			const pane = panes.get(slot);

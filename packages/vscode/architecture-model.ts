@@ -141,6 +141,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "targets.list", "hubs": ["shell", "workbench"], "description": "Run targets." },
 	{ "pattern": "run.target", "hubs": ["shell", "workbench"], "description": "Run a target." },
 	{ "pattern": "theme.colorScheme", "hubs": ["shell", "workbench"], "description": "Theme sync." },
+	{ "pattern": "dock.>", "hubs": ["shell", "workbench"], "description": "The shell's dock and VS Code's editor area: VS Code's new windows as dock panels (dock.openWindow, dock.closeWindow), and dock panels shown as VS Code editors (dock.hostEditor, dock.closeEditor)." },
 	{ "pattern": "preview.>", "hubs": ["shell", "root", "workbench", "node"], "description": "Preview windows, the dev server, HMR." },
 	{ "pattern": "preview.decide", "hubs": ["shell", "preview:*"], "description": "A preview window's page tap asks for a capability the service worker can't see (WebSocket, WebRTC) — prompted in that window." },
 	{ "pattern": "preview.open", "hubs": ["shell", "preview:*"], "description": "A preview window's page tap hands up a page the app opened as a new window: another preview window." },

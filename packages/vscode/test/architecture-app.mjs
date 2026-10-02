@@ -387,16 +387,65 @@ test("the app opens its own page as a new window: a second preview window onto t
 		return titles.length === 2 && titles.every((title) => title === "wired frame v3");
 	});
 
-	// Closing the second window leaves the first — and its server — running.
+	// Closing the second window (its tab in the shell's dock) leaves the first — and its server — running.
 	await session.page.evaluate((title) => {
-		const pane = [...document.querySelectorAll(".wa-win")].find((element) => element.querySelector(".wa-win__title")?.textContent?.startsWith(title));
+		const tab = [...document.querySelectorAll(".dv-tab")].find((element) => element.textContent?.startsWith(title));
 
-		[...pane.querySelectorAll("wa-button")].find((button) => button.title === "Close").click();
+		tab.querySelector(".dv-default-tab-action").click();
 	}, "Preview :" + port + " (2)");
 	await eventually("one window again", async () => previewPages().length === 1);
 	await session.page.waitForTimeout(1000);
 	assert.equal(previewPages().length, 1, "the first window stays");
 	assertEchoes((await previewPage().evaluate(() => globalThis.__wired)).results);
+});
+
+test("a preview window dropped on the editor area runs in a VS Code editor: its hubs rejoin, a tab switch keeps its page, and it docks back", async () => {
+	const port = previewPort();
+	const window = "preview:" + port;
+	const pageUps = () => debugMcp.store.queryLogs({ "source": window + "/wired-page", "textIncludes": "wired page up" }).length;
+	const startedIn = async (frame) => (await frame.evaluate(() => globalThis.__wired).catch(() => undefined))?.startedAt;
+	const docked = await startedIn(previewPage());
+	const ups = pageUps();
+
+	// Drag its tab from the shell's dock onto the editor area — clear of the floating window itself and of the dock's
+	// edges (those dock it beside the editor instead): shell-dock.ts's own drop, into a hosted editor.
+	const editor = session.page.locator("iframe[title=\"editor\"]");
+	const box = await editor.boundingBox();
+
+	await session.page.locator(".dv-tab", { "hasText": "Preview :" + port }).first().dragTo(editor, { "targetPosition": { "x": box.width * 0.2, "y": box.height * 0.6 } });
+
+	// Its page reloads inside the workbench's document, and its hubs come back through the shell: a second startup log.
+	const hosted = await eventually("the page in a VS Code editor", async () => previewPages().find((frame) => frame.parentFrame() === session.workbench()));
+
+	await eventually("its app running again", async () => {
+		const startedAt = await startedIn(hosted);
+
+		return startedAt !== undefined && startedAt !== docked;
+	});
+	await eventually("its hubs rejoined the tree", async () => pageUps() === ups + 1);
+	assert.deepEqual((await session.conformance()).filter((violation) => violation.id !== override()), [], "nothing needs review");
+
+	// Another editor in front, then the preview again: the same page all along — not reloaded, as a pane taken out of
+	// the document would have been.
+	const hostedStart = await startedIn(hosted);
+
+	// (By command: the debug toolbar floats over the tabs.)
+	const switchEditor = (command) => session.workbench().evaluate((id) => globalThis.__editor.api.commands.executeCommand(id), command);
+	const shown = () => hosted.frameElement().then((element) => element.evaluate((frame) => getComputedStyle(frame.parentElement).visibility));
+
+	await switchEditor("workbench.action.previousEditor");
+	await eventually("another editor in front", async () => await shown() === "hidden");
+	await switchEditor("workbench.action.nextEditor");
+	await eventually("the preview in front again", async () => await shown() === "visible");
+	assert.equal(await startedIn(hosted), hostedStart, "a tab switch keeps its page");
+	assert.equal(pageUps(), ups + 1, "and its hubs, without a reconnect");
+
+	// Back into the dock: its page reloads there, and rejoins once more.
+	await session.workbench().locator("button[title^=\"Move \"]").click();
+	await eventually("the page back in the dock", async () => previewPages().some((frame) => frame.parentFrame() === session.page.mainFrame()));
+	await eventually("its hubs rejoined again", async () => pageUps() === ups + 2);
+	assertEchoes((await previewPage().evaluate(() => globalThis.__wired)).results);
+	assert.deepEqual((await session.conformance()).filter((violation) => violation.id !== override()), [], "still nothing to review");
 });
 
 /** A locally served observability tarball (ARCH_OBSERVABILITY_TGZ) is a network endpoint only this run uses. */

@@ -120,7 +120,7 @@ const shellDock = (): ShellDockHost | undefined => {
 };
 
 registerHostedEditors({
-	"render": (slot, container) => shellDock()?.attach(slot, container) ?? { "dispose": () => undefined },
+	"render": (slot, element) => { shellDock()?.attach(slot, element); },
 	"onClose": (slot) => { shellDock()?.closed(slot); }
 });
 serve(workbenchHub, "dock.hostEditor", async (args) => {

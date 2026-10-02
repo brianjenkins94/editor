@@ -9,8 +9,9 @@
 export const SHELL_DOCK_HOST = "__shellDock";
 
 export interface ShellDockHost {
-	/** Show slot `slot` in `container` — when its editor opens, and again whenever it moves to another group. */
-	"attach": (slot: string, container: HTMLElement) => { "dispose": () => void };
+	/** Show slot `slot` in `element` — its own element in the workbench, given once, when its editor first opens; the
+	 *  workbench keeps it over the editor (and loaded) from then on. */
+	"attach": (slot: string, element: HTMLElement) => void;
 	/** Slot `slot`'s editor was closed. */
 	"closed": (slot: string) => void;
 }
