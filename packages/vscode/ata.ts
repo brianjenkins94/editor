@@ -194,7 +194,10 @@ function references(dts: string): { "relative": string[]; "packages": string[]; 
 	const packages = new Set<string>();
 	const imports = new Set<string>();
 
-	for (const match of dts.matchAll(/(?:from|import|require)\s*(?:\(\s*)?["']([^"']+)["']|\/\/\/\s*<reference\s+(path|types)\s*=\s*["']([^"']+)["']/gu)) {
+	// Comments out first (triple-slash references aside): @types/node's doc examples alone `require("Hello!")` dozens of times.
+	const code = dts.replace(/("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\/|(?<!\/)\/\/(?!\/\s*<reference)[^\n]*/gu, (_, string: string | undefined) => string ?? "");
+
+	for (const match of code.matchAll(/(?:from|import|require)\s*(?:\(\s*)?["']([^"']+)["']|\/\/\/\s*<reference\s+(path|types)\s*=\s*["']([^"']+)["']/gu)) {
 		const spec = match[1] ?? match[3];
 		const kind = match[2]; // "path" | "types" | undefined (a module specifier)
 
@@ -281,6 +284,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 	const seenPackage = new Set<string>();          // packages already acquired this session
 	const metaCache = new Map<string, Set<string>>(); // pkg → its file set (from ?meta)
 	const importsOf = new Map<string, unknown>();      // pkg → its package.json `imports` map
+	const dependenciesOf = new Map<string, Set<string>>(); // pkg → what its package.json depends on
 
 	/** Absolute workspace path for a node_modules-relative path. */
 	const abs = (rel: string): string => `${nodeModules}/${rel}`;
@@ -382,7 +386,11 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			return true;
 		}
 
-		const { relative, packages, imports } = references(code);
+		const { relative, imports, ...referenced } = references(code);
+		// A DefinitelyTyped package declares every package it uses; any other bare name in it is ambient — @types/node's
+		// `"fs"`, `"worker_threads"`, … are its own `declare module`s, not packages to fetch.
+		const declared = pkg.startsWith("@types/") ? dependenciesOf.get(pkg) : undefined;
+		const packages = declared === undefined ? referenced.packages : referenced.packages.filter((dep) => declared.has(dep) || declared.has(typesCounterpart(dep)));
 		const targets = [
 			...relative.map((ref) => resolveInMeta(sub, ref, files)),
 			...imports.map((spec) => resolveImport(spec, importsOf.get(pkg))).filter((path) => path !== undefined).map((path) => resolveInMeta("", path, files))
@@ -433,6 +441,7 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 			entry = typesEntry(meta);
 			importsOf.set(pkg, meta["imports"]);
+			dependenciesOf.set(pkg, new Set(Object.keys({ ...meta["dependencies"] as object, ...meta["peerDependencies"] as object })));
 			subpaths = subpathTypes(meta).map((sub) => sub.replace(/^\.\//u, "")).filter((sub) => DECL.test(sub) && sub !== entry?.replace(/^\.\//u, ""));
 		} catch { /* malformed package.json */ }
 
