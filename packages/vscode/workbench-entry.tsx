@@ -289,6 +289,13 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 
 	if (replace) {
 		await clearWorkspace(workspaceRoot());
+
+		// A load that brings its own `.git` (a clone — see git-clone.ts) replaces the workspace's: clearWorkspace keeps
+		// `.git` as scaffolding (the editor's own repo, ensureRepo's), but the workspace is becoming THIS repo, history
+		// and all. A load without one (the API fallback) keeps the editor's.
+		if (files.some((file) => file.path.startsWith(workspaceRoot() + "/.git/"))) {
+			await vscode.workspace.fs.delete(vscode.Uri.file(workspaceRoot() + "/.git"), { "recursive": true, "useTrash": false }).then(undefined, () => { /* none yet */ });
+		}
 	}
 
 	for (const file of files) {
@@ -322,6 +329,11 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 		// (in-place overwrite — clearWorkspace kept it). Matches ensureRepo's first-run default.
 		if (!providedAtRoot(".gitignore")) {
 			await vscode.workspace.fs.writeFile(vscode.Uri.file(root + "/.gitignore"), encoder.encode(gitEngine.DEFAULT_GITIGNORE));
+		}
+
+		// A load that brought its own `.git` (a clone): keep the editor's scaffolding out of git there too.
+		if (files.some((file) => file.path.startsWith(root + "/.git/"))) {
+			await gitEngine.excludeScaffolding();
 		}
 
 		// eslint: a repo's own config already overwrote in place; when it ships none, drop any stale variant. Nothing

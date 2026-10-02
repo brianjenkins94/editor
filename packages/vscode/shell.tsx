@@ -635,7 +635,9 @@ function Shell() {
 
 			const projectFiles = files.map((file) => ({ "path": "/workspace/" + file.path, "bytes": file.bytes }));
 
-			hubRef.current?.publish("project.openFiles", { "files": projectFiles, "openEditors": pickOpenEditors(files.map((file) => file.path)) });
+			// A clone's files include its `.git` (git-clone.ts): the workspace becomes the repo, history and all. Editors open
+			// from the working tree only.
+			hubRef.current?.publish("project.openFiles", { "files": projectFiles, "openEditors": pickOpenEditors(files.map((file) => file.path).filter((path) => !path.startsWith(".git/"))) });
 
 			// Remember where this workspace came from so a commit knows where to push.
 			const binding = { "owner": owner, "repo": repo, "branch": meta.default_branch };

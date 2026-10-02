@@ -10,7 +10,9 @@
  * token reaching only GitHub.
  *
  * The clone lands in memory, in a zen-fs mount of its own in the SHELL's realm (never the workspace's FS — that's the
- * app's), and its working tree is returned for the shell to publish to the app as a repo load always has.
+ * app's: the token stays here), and ALL of it is returned — its working tree and its `.git` — for the shell to publish
+ * to the app as a repo load always has. The workspace becomes the clone, history and all: the editor's source control,
+ * changes and edit history read a real repo, its HEAD the commit cloned.
  */
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
 import { Buffer } from "buffer";
@@ -29,11 +31,12 @@ const MOUNT = "/clone";
 export interface ClonedRepo {
 	/** The branch the clone checked out (the repo's default). */
 	"branch": string;
-	/** Every working-tree file, repo-relative, as bytes (binary round-trips). */
+	/** Every file, repo-relative, as bytes (binary round-trips) — the working tree and `.git/` (a shallow clone's: one
+	 *  pack, its index, the refs, the git index). */
 	"files": { "path": string; "bytes": Uint8Array }[];
 }
 
-/** Shallow-clone `owner/repo` into memory and return its working tree. `token`, when given, authenticates the clone
+/** Shallow-clone `owner/repo` into memory and return its files, `.git` included. `token`, when given, authenticates the clone
  *  (through the proxy — see above); without one, only a public repo clones. */
 export async function cloneRepo(owner: string, repo: string, token?: string): Promise<ClonedRepo> {
 	const dir = MOUNT + "/" + owner + "-" + repo;
@@ -55,10 +58,6 @@ export async function cloneRepo(owner: string, repo: string, token?: string): Pr
 		const files: ClonedRepo["files"] = [];
 		const walk = async (at: string, rel: string): Promise<void> => {
 			for (const name of await fs.promises.readdir(at)) {
-				if (rel === "" && name === ".git") {
-					continue;
-				}
-
 				const full = at + "/" + name;
 				const path = rel === "" ? name : rel + "/" + name;
 
