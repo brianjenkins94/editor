@@ -158,6 +158,37 @@ const CARDS = [
 	{ "title": "Span errors · last 10 s", "match": /^root:spans\\.(.+)\\.errors$/, "top": 6, "nonzero": true }
 ];
 const fmt = (v) => v >= 100 ? v.toFixed(0) : v.toFixed(1);
+/** The editor's own sources; any other is an app's (a preview's, named under its window: \`preview:5180/client-0\`). */
+const EDITOR = new Set(["workbench", "shell", "root"]);
+function drawCard(title, lines, { max: fixed, from } = {}) {
+	if (lines.length === 0) return "";
+	const max = fixed ?? Math.max(1, ...lines.flatMap((l) => l.points.map((p) => p[1]))) * 1.1;
+	const paths = lines.map((line, i) => {
+		const pts = line.points.filter((p) => p[0] >= from).map((p) => ((p[0] - from) / 1200).toFixed(1) + "," + (56 - (p[1] / max) * 54).toFixed(1)).join(" ");
+		return '<polyline fill="none" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke="var(' + COLORS[i % COLORS.length] + ')" points="' + pts + '"/>';
+	}).join("");
+	const legend = lines.map((line, i) => '<span style="color: var(' + COLORS[i % COLORS.length] + ')">' + line.name + " " + fmt(line.points.at(-1)?.[1] ?? 0) + "</span>").join("");
+	return '<div class="card"><div class="head"><span>' + title + '</span><span>max ' + fmt(max / (fixed ? 1 : 1.1)) + '</span></div><svg viewBox="0 0 100 56" preserveAspectRatio="none">' + paths + '</svg><div class="legend">' + legend + "</div></div>";
+}
+/** An app's gauges, with no card of their own to declare: one card per app and gauge (\`fps\`, \`lag\`), a line per source
+ *  and key — so a game's FPS draws one line per client window, its lag one per client. */
+function appCards(series, from) {
+	const cards = new Map();
+	for (const [key, points] of Object.entries(series)) {
+		const at = key.lastIndexOf(":"); // a source can have a colon (\`preview:5180\`); a gauge's name can't
+		const source = key.slice(0, at);
+		const name = key.slice(at + 1);
+		if (EDITOR.has(source)) continue;
+		const slash = source.indexOf("/");
+		const app = slash === -1 ? source : source.slice(0, slash);
+		const dot = name.indexOf(".");
+		const gauge = dot === -1 ? name : name.slice(0, dot);
+		const title = gauge + " · " + app;
+		const line = [slash === -1 ? "" : source.slice(slash + 1), dot === -1 ? "" : name.slice(dot + 1)].filter(Boolean).join(" ") || app;
+		cards.set(title, [...cards.get(title) ?? [], { "name": line, points }]);
+	}
+	return [...cards].sort(([a], [b]) => a.localeCompare(b)).map(([title, lines]) => drawCard(title, lines.sort((a, b) => a.name.localeCompare(b.name)), { from })).join("");
+}
 function render(series) {
 	const now = Math.max(0, ...Object.values(series).map((points) => points.at(-1)?.[0] ?? 0));
 	const from = now - 120000;
@@ -166,15 +197,8 @@ function render(series) {
 		lines.sort((a, b) => (b.points.at(-1)?.[1] ?? 0) - (a.points.at(-1)?.[1] ?? 0));
 		if (card.nonzero) lines = lines.filter((line) => line.points.some((p) => p[1] > 0));
 		if (card.top) lines = lines.slice(0, card.top);
-		if (lines.length === 0) return "";
-		const max = card.max ?? Math.max(1, ...lines.flatMap((l) => l.points.map((p) => p[1]))) * 1.1;
-		const paths = lines.map((line, i) => {
-			const pts = line.points.filter((p) => p[0] >= from).map((p) => ((p[0] - from) / 1200).toFixed(1) + "," + (56 - (p[1] / max) * 54).toFixed(1)).join(" ");
-			return '<polyline fill="none" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke="var(' + COLORS[i % COLORS.length] + ')" points="' + pts + '"/>';
-		}).join("");
-		const legend = lines.map((line, i) => '<span style="color: var(' + COLORS[i % COLORS.length] + ')">' + line.name + " " + fmt(line.points.at(-1)?.[1] ?? 0) + "</span>").join("");
-		return '<div class="card"><div class="head"><span>' + card.title + '</span><span>max ' + fmt(max / (card.max ? 1 : 1.1)) + '</span></div><svg viewBox="0 0 100 56" preserveAspectRatio="none">' + paths + '</svg><div class="legend">' + legend + "</div></div>";
-	}).join("");
+		return drawCard(card.title, lines, { "max": card.max, from });
+	}).join("") + appCards(series, from);
 	document.getElementById("cards").innerHTML = html || '<p class="empty">Waiting for metrics…</p>';
 }
 window.addEventListener("message", (event) => { if (event.data && event.data.series) render(event.data.series); });

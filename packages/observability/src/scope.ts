@@ -4,7 +4,8 @@
  * windows') trees join a viewer's, their reports and records would land on the same ids and merge. The hub where an
  * app joins (the editor's shell, one link per preview window; netsim's referee, one per client) renames what comes
  * across, in every frame of observability traffic — architecture reports (the reporter, its topology, node ops and
- * traffic ends) on `$sys.arch.<id>`, log records on `$sys.log.<source>`, and startup backlogs: the hub across the link
+ * traffic ends) on `$sys.arch.<id>`, log records on `$sys.log.<source>`, metrics samples on `$sys.metrics.<source>`, and
+ * startup backlogs: the hub across the link
  * (its `peer`, the id its hello gave) IS the scope — `page` → `preview:5173` — and everything behind it moves under it
  * — `worker` → `preview:5173/worker`. Ids of the joining side (`keep` — the hub itself, which the app's reports name
  * as their uplink's peer) stay as they are. Nothing the app sends can pass as anything outside its scope.
@@ -14,6 +15,7 @@ import type { ArchReport, NodeOp } from "./arch.ts";
 import { mapFrame } from "@brianjenkins94/hub";
 import { ARCH_SUBJECT } from "./arch.ts";
 import { LOG_BACKLOG, LOG_SUBJECT } from "./index.ts";
+import { METRICS_SUBJECT } from "./metrics.ts";
 
 interface Frame { "subject"?: unknown; "data"?: unknown }
 interface Record { "context"?: { "source"?: unknown } }
@@ -97,6 +99,14 @@ export function scopeObservability(frame: unknown, scope: string, keep: (id: str
 
 	if (subject.startsWith(LOG_SUBJECT + ".")) {
 		return { ...(frame as object), "subject": LOG_SUBJECT + "." + always(subject.slice(LOG_SUBJECT.length + 1)), "data": scopeRecord(data, always) };
+	}
+
+	// A sample names its source twice — its subject, and its own `source` (what a monitor reads) — both under the scope.
+	if (subject.startsWith(METRICS_SUBJECT + ".")) {
+		const source = always(subject.slice(METRICS_SUBJECT.length + 1));
+		const sample = data !== null && typeof data === "object" ? { ...(data as object), "source": source } : data;
+
+		return { ...(frame as object), "subject": METRICS_SUBJECT + "." + source, "data": sample };
 	}
 
 	if (subject === LOG_BACKLOG && Array.isArray(data)) {

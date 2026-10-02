@@ -56,7 +56,7 @@ test("the edge names: whatever subject or source a peer logs under, it's filed u
 	assert.deepEqual(records.map((entry) => [entry.context?.["source"], entry.message]), [["client-0", "lying"], ["client-0/ui", "its page"], ["client-0/referee", "spoofed"]]);
 });
 
-test("observabilityPermissions: logs, backlogs and reports out, the viewers' sync in — nothing else either way", async () => {
+test("observabilityPermissions: logs, backlogs, reports and metrics out, the viewers' sync in — nothing else either way", async () => {
 	const [up, down] = pipe();
 	const root = createHub({ "id": "root" });
 	const peer = createHub({ "id": "p" });
@@ -68,7 +68,7 @@ test("observabilityPermissions: logs, backlogs and reports out, the viewers' syn
 	await Promise.all([root.link(up, { "peer": "p", "permissions": observabilityPermissions() }).ready, peer.link(down).ready]);
 	await until("each side's interest at the other", () => peer.interested("$sys.log.p") && root.interested("$sys.arch.sync"));
 
-	for (const subject of ["$sys.log.p", "$sys.log.p/ui", "$sys.arch.p", "$sys.backlog.log", "$sys.other", "game.move"]) {
+	for (const subject of ["$sys.log.p", "$sys.log.p/ui", "$sys.arch.p", "$sys.metrics.p", "$sys.backlog.log", "$sys.other", "game.move"]) {
 		peer.publish(subject, {});
 	}
 
@@ -79,8 +79,8 @@ test("observabilityPermissions: logs, backlogs and reports out, the viewers' syn
 	await until("what each may send", () => heard.includes("$sys.backlog.log") && told.includes("$sys.arch.sync"));
 	await flush(); // and what each may not, its chance to arrive
 
-	assert.deepEqual(heard.filter((subject) => !["$sys.arch.sync", "$sys.log.root", "game.state"].includes(subject)), ["$sys.log.p", "$sys.log.p/ui", "$sys.arch.p", "$sys.backlog.log"]);
-	assert.deepEqual(told.filter((subject) => !["$sys.log.p", "$sys.log.p/ui", "$sys.arch.p", "$sys.backlog.log", "$sys.other", "game.move"].includes(subject)), ["$sys.arch.sync"]);
+	assert.deepEqual(heard.filter((subject) => !["$sys.arch.sync", "$sys.log.root", "game.state"].includes(subject)), ["$sys.log.p", "$sys.log.p/ui", "$sys.arch.p", "$sys.metrics.p", "$sys.backlog.log"]);
+	assert.deepEqual(told.filter((subject) => !["$sys.log.p", "$sys.log.p/ui", "$sys.arch.p", "$sys.metrics.p", "$sys.backlog.log", "$sys.other", "game.move"].includes(subject)), ["$sys.arch.sync"]);
 });
 
 test("ownWorker marks a worker's re-raised error handled, and reports one that couldn't load", () => {

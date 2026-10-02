@@ -28,7 +28,7 @@ const FILES = {
 	// The page: starts the worker, adds the frame, and hands each one end of a channel between them.
 	"main.ts": [
 		"import { createHub, portTransport } from \"@brianjenkins94/hub\";",
-		"import { createArchReporter, linkPreviewHost, relayLoggerToHub, servePageTools } from \"@brianjenkins94/observability\";",
+		"import { createArchReporter, linkPreviewHost, relayLoggerToHub, reportMetrics, servePageTools } from \"@brianjenkins94/observability\";",
 		"",
 		"const hub = createHub({ \"id\": \"page\" });",
 		"const state: { \"hub\": string; \"results\": unknown[]; \"stray\": number; \"startedAt\": number } = { \"hub\": hub.id, \"results\": [], \"stray\": 0, \"startedAt\": performance.timeOrigin };",
@@ -38,6 +38,8 @@ const FILES = {
 		"linkPreviewHost(hub);",
 		"createArchReporter(hub);",
 		"relayLoggerToHub(hub, \"wired-page\").info(\"wired page up\");",
+		"// And a gauge on the metrics plane, as a game's frame rate would be.",
+		"reportMetrics(hub).gauge(\"results\", () => state.results.length);",
 		"(globalThis as unknown as { \"__wiredHub\": typeof hub }).__wiredHub = hub;",
 		"const worker = new Worker(new URL(\"./worker.ts\", import.meta.url), { \"type\": \"module\" });",
 		"",
@@ -94,13 +96,15 @@ const FILES = {
 	// The worker: in the page's tree, and serving an RPC on its end of the channel to the frame.
 	"worker.ts": [
 		"import { createHub, portTransport, serve } from \"@brianjenkins94/hub\";",
-		"import { createArchReporter } from \"@brianjenkins94/observability\";",
+		"import { createArchReporter, reportMetrics } from \"@brianjenkins94/observability\";",
 		"",
 		"const hub = createHub({ \"id\": \"worker\" });",
+		"let echoes = 0;",
 		"",
 		"hub.link(portTransport(globalThis));",
 		"createArchReporter(hub);",
-		"serve(hub, \"wired.echo\", (args) => ({ \"echoed\": args, \"from\": hub.id }));",
+		"reportMetrics(hub).gauge(\"echoes\", () => echoes);",
+		"serve(hub, \"wired.echo\", (args) => { echoes += 1; return { \"echoed\": args, \"from\": hub.id }; });",
 		"console.log(\"wired worker says hi\");",
 		"addEventListener(\"message\", (event: MessageEvent) => {",
 		"\tif (event.data?.port instanceof MessagePort) {",
@@ -306,6 +310,25 @@ test("the app's own hubs join the editor's tree: its startup log, its tab and it
 
 	assertEchoes(answer.results, "its tool answered, through the editor's tree");
 	assert.ok((await debugMcp.tabs(2000)).some((tab) => tab.preview !== true), "beside the editor's own tab");
+});
+
+test("the app's metrics reach the editor's metrics plane, named by the edge: its page and its worker under its window", async () => {
+	const window = "preview:" + previewPort();
+	let read = {};
+	const plane = await eventually("the app's page and worker, on the editor's metrics plane", async () => {
+		read = await session.workbench().evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.metrics.read")).catch(() => ({}));
+
+		// (The window itself is the editor's tap in it, the hub across the shell's link: the app's hubs are behind it.)
+		return read[window + "/page"]?.length > 0 && read[window + "/worker"]?.length > 0 ? read : undefined;
+	}).catch(async (error) => {
+		const app = await previewPage().evaluate(() => ({ "wants": globalThis.__wiredHub?.interested("$sys.metrics.page"), "links": globalThis.__wiredHub?.inspect().links.map((link) => link.peerId) })).catch((reason) => String(reason));
+
+		throw new Error(error.message + " — the plane has: " + Object.keys(read).join(", ") + "; the app's hub: " + JSON.stringify(app));
+	});
+
+	assert.equal(typeof plane[window + "/page"].at(-1).values["results"], "number", "the page's gauge, under its window: " + JSON.stringify(plane[window + "/page"].at(-1)));
+	assert.ok(plane[window + "/worker"].at(-1).values["echoes"] >= 1, "the worker's, under it — it has echoed the frame: " + JSON.stringify(plane[window + "/worker"].at(-1)));
+	assert.ok(!("page" in plane) && !("worker" in plane), "nothing under the app's own hub ids: " + Object.keys(plane).join(", "));
 });
 
 test("the app's link is confined: an editor subject it publishes doesn't cross into the editor", async () => {

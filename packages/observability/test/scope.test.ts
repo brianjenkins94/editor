@@ -74,6 +74,17 @@ test("two windows of one app keep apart in the viewer: each window's page IS its
 
 });
 
+test("the edge names a metrics sample — its subject and its own source — and nothing passes as outside the scope", () => {
+	const sample = (source: string) => ({ "source": source, "t": 1, "values": { "fps": 60 } });
+	const scoped = (subject: string, data: unknown) => scopeObservability({ "subject": subject, "data": data }, "preview:5180", () => false, "page") as { "subject": string; "data": { "source": string } };
+
+	// The page across the link is the scope itself; what's behind it, under it.
+	assert.deepEqual(scoped("$sys.metrics.page", sample("page")), { "subject": "$sys.metrics.preview:5180", "data": { "source": "preview:5180", "t": 1, "values": { "fps": 60 } } });
+	assert.equal(scoped("$sys.metrics.client-0", sample("client-0")).data.source, "preview:5180/client-0");
+	// A sample claiming to be the editor's is the app's all the same — by subject and by the source inside it.
+	assert.deepEqual([scoped("$sys.metrics.workbench", sample("workbench")).subject, scoped("$sys.metrics.page", sample("workbench")).data.source], ["$sys.metrics.preview:5180/workbench", "preview:5180"]);
+});
+
 test("the edge renames every app id in a report — reporter, topology, node ops, traffic, samples — and nothing of the joining side", () => {
 	const report = scopeArchReport({
 		"reporter": "page",

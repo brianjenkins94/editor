@@ -198,14 +198,14 @@ export function installHubCollector(hub: Hub, onRecord: (record: LogRecord) => v
 }
 
 /**
- * What a link lets a peer do for observability: publish logs (`$sys.log`, its startup backlog) and architecture reports
- * (`$sys.arch`), and hear the viewers' `$sys.arch.sync`. For a link the edge names (scopedTransport): whatever id the
+ * What a link lets a peer do for observability: publish logs (`$sys.log`, its startup backlog), architecture reports
+ * (`$sys.arch`) and metrics (`$sys.metrics`), and hear the viewers' `$sys.arch.sync`. For a link the edge names (scopedTransport): whatever id the
  * peer logs or reports under is renamed under its scope, so it can't pass as anyone else. Merge it into the link's own
  * permissions.
  */
 export function observabilityPermissions(): Required<LinkPermissions> {
 	return {
-		"publish": [`${LOG_SUBJECT}.>`, LOG_BACKLOG, "$sys.arch.>"],
+		"publish": [`${LOG_SUBJECT}.>`, LOG_BACKLOG, "$sys.arch.>", "$sys.metrics.>"],
 		"subscribe": ["$sys.arch.sync"]
 	};
 }
