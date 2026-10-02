@@ -5,8 +5,14 @@ import { test } from "node:test";
 import { channelTransport, createHub, createRpcClient, dataChannelTransport, frameOf, mapFrame, matches, pipe, serve, websocketTransport } from "../src/index.ts";
 
 /** Let queued deliveries (across several hops) drain. */
-function flush(): Promise<void> {
-	return new Promise((resolve) => { setTimeout(resolve, 10); });
+/** Let what's in flight land. A pipe delivers each hop on a timer of its own, so this waits timer turns, not wall time:
+ *  a loop that stalls (a busy CI runner) fires every due timer in one batch, and a fixed sleep would resolve in that batch
+ *  — before the next hop's timer even exists. Each turn queues behind every hop already scheduled, so each lets the
+ *  traffic go at least one hop further; twenty cover the longest chain here (hellos, interest and a message, three deep). */
+async function flush(): Promise<void> {
+	for (let turn = 0; turn < 20; turn++) {
+		await new Promise((resolve) => { setTimeout(resolve, 0); });
+	}
 }
 
 test("subject matching", () => {
