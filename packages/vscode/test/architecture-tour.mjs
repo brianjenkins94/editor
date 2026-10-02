@@ -10,6 +10,7 @@
  */
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
+import { until } from "@brianjenkins94/util/until";
 
 import { alive, hasLabel, startSession } from "./architecture-harness.mjs";
 
@@ -81,6 +82,44 @@ test("git review: a diff in the shell", async () => {
 	await session.until("Code Hike", hasLabel("sw", "net:lighter.codehike.org", /./u), 30_000);
 });
 
+// VS Code's new windows are panels of the shell's dock (shell-dock.ts): an editor moved out lives on, its DOM in a
+// blank frame of the shell, and comes back whichever side closes the window — VS Code (its editors restored to the
+// main window) or the user (the panel closed).
+test("dock: an editor moved into a new window lands in a panel of the shell's dock, and comes back", async () => {
+	const { page } = session;
+	const windows = page.locator("iframe[name^=\"vscode-window-\"]");
+	const panel = page.locator(".dv-tab", { "hasText": "Editors" });
+	const run = (command) => session.workbench().evaluate((id) => globalThis.__editor.api.commands.executeCommand(id), command);
+	const editorsInWindow = () => windows.first().evaluate((frame) => frame.contentDocument?.querySelectorAll(".monaco-editor").length ?? 0).catch(() => 0);
+
+	// (The git review's diff, still open over the editor region, would cover the dock's tabs.)
+	if (await page.getByTitle("Close diff").isVisible()) {
+		await page.getByTitle("Close diff").click();
+	}
+
+	await session.open("index.ts");
+	await run("workbench.action.moveEditorToNewWindow");
+	await eventually("the editor in a dock panel", async () => await windows.count() === 1 && await editorsInWindow() > 0);
+	assert.equal(await panel.count(), 1, "its panel");
+
+	// VS Code closes it: back into the main window, and the panel goes with the window.
+	await run("workbench.action.restoreEditorsToMainWindow");
+	await eventually("the window closed by VS Code", async () => await windows.count() === 0 && await panel.count() === 0);
+	assert.ok(await session.workbench().locator(".tabs-container .tab", { "hasText": "index.ts" }).count() > 0, "the editor back in the main window");
+
+	// The user closes it: the panel closed, the window gone from VS Code too.
+	await run("workbench.action.moveEditorToNewWindow");
+	await eventually("the editor in a dock panel again", async () => await windows.count() === 1 && await editorsInWindow() > 0);
+	await panel.locator(".dv-default-tab-action").click();
+	await eventually("the window closed by the user", async () => await windows.count() === 0 && await panel.count() === 0);
+	assert.deepEqual(await session.conformance(), [], "nothing needs review");
+});
+
 test("conformance: nothing observed needs review", async () => {
 	assert.deepEqual(await session.conformance(), []);
 });
+
+/** Poll `probe` (in this process) until it's truthy, waiting the way the page does. */
+function eventually(what, probe, timeoutMs = 30_000) {
+	return until(what, probe, { "timeoutMs": timeoutMs, "intervalMs": 250, "sleep": (ms) => session.page.waitForTimeout(ms) });
+}

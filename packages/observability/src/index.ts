@@ -489,11 +489,16 @@ function describeTab(tab: string, hub: Hub): TabInfo {
 /**
  * The editor window hosting this page, when it's the TOP frame of an editor preview (served under `/__virtual__/`);
  * undefined otherwise — including in a frame the app nests inside its page, which reaches the editor through the
- * app's own hub tree (linking it too would make a cycle).
+ * app's own hub tree (linking it too would make a cycle). A preview popped out into a browser window of its own has
+ * no parent: its host is the editor that opened it (the window's page tap says it's a preview window).
  */
 export function previewHost(): Window | undefined {
-	if (typeof window === "undefined" || window.parent === window || !location.pathname.includes("/__virtual__/")) {
+	if (typeof window === "undefined" || !location.pathname.includes("/__virtual__/")) {
 		return undefined;
+	}
+
+	if (window.parent === window) {
+		return editorTap() === undefined ? undefined : (window.opener as Window | null) ?? undefined;
 	}
 
 	try {

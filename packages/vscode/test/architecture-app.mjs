@@ -164,6 +164,15 @@ function assertEchoes(results, message) {
 	assert.ok(results.length > 0 && results.every((result) => result.echoed === "hi" && result.from === "worker"), (message ?? "the frame reached the worker") + ": " + JSON.stringify(results));
 }
 
+/** The preview page's echoes, once its app has some — right after the page reloads, its frame hasn't asked yet. */
+function echoesOnceRunning() {
+	return eventually("its app running", async () => {
+		const results = (await previewPage()?.evaluate(() => globalThis.__wired).catch(() => undefined))?.results;
+
+		return results?.length > 0 ? results : undefined;
+	});
+}
+
 /** Every preview window's top page (not their nested frames), in the order the windows opened. */
 function previewPages() {
 	// (A frame can be without a URL for a moment, as it's made: not a preview page yet.)
@@ -444,8 +453,47 @@ test("a preview window dropped on the editor area runs in a VS Code editor: its 
 	await session.workbench().locator("button[title^=\"Move \"]").click();
 	await eventually("the page back in the dock", async () => previewPages().some((frame) => frame.parentFrame() === session.page.mainFrame()));
 	await eventually("its hubs rejoined again", async () => pageUps() === ups + 2);
-	assertEchoes((await previewPage().evaluate(() => globalThis.__wired)).results);
+	assertEchoes(await echoesOnceRunning());
 	assert.deepEqual((await session.conformance()).filter((violation) => violation.id !== override()), [], "still nothing to review");
+});
+
+test("a preview window popped out into a browser window of its own: its hubs rejoin through its opener, an edit reaches it, and closing it brings it back", async () => {
+	const port = previewPort();
+	const window = "preview:" + port;
+	const pageUps = () => debugMcp.store.queryLogs({ "source": window + "/wired-page", "textIncludes": "wired page up" }).length;
+	const ups = pageUps();
+	const opened = session.page.waitForEvent("popup");
+
+	// "Pop out", in its panel's header (shell-preview.ts): its page reopens in a window named as the preview window.
+	// (By its aria-label: a wa-button doesn't reflect its title to an attribute.)
+	await session.page.locator("wa-button[aria-label=\"Pop out into its own window\"]").first().click();
+
+	const popup = await opened;
+
+	await eventually("its app running in its own window", async () => (await popup.evaluate(() => globalThis.__wired).catch(() => undefined))?.results?.length > 0);
+	assert.equal(await popup.evaluate(() => globalThis.__editorTap?.window), window, "its tap knows its window by the popup's name");
+	assert.ok(!previewPages().some((frame) => frame.parentFrame() === session.page.mainFrame()), "nothing left of it in the dock but its placeholder");
+
+	// No parent to link to: its tap links to its opener, the shell, which takes the window's traffic from the popup.
+	await eventually("its hubs rejoined through its opener", async () => pageUps() === ups + 1);
+	assertEchoes((await popup.evaluate(() => globalThis.__wired)).results, "its frame reached its worker");
+	assert.deepEqual((await session.conformance()).filter((violation) => violation.id !== override()), [], "nothing needs review");
+
+	// An edit reaches it there: the shell posts the dev server's HMR into the popup's frames.
+	await session.workbench().evaluate(async () => {
+		const api = globalThis.__editor.api;
+		const uri = api.Uri.file("/workspace/apps/wired/frame.ts");
+		const text = new TextDecoder().decode(await api.workspace.fs.readFile(uri)).replace(/wired frame v\d+/u, "wired frame popped");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
+	});
+	await eventually("its frame reloaded with the edit", async () => (await popup.frames().find((frame) => frame.url().includes("frame.html"))?.evaluate(() => document.title)) === "wired frame popped");
+
+	// Closing its window brings the page back into the dock, where it rejoins once more.
+	await popup.close();
+	await eventually("the page back in the dock", async () => previewPages().some((frame) => frame.parentFrame() === session.page.mainFrame()));
+	await eventually("its hubs rejoined again", async () => pageUps() === ups + 2);
+	assertEchoes(await echoesOnceRunning());
 });
 
 /** A locally served observability tarball (ARCH_OBSERVABILITY_TGZ) is a network endpoint only this run uses. */
