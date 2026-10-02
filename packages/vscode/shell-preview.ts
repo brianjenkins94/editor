@@ -23,12 +23,12 @@ import type { ArchSink } from "@brianjenkins94/observability";
 import type { LinkPermissions, Transport } from "@brianjenkins94/hub";
 import { createRpcClient, rpcCallSubject, rpcReplySubject, serve, windowTransport } from "@brianjenkins94/hub";
 import { installWindowMessageProbe, LOG_SUBJECT, scopedTransport } from "@brianjenkins94/observability";
-import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, RotateCcw, Unplug } from "lucide";
+import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, RotateCcw, SquareArrowDownLeft, SquareArrowOutUpRight, Unplug } from "lucide";
 import type { DevtoolsPanel } from "./preview-devtools";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import { css, iconSvg } from "./theme";
 import { parseVirtual, PREVIEW_WINDOW_PREFIX, previewPageOf, windowId, windowTitle } from "./virtual-path";
-import { createPaneWindow, type PaneWindow } from "./window";
+import { createPaneWindow, type PaneWindow, type PaneWindowFactory } from "./window";
 
 /** Levels the preview tap emits — anything else is coerced to "info". */
 const OBS_LEVELS = new Set(["trace", "debug", "info", "warn", "error", "fatal"]);
@@ -53,6 +53,13 @@ const promptLayer = css({
 	"&.open": { "display": "flex" }
 });
 const promptCard = css({ "width": "min(420px, 100%)", "boxShadow": "var(--wa-shadow-l)" });
+// What a preview window shows while its page is popped out into a browser window of its own.
+const poppedLayer = css({
+	"position": "absolute", "inset": 0, "zIndex": 4,
+	"display": "flex", "flexDirection": "column", "alignItems": "center", "justifyContent": "center", "gap": "var(--wa-space-s)",
+	"backgroundColor": "var(--wa-color-surface-default)", "color": "var(--wa-color-text-quiet)",
+	"&[hidden]": { "display": "none" }
+});
 const promptTitle = css({ "display": "block", "fontWeight": "var(--wa-font-weight-semibold)", "marginBlockEnd": "var(--wa-space-2xs)" });
 const promptScope = css({ "display": "block", "fontFamily": "var(--wa-font-family-code, monospace)", "fontSize": "12px", "wordBreak": "break-all", "color": "var(--wa-color-text-quiet)", "marginBlockEnd": "var(--wa-space-s)" });
 const promptActions = css({ "display": "flex", "flexWrap": "wrap", "gap": "var(--wa-space-2xs)", "justifyContent": "flex-end" });
@@ -103,12 +110,16 @@ interface PreviewSurface {
 	/** Serializes THIS window's capability prompts through its overlay, one at a time (another window's prompt can
 	 *  show concurrently on its own overlay). */
 	"promptChain": Promise<unknown>;
+	/** Its page, popped out into a browser window of its own (named as this window, so the page's tap still knows
+	 *  which it is; it links to its opener — this shell — instead of a parent). The frame shows `poppedEl` meanwhile. */
+	"popup"?: { "window": Window; "url": string; "watch": ReturnType<typeof setInterval> };
+	"poppedEl": HTMLDivElement;
 }
 
 /** Wire the preview windows to a hub that reaches the app realm (the shell hub). Idempotent per shell. `sink` puts
  *  the windows on the live architecture diagram: each iframe's lifetime, what the shell posts into it, and — through
  *  a window message probe — everything any frame posts up to the shell, attributed to the iframe it came from. */
-export function installShellPreview(hub: Hub, sink?: ArchSink): void {
+export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneWindowFactory = createPaneWindow): void {
 	/** Every window, by id. */
 	const surfaces = new Map<string, PreviewSurface>();
 	/** Each port's next window number — only ever counts up (see openWindow). */
@@ -128,6 +139,8 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	const lastUsed = (list: PreviewSurface[]): PreviewSurface | undefined => list.toSorted((a, b) => b.usedAt - a.usedAt)[0];
 	/** The port's window a prompt or the toolbar goes to: the one last used; with no port, the last used of all. */
 	const windowFor = (port: number | undefined): PreviewSurface | undefined => lastUsed(port === undefined ? [...surfaces.values()] : windowsOf(port));
+	/** Where a window's page is: its frame's, or the browser window it's popped out into. */
+	const pageOf = (surface: PreviewSurface): Window | null => surface.popup?.window ?? surface.frame.contentWindow;
 	const record = (to: string, label: string, bytes?: number): void => { sink?.record(sink.self, to, "message", label, bytes); };
 
 	// The tsval debugger's render surface (debug-preview.html) gets its OWN window too — a live runtime surface, like
@@ -163,10 +176,19 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	// restart + stop always.
 	const renderDebugToolbar = (): void => {
 		for (const surface of surfaces.values()) {
-			// Every app window has "new window" and DevTools.
+			// Every app window has "new window", DevTools (docked under the frame, so not while popped out) and pop out.
+			const devtools = headerButton(Bug, surface.devtools === undefined ? "DevTools" : "Close DevTools", () => { toggleDevtools(surface); }, surface.devtools !== undefined);
+
+			if (surface.popup !== undefined) {
+				devtools.setAttribute("disabled", "");
+			}
+
 			surface.paneWindow.headerActions.replaceChildren(
 				headerButton(AppWindow, "New window", () => { openWindow(surface.port, { "from": surface }); }),
-				headerButton(Bug, surface.devtools === undefined ? "DevTools" : "Close DevTools", () => { toggleDevtools(surface); }, surface.devtools !== undefined)
+				devtools,
+				surface.popup === undefined
+					? headerButton(SquareArrowOutUpRight, "Pop out into its own window", () => { popOut(surface); })
+					: headerButton(SquareArrowDownLeft, "Bring back", () => { bringBack(surface); })
 			);
 		}
 
@@ -229,6 +251,72 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		renderDebugToolbar();
 	};
 
+	/**
+	 * Pop a window's page out into a browser window of its own. Its page reloads there — a page can't move between
+	 * windows — and its tap, finding no parent, links to its opener: this shell, which now takes the window's traffic
+	 * from the popup (the window's link reads its page through `pageOf`). It's still served from this tab, so it lives
+	 * as long as the editor does. Closing the popup brings the page back; so does "Bring back".
+	 */
+	const popOut = (surface: PreviewSurface): void => {
+		let url = surface.frame.src;
+
+		try {
+			url = surface.frame.contentWindow?.location.href ?? url; // where it's got to, not where it started
+		} catch { /* not readable: where it started */ }
+
+		const rect = surface.frame.getBoundingClientRect();
+
+		// Named as the window: the page's tap knows its window by its top frame's name. The frame gives the name up
+		// first — `window.open` into a name an existing frame has navigates that frame instead of opening a window. Its
+		// window's name, not its `name` attribute: the attribute names a frame once, when it's created.
+		setFrameName(surface.frame, "");
+
+		const popup = window.open(url, surface.id, `popup,width=${Math.max(320, Math.round(rect.width))},height=${Math.max(240, Math.round(rect.height))}`);
+
+		if (popup === null) {
+			setFrameName(surface.frame, surface.id);
+
+			return; // blocked
+		}
+
+		if (surface.devtools !== undefined) {
+			toggleDevtools(surface);
+		}
+
+		surface.popup = { "window": popup, "url": url, "watch": setInterval(() => { if (popup.closed) { bringBack(surface); } }, 500) };
+		surface.frame.src = "about:blank";
+		surface.poppedEl.hidden = false;
+		record(surface.id, "pop out");
+		renderDebugToolbar();
+	};
+
+	/** Bring a popped-out page back into its window, at the page it's on (or popped out at, if its window's gone). */
+	const bringBack = (surface: PreviewSurface): void => {
+		const popup = surface.popup;
+
+		if (popup === undefined) {
+			return;
+		}
+
+		let url = popup.url;
+
+		try {
+			// Where it's got to — if it's still on one of the server's pages (not a blank, or a page it navigated away to).
+			const showing = popup.window.closed ? undefined : previewPageOf(popup.window.location.href);
+
+			url = showing?.port === surface.port ? showing.url : url;
+		} catch { /* not readable: where it popped out */ }
+
+		clearInterval(popup.watch);
+		surface.popup = undefined;
+		popup.window.close();
+		surface.poppedEl.hidden = true;
+		setFrameName(surface.frame, surface.id); // kept across the navigation: the page's tap reads it
+		surface.frame.src = url;
+		record(surface.id, "bring back");
+		renderDebugToolbar();
+	};
+
 	/** A running server's bookkeeping: its HMR goes into every window of the port — and every frame the app nests in
 	 *  each (a game's instance iframes), each with its own HMR client, which acts only on modules it loaded (React Fast
 	 *  Refresh, state preserved; anything else reloads that frame). */
@@ -244,8 +332,10 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 				for (const surface of windowsOf(port)) {
 					record(surface.id, "hmr " + ((message as { "type"?: string } | null)?.type ?? "update"));
 
-					if (surface.frame.contentWindow !== null) {
-						for (const target of framesUnder(surface.frame.contentWindow)) {
+					const page = pageOf(surface);
+
+					if (page !== null) {
+						for (const target of framesUnder(page)) {
 							target.postMessage(message, "*");
 						}
 					}
@@ -273,7 +363,12 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 			sink?.terminate("devtools:" + surface.key);
 		}
 
-		surface.paneWindow.element.remove();
+		if (surface.popup !== undefined) {
+			clearInterval(surface.popup.watch);
+			surface.popup.window.close();
+		}
+
+		surface.paneWindow.close();
 		surfaces.delete(surface.id);
 		hub.publish("page_tools.changed", { "preview": surface.port, "window": surface.id }); // its app's tools went with it
 		sink?.terminate(surface.id);
@@ -297,7 +392,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		const height = Math.min(600, window.innerHeight - 120);
 		const width = Math.min(520, window.innerWidth - 80);
 		const anchor = (from ?? windowsOf(port).at(-1))?.paneWindow.element.getBoundingClientRect();
-		const paneWindow = createPaneWindow({
+		const paneWindow = makeWindow({
 			"title": `${windowTitle(id)} · ${previewMode}`, // titlebar states the window + which debug run type drives it
 			"storageKey": id,
 			"width": width,
@@ -323,6 +418,25 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		promptEl.className = promptLayer();
 		paneWindow.body.appendChild(promptEl);
 
+		const poppedEl = document.createElement("div");
+		const poppedNote = document.createElement("span");
+		const poppedBack = document.createElement("wa-button");
+
+		poppedEl.className = poppedLayer();
+		poppedEl.hidden = true;
+		poppedNote.textContent = "Open in its own window";
+		poppedBack.setAttribute("size", "small");
+		poppedBack.textContent = "Bring back";
+		poppedBack.addEventListener("click", () => {
+			const surface = surfaces.get(id);
+
+			if (surface !== undefined) {
+				bringBack(surface);
+			}
+		});
+		poppedEl.append(poppedNote, poppedBack);
+		paneWindow.body.appendChild(poppedEl);
+
 		// The app's own hubs join the editor's tree here — its page's root hub links to us (observability's
 		// linkPreviewHost) — so its logs, architecture and page tools reach the log plane and debug-mcp, as part of this
 		// tab. Non-transit (two windows never reach each other), known by the window's id, confined to what an app needs
@@ -330,9 +444,14 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		// hubs alike (`page`, …), and two windows' must not merge. A new page (a reload) re-reads its tools: announce the
 		// change for debug-mcp.
 		const reporters = new Set<string>();
-		// (Its window looked up on each message: null until the frame is in the document. What's sent while there's none
-		// is dropped; hub's hello handshake recovers.)
-		const unlinkApp = hub.link(scopedTransport(windowTransport(() => frame.contentWindow, location.origin), id, {
+		// (Its window looked up on each message: null until the frame is in the document, the popup while it's popped out.
+		// What's sent while there's none is dropped; hub's hello handshake recovers.)
+		const page = (): Window | null => {
+			const surface = surfaces.get(id);
+
+			return surface === undefined ? frame.contentWindow : pageOf(surface);
+		};
+		const unlinkApp = hub.link(scopedTransport(windowTransport(page, location.origin), id, {
 			// The edge names the app's contexts: its page IS this window, the rest under it; the shell keeps its name.
 			"keep": (other) => other === hub.id,
 			// Who reported, so closing the window can end them all (see closeWindow).
@@ -347,7 +466,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 
 		frame.addEventListener("load", () => { hub.publish("page_tools.changed", { "preview": port, "window": id }); });
 
-		const surface: PreviewSurface = { "id": id, "key": id.slice(PREVIEW_WINDOW_PREFIX.length), "port": port, "index": index, "usedAt": Date.now(), "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "unlinkApp": unlinkApp, "reporters": reporters, "height": height, "promptChain": Promise.resolve() };
+		const surface: PreviewSurface = { "id": id, "key": id.slice(PREVIEW_WINDOW_PREFIX.length), "port": port, "index": index, "usedAt": Date.now(), "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "unlinkApp": unlinkApp, "reporters": reporters, "height": height, "promptChain": Promise.resolve(), "poppedEl": poppedEl };
 
 		// The window last touched is the port's for prompts and the debug toolbar.
 		paneWindow.element.addEventListener("pointerdown", () => { surface.usedAt = Date.now(); }, { "capture": true });
@@ -399,6 +518,10 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		const base = new URL(info.url, location.href);
 
 		for (const surface of windowsOf(port)) {
+			if (surface.popup !== undefined) {
+				continue; // its page is in its own window, which keeps it
+			}
+
 			const showing = surface.frame.src === "" ? undefined : new URL(surface.frame.src, location.href);
 
 			if (showing === undefined || showing.origin !== base.origin || !showing.pathname.startsWith(base.pathname)) {
@@ -442,7 +565,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 		}
 
 		tsvalSurface?.port?.close();
-		tsvalSurface?.paneWindow.element.remove();
+		tsvalSurface?.paneWindow.close();
 		tsvalSurface = undefined;
 		renderDebugToolbar();
 	};
@@ -454,7 +577,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 			return;
 		}
 
-		const paneWindow = createPaneWindow({
+		const paneWindow = makeWindow({
 			"title": "tsval Preview",
 			"storageKey": "tsval-preview",
 			"width": Math.min(460, window.innerWidth - 80),
@@ -559,7 +682,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 	let promptOnly: { "paneWindow": PaneWindow; "promptEl": HTMLDivElement; "promptChain": Promise<unknown> } | undefined;
 	const promptWindow = (): NonNullable<typeof promptOnly> => {
 		if (promptOnly === undefined) {
-			const paneWindow = createPaneWindow({ "title": "Capability request", "storageKey": "capability-prompt", "width": Math.min(460, window.innerWidth - 80), "height": 220, "onClose": () => { paneWindow.element.remove(); } });
+			const paneWindow = createPaneWindow({ "title": "Capability request", "storageKey": "capability-prompt", "width": Math.min(460, window.innerWidth - 80), "height": 220, "onClose": () => { paneWindow.close(); } });
 			const promptEl = document.createElement("div");
 
 			promptEl.className = promptLayer();
@@ -608,7 +731,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 
 	/** The preview window a message came from: its iframe's window, or any frame nested in it (the app's own iframes). */
 	function surfaceOf(source: MessageEventSource | null): PreviewSurface | undefined {
-		return [...surfaces.values()].find((surface) => isWithin(source, surface.frame.contentWindow));
+		return [...surfaces.values()].find((surface) => isWithin(source, pageOf(surface)));
 	}
 
 	/** One record from a preview's page or worker tap, onto the log plane under `source` (the window it's from). */
@@ -715,6 +838,16 @@ export function installShellPreview(hub: Hub, sink?: ArchSink): void {
 			openWindow(target.port, { "url": target.url, "from": surface });
 		}
 	});
+}
+
+/** Rename a frame's browsing context (what `window.open` targets and its pages read as `window.name`) — the frame's
+ *  `name` attribute only names it at creation. Same origin, so its window is ours to rename. */
+function setFrameName(frame: HTMLIFrameElement, name: string): void {
+	frame.name = name;
+
+	if (frame.contentWindow !== null) {
+		frame.contentWindow.name = name;
+	}
 }
 
 /** `root` and every frame nested in it, depth first — cross-origin ones included (postMessage reaches them). */

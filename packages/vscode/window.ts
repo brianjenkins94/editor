@@ -29,7 +29,12 @@ export interface PaneWindow {
 	"setBodyHeight": (height: number) => void;
 	/** Append to <body> if not already shown. */
 	"show": () => void;
+	/** Take the window away (without calling its `onClose`: that's for the user closing it). */
+	"close": () => void;
 }
+
+/** Makes a window — a floating one (createPaneWindow) or a panel of the shell's dock (shell-dock.ts). */
+export type PaneWindowFactory = (options: PaneWindowOptions) => PaneWindow;
 
 interface Persisted { "left"?: number; "top"?: number; "collapsed"?: boolean }
 
@@ -185,6 +190,7 @@ export function createPaneWindow(options: PaneWindowOptions): PaneWindow {
 		"headerActions": headerExtras,
 		"setCollapsed": setCollapsed,
 		"setBodyHeight": (next: number) => { body.style.height = next + "px"; },
-		"show": show
+		"show": show,
+		"close": () => { win.remove(); }
 	};
 }

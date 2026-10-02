@@ -358,7 +358,8 @@ function Shell() {
 
 		const shellHub = createHub({ "id": "shell" });
 		// The main region is a dock: the editor iframe is its fixed panel, VS Code's new windows dock around it.
-		const { "editorFrame": appFrame } = createShellDock(dockHost, shellHub);
+		const dock = createShellDock(dockHost, shellHub);
+		const appFrame = dock.editorFrame;
 
 		// Load the SAME page into the iframe; that instance sees `window.parent !== window` → main.tsx boots the app.
 		performance.mark("shell/app-iframe");
@@ -370,7 +371,7 @@ function Shell() {
 
 		// The preview windows live in the top frame so they can roam beyond the editor — the app dev-server previews AND
 		// the tsval debugger's render surface, all managed here. See shell-preview.ts / debug-preview-view.ts.
-		installShellPreview(shellHub, architecture);
+		installShellPreview(shellHub, architecture, dock.window);
 		reportShellMetrics(shellHub); // its long frames, on the metrics plane (editor-metrics.ts)
 
 		// The editor (workbench iframe) follows the OS theme too. The shell is the source of truth for the OS

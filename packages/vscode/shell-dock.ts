@@ -21,6 +21,7 @@ import type { DockviewApi, IContentRenderer } from "dockview-core";
 import { serve } from "@brianjenkins94/hub";
 import { createDockview, themeDark, themeLight } from "dockview-core";
 import dockviewCss from "dockview:css";
+import type { PaneWindowFactory } from "./window";
 import { css } from "./theme";
 
 /** The editor's panel (and its iframe's) id. */
@@ -28,14 +29,34 @@ const EDITOR_PANEL = "editor";
 /** Prefix of a VS Code window's panel id and frame name. */
 const WINDOW_PREFIX = "vscode-window-";
 
+/** Prefix of a window panel's id (a preview, the tsval render surface — see `window`). */
+const PANE_PREFIX = "pane-";
+/** The height of a group's tab bar, above a window panel's body. */
+const TAB_BAR_HEIGHT = 35;
+
 // A panel's content box, and the iframe filling it.
 const fillCss = css({ "width": "100%", "height": "100%" });
 const frameCss = css({ "display": "block", "width": "100%", "height": "100%", "border": 0 });
+// A window panel's body: what its owner puts in it fills it (an iframe, or the iframe over DevTools).
+const paneBodyCss = css({ "position": "relative", "width": "100%", "height": "100%", "overflow": "hidden", "& > iframe": { "display": "block", "width": "100%", "height": "100%", "border": 0 } });
+// A window panel's header actions, shown in its group's tab bar while it's the group's active panel.
+const paneActionsCss = css({ "display": "flex", "alignItems": "center", "height": "100%", "gap": "var(--wa-space-3xs)", "paddingInline": "var(--wa-space-2xs)" });
 
 export interface ShellDock {
 	"api": DockviewApi;
 	/** The editor iframe, in its fixed panel. Not loaded: the shell points it at the app. */
 	"editorFrame": HTMLIFrameElement;
+	/** A window as a panel of the dock — floating where the options put it, to be docked anywhere from there. */
+	"window": PaneWindowFactory;
+}
+
+/** A window panel's parts, made before its panel is added and handed to dockview by the panel's id. */
+interface Pane {
+	"body": HTMLElement;
+	"actions": HTMLElement;
+	"onClose"?: () => void;
+	/** Its owner is closing it (`close()`), not the user: don't call `onClose`. */
+	"closing": boolean;
 }
 
 function frameElement(name?: string): HTMLIFrameElement {
@@ -74,14 +95,52 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 	/** VS Code windows VS Code itself is closing — their panel's removal mustn't tell VS Code it closed. */
 	const closingFromVscode = new Set<string>();
 	let windowCount = 0;
+	const panes = new Map<string, Pane>();
+	let paneCount = 0;
 
 	const scheme = window.matchMedia("(prefers-color-scheme: dark)");
 	const api = createDockview(host, {
 		"theme": scheme.matches ? themeDark : themeLight,
 		"floatingGroupBounds": "boundedWithinViewport",
+		// A window panel's header actions sit in its group's tab bar, the active panel's showing.
+		"createRightHeaderActionComponent": () => {
+			const element = document.createElement("div");
+			let listener: { "dispose": () => void } | undefined;
+
+			return {
+				"element": element,
+				"init": ({ api: groupApi, group }) => {
+					const render = (): void => {
+						const pane = group.activePanel === undefined ? undefined : panes.get(group.activePanel.id);
+
+						element.replaceChildren(...pane === undefined ? [] : [pane.actions]);
+					};
+
+					render();
+					listener = groupApi.onDidActivePanelChange(render);
+				},
+				"dispose": () => { listener?.dispose(); }
+			};
+		},
 		"createComponent": ({ id, name }) => {
 			if (name === "editor") {
 				return frameContent(editorFrame);
+			}
+
+			if (name === "pane") {
+				const pane = panes.get(id)!;
+
+				return {
+					"element": pane.body,
+					"init": () => undefined,
+					"dispose": () => {
+						panes.delete(id);
+
+						if (!pane.closing) {
+							pane.onClose?.();
+						}
+					}
+				};
 			}
 
 			const frame = frameElement(id);
@@ -151,5 +210,51 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 		}
 	});
 
-	return { "api": api, "editorFrame": editorFrame };
+	const paneWindow: PaneWindowFactory = (options) => {
+		paneCount += 1;
+
+		const id = PANE_PREFIX + paneCount;
+		const body = document.createElement("div");
+		const actions = document.createElement("div");
+		const pane: Pane = { "body": body, "actions": actions, "onClose": options.onClose, "closing": false };
+
+		body.className = paneBodyCss();
+		actions.className = paneActionsCss();
+		panes.set(id, pane);
+
+		// It opens floating, as the floating windows did — where asked (viewport coordinates), else centred — at the
+		// asked size plus the tab bar, all inside the dock.
+		const origin = host.getBoundingClientRect();
+		const width = Math.min(options.width ?? 640, origin.width * 0.9);
+		const height = Math.min((options.height ?? 480) + TAB_BAR_HEIGHT, origin.height * 0.9);
+		const clamp = (value: number, max: number): number => Math.max(0, Math.min(value, max));
+		const panel = api.addPanel({
+			"id": id,
+			"component": "pane",
+			"title": options.title,
+			"renderer": "always",
+			"floating": {
+				"x": clamp(options.left === undefined ? (origin.width - width) / 2 : options.left - origin.left, origin.width - width),
+				"y": clamp(options.top === undefined ? (origin.height - height) / 2 : options.top - origin.top, origin.height - height),
+				"width": width,
+				"height": height
+			}
+		});
+
+		return {
+			"element": body,
+			"body": body,
+			"headerActions": actions,
+			// The dock sizes a panel; there's no collapsed state.
+			"setCollapsed": () => undefined,
+			"setBodyHeight": () => undefined,
+			"show": () => { panel.api.setActive(); },
+			"close": () => {
+				pane.closing = true;
+				panel.api.close();
+			}
+		};
+	};
+
+	return { "api": api, "editorFrame": editorFrame, "window": paneWindow };
 }

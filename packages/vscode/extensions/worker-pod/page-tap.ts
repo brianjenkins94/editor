@@ -30,7 +30,8 @@ export interface EditorTap {
 
 type TapWindow = Window & { "__editorTap"?: EditorTap; "__obsTap"?: true };
 
-/** The editor window hosting this preview: above every frame the app nests in it, each a preview page too. */
+/** The editor window hosting this preview: above every frame the app nests in it, each a preview page too — or, for a
+ *  preview popped out into a browser window of its own, the editor that opened it. */
 function findHost(): { "host": Window; "top": TapWindow } {
 	let current: Window = window;
 
@@ -40,7 +41,9 @@ function findHost(): { "host": Window; "top": TapWindow } {
 		}
 	} catch { /* a parent we can't read: the top we have */ }
 
-	return { "host": current.parent, "top": current as TapWindow };
+	const opener = current.parent === current ? (current.opener as Window | null) : null;
+
+	return { "host": opener ?? current.parent, "top": current as TapWindow };
 }
 
 /** The top frame's tap: the window's hub, and what it offers. */
