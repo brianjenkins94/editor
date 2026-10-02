@@ -151,6 +151,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "workspace.changed", "hubs": ["workbench", "node"], "description": "Every change a realm makes to the shared workspace — persisted and announced by the workbench; dev servers hot-reload from it." },
 	{ "pattern": "workspace.buffer", "hubs": ["workbench", "node"], "description": "The node worker asks for the shared workspace buffer." },
 	{ "pattern": "node.>", "hubs": ["workbench", "pod", "node"], "description": "Node runs: start, stdout, exit, stdin." },
+	{ "pattern": "runs.>", "hubs": ["workbench", "pod", "root"], "description": "What's running (runs.ts): every terminal's runs — services and tasks — as the list changes, and its list and stop calls, for the status bar's running list and the runs page tool." },
 	{ "pattern": "classify.>", "hubs": ["workbench", "classify"], "description": "Cosmetic/semantic verdicts and edit-burst grouping (cancellable)." },
 	{ "pattern": "recognizer.project", "hubs": ["workbench", "recognizer"], "description": "Project a game into the event sheet's model." },
 	{ "pattern": "provoke.round", "hubs": ["node", "provoke"], "description": "One cold transform round: the workspace buffer in, failures out." },

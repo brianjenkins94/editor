@@ -143,6 +143,19 @@ export function editorPageTools(hub: Hub): PageTool[] {
 			return result;
 		}
 	}, {
+		"name": "runs",
+		"description": "What's running in the editor, and what ran lately: every terminal's runs — a SERVICE runs until stopped (a dev server: `vite`, `npm run dev`, with its preview port), a TASK runs to completion (a `node` script) — each with its id, title, cwd, the terminal it came from, state (running / exited / failed / stopped), start and end times and exit code. Pass `stop` with a run's id to stop it.",
+		"inputSchema": schema({
+			"stop": { "type": "string", "description": "A running run's id, to stop it." }
+		}),
+		"handler": async ({ stop }, { signal }) => {
+			if (typeof stop === "string") {
+				return { "stopped": await request("runs.stop", { "id": stop }, signal) };
+			}
+
+			return request("runs.list", undefined, signal);
+		}
+	}, {
 		"name": "preview_profile",
 		"description": "CPU-profile the PREVIEWED APP's page for a while (the JS Self-Profiling API, in that page's own realm) and return where its time went: the busiest functions by self time (selfMs) and with what they called (totalMs), each with its script url and line, plus idleMs and durationMs. A docked preview shares the editor's thread, so editor functions can appear too — the app's are the ones whose url is under /__virtual__/. Set `full` for the whole Chrome .cpuprofile as well (it can be large). Requires that preview to be open (run the app first); a page from before the editor served the profiling policy needs a reload.",
 		"inputSchema": schema({

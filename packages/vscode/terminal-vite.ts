@@ -33,9 +33,24 @@ function stamp(): string {
 }
 
 /** The `vite` command. `runner` drives the worker preview; `writeLive` streams to the terminal as it runs. */
-export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput): CustomCommand {
+export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput, terminal: number): CustomCommand {
 	return defineCommand("vite", async (_args, ctx) => {
+		// One dev server per directory: a second `vite` here would only start a copy on the next port, unseen beside the
+		// first. Say where the first is instead.
+		const serving = runner.runs.runningService((run) => run.cwd === ctx.cwd);
+
+		if (serving !== undefined) {
+			const where = "terminal" in serving.origin ? ` in terminal ${serving.origin.terminal}` : "";
+
+			return { "stdout": "", "stderr": `vite: ${ctx.cwd} is already being served${serving.port === undefined ? "" : " on :" + serving.port}${where} (${serving.title}) — its preview is open. Stop it there (Ctrl-C), or from the running list, to start it again.\n`, "exitCode": 1 };
+		}
+
 		const port = allocatePort(); // its own port + preview window, so concurrent dev servers coexist
+		// (`npm run` passes the script's name in the environment it runs it with — ctx.env, not the exported one.)
+		const event = Object.fromEntries(ctx.env)["npm_lifecycle_event"] ?? ctx.exportedEnv?.["npm_lifecycle_event"];
+		let stop = (): void => { /* set below, once it's blocking */ };
+		// A service — it runs until it's stopped — in the running list, as it was asked for (`npm run dev` runs `vite`).
+		const run = runner.runs.start({ "title": event === undefined ? "vite" : "npm run " + event, "kind": "service", "cwd": ctx.cwd, "origin": { "terminal": terminal }, "port": port }, () => { stop(); });
 
 		runner.openPreview(ctx.cwd, port);
 		// Present the dev server as a VS Code debug session too (the "production" debug mode) — it shows in Run and
@@ -67,6 +82,7 @@ export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput): Cu
 			}
 
 			ctx.signal?.addEventListener("abort", () => { resolve(); }, { "once": true });
+			stop = resolve; // the running list's Stop
 			offStop = runner.onProductionStop(sessionId, () => { resolve(); });
 			offClosed = runner.onPreviewClose(port, () => { resolve(); });
 		});
@@ -77,6 +93,7 @@ export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput): Cu
 		runner.endProductionSession(sessionId);
 		runner.closePreview(port);
 		inUsePorts.delete(port); // free it for the next run
+		run.end(130, true);
 		writeLive("out", "\n  [2mvite: dev server stopped[0m\n");
 
 		return { "stdout": "", "stderr": "", "exitCode": 130 };

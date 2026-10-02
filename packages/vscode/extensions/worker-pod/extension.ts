@@ -24,6 +24,7 @@ import { registerDebugToolbar } from "./debug-toolbar";
 import { registerMetricsBridge } from "./metrics-bridge";
 import { podHub } from "./pod";
 import { registerProductionDebug } from "./production-adapter";
+import { registerRunning } from "./running";
 
 /** A run target's repo-relative identity — strips the /workspace root; "." for the root itself. */
 function repoRelative(path: string): string {
@@ -140,6 +141,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	context.subscriptions.push({ "dispose": podHub.subscribe("pod.ready", (data) => { podLog.info("worker joined", data as Record<string, unknown>); }) });
 	// The metrics plane's samples, for VS Code's side (the insights monitor reads them by command).
 	registerMetricsBridge(context);
+	// What's running, in the status bar (the run registry's list, runs.ts).
+	registerRunning(context);
 
 	// port → preview run id, so a shell-forwarded WS/WebRTC decision (keyed by the preview's port, which is all the
 	// shim knows) attributes to the run that owns that port — the same port→run attribution the SW does for net.

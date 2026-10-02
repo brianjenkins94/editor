@@ -15,6 +15,8 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
+import type { RunRegistry } from "./runs";
+import { createRunRegistry } from "./runs";
 
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
 export type NodeOutput = (stream: "out" | "err", data: string) => void;
@@ -24,6 +26,8 @@ export interface NodeRunHooks { "onOutput": NodeOutput; "signal"?: AbortSignal }
 export interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": Uint8Array }
 
 export interface NodeRunner {
+	/** What's running — every terminal's runs, in one registry (runs.ts). */
+	"runs": RunRegistry;
 	/** Run `file` (already resolved against cwd) to completion, streaming output; resolves with its exit code. */
 	"run": (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks) => Promise<{ "exitCode": number }>;
 	/** Auto-attach: try to launch `file` under the tsval DEBUG adapter (breakpoints, step-back, capability stops).
@@ -226,6 +230,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 	});
 
 	return {
+		"runs": createRunRegistry(hub),
 		"run": async (file, cwd, env, hooks) => {
 			ensureWorker();
 			await ready; // don't publish `node.start` until the worker has announced its subscription

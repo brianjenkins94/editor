@@ -52,12 +52,18 @@ function longestCommonPrefix(items: string[]): string {
 	return prefix;
 }
 
+/** Terminals opened so far: each one's number names it as the origin of what it runs (runs.ts). */
+let terminalsOpened = 0;
+
 export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (data: string) => void, cwd0: string): TerminalProcess {
+	terminalsOpened += 1;
+
+	const terminal = terminalsOpened;
 	let sessionPromise: Promise<BashSession> | undefined;
 	const getSession = (): Promise<BashSession> => {
 		// just-bash, and the custom commands (which build on its defineCommand), load with the first command run.
 		sessionPromise ??= Promise.all([import("just-bash/browser"), import("./terminal-node"), import("./terminal-npm"), import("./terminal-vite")])
-			.then(([module, { createNodeCommand }, { createNpmCommand }, { createViteCommand }]) => new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": [createNodeCommand(runner, writeLive), createNpmCommand(getSession), createViteCommand(runner, writeLive)] }) as unknown as BashSession);
+			.then(([module, { createNodeCommand }, { createNpmCommand }, { createViteCommand }]) => new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": [createNodeCommand(runner, writeLive, terminal), createNpmCommand(getSession), createViteCommand(runner, writeLive, terminal)] }) as unknown as BashSession);
 
 		return sessionPromise;
 	};
@@ -402,5 +408,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 		prompt();
 	};
 
-	return { "start": start, "input": input };
+	// The terminal closing stops what it's running — a dev server, a script — rather than leaving it running unseen.
+	return { "start": start, "input": input, "shutdown": () => { controller?.abort(); } };
 }
