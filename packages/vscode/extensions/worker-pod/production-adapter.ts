@@ -6,10 +6,11 @@
  * here — it's RUN-CONTROL: running / Stop / terminate, plus output in the Debug Console. Full stepping stays
  * tsval's job (`node <file>` auto-attaches there).
  *
- * ATTACH model: the run itself lives where it always did (terminal-vite → node-runner). This adapter just rides
- * hub channels the run's driver publishes — `production.out.<id>` (→ Debug Console), `production.exit.<id>`
- * (→ terminated) — and on Stop/disconnect publishes `production.stop.<id>` so the driver tears the run down.
- * One brain, thin adapter — the same shape as the capability interceptors.
+ * The run itself lives where it always did (terminal-vite → node-runner). This adapter just rides hub channels the
+ * run's driver publishes — `production.out.<id>` (→ Debug Console), `production.exit.<id>` (→ terminated) — and on
+ * Stop publishes `production.stop.<id>` so the driver tears the run down. One brain, thin adapter — the same shape as
+ * the capability interceptors. It's declared a LAUNCH, though it starts nothing itself: Stop does end the run, and
+ * VS Code calls an attach's stop "Disconnect" — as if the run would go on without it, which it never does.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
@@ -59,7 +60,7 @@ class ProductionDebugSession implements vscode.DebugAdapter {
 				this.event("initialized");
 				break;
 
-			case "attach":
+			case "launch":
 				this.id = String(args["__prodId"] ?? "");
 				// The run's driver streams its output here; relay it to the Debug Console.
 				this.offs.push(this.hub.subscribe(`production.out.${this.id}`, (data) => {
@@ -112,13 +113,13 @@ class ProductionDebugSession implements vscode.DebugAdapter {
 }
 
 /**
- * Register the `production` debug type: a config provider (bare attach config) + the descriptor factory that
+ * Register the `production` debug type: a config provider (bare launch config) + the descriptor factory that
  * hands back a hub-riding session. `hub` is the pod hub — the run driver's `production.*` channels federate to it.
  */
 export function registerProductionDebug(context: vscode.ExtensionContext, hub: Hub): void {
 	context.subscriptions.push(
 		vscode.debug.registerDebugConfigurationProvider("production", {
-			"resolveDebugConfiguration": (_folder, config) => (config.type === undefined ? { "type": "production", "request": "attach", "name": "Production run" } : config)
+			"resolveDebugConfiguration": (_folder, config) => (config.type === undefined ? { "type": "production", "request": "launch", "name": "Production run" } : config)
 		}),
 		vscode.debug.registerDebugAdapterDescriptorFactory("production", {
 			"createDebugAdapterDescriptor": () => new vscode.DebugAdapterInlineImplementation(new ProductionDebugSession(hub))

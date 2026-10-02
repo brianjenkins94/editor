@@ -169,7 +169,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 	// The production debug type — presents an almostnode run (the vite preview) as a debug session with a
 	// run-control controller (Stop + Debug Console). The run's driver publishes `production.launch` (federates
-	// to podHub); we start the attach session, and the adapter rides the run's `production.*` channels.
+	// to podHub); we start its session (a launch, so VS Code's toolbar says Stop), and the adapter rides the run's
+	// `production.*` channels.
 	registerProductionDebug(context, podHub);
 
 	// Mirror the active debug session's toolbar (state out, commands in) so the preview titlebar can host a replica
@@ -187,7 +188,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 		// Stamp the preview port into the session config so the debug-toolbar mirror can tell the shell WHICH preview
 		// window this session drives (per-port toolbar routing). Undefined for a port-less node fallback.
-		void vscode.debug.startDebugging(undefined, { "type": "production", "request": "attach", "name": name, "__prodId": id, "__port": info.port });
+		void vscode.debug.startDebugging(undefined, { "type": "production", "request": "launch", "name": name, "__prodId": id, "__port": info.port });
 
 		// Run-grain bracket for the PREVIEW only (a port-bound run): the SW tags that port's gated net calls with
 		// `id`, so they accumulate in silo-store's bucket; flush them as one `mode:"preview"` run record at exit. A

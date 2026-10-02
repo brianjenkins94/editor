@@ -23,7 +23,7 @@ import type { ArchSink } from "@brianjenkins94/observability";
 import type { LinkPermissions, Transport } from "@brianjenkins94/hub";
 import { createRpcClient, rpcCallSubject, rpcReplySubject, serve, windowTransport } from "@brianjenkins94/hub";
 import { installWindowMessageProbe, LOG_SUBJECT, scopedTransport } from "@brianjenkins94/observability";
-import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, RotateCcw, SquareArrowDownLeft, SquareArrowOutUpRight, Unplug } from "lucide";
+import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, RotateCcw, SquareArrowDownLeft, SquareArrowOutUpRight } from "lucide";
 import type { DevtoolsPanel } from "./preview-devtools";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import { installPreviewProfiler } from "./preview-profile";
@@ -177,7 +177,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	// the last used window of the session's preview port, or the last used window of all for a node/tsval session
 	// with no port. VS Code has ONE active session at a time, so the toolbar lives on ONE window; clear every window
 	// first so it never lingers on a previously-active one. pause/step show only for a stepping session (tsval);
-	// restart + stop always.
+	// restart always (no stop: closing the window does that).
 	const renderDebugToolbar = (): void => {
 		for (const surface of surfaces.values()) {
 			// Every app window has "new window", DevTools (docked under the frame, so not while popped out) and pop out.
@@ -230,7 +230,9 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			);
 		}
 
-		host.append(button(RotateCcw, "restart", "Restart"), button(Unplug, "stop", "Stop"));
+		// No stop in the frame: closing a server's last window stops it, and an unplug icon read as "detach" — leaving the
+		// server running somewhere — which nothing here does. (VS Code's own debug toolbar keeps its Stop.)
+		host.append(button(RotateCcw, "restart", "Restart"));
 	};
 
 	/** Dock DevTools under the app in `surface`'s window, or undock it. */

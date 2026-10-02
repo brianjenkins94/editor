@@ -52,7 +52,7 @@
         "initialConfigurations": [
           {
             "type": "production",
-            "request": "attach",
+            "request": "launch",
             "name": "Production run"
           }
         ]
