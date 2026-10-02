@@ -13,17 +13,20 @@ import { ArchitectureStore } from "../src/arch-store.ts";
 import { collectArchReports, createArchReporter, requestArchSync } from "../src/arch.ts";
 import { installHubCollector, LOG_BACKLOG } from "../src/index.ts";
 import { scopeArchReport, scopedId, scopedTransport, scopeObservability, scopeOf } from "../src/scope.ts";
+import { until } from "./until.ts";
 
-function wait(ms: number): Promise<void> {
-	return new Promise((resolve) => { setTimeout(resolve, ms); });
-}
-
-test("two windows of one app keep apart in the viewer: each window's page IS its window, its other hubs under it", async () => {
+test("two windows of one app keep apart in the viewer: each window's page IS its window, its other hubs under it", async (t) => {
 	const shell = createHub({ "id": "shell" });
 	const store = new ArchitectureStore();
 	const records: LogRecord[] = [];
 	const reporters = [createArchReporter(shell)];
 	const workers: [ReturnType<typeof createHub>, string][] = [];
+
+	t.after(() => {
+		for (const reporter of reporters) {
+			reporter.dispose();
+		}
+	});
 
 	collectArchReports(shell, (report) => { store.apply(report); });
 	installHubCollector(shell, (record) => { records.push(record); });
@@ -43,7 +46,7 @@ test("two windows of one app keep apart in the viewer: each window's page IS its
 		workers.push([worker, scope]);
 	}
 
-	await wait(50);
+	await until("the shell's interest at each window's worker", () => workers.every(([worker]) => worker.interested("$sys.log.worker") && worker.interested("$sys.arch.worker")));
 
 	// (Published as relayLoggerToHub would: its logger is one per realm, and this process holds both windows.)
 	for (const [worker, scope] of workers) {
@@ -51,7 +54,11 @@ test("two windows of one app keep apart in the viewer: each window's page IS its
 	}
 
 	requestArchSync(shell);
-	await wait(400);
+
+	const hellos = () => records.filter((record) => record.message.startsWith("hello"));
+	const topology = () => Object.keys((store.snapshot() as { "topology": Record<string, unknown> }).topology);
+
+	await until("both windows' hellos and all five hubs' topologies", () => hellos().length >= 2 && topology().length >= 5);
 
 	const snapshot = store.snapshot() as { "topology": Record<string, { "links": { "peerId"?: string }[] }>; "channels": { "a": string; "b": string }[] };
 
@@ -65,9 +72,6 @@ test("two windows of one app keep apart in the viewer: each window's page IS its
 	assert.ok(!linked("preview:5173", "preview:5173~2/worker"), "and never across windows");
 	assert.deepEqual(records.filter((record) => record.message.startsWith("hello")).map((record) => [record.context?.["source"], record.message]).sort((left, right) => String(left[0]).localeCompare(String(right[0]))), [["preview:5173/worker", "hello from preview:5173"], ["preview:5173~2/worker", "hello from preview:5173~2"]]);
 
-	for (const reporter of reporters) {
-		reporter.dispose();
-	}
 });
 
 test("the edge renames every app id in a report — reporter, topology, node ops, traffic, samples — and nothing of the joining side", () => {

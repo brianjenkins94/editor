@@ -10,7 +10,10 @@ import { test } from "node:test";
 import { createHub, pipe } from "../../hub/src/index.ts";
 import { installHubCollector, observabilityPermissions, ownWorker, scopedTransport } from "../src/index.ts";
 import { sourceOfLogSubject, tagBySubject } from "../src/log-subject.ts";
+import { until } from "./until.ts";
 
+/** A few timer turns: what's in flight goes a few hops further — for checking nothing ELSE arrived. To wait for something
+ *  that should, `until`. */
 async function flush(): Promise<void> {
 	for (let round = 0; round < 5; round += 1) {
 		await new Promise((resolve) => { setTimeout(resolve, 0); });
@@ -38,7 +41,7 @@ test("the edge names: whatever subject or source a peer logs under, it's filed u
 
 	installHubCollector(root, (record) => { records.push(record); });
 	await Promise.all([root.link(scopedTransport(up, "client-0", { "keep": (id) => id === "root" }), { "peer": "client-0", "permissions": observabilityPermissions() }).ready, client.link(down).ready]);
-	await flush();
+	await until("the collector's interest at the client", () => client.interested("$sys.log.client"));
 
 	const record = (source: string, message: string) => ({ "kind": "log", "level": "info", "message": message, "context": { "source": source }, "time": 0, "depth": 0 });
 
@@ -48,7 +51,7 @@ test("the edge names: whatever subject or source a peer logs under, it's filed u
 	client.publish("$sys.log.client-0/ui", record("client-0/ui", "its page"));
 	// On another's subject: under its scope all the same — never the referee's.
 	client.publish("$sys.log.referee", record("referee", "spoofed"));
-	await flush();
+	await until("all three records", () => records.length >= 3);
 
 	assert.deepEqual(records.map((entry) => [entry.context?.["source"], entry.message]), [["client-0", "lying"], ["client-0/ui", "its page"], ["client-0/referee", "spoofed"]]);
 });
@@ -63,7 +66,7 @@ test("observabilityPermissions: logs, backlogs and reports out, the viewers' syn
 	root.subscribe(">", (_data, envelope) => { heard.push(envelope.subject); });
 	peer.subscribe(">", (_data, envelope) => { told.push(envelope.subject); });
 	await Promise.all([root.link(up, { "peer": "p", "permissions": observabilityPermissions() }).ready, peer.link(down).ready]);
-	await flush();
+	await until("each side's interest at the other", () => peer.interested("$sys.log.p") && root.interested("$sys.arch.sync"));
 
 	for (const subject of ["$sys.log.p", "$sys.log.p/ui", "$sys.arch.p", "$sys.backlog.log", "$sys.other", "game.move"]) {
 		peer.publish(subject, {});
@@ -73,7 +76,8 @@ test("observabilityPermissions: logs, backlogs and reports out, the viewers' syn
 		root.publish(subject, {});
 	}
 
-	await flush();
+	await until("what each may send", () => heard.includes("$sys.backlog.log") && told.includes("$sys.arch.sync"));
+	await flush(); // and what each may not, its chance to arrive
 
 	assert.deepEqual(heard.filter((subject) => !["$sys.arch.sync", "$sys.log.root", "game.state"].includes(subject)), ["$sys.log.p", "$sys.log.p/ui", "$sys.arch.p", "$sys.backlog.log"]);
 	assert.deepEqual(told.filter((subject) => !["$sys.log.p", "$sys.log.p/ui", "$sys.arch.p", "$sys.backlog.log", "$sys.other", "game.move"].includes(subject)), ["$sys.arch.sync"]);
@@ -113,7 +117,7 @@ test("a relay marks a page that speaks a newer protocol than it knows — and on
 	assert.match(markOutdated({ ...tab, "protocol": OBSERVABILITY_PROTOCOL + 1 }).outdated ?? "", /restart it/u);
 });
 
-test("a page that goes says so, and the store ends it — until a reload brings it back under the same id", async () => {
+test("a page that goes says so, and the store ends it — until a reload brings it back under the same id", async (t) => {
 	const { ArchitectureStore } = await import("../src/arch-store.ts");
 	const { createArchReporter } = await import("../src/arch.ts");
 	const globals = globalThis as { "window"?: unknown; "location"?: unknown; "addEventListener"?: unknown; "removeEventListener"?: unknown };
@@ -139,13 +143,12 @@ test("a page that goes says so, and the store ends it — until a reload brings 
 
 		const reporter = createArchReporter(page);
 
-		await new Promise((resolve) => { setTimeout(resolve, 400); });
-		assert.equal(store.nodes.get("page")?.state, "alive");
+		t.after(() => { reporter.dispose(); });
+		await until("the page, reporting", () => store.nodes.get("page")?.state === "alive");
 
 		listeners.get("pagehide")!();
-		await flush();
 
-		const gone = store.nodes.get("page")!;
+		const gone = await until("the page's last word", () => store.nodes.get("page")?.state === "terminated" ? store.nodes.get("page") : undefined);
 
 		assert.equal(gone.state, "terminated", "its last word ended it");
 		assert.equal(typeof gone.lastEndedAt, "number");
@@ -186,9 +189,10 @@ test("a preview app's tab answer names its window — the id the editor's shell 
 		await Promise.all([shell.link(up, { "peer": "preview:5173~2", "transit": false }).ready, page.link(down, { "uplink": true }).ready]);
 		answerTabDiscovery(page, "app");
 		shell.subscribe(TAB_HERE, (data) => { answers.push(data as { "scope"?: string; "preview"?: boolean }); });
-		await flush();
+		assert.ok(await shell.whenInterested(TAB_DISCOVER, 5000));
+		assert.ok(await page.whenInterested(TAB_HERE, 5000));
 		shell.publish(TAB_DISCOVER, { "query": "q" });
-		await flush();
+		await until("the page's answer", () => answers.length > 0);
 
 		assert.equal(answers[0]?.preview, true);
 		assert.equal(answers[0]?.scope, "preview:5173~2");

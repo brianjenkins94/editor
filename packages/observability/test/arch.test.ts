@@ -7,53 +7,46 @@ import { createHub, createRpcClient, pipe, serve } from "../../hub/src/index.ts"
 import { ArchitectureStore } from "../src/arch-store.ts";
 import { collectArchReports, createArchReporter, normalizeSubject, requestArchSync, SILENCE_MS } from "../src/arch.ts";
 import { scopedTransport } from "../src/scope.ts";
+import { elapse, until } from "./until.ts";
 
-function wait(ms: number): Promise<void> {
-	return new Promise((resolve) => { setTimeout(resolve, ms); });
-}
-
-/** root ⇄ pod, each with a reporter; the collector sits on root. */
-async function setup() {
+/** root ⇄ pod, each with a reporter (disposed after the test); the collector sits on root. */
+async function setup(t: { "after": (fn: () => void) => void }) {
 	const [a, b] = pipe({ "lossy": true });
 	const root = createHub({ "id": "root" });
 	const pod = createHub({ "id": "pod" });
 	const reporters = [createArchReporter(root), createArchReporter(pod)];
 	const reports: ArchReport[] = [];
 
+	t.after(() => { reporters.forEach((reporter) => { reporter.dispose(); }); });
 	root.link(a);
 	pod.link(b);
 	collectArchReports(root, (report) => { reports.push(report); });
-	await wait(20);
+	await until("the collector's interest at pod", () => pod.interested("$sys.arch.pod"));
 
-	return { "root": root, "pod": pod, "reports": reports, "dispose": () => { reporters.forEach((reporter) => { reporter.dispose(); }); } };
+	return { "root": root, "pod": pod, "reports": reports };
 }
 
 function trafficOf(reports: ArchReport[], reporter: string) {
 	return reports.filter((report) => report.reporter === reporter).flatMap((report) => report.traffic ?? []);
 }
 
-test("each hub reports its topology, peers included", async () => {
-	const { reports, dispose } = await setup();
+test("each hub reports its topology, peers included", async (t) => {
+	const { reports } = await setup(t);
+	const podTopology = await until("pod's topology, with its peer", () => reports.find((report) => report.reporter === "pod" && report.topology?.links[0]?.peerId !== undefined)?.topology);
 
-	await wait(300);
-
-	const podTopology = reports.find((report) => report.reporter === "pod" && report.topology !== undefined)?.topology;
-
-	assert.equal(podTopology?.links[0]?.peerId, "root");
-	dispose();
+	assert.equal(podTopology.links[0]?.peerId, "root");
 });
 
-test("traffic is counted once, by the sender, with RPC labelled by method", async () => {
-	const { root, pod, reports, dispose } = await setup();
+test("traffic is counted once, by the sender, with RPC labelled by method", async (t) => {
+	const { root, pod, reports } = await setup(t);
 
 	serve(pod, "git.status", () => "clean");
-	await wait(20);
-	assert.equal(await createRpcClient(root).request("git.status"), "clean");
+	assert.equal(await createRpcClient(root).request("git.status", {}, { "waitForResponderMs": 5000 }), "clean");
 	pod.subscribe("node.out.>", () => undefined);
-	await wait(20);
+	assert.ok(await root.whenInterested("node.out.42", 5000));
 	root.publish("node.out.42", "x");
 	root.publish("node.out.43", "y");
-	await wait(300);
+	await until("both ends' counts reported", () => trafficOf(reports, "root").find((count) => count.label === "node.out.*")?.count === 2 && trafficOf(reports, "pod").some((count) => count.kind === "reply"));
 
 	const fromRoot = trafficOf(reports, "root");
 	const fromPod = trafficOf(reports, "pod");
@@ -64,65 +57,64 @@ test("traffic is counted once, by the sender, with RPC labelled by method", asyn
 	assert.equal(fromRoot.find((count) => count.label === "node.out.*")?.count, 2);
 	// the reports themselves are never counted
 	assert.ok(![...fromRoot, ...fromPod].some((count) => count.label.startsWith("$sys.arch")));
-	dispose();
 });
 
-test("probe-fed nodes and channels, and a full-state answer to sync", async () => {
+test("probe-fed nodes and channels, and a full-state answer to sync", async (t) => {
 	const [a, b] = pipe({ "lossy": true });
 	const root = createHub({ "id": "root" });
 	const workbench = createHub({ "id": "workbench" });
 	const reporter = createArchReporter(workbench);
 
+	t.after(() => { reporter.dispose(); });
 	root.link(a);
 	workbench.link(b);
 	reporter.spawn({ "id": "worker:TextMateWorker" });
 	reporter.record("workbench", "worker:TextMateWorker", "request", "$acceptNewModel", 10);
 	reporter.record("workbench", "worker:TextMateWorker", "request", "$acceptNewModel", 5);
-	await wait(300);
+	await elapse(300); // its reports flush to nobody
 
 	const late: ArchReport[] = [];
 
 	collectArchReports(root, (report) => { late.push(report); }); // a viewer opened after the fact
-	await wait(20);
+	await until("the viewer's interest at workbench", () => workbench.interested("$sys.arch.workbench") && root.interested("$sys.arch.sync"));
 	requestArchSync(root);
-	await wait(50);
 
-	const full = late.find((report) => report.reporter === "workbench" && report.full === true);
+	const full = await until("workbench's full-state answer", () => late.find((report) => report.reporter === "workbench" && report.full === true));
 
-	assert.ok(full !== undefined);
 	assert.deepEqual(full.nodes, [{ "op": "spawn", "spec": { "id": "worker:TextMateWorker" } }]);
 	assert.deepEqual(full.traffic?.find((count) => count.to === "worker:TextMateWorker"), { "from": "workbench", "to": "worker:TextMateWorker", "kind": "request", "label": "$acceptNewModel", "count": 2, "bytes": 15 });
-	reporter.dispose();
 });
 
-test("a store opened mid-stream converges on the true counts — nothing counted twice", async () => {
+test("a store opened mid-stream converges on the true counts — nothing counted twice", async (t) => {
 	const [a, b] = pipe({ "lossy": true });
 	const root = createHub({ "id": "root" });
 	const pod = createHub({ "id": "pod" });
 	const reporter = createArchReporter(pod);
 
+	t.after(() => { reporter.dispose(); });
 	root.link(a);
 	pod.link(b);
 	root.subscribe("git.changed", () => undefined);
-	await wait(20);
+	assert.ok(await pod.whenInterested("git.changed", 5000));
 
 	for (let index = 0; index < 5; index += 1) {
 		pod.publish("git.changed");
 	}
 
-	await wait(300); // flushed to nobody (no viewer yet)
+	await elapse(300); // flushed to nobody (no viewer yet)
 
 	pod.publish("git.changed"); // pending when the viewer syncs
 
 	const store = new ArchitectureStore();
 
 	collectArchReports(root, (report) => { store.apply(report); });
-	await wait(5);
+	await until("the viewer's interest at pod", () => pod.interested("$sys.arch.pod") && root.interested("$sys.arch.sync"));
 	requestArchSync(root);
-	await wait(100);
+	await until("the sync's 6", () => store.channel("pod", "root").channel.labels.get("git.changed")?.count === 6);
 
 	pod.publish("git.changed"); // after the sync: a delta
-	await wait(300);
+	await until("the delta", () => store.channel("pod", "root").channel.labels.get("git.changed")?.count === 7);
+	await elapse(300); // and nothing more arrives: no count twice
 
 	const { channel } = store.channel("pod", "root");
 
@@ -130,10 +122,9 @@ test("a store opened mid-stream converges on the true counts — nothing counted
 	assert.equal(channel.linked, true); // the topology says they're linked
 	assert.ok(channel.interest["pod"]?.includes("git.changed")); // and what root asked pod for
 	assert.ok(store.log.some((sample) => sample.label === "git.changed"));
-	reporter.dispose();
 });
 
-test("traffic sent before the peer's hello is still attributed to the peer, never to a placeholder", async () => {
+test("traffic sent before the peer's hello is still attributed to the peer, never to a placeholder", async (t) => {
 	// A window-like transport: messages to a side that isn't listening yet are DROPPED.
 	let left: ((message: unknown) => void) | undefined;
 	let right: ((message: unknown) => void) | undefined;
@@ -160,33 +151,34 @@ test("traffic sent before the peer's hello is still attributed to the peer, neve
 	const reporter = createArchReporter(root);
 	const store = new ArchitectureStore();
 
+	t.after(() => { reporter.dispose(); });
 	collectArchReports(root, (report) => { store.apply(report); });
 	root.link(a); // nobody listening yet: root's hello is lost, it doesn't know its peer
-	await wait(20);
+	await elapse(20);
 	workbench.link(b); // workbench's hello reaches root, root's reply reaches workbench
-	await wait(400);
+	await until("the hellos, counted on root ⇄ workbench", () => (store.channels.get("root|workbench")?.labels.get("hello")?.hub ?? 0) > 0);
 
 	assert.ok(![...store.nodes.keys()].some((id) => id.startsWith("root:link")), [...store.nodes.keys()].join(","));
 	assert.ok(store.channels.has("root|workbench"));
 	assert.ok((store.channels.get("root|workbench")?.labels.get("hello")?.hub ?? 0) > 0);
-	reporter.dispose();
 });
 
-test("a peer that boots slowly is named once it says hello; a link nothing answers is in the topology, with no channel", async () => {
+test("a peer that boots slowly is named once it says hello; a link nothing answers is in the topology, with no channel", async (t) => {
 	const [a, b] = pipe({ "lossy": true });
 	const root = createHub({ "id": "root" });
 	const reporter = createArchReporter(root);
 	const store = new ArchitectureStore();
 
+	t.after(() => { reporter.dispose(); });
 	collectArchReports(root, (report) => { store.apply(report); });
 	root.link(a); // traffic starts flowing (interest, hello) long before the peer is up
 	root.subscribe("anything", () => undefined);
-	await wait(700); // several flushes while the peer is still booting
+	await elapse(700); // several flushes while the peer is still booting
 
 	const late = createHub({ "id": "workbench" });
 
 	late.link(b);
-	await wait(400);
+	await until("root ⇄ workbench, with root's held hello", () => store.channels.get("root|workbench")?.labels.has("hello"));
 	assert.ok(![...store.nodes.keys()].some((id) => id.includes(":link")), [...store.nodes.keys()].join(","));
 	// What root sent before the peer said who it is (its hello, its interest) was held, and counted once it did.
 	assert.ok(store.channels.get("root|workbench")?.labels.has("hello"), [...store.channels.get("root|workbench")?.labels.keys() ?? []].join(","));
@@ -195,22 +187,20 @@ test("a peer that boots slowly is named once it says hello; a link nothing answe
 	const [c, d] = pipe({ "lossy": true });
 	const second = root.link(c);
 
+	t.after(second);
 	d.listen(() => undefined);
-	await wait(400);
-	assert.equal(store.topology.get("root")?.links.filter((link) => link.peerId === undefined).length, 1);
+	await until("the unanswered link, in root's topology", () => store.topology.get("root")?.links.filter((link) => link.peerId === undefined).length === 1);
 	assert.deepEqual([...store.channels.keys()].filter((key) => key.startsWith("root|")), ["root|workbench"]);
-	second();
-	reporter.dispose();
 });
 
-test("a short-lived peer that says hello and is gone before the next flush is still named, never left as a placeholder", async () => {
+test("a short-lived peer that says hello and is gone before the next flush is still named, never left as a placeholder", async (t) => {
 	const [a, b] = pipe({ "lossy": true });
 	const node = createHub({ "id": "node" });
 	const reporter = createArchReporter(node);
 	const store = new ArchitectureStore();
 
+	t.after(() => { reporter.dispose(); });
 	collectArchReports(node, (report) => { store.apply(report); });
-	await wait(20);
 
 	// A throwaway child worker: linked, one round of traffic, unlinked — all well inside one flush interval.
 	const child = createHub({ "id": "provoke" });
@@ -218,14 +208,12 @@ test("a short-lived peer that says hello and is gone before the next flush is st
 
 	child.link(b);
 	serve(child, "provoke.round", () => ({ "failures": [] }));
-	await wait(20);
-	await createRpcClient(node).request("provoke.round", {}, { "timeoutMs": 1000 });
+	await createRpcClient(node).request("provoke.round", {}, { "timeoutMs": 5000, "waitForResponderMs": 5000 });
 	unlinkNode();
-	await wait(400);
+	await until("node ⇄ provoke, named", () => store.channels.has("node|provoke"));
 
 	assert.ok(![...store.nodes.keys()].some((id) => id.startsWith("node:link")), [...store.nodes.keys()].join(","));
 	assert.ok(store.channels.has("node|provoke"));
-	reporter.dispose();
 });
 
 test("ids in subjects and RPC names collapse to *, words don't", () => {
@@ -237,13 +225,14 @@ test("ids in subjects and RPC names collapse to *, words don't", () => {
 	assert.equal(normalizeSubject("workbench.openProject"), "workbench.openProject");
 });
 
-test("an RPC whose name carries an id is labelled once, not once per id — by the caller and by the server replying", async () => {
+test("an RPC whose name carries an id is labelled once, not once per id — by the caller and by the server replying", async (t) => {
 	const [a, b] = pipe({ "lossy": true });
 	const caller = createHub({ "id": "caller" });
 	const server = createHub({ "id": "server" });
 	const reporters = [createArchReporter(caller), createArchReporter(server)];
 	const store = new ArchitectureStore();
 
+	t.after(() => { reporters.forEach((reporter) => { reporter.dispose(); }); });
 	collectArchReports(caller, (report) => { store.apply(report); });
 	caller.link(a);
 	server.link(b);
@@ -254,30 +243,31 @@ test("an RPC whose name carries an id is labelled once, not once per id — by t
 		serve(server, `debug.session.${id}.step`, () => ({ "state": "stopped" }));
 	}
 
-	await wait(20);
-
 	const rpc = createRpcClient(caller);
 
 	for (const id of ids) {
-		await rpc.request(`debug.session.${id}.step`, {}, { "timeoutMs": 1000 });
+		await rpc.request(`debug.session.${id}.step`, {}, { "timeoutMs": 5000, "waitForResponderMs": 5000 });
 	}
 
-	await wait(400);
+	const sessionLabels = () => [...(store.channels.get("caller|server")?.labels.keys() ?? [])].filter((label) => label.includes("debug.session")).sort();
 
-	const labels = [...(store.channels.get("caller|server")?.labels.keys() ?? [])].filter((label) => label.includes("debug.session")).sort();
+	await until("the call's and the reply's labels", () => sessionLabels().length >= 2);
+	await elapse(300); // and no per-id label after them
+
+	const labels = sessionLabels();
 
 	// The server learns the name from the call arriving, and labels its reply with it.
 	assert.deepEqual(labels, ["debug.session.*.step()", "↩ debug.session.*.step()"]);
-	reporters.forEach((reporter) => { reporter.dispose(); });
 });
 
-test("a report nobody could hear yet is held, not lost: the viewer that links later gets the traffic and topology", async () => {
+test("a report nobody could hear yet is held, not lost: the viewer that links later gets the traffic and topology", async (t) => {
 	const frame = createHub({ "id": "frame" });
 	const reporter = createArchReporter(frame);
 
+	t.after(() => { reporter.dispose(); });
 	// Traffic before any viewer's interest can have reached this hub (a frame that's just started).
 	reporter.record("frame", "worker", "request", "wired.echo()", 10);
-	await wait(400);
+	await elapse(400); // flushes with nobody to hear them
 
 	const [a, b] = pipe({ "lossy": true });
 	const viewer = createHub({ "id": "viewer" });
@@ -286,16 +276,15 @@ test("a report nobody could hear yet is held, not lost: the viewer that links la
 	collectArchReports(viewer, (report) => { reports.push(report); });
 	viewer.link(a);
 	frame.link(b);
-	await wait(600);
 
-	const mine = reports.filter((report) => report.reporter === "frame");
+	const mine = () => reports.filter((report) => report.reporter === "frame");
 
-	assert.ok(mine.some((report) => (report.traffic ?? []).some((count) => count.label === "wired.echo()" && count.count === 1)), "the traffic from before it had a listener: " + JSON.stringify(mine));
-	assert.ok(mine.some((report) => report.topology?.links.some((link) => link.peerId === "viewer")), "and its topology");
-	reporter.dispose();
+	await until("frame's held traffic and its topology", () => mine().some((report) => (report.traffic ?? []).some((count) => count.label === "wired.echo()")) && mine().some((report) => report.topology?.links.some((link) => link.peerId === "viewer")));
+	assert.ok(mine().some((report) => (report.traffic ?? []).some((count) => count.label === "wired.echo()" && count.count === 1)), "the traffic from before it had a listener: " + JSON.stringify(mine()));
+	assert.ok(mine().some((report) => report.topology?.links.some((link) => link.peerId === "viewer")), "and its topology");
 });
 
-test("the edge names: a hub that calls itself `client` reports, beyond its link, as the id the link gave it", async () => {
+test("the edge names: a hub that calls itself `client` reports, beyond its link, as the id the link gave it", async (t) => {
 	const [a, b] = pipe({ "lossy": true });
 	const edge = createHub({ "id": "edge" });
 	const client = createHub({ "id": "client" });
@@ -307,14 +296,12 @@ test("the edge names: a hub that calls itself `client` reports, beyond its link,
 
 	const reporter = createArchReporter(client);
 
-	await wait(400);
+	t.after(() => { reporter.dispose(); });
 	assert.equal(reporter.self, "client", "it reports as itself");
 
-	const named = reports.find((report) => report.reporter === "seat-2" && report.topology !== undefined);
+	const named = await until("a report under the edge's name, with a topology", () => reports.find((report) => report.reporter === "seat-2" && report.topology?.links[0]?.peerId !== undefined));
 
-	assert.ok(named !== undefined, JSON.stringify(reports.map((report) => report.reporter)));
 	assert.deepEqual(named.topology?.links.map((link) => link.peerId), ["edge"], "the edge's own id is kept");
-	reporter.dispose();
 });
 
 test("a viewer times out a reporter gone silent, and takes it back when it reports again", () => {

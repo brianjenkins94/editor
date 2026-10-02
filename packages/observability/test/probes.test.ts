@@ -9,6 +9,7 @@ import { test } from "node:test";
 import { createHub, pipe } from "../../hub/src/index.ts";
 import { describeJsonMessage, installNetworkProbes, windowName } from "../src/arch-probes.ts";
 import { collectArchReports, createArchReporter, previewPayload, requestArchSync } from "../src/arch.ts";
+import { elapse, until } from "./until.ts";
 
 interface Recorded { "from": string; "to": string; "kind": TrafficKind; "label": string; "payload"?: unknown }
 
@@ -75,17 +76,6 @@ class FakePeerConnection extends EventTarget {
 (globalThis as { "RTCDataChannel"?: unknown }).RTCDataChannel = FakeDataChannel;
 installNetworkProbes(sink);
 
-function wait(ms: number): Promise<void> {
-	return new Promise((resolve) => { setTimeout(resolve, ms); });
-}
-
-/** Until `done()`, or `timeoutMs` — a loaded runner can take longer than any fixed wait to deliver. */
-async function until(done: () => boolean, timeoutMs = 2000): Promise<void> {
-	for (const start = Date.now(); !done() && Date.now() - start < timeoutMs;) {
-		await wait(5);
-	}
-}
-
 test("a BroadcastChannel's messages, each way — not a hub link riding one (the hub tap counts that)", async (t) => {
 	recorded.length = 0;
 
@@ -99,8 +89,8 @@ test("a BroadcastChannel's messages, each way — not a hub link riding one (the
 	});
 	a.postMessage({ "type": "connect", "peer": "player-1" });
 	a.postMessage({ "\0hub": { "hub": "hello", "id": "x" } });
-	await until(() => recorded.length >= 2);
-	await wait(20); // and the hub frame, which must not be recorded, had its chance to be
+	await until("the message, each way", () => recorded.length >= 2);
+	await elapse(20); // and the hub frame, which must not be recorded, had its chance to be
 
 	assert.deepEqual(recorded.map(({ from, to, label }) => [from, to, label]), [["page", "channel:netsim.m.lobby", "connect"], ["channel:netsim.m.lobby", "page", "connect"]]);
 	assert.deepEqual(recorded[0]?.payload, { "type": "connect", "peer": "player-1" }, "what it carried, for capture");
@@ -120,7 +110,7 @@ test("a Web Lock asked for, granted, released — and one that's taken, unavaila
 	});
 
 	try {
-		await until(() => granted);
+		await until("the first lock, granted", () => granted);
 		await navigator.locks.request(name, { "ifAvailable": true }, async (lock) => { assert.equal(lock, null); });
 	} finally {
 		release();
@@ -199,21 +189,27 @@ test("payload capture is opt-in: off, samples carry no payload; on (a viewer ask
 	const payloads = () => reports.flatMap((report) => report.samples ?? []).filter((sample) => sample.label === "game.move").map((sample) => sample.payload);
 
 	viewer.subscribe("game.move", () => undefined);
-	await wait(50);
+	assert.ok(await page.whenInterested("game.move", 5000));
+	assert.ok(await page.whenInterested("$sys.arch.page", 5000));
 	page.publish("game.move", { "x": 1 });
-	await wait(400);
+	await until("the first move's sample", () => payloads().length >= 1);
 	assert.deepEqual(payloads(), [undefined], "off by default");
 
+	// (The sync is a message too: what it turns on applies once it's there — after which a move published from this test
+	// is sampled with capture on. The traffic that follows it is the proof it landed.)
 	requestArchSync(viewer, { "capture": true });
-	await wait(50);
+	await until("the sync's full report", () => reports.some((report) => report.reporter === "page" && report.full === true));
 	page.publish("game.move", { "x": 2 });
-	await wait(400);
+	await until("the second move's sample", () => payloads().length >= 2);
 	assert.deepEqual(payloads(), [undefined, "{\"x\":2}"]);
 
+	const fulls = () => reports.filter((report) => report.reporter === "page" && report.full === true).length;
+	const before = fulls();
+
 	requestArchSync(viewer, { "capture": false });
-	await wait(50);
+	await until("the second sync's full report", () => fulls() > before);
 	page.publish("game.move", { "x": 3 });
-	await wait(400);
+	await until("the third move's sample", () => payloads().length >= 3);
 	assert.deepEqual(payloads(), [undefined, "{\"x\":2}", undefined], "and off again");
 });
 

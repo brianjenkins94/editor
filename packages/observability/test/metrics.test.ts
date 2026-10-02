@@ -4,8 +4,9 @@ import { test } from "node:test";
 import { createHub } from "@brianjenkins94/hub";
 import type { MetricsSample } from "../src/metrics.ts";
 import { METRICS_SUBJECT, MetricsHistory, reportMetrics, spanMetrics } from "../src/metrics.ts";
+import { elapse, until } from "./until.ts";
 
-test("a reporter publishes each gauge's reading on $sys.metrics under its source, a group's as name.key", async () => {
+test("a reporter publishes each gauge's reading on $sys.metrics under its source, a group's as name.key", async (t) => {
 	const hub = createHub({ "id": "page" });
 	const seen: MetricsSample[] = [];
 
@@ -14,10 +15,10 @@ test("a reporter publishes each gauge's reading on $sys.metrics under its source
 	const metrics = reportMetrics(hub, { "intervalMs": 20 });
 	let n = 0;
 
+	t.after(() => { metrics.dispose(); });
 	metrics.gauge("count", () => (n += 1));
 	metrics.gauge("memory", () => ({ "total": 3, "workbench": 2 }));
-	await new Promise((resolve) => { setTimeout(resolve, 70); });
-	metrics.dispose();
+	await until("two samples", () => seen.length >= 2);
 
 	assert.ok(seen.length >= 2, "sampled on the interval");
 	assert.equal(seen[0].source, "page");
@@ -33,7 +34,7 @@ test("a gauge with no reading, or one that throws, is left out of that sample; a
 
 	const metrics = reportMetrics(hub, { "source": "shell", "intervalMs": 20 });
 
-	await new Promise((resolve) => { setTimeout(resolve, 50); });
+	await elapse(50); // two and a half intervals: nothing to publish, so nothing published
 	assert.equal(seen.length, 0, "no gauges, no samples");
 
 	metrics.gauge("later", () => undefined);
@@ -46,7 +47,7 @@ test("a gauge with no reading, or one that throws, is left out of that sample; a
 	assert.deepEqual(metrics.sample().values, {});
 	assert.equal(metrics.sample().source, "shell");
 	seen.length = 0;
-	await new Promise((resolve) => { setTimeout(resolve, 50); });
+	await elapse(50); // two and a half intervals: nothing to publish, so nothing published
 	assert.equal(seen.length, 0, "gauges with nothing to report: no samples");
 	metrics.dispose();
 });

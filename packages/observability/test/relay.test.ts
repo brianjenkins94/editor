@@ -9,12 +9,7 @@ import { test } from "node:test";
 // From source: node won't strip types from the pnpm copy under node_modules.
 import { createHub, pipe } from "../../hub/src/index.ts";
 import { CONSOLE_ECHO, consoleCollector, installHubCollector, relayLoggerToHub } from "../src/index.ts";
-
-async function flush(): Promise<void> {
-	for (let round = 0; round < 5; round += 1) {
-		await new Promise((resolve) => { setTimeout(resolve, 0); });
-	}
-}
+import { until } from "./until.ts";
 
 test("records logged before anyone listens are held, and sent in order once someone does", async () => {
 	const worker = createHub({ "id": "worker" });
@@ -29,9 +24,9 @@ test("records logged before anyone listens are held, and sent in order once some
 
 	installHubCollector(root, (record) => { records.push(record); });
 	await Promise.all([root.link(up).ready, worker.link(down).ready]);
-	await flush();
+	await until("the collector's interest at the worker", () => worker.interested("$sys.log.worker"));
 	log.info("third");
-	await flush();
+	await until("the third record", () => records.some((record) => record.message === "third"));
 
 	assert.deepEqual(records.map((record) => record.message).filter((message) => ["first", "second", "third"].includes(String(message))), ["first", "second", "third"]);
 });
