@@ -1,0 +1,8 @@
+{
+	"bootMs": { "max": 10000, "warnAbove": 0.5 },
+	"typedHoverMs": { "max": 10000, "warnAbove": 0.5 },
+	"repoLoadMs": { "max": 15000, "warnAbove": 0.5 },
+	"memoryMB.workbench": { "max": 300, "warnAbove": 0.25 },
+	"memoryMB.extension host": { "max": 100, "warnAbove": 0.25 },
+	"memoryMB.node": { "max": 200, "warnAbove": 0.25 }
+}

@@ -6,7 +6,7 @@
     "build": "tsx build.ts",
     "dev": "tsx dev.ts",
     "lint": "util-lint",
-    "test:architecture": "node --test --test-concurrency=1 test/architecture-smoke.mjs test/architecture-tour.mjs test/architecture-app.mjs",
+    "test:architecture": "node --test --test-concurrency=1 test/architecture-smoke.mjs test/architecture-tour.mjs test/architecture-app.mjs test/performance.mjs",
     "postinstall": "node patches/apply.mjs"
   },
   "dependencies": {

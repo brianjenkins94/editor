@@ -20,10 +20,14 @@
   # headless Chromium — boot, a preview + HMR, two dev servers, a cold provoke round, a node script under the tsval
   # debugger, a webview, the git review diff, this checkout's debug-mcp — checked against the declared model. They catch
   # a wiring regression or an upstream monaco-vscode-api release (the component installs the latest) before it ships.
-  # Its own workflow, not a job in `ci`, so it doesn't gate the deploy until it has proven stable there.
+  # Its own workflow, not a job in `ci`, so it doesn't gate the deploy until it has proven stable there. The last suite
+  # (test/performance.mjs) holds boot, a typed hover, a 1000-file load and memory by realm to performance-budgets.json,
+  # and warns on a rise since the last green run here — whose `performance` artifact is its baseline.
   "jobs": {
     "architecture": {
       "runs-on": "ubuntu-latest",
+      # actions: read, to download the last green run's performance results.
+      "permissions": { "contents": "read", "actions": "read" },
       "steps": [
         { "uses": "actions/checkout@v4" },
         { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*" } },
@@ -31,6 +35,12 @@
         # packages; it prebuilds packages/vscode itself (whose full build would need the component first anyway).
         { "run": "pnpm --recursive --if-present --filter '!./packages/vscode' run build" },
         { "run": "pnpm --filter ./packages/vscode exec playwright install --with-deps chromium" },
+        # The baseline the performance suite compares against: the last green run on main's results (none on a first run).
+        {
+          "continue-on-error": true,
+          "run": "id=$(gh run list --repo \"$GITHUB_REPOSITORY\" --workflow architecture --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')\nif [ -n \"$id\" ]; then gh run download \"$id\" --repo \"$GITHUB_REPOSITORY\" --name performance --dir /tmp/performance-baseline || echo \"run $id kept no performance results\"; fi",
+          "env": { "GH_TOKEN": "${{ github.token }}" }
+        },
         # The fixture app installs hub and observability as tarballs: this commit's, not the published ones (a change to
         # either publishes only after ci passes, so @latest would race it). util-publish with CI unset just packs them
         # into docs/packages (no release); a static server hands them to the editor in the browser.
@@ -39,8 +49,15 @@
           "env": {
             "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}",
             "ARCH_HUB_TGZ": "http://localhost:5198/hub@0.0.0.tgz",
-            "ARCH_OBSERVABILITY_TGZ": "http://localhost:5198/observability@0.0.0.tgz"
+            "ARCH_OBSERVABILITY_TGZ": "http://localhost:5198/observability@0.0.0.tgz",
+            "PERF_BASELINE": "/tmp/performance-baseline/performance.json"
           }
+        },
+        # This run's results — the next one's baseline — and something to look at when a budget fails.
+        {
+          "if": "${{ always() }}",
+          "uses": "actions/upload-artifact@v4",
+          "with": { "name": "performance", "path": "/tmp/performance.json", "if-no-files-found": "ignore" }
         },
         {
           "if": "${{ failure() }}",
