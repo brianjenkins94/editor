@@ -28,10 +28,11 @@ const budgets = JSON.parse(fs.readFileSync(new URL("performance-budgets.json", i
 const results = {};
 let session;
 
-// measureUserAgentSpecificMemory resolves only at a garbage collection — an idle editor on a CI runner went two minutes
-// without one — and a reading taken early misses workers started since (TypeScript's servers, under the extension host:
-// 10 realms one time, 16 the next). Eager, every reading is immediate and has every realm.
-before(async () => { session = await startSession({ "chromiumArgs": ["--enable-blink-features=ForceEagerMeasureMemory"] }); });
+// The memory reading is measureUserAgentSpecificMemory, which Chrome's headless shell on Linux doesn't have (it throws
+// "not available" — CI's runners, reproduced in Playwright's Linux image): the full Chromium build does, so that's the
+// browser here. And eager: by default a reading resolves only at a garbage collection, and one taken early misses
+// workers started since (TypeScript's servers — 10 realms one time, 16 the next). Eager, it's immediate and has them all.
+before(async () => { session = await startSession({ "chromium": { "channel": "chromium", "args": ["--enable-blink-features=ForceEagerMeasureMemory"] } }); });
 
 after(async () => {
 	report();
