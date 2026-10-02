@@ -103,14 +103,40 @@ test("the demo's first typed hover", async () => {
 
 test("memory by realm, at idle", async () => {
 	const workbench = await editor();
-	const read = async () => ((await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.metrics.read")))["workbench"] ?? []).filter((sample) => sample.values["memory.total"] !== undefined).at(-1)?.values;
+	// The workbench's samples (none until the pod, which serves the command, has activated).
+	const samples = async () => (await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.metrics.read")).catch(() => ({})))["workbench"] ?? [];
+	const read = async () => (await samples()).filter((sample) => sample.values["memory.total"] !== undefined).at(-1)?.values;
 	const before = (await read())?.["memory.total"];
+	// What the gauge stands on, measured directly — so if no reading comes, the failure says why.
+	const direct = await workbench.evaluate(async () => {
+		const measure = performance.measureUserAgentSpecificMemory;
+		const found = { "crossOriginIsolated": globalThis.crossOriginIsolated, "api": typeof measure };
+
+		if (typeof measure === "function") {
+			try {
+				const result = await Promise.race([measure.call(performance), new Promise((_, reject) => { setTimeout(() => { reject(new Error("no answer in 10 s")); }, 10_000); })]);
+
+				found.measured = Math.round(result.bytes / 1048576) + " MB in " + result.breakdown.length + " realms";
+			} catch (error) {
+				found.error = String(error);
+			}
+		}
+
+		return found;
+	});
+
+	console.log("memory measurement, directly:", JSON.stringify(direct));
+
 	// A new reading — the gauge takes one every 10 s — so one taken after the hover.
 	const values = await until("a memory reading taken after the hover", async () => {
 		const latest = await read();
 
 		return latest !== undefined && latest["memory.total"] !== before ? latest : undefined;
-	}, { "timeoutMs": 120_000, "intervalMs": 1000, "sleep": (ms) => session.page.waitForTimeout(ms) });
+	}, { "timeoutMs": 120_000, "intervalMs": 1000, "sleep": (ms) => session.page.waitForTimeout(ms) }).catch(async (error) => {
+		const gauges = [...new Set((await samples()).flatMap((sample) => Object.keys(sample.values)))];
+
+		throw new Error(error.message + " — measured directly: " + JSON.stringify(direct) + "; the workbench's gauges: " + (gauges.join(", ") || "none"));
+	});
 
 	// Every realm the reading has is recorded (the artifact shows them all); those with a budget are held to it.
 	for (const [key, value] of Object.entries(values).filter(([key]) => key.startsWith("memory."))) {
