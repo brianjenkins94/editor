@@ -195,8 +195,37 @@ export function hostPlugins(): Plugin[] {
 		editorVersionsPlugin(),
 		nodeModulesCdnPlugin(),
 		vscodePlugin(),
-		workbenchPreloadPlugin()
+		workbenchPreloadPlugin(),
+		dockviewCssPlugin()
 	];
+}
+
+/**
+ * `dockview:css` — dockview-core's stylesheet, as a string. Its published package ships no .css file (its build
+ * inlines the sheet into the UMD bundle only, as the text of a `<style>` it appends), and the ESM build we import has
+ * none, so lift that one string out of the UMD file at build time rather than load a second copy of dockview for it.
+ */
+function dockviewCssPlugin(): Plugin {
+	const id = "dockview:css";
+
+	return {
+		"name": "dockview-css",
+		"resolveId": (source) => (source === id ? "\0" + id : undefined),
+		"load": (resolved) => {
+			if (resolved !== "\0" + id) {
+				return undefined;
+			}
+
+			const umd = fs.readFileSync(createRequire(import.meta.url).resolve("dockview-core/dist/dockview-core.js"));
+			const css = /s\.textContent = ("(?:[^"\\]|\\.)*");/u.exec(umd)?.[1];
+
+			if (css === undefined) {
+				throw new Error("dockview-css: no stylesheet found in dockview-core's UMD build");
+			}
+
+			return "export default " + css + ";";
+		}
+	};
 }
 
 /**

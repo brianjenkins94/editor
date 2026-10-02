@@ -10,6 +10,7 @@ import {
 	LogLevel
 } from "@codingame/monaco-vscode-api";
 import { StorageScope, StorageTarget } from "@codingame/monaco-vscode-api/vscode/vs/platform/storage/common/storage";
+import { BrowserAuxiliaryWindowService } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/auxiliaryWindow/browser/auxiliaryWindowService";
 import getAuthenticationServiceOverride from "@codingame/monaco-vscode-authentication-service-override";
 import getConfigurationServiceOverride, { initUserConfiguration } from "@codingame/monaco-vscode-configuration-service-override";
 import getDebugServiceOverride from "@codingame/monaco-vscode-debug-service-override";
@@ -206,7 +207,30 @@ export interface BootOptions {
 	/** Called when a document is saved, with its path and new contents — lets the consumer
 	 *  forward edits elsewhere (e.g. into an almostnode box's VirtualFS for a live preview). */
 	"onSave"?: (path: string, contents: string) => void;
+	/** Where VS Code's new windows open (Move Editor into New Window, an editor dragged out of the workbench): a
+	 *  same-origin Window the consumer provides, e.g. a blank iframe in a dock panel of the page around this one. VS
+	 *  Code moves the editor group's live DOM into it, as it would into a popup. Resolve undefined for a real popup.
+	 *  VS Code closes the window by calling its `close()`, so a consumer's window closes its frame from there; the
+	 *  consumer tells VS Code the user closed it with an `unload` event on the window. */
+	"openAuxiliaryWindow"?: (request: AuxiliaryWindowRequest) => Promise<Window | undefined>;
 }
+
+/** What VS Code asks of a new window: where it wants it, in screen coordinates (an editor dropped outside the
+ *  workbench asks for the drop point). */
+export interface AuxiliaryWindowRequest {
+	"bounds"?: { "x"?: number; "y"?: number; "width"?: number; "height"?: number };
+}
+
+// VS Code opens every auxiliary window through this one private method (a `window.open("about:blank")`); the rest of
+// the service — moving the editor part's DOM in, copying styles, focus and close tracking — only needs a same-origin
+// Window back. So asking the consumer first, with the popup as the fallback, is the whole override.
+const auxiliaryWindowService = BrowserAuxiliaryWindowService.prototype as unknown as { "openWindow": (options?: AuxiliaryWindowRequest) => Promise<Window | undefined> };
+const openPopupWindow = auxiliaryWindowService.openWindow;
+let openHostedWindow: BootOptions["openAuxiliaryWindow"];
+
+auxiliaryWindowService.openWindow = async function(this: unknown, options) {
+	return (await openHostedWindow?.({ "bounds": options?.bounds })) ?? openPopupWindow.call(this, options);
+};
 
 // Workers — static; referenced by MonacoEnvironment below.
 const workers: Partial<Record<string, Worker>> = {
@@ -402,6 +426,8 @@ export async function boot(options: BootOptions): Promise<void> {
 		productName = "monaco-vscode-api",
 		onSave
 	} = options;
+
+	openHostedWindow = options.openAuxiliaryWindow;
 
 	await createIndexedDBProviders();
 

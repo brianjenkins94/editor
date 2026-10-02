@@ -34,7 +34,10 @@ const server = await createServer({
 	// ROLLDOWN, not esbuild, so the fix is `rolldownOptions` + polyfillNodeRolldown (the esbuild variant throws
 	// "Not implemented" and kills the optimizer): it resolves the four builtins and inlines a `process` shim.
 	"optimizeDeps": { "rolldownOptions": { "plugins": [polyfillNodeRolldown(["fs", "path", "url", "util"])] } },
-	"plugins": [brotliStub, ...hostPlugins()]
+	"plugins": [brotliStub, ...hostPlugins()],
+	// PORT lets a second checkout (a git worktree) run beside the main one; strict so a taken port fails loudly
+	// instead of sliding to the next one, where a launch config pinned to the port would find the other server.
+	"server": process.env["PORT"] === undefined ? {} : { "port": Number(process.env["PORT"]), "strictPort": true }
 });
 
 await server.listen();

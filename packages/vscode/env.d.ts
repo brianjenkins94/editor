@@ -26,6 +26,13 @@ declare module "eslint:preset-plugins" {
 	export default loaders;
 }
 
+/** dockview-core's stylesheet, lifted out of its UMD build (see dockviewCssPlugin in build.ts). */
+declare module "dockview:css" {
+	const css: string;
+
+	export default css;
+}
+
 /** settings-defaults.jsonc, parsed — registered as the editor's configuration defaults (see snapshot.ts). */
 declare module "editor:settings-defaults" {
 	const defaults: Record<string, unknown>;

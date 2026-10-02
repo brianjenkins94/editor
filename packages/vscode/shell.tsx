@@ -25,6 +25,7 @@ import { reportArchitecture } from "./architecture";
 import { getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
 import type { RepoBinding } from "./github-auth";
 import { reportShellMetrics } from "./editor-metrics";
+import { createShellDock } from "./shell-dock";
 import { installShellPreview } from "./shell-preview";
 import { css, globalCss, iconSvg } from "./theme";
 import "@awesome.me/webawesome/dist/components/page/page.js";
@@ -57,7 +58,9 @@ const injectGlobals = globalCss({
 		"--muted": "var(--wa-color-text-quiet)",
 		"--accent": "var(--wa-color-brand-fill-loud)"
 	},
-	"html, body": { "height": "100%", "margin": 0 },
+	// `clip`, not `hidden`: the shell page must never scroll, and a hidden overflow still scrolls programmatically — as
+	// when VS Code focuses an editor in a dock panel mid-layout and the browser scrolls the page to show it.
+	"html, body": { "height": "100%", "margin": 0, "overflow": "clip" },
 	"body": { "backgroundColor": "var(--wa-color-surface-default)", "color": "var(--wa-color-text-normal)", "fontFamily": "var(--wa-font-family-body, system-ui, sans-serif)" },
 	// The shell fills the viewport; its menu/aside widths are theme-driven and collapse to 0 via the classes below.
 	".wa-shell": { "height": "100vh", "--menu-width": "260px", "--aside-width": "380px" },
@@ -220,8 +223,8 @@ const projectCard = css({
 const projectName = css({ "display": "block", "fontWeight": "var(--wa-font-weight-semibold)" });
 const projectDesc = css({ "display": "block", "fontSize": "11px", "color": "var(--wa-color-text-quiet)", "marginBlockStart": "2px", "whiteSpace": "normal" });
 
-// The editor iframe fills the `main` region; the diff overlay covers it when a file is opened.
-const appFrame = css({ "width": "100%", "height": "100%", "border": 0, "display": "block" });
+// The dock fills the `main` region (the editor iframe is its fixed panel); the diff overlay covers it when a file is opened.
+const dockHostCss = css({ "position": "absolute", "inset": 0 });
 const mainWrap = css({ "position": "relative", "height": "100%" });
 const overlay = css({
 	"position": "absolute",
@@ -334,7 +337,7 @@ function Shell() {
 
 	const rpcRef = useRef<ReturnType<typeof createRpcClient>>();
 	const pageRef = useRef<HTMLElement>(null);
-	const appFrameRef = useRef<HTMLIFrameElement>(null);
+	const dockHostRef = useRef<HTMLDivElement>(null);
 	const gitPanelRef = useRef<HTMLDivElement>(null);
 	const overlayRef = useRef<HTMLDivElement>(null);
 	const overlayTitleRef = useRef<HTMLSpanElement>(null);
@@ -347,17 +350,19 @@ function Shell() {
 	// in a background tab doesn't get (its timers are throttled to about once a second), and everything the editor
 	// loads waits on this iframe.
 	useLayoutEffect(() => {
-		const appFrame = appFrameRef.current;
+		const dockHost = dockHostRef.current;
 
-		if (appFrame === null) {
+		if (dockHost === null) {
 			return;
 		}
+
+		const shellHub = createHub({ "id": "shell" });
+		// The main region is a dock: the editor iframe is its fixed panel, VS Code's new windows dock around it.
+		const { "editorFrame": appFrame } = createShellDock(dockHost, shellHub);
 
 		// Load the SAME page into the iframe; that instance sees `window.parent !== window` → main.tsx boots the app.
 		performance.mark("shell/app-iframe");
 		appFrame.src = location.href;
-
-		const shellHub = createHub({ "id": "shell" });
 
 		const architecture = reportArchitecture(shellHub); // this realm's hub + network (GitHub, Code Hike) on $sys.arch
 		hubRef.current = shellHub;
@@ -910,7 +915,7 @@ function Shell() {
 			</div>
 
 			<div class={mainWrap()}>
-				<iframe ref={appFrameRef} class={appFrame()} title="editor" allow="cross-origin-isolated" />
+				<div ref={dockHostRef} class={dockHostCss()} />
 
 				<div ref={overlayRef} class={overlay()}>
 					<div class={overlayHead()}>

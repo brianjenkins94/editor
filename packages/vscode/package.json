@@ -22,6 +22,7 @@
     "@zenfs/core": "2.7.6",
     "codehike": "^1.1.0",
     "cspell-lib": "^10.3.0",
+    "dockview-core": "8.4.0",
     "eslint": "^10.10.0",
     "isomorphic-git": "^1.42.2",
     "just-bash": "^3.4.2",
@@ -29,8 +30,8 @@
     "preact": "latest",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "theme": "file:../theme",
     "react-reconciler": "0.29.0",
+    "theme": "file:../theme",
     "vscode-languageclient": "^10.1.1",
     "vscode-languageserver": "^10.1.1",
     "vscode-languageserver-textdocument": "^1.0.12"

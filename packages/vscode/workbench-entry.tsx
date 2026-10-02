@@ -12,7 +12,7 @@
  * commands through its `vscode` API. Filesystem overlays (CDN node_modules now, real-disk FSA later) layer UNDER the seeded snapshot —
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
-import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
+import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
 import { boot, ExtensionHostKind, installMonacoProbes, registerExtension, OPEN_ARCHITECTURE_COMMAND, registerFileSystemOverlay, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
@@ -441,7 +441,8 @@ function maybeBoot(): void {
 		"onSave": (path, contents) => {
 			workbenchHub.publish("workbench.save", { "path": path, "contents": contents });
 			paneLog.info("saved", { "path": path, "bytes": contents.length });
-		}
+		},
+		"openAuxiliaryWindow": openDockedWindow
 	})
 		.then(async () => {
 			bootSpan.info("monaco booted");
@@ -634,6 +635,30 @@ function maybeBoot(): void {
 // was 1.5s of every load); the retry is a backstop. Linking the hub above is itself the announce — the host retargets to
 // this window on the first frame — so there's no separate "ready" ping.
 const paneRpc = createRpcClient(workbenchHub);
+
+/**
+ * A VS Code window as a panel of the shell's dock (shell-dock.ts): the shell adds a blank iframe and names it, and
+ * we find it on the top window — same origin, so VS Code can move its editors' DOM in. VS Code closes a window by
+ * calling `close()`, a no-op on a frame's window, so that asks the shell to remove the panel instead. No shell (the
+ * workbench on its own) → undefined, and VS Code opens a real popup.
+ */
+async function openDockedWindow(request: AuxiliaryWindowRequest): Promise<Window | undefined> {
+	try {
+		const { name } = await paneRpc.request("dock.openWindow", request, { "timeoutMs": 4000, "waitForResponderMs": 1000 }) as { "name": string };
+		const frame = window.top?.document.querySelector<HTMLIFrameElement>(`iframe[name="${CSS.escape(name)}"]`);
+		const docked = frame?.contentWindow ?? undefined;
+
+		if (docked !== undefined) {
+			docked.close = () => { workbenchHub.publish("dock.closeWindow", { "name": name }); };
+		}
+
+		return docked;
+	} catch (error) {
+		paneLog.info("no dock to open a window in", { "error": errText(error) });
+
+		return undefined;
+	}
+}
 
 void (async () => {
 	for (;;) {
