@@ -6,7 +6,10 @@
  * seeded up front (snapshot.ts). The node_modules CDN overlay (node-modules-provider.ts) is async/lazy — great
  * for go-to-definition, but the checker can't await it, which is why baking exists. ATA is the runtime version of
  * the bake: discover a file's imports, fetch their `.d.ts` (+ `@types/<pkg>`, crawling the reference graph), and
- * WRITE the results into the same in-memory FS the seed uses — so the checker resolves them synchronously.
+ * WRITE the results into the same in-memory FS the seed uses — so the checker resolves them synchronously. The
+ * project's manifests add what no import names: package.json's `@types/*`, tsconfig's `types`, and the configs it
+ * `extends`. (It replaces TypeScript's own web type acquisition, which installs the whole dependency tree, binaries
+ * and all, into the extension host — see settings-defaults.jsonc.)
  *
  * It reuses OUR existing CDN path rather than a third-party acquirer: fetches go same-origin to
  * `<base>/workspace/node_modules/<pkg>/…`, which the service worker proxies to unpkg (with `?meta` for a
@@ -33,15 +36,16 @@ const MAX_NETWORK = 400;
 /** A declaration file. */
 const DECL = /\.d\.[mc]?ts$/u;
 
-/** unpkg `?meta` directory node: a file, or a directory whose `files` recurse. */
-interface MetaNode { "type": "file" | "directory"; "path": string; "files"?: MetaNode[] }
+/** unpkg `?meta`: a directory node whose `files` recurse (the old listing), or `{ prefix, files }` with every file beneath
+ *  it flat, by full path, `type` its MIME type (the current one). */
+interface MetaNode { "type"?: string; "path": string; "files"?: MetaNode[] }
 
 /** Bare package specifiers in source (scope-aware), reduced to their package root. Mirrors snapshot.ts. */
 function importedPackages(source: string): string[] {
 	const roots = new Set<string>();
 
 	for (const match of source.matchAll(/(?:from|import|require)\s*(?:\(\s*)?["']([^"']+)["']/gu)) {
-		const pkg = packageRootOf(match[1]);
+		const pkg = match[1].startsWith("node:") ? "@types/node" : packageRootOf(match[1]);
 
 		if (pkg !== undefined) {
 			roots.add(pkg);
@@ -49,6 +53,27 @@ function importedPackages(source: string): string[] {
 	}
 
 	return [...roots];
+}
+
+/** JSON with comments and trailing commas (a tsconfig) → its value; undefined when it doesn't parse. */
+function parseJsonc(text: string): Record<string, unknown> | undefined {
+	try {
+		return JSON.parse(text.replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//gu, (_, string: string | undefined) => string ?? "").replace(/,(\s*[}\]])/gu, "$1")) as Record<string, unknown>;
+	} catch {
+		return undefined;
+	}
+}
+
+/** A tsconfig's bare-specifier `extends` (`@tsconfig/node-lts/tsconfig.json`), split into package + file; relative
+ *  extends are workspace files, already present. */
+function extendsTargets(tsconfig: Record<string, unknown> | undefined): [string, string][] {
+	const value = tsconfig?.["extends"];
+
+	return (Array.isArray(value) ? value : [value]).flatMap((spec) => {
+		const pkg = typeof spec === "string" ? packageRootOf(spec) : undefined;
+
+		return pkg === undefined ? [] : [[pkg, (spec as string).slice(pkg.length + 1) || "tsconfig.json"] as [string, string]];
+	});
 }
 
 /** The package root of a bare specifier or node_modules-relative path (scope-aware); undefined for relative/node. */
@@ -138,10 +163,10 @@ function pickTypes(node: unknown): string | undefined {
 /** Flatten a `?meta` tree into the set of file paths it contains (package-relative, no leading slash). */
 function collectFiles(node: MetaNode, out: Set<string>): void {
 	for (const child of node.files ?? []) {
-		if (child.type === "file") {
-			out.add(child.path.replace(/^\/+/u, ""));
-		} else {
+		if (child.type === "directory" || child.files !== undefined) {
 			collectFiles(child, out);
+		} else {
+			out.add(child.path.replace(/^\/+/u, ""));
 		}
 	}
 }
@@ -178,7 +203,7 @@ function references(dts: string): { "relative": string[]; "packages": string[] }
 /** Resolve a relative reference to an EXISTING package file (from `?meta`) — no blind probing, no escaping. */
 function resolveInMeta(fromSub: string, ref: string, files: Set<string>): string | undefined {
 	const dir = fromSub.includes("/") ? fromSub.slice(0, fromSub.lastIndexOf("/")) : "";
-	const joined = new URL(ref, "file:///" + dir + "/").pathname.slice(1); // package-relative, normalized
+	const joined = new URL(ref, "file:///" + (dir === "" ? "" : dir + "/")).pathname.slice(1); // package-relative, normalized (a root file's base is file:///, not file:////)
 
 	for (const candidate of [joined, joined + ".d.ts", joined + ".d.mts", joined + ".d.cts", joined + "/index.d.ts"]) {
 		if (files.has(candidate)) {
@@ -306,17 +331,11 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 		const { relative, packages } = references(code);
 
-		for (const ref of relative) {
-			const target = resolveInMeta(sub, ref, files);
-
-			if (target !== undefined) {
-				await acquireFile(pkg, target, files, budget);
-			}
-		}
-
-		for (const dep of packages) {
-			await acquirePackage(dep, budget);
-		}
+		// Siblings in parallel: @types/node's index.d.ts alone references ~80 files, one round trip each.
+		await Promise.all([
+			...relative.map((ref) => resolveInMeta(sub, ref, files)).filter((target) => target !== undefined).map((target) => acquireFile(pkg, target, files, budget)),
+			...packages.map((dep) => acquirePackage(dep, budget))
+		]);
 
 		return true;
 	};
@@ -378,22 +397,27 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 	}
 
-	const run = (document: vscode.TextDocument | undefined): void => {
-		if (document === undefined || document.uri.scheme !== "file" || !RELEVANT.test(document.uri.path) || document.uri.path.includes("/node_modules/")) {
-			return;
+	/** A tsconfig file another config `extends`, fetched as-is (it's config, not a types entry), with the package.json
+	 *  module resolution reads beside it — then whatever IT extends. */
+	const acquireConfig = async (pkg: string, sub: string, budget: { "n": number }, depth = 0): Promise<void> => {
+		await acquireFile(pkg, "package.json", new Set(), budget);
+
+		if (await acquireFile(pkg, sub, new Set(), budget) && depth < 4) {
+			const text = await readLocal(pkg + "/" + sub);
+
+			for (const [next, nextSub] of extendsTargets(text === undefined ? undefined : parseJsonc(text))) {
+				await acquireConfig(next, nextSub, budget, depth + 1);
+			}
 		}
+	};
 
-		const packages = importedPackages(document.getText());
-
-		if (packages.length === 0) {
-			return;
-		}
-
-		const span = log.span("ata", { "file": document.uri.path, "imports": packages.length });
+	/** Acquire `packages` (and `configs`, tsconfigs to extend), then reload the TS projects if anything landed. */
+	const acquire = (what: Record<string, unknown>, packages: string[], configs: [string, string][] = []): void => {
+		const span = log.span("ata", { ...what, "imports": packages.length });
 		const budget = { "n": MAX_NETWORK };
 		const writtenBefore = written;
 
-		void Promise.all(packages.map((pkg) => acquirePackage(pkg, budget)))
+		void Promise.all([...packages.map((pkg) => acquirePackage(pkg, budget)), ...configs.map(([pkg, sub]) => acquireConfig(pkg, sub, budget))])
 			.then(async () => {
 				// tsserver may have resolved these imports (and failed) before the writes landed. Its failed-lookup
 				// watchers are registered asynchronously through the extension host, so on a cold boot the writes'
@@ -411,7 +435,61 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			.catch((error: unknown) => { span.error("ata failed", { "error": error instanceof Error ? error.message : String(error) }); span.end(); });
 	};
 
+	const run = (document: vscode.TextDocument | undefined): void => {
+		if (document === undefined || document.uri.scheme !== "file" || !RELEVANT.test(document.uri.path) || document.uri.path.includes("/node_modules/")) {
+			return;
+		}
+
+		const packages = importedPackages(document.getText());
+
+		if (packages.length > 0) {
+			acquire({ "file": document.uri.path }, packages);
+		}
+	};
+
+	// What the PROJECT needs that no source file imports: the root package.json's `@types/*` dependencies (the ambient
+	// `process` of @types/node), tsconfig's `compilerOptions.types`, and the configs a tsconfig `extends`.
+	const runProject = async (): Promise<void> => {
+		const root = workspaceFolder.replace(/\/$/u, "");
+		const read = async (path: string): Promise<Record<string, unknown> | undefined> => {
+			try {
+				return parseJsonc(new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.file(root + "/" + path))));
+			} catch {
+				return undefined;
+			}
+		};
+
+		const [manifest, tsconfig] = await Promise.all([read("package.json"), read("tsconfig.json")]);
+		const declared = Object.keys({ ...manifest?.["dependencies"] as object, ...manifest?.["devDependencies"] as object }).filter((name) => name.startsWith("@types/"));
+		const types = (tsconfig?.["compilerOptions"] as { "types"?: unknown } | undefined)?.types;
+		const listed = Array.isArray(types) ? types.filter((name): name is string => typeof name === "string").map((name) => packageRootOf(name) ?? name) : [];
+		const packages = [...new Set([...declared, ...listed])];
+		const configs = extendsTargets(tsconfig);
+
+		// Apart, so the few config files land (and reload the project) without waiting on a big types crawl.
+		if (configs.length > 0) {
+			acquire({ "file": root + "/tsconfig.json" }, [], configs);
+		}
+
+		if (packages.length > 0) {
+			acquire({ "file": root + "/{package.json,tsconfig.json}" }, packages);
+		}
+	};
+
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	let projectTimer: ReturnType<typeof setTimeout> | undefined;
+	// A repo load replaces both manifests: re-read them once it settles.
+	const manifests = api.workspace.createFileSystemWatcher(new api.RelativePattern(api.Uri.file(workspaceFolder), "{package.json,tsconfig.json}"));
+	const scheduleProject = (): void => {
+		clearTimeout(projectTimer);
+		projectTimer = setTimeout(() => {
+			void runProject();
+		}, DEBOUNCE_MS);
+	};
+
+	manifests.onDidCreate(scheduleProject);
+	manifests.onDidChange(scheduleProject);
+	void runProject();
 
 	const schedule = (document: vscode.TextDocument | undefined): void => {
 		if (timer !== undefined) {

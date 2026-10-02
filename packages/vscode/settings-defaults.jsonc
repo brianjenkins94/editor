@@ -37,9 +37,14 @@
 	"files.trimTrailingWhitespace": true,
 	"javascript.format.insertSpaceAfterFunctionKeywordForAnonymousFunctions": false,
 	"javascript.format.insertSpaceBeforeFunctionParenthesis": false,
+	// TypeScript's own web type acquisition installs the workspace's whole package.json tree into the extension host's
+	// memory, every platform's optional native binaries included — `typescript@7` alone is 20 × ~35 MB `tsc` builds.
+	// ata.ts acquires just the type surface, into the workspace store, instead.
+	"js/ts.tsserver.web.typeAcquisition.enabled": false,
 	"search.exclude": {
 		"**/package-lock.json": true
 	},
 	"typescript.format.insertSpaceAfterFunctionKeywordForAnonymousFunctions": false,
-	"typescript.format.insertSpaceBeforeFunctionParenthesis": false
+	"typescript.format.insertSpaceBeforeFunctionParenthesis": false,
+	"typescript.tsserver.web.typeAcquisition.enabled": false
 }

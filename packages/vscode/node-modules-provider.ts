@@ -23,10 +23,35 @@ import {
 } from "@brianjenkins94/monaco-vscode-api/main";
 import { createChangeEvent, notFound, readOnly, relUnder } from "./provider-base";
 
+/** unpkg `?meta`: the old listing (`type: "directory"`, its immediate `files`), or the current one — `{ prefix, files }`
+ *  with every file beneath the prefix flat, by full path (`type` is then a MIME type, and directories aren't listed). */
 interface UnpkgMeta {
-	"type": "file" | "directory";
+	"type"?: string;
+	"prefix"?: string;
 	"size"?: number;
-	"files"?: { "path": string; "type": "file" | "directory"; "size"?: number }[];
+	"files"?: { "path": string; "type"?: string; "size"?: number }[];
+}
+
+/** A directory's immediate children from either `?meta` shape; in the flat one, a deeper path means a subdirectory. */
+function childEntries(meta: UnpkgMeta): [string, FileType][] {
+	if (meta.type === "directory") {
+		return (meta.files ?? []).map((entry) => [
+			entry.path.split("/").filter(Boolean).pop() ?? "",
+			entry.type === "directory" ? FileType.Directory : FileType.File
+		]);
+	}
+
+	const children = new Map<string, FileType>();
+
+	for (const entry of meta.files ?? []) {
+		const [name, ...deeper] = entry.path.slice((meta.prefix ?? "/").length).split("/").filter(Boolean);
+
+		if (name !== undefined) {
+			children.set(name, deeper.length > 0 ? FileType.Directory : FileType.File);
+		}
+	}
+
+	return [...children];
 }
 
 /** A spurious TypeScript-SOURCE probe: `.ts`/`.tsx`/`.mts`/`.cts` that is NOT a declaration (`.d.ts` …).
@@ -262,15 +287,14 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			}
 
 			const meta = metaResults.get(rel);
+			const children = meta === undefined ? [] : childEntries(meta);
 
-			if (meta?.type !== "directory") {
+			// unpkg answers `?meta` for ANY path (see stat), so an empty listing is a file or nothing — not a directory.
+			if (children.length === 0) {
 				throw notFound();
 			}
 
-			return (meta.files ?? []).map((entry) => [
-				entry.path.split("/").filter(Boolean).pop() ?? "",
-				entry.type === "directory" ? FileType.Directory : FileType.File
-			]);
+			return children;
 		},
 
 		"writeFile": () => Promise.reject(readOnly()),

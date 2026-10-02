@@ -176,14 +176,21 @@ function stamp(response) {
 // source. Keep in sync with vite.ts nodeModulesCdnPlugin (the dev mirror).
 async function fetchCdn(pathname, requestUrl) {
 	const { pkg, sub } = splitPackage(pathname.slice(NODE_MODULES.length));
-	const version = requestUrl.searchParams.get("v");
-	const spec = pkg + (version === null ? "" : "@" + version) + (sub === "" ? "" : "/" + sub);
-	const upstream = CDN + "/" + spec + (requestUrl.searchParams.has("meta") ? "?meta" : "");
+	const meta = requestUrl.searchParams.has("meta");
+	let version = requestUrl.searchParams.get("v");
+	let spec = pkg + (version === null ? "" : "@" + version) + (sub === "" ? "" : "/" + sub);
 	// A timed span: the collector shows `→ cdn` / `← cdn (Xms)`, so a slow/failed CDN fallback is visible.
 	const span = swLog.span("cdn", { "spec": spec });
 
 	try {
-		const response = await fetch(upstream);
+		// unpkg's redirect for an UNVERSIONED `?meta` carries no CORS header (its file redirects do), so this fetch would
+		// fail on it: pin the version from the package's package.json first.
+		if (meta && version === null) {
+			version = (await (await fetch(CDN + "/" + pkg + "/package.json")).json()).version ?? null;
+			spec = pkg + (version === null ? "" : "@" + version) + (sub === "" ? "" : "/" + sub);
+		}
+
+		const response = await fetch(CDN + "/" + spec + (meta ? "?meta" : ""));
 		const headers = new Headers(response.headers);
 
 		headers.set("Cross-Origin-Embedder-Policy", "credentialless");
@@ -194,8 +201,8 @@ async function fetchCdn(pathname, requestUrl) {
 
 		return new Response(response.body, { "status": response.status, "statusText": response.statusText, "headers": headers });
 	} catch (error) {
-		console.error("[coi-serviceworker] cdn", upstream, error);
-		span.error("cdn failed", { "upstream": upstream, "error": String(error) });
+		console.error("[coi-serviceworker] cdn", spec, error);
+		span.error("cdn failed", { "spec": spec, "error": String(error) });
 		span.end();
 
 		return new Response("cdn error", { "status": 502, "statusText": "Bad Gateway" });
