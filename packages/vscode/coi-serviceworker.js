@@ -174,6 +174,22 @@ function stamp(response) {
 // fetch follows the CDN's unversioned 302 and isn't bound by the document's COEP — and hand it back
 // same-origin. Serves RAW source (no import rewrite): the consumer is go-to-definition, which shows real dep
 // source. Keep in sync with vite.ts nodeModulesCdnPlugin (the dev mirror).
+// Whether the CDN answers for `pkg@version` at all (its package.json comes with CORS), asked once per version: what
+// tells a missing file from an unreachable CDN.
+const answering = new Map();
+
+function packageAnswers(pinned) {
+	if (!answering.has(pinned)) {
+		answering.set(pinned, fetch(CDN + "/" + pinned + "/package.json").then((response) => response.ok, () => {
+			answering.delete(pinned); // unreachable now: ask again next time
+
+			return false;
+		}));
+	}
+
+	return answering.get(pinned);
+}
+
 async function fetchCdn(pathname, requestUrl) {
 	const { pkg, sub } = splitPackage(pathname.slice(NODE_MODULES.length));
 	const meta = requestUrl.searchParams.has("meta");
@@ -201,6 +217,15 @@ async function fetchCdn(pathname, requestUrl) {
 
 		return new Response(response.body, { "status": response.status, "statusText": response.statusText, "headers": headers });
 	} catch (error) {
+		// unpkg's 404 carries no CORS header either, so a file that isn't there (tsserver probing `react/index.d.ts`,
+		// whose types live in @types/react) throws here like an outage would. If the package itself answers, the CDN
+		// is up and the file is missing: say 404, which the node_modules provider caches, rather than a 502 it retries.
+		if (version !== null && await packageAnswers(pkg + "@" + version)) {
+			span.end({ "status": 404 });
+
+			return new Response("not found", { "status": 404, "statusText": "Not Found" });
+		}
+
 		console.error("[coi-serviceworker] cdn", spec, error);
 		span.error("cdn failed", { "spec": spec, "error": String(error) });
 		span.end();
