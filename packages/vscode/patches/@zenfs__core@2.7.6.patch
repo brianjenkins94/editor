@@ -1,8 +1,35 @@
 diff --git a/dist/backends/single_buffer.js b/dist/backends/single_buffer.js
-index 119eb77..04c6505 100644
+index 119eb77..3ee7e5a 100644
 --- a/dist/backends/single_buffer.js
 +++ b/dist/backends/single_buffer.js
-@@ -574,8 +574,13 @@ const kMetadataOffset = offsetof(SuperBlock, 'metadata_offset') / Uint32Array.BY
+@@ -426,11 +426,21 @@ let SuperBlock = (() => {
+                 _update(md);
+                 return;
+             }
+-            if (this.checksum !== checksum(this))
+-                throw crit(withErrno('EIO', 'sbfs: checksum mismatch for super block'));
+-            this.metadata = new MetadataBlock(this.buffer, this.metadata_offset);
+-            if (this.metadata.checksum !== checksum(this.metadata))
+-                throw crit(withErrno('EIO', `sbfs: checksum mismatch for metadata block (saved ${hex(this.metadata.checksum)}, computed ${hex(checksum(this.metadata))})`));
++            // Attaching takes no lock, so another realm may be mid-write — between changing a block and updating its
++            // checksum — as this one reads. A mismatch a re-read clears was that torn read; only one that persists is
++            // corruption.
++            for (let attempt = 0;; attempt++) {
++                const superOk = this.checksum === checksum(this);
++                this.metadata = new MetadataBlock(this.buffer, this.metadata_offset);
++                this.metadata.waitUnlocked();
++                if (superOk && this.metadata.checksum === checksum(this.metadata))
++                    break;
++                if (attempt >= 10000) {
++                    if (!superOk)
++                        throw crit(withErrno('EIO', 'sbfs: checksum mismatch for super block'));
++                    throw crit(withErrno('EIO', `sbfs: checksum mismatch for metadata block (saved ${hex(this.metadata.checksum)}, computed ${hex(checksum(this.metadata))})`));
++                }
++            }
+             if (this.inode_format != _inode_version)
+                 throw crit(withErrno('EIO', 'sbfs: inode format mismatch'));
+             if (this.metadata_block_size != sizeof(MetadataBlock))
+@@ -574,8 +584,13 @@ const kMetadataOffset = offsetof(SuperBlock, 'metadata_offset') / Uint32Array.BY
   */
  function checksum(value) {
      let length = sizeof(value) - 4;
@@ -16,7 +43,7 @@ index 119eb77..04c6505 100644
      return crc32c(new Uint8Array(value.buffer, value.byteOffset + 4, length));
  }
  /**
-@@ -611,6 +616,109 @@ export class SingleBufferStore extends BufferView {
+@@ -611,6 +626,109 @@ export class SingleBufferStore extends BufferView {
          this._view = new DataView(this.buffer, this.byteOffset, this.byteLength);
          this._u8 = new Uint8Array(this.buffer, this.byteOffset, this.byteLength);
          this.superblock = new SuperBlock(this.buffer, this.byteOffset);
@@ -126,7 +153,7 @@ index 119eb77..04c6505 100644
      }
      *keys() {
          const keys = new Set();
-@@ -625,44 +733,54 @@ export class SingleBufferStore extends BufferView {
+@@ -625,44 +743,54 @@ export class SingleBufferStore extends BufferView {
          }
      }
      get(id) {
@@ -200,7 +227,7 @@ index 119eb77..04c6505 100644
                          return;
                      }
                      catch (e_1) {
-@@ -674,19 +792,32 @@ export class SingleBufferStore extends BufferView {
+@@ -674,19 +802,32 @@ export class SingleBufferStore extends BufferView {
                      }
                  }
              }
@@ -239,7 +266,7 @@ index 119eb77..04c6505 100644
          }
          catch (e_2) {
              env_1.error = e_2;
-@@ -697,18 +828,58 @@ export class SingleBufferStore extends BufferView {
+@@ -697,18 +838,58 @@ export class SingleBufferStore extends BufferView {
          }
      }
      delete(id) {
