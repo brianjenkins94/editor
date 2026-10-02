@@ -201,9 +201,10 @@ export function hostPlugins(): Plugin[] {
 }
 
 /**
- * `dockview:css` — dockview-core's stylesheet, as a string. Its published package ships no .css file (its build
- * inlines the sheet into the UMD bundle only, as the text of a `<style>` it appends), and the ESM build we import has
- * none, so lift that one string out of the UMD file at build time rather than load a second copy of dockview for it.
+ * `dockview:css` — dockview's stylesheet, as a string. dockview-core publishes none (its UMD bundle injects the sheet
+ * as a `<style>`, and the ESM build we import has nothing), but the `dockview` package publishes that same sheet as a
+ * file, `dist/styles/dockview.css` — so it's read from there, never lifted out of a bundle's code. The two packages are
+ * pinned to one version (package.json), and the build checks that they are: the sheet must match the code it styles.
  */
 function dockviewCssPlugin(): Plugin {
 	const id = "dockview:css";
@@ -216,14 +217,14 @@ function dockviewCssPlugin(): Plugin {
 				return undefined;
 			}
 
-			const umd = fs.readFileSync(createRequire(import.meta.url).resolve("dockview-core/dist/dockview-core.js"));
-			const css = /s\.textContent = ("(?:[^"\\]|\\.)*");/u.exec(umd)?.[1];
+			const require = createRequire(import.meta.url);
+			const version = (name: string): string => (JSON.parse(fs.readFileSync(require.resolve(name + "/package.json"))) as { "version": string }).version;
 
-			if (css === undefined) {
-				throw new Error("dockview-css: no stylesheet found in dockview-core's UMD build");
+			if (version("dockview") !== version("dockview-core")) {
+				throw new Error(`dockview-css: dockview ${version("dockview")} and dockview-core ${version("dockview-core")} must be one version — the stylesheet comes from the first, the code it styles from the second`);
 			}
 
-			return "export default " + css + ";";
+			return "export default " + JSON.stringify(fs.readFileSync(require.resolve("dockview/dist/styles/dockview.css"))) + ";";
 		}
 	};
 }

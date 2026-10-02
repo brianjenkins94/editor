@@ -26,7 +26,7 @@ declare module "eslint:preset-plugins" {
 	export default loaders;
 }
 
-/** dockview-core's stylesheet, lifted out of its UMD build (see dockviewCssPlugin in build.ts). */
+/** dockview's stylesheet — the `dockview` package's dist/styles/dockview.css (see dockviewCssPlugin in build.ts). */
 declare module "dockview:css" {
 	const css: string;
 
