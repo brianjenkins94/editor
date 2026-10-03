@@ -13,6 +13,10 @@ export interface TapRecord {
 export type Send = (record: TapRecord) => void;
 export type Decide = (kind: string, resource: string) => Promise<boolean>;
 
+/** What a page (or a worker) hands a worker it starts, as its first message, with the port that worker joins its hub on
+ *  (page-tap.ts, worker-tap.ts). */
+export const WORKER_OFFER = "__editorTap";
+
 function format(value: unknown): string {
 	if (typeof value === "string") {
 		return value;

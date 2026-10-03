@@ -254,6 +254,26 @@ test("a page's capability request (WebSocket, WebRTC) is decided by the editor, 
 	await session.until("the shell's answer to the window", hasLabel("shell", window, /^↩ preview\.decide\(\)$/u));
 });
 
+test("a worker's capability request is decided the same way — asked through its page", async () => {
+	const window = "preview:" + previewPort();
+	const answers = (snapshot) => snapshot.channels.filter((channel) => (channel.a === "shell" && channel.b === window) || (channel.a === window && channel.b === "shell"))
+		.reduce((total, channel) => total + (channel.labels["↩ preview.decide()"]?.count ?? 0), 0);
+	const before = answers(session.snapshot());
+	const worker = session.page.workers().find((candidate) => /\/worker\.ts/u.test(candidate.url()));
+
+	assert.ok(worker !== undefined, "the app's worker: " + session.page.workers().map((candidate) => candidate.url()).join(", "));
+	// The worker's tap gates its WebSocket like the page's: it asks its page (tap.worker.decide), which asks the shell.
+	await worker.evaluate(() => { globalThis.__decideTest = new WebSocket("ws://localhost:1/worker-decide-test"); });
+
+	const deny = session.page.locator("wa-button", { "hasText": "Deny" }).first();
+
+	if (await deny.waitFor({ "timeout": 10_000 }).then(() => true, () => false)) {
+		await deny.click();
+	}
+
+	await session.until("the shell's answer to the worker's question, into its window", (snapshot) => answers(snapshot) > before);
+});
+
 test("a worker's console reaches the editor's log plane too — through the worker tap, tagged with its worker", async () => {
 	const [record] = await eventually("the worker's log in debug-mcp", async () => {
 		const found = debugMcp.store.queryLogs({ "source": "preview:" + previewPort(), "textIncludes": "wired worker says hi" });
@@ -262,8 +282,10 @@ test("a worker's console reaches the editor's log plane too — through the work
 	});
 
 	assert.equal(record.attrs?.worker, "/worker.ts");
-	// And the channel it came over is in the architecture: the shell's end of the workers' BroadcastChannel.
-	await session.until("the worker tap's channel", hasLabel("shell", "channel:__editor_preview_tap__", /^obs-log$/u));
+	// And it came through its page — the only way a worker reaches the editor: the worker's tap joined the window's hub.
+	const window = "preview:" + previewPort();
+
+	await session.until("the worker's tap, joined to its page", (snapshot) => snapshot.topology?.[window]?.links.some((link) => new RegExp("^" + window + "/worker-tap-[0-9a-f]{4}$", "u").test(link.peerId ?? "")) === true);
 });
 
 test("an edit to a module only the nested frame loaded reloads that frame, and leaves the page alone", async () => {
@@ -348,7 +370,10 @@ test("the editor's architecture view takes the app's contexts as the app's: none
 	const snapshot = await session.until("the app's hubs in the view", (current) => [window, window + "/page", window + "/worker"].every((id) => current.topology?.[id] !== undefined));
 
 	assert.ok(snapshot.nodes.some((node) => node.id === window + "/frame"), "its nested frame's hub too");
-	assert.deepEqual(snapshot.topology[window].links.map((link) => link.peerId).sort(), [window + "/page", "shell"], "the app's page joined through the tap — one link from the window to the shell");
+	const peers = snapshot.topology[window].links.map((link) => link.peerId);
+
+	assert.deepEqual(peers.filter((peer) => !/\/worker-tap-/u.test(peer)).sort(), [window + "/page", "shell"], "the app's page joined through the tap — one link from the window to the shell");
+	assert.equal(peers.filter((peer) => /\/worker-tap-/u.test(peer)).length, 1, "and the page's worker, through it: " + peers.join(", "));
 	assert.deepEqual((await session.conformance()).filter((violation) => violation.id !== override()), []);
 
 	// And where they run, as each says: the frame in the page (the window); the worker under the page that started it.

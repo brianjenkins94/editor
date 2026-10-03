@@ -2,20 +2,22 @@
  * The tap in every page a preview serves (the dev server inlines it as the document's first script — node-worker.ts),
  * so it runs before the app's own code. It lights up what the editor can't otherwise see of an app — its console and
  * uncaught errors — keeps the app's new windows in the editor, gates the network the service worker can't see
- * (WebSocket, WebRTC), and tells the workers the page starts where they came from.
+ * (WebSocket, WebRTC), and gives the workers the page starts their way to it.
  *
  * A preview window's top frame holds its one hub into the editor: the tap's, linked to the shell (which names it as
  * the window — `preview:<port>`). Everything rides it: records on `$sys.log`, capability decisions and new windows as
  * calls the shell serves (`preview.decide`, `preview.open` — it knows the window from the link). The app's own hub, if
  * it has one, joins through it (`__editorTap.connect()`, used by observability's linkPreviewHost), never beside it.
- * A frame nested in the window — same origin — uses the top frame's tap directly.
+ * A frame nested in the window — same origin — uses the top frame's tap directly. A worker the page starts joins the
+ * window's hub through its page (worker-tap.ts): handed a port as its first message, it sends its records and asks its
+ * capability questions here (`tap.worker.log`, `tap.worker.decide`), and the tap passes them on as its own.
  */
 import type { Transport } from "@brianjenkins94/hub";
 import type { TapRecord } from "./tap-shared";
-import { createHub, createRpcClient, pipe, windowTransport } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, pipe, portTransport, serve, windowTransport } from "@brianjenkins94/hub";
 import { createArchReporter, REALM_PARENT } from "@brianjenkins94/observability";
 import { PREVIEW_HOST_MARK, VIRTUAL_MARKER, VIRTUAL_RE, WINDOW_PARAM } from "../../virtual-path";
-import { installConsoleTap, installSocketGate } from "./tap-shared";
+import { installConsoleTap, installSocketGate, WORKER_OFFER } from "./tap-shared";
 
 /** What a preview window's top frame offers the frames in it and the app (`window.__editorTap`). */
 export interface EditorTap {
@@ -26,6 +28,8 @@ export interface EditorTap {
 	"open": (href: string) => void;
 	/** A transport onto the window's hub, for the app's own hub to join the editor's tree through. */
 	"connect": () => Transport;
+	/** A worker the page starts joins the window's hub on this port (worker-tap.ts). */
+	"adopt": (port: MessagePort) => void;
 }
 
 type TapWindow = Window & { "__editorTap"?: EditorTap; "__obsTap"?: true };
@@ -71,12 +75,27 @@ function windowTap(host: Window, windowId: string): EditorTap {
 	const log = (record: TapRecord): void => {
 		hub.publish("$sys.log.tap", { "kind": "log", "level": record.level, "message": record.message, "attrs": record.attrs, "context": { "source": "tap" }, "time": Date.now(), "depth": 0 });
 	};
+	// Unanswered (no shell, no decider) ⇒ deny.
+	const decide = async (kind: string, resource: string): Promise<boolean> => rpc.request("preview.decide", { "kind": kind, "resource": resource }, { "timeoutMs": 300_000, "waitForResponderMs": 10_000 }).then((allow) => allow === true, () => false);
+
+	// The page's workers, through it: their records and their capability questions, passed on as the window's own.
+	hub.subscribe("tap.worker.log", (data) => {
+		const record = (data as { "record"?: TapRecord } | null)?.record;
+
+		if (record !== undefined) {
+			log(record);
+		}
+	});
+	serve(hub, "tap.worker.decide", async (args) => {
+		const { kind, resource } = (args ?? {}) as { "kind"?: unknown; "resource"?: unknown };
+
+		return typeof kind === "string" && await decide(kind, typeof resource === "string" ? resource : "");
+	});
 
 	return {
 		"window": windowId,
 		"log": log,
-		// Unanswered (no shell, no decider) ⇒ deny.
-		"decide": async (kind, resource) => rpc.request("preview.decide", { "kind": kind, "resource": resource }, { "timeoutMs": 300_000, "waitForResponderMs": 10_000 }).then((allow) => allow === true, () => false),
+		"decide": decide,
 		"open": (href) => { void rpc.request("preview.open", { "url": href }, { "timeoutMs": 10_000, "waitForResponderMs": 10_000 }).catch(() => undefined); },
 		"connect": () => {
 			const [mine, theirs] = pipe();
@@ -84,7 +103,8 @@ function windowTap(host: Window, windowId: string): EditorTap {
 			hub.link(mine);
 
 			return theirs;
-		}
+		},
+		"adopt": (port) => { hub.link(portTransport(port)); }
 	};
 }
 
@@ -122,7 +142,7 @@ function install(): void {
 	installSocketGate(tap.decide);
 	gateWebRtc(tap.decide);
 	keepNewWindows(tap.open);
-	tagWorkers(windowId);
+	adoptWorkers(windowId, tap);
 }
 
 /** New windows stay in the editor: the app opening one of its server's pages as a new window — `window.open`, a
@@ -206,15 +226,13 @@ function gateWebRtc(decide: EditorTap["decide"]): void {
 	(window as { "RTCPeerConnection": unknown }).RTCPeerConnection = Gated;
 }
 
-/** The workers this page starts are told where they came from — this page (their realm's parent) and its preview
- *  window — in their URL's hash, which never reaches the server. */
-function tagWorkers(windowId: string): void {
-	const Original = window.Worker as typeof Worker | undefined;
-
-	if (Original === undefined) {
-		return;
-	}
-
+/**
+ * The workers this page starts are told where they came from — this page (their realm's parent) and its preview window
+ * — in their URL's hash, which never reaches the server; and each is handed a port onto the window's hub as its first
+ * message (`WORKER_OFFER`), which its tap takes before the app's own handlers see it (worker-tap.ts). A shared worker
+ * gets the port on its port, and joins the first page that offers one.
+ */
+function adoptWorkers(windowId: string, tap: EditorTap): void {
 	const tagged = (url: string | URL): string | URL => {
 		try {
 			const parsed = new URL(String(url), location.href);
@@ -234,12 +252,35 @@ function tagWorkers(windowId: string): void {
 			return url;
 		}
 	};
+	const offer = (post: (message: unknown, transfer: Transferable[]) => void): void => {
+		const { port1, port2 } = new MessageChannel();
 
-	(window as { "Worker": unknown }).Worker = class extends Original {
-		public constructor(url: string | URL, options?: WorkerOptions) {
-			super(tagged(url), options);
-		}
+		try {
+			post({ [WORKER_OFFER]: true }, [port2]);
+			tap.adopt(port1);
+		} catch { /* a tap never breaks the app */ }
 	};
+	const OriginalWorker = window.Worker as typeof Worker | undefined;
+	const OriginalShared = window.SharedWorker as typeof SharedWorker | undefined;
+
+	if (OriginalWorker !== undefined) {
+		(window as { "Worker": unknown }).Worker = class extends OriginalWorker {
+			public constructor(url: string | URL, options?: WorkerOptions) {
+				super(tagged(url), options);
+				offer((message, transfer) => { super.postMessage(message, transfer); });
+			}
+		};
+	}
+
+	if (OriginalShared !== undefined) {
+		// (Its URL stays as it is: a shared worker is found by its URL, and a window's tag would make one per window.)
+		(window as { "SharedWorker": unknown }).SharedWorker = class extends OriginalShared {
+			public constructor(url: string | URL, options?: string | WorkerOptions) {
+				super(url, options);
+				offer((message, transfer) => { this.port.postMessage(message, transfer); });
+			}
+		};
+	}
 }
 
 install();

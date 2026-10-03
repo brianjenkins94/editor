@@ -21,17 +21,15 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { ArchSink } from "@brianjenkins94/observability";
 import type { LinkPermissions, Transport } from "@brianjenkins94/hub";
 import { createRpcClient, rpcCallSubject, rpcReplySubject, serve, windowTransport } from "@brianjenkins94/hub";
-import { installWindowMessageProbe, LOG_SUBJECT, scopedTransport } from "@brianjenkins94/observability";
+import { installWindowMessageProbe, scopedTransport } from "@brianjenkins94/observability";
 import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, RotateCcw, SquareArrowDownLeft, SquareArrowOutUpRight } from "lucide";
 import type { DevtoolsPanel } from "./preview-devtools";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import { installAutoProfiler, installPreviewProfiler } from "./preview-profile";
 import { css, iconSvg } from "./theme";
-import { parseVirtual, PREVIEW_HOST_MARK, PREVIEW_WINDOW_PREFIX, previewPageOf, windowId, windowTitle } from "./virtual-path";
+import { PREVIEW_HOST_MARK, PREVIEW_WINDOW_PREFIX, previewPageOf, windowId, windowTitle } from "./virtual-path";
 import { createPaneWindow, type PaneWindow, type PaneWindowFactory } from "./window";
 
-/** Levels the preview tap emits — anything else is coerced to "info". */
-const OBS_LEVELS = new Set(["trace", "debug", "info", "warn", "error", "fatal"]);
 /** The default preview port, used when an event omits one (single-preview back-compat). */
 const DEFAULT_PORT = 5173;
 
@@ -739,52 +737,6 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	function surfaceOf(source: MessageEventSource | null): PreviewSurface | undefined {
 		return [...surfaces.values()].find((surface) => isWithin(source, pageOf(surface)));
 	}
-
-	/** One record from a preview's page or worker tap, onto the log plane under `source` (the window it's from). */
-	const publishTapRecord = (source: string, record: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> }): void => {
-		const { level, message, attrs } = record;
-
-		hub.publish(`${LOG_SUBJECT}.${source}`, {
-			"kind": "log",
-			"level": typeof level === "string" && OBS_LEVELS.has(level) ? level : "info",
-			"message": typeof message === "string" ? message : String(message),
-			"attrs": attrs ?? {},
-			"context": { "source": source },
-			"time": Date.now(),
-			"depth": 0
-		});
-	};
-
-	// A previewed app's WORKERS can't post to this window; their tap (node-worker.ts WORKER_TAP) reports on a
-	// same-origin BroadcastChannel instead — every editor tab of this origin hears it, so each takes only its own tab's
-	// (the tab and port are in the worker's address). Its records go under a window of that server (which one isn't
-	// known: a worker can't tell — the last used), and its WebSocket decisions round-trip like a page's.
-	const tapChannel = typeof BroadcastChannel === "function" ? new BroadcastChannel("__editor_preview_tap__") : undefined;
-	const tabOf = (url: string | undefined): string | undefined => (url === undefined ? undefined : parseVirtual(new URL(url, location.href).pathname)?.tab);
-
-	tapChannel?.addEventListener("message", (event: MessageEvent) => {
-		const data = event.data as { "channel"?: string; "tab"?: string; "port"?: number; "window"?: string; "from"?: string; "id"?: string; "kind"?: string; "resource"?: string; "record"?: { "level"?: string; "message"?: unknown; "attrs"?: Record<string, unknown> } } | null;
-		const port = data?.port;
-
-		if (typeof port !== "number" || data?.tab === undefined || data.tab !== tabOf(servers.get(port)?.url)) {
-			return; // another editor tab's worker, or a server this tab doesn't run
-		}
-
-		// The window the worker was started in (its page's tap tagged it), if it's still open on this server; else the
-		// port's last used one (a worker the tap didn't start — an app's worker of a worker).
-		const tagged = typeof data.window === "string" ? surfaces.get(data.window) : undefined;
-		const surface = tagged?.port === port ? tagged : windowFor(port);
-
-		if (data.channel === "obs-log" && data.record !== undefined && surface !== undefined) {
-			publishTapRecord(surface.id, data.record);
-		} else if (data.channel === "cap-decide" && typeof data.kind === "string") {
-			const reply = (allow: boolean): void => { tapChannel.postMessage({ "channel": "cap-decision", "to": data.from, "id": data.id, "allow": allow }); };
-
-			capRpc.request("capability.decide", { "kind": data.kind, "args": [data.resource ?? ""], "port": port, ...surface === undefined ? {} : { "window": surface.id } }, { "timeoutMs": 300000, "waitForResponderMs": 10000 })
-				.then((allow) => { reply(allow !== false); })
-				.catch(() => { reply(false); }); // can't reach the decider ⇒ fail closed
-		}
-	});
 
 	globalThis.addEventListener("message", (event: MessageEvent) => {
 		// The tsval render surface announced itself → hand it a MessagePort and bridge that port to the hub (same-realm
