@@ -46,6 +46,14 @@ reference router a few lines long); the rest are named tests in `test/hub.test.t
 - **Interest before messages.** A message published before the far side's interest has arrived goes nowhere — `await
   link(…).ready` or `whenInterested` before a one-off message.
 
+## Beside the hub
+
+- **`createNetwork`** (`src/network.ts`) — for tests: links hubs in memory on a simulated clock, with seeded drops,
+  duplicates and jitter on the messages you pick, so a whole tree runs in one process, deterministically.
+- **`offerLink` / `answerLink`** (`src/rtc.ts`) — a WebRTC data channel between two pages, handed to `take` the moment
+  it exists (the only time it can be transferred to a worker), for `dataChannelTransport`; signaling is yours
+  (`localSignaling` within a page).
+
 ## What it doesn't do
 
 No persistence or acknowledgement (a router, not a broker); no reconnect (the transport's owner relinks); no loop
