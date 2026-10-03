@@ -77,6 +77,29 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 
 	assert.deepEqual(run.origin, { "other": "Run and Debug" });
 	assert.match(run.id, /^[0-9a-f-]{36}$/u, "a UUID: records outlive the page");
+
+	// Its envelope, in .silo/runs/<user>.jsonl: whose, where, on what code.
+	const envelope = await eventually("its envelope", () => session.workbench().evaluate(async (id) => {
+		const { api } = globalThis.__editor;
+		const folder = api.Uri.file("/workspace/.silo/runs");
+		const entries = await api.workspace.fs.readDirectory(folder).then((found) => found, () => []);
+
+		for (const [name] of entries) {
+			const text = new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.joinPath(folder, name)));
+			const line = text.split("\n").find((each) => each.includes(id));
+
+			if (line !== undefined) {
+				return JSON.parse(line);
+			}
+		}
+
+		return undefined;
+	}, run.id));
+
+	assert.equal(envelope.entry, "f5.js");
+	assert.equal(envelope.environment.runtime, "tsval");
+	assert.match(envelope.environment.engine, /^chromium-\d+$/u);
+	assert.match(envelope.files["f5.js"], /^[0-9a-f]{40}$/u, "the blob oid of the code that ran");
 });
 
 // A service — it keeps running (lifecycle.ts) — needs an event loop tsval doesn't have, so it runs on the script worker

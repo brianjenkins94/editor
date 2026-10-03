@@ -257,9 +257,9 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 	// its id as the session starts, and puts it in the session's launch config. Its end is the session's (`node.exit`,
 	// as for a terminal's debug run); stopping it from here stops the session (`debug.stop`).
 	serve(hub, "runs.begin", (args) => {
-		const { title, cwd } = (args ?? {}) as { "title"?: unknown; "cwd"?: unknown };
+		const { title, cwd, entry } = (args ?? {}) as { "title"?: unknown; "cwd"?: unknown; "entry"?: unknown };
 		let stopped = false;
-		const run = runs.start({ "title": typeof title === "string" ? title : "debug", "kind": "task", "cwd": typeof cwd === "string" ? cwd : "/workspace", "origin": { "other": "Run and Debug" } }, () => {
+		const run = runs.start({ "title": typeof title === "string" ? title : "debug", "kind": "task", "cwd": typeof cwd === "string" ? cwd : "/workspace", "origin": { "other": "Run and Debug" }, "runtime": "tsval", ...typeof entry === "string" && entry !== "" ? { "entry": entry } : {} }, () => {
 			stopped = true;
 			hub.publish("debug.stop", { "runId": run.id });
 		});

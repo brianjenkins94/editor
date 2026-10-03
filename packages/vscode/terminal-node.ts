@@ -66,7 +66,7 @@ export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 		// In the running list as it was asked for (`npm run build` runs `node build.ts`). (`npm run` passes the script's
 		// name in the environment it runs it with — ctx.env, not the exported one.)
 		const event = Object.fromEntries(ctx.env)["npm_lifecycle_event"] ?? env["npm_lifecycle_event"];
-		const run = runner.runs.start({ "title": event === undefined ? "node " + args.join(" ") : "npm run " + event, "kind": kind, "cwd": ctx.cwd, "origin": { "terminal": terminal } }, () => { controller.abort(); });
+		const run = runner.runs.start({ "title": event === undefined ? "node " + args.join(" ") : "npm run " + event, "kind": kind, "cwd": ctx.cwd, "origin": { "terminal": terminal }, "entry": file, "runtime": kind === "task" ? "tsval" : "almostnode" }, () => { controller.abort(); });
 		const ended = (exitCode: number): { "stdout": string; "stderr": string; "exitCode": number } => {
 			run.end(exitCode, controller.signal.aborted);
 
@@ -88,6 +88,8 @@ export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 			// A service, or tsval declined → run on the almostnode "production" path. Present it as a production debug session too
 			// (Run and Debug controller + Debug Console), same as the vite preview — so this path isn't a bare
 			// process. The debug Stop button and the shell's Ctrl-C both abort the run via one combined signal.
+			run.update({ "runtime": "almostnode" });
+
 			const sessionId = runner.startProductionSession(`node ${target}`, undefined, undefined, run.id);
 			const offStop = runner.onProductionStop(sessionId, () => { controller.abort(); });
 

@@ -30,6 +30,7 @@ import type { CapabilityRequest } from "@brianjenkins94/util/silo/enforce/broker
 import type { Disposition, Policy } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { shortHash } from "@brianjenkins94/util/hash";
+import { userSlug } from "@brianjenkins94/util/silo/evidence";
 import { EMPTY_POLICY, parsePolicy, withRule } from "@brianjenkins94/util/silo/policy";
 
 // ── paths ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -75,7 +76,7 @@ export async function currentUser(): Promise<string> {
 
 	if (folder !== undefined) {
 		const config = await readText(vscode.Uri.joinPath(folder.uri, ".git", "config"));
-		const slug = config === undefined ? undefined : userFromGitConfig(config);
+		const slug = config === undefined ? undefined : userSlug(config);
 
 		if (slug !== undefined) {
 			userCache = slug;
@@ -83,52 +84,6 @@ export async function currentUser(): Promise<string> {
 	}
 
 	return userCache;
-}
-
-/** Pull a slug out of a git config's `[user]` section — email local-part preferred, else name. */
-function userFromGitConfig(config: string): string | undefined {
-	let inUser = false;
-	let email: string | undefined;
-	let name: string | undefined;
-
-	for (const raw of config.split(/\r?\n/)) {
-		const line = raw.trim();
-
-		if (line.startsWith("[")) {
-			inUser = /^\[user(\s|\]|")/.test(line); // `[user]` or `[user "x"]`, not `[remote …]`
-
-			continue;
-		}
-
-		if (!inUser) {
-			continue;
-		}
-
-		const eq = line.indexOf("=");
-
-		if (eq === -1) {
-			continue;
-		}
-
-		const key = line.slice(0, eq).trim().toLowerCase();
-		const value = line.slice(eq + 1).trim();
-
-		if (key === "email") {
-			email = value;
-		} else if (key === "name") {
-			name = value;
-		}
-	}
-
-	const source = email !== undefined ? email.split("@")[0] : name;
-
-	return source === undefined ? undefined : slugify(source);
-}
-
-function slugify(value: string): string | undefined {
-	const slug = value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-
-	return slug === "" ? undefined : slug;
 }
 
 // ── policy: base contract + my overrides ─────────────────────────────────────────────────────────────────────

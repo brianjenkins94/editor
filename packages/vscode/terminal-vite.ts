@@ -50,7 +50,7 @@ export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 		const event = Object.fromEntries(ctx.env)["npm_lifecycle_event"] ?? ctx.exportedEnv?.["npm_lifecycle_event"];
 		let stop = (): void => { /* set below, once it's blocking */ };
 		// A service — it runs until it's stopped — in the running list, as it was asked for (`npm run dev` runs `vite`).
-		const run = runner.runs.start({ "title": event === undefined ? "vite" : "npm run " + event, "kind": "service", "cwd": ctx.cwd, "origin": { "terminal": terminal }, "port": port }, () => { stop(); });
+		const run = runner.runs.start({ "title": event === undefined ? "vite" : "npm run " + event, "kind": "service", "cwd": ctx.cwd, "origin": { "terminal": terminal }, "port": port, "entry": ctx.cwd, "runtime": "preview" }, () => { stop(); });
 
 		runner.openPreview(ctx.cwd, port);
 		// Present the dev server as a VS Code debug session too (the "production" debug mode) — it shows in Run and

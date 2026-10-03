@@ -51,6 +51,7 @@ import workerPodManifest from "./extensions/worker-pod/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { installProfileFiles } from "./profile-files";
+import { installEvidence } from "./evidence";
 import { windowClientTransport } from "./pane-link";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import { createBashProcess, serveTaskTerminals } from "./terminal";
@@ -565,6 +566,8 @@ function maybeBoot(): void {
 
 				// A preview that ran slow was profiled: save it, source-mapped, for whoever reads profiles (profile-files.ts).
 				installProfileFiles(api as typeof import("vscode"), workbenchHub, nodeRunner.runs);
+				// Each run's envelope — whose, where, on what code — into .silo/runs/ as it ends (evidence.ts).
+				installEvidence(api as typeof import("vscode"), nodeRunner.runs);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
 				// And the pod's tasks' terminals: a just-bash process that runs one command, over the hub (terminal.ts).

@@ -34,26 +34,31 @@ export interface RunInfo {
 	"exitCode"?: number;
 	/** A service's port (a dev server's preview). */
 	"port"?: number;
+	/** The file it runs (a dev server: its folder), and what runs it — tsval's interpreter, almostnode, or the browser. */
+	"entry"?: string;
+	"runtime"?: "tsval" | "almostnode" | "preview";
 }
 
 /** What starts a run hands back: change it as it goes, end it once. */
 export interface RunHandle {
 	"id": string;
 	/** A task that turns out to keep running (it started listening) becomes a service. */
-	"update": (change: Partial<Pick<RunInfo, "port" | "title" | "kind">>) => void;
+	"update": (change: Partial<Pick<RunInfo, "port" | "title" | "kind" | "runtime">>) => void;
 	/** It ended: by itself (`exited`, or `failed` with a nonzero code) or because it was stopped. */
 	"end": (exitCode: number, stopped?: boolean) => void;
 }
 
 export interface RunRegistry {
 	/** Register a run that's starting; `stop` is how to stop it (`runs.stop`). */
-	"start": (run: Pick<RunInfo, "title" | "kind" | "cwd" | "origin" | "port">, stop: () => void) => RunHandle;
+	"start": (run: Pick<RunInfo, "title" | "kind" | "cwd" | "origin" | "port" | "entry" | "runtime">, stop: () => void) => RunHandle;
 	/** The running ones first (newest first), then the ones that ended (newest first). */
 	"list": () => RunInfo[];
 	/** Stop a running run; false if there's none by that id. */
 	"stop": (id: string) => boolean;
 	/** The running service that `matches`, if any — a second `vite` in the same directory finds the first. */
 	"runningService": (matches: (run: RunInfo) => boolean) => RunInfo | undefined;
+	/** Hear each run as it ends (evidence.ts records it). Returns the unsubscribe. */
+	"onEnd": (listener: (run: RunInfo) => void) => () => void;
 }
 
 /** How many ended runs are kept, for the list's history. */
@@ -62,6 +67,7 @@ const KEEP_ENDED = 10;
 export function createRunRegistry(hub: Hub): RunRegistry {
 	const running = new Map<string, { "info": RunInfo; "stop": () => void }>();
 	const ended: RunInfo[] = [];
+	const endListeners = new Set<(run: RunInfo) => void>();
 
 	// Copies: a caller in this realm gets the list itself, not a clone, and must not see a run change under it.
 	const list = (): RunInfo[] => [...[...running.values()].map((run) => run.info).sort((a, b) => b.startedAt - a.startedAt), ...ended].map((info) => ({ ...info }));
@@ -95,6 +101,12 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 					Object.assign(info, { "state": stopped ? "stopped" : exitCode === 0 ? "exited" : "failed", "endedAt": Date.now(), "exitCode": exitCode });
 					ended.unshift(info);
 					ended.length = Math.min(ended.length, KEEP_ENDED);
+
+					for (const listener of endListeners) {
+						try {
+							listener({ ...info });
+						} catch { /* a listener's failure isn't the run's */ }
+					}
 				}
 			};
 		},
@@ -110,7 +122,12 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 
 			return true;
 		},
-		"runningService": (matches) => [...running.values()].map((run) => run.info).find((info) => info.kind === "service" && matches(info))
+		"runningService": (matches) => [...running.values()].map((run) => run.info).find((info) => info.kind === "service" && matches(info)),
+		"onEnd": (listener) => {
+			endListeners.add(listener);
+
+			return () => { endListeners.delete(listener); };
+		}
 	};
 
 	return registry;

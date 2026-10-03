@@ -599,7 +599,7 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 				const program = typeof config["program"] === "string" ? config["program"] : "";
 
 				try {
-					const { id } = await rpc.request("runs.begin", { "title": program === "" ? config.name : `${config.name} — ${vscode.workspace.asRelativePath(program)}`, "cwd": program.slice(0, program.lastIndexOf("/")) || "/workspace" }, { "timeoutMs": 5000, "waitForResponderMs": 2000 }) as { "id": string };
+					const { id } = await rpc.request("runs.begin", { "title": program === "" ? config.name : `${config.name} — ${vscode.workspace.asRelativePath(program)}`, "cwd": program.slice(0, program.lastIndexOf("/")) || "/workspace", "entry": program }, { "timeoutMs": 5000, "waitForResponderMs": 2000 }) as { "id": string };
 
 					return { ...config, "__runId": id };
 				} catch {

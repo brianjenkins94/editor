@@ -21,6 +21,16 @@
         }
       ]
     },
+    "configuration": {
+      "title": "Runtime evidence",
+      "properties": {
+        "silo.machine": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "This machine's name in the runtime evidence kept in `.silo/` (each run records where it ran: this name, plus the browser, OS and cores it detects). Name each machine you work on, so timings compare like with like. Empty is `default`."
+        }
+      }
+    },
     "views": {
       "insights": [
         {

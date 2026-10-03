@@ -169,6 +169,15 @@ export async function commitSelection(message: string, files: CommitFile[]): Pro
 	return commit({ "fs": fs, "dir": DIR, "message": message, "author": AUTHOR });
 }
 
+/** The commit HEAD points at, or undefined before the first commit (or with no repository). */
+export async function headCommit(): Promise<string | undefined> {
+	try {
+		return await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" });
+	} catch {
+		return undefined;
+	}
+}
+
 /** True when `path` exists in HEAD (i.e. it's tracked, not a brand-new file). */
 async function isTracked(path: string): Promise<boolean> {
 	try {
