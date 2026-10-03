@@ -20,6 +20,7 @@ import { observe } from "@brianjenkins94/observability";
 import { identifyWorker } from "../../architecture-model";
 import { ZENFS_NODE } from "../../architecture-zenfs";
 import { registerTsvalDebug, takeExitCode } from "./debug-adapter";
+import { registerTsvalSurface } from "./tsval-surface";
 import { registerDebugToolbar } from "./debug-toolbar";
 import { registerMetricsBridge } from "./metrics-bridge";
 import { podHub } from "./pod";
@@ -163,6 +164,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 	// The tsval debug type — a worker-backed stepping debugger (debug-adapter.ts + debug-worker.ts).
 	registerTsvalDebug(context);
+	// The tsval render surface, kept in step with its sessions (tsval-surface.ts).
+	registerTsvalSurface(context);
 
 	// The production debug type — presents an almostnode run (the vite preview) as a debug session with a
 	// run-control controller (Stop + Debug Console). The run's driver publishes `production.launch` (federates

@@ -149,7 +149,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	// The tsval debugger's render surface (debug-preview.html) gets its OWN window too — a live runtime surface, like
 	// the app previews — but it's fed a mutation stream over the hub rather than a served URL, so it's tracked apart
 	// from the server windows while reusing this module's window + debug-toolbar machinery. See
-	// debug-preview-view.ts (the workbench-side bridge). The page is served next to the shell (public/debug-preview.html).
+	// tsval-surface.ts (in the pod, beside the tsval adapter). The page is served next to the shell (public/debug-preview.html).
 	const tsvalUrl = new URL("debug-preview.html", location.href).href;
 	let tsvalSurface: { "paneWindow": PaneWindow; "frame": HTMLIFrameElement; "port"?: MessagePort } | undefined;
 
@@ -553,7 +553,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		renderDebugToolbar();
 	});
 
-	// The tsval render window — opened on session start, torn down on stop; the workbench bridge (debug-preview-view.ts)
+	// The tsval render window — opened on session start, torn down on stop; the pod (tsval-surface.ts)
 	// drives it over the hub. It reuses createPaneWindow + renderDebugToolbar, so the step controls land on THIS window.
 	const teardownTsval = (): void => {
 		if (tsvalSurface !== undefined) {

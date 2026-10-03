@@ -3,7 +3,7 @@
  * (`debug.session.<id>.control`, adapter → worker) and events come UP (`debug.session.<id>.event`, worker → adapter),
  * so several sessions share the pod hub without crossing. A control message that starts work carries the adapter
  * action's trace context in the hub envelope, so the worker's step continues that trace. The React render stream goes
- * straight to the render surface on `tsval.preview.stream` (see debug-preview-view.ts), not through the adapter.
+ * straight to the render surface on `tsval.preview.stream` (see tsval-surface.ts), not through the adapter.
  *
  * The one thing that isn't a message: resuming from a breakpoint inside a host-invoked guest call (a React handler).
  * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at

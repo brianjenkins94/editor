@@ -35,7 +35,6 @@ import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { reportWorkbenchMetrics } from "./editor-metrics";
-import { installDebugPreview } from "./debug-preview-view";
 import { createEventSheetAugmentation } from "./event-sheet-view";
 import { installFileAugmentations } from "./file-augmentations";
 import type { VerdictEntry } from "./cosmetic-classifier";
@@ -543,10 +542,6 @@ function maybeBoot(): void {
 				// when the configuration service read them at startup — the store mounts after boot, and restoring it
 				// fires no change events. Announce them now so they apply. (Writes after boot fire events themselves.)
 				void announceWorkspaceSettings(api as typeof import("vscode"), workspaceFs);
-				// The tsval debug preview: a dumb-iframe panel view + the adapter↔surface render bridge. Real DOM
-				// (not a webview), so it composites in our coi-serviceworker single-origin harness. See
-				// debug-preview-view.ts.
-				installDebugPreview(() => vscodeApi, workbenchHub);
 					// File augmentations: the auxpane shows a per-file-type projection of the active file. First one is
 					// the Event Sheet (a Construct-style projection of the CST) — a 3-column table whose rows jump the
 					// editor to the code they map to. See file-augmentations.ts / event-sheet-view.ts.
