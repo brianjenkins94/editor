@@ -51,14 +51,20 @@ function renamer(scope: string, peer: string | undefined): (id: string) => strin
 	return (id) => (id === peer ? scope : scopedId(scope, id));
 }
 
+/** The ids `report` says its reporter reaches over its uplinks, if it's `peer`'s and carries its topology. */
+function uplinksOf(report: ArchReport, peer: string | undefined): Set<string> {
+	return new Set(report.reporter === peer ? report.topology?.links.flatMap((link) => (link.uplink === true && link.peerId !== undefined ? [link.peerId] : [])) : []);
+}
+
 /** `report`, its app's hub ids renamed under `scope` (`peer` — the hub across the link — to `scope` itself). The
  *  reporter is always the app's — even one that calls itself by a kept name (an app hub named `shell` must not pass as
  *  the editor's) — so it, and any id equal to it, is always renamed; `keep` spares only the OTHER ids it mentions (the
- *  joining side it links to). So is whatever the peer's own report reaches over its uplinks: above the peer, so not
- *  under this edge — the joining side itself, or another tree the peer is in too (a multi-homed leaf, hub's README). */
-export function scopeArchReport(report: ArchReport, scope: string, keep: (id: string) => boolean = () => false, peer?: string): ArchReport {
+ *  joining side it links to). So are the ids in `above`: what the peer reaches over its own uplinks, so not under this
+ *  edge — the joining side itself, or another tree the peer is in too (a multi-homed leaf, hub's README). A reporter
+ *  sends its topology only when it changes, so the edge remembers them (scopedTransport); by default, the peer's
+ *  uplinks in this report's topology, if it carries one. */
+export function scopeArchReport(report: ArchReport, scope: string, keep: (id: string) => boolean = () => false, peer?: string, above: ReadonlySet<string> = uplinksOf(report, peer)): ArchReport {
 	const named = renamer(scope, peer);
-	const above = new Set(report.reporter === peer ? report.topology?.links.filter((link) => link.uplink === true).map((link) => link.peerId) : []);
 	const rename = (id: string): string => (id !== report.reporter && (keep(id) || above.has(id)) ? id : named(id));
 
 	return {
@@ -75,7 +81,7 @@ export function scopeArchReport(report: ArchReport, scope: string, keep: (id: st
  * One hub frame from an app, with its observability scoped (anything else — control frames, RPC, the app's own
  * traffic — as it came). Apply it where the app's frames arrive, before the hub sees them: `scopedTransport`.
  */
-export function scopeObservability(frame: unknown, scope: string, keep: (id: string) => boolean = () => false, peer?: string): unknown {
+export function scopeObservability(frame: unknown, scope: string, keep: (id: string) => boolean = () => false, peer?: string, above?: ReadonlySet<string>): unknown {
 	const subject = (frame as Frame | null)?.subject;
 
 	// Only messages: a control frame's subject is interest (`sub $sys.arch.>`) — the app's wanting, not its saying.
@@ -94,7 +100,7 @@ export function scopeObservability(frame: unknown, scope: string, keep: (id: str
 			return { ...(frame as object), "subject": ARCH_SUBJECT + "." + always(subject.slice(ARCH_SUBJECT.length + 1)) };
 		}
 
-		const report = scopeArchReport(data as ArchReport, scope, keep, peer);
+		const report = scopeArchReport(data as ArchReport, scope, keep, peer, above);
 
 		return { ...(frame as object), "subject": ARCH_SUBJECT + "." + report.reporter, "data": report };
 	}
@@ -126,6 +132,9 @@ export function scopeObservability(frame: unknown, scope: string, keep: (id: str
  */
 export function scopedTransport(transport: Transport, scope: string, { keep, onFrame }: { "keep"?: (id: string) => boolean; "onFrame"?: (frame: Envelope | Control) => void } = {}): Transport {
 	let peer: string | undefined;
+	// What the peer reaches over its uplinks, as its last topology said (scopeArchReport): its later reports — traffic,
+	// samples — come without one.
+	let above = new Set<string>();
 
 	return {
 		...transport,
@@ -133,10 +142,16 @@ export function scopedTransport(transport: Transport, scope: string, { keep, onF
 			onMessage(mapFrame(message, (frame) => {
 				// A hub's hello comes before anything it publishes: by then, the peer's own id is known.
 				if ("hub" in frame && frame.hub === "hello" && typeof frame.id === "string") {
+					if (frame.id !== peer) {
+						above = new Set();
+					}
+
 					peer = frame.id;
+				} else if (!("hub" in frame) && frame.subject === ARCH_SUBJECT + "." + peer && (frame.data as ArchReport | null)?.topology !== undefined) {
+					above = uplinksOf(frame.data as ArchReport, peer);
 				}
 
-				const scoped = scopeObservability(frame, scope, keep, peer) as typeof frame;
+				const scoped = scopeObservability(frame, scope, keep, peer, above) as typeof frame;
 
 				onFrame?.(scoped);
 

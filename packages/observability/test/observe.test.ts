@@ -6,7 +6,8 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 // From source: node won't strip types from the pnpm copy under node_modules.
 import { createHub, pipe } from "../../hub/src/index.ts";
-import { linkDebugMcp, observe, observeApp, scopedTransport } from "../src/index.ts";
+import type { ArchReport } from "../src/index.ts";
+import { collectArchReports, linkDebugMcp, observe, observeApp, scopedTransport } from "../src/index.ts";
 import { until } from "./until.ts";
 
 test("a context's logs and architecture reach its app's root, under the name the edge gives it", async (t) => {
@@ -82,4 +83,36 @@ test("debug-mcp: one quiet attempt by default; `retryMs` keeps trying; `false` t
 	await new Promise((resolve) => { setTimeout(resolve, 50); });
 	app.dispose();
 	assert.equal(tried.length, stopped, "disposing stops the retrying, and `false` tries none");
+});
+
+test("a multi-homed leaf named by its uplink: its edge keeps the other tree's name in every report, not only the one with its topology", async (t) => {
+	// A game's client worker: its hub calls itself `client`, the referee (its uplink) names it `player-0`, and its
+	// instance page is the edge its reports reach the tab through.
+	const referee = createHub({ "id": "referee" });
+	const client = createHub({ "id": "client" });
+	const instance = createHub({ "id": "player-0/ui" });
+	const reports: ArchReport[] = [];
+	const [r1, r2] = pipe();
+	const [i1, i2] = pipe();
+
+	collectArchReports(instance, (report) => { reports.push(report); });
+
+	const child = observe(client);
+
+	t.after(() => { child.dispose(); });
+	referee.subscribe("game.commands", () => undefined);
+	referee.link(r1, { "peer": "player-0" });
+	client.link(r2, { "uplink": true, "transit": false });
+	client.link(i2, { "transit": false });
+	instance.link(scopedTransport(i1, "player-0", { "keep": (id) => id === "player-0/ui" }), { "peer": "player-0" });
+	await until("the client's topology", () => reports.some((report) => report.reporter === "player-0" && report.topology !== undefined));
+	// Then traffic only: a later report carries no topology.
+	await client.whenInterested("game.commands", 1000);
+	client.publish("game.commands", { "move": 1 });
+	await until("a report of its traffic to the referee", () => reports.some((report) => report.topology === undefined && (report.traffic ?? []).length > 0));
+
+	const ids = reports.flatMap((report) => [...report.topology?.links.map((link) => link.peerId) ?? [], ...(report.traffic ?? []).flatMap((count) => [count.from, count.to])]);
+
+	assert.ok(ids.includes("referee"), "the referee by its own name");
+	assert.ok(!ids.includes("player-0/referee"), "never as if it were under the client");
 });
