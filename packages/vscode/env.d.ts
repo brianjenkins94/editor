@@ -48,8 +48,15 @@ declare module "eslint:extension" {
 	export default path;
 }
 
-/** The insights extension (coverage through VS Code's test-coverage UI), bundled like the others: its path. */
+/** The insights extension (every run's coverage in the gutter; the metrics monitor), bundled like the others: its path. */
 declare module "insights:extension" {
+	const path: string;
+
+	export default path;
+}
+
+/** The running extension (what's running, from VS Code's public API), bundled like the others: its path. */
+declare module "running:extension" {
 	const path: string;
 
 	export default path;

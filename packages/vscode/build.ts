@@ -251,7 +251,7 @@ export async function preBuild(): Promise<void> {
 		// just-bash chunk as /browser.js → index.html, "Failed to load module script") — the import itself, relative,
 		// still worked.
 		"base": "./",
-		"plugins": [bundledExtension("hello"), bundledExtension("worker-pod"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("insights"), editorSettingsDefaultsPlugin()],
+		"plugins": [bundledExtension("hello"), bundledExtension("worker-pod"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("insights"), bundledExtension("running"), editorSettingsDefaultsPlugin()],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
 		// `buffer` → the node-stdlib-browser polyfill: isomorphic-git (the git SCM engine) uses the `Buffer` global,

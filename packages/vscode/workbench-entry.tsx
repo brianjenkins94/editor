@@ -23,6 +23,7 @@ import type { PodBridge } from "./extensions/worker-pod/extension";
 import type { WorkspaceFs } from "./workspace-fs";
 import capabilitiesExtensionPath from "capabilities:extension";
 import insightsExtensionPath from "insights:extension";
+import runningExtensionPath from "running:extension";
 import settingsDefaults from "editor:settings-defaults";
 import eslintExtensionPath from "eslint:extension";
 import helloExtensionPath from "hello:extension";
@@ -48,10 +49,11 @@ import capabilitiesManifest from "./extensions/capabilities/package.json";
 import eslintManifest from "./extensions/eslint/package.json";
 import helloManifest from "./extensions/hello/package.json";
 import insightsManifest from "./extensions/insights/package.json";
+import runningManifest from "./extensions/running/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
-import { installRunProfiles } from "./run-profiles";
+import { installProfileFiles } from "./profile-files";
 import { windowClientTransport } from "./pane-link";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import { createBashProcess } from "./terminal";
@@ -558,8 +560,8 @@ function maybeBoot(): void {
 				// (worker) is shared by every terminal.
 				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer, tab);
 
-				// A preview that ran slow was profiled: keep the profile with its dev server's run (run-profiles.ts).
-				installRunProfiles(api as typeof import("vscode"), workbenchHub, nodeRunner.runs);
+				// A preview that ran slow was profiled: save it, source-mapped, for whoever reads profiles (profile-files.ts).
+				installProfileFiles(api as typeof import("vscode"), workbenchHub, nodeRunner.runs);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
 
@@ -659,7 +661,13 @@ function maybeBoot(): void {
 
 			insightsExt.registerFileUrl("./extension.js", new URL(insightsExtensionPath, location.href).href);
 
-			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod", "eslint", "capabilities", "insights"] });
+			// Running: what's running and how it ended, from terminal shell integration, debug sessions and tasks — public
+			// API only, as a desktop extension would see it.
+			const runningExt = registerExtension(runningManifest, ExtensionHostKind.LocalWebWorker);
+
+			runningExt.registerFileUrl("./extension.js", new URL(runningExtensionPath, location.href).href);
+
+			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod", "eslint", "capabilities", "insights", "running"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");

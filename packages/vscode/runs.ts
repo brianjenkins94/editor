@@ -5,12 +5,11 @@
  *
  * A run is a **service** (a dev server: runs until stopped) or a **task** (a script: runs to completion). The registry
  * keeps the running ones and the last few that ended, and publishes the whole list on `runs.changed` whenever it
- * changes — the status bar's running list, debug-mcp's `runs` tool and anything else on the hub read it — and serves
- * `runs.list` and `runs.stop`.
+ * changes, and serves `runs.list` and `runs.stop`.
  *
- * Debug sessions started some other way — F5, an agent's debug_start, a coverage run — are reported by the pod as
- * `runs.external.started` / `.ended` (running.ts), and listed as tasks from Run and Debug; stopping one asks the pod to
- * stop its session (`runs.external.stop`).
+ * It's the core runtime's own account, read by the shell's run picker, profile-files.ts (where a profiled preview's dev
+ * server serves) and agents (debug-mcp's `runs`). VS Code's "what's running" is the `running` extension's, from VS
+ * Code's own API (terminal shell integration, debug sessions, tasks), as it would be on the desktop.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { serve } from "@brianjenkins94/hub";
@@ -36,15 +35,6 @@ export interface RunInfo {
 	"exitCode"?: number;
 	/** A service's port (a dev server's preview). */
 	"port"?: number;
-	/** Profiles taken while it ran (its preview ran slow — run-profiles.ts), oldest first. */
-	"profiles"?: RunProfile[];
-}
-
-/** A CPU profile of a run's preview: where it's saved, and the app's functions that took the most time. */
-export interface RunProfile {
-	"path": string;
-	"at": number;
-	"hotspots": { "function": string; "file"?: string; "line": number; "selfMs": number; "totalMs": number }[];
 }
 
 /** What starts a run hands back: change it as it goes, end it once. */
@@ -57,7 +47,7 @@ export interface RunHandle {
 }
 
 export interface RunRegistry {
-	/** Register a run that's starting; `stop` is how to stop it (the registry's `stop`, the status bar's). */
+	/** Register a run that's starting; `stop` is how to stop it (`runs.stop`). */
 	"start": (run: Pick<RunInfo, "title" | "kind" | "cwd" | "origin" | "port">, stop: () => void) => RunHandle;
 	/** The running ones first (newest first), then the ones that ended (newest first). */
 	"list": () => RunInfo[];
@@ -65,8 +55,6 @@ export interface RunRegistry {
 	"stop": (id: string) => boolean;
 	/** The running service that `matches`, if any — a second `vite` in the same directory finds the first. */
 	"runningService": (matches: (run: RunInfo) => boolean) => RunInfo | undefined;
-	/** Keep a profile with the running service on `port`; false if there's none. */
-	"addProfile": (port: number, profile: RunProfile) => boolean;
 }
 
 /** How many ended runs are kept, for the list's history. */
@@ -80,25 +68,6 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 	// Copies: a subscriber in this realm gets the list itself, not a clone, and must not see a run change under it.
 	const list = (): RunInfo[] => [...[...running.values()].map((run) => run.info).sort((a, b) => b.startedAt - a.startedAt), ...ended].map((info) => ({ ...info }));
 	const changed = (): void => { hub.publish(RUNS_CHANGED, list()); };
-
-	// Debug sessions the pod reports — started from Run and Debug, not from a terminal.
-	const external = new Map<string, RunHandle>();
-
-	hub.subscribe("runs.external.started", (data) => {
-		const { key, title, cwd } = (data ?? {}) as { "key"?: unknown; "title"?: unknown; "cwd"?: unknown };
-
-		if (typeof key === "string" && !external.has(key)) {
-			external.set(key, registry.start({ "title": typeof title === "string" ? title : "debug session", "kind": "task", "cwd": typeof cwd === "string" ? cwd : "/workspace", "origin": { "other": "Run and Debug" } }, () => { hub.publish("runs.external.stop", { "key": key }); }));
-		}
-	});
-	hub.subscribe("runs.external.ended", (data) => {
-		const { key, stopped, exitCode } = (data ?? {}) as { "key"?: unknown; "stopped"?: unknown; "exitCode"?: unknown };
-
-		if (typeof key === "string") {
-			external.get(key)?.end(typeof exitCode === "number" ? exitCode : 0, stopped === true);
-			external.delete(key);
-		}
-	});
 
 	serve(hub, "runs.list", () => list());
 	serve(hub, "runs.stop", (args) => {
@@ -149,19 +118,7 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 
 			return true;
 		},
-		"runningService": (matches) => [...running.values()].map((run) => run.info).find((info) => info.kind === "service" && matches(info)),
-		"addProfile": (port, profile) => {
-			const info = [...running.values()].map((run) => run.info).find((candidate) => candidate.port === port);
-
-			if (info === undefined) {
-				return false;
-			}
-
-			info.profiles = [...info.profiles ?? [], profile]; // a new array: lists already published hold the old one
-			changed();
-
-			return true;
-		}
+		"runningService": (matches) => [...running.values()].map((run) => run.info).find((info) => info.kind === "service" && matches(info))
 	};
 
 	return registry;

@@ -1,7 +1,7 @@
 {
   "name": "insights",
   "displayName": "Insights",
-  "description": "What a program did when it ran, and what the editor is doing, with nothing to ask for: every run's statement coverage marked in the gutter of the file it ran (from any debug session that reports it — the tsval debugger does), and a monitor of the metrics plane (memory by realm, workspace fill, long frames, hub traffic, storage) in the status bar and a view of sparkline cards.",
+  "description": "What a program did when it ran, and what the editor is doing, with nothing to ask for: every run's statement coverage marked in the gutter of the file it ran (from any debug session that reports it — the tsval debugger does); a profile saved under .silo/profiles/ (the editor saves one when a preview runs slow) announced with where its time went; and a monitor of the metrics plane (memory by realm, workspace fill, long frames, hub traffic, storage) in the status bar and a view of sparkline cards.",
   "publisher": "brianjenkins94",
   "version": "0.0.1",
   "engines": {

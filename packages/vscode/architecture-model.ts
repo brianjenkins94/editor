@@ -153,7 +153,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "workspace.changed", "hubs": ["workbench", "node", "node-scripts"], "description": "Every change a realm makes to the shared workspace — persisted and announced by the workbench; dev servers hot-reload from it." },
 	{ "pattern": "workspace.buffer", "hubs": ["workbench", "node", "node-scripts"], "description": "The node workers ask for the shared workspace buffer." },
 	{ "pattern": "node.>", "hubs": ["workbench", "pod", "node", "node-scripts"], "description": "Node runs: start, stdout, exit, stdin, and a port it starts listening on (the scripts worker); and a script's own server, asked for by the dev-server worker (node.script.request)." },
-	{ "pattern": "runs.>", "hubs": ["workbench", "pod", "root", "shell"], "description": "What's running (runs.ts): every terminal's runs — services and tasks — as the list changes, and its list and stop calls, for the status bar's running list, the run picker and the runs page tool." },
+	{ "pattern": "runs.>", "hubs": ["workbench", "root", "shell"], "description": "The core runtime's runs (runs.ts): every terminal's node scripts and dev servers — services and tasks — as the list changes, and its list and stop calls, for the run picker and the runs page tool." },
 	{ "pattern": "classify.>", "hubs": ["workbench", "classify"], "description": "Cosmetic/semantic verdicts and edit-burst grouping (cancellable)." },
 	{ "pattern": "recognizer.project", "hubs": ["workbench", "recognizer"], "description": "Project a game into the event sheet's model." },
 	{ "pattern": "provoke.round", "hubs": ["node", "provoke"], "description": "One cold transform round: the workspace buffer in, failures out." },
