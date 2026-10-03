@@ -160,11 +160,11 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "tool.>", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"], "description": "debug-mcp calls a tab's page tools — the editor's (page-tools.ts: page_eval, the debugger, provoke, CDP, profiles, runs), an app's own (served under its tab id)." },
 	// ── the shell ⇄ the app and the workbench ──
 	{ "pattern": "project.>", "from": ["shell"], "to": ["root"], "description": "The project picker: the catalog (project.list) and opening one." },
-	{ "pattern": "workspace.files", "from": ["shell"], "to": ["root"], "description": "The current project's files." },
+	{ "pattern": "workspace.files", "from": ["shell"], "to": ["root"], "description": "The current project's files and active editor, for a commit or a share link." },
 	{ "pattern": "workbench.init", "from": ["workbench"], "to": ["root"], "description": "The workbench's boot handshake: what to open." },
 	{ "pattern": "workbench.online", "from": ["workbench"], "to": ["root"], "description": "The workbench is up." },
 	{ "pattern": "workbench.save", "from": ["workbench"], "to": ["root"], "description": "A save, for the app frame." },
-	{ "pattern": "workbench.files", "from": ["root"], "to": ["workbench"], "description": "The app frame asks the workbench for the workspace's files." },
+	{ "pattern": "workbench.files", "from": ["root"], "to": ["workbench"], "description": "The app frame asks the workbench for the workspace's files and active editor." },
 	{ "pattern": "workbench.openProject", "from": ["root"], "to": ["workbench"], "description": "Switch the workbench to another project." },
 	{ "pattern": "git.status", "from": ["shell", "pod"], "to": ["workbench"], "description": "The git service's changes, for the shell's review panel and VS Code's Source Control view (the pod's)." },
 	{ "pattern": "git.file", "from": ["shell", "pod"], "to": ["workbench"], "description": "A changed file's two sides." },

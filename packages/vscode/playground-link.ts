@@ -1,7 +1,8 @@
 /**
- * TypeScript Playground links, opened as projects. Swap the host of any playground link for ours and the same hash opens
- * here as a real workspace. The shell decodes it (it owns the URL) and hands the files to the app as a project load, the
- * same way a GitHub repo arrives.
+ * TypeScript Playground links, opened as projects — and written, to share one. Swap the host of any playground link for
+ * ours and the same hash opens here as a real workspace. The shell decodes it (it owns the URL) and hands the files to the
+ * app as a project load, the same way a GitHub repo arrives. Share writes the workspace back out as a v2 link, which the
+ * playground itself opens too.
  *
  * The formats, as the playground writes them:
  *   • `#code/v2/<lz>` (Playground v2): lz-string JSON `{ version, files: { "/workspace/…": text }, activeFile, selection }`
@@ -9,10 +10,8 @@
  *   • `#code/<lz>` (the classic playground): one file's source, lz-string compressed; its compiler options ride the query
  *     string (`?target=4&strict=false`), as the ones that differ from the playground's defaults.
  *   • `#src=<text>`: one file's source, URI-encoded.
- *
- * lz-string's `decompressFromEncodedURIComponent` is reimplemented below (the format is small and fixed) rather than
- * pulled in as a dependency.
  */
+import LZString from "lz-string";
 
 /** A decoded playground project, ready to open: absolute workspace paths and the editors to focus. */
 export interface PlaygroundProject {
@@ -22,110 +21,14 @@ export interface PlaygroundProject {
 
 const WORKSPACE = "/workspace/";
 
-// lz-string's URI-safe alphabet: each character carries 6 bits.
-const URI_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$";
+/** A link's lz-string payload, decoded; undefined when it isn't one (lz-string answers null, or "", or throws). */
+function decode(payload: string): string | undefined {
+	try {
+		const text = LZString.decompressFromEncodedURIComponent(payload);
 
-/** lz-string's `decompressFromEncodedURIComponent`: undefined when the input isn't a valid stream. */
-export function decompressFromEncodedURIComponent(input: string): string | undefined {
-	// A `+` that went through form decoding comes back as a space.
-	const encoded = input.replace(/ /gu, "+");
-
-	if (encoded.length === 0) {
+		return typeof text === "string" && text !== "" ? text : undefined;
+	} catch {
 		return undefined;
-	}
-
-	const valueAt = (index: number): number => URI_ALPHABET.indexOf(encoded.charAt(index));
-	const RESET = 32; // the top bit of a 6-bit character
-	let value = valueAt(0);
-	let position = RESET;
-	let index = 1;
-
-	// Read `count` bits, least significant first.
-	const read = (count: number): number => {
-		let bits = 0;
-
-		for (let power = 1; power !== 1 << count; power <<= 1) {
-			const bit = value & position;
-
-			position >>= 1;
-
-			if (position === 0) {
-				position = RESET;
-				value = valueAt(index);
-				index += 1;
-			}
-
-			bits |= (bit > 0 ? 1 : 0) * power;
-		}
-
-		return bits;
-	};
-
-	// Codes 0–2 are reserved: an 8-bit literal, a 16-bit literal, end of stream.
-	const dictionary: string[] = ["", "", ""];
-	let enlargeIn = 4;
-	let bitWidth = 3;
-
-	const literal = (code: number): string | undefined => {
-		if (code === 0) {
-			return String.fromCharCode(read(8));
-		}
-
-		return code === 1 ? String.fromCharCode(read(16)) : undefined;
-	};
-
-	const first = literal(read(2));
-
-	if (first === undefined) {
-		return undefined;
-	}
-
-	dictionary.push(first);
-
-	let previous = first;
-	const out = [first];
-
-	for (;;) {
-		if (index > encoded.length) {
-			return undefined; // ran off the end without an end-of-stream code
-		}
-
-		let code = read(bitWidth);
-
-		if (code === 2) {
-			return out.join("");
-		}
-
-		if (code < 2) {
-			dictionary.push(literal(code));
-			code = dictionary.length - 1;
-			enlargeIn -= 1;
-
-			if (enlargeIn === 0) {
-				enlargeIn = 1 << bitWidth;
-				bitWidth += 1;
-			}
-		}
-
-		let entry: string;
-
-		if (code < dictionary.length) {
-			entry = dictionary[code];
-		} else if (code === dictionary.length) {
-			entry = previous + previous.charAt(0);
-		} else {
-			return undefined;
-		}
-
-		out.push(entry);
-		dictionary.push(previous + entry.charAt(0));
-		enlargeIn -= 1;
-		previous = entry;
-
-		if (enlargeIn === 0) {
-			enlargeIn = 1 << bitWidth;
-			bitWidth += 1;
-		}
 	}
 }
 
@@ -250,13 +153,13 @@ export function parsePlaygroundLink(hash: string, search = ""): PlaygroundProjec
 	const query = new URLSearchParams(search);
 
 	if (fragment.startsWith("code/v2/")) {
-		const json = decompressFromEncodedURIComponent(fragment.slice("code/v2/".length));
+		const json = decode(fragment.slice("code/v2/".length));
 
 		return json === undefined ? undefined : v2Project(json);
 	}
 
 	if (fragment.startsWith("code/")) {
-		const source = decompressFromEncodedURIComponent(fragment.slice("code/".length));
+		const source = decode(fragment.slice("code/".length));
 
 		return source === undefined ? undefined : classicProject(source, query);
 	}
@@ -270,4 +173,44 @@ export function parsePlaygroundLink(hash: string, search = ""): PlaygroundProjec
 	}
 
 	return undefined;
+}
+
+/** Where the cursor was, as the playground records it: Monaco's 1-based lines and columns. */
+export interface PlaygroundSelection {
+	"positionLineNumber": number;
+	"positionColumn": number;
+	"selectionStartLineNumber": number;
+	"selectionStartColumn": number;
+}
+
+/** A workspace to share: its files, and the editor in front. */
+export interface SharedWorkspace {
+	"files": { "path": string; "bytes": Uint8Array }[];
+	"activeFile"?: string;
+	"selection"?: PlaygroundSelection;
+}
+
+/** A Playground v2 link to `workspace` on `base` (this page's address). A link carries text, so binary files are left out
+ *  and named in `skipped`. */
+export function playgroundLink(base: string, workspace: SharedWorkspace): { "url": string; "skipped": string[] } {
+	const decoder = new TextDecoder("utf-8", { "fatal": true });
+	const files: Record<string, string> = {};
+	const skipped: string[] = [];
+
+	for (const { bytes, path } of workspace.files.filter((file) => file.path.startsWith(WORKSPACE))) {
+		try {
+			if (bytes.includes(0)) {
+				throw new TypeError("binary"); // a NUL byte means binary, as git judges it
+			}
+
+			files[path] = decoder.decode(bytes);
+		} catch {
+			skipped.push(path);
+		}
+	}
+
+	const active = workspace.activeFile !== undefined && Object.hasOwn(files, workspace.activeFile) ? workspace.activeFile : undefined;
+	const state = { "version": 2, "activeFile": active, "files": files, "selection": active === undefined ? undefined : workspace.selection };
+
+	return { "url": base + "#code/v2/" + LZString.compressToEncodedURIComponent(JSON.stringify(state)), "skipped": skipped };
 }

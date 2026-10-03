@@ -18,6 +18,7 @@ import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, openHo
 import { render } from "preact";
 import type { ShellDockHost } from "./dock-host";
 import type { PodBridge } from "./extensions/worker-pod/extension";
+import type { SharedWorkspace } from "./playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
 import capabilitiesExtensionPath from "capabilities:extension";
 import eventSheetExtensionPath from "event-sheet:extension";
@@ -744,9 +745,25 @@ workbenchHub.subscribe("workbench.openProject", (data) => {
 	}, 150);
 });
 
-// The host asks for the current workspace (for a commit back to GitHub). We hold the FS, so we serve it — every
-// project file as bytes, editor scaffolding excluded.
-serve(workbenchHub, "workbench.files", () => collectFiles(workspaceRoot()));
+// The host asks for the current workspace — to commit it back to GitHub, or share it as a link. We hold the FS and the
+// editors, so we serve it: every project file as bytes (editor scaffolding excluded), and the editor in front with its
+// selection (1-based, as a playground link records it).
+serve(workbenchHub, "workbench.files", async (): Promise<SharedWorkspace> => {
+	const files = await collectFiles(workspaceRoot());
+	const editor = vscodeApi.window.activeTextEditor;
+
+	if (editor === undefined || editor.document.uri.scheme !== "file") {
+		return { "files": files };
+	}
+
+	const { active, anchor } = editor.selection;
+
+	return {
+		"files": files,
+		"activeFile": editor.document.uri.path,
+		"selection": { "positionLineNumber": active.line + 1, "positionColumn": active.character + 1, "selectionStartLineNumber": anchor.line + 1, "selectionStartColumn": anchor.character + 1 }
+	};
+});
 
 // Dev-only host-page debug bridge (window.__editor). Reads the captured API lazily; no-op off localhost.
 installDebugBridge(() => vscodeApi);

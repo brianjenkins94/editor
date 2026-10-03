@@ -17,7 +17,7 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { RunInfo } from "./runs";
 import type { LaunchTarget } from "./extensions/worker-pod/launch";
 import { createHub, createRpcClient, windowTransport } from "@brianjenkins94/hub";
-import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play } from "lucide";
+import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play, Share2 } from "lucide";
 import { logger } from "@brianjenkins94/util/logger";
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
@@ -25,7 +25,8 @@ import { renderGitPanel } from "./git-panel";
 import { reportArchitecture } from "./architecture";
 import { getPat, getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
 import type { RepoBinding } from "./github-auth";
-import { parsePlaygroundLink } from "./playground-link";
+import { parsePlaygroundLink, playgroundLink } from "./playground-link";
+import type { SharedWorkspace } from "./playground-link";
 import { reportShellMetrics } from "./editor-metrics";
 import { createShellDock } from "./shell-dock";
 import { installShellPreview } from "./shell-preview";
@@ -339,6 +340,9 @@ function Shell() {
 	const [committing, setCommitting] = useState(false);
 	const [commitError, setCommitError] = useState<string | undefined>(undefined);
 	const [commitResult, setCommitResult] = useState<string | undefined>(undefined);
+	// Share popover (the top-bar Share button): the workspace as a playground link, copied as it opens.
+	const [shareOpen, setShareOpen] = useState(false);
+	const [share, setShare] = useState<{ "url"?: string; "skipped"?: string[]; "copied"?: boolean; "error"?: string } | undefined>(undefined);
 
 	const rpcRef = useRef<ReturnType<typeof createRpcClient>>();
 	const pageRef = useRef<HTMLElement>(null);
@@ -690,6 +694,23 @@ function Shell() {
 		}
 	};
 
+	// Share the workspace as a Playground v2 link (playground-link.ts) on this page's address: ask the app for the files and
+	// the editor in front, encode them, and copy the link. It opens here, or in the TypeScript Playground.
+	const copyShare = async (url: string): Promise<boolean> => navigator.clipboard.writeText(url).then(() => true, () => false);
+	const openShare = async (): Promise<void> => {
+		setShareOpen(true);
+		setShare(undefined);
+
+		try {
+			const workspace = await rpcRef.current?.request("workspace.files", undefined, { "timeoutMs": 20000 }) as SharedWorkspace;
+			const { skipped, url } = playgroundLink(location.origin + location.pathname, workspace);
+
+			setShare({ "url": url, "skipped": skipped, "copied": await copyShare(url) });
+		} catch (error) {
+			setShare({ "error": errText(error) });
+		}
+	};
+
 	// Commit the current workspace back to the bound repo: ask the app for the files (the pane holds the FS), convert
 	// to the Git Data write shape (repo-relative paths; text inline, binary as base64 blobs), and push.
 	const commit = async (): Promise<void> => {
@@ -716,7 +737,7 @@ function Shell() {
 		const span = githubLog.span("github.commit", { "repo": binding.owner + "/" + binding.repo, "branch": binding.branch });
 
 		try {
-			const files = await rpcRef.current?.request("workspace.files", undefined, { "timeoutMs": 20000 }) as { "path": string; "bytes": Uint8Array }[];
+			const { files } = await rpcRef.current?.request("workspace.files", undefined, { "timeoutMs": 20000 }) as SharedWorkspace;
 			const prefix = "/workspace/";
 			const { bytesToBase64, createGitHub } = await import("./github");
 			const writes = files.map((file) => {
@@ -844,6 +865,42 @@ function Shell() {
 
 										<div class={ghActions()}>
 											<wa-button variant="brand" size="small" disabled={committing || commitMessage.trim() === ""} onClick={() => { void commit(); }}>{committing ? "Committing…" : "Commit"}</wa-button>
+										</div>
+									</>
+								)}
+							</div>
+						</>
+					)}
+				</span>
+
+				<span class={runWrap()}>
+					<wa-button appearance="plain" size="small" title="Share as a link" aria-label="Share" aria-expanded={shareOpen} onClick={() => { if (shareOpen) { setShareOpen(false); } else { void openShare(); } }}><Icon node={Share2} /></wa-button>
+
+					{shareOpen && (
+						<>
+							<div class={runBackdrop()} onClick={() => { setShareOpen(false); }} />
+
+							<div class={githubMenu()} role="dialog" aria-label="Share">
+								<span class={ghTitle()}>Share</span>
+
+								{share === undefined ? (
+									<span class={ghHint()}>Making a link…</span>
+								) : share.error !== undefined ? (
+									<span class={ghError()}>{share.error}</span>
+								) : (
+									<>
+										<span class={share.copied === true ? ghOk() : ghHint()}>{share.copied === true ? "Link copied." : "Copy this link."} It opens this project here, or in the TypeScript Playground.</span>
+
+										<wa-input class={ghInput()} size="small" readonly value={share.url} aria-label="Share link"></wa-input>
+
+										<span class={ghHint()}>
+											{(share.url.length / 1024).toFixed(1)} KB
+											{share.url.length > 8192 && " — some apps cut links this long"}
+											{share.skipped.length > 0 && ` · ${share.skipped.length} binary ${share.skipped.length === 1 ? "file" : "files"} left out`}
+										</span>
+
+										<div class={ghActions()}>
+											<wa-button size="small" appearance="outlined" onClick={() => { void copyShare(share.url).then((copied) => { setShare({ ...share, "copied": copied }); }); }}>Copy</wa-button>
 										</div>
 									</>
 								)}

@@ -28,6 +28,7 @@
     "isomorphic-git": "^1.42.2",
     "just-bash": "^3.4.2",
     "lucide": "latest",
+    "lz-string": "^1.5.0",
     "preact": "latest",
     "react": "18.2.0",
     "react-dom": "18.2.0",
