@@ -54,10 +54,12 @@ function renamer(scope: string, peer: string | undefined): (id: string) => strin
 /** `report`, its app's hub ids renamed under `scope` (`peer` — the hub across the link — to `scope` itself). The
  *  reporter is always the app's — even one that calls itself by a kept name (an app hub named `shell` must not pass as
  *  the editor's) — so it, and any id equal to it, is always renamed; `keep` spares only the OTHER ids it mentions (the
- *  joining side it links to). */
+ *  joining side it links to). So is whatever the peer's own report reaches over its uplinks: above the peer, so not
+ *  under this edge — the joining side itself, or another tree the peer is in too (a multi-homed leaf, hub's README). */
 export function scopeArchReport(report: ArchReport, scope: string, keep: (id: string) => boolean = () => false, peer?: string): ArchReport {
 	const named = renamer(scope, peer);
-	const rename = (id: string): string => (id !== report.reporter && keep(id) ? id : named(id));
+	const above = new Set(report.reporter === peer ? report.topology?.links.filter((link) => link.uplink === true).map((link) => link.peerId) : []);
+	const rename = (id: string): string => (id !== report.reporter && (keep(id) || above.has(id)) ? id : named(id));
 
 	return {
 		...report,

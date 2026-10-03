@@ -146,3 +146,30 @@ test("an app hub that calls itself `shell` is still the app's — reports and re
 	assert.deepEqual(scopeObservability({ "subject": "$sys.log.shell", "data": { "context": { "source": "shell" } } }, "preview:5173", (id) => id === "shell"), { "subject": "$sys.log.preview:5173/shell", "data": { "context": { "source": "preview:5173/shell" } } });
 	assert.deepEqual(scopeObservability({ "subject": "$sys.arch.shell", "data": { "reporter": "shell", "time": 1, "ended": true } }, "preview:5173", (id) => id === "shell"), { "subject": "$sys.arch.preview:5173/shell", "data": { "reporter": "preview:5173/shell", "time": 1, "ended": true } });
 });
+
+test("what the peer reaches over its uplinks is above it, not under the edge: a multi-homed leaf's other tree keeps its name", () => {
+	// A game's client worker: named by both its links (it calls itself `client`), its uplink the referee's — another tree.
+	const link = (id: string, peerId: string, uplink?: true) => ({ "id": id, "peerId": peerId, "remoteInterest": [], "advertised": [], ...uplink ? { "uplink": uplink } : {} });
+	const client = scopeArchReport({
+		"reporter": "client",
+		"time": 1,
+		"ended": false,
+		"topology": { "id": "client", "subscriptions": [], "links": [link("link-1", "referee", true), link("link-2", "player-0/ui")] },
+		"traffic": [{ "from": "referee", "to": "client", "kind": "message", "label": "game.state", "count": 1, "bytes": 1 }]
+	}, "player-0", (id) => id === "player-0/ui", "client");
+
+	assert.equal(client.reporter, "player-0", "the peer is the scope");
+	assert.deepEqual(client.topology!.links.map((each) => each.peerId), ["referee", "player-0/ui"], "its uplink keeps its name, with no `keep` for it");
+	assert.deepEqual(client.traffic!.map((count) => [count.from, count.to]), [["referee", "player-0"]]);
+
+	// A hub behind the peer: its uplink is the peer — under the edge, so named by it.
+	const behind = scopeArchReport({
+		"reporter": "helper",
+		"time": 1,
+		"ended": false,
+		"topology": { "id": "helper", "subscriptions": [], "links": [link("link-1", "client", true)] }
+	}, "player-0", () => false, "client");
+
+	assert.equal(behind.reporter, "player-0/helper");
+	assert.equal(behind.topology!.links[0]!.peerId, "player-0", "the peer, as the edge names it");
+});
