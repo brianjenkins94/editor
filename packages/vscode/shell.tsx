@@ -14,6 +14,7 @@
  * mounted into the `aside` region as-is; its WA rebuild is a follow-on.
  */
 import type { Hub } from "@brianjenkins94/hub";
+import type { RunInfo } from "./runs";
 import type { RunTarget } from "./targets";
 import { createHub, createRpcClient, windowTransport } from "@brianjenkins94/hub";
 import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play } from "lucide";
@@ -113,6 +114,8 @@ const runItem = css({
 });
 const runItemName = css({ "fontWeight": "var(--wa-font-weight-semibold)" });
 const runItemMeta = css({ "marginInlineStart": "auto", "fontSize": "11px", "color": "var(--wa-color-text-quiet)" });
+const runGroup = css({ "padding": "var(--wa-space-2xs) var(--wa-space-xs) 0", "fontSize": "11px", "fontWeight": "var(--wa-font-weight-semibold)", "color": "var(--wa-color-text-quiet)", "textTransform": "uppercase", "letterSpacing": "0.04em" });
+const runItemLive = css({ "fontSize": "11px", "color": "var(--wa-color-success-on-quiet)" });
 const runEmpty = css({ "padding": "var(--wa-space-xs)", "fontSize": "12px", "color": "var(--wa-color-text-quiet)" });
 
 // GitHub connect popover — same anchored-popover pattern as the run picker, but right-aligned (the button sits on the
@@ -317,6 +320,7 @@ function Shell() {
 	const [asideWidth, setAsideWidth] = useState(() => loadPaneWidth("asideWidth", PANE.asideDefault));
 	const [runOpen, setRunOpen] = useState(false);
 	const [targets, setTargets] = useState<RunTarget[]>([]);
+	const [runs, setRuns] = useState<RunInfo[]>([]);
 	// GitHub connection: `githubUser` is the logged-in login (undefined = not connected). The heavy client (fido) is
 	// only imported when we actually talk to GitHub, so it code-splits out of the cold-start bundle.
 	const [githubUser, setGithubUser] = useState<string | undefined>(undefined);
@@ -508,11 +512,24 @@ function Shell() {
 					setTargets([]);
 				}
 			})();
+			// What's already running, so a running service is offered as itself rather than as a second copy.
+			void rpcRef.current?.request("runs.list", undefined, { "timeoutMs": 4000 }).then((list) => { setRuns(Array.isArray(list) ? list as RunInfo[] : []); }, () => { setRuns([]); });
 		}
 	};
 
+	// A target's run, if it's running now (the registry titles a run as it was typed: `npm run dev`, in its directory).
+	const runOf = (target: RunTarget): RunInfo | undefined => runs.find((run) => run.state === "running" && run.title === target.command && run.cwd === target.cwd);
+
+	// A running service is already there: show its preview rather than start a second copy (which `vite` refuses).
 	const runTarget = (target: RunTarget): void => {
-		hubRef.current?.publish("run.target", { "command": target.command, "cwd": target.cwd, "name": target.package === "." ? target.name : `${target.name} · ${target.package}` });
+		const running = runOf(target);
+
+		if (running?.port !== undefined) {
+			hubRef.current?.publish("preview.open", { "port": running.port });
+		} else if (running === undefined) {
+			hubRef.current?.publish("run.target", { "command": target.command, "cwd": target.cwd, "name": target.package === "." ? target.name : `${target.name} · ${target.package}` });
+		}
+
 		setRunOpen(false);
 	};
 
@@ -735,20 +752,37 @@ function Shell() {
 							<div class={runMenu()} role="menu">
 								{targets.length === 0 ? (
 									<div class={runEmpty()}>No run targets found</div>
-								) : targets.map((target) => (
-									<div
-										key={target.id}
-										class={runItem()}
-										role="menuitem"
-										tabIndex={0}
-										onClick={() => { runTarget(target); }}
-										onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); runTarget(target); } }}
-									>
-										<span class={runItemName()}>{target.name}</span>
+								) : (["service", "task"] as const).map((lifecycle) => {
+									const group = targets.filter((target) => target.lifecycle === lifecycle);
 
-										<span class={runItemMeta()}>{target.kind === "bin" ? "bin" : target.package === "." ? "script" : target.package}</span>
-									</div>
-								))}
+									return group.length === 0 ? null : (
+										<div key={lifecycle} role="group" aria-label={lifecycle === "service" ? "Services" : "Tasks"}>
+											<div class={runGroup()}>{lifecycle === "service" ? "Services" : "Tasks"}</div>
+
+											{group.map((target) => {
+												const running = runOf(target);
+
+												return (
+													<div
+														key={target.id}
+														class={runItem()}
+														role="menuitem"
+														tabIndex={0}
+														title={`${target.command} — ${target.reason}`}
+														onClick={() => { runTarget(target); }}
+														onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); runTarget(target); } }}
+													>
+														<span class={runItemName()}>{target.name}</span>
+
+														{running !== undefined && <span class={runItemLive()}>{running.port === undefined ? "running" : `running · :${running.port}`}</span>}
+
+														<span class={runItemMeta()}>{target.kind === "bin" ? "bin" : target.package === "." ? "script" : target.package}</span>
+													</div>
+												);
+											})}
+										</div>
+									);
+								})}
 							</div>
 						</>
 					)}

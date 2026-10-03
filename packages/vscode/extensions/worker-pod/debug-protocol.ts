@@ -42,7 +42,8 @@ export interface Snapshot {
 /** Worker → adapter. */
 export type WorkerEvent =
 	| { "type": "stopped"; "reason": string; "snapshot": Snapshot; "atomic"?: boolean }
-	| { "type": "terminated" }
+	/** The program is over: `exitCode` 1 when it threw, else 0. */
+	| { "type": "terminated"; "exitCode"?: number }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" }
 	| { "type": "rendered" }
 	| { "type": "history"; "length": number }

@@ -19,7 +19,7 @@ import { flushRun } from "../capabilities/silo-store";
 import { observe } from "@brianjenkins94/observability";
 import { identifyWorker } from "../../architecture-model";
 import { ZENFS_NODE } from "../../architecture-zenfs";
-import { registerTsvalDebug } from "./debug-adapter";
+import { registerTsvalDebug, takeExitCode } from "./debug-adapter";
 import { registerDebugToolbar } from "./debug-toolbar";
 import { registerMetricsBridge } from "./metrics-bridge";
 import { podHub } from "./pod";
@@ -264,7 +264,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 					if (typeof runId === "string") {
 						debugSessionsByRunId.delete(runId);
-						podHub.publish(`node.exit.${runId}`, { "exitCode": 0 });
+						podHub.publish(`node.exit.${runId}`, { "exitCode": takeExitCode(session.id) });
 					}
 				})
 			);

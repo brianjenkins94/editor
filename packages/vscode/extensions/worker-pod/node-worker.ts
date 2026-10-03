@@ -29,7 +29,7 @@
  * relayLoggerToHub, so every execution shows in the observability plane (federated up to the page's collector /
  * debug-mcp). Mirrors debug-worker.ts's hub wiring.
  */
-import { getServer, Runtime } from "@brianjenkins94/almostnode";
+import { getAllServers, getServer, getServerBridge, Runtime } from "@brianjenkins94/almostnode";
 import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { installWorkerProbe, observe } from "@brianjenkins94/observability";
 import pageTap from "worker-pod:page-tap";
@@ -108,6 +108,8 @@ const EXIT_THROW = /^Process exited with code (\d+)$/u;
 let running = false;
 // The running process's stdin (the shim EventEmitter), while a run is live — fed by `node.stdin.<runId>`.
 let currentStdin: ProcessStdin | undefined;
+// The live run's id: a server it starts listening is reported as `node.listening.<runId>` { port } — it's a service.
+let currentRunId: string | undefined;
 
 /** Run one script to completion (event-loop quiescence or process.exit), streaming output over the hub. */
 async function runNode(args: StartArgs): Promise<void> {
@@ -137,6 +139,7 @@ async function runNode(args: StartArgs): Promise<void> {
 	}
 
 	running = true;
+	currentRunId = runId;
 	const span = log.span("node.run", { "file": file, "cwd": cwd });
 	// almostnode's module wrapper assigns globalThis.process; snapshot it and restore only when the run truly ends
 	// (NOT right after the sync body — a server/interactive reader keeps running and still needs its process shim).
@@ -151,6 +154,7 @@ async function runNode(args: StartArgs): Promise<void> {
 		settled = true;
 		running = false;
 		currentStdin = undefined;
+		currentRunId = undefined;
 		keepAlive.reset();
 		(globalThis as { "process"?: unknown }).process = savedProcess; // restore before logging (logger writes via process)
 
@@ -221,16 +225,17 @@ async function runNode(args: StartArgs): Promise<void> {
 		}
 	});
 
-	// The process is "alive" past its sync body while a stdin reader is attached — otherwise a script that only
-	// does `process.stdin.on('data', …)` would look idle and we'd exit out from under it. Re-checked on each drain.
-	const stdinIsListening = (): boolean => {
+	// The process is "alive" past its sync body while a stdin reader is attached or a server is listening — otherwise a
+	// script that only does `process.stdin.on('data', …)` or `server.listen(…)` would look idle and we'd exit out from
+	// under it, as Node wouldn't. Re-checked on each drain.
+	const keepsRunning = (): boolean => {
 		const stdin = (globalThis as unknown as { "process"?: ShimProcess }).process?.stdin;
 
-		return stdin !== undefined && (stdin.listenerCount("data") > 0 || stdin.listenerCount("readable") > 0);
+		return (stdin !== undefined && (stdin.listenerCount("data") > 0 || stdin.listenerCount("readable") > 0)) || getAllServers().size > 0;
 	};
 
 	try {
-		keepAlive.begin(stdinIsListening);
+		keepAlive.begin(keepsRunning);
 		runtime.runFile(file); // synchronous — runs the top-level body; timers/promises continue after it returns
 		currentStdin = (globalThis as unknown as { "process"?: ShimProcess }).process?.stdin;
 		// Resolve when the event loop drains (no pending timers, no interval, no stdin reader). For a one-shot
@@ -250,6 +255,13 @@ async function runNode(args: StartArgs): Promise<void> {
 
 // Scripts are the scripts worker's alone.
 if (SCRIPTS) {
+	// A run that starts listening is a service, whatever it was taken for: say so (the runner relabels its run).
+	getServerBridge({ "onServerReady": (port: number) => {
+		if (currentRunId !== undefined) {
+			hub.publish(`node.listening.${currentRunId}`, { "port": port });
+		}
+	} });
+
 	hub.subscribe("node.start", (data) => { void runNode(data as StartArgs); });
 
 	// Tell the main thread we're subscribed so its first `node.start` doesn't out-race our interest. Repeated a few

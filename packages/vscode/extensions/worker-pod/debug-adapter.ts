@@ -19,6 +19,7 @@ import { loadEffectivePolicy } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
 import type { Control, CoverageReport, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
+import { lifecycleOfSource } from "../../lifecycle";
 import { controlSubject, eventSubject } from "./debug-protocol";
 import { podHub } from "./pod";
 
@@ -502,6 +503,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 			case "terminated":
 				this.endAction();
+				exitCodes.set(this.id, message.exitCode ?? 0);
 				this.event("terminated");
 				this.closeWorker();
 				this.settle("terminated");
@@ -540,15 +542,42 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	}
 }
 
+/** How each session's program ended (by session id), for whoever reports its end — a terminal's run waits on it. */
+const exitCodes = new Map<string, number>();
+
+/** A finished session's exit code (0 if it never said), forgotten once read. */
+export function takeExitCode(sessionId: string): number {
+	const code = exitCodes.get(sessionId) ?? 0;
+
+	exitCodes.delete(sessionId);
+
+	return code;
+}
+
 /**
  * Register the `tsval` debug type: a config provider that supplies a default launch config (bare F5 / the
  * green Run button, no launch.json), and the descriptor factory that hands back a worker-backed session.
+ *
+ * Bare F5 runs the file you have open. A task runs under tsval; a service (it listens, ticks, reads input —
+ * lifecycle.ts) needs the event loop tsval doesn't have, so it's run as `node <file>` in a terminal instead, which
+ * runs it on the real runtime.
  */
 export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.debug.registerDebugConfigurationProvider("tsval", {
 			"resolveDebugConfiguration": (_folder, config) => {
 				if (config.type === undefined) {
+					const document = vscode.window.activeTextEditor?.document;
+
+					if (document !== undefined && document.uri.scheme === "file" && lifecycleOfSource(document.getText()).lifecycle === "service") {
+						const path = document.uri.path;
+						const cwd = path.slice(0, path.lastIndexOf("/")) || "/";
+
+						podHub.publish("run.target", { "command": "node " + path.slice(cwd.length + 1), "cwd": cwd });
+
+						return undefined; // not a debug session: the terminal runs it
+					}
+
 					// eslint-disable-next-line no-template-curly-in-string -- ${file} is a VS Code launch-config variable, not a JS template literal
 					return { "type": "tsval", "request": "launch", "name": "Debug (tsval)", "program": "${file}" };
 				}

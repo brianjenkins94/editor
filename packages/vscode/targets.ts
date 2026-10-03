@@ -1,7 +1,8 @@
 /**
  * Run targets — the set of runnable things a repo exposes, discovered from its package.json(s). A repo isn't one
  * runnable: it has scripts (dev/build/test/…), bins (CLIs), and in a monorepo all of those per package. This
- * enumerates them so the shell's run picker can offer a choice, and runs the chosen one in a terminal — which,
+ * enumerates them — each a service (keeps running) or a task (runs to completion), lifecycle.ts — so the shell's run
+ * picker can offer a choice, and runs the chosen one in a terminal — which,
  * because every launch goes through our just-bash shell (the ambient run-minter), gets bracketed + recorded in the
  * `.silo/` run ledger with its `target` identity, no explicit `silo run` needed.
  *
@@ -12,7 +13,9 @@
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
+import type { Lifecycle } from "./lifecycle";
 import { serve } from "@brianjenkins94/hub";
+import { lifecycleOfScript, lifecycleOfSource } from "./lifecycle";
 
 const WORKSPACE = "/workspace";
 
@@ -27,6 +30,9 @@ export interface RunTarget {
 	"command": string;
 	/** Absolute cwd (e.g. `/workspace` or `/workspace/packages/web`). */
 	"cwd": string;
+	/** Keeps running until stopped (a dev server) or runs to completion (a build) — and why we think so (lifecycle.ts). */
+	"lifecycle": Lifecycle;
+	"reason": string;
 }
 
 /** A package dir → its repo-relative identity ("." for the root). */
@@ -42,6 +48,30 @@ async function readManifest(vscode: typeof vscodeApi, uri: vscodeApi.Uri): Promi
 	}
 }
 
+/** The file a command runs directly (`node server.js`, `tsx src/main.ts`), resolved against `cwd`. */
+function scriptFile(command: string, cwd: string): string | undefined {
+	const file = /^(?:node|tsx|ts-node)\s+(?:-\S+\s+)*([^\s;&|-][^\s;&|]*)\s*$/u.exec(command.trim())?.[1];
+
+	return file === undefined ? undefined : file.startsWith("/") ? file : `${cwd}/${file.replace(/^\.\//u, "")}`;
+}
+
+async function readText(vscode: typeof vscodeApi, path: string): Promise<string | undefined> {
+	try {
+		return new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(path)));
+	} catch {
+		return undefined;
+	}
+}
+
+/** Service or task: by the script's command and name, and — when it runs a file and they say task — by the file. */
+async function lifecycleOf(vscode: typeof vscodeApi, name: string, command: string, cwd: string): Promise<Pick<RunTarget, "lifecycle" | "reason">> {
+	const guess = lifecycleOfScript(name, command);
+	const file = guess.lifecycle === "task" ? scriptFile(command, cwd) : undefined;
+	const source = file === undefined ? undefined : await readText(vscode, file);
+
+	return source === undefined ? guess : lifecycleOfSource(source);
+}
+
 /** Enumerate every runnable: each package.json's scripts + bins, across the workspace (monorepo → per package). */
 export async function discoverTargets(vscode: typeof vscodeApi): Promise<RunTarget[]> {
 	let manifests: vscodeApi.Uri[];
@@ -54,7 +84,8 @@ export async function discoverTargets(vscode: typeof vscodeApi): Promise<RunTarg
 
 	const targets: RunTarget[] = [];
 
-	for (const uri of manifests) {
+	// (Not a dependency's: the exclude doesn't always hold — a package types acquisition wrote can turn up.)
+	for (const uri of manifests.filter((manifest) => !manifest.path.includes("/node_modules/"))) {
 		const pkg = await readManifest(vscode, uri);
 
 		if (pkg === undefined) {
@@ -65,20 +96,15 @@ export async function discoverTargets(vscode: typeof vscodeApi): Promise<RunTarg
 		const pkgRel = repoRelativeDir(dir);
 		const scripts = typeof pkg["scripts"] === "object" && pkg["scripts"] !== null ? pkg["scripts"] as Record<string, string> : {};
 
-		for (const name of Object.keys(scripts)) {
-			targets.push({ "id": `${pkgRel}:script:${name}`, "package": pkgRel, "kind": "script", "name": name, "command": `npm run ${name}`, "cwd": dir });
+		for (const [name, command] of Object.entries(scripts)) {
+			targets.push({ "id": `${pkgRel}:script:${name}`, "package": pkgRel, "kind": "script", "name": name, "command": `npm run ${name}`, "cwd": dir, ...await lifecycleOf(vscode, name, String(command), dir) });
 		}
 
 		const bin = pkg["bin"];
+		const bins: [string, string][] = typeof bin === "string" ? [[typeof pkg["name"] === "string" ? pkg["name"] : pkgRel, bin]] : typeof bin === "object" && bin !== null ? Object.entries(bin as Record<string, string>) : [];
 
-		if (typeof bin === "string") {
-			const name = typeof pkg["name"] === "string" ? pkg["name"] : pkgRel;
-
-			targets.push({ "id": `${pkgRel}:bin:${name}`, "package": pkgRel, "kind": "bin", "name": name, "command": `node ${bin}`, "cwd": dir });
-		} else if (typeof bin === "object" && bin !== null) {
-			for (const [name, path] of Object.entries(bin as Record<string, string>)) {
-				targets.push({ "id": `${pkgRel}:bin:${name}`, "package": pkgRel, "kind": "bin", "name": name, "command": `node ${path}`, "cwd": dir });
-			}
+		for (const [name, path] of bins) {
+			targets.push({ "id": `${pkgRel}:bin:${name}`, "package": pkgRel, "kind": "bin", "name": name, "command": `node ${path}`, "cwd": dir, ...await lifecycleOf(vscode, name, `node ${path}`, dir) });
 		}
 	}
 

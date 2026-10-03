@@ -8,6 +8,7 @@ import type { CustomCommand } from "just-bash/browser";
 import type { NodeOutput, NodeRunner } from "./node-runner";
 
 import { defineCommand } from "just-bash/browser";
+import { lifecycleOfSource } from "./lifecycle";
 
 /** POSIX resolve of `path` against `base` (collapsing `.`/`..`). */
 function resolvePosix(base: string, path: string): string {
@@ -57,10 +58,15 @@ export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 			}
 		}
 
-		// A task — it runs to completion — in the running list, as it was asked for (`npm run build` runs `node build.ts`).
-		// (`npm run` passes the script's name in the environment it runs it with — ctx.env, not the exported one.)
-		const lifecycle = Object.fromEntries(ctx.env)["npm_lifecycle_event"] ?? env["npm_lifecycle_event"];
-		const run = runner.runs.start({ "title": lifecycle === undefined ? "node " + args.join(" ") : "npm run " + lifecycle, "kind": "task", "cwd": ctx.cwd, "origin": { "terminal": terminal } }, () => { controller.abort(); });
+		// Service or task, by what its source does (lifecycle.ts): a task runs under the debugger, a service — which needs
+		// an event loop the debugger doesn't have — under the real runtime. An unreadable file is left to fail as a task.
+		const source = await ctx.fs.readFile(file).catch(() => undefined);
+		const guess = source === undefined ? undefined : lifecycleOfSource(source);
+		const kind = guess?.lifecycle ?? "task";
+		// In the running list as it was asked for (`npm run build` runs `node build.ts`). (`npm run` passes the script's
+		// name in the environment it runs it with — ctx.env, not the exported one.)
+		const event = Object.fromEntries(ctx.env)["npm_lifecycle_event"] ?? env["npm_lifecycle_event"];
+		const run = runner.runs.start({ "title": event === undefined ? "node " + args.join(" ") : "npm run " + event, "kind": kind, "cwd": ctx.cwd, "origin": { "terminal": terminal } }, () => { controller.abort(); });
 		const ended = (exitCode: number): { "stdout": string; "stderr": string; "exitCode": number } => {
 			run.end(exitCode, controller.signal.aborted);
 
@@ -68,17 +74,18 @@ export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 		};
 
 		try {
-			// Auto-attach: try to run `node <file>` under the tsval debug adapter (always debug mode) — breakpoints,
-			// step-back, capability hard-stops. If the debugger can't attach, fall back to a plain run so the command
-			// never breaks. (`npm run dev` → `vite` is a separate command and stays on the almostnode "production"
-			// path — a full server can't run under the interpreter.)
-			const debugged = await runner.debug(file, ctx.cwd, env, { "onOutput": writeLive, "signal": controller.signal });
+			// Auto-attach a task: run it under the tsval debug adapter (always debug mode) — breakpoints, step-back,
+			// capability hard-stops. If the debugger can't attach, fall back to a plain run so the command never breaks.
+			// (`npm run dev` → `vite` is a separate command and stays on the almostnode "production" path.)
+			if (kind === "task") {
+				const debugged = await runner.debug(file, ctx.cwd, env, { "onOutput": writeLive, "signal": controller.signal });
 
-			if (debugged.attached) {
-				return ended(debugged.exitCode);
+				if (debugged.attached) {
+					return ended(debugged.exitCode);
+				}
 			}
 
-			// tsval declined → run on the almostnode "production" path. Present it as a production debug session too
+			// A service, or tsval declined → run on the almostnode "production" path. Present it as a production debug session too
 			// (Run and Debug controller + Debug Console), same as the vite preview — so this path isn't a bare
 			// process. The debug Stop button and the shell's Ctrl-C both abort the run via one combined signal.
 			const sessionId = runner.startProductionSession(`node ${target}`);
@@ -87,7 +94,9 @@ export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 			try {
 				const { exitCode } = await runner.run(file, ctx.cwd, env, {
 					"onOutput": (stream, data) => { writeLive(stream, data); runner.emitProductionOutput(sessionId, stream, data); },
-					"signal": controller.signal
+					"signal": controller.signal,
+					// It listens: a service, whatever it was taken for — with its port.
+					"onListening": (port) => { run.update({ "kind": "service", "port": port }); }
 				});
 
 				return ended(exitCode);

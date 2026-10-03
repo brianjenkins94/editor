@@ -41,7 +41,8 @@ export interface RunInfo {
 /** What starts a run hands back: change it as it goes, end it once. */
 export interface RunHandle {
 	"id": string;
-	"update": (change: Partial<Pick<RunInfo, "port" | "title">>) => void;
+	/** A task that turns out to keep running (it started listening) becomes a service. */
+	"update": (change: Partial<Pick<RunInfo, "port" | "title" | "kind">>) => void;
 	/** It ended: by itself (`exited`, or `failed` with a nonzero code) or because it was stopped. */
 	"end": (exitCode: number, stopped?: boolean) => void;
 }
@@ -65,7 +66,8 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 	const ended: RunInfo[] = [];
 	let next = 0;
 
-	const list = (): RunInfo[] => [...[...running.values()].map((run) => run.info).sort((a, b) => b.startedAt - a.startedAt), ...ended];
+	// Copies: a subscriber in this realm gets the list itself, not a clone, and must not see a run change under it.
+	const list = (): RunInfo[] => [...[...running.values()].map((run) => run.info).sort((a, b) => b.startedAt - a.startedAt), ...ended].map((info) => ({ ...info }));
 	const changed = (): void => { hub.publish(RUNS_CHANGED, list()); };
 
 	// Debug sessions the pod reports — started from Run and Debug, not from a terminal.
@@ -79,10 +81,10 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 		}
 	});
 	hub.subscribe("runs.external.ended", (data) => {
-		const { key, stopped } = (data ?? {}) as { "key"?: unknown; "stopped"?: unknown };
+		const { key, stopped, exitCode } = (data ?? {}) as { "key"?: unknown; "stopped"?: unknown; "exitCode"?: unknown };
 
 		if (typeof key === "string") {
-			external.get(key)?.end(0, stopped === true);
+			external.get(key)?.end(typeof exitCode === "number" ? exitCode : 0, stopped === true);
 			external.delete(key);
 		}
 	});

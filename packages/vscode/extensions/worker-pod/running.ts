@@ -3,12 +3,16 @@
  * there only while something is. Its list shows each run — a service (a dev server) or a task (a script), where it came
  * from, how long it's been going — and the last few that ended, with how; picking a running one offers to stop it.
  *
+ * When a run ends it says how — a task that finished, briefly in the status bar; one that failed, or a service that
+ * stopped without being asked to, as a notification (with the way back to its terminal). Stopping something says nothing.
+ *
  * It also reports the debug sessions the registry wouldn't otherwise know — F5, an agent's debug_start, a coverage run;
  * not a terminal's (`__runId`) or a dev server's (`__prodId`), which are already its — so they're in the list too.
  */
 import type { RunInfo } from "../../runs";
 import { createRpcClient } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
+import { takeExitCode } from "./debug-adapter";
 import { podHub } from "./pod";
 
 /** `3m 20s`, `1h 2m`, `12s`. */
@@ -26,6 +30,27 @@ function describe(run: RunInfo): string {
 	const where = "terminal" in run.origin ? "terminal " + run.origin.terminal : run.origin.other;
 
 	return [run.kind === "service" ? "service" + (run.port === undefined ? "" : " · :" + run.port) : "task", where, run.cwd].join(" · ");
+}
+
+/** How a run ended, said once, as it ends. */
+function ended(run: RunInfo): void {
+	const after = since((run.endedAt ?? Date.now()) - run.startedAt);
+	const showTerminal = async (choice: string | undefined): Promise<void> => {
+		if (choice === "Show Terminal") {
+			await vscode.commands.executeCommand("workbench.action.terminal.focus");
+		}
+	};
+	const actions = "terminal" in run.origin ? ["Show Terminal"] : [];
+
+	if (run.state === "exited" && run.kind === "task") {
+		vscode.window.setStatusBarMessage(`$(check) ${run.title} finished in ${after}`, 5000);
+	} else if (run.state === "failed") {
+		const message = run.kind === "task" ? `${run.title} failed (exit ${run.exitCode}) after ${after}` : `${run.title} stopped unexpectedly (exit ${run.exitCode}) after ${after}`;
+
+		void vscode.window.showErrorMessage(message, ...actions).then(showTerminal);
+	} else if (run.state === "exited" && run.kind === "service") {
+		void vscode.window.showWarningMessage(`${run.title} stopped by itself after ${after}`, ...actions).then(showTerminal);
+	}
 }
 
 export function registerRunning(context: vscode.ExtensionContext): void {
@@ -67,7 +92,7 @@ export function registerRunning(context: vscode.ExtensionContext): void {
 		}),
 		vscode.debug.onDidTerminateDebugSession((session) => {
 			if (reported.delete(session.id)) {
-				podHub.publish("runs.external.ended", { "key": session.id, "stopped": stopping.delete(session.id) });
+				podHub.publish("runs.external.ended", { "key": session.id, "stopped": stopping.delete(session.id), "exitCode": takeExitCode(session.id) });
 			}
 		}),
 		{ "dispose": podHub.subscribe("runs.external.stop", (data) => {
@@ -80,8 +105,16 @@ export function registerRunning(context: vscode.ExtensionContext): void {
 		}) },
 		item,
 		{ "dispose": podHub.subscribe("runs.changed", (data) => {
+			const wasRunning = new Set(runs.filter((run) => run.state === "running").map((run) => run.id));
+
 			runs = Array.isArray(data) ? data as RunInfo[] : [];
 			show();
+
+			for (const run of runs) {
+				if (wasRunning.has(run.id) && run.state !== "running") {
+					ended(run);
+				}
+			}
 		}) },
 		vscode.commands.registerCommand("editor.running.show", async () => {
 			// (Asked fresh: the list carries times, and the last change may be a while ago.)

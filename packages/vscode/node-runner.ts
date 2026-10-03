@@ -22,7 +22,12 @@ import { createRunRegistry } from "./runs";
 
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
 export type NodeOutput = (stream: "out" | "err", data: string) => void;
-export interface NodeRunHooks { "onOutput": NodeOutput; "signal"?: AbortSignal }
+export interface NodeRunHooks {
+	"onOutput": NodeOutput;
+	"signal"?: AbortSignal;
+	/** The run started a server on `port` (a plain run's only — tsval has no event loop to serve from). */
+	"onListening"?: (port: number) => void;
+}
 
 /** A response relayed back from an http server running in the worker (the preview bridge). */
 export interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": Uint8Array }
@@ -131,6 +136,13 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 
 			hooks.onOutput(message.stream, message.data);
 		});
+		const offListening = hub.subscribe(`node.listening.${runId}`, (data) => {
+			const port = (data as { "port"?: unknown } | null)?.port;
+
+			if (typeof port === "number") {
+				hooks.onListening?.(port);
+			}
+		});
 
 		const finish = (exitCode: number): void => {
 			if (settled) {
@@ -139,6 +151,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 
 			settled = true;
 			offOutput();
+			offListening();
 			offExit();
 
 			if (currentRunId === runId) {

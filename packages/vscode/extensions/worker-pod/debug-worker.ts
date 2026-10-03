@@ -272,10 +272,10 @@ function coverageReport(): CoverageReport {
 	return { "file": file.fileName, "statements": statements };
 }
 
-/** The program is over: report its coverage, then end the session. */
-function finish(): void {
+/** The program is over: report its coverage, then end the session — with 1 for a program that threw, as node would. */
+function finish(exitCode = 0): void {
 	post({ "type": "coverage", "report": coverageReport(), "final": true });
-	post({ "type": "terminated" });
+	post({ "type": "terminated", "exitCode": exitCode });
 }
 
 /** Guest call depth: the `call`/`construct` frames on the control stack (the rest are expression/statement frames). */
@@ -318,7 +318,7 @@ function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): voi
 			}
 		} catch (error) {
 			post({ "type": "output", "text": "Uncaught " + String(error), "stream": "stderr" });
-			finish();
+			finish(1);
 			done = true;
 
 			return;
