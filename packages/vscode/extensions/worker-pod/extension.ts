@@ -290,7 +290,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 				}
 
 				void (async () => {
-					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file}`, "program": info.file, "__runId": info.runId });
+					// `__startedBy`: the terminal shows this run itself (the running extension leaves the session out).
+					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file}`, "program": info.file, "__runId": info.runId, "__startedBy": "terminal" });
 
 					if (started === true) {
 						podHub.publish(`node.out.${info.runId}`, { "stream": "out", "data": "[debug] running in the Debug Console…\n" });

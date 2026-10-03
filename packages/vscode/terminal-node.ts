@@ -78,7 +78,7 @@ export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 			// capability hard-stops. If the debugger can't attach, fall back to a plain run so the command never breaks.
 			// (`npm run dev` → `vite` is a separate command and stays on the almostnode "production" path.)
 			if (kind === "task") {
-				const debugged = await runner.debug(file, ctx.cwd, env, { "onOutput": writeLive, "signal": controller.signal });
+				const debugged = await runner.debug(file, ctx.cwd, env, { "runId": run.id, "onOutput": writeLive, "signal": controller.signal });
 
 				if (debugged.attached) {
 					return ended(debugged.exitCode);
@@ -88,11 +88,12 @@ export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 			// A service, or tsval declined → run on the almostnode "production" path. Present it as a production debug session too
 			// (Run and Debug controller + Debug Console), same as the vite preview — so this path isn't a bare
 			// process. The debug Stop button and the shell's Ctrl-C both abort the run via one combined signal.
-			const sessionId = runner.startProductionSession(`node ${target}`);
+			const sessionId = runner.startProductionSession(`node ${target}`, undefined, undefined, run.id);
 			const offStop = runner.onProductionStop(sessionId, () => { controller.abort(); });
 
 			try {
 				const { exitCode } = await runner.run(file, ctx.cwd, env, {
+					"runId": run.id,
 					"onOutput": (stream, data) => { writeLive(stream, data); runner.emitProductionOutput(sessionId, stream, data); },
 					"signal": controller.signal,
 					// It listens: a service, whatever it was taken for — with its port.

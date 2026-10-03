@@ -23,6 +23,8 @@ import { createRunRegistry } from "./runs";
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
 export type NodeOutput = (stream: "out" | "err", data: string) => void;
 export interface NodeRunHooks {
+	/** The run's id in the registry (runs.ts), carried by `node.start` / `debug.launch`; a fresh one if it has none. */
+	"runId"?: string;
 	"onOutput": NodeOutput;
 	"signal"?: AbortSignal;
 	/** The run started a server on `port` (a plain run's only — tsval has no event loop to serve from). */
@@ -66,8 +68,9 @@ export interface NodeRunner {
 	/** Present a long-running production run (the vite preview) as a VS Code debug session: publishes
 	 *  `production.launch` (the ext host starts a `production` attach session) and returns its id. `port`, when the
 	 *  run binds one (a preview server), is carried so the SW can attribute that port's net to this run. `target`
-	 *  is the runnable's stable identity (e.g. the project dir), recorded on the run-grain ledger. */
-	"startProductionSession": (name: string, port?: number, target?: string) => string;
+	 *  is the runnable's stable identity (e.g. the project dir), recorded on the run-grain ledger. `id`: the run's id in
+	 *  the registry, so the session is known by it (a fresh one if it has none). */
+	"startProductionSession": (name: string, port?: number, target?: string, id?: string) => string;
 	/** Stream a line of the run's output to the production debug session's Debug Console. */
 	"emitProductionOutput": (id: string, stream: "out" | "err", data: string) => void;
 	/** The debug session's Stop button (or session close) fired — the driver should tear the run down. */
@@ -126,7 +129,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 	};
 
 	const startRun = (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks): Promise<{ "exitCode": number }> => new Promise((resolve) => {
-		const runId = crypto.randomUUID();
+		const runId = hooks.runId ?? crypto.randomUUID();
 
 		currentRunId = runId;
 		let settled = false;
@@ -193,7 +196,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 	// `node.out/exit.<runId>` channels — the adapter (or its terminate) relays onto them — so the terminal drives a
 	// debug run exactly like a plain one. No node worker needed; the adapter spawns its own debug worker.
 	const startDebug = (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks): Promise<{ "attached": boolean; "exitCode": number }> => new Promise((resolve) => {
-		const runId = crypto.randomUUID();
+		const runId = hooks.runId ?? crypto.randomUUID();
 
 		currentRunId = runId; // so the terminal treats it as running (routes Ctrl-C to the abort signal below)
 		let settled = false;
@@ -248,8 +251,28 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 		hub.publish("debug.launch", { "runId": runId, "file": file, "cwd": cwd, "env": env });
 	});
 
+	const runs = createRunRegistry(hub);
+
+	// A debug session VS Code starts itself (F5, Run and Debug, debug-mcp's debug_start) is a run too: the pod asks for
+	// its id as the session starts, and puts it in the session's launch config. Its end is the session's (`node.exit`,
+	// as for a terminal's debug run); stopping it from here stops the session (`debug.stop`).
+	serve(hub, "runs.begin", (args) => {
+		const { title, cwd } = (args ?? {}) as { "title"?: unknown; "cwd"?: unknown };
+		let stopped = false;
+		const run = runs.start({ "title": typeof title === "string" ? title : "debug", "kind": "task", "cwd": typeof cwd === "string" ? cwd : "/workspace", "origin": { "other": "Run and Debug" } }, () => {
+			stopped = true;
+			hub.publish("debug.stop", { "runId": run.id });
+		});
+		const off = hub.subscribe(`node.exit.${run.id}`, (data) => {
+			off();
+			run.end((data as { "exitCode"?: number } | null)?.exitCode ?? 0, stopped);
+		});
+
+		return { "id": run.id };
+	});
+
 	return {
-		"runs": createRunRegistry(hub),
+		"runs": runs,
 		"run": async (file, cwd, env, hooks) => {
 			ensureWorker();
 			await ready; // don't publish `node.start` until the worker has announced its subscription
@@ -282,8 +305,8 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 				handler();
 			}
 		}),
-		"startProductionSession": (name, port, target) => {
-			const id = crypto.randomUUID();
+		"startProductionSession": (name, port, target, runId) => {
+			const id = runId ?? crypto.randomUUID();
 
 			hub.publish("production.launch", { "id": id, "name": name, "port": port, "target": target });
 

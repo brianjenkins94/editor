@@ -10,7 +10,7 @@
  * (a DebugAdapterServer needs a socket).
  */
 import type { Span } from "@brianjenkins94/util/logger";
-import { portTransport } from "@brianjenkins94/hub";
+import { createRpcClient, portTransport } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
@@ -564,6 +564,8 @@ export function takeExitCode(sessionId: string): number {
  * which runs it on the real runtime.
  */
 export function registerTsvalDebug(context: vscode.ExtensionContext): void {
+	const rpc = createRpcClient(podHub);
+
 	context.subscriptions.push(
 		vscode.debug.registerDebugConfigurationProvider("tsval", {
 			"resolveDebugConfiguration": (_folder, config) => {
@@ -585,6 +587,24 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 				}
 
 				return config;
+			},
+			// Every session is a run in core's registry, known by one id from start to end: a terminal's `node` brings its
+			// own (`__runId`); one VS Code started (F5, debug_start) asks for one here, once `${file}` is the real path.
+			// Without core (no answer), it runs all the same, unrecorded.
+			"resolveDebugConfigurationWithSubstitutedVariables": async (_folder, config) => {
+				if (typeof config["__runId"] === "string") {
+					return config;
+				}
+
+				const program = typeof config["program"] === "string" ? config["program"] : "";
+
+				try {
+					const { id } = await rpc.request("runs.begin", { "title": program === "" ? config.name : `${config.name} — ${vscode.workspace.asRelativePath(program)}`, "cwd": program.slice(0, program.lastIndexOf("/")) || "/workspace" }, { "timeoutMs": 5000, "waitForResponderMs": 2000 }) as { "id": string };
+
+					return { ...config, "__runId": id };
+				} catch {
+					return config;
+				}
 			}
 		}),
 		vscode.debug.registerDebugAdapterDescriptorFactory("tsval", {

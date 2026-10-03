@@ -60,6 +60,23 @@ test("node script: a task runs under the tsval debugger, with its render surface
 	await session.until("the debug worker", alive("debug-worker"));
 	await session.until("the debug session's launch", hasLabel("pod", "debug-worker", /^debug\.session\..+\.control$/u));
 	await session.until("the tsval render surface", hasLabel("shell", "tsval-preview", /^init/u));
+
+	// One run, one id: the registry's run is the debug session's (its launch config carries it).
+	const run = await eventually("the run", async () => (await session.request("runs.list", undefined, 5000)).find((each) => each.title === "node tour.js" && each.state === "running"));
+	const sessionRun = await session.workbench().evaluate(() => globalThis.__editor.api.debug.activeDebugSession?.configuration.__runId);
+
+	assert.equal(sessionRun, run.id, "the session carries the registry's run id");
+});
+
+// A session VS Code starts itself (F5, Run and Debug, debug_start) is a run in the registry too, ended with the session.
+test("debug session: one VS Code starts is a run, known by the same id", async () => {
+	await session.terminal(`echo "console.log('f5');" > f5.js`, { "fresh": true });
+	await session.request("debug.start", { "program": "/workspace/f5.js" }, 60_000);
+
+	const run = await eventually("its run, ended", async () => (await session.request("runs.list", undefined, 5000)).find((each) => each.title.endsWith("f5.js") && each.state === "exited"));
+
+	assert.deepEqual(run.origin, { "other": "Run and Debug" });
+	assert.match(run.id, /^[0-9a-f-]{36}$/u, "a UUID: records outlive the page");
 });
 
 // A service — it keeps running (lifecycle.ts) — needs an event loop tsval doesn't have, so it runs on the script worker

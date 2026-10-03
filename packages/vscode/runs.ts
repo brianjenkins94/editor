@@ -7,7 +7,10 @@
  * keeps the running ones and the last few that ended, and serves them (`runs.list`) and stopping one (`runs.stop`).
  *
  * It's the core runtime's own account, read by the shell's run picker, profile-files.ts (where a profiled preview's dev
- * server serves) and agents (debug-mcp's `runs`). VS Code's "what's running" is the `running` extension's, from VS
+ * server serves) and agents (debug-mcp's `runs`). A run's id is the one everything about the run carries — the runner's
+ * `node.start`, a debug session's launch config, a preview's production session — so what's learned from a run (its
+ * coverage, its profiles, the capabilities it used) can be put together as one record. Ids are UUIDs: records outlive
+ * the page. VS Code's "what's running" is the `running` extension's, from VS
  * Code's own API (terminal shell integration, debug sessions, tasks), as it would be on the desktop.
  */
 import type { Hub } from "@brianjenkins94/hub";
@@ -59,7 +62,6 @@ const KEEP_ENDED = 10;
 export function createRunRegistry(hub: Hub): RunRegistry {
 	const running = new Map<string, { "info": RunInfo; "stop": () => void }>();
 	const ended: RunInfo[] = [];
-	let next = 0;
 
 	// Copies: a caller in this realm gets the list itself, not a clone, and must not see a run change under it.
 	const list = (): RunInfo[] => [...[...running.values()].map((run) => run.info).sort((a, b) => b.startedAt - a.startedAt), ...ended].map((info) => ({ ...info }));
@@ -73,9 +75,7 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 
 	const registry: RunRegistry = {
 		"start": (run, stop) => {
-			next += 1;
-
-			const id = "run-" + next;
+			const id = crypto.randomUUID();
 			const info: RunInfo = { ...run, "id": id, "state": "running", "startedAt": Date.now() };
 
 			running.set(id, { "info": info, "stop": stop });

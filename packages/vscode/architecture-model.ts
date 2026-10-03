@@ -182,6 +182,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "terminal.stop.*", "from": ["pod"], "to": ["workbench"], "description": "The task's terminal closed: stop it." },
 	{ "pattern": "runs.list", "from": ["shell", "root"], "to": ["workbench"], "description": "The core runtime's runs: the run picker's running markers, the runs page tool." },
 	{ "pattern": "runs.stop", "from": ["root"], "to": ["workbench"], "description": "Stop a run (the runs page tool)." },
+	{ "pattern": "runs.begin", "from": ["pod"], "to": ["workbench"], "description": "A debug session VS Code started (F5, Run and Debug) is a run: its id, for the session's launch config." },
 	{ "pattern": "theme.colorScheme", "from": ["shell"], "to": ["workbench"], "description": "Theme sync." },
 	{ "pattern": "dock.openWindow", "from": ["workbench"], "to": ["shell"], "description": "A VS Code window opens as a panel of the shell's dock." },
 	{ "pattern": "dock.closeWindow", "from": ["workbench"], "to": ["shell"], "description": "Its window closed." },

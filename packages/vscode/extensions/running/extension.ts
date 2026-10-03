@@ -229,8 +229,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	// ── Debug sessions ────────────────────────────────────────────────────────────────────────────────────────────
 	const sessions = new Map<string, Run>();
-	// A child session, or one a terminal command or a dev server started for itself (they carry their run's id).
-	const standsAlone = (session: vscode.DebugSession): boolean => session.parentSession === undefined && session.configuration["__runId"] === undefined && session.configuration["__prodId"] === undefined;
+	// A child session, or one a terminal command or a dev server started for itself (the terminal shows those).
+	const standsAlone = (session: vscode.DebugSession): boolean => session.parentSession === undefined && session.configuration["__startedBy"] !== "terminal" && session.configuration["__prodId"] === undefined;
 
 	context.subscriptions.push(
 		vscode.debug.onDidStartDebugSession((session) => {
