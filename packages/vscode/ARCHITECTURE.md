@@ -39,7 +39,7 @@ also works over desktop's built-in git.
 |---|---|---|---|
 | **Shell** (top window) | `main.tsx` `renderShell()` branch, `shell.ts`, `git-panel.ts` | DOM, the shell hub; *later* the GitHub token (trust boundary) | Surrounding chrome: LHS project picker, top bar, and the RHS **git review panel** (`git-panel.ts` — GitHub-Desktop-style changes/diff/commit, a pure hub consumer of `git.*`). Loads the app in an iframe pointing back at the same page. |
 | **App iframe** (`/`) | `main.tsx` app branch, `coi.ts`, `vscode.tsx`, `samples.ts`, `pane-link.ts` | DOM, `rootHub`, COI bootstrap | Boots the workbench iframe (the preview windows live in the shell; this realm runs their backend — see below) and links it into `rootHub` over the retargeting pane-link transport; serves `project.list` + `workbench.init`, routes `project.open` → `openProject`. Owns the top of the hub tree. |
-| **Workbench iframe** (`/__vscode__/host.html`) | `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal.ts`, `node-runner.ts`, `git-scm.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()` (VS Code's full workbench lays itself out — its own activity bar, sashes, movable views and remembered layout, minus the menu bar and title bar, which the shell's chrome replaces), mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(git SCM `git-scm.ts`/`git-engine.ts` install here too — legitimate browser parity for desktop's built-in git; the BABLR classifier welded into it is the part that should become a standalone extension.)* |
+| **Workbench iframe** (`/__vscode__/host.html`) | `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal.ts`, `node-runner.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()` (VS Code's full workbench lays itself out — its own activity bar, sashes, movable views and remembered layout, minus the menu bar and title bar, which the shell's chrome replaces), mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(the git engine and service live here too — legitimate browser parity for desktop's built-in git; VS Code's Source Control view on it is worker-pod's. The BABLR classifier welded into it is the part that should become a standalone extension.)* |
 | **Extension host** (`LocalProcess` / `LocalWebWorker`) | `extensions/*/extension.ts`, `extensions/*/ts-plugin.js` | the vscode API — **no DOM, no zen-fs singleton** | Extensions: `hello` (default API context), `worker-pod` (spawns the LSP/debug/node workers). `eslint` + `capabilities` run in the WebWorker host *inside tsserver*, reusing tsserver's own `ts` as TS-plugins. |
 | **Workers** (`dist/lsp/*`, spawned from the workbench realm) | only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `classify-worker` (BABLR classify). (The event sheet's recognizer worker is its extension's own, spawned in the extension host.) |
 | **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (`cstSpans`, `classifyChange`), `tsval`, `util/silo` (incl. `silo/policy` — the shared policy model), and the vscode-package-local pure module `capability-breakpoints`. Built/aliased into the realms above. |
@@ -179,7 +179,7 @@ flowchart TB
       A["rootHub · COI bootstrap<br/>serves project.list + workbench.init · routes project.open"]
       subgraph WB["Workbench iframe · /__vscode__/host.html — workbench-entry.tsx"]
         W["monaco boot · zen-fs mounted · vscodeApi captured<br/>ATA · terminal factory · debug preview"]
-        GIT["git SCM — browser parity for desktop's built-in git<br/>git-scm · git-engine + isomorphic-git"]
+        GIT["git — browser parity for desktop's built-in git<br/>git-service · git-engine + isomorphic-git"]
         COS["cosmetic-classifier (worker client + cache)"]
       end
     end
@@ -355,16 +355,14 @@ The cosmetic-diff feature is the running example — and its git/SCM stack shows
 *shortcut we took*:
 
 - `classifyChange` / `cstSpans` — **package** (`@brianjenkins94/bablr`): pure, node-tested (rule 1). Correctly placed.
-- `git-engine.ts` + `git-scm.ts` — **browser parity for desktop's built-in git** (rule 2b): desktop ships the git
-  extension; the browser has no `git` binary, so we rebuilt SCM over isomorphic-git + zen-fs. It correctly lives
-  **browser-side** (workbench realm). There is **no `extensions/git/`** and shouldn't be — we do not ship SCM to
-  desktop; desktop already has it. (`git-engine`'s direct `@zenfs/core` import is fine *here* — it's browser-only.)
-- `git-service.ts` + `git-panel.ts` — the same engine, a **second binding**: `git-service` re-exposes `git-engine`
-  over the hub (`git.status`/`git.file`/`git.commit`), and `git-panel` (shell) renders the GitHub-Desktop review UI
-  from it. This is the payoff of the engine/binding split — a novel UI reading the engine over the hub, no monaco
-  coupling. (`git-engine` stays vscode-free precisely so both bindings can share it.)
+- `git-engine.ts` + `git-service.ts` — **browser parity for desktop's built-in git** (rule 2b): desktop ships the git
+  extension; the browser has no `git` binary, so we rebuilt git over isomorphic-git + zen-fs. The engine lives
+  **browser-side** (workbench realm) behind one service on the hub (`git.status`/`git.file`/`git.commit`, `git.changed`),
+  with two faces: VS Code's Source Control view (worker-pod's `source-control.ts`, the bridge's crossing) and the
+  shell's GitHub-Desktop review panel (`git-panel`). We do not ship SCM to desktop; desktop already has it.
+  (`git-engine`'s direct `@zenfs/core` import is fine *here* — it's browser-only.)
 - `git-classify-worker.ts` + the cosmetic badge — the **novel** piece (rule 2): desktop has nothing like it. It is
-  currently welded into our browser git SCM (spawned by `git-scm`, painting decorations on *our* provider). Its right
+  currently welded into our browser git (the git service asks it, and *our* Source Control view paints it). Its right
   home is a **standalone extension**, decoupled from our git provider, that reads HEAD vs working through vscode's own
   SCM/diff/fs APIs and adds the badge — so it works over desktop's built-in git too. *(This is the "bablr belongs in
   the extension" correction, correctly scoped: the classifier ports; the SCM shim does not.)* Recorded as debt.

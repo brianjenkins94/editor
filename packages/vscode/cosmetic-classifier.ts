@@ -5,7 +5,7 @@
  * analysis. `verdict` is the single classification entry point: the cosmetic/semantic verdict of a HEAD→working change
  * plus which nodes changed and the working lines they land on — everything the changes panes need for both the badge
  * and per-node diff focus. `editGroups` decomposes an edit-burst chain for the "your edits" timeline. Knows NOTHING
- * about git — the git bindings (git-scm.ts, git-service.ts) are merely consumers.
+ * about git — the git service (git-service.ts) is merely a consumer.
  *
  * CACHING: a verdict is a pure, deterministic function of the (before, after) content pair, so it is READ-THROUGH
  * cached — an in-memory tier for the session, then an optional injected `VerdictStore` (git-engine's content-addressed

@@ -1,9 +1,8 @@
 /**
- * Git service — exposes `git-engine` (+ the cosmetic classifier) over the hub, for the shell's GitHub-Desktop-style
- * review panel to consume. This is a SECOND binding onto the same engine (git-scm.ts is the vscode-SCM one), which
- * is exactly why the engine was kept vscode-free: the novel review UI reads it over the hub without knowing about
- * monaco. Runs in the workbench realm (where zen-fs + the vscode API live); the shell reaches it shell → app →
- * workbench across the hub tree.
+ * Git service — exposes `git-engine` (+ the cosmetic classifier) over the hub: the one git the editor has, read by the
+ * shell's GitHub-Desktop-style review panel and by VS Code's Source Control view (worker-pod's source-control.ts). The
+ * engine is vscode-free, so each face reads it over the hub without knowing about the other. Runs in the workbench
+ * realm (where zen-fs lives); the shell reaches it shell → app → workbench, the Source Control view pod → workbench.
  */
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
@@ -186,7 +185,9 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 
 	log.info("git service installed");
 
-	// Announce readiness: the shell panel subscribes `git.changed`, so this prompts its first load the moment the
-	// serves are live (the panel also polls, but this makes a fresh Pages load populate promptly).
-	hub.publish("git.changed");
+	// Announce readiness once there's a repository (made here if the workspace has none): both faces subscribe
+	// `git.changed`, so this prompts their first load the moment the serves are live.
+	void engine.ensureRepo().then(() => { hub.publish("git.changed"); }, (error: unknown) => {
+		log.error("git repository unavailable", { "error": error instanceof Error ? error.message : String(error) });
+	});
 }

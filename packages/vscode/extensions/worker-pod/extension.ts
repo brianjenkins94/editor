@@ -21,6 +21,7 @@ import { identifyWorker } from "../../architecture-model";
 import { ZENFS_NODE } from "../../architecture-zenfs";
 import { registerTsvalDebug, takeExitCode } from "./debug-adapter";
 import { registerLaunch } from "./launch";
+import { registerSourceControl } from "./source-control";
 import { registerTasks } from "./tasks";
 import { registerTsvalSurface } from "./tsval-surface";
 import { registerDebugToolbar } from "./debug-toolbar";
@@ -171,6 +172,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// What there is to run, as tasks run by core's shell (tasks.ts); and the shell's run picker, from them (launch.ts).
 	registerTasks(context);
 	registerLaunch(context);
+	// VS Code's Source Control view, on core's git service (source-control.ts).
+	registerSourceControl(context);
 
 	// The production debug type — presents an almostnode run (the vite preview) as a debug session with a
 	// run-control controller (Stop + Debug Console). The run's driver publishes `production.launch` (federates

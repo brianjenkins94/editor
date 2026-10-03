@@ -41,7 +41,6 @@ import type { VerdictEntry } from "./cosmetic-classifier";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
 import * as gitEngine from "./git-engine";
 import { installEditHistory } from "./edit-history";
-import { installGitScm } from "./git-scm";
 import { installGitService } from "./git-service";
 import capabilitiesManifest from "./extensions/capabilities/package.json";
 import eslintManifest from "./extensions/eslint/package.json";
@@ -564,10 +563,9 @@ function maybeBoot(): void {
 				wireWorkbenchHub(workspaceFs?.buffer);
 				// The metrics plane: memory by realm, workspace fill, long frames, hub traffic, storage (editor-metrics.ts).
 				reportWorkbenchMetrics(workbenchHub, workspaceFs?.buffer, architectureStore(workbenchHub));
-				// Source Control: browser-git (isomorphic-git over the zen-fs workspace). ONE cosmetic classifier is
-					// shared by the vscode SCM viewlet (git-scm) AND the hub git service (git-service) the shell's
-					// review panel consumes. Wired here in the workbench realm — BOTH zen-fs and the vscode API live
-					// here. See git-scm.ts / git-service.ts / git-engine.ts.
+				// Git: browser-git (isomorphic-git over the zen-fs workspace), served over the hub (git-service) to the
+					// shell's review panel and VS Code's Source Control view (worker-pod's source-control.ts). See
+					// git-service.ts / git-engine.ts.
 					// One classifier, shared by both panes, with its verdict cache persisted through the engine's
 					// content-addressed `.git/bablr/` store — so cosmetic/semantic is derived once per content pair and
 					// re-read (not re-computed) across refreshes and reloads.
@@ -576,9 +574,6 @@ function maybeBoot(): void {
 						"write": (before, after, entry) => gitEngine.writeVerdict(before, after, entry)
 					});
 
-					void installGitScm(api as typeof import("vscode"), paneLog, cosmeticClassifier).catch((error: unknown) => {
-						bootSpan.error("git SCM install failed", { "error": errText(error) });
-					});
 					installGitService(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
 					// changes pane can show your uncommitted work as small chunks (the local tier over git). See

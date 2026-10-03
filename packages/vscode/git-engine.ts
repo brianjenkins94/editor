@@ -1,7 +1,8 @@
 /**
  * Browser git ENGINE — isomorphic-git over the zen-fs workspace, with NO vscode dependency.
  *
- * This is the durable, reusable core: the same engine backs the standard vscode SCM viewlet today (git-scm.ts) and
+ * This is the durable, reusable core: through git-service.ts it backs VS Code's Source Control view and the shell's review
+ * panel today, and
  * a custom shell UI / the RHS revision history later, with the view swapped and the engine untouched. It's also the
  * COARSE (git) tier of the eventual two-tier history (Automerge = fine local edits, git = published commits).
  *
@@ -15,7 +16,7 @@ import { add, commit, hashBlob, init, readBlob, remove, resetIndex, resolveRef, 
 
 // isomorphic-git reads the `Buffer` global (a Node-ism); the browser has none and the workbench bundle doesn't
 // polyfill node globals, so provide it. The `buffer` import resolves to the node-stdlib-browser polyfill via the
-// build's resolve.alias (see build.ts pass 1). Set before any git op runs (module load precedes installGitScm).
+// build's resolve.alias (see build.ts pass 1). Set before any git op runs (module load precedes the git service's first op).
 (globalThis as unknown as { "Buffer"?: unknown }).Buffer ??= Buffer;
 
 /** The workspace is the repo root (zen-fs mounts the SingleBuffer here; see workspace-fs.ts). */

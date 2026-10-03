@@ -7,10 +7,10 @@ import { allowedOnLink, appLayout, appNodes, checkConformance, classifyUrl, decl
 const patterns = (a, b) => familiesOnLink(a, b).map((family) => family.pattern);
 
 test("a subject family may only cross the tree links between its senders and receivers", () => {
-	// git.status runs shell → workbench, through root
-	assert.ok(patterns("shell", "root").includes("git.status"));
-	assert.ok(patterns("root", "workbench").includes("git.status"));
-	assert.ok(!patterns("workbench", "pod").includes("git.status"));
+	// git.discard runs shell → workbench, through root — and only there (the Source Control view, the pod's, doesn't)
+	assert.ok(patterns("shell", "root").includes("git.discard"));
+	assert.ok(patterns("root", "workbench").includes("git.discard"));
+	assert.ok(!patterns("workbench", "pod").includes("git.discard"));
 	// capability.decide: pod serves, root (for the sw) and shell call — so it crosses root⇄workbench, workbench⇄pod,
 	// shell⇄root; the sw only ever asks its tab's root (capability.decide.<tab>), never the pod directly
 	for (const [a, b] of [["root", "workbench"], ["workbench", "pod"], ["shell", "root"]]) {
@@ -67,7 +67,7 @@ test("conformance flags undeclared channels, unexpected subjects, duplicate peer
 		"nodes": ["workbench", "mystery", "webview:1", "worker:TextMateWorker"],
 		"channels": [
 			{ "a": "shell", "b": "root", "labels": labels("git.status()", "↩ git.status()", "hello", "$sys.log.shell") },
-			{ "a": "workbench", "b": "pod", "labels": labels("git.commit()") }, // git.* doesn't belong below the workbench
+			{ "a": "workbench", "b": "pod", "labels": labels("git.discard()") }, // discarding is the shell's alone
 			// counted by direction: the shell's git.changed would be the wrong way round
 			{ "a": "root", "b": "shell", "labels": new Map([["git.changed", { "count": 3, "hub": 3, "forward": 2, "backward": 1 }]]) },
 			{ "a": "shell", "b": "node", "labels": labels("x") }, // no such link or channel
@@ -79,7 +79,7 @@ test("conformance flags undeclared channels, unexpected subjects, duplicate peer
 	});
 
 	assert.deepEqual(violations, [
-		{ "type": "unexpected-subject", "a": "workbench", "b": "pod", "subject": "git.commit", "count": 1 },
+		{ "type": "unexpected-subject", "a": "workbench", "b": "pod", "subject": "git.discard", "count": 1 },
 		{ "type": "unexpected-subject", "a": "shell", "b": "root", "subject": "git.changed", "count": 1 },
 		{ "type": "undeclared-channel", "a": "shell", "b": "node" },
 		{ "type": "duplicate-peer", "hub": "sw", "peer": "root", "links": 2 },
