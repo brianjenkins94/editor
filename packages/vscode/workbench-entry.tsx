@@ -231,11 +231,23 @@ function workspaceRoot(): string {
 async function clearWorkspace(root: string): Promise<void> {
 	const vscode = vscodeApi;
 	const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(root));
+	const kept = (name: string): boolean => SCAFFOLDING.has(name) || OVERRIDABLE_DEFAULTS.has(name);
+
+	// Close the editors on the files about to go first. VS Code closes an editor whose file is deleted from inside the
+	// app, but a moment later — after a load has reopened the same file in that editor, which then closes instead.
+	// Unsaved editors stay, as VS Code keeps them.
+	const going = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => {
+		const path: string | undefined = tab.input instanceof vscode.TabInputText ? tab.input.uri.path : undefined;
+
+		return path?.startsWith(root + "/") === true && !tab.isDirty && !kept(path.slice(root.length + 1).split("/")[0]);
+	});
+
+	await vscode.window.tabGroups.close(going);
 
 	for (const [name] of entries) {
 		// Keep scaffolding always; keep overridable-default configs so a repo that ships its own can OVERWRITE them
 		// in place (openProject prunes the ones the repo omits afterwards, so those fall through to the base).
-		if (SCAFFOLDING.has(name) || OVERRIDABLE_DEFAULTS.has(name)) {
+		if (kept(name)) {
 			continue;
 		}
 
