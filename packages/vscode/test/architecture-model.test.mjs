@@ -2,7 +2,7 @@
 // doesn't declare. Run: node --test test/architecture-model.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { allowedOnLink, appLayout, appNodes, checkConformance, classifyUrl, declaredBetween, declaredOn, familiesOnLink, identifyWorker, nodes, subjectOfLabel, subjects } from "../architecture-model.ts";
+import { allowedOnLink, appLayout, appNodes, channels, checkConformance, classifyUrl, declaredBetween, declaredOn, familiesOnLink, identifyWorker, nodes, subjectOfLabel, subjects } from "../architecture-model.ts";
 
 const patterns = (a, b) => familiesOnLink(a, b).map((family) => family.pattern);
 
@@ -50,6 +50,14 @@ test("every family names who sends it and who it's for, as hubs in the tree", ()
 		for (const id of [...family.from, ...family.to]) {
 			assert.ok(hubs.has(id), `${family.pattern}: ${id} isn't a hub`);
 		}
+	}
+});
+
+test("every direct channel says why it isn't a hub link", () => {
+	const reasons = new Set(["platform", "shared memory", "storage", "synchronous", "isolation", "bulk data", "in-realm"]);
+
+	for (const channel of channels) {
+		assert.ok(reasons.has(channel.reason), `${channel.a} ⇄ ${channel.b}: ${channel.reason}`);
 	}
 });
 

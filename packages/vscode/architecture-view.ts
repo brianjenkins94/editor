@@ -1148,7 +1148,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 				: declared === undefined
 				? h("div", { "class": "arch-state state-unresponsive" }, "undeclared: neither a hub link nor a channel in the model")
 				: h("div", { "class": "arch-state " + (channel === undefined ? "state-declared" : "state-alive") }, (declared.type === "hub" ? "hub link" : "declared channel") + (channel === undefined ? ", not seen yet" : "")),
-			declared?.type === "channel" && section(declared.spec.protocol, keyValues([["Transport", declared.spec.transport]]), h("p", null, declared.spec.description)),
+			declared?.type === "channel" && section(declared.spec.protocol, keyValues([["Transport", declared.spec.transport], ["Not a hub link because", declared.spec.reason]]), h("p", null, declared.spec.description)),
 			declared?.type === "hub" && section(
 				"Subjects allowed across this link",
 				h("p", { "class": "arch-muted" }, "Each the way its events and calls go: → toward ", h("code", null, labelOf(store, b)), ", ← toward ", h("code", null, labelOf(store, a)), "."),

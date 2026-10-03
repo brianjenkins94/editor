@@ -8,7 +8,8 @@
  * - `hubLinks`: the hub TREE. `subjects`: each subject family's direction — who sends it (publishes the event, makes
  *   the call) and who it's for (subscribes, serves) — and a family's messages may only cross the tree links on the path
  *   from a sender to a receiver, that way round (a reply, back). Adding a publisher or a subscriber is a change here.
- * - `channels`: the non-hub channels (workers, extension hosts, network, storage).
+ * - `channels`: the non-hub channels (workers, extension hosts, network, storage), each with the reason it isn't a hub
+ *   link (`ChannelReason`) — a new direct channel has to say why it can't ride the hub.
  *
  * Webviews (`webview:<id>`, in the workbench iframe) are declared for what works here: a document set inline and VS Code's
  * webview messages — the insights Monitor, a Markdown preview. What doesn't: resources a webview loads by URL
@@ -47,12 +48,21 @@ export interface NodeSpec {
 	"hub"?: boolean;
 }
 
+/**
+ * Why a channel isn't a hub link — every direct channel says, so adding one means saying why it can't ride the hub:
+ * `platform` (a protocol the browser or VS Code owns), `shared memory` or `storage` (the data itself is the channel),
+ * `synchronous` (it can't wait on the hub), `isolation` (it keeps an untrusted page off the hub), `bulk data` (a stream
+ * too heavy for it), or `in-realm` (plain calls within one realm).
+ */
+export type ChannelReason = "platform" | "shared memory" | "storage" | "synchronous" | "isolation" | "bulk data" | "in-realm";
+
 export interface ChannelSpec {
 	/** Node id patterns (`*` = any run of characters). */
 	"a": string;
 	"b": string;
 	"protocol": string;
 	"transport": string;
+	"reason": ChannelReason;
 	"description": string;
 }
 
@@ -238,44 +248,44 @@ export const subjects: SubjectFamily[] = [
 ];
 
 export const channels: ChannelSpec[] = [
-	{ "a": "workbench", "b": "worker:*", "protocol": "WebWorker protocol / postMessage", "transport": "Worker.postMessage", "description": "monaco's editor workers (request/reply/events) and the workbench's own workers." },
-	{ "a": "pod", "b": "worker:server-host", "protocol": "LSP (JSON-RPC)", "transport": "Worker.postMessage", "description": "vscode-languageclient to the cspell server, plus a one-shot control port (ws-control) that hands it the shared workspace buffer — the server host has no hub." },
-	{ "a": "workbench", "b": "exthost:LocalProcess:*", "protocol": "RPCProtocol", "transport": "in-memory buffers", "description": "MainThread / ExtHost proxies, serialized even in the same realm." },
-	{ "a": "workbench", "b": "exthost-iframe", "protocol": "bootstrap handshake", "transport": "window.postMessage", "description": "NLS bootstrap, then the MessagePort handoff." },
-	{ "a": "workbench", "b": "exthost:LocalWebWorker:*", "protocol": "RPCProtocol", "transport": "MessagePort (transferred ArrayBuffers)", "description": "MainThread / ExtHost proxies." },
-	{ "a": "exthost:LocalWebWorker:*", "b": "nested:*", "protocol": "extension defined (LSP, tsserver)", "transport": "Worker.postMessage", "description": "Workers the web worker extension host's extensions spawn: TypeScript's servers, the event sheet's recognizer." },
+	{ "a": "workbench", "b": "worker:*", "protocol": "WebWorker protocol / postMessage", "transport": "Worker.postMessage", "reason": "platform", "description": "monaco's editor workers (request/reply/events) and the workbench's own workers." },
+	{ "a": "pod", "b": "worker:server-host", "protocol": "LSP (JSON-RPC)", "transport": "Worker.postMessage", "reason": "platform", "description": "vscode-languageclient to the cspell server, plus a one-shot control port (ws-control) that hands it the shared workspace buffer — the server host has no hub." },
+	{ "a": "workbench", "b": "exthost:LocalProcess:*", "protocol": "RPCProtocol", "transport": "in-memory buffers", "reason": "platform", "description": "MainThread / ExtHost proxies, serialized even in the same realm." },
+	{ "a": "workbench", "b": "exthost-iframe", "protocol": "bootstrap handshake", "transport": "window.postMessage", "reason": "platform", "description": "NLS bootstrap, then the MessagePort handoff." },
+	{ "a": "workbench", "b": "exthost:LocalWebWorker:*", "protocol": "RPCProtocol", "transport": "MessagePort (transferred ArrayBuffers)", "reason": "platform", "description": "MainThread / ExtHost proxies." },
+	{ "a": "exthost:LocalWebWorker:*", "b": "nested:*", "protocol": "extension defined (LSP, tsserver)", "transport": "Worker.postMessage", "reason": "platform", "description": "Workers the web worker extension host's extensions spawn: TypeScript's servers, the event sheet's recognizer." },
 	// The service worker takes EVERY request from the pages and workers it controls (stamping cross-origin isolation,
 	// answering its own routes, resolving node_modules from the CDN, gating a preview's data fetches) and makes the
 	// upstream one itself — so each context's HTTP goes to `sw`, and only `sw` reaches the network. (WebSockets don't
 	// pass through it: debug-mcp.)
-	{ "a": "workbench", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "description": "The workbench bundle and its chunks, extension files, the node_modules overlay, type acquisition, the extension gallery." },
-	{ "a": "worker:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "description": "Workers loading their assets (onig.wasm, models)." },
-	{ "a": "exthost:LocalWebWorker:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "description": "Extensions loading their resources, and TypeScript's automatic type acquisition (npm package metadata)." },
-	{ "a": "shell", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "description": "GitHub repos and publishing, diff highlighting, WebAwesome's icons." },
-	{ "a": "sw", "b": "net:*", "protocol": "HTTP", "transport": "fetch", "description": "Every upstream request: the app's own server, the node_modules CDN, and the APIs the pages and workers call." },
-	{ "a": "shell", "b": "net:*", "protocol": "HTTP", "transport": "fetch, before the service worker controls the page", "description": "A first visit on the dev server: the shell renders (its WebAwesome icons, …) before the newly registered service worker claims the page, so those requests go straight out. Once it's controlled, they go through the service worker." },
-	{ "a": "workbench", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "description": "User data, logs, storage, workspace-fs." },
+	{ "a": "workbench", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "reason": "platform", "description": "The workbench bundle and its chunks, extension files, the node_modules overlay, type acquisition, the extension gallery." },
+	{ "a": "worker:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "reason": "platform", "description": "Workers loading their assets (onig.wasm, models)." },
+	{ "a": "exthost:LocalWebWorker:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "reason": "platform", "description": "Extensions loading their resources, and TypeScript's automatic type acquisition (npm package metadata)." },
+	{ "a": "shell", "b": "sw", "protocol": "HTTP", "transport": "fetch, through the service worker", "reason": "platform", "description": "GitHub repos and publishing, diff highlighting, WebAwesome's icons." },
+	{ "a": "sw", "b": "net:*", "protocol": "HTTP", "transport": "fetch", "reason": "platform", "description": "Every upstream request: the app's own server, the node_modules CDN, and the APIs the pages and workers call." },
+	{ "a": "shell", "b": "net:*", "protocol": "HTTP", "transport": "fetch, before the service worker controls the page", "reason": "platform", "description": "A first visit on the dev server: the shell renders (its WebAwesome icons, …) before the newly registered service worker claims the page, so those requests go straight out. Once it's controlled, they go through the service worker." },
+	{ "a": "workbench", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore", "reason": "storage", "description": "User data, logs, storage, workspace-fs." },
 	// the preview pipeline
-	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "description": "Into the iframe: HMR updates (vite-hmr). Everything else of a window rides its hub link (the page tap's hub: its console and errors, capability requests and new windows — preview.decide, preview.open — and its workers', which join that hub through their page: worker-tap.ts)." },
-	{ "a": "webview-sw", "b": "webview:*", "protocol": "VS Code webview resources", "transport": "fetch, through VS Code's webview service worker", "description": "A webview's resources by URL (asWebviewUri) — answered with errors here (see webview-sw)." },
-	{ "a": "workbench", "b": "webview:*", "protocol": "VS Code webview protocol", "transport": "window.postMessage", "description": "A webview's iframe — the insights Monitor, a Markdown preview: its document set inline, its messages VS Code's webview postMessage (an extension's postMessage/onDidReceiveMessage ride it)." },
-	{ "a": "shell", "b": "devtools:*", "protocol": "CDP (Chrome DevTools Protocol)", "transport": "window.postMessage", "description": "A preview's docked DevTools frontend: raw CDP commands up, replies and events down — the shell relays them over the hub (preview.cdp / preview.cdp.event.<window>) to chobitsu in the preview window's page (preview-devtools.ts)." },
-	{ "a": "shell", "b": "tsval-preview", "protocol": "tsval render protocol", "transport": "window.postMessage + MessagePort", "description": "preview-ready → init (MessagePort); events and time travel up, the mutation stream down." },
-	{ "a": "preview:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, intercepted by the service worker", "description": "Everything under /__virtual__/<tab>/<port>/ (answered by the dev server over the hub), plus the app's own requests (CDN imports pass through; data fetches are capability-gated, failing closed). Same origin and unsandboxed, by necessity — see ARCHITECTURE.md." },
-	{ "a": "node", "b": "sw", "protocol": "HTTP", "transport": "fetch", "description": "The dev servers' own requests (their dependencies), like every controlled context's." },
-	{ "a": "node-scripts", "b": "sw", "protocol": "capability decision, HTTP", "transport": "synchronous XMLHttpRequest (POST /__capability__/decide), fetch", "description": "Every write/delete a node script makes asks the service worker, which asks the pod (capability.decide); and the worker's own requests, like every controlled context's." },
-	{ "a": "node", "b": "vite:*", "protocol": "in-realm calls", "transport": "function calls", "description": "almostnode's in-browser Vite dev server: requests from virtual.request, file changes, HMR updates back." },
-	{ "a": "node-scripts", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "description": "A node script's own http.createServer, reached from a preview at /__virtual__/<tab>/<port>/ like a dev server (the dev-server worker hands such a port's requests over)." },
-	{ "a": "workbench", "b": "channel:vscode-web-state-db-global", "protocol": "VS Code storage sync", "transport": "BroadcastChannel", "description": "VS Code's global web storage (IndexedDB-backed) telling the editor's other tabs what changed." },
-	{ "a": "workbench", "b": "channel:vscode-web-state-db-global-shared", "protocol": "VS Code storage sync", "transport": "BroadcastChannel", "description": "VS Code's shared global web storage, the same across tabs." },
-	{ "a": "workbench", "b": "channel:vscode.indexedDB.vscode-userdata.changes", "protocol": "VS Code user-data sync", "transport": "BroadcastChannel", "description": "The user-data filesystem (settings, keybindings, snippets) announcing its changes to the editor's other tabs." },
+	{ "a": "shell", "b": "preview:*", "protocol": "preview bridge", "transport": "window.postMessage", "reason": "isolation", "description": "Into the iframe: HMR updates (vite-hmr). Everything else of a window rides its hub link (the page tap's hub: its console and errors, capability requests and new windows — preview.decide, preview.open — and its workers', which join that hub through their page: worker-tap.ts)." },
+	{ "a": "webview-sw", "b": "webview:*", "protocol": "VS Code webview resources", "transport": "fetch, through VS Code's webview service worker", "reason": "platform", "description": "A webview's resources by URL (asWebviewUri) — answered with errors here (see webview-sw)." },
+	{ "a": "workbench", "b": "webview:*", "protocol": "VS Code webview protocol", "transport": "window.postMessage", "reason": "platform", "description": "A webview's iframe — the insights Monitor, a Markdown preview: its document set inline, its messages VS Code's webview postMessage (an extension's postMessage/onDidReceiveMessage ride it)." },
+	{ "a": "shell", "b": "devtools:*", "protocol": "CDP (Chrome DevTools Protocol)", "transport": "window.postMessage", "reason": "platform", "description": "A preview's docked DevTools frontend: raw CDP commands up, replies and events down — the shell relays them over the hub (preview.cdp / preview.cdp.event.<window>) to chobitsu in the preview window's page (preview-devtools.ts)." },
+	{ "a": "shell", "b": "tsval-preview", "protocol": "tsval render protocol", "transport": "window.postMessage + MessagePort", "reason": "bulk data", "description": "preview-ready → init (MessagePort); events and time travel up, the mutation stream down." },
+	{ "a": "preview:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, intercepted by the service worker", "reason": "platform", "description": "Everything under /__virtual__/<tab>/<port>/ (answered by the dev server over the hub), plus the app's own requests (CDN imports pass through; data fetches are capability-gated, failing closed). Same origin and unsandboxed, by necessity — see ARCHITECTURE.md." },
+	{ "a": "node", "b": "sw", "protocol": "HTTP", "transport": "fetch", "reason": "platform", "description": "The dev servers' own requests (their dependencies), like every controlled context's." },
+	{ "a": "node-scripts", "b": "sw", "protocol": "capability decision, HTTP", "transport": "synchronous XMLHttpRequest (POST /__capability__/decide), fetch", "reason": "synchronous", "description": "Every write/delete a node script makes asks the service worker, which asks the pod (capability.decide); and the worker's own requests, like every controlled context's." },
+	{ "a": "node", "b": "vite:*", "protocol": "in-realm calls", "transport": "function calls", "reason": "in-realm", "description": "almostnode's in-browser Vite dev server: requests from virtual.request, file changes, HMR updates back." },
+	{ "a": "node-scripts", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "reason": "in-realm", "description": "A node script's own http.createServer, reached from a preview at /__virtual__/<tab>/<port>/ like a dev server (the dev-server worker hands such a port's requests over)." },
+	{ "a": "workbench", "b": "channel:vscode-web-state-db-global", "protocol": "VS Code storage sync", "transport": "BroadcastChannel", "reason": "platform", "description": "VS Code's global web storage (IndexedDB-backed) telling the editor's other tabs what changed." },
+	{ "a": "workbench", "b": "channel:vscode-web-state-db-global-shared", "protocol": "VS Code storage sync", "transport": "BroadcastChannel", "reason": "platform", "description": "VS Code's shared global web storage, the same across tabs." },
+	{ "a": "workbench", "b": "channel:vscode.indexedDB.vscode-userdata.changes", "protocol": "VS Code user-data sync", "transport": "BroadcastChannel", "reason": "platform", "description": "The user-data filesystem (settings, keybindings, snippets) announcing its changes to the editor's other tabs." },
 	// the workspace filesystem (shared memory)
-	{ "a": "workbench", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (owner)", "description": "The vscode provider (editor, tsserver, ATA, terminal, extensions) and direct callers (isomorphic-git, the terminal's path walk). Back the other way: provider writes announced as file-change events (5ms batches) — writes from other realms, and direct writes, are NOT announced." },
-	{ "a": "node", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "almostnode: the preview dev servers' module loading and transforms." },
-	{ "a": "node-scripts", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "almostnode: node scripts' module loading and fs." },
-	{ "a": "worker:server-host", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "Mounted by the cspell server (documents arrive over LSP, so it's mostly idle)." },
-	{ "a": "provoke", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "A cold transform round reads the workspace." },
-	{ "a": "zenfs", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (workspace-fs)", "description": "Provider writes, flushed every 500ms; restored at boot." }
+	{ "a": "workbench", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (owner)", "reason": "shared memory", "description": "The vscode provider (editor, tsserver, ATA, terminal, extensions) and direct callers (isomorphic-git, the terminal's path walk). Back the other way: provider writes announced as file-change events (5ms batches) — writes from other realms, and direct writes, are NOT announced." },
+	{ "a": "node", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "almostnode: the preview dev servers' module loading and transforms." },
+	{ "a": "node-scripts", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "almostnode: node scripts' module loading and fs." },
+	{ "a": "worker:server-host", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "Mounted by the cspell server (documents arrive over LSP, so it's mostly idle)." },
+	{ "a": "provoke", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "A cold transform round reads the workspace." },
+	{ "a": "zenfs", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (workspace-fs)", "reason": "storage", "description": "Provider writes, flushed every 500ms; restored at boot." }
 ];
 
 // ── lookups ───────────────────────────────────────────────────────────────────────────────────────────────────
