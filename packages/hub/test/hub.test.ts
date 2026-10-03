@@ -1,8 +1,8 @@
-import type { Transport, WebSocketLike } from "../src/index.ts";
+import type { RpcError, Transport, WebSocketLike } from "../src/index.ts";
 import * as assert from "node:assert/strict";
 
 import { test } from "node:test";
-import { channelTransport, createHub, createRpcClient, dataChannelTransport, frameOf, mapFrame, matches, pipe, serve, websocketTransport } from "../src/index.ts";
+import { channelTransport, createHub, createRpcClient, DATA_CHANNEL_PIECE, dataChannelTransport, frameOf, mapFrame, matches, pipe, serve, websocketTransport } from "../src/index.ts";
 
 /** Let queued deliveries (across several hops) drain. */
 /** Let what's in flight land. A pipe delivers each hop on a timer of its own, so this waits timer turns, not wall time:
@@ -210,7 +210,25 @@ test("request times out when nothing serves the tool", async () => {
 	const relay = createHub({ "id": "solo-relay" });
 	const rpc = createRpcClient(relay);
 
-	await assert.rejects(rpc.request("missing", undefined, { "timeoutMs": 30 }), /timed out/);
+	await assert.rejects(rpc.request("missing", undefined, { "timeoutMs": 30 }), { "code": "timeout", "message": /timed out/u });
+});
+
+test("a failed call says why in its code — no responder, a served error, a disposed client", async () => {
+	const [up, down] = pipe();
+	const server = createHub({ "id": "server" });
+	const caller = createHub({ "id": "caller" });
+	const rpc = createRpcClient(caller);
+
+	await assert.rejects(rpc.request("tool", {}, { "waitForResponderMs": 20 }), (error: RpcError) => error.code === "no-responder" && error.name === "RpcError");
+	serve(server, "tool", () => { throw new Error("nope"); });
+	await Promise.all([server.link(up).ready, caller.link(down).ready]);
+	await assert.rejects(rpc.request("tool", {}, { "timeoutMs": 1000 }), { "code": "served", "message": "nope" });
+
+	const waiting = createRpcClient(caller);
+	const call = waiting.request("never", {}, { "timeoutMs": 60_000 });
+
+	waiting.dispose();
+	await assert.rejects(call, { "code": "disposed" });
 });
 
 test("aborting a request rejects it with the signal's reason and aborts the responder's handler, which never replies", async () => {
@@ -462,6 +480,51 @@ test("non-transit links: a hub above several trees reaches each, but never joins
 	assert.equal(await createRpcClient(center).request("tool", {}, { "timeoutMs": 1000 }), "from tab B");
 });
 
+test("a multi-homed leaf: a ring through a hub whose links are all non-transit carries nothing round — the leaf hears each tree once", async () => {
+	// A game's host tab: page → referee → client → instance → page. The client is in two trees (the referee's, its tab's).
+	const page = createHub({ "id": "page" });
+	const referee = createHub({ "id": "referee" });
+	const client = createHub({ "id": "client" });
+	const instance = createHub({ "id": "instance" });
+	const wire = (x: ReturnType<typeof createHub>, y: ReturnType<typeof createHub>, yOptions = {}): void => {
+		const [a, b] = pipe();
+
+		x.link(a);
+		y.link(b, yOptions);
+	};
+
+	wire(page, referee);
+	wire(referee, client, { "transit": false });
+	wire(instance, client, { "transit": false });
+	wire(page, instance);
+
+	const heard = new Map<string, string[]>();
+	const sorted = (id: string): string[] => [...heard.get(id)!].sort((x, y) => x.localeCompare(y));
+
+	for (const hub of [page, referee, client, instance]) {
+		heard.set(hub.id, []);
+		hub.subscribe("game.>", (data) => { heard.get(hub.id)!.push(String(data)); });
+	}
+
+	await flush();
+
+	for (const hub of [page, referee, instance]) {
+		hub.publish("game.tick", hub.id);
+	}
+
+	await flush();
+	await flush();
+	for (const id of ["page", "referee", "instance"]) {
+		assert.deepEqual(sorted(id), ["instance", "page", "referee"], `${id}: each once — nothing came back round`);
+	}
+
+	assert.deepEqual(sorted("client"), ["instance", "instance", "page", "page", "referee", "referee"], "once along each tree it's in");
+	client.publish("game.tick", "client");
+	await flush();
+	await flush();
+	assert.deepEqual(heard.get("page")!.filter((from) => from === "client"), ["client", "client"], "and what it says reaches the ring along each of its links");
+});
+
 /** An edge hub with one untrusted peer linked under `options` (and the peer's hub). */
 async function edge(options: Parameters<ReturnType<typeof createHub>["link"]>[1]) {
 	const hub = createHub({ "id": "edge" });
@@ -579,6 +642,30 @@ test("permissions also stop a peer snooping another caller's RPC replies", async
 	assert.equal(await createRpcClient(victim).request("secret", undefined, { "timeoutMs": 1000 }), "for the victim only");
 	await flush();
 	assert.deepEqual(snooped, []);
+});
+
+test("a link's handle permits its own link, and says what its uplink named this hub", async () => {
+	const hub = createHub({ "id": "edge" });
+	const peer = createHub({ "id": "claims-to-be-someone" });
+	const [a, b] = pipe();
+	const down = hub.link(a, { "peer": "seat-2", "permissions": { "subscribe": [] } });
+	const up = peer.link(b, { "uplink": true });
+	const received: unknown[] = [];
+
+	assert.equal(up.knownAs, undefined, "not until the uplink's hello");
+	await up.ready;
+	assert.equal(up.knownAs, "seat-2");
+	assert.equal(down.knownAs, undefined, "a link that isn't an uplink names nobody");
+	peer.subscribe("game.state.2", (data) => { received.push(data); });
+	await flush();
+	down.permit({ "subscribe": ["game.state.2"] });
+	assert.deepEqual(hub.inspect().links[0].permissions, { "subscribe": ["game.state.2"] });
+	hub.publish("game.state.2", "seated");
+	await flush();
+	assert.deepEqual(received, ["seated"]);
+	assert.throws(() => { down.permit({ "subscribe": ["bad..subject"] }); }, "validated, as Hub.permit is");
+	assert.deepEqual(peer.inspect().links[0].uplink, true, "inspect() marks an uplink");
+	assert.equal(hub.inspect().links[0].uplink, undefined);
 });
 
 test("permit() changes a link's permissions later (e.g. once a player is seated)", async () => {
@@ -1242,4 +1329,40 @@ test("dataChannelTransport's backlog is the channel's buffered amount, plus what
 	a.dispatchEvent(new Event("open"));
 	a.bufferedAmount = 500;
 	assert.equal(transport.backlog?.(), 500);
+});
+
+test("dataChannelTransport: a frame past the channel's limit goes in pieces and arrives whole — surrogate pairs intact", async () => {
+	const { a, b, open, channels } = dataChannelPair();
+	const limit = DATA_CHANNEL_PIECE + 1;
+
+	for (const end of [a, b]) {
+		const send = end.send.bind(end);
+
+		end.send = (data: string): void => {
+			if (data.length > limit) {
+				throw new TypeError("message too large");
+			}
+
+			send(data);
+		};
+	}
+
+	const referee = createHub({ "id": "referee" });
+	const client = createHub({ "id": "client" });
+	const seen: unknown[] = [];
+
+	referee.subscribe("game.map", (data) => { seen.push(data); });
+	open();
+	await Promise.all([referee.link(dataChannelTransport(channels[0])).ready, client.link(dataChannelTransport(channels[1])).ready]);
+
+	// Long enough for several pieces; an emoji (a surrogate pair) wherever a cut might land.
+	const tiles = "🌲".repeat(DATA_CHANNEL_PIECE * 2) + "x".repeat(DATA_CHANNEL_PIECE);
+
+	client.publish("game.map", { "tiles": tiles });
+	client.publish("game.map", { "tiles": "small" });
+	await flush();
+	assert.equal(seen.length, 2, "both — the long one, then the short one after it");
+	assert.equal((seen[0] as { "tiles": string }).tiles, tiles, "whole, every pair intact");
+	assert.deepEqual(seen[1], { "tiles": "small" });
+	assert.ok(b.sent.length > 4, "the long one went in pieces");
 });

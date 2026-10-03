@@ -12,7 +12,8 @@
  * Addressing is NATS-style dotted subjects: `render.mutation`, `log.editor`, `peer.<id>` for point-to-point.
  * Patterns use `*` (one token) and `>` (the rest): `log.>`, `peer.*`. No delivery guarantees, no persistence —
  * this is a router, not a broker; wire hubs as a TREE (no cycles): a message never goes back the way it came, and
- * that is all the loop prevention there is — a cycle wired by mistake would carry a message round it forever.
+ * that is all the loop prevention there is — a cycle wired by mistake would carry a message round it forever. (One
+ * cycle is safe: one through a hub whose links are all non-transit — a multi-homed leaf, README.md.)
  *
  * What it promises, what it assumes and what it doesn't do, each promise with the test that checks it: README.md.
  *
@@ -198,8 +199,10 @@ interface Link {
  * - `ready`: resolves true once the peer's hello has arrived, and with it the peer's interest (a hub advertises its
  *   interest before every hello it sends), or false if the link is gone first. A message published before then can go
  *   nowhere: a hub forwards only what it knows the far side wants. So `await ready` before a one-off publish across a
- *   new link (or wait for `whenInterested`). */
-export type LinkHandle = (() => void) & { readonly "id": string; readonly "ready": Promise<boolean> };
+ *   new link (or wait for `whenInterested`);
+ * - `knownAs`: on an uplink, the id the hub at the other end assigned this one (Hub.knownAs) — once its hello says so;
+ * - `permit`: replace this link's permissions (Hub.permit, without naming the peer — so no id to get wrong). */
+export type LinkHandle = (() => void) & { readonly "id": string; readonly "ready": Promise<boolean>; readonly "knownAs": string | undefined; "permit": (permissions: LinkPermissions | undefined) => void };
 
 /** One link as `inspect()` / taps report it. */
 export interface LinkInfo {
@@ -212,7 +215,8 @@ export interface LinkInfo {
 export interface HubSnapshot {
 	"id": string;
 	"subscriptions": string[];
-	"links": (LinkInfo & { "remoteInterest": string[]; "advertised": string[]; "permissions"?: LinkPermissions })[];
+	/** `uplink`: the link is this hub's uplink (LinkOptions.uplink) — the hub across it is above this one. */
+	"links": (LinkInfo & { "remoteInterest": string[]; "advertised": string[]; "permissions"?: LinkPermissions; "uplink"?: true })[];
 }
 
 /**
@@ -493,7 +497,8 @@ export class Hub {
 				"peerId": link.peerId,
 				"remoteInterest": [...link.remoteInterest],
 				"advertised": [...link.advertised],
-				...link.permissions === undefined ? {} : { "permissions": link.permissions }
+				...link.permissions === undefined ? {} : { "permissions": link.permissions },
+				...link.uplink ? { "uplink": true as const } : {}
 			}))
 		};
 	}
@@ -503,21 +508,22 @@ export class Hub {
 	public permit(peer: string, permissions: LinkPermissions | undefined): boolean {
 		assertPermissions(permissions);
 
-		let found = false;
+		const links = [...this.links].filter((link) => link.peerId === peer);
 
-		for (const link of this.links) {
-			if (link.peerId === peer) {
-				link.permissions = permissions;
-				found = true;
-			}
+		this.setPermissions(links, permissions);
+
+		return links.length > 0;
+	}
+
+	private setPermissions(links: Link[], permissions: LinkPermissions | undefined): void {
+		for (const link of links) {
+			link.permissions = permissions;
 		}
 
-		if (found) {
+		if (links.length > 0) {
 			this.emit({ "type": "topology" });
 			this.readvertise(); // what may cross changed → what it's worth telling each link may have too
 		}
-
-		return found;
 	}
 
 	/** Observe every frame this hub handles (see `TapEvent`). For diagnostics — a tap must not publish on this hub
@@ -606,7 +612,14 @@ export class Hub {
 		// ask it to (re-)send its interest, in case ours/theirs raced a lossy transport — and say who we are
 		this.wire(link, { "hub": "hello", "id": this.id, ...link.assigned ? { "you": link.peerId } : {} });
 
-		return Object.assign(() => { this.unlink(link); }, { "id": link.id, "ready": ready });
+		return Object.defineProperties(Object.assign(() => { this.unlink(link); }, {
+			"id": link.id,
+			"ready": ready,
+			"permit": (permissions: LinkPermissions | undefined) => {
+				assertPermissions(permissions);
+				this.setPermissions(this.links.has(link) ? [link] : [], permissions);
+			}
+		}), { "knownAs": { "get": () => link.knownAs } }) as LinkHandle;
 	}
 
 	private unlink(link: Link): void {
@@ -1073,9 +1086,43 @@ export function websocketTransport(ws: WebSocketLike): Transport {
  * JSON (plain data only, as over a WebSocket; a frame JSON can't encode throws — the hub drops it, a `send` fault).
  * Frames sent while it's still connecting are held until it opens, so it can be linked straight away; its `close`
  * unlinks; its backlog is its `bufferedAmount` (LinkOptions.maxBacklog).
+ *
+ * A browser won't send a message past its channel's limit (64 KiB in some), so a long frame goes in pieces of at most
+ * `DATA_CHANNEL_PIECE` characters, each but the last marked to say more follows; the channel being ordered, the far end
+ * joins them back up. (Both ends must be this transport. LinkOptions.maxPayload is still the frame's own limit.)
  */
+/** The longest piece a data channel is sent (characters: at most three UTF-8 bytes each, so under 64 KiB). */
+export const DATA_CHANNEL_PIECE = 16 * 1024;
+/** Marks a piece more follows (JSON text never starts with a control character). */
+const MORE = "\u0001";
+
+/** `text` in pieces of at most DATA_CHANNEL_PIECE characters, each but the last marked MORE — never splitting a
+ *  surrogate pair, which would arrive as two replacement characters. */
+function piecesOf(text: string): string[] {
+	if (text.length <= DATA_CHANNEL_PIECE) {
+		return [text];
+	}
+
+	const pieces: string[] = [];
+
+	for (let at = 0; at < text.length;) {
+		let end = Math.min(at + DATA_CHANNEL_PIECE, text.length);
+		const last = text.charCodeAt(end - 1);
+
+		if (end < text.length && last >= 0xD800 && last <= 0xDBFF) {
+			end -= 1;
+		}
+
+		pieces.push(end < text.length ? MORE + text.slice(at, end) : text.slice(at, end));
+		at = end;
+	}
+
+	return pieces;
+}
+
 export function dataChannelTransport(channel: RTCDataChannel): Transport {
 	const held: string[] = [];
+	let partial = "";
 
 	channel.addEventListener("open", () => {
 		for (const text of held.splice(0)) {
@@ -1085,21 +1132,35 @@ export function dataChannelTransport(channel: RTCDataChannel): Transport {
 
 	return {
 		"send": (message) => {
-			const text = JSON.stringify(message);
+			const pieces = piecesOf(JSON.stringify(message));
 
 			if (channel.readyState === "connecting") {
-				held.push(text);
+				held.push(...pieces);
 			} else if (channel.readyState === "open") {
-				channel.send(text);
+				for (const piece of pieces) {
+					channel.send(piece);
+				}
 			} // closing or closed: gone (its close unlinks)
 		},
 		"listen": (onMessage) => {
 			const handler = (event: MessageEvent): void => {
-				if (typeof event.data === "string") {
-					try {
-						onMessage(JSON.parse(event.data));
-					} catch { /* not a JSON frame — not ours */ }
+				if (typeof event.data !== "string") {
+					return;
 				}
+
+				if (event.data.startsWith(MORE)) {
+					partial += event.data.slice(MORE.length);
+
+					return;
+				}
+
+				const text = partial + event.data;
+
+				partial = "";
+
+				try {
+					onMessage(JSON.parse(text));
+				} catch { /* not a JSON frame — not ours */ }
 			};
 
 			channel.addEventListener("message", handler);
@@ -1202,6 +1263,23 @@ function isRpcCall(value: unknown): value is RpcCall {
 	return typeof value === "object" && value !== null && typeof call!.id === "string" && typeof call!.replyTo === "string";
 }
 
+/** Why a call failed, beyond its message: nobody answered (`no-responder`: none was there within waitForResponderMs;
+ *  `timeout`: no reply within timeoutMs), the responder threw (`served`), or the client went (`disposed`). An abort
+ *  rejects with the signal's own reason instead. */
+export type RpcErrorCode = "no-responder" | "timeout" | "served" | "disposed";
+
+/** What a call rejects with (but for an abort): its message, and `code` to tell the cases apart without parsing it —
+ *  `catch (error) { if ((error as RpcError).code === "no-responder") … }` works across realms, where instanceof doesn't. */
+export class RpcError extends Error {
+	public readonly code: RpcErrorCode;
+
+	public constructor(code: RpcErrorCode, message: string) {
+		super(message);
+		this.name = "RpcError";
+		this.code = code;
+	}
+}
+
 export interface RpcRequestOptions {
 	/** Reject after this long (default 15s). `Infinity` = never — for a caller that owns cancellation via `signal`. */
 	"timeoutMs"?: number;
@@ -1214,8 +1292,9 @@ export interface RpcRequestOptions {
 }
 
 export interface RpcClient {
-	/** Call `name` on whatever hub serves it and await the reply. Rejects on timeout, abort, or a served error. If
-	 *  nothing serves `name`, the request goes nowhere and the call times out (see `waitForResponderMs`). */
+	/** Call `name` on whatever hub serves it and await the reply. Rejects (an RpcError, its `code` saying why) on timeout,
+	 *  a served error, or no responder; on abort, with the signal's reason. If nothing serves `name`, the request goes
+	 *  nowhere and the call times out (see `waitForResponderMs`). */
 	"request": (name: string, args?: unknown, options?: RpcRequestOptions) => Promise<unknown>;
 	/** Stop listening for replies, and reject the calls still waiting on one. */
 	"dispose": () => void;
@@ -1266,7 +1345,7 @@ export function createRpcClient(hub: Hub): RpcClient {
 		entry.cleanup?.();
 
 		if (data.error !== undefined) {
-			entry.reject(new Error(data.error));
+			entry.reject(new RpcError("served", data.error));
 		} else {
 			entry.resolve(data.result);
 		}
@@ -1293,7 +1372,7 @@ export function createRpcClient(hub: Hub): RpcClient {
 			signal?.throwIfAborted();
 
 			if (options.waitForResponderMs !== undefined && !(await raceAbort(hub.whenInterested(RPC_CALL + "." + name, options.waitForResponderMs), signal))) {
-				throw new Error(`rpc "${name}": no responder within ${options.waitForResponderMs}ms`);
+				throw new RpcError("no-responder", `rpc "${name}": no responder within ${options.waitForResponderMs}ms`);
 			}
 
 			return call(name, args, options.timeoutMs, signal);
@@ -1310,7 +1389,7 @@ export function createRpcClient(hub: Hub): RpcClient {
 			for (const [id, entry] of pending) {
 				pending.delete(id);
 				entry.cleanup?.();
-				entry.reject(new Error("rpc client disposed"));
+				entry.reject(new RpcError("disposed", "rpc client disposed"));
 			}
 		}
 	};
@@ -1330,7 +1409,7 @@ export function createRpcClient(hub: Hub): RpcClient {
 				entry.timer = setTimeout(() => {
 					pending.delete(id);
 					entry.cleanup?.();
-					reject(new Error(`rpc "${name}" timed out after ${timeoutMs}ms (no responder?)`));
+					reject(new RpcError("timeout", `rpc "${name}" timed out after ${timeoutMs}ms (no responder?)`));
 				}, timeoutMs);
 			}
 

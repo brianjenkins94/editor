@@ -36,7 +36,11 @@ reference router a few lines long); the rest are named tests in `test/hub.test.t
 ## What it assumes
 
 - **A tree.** Hubs are wired without cycles. A message never goes back the way it came; that's all the loop prevention
-  there is, so a cycle would carry a message round it forever.
+  there is, so a cycle would carry a message round it forever. The one safe cycle is through a **multi-homed leaf**: a
+  hub in two trees whose links are *all* non-transit (`transit: false` on every one) passes nothing from one to the
+  other, so a ring through it isn't a loop. It does belong to both trees, though: a message both trees carry reaches it
+  once along each — confine each link (`permissions`) to what that tree is for, or expect it twice. *("a multi-homed
+  leaf")*
 - **Reliable, ordered transports** once both ends listen (a MessagePort, a WebSocket, an ordered RTCDataChannel). The one
   loss tolerated is at the start, before the other end listens: the `hello` handshake recovers it.
 - **Interest before messages.** A message published before the far side's interest has arrived goes nowhere — `await
