@@ -24,6 +24,7 @@ import eventSheetExtensionPath from "event-sheet:extension";
 import eventSheetViewPath from "event-sheet:view";
 import insightsExtensionPath from "insights:extension";
 import runningExtensionPath from "running:extension";
+import typeQueriesExtensionPath from "type-queries:extension";
 import settingsDefaults from "editor:settings-defaults";
 import eslintExtensionPath from "eslint:extension";
 import workerPodExtensionPath from "worker-pod:extension";
@@ -44,6 +45,7 @@ import eslintManifest from "./extensions/eslint/package.json";
 import eventSheetManifest from "./extensions/event-sheet/package.json";
 import insightsManifest from "./extensions/insights/package.json";
 import runningManifest from "./extensions/running/package.json";
+import typeQueriesManifest from "./extensions/type-queries/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
@@ -653,7 +655,12 @@ function maybeBoot(): void {
 
 			runningExt.registerFileUrl("./extension.js", new URL(runningExtensionPath, location.href).href);
 
-			bootSpan.info("extensions registered", { "extensions": ["worker-pod", "eslint", "capabilities", "insights", "running", "event-sheet"] });
+			// Type queries: `// ^?` beneath an expression shows its type, as in the TypeScript Playground — public API only.
+			const typeQueriesExt = registerExtension(typeQueriesManifest, ExtensionHostKind.LocalWebWorker);
+
+			typeQueriesExt.registerFileUrl("./extension.js", new URL(typeQueriesExtensionPath, location.href).href);
+
+			bootSpan.info("extensions registered", { "extensions": ["worker-pod", "eslint", "capabilities", "insights", "running", "event-sheet", "type-queries"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");

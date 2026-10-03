@@ -69,6 +69,13 @@ declare module "running:extension" {
 	export default path;
 }
 
+/** The type-queries extension (`// ^?` → the type, from VS Code's public API), bundled like the others: its path. */
+declare module "type-queries:extension" {
+	const path: string;
+
+	export default path;
+}
+
 /** The worker-pod cspell language server bundled to an ESM string (imported by server-host, run by almostnode). */
 declare module "worker-pod:page-tap" {
 	const code: string;

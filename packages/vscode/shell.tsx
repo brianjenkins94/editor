@@ -25,6 +25,7 @@ import { renderGitPanel } from "./git-panel";
 import { reportArchitecture } from "./architecture";
 import { getPat, getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
 import type { RepoBinding } from "./github-auth";
+import { parsePlaygroundLink } from "./playground-link";
 import { reportShellMetrics } from "./editor-metrics";
 import { createShellDock } from "./shell-dock";
 import { installShellPreview } from "./shell-preview";
@@ -365,6 +366,14 @@ function Shell() {
 		const dock = createShellDock(dockHost, shellHub);
 		const appFrame = dock.editorFrame;
 
+		// A TypeScript Playground link (playground-link.ts) is a one-shot import: it's opened once the app answers below,
+		// and dropped from the address bar now, so a reload keeps the edits made since instead of importing it again.
+		const playground = parsePlaygroundLink(location.hash, location.search);
+
+		if (playground !== undefined) {
+			history.replaceState(history.state, "", location.pathname + location.search);
+		}
+
 		// Load the SAME page into the iframe; that instance sees `window.parent !== window` → main.tsx boots the app.
 		performance.mark("shell/app-iframe");
 		appFrame.src = location.href;
@@ -410,6 +419,14 @@ function Shell() {
 
 					if (Array.isArray(list)) {
 						setSamples(list);
+
+						// The app is listening now. A playground project replaces the workspace like a repo load, and isn't
+						// any repo's, so a commit has nowhere to push until one is opened.
+						if (playground !== undefined) {
+							shellHub.publish("project.openFiles", playground);
+							setRepoBinding(undefined);
+							setBoundRepo(undefined);
+						}
 
 						return;
 					}

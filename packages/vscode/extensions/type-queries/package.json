@@ -1,0 +1,17 @@
+{
+  "name": "type-queries",
+  "displayName": "Type Queries",
+  "description": "`// ^?` beneath an expression shows its type at the end of the comment, as in the TypeScript Playground and twoslash: what hovering the character the caret points at would say. Public API only (an inlay-hints provider over the hover providers).",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact"
+  ]
+}
