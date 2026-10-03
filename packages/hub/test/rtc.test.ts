@@ -3,7 +3,7 @@
  *  it's made — and that two hubs then link over the channels. */
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { answerLink, createHub, dataChannelTransport, localSignaling, offerLink } from "../src/index.ts";
+import { answerLink, createHub, dataChannelTransport, joinLobby, localSignaling, offerLink } from "../src/index.ts";
 
 class FakeChannel extends EventTarget {
 	public readyState: RTCDataChannelState = "connecting";
@@ -97,7 +97,8 @@ class FakeConnection extends EventTarget {
 	private answerer: FakeConnection | undefined;
 }
 
-test("rtc: an offer and its answer over a signaling path hand each end its channel, and two hubs link over them", async (t) => {
+/** RTCPeerConnection, stood in for while a test runs: the connections made. */
+function standIn(t: { "after": (fn: () => void) => void }): FakeConnection[] {
 	const globals = globalThis as { "RTCPeerConnection"?: unknown };
 	const connections: FakeConnection[] = [];
 
@@ -108,6 +109,26 @@ test("rtc: an offer and its answer over a signaling path hand each end its chann
 		}
 	};
 	t.after(() => { delete globals.RTCPeerConnection; });
+
+	return connections;
+}
+
+/** Two hubs linked over a pair of channels pass a message. */
+async function carries(channels: RTCDataChannel[]): Promise<boolean> {
+	const one = createHub({ "id": "one" });
+	const two = createHub({ "id": "two" });
+	const seen: unknown[] = [];
+
+	one.subscribe("game.state", (data) => { seen.push(data); });
+	await Promise.all([one.link(dataChannelTransport(channels[0])).ready, two.link(dataChannelTransport(channels[1])).ready]);
+	two.publish("game.state", 1);
+	await new Promise((resolve) => { setTimeout(resolve, 20); });
+
+	return seen.length === 1;
+}
+
+test("rtc: an offer and its answer over a signaling path hand each end its channel, and two hubs link over them", async (t) => {
+	const connections = standIn(t);
 
 	const [offering, answering] = localSignaling();
 	let closed = 0;
@@ -133,4 +154,33 @@ test("rtc: an offer and its answer over a signaling path hand each end its chann
 	client.publish("game.state", { "tick": 1 });
 	await new Promise((resolve) => { setTimeout(resolve, 20); });
 	assert.deepEqual(seen, [{ "tick": 1 }]);
+});
+
+test("joinLobby: the first tab hosts, the next are players by the lowest free id, and each player's link reaches the host", async (t) => {
+	standIn(t);
+
+	// Tabs of one browser, as one process sees them: one origin's locks, one BroadcastChannel namespace.
+	const host = await joinLobby("game", "lobby-test");
+	const first = await joinLobby("game", "lobby-test");
+	const second = await joinLobby("game", "lobby-test");
+
+	assert.equal(host.role, "host");
+	assert.equal(host.peer, "player-0");
+	assert.deepEqual([first.role, first.peer, second.role, second.peer], ["player", "player-1", "player", "player-2"]);
+
+	const hostEnds = new Map<string, RTCDataChannel>();
+
+	if (host.role !== "host" || second.role !== "player") {
+		return;
+	}
+
+	host.onPlayer((peer, makeLink) => { makeLink((channel) => { hostEnds.set(peer, channel); }); });
+
+	let playerEnd: RTCDataChannel | undefined;
+
+	await second.link((channel) => { playerEnd = channel; });
+	await new Promise((resolve) => { setTimeout(resolve, 20); });
+	assert.equal(hostEnds.get("player-2")?.label, "game.lobby-test.link.player-2", "the host's end, labelled for its player");
+	assert.equal(playerEnd?.label, "game.lobby-test.link.player-2");
+	assert.ok(await carries([hostEnds.get("player-2")!, playerEnd]), "two hubs link over the pair");
 });

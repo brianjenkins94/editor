@@ -53,6 +53,8 @@ reference router a few lines long); the rest are named tests in `test/hub.test.t
 - **`offerLink` / `answerLink`** (`src/rtc.ts`) — a WebRTC data channel between two pages, handed to `take` the moment
   it exists (the only time it can be transferred to a worker), for `dataChannelTransport`; signaling is yours
   (`localSignaling` within a page).
+- **`joinLobby`** (`src/rtc.ts`) — a match among one browser's tabs: Web Locks elect the host and number the players,
+  a BroadcastChannel carries introductions and signaling, and the host gets a `MakeLink` per player.
 
 ## What it doesn't do
 
