@@ -3,7 +3,7 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 import { createHub } from "@brianjenkins94/hub";
 import type { MetricsSample } from "../src/metrics.ts";
-import { METRICS_SUBJECT, MetricsHistory, reportMetrics, spanMetrics } from "../src/metrics.ts";
+import { durationGauge, meteredDataChannel, METRICS_SUBJECT, MetricsHistory, reportMetrics, spanMetrics } from "../src/metrics.ts";
 import { elapse, until } from "./until.ts";
 
 test("a reporter publishes each gauge's reading on $sys.metrics under its source, a group's as name.key", async (t) => {
@@ -101,4 +101,35 @@ test("span metrics: rate, errors, p50/p95 and open per source/name, from the rec
 	assert.equal(values["sw/cdn.open"], 1, "the one still running");
 	assert.equal(values["workbench/ata.open"], 1);
 	assert.equal(values["workbench/ata.rate"], undefined, "none of it has ended");
+});
+
+test("durationGauge reads the mean and max of what it recorded since the last reading — nothing if nothing ran", () => {
+	const tick = durationGauge();
+
+	assert.equal(tick.gauge(), undefined);
+	tick.record(2);
+	tick.record(6);
+	assert.deepEqual(tick.gauge(), { "mean": 4, "max": 6 });
+	assert.equal(tick.gauge(), undefined, "each reading starts afresh");
+});
+
+test("meteredDataChannel weighs what its transport sent and what the channel received, without touching the channel's send", () => {
+	class Channel extends EventTarget {
+		public readyState: RTCDataChannelState = "open";
+		public bufferedAmount = 0;
+		public send(data: string): void { this.bufferedAmount += data.length; }
+	}
+
+	const channel = new Channel();
+	const send = channel.send;
+	const { transport, gauge } = meteredDataChannel(channel as unknown as RTCDataChannel);
+
+	transport.send({ "subject": "game.state", "data": "x".repeat(1000) });
+	channel.dispatchEvent(Object.assign(new Event("message"), { "data": "y".repeat(2048) }));
+
+	const rates = gauge() as { "in": number; "out": number };
+
+	assert.equal(channel.send, send);
+	assert.ok(rates.out > 0 && rates.in > 0, "both ways");
+	assert.ok(rates.in > rates.out, "in proportion: 2 KB in, about 1 KB out");
 });

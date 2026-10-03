@@ -6,11 +6,13 @@
  * `getPerformance`. A gauge reads one number, or a group (`{ total, workbench, … }`, published as `name.key`), or
  * nothing this time (undefined: not measured yet, or not measurable here).
  *
- * Two gauges any browser realm can use come with it: `longFrameGauge` (the share of each interval a window spent in long
- * animation frames) and `memoryGauge` (memory by realm, from the slow `measureUserAgentSpecificMemory`, refreshed in the
- * background).
+ * Gauges that come with it: `longFrameGauge` (the share of each interval a window spent in long animation frames),
+ * `frameRateGauge` (the frames it drew), `memoryGauge` (memory by realm, from the slow
+ * `measureUserAgentSpecificMemory`, refreshed in the background) and `heapGauge` (this realm's heap, where Chromium says),
+ * `durationGauge` (how long something took, each time it ran) and `meteredDataChannel` (what a hub's data channel carried).
  */
-import type { Hub } from "@brianjenkins94/hub";
+import type { Hub, Transport } from "@brianjenkins94/hub";
+import { dataChannelTransport } from "@brianjenkins94/hub";
 
 export const METRICS_SUBJECT = "$sys.metrics";
 
@@ -140,6 +142,106 @@ export function memoryGauge({ everyMs = 20000, name = (url: string) => url }: { 
 	refresh();
 
 	return () => latest;
+}
+
+/** Frames this window drew per second since the last reading (requestAnimationFrame callbacks). */
+export function frameRateGauge(): Gauge {
+	let frames = 0;
+	let since = performance.now();
+	const count = (): void => {
+		frames += 1;
+		requestAnimationFrame(count);
+	};
+
+	requestAnimationFrame(count);
+
+	return () => {
+		const now = performance.now();
+		const fps = (frames * 1000) / (now - since);
+
+		frames = 0;
+		since = now;
+
+		return fps;
+	};
+}
+
+/** This window's JavaScript heap (MB): Chromium's `performance.memory`, at no cost — none elsewhere, nor in a worker
+ *  (memoryGauge measures every realm, where the page is cross-origin isolated). */
+export function heapGauge(): Gauge {
+	return () => {
+		const memory = (performance as Performance & { "memory"?: { "usedJSHeapSize": number } }).memory;
+
+		return memory === undefined ? undefined : memory.usedJSHeapSize / 1048576;
+	};
+}
+
+/** How long something took (ms), `record`ed each time it runs — read as the `mean` and `max` since the last reading, or
+ *  nothing when it didn't run. */
+export function durationGauge(): { "record": (ms: number) => void; "gauge": Gauge } {
+	let total = 0;
+	let count = 0;
+	let max = 0;
+
+	return {
+		"record": (ms) => {
+			total += ms;
+			count += 1;
+			max = Math.max(max, ms);
+		},
+		"gauge": () => {
+			if (count === 0) {
+				return undefined;
+			}
+
+			const reading = { "mean": total / count, "max": max };
+
+			total = 0;
+			count = 0;
+			max = 0;
+
+			return reading;
+		}
+	};
+}
+
+/** The hub transport over `channel` (dataChannelTransport), metered: `gauge` reads the KB/s it sent and received since
+ *  the last reading — `in` and `out`, what it actually carried (the hub's frames, already serialized: nothing is
+ *  serialized again to weigh them). It meters the transport, not the channel — the channel's own `send` is left alone,
+ *  so observability's data channel probe still sees it. */
+export function meteredDataChannel(channel: RTCDataChannel): { "transport": Transport; "gauge": Gauge } {
+	const inner = dataChannelTransport(channel);
+	let sent = 0;
+	let received = 0;
+	let since = performance.now();
+
+	channel.addEventListener("message", (event) => {
+		received += typeof event.data === "string" ? event.data.length : (event.data as { "byteLength"?: number }).byteLength ?? 0;
+	});
+
+	return {
+		"transport": {
+			...inner,
+			// What one frame added to the backlog is its weight: queued (or held until the channel opens) synchronously.
+			"send": (message) => {
+				const before = inner.backlog!();
+
+				inner.send(message);
+				sent += inner.backlog!() - before;
+			}
+		},
+		"gauge": () => {
+			const now = performance.now();
+			const seconds = (now - since) / 1000;
+			const rates = { "in": received / 1024 / seconds, "out": sent / 1024 / seconds };
+
+			sent = 0;
+			received = 0;
+			since = now;
+
+			return rates;
+		}
+	};
 }
 
 /** A series over a window, summarized: `source:gauge`, its latest reading (and how long ago), its range and mean, and —
