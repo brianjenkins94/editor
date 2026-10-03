@@ -26,7 +26,7 @@ import { installWindowMessageProbe, LOG_SUBJECT, scopedTransport } from "@brianj
 import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, RotateCcw, SquareArrowDownLeft, SquareArrowOutUpRight } from "lucide";
 import type { DevtoolsPanel } from "./preview-devtools";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
-import { installPreviewProfiler } from "./preview-profile";
+import { installAutoProfiler, installPreviewProfiler } from "./preview-profile";
 import { css, iconSvg } from "./theme";
 import { parseVirtual, PREVIEW_HOST_MARK, PREVIEW_WINDOW_PREFIX, previewPageOf, windowId, windowTitle } from "./virtual-path";
 import { createPaneWindow, type PaneWindow, type PaneWindowFactory } from "./window";
@@ -612,12 +612,14 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 
 	// Chrome DevTools Protocol for each preview window's page, over the hub — the docked DevTools is one client of it.
 	installPreviewCdp(hub, (key) => surfaces.get("preview:" + key)?.frame);
-	// CPU profiles of each preview window's page, docked or popped out (preview-profile.ts).
+	// CPU profiles of each preview window's page, docked or popped out (preview-profile.ts) — asked for, and taken when
+	// one keeps running slow.
 	installPreviewProfiler(hub, (key) => {
 		const surface = surfaces.get("preview:" + key);
 
 		return surface === undefined ? undefined : pageOf(surface) ?? undefined;
 	});
+	installAutoProfiler(hub, () => [...surfaces.values()].map((surface) => ({ "key": surface.key, "port": surface.port, "page": pageOf(surface) ?? undefined })));
 
 	/** Show ONE capability prompt as an overlay on `surface`'s preview window and resolve with the user's choice —
 	 *  the running app is dimmed behind it. */

@@ -51,6 +51,7 @@ import insightsManifest from "./extensions/insights/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
+import { installRunProfiles } from "./run-profiles";
 import { windowClientTransport } from "./pane-link";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import { createBashProcess } from "./terminal";
@@ -557,6 +558,9 @@ function maybeBoot(): void {
 				// (worker) is shared by every terminal.
 				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer, tab);
 
+				// A preview that ran slow was profiled: keep the profile with its dev server's run (run-profiles.ts).
+				installRunProfiles(api as typeof import("vscode"), workbenchHub, nodeRunner.runs);
+
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
 
 				// Uplink the extension pod to the page: a workbench hub bridges the pod (via the extension's
@@ -649,8 +653,8 @@ function maybeBoot(): void {
 
 			capabilitiesExt.registerFileUrl("./node_modules/capabilities-ts-plugin/index.js", capabilitiesPluginUrl);
 
-			// Insights: coverage (and, to come, profiles and live metrics) through VS Code's own UI, from whatever the debug
-			// sessions report — public API only, so it runs in the web worker host.
+			// Insights: every run's coverage marked in its file's gutter, and the metrics monitor, from whatever the debug
+			// sessions and the metrics plane report — public API only, so it runs in the web worker host.
 			const insightsExt = registerExtension(insightsManifest, ExtensionHostKind.LocalWebWorker);
 
 			insightsExt.registerFileUrl("./extension.js", new URL(insightsExtensionPath, location.href).href);

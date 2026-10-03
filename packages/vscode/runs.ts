@@ -36,6 +36,15 @@ export interface RunInfo {
 	"exitCode"?: number;
 	/** A service's port (a dev server's preview). */
 	"port"?: number;
+	/** Profiles taken while it ran (its preview ran slow — run-profiles.ts), oldest first. */
+	"profiles"?: RunProfile[];
+}
+
+/** A CPU profile of a run's preview: where it's saved, and the app's functions that took the most time. */
+export interface RunProfile {
+	"path": string;
+	"at": number;
+	"hotspots": { "function": string; "file"?: string; "line": number; "selfMs": number; "totalMs": number }[];
 }
 
 /** What starts a run hands back: change it as it goes, end it once. */
@@ -56,6 +65,8 @@ export interface RunRegistry {
 	"stop": (id: string) => boolean;
 	/** The running service that `matches`, if any — a second `vite` in the same directory finds the first. */
 	"runningService": (matches: (run: RunInfo) => boolean) => RunInfo | undefined;
+	/** Keep a profile with the running service on `port`; false if there's none. */
+	"addProfile": (port: number, profile: RunProfile) => boolean;
 }
 
 /** How many ended runs are kept, for the list's history. */
@@ -138,7 +149,19 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 
 			return true;
 		},
-		"runningService": (matches) => [...running.values()].map((run) => run.info).find((info) => info.kind === "service" && matches(info))
+		"runningService": (matches) => [...running.values()].map((run) => run.info).find((info) => info.kind === "service" && matches(info)),
+		"addProfile": (port, profile) => {
+			const info = [...running.values()].map((run) => run.info).find((candidate) => candidate.port === port);
+
+			if (info === undefined) {
+				return false;
+			}
+
+			info.profiles = [...info.profiles ?? [], profile]; // a new array: lists already published hold the old one
+			changed();
+
+			return true;
+		}
 	};
 
 	return registry;

@@ -6,10 +6,13 @@
  * When a run ends it says how — a task that finished, briefly in the status bar; one that failed, or a service that
  * stopped without being asked to, as a notification (with the way back to its terminal). Stopping something says nothing.
  *
+ * A dev server whose preview ran slow was profiled (run-profiles.ts): that's said too, once per profile, with its
+ * hotspots a pick away — each the app's function that took the time, opened at its line.
+ *
  * It also reports the debug sessions the registry wouldn't otherwise know — F5, an agent's debug_start, a coverage run;
  * not a terminal's (`__runId`) or a dev server's (`__prodId`), which are already its — so they're in the list too.
  */
-import type { RunInfo } from "../../runs";
+import type { RunInfo, RunProfile } from "../../runs";
 import { createRpcClient } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { takeExitCode } from "./debug-adapter";
@@ -30,6 +33,28 @@ function describe(run: RunInfo): string {
 	const where = "terminal" in run.origin ? "terminal " + run.origin.terminal : run.origin.other;
 
 	return [run.kind === "service" ? "service" + (run.port === undefined ? "" : " · :" + run.port) : "task", where, run.cwd].join(" · ");
+}
+
+/** Where a profile's time went: the app's functions, most time first — picking one opens it at its line. */
+async function showHotspots(run: RunInfo, profile: RunProfile): Promise<void> {
+	type Pick = vscode.QuickPickItem & { "file"?: string; "line"?: number };
+	const picks: Pick[] = profile.hotspots.map((spot) => ({
+		"label": "$(flame) " + spot.function,
+		"description": `${spot.selfMs} ms self · ${spot.totalMs} ms total`,
+		"detail": spot.file === undefined ? "(not one of the app's files)" : `${vscode.workspace.asRelativePath(spot.file)}:${spot.line}`,
+		"file": spot.file,
+		"line": spot.line
+	}));
+
+	picks.push({ "label": "$(file) Open the profile", "detail": vscode.workspace.asRelativePath(profile.path), "file": profile.path });
+
+	const picked = await vscode.window.showQuickPick(picks, { "title": `Where ${run.title}'s preview spent its time`, "placeHolder": profile.hotspots.length === 0 ? "None of it in the app's own code" : "Pick one to go to it" });
+
+	if (picked?.file !== undefined) {
+		const line = Math.max(0, (picked.line ?? 1) - 1);
+
+		await vscode.window.showTextDocument(vscode.Uri.file(picked.file), { "selection": new vscode.Range(line, 0, line, 0) });
+	}
 }
 
 /** How a run ended, said once, as it ends. */
@@ -57,6 +82,8 @@ export function registerRunning(context: vscode.ExtensionContext): void {
 	const item = vscode.window.createStatusBarItem("editor.running", vscode.StatusBarAlignment.Left, 50);
 	const rpc = createRpcClient(podHub);
 	let runs: RunInfo[] = [];
+	/** Each run's profiles so far, to tell a new one. */
+	const profileCounts = new Map<string, number>();
 	/** The debug sessions reported to the registry, by session id; and the ones it asked to stop. */
 	const reported = new Map<string, vscode.DebugSession>();
 	const stopping = new Set<string>();
@@ -114,6 +141,19 @@ export function registerRunning(context: vscode.ExtensionContext): void {
 				if (wasRunning.has(run.id) && run.state !== "running") {
 					ended(run);
 				}
+
+				// Its preview ran slow, and was profiled.
+				const profile = run.profiles?.at(-1);
+
+				if (profile !== undefined && (run.profiles?.length ?? 0) > (profileCounts.get(run.id) ?? 0)) {
+					void vscode.window.showInformationMessage(`${run.title}'s preview ran slow, so it was profiled.`, "Show Hotspots").then((choice) => {
+						if (choice === "Show Hotspots") {
+							void showHotspots(run, profile);
+						}
+					});
+				}
+
+				profileCounts.set(run.id, run.profiles?.length ?? 0);
 			}
 		}) },
 		vscode.commands.registerCommand("editor.running.show", async () => {
@@ -126,7 +166,7 @@ export function registerRunning(context: vscode.ExtensionContext): void {
 			type Pick = vscode.QuickPickItem & { "run"?: RunInfo };
 			const picks: Pick[] = [
 				...live.length === 0 ? [] : [{ "label": "Running", "kind": vscode.QuickPickItemKind.Separator }],
-				...live.map((run) => ({ "label": `$(${run.kind === "service" ? "server-process" : "play"}) ${run.title}`, "description": since(Date.now() - run.startedAt), "detail": describe(run), "run": run })),
+				...live.map((run) => ({ "label": `$(${run.kind === "service" ? "server-process" : "play"}) ${run.title}`, "description": since(Date.now() - run.startedAt) + (run.profiles === undefined ? "" : ` · $(flame) ${run.profiles.length} profile${run.profiles.length === 1 ? "" : "s"}`), "detail": describe(run), "run": run })),
 				...ended.length === 0 ? [] : [{ "label": "Ended", "kind": vscode.QuickPickItemKind.Separator }],
 				...ended.map((run) => ({
 					"label": `$(${run.state === "failed" ? "error" : run.state === "stopped" ? "debug-stop" : "check"}) ${run.title}`,
@@ -147,10 +187,13 @@ export function registerRunning(context: vscode.ExtensionContext): void {
 				return;
 			}
 
-			const choice = await vscode.window.showWarningMessage(`Stop ${picked.run.title}?`, { "modal": false }, "Stop");
+			const profile = picked.run.profiles?.at(-1);
+			const choice = await vscode.window.showWarningMessage(`Stop ${picked.run.title}?`, { "modal": false }, "Stop", ...profile === undefined ? [] : ["Show Hotspots"]);
 
 			if (choice === "Stop") {
 				await rpc.request("runs.stop", { "id": picked.run.id }, { "timeoutMs": 5000 });
+			} else if (choice === "Show Hotspots" && profile !== undefined) {
+				await showHotspots(picked.run, profile);
 			}
 		})
 	);
