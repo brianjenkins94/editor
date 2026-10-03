@@ -7,8 +7,8 @@ import * as path from "node:path";
 import test from "node:test";
 import * as url from "node:url";
 import ts from "typescript";
-import { anchorGame } from "../game-anchors.ts";
-import { recognizeGame } from "../game-recognizer.ts";
+import { anchorGame } from "../extensions/event-sheet/anchors.ts";
+import { recognizeGame } from "../extensions/event-sheet/recognizer.ts";
 
 const fixtureDir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "fixtures", "example");
 

@@ -104,7 +104,6 @@ export const nodes: NodeSpec[] = [
 	{ "id": "debug-worker", "label": "Debug worker", "container": "podWorkers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the pod's debug adapter: control and events over the hub on its session's subjects, the render stream straight to the tsval preview.", "observedBy": "its hub reporter + the Worker probe", "condition": "while debugging" },
 	{ "id": "worker:server-host", "label": "LSP server host", "container": "podWorkers", "detail": "cspell (vscode-languageclient)", "description": "cspell language server, spawned by the pod — JSON-RPC over postMessage plus a ws-control port for the shared filesystem.", "observedBy": "the Worker probe" },
 	{ "id": "classify", "label": "Classify worker", "container": "workers", "hub": true, "detail": "hub · BABLR cosmetic classifier", "description": "Classifies git changes as cosmetic or semantic, and groups edit bursts, for the git SCM and the review panel.", "observedBy": "its hub reporter + the Worker probe", "condition": "when git classifies a change" },
-	{ "id": "recognizer", "label": "Recognizer worker", "container": "workers", "hub": true, "detail": "hub · game recognizer", "description": "Recognizes a game's structure for the event sheet view.", "observedBy": "its hub reporter + the Worker probe", "condition": "when the event sheet opens" },
 	{ "id": "exthost-iframe", "label": "Iframe relay", "container": "extHostIframe", "detail": "webWorkerExtensionHostIframe.html", "description": "Boots the web worker extension host, relays its first messages and hands its MessagePort to the workbench.", "observedBy": "window message listener" },
 	{ "id": "exthost:LocalWebWorker:0", "label": "Worker extension host", "container": "extHostWorker", "detail": "eslint, capabilities, default extensions", "description": "Extension host in a web worker: the default extensions (typescript-language-features and its tsserver), eslint and capabilities.", "observedBy": "RPCProtocol logger + an in-worker probe (its fetches and the workers it spawns)" },
 	{ "id": "idb", "label": "IndexedDB", "container": "browser", "detail": "user data, logs, workspace-fs", "description": "monaco's user data / logs / storage, and the workspace filesystem snapshot.", "observedBy": "IDBObjectStore probe" },
@@ -135,7 +134,6 @@ export const hubLinks: [string, string][] = [
 	["workbench", "node"],
 	["workbench", "node-scripts"],
 	["workbench", "classify"],
-	["workbench", "recognizer"],
 	["node", "provoke"],
 	["pod", "debug-worker"]
 ];
@@ -231,8 +229,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"], "description": "Network/IO capability decisions, served by the pod." },
 	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"], "description": "Ask the user about a capability, served by the shell." },
 	// ── workers ──
-	{ "pattern": "classify.>", "from": ["workbench"], "to": ["classify"], "description": "Cosmetic/semantic verdicts and edit-burst grouping (cancellable)." },
-	{ "pattern": "recognizer.project", "from": ["workbench"], "to": ["recognizer"], "description": "Project a game into the event sheet's model." }
+	{ "pattern": "classify.>", "from": ["workbench"], "to": ["classify"], "description": "Cosmetic/semantic verdicts and edit-burst grouping (cancellable)." }
 ];
 
 export const channels: ChannelSpec[] = [
@@ -241,7 +238,7 @@ export const channels: ChannelSpec[] = [
 	{ "a": "workbench", "b": "exthost:LocalProcess:*", "protocol": "RPCProtocol", "transport": "in-memory buffers", "description": "MainThread / ExtHost proxies, serialized even in the same realm." },
 	{ "a": "workbench", "b": "exthost-iframe", "protocol": "bootstrap handshake", "transport": "window.postMessage", "description": "NLS bootstrap, then the MessagePort handoff." },
 	{ "a": "workbench", "b": "exthost:LocalWebWorker:*", "protocol": "RPCProtocol", "transport": "MessagePort (transferred ArrayBuffers)", "description": "MainThread / ExtHost proxies." },
-	{ "a": "exthost:LocalWebWorker:*", "b": "nested:*", "protocol": "extension defined (LSP, tsserver)", "transport": "Worker.postMessage", "description": "Workers the web worker extension host's extensions spawn." },
+	{ "a": "exthost:LocalWebWorker:*", "b": "nested:*", "protocol": "extension defined (LSP, tsserver)", "transport": "Worker.postMessage", "description": "Workers the web worker extension host's extensions spawn: TypeScript's servers, the event sheet's recognizer." },
 	// The service worker takes EVERY request from the pages and workers it controls (stamping cross-origin isolation,
 	// answering its own routes, resolving node_modules from the CDN, gating a preview's data fetches) and makes the
 	// upstream one itself — so each context's HTTP goes to `sw`, and only `sw` reaches the network. (WebSockets don't
@@ -668,8 +665,6 @@ export function identifyWorker(url: string): { "id": string; "label"?: string; "
 			return { "id": "worker:server-host", "container": "podWorkers", "owner": "pod" };
 		case "classify-worker.js":
 			return { "id": "classify", "container": "workers", "owner": "workbench" };
-		case "recognizer-worker.js":
-			return { "id": "recognizer", "container": "workers", "owner": "workbench" };
 		case "provoke-worker.js":
 			return { "id": "provoke", "container": "workers", "owner": "node" };
 		default:

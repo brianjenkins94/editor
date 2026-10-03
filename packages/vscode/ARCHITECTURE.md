@@ -41,7 +41,7 @@ also works over desktop's built-in git.
 | **App iframe** (`/`) | `main.tsx` app branch, `coi.ts`, `vscode.tsx`, `samples.ts`, `pane-link.ts` | DOM, `rootHub`, COI bootstrap | Boots the workbench iframe (the preview windows live in the shell; this realm runs their backend — see below) and links it into `rootHub` over the retargeting pane-link transport; serves `project.list` + `workbench.init`, routes `project.open` → `openProject`. Owns the top of the hub tree. |
 | **Workbench iframe** (`/__vscode__/host.html`) | `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal.ts`, `node-runner.ts`, `git-scm.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()` (VS Code's full workbench lays itself out — its own activity bar, sashes, movable views and remembered layout, minus the menu bar and title bar, which the shell's chrome replaces), mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(git SCM `git-scm.ts`/`git-engine.ts` install here too — legitimate browser parity for desktop's built-in git; the BABLR classifier welded into it is the part that should become a standalone extension.)* |
 | **Extension host** (`LocalProcess` / `LocalWebWorker`) | `extensions/*/extension.ts`, `extensions/*/ts-plugin.js` | the vscode API — **no DOM, no zen-fs singleton** | Extensions: `hello` (default API context), `worker-pod` (spawns the LSP/debug/node workers). `eslint` + `capabilities` run in the WebWorker host *inside tsserver*, reusing tsserver's own `ts` as TS-plugins. |
-| **Workers** (`dist/lsp/*`, spawned from the workbench realm) | only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `classify-worker` (BABLR classify), `recognizer-worker` (the event sheet's game recognizer). |
+| **Workers** (`dist/lsp/*`, spawned from the workbench realm) | only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `classify-worker` (BABLR classify). (The event sheet's recognizer worker is its extension's own, spawned in the extension host.) |
 | **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (`cstSpans`, `classifyChange`), `tsval`, `util/silo` (incl. `silo/policy` — the shared policy model), and the vscode-package-local pure module `capability-breakpoints`. Built/aliased into the realms above. |
 
 There is also a **service worker** (`coi-serviceworker.js`, registered by `coi.ts`): one per origin, it stamps the
@@ -254,7 +254,6 @@ flowchart LR
       node["Dev-server worker"]
       node_scripts["Script worker"]
       classify["Classify worker"]
-      recognizer["Recognizer worker"]
       provoke["Provoke worker"]
     end
     subgraph podWorkers["Pod workers"]
@@ -302,7 +301,6 @@ flowchart LR
   workbench <==>|hub| node
   workbench <==>|hub| node_scripts
   workbench <==>|hub| classify
-  workbench <==>|hub| recognizer
   node <==>|hub| provoke
   pod <==>|hub| debug_worker
   pod <-.->|LSP (JSON-RPC)| worker_server_host

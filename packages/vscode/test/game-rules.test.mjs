@@ -4,9 +4,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import ts from "typescript";
-import { anchorGame } from "../game-anchors.ts";
-import { compileGame, exampleBehaviors, exampleRules, fly } from "../game-rules.ts";
-import { recognizeGame } from "../game-recognizer.ts";
+import { anchorGame } from "../extensions/event-sheet/anchors.ts";
+import { compileGame, exampleBehaviors, exampleRules, fly } from "../extensions/event-sheet/rules.ts";
+import { recognizeGame } from "../extensions/event-sheet/recognizer.ts";
 
 // Minimal schemas + an entity config, so behaviors and objects recognize alongside the compiled rules.
 const SCHEMAS = {

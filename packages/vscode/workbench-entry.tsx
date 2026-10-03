@@ -22,6 +22,8 @@ import type { ShellDockHost } from "./dock-host";
 import type { PodBridge } from "./extensions/worker-pod/extension";
 import type { WorkspaceFs } from "./workspace-fs";
 import capabilitiesExtensionPath from "capabilities:extension";
+import eventSheetExtensionPath from "event-sheet:extension";
+import eventSheetViewPath from "event-sheet:view";
 import insightsExtensionPath from "insights:extension";
 import runningExtensionPath from "running:extension";
 import settingsDefaults from "editor:settings-defaults";
@@ -35,8 +37,6 @@ import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { reportWorkbenchMetrics } from "./editor-metrics";
-import { createEventSheetAugmentation } from "./event-sheet-view";
-import { installFileAugmentations } from "./file-augmentations";
 import type { VerdictEntry } from "./cosmetic-classifier";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
 import * as gitEngine from "./git-engine";
@@ -47,6 +47,7 @@ import { installRunTargets } from "./targets";
 import capabilitiesManifest from "./extensions/capabilities/package.json";
 import eslintManifest from "./extensions/eslint/package.json";
 import helloManifest from "./extensions/hello/package.json";
+import eventSheetManifest from "./extensions/event-sheet/package.json";
 import insightsManifest from "./extensions/insights/package.json";
 import runningManifest from "./extensions/running/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
@@ -542,10 +543,6 @@ function maybeBoot(): void {
 				// when the configuration service read them at startup — the store mounts after boot, and restoring it
 				// fires no change events. Announce them now so they apply. (Writes after boot fire events themselves.)
 				void announceWorkspaceSettings(api as typeof import("vscode"), workspaceFs);
-					// File augmentations: the auxpane shows a per-file-type projection of the active file. First one is
-					// the Event Sheet (a Construct-style projection of the CST) — a 3-column table whose rows jump the
-					// editor to the code they map to. See file-augmentations.ts / event-sheet-view.ts.
-					installFileAugmentations(() => vscodeApi, [createEventSheetAugmentation(workbenchHub)]);
 				// Runtime type acquisition: fetch types for arbitrary imports on demand and write them into the FS,
 				// so files beyond the baked demo deps (and later a user-opened folder) type-check. See ata.ts.
 				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", moduleVersions ?? {}, (path) => workspaceFs?.has(path) ?? false, paneLog);
@@ -656,13 +653,23 @@ function maybeBoot(): void {
 
 			insightsExt.registerFileUrl("./extension.js", new URL(insightsExtensionPath, location.href).href);
 
+			// The Event Sheet: its webview view's script (inlined into the page it serves) and the recognizer worker it starts,
+			// built with the LSP workers so it shares the editor's TypeScript — public API only.
+			const eventSheetExt = registerExtension(eventSheetManifest, ExtensionHostKind.LocalWebWorker);
+
+			eventSheetExt.registerFileUrl("./extension.js", new URL(eventSheetExtensionPath, location.href).href);
+			eventSheetExt.registerFileUrl("./view.js", new URL(eventSheetViewPath, location.href).href);
+			// (An extension's workers start classic: recognizer.js is a bootstrap importing the module worker by its URL, so the
+			// worker's own imports — the shared ts chunk — resolve beside it.)
+			eventSheetExt.registerFileUrl("./recognizer.js", "data:text/javascript," + encodeURIComponent(`import(${JSON.stringify(new URL("./lsp/recognizer-worker.js", location.href).href)}).catch((error) => { postMessage({ "failed": String(error) }); });`));
+
 			// Running: what's running and how it ended, from terminal shell integration, debug sessions and tasks — public
 			// API only, as a desktop extension would see it.
 			const runningExt = registerExtension(runningManifest, ExtensionHostKind.LocalWebWorker);
 
 			runningExt.registerFileUrl("./extension.js", new URL(runningExtensionPath, location.href).href);
 
-			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod", "eslint", "capabilities", "insights", "running"] });
+			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod", "eslint", "capabilities", "insights", "running", "event-sheet"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");

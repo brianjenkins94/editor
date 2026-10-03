@@ -17,10 +17,10 @@
  * the author assembled. That round-trip (author → generate → recognize → same map) is both the payoff and the test.
  */
 
-import type { GameModel } from "./game-recognizer";
-import type { Behavior, Rule } from "./game-rules";
-import { libraryFiles } from "./game-library";
-import { behaviorsUsedBy, builtinBehaviors, compileGame, exampleBehaviors, exampleRules, fly } from "./game-rules";
+import type { GameModel } from "./recognizer";
+import type { Behavior, Rule } from "./rules";
+import { libraryFiles } from "./library";
+import { behaviorsUsedBy, builtinBehaviors, compileGame, exampleBehaviors, exampleRules, fly } from "./rules";
 
 /** Import specifier + vendored-file path (relative to the game dir; also its subpath inside the runtime library). */
 interface ComponentMeta { "from": string; "path": string }

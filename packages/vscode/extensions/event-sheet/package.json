@@ -1,0 +1,34 @@
+{
+  "name": "event-sheet",
+  "displayName": "Event Sheet",
+  "description": "A game the open file belongs to, as an event sheet: a map of its objects, rules, behaviors and components that opens each one's code, and a builder that paints a level and generates the game. The recognizer that reads the code runs in a worker of the extension's own.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onView:eventSheet.view"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "eventSheet",
+          "title": "Event Sheet",
+          "icon": "$(symbol-event)"
+        }
+      ]
+    },
+    "views": {
+      "eventSheet": [
+        {
+          "type": "webview",
+          "id": "eventSheet.view",
+          "name": "Event Sheet"
+        }
+      ]
+    }
+  }
+}

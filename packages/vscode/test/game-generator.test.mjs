@@ -4,8 +4,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import ts from "typescript";
-import { blankGame, exampleAuthored, exampleGame, generateArcadeGame, generateGame } from "../game-generator.ts";
-import { recognizeGame } from "../game-recognizer.ts";
+import { blankGame, exampleAuthored, exampleGame, generateArcadeGame, generateGame } from "../extensions/event-sheet/generator.ts";
+import { recognizeGame } from "../extensions/event-sheet/recognizer.ts";
 
 test("generating the example block model emits a complete runnable game", () => {
 	const files = generateGame(exampleAuthored);

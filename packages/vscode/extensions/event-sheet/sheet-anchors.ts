@@ -9,7 +9,7 @@
  * unrelated row, and a row whose own code changed no longer matches any anchor (it orphans → "diverged from generated").
  */
 import { spanAnchors } from "@brianjenkins94/bablr";
-import type { GeneratedProgram } from "./event-sheet";
+import type { GeneratedProgram } from "./sheet";
 
 /**
  * Map each row to the content-addressed anchor of its most distinctive owned span. Returns rowId → anchorId; a row with

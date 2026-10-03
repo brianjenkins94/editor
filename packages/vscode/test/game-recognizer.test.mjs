@@ -9,7 +9,7 @@ import * as url from "node:url";
 import ts from "typescript";
 // Node 24 strips the types. The recognizer imports NO typescript itself (would bundle ~16MB in the editor) — the host
 // injects its `ts`; here the test injects node's, the way the editor injects its ambient tsserver instance.
-import { recognizeBehaviors, recognizeGame, recognizeObjects, recognizeRules } from "../game-recognizer.ts";
+import { recognizeBehaviors, recognizeGame, recognizeObjects, recognizeRules } from "../extensions/event-sheet/recognizer.ts";
 
 const fixtureDir = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "fixtures", "example");
 

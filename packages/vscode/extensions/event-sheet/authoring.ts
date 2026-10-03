@@ -1,16 +1,16 @@
 /**
- * Authoring prototype — the WRITE face of the Event Sheet, rendered in the same auxpane as the read Map. You build a game
+ * Authoring prototype — the WRITE face of the Event Sheet (Build), beside the read face (Map) in its view. You build a game
  * with NEAR-ZERO TYPING: "New game" scaffolds a blank but runnable game; then you PAINT a level on a grid (floor + placed
  * objects, each object a one-click preset that carries its behaviors + sprite) and pick systems from a palette. "Generate"
  * VENDORS the whole game into the game dir (the user owns every file); the Map face re-projects it and, if a dev server is
  * running, HMR shows it run. The model + generator underneath are the real foundation; this is the tactile surface.
  */
-/* eslint-disable ts/no-explicit-any -- the vscode api is untyped here (captured from the hello extension) */
-/* eslint-disable webawesome/no-inline-styles, webawesome/no-css-in-strings, webawesome/prefer-components -- a prototype authoring surface in the aux-bar body; intrinsic layout + custom sprite/label paint-tool tiles, not themeable chrome */
-import type { AuthoredGame } from "./game-generator";
-import { generateGame, libraryComponents, objectPresets, spriteDataUrls } from "./game-generator";
-import type { Rule } from "./game-rules";
-import { builtinBehaviors } from "./game-rules";
+/* eslint-disable webawesome/no-inline-styles, webawesome/no-css-in-strings, webawesome/prefer-components -- a prototype authoring surface in a webview; intrinsic layout + custom sprite/label paint-tool tiles, not themeable chrome */
+import type { AuthoredGame } from "./generator";
+import type { EventSheetHost } from "./view";
+import { generateGame, libraryComponents, objectPresets, spriteDataUrls } from "./generator";
+import type { Rule } from "./rules";
+import { builtinBehaviors } from "./rules";
 
 /** Capitalize the first letter (for auto-naming generated rules). */
 function capitalize(text: string): string {
@@ -41,46 +41,20 @@ type Tool = string;
 // The active tool persists across re-renders (module-level, like the Build/Map mode).
 let activeTool: Tool = "floor";
 
-/** Host hooks the auxpane owner provides: re-render this face, and scaffold a new blank game. */
-export interface AuthoringHost {
+/** What the view gives this face: re-render it, and scaffold a new blank game. */
+export interface AuthoringHooks {
 	"rerender": () => void;
 	"createGame": (name: string) => Promise<void>;
 }
 
-/** Ensure every parent directory of the generated files exists, then write them (zen-fs won't auto-create parents). */
-export async function writeGeneratedGame(api: any, root: string, files: Record<string, string>): Promise<void> {
-	const encoder = new TextEncoder();
-	const dirs = new Set<string>();
+/** A small labelled button, in VS Code's colors (`primary`: the main action). */
+export function button(label: string, onClick: () => void, primary = false): HTMLButtonElement {
+	const element = document.createElement("button");
 
-	for (const relative of Object.keys(files)) {
-		const parts = relative.split("/");
-
-		parts.pop();
-
-		let dir = root;
-
-		for (const part of parts) {
-			dir += "/" + part;
-			dirs.add(dir);
-		}
-	}
-
-	for (const dir of [...dirs].sort((a, b) => a.length - b.length)) {
-		await api.workspace.fs.createDirectory(api.Uri.file(dir));
-	}
-
-	for (const [relative, content] of Object.entries(files)) {
-		await api.workspace.fs.writeFile(api.Uri.file(root + "/" + relative), encoder.encode(content));
-	}
-}
-
-/** A small labelled button. */
-function button(label: string, onClick: () => void): HTMLElement {
-	const element = document.createElement("wa-button");
-
-	element.setAttribute("size", "small");
-	element.setAttribute("appearance", "outlined");
+	element.type = "button";
 	element.textContent = label;
+	element.style.cssText = "font:inherit;font-size:12px;padding:2px 10px;border-radius:2px;cursor:pointer;border:1px solid var(--vscode-button-border,transparent);"
+		+ (primary ? "background:var(--vscode-button-background);color:var(--vscode-button-foreground)" : "background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)");
 	element.addEventListener("click", onClick);
 
 	return element;
@@ -289,8 +263,8 @@ function renderGrid(container: HTMLElement, model: AuthoredGame, rerender: () =>
 }
 
 /** Render the authoring editor for `model` into `container`; edits mutate the model and call `host.rerender`. */
-export function renderAuthoring(container: HTMLElement, api: any, root: string, model: AuthoredGame, host: AuthoringHost): void {
-	const rerender = host.rerender;
+export function renderAuthoring(container: HTMLElement, host: EventSheetHost, root: string, model: AuthoredGame, hooks: AuthoringHooks): void {
+	const rerender = hooks.rerender;
 
 	container.replaceChildren();
 	container.style.cssText = "height:100%;overflow:auto;padding-bottom:12px";
@@ -304,19 +278,17 @@ export function renderAuthoring(container: HTMLElement, api: any, root: string, 
 		void (async (): Promise<void> => {
 			const files = generateGame(model);
 
-			await writeGeneratedGame(api, root, files);
-			api.window.showInformationMessage?.("Vendored " + Object.keys(files).length + " files into " + (root.split("/").pop() ?? root));
+			await host.writeFiles(root, files);
+			host.info("Vendored " + Object.keys(files).length + " files into " + (root.split("/").pop() ?? root));
 		})();
-	});
-
-	generate.setAttribute("variant", "brand");
+	}, true);
 
 	const newGame = button("New game", () => {
 		void (async (): Promise<void> => {
-			const chosen = await api.window.showInputBox({ "title": "New game", "prompt": "Name — scaffolds a blank runnable game you own, then paint it in Build" });
+			const chosen = await host.input({ "title": "New game", "prompt": "Name — scaffolds a blank runnable game you own, then paint it in Build" });
 
 			if (typeof chosen === "string" && chosen.trim() !== "") {
-				await host.createGame(chosen.trim());
+				await hooks.createGame(chosen.trim());
 			}
 		})();
 	});
@@ -394,7 +366,7 @@ export function renderAuthoring(container: HTMLElement, api: any, root: string, 
 		addBehavior.addEventListener("click", () => {
 			void (async (): Promise<void> => {
 				const options = libraryComponents().filter((component) => component !== "Position" && !entity.components.includes(component));
-				const picked = await api.window.showQuickPick(options, { "title": "Add behavior to " + entity.name });
+				const picked = await host.pick(options, { "title": "Add behavior to " + entity.name });
 
 				if (typeof picked === "string") {
 					entity.components.push(picked);
@@ -465,15 +437,15 @@ export function renderAuthoring(container: HTMLElement, api: any, root: string, 
 	addRule.style.cssText = "padding:6px 10px";
 	addRule.append(button("＋ Rule", () => {
 		void (async (): Promise<void> => {
-			const when = await api.window.showQuickPick(["When a key is pressed", "Every tick", "Win when…"], { "title": "Add a rule" });
+			const when = await host.pick(["When a key is pressed", "Every tick", "Win when…"], { "title": "Add a rule" });
 
 			if (typeof when !== "string") {
 				return;
 			}
 
 			if (when === "Win when…") {
-				const these = await api.window.showQuickPick(entityNames, { "title": "Win when every…" });
-				const goals = typeof these === "string" ? await api.window.showQuickPick(entityNames, { "title": "…is standing on a…" }) : undefined;
+				const these = await host.pick(entityNames, { "title": "Win when every…" });
+				const goals = typeof these === "string" ? await host.pick(entityNames, { "title": "…is standing on a…" }) : undefined;
 				const allOn = subjectOf(these ?? "");
 				const goal = subjectOf(goals ?? "");
 
@@ -484,14 +456,14 @@ export function renderAuthoring(container: HTMLElement, api: any, root: string, 
 				return;
 			}
 
-			const subjectName = await api.window.showQuickPick(entityNames, { "title": "For each…" });
+			const subjectName = await host.pick(entityNames, { "title": "For each…" });
 			const subject = subjectOf(subjectName ?? "");
 
 			if (subject === undefined) {
 				return;
 			}
 
-			const behavior = await api.window.showQuickPick(builtinBehaviors().map((entry) => entry.name), { "title": "Do what?" });
+			const behavior = await host.pick(builtinBehaviors().map((entry) => entry.name), { "title": "Do what?" });
 
 			if (typeof behavior === "string") {
 				addRuleTo({ "kind": "perEntity", "name": uniqueName(rules, (subjectName ?? "each") + capitalize(behavior)), "subject": subject, "on": when === "When a key is pressed" ? "keyDirection" : "step", "body": [{ "use": behavior }] });

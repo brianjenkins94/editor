@@ -251,7 +251,7 @@ export async function preBuild(): Promise<void> {
 		// just-bash chunk as /browser.js → index.html, "Failed to load module script") — the import itself, relative,
 		// still worked.
 		"base": "./",
-		"plugins": [bundledExtension("hello"), bundledExtension("worker-pod"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("insights"), bundledExtension("running"), editorSettingsDefaultsPlugin()],
+		"plugins": [bundledExtension("hello"), bundledExtension("worker-pod"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("event-sheet"), bundledModule("event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin()],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
 		// `buffer` → the node-stdlib-browser polyfill: isomorphic-git (the git SCM engine) uses the `Buffer` global,
@@ -302,9 +302,9 @@ export async function preBuild(): Promise<void> {
 					// BABLR cosmetic/semantic classify worker (not part of the LSP pod), served from lsp/ like the
 					// other worker chunks. Driven by cosmetic-classifier.ts.
 					"lsp/classify-worker": resolvePath("./classify-worker.ts"),
-					// Reverse-projection recognizer worker — built HERE so its `typescript` shares the deduped ts chunk
-					// above (no second copy in main.js). Driven by game-projection.ts.
-					"lsp/recognizer-worker": resolvePath("./recognizer-worker.ts")
+					// The event sheet's recognizer worker — built HERE so its `typescript` shares the deduped ts chunk above
+					// (no second copy); the event-sheet extension starts it (extensions/event-sheet/extension.ts).
+					"lsp/recognizer-worker": resolvePath("./extensions/event-sheet/recognizer-worker.ts")
 				},
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",

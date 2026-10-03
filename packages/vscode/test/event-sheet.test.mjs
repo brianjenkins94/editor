@@ -9,8 +9,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // Node 24 strips the types; rowAnchors' only runtime import is bablr/dist (gitignored, local/CI-built).
-import { generate, sampleSheet } from "../event-sheet.ts";
-import { rowAnchors } from "../event-sheet-anchors.ts";
+import { generate, sampleSheet } from "../extensions/event-sheet/sheet.ts";
+import { rowAnchors } from "../extensions/event-sheet/sheet-anchors.ts";
 
 test("every generated line is chrome or maps to exactly one row", () => {
 	const program = generate(sampleSheet);

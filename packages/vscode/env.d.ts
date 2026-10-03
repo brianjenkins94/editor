@@ -55,6 +55,20 @@ declare module "insights:extension" {
 	export default path;
 }
 
+/** The event-sheet extension, bundled like the others: its path. */
+declare module "event-sheet:extension" {
+	const path: string;
+
+	export default path;
+}
+
+/** The event sheet's webview script (served beside the entry; the extension inlines it into its webview): its path. */
+declare module "event-sheet:view" {
+	const path: string;
+
+	export default path;
+}
+
 /** The running extension (what's running, from VS Code's public API), bundled like the others: its path. */
 declare module "running:extension" {
 	const path: string;

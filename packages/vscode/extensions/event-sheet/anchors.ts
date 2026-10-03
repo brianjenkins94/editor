@@ -12,7 +12,7 @@
  * the TS and BABLR node boundaries don't line up exactly.
  */
 import { spanAnchors } from "@brianjenkins94/bablr";
-import type { GameModel, NodeLoc } from "./game-recognizer";
+import type { GameModel, NodeLoc } from "./recognizer";
 
 interface Anchor { "type": string | null; "start": number; "end": number; "id": string }
 
