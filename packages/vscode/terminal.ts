@@ -22,6 +22,7 @@ import type { TerminalProcess } from "@brianjenkins94/monaco-vscode-api/main";
 import type { NodeOutput, NodeRunner } from "./node-runner";
 import type { BashSession, SessionState } from "./terminal-session";
 import { createWorkspaceTerminalFs } from "./terminal-fs";
+import { commandExecuted, commandFinished, commandLine, commandStart, promptStart, workingDirectory } from "./terminal-integration";
 import { execInSession } from "./terminal-session";
 
 type VscodeApi = typeof import("vscode");
@@ -90,12 +91,21 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 		fire(stream === "err" ? `[31m${text}[0m` : text);
 	};
 
-	const prompt = (): void => { fire(`\r\n[1;36m${state.cwd}[0m $ `); };
+	// Marked for VS Code's shell integration (terminal-integration.ts), as a desktop shell's prompt is: where it is, where
+	// the prompt starts, where the command line starts. (A redrawn prompt is marked again, as a shell's PS1 would be.)
+	const prompt = (): void => { fire(`\r\n${workingDirectory(state.cwd)}${promptStart()}[1;36m${state.cwd}[0m $ ${commandStart()}`); };
 
 	const runLine = async (input: string): Promise<void> => {
 		running = true;
 		controller = new AbortController();
 		const { signal } = controller;
+		// Shell integration: what runs and that it's running, then how it ended. A blank line runs nothing.
+		const runs = input.trim() !== "";
+		let exitCode = 0;
+
+		if (runs) {
+			fire(commandLine(input) + commandExecuted());
+		}
 
 		try {
 			const session = await getSession();
@@ -103,6 +113,8 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 			// custom command's `ctx.signal` (so `node` kills its worker). An interrupted run may not reach the PROBE.
 			const result = await execInSession(session, state, input, signal);
 			const { stdout } = result;
+
+			exitCode = result.exitCode;
 
 			// stdout then stderr, each with its trailing newline trimmed (the prompt supplies one), joined so the
 			// two streams land on separate lines rather than run together. (A streamed `node` wrote its output
@@ -121,6 +133,8 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 				write(blocks.join("\n"));
 			}
 		} catch (error) {
+			exitCode = 1;
+
 			if (!signal.aborted) { // an abort is the user's Ctrl-C, not a failure to report
 				write(`[31m${error instanceof Error ? error.message : String(error)}[0m`);
 			}
@@ -130,6 +144,8 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 			stdinBuffer = "";
 			line = "";
 			pos = 0;
+			// Interrupted is 130, as a shell reports SIGINT.
+			fire(runs ? commandFinished(signal.aborted ? 130 : exitCode) : commandFinished());
 			prompt();
 		}
 	};
@@ -385,7 +401,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 			} else if (code === 0x7F || code === 0x08) { // Backspace
 				backspace();
 			} else if (code === 0x03) { // Ctrl-C — abandon the current line
-				fire("^C");
+				fire("^C" + commandFinished()); // (finished without running, for shell integration)
 				line = "";
 				pos = 0;
 				histIndex = history.length;
