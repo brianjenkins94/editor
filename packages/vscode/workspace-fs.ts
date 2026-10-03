@@ -12,6 +12,8 @@
  * M1 (this): PERSIST it to IndexedDB, so acquired types (from ata.ts) and edits survive a reload — which lets
  * ATA drop its own bespoke cache and write once, here. The baked seed is NOT persisted (only post-boot writes
  * are), so a rebuilt demo file still shows through while a user edit or an acquired type overrides it on restore.
+ * Deleting a seeded path persists a TOMBSTONE (a `null` entry), so it stays deleted rather than reseeded — a replaced
+ * workspace (a repo, a playground link) reloads as itself, not with the demo back beside it.
  *
  * M3 swapped the backend to a SharedArrayBuffer (SingleBuffer) so the LSP workers attach to this SAME filesystem
  * (see the zenfs-vfs.ts seam). The service worker deliberately does NOT serve from it: the SW can't be
@@ -99,8 +101,9 @@ function openPersist(): Promise<IDBDatabase | undefined> {
 	});
 }
 
-/** All persisted [path, contents] pairs (for restore on boot). */
-function persistLoadAll(db: IDBDatabase): Promise<[string, Uint8Array][]> {
+/** All persisted [path, contents] pairs (for restore on boot), in path order: a folder before what's in it. `null`
+ *  contents are a tombstone — a seeded path deleted since. */
+function persistLoadAll(db: IDBDatabase): Promise<[string, Uint8Array | null][]> {
 	return new Promise((resolve) => {
 		try {
 			const store = db.transaction(PERSIST_STORE, "readonly").objectStore(PERSIST_STORE);
@@ -108,7 +111,7 @@ function persistLoadAll(db: IDBDatabase): Promise<[string, Uint8Array][]> {
 			const values = store.getAll();
 
 			store.transaction.oncomplete = () => {
-				resolve((keys.result as string[]).map((key, index) => [key, (values.result as Uint8Array[])[index]]));
+				resolve((keys.result as string[]).map((key, index) => [key, (values.result as (Uint8Array | null)[])[index]]));
 			};
 
 			store.transaction.onerror = () => { resolve([]); };
@@ -186,9 +189,16 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	// (acquired types + edits) on top, so those override the seed for any overlapping path.
 	caller = "seed";
 
+	// Every path the seed makes, its folders included: deleting one of these needs a tombstone to stay deleted.
+	const seeded = new Set<string>();
+
 	for (const file of files) {
 		ensureParent(file.path);
 		fs.writeFileSync(file.path, file.contents);
+
+		for (let path = file.path; path.startsWith("/workspace/"); path = path.slice(0, path.lastIndexOf("/"))) {
+			seeded.add(path);
+		}
 
 		if (file.readonly === true && !OVERRIDABLE_DEFAULTS.has(relative(file.path))) {
 			readonlyPaths.add(file.path);
@@ -198,6 +208,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	caller = undefined;
 	const db = await openPersist();
 	let restored = 0;
+	let tombstoned = 0;
 
 	const retired: string[] = [];
 
@@ -209,6 +220,11 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		for (const [path, contents] of persisted) {
 			if (RETIRED.has(path)) {
 				retired.push(path); // written by an older build; dropped below rather than brought back
+			} else if (contents === null) {
+				try {
+					fs.rmSync(path, { "recursive": true, "force": true }); // seeded, deleted since: it stays deleted
+					tombstoned += 1;
+				} catch { /* a file stands where its folder was: already gone */ }
 			} else {
 				ensureParent(path);
 				fs.writeFileSync(path, contents);
@@ -258,8 +274,15 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 						objects.put(typeof contents === "string" ? new TextEncoder().encode(contents) : contents, file);
 					}
 				} else {
-					objects.delete(path);
 					objects.delete(IDBKeyRange.bound(path + "/", path + "/\uffff"));
+
+					// The seed would bring a path it has back on the next boot, so that one gets a tombstone (a later
+					// write replaces it); anything else just goes.
+					if (seeded.has(path)) {
+						objects.put(null, path);
+					} else {
+						objects.delete(path);
+					}
 				}
 			}
 		} catch (error) {
@@ -430,7 +453,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	registerFileSystemOverlay(2, provider);
 
 	(globalThis as unknown as { "__workspaceFs": WorkspaceFs }).__workspaceFs = handle;
-	log.info("workspace zen-fs mounted", { "backend": buffer !== undefined ? "SingleBuffer" : "InMemory", "mb": Math.round(BUFFER_BYTES / 1048576), "seeded": files.length, "restored": restored });
+	log.info("workspace zen-fs mounted", { "backend": buffer !== undefined ? "SingleBuffer" : "InMemory", "mb": Math.round(BUFFER_BYTES / 1048576), "seeded": files.length, "restored": restored, "tombstoned": tombstoned });
 
 	return handle;
 }
