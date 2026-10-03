@@ -1,10 +1,3 @@
-/** The hello extension, bundled to a browser CommonJS file served beside the entry: its path (see bundledExtension in build.ts). */
-declare module "hello:extension" {
-	const path: string;
-
-	export default path;
-}
-
 /** The worker-pod extension, bundled to a browser CommonJS file served beside the entry: its path (see bundledExtension in build.ts). */
 declare module "worker-pod:extension" {
 	const path: string;

@@ -7,17 +7,15 @@
  * + contents back to the host. `boot`/`registerExtension`/`registerFileSystemOverlay` come from the
  * pre-built monaco-vscode-api bundle, kept external and mapped to the sibling `./main.js`.
  *
- * The hello extension (extensions/hello) is the product extension: registered as browser CJS by the URL of its served
- * bundle, it is also the default API context, so the activity bar can execute `workbench.view.*`
- * commands through its `vscode` API. Filesystem overlays (CDN node_modules now, real-disk FSA later) layer UNDER the seeded snapshot —
+ * worker-pod (extensions/worker-pod) is the bridge, and the one way core reaches VS Code: registered as browser CJS by
+ * the URL of its served bundle, it is the default API context, and core's `vscode` API is its (the activity bar runs
+ * `workbench.view.*` commands through it). Filesystem overlays (CDN node_modules now, real-disk FSA later) layer UNDER the seeded snapshot —
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
 import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
 import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, openHostedEditor, registerExtension, OPEN_ARCHITECTURE_COMMAND, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
-// The hello extension: its package.json manifest + its bundled CJS code (from the `hello:extension`
-// virtual module in entry.config.ts).
 import type { ShellDockHost } from "./dock-host";
 import type { PodBridge } from "./extensions/worker-pod/extension";
 import type { WorkspaceFs } from "./workspace-fs";
@@ -28,7 +26,6 @@ import insightsExtensionPath from "insights:extension";
 import runningExtensionPath from "running:extension";
 import settingsDefaults from "editor:settings-defaults";
 import eslintExtensionPath from "eslint:extension";
-import helloExtensionPath from "hello:extension";
 import workerPodExtensionPath from "worker-pod:extension";
 import { NETWORK_PROBES } from "./architecture";
 import { SHELL_DOCK_HOST } from "./dock-host";
@@ -44,7 +41,6 @@ import { installEditHistory } from "./edit-history";
 import { installGitService } from "./git-service";
 import capabilitiesManifest from "./extensions/capabilities/package.json";
 import eslintManifest from "./extensions/eslint/package.json";
-import helloManifest from "./extensions/hello/package.json";
 import eventSheetManifest from "./extensions/event-sheet/package.json";
 import insightsManifest from "./extensions/insights/package.json";
 import runningManifest from "./extensions/running/package.json";
@@ -181,7 +177,7 @@ let workbenchContainer: HTMLElement | undefined;
 let init: Init | undefined;
 let booted = false;
 
-// The per-extension VS Code API, captured once the hello extension resolves. `runCommand` drives the workbench
+// Core's VS Code API — the bridge's (worker-pod's), once it resolves. `runCommand` drives the workbench
 // through it and reads the latest api, so a command issued early still runs once it's captured.
 // eslint-disable-next-line ts/no-explicit-any
 let vscodeApi: any = null;
@@ -522,17 +518,19 @@ function maybeBoot(): void {
 				"contributes": { "configurationDefaults": settingsDefaults }
 			});
 
-			// The hello extension — the default API context (so getApi()/runCommand work) + the hello world
-			// command. Registered as CJS by the URL of its bundle, served beside this entry (bundledExtension in
-			// build.ts), so its code is fetched on activation rather than carried in workbench.js. The other
-			// extensions below register the same way.
-			const ext = registerExtension(helloManifest, ExtensionHostKind.LocalProcess);
+			// worker-pod — the bridge between the core runtime and VS Code, and the ONE way core reaches VS Code: core's
+			// vscode API is the pod's (getApi), so everything core does in VS Code is done as the bridge, and nothing
+			// else of core's crosses. It also hosts the language servers (on the main-thread LocalProcess host, so it
+			// spawns top-level, non-throttled server workers), the debug adapters, tasks and Source Control. Registered
+			// as CJS by the URL of its bundle, served beside this entry (bundledExtension in build.ts), so its code is
+			// fetched on activation rather than carried in workbench.js; the other extensions below register the same way.
+			const workerPodExt = registerExtension(workerPodManifest, ExtensionHostKind.LocalProcess);
 
-			ext.registerFileUrl("./extension.js", new URL(helloExtensionPath, location.href).href);
-			ext.setAsDefaultApi().catch((error: unknown) => {
+			workerPodExt.registerFileUrl("./extension.js", new URL(workerPodExtensionPath, location.href).href);
+			workerPodExt.setAsDefaultApi().catch((error: unknown) => {
 				bootSpan.error("setAsDefaultApi failed", { "error": errText(error) });
 			});
-			ext.getApi().then((api: unknown) => {
+			workerPodExt.getApi().then((api: unknown) => {
 				vscodeApi = api;
 				// Unblock the debug bridge (window.__editor.ready / .api). See debug-bridge.ts.
 				markApiReady(); // let a queued openProject (picker) proceed
@@ -593,15 +591,8 @@ function maybeBoot(): void {
 
 					workbenchHub.subscribe("theme.colorScheme", (data) => { applyEditorTheme((data as { "dark"?: boolean } | null)?.dark ?? themeMq.matches); });
 					themeMq.addEventListener("change", () => { applyEditorTheme(themeMq.matches); });
-					bootSpan.info("hello extension api captured");
-			}).catch((error: unknown) => { bootSpan.error("hello extension setup failed", { "error": errText(error) }); });
-
-			// The LSP host — the manager extension that runs language servers in workers (LSP spine). Registered
-			// on the main-thread (LocalProcess) host so it spawns top-level, non-throttled server workers; the
-			// server ships inside its own bundle and starts as a Blob-URL module worker (see its extension.ts).
-			const workerPodExt = registerExtension(workerPodManifest, ExtensionHostKind.LocalProcess);
-
-			workerPodExt.registerFileUrl("./extension.js", new URL(workerPodExtensionPath, location.href).href);
+					bootSpan.info("the bridge's vscode api, for core");
+			}).catch((error: unknown) => { bootSpan.error("the bridge's setup failed", { "error": errText(error) }); });
 
 			// The eslint extension — a TS server plugin that lints inside tsserver, reusing tsserver's own `ts`
 			// (no bundled copy). Registered in the WEB-WORKER host (where tsserver runs) so the ext-host worker's
@@ -662,7 +653,7 @@ function maybeBoot(): void {
 
 			runningExt.registerFileUrl("./extension.js", new URL(runningExtensionPath, location.href).href);
 
-			bootSpan.info("extensions registered", { "extensions": ["hello", "worker-pod", "eslint", "capabilities", "insights", "running", "event-sheet"] });
+			bootSpan.info("extensions registered", { "extensions": ["worker-pod", "eslint", "capabilities", "insights", "running", "event-sheet"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");
