@@ -4,8 +4,7 @@
  * running, stop any of it, and refuse to start a second copy of a service that's already up.
  *
  * A run is a **service** (a dev server: runs until stopped) or a **task** (a script: runs to completion). The registry
- * keeps the running ones and the last few that ended, and publishes the whole list on `runs.changed` whenever it
- * changes, and serves `runs.list` and `runs.stop`.
+ * keeps the running ones and the last few that ended, and serves them (`runs.list`) and stopping one (`runs.stop`).
  *
  * It's the core runtime's own account, read by the shell's run picker, profile-files.ts (where a profiled preview's dev
  * server serves) and agents (debug-mcp's `runs`). VS Code's "what's running" is the `running` extension's, from VS
@@ -13,9 +12,6 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { serve } from "@brianjenkins94/hub";
-
-/** `runs.changed`: the list, every time it changes. */
-export const RUNS_CHANGED = "runs.changed";
 
 export type RunKind = "service" | "task";
 export type RunState = "running" | "exited" | "failed" | "stopped";
@@ -65,9 +61,8 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 	const ended: RunInfo[] = [];
 	let next = 0;
 
-	// Copies: a subscriber in this realm gets the list itself, not a clone, and must not see a run change under it.
+	// Copies: a caller in this realm gets the list itself, not a clone, and must not see a run change under it.
 	const list = (): RunInfo[] => [...[...running.values()].map((run) => run.info).sort((a, b) => b.startedAt - a.startedAt), ...ended].map((info) => ({ ...info }));
-	const changed = (): void => { hub.publish(RUNS_CHANGED, list()); };
 
 	serve(hub, "runs.list", () => list());
 	serve(hub, "runs.stop", (args) => {
@@ -84,14 +79,12 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 			const info: RunInfo = { ...run, "id": id, "state": "running", "startedAt": Date.now() };
 
 			running.set(id, { "info": info, "stop": stop });
-			changed();
 
 			return {
 				"id": id,
 				"update": (change) => {
 					if (running.has(id)) {
 						Object.assign(info, change);
-						changed();
 					}
 				},
 				"end": (exitCode, stopped = false) => {
@@ -102,7 +95,6 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 					Object.assign(info, { "state": stopped ? "stopped" : exitCode === 0 ? "exited" : "failed", "endedAt": Date.now(), "exitCode": exitCode });
 					ended.unshift(info);
 					ended.length = Math.min(ended.length, KEEP_ENDED);
-					changed();
 				}
 			};
 		},

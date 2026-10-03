@@ -2,15 +2,15 @@
 // doesn't declare. Run: node --test test/architecture-model.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appLayout, appNodes, checkConformance, classifyUrl, declaredBetween, declaredOn, familiesOnLink, identifyWorker, nodes, subjectOfLabel } from "../architecture-model.ts";
+import { allowedOnLink, appLayout, appNodes, checkConformance, classifyUrl, declaredBetween, declaredOn, familiesOnLink, identifyWorker, nodes, subjectOfLabel, subjects } from "../architecture-model.ts";
 
 const patterns = (a, b) => familiesOnLink(a, b).map((family) => family.pattern);
 
-test("a subject family may only cross the tree links between its hubs", () => {
-	// git.* runs shell ⇄ workbench, through root
-	assert.ok(patterns("shell", "root").includes("git.>"));
-	assert.ok(patterns("root", "workbench").includes("git.>"));
-	assert.ok(!patterns("workbench", "pod").includes("git.>"));
+test("a subject family may only cross the tree links between its senders and receivers", () => {
+	// git.status runs shell → workbench, through root
+	assert.ok(patterns("shell", "root").includes("git.status"));
+	assert.ok(patterns("root", "workbench").includes("git.status"));
+	assert.ok(!patterns("workbench", "pod").includes("git.status"));
 	// capability.decide: pod serves, root (for the sw) and shell call — so it crosses root⇄workbench, workbench⇄pod,
 	// shell⇄root; the sw only ever asks its tab's root (capability.decide.<tab>), never the pod directly
 	for (const [a, b] of [["root", "workbench"], ["workbench", "pod"], ["shell", "root"]]) {
@@ -23,6 +23,34 @@ test("a subject family may only cross the tree links between its hubs", () => {
 	assert.ok(!patterns("workbench", "node").includes("capability.decide"));
 	// logs go everywhere
 	assert.ok(patterns("pod", "debug-worker").includes("$sys.log.>"));
+});
+
+test("and only in its direction: an event or a call from its senders to its receivers, a reply back", () => {
+	// a call goes caller → server, its reply server → caller
+	assert.ok(allowedOnLink("git.status()", "shell", "root"));
+	assert.ok(!allowedOnLink("git.status()", "root", "shell"), "the workbench doesn't call the shell's git.status");
+	assert.ok(allowedOnLink("↩ git.status()", "root", "shell"));
+	assert.ok(!allowedOnLink("↩ git.status()", "shell", "root"));
+	// an event goes publisher → subscriber
+	assert.ok(allowedOnLink("git.changed", "workbench", "root"));
+	assert.ok(!allowedOnLink("git.changed", "root", "workbench"), "the shell doesn't announce git changes");
+	// a dynamic hub is its pattern's: a preview window's page asks the shell, never the other way
+	assert.ok(allowedOnLink("preview.decide()", "preview:5173", "shell"));
+	assert.ok(!allowedOnLink("preview.decide()", "shell", "preview:5173~2"));
+	// what isn't declared may cross nowhere
+	assert.ok(!allowedOnLink("runs.changed", "workbench", "root"));
+});
+
+test("every family names who sends it and who it's for, as hubs in the tree", () => {
+	const hubs = new Set(["*", ...nodes.filter((node) => node.hub === true).map((node) => node.id), "preview:*", "debug-mcp"]);
+
+	for (const family of subjects) {
+		assert.ok(Array.isArray(family.from) && Array.isArray(family.to), family.pattern);
+
+		for (const id of [...family.from, ...family.to]) {
+			assert.ok(hubs.has(id), `${family.pattern}: ${id} isn't a hub`);
+		}
+	}
 });
 
 test("labels map back to subjects; control frames aren't subjects", () => {
@@ -40,6 +68,8 @@ test("conformance flags undeclared channels, unexpected subjects, duplicate peer
 		"channels": [
 			{ "a": "shell", "b": "root", "labels": labels("git.status()", "↩ git.status()", "hello", "$sys.log.shell") },
 			{ "a": "workbench", "b": "pod", "labels": labels("git.commit()") }, // git.* doesn't belong below the workbench
+			// counted by direction: the shell's git.changed would be the wrong way round
+			{ "a": "root", "b": "shell", "labels": new Map([["git.changed", { "count": 3, "hub": 3, "forward": 2, "backward": 1 }]]) },
 			{ "a": "shell", "b": "node", "labels": labels("x") }, // no such link or channel
 			{ "a": "workbench", "b": "worker:TextMateWorker", "labels": labels("$acceptNewModel") },
 			// a probe-observed message on a pair that is ALSO a hub link isn't a subject
@@ -50,6 +80,7 @@ test("conformance flags undeclared channels, unexpected subjects, duplicate peer
 
 	assert.deepEqual(violations, [
 		{ "type": "unexpected-subject", "a": "workbench", "b": "pod", "subject": "git.commit", "count": 1 },
+		{ "type": "unexpected-subject", "a": "shell", "b": "root", "subject": "git.changed", "count": 1 },
 		{ "type": "undeclared-channel", "a": "shell", "b": "node" },
 		{ "type": "duplicate-peer", "hub": "sw", "peer": "root", "links": 2 },
 		{ "type": "unknown-node", "id": "mystery" } // a webview (webview:1) is known: an inline document is fine here

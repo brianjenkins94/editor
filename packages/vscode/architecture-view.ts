@@ -12,7 +12,7 @@ import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@bria
 import type { ContainerSpec, Violation } from "./architecture-model";
 import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
 import type { AppLayout } from "./architecture-model";
-import { appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredOn, declaredMermaid, nodes as declaredNodes, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectMatches, subjectOfLabel } from "./architecture-model";
+import { allowedOnLink, appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredOn, declaredMermaid, nodes as declaredNodes, directionOnLink, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectOfLabel } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 import { windowTitle } from "./virtual-path";
 
@@ -1151,7 +1151,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			declared?.type === "channel" && section(declared.spec.protocol, keyValues([["Transport", declared.spec.transport]]), h("p", null, declared.spec.description)),
 			declared?.type === "hub" && section(
 				"Subjects allowed across this link",
-				h("div", { "class": "arch-subjects" }, ...families.map((family) => h("span", { "class": "arch-subject", "title": family.description }, family.pattern)))
+				h("p", { "class": "arch-muted" }, "Each the way its events and calls go: → toward ", h("code", null, labelOf(store, b)), ", ← toward ", h("code", null, labelOf(store, a)), "."),
+				h("div", { "class": "arch-subjects" }, ...families.map((family) => h("span", { "class": "arch-subject", "title": `${family.description}\nfrom ${family.from.join(", ") || "nobody"} to ${family.to.join(", ") || "nobody"}` }, `${directionOnLink(family, a, b) ?? ""} ${family.pattern}`)))
 			)
 		];
 
@@ -1160,10 +1161,15 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		}
 
 		const unexpected = (label: string): boolean => {
-			// Only hub-carried messages are subjects; a probe-observed message on the same pair isn't.
-			const subject = declared?.type === "hub" && (channel.labels.get(label)?.hub ?? 0) > 0 ? subjectOfLabel(label) : undefined;
+			// Only hub-carried messages are subjects; a probe-observed message on the same pair isn't. Each is checked the
+			// way it went.
+			const stats = channel.labels.get(label);
 
-			return subject !== undefined && !families.some((family) => subjectMatches(family.pattern, subject));
+			if (declared?.type !== "hub" || stats === undefined || (stats.hub ?? 0) === 0 || subjectOfLabel(label) === undefined) {
+				return false;
+			}
+
+			return (stats.forward > 0 && !allowedOnLink(label, a, b)) || (stats.backward > 0 && !allowedOnLink(label, b, a));
 		};
 
 		const labels = [...channel.labels.entries()].filter(([label]) => showAcks || !label.startsWith("ack ")).sort(([, x], [, y]) => y.count - x.count);

@@ -12,7 +12,6 @@
  * `preview:<port>` — the port's first — or `preview:<port>~<n>`. It applies what arrives over the hub:
  *   • `preview.open`  { port } → the server's window (a first one, or resurface the last used).
  *   • `preview.ready` { url, port } → the server is up at `url`: point every window of the port there.
- *   • `preview.window` { port, url? } → another window onto a running server (at `url`, a page of it, if given).
  *   • `preview.close` { port } → the server stopped: close every window of the port. Closing a window closes just it
  *     — but closing a server's last window stops the server (as it always did: it's how a preview is dismissed).
  *   • `preview.hmr.<port>` → post the HMR update into every window of the port (its injected client applies it).
@@ -533,15 +532,6 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			if (showing === undefined || showing.origin !== base.origin || !showing.pathname.startsWith(base.pathname)) {
 				surface.frame.src = info.url;
 			}
-		}
-	});
-
-	hub.subscribe("preview.window", (data) => {
-		const info = data as { "port"?: number; "url"?: string } | null;
-
-		// Only onto a running server (a window has nothing to show otherwise).
-		if (typeof info?.port === "number" && servers.has(info.port)) {
-			openWindow(info.port, typeof info.url === "string" ? { "url": info.url } : {});
 		}
 	});
 

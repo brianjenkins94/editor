@@ -5,8 +5,9 @@
  * - `containers`: where code runs (realms, origins), nested like the real thing (workbench iframe ⊃ ext host iframe
  *   ⊃ its worker).
  * - `nodes`: the contexts we expect, by id — hub ids for hub-carrying contexts, probe ids for the rest.
- * - `hubLinks`: the hub TREE. `subjects`: which hubs publish/serve/subscribe each subject family — a family may only
- *   cross the tree links between its participants.
+ * - `hubLinks`: the hub TREE. `subjects`: each subject family's direction — who sends it (publishes the event, makes
+ *   the call) and who it's for (subscribes, serves) — and a family's messages may only cross the tree links on the path
+ *   from a sender to a receiver, that way round (a reply, back). Adding a publisher or a subscriber is a change here.
  * - `channels`: the non-hub channels (workers, extension hosts, network, storage).
  *
  * Webviews (`webview:<id>`, in the workbench iframe) are declared for what works here: a document set inline and VS Code's
@@ -55,11 +56,19 @@ export interface ChannelSpec {
 	"description": string;
 }
 
+/**
+ * A subject family, with its direction: who sends it, and who it's for. An event goes `from` a publisher `to` its
+ * subscribers; a call goes `from` its callers `to` the hub that serves it, and its reply comes back. Each is allowed only
+ * along the hub tree's path from one of its senders to one of its receivers, in that direction — so adding a publisher
+ * or a subscriber somewhere is a change to the model, and says who talks to whom. `*` = every hub.
+ */
 export interface SubjectFamily {
 	/** NATS-style pattern on the subject (RPC by method name: `git.status` for `$rpc.call.git.status`). */
 	"pattern": string;
-	/** Hubs that publish, serve or subscribe it. `*` = every hub. */
-	"hubs": string[];
+	/** Who sends it: publishes the event, or makes the call. */
+	"from": string[];
+	/** Who it's for: subscribes to the event, or serves the call (and so sends the reply). */
+	"to": string[];
 	"description": string;
 }
 
@@ -132,44 +141,98 @@ export const hubLinks: [string, string][] = [
 ];
 
 export const subjects: SubjectFamily[] = [
-	{ "pattern": "$sys.log.>", "hubs": ["*"], "description": "Structured logs, to the root collector and debug-mcp." },
-	{ "pattern": "$sys.metrics.>", "hubs": ["*"], "description": "The metrics plane: each context's gauges, sampled once a second (editor-metrics.ts), to the pod's bridge for the insights monitor." },
-	{ "pattern": "$sys.backlog.log", "hubs": ["root", "debug-mcp", "preview:*"], "description": "A page's startup records, sent once its debug-mcp link can carry them (observability's logBacklog): the editor root's, and a previewed app's through the shell." },
-	{ "pattern": "project.>", "hubs": ["shell", "root"], "description": "Project catalog and opening." },
-	{ "pattern": "workspace.files", "hubs": ["shell", "root"], "description": "The current project's files." },
-	{ "pattern": "workbench.>", "hubs": ["root", "workbench"], "description": "Boot handshake (init, online), saves, project switches, files." },
-	{ "pattern": "git.>", "hubs": ["shell", "workbench"], "description": "The git review panel over the git service." },
-	{ "pattern": "history.chunks", "hubs": ["shell", "workbench"], "description": "Edit history for the review panel." },
-	{ "pattern": "targets.list", "hubs": ["shell", "workbench"], "description": "Run targets." },
-	{ "pattern": "run.target", "hubs": ["shell", "workbench", "pod"], "description": "Run a target in a fresh terminal: the run picker's choice, or F5 on a file that serves." },
-	{ "pattern": "theme.colorScheme", "hubs": ["shell", "workbench"], "description": "Theme sync." },
-	{ "pattern": "dock.>", "hubs": ["shell", "workbench"], "description": "The shell's dock and VS Code's editor area: VS Code's new windows as dock panels (dock.openWindow, dock.closeWindow), and dock panels shown as VS Code editors (dock.hostEditor, dock.closeEditor)." },
-	{ "pattern": "preview.>", "hubs": ["shell", "root", "workbench", "node"], "description": "Preview windows, the dev server, HMR." },
-	{ "pattern": "preview.decide", "hubs": ["shell", "preview:*"], "description": "A preview window's page tap asks for a capability the service worker can't see (WebSocket, WebRTC) — prompted in that window." },
-	{ "pattern": "preview.open", "hubs": ["shell", "preview:*"], "description": "A preview window's page tap hands up a page the app opened as a new window: another preview window." },
-	{ "pattern": "virtual.request.*", "hubs": ["sw", "root"], "description": "The service worker's /__virtual__/<tab>/<port>/ requests, addressed to the tab whose root relays them." },
-	{ "pattern": "virtual.request", "hubs": ["root", "workbench", "node"], "description": "A preview's requests, answered by the node worker's dev servers." },
-	{ "pattern": "capability.decide.*", "hubs": ["sw", "root"], "description": "The service worker's capability decisions, addressed to the tab whose root relays them to its pod." },
-	{ "pattern": "workspace.changed", "hubs": ["workbench", "node", "node-scripts"], "description": "Every change a realm makes to the shared workspace — persisted and announced by the workbench; dev servers hot-reload from it." },
-	{ "pattern": "workspace.buffer", "hubs": ["workbench", "node", "node-scripts"], "description": "The node workers ask for the shared workspace buffer." },
-	{ "pattern": "node.>", "hubs": ["workbench", "pod", "node", "node-scripts"], "description": "Node runs: start, stdout, exit, stdin, and a port it starts listening on (the scripts worker); and a script's own server, asked for by the dev-server worker (node.script.request)." },
-	{ "pattern": "runs.>", "hubs": ["workbench", "root", "shell"], "description": "The core runtime's runs (runs.ts): every terminal's node scripts and dev servers — services and tasks — as the list changes, and its list and stop calls, for the run picker and the runs page tool." },
-	{ "pattern": "classify.>", "hubs": ["workbench", "classify"], "description": "Cosmetic/semantic verdicts and edit-burst grouping (cancellable)." },
-	{ "pattern": "recognizer.project", "hubs": ["workbench", "recognizer"], "description": "Project a game into the event sheet's model." },
-	{ "pattern": "provoke.round", "hubs": ["node", "provoke"], "description": "One cold transform round: the workspace buffer in, failures out." },
-	{ "pattern": "debug.>", "hubs": ["shell", "workbench", "pod"], "description": "Debug sessions and the toolbar." },
-	{ "pattern": "debug.sessions", "hubs": ["pod", "root"], "description": "The live tsval sessions (for this tab's debug_* page tools, served by its root)." },
-	{ "pattern": "debug.start", "hubs": ["pod", "root"], "description": "Start a tsval session, answered with its first stop (this tab's debug_start page tool)." },
-	{ "pattern": "debug.breakpoints", "hubs": ["pod", "root"], "description": "Replace a file's breakpoints (this tab's debug_breakpoints page tool)." },
-	{ "pattern": "debug.session.>", "hubs": ["pod", "debug-worker", "root"], "description": "One tsval session: the adapter ⇄ worker protocol (control, events), and this tab's debug_* page tools stepping, reading or stopping it." },
-	{ "pattern": "production.>", "hubs": ["workbench", "pod"], "description": "Production (server) runs." },
-	{ "pattern": "tsval.preview.>", "hubs": ["shell", "workbench", "pod", "debug-worker"], "description": "The tsval render surface." },
-	{ "pattern": "capability.decide", "hubs": ["pod", "root", "shell"], "description": "Network/IO capability decisions, served by the pod." },
-	{ "pattern": "capability.prompt", "hubs": ["pod", "shell"], "description": "Ask the user about a capability, served by the shell." },
-	{ "pattern": "pod.ready", "hubs": ["pod", "debug-worker"], "description": "A debug worker is up." },
-	{ "pattern": "tab.>", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp's tab discovery: which editor tabs are linked, by id." },
-	{ "pattern": "page_tools.*", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp reads one tab's page-tool manifest (and hears when it changes)." },
-	{ "pattern": "tool.>", "hubs": ["root", "debug-mcp", "preview:*"], "description": "debug-mcp calls a tab's page tools — every page's page_eval / page_query, the editor's debugger, provoke and CDP tools (page-tools.ts), an app's own (served under its tab id)." }
+	// ── observability ──
+	{ "pattern": "$sys.log.>", "from": ["*"], "to": ["root", "debug-mcp", "shell"], "description": "Structured logs: to the root collector and debug-mcp; a previewed app's to the shell, which files them under its window." },
+	{ "pattern": "$sys.metrics.>", "from": ["*"], "to": ["pod", "debug-mcp", "shell"], "description": "The metrics plane: each context's gauges, sampled once a second (editor-metrics.ts), to the pod's bridge for the insights monitor and to debug-mcp; a previewed app's to the shell first." },
+	{ "pattern": "$sys.backlog.log", "from": ["root", "preview:*"], "to": ["debug-mcp"], "description": "A page's startup records, sent once its debug-mcp link can carry them (observability's logBacklog): the editor root's, and a previewed app's through the shell." },
+	{ "pattern": "tab.discover", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"], "description": "debug-mcp asks which tabs are linked (a preview's app is one, through the shell)." },
+	{ "pattern": "tab.here", "from": ["root", "preview:*"], "to": ["debug-mcp"], "description": "A tab answers discovery with its id." },
+	{ "pattern": "page_tools.changed", "from": ["root", "shell", "preview:*"], "to": ["debug-mcp"], "description": "A tab's page tools changed (a preview window's page reloaded): re-read its manifest." },
+	{ "pattern": "page_tools.*", "from": ["debug-mcp"], "to": ["root", "preview:*"], "description": "debug-mcp reads one tab's page-tool manifest." },
+	{ "pattern": "tool.>", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"], "description": "debug-mcp calls a tab's page tools — the editor's (page-tools.ts: page_eval, the debugger, provoke, CDP, profiles, runs), an app's own (served under its tab id)." },
+	// ── the shell ⇄ the app and the workbench ──
+	{ "pattern": "project.>", "from": ["shell"], "to": ["root"], "description": "The project picker: the catalog (project.list) and opening one." },
+	{ "pattern": "workspace.files", "from": ["shell"], "to": ["root"], "description": "The current project's files." },
+	{ "pattern": "workbench.init", "from": ["workbench"], "to": ["root"], "description": "The workbench's boot handshake: what to open." },
+	{ "pattern": "workbench.online", "from": ["workbench"], "to": ["root"], "description": "The workbench is up." },
+	{ "pattern": "workbench.save", "from": ["workbench"], "to": ["root"], "description": "A save, for the app frame." },
+	{ "pattern": "workbench.files", "from": ["root"], "to": ["workbench"], "description": "The app frame asks the workbench for the workspace's files." },
+	{ "pattern": "workbench.openProject", "from": ["root"], "to": ["workbench"], "description": "Switch the workbench to another project." },
+	{ "pattern": "git.status", "from": ["shell"], "to": ["workbench"], "description": "The git review panel over the git service: the changes." },
+	{ "pattern": "git.file", "from": ["shell"], "to": ["workbench"], "description": "A changed file's two sides." },
+	{ "pattern": "git.classify", "from": ["shell"], "to": ["workbench"], "description": "A change's cosmetic/semantic verdicts." },
+	{ "pattern": "git.commit", "from": ["shell"], "to": ["workbench"], "description": "Commit." },
+	{ "pattern": "git.discard", "from": ["shell"], "to": ["workbench"], "description": "Discard a change." },
+	{ "pattern": "git.changed", "from": ["workbench"], "to": ["shell"], "description": "The working tree changed: refresh the review panel." },
+	{ "pattern": "history.chunks", "from": ["shell"], "to": ["workbench"], "description": "Edit history for the review panel." },
+	{ "pattern": "targets.list", "from": ["shell"], "to": ["workbench"], "description": "The run picker's targets." },
+	{ "pattern": "run.target", "from": ["shell", "pod"], "to": ["workbench"], "description": "Run a target in a fresh terminal: the run picker's choice, or F5 on a file that serves." },
+	{ "pattern": "runs.list", "from": ["shell", "root"], "to": ["workbench"], "description": "The core runtime's runs: the run picker's running markers, the runs page tool." },
+	{ "pattern": "runs.stop", "from": ["root"], "to": ["workbench"], "description": "Stop a run (the runs page tool)." },
+	{ "pattern": "theme.colorScheme", "from": ["shell"], "to": ["workbench"], "description": "Theme sync." },
+	{ "pattern": "dock.openWindow", "from": ["workbench"], "to": ["shell"], "description": "A VS Code window opens as a panel of the shell's dock." },
+	{ "pattern": "dock.closeWindow", "from": ["workbench"], "to": ["shell"], "description": "Its window closed." },
+	{ "pattern": "dock.hostEditor", "from": ["shell"], "to": ["workbench"], "description": "A dock panel shown as a VS Code editor." },
+	{ "pattern": "dock.closeEditor", "from": ["shell"], "to": ["workbench"], "description": "That editor closed." },
+	// ── previews ──
+	{ "pattern": "preview.start", "from": ["root", "workbench"], "to": ["node"], "description": "Start a dev server's preview in the dev-server worker." },
+	{ "pattern": "preview.provoke", "from": ["root", "workbench"], "to": ["node"], "description": "A cold transform round, for the provoke page tool." },
+	{ "pattern": "preview.open", "from": ["workbench", "shell"], "to": ["shell", "root"], "description": "Open (or resurface) a server's preview window." },
+	{ "pattern": "preview.open", "from": ["preview:*"], "to": ["shell"], "description": "A preview window's page tap hands up a page the app opened as a new window: another preview window." },
+	{ "pattern": "preview.ready", "from": ["root"], "to": ["shell"], "description": "A server is up at its address: point its windows there." },
+	{ "pattern": "preview.close", "from": ["workbench", "shell"], "to": ["root", "workbench", "node", "shell"], "description": "A server stopped, or its last window closed: close its windows, stop its preview." },
+	{ "pattern": "preview.hmr.*", "from": ["node"], "to": ["shell", "workbench"], "description": "A dev server's HMR update, into every window of its port." },
+	{ "pattern": "preview.decide", "from": ["preview:*"], "to": ["shell"], "description": "A preview window's page tap asks for a capability the service worker can't see (WebSocket, WebRTC) — prompted in that window." },
+	{ "pattern": "preview.cdp", "from": ["root", "shell"], "to": ["shell"], "description": "A CDP command to a preview window's page: its docked DevTools, the preview_cdp page tool." },
+	{ "pattern": "preview.cdp.event.*", "from": ["shell"], "to": ["shell"], "description": "A preview page's CDP events, to its docked DevTools." },
+	{ "pattern": "preview.profile", "from": ["root"], "to": ["shell"], "description": "Profile a preview window's page (the preview_profile page tool)." },
+	{ "pattern": "preview.profiled", "from": ["shell"], "to": ["workbench"], "description": "A preview ran slow and was profiled: the workbench saves it, source-mapped (profile-files.ts)." },
+	{ "pattern": "virtual.request.*", "from": ["sw"], "to": ["root"], "description": "The service worker's /__virtual__/<tab>/<port>/ requests, addressed to the tab whose root relays them." },
+	{ "pattern": "virtual.request", "from": ["root", "workbench"], "to": ["node"], "description": "A preview's requests, answered by the dev-server worker." },
+	{ "pattern": "node.script.request", "from": ["node"], "to": ["node-scripts"], "description": "A request for a port no dev server has: a running script's own server, in the script worker." },
+	// ── the workspace ──
+	{ "pattern": "workspace.changed", "from": ["workbench", "node", "node-scripts"], "to": ["workbench", "node", "node-scripts"], "description": "Every change a realm makes to the shared workspace — persisted and announced by the workbench; dev servers hot-reload from it." },
+	{ "pattern": "workspace.buffer", "from": ["node", "node-scripts"], "to": ["workbench"], "description": "The node workers ask for the shared workspace buffer." },
+	// ── running node ──
+	{ "pattern": "node.start", "from": ["workbench"], "to": ["node-scripts", "pod"], "description": "Start a node run in the script worker (the pod records it)." },
+	{ "pattern": "node.ready", "from": ["node-scripts"], "to": ["workbench"], "description": "The script worker is subscribed." },
+	{ "pattern": "node.out.*", "from": ["node-scripts", "pod"], "to": ["workbench"], "description": "A run's output: the script worker's, or a debug session's (auto-attach)." },
+	{ "pattern": "node.exit.*", "from": ["node-scripts", "pod", "workbench"], "to": ["workbench", "pod"], "description": "A run ended: the script worker's, a debug session's, or an interrupted one's (the runner's own) — the pod records it." },
+	{ "pattern": "node.stdin.*", "from": ["workbench"], "to": ["node-scripts"], "description": "Typed input, to a running script." },
+	{ "pattern": "node.listening.*", "from": ["node-scripts"], "to": ["workbench"], "description": "A running script started listening on a port: it's a service." },
+	{ "pattern": "provoke.round", "from": ["node"], "to": ["provoke"], "description": "One cold transform round: the workspace buffer in, failures out." },
+	// ── debugging ──
+	{ "pattern": "debug.launch", "from": ["workbench"], "to": ["pod"], "description": "Auto-attach: run a terminal's `node <file>` as a tsval debug session." },
+	{ "pattern": "debug.stop", "from": ["workbench"], "to": ["pod"], "description": "Stop that session (Ctrl-C)." },
+	{ "pattern": "debug.declined.*", "from": ["pod"], "to": ["workbench"], "description": "The debugger couldn't take it: run it plainly." },
+	{ "pattern": "debug.state", "from": ["pod"], "to": ["shell"], "description": "The debug toolbar's state, for a preview window's header." },
+	{ "pattern": "debug.command", "from": ["shell"], "to": ["pod"], "description": "A preview window header's debug button." },
+	{ "pattern": "debug.sessions", "from": ["root"], "to": ["pod"], "description": "The live tsval sessions (this tab's debug_* page tools)." },
+	{ "pattern": "debug.start", "from": ["root"], "to": ["pod"], "description": "Start a tsval session, answered with its first stop (debug_start)." },
+	{ "pattern": "debug.breakpoints", "from": ["root"], "to": ["pod"], "description": "Replace a file's breakpoints (debug_breakpoints)." },
+	{ "pattern": "debug.session.*.control", "from": ["pod"], "to": ["debug-worker"], "description": "One tsval session: the adapter drives its worker." },
+	{ "pattern": "debug.session.*.event", "from": ["debug-worker"], "to": ["pod"], "description": "One tsval session: its worker reports stops, output, coverage." },
+	{ "pattern": "debug.session.*.state", "from": ["root"], "to": ["pod"], "description": "This tab's debug_state page tool reads one session." },
+	{ "pattern": "debug.session.*.step", "from": ["root"], "to": ["pod"], "description": "This tab's debug_step page tool steps one session." },
+	{ "pattern": "debug.session.*.stop", "from": ["root"], "to": ["pod"], "description": "This tab's debug_stop page tool stops one session." },
+	{ "pattern": "pod.ready", "from": ["debug-worker"], "to": ["pod"], "description": "A debug worker is up." },
+	{ "pattern": "production.launch", "from": ["workbench"], "to": ["pod"], "description": "A production (real-runtime) run starts: show it as a debug session." },
+	{ "pattern": "production.out.*", "from": ["workbench"], "to": ["pod"], "description": "Its output, for the Debug Console." },
+	{ "pattern": "production.exit.*", "from": ["workbench"], "to": ["pod"], "description": "It ended." },
+	{ "pattern": "production.stop.*", "from": ["pod"], "to": ["workbench"], "description": "Its debug session's Stop." },
+	{ "pattern": "tsval.preview.open", "from": ["workbench"], "to": ["shell"], "description": "Open the tsval render surface." },
+	{ "pattern": "tsval.preview.close", "from": ["workbench"], "to": ["shell"], "description": "Close it." },
+	{ "pattern": "tsval.preview.stream", "from": ["debug-worker", "workbench"], "to": ["workbench", "shell"], "description": "A tsval session's render stream, relayed to the surface." },
+	{ "pattern": "tsval.preview.hello", "from": ["shell"], "to": ["workbench"], "description": "The surface is up." },
+	{ "pattern": "tsval.preview.event", "from": ["shell"], "to": ["workbench"], "description": "A DOM event on the surface, for the session." },
+	{ "pattern": "tsval.preview.timeTravel", "from": ["shell"], "to": ["workbench"], "description": "Scrub the session's history." },
+	// ── capabilities ──
+	{ "pattern": "capability.decide.*", "from": ["sw"], "to": ["root"], "description": "The service worker's capability decisions, addressed to the tab whose root relays them to its pod." },
+	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"], "description": "Network/IO capability decisions, served by the pod." },
+	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"], "description": "Ask the user about a capability, served by the shell." },
+	// ── workers ──
+	{ "pattern": "classify.>", "from": ["workbench"], "to": ["classify"], "description": "Cosmetic/semantic verdicts and edit-burst grouping (cancellable)." },
+	{ "pattern": "recognizer.project", "from": ["workbench"], "to": ["recognizer"], "description": "Project a game into the event sheet's model." }
 ];
 
 export const channels: ChannelSpec[] = [
@@ -252,8 +315,11 @@ export function subjectMatches(pattern: string, subject: string): boolean {
 	return patternTokens.length === subjectTokens.length;
 }
 
+/** A hub link joins a and b — themselves, or the dynamic ids they're one of (`shell` ⇄ `preview:5173` is `preview:*`'s). */
 function isHubLink(a: string, b: string): boolean {
-	return hubLinks.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
+	const [x, y] = [hubOf(a) ?? a, hubOf(b) ?? b];
+
+	return hubLinks.some(([one, other]) => (one === x && other === y) || (one === y && other === x));
 }
 
 export function findChannel(a: string, b: string): ChannelSpec | undefined {
@@ -306,29 +372,65 @@ function treePath(from: string, to: string): string[] | undefined {
 
 const hubIds = [...new Set(hubLinks.flat())];
 
-/** The subject families allowed across the hub link a–b: those whose participants sit on both sides of it. */
-export function familiesOnLink(a: string, b: string): SubjectFamily[] {
-	return subjects.filter((family) => {
-		const participants = family.hubs.includes("*") ? hubIds : family.hubs;
+/** The hub an observed id is in the tree as: itself, or the dynamic id it's one of (`preview:5173` → `preview:*`). */
+function hubOf(id: string): string | undefined {
+	return hubIds.find((hub) => hub === id) ?? hubIds.find((hub) => hub.includes("*") && globMatches(hub, id));
+}
 
-		for (const x of participants) {
-			for (const y of participants) {
-				const path = x === y ? undefined : treePath(x, y);
+/** What a hub traffic label is: a call (`git.status()`), its reply (`↩ git.status()`), or an event. */
+export type MessageKind = "call" | "reply" | "event";
 
-				if (path === undefined) {
-					continue;
-				}
+export function kindOfLabel(label: string): MessageKind {
+	return label.startsWith("↩ ") ? "reply" : label.endsWith("()") ? "call" : "event";
+}
 
-				for (let index = 0; index + 1 < path.length; index += 1) {
-					if ((path[index] === a && path[index + 1] === b) || (path[index] === b && path[index + 1] === a)) {
-						return true;
-					}
-				}
+const expand = (ids: string[]): string[] => (ids.includes("*") ? hubIds : ids);
+
+/**
+ * Whether `family` lets a message of `kind` cross the hub link from `a` to `b`: it lies on the tree path from one of the
+ * family's senders to one of its receivers, in that direction. An event or a call goes `from` → `to`; a reply, back.
+ */
+export function familyAllowsHop(family: SubjectFamily, kind: MessageKind, a: string, b: string): boolean {
+	const [x, y] = [hubOf(a), hubOf(b)];
+
+	if (x === undefined || y === undefined) {
+		return false;
+	}
+
+	const senders = expand(kind === "reply" ? family.to : family.from);
+	const receivers = expand(kind === "reply" ? family.from : family.to);
+
+	for (const sender of senders) {
+		for (const receiver of receivers) {
+			const path = sender === receiver ? [] : treePath(sender, receiver) ?? [];
+
+			if (path.some((hub, index) => hub === x && path[index + 1] === y)) {
+				return true;
 			}
 		}
+	}
 
-		return false;
-	});
+	return false;
+}
+
+/** The subject families that cross the hub link a–b at all, either way: the families the link carries. */
+export function familiesOnLink(a: string, b: string): SubjectFamily[] {
+	return subjects.filter((family) => (["event", "call"] as const).some((kind) => familyAllowsHop(family, kind, a, b) || familyAllowsHop(family, kind, b, a)));
+}
+
+/** Which way a family's events and calls cross the link a–b: `→` (a to b), `←`, or `⇄`. */
+export function directionOnLink(family: SubjectFamily, a: string, b: string): "→" | "←" | "⇄" | undefined {
+	const forward = familyAllowsHop(family, "event", a, b);
+	const backward = familyAllowsHop(family, "event", b, a);
+
+	return forward && backward ? "⇄" : forward ? "→" : backward ? "←" : undefined;
+}
+
+/** Whether the model lets `label` (a hub message) cross from `a` to `b`. */
+export function allowedOnLink(label: string, a: string, b: string): boolean {
+	const subject = subjectOfLabel(label);
+
+	return subject === undefined || subjects.some((family) => subjectMatches(family.pattern, subject) && familyAllowsHop(family, kindOfLabel(label), a, b));
 }
 
 /** The subject a hub traffic label stands for (`↩ git.status()` → `git.status`), or undefined for control frames. */
@@ -344,12 +446,14 @@ export function subjectOfLabel(label: string): string | undefined {
 
 export type Violation =
 	| { "type": "undeclared-channel"; "a": string; "b": string }
+	/** A hub message crossed from `a` to `b`, which no family's senders and receivers send that way. */
 	| { "type": "unexpected-subject"; "a": string; "b": string; "subject": string; "count": number }
 	| { "type": "duplicate-peer"; "hub": string; "peer": string; "links": number }
 	| { "type": "unknown-node"; "id": string };
 
-/** `hub`: how many of a label's messages rode the hub — only those are subjects; the rest came from probes. */
-export interface ObservedChannel { "a": string; "b": string; "labels": Map<string, { "count": number; "hub"?: number }>; "medium"?: string }
+/** `hub`: how many of a label's messages rode the hub — only those are subjects; the rest came from probes. `forward`
+ *  and `backward`: how many went a → b and b → a (without them, a label is checked either way). */
+export interface ObservedChannel { "a": string; "b": string; "labels": Map<string, { "count": number; "hub"?: number; "forward"?: number; "backward"?: number }>; "medium"?: string }
 
 /** What the model says of an observed channel: of the pair it joins — or, for a pair meeting through a medium only they
  *  use (observability draws that as one edge, `medium`), of either end's channel to the medium: the model declares a
@@ -391,13 +495,26 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 		}
 
 		if (declared.type === "hub") {
-			const families = familiesOnLink(channel.a, channel.b);
-
 			for (const [label, stats] of channel.labels) {
 				const subject = (stats.hub ?? 0) > 0 ? subjectOfLabel(label) : undefined;
+				const directed = stats.forward !== undefined || stats.backward !== undefined;
 
-				if (subject !== undefined && !families.some((family) => subjectMatches(family.pattern, subject))) {
-					violations.push({ "type": "unexpected-subject", "a": channel.a, "b": channel.b, "subject": subject, "count": stats.count });
+				if (subject === undefined) {
+					continue;
+				}
+
+				if (!directed) {
+					if (!allowedOnLink(label, channel.a, channel.b) && !allowedOnLink(label, channel.b, channel.a)) {
+						violations.push({ "type": "unexpected-subject", "a": channel.a, "b": channel.b, "subject": subject, "count": stats.count });
+					}
+
+					continue;
+				}
+
+				for (const [from, to, count] of [[channel.a, channel.b, stats.forward ?? 0], [channel.b, channel.a, stats.backward ?? 0]] as const) {
+					if (count > 0 && !allowedOnLink(label, from, to)) {
+						violations.push({ "type": "unexpected-subject", "a": from, "b": to, "subject": subject, "count": count });
+					}
 				}
 			}
 		}
