@@ -48,7 +48,6 @@
       {
         "type": "production",
         "label": "production (almostnode run)",
-        "languages": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
         "initialConfigurations": [
           {
             "type": "production",

@@ -2,6 +2,9 @@
  * What's running, in the status bar: the run registry's list (runs.ts, `runs.changed` on the hub) as "▶ 2 running",
  * there only while something is. Its list shows each run — a service (a dev server) or a task (a script), where it came
  * from, how long it's been going — and the last few that ended, with how; picking a running one offers to stop it.
+ *
+ * It also reports the debug sessions the registry wouldn't otherwise know — F5, an agent's debug_start, a coverage run;
+ * not a terminal's (`__runId`) or a dev server's (`__prodId`), which are already its — so they're in the list too.
  */
 import type { RunInfo } from "../../runs";
 import { createRpcClient } from "@brianjenkins94/hub";
@@ -29,6 +32,10 @@ export function registerRunning(context: vscode.ExtensionContext): void {
 	const item = vscode.window.createStatusBarItem("editor.running", vscode.StatusBarAlignment.Left, 50);
 	const rpc = createRpcClient(podHub);
 	let runs: RunInfo[] = [];
+	/** The debug sessions reported to the registry, by session id; and the ones it asked to stop. */
+	const reported = new Map<string, vscode.DebugSession>();
+	const stopping = new Set<string>();
+	const isOwnRun = (session: vscode.DebugSession): boolean => session.parentSession !== undefined || session.configuration["__runId"] !== undefined || session.configuration["__prodId"] !== undefined;
 
 	item.name = "Running";
 	item.command = "editor.running.show";
@@ -48,6 +55,29 @@ export function registerRunning(context: vscode.ExtensionContext): void {
 	};
 
 	context.subscriptions.push(
+		vscode.debug.onDidStartDebugSession((session) => {
+			if (isOwnRun(session)) {
+				return;
+			}
+
+			const program = typeof session.configuration["program"] === "string" ? vscode.workspace.asRelativePath(session.configuration["program"]) : undefined;
+
+			reported.set(session.id, session);
+			podHub.publish("runs.external.started", { "key": session.id, "title": program === undefined ? session.name : `${session.name} — ${program}`, "cwd": typeof session.configuration["cwd"] === "string" ? session.configuration["cwd"] : vscode.workspace.workspaceFolders?.[0]?.uri.path });
+		}),
+		vscode.debug.onDidTerminateDebugSession((session) => {
+			if (reported.delete(session.id)) {
+				podHub.publish("runs.external.ended", { "key": session.id, "stopped": stopping.delete(session.id) });
+			}
+		}),
+		{ "dispose": podHub.subscribe("runs.external.stop", (data) => {
+			const session = reported.get(String((data as { "key"?: unknown } | null)?.key));
+
+			if (session !== undefined) {
+				stopping.add(session.id);
+				void vscode.debug.stopDebugging(session);
+			}
+		}) },
 		item,
 		{ "dispose": podHub.subscribe("runs.changed", (data) => {
 			runs = Array.isArray(data) ? data as RunInfo[] : [];

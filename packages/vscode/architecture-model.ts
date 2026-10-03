@@ -90,7 +90,8 @@ export const nodes: NodeSpec[] = [
 	{ "id": "workbench", "label": "Workbench", "container": "workbench", "hub": true, "detail": "hub · workbench-entry.tsx", "description": "The monaco-vscode-api boot: services, editors, the main side of every extension host, the git service, run targets.", "observedBy": "its hub reporter + the monaco probes + network probes" },
 	{ "id": "exthost:LocalProcess:0", "label": "Local extension host", "container": "workbench", "detail": "hello, worker-pod", "description": "Extension host sharing the workbench realm: the hello extension (the captured vscode API) and worker-pod.", "observedBy": "RPCProtocol logger on its ExtensionHostManager" },
 	{ "id": "pod", "label": "Pod", "container": "workbench", "hub": true, "detail": "hub · worker-pod extension", "description": "The worker-pod extension's hub (in the LocalProcess extension host): spawns the LSP and debug workers, serves capability.decide.", "observedBy": "its hub reporter" },
-	{ "id": "node", "label": "Node worker", "container": "workers", "hub": true, "detail": "hub · almostnode, preview dev server", "description": "Runs node (almostnode) for the terminal and the preview dev server; answers virtual.request.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)" },
+	{ "id": "node", "label": "Dev-server worker", "container": "workers", "hub": true, "detail": "hub · almostnode, preview dev servers", "description": "Hosts the preview dev servers (almostnode's Vite) and answers virtual.request — a script's own server's port it hands to the scripts worker. Never terminated: stopping a script can't take a dev server with it.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)" },
+	{ "id": "node-scripts", "label": "Script worker", "container": "workers", "hub": true, "detail": "hub · almostnode, node scripts", "description": "Runs the terminal's node scripts (almostnode) when the debugger doesn't: started for the first, terminated to stop one.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)", "condition": "while a node script runs outside the debugger" },
 	{ "id": "debug-worker", "label": "Debug worker", "container": "podWorkers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the pod's debug adapter: control and events over the hub on its session's subjects, the render stream straight to the tsval preview.", "observedBy": "its hub reporter + the Worker probe", "condition": "while debugging" },
 	{ "id": "worker:server-host", "label": "LSP server host", "container": "podWorkers", "detail": "cspell (vscode-languageclient)", "description": "cspell language server, spawned by the pod — JSON-RPC over postMessage plus a ws-control port for the shared filesystem.", "observedBy": "the Worker probe" },
 	{ "id": "classify", "label": "Classify worker", "container": "workers", "hub": true, "detail": "hub · BABLR cosmetic classifier", "description": "Classifies git changes as cosmetic or semantic, and groups edit bursts, for the git SCM and the review panel.", "observedBy": "its hub reporter + the Worker probe", "condition": "when git classifies a change" },
@@ -123,6 +124,7 @@ export const hubLinks: [string, string][] = [
 	["root", "debug-mcp"],
 	["workbench", "pod"],
 	["workbench", "node"],
+	["workbench", "node-scripts"],
 	["workbench", "classify"],
 	["workbench", "recognizer"],
 	["node", "provoke"],
@@ -148,9 +150,9 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "virtual.request.*", "hubs": ["sw", "root"], "description": "The service worker's /__virtual__/<tab>/<port>/ requests, addressed to the tab whose root relays them." },
 	{ "pattern": "virtual.request", "hubs": ["root", "workbench", "node"], "description": "A preview's requests, answered by the node worker's dev servers." },
 	{ "pattern": "capability.decide.*", "hubs": ["sw", "root"], "description": "The service worker's capability decisions, addressed to the tab whose root relays them to its pod." },
-	{ "pattern": "workspace.changed", "hubs": ["workbench", "node"], "description": "Every change a realm makes to the shared workspace — persisted and announced by the workbench; dev servers hot-reload from it." },
-	{ "pattern": "workspace.buffer", "hubs": ["workbench", "node"], "description": "The node worker asks for the shared workspace buffer." },
-	{ "pattern": "node.>", "hubs": ["workbench", "pod", "node"], "description": "Node runs: start, stdout, exit, stdin." },
+	{ "pattern": "workspace.changed", "hubs": ["workbench", "node", "node-scripts"], "description": "Every change a realm makes to the shared workspace — persisted and announced by the workbench; dev servers hot-reload from it." },
+	{ "pattern": "workspace.buffer", "hubs": ["workbench", "node", "node-scripts"], "description": "The node workers ask for the shared workspace buffer." },
+	{ "pattern": "node.>", "hubs": ["workbench", "pod", "node", "node-scripts"], "description": "Node runs: start, stdout, exit, stdin (the scripts worker); and a script's own server, asked for by the dev-server worker (node.script.request)." },
 	{ "pattern": "runs.>", "hubs": ["workbench", "pod", "root"], "description": "What's running (runs.ts): every terminal's runs — services and tasks — as the list changes, and its list and stop calls, for the status bar's running list and the runs page tool." },
 	{ "pattern": "classify.>", "hubs": ["workbench", "classify"], "description": "Cosmetic/semantic verdicts and edit-burst grouping (cancellable)." },
 	{ "pattern": "recognizer.project", "hubs": ["workbench", "recognizer"], "description": "Project a game into the event sheet's model." },
@@ -195,17 +197,20 @@ export const channels: ChannelSpec[] = [
 	{ "a": "shell", "b": "devtools:*", "protocol": "CDP (Chrome DevTools Protocol)", "transport": "window.postMessage", "description": "A preview's docked DevTools frontend: raw CDP commands up, replies and events down — the shell relays them over the hub (preview.cdp / preview.cdp.event.<window>) to chobitsu in the preview window's page (preview-devtools.ts)." },
 	{ "a": "shell", "b": "tsval-preview", "protocol": "tsval render protocol", "transport": "window.postMessage + MessagePort", "description": "preview-ready → init (MessagePort); events and time travel up, the mutation stream down." },
 	{ "a": "preview:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, intercepted by the service worker", "description": "Everything under /__virtual__/<tab>/<port>/ (answered by the dev server over the hub), plus the app's own requests (CDN imports pass through; data fetches are capability-gated, failing closed). Same origin and unsandboxed, by necessity — see ARCHITECTURE.md." },
-	{ "a": "node", "b": "sw", "protocol": "capability decision, HTTP", "transport": "synchronous XMLHttpRequest (POST /__capability__/decide), fetch", "description": "Every write/delete a node script makes asks the service worker, which asks the pod (capability.decide); and the worker's own requests, like every controlled context's." },
+	{ "a": "node", "b": "sw", "protocol": "HTTP", "transport": "fetch", "description": "The dev servers' own requests (their dependencies), like every controlled context's." },
+	{ "a": "node-scripts", "b": "sw", "protocol": "capability decision, HTTP", "transport": "synchronous XMLHttpRequest (POST /__capability__/decide), fetch", "description": "Every write/delete a node script makes asks the service worker, which asks the pod (capability.decide); and the worker's own requests, like every controlled context's." },
 	{ "a": "node", "b": "vite:*", "protocol": "in-realm calls", "transport": "function calls", "description": "almostnode's in-browser Vite dev server: requests from virtual.request, file changes, HMR updates back." },
-	{ "a": "node", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "description": "A node script's own http.createServer, reached from a preview at /__virtual__/<tab>/<port>/ like a dev server." },
+	{ "a": "node-scripts", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "description": "A node script's own http.createServer, reached from a preview at /__virtual__/<tab>/<port>/ like a dev server (the dev-server worker hands such a port's requests over)." },
 	{ "a": "workbench", "b": "channel:vscode-web-state-db-global", "protocol": "VS Code storage sync", "transport": "BroadcastChannel", "description": "VS Code's global web storage (IndexedDB-backed) telling the editor's other tabs what changed." },
 	{ "a": "workbench", "b": "channel:vscode-web-state-db-global-shared", "protocol": "VS Code storage sync", "transport": "BroadcastChannel", "description": "VS Code's shared global web storage, the same across tabs." },
 	{ "a": "workbench", "b": "channel:vscode.indexedDB.vscode-userdata.changes", "protocol": "VS Code user-data sync", "transport": "BroadcastChannel", "description": "The user-data filesystem (settings, keybindings, snippets) announcing its changes to the editor's other tabs." },
 	{ "a": "shell", "b": "channel:__editor_preview_tap__", "protocol": "preview worker tap", "transport": "BroadcastChannel", "description": "A preview's workers' console, errors and capability requests (worker-tap.ts) — a worker can't reach the editor's window — and the shell's answers to them." },
-	{ "a": "node", "b": "channel:vite-ws-channel", "protocol": "WebSocket shim", "transport": "BroadcastChannel", "description": "almostnode's ws shim: a node script's WebSocket server and its clients, within the origin." },
+	{ "a": "node", "b": "channel:vite-ws-channel", "protocol": "WebSocket shim", "transport": "BroadcastChannel", "description": "almostnode's ws shim, as the dev servers use it." },
+	{ "a": "node-scripts", "b": "channel:vite-ws-channel", "protocol": "WebSocket shim", "transport": "BroadcastChannel", "description": "almostnode's ws shim: a node script's WebSocket server and its clients, within the origin." },
 	// the workspace filesystem (shared memory)
 	{ "a": "workbench", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (owner)", "description": "The vscode provider (editor, tsserver, ATA, terminal, extensions) and direct callers (isomorphic-git, the terminal's path walk). Back the other way: provider writes announced as file-change events (5ms batches) — writes from other realms, and direct writes, are NOT announced." },
-	{ "a": "node", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "almostnode: module loading, node scripts' fs, the preview dev server's transforms." },
+	{ "a": "node", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "almostnode: the preview dev servers' module loading and transforms." },
+	{ "a": "node-scripts", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "almostnode: node scripts' module loading and fs." },
 	{ "a": "worker:server-host", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "Mounted by the cspell server (documents arrive over LSP, so it's mostly idle)." },
 	{ "a": "provoke", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "description": "A cold transform round reads the workspace." },
 	{ "a": "zenfs", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (workspace-fs)", "description": "Provider writes, flushed every 500ms; restored at boot." }
@@ -541,7 +546,8 @@ export function identifyWorker(url: string): { "id": string; "label"?: string; "
 
 	switch (file) {
 		case "node-worker.js":
-			return { "id": "node", "container": "workers", "owner": "workbench" };
+			// Two of it: the scripts worker, and the dev-server worker (node-runner.ts names its role in its URL).
+			return { "id": /[?&]role=scripts\b/u.test(url) ? "node-scripts" : "node", "container": "workers", "owner": "workbench" };
 		case "debug-worker.js":
 			return { "id": "debug-worker", "container": "podWorkers", "owner": "pod" };
 		case "server-host.js":

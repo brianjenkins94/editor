@@ -188,7 +188,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 		// Stamp the preview port into the session config so the debug-toolbar mirror can tell the shell WHICH preview
 		// window this session drives (per-port toolbar routing). Undefined for a port-less node fallback.
-		void vscode.debug.startDebugging(undefined, { "type": "production", "request": "launch", "name": name, "__prodId": id, "__port": info.port });
+		// Without debugging (noDebug): a production run can't pause or step, so VS Code greys out Pause and the steps.
+		void vscode.debug.startDebugging(undefined, { "type": "production", "request": "launch", "name": name, "__prodId": id, "__port": info.port }, { "noDebug": true });
 
 		// Run-grain bracket for the PREVIEW only (a port-bound run): the SW tags that port's gated net calls with
 		// `id`, so they accumulate in silo-store's bucket; flush them as one `mode:"preview"` run record at exit. A

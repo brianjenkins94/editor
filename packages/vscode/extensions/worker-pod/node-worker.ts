@@ -48,7 +48,11 @@ import { attachSharedWorkspace, connectWorkspace, createZenfsVFS, getSharedWorks
 // schedules (almostnode skips its own timer patch when it finds ours already installed — the `__patched` guard).
 const keepAlive = installTimerKeepAlive();
 
-const hub = createHub({ "id": "node" });
+// Which of the editor's two node workers this is (node-runner puts it in our URL). `servers`, the default, hosts the
+// preview dev servers and answers their requests, and is never stopped; `scripts` runs the terminal's `node` scripts
+// and is terminated to stop one — so stopping a script can't take a dev server, its preview, down with it.
+const SCRIPTS = new URL(location.href).searchParams.get("role") === "scripts";
+const hub = createHub({ "id": SCRIPTS ? "node-scripts" : "node" });
 // The tab this worker belongs to (node-runner puts it in our URL), named when asking the shared service worker.
 const TAB = new URL(location.href).searchParams.get("tab");
 
@@ -244,31 +248,34 @@ async function runNode(args: StartArgs): Promise<void> {
 	}
 }
 
-hub.subscribe("node.start", (data) => { void runNode(data as StartArgs); });
+// Scripts are the scripts worker's alone.
+if (SCRIPTS) {
+	hub.subscribe("node.start", (data) => { void runNode(data as StartArgs); });
 
-// Tell the main thread we're subscribed so its first `node.start` doesn't out-race our interest. Repeated a few
-// times because the router only forwards `node.ready` once the main side's interest in it has propagated here
-// (which lands a tick or two after boot); the runner's fallback timeout covers the case where they all miss.
-function announceReady(): void { hub.publish("node.ready", {}); }
+	// Tell the main thread we're subscribed so its first `node.start` doesn't out-race our interest. Repeated a few
+	// times because the router only forwards `node.ready` once the main side's interest in it has propagated here
+	// (which lands a tick or two after boot); the runner's fallback timeout covers the case where they all miss.
+	function announceReady(): void { hub.publish("node.ready", {}); }
 
-announceReady();
-setTimeout(announceReady, 0);
-setTimeout(announceReady, 80);
-setTimeout(announceReady, 250);
+	announceReady();
+	setTimeout(announceReady, 0);
+	setTimeout(announceReady, 80);
+	setTimeout(announceReady, 250);
 
-hub.subscribe("node.stdin.>", (data) => {
-	const message = data as { "data"?: string; "end"?: boolean };
+	hub.subscribe("node.stdin.>", (data) => {
+		const message = data as { "data"?: string; "end"?: boolean };
 
-	if (currentStdin === undefined) {
-		return;
-	}
+		if (currentStdin === undefined) {
+			return;
+		}
 
-	if (message.end === true) {
-		currentStdin.emit("end");
-	} else if (message.data !== undefined) {
-		currentStdin.emit("data", message.data);
-	}
-});
+		if (message.end === true) {
+			currentStdin.emit("end");
+		} else if (message.data !== undefined) {
+			currentStdin.emit("data", message.data);
+		}
+	});
+}
 
 // Preview bridge relay (M0): the service worker's `/__virtual__/<tab>/<port>/…` request arrives here (relayed by
 // the tab's root); we drive the server listening on that port and return its response. The server is EITHER a preview dev server started in
@@ -332,7 +339,14 @@ const previewRoots = new Map<number, string>();
 // port/root without the caller having to know them.
 let lastPreviewConfig: { "port": number; "root": string } | undefined;
 
-serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
+/** A 503 for a port nobody here listens on. */
+function notListening(port: number): VirtualResponse {
+	return { "status": 503, "statusText": "Service Unavailable", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`No server listening on port ${port}`) };
+}
+
+/** Answer a preview's request from the server on its port in THIS worker — a dev server (the servers worker) or a
+ *  script's own http.createServer (the scripts worker) — or undefined when this worker has none there. */
+async function answerVirtual(raw: unknown): Promise<VirtualResponse | undefined> {
 	const { port, method, url, headers, body, entry } = raw as VirtualRequest;
 	const server = previewServers.get(port) ?? (getServer(port) as RequestHandler | undefined);
 
@@ -342,7 +356,7 @@ serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
 	}
 
 	if (server === undefined) {
-		return { "status": 503, "statusText": "Service Unavailable", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`No server listening on port ${port}`) };
+		return undefined;
 	}
 
 	const serverNode = (previewServers.has(port) ? "vite:" : "server:") + port;
@@ -381,37 +395,55 @@ serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
 	}
 
 	return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": response.body };
-});
+}
+
+if (SCRIPTS) {
+	// A script's own server, asked by the servers worker (below) for a port that isn't a dev server's.
+	serve(hub, "node.script.request", async (raw): Promise<VirtualResponse> => await answerVirtual(raw) ?? notListening((raw as VirtualRequest).port));
+} else {
+	serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
+		const answered = await answerVirtual(raw);
+
+		if (answered !== undefined) {
+			return answered;
+		}
+
+		// Not a dev server's port: a script's own server, in the scripts worker — or nobody's.
+		return rpc.request("node.script.request", raw, { "timeoutMs": 60_000, "waitForResponderMs": 500 }).then((reply) => reply as VirtualResponse, () => notListening((raw as VirtualRequest).port));
+	});
+}
 
 // M1: start almostnode's ViteDevServer in THIS worker on the shared workspace zen-fs, so the preview runs off
 // the main thread and shares the editor's filesystem (no separate VFS / save mirroring). `ViteDevServer` pulls
 // in `typescript` (its transpiler), so it's DYNAMICALLY imported — ts lands in a lazy chunk, off the node path.
-serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number }> => {
-	const { port, root } = raw as { "port": number; "root": string };
-	const { ViteDevServer } = await import("@brianjenkins94/almostnode");
-	const vfs = await getVfs();
-	const server = new ViteDevServer(vfs, { "port": port, "root": root }) as unknown as PreviewServer;
+if (!SCRIPTS) {
+	serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number }> => {
+		const { port, root } = raw as { "port": number; "root": string };
+		const { ViteDevServer } = await import("@brianjenkins94/almostnode");
+		const vfs = await getVfs();
+		const server = new ViteDevServer(vfs, { "port": port, "root": root }) as unknown as PreviewServer;
 
-	server.start();
-	// HMR delivery (M2): the worker has no Window to post updates to, so give the server a stand-in whose
-	// postMessage publishes the update over the hub; the main thread relays it to the preview iframe.
-	server.setHMRTarget({
-		"postMessage": (message) => {
-			architecture.record("vite:" + port, architecture.self, "event", "hmr " + ((message as { "type"?: string } | null)?.type ?? "update"));
-			hub.publish(`preview.hmr.${port}`, message);
-		}
+		server.start();
+		// HMR delivery (M2): the worker has no Window to post updates to, so give the server a stand-in whose
+		// postMessage publishes the update over the hub; the main thread relays it to the preview iframe.
+		server.setHMRTarget({
+			"postMessage": (message) => {
+				architecture.record("vite:" + port, architecture.self, "event", "hmr " + ((message as { "type"?: string } | null)?.type ?? "update"));
+				hub.publish(`preview.hmr.${port}`, message);
+			}
+		});
+		// Surface a cold-start transform failure on the observability plane so it's queryable via debug-mcp — not just a
+		// worker console.warn we can't read. The server now returns a 500 (self-healing) instead of retrying, so if this
+		// fires the preview may show a one-load error that recovers on reload; a recurrence means the race is still live.
+		server.setTransformErrorReporter((info) => { log.warn("preview transform failed (served 500, recovers on reload)", info); });
+		previewServers.set(port, server);
+		previewRoots.set(port, root.replace(/\/$/u, ""));
+		architecture.spawn({ "id": "vite:" + port, "label": "Vite dev server :" + port, "container": "workers", "detail": root, "dynamic": true });
+		lastPreviewConfig = { "port": port, "root": root };
+
+		return { "ok": true, "port": port };
 	});
-	// Surface a cold-start transform failure on the observability plane so it's queryable via debug-mcp — not just a
-	// worker console.warn we can't read. The server now returns a 500 (self-healing) instead of retrying, so if this
-	// fires the preview may show a one-load error that recovers on reload; a recurrence means the race is still live.
-	server.setTransformErrorReporter((info) => { log.warn("preview transform failed (served 500, recovers on reload)", info); });
-	previewServers.set(port, server);
-	previewRoots.set(port, root.replace(/\/$/u, ""));
-	architecture.spawn({ "id": "vite:" + port, "label": "Vite dev server :" + port, "container": "workers", "detail": root, "dynamic": true });
-	lastPreviewConfig = { "port": port, "root": root };
-
-	return { "ok": true, "port": port };
-});
+}
 
 // Run ONE hardReset round in a freshly-spawned child worker (provoke-worker.ts): a cold module realm where
 // almostnode + typescript are imported for the first time, so the FIRST transform reproduces the true cold-start
@@ -450,91 +482,93 @@ async function provokeColdChild(buffer: SharedArrayBuffer, root: string, port: n
 // A transform that loses the race returns 500 (we removed the masking retry), so we count 500s and surface the
 // reporter's error shape.
 interface ProvokeResult { "rounds": number; "modules": string[]; "hardReset": boolean; "provoked": boolean; "failures": Array<{ "round": number; "url": string; "status": number }>; "transformErrors": Array<{ "round": number; "url": string; "name": string; "message": string }> }
-serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
-	const { rounds = 10, modules, hardReset = false, port: portArg, root: rootArg } = (raw ?? {}) as { "rounds"?: number; "modules"?: string[]; "hardReset"?: boolean; "port"?: number; "root"?: string };
-	const port = portArg ?? lastPreviewConfig?.port;
-	const root = rootArg ?? lastPreviewConfig?.root;
+if (!SCRIPTS) {
+	serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
+		const { rounds = 10, modules, hardReset = false, port: portArg, root: rootArg } = (raw ?? {}) as { "rounds"?: number; "modules"?: string[]; "hardReset"?: boolean; "port"?: number; "root"?: string };
+		const port = portArg ?? lastPreviewConfig?.port;
+		const root = rootArg ?? lastPreviewConfig?.root;
 
-	if (port === undefined || root === undefined) {
-		throw new Error("preview.provoke: no preview started yet (run the terminal `vite` command first, or pass port + root)");
-	}
-
-	const { ViteDevServer } = await import("@brianjenkins94/almostnode");
-	const vfs = await getVfs();
-
-	// The module set to hammer: caller-supplied, else the whole src/ graph (what a cold boot fetches at once).
-	let urls = modules;
-
-	if (urls === undefined) {
-		try {
-			const srcDir = root.replace(/\/$/, "") + "/src";
-
-			urls = (vfs.readdirSync(srcDir) as string[]).filter((name) => /\.[jt]sx?$/.test(name)).map((name) => "/src/" + name);
-		} catch {
-			urls = ["/src/main.tsx", "/src/App.tsx"];
-		}
-	}
-
-	const failures: ProvokeResult["failures"] = [];
-	const transformErrors: ProvokeResult["transformErrors"] = [];
-	const span = log.span("preview.provoke", { "rounds": rounds, "modules": urls.length, "hardReset": hardReset });
-
-	if (hardReset) {
-		const buffer = getSharedWorkspaceBuffer();
-
-		if (buffer === undefined) {
-			span.end({ "failures": 0, "error": "no shared workspace buffer" });
-
-			throw new Error("preview.provoke hardReset: no workspace SharedArrayBuffer (needs cross-origin isolation) — use the default (warm) mode instead");
+		if (port === undefined || root === undefined) {
+			throw new Error("preview.provoke: no preview started yet (run the terminal `vite` command first, or pass port + root)");
 		}
 
-		for (let round = 0; round < rounds; round += 1) {
-			const outcome = await provokeColdChild(buffer, root, port, urls, 30000);
+		const { ViteDevServer } = await import("@brianjenkins94/almostnode");
+		const vfs = await getVfs();
 
-			for (const failure of outcome.failures) {
-				failures.push({ "round": round, "url": failure.url, "status": failure.status });
-			}
+		// The module set to hammer: caller-supplied, else the whole src/ graph (what a cold boot fetches at once).
+		let urls = modules;
 
-			for (const info of outcome.transformErrors) {
-				transformErrors.push({ "round": round, "url": info.url, "name": info.name, "message": info.message });
-			}
+		if (urls === undefined) {
+			try {
+				const srcDir = root.replace(/\/$/, "") + "/src";
 
-			if (outcome.error !== undefined) {
-				log.warn("preview.provoke child error (round " + round + ")", { "error": outcome.error });
+				urls = (vfs.readdirSync(srcDir) as string[]).filter((name) => /\.[jt]sx?$/.test(name)).map((name) => "/src/" + name);
+			} catch {
+				urls = ["/src/main.tsx", "/src/App.tsx"];
 			}
 		}
-	} else {
-		for (let round = 0; round < rounds; round += 1) {
-			previewServers.get(port)?.stop();
 
-			const server = new ViteDevServer(vfs, { "port": port, "root": root }) as unknown as PreviewServer;
+		const failures: ProvokeResult["failures"] = [];
+		const transformErrors: ProvokeResult["transformErrors"] = [];
+		const span = log.span("preview.provoke", { "rounds": rounds, "modules": urls.length, "hardReset": hardReset });
 
-			server.start();
-			server.setHMRTarget({ "postMessage": (message) => { hub.publish(`preview.hmr.${port}`, message); } });
-			server.setTransformErrorReporter((info) => { log.warn("preview transform failed (provoke round " + round + ")", info); transformErrors.push({ "round": round, "url": info.url, "name": info.name, "message": info.message }); });
-			previewServers.set(port, server);
-			lastPreviewConfig = { "port": port, "root": root };
+		if (hardReset) {
+			const buffer = getSharedWorkspaceBuffer();
 
-			// Fire the whole graph at once — losing the cold-start race is the thing we're trying to catch.
-			const results = await Promise.all(urls.map(async (url) => {
-				const response = await server.handleRequest("GET", url, {});
+			if (buffer === undefined) {
+				span.end({ "failures": 0, "error": "no shared workspace buffer" });
 
-				return { "url": url, "status": response.statusCode };
-			}));
+				throw new Error("preview.provoke hardReset: no workspace SharedArrayBuffer (needs cross-origin isolation) — use the default (warm) mode instead");
+			}
 
-			for (const result of results) {
-				if (result.status >= 500) {
-					failures.push({ "round": round, "url": result.url, "status": result.status });
+			for (let round = 0; round < rounds; round += 1) {
+				const outcome = await provokeColdChild(buffer, root, port, urls, 30000);
+
+				for (const failure of outcome.failures) {
+					failures.push({ "round": round, "url": failure.url, "status": failure.status });
+				}
+
+				for (const info of outcome.transformErrors) {
+					transformErrors.push({ "round": round, "url": info.url, "name": info.name, "message": info.message });
+				}
+
+				if (outcome.error !== undefined) {
+					log.warn("preview.provoke child error (round " + round + ")", { "error": outcome.error });
+				}
+			}
+		} else {
+			for (let round = 0; round < rounds; round += 1) {
+				previewServers.get(port)?.stop();
+
+				const server = new ViteDevServer(vfs, { "port": port, "root": root }) as unknown as PreviewServer;
+
+				server.start();
+				server.setHMRTarget({ "postMessage": (message) => { hub.publish(`preview.hmr.${port}`, message); } });
+				server.setTransformErrorReporter((info) => { log.warn("preview transform failed (provoke round " + round + ")", info); transformErrors.push({ "round": round, "url": info.url, "name": info.name, "message": info.message }); });
+				previewServers.set(port, server);
+				lastPreviewConfig = { "port": port, "root": root };
+
+				// Fire the whole graph at once — losing the cold-start race is the thing we're trying to catch.
+				const results = await Promise.all(urls.map(async (url) => {
+					const response = await server.handleRequest("GET", url, {});
+
+					return { "url": url, "status": response.statusCode };
+				}));
+
+				for (const result of results) {
+					if (result.status >= 500) {
+						failures.push({ "round": round, "url": result.url, "status": result.status });
+					}
 				}
 			}
 		}
-	}
 
-	span.end({ "failures": failures.length });
-	log.info("preview.provoke done", { "rounds": rounds, "hardReset": hardReset, "failures": failures.length });
+		span.end({ "failures": failures.length });
+		log.info("preview.provoke done", { "rounds": rounds, "hardReset": hardReset, "failures": failures.length });
 
-	return { "rounds": rounds, "modules": urls, "hardReset": hardReset, "provoked": failures.length > 0, "failures": failures, "transformErrors": transformErrors };
-});
+		return { "rounds": rounds, "modules": urls, "hardReset": hardReset, "provoked": failures.length > 0, "failures": failures, "transformErrors": transformErrors };
+	});
+}
 
 // Hot reload: every change to the workspace — an editor save, a git checkout, a script's write, from any realm —
 // arrives as `workspace.changed` (see workspace-changes.ts); each dev server re-reads the files under its root and
@@ -543,41 +577,45 @@ serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
 // its module graph, and those change on nearly every save (the git index, acquired types, the capability ledger).
 const UNWATCHED = /\/(?:\.git|node_modules|\.silo)(?:\/|$)/u;
 
-hub.subscribe(WORKSPACE_CHANGED, (data) => {
-	for (const [port, root] of previewRoots) {
-		const server = previewServers.get(port);
+if (!SCRIPTS) {
+	hub.subscribe(WORKSPACE_CHANGED, (data) => {
+		for (const [port, root] of previewRoots) {
+			const server = previewServers.get(port);
 
-		for (const change of data as WorkspaceChange[]) {
-			if (server !== undefined && change.path.startsWith(root + "/") && !UNWATCHED.test(change.path.slice(root.length))) {
-				architecture.record(architecture.self, "vite:" + port, "event", "file " + change.type);
-				server.notifyChange(change.path.slice(root.length));
+			for (const change of data as WorkspaceChange[]) {
+				if (server !== undefined && change.path.startsWith(root + "/") && !UNWATCHED.test(change.path.slice(root.length))) {
+					architecture.record(architecture.self, "vite:" + port, "event", "file " + change.type);
+					server.notifyChange(change.path.slice(root.length));
+				}
 			}
 		}
-	}
-});
+	});
+}
 
 // Ctrl-C on the terminal's `vite` command: stop that port's dev server so it's really gone (a later `npm run dev`
 // starts a fresh one). With no port (legacy single-preview teardown), stop every server.
-hub.subscribe("preview.close", (data) => {
-	const port = (data as { "port"?: number } | null)?.port;
+if (!SCRIPTS) {
+	hub.subscribe("preview.close", (data) => {
+		const port = (data as { "port"?: number } | null)?.port;
 
-	if (typeof port === "number") {
-		if (previewServers.has(port)) {
-			architecture.terminate("vite:" + port);
+		if (typeof port === "number") {
+			if (previewServers.has(port)) {
+				architecture.terminate("vite:" + port);
+			}
+
+			previewServers.get(port)?.stop();
+			previewServers.delete(port);
+			previewRoots.delete(port);
+
+			return;
 		}
 
-		previewServers.get(port)?.stop();
-		previewServers.delete(port);
-		previewRoots.delete(port);
+		for (const [running, server] of previewServers) {
+			server.stop();
+			architecture.terminate("vite:" + running);
+		}
 
-		return;
-	}
-
-	for (const [running, server] of previewServers) {
-		server.stop();
-		architecture.terminate("vite:" + running);
-	}
-
-	previewServers.clear();
-	previewRoots.clear();
-});
+		previewServers.clear();
+		previewRoots.clear();
+	});
+}

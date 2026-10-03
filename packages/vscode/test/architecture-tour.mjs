@@ -54,13 +54,35 @@ test("provoke: a cold transform round in a child worker", async () => {
 });
 
 // `node <file>` in the terminal runs under the tsval debugger (the debug worker), and a capability-gated call pauses
-// it. The node worker's own script path — its synchronous capability check with the service worker (node ⇄ sw) and a
-// script's http server (node ⇄ server:*) — is only taken when tsval declines to debug, so it isn't toured here.
+// it. The script worker's synchronous capability check with the service worker (node-scripts ⇄ sw) and a script's http
+// server (node-scripts ⇄ server:*) are taken only when tsval declines, so they aren't toured.
 test("node script: runs under the tsval debugger, with its render surface", async () => {
 	await session.terminal(`echo "require('fs').writeFileSync('/workspace/tour-out.txt', 'tour');" > tour.js && node tour.js`, { "fresh": true });
 	await session.until("the debug worker", alive("debug-worker"));
 	await session.until("the debug session's launch", hasLabel("pod", "debug-worker", /^debug\.session\..+\.control$/u));
 	await session.until("the tsval render surface", hasLabel("shell", "tsval-preview", /^init/u));
+});
+
+// When tsval declines, the script runs on the script worker — its own, so stopping it (Ctrl+C terminates that worker)
+// leaves the dev servers' worker, and the previews, running.
+test("node script: outside the debugger it runs on the script worker, and stopping it leaves the previews up", async () => {
+	const workbench = session.workbench();
+
+	await workbench.evaluate(() => {
+		const hub = globalThis.__architecture.hub;
+		const off = hub.subscribe("debug.launch", (data) => {
+			off();
+			hub.publish("debug.declined." + data.runId, {});
+		});
+	});
+	await session.terminal(`echo "setInterval(() => console.log('tick'), 300);" > forever.js && node forever.js`, { "fresh": true });
+	await session.until("the script worker's run", hasLabel("workbench", "node-scripts", /^node\.start$/u));
+	await session.page.keyboard.press("Control+C");
+	await eventually("the script stopped", async () => (await session.request("runs.list", undefined, 5000)).some((run) => run.title === "node forever.js" && run.state === "stopped") || undefined);
+
+	const preview = session.page.frames().find((frame) => /__virtual__\/[^/]+\/5173\/$/u.test(frame.url()));
+
+	assert.equal(await preview?.evaluate(async () => (await fetch(location.href)).status), 200);
 });
 
 test("webview: a markdown preview", async () => {

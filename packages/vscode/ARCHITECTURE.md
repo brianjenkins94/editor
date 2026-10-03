@@ -251,7 +251,8 @@ flowchart LR
     subgraph editorWorkers["Editor workers"]
     end
     subgraph workers["App workers"]
-      node["Node worker"]
+      node["Dev-server worker"]
+      node_scripts["Script worker"]
       classify["Classify worker"]
       recognizer["Recognizer worker"]
       provoke["Provoke worker"]
@@ -299,6 +300,7 @@ flowchart LR
   root <==>|hub| debug_mcp
   workbench <==>|hub| pod
   workbench <==>|hub| node
+  workbench <==>|hub| node_scripts
   workbench <==>|hub| classify
   workbench <==>|hub| recognizer
   node <==>|hub| provoke
@@ -309,14 +311,17 @@ flowchart LR
   shell <-.->|HTTP| sw
   workbench <-.->|IndexedDB| idb
   shell <-.->|tsval render protocol| tsval_preview
-  node <-.->|capability decision, HTTP| sw
+  node <-.->|HTTP| sw
+  node_scripts <-.->|capability decision, HTTP| sw
   workbench <-.->|VS Code storage sync| channel_vscode_web_state_db_global
   workbench <-.->|VS Code storage sync| channel_vscode_web_state_db_global_shared
   workbench <-.->|VS Code user-data sync| channel_vscode_indexedDB_vscode_userdata_changes
   shell <-.->|preview worker tap| channel___editor_preview_tap__
   node <-.->|WebSocket shim| channel_vite_ws_channel
+  node_scripts <-.->|WebSocket shim| channel_vite_ws_channel
   workbench <-.->|zen-fs| zenfs
   node <-.->|zen-fs| zenfs
+  node_scripts <-.->|zen-fs| zenfs
   worker_server_host <-.->|zen-fs| zenfs
   provoke <-.->|zen-fs| zenfs
   zenfs <-.->|IndexedDB| idb

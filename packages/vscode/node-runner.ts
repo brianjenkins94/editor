@@ -10,8 +10,10 @@
  *
  * KILL: a synchronous script body blocks the worker, so an in-band "stop" can't be read — we `terminate()` the
  * worker and respawn lazily on the next run. One process runs at a time (the terminal's foreground), so a single
- * reusable worker is enough. A fresh worker announces `node.ready` once subscribed, so the first `node.start`
- * after a (re)spawn can't out-race the worker's interest and be dropped by the router.
+ * reusable worker is enough — for scripts. The preview dev servers run in a second worker (the servers worker) that's
+ * never terminated, so stopping a script can't take a dev server, and its preview, down with it. A fresh scripts
+ * worker announces `node.ready` once subscribed, so the first `node.start` after a (re)spawn can't out-race the
+ * worker's interest and be dropped by the router.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
@@ -85,6 +87,12 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 	// zen-fs at /workspace. Null without cross-origin isolation — it then runs on its own root.
 	serve(hub, "workspace.buffer", () => workspaceBuffer ?? null);
 	const rpc = createRpcClient(hub); // for request/reply calls into the worker (e.g. the preview bridge relay)
+	// Two node workers: the scripts worker (`worker`, below) runs `node` scripts and is terminated to stop one; the
+	// servers worker hosts the preview dev servers and answers their requests — started once, never terminated, so
+	// stopping a script never takes a dev server (and its preview) with it.
+	const workerUrl = (role: "scripts" | "servers"): URL => new URL("./lsp/node-worker.js?role=" + role + (tab === undefined ? "" : "&tab=" + tab), location.href);
+
+	hub.link(portTransport(new Worker(workerUrl("servers"), { "type": "module" })));
 
 	const ensureWorker = (): void => {
 		if (worker !== undefined) {
@@ -97,7 +105,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 			resolveReady = resolve;
 			setTimeout(resolve, 1500);
 		});
-		worker = new Worker(new URL("./lsp/node-worker.js" + (tab === undefined ? "" : "?tab=" + tab), location.href), { "type": "module" });
+		worker = new Worker(workerUrl("scripts"), { "type": "module" });
 
 		// Federate the worker's hub into the workbench hub — run lifecycle (start/out/exit/stdin) and its spans
 		// ride the one link.
@@ -111,8 +119,6 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 		unlink = undefined;
 		ready = undefined;
 	};
-
-	ensureWorker(); // warm at construction so it's subscribed well before the first command
 
 	const startRun = (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks): Promise<{ "exitCode": number }> => new Promise((resolve) => {
 		const runId = crypto.randomUUID();
@@ -249,17 +255,11 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 			}
 		},
 		"isRunning": () => currentRunId !== undefined,
-		"virtualRequest": async (port, method, url, headers, body) => {
-			ensureWorker();
-			await ready; // the worker must be subscribed before we send it a request
-
-			return rpc.request("virtual.request", { "port": port, "method": method, "url": url, "headers": headers, "body": body }, { "timeoutMs": 30000 }) as Promise<VirtualResponse>;
-		},
+		// The servers worker answers these (it's started above, so it only has to finish subscribing); the scripts worker
+		// starts only when a script runs.
+		"virtualRequest": async (port, method, url, headers, body) => rpc.request("virtual.request", { "port": port, "method": method, "url": url, "headers": headers, "body": body }, { "timeoutMs": 30000, "waitForResponderMs": 10_000 }) as Promise<VirtualResponse>,
 		"startPreview": async (port, root) => {
-			ensureWorker();
-			await ready;
-
-			await rpc.request("preview.start", { "port": port, "root": root }, { "timeoutMs": 30000 });
+			await rpc.request("preview.start", { "port": port, "root": root }, { "timeoutMs": 30000, "waitForResponderMs": 10_000 });
 		},
 		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); }),
 		"openPreview": (root, port) => { hub.publish("preview.open", { "root": root, "mode": "production", "port": port }); },

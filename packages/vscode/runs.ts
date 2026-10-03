@@ -7,6 +7,10 @@
  * keeps the running ones and the last few that ended, and publishes the whole list on `runs.changed` whenever it
  * changes — the status bar's running list, debug-mcp's `runs` tool and anything else on the hub read it — and serves
  * `runs.list` and `runs.stop`.
+ *
+ * Debug sessions started some other way — F5, an agent's debug_start, a coverage run — are reported by the pod as
+ * `runs.external.started` / `.ended` (running.ts), and listed as tasks from Run and Debug; stopping one asks the pod to
+ * stop its session (`runs.external.stop`).
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { serve } from "@brianjenkins94/hub";
@@ -63,6 +67,25 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 
 	const list = (): RunInfo[] => [...[...running.values()].map((run) => run.info).sort((a, b) => b.startedAt - a.startedAt), ...ended];
 	const changed = (): void => { hub.publish(RUNS_CHANGED, list()); };
+
+	// Debug sessions the pod reports — started from Run and Debug, not from a terminal.
+	const external = new Map<string, RunHandle>();
+
+	hub.subscribe("runs.external.started", (data) => {
+		const { key, title, cwd } = (data ?? {}) as { "key"?: unknown; "title"?: unknown; "cwd"?: unknown };
+
+		if (typeof key === "string" && !external.has(key)) {
+			external.set(key, registry.start({ "title": typeof title === "string" ? title : "debug session", "kind": "task", "cwd": typeof cwd === "string" ? cwd : "/workspace", "origin": { "other": "Run and Debug" } }, () => { hub.publish("runs.external.stop", { "key": key }); }));
+		}
+	});
+	hub.subscribe("runs.external.ended", (data) => {
+		const { key, stopped } = (data ?? {}) as { "key"?: unknown; "stopped"?: unknown };
+
+		if (typeof key === "string") {
+			external.get(key)?.end(0, stopped === true);
+			external.delete(key);
+		}
+	});
 
 	serve(hub, "runs.list", () => list());
 	serve(hub, "runs.stop", (args) => {
