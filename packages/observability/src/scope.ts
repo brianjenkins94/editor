@@ -20,9 +20,9 @@ import { METRICS_SUBJECT } from "./metrics.ts";
 interface Frame { "subject"?: unknown; "data"?: unknown }
 interface Record { "context"?: { "source"?: unknown } }
 
-/** `id`, under `scope` (once — an id already under it is left alone). */
+/** `id`, under `scope` (once — an id already under it, or the scope itself, is left alone). */
 export function scopedId(scope: string, id: string): string {
-	return id.startsWith(scope + "/") ? id : scope + "/" + id;
+	return id === scope || id.startsWith(scope + "/") ? id : scope + "/" + id;
 }
 
 /** The scope an id sits under, if it's a scoped one (`<scope>/<id>`). */

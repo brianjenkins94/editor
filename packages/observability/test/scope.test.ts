@@ -126,6 +126,7 @@ test("frames: reports and records are scoped, subject and all; a backlog's recor
 test("scopedId and scopeOf", () => {
 	assert.equal(scopedId("preview:5173~2", "page"), "preview:5173~2/page");
 	assert.equal(scopedId("preview:5173~2", "preview:5173~2/page"), "preview:5173~2/page");
+	assert.equal(scopedId("player-0", "player-0"), "player-0", "a hub that names itself as its scope is the scope, not under it");
 	assert.equal(scopeOf("preview:5173~2/client-0.ui"), "preview:5173~2");
 	assert.equal(scopeOf("preview:5173"), undefined);
 });

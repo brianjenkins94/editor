@@ -418,7 +418,8 @@ function debugEnabled(): boolean {
 
 	const host = location.hostname;
 
-	if (host === "localhost" || host === "127.0.0.1") {
+	// As debug-mcp's origin check has it (an IPv6 hostname keeps its brackets).
+	if (host === "localhost" || host === "127.0.0.1" || host === "[::1]") {
 		return true;
 	}
 
@@ -639,20 +640,28 @@ function serveTools(hub: Hub, options: PageToolsOptions): { "tab": string; "set"
 	return { "tab": tab, "set": set };
 }
 
+/** Where debug-mcp listens unless told otherwise. */
+export const DEBUG_MCP_URL = "ws://localhost:7378";
+
 /**
  * Dev-only: link the page's rootHub to a running `@brianjenkins94/debug-mcp` over a WebSocket, so the whole tree's
  * `$sys.log.>` stream federates out to the Node collector and becomes queryable over MCP (query_logs /
  * query_spans / get_tree_state / wait_for) — no screenshots. Enabled per `debugEnabled` (localhost, or `?debug`
- * on the deployed site). It makes ONE quiet attempt: if no debug-mcp is running the failed connect is left alone (no
- * retry, no spam); once it HAS connected, a later drop reconnects with a short backoff (the hub's `hello`
- * handshake re-advertises interest on each relink).
+ * on the deployed site). By default it makes ONE quiet attempt: if no debug-mcp is running the failed connect is left
+ * alone (a browser prints every failed WebSocket connect, which no page can silence — so retrying is asked for:
+ * `retryMs`, for a debug-mcp started after the page); once it HAS connected, a later drop reconnects with a short
+ * backoff (the hub's `hello` handshake re-advertises interest on each relink). Returns a stop: no more attempts, and
+ * the socket closed.
  */
-export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
+export function linkDebugMcp(rootHub: Hub, url = DEBUG_MCP_URL, { retryMs }: { "retryMs"?: number } = {}): () => void {
 	if (!debugEnabled()) {
-		return;
+		return () => { /* never linked: nothing to stop */ };
 	}
 
 	let everConnected = false;
+	let stopped = false;
+	let socket: WebSocket | undefined;
+	let timer: ReturnType<typeof setTimeout> | undefined;
 	let unlink: (() => void) | undefined;
 	// What's logged before the socket is up (and its interest has arrived) — startup, mostly — would never reach it.
 	const backlog = logBacklog(rootHub);
@@ -660,6 +669,7 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 	const connect = (): void => {
 		const ws = new WebSocket(url);
 
+		socket = ws;
 		ws.addEventListener("open", () => {
 			everConnected = true;
 			const link = rootHub.link(websocketTransport(ws));
@@ -674,8 +684,14 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 			unlink = undefined;
 			backlog.rearm();
 
+			if (stopped) {
+				return;
+			}
+
 			if (everConnected) {
-				setTimeout(connect, 2000); // debug-mcp restarted — rejoin
+				timer = setTimeout(connect, 2000); // debug-mcp restarted — rejoin
+			} else if (retryMs !== undefined) {
+				timer = setTimeout(connect, retryMs); // not up yet — asked to keep trying
 			}
 		});
 
@@ -684,6 +700,12 @@ export function linkDebugMcp(rootHub: Hub, url = "ws://localhost:7378"): void {
 	};
 
 	connect();
+
+	return () => {
+		stopped = true;
+		clearTimeout(timer);
+		socket?.close();
+	};
 }
 
 export interface ObserveOptions {
@@ -739,6 +761,10 @@ export interface ObserveAppOptions extends Pick<ObserveOptions, "network" | "mes
 	"tools"?: PageTool[];
 	/** How many of the tree's records to keep (`records`), newest last. Default 1000. */
 	"keep"?: number;
+	/** Standalone, the debug-mcp to link (linkDebugMcp): its `url` (default DEBUG_MCP_URL) and `retryMs`, to keep
+	 *  trying until one is up; `false` links none (a test that runs its own, say). In the editor's preview it's unused:
+	 *  the app's records go to the editor. */
+	"debugMcp"?: false | { "url"?: string; "retryMs"?: number };
 }
 
 /**
@@ -747,7 +773,7 @@ export interface ObserveAppOptions extends Pick<ObserveOptions, "network" | "mes
  * standalone, to a running debug-mcp, serving `tools` there. `tab` is undefined when debugging is off (not localhost,
  * no `?debug`).
  */
-export function observeApp(hub: Hub, { tools = [], keep = 1000, network, messages }: ObserveAppOptions = {}): Observed & { "records": LogRecord[]; "store": ArchitectureStore; "tab": string | undefined; "addTools": (tools: PageTool[]) => void } {
+export function observeApp(hub: Hub, { tools = [], keep = 1000, network, messages, debugMcp = {} }: ObserveAppOptions = {}): Observed & { "records": LogRecord[]; "store": ArchitectureStore; "tab": string | undefined; "addTools": (tools: PageTool[]) => void } {
 	const context = observe(hub, { "network": network, "messages": messages });
 	const records: LogRecord[] = [];
 	const store = new ArchitectureStore();
@@ -762,13 +788,15 @@ export function observeApp(hub: Hub, { tools = [], keep = 1000, network, message
 	// (Every reporter holds its reports until someone listens, so the tree's arrive as this interest reaches them.)
 	collectArchReports(hub, (report) => { store.apply(report); });
 
-	if (linkPreviewHost(hub) === undefined) {
-		linkDebugMcp(hub);
-	}
-
+	const unlinkDebugMcp = linkPreviewHost(hub) === undefined && debugMcp !== false ? linkDebugMcp(hub, debugMcp.url, { "retryMs": debugMcp.retryMs }) : undefined;
 	const served = serveTools(hub, { "tools": tools });
 
-	return { ...context, "records": records, "store": store, "tab": served?.tab, "addTools": (more) => { served?.set.add(more); } };
+	const dispose = (): void => {
+		unlinkDebugMcp?.();
+		context.dispose();
+	};
+
+	return { ...context, "dispose": dispose, "records": records, "store": store, "tab": served?.tab, "addTools": (more) => { served?.set.add(more); } };
 }
 
 export * from "./log-subject.ts";
