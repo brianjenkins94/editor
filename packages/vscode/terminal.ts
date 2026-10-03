@@ -17,10 +17,12 @@
  * subshell isolation, which intercepting `cd` would not) — see terminal-session.ts. One line editor, one prompt, sync
  * input handling.
  */
+import type { Hub } from "@brianjenkins94/hub";
 import type { TerminalProcess } from "@brianjenkins94/monaco-vscode-api/main";
 
 import type { NodeOutput, NodeRunner } from "./node-runner";
 import type { BashSession, SessionState } from "./terminal-session";
+import { serve } from "@brianjenkins94/hub";
 import { createWorkspaceTerminalFs } from "./terminal-fs";
 import { commandExecuted, commandFinished, commandLine, commandStart, promptStart, workingDirectory } from "./terminal-integration";
 import { execInSession } from "./terminal-session";
@@ -56,7 +58,10 @@ function longestCommonPrefix(items: string[]): string {
 /** Terminals opened so far: each one's number names it as the origin of what it runs (runs.ts). */
 let terminalsOpened = 0;
 
-export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (data: string) => void, cwd0: string): TerminalProcess {
+/** A terminal opened to run one command (a task's, serveTaskTerminals), and how it exits when that's done. */
+export interface TerminalCommand { "command": string; "exit": (code: number) => void }
+
+export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (data: string) => void, cwd0: string, run?: TerminalCommand): TerminalProcess {
 	terminalsOpened += 1;
 
 	const terminal = terminalsOpened;
@@ -103,7 +108,8 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 		const runs = input.trim() !== "";
 		let exitCode = 0;
 
-		if (runs) {
+		// (A task's terminal reports nothing of the sort: the task itself says when it starts and how it ended.)
+		if (runs && run === undefined) {
 			fire(commandLine(input) + commandExecuted());
 		}
 
@@ -145,8 +151,13 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 			line = "";
 			pos = 0;
 			// Interrupted is 130, as a shell reports SIGINT.
-			fire(runs ? commandFinished(signal.aborted ? 130 : exitCode) : commandFinished());
-			prompt();
+			// A task's terminal ends with its command (VS Code says so, and closes it on a key); a shell prompts again.
+			if (run === undefined) {
+				fire(runs ? commandFinished(signal.aborted ? 130 : exitCode) : commandFinished());
+				prompt();
+			} else {
+				run.exit(signal.aborted ? 130 : exitCode);
+			}
 		}
 	};
 
@@ -420,10 +431,52 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 
 	const start = (): void => {
 		void getSession(); // warm the bundle while the user reads the banner
+
+		// A task's terminal: run its command, shown as typed.
+		if (run !== undefined) {
+			fire(`\x1b[1;36m${state.cwd}\x1b[0m $ ${run.command}\r\n`);
+			void runLine(run.command);
+
+			return;
+		}
+
 		fire("[1mjust-bash[0m — an in-browser shell on the workspace filesystem\r\n");
 		prompt();
 	};
 
 	// The terminal closing stops what it's running — a dev server, a script — rather than leaving it running unseen.
 	return { "start": start, "input": input, "shutdown": () => { controller?.abort(); } };
+}
+
+/**
+ * The terminals of the pod's tasks (extensions/worker-pod/tasks.ts): VS Code for the web runs a task only through the
+ * pseudoterminal its provider gives it, so the pod's asks here for a just-bash process that runs the task's command once.
+ * `terminal.run` { id, command, cwd } starts it; its output comes back on `terminal.out.<id>` and its exit code on
+ * `terminal.exit.<id>`; typed input goes in on `terminal.in.<id>`, and `terminal.stop.<id>` stops it.
+ */
+export function serveTaskTerminals(api: VscodeApi, runner: NodeRunner, hub: Hub): void {
+	serve(hub, "terminal.run", (args) => {
+		const { id, command, cwd } = (args ?? {}) as { "id"?: unknown; "command"?: unknown; "cwd"?: unknown };
+
+		if (typeof id !== "string" || typeof command !== "string") {
+			return false;
+		}
+
+		const offs: (() => void)[] = [];
+		const process = createBashProcess(api, runner, (data) => { hub.publish(`terminal.out.${id}`, data); }, typeof cwd === "string" ? cwd : "/workspace", {
+			"command": command,
+			"exit": (code) => {
+				hub.publish(`terminal.exit.${id}`, { "code": code });
+
+				for (const off of offs.splice(0)) {
+					off();
+				}
+			}
+		});
+
+		offs.push(hub.subscribe(`terminal.in.${id}`, (data) => { process.input(String(data)); }), hub.subscribe(`terminal.stop.${id}`, () => { process.shutdown?.(); }));
+		process.start();
+
+		return true;
+	});
 }

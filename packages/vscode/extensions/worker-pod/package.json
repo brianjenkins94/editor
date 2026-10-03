@@ -14,6 +14,16 @@
     "onDebugResolve:tsval"
   ],
   "contributes": {
+    "taskDefinitions": [
+      {
+        "type": "run",
+        "required": ["command"],
+        "properties": {
+          "command": { "type": "string", "description": "The command to run, as typed in a terminal (npm run dev)." },
+          "cwd": { "type": "string", "description": "Where to run it (the workspace, by default)." }
+        }
+      }
+    ],
     "breakpoints": [
       { "language": "typescript" },
       { "language": "typescriptreact" },

@@ -15,7 +15,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { RunInfo } from "./runs";
-import type { RunTarget } from "./targets";
+import type { LaunchTarget } from "./extensions/worker-pod/launch";
 import { createHub, createRpcClient, windowTransport } from "@brianjenkins94/hub";
 import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play } from "lucide";
 import { logger } from "@brianjenkins94/util/logger";
@@ -75,7 +75,7 @@ const topBar = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa
 const brand = css({ "fontWeight": "var(--wa-font-weight-semibold)", "marginInlineEnd": "var(--wa-space-s)", "color": "var(--wa-color-text-quiet)" });
 const spacer = css({ "flex": "1 1 auto" });
 
-// Run picker: the top-bar Run button opens a small popover listing the repo's discovered run targets. A fixed,
+// Run picker: the top-bar Run button opens a small popover listing what there is to run (VS Code's tasks). A fixed,
 // transparent backdrop closes it on an outside click; the menu sits above it.
 const runWrap = css({ "position": "relative", "display": "inline-flex" });
 // High z-indexes so the popover clears the editor iframe (which sits in a separate app-shell region).
@@ -319,7 +319,7 @@ function Shell() {
 	const [navWidth, setNavWidth] = useState(() => loadPaneWidth("navWidth", PANE.navDefault));
 	const [asideWidth, setAsideWidth] = useState(() => loadPaneWidth("asideWidth", PANE.asideDefault));
 	const [runOpen, setRunOpen] = useState(false);
-	const [targets, setTargets] = useState<RunTarget[]>([]);
+	const [targets, setTargets] = useState<LaunchTarget[]>([]);
 	const [runs, setRuns] = useState<RunInfo[]>([]);
 	// GitHub connection: `githubUser` is the logged-in login (undefined = not connected). The heavy client (fido) is
 	// only imported when we actually talk to GitHub, so it code-splits out of the cold-start bundle.
@@ -495,8 +495,8 @@ function Shell() {
 		}
 	};
 
-	// The run picker: toggle the popover; on open, fetch the repo's discovered run targets. Selecting one publishes
-	// `run.target` so the workbench runs it in a terminal (which mints + records the run with its target identity).
+	// The run picker: toggle the popover; on open, ask what there is to run — VS Code's tasks, through the pod
+	// (`tasks.list`: the workspace's package.json scripts and its own tasks). Picking one runs it as a task (`tasks.run`).
 	const toggleRun = (): void => {
 		const willOpen = !runOpen;
 
@@ -505,9 +505,9 @@ function Shell() {
 		if (willOpen) {
 			void (async () => {
 				try {
-					const result = await rpcRef.current?.request("targets.list", undefined, { "timeoutMs": 4000 }) as { "targets"?: RunTarget[] } | undefined;
+					const result = await rpcRef.current?.request("tasks.list", undefined, { "timeoutMs": 4000 });
 
-					setTargets(Array.isArray(result?.targets) ? result.targets : []);
+					setTargets(Array.isArray(result) ? result as LaunchTarget[] : []);
 				} catch {
 					setTargets([]);
 				}
@@ -518,16 +518,16 @@ function Shell() {
 	};
 
 	// A target's run, if it's running now (the registry titles a run as it was typed: `npm run dev`, in its directory).
-	const runOf = (target: RunTarget): RunInfo | undefined => runs.find((run) => run.state === "running" && run.title === target.command && run.cwd === target.cwd);
+	const runOf = (target: LaunchTarget): RunInfo | undefined => runs.find((run) => run.state === "running" && run.title === target.command && run.cwd === target.cwd);
 
 	// A running service is already there: show its preview rather than start a second copy (which `vite` refuses).
-	const runTarget = (target: RunTarget): void => {
+	const runTarget = (target: LaunchTarget): void => {
 		const running = runOf(target);
 
 		if (running?.port !== undefined) {
 			hubRef.current?.publish("preview.open", { "port": running.port });
 		} else if (running === undefined) {
-			hubRef.current?.publish("run.target", { "command": target.command, "cwd": target.cwd, "name": target.package === "." ? target.name : `${target.name} · ${target.package}` });
+			void rpcRef.current?.request("tasks.run", { "id": target.id }, { "timeoutMs": 10000 }).catch(() => undefined);
 		}
 
 		setRunOpen(false);
@@ -751,7 +751,7 @@ function Shell() {
 
 							<div class={runMenu()} role="menu">
 								{targets.length === 0 ? (
-									<div class={runEmpty()}>No run targets found</div>
+									<div class={runEmpty()}>Nothing to run: no package.json scripts or tasks</div>
 								) : (["service", "task"] as const).map((lifecycle) => {
 									const group = targets.filter((target) => target.lifecycle === lifecycle);
 
@@ -768,7 +768,7 @@ function Shell() {
 														class={runItem()}
 														role="menuitem"
 														tabIndex={0}
-														title={`${target.command} — ${target.reason}`}
+														title={`${target.command} — in ${target.cwd}`}
 														onClick={() => { runTarget(target); }}
 														onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); runTarget(target); } }}
 													>
@@ -776,7 +776,7 @@ function Shell() {
 
 														{running !== undefined && <span class={runItemLive()}>{running.port === undefined ? "running" : `running · :${running.port}`}</span>}
 
-														<span class={runItemMeta()}>{target.kind === "bin" ? "bin" : target.package === "." ? "script" : target.package}</span>
+														<span class={runItemMeta()}>{target.package === undefined ? "task" : target.package === "." ? "script" : target.package}</span>
 													</div>
 												);
 											})}

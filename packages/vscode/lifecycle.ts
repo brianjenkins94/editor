@@ -1,7 +1,8 @@
 /**
  * Service or task: does a runnable keep running until it's stopped (a dev server, a watcher, anything that listens),
  * or run to completion (a build, a test run, a one-off script)? It decides how the editor runs it and shows it:
- *   • the launch list (targets.ts) groups by it, and offers a running service's preview instead of a second copy;
+ *   • a package.json script that keeps running is a background task (extensions/running/tasks.ts), which the run
+ *     picker groups as a service and offers its preview instead of a second copy;
  *   • `node <file>` runs a task under the tsval debugger (stepping, time travel, coverage) and a service under the
  *     real runtime — tsval has no event loop, so a server would just fall off the end of its file;
  *   • the running list (runs.ts) shows it, and a task's result when it ends.

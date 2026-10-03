@@ -22,6 +22,7 @@ import type { Control, CoverageReport, Snapshot, StepAction, WorkerEvent } from 
 import { lifecycleOfSource } from "../../lifecycle";
 import { controlSubject, eventSubject } from "./debug-protocol";
 import { podHub } from "./pod";
+import { runTask } from "./tasks";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
 type Dap = Record<string, unknown>;
@@ -559,8 +560,8 @@ export function takeExitCode(sessionId: string): number {
  * green Run button, no launch.json), and the descriptor factory that hands back a worker-backed session.
  *
  * Bare F5 runs the file you have open. A task runs under tsval; a service (it listens, ticks, reads input —
- * lifecycle.ts) needs the event loop tsval doesn't have, so it's run as `node <file>` in a terminal instead, which
- * runs it on the real runtime.
+ * lifecycle.ts) needs the event loop tsval doesn't have, so it's run as `node <file>` in a task's terminal instead,
+ * which runs it on the real runtime.
  */
 export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
@@ -572,10 +573,11 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 					if (document !== undefined && document.uri.scheme === "file" && lifecycleOfSource(document.getText()).lifecycle === "service") {
 						const path = document.uri.path;
 						const cwd = path.slice(0, path.lastIndexOf("/")) || "/";
+						const command = "node " + path.slice(cwd.length + 1);
 
-						podHub.publish("run.target", { "command": "node " + path.slice(cwd.length + 1), "cwd": cwd });
+						void vscode.tasks.executeTask(runTask(command, command, cwd, "file", true));
 
-						return undefined; // not a debug session: the terminal runs it
+						return undefined; // not a debug session: a task runs it, in a terminal
 					}
 
 					// eslint-disable-next-line no-template-curly-in-string -- ${file} is a VS Code launch-config variable, not a JS template literal
