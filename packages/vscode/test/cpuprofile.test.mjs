@@ -56,5 +56,6 @@ test("a summary: self time and total time by function, busiest first, idle apart
 		["(anonymous)", 10, 10]
 	]);
 	assert.equal(summary.functions[0].line, 20, "the line as the source has it");
+	assert.equal(summary.functions[0].column, 5, "and the column");
 	assert.equal(summarize(toCpuProfile(trace), 1).functions.length, 1, "the top N");
 });

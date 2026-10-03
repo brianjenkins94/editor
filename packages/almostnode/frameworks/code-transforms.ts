@@ -14,7 +14,29 @@ import ts from "typescript";
  * Wraps the module with a Vite-compatible `import.meta.hot` context and, for files that define components,
  * registers them with the refresh runtime and accepts self-updates.
  */
-export function addReactRefresh(code: string, filename: string): string {
+/** The lines addReactRefresh puts before the module's code (its HMR setup). */
+const HMR_SETUP_LINES = 3;
+
+/**
+ * Move a module's inline source map down `lines` lines — for code put in front of the code it was made for. A source
+ * map's `mappings` has one `;`-separated group per generated line, so `lines` empty groups in front do it.
+ */
+export function shiftInlineSourceMap(code: string, lines: number): string {
+	return code.replace(/(\/\/# sourceMappingURL=data:application\/json;(?:charset=utf-8;)?base64,)([A-Za-z0-9+/=]+)/u, (_match, prefix: string, base64: string) => {
+		try {
+			const json = new TextDecoder().decode(Uint8Array.from(atob(base64), (char) => char.charCodeAt(0)));
+			const shifted = json.replace(/"mappings":"/u, `"mappings":"${";".repeat(lines)}`);
+
+			return prefix + btoa(Array.from(new TextEncoder().encode(shifted), (byte) => String.fromCharCode(byte)).join(""));
+		} catch {
+			return prefix + base64; // not a map we can read: leave it
+		}
+	});
+}
+
+export function addReactRefresh(compiled: string, filename: string): string {
+	// The HMR setup goes in front, so the module's source map moves down with its code (DevTools, and profiles, read it).
+	const code = shiftInlineSourceMap(compiled, HMR_SETUP_LINES);
 	const components = detectReactComponents(code);
 
 	if (components.length === 0) {

@@ -25,7 +25,7 @@ export interface CpuProfile {
 }
 
 /** One function in a summary: the time it was running itself (`selfMs`), and with what it called (`totalMs`). */
-export interface ProfileEntry { "function": string; "url": string; "line": number; "selfMs": number; "totalMs": number }
+export interface ProfileEntry { "function": string; "url": string; "line": number; "column": number; "selfMs": number; "totalMs": number }
 
 export function toCpuProfile(trace: ProfilerTrace): CpuProfile {
 	const nodes: CpuProfile["nodes"] = [];
@@ -103,7 +103,7 @@ export function summarize(profile: CpuProfile, top = 20): { "durationMs": number
 	const keyOf = (id: number): string => {
 		const frame = byId.get(id)!.callFrame;
 
-		return frame.functionName + "\0" + frame.url + "\0" + frame.lineNumber;
+		return frame.functionName + "\0" + frame.url + "\0" + frame.lineNumber + "\0" + frame.columnNumber;
 	};
 	const self = new Map<string, number>();
 	const total = new Map<string, number>();
@@ -136,9 +136,9 @@ export function summarize(profile: CpuProfile, top = 20): { "durationMs": number
 
 	const round = (ms: number): number => Math.round(ms * 10) / 10;
 	const functions = [...self].sort((a, b) => b[1] - a[1]).slice(0, top).map(([key, ms]) => {
-		const [name, url, line] = key.split("\0");
+		const [name, url, line, column] = key.split("\0");
 
-		return { "function": name, "url": url, "line": Number(line) + 1, "selfMs": round(ms), "totalMs": round(total.get(key) ?? ms) };
+		return { "function": name, "url": url, "line": Number(line) + 1, "column": Number(column) + 1, "selfMs": round(ms), "totalMs": round(total.get(key) ?? ms) };
 	});
 
 	return { "durationMs": round((profile.endTime - profile.startTime) / 1000), "idleMs": round(idleMs), "functions": functions };
