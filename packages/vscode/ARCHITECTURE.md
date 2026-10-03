@@ -317,8 +317,6 @@ flowchart LR
   workbench <-.->|VS Code storage sync| channel_vscode_web_state_db_global_shared
   workbench <-.->|VS Code user-data sync| channel_vscode_indexedDB_vscode_userdata_changes
   shell <-.->|preview worker tap| channel___editor_preview_tap__
-  node <-.->|WebSocket shim| channel_vite_ws_channel
-  node_scripts <-.->|WebSocket shim| channel_vite_ws_channel
   workbench <-.->|zen-fs| zenfs
   node <-.->|zen-fs| zenfs
   node_scripts <-.->|zen-fs| zenfs

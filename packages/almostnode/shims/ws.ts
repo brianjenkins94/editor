@@ -1,6 +1,10 @@
 /**
- * ws (WebSocket) shim for browser environment
- * Used by Vite for HMR (Hot Module Replacement)
+ * ws (WebSocket) shim for browser environment: a script's `require("ws")`.
+ *
+ * A `ws://` or `wss://` URL is a real server somewhere: the browser's own WebSocket reaches it. Any other URL (`/socket`,
+ * `http://localhost:8080/socket`) is a WebSocketServer in this same realm, listening on that path: client and server are
+ * joined in memory, each side's `send` arriving at the other — no channel between realms, so nothing leaks to another
+ * context (or another tab of the origin).
  */
 
 import { EventEmitter } from "./events";
@@ -27,18 +31,17 @@ const MessageEventPolyfill = typeof MessageEvent !== "undefined" ? MessageEvent 
 	}
 };
 
-// Message channel for communication between WebSocket server and clients
-let messageChannel: BroadcastChannel | null = null;
-
-try {
-	messageChannel = new BroadcastChannel("vite-ws-channel");
-} catch {
-  // BroadcastChannel not available in some environments
-}
-
-// Track all server instances
+// The servers listening in this realm, by path.
 const servers = new Map<string, WebSocketServer>();
-let clientIdCounter = 0;
+
+/** The path a client's URL asks for: `/socket` of `/socket` or `http://localhost:8080/socket`. */
+function pathOf(url: string): string {
+	try {
+		return new URL(url, "http://localhost").pathname;
+	} catch {
+		return url;
+	}
+}
 
 export class WebSocket extends EventEmitter {
 	static readonly CONNECTING = 0;
@@ -58,9 +61,10 @@ export class WebSocket extends EventEmitter {
 	bufferedAmount = 0;
 	binaryType: "blob" | "arraybuffer" = "blob";
 
-	private readonly _id: string;
 	private _server: WebSocketServer | null = null;
 	private _nativeWs: globalThis.WebSocket | null = null;
+	/** The other end, for a connection made in this realm: what this side sends, it receives. */
+	private _peer: WebSocket | null = null;
 
   // Event handler properties
 	onopen: ((event: Event) => void) | null = null;
@@ -71,8 +75,6 @@ export class WebSocket extends EventEmitter {
 	constructor(url: string, protocols?: string | string[]) {
 		super();
 		this.url = url;
-		clientIdCounter += 1;
-		this._id = `client-${clientIdCounter}`;
 
 		if (protocols) {
 			this.protocol = Array.isArray(protocols) ? protocols[0] : protocols;
@@ -101,84 +103,16 @@ export class WebSocket extends EventEmitter {
 			return;
 		}
 
-    // For all other URLs, use BroadcastChannel (internal Vite HMR)
-		if (!messageChannel) {
-			setTimeout(() => {
-				this.readyState = WebSocket.OPEN;
-				this.emit("open");
-				if (this.onopen) { this.onopen(new Event("open")); }
-			}, 0);
+    // Any other URL: a server in this realm, listening on its path — or, with none, a standalone client (it opens, and
+    // what it sends goes nowhere).
+		const server = servers.get(pathOf(this.url)) ?? servers.get("/");
 
-			return;
-		}
-
-    // Try to connect to a server via BroadcastChannel
-		messageChannel.postMessage({
-			"type": "connect",
-			"clientId": this._id,
-			"url": this.url
-		});
-
-    // Listen for responses
-		const channel = messageChannel;
-		const handler = (event: MessageEvent) => {
-			const { data } = event;
-
-			if (data.targetClient !== this._id) { return; }
-
-			switch (data.type) {
-				case "connected":
-					this.readyState = WebSocket.OPEN;
-					this.emit("open");
-					if (this.onopen) { this.onopen(new Event("open")); }
-					break;
-
-				case "message": {
-					const msgEvent = new MessageEventPolyfill("message", { "data": data.payload });
-
-					this.emit("message", msgEvent);
-					if (this.onmessage) { this.onmessage(msgEvent as unknown as MessageEvent); }
-					break;
-				}
-
-				case "close": {
-					this.readyState = WebSocket.CLOSED;
-					const closeEvent = new CloseEventPolyfill("close", {
-						"code": data.code || 1000,
-						"reason": data.reason || "",
-						"wasClean": true
-					});
-
-					this.emit("close", closeEvent);
-					if (this.onclose) { this.onclose(closeEvent); }
-					channel.removeEventListener("message", handler);
-					break;
-				}
-
-				case "error": {
-					const errorEvent = new Event("error");
-
-					this.emit("error", errorEvent);
-					if (this.onerror) { this.onerror(errorEvent); }
-					break;
-				}
-
-				default:
-					break;
-			}
-		};
-
-		channel.addEventListener("message", handler);
-
-    // Connection timeout
+		server?._accept(this);
 		setTimeout(() => {
-			if (this.readyState === WebSocket.CONNECTING) {
-        // No server responded, act as if connected (for standalone client use)
-				this.readyState = WebSocket.OPEN;
-				this.emit("open");
-				if (this.onopen) { this.onopen(new Event("open")); }
-			}
-		}, 100);
+			this.readyState = WebSocket.OPEN;
+			this.emit("open");
+			if (this.onopen) { this.onopen(new Event("open")); }
+		}, 0);
 	}
 
 	private _connectNative(): void {
@@ -260,21 +194,18 @@ export class WebSocket extends EventEmitter {
 			return;
 		}
 
-    // If connected to internal server
-		if (this._server) {
-			this._server._handleClientMessage(this, data);
+    // Joined in this realm: the other end receives it, a turn later, as over a socket.
+		const peer = this._peer;
+
+		if (peer !== null) {
+			setTimeout(() => { peer._receiveMessage(data); }, 0);
 
 			return;
 		}
 
-    // Send via BroadcastChannel
-		if (messageChannel) {
-			messageChannel.postMessage({
-				"type": "message",
-				"clientId": this._id,
-				"url": this.url,
-				"payload": data
-			});
+    // A server-side socket from handleUpgrade, with no client here
+		if (this._server) {
+			this._server._handleClientMessage(this, data);
 		}
 	}
 
@@ -292,14 +223,13 @@ export class WebSocket extends EventEmitter {
 			return;
 		}
 
-		if (messageChannel) {
-			messageChannel.postMessage({
-				"type": "disconnect",
-				"clientId": this._id,
-				"url": this.url,
-				"code": code,
-				"reason": reason
-			});
+		// The other end hears it close.
+		const peer = this._peer;
+
+		this._peer = null;
+
+		if (peer !== null) {
+			setTimeout(() => { peer._remoteClose(code, reason); }, 0);
 		}
 
 		setTimeout(() => {
@@ -345,6 +275,26 @@ export class WebSocket extends EventEmitter {
 		this._server = server;
 	}
 
+	/** Join this socket to the other end of a connection made in this realm. */
+	_setPeer(peer: WebSocket): void {
+		this._peer = peer;
+	}
+
+	/** The other end closed. */
+	_remoteClose(code?: number, reason?: string): void {
+		if (this.readyState === WebSocket.CLOSED) {
+			return;
+		}
+
+		this._peer = null;
+		this.readyState = WebSocket.CLOSED;
+		this._server?.clients.delete(this);
+		const closeEvent = new CloseEventPolyfill("close", { "code": code || 1000, "reason": reason || "", "wasClean": true });
+
+		this.emit("close", closeEvent);
+		if (this.onclose) { this.onclose(closeEvent); }
+	}
+
 	_receiveMessage(data: unknown): void {
 		const msgEvent = new MessageEventPolyfill("message", { "data": data });
 
@@ -368,70 +318,31 @@ export class WebSocketServer extends EventEmitter {
 	clients = new Set<WebSocket>();
 	options: ServerOptions;
 	private readonly _path: string;
-	private _channelHandler: ((event: MessageEvent) => void) | null = null;
 
 	constructor(options: ServerOptions = {}) {
 		super();
 		this.options = options;
 		this._path = options.path || "/";
 
-    // If not noServer, set up listening
+    // Listening (unless noServer: it takes connections only through handleUpgrade)
 		if (!options.noServer) {
-			this._setupListener();
+			servers.set(this._path, this);
 		}
-
-    // Register server
-		servers.set(this._path, this);
 	}
 
-	private _setupListener(): void {
-		if (!messageChannel) { return; }
+	/** A client in this realm connects: its server-side socket, joined to it, is this server's new connection. */
+	_accept(client: WebSocket): void {
+		const ws = new WebSocket("internal://" + this._path);
 
-		const channel = messageChannel;
+		ws._setServer(this);
+		ws._setPeer(client);
+		client._setPeer(ws);
 
-		this._channelHandler = (event: MessageEvent) => {
-			const { data } = event;
+		if (this.options.clientTracking !== false) {
+			this.clients.add(ws);
+		}
 
-			if (data.type === "connect") {
-        // Create a new WebSocket for this client
-				const ws = new WebSocket("internal://" + this._path);
-
-				ws._setServer(this);
-				(ws as unknown as { "_clientId": string })._clientId = data.clientId;
-				this.clients.add(ws);
-
-        // Notify client of connection
-				channel.postMessage({
-					"type": "connected",
-					"targetClient": data.clientId
-				});
-
-        // Emit connection event
-				this.emit("connection", ws, { "url": data.url });
-			}
-
-			if (data.type === "message") {
-        // Find the client and deliver the message
-				for (const client of this.clients) {
-					if ((client as unknown as { "_clientId": string })._clientId === data.clientId) {
-						client._receiveMessage(data.payload);
-						break;
-					}
-				}
-			}
-
-			if (data.type === "disconnect") {
-				for (const client of this.clients) {
-					if ((client as unknown as { "_clientId": string })._clientId === data.clientId) {
-						client.close(data.code, data.reason);
-						this.clients.delete(client);
-						break;
-					}
-				}
-			}
-		};
-
-		channel.addEventListener("message", this._channelHandler);
+		setTimeout(() => { this.emit("connection", ws, { "url": client.url }); }, 0);
 	}
 
 	_handleClientMessage(client: WebSocket, data: unknown): void {
@@ -472,12 +383,8 @@ export class WebSocketServer extends EventEmitter {
 		this.clients.clear();
 
     // Remove from registry
-		servers.delete(this._path);
-
-    // Remove channel listener
-		if (this._channelHandler && messageChannel) {
-			messageChannel.removeEventListener("message", this._channelHandler);
-			this._channelHandler = null;
+		if (servers.get(this._path) === this) {
+			servers.delete(this._path);
 		}
 
 		this.emit("close");

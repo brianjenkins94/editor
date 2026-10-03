@@ -206,8 +206,9 @@ test("nothing is guessed: a context that doesn't say where it runs sits in its w
 });
 
 test("a pair meeting through a medium only they use is judged by the medium's declaration", () => {
-	// The model declares node ⇄ channel:vite-ws-channel; drawn as one edge, node ⇄ its client through that channel.
-	const throughDeclared = { "a": "node", "b": "worker:ws-client.js", "medium": "channel:vite-ws-channel", "labels": new Map() };
+	// The model declares workbench ⇄ channel:vscode-web-state-db-global; drawn as one edge, the workbench ⇄ another
+	// tab's workbench through that channel.
+	const throughDeclared = { "a": "workbench", "b": "workbench:other-tab", "medium": "channel:vscode-web-state-db-global", "labels": new Map() };
 	const throughUnknown = { "a": "workbench", "b": "node", "medium": "channel:mystery", "labels": new Map() };
 
 	assert.equal(declaredOn(throughDeclared)?.type, "channel");
