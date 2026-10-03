@@ -306,11 +306,17 @@ test("the edge names: a hub that calls itself `client` reports, beyond its link,
 
 test("a viewer times out a reporter gone silent, and takes it back when it reports again", () => {
 	const store = new ArchitectureStore();
+	// The store notes when it heard a report by its own clock: bracket that moment, so a slow runner's lost
+	// milliseconds between the report and the sweep can't push a sweep past the silence.
+	const before = Date.now();
 
-	store.apply({ "reporter": "quiet", "time": Date.now() });
-	store.sweep(Date.now() + SILENCE_MS - 1);
+	store.apply({ "reporter": "quiet", "time": before });
+
+	const after = Date.now();
+
+	store.sweep(before + SILENCE_MS - 1);
 	assert.equal(store.nodes.get("quiet")?.state, "alive");
-	store.sweep(Date.now() + SILENCE_MS + 1);
+	store.sweep(after + SILENCE_MS + 1);
 	assert.equal(store.nodes.get("quiet")?.state, "terminated", "silent past SILENCE_MS: gone");
 	store.apply({ "reporter": "quiet", "time": Date.now() });
 	assert.equal(store.nodes.get("quiet")?.state, "alive", "and back when it reports again");
