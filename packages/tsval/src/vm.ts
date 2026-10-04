@@ -156,7 +156,27 @@ export interface VMOptions {
 	"maxSteps"?: number;
 	/** Count how often each statement runs (see `VM.coverage`). Off by default: it's one map update per statement. */
 	"coverage"?: boolean;
+	/** Told what went through a few chosen sites as the program runs — the facts runtime evidence keeps of values,
+	 *  branches and types. Off by default: one check per site when it's off. See `ObserveSite` for each site's node
+	 *  and value. The callback must not run guest code (read values with `typeTag`, which never does). */
+	"observe"?: Observer;
 }
+
+/**
+ * The sites `observe` is told about, with the node it's given and what `value` is:
+ * - `optional`: `a?.b`, `a?.[k]` (the member expression) and `a?.()` (the call) — the value of `a` where the chain
+ *   tests it (nullish: the chain stopped). Not told when an earlier link already stopped the chain.
+ * - `nullish`: `a ?? b` (the binary expression) — the value of `a` (nullish: the right side ran).
+ * - `branch`: an `if` statement, a conditional expression, and `a && b` / `a || b` (the binary expression) — which
+ *   arm ran, as a number: 0 for the `if`'s then (or the condition's true side), 1 for its else (run or not);
+ *   0 when the logical expression's right side ran, 1 when it didn't.
+ * - `parameter`: each parameter declaration of a guest function called — the argument passed for it, before any
+ *   default applies (undefined when none was), or the array a rest parameter collects.
+ * - `return`: a `return` statement, or an arrow function's expression body — the value returned.
+ */
+export type ObserveSite = "optional" | "nullish" | "branch" | "parameter" | "return";
+
+export type Observer = (node: ts.Node, site: ObserveSite, value: unknown) => void;
 
 /**
  * The host-boundary guard (see `VMOptions.hostGuard`). Both hooks default to identity.
@@ -295,6 +315,8 @@ export class Machine implements VM {
 	public maxSteps: number | undefined;
 	/** Statement execution counts (VMOptions.coverage). */
 	public coverage: Map<ts.Node, number> | undefined;
+	/** What chosen sites are told to (VMOptions.observe). */
+	public observe: Observer | undefined;
 
 	/** The guest realm's Error constructors, so errors tsval itself throws (ReferenceError on an
 	 *  unbound name, TypeError on a bad call, …) are instances of the *guest's* classes. Resolved
@@ -350,6 +372,7 @@ export class Machine implements VM {
 		this.onBreakpoint = options.onBreakpoint;
 		this.maxSteps = options.maxSteps;
 		this.coverage = options.coverage === true ? new Map() : undefined;
+		this.observe = options.observe;
 	}
 
 	public get top(): Frame | undefined {
@@ -843,6 +866,7 @@ export class Machine implements VM {
 		forked.onAsyncFiber = this.onAsyncFiber;
 		forked.onBreakpoint = this.onBreakpoint;
 		forked.coverage = this.coverage === undefined ? undefined : new Map(this.coverage);
+		forked.observe = this.observe;
 		forked.callSite = undefined;
 		forked.values = this.values.map(clone);
 		forked.frames = this.frames.map(cloneFrame);

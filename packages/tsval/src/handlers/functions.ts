@@ -181,6 +181,8 @@ function callFrame(vm: Machine, frame: CallFrame): void {
 		// Arrow expression-body value is on the stack; it is the return value.
 		const value = vm.pop();
 
+		vm.observe?.(node.body!, "return", value);
+
 		vm.frames.pop();
 		vm.values.length = frame.valuesBase;
 		vm.push(value);
@@ -217,9 +219,13 @@ export function functionLength(params: readonly ts.ParameterDeclaration[]): numb
  */
 export function bindParameters(vm: Machine, scope: Scope, node: ts.SignatureDeclaration, args: unknown[]): void {
 	let any = false;
+	let index = 0;
 
 	for (const param of node.parameters) {
 		if (!isThisParameter(param)) {
+			// What was passed for it (before a default applies), or what a rest parameter collects.
+			vm.observe?.(param, "parameter", param.dotDotDotToken === undefined ? args[index] : args.slice(index));
+			index += 1;
 			any = true;
 			for (const name of bindingNames(param.name)) {
 				scope.declareLexical(name, "let");

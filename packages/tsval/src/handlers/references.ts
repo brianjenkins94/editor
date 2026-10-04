@@ -180,6 +180,10 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 	if (frame.phase === 1) {
 		const obj = vm.values[vm.values.length - 1];
 
+		if (member.questionDotToken !== undefined && obj !== CHAIN_BREAK) {
+			vm.observe?.(member, "optional", obj);
+		}
+
 		if (obj === CHAIN_BREAK || ((obj === null || obj === undefined) && member.questionDotToken)) {
 			vm.pop();
 

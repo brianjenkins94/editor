@@ -91,6 +91,14 @@ export function logicalExpression(vm: Machine, frame: NodeFrame, node: ts.Binary
 			takeRight = left === null || left === undefined;
 		}
 
+		if (vm.observe !== undefined) {
+			if (op === Kind.QuestionQuestionToken) {
+				vm.observe(node, "nullish", left);
+			} else {
+				vm.observe(node, "branch", takeRight ? 0 : 1);
+			}
+		}
+
 		if (takeRight) {
 			vm.pushNode(node.right, frame.scope);
 			frame.phase = 2;
@@ -115,6 +123,7 @@ function conditionalExpression(vm: Machine, frame: NodeFrame): void {
 	} else if (frame.phase === 1) {
 		const cond = vm.pop();
 
+		vm.observe?.(node, "branch", cond ? 0 : 1);
 		vm.pushNode(cond ? node.whenTrue : node.whenFalse, frame.scope);
 		frame.phase = 2;
 	} else {

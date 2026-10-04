@@ -151,6 +151,7 @@ function ifStatement(vm: Machine, frame: NodeFrame): void {
 	} else if (frame.phase === 1) {
 		const cond = vm.pop();
 
+		vm.observe?.(node, "branch", cond ? 0 : 1);
 		if (cond) {
 			vm.pushNode(node.thenStatement, frame.scope);
 		} else if (node.elseStatement) {
@@ -165,7 +166,12 @@ function ifStatement(vm: Machine, frame: NodeFrame): void {
 
 const returnStatement = evaluating<ts.ReturnStatement>(
 	(node) => (node.expression ? [node.expression] : []),
-	(vm, _frame, node, [value]) => { vm.raise({ "type": "return", "value": node.expression ? value : undefined }); }
+	(vm, _frame, node, [value]) => {
+		const returned = node.expression ? value : undefined;
+
+		vm.observe?.(node, "return", returned);
+		vm.raise({ "type": "return", "value": returned });
+	}
 );
 
 const throwStatement = evaluating<ts.ThrowStatement>(

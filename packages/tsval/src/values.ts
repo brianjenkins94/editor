@@ -46,3 +46,40 @@ export interface GuestFunction {
 export function isGuestFunction(value: unknown): value is GuestFunction {
 	return typeof value === "function" && Object.hasOwn(value, "__tsval") && (value as Partial<GuestFunction>).__tsval !== null && (value as Partial<GuestFunction>).__tsval !== undefined;
 }
+
+/**
+ * What a value is at runtime, as runtime evidence tags it: `undefined`, `null`, `boolean`, `number`, `string`,
+ * `bigint`, `symbol`, `function`, `array`, an object's class name (`Map`, `Player`), or `object` for a plain one (or one
+ * whose class has no name). Reads only property descriptors, never properties, so no getter — the guest's or a host's —
+ * runs; the one exception is a Proxy, whose `getPrototypeOf` trap still does.
+ */
+export function typeTag(value: unknown): string {
+	if (value === null) {
+		return "null";
+	}
+
+	const type = typeof value;
+
+	if (type !== "object") {
+		return type;
+	}
+
+	try {
+		if (Array.isArray(value)) {
+			return "array";
+		}
+
+		const prototype = Object.getPrototypeOf(value) as object | null;
+
+		if (prototype === null) {
+			return "object";
+		}
+
+		const constructor = Object.getOwnPropertyDescriptor(prototype, "constructor")?.value as unknown;
+		const name = typeof constructor === "function" ? Object.getOwnPropertyDescriptor(constructor, "name")?.value as unknown : undefined;
+
+		return typeof name === "string" && name !== "" && name !== "Object" ? name : "object";
+	} catch {
+		return "object"; // a revoked Proxy
+	}
+}

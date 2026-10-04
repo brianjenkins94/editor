@@ -134,6 +134,10 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 		frame.thisArg = thisOf(frame.scope, ref);
 		const calleeValue = getValue(vm, frame.scope, ref, false); // vetted by invokeHost instead
 
+		if (node.questionDotToken !== undefined && calleeValue !== CHAIN_BREAK) {
+			vm.observe?.(node, "optional", calleeValue);
+		}
+
 		// `f?.()` on a nullish callee (or a broken chain) short-circuits before the arguments run.
 		if (calleeValue === CHAIN_BREAK || ((calleeValue === null || calleeValue === undefined) && node.questionDotToken)) {
 			vm.frames.pop();
