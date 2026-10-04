@@ -8,9 +8,10 @@
  * markup reads naturally without re-deriving Web Awesome's full prop types here.
  */
 /* eslint-disable ts/naming-convention -- custom-element tag names are hyphenated by spec (wa-button, …), not camelCase */
-import type { JSX as PreactJSX } from "preact";
+// `HTMLAttributes` from preact itself, not its `JSX` namespace: preact 11 keeps it only at the top level.
+import type { HTMLAttributes } from "preact";
 
-type WaAttributes = PreactJSX.HTMLAttributes<HTMLElement> & Record<string, unknown>;
+type WaAttributes = HTMLAttributes<HTMLElement> & Record<string, unknown>;
 
 declare module "preact" {
 	namespace JSX {
