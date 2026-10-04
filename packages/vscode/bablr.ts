@@ -7,7 +7,8 @@
  *   spans/<oid>.json            a text's spans (each span's spanAnchors id and offsets), or that BABLR can't parse it
  *   verdicts/<oid>_<oid>.json   a change's cosmetic/semantic verdict (cosmetic-classifier.ts)
  *
- * Everything there can be deleted at any time; it's capped at CACHE_BYTES, least recently used first out.
+ * Everything there can be deleted at any time; it's capped at CACHE_BYTES (small: it shares the workspace's fixed
+ * buffer), least recently used first out.
  *
  * Its callers: the cosmetic classifier (verdicts, edit groups), the runtime evidence (evidence.ts: span ids for a run's
  * statements), and — over the hub, `spans.of` — the pod's `editor.bablr.spans` command, for extensions (the insights
@@ -41,10 +42,11 @@ export interface Bablr {
 }
 
 const CACHE = `/workspace/${LOCAL_DIR}/bablr`;
-/** How much the cache keeps before it lets the least recently used go. */
-const CACHE_BYTES = 32 * 1024 * 1024;
-/** How many writes between checks of the cache's size. */
-const PRUNE_EVERY = 25;
+/** How much the cache keeps before it lets the least recently used go. Small: `/workspace` is one fixed 64 MB buffer the
+ *  whole project shares (workspace-fs.ts), and this lives in it — until the cache moves to its own IndexedDB store. */
+const CACHE_BYTES = 4 * 1024 * 1024;
+/** How many writes between checks of the cache's size (a text's spans can be ~100 KB). */
+const PRUNE_EVERY = 5;
 
 export function startBablr(hub: Hub): Bablr {
 	const worker = new Worker(new URL("./lsp/bablr-worker.js", location.href), { "type": "module" });
