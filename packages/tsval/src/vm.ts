@@ -170,8 +170,8 @@ export interface VMOptions {
  * - `branch`: an `if` statement, a conditional expression, and `a && b` / `a || b` (the binary expression) — which
  *   arm ran, as a number: 0 for the `if`'s then (or the condition's true side), 1 for its else (run or not);
  *   0 when the logical expression's right side ran, 1 when it didn't.
- * - `parameter`: each parameter declaration of a guest function called — the argument passed for it, before any
- *   default applies (undefined when none was), or the array a rest parameter collects.
+ * - `parameter`: each parameter declaration without a default or a pattern of a guest function called — the argument
+ *   passed for it (undefined when none was), or the array a rest parameter collects.
  * - `return`: a `return` statement, or an arrow function with an expression body (the arrow itself: its body may be a
  *   site of its own) — the value returned.
  *

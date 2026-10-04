@@ -223,8 +223,13 @@ export function bindParameters(vm: Machine, scope: Scope, node: ts.SignatureDecl
 
 	for (const param of node.parameters) {
 		if (!isThisParameter(param)) {
-			// What was passed for it (before a default applies), or what a rest parameter collects.
-			vm.observe?.(param, "parameter", param.dotDotDotToken === undefined ? args[index] : args.slice(index));
+			// What was passed for it, or what a rest parameter collects — not for one with a default or a pattern: what a
+			// preview's instrumented code can see of those isn't the same (RUNTIME-EVIDENCE.md, P8), and evidence from
+			// either runtime must mean one thing.
+			if (param.initializer === undefined && ts.isIdentifier(param.name)) {
+				vm.observe?.(param, "parameter", param.dotDotDotToken === undefined ? args[index] : args.slice(index));
+			}
+
 			index += 1;
 			any = true;
 			for (const name of bindingNames(param.name)) {

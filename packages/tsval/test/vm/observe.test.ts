@@ -65,7 +65,7 @@ test("if and the conditional: which arm ran (1 for an else that isn't there)", (
 	]);
 });
 
-test("parameters: what was passed (before a default), and a rest parameter's array; returns: what came back", () => {
+test("parameters: what was passed (none for one with a default), and a rest parameter's array; returns: what came back", () => {
 	assert.deepStrictEqual(observed([
 		"class Player { name: string; constructor(name: string) { this.name = name; } }",
 		"function make(name: string, score = 0, ...tags: string[]) { return new Player(name); }",
@@ -74,7 +74,6 @@ test("parameters: what was passed (before a default), and a rest parameter's arr
 		"twice(2);"
 	].join("\n")), [
 		"parameter name: string → string",
-		"parameter score = 0 → undefined",
 		"parameter ...tags: string[] → array",
 		"parameter name: string → string",
 		"return return new Player(name); → Player",

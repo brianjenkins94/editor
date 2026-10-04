@@ -362,7 +362,10 @@ budgets (test/performance.mjs) measure an instrumented preview before the defaul
 ### Building it
 
 1. **The transformer**, in almostnode beside its other code transforms, tested on its own: sites and ranges as tsval's,
-   semantics unchanged.
+   semantics unchanged. Done (frameworks/instrument.ts): a differential test runs the same programs in tsval and
+   instrumented and finds the same evidence (test/preview-instrument.test.mjs); a later link of an optional chain names
+   the one before it, so it goes untold when that one stopped the chain, as in tsval; tsval no longer observes
+   parameters with a default or a pattern (P8).
 2. **The page runtime** and its reports: counts by file and version, flushed as above, `evidence.preview` allowed
    through the link.
 3. **Core**: reports gathered by run (by port), past versions' sources from the dev server, a last pull before the
