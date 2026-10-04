@@ -265,7 +265,9 @@ through it.
    values, nullish, kinds and this machine's samples, or each arm's share, for the innermost span under the cursor,
    labelled by its node type. Declared against observed waits for step 7's types at ranges: TypeScript's own hover
    shows the declared type beside it until then.
-6. **Quick fixes**: `?.` and `??`, then branches.
+6. **Quick fixes**: `?.` and `??`, then branches. Done (extensions/insights/fixes.ts): hints, with the evidence in the
+   message, past `silo.evidence.minRuns` (3) and `silo.evidence.minSeen` (10); `?.` and `??` get a fix that removes
+   them, a branch never taken only the hint — deleting code on evidence alone is for you to decide.
 7. **The typed strategy**: types at ranges from the tsserver plugin, `inferred` and `observed` on references,
    `typed` in the pipeline, cases in the corpus.
 

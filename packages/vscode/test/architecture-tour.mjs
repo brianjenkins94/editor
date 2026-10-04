@@ -214,7 +214,9 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 	await session.terminal([
 		`echo 'const world = { onWin: () => 1 };' > values.js`,
 		`echo 'function pick(key) { return key ?? "none"; }' >> values.js`,
-		`echo 'for (const key of ["a", undefined]) { if (pick(key) === "a") { world.onWin?.(); } }' >> values.js`
+		`echo 'for (const key of ["a", undefined]) { if (pick(key) === "a") { world.onWin?.(); } }' >> values.js`,
+		`echo 'const won = world.onWin ?? (() => 0);' >> values.js`,
+		`echo 'const bonus = won ? 2 : 0;' >> values.js`
 	].join(" && "), { "fresh": true });
 	await session.request("debug.start", { "program": "/workspace/values.js" }, 60_000);
 
@@ -241,12 +243,12 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 	const values = found.evidence.filter((line) => line.kind === "value");
 	const tagged = (tags) => values.filter((line) => JSON.stringify(line.tags) === JSON.stringify(tags));
 
-	assert.equal(tagged({ "function": 1 }).length, 1, "world.onWin?.(): a function, never nullish");
-	assert.equal(tagged({ "function": 1 })[0].nullish, 0);
+	assert.equal(tagged({ "function": 1 }).length, 2, "world.onWin?.() and world.onWin ?? …: a function, never nullish");
+	assert.ok(tagged({ "function": 1 }).every((line) => line.nullish === 0));
 	assert.equal(tagged({ "string": 1, "undefined": 1 }).length, 2, "pick's key, and key ?? …: one string, one undefined");
 	assert.equal(tagged({ "string": 2 }).length, 1, "pick's return: a string both times");
 	assert.equal(tagged({ "number": 1 }).length, 1, "() => 1 returned a number");
-	assert.deepEqual(found.evidence.filter((line) => line.kind === "branch").map((line) => line.arms), [[1, 1]], "the if: each arm once");
+	assert.deepEqual(found.evidence.filter((line) => line.kind === "branch").map((line) => line.arms).sort(), [[1, 0], [1, 1]], "the if: each arm once; the ?: only ever true");
 	assert.ok(found.evidence.some((line) => line.kind === "reached"), "beside its coverage");
 	assert.ok(found.samples.some((line) => line.values.includes("none")), "the values, on this machine");
 	assert.ok(found.evidence.every((line) => !JSON.stringify(line).includes("none")), "and never in git");
@@ -270,6 +272,43 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 	assert.match(hovers.optional, /`function` █+ 100%/u);
 	assert.match(hovers.branch, /then 1× \(50%\) · else 1× \(50%\), in 1 run/u);
 	assert.match(hovers.returned, /Seen here: "a", "none"/u, "the values, as this machine saw them");
+
+	// What runs say could go, as hints — here with the thresholds at one run, one value — and a fix that removes it.
+	const hints = await eventually("the evidence's hints", () => session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const settings = api.workspace.getConfiguration("silo.evidence");
+
+		await settings.update("minRuns", 1, api.ConfigurationTarget.Global);
+		await settings.update("minSeen", 1, api.ConfigurationTarget.Global);
+
+		const uri = api.Uri.file("/workspace/values.js");
+		const found = api.languages.getDiagnostics(uri).filter((diagnostic) => diagnostic.source === "evidence");
+
+		return found.length >= 3 ? found.map((diagnostic) => ({ "code": diagnostic.code, "message": diagnostic.message, "line": diagnostic.range.start.line })) : undefined;
+	}));
+
+	assert.deepEqual(hints.map((hint) => hint.code).sort(), ["branch-never-taken", "unneeded-nullish-coalescing", "unneeded-optional-chain"], "world.onWin?.(), world.onWin ?? …, and won ? … : …; not key ?? …, nullish once, nor the if, both arms taken");
+	assert.match(hints.find((hint) => hint.code === "branch-never-taken").message, /false never ran: 1 time in 1 run, every one the true/u);
+
+	const fixed = await session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/values.js");
+		const document = await api.workspace.openTextDocument(uri);
+		const nullish = api.languages.getDiagnostics(uri).find((diagnostic) => diagnostic.code === "unneeded-nullish-coalescing");
+		const actions = await api.commands.executeCommand("vscode.executeCodeActionProvider", uri, nullish.range, api.CodeActionKind.QuickFix.value);
+		const remove = actions.find((action) => action.title.startsWith("Remove `?? (() => 0)`"));
+
+		await api.workspace.applyEdit(remove.edit);
+
+		const settings = api.workspace.getConfiguration("silo.evidence");
+
+		await settings.update("minRuns", undefined, api.ConfigurationTarget.Global);
+		await settings.update("minSeen", undefined, api.ConfigurationTarget.Global);
+
+		return { "titles": actions.map((action) => action.title), "line": document.lineAt(3).text };
+	});
+
+	assert.equal(fixed.line, "const won = world.onWin;", "the quick fix removed the ?? and its right side");
 });
 
 test("node script: a service runs on the script worker, and stopping it leaves the previews up", async () => {
