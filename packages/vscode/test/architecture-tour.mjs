@@ -286,6 +286,12 @@ test("search: findFiles keeps to its glob, and to files.exclude unless told not 
 		const { api } = globalThis.__editor;
 		const paths = async (include, exclude) => (await api.workspace.findFiles(include, exclude)).map((uri) => uri.path);
 
+		// The search service samples 1 in 20 searches for telemetry, which reads the provider's stats: search often
+		// enough that a sampled one surely comes along (1 - 0.95^100 > 99%).
+		for (let index = 0; index < 100; index += 1) {
+			await paths("**/package.json");
+		}
+
 		return { "manifests": await paths("**/package.json"), "sources": await paths("src/**"), "all": await paths("**/*"), "everything": await paths("**/*", null) };
 	});
 

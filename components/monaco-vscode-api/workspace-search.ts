@@ -23,13 +23,19 @@ import { ISearchService } from "@codingame/monaco-vscode-api/vscode/vs/workbench
 /** A file bigger than this isn't searched for text (a bundle, a lockfile): the override's limit too, in effect. */
 const MAX_TEXT_BYTES = 1024 * 1024;
 
+/** How much a search walked, as the search service's stats count it. */
+interface Walked { "directoriesWalked": number; "filesWalked": number }
+
 /** Every file under `folderQuery`'s folder that `query` includes, in walk order, each with its path relative to the
- *  folder — stopping once `limit` are found or `token` is cancelled. Excluded folders aren't walked into. */
-async function filesOf(fileService: IFileService, query: IFileQuery | ITextQuery, folderQuery: IFolderQuery, limit: number, token: CancellationToken | undefined): Promise<{ "uri": URI; "path": string }[]> {
+ *  folder — stopping once `limit` are found or `token` is cancelled. Excluded folders aren't walked into. Adds what it
+ *  walked to `walked`. */
+async function filesOf(fileService: IFileService, query: IFileQuery | ITextQuery, folderQuery: IFolderQuery, limit: number, token: CancellationToken | undefined, walked: Walked = { "directoriesWalked": 0, "filesWalked": 0 }): Promise<{ "uri": URI; "path": string }[]> {
 	const tester = new QueryGlobTester(query, folderQuery);
 	const found: { "uri": URI; "path": string }[] = [];
 	const walk = async (folder: URI, prefix: string): Promise<void> => {
 		const stat = await fileService.resolve(folder).catch(() => undefined);
+
+		walked.directoriesWalked += 1;
 
 		for (const child of stat?.children ?? []) {
 			if (found.length >= limit || token?.isCancellationRequested === true) {
@@ -37,6 +43,10 @@ async function filesOf(fileService: IFileService, query: IFileQuery | ITextQuery
 			}
 
 			const path = prefix + child.name;
+
+			if (child.isFile) {
+				walked.filesWalked += 1;
+			}
 
 			if (child.isDirectory) {
 				if (!tester.matchesExcludesSync(path, child.name)) {
@@ -103,9 +113,11 @@ class WorkspaceSearch implements ISearchResultProvider {
 	public async fileSearch(query: IFileQuery, token?: CancellationToken): Promise<ISearchComplete> {
 		const limit = query.maxResults ?? Number.MAX_SAFE_INTEGER;
 		const results: IFileMatch[] = [];
+		const started = Date.now();
+		const walked: Walked = { "directoriesWalked": 0, "filesWalked": 0 };
 
 		for (const folderQuery of query.folderQueries) {
-			for (const { uri, path } of await filesOf(this.fileService, query, folderQuery, limit + 1 - results.length, token)) {
+			for (const { uri, path } of await filesOf(this.fileService, query, folderQuery, limit + 1 - results.length, token, walked)) {
 				// Quick Open's typed text, fuzzily, against the path in the folder.
 				if (query.filePattern === undefined || query.filePattern === "" || fuzzyContains(path, query.filePattern)) {
 					results.push({ "resource": uri });
@@ -113,7 +125,10 @@ class WorkspaceSearch implements ISearchResultProvider {
 			}
 		}
 
-		return { "results": results.slice(0, limit), "limitHit": results.length > limit, "messages": [], "stats": { "type": "fileSearchProvider", "fromCache": false, "resultCount": Math.min(results.length, limit) }, "exit": SearchCompletionExitCode.Normal } as ISearchComplete;
+		const resultCount = Math.min(results.length, limit);
+
+		// The search service samples 5% of searches for telemetry, reading detailStats unguarded: without it they throw.
+		return { "results": results.slice(0, limit), "limitHit": results.length > limit, "messages": [], "stats": { "type": "fileSearchProvider", "fromCache": false, "resultCount": resultCount, "detailStats": { "fileWalkTime": Date.now() - started, ...walked, "cmdTime": 0, "cmdResultCount": resultCount } }, "exit": SearchCompletionExitCode.Normal } as ISearchComplete;
 	}
 
 	public async textSearch(query: ITextQuery, onProgress?: (item: ISearchProgressItem) => void, token?: CancellationToken): Promise<ISearchComplete> {
