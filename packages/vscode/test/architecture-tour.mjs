@@ -272,6 +272,7 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 	assert.match(hovers.optional, /`function` █+ 100%/u);
 	assert.match(hovers.branch, /then 1× \(50%\) · else 1× \(50%\), in 1 run/u);
 	assert.match(hovers.returned, /Seen here: "a", "none"/u, "the values, as this machine saw them");
+	assert.match(hovers.returned, /Declared `[^`]+` · observed `string`/u, "the declared type beside what was observed");
 
 	// What runs say could go, as hints — here with the thresholds at one run, one value — and a fix that removes it.
 	const hints = await eventually("the evidence's hints", () => session.workbench().evaluate(async () => {
@@ -309,6 +310,28 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 	});
 
 	assert.equal(fixed.line, "const won = world.onWin;", "the quick fix removed the ?? and its right side");
+});
+
+// What TypeScript makes of a file's ranges, from the capabilities tsserver plugin (`_types.at`): the declared side of
+// runtime evidence, and the typed strategy's signal — the type of what each site observes.
+test("types: the tsserver plugin types each of a file's ranges as its site observes", async () => {
+	const types = await eventually("types at ranges", () => session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/typed.ts");
+		const source = "function f(n: number | undefined, s?: { t: string }) {\n\treturn n ?? s?.t.length;\n}\nconst g = (x: number) => x * 2;\n";
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(source));
+		await api.window.showTextDocument(uri);
+
+		const range = (text, length = text.length) => ({ "start": source.indexOf(text), "end": source.indexOf(text) + length });
+		const response = await api.commands.executeCommand("typescript.tsserverRequest", "_types.at", { "file": uri, "ranges": [range("n: number | undefined"), range("n ?? s?.t.length"), range("s?.t"), range("(x: number) => x * 2"), range("return n ?? s?.t.length")] });
+		const found = response?.body?.types;
+
+		return Array.isArray(found) && found[0] !== null ? found : undefined;
+	}));
+
+	// (The workspace's TypeScript isn't strict, so `undefined` drops out of these types.)
+	assert.deepEqual(types, ["number", "number", "{ t: string; }", "number", "number"], "a parameter, ??'s left, what ?. tested, an arrow's return, a return's value");
 });
 
 test("node script: a service runs on the script worker, and stopping it leaves the previews up", async () => {

@@ -332,13 +332,13 @@ serve(hub, "bablr.refer", async (args, { signal }) => {
 	}) };
 });
 
-// References, the text their file has now (and their baselines' texts, by blob oid, and other files' texts, by path,
-// when the caller could get them) ⇒ where each one's span is: silo's resolver — the authored pipeline, with the other
+// References, the text their file has now (and their baselines' texts, by blob oid, other files' texts, by path, and
+// what spans of this text are beyond their shape — TypeScript's type, observed tags — when the caller could get them) ⇒ where each one's span is: silo's resolver — the authored pipeline, with the other
 // files as where a span may have moved and the structural diff from a baseline as its re-identified strategy, or the
 // observed one (the id alone) — and, for one found anywhere but by its own id, the reference as it would be made where
 // it was found now (for an annotation to be rewritten with).
 serve(hub, "bablr.resolve", async (args, { signal }) => {
-	const { source, file, refs, baselines = {}, others = {}, observed = false } = args as { "source": string; "file": string; "refs": SpanRef[]; "baselines"?: Record<string, string>; "others"?: Record<string, string>; "observed"?: boolean };
+	const { source, file, refs, baselines = {}, others = {}, observed = false, types = {} } = args as { "source": string; "file": string; "refs": SpanRef[]; "baselines"?: Record<string, string>; "others"?: Record<string, string>; "observed"?: boolean; "types"?: Record<string, { "inferred"?: string; "observed"?: string[] }> };
 	const cst = source === "" ? undefined : await parse(source, signal);
 
 	if (cst === undefined) {
@@ -390,7 +390,7 @@ serve(hub, "bablr.resolve", async (args, { signal }) => {
 		}
 
 		const index = elsewhere;
-		const resolution = resolve(ref, { "file": file, "shapes": shapes, ...index === undefined ? {} : { "elsewhere": (id: string) => index.get(id) }, ...reidentified === undefined ? {} : { "reidentified": reidentified } }, observed ? OBSERVED : PIPELINE);
+		const resolution = resolve(ref, { "file": file, "shapes": shapes, "types": (id: string) => types[id], ...index === undefined ? {} : { "elsewhere": (id: string) => index.get(id) }, ...reidentified === undefined ? {} : { "reidentified": reidentified } }, observed ? OBSERVED : PIPELINE);
 		const at = resolution.status === "attached" ? undefined : resolution.candidate;
 		const there = at === undefined || at.file === file ? { "shapes": shapes, "blob": blob } : index?.get(at.span);
 

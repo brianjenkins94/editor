@@ -269,7 +269,11 @@ through it.
    message, past `silo.evidence.minRuns` (3) and `silo.evidence.minSeen` (10); `?.` and `??` get a fix that removes
    them, a branch never taken only the hint — deleting code on evidence alone is for you to decide.
 7. **The typed strategy**: types at ranges from the tsserver plugin, `inferred` and `observed` on references,
-   `typed` in the pipeline, cases in the corpus.
+   `typed` in the pipeline, cases in the corpus. Done: `_types.at` (capabilities tsserver plugin) types each range as
+   its site observes; `typed` re-scores same-shape candidates and treats `any` and `unknown` as saying nothing; notes
+   keep `inferred` and, when a note is only matched by shape, look again with its candidates' types; the hover shows
+   the declared type beside the observed kinds. Not yet: `observed` on references and candidates — the strategy takes
+   it, but nothing reads a span's evidence into a reference yet.
 
 ### Decisions for this slice
 

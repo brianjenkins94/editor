@@ -27,6 +27,10 @@ export interface Span { "id": string; "start": number; "end": number }
 /** Where a reference's span is, and the reference as it would be made there now (when found other than by its id). */
 export type Resolved = Resolution & { "ref"?: SpanRef };
 
+/** How references are looked for: `observed` (runtime evidence) by their ids alone; `types`, what spans of the text
+ *  are beyond their shape — TypeScript's type, the tags runs observed — by span id, for the typed strategy. */
+export interface ResolveOptions { "observed"?: boolean; "types"?: Record<string, { "inferred"?: string; "observed"?: string[] }> }
+
 /** The files BABLR's grammar may take: where a moved span is looked for. */
 const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 /** At most this many changed files are looked in for a moved span (each is parsed once, then cached). */
@@ -48,7 +52,7 @@ export interface Bablr {
 	 *  as it would be made there now, for one found other than by its own id. An authored annotation whose id is gone
 	 *  is looked for in the other changed files (moved) and re-identified from its baseline, from git's objects; an
 	 *  `observed` one is looked for by its id, in its own file, alone. */
-	"resolve": (source: string, file: string, refs: SpanRef[], observed?: boolean) => Promise<Resolved[]>;
+	"resolve": (source: string, file: string, refs: SpanRef[], options?: ResolveOptions) => Promise<Resolved[]>;
 	/** The span id standing for each of `ranges` in `source` (bablr-language-ts's pickAnchor), from its cached spans —
 	 *  or, `exact`, the span whose range is exactly the range (the node itself, when several are), and none when no
 	 *  span is: what an observed site keeps, so unrelated sites never pool into one enclosing span. */
@@ -162,8 +166,8 @@ export function startBablr(hub: Hub): Bablr {
 
 		return ranges.map((_, index) => refs?.[index] ?? undefined);
 	};
-	const resolveRefs = async (source: string, file: string, refs: SpanRef[], observed = false): Promise<Resolved[]> => {
-		const first = (await request<{ "resolutions": Resolved[] }>("resolve", { "source": source, "file": file, "refs": refs, "observed": observed })).resolutions;
+	const resolveRefs = async (source: string, file: string, refs: SpanRef[], { observed = false, types }: ResolveOptions = {}): Promise<Resolved[]> => {
+		const first = (await request<{ "resolutions": Resolved[] }>("resolve", { "source": source, "file": file, "refs": refs, "observed": observed, "types": types })).resolutions;
 		// An authored one its own id didn't find is looked for further: in the other files that differ from HEAD (code
 		// moved to another file changed that file), and followed from its baseline — when git has it (code that was
 		// committed). An observed one fades instead.
@@ -189,7 +193,7 @@ export function startBablr(hub: Hub): Bablr {
 			return first;
 		}
 
-		const again = (await request<{ "resolutions": Resolved[] }>("resolve", { "source": source, "file": file, "refs": lost.map(({ ref }) => ref), "baselines": baselines, "others": others })).resolutions;
+		const again = (await request<{ "resolutions": Resolved[] }>("resolve", { "source": source, "file": file, "refs": lost.map(({ ref }) => ref), "baselines": baselines, "others": others, "types": types })).resolutions;
 
 		lost.forEach(({ index }, at) => { first[index] = again[at]; });
 
@@ -204,9 +208,10 @@ export function startBablr(hub: Hub): Bablr {
 			return typeof source === "string" && typeof file === "string" && Array.isArray(ranges) ? { "refs": (await refer(source, file, ranges as { "start": number; "end": number }[])).map((ref) => ref ?? null) } : {};
 		}),
 		serve(hub, "annotations.resolve", async (args) => {
-			const { source, file, refs, observed } = (args ?? {}) as { "source"?: unknown; "file"?: unknown; "refs"?: unknown; "observed"?: unknown };
+			const { source, file, refs, observed, types } = (args ?? {}) as { "source"?: unknown; "file"?: unknown; "refs"?: unknown; "observed"?: unknown; "types"?: unknown };
+			const known = types !== null && typeof types === "object" ? types as ResolveOptions["types"] : undefined;
 
-			return typeof source === "string" && typeof file === "string" && Array.isArray(refs) ? { "resolutions": await resolveRefs(source, file, refs as SpanRef[], observed === true) } : {};
+			return typeof source === "string" && typeof file === "string" && Array.isArray(refs) ? { "resolutions": await resolveRefs(source, file, refs as SpanRef[], { "observed": observed === true, "types": known }) } : {};
 		})
 	];
 

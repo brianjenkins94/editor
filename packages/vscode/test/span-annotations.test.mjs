@@ -103,3 +103,19 @@ test("a function whose body was rewritten is followed by the diff — its name a
 	assert.equal(status, "re-placed");
 	assert.equal(candidate.strategy, "re-identified");
 });
+
+test("the typed strategy lifts a shape match whose types agree, drops one whose types don't, and leaves the rest as the shape had it", () => {
+	const shaped = edit("arguments renamed", base, "fn(foo, bar, baz)", base.replace("fn(foo, bar, baz)", "fn(qux, quux, baz)"), "fn(qux, quux, baz)");
+	const target = shaped.expected;
+	const typedRef = { ...shaped.ref, "inferred": "number", "observed": ["number"] };
+	const typesOf = (inferred, observed) => (id) => (id === target ? { "inferred": inferred, "observed": observed } : undefined);
+
+	assert.equal(resolve(shaped.ref, shaped.here).status, "uncertain", "by shape alone, it's asked about");
+	assert.equal(resolve(typedRef, shaped.here).status, "uncertain", "types on one side only change nothing");
+
+	const agree = resolve(typedRef, { ...shaped.here, "types": typesOf("number", ["number"]) });
+
+	assert.deepEqual([agree.status, agree.candidate.span, agree.candidate.strategy], ["re-placed", target, "typed"]);
+	assert.equal(resolve(typedRef, { ...shaped.here, "types": typesOf("string", ["string"]) }).status, "orphaned", "its types disagree: not this one");
+	assert.equal(resolve({ ...shaped.ref, "inferred": "any" }, { ...shaped.here, "types": typesOf("any") }).status, "uncertain", "any matching any says nothing");
+});

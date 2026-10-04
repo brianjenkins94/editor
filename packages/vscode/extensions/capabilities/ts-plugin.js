@@ -13,6 +13,10 @@
  * getSemanticDiagnostics is synchronous, the canary runs in the BACKGROUND: on a text change we kick a run
  * (bounded by a tsval step budget so untrusted code can't hang the server), cache its observations, and call
  * `project.refreshDiagnostics()` to make tsserver re-request — the next pass merges the runtime values in.
+ *
+ * And, since it holds the project's real checker: the `_types.at` request (through `typescript.tsserverRequest`) says
+ * what TypeScript makes of each of a file's ranges — runtime evidence's declared types and the typed strategy's
+ * (RUNTIME-EVIDENCE.md).
  */
 
 export default function init(modules) {
@@ -155,9 +159,98 @@ export default function init(modules) {
 		});
 	}
 
+	/** The innermost node of `sourceFile` whose range is exactly [start, end) — or that only adds its statement's `;`,
+	 *  which TypeScript counts and BABLR's spans don't. */
+	function nodeAt(sourceFile, start, end) {
+		let found;
+		const text = sourceFile.text;
+
+		function visit(node) {
+			const nodeStart = node.getStart(sourceFile);
+			const nodeEnd = node.getEnd();
+
+			if (nodeStart > start || nodeEnd < end) {
+				return;
+			}
+
+			if (nodeStart === start && (nodeEnd === end || (nodeEnd === end + 1 && text[end] === ";"))) {
+				found = node; // deeper matches overwrite: the innermost wins
+			}
+
+			ts.forEachChild(node, visit);
+		}
+
+		ts.forEachChild(sourceFile, visit);
+
+		return found;
+	}
+
+	/** The type of what a site observed: the base a `?.` tested, the left side of `??`, a parameter, the value a
+	 *  `return` gave, a function's return type — otherwise the node's own type. */
+	function observedType(checker, node) {
+		if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node) || ts.isCallExpression(node)) && node.questionDotToken !== undefined) {
+			return checker.getTypeAtLocation(node.expression);
+		}
+
+		if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
+			return checker.getTypeAtLocation(node.left);
+		}
+
+		if (ts.isParameter(node)) {
+			return checker.getTypeAtLocation(node.name);
+		}
+
+		if (ts.isReturnStatement(node)) {
+			return node.expression === undefined ? checker.getVoidType() : checker.getTypeAtLocation(node.expression);
+		}
+
+		if (ts.isFunctionLike(node)) {
+			const signature = checker.getSignatureFromDeclaration(node);
+
+			if (signature !== undefined) {
+				return checker.getReturnTypeOfSignature(signature);
+			}
+		}
+
+		return checker.getTypeAtLocation(node);
+	}
+
+	// `_types.at` — each of a file's ranges as TypeScript types it (null where no node has the range). Registered once
+	// per tsserver, from the first project that has a session; each request finds its file's own project.
+	let typesRegistered = false;
+
+	function registerTypesAt(info) {
+		if (typesRegistered || info.session === undefined || typeof info.session.addProtocolHandler !== "function") {
+			return;
+		}
+
+		typesRegistered = true;
+		info.session.addProtocolHandler("_types.at", function(request) {
+			const args = (request && request.arguments) || {};
+			const file = typeof args.file === "string" ? args.file : "";
+			const ranges = Array.isArray(args.ranges) ? args.ranges : [];
+			const path = ts.server !== undefined && typeof ts.server.toNormalizedPath === "function" ? ts.server.toNormalizedPath(file) : file;
+			const project = info.project.projectService.getDefaultProjectForFile(path, false) || info.project;
+			const program = project.getLanguageService().getProgram();
+			const sourceFile = program === undefined ? undefined : program.getSourceFile(path);
+			const types = ranges.map(function(range) {
+				try {
+					const node = sourceFile === undefined ? undefined : nodeAt(sourceFile, range.start, range.end);
+
+					return node === undefined ? null : program.getTypeChecker().typeToString(observedType(program.getTypeChecker(), node), node, ts.TypeFormatFlags.NoTruncation);
+				} catch (error) {
+					return null;
+				}
+			});
+
+			return { "response": { "types": types }, "responseRequired": true };
+		});
+	}
+
 	return {
 		"create": function(info) {
 			applyConfig(info.config);
+			registerTypesAt(info);
 
 			const ls = info.languageService;
 			const proxy = Object.create(null);

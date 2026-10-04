@@ -183,10 +183,12 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		// A reference to the span standing for each range of a text — what an annotation keeps (undefined where BABLR
 		// can't place it, or can't parse the text)…
 		((await rpc.request("annotations.refer", { "source": source, "file": file, "ranges": ranges }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "refs"?: unknown[] }).refs ?? []).map((ref) => ref ?? undefined)
-	), vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, refs: unknown, options?: { "observed"?: boolean }) =>
+	), vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, refs: unknown, options?: { "observed"?: boolean; "types"?: unknown }) =>
 		// …and where each reference's span is now: attached, moved, re-placed, uncertain or orphaned, with where it
-		// landed. `observed` (runtime evidence): by its id alone — one that's lost fades, it isn't looked for.
-		(await rpc.request("annotations.resolve", { "source": source, "file": file, "refs": refs, "observed": options?.observed === true }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "resolutions"?: unknown[] }).resolutions));
+		// landed. `observed` (runtime evidence): by its id alone — one that's lost fades, it isn't looked for. `types`:
+		// what spans of the text are beyond their shape (by span id: TypeScript's type, observed tags), for the typed
+		// strategy.
+		(await rpc.request("annotations.resolve", { "source": source, "file": file, "refs": refs, "observed": options?.observed === true, "types": options?.types }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "resolutions"?: unknown[] }).resolutions));
 
 	// The production debug type — presents an almostnode run (the vite preview) as a debug session with a
 	// run-control controller (Stop + Debug Console). The run's driver publishes `production.launch` (federates

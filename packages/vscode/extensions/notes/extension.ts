@@ -87,6 +87,26 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	const comment = (note: Note, owner: string): vscode.Comment => ({ "body": new vscode.MarkdownString(note.payload?.text ?? ""), "mode": vscode.CommentMode.Preview, "author": { "name": owner } });
 
+	/** What TypeScript makes of each of `ranges` in `document` (the capabilities tsserver plugin's `_types.at`); null
+	 *  where it can't say, all of them when there's no such plugin. */
+	const typesAt = async (document: vscode.TextDocument, ranges: { "start": number; "end": number }[]): Promise<(string | null)[]> => {
+		if (ranges.length === 0) {
+			return [];
+		}
+
+		const response = await Promise.resolve(vscode.commands.executeCommand<{ "body"?: { "types"?: (string | null)[] } } | undefined>("typescript.tsserverRequest", "_types.at", { "file": document.uri, "ranges": ranges })).catch(() => undefined);
+
+		return ranges.map((_, index) => response?.body?.types?.[index] ?? null);
+	};
+
+	/** `ref`, made in `document`, with TypeScript's type for its span — the typed strategy's signal for finding it again. */
+	const withType = async (ref: SpanRef, document: vscode.TextDocument): Promise<SpanRef> => {
+		const [inferred] = ref.baseline === undefined ? [null] : await typesAt(document, [{ "start": ref.baseline.start, "end": ref.baseline.end }]);
+
+		// Untyped code (`any`, `unknown`) says nothing about what the span is: not kept.
+		return inferred === null || inferred === "any" || inferred === "unknown" ? ref : { ...ref, "inferred": inferred };
+	};
+
 	/** Resolve every note on `document` against its text now, and show each where it landed. */
 	const show = async (document: vscode.TextDocument): Promise<void> => {
 		if (document.uri.scheme !== "file" || !CODE_FILE.test(document.uri.path)) {
@@ -97,8 +117,22 @@ export function activate(context: vscode.ExtensionContext): void {
 		const version = document.version;
 		const source = document.getText();
 		const notes = (await notesOn(file)).filter(({ note }) => note.dismissed !== true);
-		const resolutions = notes.length === 0 ? [] : await vscode.commands.executeCommand<Resolved[] | undefined>("editor.annotations.resolve", source, file, notes.map(({ note }) => note.ref)).then((answer) => answer, () => undefined);
-		const landed = notes.map(({ note, owner }, index) => ({ "note": note, "owner": owner, "resolved": resolutions?.[index] ?? { "status": "orphaned" as const, "alternatives": [] } }));
+		const resolve = async (refs: SpanRef[], types?: Record<string, { "inferred"?: string }>): Promise<Resolved[] | undefined> => (refs.length === 0 ? [] : Promise.resolve(vscode.commands.executeCommand<Resolved[] | undefined>("editor.annotations.resolve", source, file, refs, types === undefined ? undefined : { "types": types })).catch(() => undefined));
+		const resolutions = await resolve(notes.map(({ note }) => note.ref)) ?? [];
+		// A note found only by its shape (asked about, or lost) whose type is known is looked for again with the types of
+		// the places it might be: the typed strategy lifts the one that matches, and lowers the ones that don't.
+		const unsure = notes.map((_, index) => index).filter((index) => notes[index].note.ref.inferred !== undefined && (resolutions[index]?.status === "uncertain" || resolutions[index]?.status === "orphaned"));
+		const places = [...new Map(unsure.flatMap((index) => [resolutions[index]?.candidate, ...resolutions[index]?.alternatives ?? []]).flatMap((found) => (found?.start === undefined || found.end === undefined || found.file !== file ? [] : [[found.span, { "start": found.start, "end": found.end }] as const]))).entries()];
+
+		if (places.length > 0) {
+			const inferred = await typesAt(document, places.map(([, range]) => range));
+			const types = Object.fromEntries(places.flatMap(([span], index) => (inferred[index] === null ? [] : [[span, { "inferred": inferred[index]! }]])));
+			const again = await resolve(unsure.map((index) => notes[index].note.ref), types);
+
+			unsure.forEach((index, at) => { resolutions[index] = again?.[at] ?? resolutions[index]; });
+		}
+
+		const landed = notes.map(({ note, owner }, index) => ({ "note": note, "owner": owner, "resolved": resolutions[index] ?? { "status": "orphaned" as const, "alternatives": [] } }));
 
 		if (document.version !== version) {
 			return; // edited while resolving: a newer look follows
@@ -163,7 +197,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			// Found by anything but its own id: a note of yours is rewritten where it landed (healed), so the next look
 			// finds it by id. An uncertain one waits for you to keep it there.
 			if (owner === you && resolved.status === "re-placed" && resolved.ref !== undefined) {
-				await save(file, { ...note, "ref": resolved.ref, "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": new Date().toISOString() });
+				await save(file, { ...note, "ref": await withType(resolved.ref, document), "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": new Date().toISOString() });
 			}
 		}
 
@@ -230,7 +264,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 
 			const now = new Date().toISOString();
-			const note: Note = { "id": crypto.randomUUID(), "kind": "note", "ref": ref, "payload": { "text": body.trim() }, "author": await me(), "createdAt": now, "updatedAt": now };
+			const note: Note = { "id": crypto.randomUUID(), "kind": "note", "ref": await withType(ref, editor.document), "payload": { "text": body.trim() }, "author": await me(), "createdAt": now, "updatedAt": now };
 
 			await save(file, note);
 			await show(editor.document);
@@ -252,7 +286,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			const at = found?.resolved?.candidate;
 
 			if (note !== undefined && found?.resolved?.ref !== undefined && at !== undefined) {
-				await save(note.ref.file, { ...note, "ref": found.resolved.ref, "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": new Date().toISOString() });
+				const document = vscode.workspace.textDocuments.find((open) => relative(open.uri) === found.resolved!.ref!.file);
+
+				await save(note.ref.file, { ...note, "ref": document === undefined ? found.resolved.ref : await withType(found.resolved.ref, document), "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": new Date().toISOString() });
 				showAll();
 			}
 		}),
@@ -283,7 +319,7 @@ export function activate(context: vscode.ExtensionContext): void {
 					await save(pending.file, { ...note, "dismissed": true, "updatedAt": new Date().toISOString() });
 				}
 
-				await save(file, { ...note, "ref": ref, "placed": { "strategy": "by hand", "score": 1 }, "updatedAt": new Date().toISOString() });
+				await save(file, { ...note, "ref": await withType(ref, editor.document), "placed": { "strategy": "by hand", "score": 1 }, "updatedAt": new Date().toISOString() });
 				lost.delete(note.id);
 				pending = undefined;
 				status.hide();
