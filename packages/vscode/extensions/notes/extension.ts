@@ -16,7 +16,7 @@
  */
 import type { Annotation, Resolution, SpanRef } from "@brianjenkins94/util/silo/annotations";
 import { annotationsPath, annotationsText, parseAnnotations } from "@brianjenkins94/util/silo/annotations";
-import { GITATTRIBUTES, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { GITATTRIBUTES, parseEvidence, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
 import * as vscode from "vscode";
 
 type Note = Annotation<{ "text": string }>;
@@ -99,12 +99,35 @@ export function activate(context: vscode.ExtensionContext): void {
 		return ranges.map((_, index) => response?.body?.types?.[index] ?? null);
 	};
 
-	/** `ref`, made in `document`, with TypeScript's type for its span — the typed strategy's signal for finding it again. */
+	/** The type tags runs observed at each span of `file` that's a value site (RUNTIME-EVIDENCE.md): every user's runs
+	 *  in every environment, `.silo/evidence/<user>/<environment>/<file>.jsonl`, read where the layout puts them. */
+	const observedOf = async (file: string): Promise<Map<string, string[]>> => {
+		const folder = vscode.Uri.joinPath(root, `${SILO_DIR}/evidence`);
+		const folders = async (uri: vscode.Uri): Promise<string[]> => Promise.resolve(vscode.workspace.fs.readDirectory(uri)).then((entries) => entries.filter(([, type]) => type === vscode.FileType.Directory).map(([name]) => name), () => []);
+		const tags = new Map<string, Set<string>>();
+
+		for (const user of await folders(folder)) {
+			for (const environment of await folders(vscode.Uri.joinPath(folder, user))) {
+				for (const observation of parseEvidence(await text(vscode.Uri.joinPath(folder, user, environment, `${file}.jsonl`)))) {
+					if (observation.kind === "value") {
+						tags.set(observation.span, new Set([...tags.get(observation.span) ?? [], ...Object.keys(observation.tags)]));
+					}
+				}
+			}
+		}
+
+		return new Map([...tags].map(([span, kinds]) => [span, [...kinds].sort()]));
+	};
+
+	/** `ref`, made in `document`, with what its span is beyond its shape — TypeScript's type, and the kinds of value runs
+	 *  saw go through it — the typed strategy's signals for finding it again. */
 	const withType = async (ref: SpanRef, document: vscode.TextDocument): Promise<SpanRef> => {
 		const [inferred] = ref.baseline === undefined ? [null] : await typesAt(document, [{ "start": ref.baseline.start, "end": ref.baseline.end }]);
-
+		const observed = (await observedOf(ref.file)).get(ref.span);
 		// Untyped code (`any`, `unknown`) says nothing about what the span is: not kept.
-		return inferred === null || inferred === "any" || inferred === "unknown" ? ref : { ...ref, "inferred": inferred };
+		const { "inferred": _inferred, "observed": _observed, ...bare } = ref;
+
+		return { ...bare, ...inferred === null || inferred === "any" || inferred === "unknown" ? {} : { "inferred": inferred }, ...observed === undefined ? {} : { "observed": observed } };
 	};
 
 	/** Resolve every note on `document` against its text now, and show each where it landed. */
@@ -117,16 +140,18 @@ export function activate(context: vscode.ExtensionContext): void {
 		const version = document.version;
 		const source = document.getText();
 		const notes = (await notesOn(file)).filter(({ note }) => note.dismissed !== true);
-		const resolve = async (refs: SpanRef[], types?: Record<string, { "inferred"?: string }>): Promise<Resolved[] | undefined> => (refs.length === 0 ? [] : Promise.resolve(vscode.commands.executeCommand<Resolved[] | undefined>("editor.annotations.resolve", source, file, refs, types === undefined ? undefined : { "types": types })).catch(() => undefined));
+		const resolve = async (refs: SpanRef[], types?: Record<string, { "inferred"?: string; "observed"?: string[] }>): Promise<Resolved[] | undefined> => (refs.length === 0 ? [] : Promise.resolve(vscode.commands.executeCommand<Resolved[] | undefined>("editor.annotations.resolve", source, file, refs, types === undefined ? undefined : { "types": types })).catch(() => undefined));
 		const resolutions = await resolve(notes.map(({ note }) => note.ref)) ?? [];
-		// A note found only by its shape (asked about, or lost) whose type is known is looked for again with the types of
-		// the places it might be: the typed strategy lifts the one that matches, and lowers the ones that don't.
-		const unsure = notes.map((_, index) => index).filter((index) => notes[index].note.ref.inferred !== undefined && (resolutions[index]?.status === "uncertain" || resolutions[index]?.status === "orphaned"));
+		// A note found only by its shape (asked about, or lost) that knows what its span was — its type, the kinds of value
+		// runs saw there — is looked for again with the same of the places it might be: the typed strategy lifts the one
+		// that matches, and lowers the ones that don't.
+		const unsure = notes.map((_, index) => index).filter((index) => (notes[index].note.ref.inferred !== undefined || notes[index].note.ref.observed !== undefined) && (resolutions[index]?.status === "uncertain" || resolutions[index]?.status === "orphaned"));
 		const places = [...new Map(unsure.flatMap((index) => [resolutions[index]?.candidate, ...resolutions[index]?.alternatives ?? []]).flatMap((found) => (found?.start === undefined || found.end === undefined || found.file !== file ? [] : [[found.span, { "start": found.start, "end": found.end }] as const]))).entries()];
 
 		if (places.length > 0) {
 			const inferred = await typesAt(document, places.map(([, range]) => range));
-			const types = Object.fromEntries(places.flatMap(([span], index) => (inferred[index] === null ? [] : [[span, { "inferred": inferred[index]! }]])));
+			const observed = await observedOf(file);
+			const types = Object.fromEntries(places.map(([span], index) => [span, { ...inferred[index] === null ? {} : { "inferred": inferred[index]! }, ...observed.has(span) ? { "observed": observed.get(span) } : {} }]));
 			const again = await resolve(unsure.map((index) => notes[index].note.ref), types);
 
 			unsure.forEach((index, at) => { resolutions[index] = again?.[at] ?? resolutions[index]; });

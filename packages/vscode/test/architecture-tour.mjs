@@ -310,6 +310,31 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 	});
 
 	assert.equal(fixed.line, "const won = world.onWin;", "the quick fix removed the ?? and its right side");
+
+	// A note on a value site keeps the kinds of value runs saw there: the typed strategy's other signal.
+	const noted = await session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const editor = await api.window.showTextDocument(api.Uri.file("/workspace/values.js"));
+		const at = editor.document.getText().indexOf("world.onWin?.()");
+
+		editor.selection = new api.Selection(editor.document.positionAt(at), editor.document.positionAt(at + "world.onWin?.()".length));
+
+		const id = await api.commands.executeCommand("notes.add", "fires once per win");
+		const folder = api.Uri.file("/workspace/.silo/notes");
+
+		for (const [owner] of await api.workspace.fs.readDirectory(folder)) {
+			const text = await api.workspace.fs.readFile(api.Uri.joinPath(folder, owner, "values.js.jsonl")).then((bytes) => new TextDecoder().decode(bytes), () => "");
+			const note = text.trim().split("\n").filter((line) => line !== "").map((line) => JSON.parse(line)).find((each) => each.id === id);
+
+			if (note !== undefined) {
+				return note.ref;
+			}
+		}
+
+		return undefined;
+	});
+
+	assert.deepEqual(noted?.observed, ["function"], "world.onWin was a function every time");
 });
 
 // What TypeScript makes of a file's ranges, from the capabilities tsserver plugin (`_types.at`): the declared side of

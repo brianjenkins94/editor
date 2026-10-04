@@ -146,7 +146,7 @@ Decided 2026-10-04: every one as recommended (the **bold** option).
    moved), each observation an `observedRef` (its id alone); the event sheet's parts carry a `SpanRef`; and the two
    annotation commands replaced `editor.bablr.spans` and `editor.bablr.anchors`.
 
-**The typed strategy** (RUNTIME-EVIDENCE.md, "The typed strategy"): the span's inferred type — and, once references
-carry them, the runtime values seen there — as signals for a match the shape alone can't settle: a re-scorer of
+**The typed strategy** (RUNTIME-EVIDENCE.md, "The typed strategy"): the span's inferred type and the kinds of value
+runs saw there as signals for a match the shape alone can't settle: a re-scorer of
 same-shape candidates, last in the pipeline. Done; nothing else changed. How often
 it's needed shows in practice: every annotation a strategy other than its own id found records which one, and its score.
