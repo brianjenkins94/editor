@@ -272,8 +272,8 @@ through it.
    `typed` in the pipeline, cases in the corpus. Done: `_types.at` (capabilities tsserver plugin) types each range as
    its site observes; `typed` re-scores same-shape candidates and treats `any` and `unknown` as saying nothing; notes
    keep `inferred` and, when a note is only matched by shape, look again with its candidates' types; the hover shows
-   the declared type beside the observed kinds. Not yet: `observed` on references and candidates — the strategy takes
-   it, but nothing reads a span's evidence into a reference yet.
+   the declared type beside the observed kinds; notes keep `observed` too (the kinds of value runs saw at their span,
+   read from the evidence), and give each candidate its own.
 
 ### Decisions for this slice
 
@@ -291,6 +291,107 @@ Decided 2026-10-04: every one as recommended (the **bold** option).
 - **V7 · What the typed strategy is.** **(a) a re-scorer of same-shape candidates**; (b) a finder of its own over every
   span of the node's type.
 - **V8 · The first surface.** **(a) hover, then quick fixes**; (b) quick fixes first.
+
+## Third slice: previews, under HMR
+
+The second slice records what tsval runs observe. A preview, though, runs as real JavaScript in the browser (D9), and
+it can stay open for hours while modules are swapped underneath it. This slice records the same evidence there: the
+same kinds, the same sites, the same files.
+
+### What's there to work with
+
+- **The preview's dev server is ours.** It's almostnode's `ViteDevServer`, not Vite: it compiles each workspace
+  module with `ts.transpileModule` (`transformCode`), with an inline source map. Dependencies come from the CDN and
+  never pass through it.
+- **HMR is ours too.** A change goes out on `preview.hmr.<port>`, and the injected client re-imports the module as a
+  new instance (`?t=`). Only `.tsx`/`.jsx` modules get `import.meta.hot`; a `.ts` edit reloads the page.
+- **The page already talks to the editor.** The page tap is a hub client in every preview page; the shell decides what
+  it may publish.
+- **A preview is a run.** `npm run dev` registers a service run with an id and its port (`runs.runningService(port)`).
+  It ends on Ctrl-C, Stop, or when the last window closes, and the windows close before the run ends.
+
+### Capture: a TypeScript transformer in the dev server
+
+The dev server compiles a workspace module with one more step: a `before` transformer that instruments it. It works
+on the original source's syntax tree, so every range it records is in the original file's lines and characters, and
+the source map the compile emits stays right. No source maps need to be composed.
+
+- **Sites as tsval's.** Statements count as they start; `?.` and `??` observe the value tested; `if`, `?:`, `&&`, `||`
+  record the arm that ran; parameters and returns observe their values. Each wrapper returns what it was given and
+  reads each value once, so the program does what it did before. A member callee (`obj.m?.()`) keeps its `this`.
+- **Parameters with a default or a pattern aren't observed.** A transform can't see the argument a default replaced
+  (arrow functions have no `arguments`), and evidence from tsval, which does see it, must mean the same thing.
+- **Workspace files only.** Not `node_modules`, not `/@pkg/` files. The transform cache keys on the setting too.
+
+### Counting: a page runtime that outlives hot updates
+
+A small runtime, served like the page tap (`/@editor/…`) and injected into every preview page, keeps the counts. It's
+page-global, keyed by file and version (the source's git blob oid), so a module re-imported after an edit counts into
+its new version, and one re-imported unchanged counts on into its old one. A module's own scope would lose its counts
+on every update. In a worker, the same runtime keeps its counts and reports through the worker tap.
+
+### Reporting: often, and before the page goes
+
+Each window reports what it has counted since it loaded, as totals rather than increments, so a lost report costs
+nothing. It reports every 10 seconds while something changed, on each hot update, on `pagehide`, and when the editor
+asks before the preview closes. That last one closes a gap: today the windows close before the run ends. Reports go
+out on a new subject, `evidence.preview`, which the shell's link permissions let the page publish.
+
+### Recording: core folds a preview run like any other
+
+- **The run is found by port.** A report carries the page's port, and core finds the running service there. The page
+  never needs to know a run id.
+- **Versions, then spans.** Core keeps each window's latest totals per (file, version) until the run ends. Then it maps
+  each version's ranges to spans through BABLR, adds up what every window and version saw under each span, and folds
+  each file once. Code an HMR edit didn't touch has the same span ids in every version, so its counts add up across
+  versions. Code that was edited has new ids, and its old counts stay with the old spans and fade.
+- **Past versions' sources.** Mapping a version's ranges needs that version's text, which the file may no longer
+  have. The dev server keeps each version it instrumented, by blob oid, for as long as it runs, and core asks it for
+  the ones it needs.
+- **The envelope says which versions ran.** `files` keeps each path's last version, and `versions` lists every oid of
+  a path that more than one version of ran.
+- **Fast Refresh keeps state across an edit**, so new code can see values that old code made. They're still values that
+  went through the new code, so they count.
+
+### Cost
+
+Wrappers run on the app's hot paths, and a game's frame budget is tight. Statement counters are an increment; value
+sites tag every value. The setting `silo.evidence.previews` (`full`, `coverage`, `off`) scales it back. The performance
+budgets (test/performance.mjs) measure an instrumented preview before the default is chosen for good.
+
+### Building it
+
+1. **The transformer**, in almostnode beside its other code transforms, tested on its own: sites and ranges as tsval's,
+   semantics unchanged.
+2. **The page runtime** and its reports: counts by file and version, flushed as above, `evidence.preview` allowed
+   through the link.
+3. **Core**: reports gathered by run (by port), past versions' sources from the dev server, a last pull before the
+   preview closes, folding at run end, `versions` in the envelope (silo).
+4. **The setting and a performance check.**
+5. **A tour test**: `npm run dev`, use the app, edit a module (a hot update), use it again, stop; evidence for both
+   versions, the untouched code's counts added across them.
+
+### Decisions for this slice
+
+Decided 2026-10-04: every one as recommended (the **bold** option).
+
+- **P1 · Where to instrument.** **(a) a TypeScript `before` transformer in the dev server's compile**; (b) rewrite the
+  compiled output where responses pass (`answerVirtual`), composing source maps; (c) in the service worker.
+- **P2 · Which files.** **(a) workspace `.ts`/`.tsx`/`.jsx`, and `.js`/`.mjs` sent through the same compile when
+  instrumenting**; (b) only what the dev server compiles today (TypeScript and JSX).
+- **P3 · What's on by default.** **(a) everything (`full`), measured against the performance budgets before it
+  stays**; (b) coverage only; (c) off until asked for.
+- **P4 · Where counts live.** **(a) a page-global runtime, by file and version**; (b) in each module's scope (lost on
+  every hot update).
+- **P5 · When a window reports.** **(a) totals, every 10 seconds while changing, on hot updates, on `pagehide`, and when
+  asked before closing**; (b) only on `pagehide` and close.
+- **P6 · How a report finds its run.** **(a) by port, in core**; (b) thread the run id into the dev server and the page.
+- **P7 · Past versions' sources.** **(a) the dev server keeps them by blob oid, and core asks**; (b) each window sends
+  a version's source with its first report; (c) only versions whose source the file still has are recorded.
+- **P8 · Parameters.** **(a) only those without a default or pattern, in previews and tsval alike**; (b) previews
+  observe the value after its default, tsval before; (c) no parameters in previews.
+- **P9 · The envelope's versions.** **(a) `files` keeps the last version, `versions` lists every oid that ran**; (b)
+  `files` only.
 
 ## Decisions
 
