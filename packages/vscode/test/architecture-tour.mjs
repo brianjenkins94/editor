@@ -250,6 +250,26 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 	assert.ok(found.evidence.some((line) => line.kind === "reached"), "beside its coverage");
 	assert.ok(found.samples.some((line) => line.values.includes("none")), "the values, on this machine");
 	assert.ok(found.evidence.every((line) => !JSON.stringify(line).includes("none")), "and never in git");
+
+	// On hover (the insights extension), what went through the code under the cursor.
+	const hovers = await eventually("the evidence, on hover", () => session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const editor = await api.window.showTextDocument(api.Uri.file("/workspace/values.js"));
+		const text = editor.document.getText();
+		const hover = async (needle, offset = 0) => {
+			const found = await api.commands.executeCommand("vscode.executeHoverProvider", editor.document.uri, editor.document.positionAt(text.indexOf(needle) + offset));
+
+			return found.flatMap((each) => each.contents.map((content) => (typeof content === "string" ? content : content.value))).join("\n");
+		};
+		const optional = await hover("?.", -1);
+
+		return optional.includes("never nullish") ? { "optional": optional, "branch": await hover("if ("), "returned": await hover("return") } : undefined;
+	}));
+
+	assert.match(hovers.optional, /`\?\.` — what it tested\*\* — 1 value in 1 run, never nullish/u);
+	assert.match(hovers.optional, /`function` █+ 100%/u);
+	assert.match(hovers.branch, /then 1× \(50%\) · else 1× \(50%\), in 1 run/u);
+	assert.match(hovers.returned, /Seen here: "a", "none"/u, "the values, as this machine saw them");
 });
 
 test("node script: a service runs on the script worker, and stopping it leaves the previews up", async () => {

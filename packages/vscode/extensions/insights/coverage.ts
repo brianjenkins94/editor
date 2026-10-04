@@ -7,36 +7,17 @@
  *  - the session's own report — its `coverage` custom event (its final coverage, just before it ends) and, when it stops,
  *    its `getCoverage` custom request (coverage so far): every statement the program can run, with how often it ran.
  *    Exact for the text that ran, so editing the file drops it.
- *  - the evidence kept in git (RUNTIME-EVIDENCE.md): `.silo/evidence/<user>/<environment>/<file>.jsonl`, written as each
- *    run ends, keyed on BABLR spans — everyone's runs, in every environment, folded together. It outlives the session and
- *    follows the code: a statement you didn't touch keeps its marks when code around it moves or changes; one you edited
- *    loses them until it runs again. Evidence is an observed span annotation (SPAN-ANNOTATIONS.md): each span is found
- *    in the open document by the editor's BABLR, by its id alone (worker-pod's `editor.annotations.resolve`), and one
- *    that isn't there fades rather than being looked for. A file BABLR's grammar doesn't take yet has no evidence, only
- *    its sessions' reports.
+ *  - the evidence kept in git (RUNTIME-EVIDENCE.md; read through evidence.ts): everyone's runs, in every environment,
+ *    folded together. It outlives the session and follows the code: a statement you didn't touch keeps its marks when
+ *    code around it moves or changes; one you edited loses them until it runs again. A file BABLR's grammar doesn't take
+ *    yet has no evidence, only its sessions' reports.
  */
-import type { Resolution } from "@brianjenkins94/util/silo/annotations";
-import type { Observation } from "@brianjenkins94/util/silo/evidence";
 import type { CoverageReport } from "../worker-pod/debug-protocol";
-import { observedRef } from "@brianjenkins94/util/silo/annotations";
-import { parseEvidence, SILO_DIR } from "@brianjenkins94/util/silo/evidence";
+import type { EvidenceStore } from "./evidence";
 import * as vscode from "vscode";
 
-/** A span's evidence, every user's and environment's folded together. */
-interface SpanEvidence { "ever": number; "runs": number; "lastAt": string }
-
 /** What evidence says of a line: whether every evidenced statement starting on it ran, in how many runs, and when last. */
-interface LineEvidence extends SpanEvidence { "ran": boolean }
-
-/** Where each of `spans` is in `source`, the text of `file`, by its id alone — from the editor's one BABLR worker,
- *  through worker-pod's command; undefined where there's no such command (VS Code without the editor). */
-async function find(source: string, file: string, spans: string[]): Promise<Resolution[] | undefined> {
-	try {
-		return await vscode.commands.executeCommand<Resolution[] | undefined>("editor.annotations.resolve", source, file, spans.map((span) => observedRef(span, file)), { "observed": true });
-	} catch {
-		return undefined;
-	}
-}
+interface LineEvidence { "ever": number; "runs": number; "lastAt": string; "ran": boolean }
 
 /** A gutter bar, as VS Code's own coverage draws one. */
 function bar(color: string): vscode.Uri {
@@ -56,51 +37,11 @@ function lines(report: CoverageReport): Map<number, { "ran": boolean; "count": n
 	return byLine;
 }
 
-export function registerCoverage(context: vscode.ExtensionContext): void {
+export function registerCoverage(context: vscode.ExtensionContext, store: EvidenceStore): void {
 	const ran = vscode.window.createTextEditorDecorationType({ "gutterIconPath": bar("#2ea04370"), "gutterIconSize": "contain", "overviewRulerColor": "#2ea04340", "overviewRulerLane": vscode.OverviewRulerLane.Left });
 	const missed = vscode.window.createTextEditorDecorationType({ "gutterIconPath": bar("#f85149c0"), "gutterIconSize": "contain", "overviewRulerColor": "#f85149a0", "overviewRulerLane": vscode.OverviewRulerLane.Left, "backgroundColor": "#f8514910", "isWholeLine": true });
 	/** The latest session's coverage, by file path — until the file is edited. */
 	const reports = new Map<string, CoverageReport>();
-	/** The evidence kept for each file (by workspace-relative path), read when first shown and again when it changes. */
-	const evidence = new Map<string, Promise<Map<string, SpanEvidence>>>();
-
-	const evidenceOf = (path: string): Promise<Map<string, SpanEvidence>> => {
-		let known = evidence.get(path);
-
-		if (known === undefined) {
-			known = (async () => {
-				const bySpan = new Map<string, SpanEvidence>();
-
-				// `.silo/evidence/<user>/<environment>/<file>.jsonl`, read where the layout puts it rather than searched for.
-				const root = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("/workspace");
-				const folders = async (uri: vscode.Uri): Promise<string[]> => Promise.resolve(vscode.workspace.fs.readDirectory(uri)).then((entries) => entries.filter(([, type]) => type === vscode.FileType.Directory).map(([name]) => name), () => []);
-				const evidence = vscode.Uri.joinPath(root, `${SILO_DIR}/evidence`);
-				const files: vscode.Uri[] = [];
-
-				for (const user of await folders(evidence)) {
-					for (const environment of await folders(vscode.Uri.joinPath(evidence, user))) {
-						files.push(vscode.Uri.joinPath(evidence, user, environment, `${path}.jsonl`));
-					}
-				}
-
-				for (const uri of files) {
-					const text = await Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => new TextDecoder().decode(bytes), () => "");
-
-					for (const observation of parseEvidence(text).filter((each: Observation) => each.kind === "reached")) {
-						const before = bySpan.get(observation.span);
-
-						bySpan.set(observation.span, { "ever": (before?.ever ?? 0) + observation.ever, "runs": (before?.runs ?? 0) + observation.runs, "lastAt": before !== undefined && before.lastAt > observation.lastAt ? before.lastAt : observation.lastAt });
-					}
-				}
-
-				return bySpan;
-			})().catch(() => new Map<string, SpanEvidence>());
-			evidence.set(path, known);
-		}
-
-		return known;
-	};
-
 	const paint = (editor: vscode.TextEditor, marks: Iterable<[number, { "ran": boolean; "hover": string }]>): void => {
 		const ranLines: vscode.DecorationOptions[] = [];
 		const missedLines: vscode.DecorationOptions[] = [];
@@ -115,37 +56,26 @@ export function registerCoverage(context: vscode.ExtensionContext): void {
 		editor.setDecorations(missed, missedLines);
 	};
 
-	/** The evidence's marks for the document as it is now: each evidenced span found in it, on the line it starts. */
+	/** The evidence's marks for the document as it is now: each statement with evidence found in it, on the line it starts. */
 	const evidenceMarks = async (document: vscode.TextDocument): Promise<Map<number, LineEvidence> | undefined> => {
-		const file = vscode.workspace.asRelativePath(document.uri, false);
-		const known = await evidenceOf(file);
+		const placed = await store.placed(document);
 
-		if (known.size === 0) {
-			return new Map();
-		}
-
-		const version = document.version;
-		const spans = [...known.keys()];
-		const found = await find(document.getText(), file, spans);
-
-		if (found === undefined || document.version !== version) {
-			return found === undefined ? new Map() : undefined; // no BABLR: nothing to show; edited since: a newer draw follows
+		if (placed === undefined) {
+			return undefined; // edited since: a newer draw follows
 		}
 
 		const byLine = new Map<number, LineEvidence>();
 
-		spans.forEach((id, index) => {
-			const at = found[index]?.candidate;
-			const span = known.get(id)!;
+		for (const { start, evidence } of placed) {
+			const span = evidence.reached;
 
-			// Found here (lost — or moved to another file — it fades: new runs make new evidence).
-			if (at?.start !== undefined && at.file === file) {
-				const line = document.positionAt(at.start).line;
+			if (span !== undefined) {
+				const line = document.positionAt(start).line;
 				const before = byLine.get(line);
 
 				byLine.set(line, before === undefined ? { ...span, "ran": span.ever > 0 } : { ...before, "ran": before.ran && span.ever > 0 });
 			}
-		});
+		}
 
 		return byLine;
 	};
@@ -175,15 +105,6 @@ export function registerCoverage(context: vscode.ExtensionContext): void {
 	};
 	// Typing: draw once it pauses (BABLR re-reads the whole file).
 	let typing: ReturnType<typeof setTimeout> | undefined;
-	const watcher = vscode.workspace.createFileSystemWatcher(`**/${SILO_DIR}/evidence/**/*.jsonl`);
-	const changed = (uri: vscode.Uri): void => {
-		// `.silo/evidence/<user>/<environment>/<file>.jsonl` → <file>
-		const file = /\/\.silo\/evidence\/[^/]+\/[^/]+\/(.+)\.jsonl$/u.exec(uri.path)?.[1];
-
-		if (file !== undefined && evidence.delete(file)) {
-			redraw();
-		}
-	};
 
 	const show = (report: CoverageReport | undefined): void => {
 		if (report === undefined || report.statements.length === 0) {
@@ -199,7 +120,7 @@ export function registerCoverage(context: vscode.ExtensionContext): void {
 		}
 	};
 
-	context.subscriptions.push(ran, missed, watcher, watcher.onDidCreate(changed), watcher.onDidChange(changed), watcher.onDidDelete(changed),
+	context.subscriptions.push(ran, missed, store.onDidChange(() => { redraw(); }),
 		// A session's final coverage, as it ends.
 		vscode.debug.onDidReceiveDebugSessionCustomEvent((event) => {
 			if (event.event === "coverage") {

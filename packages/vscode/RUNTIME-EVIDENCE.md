@@ -261,7 +261,10 @@ through it.
 4. **evidence.ts**: exact spans for sites, folded and written beside `reached`. Done: a site's span is the innermost
    one without an ordinal whose range is its node's (a statement's trailing `;` aside); samples go to
    `.silo/local/samples/<file>.jsonl`, kept only for sites the evidence still knows.
-5. **Insights**: the hover.
+5. **Insights**: the hover. Done (extensions/insights/hover.ts, over evidence.ts, the store the gutter marks share):
+   values, nullish, kinds and this machine's samples, or each arm's share, for the innermost span under the cursor,
+   labelled by its node type. Declared against observed waits for step 7's types at ranges: TypeScript's own hover
+   shows the declared type beside it until then.
 6. **Quick fixes**: `?.` and `??`, then branches.
 7. **The typed strategy**: types at ranges from the tsserver plugin, `inferred` and `observed` on references,
    `typed` in the pipeline, cases in the corpus.
