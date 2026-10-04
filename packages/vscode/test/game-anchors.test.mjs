@@ -7,6 +7,7 @@ import * as path from "node:path";
 import test from "node:test";
 import * as url from "node:url";
 import ts from "typescript";
+import { pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import { anchorGame } from "../extensions/event-sheet/anchors.ts";
 import { recognizeGame } from "../extensions/event-sheet/recognizer.ts";
 
@@ -26,16 +27,23 @@ function readGame(dir, base = dir, out = {}) {
 	return out;
 }
 
+/** BABLR's anchors for ranges of a text — what the editor's `editor.bablr.anchors` answers, here straight from BABLR. */
+const anchorsOf = async (source, ranges) => {
+	const anchors = spanAnchors(source);
+
+	return ranges.map((range) => pickAnchor(anchors, range.start, range.end));
+};
+
 /** Project + anchor, and return the anchor id for a named behavior. */
-function behaviorAnchor(files, name) {
-	const model = anchorGame(files, recognizeGame(files, ts));
+async function behaviorAnchor(files, name) {
+	const model = await anchorGame(files, recognizeGame(files, ts), anchorsOf);
 
 	return model.behaviors.find((behavior) => behavior.name === name)?.anchor;
 }
 
-test("every recognized node gets an anchor, and the five behaviors' anchors are distinct", () => {
+test("every recognized node gets an anchor, and the five behaviors' anchors are distinct", async () => {
 	const files = readGame(fixtureDir);
-	const model = anchorGame(files, recognizeGame(files, ts));
+	const model = await anchorGame(files, recognizeGame(files, ts), anchorsOf);
 
 	for (const node of [...model.behaviors, ...model.objects, ...model.rules, ...model.rules.flatMap((rule) => rule.rows)]) {
 		assert.equal(typeof node.anchor, "string", (node.name ?? node.event) + " has an anchor");
@@ -48,22 +56,22 @@ test("every recognized node gets an anchor, and the five behaviors' anchors are 
 	assert.equal(new Set(anchors).size, anchors.length, "behavior anchors are unique");
 });
 
-test("move-stable: an unrelated edit above a node does not change its anchor", () => {
+test("move-stable: an unrelated edit above a node does not change its anchor", async () => {
 	const files = readGame(fixtureDir);
-	const before = behaviorAnchor(files, "Position");
+	const before = await behaviorAnchor(files, "Position");
 
 	// Shift Position down by prepending unrelated lines to its file.
 	const shifted = { ...files, "schemas/position.ts": "// a new comment\n\n" + files["schemas/position.ts"] };
 
-	assert.equal(behaviorAnchor(shifted, "Position"), before, "Position's anchor is unchanged by a shift above it");
+	assert.equal(await behaviorAnchor(shifted, "Position"), before, "Position's anchor is unchanged by a shift above it");
 });
 
-test("self-edit-aware: changing a node's own content changes its anchor", () => {
+test("self-edit-aware: changing a node's own content changes its anchor", async () => {
 	const files = readGame(fixtureDir);
-	const before = behaviorAnchor(files, "Position");
+	const before = await behaviorAnchor(files, "Position");
 
 	// Rename Position's field x → z (its own content changes).
 	const edited = { ...files, "schemas/position.ts": files["schemas/position.ts"].replace(/"x"/u, "\"z\"") };
 
-	assert.notEqual(behaviorAnchor(edited, "Position"), before, "editing Position's own field changes its anchor");
+	assert.notEqual(await behaviorAnchor(edited, "Position"), before, "editing Position's own field changes its anchor");
 });

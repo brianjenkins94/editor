@@ -10,7 +10,6 @@
  * once it listens: a request sent before then would be lost.
  */
 import type { TsApi } from "./recognizer";
-import { anchorGame } from "./anchors";
 import { recognizeGame } from "./recognizer";
 
 let tsApi: TsApi | undefined;
@@ -22,8 +21,8 @@ globalThis.addEventListener("message", (event: MessageEvent) => {
 		try {
 			// The shared ts chunk — loaded once, on first use.
 			tsApi ??= ((await import("typescript")) as unknown as { "default": TsApi }).default;
-			// Recognize with the TS AST, then attach durable BABLR anchors (anchors.ts).
-			globalThis.postMessage({ "id": id, "model": anchorGame(files, recognizeGame(files, tsApi)) });
+			// Recognize with the TS AST; the extension attaches the durable BABLR anchors (anchors.ts), from the editor's BABLR.
+			globalThis.postMessage({ "id": id, "model": recognizeGame(files, tsApi) });
 		} catch (error) {
 			globalThis.postMessage({ "id": id, "error": error instanceof Error ? error.message : String(error) });
 		}

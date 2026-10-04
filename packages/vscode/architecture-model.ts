@@ -247,7 +247,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"], "description": "Ask the user about a capability, served by the shell." },
 	// ── workers ──
 	{ "pattern": "bablr.>", "from": ["workbench"], "to": ["bablr"], "description": "What bablr.ts asks its BABLR worker for: cosmetic/semantic verdicts, edit-burst grouping (cancellable), a text's spans, and the span standing for each of its ranges (a run's evidence)." },
-	{ "pattern": "spans.of", "from": ["pod"], "to": ["workbench"], "description": "A text's BABLR spans, from core's cache (bablr.ts) — the pod's editor.bablr.spans command, for extensions (the insights extension's evidence marks)." }
+	{ "pattern": "spans.of", "from": ["pod"], "to": ["workbench"], "description": "A text's BABLR spans — or, given ranges, the span standing for each — from core's BABLR (bablr.ts): the pod's editor.bablr.spans and editor.bablr.anchors commands, for extensions (the insights extension's evidence marks, the event sheet's anchors)." }
 ];
 
 export const channels: ChannelSpec[] = [

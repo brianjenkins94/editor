@@ -75,27 +75,38 @@ export function startBablr(hub: Hub): Bablr {
 		return (await request<{ "spans"?: Span[]; "unparsable"?: true }>("spans", { "source": source }, signal)).spans;
 	};
 
-	// The pod's `editor.bablr.spans` (for extensions) asks here, so it gets the cache too.
-	const offServe = serve(hub, "spans.of", async (args, { signal }) => {
-		const source = (args as { "source"?: unknown } | undefined)?.source;
+	const anchors = async (source: string, ranges: { "start": number; "end": number }[]): Promise<(string | undefined)[] | undefined> => {
+		const known = await spans(source);
 
-		return typeof source === "string" ? { "spans": await spans(source, signal) } : {};
+		if (known === undefined) {
+			return undefined;
+		}
+
+		const { ids } = await request<{ "ids": (string | null)[] }>("pick", { "spans": known, "ranges": ranges });
+
+		return ids.map((id) => id ?? undefined);
+	};
+
+	// The pod's `editor.bablr.spans` and `editor.bablr.anchors` (for extensions) ask here, so they share the worker and
+	// its cache: a text's spans, or — given ranges — the span standing for each.
+	const offServe = serve(hub, "spans.of", async (args, { signal }) => {
+		const { source, ranges } = (args ?? {}) as { "source"?: unknown; "ranges"?: unknown };
+
+		if (typeof source !== "string") {
+			return {};
+		}
+
+		if (Array.isArray(ranges)) {
+			return { "ids": (await anchors(source, ranges as { "start": number; "end": number }[]))?.map((id) => id ?? null) };
+		}
+
+		return { "spans": await spans(source, signal) };
 	});
 
 	return {
 		"request": request,
 		"spans": spans,
-		"anchors": async (source, ranges) => {
-			const known = await spans(source);
-
-			if (known === undefined) {
-				return undefined;
-			}
-
-			const { ids } = await request<{ "ids": (string | null)[] }>("pick", { "spans": known, "ranges": ranges });
-
-			return ids.map((id) => id ?? undefined);
-		},
+		"anchors": anchors,
 		"dispose": () => {
 			offServe();
 			unlink();

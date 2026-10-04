@@ -166,6 +166,12 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 	assert.ok(cache.keys.some((key) => /^[0-9a-f]{12}\/[0-9a-f]{40}$/u.test(key)), "a text's parse, by parse version and blob oid");
 	assert.deepEqual([cache.spans, cache.git], [[], []], "nothing left in the workspace's old caches");
 
+	// What an extension gets from the editor's BABLR (the event sheet anchors its parts this way): the span standing
+	// for a range — here, f5.js's one statement.
+	const ids = await session.workbench().evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.bablr.anchors", "console.log('f5');\n", [{ "start": 0, "end": 18 }]));
+
+	assert.match(ids?.[0] ?? "", /^[0-9a-f]{16}(?:#\d+)?$/u, "a spanAnchors id");
+
 	// Shown from the evidence: open the file and edit another line — the session's marks drop, the evidence's follow the
 	// statement's span; edit the statement itself, and its mark goes until it runs again.
 	const workbench = session.workbench();

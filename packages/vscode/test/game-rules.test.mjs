@@ -4,9 +4,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import ts from "typescript";
+import { pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import { anchorGame } from "../extensions/event-sheet/anchors.ts";
 import { compileGame, exampleBehaviors, exampleRules, fly } from "../extensions/event-sheet/rules.ts";
 import { recognizeGame } from "../extensions/event-sheet/recognizer.ts";
+
+/** BABLR's anchors for ranges of a text — what the editor's `editor.bablr.anchors` answers, here straight from BABLR. */
+const anchorsOf = async (source, ranges) => {
+	const anchors = spanAnchors(source);
+
+	return ranges.map((range) => pickAnchor(anchors, range.start, range.end));
+};
 
 // Minimal schemas + an entity config, so behaviors and objects recognize alongside the compiled rules.
 const SCHEMAS = {
@@ -117,9 +125,9 @@ test("arcade: continuous movement compiles to deterministic fixed-point code, no
 	assert.doesNotMatch(system, /fly\(world, eid, dir\)/u);
 });
 
-test("composed behaviors get durable anchors (the library keeps its identity across edits)", () => {
+test("composed behaviors get durable anchors (the library keeps its identity across edits)", async () => {
 	const files = { ...SCHEMAS, ...GAME, ...compileGame(exampleRules, exampleBehaviors) };
-	const model = anchorGame(files, recognizeGame(files, ts));
+	const model = await anchorGame(files, recognizeGame(files, ts), anchorsOf);
 
 	const push = model.composites.find((composite) => composite.name === "gridPush");
 
@@ -132,7 +140,7 @@ test("composed behaviors get durable anchors (the library keeps its identity acr
 
 	// A cosmetic edit ABOVE the behavior (a new comment line) must not change its anchor — that is the point of anchoring.
 	const shifted = { ...files, "behaviors/gridPush.ts": "// a new comment above\n" + files["behaviors/gridPush.ts"] };
-	const reanchored = anchorGame(shifted, recognizeGame(shifted, ts));
+	const reanchored = await anchorGame(shifted, recognizeGame(shifted, ts), anchorsOf);
 	const pushAgain = reanchored.composites.find((composite) => composite.name === "gridPush");
 
 	assert.equal(pushAgain?.anchor, push.anchor, "the anchor survives an edit above it (move-stable)");

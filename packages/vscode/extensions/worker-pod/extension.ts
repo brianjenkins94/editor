@@ -187,6 +187,15 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		const answer = await rpc.request("spans.of", { "source": source }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "spans"?: { "id": string; "start": number; "end": number }[] };
 
 		return answer.spans;
+	}), vscode.commands.registerCommand("editor.bablr.anchors", async (source: unknown, ranges: unknown) => {
+		// And the span standing for each of a text's ranges (another parser's nodes — the event sheet's recognized parts).
+		if (typeof source !== "string" || source === "" || !Array.isArray(ranges)) {
+			return undefined;
+		}
+
+		const answer = await rpc.request("spans.of", { "source": source, "ranges": ranges }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "ids"?: (string | null)[] };
+
+		return answer.ids;
 	}));
 
 	// The production debug type — presents an almostnode run (the vite preview) as a debug session with a

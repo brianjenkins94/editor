@@ -6,60 +6,33 @@
  * attachments (annotations, extracted custom-code snippets, orphan detection) can key on. This is what "annotate the CST
  * in place with change-resistant anchors" means: the map's identity survives edits.
  *
- * Runs where BABLR lives (the recognizer worker). Per file, derive spanAnchors once; per node, pick the anchor that best
- * represents its range (bablr-language-ts's pickAnchor — the evidence store matches coverage the same way).
+ * BABLR itself is the editor's (`anchorsOf`: in the extension, worker-pod's `editor.bablr.anchors` command — one BABLR
+ * worker, one cache of parses): per file, one call for the anchor that best stands for each node's range
+ * (bablr-language-ts's pickAnchor — the evidence store matches coverage the same way).
  */
-import { pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import type { GameModel, NodeLoc } from "./recognizer";
 
-type Anchor = ReturnType<typeof spanAnchors>[number];
+/** The anchor id standing for each of `ranges` in `source`, or undefined when BABLR's grammar doesn't take it. */
+export type AnchorsOf = (source: string, ranges: { "start": number; "end": number }[]) => Promise<(string | undefined | null)[] | undefined>;
 
-/**
- * Attach a durable anchor id to every recognized node in the model (mutates + returns it). Cross-file: spanAnchors is
- * derived once per file and reused for every node in it.
- */
-export function anchorGame(files: Record<string, string>, model: GameModel): GameModel {
-	const cache = new Map<string, Anchor[]>();
+/** Attach a durable anchor id to every recognized node in the model (mutates + returns it): one `anchorsOf` per file. */
+export async function anchorGame(files: Record<string, string>, model: GameModel, anchorsOf: AnchorsOf): Promise<GameModel> {
+	const nodes: NodeLoc[] = [...model.behaviors, ...model.composites, ...model.objects, ...model.rules.flatMap((rule) => [rule, ...rule.rows])];
+	const byFile = new Map<string, NodeLoc[]>();
 
-	const anchorsFor = (path: string): Anchor[] => {
-		let anchors = cache.get(path);
-
-		if (anchors === undefined) {
-			try {
-				anchors = spanAnchors(files[path] ?? "") as Anchor[];
-			} catch {
-				anchors = []; // unparsable / empty file — no anchors (BABLR throws on "")
-			}
-
-			cache.set(path, anchors);
-		}
-
-		return anchors;
-	};
-
-	const attach = (node: NodeLoc): void => {
-		node.anchor = pickAnchor(anchorsFor(node.defPath), node.start, node.end);
-	};
-
-	for (const behavior of model.behaviors) {
-		attach(behavior);
+	for (const node of nodes) {
+		byFile.set(node.defPath, [...byFile.get(node.defPath) ?? [], node]);
 	}
 
-	for (const composite of model.composites) {
-		attach(composite);
-	}
+	await Promise.all([...byFile].map(async ([path, inFile]) => {
+		const source = files[path] ?? "";
+		// An unparsable or empty file has no anchors (BABLR throws on "").
+		const ids = source === "" ? undefined : await anchorsOf(source, inFile.map((node) => ({ "start": node.start, "end": node.end }))).catch(() => undefined);
 
-	for (const object of model.objects) {
-		attach(object);
-	}
-
-	for (const rule of model.rules) {
-		attach(rule);
-
-		for (const row of rule.rows) {
-			attach(row);
-		}
-	}
+		inFile.forEach((node, index) => {
+			node.anchor = ids?.[index] ?? undefined;
+		});
+	}));
 
 	return model;
 }

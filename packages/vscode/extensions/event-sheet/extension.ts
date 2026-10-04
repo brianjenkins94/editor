@@ -3,11 +3,13 @@
  * webview view. This is its VS Code side, on the public API only: it serves the view, answers what the view asks of it
  * (EventSheetHost: the game around the active file, its projection, opening a file at a line, writing files, prompts),
  * tells the view when to refresh (the active editor changed, a file was saved), and runs the recognizer in a worker of
- * its own (recognizer-worker.ts) so parsing doesn't hold up the extension host.
+ * its own (recognizer-worker.ts) so parsing doesn't hold up the extension host — anchoring what it recognizes with the
+ * editor's BABLR (anchors.ts).
  */
 import type { EventSheetHost, HostMessage, ViewMessage } from "./view";
 import type { GameModel } from "./recognizer";
 import * as vscode from "vscode";
+import { anchorGame } from "./anchors";
 
 const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 const IGNORE = /(?:^|\/)(?:node_modules|\.git|\.silo|dist|assets)(?:\/|$)/u;
@@ -114,11 +116,15 @@ function recognizer(context: vscode.ExtensionContext): { "project": (files: Reco
 
 			await current.ready;
 
-			return new Promise((resolve, reject) => {
+			const model = await new Promise<GameModel>((resolve, reject) => {
 				next += 1;
 				pending.set(next, { "resolve": resolve, "reject": reject });
 				current.worker.postMessage({ "id": next, "files": files });
 			});
+
+			// Durable anchors, from the editor's BABLR (one worker, one cache of parses): worker-pod's command. Without it
+			// (VS Code without the editor), the nodes go unanchored.
+			return anchorGame(files, model, async (source, ranges) => vscode.commands.executeCommand<(string | null)[] | undefined>("editor.bablr.anchors", source, ranges));
 		},
 		"dispose": () => { worker?.worker.terminate(); }
 	};
