@@ -69,6 +69,13 @@ declare module "running:extension" {
 	export default path;
 }
 
+/** The notes extension (notes that stay with their code: durable span annotations), bundled like the others: its path. */
+declare module "notes:extension" {
+	const path: string;
+
+	export default path;
+}
+
 /** The type-queries extension (`// ^?` → the type, from VS Code's public API), bundled like the others: its path. */
 declare module "type-queries:extension" {
 	const path: string;

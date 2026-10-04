@@ -67,8 +67,20 @@ export function registerCoverage(context: vscode.ExtensionContext): void {
 			known = (async () => {
 				const bySpan = new Map<string, SpanEvidence>();
 
-				for (const uri of await vscode.workspace.findFiles(`${SILO_DIR}/evidence/*/*/${path}.jsonl`)) {
-					const text = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+				// `.silo/evidence/<user>/<environment>/<file>.jsonl`, read where the layout puts it rather than searched for.
+				const root = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("/workspace");
+				const folders = async (uri: vscode.Uri): Promise<string[]> => Promise.resolve(vscode.workspace.fs.readDirectory(uri)).then((entries) => entries.filter(([, type]) => type === vscode.FileType.Directory).map(([name]) => name), () => []);
+				const evidence = vscode.Uri.joinPath(root, `${SILO_DIR}/evidence`);
+				const files: vscode.Uri[] = [];
+
+				for (const user of await folders(evidence)) {
+					for (const environment of await folders(vscode.Uri.joinPath(evidence, user))) {
+						files.push(vscode.Uri.joinPath(evidence, user, environment, `${path}.jsonl`));
+					}
+				}
+
+				for (const uri of files) {
+					const text = await Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => new TextDecoder().decode(bytes), () => "");
 
 					for (const observation of parseEvidence(text).filter((each: Observation) => each.kind === "reached")) {
 						const before = bySpan.get(observation.span);

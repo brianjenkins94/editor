@@ -13,9 +13,11 @@
  * fails what's in flight and every later call.
  */
 import type { Hub } from "@brianjenkins94/hub";
+import type { Resolution, SpanRef } from "@brianjenkins94/util/silo/annotations";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { LOCAL_DIR } from "@brianjenkins94/util/silo/evidence";
 import { fs } from "@zenfs/core";
+import { blobText } from "./git-engine";
 
 /** One span of a text: its spanAnchors id and offsets (punctuation left out — it's never a handle). */
 export interface Span { "id": string; "start": number; "end": number }
@@ -29,6 +31,11 @@ export interface Bablr {
 	/** Where span `span` of `baseline` went in `current`, by the structural diff: the same node (`kept`) or the one that
 	 *  replaced it — or undefined, gone. How a span annotation is re-placed from its baseline (SPAN-ANNOTATIONS.md). */
 	"follow": (baseline: string, current: string, span: string) => Promise<{ "id": string; "how": "kept" | "replaced" } | undefined>;
+	/** A reference to the span standing for `range` in `source`, the text of `file` — what an annotation keeps. */
+	"refer": (source: string, file: string, range: { "start": number; "end": number }) => Promise<SpanRef | undefined>;
+	/** Where `ref`'s span is in `source`, the text its file has now (SPAN-ANNOTATIONS.md) — and the reference as it would
+	 *  be made there now, when it's found. Its baseline, from git's objects, re-identifies it when its id is gone. */
+	"resolve": (source: string, file: string, ref: SpanRef) => Promise<Resolution & { "ref"?: SpanRef }>;
 	/** The span id standing for each of `ranges` in `source` (bablr-language-ts's pickAnchor), from its cached spans. */
 	"anchors": (source: string, ranges: { "start": number; "end": number }[]) => Promise<(string | undefined)[] | undefined>;
 	"dispose": () => void;
@@ -90,6 +97,34 @@ export function startBablr(hub: Hub): Bablr {
 		return ids.map((id) => id ?? undefined);
 	};
 
+	const refer = async (source: string, file: string, range: { "start": number; "end": number }): Promise<SpanRef | undefined> => (await request<{ "ref"?: SpanRef }>("refer", { "source": source, "file": file, "start": range.start, "end": range.end })).ref;
+	const resolveRef = async (source: string, file: string, ref: SpanRef): Promise<Resolution & { "ref"?: SpanRef }> => {
+		const first = await request<Resolution & { "ref"?: SpanRef }>("resolve", { "source": source, "file": file, "ref": ref });
+
+		// Its own id found it, or there's no baseline to follow it from: that's the answer. Otherwise follow it from the
+		// baseline — when git has it (code that was committed).
+		if (first.status === "attached" || ref.baseline === undefined) {
+			return first;
+		}
+
+		const baseline = await blobText(ref.baseline.blob);
+
+		return baseline === undefined ? first : request("resolve", { "source": source, "file": file, "ref": ref, "baseline": baseline });
+	};
+	// The pod's `editor.annotations.refer` and `editor.annotations.resolve` (for extensions: the notes) ask here.
+	const offAnnotations = [
+		serve(hub, "annotations.refer", async (args) => {
+			const { source, file, start, end } = (args ?? {}) as { "source"?: unknown; "file"?: unknown; "start"?: unknown; "end"?: unknown };
+
+			return typeof source === "string" && typeof file === "string" && typeof start === "number" && typeof end === "number" ? { "ref": await refer(source, file, { "start": start, "end": end }) } : {};
+		}),
+		serve(hub, "annotations.resolve", async (args) => {
+			const { source, file, ref } = (args ?? {}) as { "source"?: unknown; "file"?: unknown; "ref"?: SpanRef };
+
+			return typeof source === "string" && typeof file === "string" && ref !== undefined ? resolveRef(source, file, ref) : { "status": "orphaned", "alternatives": [] };
+		})
+	];
+
 	// The pod's `editor.bablr.spans` and `editor.bablr.anchors` (for extensions) ask here, so they share the worker and
 	// its cache: a text's spans, or — given ranges — the span standing for each.
 	const offServe = serve(hub, "spans.of", async (args, { signal }) => {
@@ -110,6 +145,8 @@ export function startBablr(hub: Hub): Bablr {
 		"request": request,
 		"spans": spans,
 		"anchors": anchors,
+		"refer": refer,
+		"resolve": resolveRef,
 		"follow": async (baseline, current, span) => {
 			const found = await request<{ "id"?: string; "how"?: "kept" | "replaced" }>("follow", { "baseline": baseline, "current": current, "span": span });
 
@@ -117,6 +154,11 @@ export function startBablr(hub: Hub): Bablr {
 		},
 		"dispose": () => {
 			offServe();
+
+			for (const off of offAnnotations) {
+				off();
+			}
+
 			unlink();
 			worker.terminate();
 		}

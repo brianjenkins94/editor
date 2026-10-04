@@ -1,0 +1,37 @@
+{
+  "name": "notes",
+  "displayName": "Notes",
+  "description": "Notes on code that stay with it: a note is kept on the span it's about (a BABLR span, in .silo/notes/, in git), follows its code as it moves and changes, and — when its code is gone — waits in the Problems view for you to re-place or dismiss it. The first authored kind of durable span annotation (SPAN-ANNOTATIONS.md). Public API only; the editor's BABLR answers through worker-pod's editor.annotations.* commands.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      { "command": "notes.add", "title": "Add Note", "category": "Notes" },
+      { "command": "notes.dismiss", "title": "Dismiss Note", "category": "Notes" },
+      { "command": "notes.confirm", "title": "Keep Note Here", "category": "Notes" },
+      { "command": "notes.replace", "title": "Re-place Note…", "category": "Notes" },
+      { "command": "notes.placeHere", "title": "Place Note Here", "category": "Notes" }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "notes.add", "when": "editorHasSelection", "group": "notes" }
+      ],
+      "comments/commentThread/title": [
+        { "command": "notes.confirm", "when": "commentController == notes && commentThread == note-uncertain", "group": "inline" },
+        { "command": "notes.replace", "when": "commentController == notes && commentThread =~ /^note/", "group": "inline" },
+        { "command": "notes.dismiss", "when": "commentController == notes && commentThread =~ /^note/", "group": "inline" }
+      ],
+      "commandPalette": [
+        { "command": "notes.confirm", "when": "false" },
+        { "command": "notes.placeHere", "when": "false" }
+      ]
+    }
+  }
+}

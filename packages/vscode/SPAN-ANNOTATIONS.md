@@ -118,8 +118,8 @@ Decided 2026-10-04: every one as recommended (the **bold** option).
 - **D2 · What a similar match does.** **(a) attach as uncertain, shown with confirm and re-place**; (b) treat it as
   orphaned until confirmed. (Refined: a match scoring at or above the policy's `autoAt`, with no close second, re-places
   on its own; below that, it's uncertain.)
-- **D3 · Where orphans show.** **(a) as diagnostics (Problems view, hint severity) with code actions** for re-place and
-  dismiss; (b) a view of their own; (c) both.
+- **D3 · Where orphans show.** **(a) as diagnostics (Problems view) with code actions** for re-place and dismiss; (b) a
+  view of their own; (c) both. (Information severity, not hint: VS Code leaves hints out of the Problems view.)
 - **D4 · Healing.** **(a) the owner's annotation is rewritten when found by steps 2–4**; (b) never rewritten; always
   resolved on read.
 - **D5 · Dismissal.** **(a) a tombstone line**, so merges can't resurrect it; (b) delete the line.
@@ -131,8 +131,10 @@ Decided 2026-10-04: every one as recommended (the **bold** option).
    own — and the corpus of edit cases that scores a pipeline.
 2. **Step 3**: the BABLR worker re-identifies a span from a baseline (`bablr.reidentify`, from cached parses), and core
    reads baseline contents from git's objects.
-3. **Notes**, the first authored kind: add a note to a selection, see it inline, keep it attached as code changes, and
-   re-place or dismiss it when it's lost — orphans as diagnostics with code actions.
+3. **Notes**, the first authored kind (extensions/notes): add a note to a selection, see it inline, keep it attached as
+   code changes, and re-place or dismiss it when it's lost — orphans as diagnostics with code actions. Done; the moved
+   strategy (a span found in another file) waits for an index of every file's spans, so a note whose code moved to
+   another file is asked about for now.
 4. **The rest move onto it**: the event sheet's anchors and the runtime evidence's span lookup use the same resolver
    (evidence keeps steps 1–2 and fading).
 

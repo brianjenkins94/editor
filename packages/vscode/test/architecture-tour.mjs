@@ -210,6 +210,75 @@ test("node script: a service runs on the script worker, and stopping it leaves t
 	assert.equal(await preview?.evaluate(async () => (await fetch(location.href)).status), 200);
 });
 
+// A note stays with its code (SPAN-ANNOTATIONS.md): kept on its span in .silo/notes/, followed when its code is edited
+// (and rewritten there), asked about in the Problems view when its code goes, and dismissed with a tombstone.
+test("notes: a note follows its code, and waits in Problems when its code is gone", async () => {
+	const workbench = session.workbench();
+	const run = (step, arg) => workbench.evaluate(async ([what, value]) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/noted.js");
+		const notes = async () => {
+			const folder = api.Uri.file("/workspace/.silo/notes");
+			const [owner] = await api.workspace.fs.readDirectory(folder).then((entries) => entries.map(([name]) => name), () => []);
+			const text = owner === undefined ? "" : await api.workspace.fs.readFile(api.Uri.joinPath(folder, owner, "noted.js.jsonl")).then((bytes) => new TextDecoder().decode(bytes), () => "");
+
+			return text.trim() === "" ? [] : text.trim().split("\n").map((line) => JSON.parse(line));
+		};
+
+		switch (what) {
+			case "add": {
+				await api.workspace.fs.writeFile(uri, new TextEncoder().encode("setup();\nfn(foo, bar, baz);\nlog(1);\n"));
+
+				const editor = await api.window.showTextDocument(uri);
+				const text = editor.document.getText();
+				const at = text.indexOf("fn(foo, bar, baz)");
+
+				editor.selection = new api.Selection(editor.document.positionAt(at), editor.document.positionAt(at + "fn(foo, bar, baz)".length));
+
+				return api.commands.executeCommand("notes.add", value);
+			}
+			case "edit": {
+				const editor = await api.window.showTextDocument(uri);
+				const text = editor.document.getText();
+
+				await editor.edit((builder) => { builder.replace(new api.Range(editor.document.positionAt(text.indexOf(value[0])), editor.document.positionAt(text.indexOf(value[0]) + value[0].length)), value[1]); });
+
+				return undefined;
+			}
+			case "notes":
+				return notes();
+			case "lost":
+				return api.languages.getDiagnostics(uri).filter((diagnostic) => diagnostic.source === "notes").map((diagnostic) => diagnostic.message);
+			case "dismiss":
+				return api.commands.executeCommand("notes.dismiss", value);
+			default:
+				return undefined;
+		}
+	}, [step, arg]);
+
+	const id = await run("add", "check the bounds");
+	const [placed] = await eventually("the note, kept on its span", async () => (await run("notes")).filter((note) => note.id === id).length > 0 ? run("notes") : undefined);
+
+	assert.equal(placed.payload.text, "check the bounds");
+	assert.deepEqual(placed.ref.shape.atoms.slice(0, 3), ["fn", "(", "foo"]);
+
+	// Its argument edited: a new span id, but the note follows its code and is rewritten there.
+	await run("edit", ["baz)", "baz2)"]);
+
+	const followed = await eventually("the note, followed and rewritten", async () => (await run("notes")).find((note) => note.id === id && note.ref.span !== placed.ref.span));
+
+	assert.ok(followed.placed?.strategy !== undefined, "it says which strategy placed it");
+	assert.ok(followed.ref.shape.atoms.includes("baz2"));
+
+	// Its code gone: the note waits in the Problems view.
+	await run("edit", ["fn(foo, bar, baz2);\n", ""]);
+	await eventually("the lost note, in Problems", async () => (await run("lost")).some((message) => message.includes("check the bounds")) || undefined);
+
+	// Dismissed: a tombstone, so a merge can't bring it back.
+	await run("dismiss", id);
+	await eventually("the note's tombstone", async () => (await run("notes")).find((note) => note.id === id && note.dismissed === true));
+});
+
 // findFiles (and the search view's include/exclude) honour their globs (components/monaco-vscode-api/workspace-search.ts):
 // the search override's own provider ignored them and returned every file.
 test("search: findFiles keeps to its glob, and to files.exclude unless told not to", async () => {

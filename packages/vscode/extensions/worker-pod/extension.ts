@@ -196,7 +196,15 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		const answer = await rpc.request("spans.of", { "source": source, "ranges": ranges }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "ids"?: (string | null)[] };
 
 		return answer.ids;
-	}));
+	}), vscode.commands.registerCommand("editor.annotations.refer", async (source: unknown, file: unknown, range: unknown) => {
+		// Durable annotations on spans (SPAN-ANNOTATIONS.md), from core's BABLR: a reference to the span standing for a
+		// range of a text — what an annotation keeps…
+		const { start, end } = (range ?? {}) as { "start"?: unknown; "end"?: unknown };
+
+		return (await rpc.request("annotations.refer", { "source": source, "file": file, "start": start, "end": end }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "ref"?: unknown }).ref;
+	}), vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, ref: unknown) =>
+		// …and where a reference's span is now: attached, moved, re-placed, uncertain or orphaned, with where it landed.
+		rpc.request("annotations.resolve", { "source": source, "file": file, "ref": ref }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 })));
 
 	// The production debug type — presents an almostnode run (the vite preview) as a debug session with a
 	// run-control controller (Stop + Debug Console). The run's driver publishes `production.launch` (federates

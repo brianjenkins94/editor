@@ -26,6 +26,7 @@ import eventSheetViewPath from "event-sheet:view";
 import insightsExtensionPath from "insights:extension";
 import runningExtensionPath from "running:extension";
 import typeQueriesExtensionPath from "type-queries:extension";
+import notesExtensionPath from "notes:extension";
 import settingsDefaults from "editor:settings-defaults";
 import eslintExtensionPath from "eslint:extension";
 import workerPodExtensionPath from "worker-pod:extension";
@@ -47,6 +48,7 @@ import eventSheetManifest from "./extensions/event-sheet/package.json";
 import insightsManifest from "./extensions/insights/package.json";
 import runningManifest from "./extensions/running/package.json";
 import typeQueriesManifest from "./extensions/type-queries/package.json";
+import notesManifest from "./extensions/notes/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
@@ -676,7 +678,13 @@ function maybeBoot(): void {
 
 			typeQueriesExt.registerFileUrl("./extension.js", new URL(typeQueriesExtensionPath, location.href).href);
 
-			bootSpan.info("extensions registered", { "extensions": ["worker-pod", "eslint", "capabilities", "insights", "running", "event-sheet", "type-queries"] });
+			// Notes that stay with their code: durable span annotations, kept in .silo/notes/ and resolved by the editor's
+			// BABLR (worker-pod's editor.annotations.* commands) — public API only.
+			const notesExt = registerExtension(notesManifest, ExtensionHostKind.LocalWebWorker);
+
+			notesExt.registerFileUrl("./extension.js", new URL(notesExtensionPath, location.href).href);
+
+			bootSpan.info("extensions registered", { "extensions": ["worker-pod", "eslint", "capabilities", "insights", "running", "event-sheet", "type-queries", "notes"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");
