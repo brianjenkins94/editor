@@ -1,6 +1,7 @@
 /**
  * A slow preview's profile, as a file: when a preview runs slow the shell profiles it on its own (`preview.profiled`,
- * preview-profile.ts); here it's saved as a `.cpuprofile` under `.silo/profiles/` (out of git) — the profile anything
+ * preview-profile.ts); here it's saved as a `.cpuprofile` under `.silo/local/profiles/` (silo keeps `local/` out of git:
+ * a raw profile is megabytes, and its hotspots are what the evidence keeps) — the profile anything
  * can read: DevTools, a desktop profile viewer, the insights extension (which watches for them and says where the time
  * went).
  *
@@ -18,12 +19,14 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { CpuProfile } from "./cpuprofile";
 import type { PreviewProfile } from "./preview-profile";
 import type { RunRegistry } from "./runs";
+import { LOCAL_DIR } from "@brianjenkins94/util/silo/evidence";
+import { ensureSiloFiles } from "./evidence";
 import { PREVIEW_PROFILED } from "./preview-profile";
 import { inlineSourceMap, originalPosition } from "./sourcemap";
 import { VIRTUAL_RE } from "./virtual-path";
 
 /** Where profiles are saved. */
-export const PROFILES = "/workspace/.silo/profiles";
+export const PROFILES = `/workspace/${LOCAL_DIR}/profiles`;
 
 /**
  * `profile` with the app's frames moved to where they're written: each served from the preview on `port` (whose dev
@@ -76,6 +79,7 @@ export function installProfileFiles(vscode: typeof vscodeApi, hub: Hub, runs: Ru
 
 		void (async () => {
 			try {
+				await ensureSiloFiles(vscode);
 				await vscode.workspace.fs.writeFile(vscode.Uri.file(`${PROFILES}/${name}`), new TextEncoder().encode(JSON.stringify(await sourceMapped(profile, port, run.cwd))));
 			} catch {
 				// Nowhere to keep it.

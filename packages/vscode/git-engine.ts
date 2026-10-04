@@ -32,25 +32,22 @@ export interface GitStatus { "staged": GitChange[]; "unstaged": GitChange[] }
  *  workbench-entry.tsx), since isomorphic-git reads it straight off the filesystem. */
 export const DEFAULT_GITIGNORE = "node_modules/\n";
 
-/** Editor-owned paths git never sees in ANY workspace repo — the editor's own or a cloned one: `.silo/`, the capability
- *  engine's grants (the capability engine is paused for now, and what it records may yet move into runs.jsonl beside
- *  coverage and profiles). Listed in `.git/info/exclude`, the repo-local ignore file, so a repo's own `.gitignore` is
- *  never touched and nothing here is ever committed back. */
-export const EXCLUDED = [".silo/"];
-
-/** Add EXCLUDED to `.git/info/exclude` (isomorphic-git honors it like .gitignore), keeping whatever's there — idempotent,
- *  run on every repo the workspace becomes (ensureRepo; a clone load in workbench-entry.tsx). */
-export async function excludeScaffolding(): Promise<void> {
+/** `.silo/` is in git (RUNTIME-EVIDENCE.md): silo's policy, the runs and their evidence travel with the repo, and
+ *  `.silo/.gitignore` keeps out only what stays on the machine. The editor used to list `.silo/` in `.git/info/exclude`;
+ *  take that line back out of a repo that still has it — idempotent, run on every repo the workspace becomes
+ *  (ensureRepo; a clone load in workbench-entry.tsx). */
+export async function includeSilo(): Promise<void> {
 	const file = DIR + "/.git/info/exclude";
-	const existing = fs.existsSync(file) ? await fs.promises.readFile(file, "utf8") : "";
-	const missing = EXCLUDED.filter((line) => !existing.split("\n").includes(line));
 
-	if (missing.length === 0) {
+	if (!fs.existsSync(file)) {
 		return;
 	}
 
-	await fs.promises.mkdir(DIR + "/.git/info", { "recursive": true });
-	await fs.promises.writeFile(file, (existing === "" || existing.endsWith("\n") ? existing : existing + "\n") + missing.join("\n") + "\n");
+	const lines = (await fs.promises.readFile(file, "utf8")).split("\n");
+
+	if (lines.includes(".silo/")) {
+		await fs.promises.writeFile(file, lines.filter((line) => line !== ".silo/").join("\n"));
+	}
 }
 
 /** Ensure /workspace is a git repo — `git init` on first run (idempotent), with a default `.gitignore` so the seeded
@@ -65,7 +62,7 @@ export async function ensureRepo(): Promise<void> {
 		await fs.promises.writeFile(DIR + "/.gitignore", DEFAULT_GITIGNORE);
 	}
 
-	await excludeScaffolding();
+	await includeSilo();
 }
 
 /** A→added/untracked, D→deleted, M→modified, from a statusMatrix row's head+workdir columns. */

@@ -131,6 +131,17 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 	assert.match(evidence.path, /\/\.silo\/evidence\/[^/]+\/default\.tsval\.chromium-\d+\.[a-z]+\/f5\.js\.jsonl$/u);
 	assert.ok(lines.some((line) => line.kind === "reached" && line.key === "bablr1" && line.ever === 1 && line.lastRun === run.id), "the statement that ran, on its span");
 	assert.match(evidence.attributes, /^\*\.jsonl merge=union$/mu);
+
+	// In git: nothing excludes .silo/ any more, and its own .gitignore keeps only local/ on the machine.
+	const { exclude, ignore } = await session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const text = (path) => api.workspace.fs.readFile(api.Uri.file(path)).then((bytes) => new TextDecoder().decode(bytes), () => "");
+
+		return { "exclude": await text("/workspace/.git/info/exclude"), "ignore": await text("/workspace/.silo/.gitignore") };
+	});
+
+	assert.doesNotMatch(exclude, /^\.silo\/$/mu, "the runs and their evidence go in git");
+	assert.match(ignore, /^local\/$/mu, "what stays on the machine");
 });
 
 // A service — it keeps running (lifecycle.ts) — needs an event loop tsval doesn't have, so it runs on the script worker

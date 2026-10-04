@@ -344,9 +344,9 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 			await vscode.workspace.fs.writeFile(vscode.Uri.file(root + "/.gitignore"), encoder.encode(gitEngine.DEFAULT_GITIGNORE));
 		}
 
-		// A load that brought its own `.git` (a clone): keep the editor's scaffolding out of git there too.
+		// A load that brought its own `.git` (a clone): `.silo/` goes in git there too.
 		if (files.some((file) => file.path.startsWith(root + "/.git/"))) {
-			await gitEngine.excludeScaffolding();
+			await gitEngine.includeSilo();
 		}
 
 		// eslint: a repo's own config already overwrote in place; when it ships none, drop any stale variant. Nothing

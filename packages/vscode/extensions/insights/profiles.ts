@@ -1,5 +1,5 @@
 /**
- * Profiles, said as they arrive: a `.cpuprofile` saved under `.silo/profiles/` — the editor saves one when a preview
+ * Profiles, said as they arrive: a `.cpuprofile` saved under `.silo/local/profiles/` — the editor saves one when a preview
  * keeps running slow (profile-files.ts) — is announced, with where its time went a pick away: the app's own functions,
  * most time first, each opened at the line it's written on. It reads nothing but the file, through the workspace file
  * system API, so it works for any profile saved there, however it got there.
@@ -40,7 +40,7 @@ async function showHotspots(uri: vscode.Uri, hotspots: ProfileEntry[]): Promise<
 }
 
 export function registerProfiles(context: vscode.ExtensionContext): void {
-	const watcher = vscode.workspace.createFileSystemWatcher("**/.silo/profiles/*.cpuprofile", false, true, true);
+	const watcher = vscode.workspace.createFileSystemWatcher("**/.silo/local/profiles/*.cpuprofile", false, true, true);
 
 	context.subscriptions.push(watcher, watcher.onDidCreate(async (uri) => {
 		let profile: CpuProfile;

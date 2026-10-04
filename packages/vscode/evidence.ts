@@ -15,7 +15,7 @@ import type { Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidenc
 import type { StatementCoverage } from "./extensions/worker-pod/debug-protocol";
 import type { RunInfo, RunRegistry } from "./runs";
 import { createRpcClient } from "@brianjenkins94/hub";
-import { envelopeLine, evidencePath, evidenceText, foldReached, GITATTRIBUTES, parseEvidence, runsPath, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { envelopeLine, evidencePath, evidenceText, foldReached, GITATTRIBUTES, GITIGNORE, parseEvidence, runsPath, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { blobOid, headCommit } from "./git-engine";
 
 const ROOT = "/workspace";
@@ -51,6 +51,29 @@ function offsets(source: string, statements: StatementCoverage[]): { "start": nu
 	const at = ([line, character]: [number, number]): number => (lineStarts[line] ?? source.length) + character;
 
 	return statements.map((statement) => ({ "start": at(statement.start), "end": at(statement.end) }));
+}
+
+let siloFiles: Promise<void> | undefined;
+
+/**
+ * `.silo/`'s own two files, before anything is written into it: `.gitignore` (silo's GITIGNORE — `local/` stays on this
+ * machine) and `.gitattributes` (silo's GITATTRIBUTES — its JSONL merges by line). Lines already there are kept. Once a
+ * session; profile-files.ts calls it too, since a profile can be the first thing saved there.
+ */
+export async function ensureSiloFiles(vscode: typeof vscodeApi): Promise<void> {
+	siloFiles ??= (async () => {
+		for (const [name, wanted] of [[".gitignore", GITIGNORE], [".gitattributes", GITATTRIBUTES]] as const) {
+			const uri = vscode.Uri.file(`${ROOT}/${SILO_DIR}/${name}`);
+			const existing = await vscode.workspace.fs.readFile(uri).then((bytes) => new TextDecoder().decode(bytes), () => "");
+			const missing = wanted.split("\n").filter((line) => line !== "" && !existing.split(/\r?\n/u).includes(line));
+
+			if (missing.length > 0) {
+				await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode((existing === "" || existing.endsWith("\n") ? existing : existing + "\n") + missing.join("\n") + "\n"));
+			}
+		}
+	})().catch(() => { siloFiles = undefined; });
+
+	return siloFiles;
 }
 
 /** `path` relative to the workspace (the repo root). */
@@ -122,6 +145,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		const path = runsPath(envelope.user);
 		const before = await read(path) ?? new Uint8Array();
 
+		await ensureSiloFiles(vscode);
 		await vscode.workspace.fs.writeFile(uri(path), new Uint8Array([...before, ...new TextEncoder().encode(envelopeLine(envelope))]));
 
 		if (covered !== undefined) {
@@ -149,18 +173,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		const path = evidencePath(envelope.user, envelope.environment, repoRelative(covered.file));
 		const known = parseEvidence(new TextDecoder().decode(await read(path) ?? new Uint8Array()));
 
-		await ensureGitattributes();
 		await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(foldReached(known, reached, { "id": envelope.id, "at": envelope.endedAt }))));
-	};
-
-	/** `.silo/.gitattributes` merges evidence and run files line by line (silo's GITATTRIBUTES), keeping what's there. */
-	const ensureGitattributes = async (): Promise<void> => {
-		const path = `${SILO_DIR}/.gitattributes`;
-		const existing = new TextDecoder().decode(await read(path) ?? new Uint8Array());
-
-		if (!existing.split("\n").includes(GITATTRIBUTES.trim())) {
-			await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode((existing === "" || existing.endsWith("\n") ? existing : existing + "\n") + GITATTRIBUTES));
-		}
 	};
 
 	runs.onEnd((run) => {
