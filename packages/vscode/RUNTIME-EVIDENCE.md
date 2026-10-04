@@ -257,6 +257,7 @@ through it.
 2. **The debug worker** sums each site's observations, and the report carries `sites`. Done (site-sums.ts): a fork
    goes on from a copy of its stop's sums, as its coverage does, so stepping back and forward doesn't count twice.
 3. **silo**: `value` and `branch` observations, `foldValues` and `foldBranches`, the parser taking every kind.
+   Done: every kind keeps `ever` (runs that observed it since its span changed), and each fold leaves the others alone.
 4. **evidence.ts**: exact spans for sites, folded and written beside `reached`.
 5. **Insights**: the hover.
 6. **Quick fixes**: `?.` and `??`, then branches.
