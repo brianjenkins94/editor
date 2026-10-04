@@ -114,6 +114,22 @@ test("workers and URLs map to model ids", () => {
 	assert.equal(classifyUrl(new URL("https://unpkg.com/react")), "net:unpkg.com");
 });
 
+test("ARCHITECTURE.md's store table is the model's", async () => {
+	const { readFile } = await import("node:fs/promises");
+	const { declaredStoresTable } = await import("../architecture-model.ts");
+	const doc = await readFile(new URL("../ARCHITECTURE.md", import.meta.url), "utf8");
+	const block = /<!-- architecture-stores:begin -->\n([\s\S]*?)\n<!-- architecture-stores:end -->/u.exec(doc)?.[1];
+
+	assert.equal(block, declaredStoresTable(), "ARCHITECTURE.md is stale: regenerate the store table from architecture-model.ts");
+});
+
+test("an IndexedDB database nobody declared is a store out of the design's sight", () => {
+	const idb = (by, database) => ({ "a": by, "b": "idb", "labels": new Map([[database + " › files.put", { "count": 1 }]]) });
+	const violations = checkConformance({ "nodes": [], "channels": [idb("workbench", "vscode-web-state-db-global"), idb("bablr", "bablr"), idb("workbench", "secret-cache")], "topology": new Map() });
+
+	assert.deepEqual(violations.filter((violation) => violation.type === "undeclared-store"), [{ "type": "undeclared-store", "database": "secret-cache", "by": "workbench" }]);
+});
+
 test("ARCHITECTURE.md's generated diagram is the model's", async () => {
 	const { readFile } = await import("node:fs/promises");
 	const { declaredMermaid } = await import("../architecture-model.ts");

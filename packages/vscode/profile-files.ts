@@ -1,7 +1,8 @@
 /**
  * A slow preview's profile, as a file: when a preview runs slow the shell profiles it on its own (`preview.profiled`,
  * preview-profile.ts); here it's saved as a `.cpuprofile` under `.silo/local/profiles/` (silo keeps `local/` out of git:
- * a raw profile is megabytes, and its hotspots are what the evidence keeps) — the profile anything
+ * a raw profile is megabytes, and its hotspots are what the evidence keeps). Only the newest KEEP_PROFILES stay: silo's
+ * local/ is held in memory (workspace-fs.ts). The profile anything
  * can read: DevTools, a desktop profile viewer, the insights extension (which watches for them and says where the time
  * went).
  *
@@ -25,8 +26,9 @@ import { PREVIEW_PROFILED } from "./preview-profile";
 import { inlineSourceMap, originalPosition } from "./sourcemap";
 import { VIRTUAL_RE } from "./virtual-path";
 
-/** Where profiles are saved. */
+/** Where profiles are saved, and how many of the newest stay. */
 export const PROFILES = `/workspace/${LOCAL_DIR}/profiles`;
+const KEEP_PROFILES = 5;
 
 /**
  * `profile` with the app's frames moved to where they're written: each served from the preview on `port` (whose dev
@@ -81,6 +83,14 @@ export function installProfileFiles(vscode: typeof vscodeApi, hub: Hub, runs: Ru
 			try {
 				await ensureSiloFiles(vscode);
 				await vscode.workspace.fs.writeFile(vscode.Uri.file(`${PROFILES}/${name}`), new TextEncoder().encode(JSON.stringify(await sourceMapped(profile, port, run.cwd))));
+
+				// The newest stay (names end in their time, so they sort by it within a window); the rest go.
+				const saved = (await vscode.workspace.fs.readDirectory(vscode.Uri.file(PROFILES))).map(([file]) => file).filter((file) => file.endsWith(".cpuprofile"));
+				const byTime = saved.sort((a, b) => (/\d{4}-\d\d-\d\dT[\d-]+Z/u.exec(b)?.[0] ?? "").localeCompare(/\d{4}-\d\d-\d\dT[\d-]+Z/u.exec(a)?.[0] ?? ""));
+
+				for (const old of byTime.slice(KEEP_PROFILES)) {
+					await vscode.workspace.fs.delete(vscode.Uri.file(`${PROFILES}/${old}`));
+				}
 			} catch {
 				// Nowhere to keep it.
 			}

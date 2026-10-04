@@ -4,8 +4,8 @@
  * text's parse by its blob oid in its own IndexedDB cache, which everything it derives starts from.
  *
  * Until the verdicts are derived from cached parses too, a change's cosmetic/semantic verdict is also kept here, by the
- * two contents' blob oids, in `.silo/local/bablr/verdicts/` (on this machine, never committed — silo's `local/`), capped
- * at CACHE_BYTES (small: it shares the workspace's fixed buffer), least recently used first out.
+ * two contents' blob oids, in `.silo/local/bablr/verdicts/` (on this machine, never committed — silo's `local/`, its own
+ * IndexedDB-backed mount), capped at CACHE_BYTES (small: the mount is held in memory), least recently used first out.
  *
  * Its callers: the cosmetic classifier (verdicts, edit groups), the runtime evidence (evidence.ts: span ids for a run's
  * statements), and — over the hub, `spans.of` — the pod's `editor.bablr.spans` command, for extensions (the insights
@@ -39,8 +39,7 @@ export interface Bablr {
 }
 
 const CACHE = `/workspace/${LOCAL_DIR}/bablr`;
-/** How much the cache keeps before it lets the least recently used go. Small: `/workspace` is one fixed 64 MB buffer the
- *  whole project shares (workspace-fs.ts), and this lives in it — until the cache moves to its own IndexedDB store. */
+/** How much the verdicts keep before the least recently used go. Small: silo's local/ is held in memory (workspace-fs.ts). */
 const CACHE_BYTES = 4 * 1024 * 1024;
 /** How many writes between checks of the cache's size (a text's spans can be ~100 KB). */
 const PRUNE_EVERY = 5;

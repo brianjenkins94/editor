@@ -289,7 +289,7 @@ export const channels: ChannelSpec[] = [
 	{ "a": "node-scripts", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "almostnode: node scripts' module loading and fs." },
 	{ "a": "worker:server-host", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "Mounted by the cspell server (documents arrive over LSP, so it's mostly idle)." },
 	{ "a": "provoke", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "A cold transform round reads the workspace." },
-	{ "a": "zenfs", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (workspace-fs)", "reason": "storage", "description": "Provider writes, flushed every 500ms; restored at boot." }
+	{ "a": "zenfs", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (workspace-fs, silo-local)", "reason": "storage", "description": "Provider writes, flushed every 500ms and restored at boot (workspace-fs); and silo's local/, a mount of its own store (silo-local)." }
 ];
 
 // ── lookups ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -462,7 +462,9 @@ export type Violation =
 	/** A hub message crossed from `a` to `b`, which no family's senders and receivers send that way. */
 	| { "type": "unexpected-subject"; "a": string; "b": string; "subject": string; "count": number }
 	| { "type": "duplicate-peer"; "hub": string; "peer": string; "links": number }
-	| { "type": "unknown-node"; "id": string };
+	| { "type": "unknown-node"; "id": string }
+	/** An IndexedDB database nobody declared among the stores: kept out of the design's sight. */
+	| { "type": "undeclared-store"; "database": string; "by": string };
 
 /** `hub`: how many of a label's messages rode the hub — only those are subjects; the rest came from probes. `forward`
  *  and `backward`: how many went a → b and b → a (without them, a label is checked either way). */
@@ -545,6 +547,20 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 		for (const [peer, links] of peers) {
 			if (links > 1) {
 				violations.push({ "type": "duplicate-peer", "hub": hub, "peer": peer, "links": links });
+			}
+		}
+	}
+
+	// Every IndexedDB database used: declared among the stores (its labels say `<database> › <store>.<operation>`).
+	const reported = new Set<string>();
+
+	for (const channel of observed.channels.filter((candidate) => (candidate.a === "idb" || candidate.b === "idb") && !app.has(candidate.a) && !app.has(candidate.b))) {
+		for (const label of channel.labels.keys()) {
+			const database = label.split(" › ")[0];
+
+			if (database !== label && !declaresDatabase(database) && !reported.has(database)) {
+				reported.add(database);
+				violations.push({ "type": "undeclared-store", "database": database, "by": channel.a === "idb" ? channel.b : channel.a });
 			}
 		}
 	}
@@ -665,9 +681,41 @@ export function dynamicContainer(id: string): string | undefined {
 	return undefined;
 }
 
-/** Node id owning an IndexedDB database, when it isn't the realm that opens it. */
+/** Node id owning an IndexedDB database, when it isn't the realm that opens it: the workspace's zen-fs, persisting its
+ *  shared buffer (`workspace-fs`) and mounting silo's local/ (`silo-local`). */
 export function idbOwner(database: string): string | undefined {
-	return database === "workspace-fs" ? "zenfs" : undefined;
+	return database === "workspace-fs" || database === "silo-local" ? "zenfs" : undefined;
+}
+
+/**
+ * Everything the editor keeps — where, for how long, and what — so no store is out of the design's sight (RUNTIME-
+ * EVIDENCE.md; `.git/` holds git's own and nothing else). `where` is a path in the workspace or an IndexedDB database
+ * (`idb:<name>`, `*` for any suffix); conformance checks every database the IndexedDB probe sees against these.
+ *  - committed: in git, travels with the repo;
+ *  - local: this machine only, not derivable (losing it loses something);
+ *  - derived: this machine only, a cache (safe to delete at any time);
+ *  - platform: VS Code's own.
+ */
+export interface StoreSpec { "where": string; "kind": "committed" | "local" | "derived" | "platform"; "owner": string; "holds": string }
+
+export const stores: StoreSpec[] = [
+	{ "where": ".silo/", "kind": "committed", "owner": "workbench", "holds": "Silo's policy and capability rollups; each run's envelope (runs/) and what runs observed, keyed on BABLR spans (evidence/)." },
+	{ "where": ".git/", "kind": "committed", "owner": "workbench", "holds": "Git's own (isomorphic-git): objects, refs, the index, config. Nothing of the editor's." },
+	{ "where": ".silo/local/ = idb:silo-local", "kind": "local", "owner": "zenfs", "holds": "A zen-fs mount of its own IndexedDB store (workspace-fs.ts), only in the workbench: each file's edit history (edit-history/), the newest raw CPU profiles (profiles/), BABLR's verdicts (bablr/verdicts/). Held in memory too, so each keeps little." },
+	{ "where": "idb:workspace-fs", "kind": "local", "owner": "zenfs", "holds": "The workspace's own writes (edits, acquired types), restored over the seed at boot." },
+	{ "where": "idb:bablr", "kind": "derived", "owner": "bablr", "holds": "The BABLR worker's parses, by parse version and git blob oid — the browser's .silo/local/bablr/ (bablr-worker.ts)." },
+	{ "where": "idb:vscode-web-db", "kind": "platform", "owner": "workbench", "holds": "VS Code's user data and logs." },
+	{ "where": "idb:vscode-web-state-db*", "kind": "platform", "owner": "workbench", "holds": "VS Code's storage (global, shared, per workspace)." }
+];
+
+/** Whether the model declares IndexedDB database `name` among the stores. */
+export function declaresDatabase(name: string): boolean {
+	return stores.some((store) => store.where.split(" = ").some((where) => where.startsWith("idb:") && (where.endsWith("*") ? name.startsWith(where.slice(4, -1)) : name === where.slice(4))));
+}
+
+/** The stores, as the table ARCHITECTURE.md shows (generated: the model test checks it). */
+export function declaredStoresTable(): string {
+	return ["| Where | Kind | Owner | Holds |", "| --- | --- | --- | --- |", ...stores.map((store) => `| \`${store.where}\` | ${store.kind} | ${store.owner} | ${store.holds} |`)].join("\n");
 }
 
 /** Identity of a worker created in the workbench realm, by file name (see the monaco probes' `identifyWorker`). */

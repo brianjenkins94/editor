@@ -213,32 +213,6 @@ export async function blobOid(content: string): Promise<string> {
 	return (await hashBlob({ "object": new TextEncoder().encode(content) })).oid;
 }
 
-/** Where each file's edit history is kept: inside `.git`, off the working tree, local to this repo (and only what was
- *  typed here — nothing it can be derived from, so not a cache). It used to be `.git/bablr-automerge/`, read as a fallback. */
-const EDIT_HISTORY = DIR + "/.git/edit-history";
-const OLD_EDIT_HISTORY = DIR + "/.git/bablr-automerge";
-
-/**
- * Persist a file's Automerge edit-history doc (the fine-grained local tier) under `.git/edit-history/`, as the raw
- * `Automerge.save` binary. The synced/shared version is the Keyhive milestone.
- */
-export async function writeAutomerge(path: string, bytes: Uint8Array): Promise<void> {
-	await fs.promises.mkdir(EDIT_HISTORY, { "recursive": true });
-	await fs.promises.writeFile(EDIT_HISTORY + "/" + encodeURIComponent(path) + ".bin", bytes);
-}
-
-/** Read back a file's Automerge edit-history doc, or null if none has been recorded yet. */
-export async function readAutomerge(path: string): Promise<Uint8Array | null> {
-	for (const dir of [EDIT_HISTORY, OLD_EDIT_HISTORY]) {
-		try {
-			const data = await fs.promises.readFile(dir + "/" + encodeURIComponent(path) + ".bin");
-
-			return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-		} catch { /* not here */ }
-	}
-
-	return null; // none yet
-}
 
 /** The HEAD version of a file, for quick-diff gutters + the diff view. "" when the repo is unborn or the file is
  *  new (no HEAD blob), which is exactly what a diff against "nothing" wants. */

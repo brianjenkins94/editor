@@ -1215,6 +1215,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 				return h("span", null, h("code", null, violation.subject), ` × ${formatCount(violation.count)} across `, link(labelOf(store, violation.a) + " ⇄ " + labelOf(store, violation.b), { "type": "edge", "id": store.between(violation.a, violation.b)?.id ?? violation.a + "|" + violation.b }), " — not among the hubs of any family that may cross it");
 			case "duplicate-peer":
 				return h("span", null, link(labelOf(store, violation.hub), { "type": "node", "id": violation.hub }), ` has ${violation.links} links to "${violation.peer}" — duplicate hub ids, or stale links`);
+			case "undeclared-store":
+				return h("span", null, "IndexedDB ", h("code", null, violation.database), " (", link(labelOf(store, violation.by), { "type": "node", "id": violation.by }), ") — not among the model's stores");
 			case "unknown-node":
 			default:
 				return h("span", null, link(labelOf(store, violation.id), { "type": "node", "id": violation.id }, "arch-link arch-violations"), " — not in the model");

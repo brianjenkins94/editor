@@ -243,6 +243,17 @@ test("git review: a diff in the shell", async () => {
 	});
 	await eventually("the change's verdict, cached", async () => (await verdicts()) > 0 || undefined, 60_000);
 
+	// The edits typed above were recorded as edit history in silo's local/ (its own IndexedDB-backed mount), not in .git/.
+	const history = await eventually("the edit history, in silo's local/", () => session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const list = (path) => api.workspace.fs.readDirectory(api.Uri.file(path)).then((found) => found.map(([name]) => name), () => []);
+		const kept = await list("/workspace/.silo/local/edit-history");
+
+		return kept.length === 0 ? undefined : { "kept": kept, "git": [...await list("/workspace/.git/edit-history"), ...await list("/workspace/.git/bablr-automerge")] };
+	}));
+
+	assert.ok(history.kept.some((name) => name.endsWith(".bin")));
+	assert.deepEqual(history.git, [], "nothing of the editor's left in .git/");
 });
 
 // VS Code's new windows are panels of the shell's dock (shell-dock.ts): an editor moved out lives on, its DOM in a

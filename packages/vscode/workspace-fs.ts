@@ -28,7 +28,9 @@ import type { ArchSink } from "@brianjenkins94/observability";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type { WorkspaceChange } from "./workspace-changes";
 import { FileChangeType, FileSystemProviderCapabilities, FileType, registerFileSystemOverlay, Uri } from "@brianjenkins94/monaco-vscode-api/main";
-import { configure, fs, InMemory, mounts, SingleBuffer } from "@zenfs/core";
+import { LOCAL_DIR } from "@brianjenkins94/util/silo/evidence";
+import { configure, fs, InMemory, mounts, resolveMountConfig, SingleBuffer } from "@zenfs/core";
+import { IndexedDB } from "@zenfs/dom";
 
 import { observeZenfs, reportZenfsUsage, ZENFS_NODE } from "./architecture-zenfs";
 import { createChangeEvent, notFound, readOnly } from "./provider-base";
@@ -65,6 +67,17 @@ const FLUSH_MS = 500;
 /** Fixed size of the shared filesystem buffer (SingleBuffer can't grow). 64 MB: headroom for a real project's
  *  type surface + sources; tunable. Overflow handling (evict / realloc) is a later concern. */
 const BUFFER_BYTES = 64 * 1024 * 1024;
+/**
+ * Silo's `local/` — what stays on this machine (the edit history, raw profiles, BABLR's verdicts): files like any other
+ * under `/workspace`, but mounted from an IndexedDB store of its own (`silo-local`), not kept in the shared buffer —
+ * whose fixed size the whole project shares, and which it would otherwise eat. Only this realm mounts it (nothing the
+ * workers run needs it), and only this realm writes it. zen-fs keeps a copy of the store in memory, for the provider's
+ * synchronous reads, so what's kept here stays small: each user of it caps what it keeps.
+ */
+export const LOCAL_MOUNT = `/workspace/${LOCAL_DIR}`;
+const LOCAL_DB = "silo-local";
+const inLocal = (path: string): boolean => path === LOCAL_MOUNT || path.startsWith(LOCAL_MOUNT + "/");
+
 /** Persisted paths an older build wrote that no longer exist (ATA's retired force-reference file). */
 const RETIRED = new Set(["/workspace/ata-ambient.d.ts"]);
 
@@ -148,6 +161,19 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		await configure({ "mounts": { "/": InMemory } });
 	}
 
+	// Silo's local/, from its own IndexedDB store (LOCAL_MOUNT) — before the seed and the restore, which may write there.
+	// Without IndexedDB (a private window), it stays in the workspace store like any folder.
+	let localStore: object | undefined;
+
+	try {
+		const local = await resolveMountConfig({ "backend": IndexedDB, "storeName": LOCAL_DB });
+
+		fs.mount(LOCAL_MOUNT, local);
+		localStore = local;
+	} catch (error) {
+		log.warn("silo's local/ isn't mounted from IndexedDB — it stays in the workspace store", { "error": String(error) });
+	}
+
 	// Who is calling the store right now: the provider and the boot seed say so; anyone else is a direct caller.
 	// Provider methods do all their zen-fs work synchronously (no await before it), so a plain variable is enough.
 	let caller: string | undefined;
@@ -211,6 +237,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	let tombstoned = 0;
 
 	const retired: string[] = [];
+	const moved: string[] = [];
 
 	if (db !== undefined) {
 		const persisted = await persistLoadAll(db);
@@ -220,6 +247,14 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		for (const [path, contents] of persisted) {
 			if (RETIRED.has(path)) {
 				retired.push(path); // written by an older build; dropped below rather than brought back
+			} else if (localStore !== undefined && inLocal(path)) {
+				// An older build kept silo's local/ in the workspace store: move it into its own (once), and out of here.
+				if (contents !== null && !fs.existsSync(path)) {
+					ensureParent(path);
+					fs.writeFileSync(path, contents);
+				}
+
+				moved.push(path);
 			} else if (contents === null) {
 				try {
 					fs.rmSync(path, { "recursive": true, "force": true }); // seeded, deleted since: it stays deleted
@@ -301,6 +336,15 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		persist(path); // gone from zen-fs, so the flush deletes it
 	}
 
+	// What moved into silo's local/ lives in its own store now: out of this one's persistence.
+	if (db !== undefined && moved.length > 0) {
+		const objects = db.transaction(PERSIST_STORE, "readwrite").objectStore(PERSIST_STORE);
+
+		for (const path of moved) {
+			objects.delete(path);
+		}
+	}
+
 	const { listeners, onDidChangeFile } = createChangeEvent();
 
 	// Emit change events the way a real vscode provider does: fire the REAL URI (not a `{ path }` stand-in —
@@ -356,7 +400,7 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	const inGit = (path: string): boolean => /\/\.git(?:\/|$)/u.test(path);
 	const apply = (changes: WorkspaceChange[]): void => {
 		for (const change of changes) {
-			if (change.path === "/workspace" || change.path.startsWith("/workspace/")) {
+			if ((change.path === "/workspace" || change.path.startsWith("/workspace/")) && !(localStore !== undefined && inLocal(change.path))) {
 				persist(change.path);
 
 				if (!inGit(change.path)) {
@@ -368,6 +412,16 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 
 	if (store !== undefined) {
 		watchWorkspaceStore(store, buffer !== undefined ? "/workspace" : "", hub === undefined ? apply : (changes) => { hub.publish(WORKSPACE_CHANGED, changes); });
+	}
+
+	// Silo's local/ changes too: announced to VS Code (a saved profile, say), but neither persisted (its store is its
+	// own) nor told to the other realms (they don't mount it).
+	if (localStore !== undefined) {
+		watchWorkspaceStore(localStore, LOCAL_MOUNT, (changes) => {
+			for (const change of changes) {
+				fire(Uri.file(change.path) as unknown as Change["resource"], CHANGE_TYPES[change.type]);
+			}
+		});
 	}
 
 	hub?.subscribe(WORKSPACE_CHANGED, (data) => { apply(data as WorkspaceChange[]); });

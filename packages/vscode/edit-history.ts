@@ -7,18 +7,23 @@
  * CAPTURE (this module, workbench realm): coalesce keystrokes into idle-debounced BURSTS; each burst is one
  * `Automerge.change` on a doc holding the file text. Lossless + append-only — grouping into meaningful units happens
  * at DISPLAY time (by BABLR node), so the capture format never has to commit to a grouping. Persisted per file as the
- * `Automerge.save` binary under `.git/` (via the engine), so it survives reload; the synced version is the Keyhive
- * milestone. Automerge (WASM) is lazily imported so its weight never lands on cold start.
+ * `Automerge.save` binary in silo's local/ (`.silo/local/edit-history/`, its own IndexedDB-backed mount — on this
+ * machine, never committed), so it survives reload; the synced version is the Keyhive milestone. Automerge (WASM) is
+ * lazily imported so its weight never lands on cold start.
  *
  * BASELINE ("since the last commit"): the doc is seeded with the HEAD text as its first change, so the most recent
  * history entry whose snapshot equals current HEAD marks the last commit — chunks are everything after it. This
  * self-corrects on commit (the committed text becomes the latest snapshot, so the list empties) with nothing to store.
+ * And a file whose saved history ends at HEAD — nothing since the last commit — starts afresh: what came before it is
+ * never shown, and silo's local/ is kept in memory, so it isn't kept.
  */
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type { CosmeticClassifier } from "./cosmetic-classifier";
 import { serve } from "@brianjenkins94/hub";
+import { LOCAL_DIR } from "@brianjenkins94/util/silo/evidence";
+import { fs } from "@zenfs/core";
 import * as engine from "./git-engine";
 
 const DIR = "/workspace";
@@ -43,6 +48,36 @@ const automerge = async (): Promise<AutomergeApi> => {
 
 	return amPromise;
 };
+
+/** Where each file's history is kept, and where older builds kept it (read once, then moved). */
+const HISTORY = `${DIR}/${LOCAL_DIR}/edit-history`;
+const OLD_HISTORY = [`${DIR}/.git/edit-history`, `${DIR}/.git/bablr-automerge`];
+
+/** A file's saved history, or null if none has been recorded — moved here from an older build's place on first read. */
+async function readHistory(path: string): Promise<Uint8Array | null> {
+	const name = encodeURIComponent(path) + ".bin";
+
+	for (const dir of [HISTORY, ...OLD_HISTORY]) {
+		try {
+			const data = await fs.promises.readFile(dir + "/" + name);
+			const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+
+			if (dir !== HISTORY) {
+				await writeHistory(path, bytes);
+				await fs.promises.unlink(dir + "/" + name).catch(() => undefined);
+			}
+
+			return bytes;
+		} catch { /* not here */ }
+	}
+
+	return null;
+}
+
+async function writeHistory(path: string, bytes: Uint8Array): Promise<void> {
+	await fs.promises.mkdir(HISTORY, { "recursive": true });
+	await fs.promises.writeFile(HISTORY + "/" + encodeURIComponent(path) + ".bin", bytes);
+}
 
 /** Repo-relative path for a classifiable workspace file, else undefined. */
 function repoRelative(uri: vscodeApi.Uri): string | undefined {
@@ -69,14 +104,12 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifie
 		}
 
 		const AM = await automerge();
-		const saved = await engine.readAutomerge(path);
-		let doc: AutomergeDoc;
+		const saved = await readHistory(path);
+		const head = await engine.headContent(path);
+		let doc = saved === null ? undefined : AM.load(saved);
 
-		if (saved !== null) {
-			doc = AM.load(saved);
-		} else {
-			const head = await engine.headContent(path);
-
+		// Nothing since the last commit: what came before it is never shown, so the history starts afresh at HEAD.
+		if (doc === undefined || doc.text === head) {
 			doc = AM.change(AM.init(), "seed", (draft) => { draft.text = head; });
 		}
 
@@ -99,7 +132,7 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifie
 		docs.set(path, next);
 
 		try {
-			await engine.writeAutomerge(path, AM.save(next));
+			await writeHistory(path, AM.save(next));
 		} catch (error) {
 			log.error("edit-history persist failed", { "path": path, "error": errText(error) });
 		}

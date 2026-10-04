@@ -324,6 +324,25 @@ flowchart LR
 ```
 <!-- architecture-model:end -->
 
+## Where the editor keeps things (generated)
+
+Every store — in git, on this machine, or derived — **declared in `architecture-model.ts`** (`stores`), so none is out of
+the design's sight. `.git/` holds git's own and nothing else. The live view's conformance flags any IndexedDB database
+the editor uses that isn't here; `test/architecture-model.test.mjs` fails until this block is regenerated
+(`declaredStoresTable()`).
+
+<!-- architecture-stores:begin -->
+| Where | Kind | Owner | Holds |
+| --- | --- | --- | --- |
+| `.silo/` | committed | workbench | Silo's policy and capability rollups; each run's envelope (runs/) and what runs observed, keyed on BABLR spans (evidence/). |
+| `.git/` | committed | workbench | Git's own (isomorphic-git): objects, refs, the index, config. Nothing of the editor's. |
+| `.silo/local/ = idb:silo-local` | local | zenfs | A zen-fs mount of its own IndexedDB store (workspace-fs.ts), only in the workbench: each file's edit history (edit-history/), the newest raw CPU profiles (profiles/), BABLR's verdicts (bablr/verdicts/). Held in memory too, so each keeps little. |
+| `idb:workspace-fs` | local | zenfs | The workspace's own writes (edits, acquired types), restored over the seed at boot. |
+| `idb:bablr` | derived | bablr | The BABLR worker's parses, by parse version and git blob oid — the browser's .silo/local/bablr/ (bablr-worker.ts). |
+| `idb:vscode-web-db` | platform | workbench | VS Code's user data and logs. |
+| `idb:vscode-web-state-db*` | platform | workbench | VS Code's storage (global, shared, per workspace). |
+<!-- architecture-stores:end -->
+
 ## Placement procedure
 
 Ask, in order:
