@@ -210,6 +210,22 @@ test("node script: a service runs on the script worker, and stopping it leaves t
 	assert.equal(await preview?.evaluate(async () => (await fetch(location.href)).status), 200);
 });
 
+// findFiles (and the search view's include/exclude) honour their globs (components/monaco-vscode-api/workspace-search.ts):
+// the search override's own provider ignored them and returned every file.
+test("search: findFiles keeps to its glob, and to files.exclude unless told not to", async () => {
+	const found = await session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const paths = async (include, exclude) => (await api.workspace.findFiles(include, exclude)).map((uri) => uri.path);
+
+		return { "manifests": await paths("**/package.json"), "sources": await paths("src/**"), "all": await paths("**/*"), "everything": await paths("**/*", null) };
+	});
+
+	assert.ok(found.manifests.length > 0 && found.manifests.every((path) => path.endsWith("/package.json")), "only package.json files");
+	assert.ok(found.sources.length > 0 && found.sources.every((path) => path.startsWith("/workspace/src/")), "only what's under src/");
+	assert.ok(found.all.every((path) => !path.includes("/node_modules/")), "files.exclude (node_modules) applies by default");
+	assert.ok(found.everything.length > found.all.length, "and not when excludes are turned off");
+});
+
 test("webview: a markdown preview", async () => {
 	await session.terminal(`echo "# Tour" > TOUR.md`, { "fresh": true });
 	await session.page.waitForTimeout(1000);

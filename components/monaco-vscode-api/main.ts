@@ -99,6 +99,7 @@ import { setUnexpectedErrorHandler } from "@codingame/monaco-vscode-api/monaco";
 import getQuickAccessServiceOverride from "@codingame/monaco-vscode-quickaccess-service-override";
 import { Worker } from "./demo/src/tools/fakeWorker";
 import { TerminalBackend } from "./terminal-backend";
+import { registerWorkspaceSearch } from "./workspace-search";
 import "vscode/localExtensionHost";
 
 // Default language / feature extensions (loaded for side effects)
@@ -537,6 +538,9 @@ export async function boot(options: BootOptions): Promise<void> {
 	if (layout === "workbench" && hiddenViewContainers.length > 0) {
 		await hideViewContainers(hiddenViewContainers);
 	}
+
+	// file: searches (findFiles, the search view) honour their include and exclude globs (workspace-search.ts).
+	await registerWorkspaceSearch();
 
 
 	setUnexpectedErrorHandler((error) => {
