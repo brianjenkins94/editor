@@ -62,7 +62,9 @@ Matching is kept apart from deciding, so either can be tuned, swapped or experim
 The strategies to start with, tried in this order, stopping at a certain match:
 
 1. **Same span.** Its id is among the current file's spans → *attached* (score 1).
-2. **Moved.** Its id is among another file's spans (ids don't depend on the file) → *moved* (0.95).
+2. **Moved.** Its id is among another file's spans (ids don't depend on the file) → *moved* (0.95). The files looked
+   in are the ones that differ from HEAD on disk: code moved to another file changed that file. Parses are cached, so
+   each is parsed once.
 3. **Re-identified.** Its baseline content is available (from git's objects, for code that was committed): follow
    the span's node through the structural diff `reidentify` uses (BABLR's `follow`). The diff compares a container
    by its type alone, so a container survives edits inside it — `fn(foo, bar, baz)` that became `fn(foo, bar, baz2)`,
@@ -135,9 +137,10 @@ Decided 2026-10-04: every one as recommended (the **bold** option).
 2. **Step 3**: the BABLR worker re-identifies a span from a baseline (`bablr.reidentify`, from cached parses), and core
    reads baseline contents from git's objects.
 3. **Notes**, the first authored kind (extensions/notes): add a note to a selection, see it inline, keep it attached as
-   code changes, and re-place or dismiss it when it's lost — orphans as diagnostics with code actions. Done; the moved
-   strategy (a span found in another file) waits for an index of every file's spans, so a note whose code moved to
-   another file is asked about for now.
+   code changes, and re-place or dismiss it when it's lost — orphans as diagnostics with code actions. Done. A note
+   whose code moved to another file goes with it (a tombstone in the old file's notes, the note in the new one's) once
+   that file is saved; someone else's note waits in Problems, pointing there, until its author next looks. A move
+   that arrives committed (pulled) isn't a changed file, so it isn't looked for: that note is asked about.
 4. **The rest move onto it**: the event sheet's anchors and the runtime evidence's span lookup use the same resolver
    (evidence keeps steps 1–2 and fading). Done: evidence resolves through silo's `OBSERVED` pipeline (same span, then
    moved), each observation an `observedRef` (its id alone); the event sheet's parts carry a `SpanRef`; and the two

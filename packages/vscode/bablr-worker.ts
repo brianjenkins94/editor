@@ -332,12 +332,13 @@ serve(hub, "bablr.refer", async (args, { signal }) => {
 	}) };
 });
 
-// References, the text their file has now (and their baselines' texts, by blob oid, when the caller could get them) ⇒
-// where each one's span is: silo's resolver — the authored pipeline, with the structural diff from a baseline as its
-// re-identified strategy, or the observed one (the id alone) — and, for one found anywhere but by its own id, the
-// reference as it would be made here now (for an annotation to be rewritten with).
+// References, the text their file has now (and their baselines' texts, by blob oid, and other files' texts, by path,
+// when the caller could get them) ⇒ where each one's span is: silo's resolver — the authored pipeline, with the other
+// files as where a span may have moved and the structural diff from a baseline as its re-identified strategy, or the
+// observed one (the id alone) — and, for one found anywhere but by its own id, the reference as it would be made where
+// it was found now (for an annotation to be rewritten with).
 serve(hub, "bablr.resolve", async (args, { signal }) => {
-	const { source, file, refs, baselines = {}, observed = false } = args as { "source": string; "file": string; "refs": SpanRef[]; "baselines"?: Record<string, string>; "observed"?: boolean };
+	const { source, file, refs, baselines = {}, others = {}, observed = false } = args as { "source": string; "file": string; "refs": SpanRef[]; "baselines"?: Record<string, string>; "others"?: Record<string, string>; "observed"?: boolean };
 	const cst = source === "" ? undefined : await parse(source, signal);
 
 	if (cst === undefined) {
@@ -348,6 +349,28 @@ serve(hub, "bablr.resolve", async (args, { signal }) => {
 	const ids = new Set(shapes.map((shape) => shape.id));
 	const anchors = spanAnchors(source, "Program", cst);
 	const blob = await blobOid(source);
+	// The other files' spans, by id — parsed (or taken from the cache) only once a reference needs them.
+	let elsewhere: Map<string, { "file": string; "shape": SpanShape; "shapes": SpanShape[]; "blob": string }> | undefined;
+	const indexOthers = async (): Promise<NonNullable<typeof elsewhere>> => {
+		const index = new Map<string, { "file": string; "shape": SpanShape; "shapes": SpanShape[]; "blob": string }>();
+
+		for (const [path, text] of Object.entries(others)) {
+			const parsed = await parse(text, signal);
+
+			if (parsed !== undefined) {
+				const theirs = shapesOf(text, parsed);
+				const theirBlob = await blobOid(text);
+
+				for (const shape of theirs) {
+					if (!index.has(shape.id)) {
+						index.set(shape.id, { "file": path, "shape": shape, "shapes": theirs, "blob": theirBlob });
+					}
+				}
+			}
+		}
+
+		return index;
+	};
 	const resolutions = [];
 
 	for (const ref of refs) {
@@ -362,10 +385,16 @@ serve(hub, "bablr.resolve", async (args, { signal }) => {
 			reidentified = found === undefined ? undefined : { "id": anchors[found.to].id, "how": found.how };
 		}
 
-		const resolution = resolve(ref, { "file": file, "shapes": shapes, ...reidentified === undefined ? {} : { "reidentified": reidentified } }, observed ? OBSERVED : PIPELINE);
-		const moved = resolution.candidate !== undefined && resolution.status !== "attached";
+		if (!observed && !ids.has(ref.span) && Object.keys(others).length > 0) {
+			elsewhere ??= await indexOthers();
+		}
 
-		resolutions.push({ ...resolution, ...moved ? { "ref": referTo(shapes, resolution.candidate!.span, file, blob) } : {} });
+		const index = elsewhere;
+		const resolution = resolve(ref, { "file": file, "shapes": shapes, ...index === undefined ? {} : { "elsewhere": (id: string) => index.get(id) }, ...reidentified === undefined ? {} : { "reidentified": reidentified } }, observed ? OBSERVED : PIPELINE);
+		const at = resolution.status === "attached" ? undefined : resolution.candidate;
+		const there = at === undefined || at.file === file ? { "shapes": shapes, "blob": blob } : index?.get(at.span);
+
+		resolutions.push({ ...resolution, ...at === undefined || there === undefined ? {} : { "ref": referTo(there.shapes, at.span, at.file, there.blob) } });
 	}
 
 	return { "resolutions": resolutions };

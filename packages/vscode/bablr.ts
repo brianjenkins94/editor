@@ -19,13 +19,18 @@ import type { Resolution, SpanRef } from "@brianjenkins94/util/silo/annotations"
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { LOCAL_DIR } from "@brianjenkins94/util/silo/evidence";
 import { fs } from "@zenfs/core";
-import { blobText } from "./git-engine";
+import { blobText, status } from "./git-engine";
 
 /** One span of a text: its spanAnchors id and offsets (punctuation left out — it's never a handle). */
 export interface Span { "id": string; "start": number; "end": number }
 
 /** Where a reference's span is, and the reference as it would be made there now (when found other than by its id). */
 export type Resolved = Resolution & { "ref"?: SpanRef };
+
+/** The files BABLR's grammar may take: where a moved span is looked for. */
+const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
+/** At most this many changed files are looked in for a moved span (each is parsed once, then cached). */
+const MAX_OTHERS = 50;
 
 export interface Bablr {
 	/** Ask the worker for `bablr.<name>` (bablr-worker.ts), after whatever was asked before. No timeout: the first call
@@ -40,12 +45,31 @@ export interface Bablr {
 	 *  undefined for one BABLR can't place, all of them when it can't parse the text. */
 	"refer": (source: string, file: string, ranges: { "start": number; "end": number }[]) => Promise<(SpanRef | undefined)[]>;
 	/** Where each of `refs`' spans is in `source`, the text their file has now (SPAN-ANNOTATIONS.md) — and the reference
-	 *  as it would be made there now, for one found other than by its own id. An authored annotation's baseline, from
-	 *  git's objects, re-identifies it when its id is gone; an `observed` one is looked for by its id alone. */
+	 *  as it would be made there now, for one found other than by its own id. An authored annotation whose id is gone
+	 *  is looked for in the other changed files (moved) and re-identified from its baseline, from git's objects; an
+	 *  `observed` one is looked for by its id, in its own file, alone. */
 	"resolve": (source: string, file: string, refs: SpanRef[], observed?: boolean) => Promise<Resolved[]>;
 	/** The span id standing for each of `ranges` in `source` (bablr-language-ts's pickAnchor), from its cached spans. */
 	"anchors": (source: string, ranges: { "start": number; "end": number }[]) => Promise<(string | undefined)[] | undefined>;
 	"dispose": () => void;
+}
+
+/** What a lost annotation's span may have moved to: the code files that differ from HEAD on disk, other than `file`,
+ *  with their text (by workspace-relative path) — at most MAX_OTHERS of them. None when there's no repo. */
+async function changedFiles(file: string): Promise<Record<string, string>> {
+	const changes = await status().catch(() => undefined);
+	const paths = [...new Set([...changes?.staged ?? [], ...changes?.unstaged ?? []].filter((change) => change.status !== "D" && change.path !== file && CODE_FILE.test(change.path)).map((change) => change.path))].slice(0, MAX_OTHERS);
+	const others: Record<string, string> = {};
+
+	for (const path of paths) {
+		const text = await fs.promises.readFile(`/workspace/${path}`, "utf8").catch(() => undefined);
+
+		if (text !== undefined && text !== "") {
+			others[path] = text;
+		}
+	}
+
+	return others;
 }
 
 export function startBablr(hub: Hub): Bablr {
@@ -111,8 +135,10 @@ export function startBablr(hub: Hub): Bablr {
 	};
 	const resolveRefs = async (source: string, file: string, refs: SpanRef[], observed = false): Promise<Resolved[]> => {
 		const first = (await request<{ "resolutions": Resolved[] }>("resolve", { "source": source, "file": file, "refs": refs, "observed": observed })).resolutions;
-		// An authored one its own id didn't find is followed from its baseline — when git has it (code that was committed).
-		const lost = observed ? [] : refs.map((ref, index) => ({ "ref": ref, "index": index })).filter(({ ref, index }) => first[index].status !== "attached" && ref.baseline !== undefined);
+		// An authored one its own id didn't find is looked for further: in the other files that differ from HEAD (code
+		// moved to another file changed that file), and followed from its baseline — when git has it (code that was
+		// committed). An observed one fades instead.
+		const lost = observed ? [] : refs.map((ref, index) => ({ "ref": ref, "index": index })).filter(({ index }) => first[index].status !== "attached");
 
 		if (lost.length === 0) {
 			return first;
@@ -120,7 +146,7 @@ export function startBablr(hub: Hub): Bablr {
 
 		const baselines: Record<string, string> = {};
 
-		for (const blob of new Set(lost.map(({ ref }) => ref.baseline!.blob))) {
+		for (const blob of new Set(lost.flatMap(({ ref }) => ref.baseline === undefined ? [] : [ref.baseline.blob]))) {
 			const text = await blobText(blob);
 
 			if (text !== undefined) {
@@ -128,15 +154,15 @@ export function startBablr(hub: Hub): Bablr {
 			}
 		}
 
-		const followed = lost.filter(({ ref }) => baselines[ref.baseline!.blob] !== undefined);
+		const others = await changedFiles(file);
 
-		if (followed.length === 0) {
+		if (Object.keys(baselines).length === 0 && Object.keys(others).length === 0) {
 			return first;
 		}
 
-		const again = (await request<{ "resolutions": Resolved[] }>("resolve", { "source": source, "file": file, "refs": followed.map(({ ref }) => ref), "baselines": baselines })).resolutions;
+		const again = (await request<{ "resolutions": Resolved[] }>("resolve", { "source": source, "file": file, "refs": lost.map(({ ref }) => ref), "baselines": baselines, "others": others })).resolutions;
 
-		followed.forEach(({ index }, at) => { first[index] = again[at]; });
+		lost.forEach(({ index }, at) => { first[index] = again[at]; });
 
 		return first;
 	};

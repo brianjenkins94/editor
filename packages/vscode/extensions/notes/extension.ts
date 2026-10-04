@@ -6,7 +6,8 @@
  * against the text as it is now — by the editor's BABLR, through worker-pod's `editor.annotations.resolve` — and lands:
  *
  *  - on its own span, or followed to it (its code moved or was edited): shown inline, as a comment thread. A note of
- *    yours found any way but its own id is rewritten where it landed, so the next look finds it by id;
+ *    yours found any way but its own id is rewritten where it landed, so the next look finds it by id — and one whose
+ *    code moved to another (changed, saved) file goes with it; anyone else's waits in Problems, pointing there;
  *  - on a span it probably moved to (`uncertain`): shown there, marked, with Keep Note Here and Re-place;
  *  - nowhere (its code went): kept, and shown in the Problems view at its last place, with Re-place and Dismiss.
  *
@@ -113,6 +114,30 @@ export function activate(context: vscode.ExtensionContext): void {
 
 		for (const { note, owner, resolved } of landed) {
 			const at = resolved.candidate;
+
+			// Its code moved to another file: a note of yours goes with it (a tombstone here, the note in that file's
+			// notes); anyone else's waits here, pointing there, until its author next looks.
+			if (resolved.status === "moved" && at?.start !== undefined && at.end !== undefined && at.file !== file) {
+				if (owner === you && resolved.ref !== undefined) {
+					await save(file, { ...note, "dismissed": true, "updatedAt": new Date().toISOString() });
+					await save(at.file, { ...note, "ref": resolved.ref, "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": new Date().toISOString() });
+
+					continue;
+				}
+
+				const there = vscode.Uri.joinPath(root, at.file);
+				const target = await vscode.workspace.openTextDocument(there).then((opened) => new vscode.Range(opened.positionAt(at.start!), opened.positionAt(at.end!)), () => new vscode.Range(0, 0, 0, 0));
+				const near = document.positionAt(Math.min(note.ref.baseline?.start ?? 0, source.length));
+				const diagnostic = new vscode.Diagnostic(document.lineAt(near.line).range, `A note's code moved to ${at.file}: "${note.payload?.text ?? ""}" — it moves there when ${owner} next opens this file.`, vscode.DiagnosticSeverity.Information);
+
+				diagnostic.source = "notes";
+				diagnostic.code = note.id;
+				diagnostic.relatedInformation = [new vscode.DiagnosticRelatedInformation(new vscode.Location(there, target), "Its code, now")];
+				orphans.push(diagnostic);
+				lost.set(note.id, { "note": note, "owner": owner });
+
+				continue;
+			}
 
 			if (resolved.status === "orphaned" || at?.start === undefined || at.end === undefined || at.file !== file) {
 				const near = document.positionAt(Math.min(note.ref.baseline?.start ?? 0, source.length));
@@ -281,6 +306,8 @@ export function activate(context: vscode.ExtensionContext): void {
 			})
 		}, { "providedCodeActionKinds": [vscode.CodeActionKind.QuickFix] }),
 		vscode.window.onDidChangeVisibleTextEditors(showAll),
+		// Saved: code moved into this file is on disk now, where a note that lost its place elsewhere looks for it.
+		vscode.workspace.onDidSaveTextDocument(showAll),
 		vscode.workspace.onDidChangeTextDocument((event) => {
 			if (event.contentChanges.length > 0) {
 				clearTimeout(typing);

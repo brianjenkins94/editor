@@ -288,6 +288,60 @@ test("notes: a note follows its code, and waits in Problems when its code is gon
 	await eventually("the note's tombstone", async () => (await run("notes")).find((note) => note.id === id && note.dismissed === true));
 });
 
+test("notes: a note goes with its code to another file", async () => {
+	const workbench = session.workbench();
+	const run = (step) => workbench.evaluate(async (what) => {
+		const { api } = globalThis.__editor;
+		const from = api.Uri.file("/workspace/moved-from.js");
+		const notesOn = async (file) => {
+			const folder = api.Uri.file("/workspace/.silo/notes");
+			const [owner] = await api.workspace.fs.readDirectory(folder).then((entries) => entries.map(([name]) => name), () => []);
+			const text = owner === undefined ? "" : await api.workspace.fs.readFile(api.Uri.joinPath(folder, owner, `${file}.jsonl`)).then((bytes) => new TextDecoder().decode(bytes), () => "");
+
+			return text.trim() === "" ? [] : text.trim().split("\n").map((line) => JSON.parse(line));
+		};
+
+		switch (what) {
+			case "add": {
+				await api.workspace.fs.writeFile(from, new TextEncoder().encode("setup();\nshift(width, height);\nlog(1);\n"));
+
+				const editor = await api.window.showTextDocument(from);
+				const at = editor.document.getText().indexOf("shift(width, height)");
+
+				editor.selection = new api.Selection(editor.document.positionAt(at), editor.document.positionAt(at + "shift(width, height)".length));
+
+				return api.commands.executeCommand("notes.add", "mind the aspect ratio");
+			}
+			case "move": {
+				// Pasted into another file, saved; cut from this one.
+				await api.workspace.fs.writeFile(api.Uri.file("/workspace/moved-to.js"), new TextEncoder().encode("other();\nshift(width, height);\n"));
+
+				const editor = await api.window.showTextDocument(from);
+				const text = editor.document.getText();
+				const at = text.indexOf("shift(width, height);\n");
+
+				await editor.edit((builder) => { builder.delete(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + "shift(width, height);\n".length))); });
+
+				return undefined;
+			}
+			default:
+				return { "from": await notesOn("moved-from.js"), "to": await notesOn("moved-to.js") };
+		}
+	}, step);
+
+	const id = await run("add");
+
+	await eventually("the note, kept", async () => (await run("notes")).from.some((note) => note.id === id) || undefined);
+	await run("move");
+
+	const moved = await eventually("the note, gone with its code", async () => (await run("notes")).to.find((note) => note.id === id));
+	const left = (await run("notes")).from.find((note) => note.id === id);
+
+	assert.equal(moved.ref.file, "moved-to.js");
+	assert.equal(moved.placed?.strategy, "moved");
+	assert.equal(left?.dismissed, true, "a tombstone where it was");
+});
+
 // findFiles (and the search view's include/exclude) honour their globs (components/monaco-vscode-api/workspace-search.ts):
 // the search override's own provider ignored them and returned every file.
 test("search: findFiles keeps to its glob, and to files.exclude unless told not to", async () => {
