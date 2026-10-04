@@ -132,6 +132,20 @@ function shellBuffer(): Plugin {
 	return { "name": "shell-buffer", "config": () => ({ "resolve": { "alias": { "buffer": stdlib["buffer"] as string } } }) };
 }
 
+/** oxc-parser's WASI binding, its browser build: whichever of its two names is installed (`binding-wasm32-wasip1` from
+ *  0.152, `binding-wasm32-wasi` before). */
+function oxcWasiBrowser(): string {
+	const require = createRequire(import.meta.url);
+
+	for (const name of ["@oxc-parser/binding-wasm32-wasip1", "@oxc-parser/binding-wasm32-wasi"]) {
+		try {
+			return require.resolve(name).replace(/parser\.wasi\.cjs$/u, "parser.wasi-browser.js");
+		} catch { /* not this one */ }
+	}
+
+	throw new Error("oxc-parser's WASI binding isn't installed (package.json pins it beside oxc-parser)");
+}
+
 /** Plugin code that passes `require` around as a VALUE — `optionalRequire(require, "typescript")` — hides the module id
  *  from the bundler, which leaves its runtime `require` (it throws in a worker). Rewrite `require` in argument position
  *  to the engine's registry-backed require (`globalThis.__eslintRequire`, see engine.ts / node-module.js). */
@@ -384,7 +398,9 @@ export async function preBuild(): Promise<void> {
 				// `main` (parser.wasi.cjs), which imports `node:wasi`/`node:worker_threads` and drives @napi-rs down its
 				// node WASI path (→ "__nodeWASI is not a constructor" in the browser). The browser entry uses @napi-rs's
 				// own browser WASI runtime + the emitted wasi-worker-browser instead.
-				{ "find": /^@oxc-parser\/binding-wasm32-wasi$/u, "replacement": createRequire(import.meta.url).resolve("@oxc-parser/binding-wasm32-wasi").replace(/parser\.wasi\.cjs$/u, "parser.wasi-browser.js") }
+				// oxc-parser's WASI binding, browser build — named `binding-wasm32-wasi` up to 0.151, `binding-wasm32-wasip1` from
+				// 0.152: whichever the installed parser imports (package.json pins the parser and its binding as a pair).
+				{ "find": /^@oxc-parser\/binding-wasm32-wasi(?:p1)?$/u, "replacement": oxcWasiBrowser() }
 			]
 		},
 		"worker": { "format": "es", "rollupOptions": { "output": { "banner": PROCESS_SHIM, "entryFileNames": "lsp/[name]-[hash].js", "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" } } },

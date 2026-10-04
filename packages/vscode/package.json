@@ -29,6 +29,7 @@
     "just-bash": "^3.4.2",
     "lucide": "latest",
     "lz-string": "^1.5.0",
+    "oxc-parser": "0.151.0",
     "preact": "latest",
     "react": "18.2.0",
     "react-dom": "18.2.0",
@@ -39,7 +40,7 @@
     "vscode-languageserver-textdocument": "^1.0.12"
   },
   "devDependencies": {
-    "@oxc-parser/binding-wasm32-wasi": "0.149.0",
+    "@oxc-parser/binding-wasm32-wasi": "0.151.0",
     "@types/node": "latest",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
