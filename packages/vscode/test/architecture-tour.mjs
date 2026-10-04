@@ -207,6 +207,51 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 // A service — it keeps running (lifecycle.ts) — needs an event loop tsval doesn't have, so it runs on the script worker
 // (the real runtime): its own worker, so stopping it (Ctrl+C terminates that worker) leaves the dev servers' worker, and
 // the previews, running.
+// What went through a run's ?., ??, parameters, returns and branches (RUNTIME-EVIDENCE.md, the second slice): folded
+// into the same evidence file as its coverage, each site under the span that is exactly its node — and the values
+// themselves only on this machine, in .silo/local/samples/.
+test("evidence: a run's values and branches, beside its coverage", async () => {
+	await session.terminal([
+		`echo 'const world = { onWin: () => 1 };' > values.js`,
+		`echo 'function pick(key) { return key ?? "none"; }' >> values.js`,
+		`echo 'for (const key of ["a", undefined]) { if (pick(key) === "a") { world.onWin?.(); } }' >> values.js`
+	].join(" && "), { "fresh": true });
+	await session.request("debug.start", { "program": "/workspace/values.js" }, 60_000);
+
+	const found = await eventually("its values and branches, as evidence", () => session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const find = async (folder, name) => {
+			for (const [entry, type] of await api.workspace.fs.readDirectory(folder).then((all) => all, () => [])) {
+				const child = api.Uri.joinPath(folder, entry);
+				const hit = type === api.FileType.Directory ? await find(child, name) : entry === name ? new TextDecoder().decode(await api.workspace.fs.readFile(child)) : undefined;
+
+				if (hit !== undefined) {
+					return hit;
+				}
+			}
+
+			return undefined;
+		};
+		const evidence = await find(api.Uri.file("/workspace/.silo/evidence"), "values.js.jsonl");
+		const samples = await find(api.Uri.file("/workspace/.silo/local/samples"), "values.js.jsonl");
+		const lines = (text) => (text ?? "").trim().split("\n").filter((line) => line !== "").map((line) => JSON.parse(line));
+
+		return lines(evidence).some((line) => line.kind === "value") ? { "evidence": lines(evidence), "samples": lines(samples) } : undefined;
+	}));
+	const values = found.evidence.filter((line) => line.kind === "value");
+	const tagged = (tags) => values.filter((line) => JSON.stringify(line.tags) === JSON.stringify(tags));
+
+	assert.equal(tagged({ "function": 1 }).length, 1, "world.onWin?.(): a function, never nullish");
+	assert.equal(tagged({ "function": 1 })[0].nullish, 0);
+	assert.equal(tagged({ "string": 1, "undefined": 1 }).length, 2, "pick's key, and key ?? …: one string, one undefined");
+	assert.equal(tagged({ "string": 2 }).length, 1, "pick's return: a string both times");
+	assert.equal(tagged({ "number": 1 }).length, 1, "() => 1 returned a number");
+	assert.deepEqual(found.evidence.filter((line) => line.kind === "branch").map((line) => line.arms), [[1, 1]], "the if: each arm once");
+	assert.ok(found.evidence.some((line) => line.kind === "reached"), "beside its coverage");
+	assert.ok(found.samples.some((line) => line.values.includes("none")), "the values, on this machine");
+	assert.ok(found.evidence.every((line) => !JSON.stringify(line).includes("none")), "and never in git");
+});
+
 test("node script: a service runs on the script worker, and stopping it leaves the previews up", async () => {
 	await session.terminal(`echo "setInterval(() => console.log('tick'), 300);" > forever.js && node forever.js`, { "fresh": true });
 	await session.until("the script worker's run", hasLabel("workbench", "node-scripts", /^node\.start$/u));

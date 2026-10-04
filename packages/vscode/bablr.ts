@@ -49,8 +49,10 @@ export interface Bablr {
 	 *  is looked for in the other changed files (moved) and re-identified from its baseline, from git's objects; an
 	 *  `observed` one is looked for by its id, in its own file, alone. */
 	"resolve": (source: string, file: string, refs: SpanRef[], observed?: boolean) => Promise<Resolved[]>;
-	/** The span id standing for each of `ranges` in `source` (bablr-language-ts's pickAnchor), from its cached spans. */
-	"anchors": (source: string, ranges: { "start": number; "end": number }[]) => Promise<(string | undefined)[] | undefined>;
+	/** The span id standing for each of `ranges` in `source` (bablr-language-ts's pickAnchor), from its cached spans —
+	 *  or, `exact`, the span whose range is exactly the range (the node itself, when several are), and none when no
+	 *  span is: what an observed site keeps, so unrelated sites never pool into one enclosing span. */
+	"anchors": (source: string, ranges: { "start": number; "end": number }[], exact?: boolean) => Promise<(string | undefined)[] | undefined>;
 	"dispose": () => void;
 }
 
@@ -108,19 +110,46 @@ export function startBablr(hub: Hub): Bablr {
 		void fs.promises.rm(old, { "recursive": true, "force": true }).catch(() => undefined);
 	}
 
+	// The last text's spans, so asking twice in a row (a run's statements, then its sites) asks the worker once.
+	let last: { "source": string; "spans": Promise<Span[] | undefined> } | undefined;
+
 	const spans = async (source: string, signal?: AbortSignal): Promise<Span[] | undefined> => {
 		if (source === "") {
 			return undefined; // BABLR has nothing to parse
 		}
 
-		return (await request<{ "spans"?: Span[]; "unparsable"?: true }>("spans", { "source": source }, signal)).spans;
+		if (last?.source !== source) {
+			const asked = request<{ "spans"?: Span[]; "unparsable"?: true }>("spans", { "source": source }, signal).then((answer) => answer.spans);
+
+			last = { "source": source, "spans": asked };
+			asked.catch(() => { if (last?.spans === asked) { last = undefined; } });
+		}
+
+		return last.spans;
 	};
 
-	const anchors = async (source: string, ranges: { "start": number; "end": number }[]): Promise<(string | undefined)[] | undefined> => {
+	const anchors = async (source: string, ranges: { "start": number; "end": number }[], exact = false): Promise<(string | undefined)[] | undefined> => {
 		const known = await spans(source);
 
 		if (known === undefined) {
 			return undefined;
+		}
+
+		if (exact) {
+			// Several spans can have one range (a BinaryExpression in a LogicExpression in an Expression); they come
+			// innermost first. The innermost without an ordinal is the node itself, and its id doesn't shift when the
+			// same code turns up earlier in the file. A statement's range from TypeScript takes its `;`; BABLR's doesn't.
+			const byRange = new Map<string, Span[]>();
+
+			for (const span of known) {
+				byRange.set(`${span.start}:${span.end}`, [...byRange.get(`${span.start}:${span.end}`) ?? [], span]);
+			}
+
+			return ranges.map(({ start, end }) => {
+				const found = byRange.get(`${start}:${end}`) ?? (source[end - 1] === ";" ? byRange.get(`${start}:${end - 1}`) : undefined);
+
+				return (found?.find((span) => !span.id.includes("#")) ?? found?.[0])?.id;
+			});
 		}
 
 		const { ids } = await request<{ "ids": (string | null)[] }>("pick", { "spans": known, "ranges": ranges });

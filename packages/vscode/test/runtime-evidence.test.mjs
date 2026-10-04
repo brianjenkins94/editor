@@ -3,7 +3,7 @@
 //   node --test test/runtime-evidence.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { evidenceText, foldBranches, foldReached, foldValues, HALF_LIFE_RUNS, MAX_TAGS, parseEvidence } from "@brianjenkins94/util/silo/evidence";
+import { evidenceText, foldBranches, foldReached, foldSamples, foldValues, HALF_LIFE_RUNS, MAX_SAMPLES, MAX_TAGS, parseEvidence, parseSamples, samplesPath, samplesText } from "@brianjenkins94/util/silo/evidence";
 
 const run = (n) => ({ "id": `run-${n}`, "at": `2026-10-04T00:00:0${n}Z` });
 const fade = 2 ** (-1 / HALF_LIFE_RUNS);
@@ -64,4 +64,12 @@ test("an evidence file round-trips every kind, sorted by kind and span", () => {
 
 	assert.deepEqual(text.trim().split("\n").map((line) => JSON.parse(line).kind), ["branch", "reached", "value"]);
 	assert.deepEqual(parseEvidence(text + "not json\n{\"kind\":\"time\",\"span\":\"t\",\"lastAt\":\"x\"}\n").length, 3, "junk and unknown kinds skipped");
+});
+
+test("samples: this machine's, newest distinct first, only for sites the evidence still knows", () => {
+	let known = foldSamples([], [{ "span": "a", "values": ["left", "right"] }, { "span": "gone", "values": [1] }], new Set(["a", "gone"]));
+
+	known = foldSamples(known, [{ "span": "a", "values": ["up", "left", 1, 2, 3] }], new Set(["a"]));
+	assert.deepEqual(parseSamples(samplesText(known)), [{ "span": "a", "values": ["up", "left", 1, 2, 3].slice(0, MAX_SAMPLES) }]);
+	assert.match(samplesPath("src/world.ts"), /^\.silo\/local\/samples\/src\/world\.ts\.jsonl$/u, "under local/: never committed");
 });

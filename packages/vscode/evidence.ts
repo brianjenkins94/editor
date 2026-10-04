@@ -3,19 +3,22 @@
  * whose run, where it ran, on what code — is appended to `.silo/runs/<user>.jsonl`, and what it observed is folded into
  * `.silo/evidence/<user>/<environment>/<file>.jsonl`, keyed on BABLR spans. silo decides the shape, the layout and how
  * evidence fades (@brianjenkins94/util/silo/evidence); this gathers the facts only the editor has: the run (runs.ts), the
- * browser it ran in, the repo it ran on, and what the runtimes saw — so far a debug session's coverage
- * (`evidence.coverage`, from the tsval adapter), each statement keyed by the spanAnchors id the BABLR worker finds
- * for it. A file BABLR's grammar doesn't take yet gets no evidence; its run is still recorded.
+ * browser it ran in, the repo it ran on, and what the runtimes saw — so far what a debug session observed
+ * (`evidence.observed`, from the tsval adapter): its coverage, each statement keyed by the span the BABLR worker picks
+ * for it, and what went through its observed sites (values at `?.`, `??`, parameters and returns; each branch's arms),
+ * each keyed by the span that is exactly its node — a site without one isn't recorded. The values themselves stay on
+ * this machine (`.silo/local/samples/`). A file BABLR's grammar doesn't take yet gets no evidence; its run is still
+ * recorded.
  *
  * Runs in the workbench realm; writes through VS Code's file system, so an open runs file shows each new line.
  */
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
-import type { StatementCoverage } from "./extensions/worker-pod/debug-protocol";
+import type { SiteObservation, StatementCoverage } from "./extensions/worker-pod/debug-protocol";
 import type { Bablr } from "./bablr";
 import type { RunInfo, RunRegistry } from "./runs";
-import { envelopeLine, evidencePath, evidenceText, foldReached, GITATTRIBUTES, GITIGNORE, parseEvidence, runsPath, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, GITATTRIBUTES, GITIGNORE, parseEvidence, parseSamples, runsPath, samplesPath, samplesText, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { blobOid, headCommit } from "./git-engine";
 
 const ROOT = "/workspace";
@@ -37,11 +40,12 @@ function browserClass(): Omit<Environment, "runtime" | "name"> {
 	return { "engine": engine, "os": os, "cores": navigator.hardwareConcurrency, ...memory === undefined ? {} : { "memoryGb": memory } };
 }
 
-/** A run's coverage of the program it ran: the source that ran, and each statement's range in it with its count. */
-interface Coverage { "file": string; "source": string; "statements": StatementCoverage[] }
+/** What a run observed of the program it ran: the source that ran, each statement's range in it with its count, and
+ *  each observed site that ran. */
+interface Coverage { "file": string; "source": string; "statements": StatementCoverage[]; "sites": SiteObservation[] }
 
-/** Each statement's range in `source` as offsets (its line/character positions, counted in UTF-16 code units). */
-function offsets(source: string, statements: StatementCoverage[]): { "start": number; "end": number }[] {
+/** Each range in `source` as offsets (its line/character positions, counted in UTF-16 code units). */
+function offsets(source: string, statements: { "start": [number, number]; "end": [number, number] }[]): { "start": number; "end": number }[] {
 	const lineStarts = [0];
 
 	for (let index = source.indexOf("\n"); index !== -1; index = source.indexOf("\n", index + 1)) {
@@ -85,11 +89,11 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 	// Each run's coverage, until the run ends (the session's coverage comes just before its end).
 	const coverage = new Map<string, Coverage>();
 
-	hub.subscribe("evidence.coverage", (data) => {
+	hub.subscribe("evidence.observed", (data) => {
 		const { runId, ...rest } = (data ?? {}) as Coverage & { "runId"?: unknown };
 
 		if (typeof runId === "string" && typeof rest.source === "string" && Array.isArray(rest.statements)) {
-			coverage.set(runId, rest);
+			coverage.set(runId, { ...rest, "sites": Array.isArray(rest.sites) ? rest.sites : [] });
 		}
 	});
 
@@ -152,15 +156,17 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		}
 	};
 
-	/** A run's coverage, keyed on spans, folded into what earlier runs in its environment observed of the file. */
+	/** What a run observed, keyed on spans, folded into what earlier runs in its environment observed of the file; its
+	 *  values' samples into this machine's. */
 	const recordCoverage = async (envelope: RunEnvelope, covered: Coverage): Promise<void> => {
 		if (covered.source === "") {
 			return; // BABLR has nothing to parse
 		}
 
 		const ids = await bablr.anchors(covered.source, offsets(covered.source, covered.statements));
+		const siteIds = await bablr.anchors(covered.source, offsets(covered.source, covered.sites), true);
 
-		if (ids === undefined) {
+		if (ids === undefined || siteIds === undefined) {
 			return; // BABLR's grammar doesn't take this file yet
 		}
 
@@ -169,10 +175,28 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 
 			return typeof span === "string" ? [{ "span": span, "count": statement.count }] : [];
 		});
-		const path = evidencePath(envelope.user, envelope.environment, repoRelative(covered.file));
-		const known = parseEvidence(new TextDecoder().decode(await read(path) ?? new Uint8Array()));
+		const sites = covered.sites.flatMap((site, index) => {
+			const span = siteIds[index];
 
-		await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(foldReached(known, reached, { "id": envelope.id, "at": envelope.endedAt }))));
+			return typeof span === "string" ? [{ ...site, "span": span }] : [];
+		});
+		const values = sites.filter((site) => site.site !== "branch").map((site) => ({ "span": site.span, "seen": site.seen ?? 0, "nullish": site.nullish ?? 0, "tags": site.tags ?? {} }));
+		const branches = sites.filter((site) => site.site === "branch").map((site) => ({ "span": site.span, "arms": site.arms ?? [] }));
+		const file = repoRelative(covered.file);
+		const path = evidencePath(envelope.user, envelope.environment, file);
+		const run = { "id": envelope.id, "at": envelope.endedAt };
+		const folded = foldBranches(foldValues(foldReached(parseEvidence(new TextDecoder().decode(await read(path) ?? new Uint8Array())), reached, run), values, run), branches, run);
+
+		await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(folded)));
+
+		// The values themselves, for this machine only — and only for sites the evidence still knows.
+		const samples = sites.flatMap((site) => (site.samples === undefined ? [] : [{ "span": site.span, "values": site.samples }]));
+		const local = samplesPath(file);
+		const known = parseSamples(new TextDecoder().decode(await read(local) ?? new Uint8Array()));
+
+		if (samples.length > 0 || known.length > 0) {
+			await vscode.workspace.fs.writeFile(uri(local), new TextEncoder().encode(samplesText(foldSamples(known, samples, new Set(folded.filter((each) => each.kind === "value").map((each) => each.span))))));
+		}
 	};
 
 	runs.onEnd((run) => {

@@ -223,7 +223,7 @@ Same files, new lines: `value` and `branch` observations join `reached` in
 ### How it flows
 
 The path is coverage's, with nothing new: the debug worker's end-of-run report gains `sites` beside `statements`.
-The adapter publishes both on `evidence.coverage` (renamed `evidence.observed`). `evidence.ts` maps each site's
+The adapter publishes both on `evidence.observed` (formerly `evidence.coverage`). `evidence.ts` maps each site's
 range to its exact span, and silo folds `value` and `branch` beside `reached`. The insights extension reads them back.
 
 ### The typed strategy
@@ -258,7 +258,9 @@ through it.
    goes on from a copy of its stop's sums, as its coverage does, so stepping back and forward doesn't count twice.
 3. **silo**: `value` and `branch` observations, `foldValues` and `foldBranches`, the parser taking every kind.
    Done: every kind keeps `ever` (runs that observed it since its span changed), and each fold leaves the others alone.
-4. **evidence.ts**: exact spans for sites, folded and written beside `reached`.
+4. **evidence.ts**: exact spans for sites, folded and written beside `reached`. Done: a site's span is the innermost
+   one without an ordinal whose range is its node's (a statement's trailing `;` aside); samples go to
+   `.silo/local/samples/<file>.jsonl`, kept only for sites the evidence still knows.
 5. **Insights**: the hover.
 6. **Quick fixes**: `?.` and `??`, then branches.
 7. **The typed strategy**: types at ranges from the tsserver plugin, `inferred` and `observed` on references,
