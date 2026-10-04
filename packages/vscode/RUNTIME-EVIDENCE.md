@@ -371,10 +371,13 @@ budgets (test/performance.mjs) measure an instrumented preview before the defaul
    workspace modules once a preview starts, `full` until step 4's setting): each page — a frame, a load — reports as
    its own (`page`), and `evidence.flush` asks them all.
 3. **Core**: reports gathered by run (by port), past versions' sources from the dev server, a last pull before the
-   preview closes, folding at run end, `versions` in the envelope (silo).
+   preview closes, folding at run end, `versions` in the envelope (silo). Done: evidence.ts keeps each page's latest
+   totals and asks the dev server for a version's source (`preview.version`) as soon as a page reports it; the `vite`
+   command asks the pages to report (`evidence.flush`) before their windows close; at the end, pages' totals for a
+   version are added, each version is read against its own source, and each file is folded once.
 4. **The setting and a performance check.**
 5. **A tour test**: `npm run dev`, use the app, edit a module (a hot update), use it again, stop; evidence for both
-   versions, the untouched code's counts added across them.
+   versions, the untouched code's counts added across them. Done ("evidence: a preview run, across a hot update").
 
 ### Decisions for this slice
 

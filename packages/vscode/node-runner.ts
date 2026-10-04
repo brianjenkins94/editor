@@ -65,6 +65,9 @@ export interface NodeRunner {
 	"closePreview": (port?: number) => void;
 	/** When the preview on `port` is stopped from anywhere — Ctrl-C, or its last window closed. */
 	"onPreviewClose": (port: number, handler: () => void) => () => void;
+	/** Ask every preview page to report its runtime evidence now, and give the reports a moment to arrive — before a
+	 *  preview's windows close, since they close before its run ends (evidence.ts folds at the end). */
+	"flushPreviewEvidence": () => Promise<void>;
 	/** Present a long-running production run (the vite preview) as a VS Code debug session: publishes
 	 *  `production.launch` (the ext host starts a `production` attach session) and returns its id. `port`, when the
 	 *  run binds one (a preview server), is carried so the SW can attribute that port's net to this run. `target`
@@ -300,6 +303,10 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); }),
 		"openPreview": (root, port) => { hub.publish("preview.open", { "root": root, "mode": "production", "port": port }); },
 		"closePreview": (port) => { hub.publish("preview.close", { "port": port }); },
+		"flushPreviewEvidence": async () => {
+			hub.publish("evidence.flush", {});
+			await new Promise((resolve) => { setTimeout(resolve, 500); });
+		},
 		"onPreviewClose": (port, handler) => hub.subscribe("preview.close", (data) => {
 			if ((data as { "port"?: number } | null)?.port === port) {
 				handler();

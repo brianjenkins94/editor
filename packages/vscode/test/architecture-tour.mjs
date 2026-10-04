@@ -60,6 +60,79 @@ test("previews: two dev servers side by side", async () => {
 	assert.ok(counted.every((module) => /^[0-9a-f]{40}$/u.test(module.version)), "each by its version: the source's blob oid");
 });
 
+// A preview run's runtime evidence (RUNTIME-EVIDENCE.md, the third slice): its pages count what its modules did, an HMR
+// edit brings a second version of one, and when it stops, both versions are folded into the file's evidence — the
+// statements the edit didn't touch counted across both — and the run's envelope lists both.
+test("evidence: a preview run, across a hot update", async () => {
+	const write = (files) => session.workbench().evaluate(async (all) => {
+		const { api } = globalThis.__editor;
+
+		// (The workspace's file system makes no parents.)
+		await api.workspace.fs.createDirectory(api.Uri.file("/workspace/evapp/src"));
+
+		for (const [path, text] of Object.entries(all)) {
+			await api.workspace.fs.writeFile(api.Uri.file(`/workspace/evapp/${path}`), new TextEncoder().encode(text));
+		}
+	}, files);
+	const main = (word) => `const box = document.getElementById("out");\nfunction label(n?: number) { return n ?? "${word}"; }\nif (box) { box.textContent = String(label(1)) + String(label()); }\n`;
+
+	await write({
+		"package.json": JSON.stringify({ "name": "evapp", "private": true, "type": "module", "scripts": { "dev": "vite" } }),
+		// eslint-disable-next-line webawesome/no-html-in-strings -- the test app's own page, written to the workspace as a file
+		"index.html": "<!doctype html><html><head><meta charset=\"UTF-8\"></head><body><div id=\"out\"></div><script type=\"module\" src=\"./src/main.tsx\"></script></body></html>",
+		"src/main.tsx": main("none")
+	});
+	await session.terminal("cd /workspace/evapp && npm run dev", { "fresh": true });
+
+	const run = await eventually("its run", async () => (await session.request("runs.list", undefined, 5000)).find((each) => each.cwd === "/workspace/evapp" && each.state === "running"));
+	const versions = () => eventually("the page's counts", async () => {
+		const frame = session.page.frames().find((each) => each.url().includes(`/${run.port}/`) && each.url().includes("/__virtual__/"));
+		const modules = frame === undefined ? [] : await frame.evaluate(() => globalThis.__evidence?.evidence() ?? []).catch(() => []);
+
+		return modules.filter((module) => module.file === "/workspace/evapp/src/main.tsx");
+	});
+
+	await eventually("the first version counted", async () => (await versions()).length === 1 || undefined);
+	// An HMR edit: the module re-imported as a second version (a .tsx module accepts its own updates).
+	await write({ "src/main.tsx": main("nada") });
+	await eventually("the second version counted", async () => (await versions()).length === 2 || undefined);
+	await session.request("runs.stop", { "id": run.id }, 5000);
+
+	const found = await eventually("its evidence", () => session.workbench().evaluate(async (id) => {
+		const { api } = globalThis.__editor;
+		const text = (uri) => api.workspace.fs.readFile(uri).then((bytes) => new TextDecoder().decode(bytes), () => "");
+		const find = async (folder, name) => {
+			for (const [entry, type] of await api.workspace.fs.readDirectory(folder).then((all) => all, () => [])) {
+				const child = api.Uri.joinPath(folder, entry);
+				const hit = type === api.FileType.Directory ? await find(child, name) : entry === name ? await text(child) : undefined;
+
+				if (hit !== undefined) {
+					return hit;
+				}
+			}
+
+			return undefined;
+		};
+		const evidence = await find(api.Uri.file("/workspace/.silo/evidence"), "main.tsx.jsonl");
+		const runsFolder = api.Uri.file("/workspace/.silo/runs");
+		let envelope;
+
+		for (const [name] of await api.workspace.fs.readDirectory(runsFolder).then((all) => all, () => [])) {
+			const line = (await text(api.Uri.joinPath(runsFolder, name))).split("\n").find((each) => each.includes(id));
+
+			envelope = line === undefined ? envelope : JSON.parse(line);
+		}
+
+		return evidence === undefined || envelope === undefined ? undefined : { "lines": evidence.trim().split("\n").map((line) => JSON.parse(line)), "envelope": envelope };
+	}, run.id));
+
+	assert.equal(found.envelope.environment.runtime, "preview");
+	assert.equal(found.envelope.versions?.["evapp/src/main.tsx"]?.length, 2, "both versions it ran");
+	assert.ok(found.lines.some((line) => line.kind === "reached" && line.ever === 1 && line.w >= 2), "a statement the edit didn't touch, run by both versions: one run, counted twice");
+	assert.ok(found.lines.some((line) => line.kind === "value" && line.nullish >= 1), "n ?? …: undefined once");
+	assert.ok(found.lines.some((line) => line.kind === "branch"), "the if's arms");
+});
+
 test("provoke: a cold transform round in a child worker", async () => {
 	await session.request("preview.provoke", { "rounds": 1, "hardReset": true }, 90_000);
 	await session.until("node ⇄ provoke worker", hasLabel("node", "provoke", /./u));

@@ -90,6 +90,8 @@ export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 		off();
 		offStop();
 		offClosed();
+		// What its pages counted, reported before their windows close (RUNTIME-EVIDENCE.md, the third slice).
+		await runner.flushPreviewEvidence();
 		runner.endProductionSession(sessionId);
 		runner.closePreview(port);
 		inUsePorts.delete(port); // free it for the next run

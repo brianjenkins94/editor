@@ -297,7 +297,7 @@ interface VirtualRequest { "port": number; "method": string; "url": string; "hea
 interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 type RequestHandler = { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> };
-type PreviewServer = RequestHandler & { "start": () => void; "setInstrumentation": (level: "full" | "coverage" | "off") => void; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "stop": () => void };
+type PreviewServer = RequestHandler & { "start": () => void; "setInstrumentation": (level: "full" | "coverage" | "off") => void; "versionSource": (oid: string) => { "file": string; "source": string } | undefined; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "stop": () => void };
 
 // The preview taps (page-tap.ts, worker-tap.ts — bundled to script text at build time): the dev server puts one first
 // in every page it serves (inline, so it runs before the app's own code — the errors thrown during the app's module
@@ -498,6 +498,14 @@ async function provokeColdChild(buffer: SharedArrayBuffer, root: string, port: n
 // reporter's error shape.
 interface ProvokeResult { "rounds": number; "modules": string[]; "hardReset": boolean; "provoked": boolean; "failures": Array<{ "round": number; "url": string; "status": number }>; "transformErrors": Array<{ "round": number; "url": string; "name": string; "message": string }> }
 if (!SCRIPTS) {
+	// A version of a module a dev server instrumented, by its source's blob oid: runtime evidence reads a version's counts
+	// against its own text (evidence.ts asks as soon as a page reports a version — a hot update may have replaced it).
+	serve(hub, "preview.version", (raw) => {
+		const { port, oid } = (raw ?? {}) as { "port"?: unknown; "oid"?: unknown };
+
+		return typeof port === "number" && typeof oid === "string" ? previewServers.get(port)?.versionSource(oid) ?? {} : {};
+	});
+
 	serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
 		const { rounds = 10, modules, hardReset = false, port: portArg, root: rootArg } = (raw ?? {}) as { "rounds"?: number; "modules"?: string[]; "hardReset"?: boolean; "port"?: number; "root"?: string };
 		const port = portArg ?? lastPreviewConfig?.port;

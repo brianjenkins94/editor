@@ -198,6 +198,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "preview.close", "from": ["workbench", "shell"], "to": ["root", "workbench", "node", "shell"], "description": "A server stopped, or its last window closed: close its windows, stop its preview." },
 	{ "pattern": "preview.hmr.*", "from": ["node"], "to": ["shell", "workbench"], "description": "A dev server's HMR update, into every window of its port." },
 	{ "pattern": "evidence.preview", "from": ["preview:*"], "to": ["workbench"], "description": "A preview page's runtime evidence (page-evidence.ts): what its instrumented modules observed, by file and version, its totals since it loaded — folded into its run's evidence (evidence.ts)." },
+	{ "pattern": "preview.version", "from": ["workbench"], "to": ["node"], "description": "Core asks a dev server for a module version it instrumented, by its source's blob oid: runtime evidence reads a version's counts against its own text." },
 	{ "pattern": "evidence.flush", "from": ["workbench"], "to": ["preview:*"], "description": "Core asks every preview page to report its runtime evidence now (before the preview closes)." },
 	{ "pattern": "preview.decide", "from": ["preview:*"], "to": ["shell"], "description": "A preview window's page tap asks for a capability the service worker can't see (WebSocket, WebRTC) — prompted in that window." },
 	{ "pattern": "preview.cdp", "from": ["root", "shell"], "to": ["shell"], "description": "A CDP command to a preview window's page: its docked DevTools, the preview_cdp page tool." },
