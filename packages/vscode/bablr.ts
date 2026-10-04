@@ -1,14 +1,11 @@
 /**
- * The editor's BABLR, from the workbench realm: one worker (bablr-worker.ts), asked one call at a time, behind a cache of
- * what it derives. BABLR is a VM interpreter — about 14ms a line — so it never runs on the UI thread, and nothing is
- * derived twice: a text's spans and a change's verdict are pure functions of their content, so they're kept by git blob
- * oid in `.silo/local/bablr/` (on this machine, never committed — silo's `local/`), and a hit skips BABLR entirely:
+ * The editor's BABLR, from the workbench realm: one worker (bablr-worker.ts), asked one call at a time. BABLR is a VM
+ * interpreter — about 14ms a line — so it never runs on the UI thread, and nothing is parsed twice: the worker keeps each
+ * text's parse by its blob oid in its own IndexedDB cache, which everything it derives starts from.
  *
- *   spans/<oid>.json            a text's spans (each span's spanAnchors id and offsets), or that BABLR can't parse it
- *   verdicts/<oid>_<oid>.json   a change's cosmetic/semantic verdict (cosmetic-classifier.ts)
- *
- * Everything there can be deleted at any time; it's capped at CACHE_BYTES (small: it shares the workspace's fixed
- * buffer), least recently used first out.
+ * Until the verdicts are derived from cached parses too, a change's cosmetic/semantic verdict is also kept here, by the
+ * two contents' blob oids, in `.silo/local/bablr/verdicts/` (on this machine, never committed — silo's `local/`), capped
+ * at CACHE_BYTES (small: it shares the workspace's fixed buffer), least recently used first out.
  *
  * Its callers: the cosmetic classifier (verdicts, edit groups), the runtime evidence (evidence.ts: span ids for a run's
  * statements), and — over the hub, `spans.of` — the pod's `editor.bablr.spans` command, for extensions (the insights
@@ -32,7 +29,7 @@ export interface Bablr {
 	/** Ask the worker for `bablr.<name>` (bablr-worker.ts), after whatever was asked before. No timeout: the first call
 	 *  waits out the worker's (large) bundle loading, and a parse takes what it takes; `signal` and a dead worker end it. */
 	"request": <T>(name: string, args: unknown, signal?: AbortSignal) => Promise<T>;
-	/** `source`'s spans — cached by its blob oid — or undefined when BABLR's grammar doesn't take it. */
+	/** `source`'s spans — from its cached parse — or undefined when BABLR's grammar doesn't take it. */
 	"spans": (source: string, signal?: AbortSignal) => Promise<Span[] | undefined>;
 	/** The span id standing for each of `ranges` in `source` (bablr-language-ts's pickAnchor), from its cached spans. */
 	"anchors": (source: string, ranges: { "start": number; "end": number }[]) => Promise<(string | undefined)[] | undefined>;
@@ -98,7 +95,7 @@ export function startBablr(hub: Hub): Bablr {
 	const prune = async (): Promise<void> => {
 		const entries: { "file": string; "size": number; "used": number }[] = [];
 
-		for (const dir of ["spans", "verdicts"]) {
+		for (const dir of ["verdicts"]) {
 			for (const name of await fs.promises.readdir(`${CACHE}/${dir}`).catch(() => [] as string[])) {
 				const file = `${CACHE}/${dir}/${name}`;
 				const stats = await fs.promises.stat(file).catch(() => undefined);
@@ -138,27 +135,18 @@ export function startBablr(hub: Hub): Bablr {
 		} catch { /* nowhere to keep it: it's derived again next time */ }
 	};
 
-	// The verdict cache used to live in `.git/bablr/`; it's all derivable, so it just goes.
-	void fs.promises.rm("/workspace/.git/bablr", { "recursive": true, "force": true }).catch(() => undefined);
+	// What earlier builds kept in the workspace — the verdicts in `.git/bablr/`, spans in `.silo/local/bablr/spans/` — is
+	// all derivable, and the worker's cache has it now: it just goes.
+	for (const old of ["/workspace/.git/bablr", `${CACHE}/spans`]) {
+		void fs.promises.rm(old, { "recursive": true, "force": true }).catch(() => undefined);
+	}
 
 	const spans = async (source: string, signal?: AbortSignal): Promise<Span[] | undefined> => {
 		if (source === "") {
 			return undefined; // BABLR has nothing to parse
 		}
 
-		const oid = await blobOid(source);
-		const file = `${CACHE}/spans/${oid}.json`;
-		const cached = await read<{ "spans"?: Span[]; "unparsable"?: true }>(file);
-
-		if (cached !== undefined) {
-			return cached.spans;
-		}
-
-		const derived = await request<{ "spans"?: Span[]; "unparsable"?: true }>("spans", { "source": source }, signal);
-
-		await write("spans", `${oid}.json`, derived);
-
-		return derived.spans;
+		return (await request<{ "spans"?: Span[]; "unparsable"?: true }>("spans", { "source": source }, signal)).spans;
 	};
 
 	// The pod's `editor.bablr.spans` (for extensions) asks here, so it gets the cache too.

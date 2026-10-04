@@ -36,10 +36,10 @@ function hash64(text: string): string {
 /**
  * The content-addressed anchor id for every non-trivia CST span in `src`, in CST (close) order. Feed a span's `id` to
  * the annotation store; on open, re-derive `spanAnchors(current)` and look the id up to re-attach — no baseline, no
- * base, no history.
+ * base, no history. `cst` is `src`'s parse (cstSpans), when the caller has it already — a cache's, say.
  */
-export function spanAnchors(src: string, production = "Program"): SpanAnchor[] {
-	const spans = cstSpans(src, production).spans as Span[];
+export function spanAnchors(src: string, production = "Program", cst: { "spans": unknown[] } = cstSpans(src, production)): SpanAnchor[] {
+	const spans = cst.spans as Span[];
 	const tokens = spans.filter((span) => span.token && !span.trivia).map((span) => ({ "atom": (span.type ?? "") + "\t" + JSON.stringify(src.slice(span.start, span.end)), "start": span.start, "end": span.end }));
 
 	// A span's trivia-insensitive content = its inner non-trivia token atoms (so reindent / comment edits don't move it).

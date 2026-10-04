@@ -308,6 +308,7 @@ flowchart LR
   workbench <-.->|HTTP| sw
   shell <-.->|HTTP| sw
   workbench <-.->|IndexedDB| idb
+  bablr <-.->|IndexedDB| idb
   shell <-.->|tsval render protocol| tsval_preview
   node <-.->|HTTP| sw
   node_scripts <-.->|capability decision, HTTP| sw

@@ -143,16 +143,28 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 	assert.doesNotMatch(exclude, /^\.silo\/$/mu, "the runs and their evidence go in git");
 	assert.match(ignore, /^local\/$/mu, "what stays on the machine");
 
-	// BABLR's work, kept by content on this machine: the spans it found for f5.js, and no old cache in .git/.
+	// BABLR's work, kept by content on this machine: f5.js's parse, in the BABLR worker's own IndexedDB (not the
+	// workspace), keyed by parse version and blob oid — and nothing left of the caches earlier builds kept in the workspace.
 	const cache = await session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;
 		const list = (path) => api.workspace.fs.readDirectory(api.Uri.file(path)).then((found) => found.map(([name]) => name), () => []);
+		const keys = await new Promise((resolve) => {
+			const open = indexedDB.open("bablr");
 
-		return { "spans": await list("/workspace/.silo/local/bablr/spans"), "git": await list("/workspace/.git/bablr") };
+			open.onsuccess = () => {
+				const request = open.result.transaction("cst").objectStore("cst").getAllKeys();
+
+				request.onsuccess = () => { resolve(request.result); };
+				request.onerror = () => { resolve([]); };
+			};
+			open.onerror = () => { resolve([]); };
+		});
+
+		return { "keys": keys, "spans": await list("/workspace/.silo/local/bablr/spans"), "git": await list("/workspace/.git/bablr") };
 	});
 
-	assert.ok(cache.spans.some((name) => /^[0-9a-f]{40}\.json$/u.test(name)), "a text's spans, by its blob oid");
-	assert.deepEqual(cache.git, [], "nothing left in .git/bablr");
+	assert.ok(cache.keys.some((key) => /^[0-9a-f]{12}\/[0-9a-f]{40}$/u.test(key)), "a text's parse, by parse version and blob oid");
+	assert.deepEqual([cache.spans, cache.git], [[], []], "nothing left in the workspace's old caches");
 
 	// Shown from the evidence: open the file and edit another line — the session's marks drop, the evidence's follow the
 	// statement's span; edit the statement itself, and its mark goes until it runs again.
@@ -230,6 +242,7 @@ test("git review: a diff in the shell", async () => {
 		await api.commands.executeCommand("editor.git.refresh");
 	});
 	await eventually("the change's verdict, cached", async () => (await verdicts()) > 0 || undefined, 60_000);
+
 });
 
 // VS Code's new windows are panels of the shell's dock (shell-dock.ts): an editor moved out lives on, its DOM in a
