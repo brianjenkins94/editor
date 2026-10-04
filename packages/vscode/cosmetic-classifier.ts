@@ -7,10 +7,9 @@
  * and per-node diff focus. `editGroups` decomposes an edit-burst chain for the "your edits" timeline. Knows NOTHING
  * about git — the git service (git-service.ts) is merely a consumer.
  *
- * CACHING: a verdict is a pure, deterministic function of the (before, after) content pair, so it is READ-THROUGH
- * cached — an in-memory tier for the session, then an optional injected `VerdictStore` (BABLR's cache, bablr.ts: keyed
- * by blob oids in `.silo/local/bablr/verdicts/`, durable across reloads) — and BABLR (slow) runs only on a true miss. Both changes panes share this one
- * cache, so a file is classified once per content pair, not once per pane per refresh.
+ * CACHING: the slow part of a verdict is parsing its two texts, and the BABLR worker keeps every parse (by blob oid, in
+ * its own IndexedDB) — so a verdict over texts it has seen is milliseconds, across reloads too. What's left to cache is
+ * the session's answers, in memory, so both changes panes ask once per content pair, not once per pane per refresh.
  *
  * TRANSPORT: the worker serves `bablr.verdict` / `bablr.editGroups` on its own hub, linked to the workbench hub (so the
  * calls are visible on the architecture view). bablr.ts queues them, one at a time, behind its other callers' — and
@@ -24,18 +23,8 @@ export type ChangeKind = "cosmetic" | "semantic" | "unparsable";
 /** A change's verdict + the changed node ids and the working lines they land on — the badge AND the diff-focus data. */
 export interface VerdictEntry { "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[] }
 
-/**
- * Durable, content-addressed backing for the verdict cache (bablr.ts's, in `.silo/local/bablr/verdicts/`). Optional — without it the
- * classifier still caches in memory for the session. Keyed by the two contents (the store hashes them, e.g. to git
- * blob oids), so a hit is provably the same inputs.
- */
-export interface VerdictStore {
-	"read": (before: string, after: string) => Promise<VerdictEntry | null>;
-	"write": (before: string, after: string, entry: VerdictEntry) => Promise<void>;
-}
-
 export interface CosmeticClassifier {
-	/** The verdict of a change + its changed-node detail. Read-through cached (memory → store → BABLR). Pass an
+	/** The verdict of a change + its changed-node detail. Cached in memory for the session. Pass an
 	 *  `AbortSignal` to cancel a superseded request; the promise then rejects with an AbortError. */
 	"verdict": (before: string, after: string, signal?: AbortSignal) => Promise<VerdictEntry>;
 	/** Node-grouped chunks for the "your edits" timeline, over a burst chain [HEAD, …afters] → groups + burst count. */
@@ -45,7 +34,7 @@ export interface CosmeticClassifier {
 /** One node-grouped chunk for the "your edits" timeline — mirrors bablr's EditGroup (kept local to avoid a type dep). */
 export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
 
-/** FNV-1a 32-bit — a cheap key for the in-memory tier (the durable store keys by collision-free git blob oid). */
+/** FNV-1a 32-bit — a cheap key for the in-memory cache. */
 function fnv32(text: string): number {
 	let h = 0x811c9dc5;
 
@@ -57,12 +46,11 @@ function fnv32(text: string): number {
 	return h >>> 0;
 }
 
-/** Create a classifier over the editor's BABLR worker (bablr.ts), optionally persisting verdicts through `store` for a
- *  durable, cross-reload cache. */
-export function createCosmeticClassifier(bablr: Bablr, store?: VerdictStore): CosmeticClassifier {
+/** Create a classifier over the editor's BABLR worker (bablr.ts). */
+export function createCosmeticClassifier(bablr: Bablr): CosmeticClassifier {
 	const request = <T>(name: string, args: unknown, signal: AbortSignal | undefined): Promise<T> => bablr.request<T>(name, args, signal);
 
-	// The verdict cache's in-memory tier — keyed by a cheap content-pair hash (the durable store keys by git blob oid).
+	// The session's verdicts — keyed by a cheap content-pair hash.
 	const memo = new Map<string, VerdictEntry>();
 	const memoKey = (before: string, after: string): string => before.length + ":" + after.length + ":" + fnv32(before) + ":" + fnv32(after);
 
@@ -79,16 +67,7 @@ export function createCosmeticClassifier(bablr: Bablr, store?: VerdictStore): Co
 				return hit;
 			}
 
-			// Durable tier: a content-addressed hit means genuinely identical inputs, so skip BABLR entirely.
-			const persisted = store === undefined ? null : await store.read(before, after);
-
-			if (persisted !== null && persisted !== undefined) {
-				memo.set(key, persisted);
-
-				return persisted;
-			}
-
-			// True miss — derive over [HEAD, working]: verdict + changed nodes + their working lines. Then cache both tiers.
+			// Derive over [HEAD, working]: verdict + changed nodes + their working lines (from the worker's cached parses).
 			const entry = await request<VerdictEntry>("verdict", { "contents": [before, after] }, signal);
 
 			if (memo.size > 200) {
@@ -96,7 +75,6 @@ export function createCosmeticClassifier(bablr: Bablr, store?: VerdictStore): Co
 			}
 
 			memo.set(key, entry);
-			void store?.write(before, after, entry).catch(() => { /* best-effort durability — never block the answer */ });
 
 			return entry;
 		},

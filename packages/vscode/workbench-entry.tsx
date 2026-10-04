@@ -586,10 +586,9 @@ function maybeBoot(): void {
 				// Git: browser-git (isomorphic-git over the zen-fs workspace), served over the hub (git-service) to the
 					// shell's review panel and VS Code's Source Control view (worker-pod's source-control.ts). See
 					// git-service.ts / git-engine.ts.
-					// One classifier, shared by both panes, with its verdicts kept by BABLR's cache (bablr.ts, in
-					// .silo/local/bablr/) — so cosmetic/semantic is derived once per content pair and re-read (not
-					// re-computed) across refreshes and reloads.
-					const cosmeticClassifier = createCosmeticClassifier(bablr, bablr.verdicts);
+					// One classifier, shared by both panes: its verdicts come from the BABLR worker's cached parses
+					// (bablr.ts), so each version of a file is parsed once, across refreshes and reloads.
+					const cosmeticClassifier = createCosmeticClassifier(bablr);
 
 					installGitService(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the

@@ -701,9 +701,9 @@ export interface StoreSpec { "where": string; "kind": "committed" | "local" | "d
 export const stores: StoreSpec[] = [
 	{ "where": ".silo/", "kind": "committed", "owner": "workbench", "holds": "Silo's policy and capability rollups; each run's envelope (runs/) and what runs observed, keyed on BABLR spans (evidence/)." },
 	{ "where": ".git/", "kind": "committed", "owner": "workbench", "holds": "Git's own (isomorphic-git): objects, refs, the index, config. Nothing of the editor's." },
-	{ "where": ".silo/local/ = idb:silo-local", "kind": "local", "owner": "zenfs", "holds": "A zen-fs mount of its own IndexedDB store (workspace-fs.ts), only in the workbench: each file's edit history (edit-history/), the newest raw CPU profiles (profiles/), BABLR's verdicts (bablr/verdicts/). Held in memory too, so each keeps little." },
+	{ "where": ".silo/local/ = idb:silo-local", "kind": "local", "owner": "zenfs", "holds": "A zen-fs mount of its own IndexedDB store (workspace-fs.ts), only in the workbench: each file's edit history (edit-history/) and the newest raw CPU profiles (profiles/). Held in memory too, so each keeps little." },
 	{ "where": "idb:workspace-fs", "kind": "local", "owner": "zenfs", "holds": "The workspace's own writes (edits, acquired types), restored over the seed at boot." },
-	{ "where": "idb:bablr", "kind": "derived", "owner": "bablr", "holds": "The BABLR worker's parses, by parse version and git blob oid — the browser's .silo/local/bablr/ (bablr-worker.ts)." },
+	{ "where": "idb:bablr", "kind": "derived", "owner": "bablr", "holds": "The BABLR worker's parses, by parse version and git blob oid — the browser's .silo/local/bablr/ (bablr-worker.ts). Spans, verdicts and edit groups are all derived from them." },
 	{ "where": "idb:vscode-web-db", "kind": "platform", "owner": "workbench", "holds": "VS Code's user data and logs." },
 	{ "where": "idb:vscode-web-state-db*", "kind": "platform", "owner": "workbench", "holds": "VS Code's storage (global, shared, per workspace)." }
 ];

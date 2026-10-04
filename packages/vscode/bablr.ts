@@ -1,11 +1,8 @@
 /**
  * The editor's BABLR, from the workbench realm: one worker (bablr-worker.ts), asked one call at a time. BABLR is a VM
  * interpreter — about 14ms a line — so it never runs on the UI thread, and nothing is parsed twice: the worker keeps each
- * text's parse by its blob oid in its own IndexedDB cache, which everything it derives starts from.
- *
- * Until the verdicts are derived from cached parses too, a change's cosmetic/semantic verdict is also kept here, by the
- * two contents' blob oids, in `.silo/local/bablr/verdicts/` (on this machine, never committed — silo's `local/`, its own
- * IndexedDB-backed mount), capped at CACHE_BYTES (small: the mount is held in memory), least recently used first out.
+ * text's parse by its blob oid in its own IndexedDB cache, and everything it derives — spans, verdicts, edit groups —
+ * starts from that.
  *
  * Its callers: the cosmetic classifier (verdicts, edit groups), the runtime evidence (evidence.ts: span ids for a run's
  * statements), and — over the hub, `spans.of` — the pod's `editor.bablr.spans` command, for extensions (the insights
@@ -16,11 +13,9 @@
  * fails what's in flight and every later call.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import type { VerdictStore } from "./cosmetic-classifier";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { LOCAL_DIR } from "@brianjenkins94/util/silo/evidence";
 import { fs } from "@zenfs/core";
-import { blobOid } from "./git-engine";
 
 /** One span of a text: its spanAnchors id and offsets (punctuation left out — it's never a handle). */
 export interface Span { "id": string; "start": number; "end": number }
@@ -33,16 +28,8 @@ export interface Bablr {
 	"spans": (source: string, signal?: AbortSignal) => Promise<Span[] | undefined>;
 	/** The span id standing for each of `ranges` in `source` (bablr-language-ts's pickAnchor), from its cached spans. */
 	"anchors": (source: string, ranges: { "start": number; "end": number }[]) => Promise<(string | undefined)[] | undefined>;
-	/** The verdict cache, for the cosmetic classifier. */
-	"verdicts": VerdictStore;
 	"dispose": () => void;
 }
-
-const CACHE = `/workspace/${LOCAL_DIR}/bablr`;
-/** How much the verdicts keep before the least recently used go. Small: silo's local/ is held in memory (workspace-fs.ts). */
-const CACHE_BYTES = 4 * 1024 * 1024;
-/** How many writes between checks of the cache's size (a text's spans can be ~100 KB). */
-const PRUNE_EVERY = 5;
 
 export function startBablr(hub: Hub): Bablr {
 	const worker = new Worker(new URL("./lsp/bablr-worker.js", location.href), { "type": "module" });
@@ -74,69 +61,9 @@ export function startBablr(hub: Hub): Bablr {
 		});
 	};
 
-	// ── the cache ──
-	let writes = 0;
-
-	const read = async <T>(file: string): Promise<T | undefined> => {
-		try {
-			const value = JSON.parse(new TextDecoder().decode(await fs.promises.readFile(file))) as T;
-			const now = new Date();
-
-			void fs.promises.utimes(file, now, now).catch(() => undefined); // recently used: last out
-
-			return value;
-		} catch {
-			return undefined; // a miss (or unreadable): derive it again
-		}
-	};
-
-	/** Let the least recently used go once the cache passes CACHE_BYTES, down to three quarters of it. */
-	const prune = async (): Promise<void> => {
-		const entries: { "file": string; "size": number; "used": number }[] = [];
-
-		for (const dir of ["verdicts"]) {
-			for (const name of await fs.promises.readdir(`${CACHE}/${dir}`).catch(() => [] as string[])) {
-				const file = `${CACHE}/${dir}/${name}`;
-				const stats = await fs.promises.stat(file).catch(() => undefined);
-
-				if (stats !== undefined) {
-					entries.push({ "file": file, "size": stats.size, "used": stats.mtimeMs });
-				}
-			}
-		}
-
-		let total = entries.reduce((sum, entry) => sum + entry.size, 0);
-
-		if (total <= CACHE_BYTES) {
-			return;
-		}
-
-		for (const entry of entries.sort((a, b) => a.used - b.used)) {
-			if (total <= CACHE_BYTES * 0.75) {
-				break;
-			}
-
-			await fs.promises.unlink(entry.file).catch(() => undefined);
-			total -= entry.size;
-		}
-	};
-
-	const write = async (dir: string, name: string, value: unknown): Promise<void> => {
-		try {
-			await fs.promises.mkdir(`${CACHE}/${dir}`, { "recursive": true });
-			await fs.promises.writeFile(`${CACHE}/${dir}/${name}`, JSON.stringify(value));
-
-			writes += 1;
-
-			if (writes % PRUNE_EVERY === 0) {
-				await prune();
-			}
-		} catch { /* nowhere to keep it: it's derived again next time */ }
-	};
-
-	// What earlier builds kept in the workspace — the verdicts in `.git/bablr/`, spans in `.silo/local/bablr/spans/` — is
-	// all derivable, and the worker's cache has it now: it just goes.
-	for (const old of ["/workspace/.git/bablr", `${CACHE}/spans`]) {
+	// What earlier builds kept in the workspace — verdicts in `.git/bablr/`, then spans and verdicts in
+	// `.silo/local/bablr/` — is all derivable, and the worker's cache has what it came from: it just goes.
+	for (const old of ["/workspace/.git/bablr", `/workspace/${LOCAL_DIR}/bablr`]) {
 		void fs.promises.rm(old, { "recursive": true, "force": true }).catch(() => undefined);
 	}
 
@@ -168,10 +95,6 @@ export function startBablr(hub: Hub): Bablr {
 			const { ids } = await request<{ "ids": (string | null)[] }>("pick", { "spans": known, "ranges": ranges });
 
 			return ids.map((id) => id ?? undefined);
-		},
-		"verdicts": {
-			"read": async (before, after) => (await read(`${CACHE}/verdicts/${await blobOid(before)}_${await blobOid(after)}.json`)) ?? null,
-			"write": async (before, after, entry) => { await write("verdicts", `${await blobOid(before)}_${await blobOid(after)}.json`, entry); }
 		},
 		"dispose": () => {
 			offServe();

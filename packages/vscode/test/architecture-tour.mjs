@@ -222,13 +222,20 @@ test("git review: a diff in the shell", async () => {
 	await session.page.getByText("App.tsx").last().click();
 	await session.until("Code Hike", hasLabel("sw", "net:lighter.codehike.org", /./u), 30_000);
 
-	// A modified file's cosmetic/semantic verdict, kept by BABLR's cache on this machine (bablr.ts): commit what's there,
-	// change a committed file, and its verdict is derived (once) and kept.
-	const verdicts = () => session.workbench().evaluate(async () => {
-		const { api } = globalThis.__editor;
+	// A modified file's cosmetic/semantic verdict, derived from the BABLR worker's cached parses: commit what's there,
+	// change a committed file, and deriving its verdict parses the new version into the cache (bablr IndexedDB).
+	const parses = () => session.workbench().evaluate(() => new Promise((resolve) => {
+		const open = indexedDB.open("bablr");
 
-		return api.workspace.fs.readDirectory(api.Uri.file("/workspace/.silo/local/bablr/verdicts")).then((found) => found.length, () => 0);
-	});
+		open.onsuccess = () => {
+			const request = open.result.transaction("cst").objectStore("cst").count();
+
+			request.onsuccess = () => { resolve(request.result); };
+			request.onerror = () => { resolve(0); };
+		};
+		open.onerror = () => { resolve(0); };
+	}));
+	const before = await parses();
 
 	await session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;
@@ -241,7 +248,7 @@ test("git review: a diff in the shell", async () => {
 		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(text + "\n// reformatted\n"));
 		await api.commands.executeCommand("editor.git.refresh");
 	});
-	await eventually("the change's verdict, cached", async () => (await verdicts()) > 0 || undefined, 60_000);
+	await eventually("the change's verdict, from parses the cache now keeps", async () => (await parses()) > before || undefined, 60_000);
 
 	// The edits typed above were recorded as edit history in silo's local/ (its own IndexedDB-backed mount), not in .git/.
 	const history = await eventually("the edit history, in silo's local/", () => session.workbench().evaluate(async () => {

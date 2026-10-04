@@ -194,10 +194,22 @@ async function parse(source: string, signal?: AbortSignal): Promise<Cst | undefi
 	return cst;
 }
 
-// A content chain (in practice [HEAD, working]) ⇒ verdict + changed nodes + their working lines.
+/** How a derivation gets a text's parse: from the cache — and, for a text BABLR can't parse, the failure a parse is. */
+const cachedParse = (signal: AbortSignal) => async (source: string): Promise<Cst> => {
+	const cst = await parse(source, signal);
+
+	if (cst === undefined) {
+		throw new Error("BABLR can't parse this text");
+	}
+
+	return cst;
+};
+
+// A content chain (in practice [HEAD, working]) ⇒ verdict + changed nodes + their working lines. From cached parses:
+// each version of a file is parsed once, however many working versions it's compared against.
 serve(hub, "bablr.verdict", async (args, { signal }) => {
 	try {
-		const result = await deriveIdentityAsync((args as { "contents": string[] }).contents, { "signal": signal });
+		const result = await deriveIdentityAsync((args as { "contents": string[] }).contents, { "signal": signal, "parse": cachedParse(signal) });
 
 		return { "verdict": result.verdict, "changedNodeIds": result.changedNodeIds, "changedLines": "changedLines" in result ? result.changedLines : [] };
 	} catch (error) {
@@ -210,10 +222,11 @@ serve(hub, "bablr.verdict", async (args, { signal }) => {
 	}
 });
 
-// A burst chain [HEAD, …afters] ⇒ node-grouped chunks for the "your edits" timeline.
+// A burst chain [HEAD, …afters] ⇒ node-grouped chunks for the "your edits" timeline. From cached parses too: each burst's
+// text is parsed once, ever.
 serve(hub, "bablr.editGroups", async (args, { signal }) => {
 	try {
-		const { groups, bursts } = await editGroups((args as { "chain": string[] }).chain, { "signal": signal });
+		const { groups, bursts } = await editGroups((args as { "chain": string[] }).chain, { "signal": signal, "parse": cachedParse(signal) });
 
 		return { "groups": groups, "bursts": bursts };
 	} catch (error) {

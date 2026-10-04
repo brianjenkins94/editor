@@ -34,13 +34,17 @@ function lineAt(src: string, offset: number): number {
 	return line;
 }
 
+/** How a derivation reads its texts: `parse` is how it gets a text's parse (cstSpans) — a cache's, say; BABLR's own,
+ *  paced by `budget` and cancelled by `signal`, otherwise. */
+export interface IdentityOptions { "signal"?: AbortSignal; "budget"?: number; "production"?: string; "parse"?: (content: string) => Promise<{ "spans": unknown[] }> }
+
 /**
  * Yielding derive over a content chain (oldest → newest), for the classify worker — in practice `[HEAD, working]`.
  * Parses each link (paced + cancellable), re-identifies forward, and returns the final (working) snapshot, the
  * whole-file verdict from the last two links (e.g. HEAD→working), which final nodes are new/changed vs the previous
  * link, and every final node's line. Ids are relative to the FIRST link (the baseline) — no commit-chain/CDC.
  */
-export async function deriveIdentityAsync(contents: string[], options: { "signal"?: AbortSignal; "budget"?: number; "production"?: string } = {}): Promise<{ "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[]; "nodeLines": Record<string, number>; "snapshot": Snapshot | null }> {
+export async function deriveIdentityAsync(contents: string[], options: IdentityOptions = {}): Promise<{ "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[]; "nodeLines": Record<string, number>; "snapshot": Snapshot | null }> {
 	const production = options.production ?? "Program";
 
 	try {
@@ -53,7 +57,7 @@ export async function deriveIdentityAsync(contents: string[], options: { "signal
 		let lastSpans: Span[] = [];
 
 		for (const content of contents) {
-			const spans = (await cstSpansAsync(content, production, options)).spans as Span[];
+			const spans = (await (options.parse ?? ((text: string) => cstSpansAsync(text, production, options)))(content)).spans as Span[];
 
 			lastSpans = spans;
 			atomsChain.push(atomsFor(content, spans));
@@ -251,7 +255,7 @@ function mergeGroups(nodes: { "id": string; "label": string; "kind": string; "st
  * the nodes that are NET new/changed HEAD→working, each with a display label and its current line range — the range the
  * pane highlights when the reviewer hovers the chunk. `bursts` is how many edit-bursts produced this change.
  */
-export async function editGroups(contents: string[], options: { "signal"?: AbortSignal; "budget"?: number; "production"?: string } = {}): Promise<{ "groups": EditGroup[]; "bursts": number }> {
+export async function editGroups(contents: string[], options: IdentityOptions = {}): Promise<{ "groups": EditGroup[]; "bursts": number }> {
 	const production = options.production ?? "Program";
 
 	if (contents.length < 2) {
@@ -272,7 +276,7 @@ export async function editGroups(contents: string[], options: { "signal"?: Abort
 				continue;
 			}
 
-			const spans = (await cstSpansAsync(content, production, options)).spans as Span[];
+			const spans = (await (options.parse ?? ((text: string) => cstSpansAsync(text, production, options)))(content)).spans as Span[];
 
 			lastSpans = spans;
 			atomsChain.push(atomsFor(content, spans));
