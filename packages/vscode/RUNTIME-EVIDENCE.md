@@ -254,7 +254,8 @@ through it.
 
 1. **tsval**: `observe(node, site, value)` at the sites above, one `undefined` check when off, tested on its own.
    Done, with `typeTag(value)`: a value's tag read from property descriptors only, so tagging never runs a getter.
-2. **The debug worker** sums each site's observations, and the report carries `sites`.
+2. **The debug worker** sums each site's observations, and the report carries `sites`. Done (site-sums.ts): a fork
+   goes on from a copy of its stop's sums, as its coverage does, so stepping back and forward doesn't count twice.
 3. **silo**: `value` and `branch` observations, `foldValues` and `foldBranches`, the parser taking every kind.
 4. **evidence.ts**: exact spans for sites, folded and written beside `reached`.
 5. **Insights**: the hover.

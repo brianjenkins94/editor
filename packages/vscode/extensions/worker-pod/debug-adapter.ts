@@ -420,7 +420,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 	/** The worker's coverage now, or — when it's gone or doesn't answer within `timeoutMs` — the last it reported. */
 	private currentCoverage(timeoutMs: number): Promise<CoverageReport> {
-		const fallback = (): CoverageReport => this.coverage ?? { "file": this.program, "statements": [] };
+		const fallback = (): CoverageReport => this.coverage ?? { "file": this.program, "statements": [], "sites": [] };
 
 		if (this.worker === undefined) {
 			return Promise.resolve(fallback());
@@ -452,7 +452,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			const runId = this.session.configuration["__runId"];
 
 			if (typeof runId === "string") {
-				podHub.publish("evidence.coverage", { "runId": runId, "file": this.program, "source": this.source, "statements": report.statements });
+				podHub.publish("evidence.coverage", { "runId": runId, "file": this.program, "source": this.source, "statements": report.statements, "sites": report.sites });
 			}
 		}
 	}

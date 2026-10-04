@@ -181,7 +181,7 @@ function callFrame(vm: Machine, frame: CallFrame): void {
 		// Arrow expression-body value is on the stack; it is the return value.
 		const value = vm.pop();
 
-		vm.observe?.(node.body!, "return", value);
+		vm.observe?.(node, "return", value); // the arrow itself: its body may be a site of its own (`() => a ?? b`)
 
 		vm.frames.pop();
 		vm.values.length = frame.valuesBase;

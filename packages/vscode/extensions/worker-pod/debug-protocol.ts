@@ -53,9 +53,24 @@ export type WorkerEvent =
 /** One statement's coverage: its range (0-based line and character, as VS Code's Position) and how often it ran. */
 export interface StatementCoverage { "start": [number, number]; "end": [number, number]; "count": number }
 
-/** Every statement tsval can run in the program, with how often each ran — 0 for the ones that never did. The body
- *  of the adapter's `getCoverage` reply and of its `coverage` event. */
-export interface CoverageReport { "file": string; "statements": StatementCoverage[] }
+/** What went through one observed site (tsval's `observe`; RUNTIME-EVIDENCE.md, the second slice), over a run: its
+ *  kind and its node's range, then — for a value site — how often a value came through, how often it was nullish, how
+ *  often each type tag, and a few distinct primitives (kept on this machine, never committed); for a branch, how often
+ *  each arm ran. */
+export interface SiteObservation {
+	"site": "optional" | "nullish" | "branch" | "parameter" | "return";
+	"start": [number, number];
+	"end": [number, number];
+	"seen"?: number;
+	"nullish"?: number;
+	"tags"?: Record<string, number>;
+	"samples"?: (string | number | boolean)[];
+	"arms"?: number[];
+}
+
+/** Every statement tsval can run in the program, with how often each ran — 0 for the ones that never did — and every
+ *  observed site that ran. The body of the adapter's `getCoverage` reply and of its `coverage` event. */
+export interface CoverageReport { "file": string; "statements": StatementCoverage[]; "sites": SiteObservation[] }
 
 /** Worker → render surface (`PREVIEW_STREAM`); `reset` comes from the workbench bridge at session start. */
 export type PreviewMessage =

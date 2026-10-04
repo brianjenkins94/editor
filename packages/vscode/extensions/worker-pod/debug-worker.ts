@@ -20,6 +20,7 @@
  */
 import type { LoadedVM } from "@brianjenkins94/tsval";
 import type { Control, CoverageReport, PreviewMessage, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
+import type { SiteSums } from "./site-sums";
 import type { GuestRoot } from "./debug-react";
 
 import { createHub, portTransport } from "@brianjenkins94/hub";
@@ -33,6 +34,7 @@ import { NETWORK_PROBES } from "../../architecture";
 import { observe } from "@brianjenkins94/observability";
 import { controlSubject, eventSubject, PREVIEW_STREAM } from "./debug-protocol";
 import { createGuestRoot } from "./debug-react";
+import { addObservation, copySums, siteObservations } from "./site-sums";
 
 // This worker's own hub, linked UP to the pod hub. The whole debug protocol rides it (debug-protocol.ts), on its
 // session's subjects — the adapter puts the session id in our URL. It announces `pod.ready` after launch.
@@ -86,6 +88,21 @@ let guestRoot: GuestRoot | undefined;
 /** The VM on the timeline being shown — what coverage reports on. A forward step advances a fork; a step back
  *  returns to an earlier stop. */
 let current: Vm | undefined;
+/** What went through each observed site on each timeline (tsval's `observe`), and the sums being added to now — the
+ *  timeline running. A fork starts from a copy of its stop's sums, as its coverage starts from a copy of its counts. */
+const sumsOf = new WeakMap<Vm, SiteSums>();
+let recording: SiteSums = new Map();
+
+/** tsval's `observe`: what went through a site, added to the running timeline's sums. */
+function observeSite(node: ts.Node, site: Parameters<typeof addObservation>[2], value: unknown): void {
+	addObservation(recording, node, site, value);
+}
+
+/** Start recording `vm`'s observations into `sums`. */
+function record(vm: Vm, sums: SiteSums): void {
+	sumsOf.set(vm, sums);
+	recording = sums;
+}
 
 function nextAction(): Promise<Action> {
 	return new Promise((resolve) => { awaitAction = resolve; });
@@ -253,7 +270,7 @@ function coverageReport(): CoverageReport {
 	const statements: CoverageReport["statements"] = [];
 
 	if (file === undefined) {
-		return { "file": "", "statements": statements };
+		return { "file": "", "statements": statements, "sites": [] };
 	}
 
 	const visit = (node: ts.Node): void => {
@@ -269,7 +286,7 @@ function coverageReport(): CoverageReport {
 
 	file.forEachChild(visit);
 
-	return { "file": file.fileName, "statements": statements };
+	return { "file": file.fileName, "statements": statements, "sites": siteObservations(current === undefined ? undefined : sumsOf.get(current), file) };
 }
 
 /** The program is over: report its coverage, then end the session — with 1 for a program that threw, as node would. */
@@ -379,10 +396,15 @@ function handle(action: Action): void {
 			done = true;
 			break;
 
-		default:
-			// Forward: fork the current stop and advance a copy (honors the action even after a step-back).
-			advanceFrom(history[index].fork(), action, actionTrace);
+		default: {
+			// Forward: fork the current stop and advance a copy (honors the action even after a step-back), its
+			// observations going on from a copy of that stop's.
+			const next = history[index].fork();
+
+			record(next, copySums(sumsOf.get(history[index])));
+			advanceFrom(next, action, actionTrace);
 			break;
+		}
 	}
 }
 
@@ -418,11 +440,13 @@ function launchReact(message: Extract<Control, { "type": "launch" }>, trace: Tra
 		"fileName": message.fileName,
 		"onBreakpoint": onBreakpointHook,
 		"coverage": true,
+		"observe": observeSite,
 		"globals": { "React": React, "ReactDOM": reactDom, "document": documentShim, "console": guestConsole() }
 	});
 
 	sourceFile = loaded.sourceFile;
 	current = loaded.vm;
+	record(loaded.vm, new Map());
 	loaded.vm.addBreakpointsByLine(...message.lines);
 
 	// The initial mount is the launch's work — span it as a continuation of the adapter's launch trace, so the
@@ -461,9 +485,10 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 				break;
 			}
 
-			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, ...capabilitySurface() });
+			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "observe": observeSite, ...capabilitySurface() });
 
 			sourceFile = loaded.sourceFile;
+			record(loaded.vm, new Map());
 			loaded.vm.addBreakpointsByLine(...message.lines);
 			// Capability breakpoints: pre-arm a breakpoint at every capability call the policy won't let pass, so a
 			// gated call hard-stops at its line with the debugger's normal step / step-back (the runtime resource is

@@ -172,7 +172,10 @@ export interface VMOptions {
  *   0 when the logical expression's right side ran, 1 when it didn't.
  * - `parameter`: each parameter declaration of a guest function called — the argument passed for it, before any
  *   default applies (undefined when none was), or the array a rest parameter collects.
- * - `return`: a `return` statement, or an arrow function's expression body — the value returned.
+ * - `return`: a `return` statement, or an arrow function with an expression body (the arrow itself: its body may be a
+ *   site of its own) — the value returned.
+ *
+ * Each node is told about as one site only, so a host can key what it keeps by node.
  */
 export type ObserveSite = "optional" | "nullish" | "branch" | "parameter" | "return";
 

@@ -32,7 +32,7 @@ test("optional chains: the value each ?. tests, and nothing past a link that sto
 		"world.map?.size?.toFixed();"
 	].join("\n")), [
 		"optional world.onWin?.() → function",
-		"return 1 → number",
+		"return () => 1 → number",
 		"optional world.map?.size → undefined",
 		"optional world.map?.size → undefined"
 	]);
@@ -79,7 +79,15 @@ test("parameters: what was passed (before a default), and a rest parameter's arr
 		"parameter name: string → string",
 		"return return new Player(name); → Player",
 		"parameter n: number → number",
-		"return n * 2 → number"
+		"return (n: number) => n * 2 → number"
+	]);
+});
+
+test("an arrow's expression body that is a site of its own: the return is told on the arrow", () => {
+	assert.deepStrictEqual(observed("const pick = (key?: string) => key ?? 'none';\npick();"), [
+		"parameter key?: string → undefined",
+		"nullish key ?? 'none' → undefined",
+		"return (key?: string) => key ?? 'none' → string"
 	]);
 });
 
