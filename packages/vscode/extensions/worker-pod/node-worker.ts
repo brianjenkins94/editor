@@ -448,9 +448,12 @@ if (!SCRIPTS) {
 		// worker console.warn we can't read. The server now returns a 500 (self-healing) instead of retrying, so if this
 		// fires the preview may show a one-load error that recovers on reload; a recurrence means the race is still live.
 		server.setTransformErrorReporter((info) => { log.warn("preview transform failed (served 500, recovers on reload)", info); });
-		// The workspace's modules, instrumented for runtime evidence (RUNTIME-EVIDENCE.md, the third slice): the page
-		// runtime the tap carries counts what they report.
-		server.setInstrumentation("full");
+		// The workspace's modules, instrumented for runtime evidence (RUNTIME-EVIDENCE.md, the third slice) as far as the
+		// `silo.evidence.previews` setting says (core answers; `full` when it can't): the page runtime the tap carries
+		// counts what they report.
+		const level = await rpc.request("evidence.level", undefined, { "timeoutMs": 2_000, "waitForResponderMs": 2_000 }).catch(() => "full");
+
+		server.setInstrumentation(level === "coverage" || level === "off" ? level : "full");
 		previewServers.set(port, server);
 		previewRoots.set(port, root.replace(/\/$/u, ""));
 		architecture.spawn({ "id": "vite:" + port, "label": "Vite dev server :" + port, "container": "workers", "detail": root, "dynamic": true });

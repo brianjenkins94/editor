@@ -375,7 +375,12 @@ budgets (test/performance.mjs) measure an instrumented preview before the defaul
    totals and asks the dev server for a version's source (`preview.version`) as soon as a page reports it; the `vite`
    command asks the pages to report (`evidence.flush`) before their windows close; at the end, pages' totals for a
    version are added, each version is read against its own source, and each file is folded once.
-4. **The setting and a performance check.**
+4. **The setting and a performance check.** Done: `silo.evidence.previews` (insights), asked by each starting dev
+   server (`evidence.level`). test/preview-instrument-cost.mjs times a game-like hot loop (vector math, property reads,
+   `?.`, `??`, branches, small calls), pure JavaScript and so the worst case: `coverage` ×1.4, `full` ×2.9 (the
+   wrapper calls alone are ×1.9; the page runtime counts in typed arrays, with a fast path for a site's usual kind, and
+   `typeTag` reads a prototype's class once). An app that spends its frames in the DOM or a canvas pays less. `full`
+   stays the default; a preview with a tight frame budget drops to `coverage`.
 5. **A tour test**: `npm run dev`, use the app, edit a module (a hot update), use it again, stop; evidence for both
    versions, the untouched code's counts added across them. Done ("evidence: a preview run, across a hot update").
 

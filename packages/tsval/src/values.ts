@@ -75,11 +75,22 @@ export function typeTag(value: unknown): string {
 			return "object";
 		}
 
-		const constructor = Object.getOwnPropertyDescriptor(prototype, "constructor")?.value as unknown;
-		const name = typeof constructor === "function" ? Object.getOwnPropertyDescriptor(constructor, "name")?.value as unknown : undefined;
+		// A prototype's class doesn't change: read its name once (instrumented code tags every value it observes).
+		let tag = tagsByPrototype.get(prototype);
 
-		return typeof name === "string" && name !== "" && name !== "Object" ? name : "object";
+		if (tag === undefined) {
+			const constructor = Object.getOwnPropertyDescriptor(prototype, "constructor")?.value as unknown;
+			const name = typeof constructor === "function" ? Object.getOwnPropertyDescriptor(constructor, "name")?.value as unknown : undefined;
+
+			tag = typeof name === "string" && name !== "" && name !== "Object" ? name : "object";
+			tagsByPrototype.set(prototype, tag);
+		}
+
+		return tag;
 	} catch {
 		return "object"; // a revoked Proxy
 	}
 }
+
+/** Each prototype's tag, once read. */
+const tagsByPrototype = new WeakMap<object, string>();

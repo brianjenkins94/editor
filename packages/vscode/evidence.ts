@@ -21,7 +21,7 @@ import type { SiteObservation, StatementCoverage } from "./extensions/worker-pod
 import type { ModuleEvidence } from "./extensions/worker-pod/page-evidence";
 import type { Bablr } from "./bablr";
 import type { RunInfo, RunRegistry } from "./runs";
-import { createRpcClient } from "@brianjenkins94/hub";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, GITATTRIBUTES, GITIGNORE, parseEvidence, parseSamples, runsPath, samplesPath, samplesText, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { blobOid, headCommit } from "./git-engine";
 
@@ -121,6 +121,9 @@ function repoRelative(path: string): string {
 
 export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunRegistry, bablr: Bablr): void {
 	const rpc = createRpcClient(hub);
+
+	// How much a preview's dev server instruments (`silo.evidence.previews`), asked as each preview starts.
+	serve(hub, "evidence.level", () => vscode.workspace.getConfiguration("silo.evidence").get<string>("previews") ?? "full");
 	// Each run's coverage, until the run ends (the session's coverage comes just before its end).
 	const coverage = new Map<string, Coverage>();
 

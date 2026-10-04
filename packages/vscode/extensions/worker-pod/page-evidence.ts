@@ -11,8 +11,7 @@
  */
 import type { ObserveSite } from "@brianjenkins94/tsval";
 import type { SiteObservation, StatementCoverage } from "./debug-protocol";
-import type { SiteSums } from "./site-sums";
-import { addObservation, summary } from "./site-sums";
+import { typeTag } from "../../../tsval/src/values";
 
 /** What one version of a module observed in a page: its file and version, each statement with its count, each site
  *  that ran — positions in the module's original source. */
@@ -36,13 +35,28 @@ interface Ops {
 
 /** How often a page with changes reports. */
 const REPORT_MS = 10_000;
+/** At most this many type tags a site reports (the rest as `other`), and distinct primitives it keeps, each string cut
+ *  to SAMPLE_CHARS — as the debug worker's site sums (site-sums.ts). */
+const MAX_TAGS = 8;
+const MAX_SAMPLES = 5;
+const SAMPLE_CHARS = 40;
+
+/** A value site's kinds of value: the first it saw, counted on a fast path, then any others; and a few primitives. */
+interface Kinds { "first": string; "firstCount": number; "others": Record<string, number> | undefined; "samples": (string | number | boolean)[] }
+
+/** `tags`, at most MAX_TAGS of them: the most counted MAX_TAGS − 1, and the rest as `other`. */
+function capped(tags: Record<string, number>): Record<string, number> {
+	const ranked = Object.entries(tags).sort(([, a], [, b]) => b - a);
+
+	return ranked.length <= MAX_TAGS ? tags : { ...Object.fromEntries(ranked.slice(0, MAX_TAGS - 1)), "other": ranked.slice(MAX_TAGS - 1).reduce((sum, [, count]) => sum + count, 0) };
+}
 
 /**
  * Count what the page's instrumented modules tell `globalThis.__evidence`, and call `report` with every version's
  * evidence when it's time. Returns `flush`, which reports now.
  */
 export function installPageEvidence(report: (modules: ModuleEvidence[]) => void): { "flush": () => void } {
-	const versions = new Map<string, { "file": string; "version": string; "table": Entry[]; "counts": Uint32Array; "sums": SiteSums<number>; "ops": Ops }>();
+	const versions = new Map<string, { "file": string; "version": string; "table": Entry[]; "counts": Uint32Array; "seen": Uint32Array; "nullish": Uint32Array; "arms": Uint32Array; "kinds": (Kinds | undefined)[]; "ops": Ops }>();
 	let changed = false;
 
 	const module = (file: string, version: string, table: Entry[]): Ops => {
@@ -53,48 +67,90 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void)
 			return known.ops; // re-imported unchanged: it counts on
 		}
 
+		// Counted on the app's hot paths, so lean: typed counters by site, and each value site's kinds with a fast path
+		// for the one it usually sees (most sites only ever see one).
 		const counts = new Uint32Array(table.length);
-		const sums: SiteSums<number> = new Map();
+		const seen = new Uint32Array(table.length);
+		const nullish = new Uint32Array(table.length);
+		const arms = new Uint32Array(table.length * 2);
+		const kinds: (Kinds | undefined)[] = [];
 		// Whether each optional link stopped its chain: a later link is told only when the one before it didn't.
-		const stopped = new Map<number, boolean>();
+		const stopped = new Uint8Array(table.length);
 		const value = (site: number, observed: unknown): unknown => {
-			stopped.set(site, observed === null || observed === undefined);
-			addObservation(sums, site, table[site]![0] as Exclude<SiteKind, "statement">, observed);
 			changed = true;
+			seen[site] += 1;
+
+			if (observed === null || observed === undefined) {
+				nullish[site] += 1;
+				stopped[site] = 1;
+			} else {
+				stopped[site] = 0;
+			}
+
+			const tag = typeTag(observed);
+			let mine = kinds[site];
+
+			if (mine === undefined) {
+				mine = { "first": tag, "firstCount": 0, "others": undefined, "samples": [] };
+				kinds[site] = mine;
+			}
+
+			if (tag === mine.first) {
+				mine.firstCount += 1;
+			} else {
+				mine.others ??= {};
+				mine.others[tag] = (mine.others[tag] ?? 0) + 1;
+			}
+
+			if (mine.samples.length < MAX_SAMPLES) {
+				const sample = typeof observed === "string" ? observed.slice(0, SAMPLE_CHARS) : typeof observed === "boolean" || (typeof observed === "number" && Number.isFinite(observed)) ? observed : undefined;
+
+				if (sample !== undefined && !mine.samples.includes(sample)) {
+					mine.samples.push(sample);
+				}
+			}
 
 			return observed;
-		};
-		const arm = (site: number, taken: number): void => {
-			addObservation(sums, site, "branch", taken);
-			changed = true;
 		};
 		const ops: Ops = {
 			"s": (site) => { counts[site] += 1; changed = true; },
 			"v": value,
 			"c": (site, before, observed) => {
-				if (stopped.get(before) === true) {
-					stopped.set(site, true);
+				if (stopped[before] === 1) {
+					stopped[site] = 1;
 
 					return observed;
 				}
 
 				return value(site, observed);
 			},
-			"b": (site, observed) => { arm(site, observed ? 0 : 1); return observed; },
-			"a": (site, observed) => { arm(site, observed ? 0 : 1); return observed; },
-			"o": (site, observed) => { arm(site, observed ? 1 : 0); return observed; }
+			"b": (site, observed) => { arms[site * 2 + (observed ? 0 : 1)] += 1; changed = true; return observed; },
+			"a": (site, observed) => { arms[site * 2 + (observed ? 0 : 1)] += 1; changed = true; return observed; },
+			"o": (site, observed) => { arms[site * 2 + (observed ? 1 : 0)] += 1; changed = true; return observed; }
 		};
 
-		versions.set(key, { "file": file, "version": version, "table": table, "counts": counts, "sums": sums, "ops": ops });
+		versions.set(key, { "file": file, "version": version, "table": table, "counts": counts, "seen": seen, "nullish": nullish, "arms": arms, "kinds": kinds, "ops": ops });
 
 		return ops;
 	};
 
-	const evidence = (): ModuleEvidence[] => [...versions.values()].map(({ file, version, table, counts, sums }) => ({
+	const evidence = (): ModuleEvidence[] => [...versions.values()].map(({ file, version, table, counts, seen, nullish, arms, kinds }) => ({
 		"file": file,
 		"version": version,
 		"statements": table.flatMap(([kind, ...range], site) => (kind === "statement" ? [{ "start": [range[0]!, range[1]!] as [number, number], "end": [range[2]!, range[3]!] as [number, number], "count": counts[site]! }] : [])),
-		"sites": [...sums].map(([site, known]) => ({ "start": [table[site]![1], table[site]![2]] as [number, number], "end": [table[site]![3], table[site]![4]] as [number, number], ...summary(known) }))
+		"sites": table.flatMap(([kind, ...range], site): SiteObservation[] => {
+			const at = { "site": kind as ObserveSite, "start": [range[0]!, range[1]!] as [number, number], "end": [range[2]!, range[3]!] as [number, number] };
+
+			if (kind === "branch") {
+				const [taken, other] = [arms[site * 2] ?? 0, arms[site * 2 + 1] ?? 0];
+
+				return taken + other === 0 ? [] : [{ ...at, "arms": [taken, other] }];
+			}
+
+			const mine = kinds[site];
+
+			return kind === "statement" || mine === undefined ? [] : [{ ...at, "seen": seen[site]!, "nullish": nullish[site]!, "tags": capped({ [mine.first]: mine.firstCount, ...mine.others }), ...mine.samples.length > 0 ? { "samples": mine.samples } : {} }];
+		})
 	}));
 
 	const flush = (): void => {
