@@ -171,6 +171,113 @@ One kind of evidence through every layer, shaped so values and types can join wi
 6. The insights extension reads the files back: coverage survives a reload, stays put when a nearby line is edited,
    and clears for the statement you changed.
 
+## Second slice: values, branches and types
+
+The first slice records whether code ran. The second records what went through it, which way it went, and whether the
+types held. Annotations can then use the same facts to re-place themselves when shape alone can't settle it
+(SPAN-ANNOTATIONS.md, the typed strategy).
+
+### What a run observes
+
+tsval gets an `observe` option beside `coverage`. It's called at a few chosen sites, not at every expression, and the
+debug worker sums what it reports while the run goes on. Nothing is kept per event.
+
+| Site | Kind | What's summed |
+|---|---|---|
+| `a?.b`, `a?.()` | `value` of `a` | seen, nullish (the chain stopped), type tags |
+| `a ?? b` | `value` of `a` | seen, nullish (the right side ran), type tags |
+| `if`, `c ? x : y` | `branch` | how often each arm ran |
+| `a && b`, `a \|\| b` | `branch` | how often the right side ran, and how often it didn't |
+| a parameter | `value` | seen, nullish, type tags |
+| a `return` | `value` | seen, nullish, type tags |
+
+A **type tag** is what a value was at runtime: `undefined`, `null`, `boolean`, `number`, `string`, `bigint`, `symbol`,
+`function`, `array`, or an object's class name (`Map`, `Player`; `object` for a plain one). Each site keeps at most
+8 tags; anything past that counts as `other`.
+
+### What's committed
+
+Same files, new lines: `value` and `branch` observations join `reached` in
+`.silo/evidence/<user>/<env>/<file>.jsonl`, one line per (kind, span), folded and faded the same way.
+
+```json
+{ "span": "9f3a…c2", "key": "bablr1", "kind": "value", "w": 38.4, "runs": 19.1,
+  "seen": 1206, "nullish": 0, "tags": { "function": 1206 }, "lastRun": "…", "lastAt": "…" }
+{ "span": "51c0…9a", "key": "bablr1", "kind": "branch", "w": 12.0, "runs": 19.1,
+  "arms": [1180, 26], "lastRun": "…", "lastAt": "…" }
+```
+
+- **Strict counts for quick fixes.** `seen`, `nullish`, `tags` and `arms` count since the span last changed and are
+  never faded. The span's id changes when its code does, so these reset by themselves. "Remove the `?.`" needs
+  `nullish: 0` and enough `seen`. `w` and `runs` fade, and they say how recent and how strong the evidence is.
+- **No values in git.** Tags and counts are committed. The values themselves stay out of git, because strings can be
+  tokens, emails or anything else. A few distinct primitives per site (for "this was only ever `"left"` or
+  `"right"`") are kept in `.silo/local/` on the machine that saw them.
+- **Declared types aren't stored.** They're the code's, and TypeScript can say what they are at any time. "Did the types
+  hold" is computed when it's shown: the declared type at the span against the tags its evidence saw.
+- **Exact spans only.** A site is recorded under the BABLR span whose range is exactly the site's node: the `a?.b`
+  member expression, the `??` expression, the `if` statement. A site without an exact span isn't recorded. The
+  fallback statements use (pickAnchor's nearest enclosing span) would pool unrelated sites into one line.
+- **Size.** One line per site that ran. A 300-line file has around 100 such sites, so about 15 KB per environment.
+
+### How it flows
+
+The path is coverage's, with nothing new: the debug worker's end-of-run report gains `sites` beside `statements`.
+The adapter publishes both on `evidence.coverage` (renamed `evidence.observed`). `evidence.ts` maps each site's
+range to its exact span, and silo folds `value` and `branch` beside `reached`. The insights extension reads them back.
+
+### The typed strategy
+
+Two facts help when shape alone is ambiguous: what TypeScript says a span's type is, and which types actually went
+through it.
+
+- **Recorded at reference time.** A `SpanRef` gains `inferred` (TypeScript's type for the span, as text) and
+  `observed` (the span's type tags from evidence, when it has any). Both are optional; a reference without them
+  resolves exactly as today.
+- **A re-scorer, not a finder.** `typed` takes the same-shape strategy's candidates and adjusts their scores. A
+  candidate whose inferred type matches, and whose observed tags overlap, is lifted; one whose types disagree is
+  lowered. It can turn an *uncertain* match into a *re-placed* one, or push a wrong one below `askAt`. It never finds
+  a span the shape didn't. Weights are a `TypedWeights` like the others, scored by the same corpus.
+- **Where types come from.** The capabilities tsserver plugin already holds the project's real checker. It answers
+  "the types at these ranges" as a plugin command, the way eslint's `_eslint.fixAll` is reached
+  (`typescript.tsserverRequest`). The BABLR worker never loads TypeScript. tsval's own checker only knows its one file
+  and the default libs, so it can't stand in.
+
+### In VS Code
+
+- **Hover** on a span shows its values (seen, how often nullish, its tags as a bar), its branches (each arm's share)
+  and, for a declaration, the declared type against what was observed.
+- **Then quick fixes**, hint severity, on request (D8): an unnecessary `?.` or `??` (never nullish since the span last
+  changed, seen at least N times across at least M runs), and a branch never taken.
+
+### Building it
+
+1. **tsval**: `observe(node, site, value)` at the sites above, one `undefined` check when off, tested on its own.
+2. **The debug worker** sums each site's observations, and the report carries `sites`.
+3. **silo**: `value` and `branch` observations, `foldValues` and `foldBranches`, the parser taking every kind.
+4. **evidence.ts**: exact spans for sites, folded and written beside `reached`.
+5. **Insights**: the hover.
+6. **Quick fixes**: `?.` and `??`, then branches.
+7. **The typed strategy**: types at ranges from the tsserver plugin, `inferred` and `observed` on references,
+   `typed` in the pipeline, cases in the corpus.
+
+### Decisions for this slice
+
+Decided 2026-10-04: every one as recommended (the **bold** option).
+
+- **V1 · Where `observe` fires.** (a) after every expression (one generic hook in tsval's step loop); **(b) the sites
+  above**: the ones behind the features, plus parameters and returns for types; (c) (b) plus every variable binding.
+- **V2 · What a value summary keeps.** **(a) tags and counts committed, a few distinct primitives kept locally**;
+  (b) primitives committed too; (c) tags and counts only, nowhere else.
+- **V3 · Declared types.** **(a) not stored; compared when shown**; (b) stored with each observation.
+- **V4 · Which span a site uses.** **(a) the exact span for its node, or none**; (b) pickAnchor's nearest span.
+- **V5 · How it travels.** **(a) the one end-of-run report, `sites` beside `statements`**; (b) a channel per kind.
+- **V6 · Where the typed strategy's types come from.** **(a) the tsserver plugin, as a plugin command**; (b) the hover
+  provider, one request per range; (c) tsval's own checker.
+- **V7 · What the typed strategy is.** **(a) a re-scorer of same-shape candidates**; (b) a finder of its own over every
+  span of the node's type.
+- **V8 · The first surface.** **(a) hover, then quick fixes**; (b) quick fixes first.
+
 ## Decisions
 
 Decided 2026-10-03: every one as recommended (the **bold** option).
