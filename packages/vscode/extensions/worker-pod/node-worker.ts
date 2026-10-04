@@ -297,7 +297,7 @@ interface VirtualRequest { "port": number; "method": string; "url": string; "hea
 interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 type RequestHandler = { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> };
-type PreviewServer = RequestHandler & { "start": () => void; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "stop": () => void };
+type PreviewServer = RequestHandler & { "start": () => void; "setInstrumentation": (level: "full" | "coverage" | "off") => void; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "stop": () => void };
 
 // The preview taps (page-tap.ts, worker-tap.ts — bundled to script text at build time): the dev server puts one first
 // in every page it serves (inline, so it runs before the app's own code — the errors thrown during the app's module
@@ -448,6 +448,9 @@ if (!SCRIPTS) {
 		// worker console.warn we can't read. The server now returns a 500 (self-healing) instead of retrying, so if this
 		// fires the preview may show a one-load error that recovers on reload; a recurrence means the race is still live.
 		server.setTransformErrorReporter((info) => { log.warn("preview transform failed (served 500, recovers on reload)", info); });
+		// The workspace's modules, instrumented for runtime evidence (RUNTIME-EVIDENCE.md, the third slice): the page
+		// runtime the tap carries counts what they report.
+		server.setInstrumentation("full");
 		previewServers.set(port, server);
 		previewRoots.set(port, root.replace(/\/$/u, ""));
 		architecture.spawn({ "id": "vite:" + port, "label": "Vite dev server :" + port, "container": "workers", "detail": root, "dynamic": true });

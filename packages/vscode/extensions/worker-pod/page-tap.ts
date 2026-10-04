@@ -11,12 +11,16 @@
  * A frame nested in the window — same origin — uses the top frame's tap directly. A worker the page starts joins the
  * window's hub through its page (worker-tap.ts): handed a port as its first message, it sends its records and asks its
  * capability questions here (`tap.worker.log`, `tap.worker.decide`), and the tap passes them on as its own.
+ *
+ * Each page also carries runtime evidence's page runtime (page-evidence.ts): what its instrumented modules observe,
+ * reported on the window's hub (`evidence.preview`), and reported again whenever the editor asks (`evidence.flush`).
  */
 import type { Transport } from "@brianjenkins94/hub";
 import type { TapRecord } from "./tap-shared";
 import { createHub, createRpcClient, pipe, portTransport, serve, windowTransport } from "@brianjenkins94/hub";
 import { createArchReporter, REALM_PARENT } from "@brianjenkins94/observability";
 import { PREVIEW_HOST_MARK, VIRTUAL_MARKER, VIRTUAL_RE, WINDOW_PARAM } from "../../virtual-path";
+import { installPageEvidence } from "./page-evidence";
 import { installConsoleTap, installSocketGate, WORKER_OFFER } from "./tap-shared";
 
 /** What a preview window's top frame offers the frames in it and the app (`window.__editorTap`). */
@@ -30,6 +34,10 @@ export interface EditorTap {
 	"connect": () => Transport;
 	/** A worker the page starts joins the window's hub on this port (worker-tap.ts). */
 	"adopt": (port: MessagePort) => void;
+	/** A page's runtime evidence, out on the window's hub: `page` names the page (its frame and its load). */
+	"evidence": (page: string, modules: unknown[]) => void;
+	/** Report now when the editor asks (each of the window's pages registers its flush). */
+	"onFlush": (flush: () => void) => void;
 }
 
 type TapWindow = Window & { "__editorTap"?: EditorTap; "__obsTap"?: true };
@@ -92,6 +100,15 @@ function windowTap(host: Window, windowId: string): EditorTap {
 		return typeof kind === "string" && await decide(kind, typeof resource === "string" ? resource : "");
 	});
 
+	// Runtime evidence: the editor asks every page of the window to report now (before the preview closes).
+	const flushes = new Set<() => void>();
+
+	hub.subscribe("evidence.flush", () => {
+		for (const flush of flushes) {
+			flush();
+		}
+	});
+
 	return {
 		"window": windowId,
 		"log": log,
@@ -104,7 +121,9 @@ function windowTap(host: Window, windowId: string): EditorTap {
 
 			return theirs;
 		},
-		"adopt": (port) => { hub.link(portTransport(port)); }
+		"adopt": (port) => { hub.link(portTransport(port)); },
+		"evidence": (page, modules) => { hub.publish("evidence.preview", { "window": windowId, "page": page, "modules": modules }); },
+		"onFlush": (flush) => { flushes.add(flush); }
 	};
 }
 
@@ -139,6 +158,10 @@ function install(): void {
 	const send = (record: TapRecord): void => { tap.log(frame === undefined ? record : { ...record, "attrs": { "frame": frame, ...record.attrs } }); };
 
 	installConsoleTap(send);
+	// This page's runtime evidence, named by its frame and this load (a reload is a page of its own).
+	const page = `${windowId}${frame ?? ""}#${crypto.randomUUID()}`;
+
+	tap.onFlush(installPageEvidence((modules) => { tap.evidence(page, modules); }).flush);
 	installSocketGate(tap.decide);
 	gateWebRtc(tap.decide);
 	keepNewWindows(tap.open);

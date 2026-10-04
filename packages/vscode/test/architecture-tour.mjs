@@ -45,6 +45,19 @@ test("previews: two dev servers side by side", async () => {
 	await session.terminal("cd apps/second && npm run dev", { "fresh": true });
 	await session.until("preview :5174", hasLabel("preview:5174", "sw", /^GET /u));
 	await session.until("its dev server", alive("vite:5174"));
+
+	// Its modules instrumented for runtime evidence (RUNTIME-EVIDENCE.md, the third slice): the page runtime the tap
+	// carries has counted what the app's own code did, by file and version, in the original source's positions.
+	const counted = await eventually("the preview's runtime evidence", async () => {
+		const frame = session.page.frames().find((each) => /\/__virtual__\/[^/]+\/5173\//u.test(each.url()));
+		const modules = frame === undefined ? [] : await frame.evaluate(() => globalThis.__evidence?.evidence() ?? []).catch(() => []);
+		const ran = modules.filter((module) => module.statements.some((statement) => statement.count > 0));
+
+		return ran.length > 0 ? modules : undefined;
+	});
+
+	assert.ok(counted.every((module) => module.file.startsWith("/workspace/") && !module.file.includes("/node_modules/")), "workspace modules only");
+	assert.ok(counted.every((module) => /^[0-9a-f]{40}$/u.test(module.version)), "each by its version: the source's blob oid");
 });
 
 test("provoke: a cold transform round in a child worker", async () => {

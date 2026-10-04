@@ -1,12 +1,14 @@
 /**
  * What went through each observed site of a tsval run (its `observe` hook), summed as the program runs: the debug
  * worker's half of runtime evidence's values and branches (RUNTIME-EVIDENCE.md, the second slice). Nothing is kept per
- * event. A timeline's sums are its own: a fork (time travel's next step) starts from a copy, as coverage does.
+ * event. A timeline's sums are its own: a fork (time travel's next step) starts from a copy, as coverage does. The page
+ * runtime (page-evidence.ts) sums a preview's sites the same way, keyed by its site index instead of a node.
  */
 import type { ObserveSite } from "@brianjenkins94/tsval";
 import type ts from "typescript";
 import type { SiteObservation } from "./debug-protocol";
-import { typeTag } from "@brianjenkins94/tsval";
+// typeTag alone, not the interpreter: the page runtime bundles this into every preview page.
+import { typeTag } from "../../../tsval/src/values";
 
 /** At most this many type tags a site; the rest count as `other`. */
 const MAX_TAGS = 8;
@@ -16,10 +18,11 @@ const SAMPLE_CHARS = 40;
 
 interface Sums { "site": ObserveSite; "seen": number; "nullish": number; "tags": Record<string, number>; "samples": (string | number | boolean)[]; "arms": number[] }
 
-export type SiteSums = Map<ts.Node, Sums>;
+export type SiteSums<Key = ts.Node> = Map<Key, Sums>;
 
-/** Add what `site` (`node`) was just told — a value, or for a branch the arm that ran — to `sums`. */
-export function addObservation(sums: SiteSums, node: ts.Node, site: ObserveSite, value: unknown): void {
+/** Add what `site` (`node`, or whatever keys the sums) was just told — a value, or for a branch the arm that ran — to
+ *  `sums`. */
+export function addObservation<Key>(sums: SiteSums<Key>, node: Key, site: ObserveSite, value: unknown): void {
 	let known = sums.get(node);
 
 	if (known === undefined) {
@@ -65,10 +68,10 @@ export function siteObservations(sums: SiteSums | undefined, file: ts.SourceFile
 		return [line, character];
 	};
 
-	return [...sums ?? []].sort(([a], [b]) => a.getStart(file) - b.getStart(file)).map(([node, known]) => ({
-		"site": known.site,
-		"start": position(node.getStart(file)),
-		"end": position(node.getEnd()),
-		...known.site === "branch" ? { "arms": known.arms } : { "seen": known.seen, "nullish": known.nullish, "tags": known.tags, ...known.samples.length > 0 ? { "samples": known.samples } : {} }
-	}));
+	return [...sums ?? []].sort(([a], [b]) => a.getStart(file) - b.getStart(file)).map(([node, known]) => ({ "start": position(node.getStart(file)), "end": position(node.getEnd()), ...summary(known) }));
+}
+
+/** What a site's sums say, as a report gives it: for a branch its arms, for a value its counts, tags and samples. */
+export function summary(known: Sums): Omit<SiteObservation, "start" | "end"> {
+	return { "site": known.site, ...known.site === "branch" ? { "arms": known.arms } : { "seen": known.seen, "nullish": known.nullish, "tags": known.tags, ...known.samples.length > 0 ? { "samples": known.samples } : {} } };
 }

@@ -12,7 +12,9 @@ import { REACT_REFRESH_CDN, REACT_VERSION } from "../config/cdn";
 import { DevServer } from "../dev-server";
 import { Buffer } from "../shims/stream";
 import { simpleHash } from "../utils/hash";
-import { addReactRefresh as _addReactRefresh } from "./code-transforms";
+import { addReactRefresh as _addReactRefresh, shiftInlineSourceMap } from "./code-transforms";
+import type { InstrumentLevel } from "./instrument";
+import { instrument } from "./instrument";
 import type { Manifest } from "./packages";
 import { isRegistrySpec, PACKAGE_PREFIX, PackageResolver } from "./packages";
 
@@ -291,12 +293,30 @@ function registryUrl(name: string, version: string, subpath: string): string {
 	return `https://esm.sh/${name}@${version}` + (subpath === "" ? `?${query}` : `&${query}${subpath}`);
 }
 
+/** The git blob oid of `text` (sha1 of `blob <length>\0<bytes>`): a module version's name, as git and runtime evidence
+ *  name a file's content. */
+async function blobOid(text: string): Promise<string> {
+	const bytes = new TextEncoder().encode(text);
+	const header = new TextEncoder().encode(`blob ${bytes.length}\0`);
+	const object = new Uint8Array(header.length + bytes.length);
+
+	object.set(header);
+	object.set(bytes, header.length);
+
+	return [...new Uint8Array(await crypto.subtle.digest("SHA-1", object))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export class ViteDevServer extends DevServer {
 	private watcherCleanup: (() => void) | null = null;
 	private readonly options: ViteDevServerOptions;
 	private hmrTargetWindow: Window | null = null;
 	private transformErrorReporter: ((info: TransformErrorInfo) => void) | null = null;
-	private readonly transformCache = new Map<string, { "code": string; "hash": string }>();
+	private readonly transformCache = new Map<string, { "code": string; "hash": string; "level": InstrumentLevel | "off" }>();
+	/** How much of the workspace's modules to instrument for runtime evidence (instrument.ts): off until told. */
+	private instrumentLevel: InstrumentLevel | "off" = "off";
+	/** Each version of a workspace module instrumented, by its source's git blob oid: what it was — so the evidence of
+	 *  a version a hot update replaced can still be read against its own text (RUNTIME-EVIDENCE.md, the third slice). */
+	private readonly versions = new Map<string, { "file": string; "source": string }>();
 	/** Bare imports → esm.sh (registry deps) or /@pkg/ (URL/tarball deps, fetched and served here). See packages.ts. */
 	private readonly packages: PackageResolver;
 
@@ -327,6 +347,19 @@ export class ViteDevServer extends DevServer {
    */
 	setTransformErrorReporter(reporter: (info: TransformErrorInfo) => void): void {
 		this.transformErrorReporter = reporter;
+	}
+
+  /**
+   * Instrument the workspace's modules for runtime evidence — everything, statements only, or not at all (instrument.ts).
+   * Modules served after this are; a page reloaded gets them.
+   */
+	setInstrumentation(level: InstrumentLevel | "off"): void {
+		this.instrumentLevel = level;
+	}
+
+  /** A version of a workspace module this server instrumented, by its source's git blob oid. */
+	versionSource(oid: string): { "file": string; "source": string } | undefined {
+		return this.versions.get(oid);
 	}
 
   /**
@@ -461,6 +494,11 @@ export class ViteDevServer extends DevServer {
 	}
 
 	private async serveRewrittenJs(filePath: string, urlPath: string): Promise<ResponseData> {
+		// Instrumented, a workspace script goes through the compile like TypeScript does (P2).
+		if (this.instrumentLevel !== "off" && !filePath.includes("/node_modules/")) {
+			return this.transformAndServe(filePath, urlPath);
+		}
+
 		try {
 			return this.javascript(await this.packages.rewriteImports(this.vfs.readFileSync(filePath, "utf8") as string, urlPath, ts));
 		} catch (error) {
@@ -623,7 +661,7 @@ export class ViteDevServer extends DevServer {
 			// Serve a prior transform if the source is unchanged.
 			const cached = this.transformCache.get(filePath);
 
-			if (cached && cached.hash === hash) {
+			if (cached && cached.hash === hash && cached.level === this.instrumentLevel) {
 				const buffer = Buffer.from(await this.packages.rewriteImports(cached.code, urlPath, ts));
 
 				return {
@@ -640,10 +678,10 @@ export class ViteDevServer extends DevServer {
 				};
 			}
 
-			const transformed = await this.transformCode(content, urlPath);
+			const transformed = await this.transformCode(content, urlPath, filePath);
 
 			// Cache the transform result (before rewriting its bare imports: where they resolve follows package.json).
-			this.transformCache.set(filePath, { "code": transformed, "hash": hash });
+			this.transformCache.set(filePath, { "code": transformed, "hash": hash, "level": this.instrumentLevel });
 
 			const buffer = Buffer.from(await this.packages.rewriteImports(transformed, urlPath, ts));
 
@@ -699,7 +737,7 @@ export class ViteDevServer extends DevServer {
   /**
    * Transform JSX/TS code to browser-compatible JavaScript
    */
-	private async transformCode(code: string, filename: string): Promise<string> {
+	private async transformCode(code: string, filename: string, filePath = filename): Promise<string> {
 		if (!isBrowser) {
       // In test environment, just return code as-is
 			return code;
@@ -709,8 +747,11 @@ export class ViteDevServer extends DevServer {
     // CDN fetch). JsxEmit.ReactJSX is the React 17+ automatic runtime (imports from react/jsx-runtime), matching
     // the old esbuild jsx:'automatic' + jsxImportSource:'react'. Bare imports (react, …) are left intact and
     // resolved by the injected import map.
+		// A workspace module (not a dependency's), instrumented for runtime evidence: its version is its source's blob oid.
+		const instrumented = this.instrumentLevel === "off" || filePath.includes("/node_modules/") ? undefined : instrument(filePath, await blobOid(code), this.instrumentLevel);
 		const result = ts.transpileModule(code, {
 			"fileName": filename,
+			...instrumented === undefined ? {} : { "transformers": { "before": [instrumented.before] } },
 			"compilerOptions": {
 				"jsx": ts.JsxEmit.ReactJSX,
 				"jsxImportSource": "react",
@@ -723,12 +764,20 @@ export class ViteDevServer extends DevServer {
 			}
 		});
 
-    // Add React Refresh registration for JSX/TSX files
-		if (/\.(jsx|tsx)$/.test(filename)) {
-			return this.addReactRefresh(result.outputText, filename);
+		let output = result.outputText;
+
+		if (instrumented !== undefined) {
+			this.versions.set(await blobOid(code), { "file": filePath, "source": code });
+			// The prelude is one line in front: the module's map moves down with its code.
+			output = instrumented.prelude() + "\n" + shiftInlineSourceMap(output, 1);
 		}
 
-		return result.outputText;
+    // Add React Refresh registration for JSX/TSX files
+		if (/\.(jsx|tsx)$/.test(filename)) {
+			return this.addReactRefresh(output, filename);
+		}
+
+		return output;
 	}
 
 	private addReactRefresh(code: string, filename: string): string {

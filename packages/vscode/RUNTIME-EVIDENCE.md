@@ -367,7 +367,9 @@ budgets (test/performance.mjs) measure an instrumented preview before the defaul
    the one before it, so it goes untold when that one stopped the chain, as in tsval; tsval no longer observes
    parameters with a default or a pattern (P8).
 2. **The page runtime** and its reports: counts by file and version, flushed as above, `evidence.preview` allowed
-   through the link.
+   through the link. Done (extensions/worker-pod/page-evidence.ts, carried by the page tap; the dev server instruments
+   workspace modules once a preview starts, `full` until step 4's setting): each page — a frame, a load — reports as
+   its own (`page`), and `evidence.flush` asks them all.
 3. **Core**: reports gathered by run (by port), past versions' sources from the dev server, a last pull before the
    preview closes, folding at run end, `versions` in the envelope (silo).
 4. **The setting and a performance check.**

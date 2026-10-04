@@ -69,16 +69,17 @@ interface PromptRequest { "kind"?: string; "scope"?: string; "resource"?: string
 /**
  * What may cross the link a preview window `id` joins the editor's tree through — its page tap's hub, and the app's
  * own behind it. Out of the window: its observability (`$sys.log`, its startup backlog, `$sys.arch`, `$sys.metrics`), tab discovery
- * answers, page-tool announcements, its replies to debug-mcp (the one caller of its tools), and its tap's calls (a
- * capability decision, a new window — `preview.decide`, `preview.open`). Into it: architecture sync, tab discovery,
+ * answers, page-tool announcements, its replies to debug-mcp (the one caller of its tools), its runtime evidence
+ * (`evidence.preview`), and its tap's calls (a capability decision, a new window — `preview.decide`, `preview.open`).
+ * Into it: architecture sync, tab discovery, the editor asking its pages to report their evidence (`evidence.flush`),
  * calls to the tools it serves under its tab id (see observability's servePageTools), and the replies to its calls.
  * The preview isn't a security boundary (same origin, unsandboxed — see ARCHITECTURE.md): this keeps an app's traffic
  * and the editor's apart, and nothing else of the app's leaves it.
  */
 function previewAppPermissions(id: string): LinkPermissions {
 	return {
-		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "tab.here", "page_tools.changed", rpcReplySubject("debug-mcp"), rpcCallSubject("preview.decide"), rpcCallSubject("preview.open")],
-		"subscribe": ["$sys.arch.sync", "tab.discover", ...["page_tools.*", "tool.>"].map((name) => rpcCallSubject(name)), rpcReplySubject(id)]
+		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "tab.here", "page_tools.changed", "evidence.preview", rpcReplySubject("debug-mcp"), rpcCallSubject("preview.decide"), rpcCallSubject("preview.open")],
+		"subscribe": ["$sys.arch.sync", "tab.discover", "evidence.flush", ...["page_tools.*", "tool.>"].map((name) => rpcCallSubject(name)), rpcReplySubject(id)]
 	};
 }
 
