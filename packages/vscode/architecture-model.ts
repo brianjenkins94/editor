@@ -246,7 +246,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"], "description": "Network/IO capability decisions, served by the pod." },
 	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"], "description": "Ask the user about a capability, served by the shell." },
 	// ── workers ──
-	{ "pattern": "classify.>", "from": ["workbench"], "to": ["classify"], "description": "Cosmetic/semantic verdicts, edit-burst grouping (cancellable), and the spanAnchors ids a run's evidence keys on." }
+	{ "pattern": "classify.>", "from": ["workbench", "pod"], "to": ["classify"], "description": "Cosmetic/semantic verdicts, edit-burst grouping (cancellable), and BABLR's spans: the ids a run's evidence keys on (workbench), and an open text's, to show it (the pod's editor.bablr.spans, for the insights extension)." }
 ];
 
 export const channels: ChannelSpec[] = [

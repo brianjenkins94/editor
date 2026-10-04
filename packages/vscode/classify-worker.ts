@@ -7,12 +7,14 @@
  * edit-burst chain into node-grouped chunks for the "your edits" timeline.
  *
  * Served over the hub (see cosmetic-classifier.ts for the client): `classify.verdict` and `classify.editGroups`; and
- * `classify.anchors`, the spanAnchors id of each of a source's ranges, for the runtime evidence (evidence.ts).
+ * `classify.anchors`, the spanAnchors id of each of a source's ranges, for the runtime evidence (evidence.ts); and
+ * `classify.spans`, every span of a source, for showing that evidence on the text as it is now (the insights extension,
+ * through worker-pod's `editor.bablr.spans` command).
  * YIELDING + ABORT: the derivation paces the BABLR VM (yields as it parses), so a cancelled call's signal lands
  * mid-parse and the run bails cooperatively, no worker termination. The classifier drives one call at a time.
  */
 import "./bablr-fast-freeze"; // MUST be first: neutralizes record freezing before the BABLR bundle captures Object.freeze
-import { anchorRanges, deriveIdentityAsync, editGroups } from "@brianjenkins94/bablr";
+import { anchorRanges, deriveIdentityAsync, editGroups, spanAnchors } from "@brianjenkins94/bablr";
 import { serve } from "@brianjenkins94/hub";
 
 import { createWorkerHub } from "./worker-hub";
@@ -57,6 +59,15 @@ serve(hub, "classify.anchors", (args) => {
 
 	try {
 		return { "ids": anchorRanges(source, ranges).map((id) => id ?? null) };
+	} catch {
+		return { "unparsable": true };
+	}
+});
+
+// A source ⇒ every span of it that can be a handle (punctuation never is: pickAnchor skips it) — its id and offsets.
+serve(hub, "classify.spans", (args) => {
+	try {
+		return { "spans": (spanAnchors((args as { "source": string }).source) as { "type": string | null; "start": number; "end": number; "id": string }[]).filter((span) => span.type !== null).map(({ id, start, end }) => ({ "id": id, "start": start, "end": end })) };
 	} catch {
 		return { "unparsable": true };
 	}

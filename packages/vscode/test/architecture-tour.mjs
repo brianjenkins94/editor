@@ -142,6 +142,28 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 
 	assert.doesNotMatch(exclude, /^\.silo\/$/mu, "the runs and their evidence go in git");
 	assert.match(ignore, /^local\/$/mu, "what stays on the machine");
+
+	// Shown from the evidence: open the file and edit another line — the session's marks drop, the evidence's follow the
+	// statement's span; edit the statement itself, and its mark goes until it runs again.
+	const workbench = session.workbench();
+	const marks = () => workbench.evaluate(() => document.querySelectorAll(".monaco-editor .margin .cgmr").length);
+	const edit = (change) => workbench.evaluate(async (what) => {
+		const { api } = globalThis.__editor;
+		const editor = await api.window.showTextDocument(api.Uri.file("/workspace/f5.js"));
+
+		await editor.edit((builder) => {
+			if (what === "append") {
+				builder.insert(new api.Position(editor.document.lineCount, 0), "\n// unrelated\n");
+			} else {
+				builder.replace(editor.document.lineAt(0).range, "console.log('f6');");
+			}
+		});
+	}, change);
+
+	await edit("append");
+	await eventually("the evidence's mark, after an unrelated edit", async () => (await marks()) > 0 || undefined);
+	await edit("statement");
+	await eventually("no mark on the edited statement", async () => (await marks()) === 0 || undefined);
 });
 
 // A service — it keeps running (lifecycle.ts) — needs an event loop tsval doesn't have, so it runs on the script worker
