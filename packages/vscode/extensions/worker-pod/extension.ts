@@ -176,35 +176,17 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	registerLaunch(context);
 	// VS Code's Source Control view, on core's git service (source-control.ts).
 	registerSourceControl(context);
-	// BABLR's spans of a text, from core's BABLR (bablr.ts: cached by content, so an unchanged file is never parsed
-	// twice), for extensions that show what's keyed on them — the insights extension's evidence. A command: what an
-	// extension can call. Undefined when BABLR's grammar doesn't take the text.
-	context.subscriptions.push(vscode.commands.registerCommand("editor.bablr.spans", async (source: unknown) => {
-		if (typeof source !== "string" || source === "") {
-			return undefined;
-		}
-
-		const answer = await rpc.request("spans.of", { "source": source }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "spans"?: { "id": string; "start": number; "end": number }[] };
-
-		return answer.spans;
-	}), vscode.commands.registerCommand("editor.bablr.anchors", async (source: unknown, ranges: unknown) => {
-		// And the span standing for each of a text's ranges (another parser's nodes — the event sheet's recognized parts).
-		if (typeof source !== "string" || source === "" || !Array.isArray(ranges)) {
-			return undefined;
-		}
-
-		const answer = await rpc.request("spans.of", { "source": source, "ranges": ranges }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "ids"?: (string | null)[] };
-
-		return answer.ids;
-	}), vscode.commands.registerCommand("editor.annotations.refer", async (source: unknown, file: unknown, range: unknown) => {
-		// Durable annotations on spans (SPAN-ANNOTATIONS.md), from core's BABLR: a reference to the span standing for a
-		// range of a text — what an annotation keeps…
-		const { start, end } = (range ?? {}) as { "start"?: unknown; "end"?: unknown };
-
-		return (await rpc.request("annotations.refer", { "source": source, "file": file, "start": start, "end": end }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "ref"?: unknown }).ref;
-	}), vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, ref: unknown) =>
-		// …and where a reference's span is now: attached, moved, re-placed, uncertain or orphaned, with where it landed.
-		rpc.request("annotations.resolve", { "source": source, "file": file, "ref": ref }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 })));
+	// Durable annotations on code spans (SPAN-ANNOTATIONS.md), from core's BABLR (bablr.ts: one worker, its parses cached
+	// by content, so an unchanged file is never parsed twice) — for extensions, everything they attach to code: notes,
+	// the insights extension's evidence, the event sheet's anchors. Commands: what an extension can call.
+	context.subscriptions.push(vscode.commands.registerCommand("editor.annotations.refer", async (source: unknown, file: unknown, ranges: unknown) =>
+		// A reference to the span standing for each range of a text — what an annotation keeps (undefined where BABLR
+		// can't place it, or can't parse the text)…
+		((await rpc.request("annotations.refer", { "source": source, "file": file, "ranges": ranges }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "refs"?: unknown[] }).refs ?? []).map((ref) => ref ?? undefined)
+	), vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, refs: unknown, options?: { "observed"?: boolean }) =>
+		// …and where each reference's span is now: attached, moved, re-placed, uncertain or orphaned, with where it
+		// landed. `observed` (runtime evidence): by its id alone — one that's lost fades, it isn't looked for.
+		(await rpc.request("annotations.resolve", { "source": source, "file": file, "refs": refs, "observed": options?.observed === true }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "resolutions"?: unknown[] }).resolutions));
 
 	// The production debug type — presents an almostnode run (the vite preview) as a debug session with a
 	// run-control controller (Stop + Debug Console). The run's driver publishes `production.launch` (federates

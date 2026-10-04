@@ -22,8 +22,8 @@ export interface EventSheetHost {
 	/** The game around the active editor's file: its root (the nearest directory with a package.json) and its code
 	 *  files (by path relative to the root); none when there's no code file open, or no package.json above it. */
 	"game": () => Promise<{ "root": string; "files": Record<string, string> } | { "problem": string }>;
-	/** The recognizer's model of a game's files. */
-	"project": (files: Record<string, string>) => Promise<GameModel>;
+	/** The recognizer's model of a game's files (by path relative to its root). */
+	"project": (root: string, files: Record<string, string>) => Promise<GameModel>;
 	/** Open a file at a 1-based line. */
 	"open": (path: string, line: number) => void;
 	/** Write files under `root` (making their directories). */
@@ -379,7 +379,7 @@ function start(): void {
 				showMessage("Loading…");
 
 				try {
-					authored = authoredFromModel(await host.project(game.files));
+					authored = authoredFromModel(await host.project(game.root, game.files));
 				} catch {
 					authored = { "level": "level1", "entities": [], "systems": [] };
 				}
@@ -400,7 +400,7 @@ function start(): void {
 		showMessage("Projecting…");
 
 		try {
-			const model = await host.project(game.files);
+			const model = await host.project(game.root, game.files);
 
 			if (mine === rebuilding) {
 				paint(body, host, game.root, model);

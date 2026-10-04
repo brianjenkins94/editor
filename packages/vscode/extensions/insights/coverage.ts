@@ -10,11 +10,15 @@
  *  - the evidence kept in git (RUNTIME-EVIDENCE.md): `.silo/evidence/<user>/<environment>/<file>.jsonl`, written as each
  *    run ends, keyed on BABLR spans — everyone's runs, in every environment, folded together. It outlives the session and
  *    follows the code: a statement you didn't touch keeps its marks when code around it moves or changes; one you edited
- *    loses them until it runs again. The open document's spans come from the editor's BABLR worker (worker-pod's
- *    `editor.bablr.spans` command); a file BABLR's grammar doesn't take yet has no evidence, only its sessions' reports.
+ *    loses them until it runs again. Evidence is an observed span annotation (SPAN-ANNOTATIONS.md): each span is found
+ *    in the open document by the editor's BABLR, by its id alone (worker-pod's `editor.annotations.resolve`), and one
+ *    that isn't there fades rather than being looked for. A file BABLR's grammar doesn't take yet has no evidence, only
+ *    its sessions' reports.
  */
+import type { Resolution } from "@brianjenkins94/util/silo/annotations";
 import type { Observation } from "@brianjenkins94/util/silo/evidence";
 import type { CoverageReport } from "../worker-pod/debug-protocol";
+import { observedRef } from "@brianjenkins94/util/silo/annotations";
 import { parseEvidence, SILO_DIR } from "@brianjenkins94/util/silo/evidence";
 import * as vscode from "vscode";
 
@@ -24,11 +28,11 @@ interface SpanEvidence { "ever": number; "runs": number; "lastAt": string }
 /** What evidence says of a line: whether every evidenced statement starting on it ran, in how many runs, and when last. */
 interface LineEvidence extends SpanEvidence { "ran": boolean }
 
-/** The text's BABLR spans, from the editor's one BABLR worker through worker-pod's command; undefined where there's no such
- *  command (VS Code without the editor) or BABLR's grammar doesn't take the text. */
-async function spansOf(source: string): Promise<{ "id": string; "start": number; "end": number }[] | undefined> {
+/** Where each of `spans` is in `source`, the text of `file`, by its id alone — from the editor's one BABLR worker,
+ *  through worker-pod's command; undefined where there's no such command (VS Code without the editor). */
+async function find(source: string, file: string, spans: string[]): Promise<Resolution[] | undefined> {
 	try {
-		return await vscode.commands.executeCommand<{ "id": string; "start": number; "end": number }[] | undefined>("editor.bablr.spans", source);
+		return await vscode.commands.executeCommand<Resolution[] | undefined>("editor.annotations.resolve", source, file, spans.map((span) => observedRef(span, file)), { "observed": true });
 	} catch {
 		return undefined;
 	}
@@ -113,31 +117,35 @@ export function registerCoverage(context: vscode.ExtensionContext): void {
 
 	/** The evidence's marks for the document as it is now: each evidenced span found in it, on the line it starts. */
 	const evidenceMarks = async (document: vscode.TextDocument): Promise<Map<number, LineEvidence> | undefined> => {
-		const known = await evidenceOf(vscode.workspace.asRelativePath(document.uri, false));
+		const file = vscode.workspace.asRelativePath(document.uri, false);
+		const known = await evidenceOf(file);
 
 		if (known.size === 0) {
 			return new Map();
 		}
 
 		const version = document.version;
-		const anchors = await spansOf(document.getText());
+		const spans = [...known.keys()];
+		const found = await find(document.getText(), file, spans);
 
-		if (anchors === undefined || document.version !== version) {
-			return anchors === undefined ? new Map() : undefined; // unparsable: nothing to show; edited since: a newer draw follows
+		if (found === undefined || document.version !== version) {
+			return found === undefined ? new Map() : undefined; // no BABLR: nothing to show; edited since: a newer draw follows
 		}
 
 		const byLine = new Map<number, LineEvidence>();
 
-		for (const anchor of anchors) {
-			const span = known.get(anchor.id);
+		spans.forEach((id, index) => {
+			const at = found[index]?.candidate;
+			const span = known.get(id)!;
 
-			if (span !== undefined) {
-				const line = document.positionAt(anchor.start).line;
+			// Found here (lost — or moved to another file — it fades: new runs make new evidence).
+			if (at?.start !== undefined && at.file === file) {
+				const line = document.positionAt(at.start).line;
 				const before = byLine.get(line);
 
 				byLine.set(line, before === undefined ? { ...span, "ran": span.ever > 0 } : { ...before, "ran": before.ran && span.ever > 0 });
 			}
-		}
+		});
 
 		return byLine;
 	};

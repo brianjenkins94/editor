@@ -96,13 +96,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		const version = document.version;
 		const source = document.getText();
 		const notes = (await notesOn(file)).filter(({ note }) => note.dismissed !== true);
-		const landed: { "note": Note; "owner": string; "resolved": Resolved }[] = [];
-
-		for (const { note, owner } of notes) {
-			const resolved = await vscode.commands.executeCommand<Resolved | undefined>("editor.annotations.resolve", source, file, note.ref).then((answer) => answer ?? { "status": "orphaned" as const, "alternatives": [] }, () => ({ "status": "orphaned" as const, "alternatives": [] }));
-
-			landed.push({ "note": note, "owner": owner, "resolved": resolved });
-		}
+		const resolutions = notes.length === 0 ? [] : await vscode.commands.executeCommand<Resolved[] | undefined>("editor.annotations.resolve", source, file, notes.map(({ note }) => note.ref)).then((answer) => answer, () => undefined);
+		const landed = notes.map(({ note, owner }, index) => ({ "note": note, "owner": owner, "resolved": resolutions?.[index] ?? { "status": "orphaned" as const, "alternatives": [] } }));
 
 		if (document.version !== version) {
 			return; // edited while resolving: a newer look follows
@@ -201,7 +196,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 
 			const file = relative(editor.document.uri);
-			const ref = await vscode.commands.executeCommand<SpanRef | undefined>("editor.annotations.refer", editor.document.getText(), file, { "start": editor.document.offsetAt(editor.selection.start), "end": editor.document.offsetAt(editor.selection.end) });
+			const [ref] = await vscode.commands.executeCommand<(SpanRef | undefined)[]>("editor.annotations.refer", editor.document.getText(), file, [{ "start": editor.document.offsetAt(editor.selection.start), "end": editor.document.offsetAt(editor.selection.end) }]);
 
 			if (ref === undefined) {
 				void vscode.window.showInformationMessage("A note needs BABLR to understand this file, and it can't parse it yet.");
@@ -253,7 +248,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 
 			const file = relative(editor.document.uri);
-			const ref = await vscode.commands.executeCommand<SpanRef | undefined>("editor.annotations.refer", editor.document.getText(), file, { "start": editor.document.offsetAt(editor.selection.start), "end": editor.document.offsetAt(editor.selection.end) });
+			const [ref] = await vscode.commands.executeCommand<(SpanRef | undefined)[]>("editor.annotations.refer", editor.document.getText(), file, [{ "start": editor.document.offsetAt(editor.selection.start), "end": editor.document.offsetAt(editor.selection.end) }]);
 
 			if (ref !== undefined) {
 				const { note } = pending;

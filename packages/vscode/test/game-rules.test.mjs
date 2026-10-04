@@ -5,15 +5,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import ts from "typescript";
 import { pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
+import { referTo } from "@brianjenkins94/util/silo/annotations";
 import { anchorGame } from "../extensions/event-sheet/anchors.ts";
 import { compileGame, exampleBehaviors, exampleRules, fly } from "../extensions/event-sheet/rules.ts";
 import { recognizeGame } from "../extensions/event-sheet/recognizer.ts";
 
-/** BABLR's anchors for ranges of a text — what the editor's `editor.bablr.anchors` answers, here straight from BABLR. */
-const anchorsOf = async (source, ranges) => {
-	const anchors = spanAnchors(source);
+/** A reference to the span standing for each range of a text — what the editor's `editor.annotations.refer` answers,
+ *  here straight from BABLR and silo (tokens left out of the shapes: these tests look at the ids). */
+const referOf = async (source, file, ranges) => {
+	const shapes = spanAnchors(source).filter((span) => span.type !== null).map((span) => ({ ...span, "atoms": [] }));
 
-	return ranges.map((range) => pickAnchor(anchors, range.start, range.end));
+	return ranges.map((range) => {
+		const id = pickAnchor(shapes, range.start, range.end);
+
+		return id === undefined ? undefined : referTo(shapes, id, file);
+	});
 };
 
 // Minimal schemas + an entity config, so behaviors and objects recognize alongside the compiled rules.
@@ -127,21 +133,21 @@ test("arcade: continuous movement compiles to deterministic fixed-point code, no
 
 test("composed behaviors get durable anchors (the library keeps its identity across edits)", async () => {
 	const files = { ...SCHEMAS, ...GAME, ...compileGame(exampleRules, exampleBehaviors) };
-	const model = await anchorGame(files, recognizeGame(files, ts), anchorsOf);
+	const model = await anchorGame(files, recognizeGame(files, ts), referOf);
 
 	const push = model.composites.find((composite) => composite.name === "gridPush");
 
-	assert.ok(typeof push?.anchor === "string" && push.anchor.length > 0, "the composite carries a durable anchor id");
+	assert.ok(typeof push?.ref?.span === "string" && push.ref?.span.length > 0, "the composite carries a durable anchor id");
 
 	// Its id is its own — not shared with the rules that compose it.
-	const ruleAnchors = model.rules.map((rule) => rule.anchor).filter((anchor) => anchor !== undefined);
+	const ruleAnchors = model.rules.map((rule) => rule.ref?.span).filter((anchor) => anchor !== undefined);
 
-	assert.ok(!ruleAnchors.includes(push.anchor), "the composite's anchor is distinct from the rules'");
+	assert.ok(!ruleAnchors.includes(push.ref?.span), "the composite's anchor is distinct from the rules'");
 
 	// A cosmetic edit ABOVE the behavior (a new comment line) must not change its anchor — that is the point of anchoring.
 	const shifted = { ...files, "behaviors/gridPush.ts": "// a new comment above\n" + files["behaviors/gridPush.ts"] };
-	const reanchored = await anchorGame(shifted, recognizeGame(shifted, ts), anchorsOf);
+	const reanchored = await anchorGame(shifted, recognizeGame(shifted, ts), referOf);
 	const pushAgain = reanchored.composites.find((composite) => composite.name === "gridPush");
 
-	assert.equal(pushAgain?.anchor, push.anchor, "the anchor survives an edit above it (move-stable)");
+	assert.equal(pushAgain?.ref?.span, push.ref?.span, "the anchor survives an edit above it (move-stable)");
 });

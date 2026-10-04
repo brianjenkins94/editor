@@ -5,8 +5,9 @@
  * TWO tools, each for its strength:
  *  - RECOGNITION (structure: "is this a component / a query / an entity config?") uses the TYPESCRIPT AST — fast, robust
  *    on real-world TS, and type-aware if run inside tsserver. That's THIS module.
- *  - ANCHORING (durable identity: "which node is this, so its attachment survives edits/moves?") uses BABLR spanAnchors,
- *    mapped to a recognized node's source range by offset. That's added at the wiring step, not here.
+ *  - ANCHORING (durable identity: "which node is this, so its attachment survives edits/moves?") uses a reference to
+ *    the BABLR span standing for a recognized node's source range (SPAN-ANNOTATIONS.md). That's added at the wiring
+ *    step (anchors.ts), not here.
  *
  * IMPORTANT — the `ts` is INJECTED, never imported: the editor already runs one TypeScript (the externalized tsserver
  * instance the capabilities plugin reuses). Importing `typescript` here would bundle a second ~16MB copy into the
@@ -18,19 +19,21 @@
  * force multiplier. Pure + cross-file: it takes the whole game's `{ path → source }` so usage in one file confirms a
  * behavior defined in another.
  */
+import type { SpanRef } from "@brianjenkins94/util/silo/annotations";
 import type * as TS from "typescript";
 
 /** The injected TypeScript API (the editor's own instance, or node's in tests). */
 export type TsApi = typeof TS;
 
 /** Source location of a recognized node in its file: 1-based deep-link line + char offsets (for anchoring / reverse-map).
- *  `anchor` is the durable content-addressed id, attached later by anchorGame (game-anchors.ts). */
+ *  `ref` is the durable reference to its span — what anything attached to the node keeps — added by anchorGame
+ *  (anchors.ts). */
 export interface NodeLoc {
 	"defPath": string;
 	"defLine": number;
 	"start": number;
 	"end": number;
-	"anchor"?: string;
+	"ref"?: SpanRef;
 }
 
 /** A behavior = an exported ECS component, presented without the bitECS wiring. */

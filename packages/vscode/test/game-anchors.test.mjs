@@ -8,6 +8,7 @@ import test from "node:test";
 import * as url from "node:url";
 import ts from "typescript";
 import { pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
+import { referTo } from "@brianjenkins94/util/silo/annotations";
 import { anchorGame } from "../extensions/event-sheet/anchors.ts";
 import { recognizeGame } from "../extensions/event-sheet/recognizer.ts";
 
@@ -27,31 +28,37 @@ function readGame(dir, base = dir, out = {}) {
 	return out;
 }
 
-/** BABLR's anchors for ranges of a text — what the editor's `editor.bablr.anchors` answers, here straight from BABLR. */
-const anchorsOf = async (source, ranges) => {
-	const anchors = spanAnchors(source);
+/** A reference to the span standing for each range of a text — what the editor's `editor.annotations.refer` answers,
+ *  here straight from BABLR and silo (tokens left out of the shapes: these tests look at the ids). */
+const referOf = async (source, file, ranges) => {
+	const shapes = spanAnchors(source).filter((span) => span.type !== null).map((span) => ({ ...span, "atoms": [] }));
 
-	return ranges.map((range) => pickAnchor(anchors, range.start, range.end));
+	return ranges.map((range) => {
+		const id = pickAnchor(shapes, range.start, range.end);
+
+		return id === undefined ? undefined : referTo(shapes, id, file);
+	});
 };
 
 /** Project + anchor, and return the anchor id for a named behavior. */
 async function behaviorAnchor(files, name) {
-	const model = await anchorGame(files, recognizeGame(files, ts), anchorsOf);
+	const model = await anchorGame(files, recognizeGame(files, ts), referOf);
 
-	return model.behaviors.find((behavior) => behavior.name === name)?.anchor;
+	return model.behaviors.find((behavior) => behavior.name === name)?.ref?.span;
 }
 
 test("every recognized node gets an anchor, and the five behaviors' anchors are distinct", async () => {
 	const files = readGame(fixtureDir);
-	const model = await anchorGame(files, recognizeGame(files, ts), anchorsOf);
+	const model = await anchorGame(files, recognizeGame(files, ts), referOf);
 
 	for (const node of [...model.behaviors, ...model.objects, ...model.rules, ...model.rules.flatMap((rule) => rule.rows)]) {
-		assert.equal(typeof node.anchor, "string", (node.name ?? node.event) + " has an anchor");
+		assert.equal(typeof node.ref?.span, "string", (node.name ?? node.event) + " has an anchor");
+		assert.equal(node.ref.file, node.defPath, "a reference names its file");
 	}
 
 	// The three tags are all `export const X: number[] = []` — identical initializers. Distinct anchors proves we anchor
 	// on the declaration (name included), not the shared empty array.
-	const anchors = model.behaviors.map((behavior) => behavior.anchor);
+	const anchors = model.behaviors.map((behavior) => behavior.ref?.span);
 
 	assert.equal(new Set(anchors).size, anchors.length, "behavior anchors are unique");
 });

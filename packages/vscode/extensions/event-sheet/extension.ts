@@ -6,6 +6,7 @@
  * its own (recognizer-worker.ts) so parsing doesn't hold up the extension host — anchoring what it recognizes with the
  * editor's BABLR (anchors.ts).
  */
+import type { SpanRef } from "@brianjenkins94/util/silo/annotations";
 import type { EventSheetHost, HostMessage, ViewMessage } from "./view";
 import type { GameModel } from "./recognizer";
 import * as vscode from "vscode";
@@ -55,7 +56,7 @@ async function gameFiles(root: string): Promise<Record<string, string>> {
 }
 
 /** The recognizer, in its worker: started on first use (it says when it's ready), asked by id. */
-function recognizer(context: vscode.ExtensionContext): { "project": (files: Record<string, string>) => Promise<GameModel>; "dispose": () => void } {
+function recognizer(context: vscode.ExtensionContext): { "project": (root: string, files: Record<string, string>) => Promise<GameModel>; "dispose": () => void } {
 	let worker: { "worker": Worker; "ready": Promise<void> } | undefined;
 	let next = 0;
 	const pending = new Map<number, { "resolve": (model: GameModel) => void; "reject": (error: Error) => void }>();
@@ -109,7 +110,7 @@ function recognizer(context: vscode.ExtensionContext): { "project": (files: Reco
 	};
 
 	return {
-		"project": async (files) => {
+		"project": async (root, files) => {
 			worker ??= start();
 
 			const current = worker;
@@ -122,9 +123,9 @@ function recognizer(context: vscode.ExtensionContext): { "project": (files: Reco
 				current.worker.postMessage({ "id": next, "files": files });
 			});
 
-			// Durable anchors, from the editor's BABLR (one worker, one cache of parses): worker-pod's command. Without it
-			// (VS Code without the editor), the nodes go unanchored.
-			return anchorGame(files, model, async (source, ranges) => vscode.commands.executeCommand<(string | null)[] | undefined>("editor.bablr.anchors", source, ranges));
+			// Durable span references, from the editor's BABLR (one worker, one cache of parses): worker-pod's command,
+			// each file named as the workspace does. Without it (VS Code without the editor), the nodes go unanchored.
+			return anchorGame(files, model, async (source, path, ranges) => vscode.commands.executeCommand<(SpanRef | undefined)[]>("editor.annotations.refer", source, vscode.workspace.asRelativePath(vscode.Uri.file(root + "/" + path), false), ranges));
 		},
 		"dispose": () => { worker?.worker.terminate(); }
 	};

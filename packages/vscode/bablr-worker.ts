@@ -11,8 +11,8 @@
  * every span of a source, from its cached parse (below); and `bablr.pick`, the span standing for each of a text's
  * ranges, from its spans (the runtime evidence's span ids for a run's statements); and `bablr.follow`, where a span of
  * one version of a text went in another (a span annotation re-placed from its baseline, SPAN-ANNOTATIONS.md); and for
- * annotations themselves, `bablr.refer` (a reference to the span standing for a range) and `bablr.resolve` (where a
- * reference's span is in a text now — silo's resolver, over the text's span shapes).
+ * annotations themselves, `bablr.refer` (references to the spans standing for ranges) and `bablr.resolve` (where
+ * references' spans are in a text now — silo's resolver, over the text's span shapes).
  * YIELDING + ABORT: the derivation paces the BABLR VM (yields as it parses), so a cancelled call's signal lands
  * mid-parse and the run bails cooperatively, no worker termination. bablr.ts drives one call at a time.
  */
@@ -20,7 +20,7 @@ import "./bablr-fast-freeze"; // MUST be first: neutralizes record freezing befo
 import { atomsOf, cstSpansAsync, deriveIdentityAsync, editGroups, follow, PARSE_VERSION, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import { serve } from "@brianjenkins94/hub";
 import type { SpanRef, SpanShape } from "@brianjenkins94/util/silo/annotations";
-import { referTo, resolve } from "@brianjenkins94/util/silo/annotations";
+import { OBSERVED, PIPELINE, referTo, resolve } from "@brianjenkins94/util/silo/annotations";
 
 import { createWorkerHub } from "./worker-hub";
 
@@ -312,45 +312,61 @@ function shapesOf(source: string, cst: Cst): SpanShape[] {
 	});
 }
 
-// A text, a range in it, and the file's name ⇒ a reference to the span standing for the range (its id, shape and
+// A text, ranges in it, and the file's name ⇒ a reference to the span standing for each range (its id, shape and
 // neighbours, and the text's blob oid as its baseline) — what an annotation keeps. Nothing when BABLR can't parse it.
 serve(hub, "bablr.refer", async (args, { signal }) => {
-	const { source, start, end, file } = args as { "source": string; "start": number; "end": number; "file": string };
-	const cst = await parse(source, signal);
+	const { source, ranges, file } = args as { "source": string; "ranges": { "start": number; "end": number }[]; "file": string };
+	const cst = source === "" ? undefined : await parse(source, signal);
 
 	if (cst === undefined) {
 		return {};
 	}
 
 	const shapes = shapesOf(source, cst);
-	const id = pickAnchor(shapes, start, end);
+	const blob = await blobOid(source);
 
-	return id === undefined ? {} : { "ref": referTo(shapes, id, file, await blobOid(source)) };
+	return { "refs": ranges.map((range) => {
+		const id = pickAnchor(shapes, range.start, range.end);
+
+		return (id === undefined ? undefined : referTo(shapes, id, file, blob)) ?? null;
+	}) };
 });
 
-// A reference, the text its file has now (and its baseline's text, when the caller could get it) ⇒ where its span is:
-// silo's resolver, with the structural diff from the baseline as its re-identified strategy — and, when it's found,
-// the reference as it would be made here now (for an annotation to be rewritten with).
+// References, the text their file has now (and their baselines' texts, by blob oid, when the caller could get them) ⇒
+// where each one's span is: silo's resolver — the authored pipeline, with the structural diff from a baseline as its
+// re-identified strategy, or the observed one (the id alone) — and, for one found anywhere but by its own id, the
+// reference as it would be made here now (for an annotation to be rewritten with).
 serve(hub, "bablr.resolve", async (args, { signal }) => {
-	const { source, file, ref, baseline } = args as { "source": string; "file": string; "ref": SpanRef; "baseline"?: string };
-	const cst = await parse(source, signal);
+	const { source, file, refs, baselines = {}, observed = false } = args as { "source": string; "file": string; "refs": SpanRef[]; "baselines"?: Record<string, string>; "observed"?: boolean };
+	const cst = source === "" ? undefined : await parse(source, signal);
 
 	if (cst === undefined) {
-		return { "status": "orphaned", "alternatives": [] };
+		return { "resolutions": refs.map(() => ({ "status": "orphaned", "alternatives": [] })) };
 	}
 
 	const shapes = shapesOf(source, cst);
-	let reidentified: { "id": string; "how": "kept" | "replaced" } | undefined;
+	const ids = new Set(shapes.map((shape) => shape.id));
+	const anchors = spanAnchors(source, "Program", cst);
+	const blob = await blobOid(source);
+	const resolutions = [];
 
-	if (baseline !== undefined && !shapes.some((shape) => shape.id === ref.span)) {
-		const was = await parse(baseline, signal);
-		const index = was === undefined ? -1 : spanAnchors(baseline, "Program", was).findIndex((anchor) => anchor.id === ref.span);
-		const found = was === undefined || index === -1 ? undefined : follow(atomsOf(baseline, was), atomsOf(source, cst), index);
+	for (const ref of refs) {
+		let reidentified: { "id": string; "how": "kept" | "replaced" } | undefined;
+		const baseline = ref.baseline === undefined ? undefined : baselines[ref.baseline.blob];
 
-		reidentified = found === undefined ? undefined : { "id": spanAnchors(source, "Program", cst)[found.to].id, "how": found.how };
+		if (!observed && baseline !== undefined && !ids.has(ref.span)) {
+			const was = await parse(baseline, signal);
+			const index = was === undefined ? -1 : spanAnchors(baseline, "Program", was).findIndex((anchor) => anchor.id === ref.span);
+			const found = was === undefined || index === -1 ? undefined : follow(atomsOf(baseline, was), atomsOf(source, cst), index);
+
+			reidentified = found === undefined ? undefined : { "id": anchors[found.to].id, "how": found.how };
+		}
+
+		const resolution = resolve(ref, { "file": file, "shapes": shapes, ...reidentified === undefined ? {} : { "reidentified": reidentified } }, observed ? OBSERVED : PIPELINE);
+		const moved = resolution.candidate !== undefined && resolution.status !== "attached";
+
+		resolutions.push({ ...resolution, ...moved ? { "ref": referTo(shapes, resolution.candidate!.span, file, blob) } : {} });
 	}
 
-	const resolution = resolve(ref, { "file": file, "shapes": shapes, ...reidentified === undefined ? {} : { "reidentified": reidentified } });
-
-	return { ...resolution, ...resolution.candidate === undefined ? {} : { "ref": referTo(shapes, resolution.candidate.span, file, await blobOid(source)) } };
+	return { "resolutions": resolutions };
 });

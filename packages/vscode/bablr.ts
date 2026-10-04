@@ -5,8 +5,10 @@
  * starts from that.
  *
  * Its callers: the cosmetic classifier (verdicts, edit groups), the runtime evidence (evidence.ts: span ids for a run's
- * statements), and — over the hub, `spans.of` — the pod's `editor.bablr.spans` command, for extensions (the insights
- * extension's evidence marks). One worker for now; if BABLR's cost outgrows it, a pool goes here, behind `request`.
+ * statements), and — over the hub, `annotations.refer` and `annotations.resolve` — the pod's `editor.annotations.*`
+ * commands, for extensions: everything they attach to code (notes, the insights extension's evidence marks, the event
+ * sheet's anchors) refers to its span, and finds it again, the one way SPAN-ANNOTATIONS.md sets out. One worker for now;
+ * if BABLR's cost outgrows it, a pool goes here, behind `request`.
  *
  * ABORT: the worker yields between parse chunks, so a cancelled call's signal reaches it mid-run and it bails
  * cooperatively (the worker stays warm); a still-queued call is dropped unsent. A worker that fails to load, or dies,
@@ -22,6 +24,9 @@ import { blobText } from "./git-engine";
 /** One span of a text: its spanAnchors id and offsets (punctuation left out — it's never a handle). */
 export interface Span { "id": string; "start": number; "end": number }
 
+/** Where a reference's span is, and the reference as it would be made there now (when found other than by its id). */
+export type Resolved = Resolution & { "ref"?: SpanRef };
+
 export interface Bablr {
 	/** Ask the worker for `bablr.<name>` (bablr-worker.ts), after whatever was asked before. No timeout: the first call
 	 *  waits out the worker's (large) bundle loading, and a parse takes what it takes; `signal` and a dead worker end it. */
@@ -31,11 +36,13 @@ export interface Bablr {
 	/** Where span `span` of `baseline` went in `current`, by the structural diff: the same node (`kept`) or the one that
 	 *  replaced it — or undefined, gone. How a span annotation is re-placed from its baseline (SPAN-ANNOTATIONS.md). */
 	"follow": (baseline: string, current: string, span: string) => Promise<{ "id": string; "how": "kept" | "replaced" } | undefined>;
-	/** A reference to the span standing for `range` in `source`, the text of `file` — what an annotation keeps. */
-	"refer": (source: string, file: string, range: { "start": number; "end": number }) => Promise<SpanRef | undefined>;
-	/** Where `ref`'s span is in `source`, the text its file has now (SPAN-ANNOTATIONS.md) — and the reference as it would
-	 *  be made there now, when it's found. Its baseline, from git's objects, re-identifies it when its id is gone. */
-	"resolve": (source: string, file: string, ref: SpanRef) => Promise<Resolution & { "ref"?: SpanRef }>;
+	/** A reference to the span standing for each of `ranges` in `source`, the text of `file` — what an annotation keeps;
+	 *  undefined for one BABLR can't place, all of them when it can't parse the text. */
+	"refer": (source: string, file: string, ranges: { "start": number; "end": number }[]) => Promise<(SpanRef | undefined)[]>;
+	/** Where each of `refs`' spans is in `source`, the text their file has now (SPAN-ANNOTATIONS.md) — and the reference
+	 *  as it would be made there now, for one found other than by its own id. An authored annotation's baseline, from
+	 *  git's objects, re-identifies it when its id is gone; an `observed` one is looked for by its id alone. */
+	"resolve": (source: string, file: string, refs: SpanRef[], observed?: boolean) => Promise<Resolved[]>;
 	/** The span id standing for each of `ranges` in `source` (bablr-language-ts's pickAnchor), from its cached spans. */
 	"anchors": (source: string, ranges: { "start": number; "end": number }[]) => Promise<(string | undefined)[] | undefined>;
 	"dispose": () => void;
@@ -97,65 +104,70 @@ export function startBablr(hub: Hub): Bablr {
 		return ids.map((id) => id ?? undefined);
 	};
 
-	const refer = async (source: string, file: string, range: { "start": number; "end": number }): Promise<SpanRef | undefined> => (await request<{ "ref"?: SpanRef }>("refer", { "source": source, "file": file, "start": range.start, "end": range.end })).ref;
-	const resolveRef = async (source: string, file: string, ref: SpanRef): Promise<Resolution & { "ref"?: SpanRef }> => {
-		const first = await request<Resolution & { "ref"?: SpanRef }>("resolve", { "source": source, "file": file, "ref": ref });
+	const refer = async (source: string, file: string, ranges: { "start": number; "end": number }[]): Promise<(SpanRef | undefined)[]> => {
+		const { refs } = await request<{ "refs"?: (SpanRef | null)[] }>("refer", { "source": source, "file": file, "ranges": ranges });
 
-		// Its own id found it, or there's no baseline to follow it from: that's the answer. Otherwise follow it from the
-		// baseline — when git has it (code that was committed).
-		if (first.status === "attached" || ref.baseline === undefined) {
+		return ranges.map((_, index) => refs?.[index] ?? undefined);
+	};
+	const resolveRefs = async (source: string, file: string, refs: SpanRef[], observed = false): Promise<Resolved[]> => {
+		const first = (await request<{ "resolutions": Resolved[] }>("resolve", { "source": source, "file": file, "refs": refs, "observed": observed })).resolutions;
+		// An authored one its own id didn't find is followed from its baseline — when git has it (code that was committed).
+		const lost = observed ? [] : refs.map((ref, index) => ({ "ref": ref, "index": index })).filter(({ ref, index }) => first[index].status !== "attached" && ref.baseline !== undefined);
+
+		if (lost.length === 0) {
 			return first;
 		}
 
-		const baseline = await blobText(ref.baseline.blob);
+		const baselines: Record<string, string> = {};
 
-		return baseline === undefined ? first : request("resolve", { "source": source, "file": file, "ref": ref, "baseline": baseline });
+		for (const blob of new Set(lost.map(({ ref }) => ref.baseline!.blob))) {
+			const text = await blobText(blob);
+
+			if (text !== undefined) {
+				baselines[blob] = text;
+			}
+		}
+
+		const followed = lost.filter(({ ref }) => baselines[ref.baseline!.blob] !== undefined);
+
+		if (followed.length === 0) {
+			return first;
+		}
+
+		const again = (await request<{ "resolutions": Resolved[] }>("resolve", { "source": source, "file": file, "refs": followed.map(({ ref }) => ref), "baselines": baselines })).resolutions;
+
+		followed.forEach(({ index }, at) => { first[index] = again[at]; });
+
+		return first;
 	};
-	// The pod's `editor.annotations.refer` and `editor.annotations.resolve` (for extensions: the notes) ask here.
-	const offAnnotations = [
+	// The pod's `editor.annotations.refer` and `editor.annotations.resolve` (for extensions) ask here, so they share the
+	// worker and its cache.
+	const offServe = [
 		serve(hub, "annotations.refer", async (args) => {
-			const { source, file, start, end } = (args ?? {}) as { "source"?: unknown; "file"?: unknown; "start"?: unknown; "end"?: unknown };
+			const { source, file, ranges } = (args ?? {}) as { "source"?: unknown; "file"?: unknown; "ranges"?: unknown };
 
-			return typeof source === "string" && typeof file === "string" && typeof start === "number" && typeof end === "number" ? { "ref": await refer(source, file, { "start": start, "end": end }) } : {};
+			return typeof source === "string" && typeof file === "string" && Array.isArray(ranges) ? { "refs": (await refer(source, file, ranges as { "start": number; "end": number }[])).map((ref) => ref ?? null) } : {};
 		}),
 		serve(hub, "annotations.resolve", async (args) => {
-			const { source, file, ref } = (args ?? {}) as { "source"?: unknown; "file"?: unknown; "ref"?: SpanRef };
+			const { source, file, refs, observed } = (args ?? {}) as { "source"?: unknown; "file"?: unknown; "refs"?: unknown; "observed"?: unknown };
 
-			return typeof source === "string" && typeof file === "string" && ref !== undefined ? resolveRef(source, file, ref) : { "status": "orphaned", "alternatives": [] };
+			return typeof source === "string" && typeof file === "string" && Array.isArray(refs) ? { "resolutions": await resolveRefs(source, file, refs as SpanRef[], observed === true) } : {};
 		})
 	];
-
-	// The pod's `editor.bablr.spans` and `editor.bablr.anchors` (for extensions) ask here, so they share the worker and
-	// its cache: a text's spans, or — given ranges — the span standing for each.
-	const offServe = serve(hub, "spans.of", async (args, { signal }) => {
-		const { source, ranges } = (args ?? {}) as { "source"?: unknown; "ranges"?: unknown };
-
-		if (typeof source !== "string") {
-			return {};
-		}
-
-		if (Array.isArray(ranges)) {
-			return { "ids": (await anchors(source, ranges as { "start": number; "end": number }[]))?.map((id) => id ?? null) };
-		}
-
-		return { "spans": await spans(source, signal) };
-	});
 
 	return {
 		"request": request,
 		"spans": spans,
 		"anchors": anchors,
 		"refer": refer,
-		"resolve": resolveRef,
+		"resolve": resolveRefs,
 		"follow": async (baseline, current, span) => {
 			const found = await request<{ "id"?: string; "how"?: "kept" | "replaced" }>("follow", { "baseline": baseline, "current": current, "span": span });
 
 			return found.id === undefined || found.how === undefined ? undefined : { "id": found.id, "how": found.how };
 		},
 		"dispose": () => {
-			offServe();
-
-			for (const off of offAnnotations) {
+			for (const off of offServe) {
 				off();
 			}
 

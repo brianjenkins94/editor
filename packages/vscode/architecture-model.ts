@@ -246,9 +246,8 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"], "description": "Network/IO capability decisions, served by the pod." },
 	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"], "description": "Ask the user about a capability, served by the shell." },
 	// ── workers ──
-	{ "pattern": "bablr.>", "from": ["workbench"], "to": ["bablr"], "description": "What bablr.ts asks its BABLR worker for: cosmetic/semantic verdicts, edit-burst grouping (cancellable), a text's spans, and the span standing for each of its ranges (a run's evidence)." },
-	{ "pattern": "annotations.>", "from": ["pod"], "to": ["workbench"], "description": "Durable annotations on code spans (SPAN-ANNOTATIONS.md), from core's BABLR: a reference to a range's span, and where a reference's span is now — the pod's editor.annotations.* commands, for the notes extension." },
-	{ "pattern": "spans.of", "from": ["pod"], "to": ["workbench"], "description": "A text's BABLR spans — or, given ranges, the span standing for each — from core's BABLR (bablr.ts): the pod's editor.bablr.spans and editor.bablr.anchors commands, for extensions (the insights extension's evidence marks, the event sheet's anchors)." }
+	{ "pattern": "bablr.>", "from": ["workbench"], "to": ["bablr"], "description": "What bablr.ts asks its BABLR worker for: cosmetic/semantic verdicts, edit-burst grouping (cancellable), a text's spans, the span standing for each of its ranges (a run's evidence), where a span went between two versions of a text, and references to spans and where they are now (annotations)." },
+	{ "pattern": "annotations.>", "from": ["pod"], "to": ["workbench"], "description": "Durable annotations on code spans (SPAN-ANNOTATIONS.md), from core's BABLR (bablr.ts): references to ranges' spans, and where references' spans are now — the pod's editor.annotations.* commands, for extensions (the notes, the insights extension's evidence marks, the event sheet's anchors)." }
 ];
 
 export const channels: ChannelSpec[] = [

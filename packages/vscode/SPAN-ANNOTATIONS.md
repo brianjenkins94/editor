@@ -7,10 +7,11 @@ case where it can't find its place: the user re-places it or dismisses it.
 ## What exists
 
 - **Runtime evidence** (`.silo/evidence/`, RUNTIME-EVIDENCE.md) keys each observation on a BABLR `spanAnchors` id.
-  On read, the insights extension finds the id among the current text's spans; a miss is simply not shown, and the
-  observation fades away over later runs.
-- **The event sheet** anchors each recognized part with a `spanAnchors` id (`editor.bablr.anchors`), recomputed on
-  every projection; nothing is persisted yet.
+  On read, the insights extension finds each id in the current text through the resolver's observed pipeline; a miss
+  is simply not shown, and the observation fades away over later runs.
+- **The event sheet** gives each recognized part a span reference (`editor.annotations.refer`), recomputed on every
+  projection — what anything attached to a part will keep; nothing is persisted yet.
+- **Notes** (extensions/notes), the first authored kind.
 - **Inline comment notes** were built on the same ids and removed on 2026-09-17 (`49ce737`): "no reason for multiple
   annotation types". This standard is that one type.
 
@@ -104,8 +105,10 @@ line, folded the same way. Collections may partition further (evidence adds an e
 
 - **silo** (`lib/util/silo`): the span reference and annotation line types, the fold with tombstones, the strategies
   that need only spans' shapes (1, 2, 4), the policy, and the resolver that runs a pipeline under a policy — all pure.
-- **The editor's BABLR** (bablr.ts, the worker): spans of a text with their shapes and neighbours, anchors for ranges,
-  and re-identification from a baseline (strategy 3), all from its cached parses.
+- **The editor's BABLR** (bablr.ts, the worker): spans of a text with their shapes and neighbours, references for
+  ranges, and re-identification from a baseline (strategy 3), all from its cached parses. Extensions reach it through
+  two commands, both batched — one call a file: `editor.annotations.refer(text, file, ranges)` and
+  `editor.annotations.resolve(text, file, refs, { observed })`.
 - **Editor core**: baseline contents from git's objects.
 - **The insights extension**: what you see, including orphans and their two actions.
 
@@ -136,7 +139,9 @@ Decided 2026-10-04: every one as recommended (the **bold** option).
    strategy (a span found in another file) waits for an index of every file's spans, so a note whose code moved to
    another file is asked about for now.
 4. **The rest move onto it**: the event sheet's anchors and the runtime evidence's span lookup use the same resolver
-   (evidence keeps steps 1–2 and fading).
+   (evidence keeps steps 1–2 and fading). Done: evidence resolves through silo's `OBSERVED` pipeline (same span, then
+   moved), each observation an `observedRef` (its id alone); the event sheet's parts carry a `SpanRef`; and the two
+   annotation commands replaced `editor.bablr.spans` and `editor.bablr.anchors`.
 
 Later: **a typed strategy** — the span's inferred type and the runtime values seen there (RUNTIME-EVIDENCE.md) as signals
 for a match the shape alone can't settle. It joins the pipeline as one more strategy; nothing else changes. How often
