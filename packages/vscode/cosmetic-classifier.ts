@@ -8,8 +8,8 @@
  * about git — the git service (git-service.ts) is merely a consumer.
  *
  * CACHING: a verdict is a pure, deterministic function of the (before, after) content pair, so it is READ-THROUGH
- * cached — an in-memory tier for the session, then an optional injected `VerdictStore` (git-engine's content-addressed
- * `.git/bablr/`, durable across reloads) — and BABLR (slow) runs only on a true miss. Both changes panes share this one
+ * cached — an in-memory tier for the session, then an optional injected `VerdictStore` (BABLR's cache, bablr.ts: keyed
+ * by blob oids in `.silo/local/bablr/verdicts/`, durable across reloads) — and BABLR (slow) runs only on a true miss. Both changes panes share this one
  * cache, so a file is classified once per content pair, not once per pane per refresh.
  *
  * TRANSPORT: the worker serves `bablr.verdict` / `bablr.editGroups` on its own hub, linked to the workbench hub (so the
@@ -25,7 +25,7 @@ export type ChangeKind = "cosmetic" | "semantic" | "unparsable";
 export interface VerdictEntry { "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[] }
 
 /**
- * Durable, content-addressed backing for the verdict cache (git-engine's `.git/bablr/`). Optional — without it the
+ * Durable, content-addressed backing for the verdict cache (bablr.ts's, in `.silo/local/bablr/verdicts/`). Optional — without it the
  * classifier still caches in memory for the session. Keyed by the two contents (the store hashes them, e.g. to git
  * blob oids), so a hit is provably the same inputs.
  */

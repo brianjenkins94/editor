@@ -246,7 +246,8 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"], "description": "Network/IO capability decisions, served by the pod." },
 	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"], "description": "Ask the user about a capability, served by the shell." },
 	// ── workers ──
-	{ "pattern": "bablr.>", "from": ["workbench", "pod"], "to": ["bablr"], "description": "Cosmetic/semantic verdicts, edit-burst grouping (cancellable), and BABLR's spans: the ids a run's evidence keys on (workbench), and an open text's, to show it (the pod's editor.bablr.spans, for the insights extension)." }
+	{ "pattern": "bablr.>", "from": ["workbench"], "to": ["bablr"], "description": "What bablr.ts asks its BABLR worker for: cosmetic/semantic verdicts, edit-burst grouping (cancellable), a text's spans, and the span standing for each of its ranges (a run's evidence)." },
+	{ "pattern": "spans.of", "from": ["pod"], "to": ["workbench"], "description": "A text's BABLR spans, from core's cache (bablr.ts) — the pod's editor.bablr.spans command, for extensions (the insights extension's evidence marks)." }
 ];
 
 export const channels: ChannelSpec[] = [

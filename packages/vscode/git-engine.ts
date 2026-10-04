@@ -213,55 +213,31 @@ export async function blobOid(content: string): Promise<string> {
 	return (await hashBlob({ "object": new TextEncoder().encode(content) })).oid;
 }
 
-/**
- * Content-addressed cache for a change's cosmetic/semantic VERDICT (+ its changed-node detail), keyed by the PAIR of
- * blob oids it derives from — the HEAD content and the working content. The verdict is a pure, deterministic function
- * of exactly those two contents, so the key is exact: a hit is provably the same inputs and BABLR (slow) is skipped; a
- * miss just recomputes. Flat under `.git/` (derivable, off the working tree), so identical edits dedup and a new edit
- * mints a new entry. This is the real reader the removed single-blob spanAnchors cache never had — the changes panes
- * ask for a verdict per modified file on every refresh, so all but the first derivation becomes free AND durable across
- * reloads. Storage only; the cosmetic classifier owns the read-through logic (in-memory tier + this).
- */
-const VERDICT_CACHE = DIR + "/.git/bablr";
-const verdictFile = async (before: string, after: string): Promise<string> =>
-	VERDICT_CACHE + "/" + (await blobOid(before)) + "_" + (await blobOid(after)) + ".json";
-
-/** The cached verdict payload for a (before, after) change, or null on a miss. */
-export async function readVerdict(before: string, after: string): Promise<unknown> {
-	try {
-		return JSON.parse(new TextDecoder().decode(await fs.promises.readFile(await verdictFile(before, after))));
-	} catch {
-		return null; // not cached (or unreadable)
-	}
-}
-
-/** Persist the verdict payload for a (before, after) change, keyed by the two contents' blob oids. */
-export async function writeVerdict(before: string, after: string, payload: unknown): Promise<void> {
-	await fs.promises.mkdir(VERDICT_CACHE, { "recursive": true });
-	await fs.promises.writeFile(await verdictFile(before, after), JSON.stringify(payload));
-}
+/** Where each file's edit history is kept: inside `.git`, off the working tree, local to this repo (and only what was
+ *  typed here — nothing it can be derived from, so not a cache). It used to be `.git/bablr-automerge/`, read as a fallback. */
+const EDIT_HISTORY = DIR + "/.git/edit-history";
+const OLD_EDIT_HISTORY = DIR + "/.git/bablr-automerge";
 
 /**
- * Persist a file's Automerge edit-history doc (the fine-grained local tier) under `.git/bablr-automerge/`, as the raw
- * `Automerge.save` binary. Same rationale as the `.bablr` sidecar: inside `.git`, off the working tree, local + per
- * session (zen-fs). The synced/shared version is the Keyhive milestone.
+ * Persist a file's Automerge edit-history doc (the fine-grained local tier) under `.git/edit-history/`, as the raw
+ * `Automerge.save` binary. The synced/shared version is the Keyhive milestone.
  */
 export async function writeAutomerge(path: string, bytes: Uint8Array): Promise<void> {
-	const dir = DIR + "/.git/bablr-automerge";
-
-	await fs.promises.mkdir(dir, { "recursive": true });
-	await fs.promises.writeFile(dir + "/" + encodeURIComponent(path) + ".bin", bytes);
+	await fs.promises.mkdir(EDIT_HISTORY, { "recursive": true });
+	await fs.promises.writeFile(EDIT_HISTORY + "/" + encodeURIComponent(path) + ".bin", bytes);
 }
 
 /** Read back a file's Automerge edit-history doc, or null if none has been recorded yet. */
 export async function readAutomerge(path: string): Promise<Uint8Array | null> {
-	try {
-		const data = await fs.promises.readFile(DIR + "/.git/bablr-automerge/" + encodeURIComponent(path) + ".bin");
+	for (const dir of [EDIT_HISTORY, OLD_EDIT_HISTORY]) {
+		try {
+			const data = await fs.promises.readFile(dir + "/" + encodeURIComponent(path) + ".bin");
 
-		return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-	} catch {
-		return null; // none yet
+			return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+		} catch { /* not here */ }
 	}
+
+	return null; // none yet
 }
 
 /** The HEAD version of a file, for quick-diff gutters + the diff view. "" when the repo is unborn or the file is

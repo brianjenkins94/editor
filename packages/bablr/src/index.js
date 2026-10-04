@@ -16,9 +16,8 @@ export { classifyChange, classifyChangeAsync } from "../../bablr-language-ts/lib
 export { nodeAtoms, reidentify, reidentifyFromSource, fileDiffIdentity, fileDiffIdentityAsync } from "../../bablr-language-ts/lib/identity";
 // Content-addressed, move-stable span ids (the durable anchor annotations attach to). See ../../bablr-language-ts/lib/anchors.
 export { spanAnchors } from "../../bablr-language-ts/lib/anchors";
-// The anchor that best stands for a range another parser found (TypeScript's statements, say): pickAnchor over a file's
-// anchors, anchorRanges for many ranges of one file.
-export { anchorRanges, pickAnchor } from "../../bablr-language-ts/lib/anchors";
+// The anchor that best stands for a range another parser found (TypeScript's statements, say), among a file's anchors.
+export { pickAnchor } from "../../bablr-language-ts/lib/anchors";
 // HEAD→working (or baseline→current) identity over a content chain + the "your edits" node-grouped chunks. No
 // commit-chain CDC (removed — see history-identity.ts / [[collab-identity-durability]]).
 export { deriveIdentityAsync, editGroups } from "../../bablr-language-ts/lib/history-identity";

@@ -158,14 +158,14 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			return; // BABLR has nothing to parse
 		}
 
-		const answer = await bablr.request<{ "ids"?: (string | null)[]; "unparsable"?: true }>("anchors", { "source": covered.source, "ranges": offsets(covered.source, covered.statements) });
+		const ids = await bablr.anchors(covered.source, offsets(covered.source, covered.statements));
 
-		if (answer.ids === undefined) {
+		if (ids === undefined) {
 			return; // BABLR's grammar doesn't take this file yet
 		}
 
 		const reached = covered.statements.flatMap((statement, index) => {
-			const span = answer.ids?.[index];
+			const span = ids[index];
 
 			return typeof span === "string" ? [{ "span": span, "count": statement.count }] : [];
 		});

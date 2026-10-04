@@ -41,7 +41,12 @@
 	// memory, every platform's optional native binaries included — `typescript@7` alone is 20 × ~35 MB `tsc` builds.
 	// ata.ts acquires just the type surface, into the workspace store, instead.
 	"js/ts.tsserver.web.typeAcquisition.enabled": false,
+	// What silo keeps on this machine — BABLR's cache, raw profiles — is thousands of derived files: not for browsing.
+	"files.exclude": {
+		"**/.silo/local": true
+	},
 	"search.exclude": {
+		"**/.silo/local": true,
 		"**/package-lock.json": true
 	},
 	"typescript.format.insertSpaceAfterFunctionKeywordForAnonymousFunctions": false,

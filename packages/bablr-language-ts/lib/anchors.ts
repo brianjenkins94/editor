@@ -102,11 +102,3 @@ export function pickAnchor(anchors: SpanAnchor[], start: number, end: number): s
 
 	return (inside ?? overlap)?.id;
 }
-
-/** The anchor id for each of `ranges` in `src` (pickAnchor), deriving the file's anchors once. Throws when BABLR can't
- *  parse `src` (or it's empty). */
-export function anchorRanges(src: string, ranges: { "start": number; "end": number }[]): (string | undefined)[] {
-	const anchors = spanAnchors(src);
-
-	return ranges.map((range) => pickAnchor(anchors, range.start, range.end));
-}

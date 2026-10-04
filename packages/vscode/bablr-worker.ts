@@ -7,15 +7,14 @@
  * changed and the working lines they land on, so the diff pane can focus per node. `editGroups` decomposes an
  * edit-burst chain into node-grouped chunks for the "your edits" timeline.
  *
- * Served over the hub: `bablr.verdict` and `bablr.editGroups` (cosmetic-classifier.ts); `bablr.anchors`, the
- * spanAnchors id of each of a source's ranges, for the runtime evidence (evidence.ts); and `bablr.spans`, every span of
- * a source, for showing that evidence on the text as it is now (the insights extension, through worker-pod's
- * `editor.bablr.spans` command).
+ * Served over the hub, to bablr.ts: `bablr.verdict` and `bablr.editGroups` (cosmetic-classifier.ts); `bablr.spans`,
+ * every span of a source (cached by bablr.ts); and `bablr.pick`, the span standing for each of a text's ranges, from its
+ * spans (the runtime evidence's span ids for a run's statements).
  * YIELDING + ABORT: the derivation paces the BABLR VM (yields as it parses), so a cancelled call's signal lands
  * mid-parse and the run bails cooperatively, no worker termination. bablr.ts drives one call at a time.
  */
 import "./bablr-fast-freeze"; // MUST be first: neutralizes record freezing before the BABLR bundle captures Object.freeze
-import { anchorRanges, deriveIdentityAsync, editGroups, spanAnchors } from "@brianjenkins94/bablr";
+import { deriveIdentityAsync, editGroups, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import { serve } from "@brianjenkins94/hub";
 
 import { createWorkerHub } from "./worker-hub";
@@ -53,23 +52,21 @@ serve(hub, "bablr.editGroups", async (args, { signal }) => {
 	}
 });
 
-// A source and ranges in it (TypeScript's statements, as a run's coverage gives them) ⇒ each range's spanAnchors id, or
-// `unparsable` when BABLR's grammar doesn't take the file (it covers the subset tsval runs, and grows).
-serve(hub, "bablr.anchors", (args) => {
-	const { source, ranges } = args as { "source": string; "ranges": { "start": number; "end": number }[] };
-
-	try {
-		return { "ids": anchorRanges(source, ranges).map((id) => id ?? null) };
-	} catch {
-		return { "unparsable": true };
-	}
-});
-
-// A source ⇒ every span of it that can be a handle (punctuation never is: pickAnchor skips it) — its id and offsets.
+// A source ⇒ every span of it that can be a handle (punctuation never is: pickAnchor skips it) — its id and offsets — or
+// `unparsable` when BABLR's grammar doesn't take it (it covers the subset tsval runs, and grows). bablr.ts caches it.
 serve(hub, "bablr.spans", (args) => {
 	try {
 		return { "spans": (spanAnchors((args as { "source": string }).source) as { "type": string | null; "start": number; "end": number; "id": string }[]).filter((span) => span.type !== null).map(({ id, start, end }) => ({ "id": id, "start": start, "end": end })) };
 	} catch {
 		return { "unparsable": true };
 	}
+});
+
+// A text's spans (bablr.spans, cached) and ranges in it — TypeScript's statements, as a run's coverage gives them ⇒ the
+// span standing for each range (pickAnchor). No parse: the spans are given.
+serve(hub, "bablr.pick", (args) => {
+	const { spans, ranges } = args as { "spans": { "id": string; "start": number; "end": number }[]; "ranges": { "start": number; "end": number }[] };
+	const handles = spans.map((span) => ({ ...span, "type": "" }));
+
+	return { "ids": ranges.map((range) => pickAnchor(handles, range.start, range.end) ?? null) };
 });

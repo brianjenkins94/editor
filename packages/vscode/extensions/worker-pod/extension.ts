@@ -176,15 +176,15 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	registerLaunch(context);
 	// VS Code's Source Control view, on core's git service (source-control.ts).
 	registerSourceControl(context);
-	// BABLR's spans of a text, from core's one BABLR worker (bablr-worker.ts), for extensions that show what's keyed on
-	// them — the insights extension's evidence. A command: what an extension can call. Undefined when BABLR's grammar
-	// doesn't take the text.
+	// BABLR's spans of a text, from core's BABLR (bablr.ts: cached by content, so an unchanged file is never parsed
+	// twice), for extensions that show what's keyed on them — the insights extension's evidence. A command: what an
+	// extension can call. Undefined when BABLR's grammar doesn't take the text.
 	context.subscriptions.push(vscode.commands.registerCommand("editor.bablr.spans", async (source: unknown) => {
 		if (typeof source !== "string" || source === "") {
 			return undefined;
 		}
 
-		const answer = await rpc.request("bablr.spans", { "source": source }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "spans"?: { "id": string; "start": number; "end": number }[] };
+		const answer = await rpc.request("spans.of", { "source": source }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "spans"?: { "id": string; "start": number; "end": number }[] };
 
 		return answer.spans;
 	}));
