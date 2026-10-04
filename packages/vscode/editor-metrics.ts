@@ -78,7 +78,7 @@ export function realmName(url: string, scope: string, workers = new Map<string, 
 		[/\/__vscode__\/host\.html$/u, "workbench"],
 		[/\/lsp\/server-host\.js$/u, "server-host"],
 		[/\/lsp\/node-worker\.js$/u, "node"],
-		[/\/lsp\/classify-worker\.js$/u, "classify"],
+		[/\/lsp\/bablr-worker\.js$/u, "bablr"],
 		[/\/lsp\/debug-worker\.js$/u, "debug-worker"],
 		[/webWorkerExtensionHostIframe/u, "exthost-iframe"],
 		[/\/debug-preview\.html$/u, "tsval-preview"]

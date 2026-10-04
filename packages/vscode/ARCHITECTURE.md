@@ -41,7 +41,7 @@ also works over desktop's built-in git.
 | **App iframe** (`/`) | `main.tsx` app branch, `coi.ts`, `vscode.tsx`, `samples.ts`, `pane-link.ts` | DOM, `rootHub`, COI bootstrap | Boots the workbench iframe (the preview windows live in the shell; this realm runs their backend — see below) and links it into `rootHub` over the retargeting pane-link transport; serves `project.list` + `workbench.init`, routes `project.open` → `openProject`. Owns the top of the hub tree. |
 | **Workbench iframe** (`/__vscode__/host.html`) | `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal.ts`, `node-runner.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()` (VS Code's full workbench lays itself out — its own activity bar, sashes, movable views and remembered layout, minus the menu bar and title bar, which the shell's chrome replaces), mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(the git engine and service live here too — legitimate browser parity for desktop's built-in git; VS Code's Source Control view on it is worker-pod's. The BABLR classifier welded into it is the part that should become a standalone extension.)* |
 | **Extension host** (`LocalProcess` / `LocalWebWorker`) | `extensions/*/extension.ts`, `extensions/*/ts-plugin.js` | the vscode API — **no DOM, no zen-fs singleton** | Extensions: `worker-pod` (the bridge: core's vscode API is its; spawns the LSP/debug/node workers; debug adapters, tasks, Source Control), `running` and `insights` and `event-sheet` (public API only). `eslint` + `capabilities` run in the WebWorker host *inside tsserver*, reusing tsserver's own `ts` as TS-plugins. |
-| **Workers** (`dist/lsp/*`, spawned from the workbench realm) | only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `classify-worker` (BABLR classify). (The event sheet's recognizer worker is its extension's own, spawned in the extension host.) |
+| **Workers** (`dist/lsp/*`, spawned from the workbench realm) | only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `bablr-worker` (the editor's BABLR: cosmetic verdicts, span ids for runtime evidence). (The event sheet's recognizer worker is its extension's own, spawned in the extension host.) |
 | **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (`cstSpans`, `classifyChange`), `tsval`, `util/silo` (incl. `silo/policy` — the shared policy model), and the vscode-package-local pure module `capability-breakpoints`. Built/aliased into the realms above. |
 
 There is also a **service worker** (`coi-serviceworker.js`, registered by `coi.ts`): one per origin, it stamps the
@@ -61,7 +61,7 @@ CDN `node_modules` overlay. Not a place you put feature code.
   dedicated `MessagePort` into one hub link; hub's `hello` handshake covers the lossy-window race the port guarded.)
 - **plain postMessage** — only where the hub can't or mustn't go: a protocol dictated by someone else (LSP to
   `server-host`), or a realm that must stay bare (the capability-gated eval sandbox). Every other worker — even a
-  single-purpose one like `classify-worker` — joins the tree with its own hub (`worker-hub.ts`) and `serve`s its
+  single-purpose one like `bablr-worker` — joins the tree with its own hub (`worker-hub.ts`) and `serve`s its
   methods: calls get timeouts, cancellation and worker-failure handling from the hub instead of a hand-rolled
   id→pending map, show up by name on the live architecture view, and can be called from anywhere in the tree.
 - **shared memory** — the workspace filesystem (below). No messages at all, so the live view observes it by wrapping
@@ -190,7 +190,7 @@ flowchart TB
   NW["node-worker<br/>almostnode / preview"]
   DW["debug-worker<br/>tsval stepping / time-travel"]
   SH["server-host<br/>LSP"]
-  CW["classify-worker<br/>BABLR classifyChange"]
+  CW["bablr-worker<br/>BABLR: verdicts, span ids"]
 
   PKG["packages/* engines — pure, bundled at build time<br/>@brianjenkins94/bablr · tsval · util/silo (silo/policy) · capability-breakpoints"]
 
@@ -253,7 +253,7 @@ flowchart LR
     subgraph workers["App workers"]
       node["Dev-server worker"]
       node_scripts["Script worker"]
-      classify["Classify worker"]
+      bablr["BABLR worker"]
       provoke["Provoke worker"]
     end
     subgraph podWorkers["Pod workers"]
@@ -300,7 +300,7 @@ flowchart LR
   workbench <==>|hub| pod
   workbench <==>|hub| node
   workbench <==>|hub| node_scripts
-  workbench <==>|hub| classify
+  workbench <==>|hub| bablr
   node <==>|hub| provoke
   pod <==>|hub| debug_worker
   pod <-.->|LSP (JSON-RPC)| worker_server_host
@@ -340,7 +340,7 @@ Ask, in order:
    tsserver's `ts`. *e.g. `capabilities`, `eslint`.* (A special case of rule 2 — it ships in an extension.)
 4. **Heavy or blocking** (parse, interpret, run node)? → a **worker**, async. Spawned by whoever owns it — the
    *extension* for extension functionality (portable), the workbench realm only for host-boot workers.
-   *e.g. `git-classify-worker` — BABLR is ~1.7s/file, it cannot run on the UI thread.*
+   *e.g. `bablr-worker` — BABLR is ~1.7s/file, it cannot run on the UI thread.*
 5. **Chrome / layout / cross-project / token custody?** → the **shell**.
 6. **Host-boot glue only** — things that only make sense for our monaco-vscode-api boot (the `boot()` call, mounting
    zen-fs, the terminal process factory, registering extensions)? → the **workbench realm** (`workbench-entry`). This
@@ -361,7 +361,7 @@ The cosmetic-diff feature is the running example — and its git/SCM stack shows
   with two faces: VS Code's Source Control view (worker-pod's `source-control.ts`, the bridge's crossing) and the
   shell's GitHub-Desktop review panel (`git-panel`). We do not ship SCM to desktop; desktop already has it.
   (`git-engine`'s direct `@zenfs/core` import is fine *here* — it's browser-only.)
-- `git-classify-worker.ts` + the cosmetic badge — the **novel** piece (rule 2): desktop has nothing like it. It is
+- `bablr-worker.ts` + the cosmetic badge — the **novel** piece (rule 2): desktop has nothing like it. It is
   currently welded into our browser git (the git service asks it, and *our* Source Control view paints it). Its right
   home is a **standalone extension**, decoupled from our git provider, that reads HEAD vs working through vscode's own
   SCM/diff/fs APIs and adds the badge — so it works over desktop's built-in git too. *(This is the "bablr belongs in

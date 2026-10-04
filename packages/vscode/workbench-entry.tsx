@@ -37,6 +37,7 @@ import { installTypeAcquisition } from "./ata";
 import { installDebugBridge, markBridgeReady } from "./debug-bridge";
 import { reportWorkbenchMetrics } from "./editor-metrics";
 import type { VerdictEntry } from "./cosmetic-classifier";
+import { startBablr } from "./bablr";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
 import * as gitEngine from "./git-engine";
 import { installEditHistory } from "./edit-history";
@@ -568,7 +569,10 @@ function maybeBoot(): void {
 				installProfileFiles(api as typeof import("vscode"), workbenchHub, nodeRunner.runs);
 				// Each run's envelope — whose, where, on what code — into .silo/runs/ as it ends, and what it observed into
 				// .silo/evidence/ (evidence.ts).
-				installEvidence(api as typeof import("vscode"), workbenchHub, nodeRunner.runs);
+				// The editor's BABLR, in its worker: the classifier's verdicts and the evidence's span ids queue on it (bablr.ts).
+				const bablr = startBablr(workbenchHub);
+
+				installEvidence(api as typeof import("vscode"), workbenchHub, nodeRunner.runs, bablr);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
 				// And the pod's tasks' terminals: a just-bash process that runs one command, over the hub (terminal.ts).
@@ -586,7 +590,7 @@ function maybeBoot(): void {
 					// One classifier, shared by both panes, with its verdict cache persisted through the engine's
 					// content-addressed `.git/bablr/` store — so cosmetic/semantic is derived once per content pair and
 					// re-read (not re-computed) across refreshes and reloads.
-					const cosmeticClassifier = createCosmeticClassifier(workbenchHub, {
+					const cosmeticClassifier = createCosmeticClassifier(bablr, {
 						"read": async (before, after) => (await gitEngine.readVerdict(before, after)) as VerdictEntry | null,
 						"write": (before, after, entry) => gitEngine.writeVerdict(before, after, entry)
 					});

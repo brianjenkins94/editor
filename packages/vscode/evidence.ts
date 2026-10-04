@@ -4,7 +4,7 @@
  * `.silo/evidence/<user>/<environment>/<file>.jsonl`, keyed on BABLR spans. silo decides the shape, the layout and how
  * evidence fades (@brianjenkins94/util/silo/evidence); this gathers the facts only the editor has: the run (runs.ts), the
  * browser it ran in, the repo it ran on, and what the runtimes saw — so far a debug session's coverage
- * (`evidence.coverage`, from the tsval adapter), each statement keyed by the spanAnchors id the classify worker finds
+ * (`evidence.coverage`, from the tsval adapter), each statement keyed by the spanAnchors id the BABLR worker finds
  * for it. A file BABLR's grammar doesn't take yet gets no evidence; its run is still recorded.
  *
  * Runs in the workbench realm; writes through VS Code's file system, so an open runs file shows each new line.
@@ -13,8 +13,8 @@ import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
 import type { StatementCoverage } from "./extensions/worker-pod/debug-protocol";
+import type { Bablr } from "./bablr";
 import type { RunInfo, RunRegistry } from "./runs";
-import { createRpcClient } from "@brianjenkins94/hub";
 import { envelopeLine, evidencePath, evidenceText, foldReached, GITATTRIBUTES, GITIGNORE, parseEvidence, runsPath, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { blobOid, headCommit } from "./git-engine";
 
@@ -81,8 +81,7 @@ function repoRelative(path: string): string {
 	return path.startsWith(ROOT + "/") ? path.slice(ROOT.length + 1) : path === ROOT ? "." : path;
 }
 
-export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunRegistry): void {
-	const rpc = createRpcClient(hub);
+export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunRegistry, bablr: Bablr): void {
 	// Each run's coverage, until the run ends (the session's coverage comes just before its end).
 	const coverage = new Map<string, Coverage>();
 
@@ -159,7 +158,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			return; // BABLR has nothing to parse
 		}
 
-		const answer = await rpc.request("classify.anchors", { "source": covered.source, "ranges": offsets(covered.source, covered.statements) }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "ids"?: (string | null)[]; "unparsable"?: true };
+		const answer = await bablr.request<{ "ids"?: (string | null)[]; "unparsable"?: true }>("anchors", { "source": covered.source, "ranges": offsets(covered.source, covered.statements) });
 
 		if (answer.ids === undefined) {
 			return; // BABLR's grammar doesn't take this file yet

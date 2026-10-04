@@ -113,7 +113,7 @@ export const nodes: NodeSpec[] = [
 	{ "id": "node-scripts", "label": "Script worker", "container": "workers", "hub": true, "detail": "hub · almostnode, node scripts", "description": "Runs the terminal's node scripts (almostnode) when the debugger doesn't: started for the first, terminated to stop one.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)", "condition": "while a node script runs outside the debugger" },
 	{ "id": "debug-worker", "label": "Debug worker", "container": "podWorkers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the pod's debug adapter: control and events over the hub on its session's subjects, the render stream straight to the tsval preview.", "observedBy": "its hub reporter + the Worker probe", "condition": "while debugging" },
 	{ "id": "worker:server-host", "label": "LSP server host", "container": "podWorkers", "detail": "cspell (vscode-languageclient)", "description": "cspell language server, spawned by the pod — JSON-RPC over postMessage plus a ws-control port for the shared filesystem.", "observedBy": "the Worker probe" },
-	{ "id": "classify", "label": "Classify worker", "container": "workers", "hub": true, "detail": "hub · BABLR cosmetic classifier", "description": "Classifies git changes as cosmetic or semantic, and groups edit bursts, for the git SCM and the review panel.", "observedBy": "its hub reporter + the Worker probe", "condition": "when git classifies a change" },
+	{ "id": "bablr", "label": "BABLR worker", "container": "workers", "hub": true, "detail": "hub · the editor's BABLR", "description": "The editor's BABLR, off the UI thread: classifies git changes as cosmetic or semantic and groups edit bursts (the git SCM and the review panel), and finds the span ids runtime evidence keys on.", "observedBy": "its hub reporter + the Worker probe", "condition": "when git classifies a change" },
 	{ "id": "exthost-iframe", "label": "Iframe relay", "container": "extHostIframe", "detail": "webWorkerExtensionHostIframe.html", "description": "Boots the web worker extension host, relays its first messages and hands its MessagePort to the workbench.", "observedBy": "window message listener" },
 	{ "id": "exthost:LocalWebWorker:0", "label": "Worker extension host", "container": "extHostWorker", "detail": "eslint, capabilities, default extensions", "description": "Extension host in a web worker: the default extensions (typescript-language-features and its tsserver), eslint and capabilities.", "observedBy": "RPCProtocol logger + an in-worker probe (its fetches and the workers it spawns)" },
 	{ "id": "idb", "label": "IndexedDB", "container": "browser", "detail": "user data, logs, workspace-fs", "description": "monaco's user data / logs / storage, and the workspace filesystem snapshot.", "observedBy": "IDBObjectStore probe" },
@@ -143,7 +143,7 @@ export const hubLinks: [string, string][] = [
 	["workbench", "pod"],
 	["workbench", "node"],
 	["workbench", "node-scripts"],
-	["workbench", "classify"],
+	["workbench", "bablr"],
 	["node", "provoke"],
 	["pod", "debug-worker"]
 ];
@@ -246,7 +246,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"], "description": "Network/IO capability decisions, served by the pod." },
 	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"], "description": "Ask the user about a capability, served by the shell." },
 	// ── workers ──
-	{ "pattern": "classify.>", "from": ["workbench", "pod"], "to": ["classify"], "description": "Cosmetic/semantic verdicts, edit-burst grouping (cancellable), and BABLR's spans: the ids a run's evidence keys on (workbench), and an open text's, to show it (the pod's editor.bablr.spans, for the insights extension)." }
+	{ "pattern": "bablr.>", "from": ["workbench", "pod"], "to": ["bablr"], "description": "Cosmetic/semantic verdicts, edit-burst grouping (cancellable), and BABLR's spans: the ids a run's evidence keys on (workbench), and an open text's, to show it (the pod's editor.bablr.spans, for the insights extension)." }
 ];
 
 export const channels: ChannelSpec[] = [
@@ -680,8 +680,8 @@ export function identifyWorker(url: string): { "id": string; "label"?: string; "
 			return { "id": "debug-worker", "container": "podWorkers", "owner": "pod" };
 		case "server-host.js":
 			return { "id": "worker:server-host", "container": "podWorkers", "owner": "pod" };
-		case "classify-worker.js":
-			return { "id": "classify", "container": "workers", "owner": "workbench" };
+		case "bablr-worker.js":
+			return { "id": "bablr", "container": "workers", "owner": "workbench" };
 		case "provoke-worker.js":
 			return { "id": "provoke", "container": "workers", "owner": "node" };
 		default:

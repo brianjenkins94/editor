@@ -277,7 +277,7 @@ export async function preBuild(): Promise<void> {
 		"base": "./",
 		// `dedupe` collapses the two physical typescript installs (almostnode's own dep + tsval's) to ONE, so the
 		// manualChunks below emits a single ~7MB ts chunk both workers share, not two copies in one 14MB chunk.
-		// `@brianjenkins94/bablr` → its BUILT, browser-safe dist (the classify worker's CST engine): the alias uses
+		// `@brianjenkins94/bablr` → its BUILT, browser-safe dist (the BABLR worker's CST engine): the alias uses
 		// the fresh dist directly, sidestepping the pnpm file:-dep store staleness that bites workspace packages.
 		"resolve": { "alias": { "@brianjenkins94/tsval": resolvePath("../tsval/src/index.ts"), "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript"] },
 		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
@@ -299,9 +299,9 @@ export async function preBuild(): Promise<void> {
 					// provoke child worker (debug affordance): node-worker spawns it per hardReset round to get a cold
 					// almostnode + ts realm. Served at lsp/provoke-worker.js so node-worker's `new URL` resolves it.
 					"lsp/provoke-worker": resolvePath("./extensions/worker-pod/provoke-worker.ts"),
-					// BABLR cosmetic/semantic classify worker (not part of the LSP pod), served from lsp/ like the
-					// other worker chunks. Driven by cosmetic-classifier.ts.
-					"lsp/classify-worker": resolvePath("./classify-worker.ts"),
+					// The editor's BABLR worker (not part of the LSP pod), served from lsp/ like the other worker chunks.
+					// Started and queued by bablr.ts.
+					"lsp/bablr-worker": resolvePath("./bablr-worker.ts"),
 					// The event sheet's recognizer worker — built HERE so its `typescript` shares the deduped ts chunk above
 					// (no second copy); the event-sheet extension starts it (extensions/event-sheet/extension.ts).
 					"lsp/recognizer-worker": resolvePath("./extensions/event-sheet/recognizer-worker.ts")
