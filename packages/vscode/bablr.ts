@@ -26,6 +26,9 @@ export interface Bablr {
 	"request": <T>(name: string, args: unknown, signal?: AbortSignal) => Promise<T>;
 	/** `source`'s spans — from its cached parse — or undefined when BABLR's grammar doesn't take it. */
 	"spans": (source: string, signal?: AbortSignal) => Promise<Span[] | undefined>;
+	/** Where span `span` of `baseline` went in `current`, by the structural diff: the same node (`kept`) or the one that
+	 *  replaced it — or undefined, gone. How a span annotation is re-placed from its baseline (SPAN-ANNOTATIONS.md). */
+	"follow": (baseline: string, current: string, span: string) => Promise<{ "id": string; "how": "kept" | "replaced" } | undefined>;
 	/** The span id standing for each of `ranges` in `source` (bablr-language-ts's pickAnchor), from its cached spans. */
 	"anchors": (source: string, ranges: { "start": number; "end": number }[]) => Promise<(string | undefined)[] | undefined>;
 	"dispose": () => void;
@@ -107,6 +110,11 @@ export function startBablr(hub: Hub): Bablr {
 		"request": request,
 		"spans": spans,
 		"anchors": anchors,
+		"follow": async (baseline, current, span) => {
+			const found = await request<{ "id"?: string; "how"?: "kept" | "replaced" }>("follow", { "baseline": baseline, "current": current, "span": span });
+
+			return found.id === undefined || found.how === undefined ? undefined : { "id": found.id, "how": found.how };
+		},
 		"dispose": () => {
 			offServe();
 			unlink();

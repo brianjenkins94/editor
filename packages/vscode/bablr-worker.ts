@@ -9,12 +9,13 @@
  *
  * Served over the hub, to bablr.ts: `bablr.verdict` and `bablr.editGroups` (cosmetic-classifier.ts); `bablr.spans`,
  * every span of a source, from its cached parse (below); and `bablr.pick`, the span standing for each of a text's
- * ranges, from its spans (the runtime evidence's span ids for a run's statements).
+ * ranges, from its spans (the runtime evidence's span ids for a run's statements); and `bablr.follow`, where a span of
+ * one version of a text went in another (a span annotation re-placed from its baseline, SPAN-ANNOTATIONS.md).
  * YIELDING + ABORT: the derivation paces the BABLR VM (yields as it parses), so a cancelled call's signal lands
  * mid-parse and the run bails cooperatively, no worker termination. bablr.ts drives one call at a time.
  */
 import "./bablr-fast-freeze"; // MUST be first: neutralizes record freezing before the BABLR bundle captures Object.freeze
-import { cstSpansAsync, deriveIdentityAsync, editGroups, PARSE_VERSION, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
+import { atomsOf, cstSpansAsync, deriveIdentityAsync, editGroups, follow, PARSE_VERSION, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import { serve } from "@brianjenkins94/hub";
 
 import { createWorkerHub } from "./worker-hub";
@@ -258,4 +259,20 @@ serve(hub, "bablr.pick", (args) => {
 	const handles = spans.map((span) => ({ ...span, "type": "" }));
 
 	return { "ids": ranges.map((range) => pickAnchor(handles, range.start, range.end) ?? null) };
+});
+
+// A span of a baseline text ⇒ where it went in the current one, by the structural diff (follow): the same node — a
+// container survives edits inside it — or the one an edit replaced it with; nothing when it went. From cached parses.
+serve(hub, "bablr.follow", async (args, { signal }) => {
+	const { baseline, current, span } = args as { "baseline": string; "current": string; "span": string };
+	const [was, now] = [await parse(baseline, signal), await parse(current, signal)];
+
+	if (was === undefined || now === undefined) {
+		return {};
+	}
+
+	const index = spanAnchors(baseline, "Program", was).findIndex((anchor) => anchor.id === span);
+	const found = index === -1 ? undefined : follow(atomsOf(baseline, was), atomsOf(current, now), index);
+
+	return found === undefined ? {} : { "id": spanAnchors(current, "Program", now)[found.to].id, "how": found.how };
 });

@@ -216,6 +216,16 @@ export async function blobOid(content: string): Promise<string> {
 
 /** The HEAD version of a file, for quick-diff gutters + the diff view. "" when the repo is unborn or the file is
  *  new (no HEAD blob), which is exactly what a diff against "nothing" wants. */
+/** The text of the blob `oid` from git's objects — a span annotation's baseline, say — or undefined when this repo
+ *  doesn't have it (it was never committed here). */
+export async function blobText(oid: string): Promise<string | undefined> {
+	try {
+		return new TextDecoder().decode((await readBlob({ "fs": fs, "dir": DIR, "oid": oid })).blob);
+	} catch {
+		return undefined;
+	}
+}
+
 export async function headContent(path: string): Promise<string> {
 	try {
 		const oid = await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" });

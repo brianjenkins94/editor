@@ -18,6 +18,9 @@ export { classifyChange, classifyChangeAsync } from "../../bablr-language-ts/lib
 // fileDiffIdentity produces the .bablr snapshot for a HEAD→working change (working nodes with anchored ids), the
 // changed-node set, and the whole-file verdict (identity-derived) — the cosmetic classifier, restated over identity.
 export { nodeAtoms, reidentify, reidentifyFromSource, fileDiffIdentity, fileDiffIdentityAsync } from "../../bablr-language-ts/lib/identity";
+// follow: where a node of one version is in another, by that same diff (kept, or replaced by an edit that changed it) —
+// how a span whose id changed is found again; atomsOf: the diff's nodes from a parse the caller already has.
+export { atomsOf, follow } from "../../bablr-language-ts/lib/identity";
 // Content-addressed, move-stable span ids (the durable anchor annotations attach to). See ../../bablr-language-ts/lib/anchors.
 export { spanAnchors } from "../../bablr-language-ts/lib/anchors";
 // The anchor that best stands for a range another parser found (TypeScript's statements, say), among a file's anchors.

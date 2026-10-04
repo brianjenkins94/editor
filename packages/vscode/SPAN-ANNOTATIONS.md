@@ -62,8 +62,12 @@ The strategies to start with, tried in this order, stopping at a certain match:
 
 1. **Same span.** Its id is among the current file's spans → *attached* (score 1).
 2. **Moved.** Its id is among another file's spans (ids don't depend on the file) → *moved* (0.95).
-3. **Re-identified.** Its baseline content is available (from git's objects, for code that was committed):
-   re-identify the baseline's nodes onto the current text and follow the node the span was (0.9).
+3. **Re-identified.** Its baseline content is available (from git's objects, for code that was committed): follow
+   the span's node through the structural diff `reidentify` uses (BABLR's `follow`). The diff compares a container
+   by its type alone, so a container survives edits inside it — `fn(foo, bar, baz)` that became `fn(foo, bar, baz2)`,
+   or a function whose whole body was rewritten, is still the same node. For the same reason, a call replaced by a
+   different call is "the same" to it too, so the score weighs how much of the node's head (its first tokens — the
+   callee and first arguments, the name and signature) survived: 0.6 for a node the diff kept, plus up to 0.35.
 4. **Same shape.** Spans of the same type, scored by how many tokens they share with the recorded shape, whether the
    recorded neighbours still sit beside them, and how near they are to where it was. `fn(foo, bar, baz)` that became
    `fn(foo, bar, baz2)` has a new id, but the same type, 7 of 8 tokens and both neighbours: it re-places on its own.
