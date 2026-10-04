@@ -182,6 +182,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "terminal.stop.*", "from": ["pod"], "to": ["workbench"], "description": "The task's terminal closed: stop it." },
 	{ "pattern": "runs.list", "from": ["shell", "root"], "to": ["workbench"], "description": "The core runtime's runs: the run picker's running markers, the runs page tool." },
 	{ "pattern": "runs.stop", "from": ["root"], "to": ["workbench"], "description": "Stop a run (the runs page tool)." },
+	{ "pattern": "evidence.coverage", "from": ["pod"], "to": ["workbench"], "description": "A debug session's final coverage, with the source that ran, as evidence of its run (evidence.ts)." },
 	{ "pattern": "runs.begin", "from": ["pod"], "to": ["workbench"], "description": "A debug session VS Code started (F5, Run and Debug) is a run: its id, for the session's launch config." },
 	{ "pattern": "theme.colorScheme", "from": ["shell"], "to": ["workbench"], "description": "Theme sync." },
 	{ "pattern": "dock.openWindow", "from": ["workbench"], "to": ["shell"], "description": "A VS Code window opens as a panel of the shell's dock." },
@@ -245,7 +246,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"], "description": "Network/IO capability decisions, served by the pod." },
 	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"], "description": "Ask the user about a capability, served by the shell." },
 	// ── workers ──
-	{ "pattern": "classify.>", "from": ["workbench"], "to": ["classify"], "description": "Cosmetic/semantic verdicts and edit-burst grouping (cancellable)." }
+	{ "pattern": "classify.>", "from": ["workbench"], "to": ["classify"], "description": "Cosmetic/semantic verdicts, edit-burst grouping (cancellable), and the spanAnchors ids a run's evidence keys on." }
 ];
 
 export const channels: ChannelSpec[] = [

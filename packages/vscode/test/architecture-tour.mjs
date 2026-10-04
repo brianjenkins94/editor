@@ -100,6 +100,37 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 	assert.equal(envelope.environment.runtime, "tsval");
 	assert.match(envelope.environment.engine, /^chromium-\d+$/u);
 	assert.match(envelope.files["f5.js"], /^[0-9a-f]{40}$/u, "the blob oid of the code that ran");
+
+	// What it observed: its coverage, keyed on BABLR spans, in .silo/evidence/<user>/<environment>/f5.js.jsonl.
+	const evidence = await eventually("its coverage, as evidence", () => session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const find = async (folder) => {
+			for (const [name, type] of await api.workspace.fs.readDirectory(folder).then((found) => found, () => [])) {
+				const child = api.Uri.joinPath(folder, name);
+
+				if (type === api.FileType.Directory) {
+					const found = await find(child);
+
+					if (found !== undefined) {
+						return found;
+					}
+				} else if (name === "f5.js.jsonl") {
+					return { "path": child.path, "text": new TextDecoder().decode(await api.workspace.fs.readFile(child)) };
+				}
+			}
+
+			return undefined;
+		};
+		const found = await find(api.Uri.file("/workspace/.silo/evidence"));
+		const attributes = await api.workspace.fs.readFile(api.Uri.file("/workspace/.silo/.gitattributes")).then((bytes) => new TextDecoder().decode(bytes), () => "");
+
+		return found === undefined ? undefined : { ...found, "attributes": attributes };
+	}));
+	const lines = evidence.text.trim().split("\n").map((line) => JSON.parse(line));
+
+	assert.match(evidence.path, /\/\.silo\/evidence\/[^/]+\/default\.tsval\.chromium-\d+\.[a-z]+\/f5\.js\.jsonl$/u);
+	assert.ok(lines.some((line) => line.kind === "reached" && line.key === "bablr1" && line.ever === 1 && line.lastRun === run.id), "the statement that ran, on its span");
+	assert.match(evidence.attributes, /^\*\.jsonl merge=union$/mu);
 });
 
 // A service — it keeps running (lifecycle.ts) — needs an event loop tsval doesn't have, so it runs on the script worker

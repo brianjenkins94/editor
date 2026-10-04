@@ -566,8 +566,9 @@ function maybeBoot(): void {
 
 				// A preview that ran slow was profiled: save it, source-mapped, for whoever reads profiles (profile-files.ts).
 				installProfileFiles(api as typeof import("vscode"), workbenchHub, nodeRunner.runs);
-				// Each run's envelope — whose, where, on what code — into .silo/runs/ as it ends (evidence.ts).
-				installEvidence(api as typeof import("vscode"), nodeRunner.runs);
+				// Each run's envelope — whose, where, on what code — into .silo/runs/ as it ends, and what it observed into
+				// .silo/evidence/ (evidence.ts).
+				installEvidence(api as typeof import("vscode"), workbenchHub, nodeRunner.runs);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
 				// And the pod's tasks' terminals: a just-bash process that runs one command, over the hub (terminal.ts).

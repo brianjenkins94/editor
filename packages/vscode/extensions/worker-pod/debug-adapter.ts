@@ -447,6 +447,13 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		if (!this.coverageSent) {
 			this.coverageSent = true;
 			this.event("coverage", report as unknown as Dap);
+
+			// And to core, as evidence of the run (evidence.ts): with the source that ran, which the file may no longer be.
+			const runId = this.session.configuration["__runId"];
+
+			if (typeof runId === "string") {
+				podHub.publish("evidence.coverage", { "runId": runId, "file": this.program, "source": this.source, "statements": report.statements });
+			}
 		}
 	}
 

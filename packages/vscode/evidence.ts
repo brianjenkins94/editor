@@ -1,15 +1,21 @@
 /**
  * What running your program teaches the editor, kept in git (RUNTIME-EVIDENCE.md): when a run ends, its envelope —
- * whose run, where it ran, on what code — is appended to `.silo/runs/<user>.jsonl`. What it observed (coverage, time,
- * values, capabilities) joins it by its run id. silo decides the shape and the layout (@brianjenkins94/util/silo/evidence);
- * this gathers the facts only the editor has: the run (runs.ts), the browser it ran in, the repo it ran on.
+ * whose run, where it ran, on what code — is appended to `.silo/runs/<user>.jsonl`, and what it observed is folded into
+ * `.silo/evidence/<user>/<environment>/<file>.jsonl`, keyed on BABLR spans. silo decides the shape, the layout and how
+ * evidence fades (@brianjenkins94/util/silo/evidence); this gathers the facts only the editor has: the run (runs.ts), the
+ * browser it ran in, the repo it ran on, and what the runtimes saw — so far a debug session's coverage
+ * (`evidence.coverage`, from the tsval adapter), each statement keyed by the spanAnchors id the classify worker finds
+ * for it. A file BABLR's grammar doesn't take yet gets no evidence; its run is still recorded.
  *
  * Runs in the workbench realm; writes through VS Code's file system, so an open runs file shows each new line.
  */
 import type * as vscodeApi from "vscode";
+import type { Hub } from "@brianjenkins94/hub";
 import type { Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
+import type { StatementCoverage } from "./extensions/worker-pod/debug-protocol";
 import type { RunInfo, RunRegistry } from "./runs";
-import { envelopeLine, runsPath, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { createRpcClient } from "@brianjenkins94/hub";
+import { envelopeLine, evidencePath, evidenceText, foldReached, GITATTRIBUTES, parseEvidence, runsPath, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { blobOid, headCommit } from "./git-engine";
 
 const ROOT = "/workspace";
@@ -31,12 +37,40 @@ function browserClass(): Omit<Environment, "runtime" | "name"> {
 	return { "engine": engine, "os": os, "cores": navigator.hardwareConcurrency, ...memory === undefined ? {} : { "memoryGb": memory } };
 }
 
+/** A run's coverage of the program it ran: the source that ran, and each statement's range in it with its count. */
+interface Coverage { "file": string; "source": string; "statements": StatementCoverage[] }
+
+/** Each statement's range in `source` as offsets (its line/character positions, counted in UTF-16 code units). */
+function offsets(source: string, statements: StatementCoverage[]): { "start": number; "end": number }[] {
+	const lineStarts = [0];
+
+	for (let index = source.indexOf("\n"); index !== -1; index = source.indexOf("\n", index + 1)) {
+		lineStarts.push(index + 1);
+	}
+
+	const at = ([line, character]: [number, number]): number => (lineStarts[line] ?? source.length) + character;
+
+	return statements.map((statement) => ({ "start": at(statement.start), "end": at(statement.end) }));
+}
+
 /** `path` relative to the workspace (the repo root). */
 function repoRelative(path: string): string {
 	return path.startsWith(ROOT + "/") ? path.slice(ROOT.length + 1) : path === ROOT ? "." : path;
 }
 
-export function installEvidence(vscode: typeof vscodeApi, runs: RunRegistry): void {
+export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunRegistry): void {
+	const rpc = createRpcClient(hub);
+	// Each run's coverage, until the run ends (the session's coverage comes just before its end).
+	const coverage = new Map<string, Coverage>();
+
+	hub.subscribe("evidence.coverage", (data) => {
+		const { runId, ...rest } = (data ?? {}) as Coverage & { "runId"?: unknown };
+
+		if (typeof runId === "string" && typeof rest.source === "string" && Array.isArray(rest.statements)) {
+			coverage.set(runId, rest);
+		}
+	});
+
 	const uri = (path: string): vscodeApi.Uri => vscode.Uri.file(`${ROOT}/${path}`);
 	const read = async (path: string): Promise<Uint8Array | undefined> => {
 		try {
@@ -58,6 +92,10 @@ export function installEvidence(vscode: typeof vscodeApi, runs: RunRegistry): vo
 
 	const record = async (run: RunInfo): Promise<void> => {
 		const entry = repoRelative(run.entry ?? run.cwd);
+		const covered = coverage.get(run.id);
+
+		coverage.delete(run.id);
+
 		const source = run.entry === undefined ? undefined : await read(entry);
 		const name = vscode.workspace.getConfiguration("silo").get<string>("machine")?.trim();
 		const envelope: RunEnvelope = {
@@ -75,10 +113,54 @@ export function installEvidence(vscode: typeof vscodeApi, runs: RunRegistry): vo
 			...await headCommit().then((commit) => (commit === undefined ? {} : { "commit": commit })),
 			"files": source === undefined ? {} : { [entry]: await blobOid(new TextDecoder().decode(source)) }
 		};
+
+		// The code a session ran is the source it was given, whatever the file holds now.
+		if (covered !== undefined) {
+			envelope.files[repoRelative(covered.file)] = await blobOid(covered.source);
+		}
+
 		const path = runsPath(envelope.user);
 		const before = await read(path) ?? new Uint8Array();
 
 		await vscode.workspace.fs.writeFile(uri(path), new Uint8Array([...before, ...new TextEncoder().encode(envelopeLine(envelope))]));
+
+		if (covered !== undefined) {
+			await recordCoverage(envelope, covered);
+		}
+	};
+
+	/** A run's coverage, keyed on spans, folded into what earlier runs in its environment observed of the file. */
+	const recordCoverage = async (envelope: RunEnvelope, covered: Coverage): Promise<void> => {
+		if (covered.source === "") {
+			return; // BABLR has nothing to parse
+		}
+
+		const answer = await rpc.request("classify.anchors", { "source": covered.source, "ranges": offsets(covered.source, covered.statements) }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "ids"?: (string | null)[]; "unparsable"?: true };
+
+		if (answer.ids === undefined) {
+			return; // BABLR's grammar doesn't take this file yet
+		}
+
+		const reached = covered.statements.flatMap((statement, index) => {
+			const span = answer.ids?.[index];
+
+			return typeof span === "string" ? [{ "span": span, "count": statement.count }] : [];
+		});
+		const path = evidencePath(envelope.user, envelope.environment, repoRelative(covered.file));
+		const known = parseEvidence(new TextDecoder().decode(await read(path) ?? new Uint8Array()));
+
+		await ensureGitattributes();
+		await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(foldReached(known, reached, { "id": envelope.id, "at": envelope.endedAt }))));
+	};
+
+	/** `.silo/.gitattributes` merges evidence and run files line by line (silo's GITATTRIBUTES), keeping what's there. */
+	const ensureGitattributes = async (): Promise<void> => {
+		const path = `${SILO_DIR}/.gitattributes`;
+		const existing = new TextDecoder().decode(await read(path) ?? new Uint8Array());
+
+		if (!existing.split("\n").includes(GITATTRIBUTES.trim())) {
+			await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode((existing === "" || existing.endsWith("\n") ? existing : existing + "\n") + GITATTRIBUTES));
+		}
 	};
 
 	runs.onEnd((run) => {

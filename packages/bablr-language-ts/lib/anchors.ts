@@ -63,3 +63,50 @@ export function spanAnchors(src: string, production = "Program"): SpanAnchor[] {
 		return { "type": node.type, "start": node.start, "end": node.end, "id": total.get(node.hash) === 1 ? node.hash : node.hash + "#" + ordinal };
 	});
 }
+
+/**
+ * The anchor id that best stands for the range [start, end) of `src` — a node another parser found (TypeScript's, say),
+ * whose boundaries needn't match BABLR's exactly: the LARGEST BARE-hash span fully inside it (bare = unique content, no
+ * `#ordinal`, so it tracks moves without duplicate-ordinal churn), falling back to the span overlapping it most.
+ * Punctuation is never a handle. Undefined when nothing overlaps.
+ */
+export function pickAnchor(anchors: SpanAnchor[], start: number, end: number): string | undefined {
+	let inside: { "id": string; "bare": boolean; "size": number } | undefined;
+	let overlap: { "id": string; "score": number } | undefined;
+
+	for (const anchor of anchors) {
+		if (anchor.type === null) {
+			continue;
+		}
+
+		const score = Math.max(0, Math.min(anchor.end, end) - Math.max(anchor.start, start));
+
+		if (score <= 0) {
+			continue;
+		}
+
+		if (anchor.start >= start && anchor.end <= end) {
+			const bare = !anchor.id.includes("#");
+			const size = anchor.end - anchor.start;
+
+			// bare beats ordinal'd; then larger beats smaller (the node's own top span).
+			if (inside === undefined || (bare && !inside.bare) || (bare === inside.bare && size > inside.size)) {
+				inside = { "id": anchor.id, "bare": bare, "size": size };
+			}
+		}
+
+		if (overlap === undefined || score > overlap.score) {
+			overlap = { "id": anchor.id, "score": score };
+		}
+	}
+
+	return (inside ?? overlap)?.id;
+}
+
+/** The anchor id for each of `ranges` in `src` (pickAnchor), deriving the file's anchors once. Throws when BABLR can't
+ *  parse `src` (or it's empty). */
+export function anchorRanges(src: string, ranges: { "start": number; "end": number }[]): (string | undefined)[] {
+	const anchors = spanAnchors(src);
+
+	return ranges.map((range) => pickAnchor(anchors, range.start, range.end));
+}
