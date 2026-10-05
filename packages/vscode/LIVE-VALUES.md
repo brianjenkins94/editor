@@ -251,5 +251,10 @@ consumer of the same strip: the overlay draws what core gives it, values or a de
    Not yet: values on spans (so an edit mid-session doesn't misplace them), picking a call, the "N dropped" note, a
    column held by a click, the cursor's row opened up.
 7. **A tour test**: a note and a session over the binary search, read back from the pane.
+   Done (test/architecture-tour.mjs, "live values"): the talk's binary search with a prose note on its first line, a
+   session paused on `return mid`; each values row read back by its line — the parameters named, `mid` and `value`
+   a column per turn, each `if`'s arm, `low` and `high` only in the turn that set them — and the note beside them;
+   stopped, the values go and the note stays. It leaves the workbench as it found it: a breakpoint's stop puts the
+   Run and Debug view where the Explorer was, which the tests after it open files from.
 8. **Capability decisions on the line**: a capability stop's *Allow once* / *Allow always* / *Deny* on its line, the
    choice resuming the run.

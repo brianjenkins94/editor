@@ -425,6 +425,79 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 
 // What TypeScript makes of a file's ranges, from the capabilities tsserver plugin (`_types.at`): the declared side of
 // runtime evidence, and the typed strategy's signal — the type of what each site observes.
+// Live values (LIVE-VALUES.md): a debug session over the binary search of Bret Victor's *Inventing on Principle*, paused
+// on its return — each line's values in the notes margin beside it, a column per turn of the loop, a prose note beside
+// them — and gone with the session, the note staying.
+test("live values: a session's values beside the code, as the talk's binary search", async () => {
+	const workbench = session.workbench();
+	const source = [
+		"function binarySearch(key, array) {",
+		"\tlet low = 0;",
+		"\tlet high = array.length - 1;",
+		"",
+		"\twhile (true) {",
+		"\t\tconst mid = Math.floor((low + high) / 2);",
+		"\t\tconst value = array[mid];",
+		"",
+		"\t\tif (value < key) {",
+		"\t\t\tlow = mid + 1;",
+		"\t\t} else if (value > key) {",
+		"\t\t\thigh = mid - 1;",
+		"\t\t} else {",
+		"\t\t\treturn mid;",
+		"\t\t}",
+		"\t}",
+		"}",
+		"",
+		"console.log(binarySearch(\"d\", [\"a\", \"b\", \"c\", \"d\", \"e\", \"f\"]));",
+		""
+	].join("\n");
+	const show = (notes) => workbench.evaluate(async ([text, shown]) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/victor.js");
+
+		if (text !== undefined) {
+			await api.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
+			await api.window.showTextDocument(uri);
+		}
+
+		globalThis.__pane.show(uri.toString(), shown);
+	}, [notes.length === 0 ? undefined : source, notes]);
+	// Each values row by its line (0-based): its label, then its cells, as shown.
+	const rows = () => workbench.evaluate(() => Object.fromEntries([...document.querySelectorAll(".live-values-row")].map((row) => [row.dataset.line, [...row.children].map((child) => child.textContent.trim())])));
+
+	await show([{ "id": "about", "fromLine": 0, "toLine": 0, "text": "**Binary search**, as in the talk." }]);
+
+	const started = await session.request("debug.start", { "program": "/workspace/victor.js", "breakpoints": [14] }, 60_000);
+
+	assert.equal(started.line, 14, "paused on the return");
+
+	const shown = await eventually("the session's values in the margin", async () => {
+		const all = await rows();
+
+		return all["6"]?.length === 4 ? all : undefined;
+	});
+
+	assert.deepEqual(shown["0"], ["key = 'd', array = ['a', 'b', 'c', 'd', 'e', 'f']"], "a function's parameters, each named");
+	assert.deepEqual(shown["1"], ["low =", "0"]);
+	assert.deepEqual(shown["2"], ["high =", "5"]);
+	assert.deepEqual(shown["5"], ["mid =", "2", "4", "3"], "a column per turn of the loop");
+	assert.deepEqual(shown["6"], ["value =", "'c'", "'e'", "'d'"]);
+	assert.deepEqual(shown["8"], ["if", "then", "else", "else"], "the arm each turn took");
+	assert.deepEqual(shown["9"], ["low =", "3", "", ""], "only in the turn that ran it");
+	assert.deepEqual(shown["11"], ["high =", "", "3", ""]);
+	assert.equal(await eventually("the note beside them", () => workbench.evaluate(() => document.querySelector(".notes-margin-entry strong")?.textContent)), "Binary search");
+
+	await session.request(`debug.session.${started.session}.stop`, undefined, 30_000);
+	await eventually("the values gone with the session", async () => Object.keys(await rows()).length === 0 || undefined);
+	assert.equal(await workbench.evaluate(() => document.querySelector(".notes-margin-entry strong")?.textContent), "Binary search", "the note stays");
+	// Leave the workbench as the next tests expect it: no note, no breakpoint, and the Explorer back where a breakpoint's
+	// stop put the Run and Debug view (they open files from its tree).
+	await show([]);
+	await session.request("debug.breakpoints", { "program": "/workspace/victor.js", "lines": [] }, 30_000);
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
+});
+
 test("types: the tsserver plugin types each of a file's ranges as its site observes", async () => {
 	const types = await eventually("types at ranges", () => session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;

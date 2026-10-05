@@ -161,6 +161,7 @@ function renderRow(row: Row, labelWidth: number, element: HTMLElement): void {
 	};
 
 	line.className = "live-values-row";
+	line.dataset["line"] = String(row.line);
 	label.className = "live-values-label";
 	label.textContent = row.label.padEnd(labelWidth);
 
