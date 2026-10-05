@@ -145,7 +145,13 @@ own — and it waits until discovery has shown how far it gets alone.
    with no cause linked, inferred, to the last one its sender received within 50 ms. The tour finds a note's resolve
    as the pod's `annotations.resolve()` causing core's `bablr.resolve()`, named. A local caveat: a `file:`
    dependency's change doesn't reach Vite's dependency cache (`node_modules/.vite`) until it's cleared.
-4. **Components**: the hub records where each handler was registered; namespaces group what a context serves.
+4. **Components**: the hub records where each handler was registered; namespaces group what a context serves. Done:
+   the hub takes a stack trace once, as a handler subscribes, and keeps the first named function outside the hub (an
+   engine's or a library's internals — `_deliver` — passed over; a minifier's names, three characters or fewer, count as
+   none); `inspect()` reports them as `sites`, which the reporter already sends. `componentsOf` groups a hub's
+   subscriptions by registrant, or by namespace where none survived, a session's or a port's own subject folded to
+   `*`. The tour tells the workbench's `startBablr` (`annotations.*`) from its `installEvidence` (`evidence.*`), its git
+   service, its run registry and the rest; CI's minified build falls back to namespaces, and the test holds either way.
 5. **The live view**: components in realms, stores, the feature lens, flows, the two gap lists.
 6. **The diagram from the tour**, and the model trimmed to its rules.
 

@@ -1464,3 +1464,23 @@ test("a call made in a handler names its message even when it first waits for a 
 	assert.equal(later?.cause, deferred, "told, a deferred call names it too");
 	assert.ok(go === undefined || go.cause === undefined);
 });
+
+test("a hub knows who subscribed to what: the function that registered each handler", () => {
+	const hub = createHub({ "id": "core" });
+
+	function startBablr(): void {
+		serve(hub, "annotations.resolve", () => undefined);
+	}
+
+	function installEvidence(): void {
+		hub.subscribe("evidence.observed", () => undefined);
+	}
+
+	startBablr();
+	installEvidence();
+
+	const { sites } = hub.inspect();
+
+	assert.deepEqual(sites?.["$rpc.call.annotations.resolve"], ["startBablr"], "serve's own frames aren't the registrant");
+	assert.deepEqual(sites?.["evidence.observed"], ["installEvidence"]);
+});

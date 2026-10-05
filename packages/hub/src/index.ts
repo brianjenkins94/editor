@@ -109,6 +109,31 @@ function isControl(message: unknown): message is Control {
 	return typeof message === "object" && message !== null && (hub === "sub" || hub === "unsub" || hub === "hello" || hub === "ping" || hub === "pong");
 }
 
+/** The hub's own functions a subscription passes through on its way in, the engine's, and a library's internals (an
+ *  event emitter's `_deliver`): never a registrant. */
+const NOT_A_SITE = /^(?:_|Hub\.|Object\.<anonymous>$|new |Array\.|Map\.|Set\.|Promise\.|Generator\.|async |eval$|(?:subscribe|serve|listen|request|call|createRpcClient|registeringFunction|whenInterested|<anonymous>)$)/u;
+
+/**
+ * The function that registered a subscription, from a stack trace taken as it subscribed: the first frame outside the
+ * hub with a name (Chrome's `at name (…)`, Firefox's and Safari's `name@…`). A minifier's names (three characters or
+ * fewer) say nothing, so they count as none.
+ */
+function registeringFunction(stack: string | undefined): string | undefined {
+	for (const line of (stack ?? "").split("\n").slice(1)) {
+		const name = (/^\s*at (?:async )?([^\s(]+)(?: \[as [^\]]+\])? \(/u.exec(line) ?? /^([^@\s]+)@/u.exec(line))?.[1];
+
+		const last = name?.slice(name.lastIndexOf(".") + 1);
+
+		if (name === undefined || last === undefined || NOT_A_SITE.test(name) || NOT_A_SITE.test(last)) {
+			continue;
+		}
+
+		return last.length > 3 ? last : undefined;
+	}
+
+	return undefined;
+}
+
 function isEnvelope(message: unknown): message is Envelope {
 	return typeof message === "object" && message !== null && typeof (message as Envelope).subject === "string";
 }
@@ -221,6 +246,9 @@ export interface LinkInfo {
 export interface HubSnapshot {
 	"id": string;
 	"subscriptions": string[];
+	/** Who subscribed to each pattern: the function that registered its handlers, as named in a stack trace taken when
+	 *  it subscribed (the first outside the hub — `startBablr`, `installEvidence`), where a name survived the build. */
+	"sites"?: Record<string, string[]>;
 	/** `uplink`: the link is this hub's uplink (LinkOptions.uplink) — the hub across it is above this one. */
 	"links": (LinkInfo & { "remoteInterest": string[]; "advertised": string[]; "permissions"?: LinkPermissions; "uplink"?: true })[];
 }
@@ -376,6 +404,8 @@ export class Hub {
 	private readonly links = new Set<Link>();
 	// subject pattern → local handlers subscribed to it.
 	private readonly handlers = new Map<string, Set<Handler>>();
+	/** Each handler's registering function (registeringFunction), where one could be named. */
+	private readonly sites = new Map<Handler, string>();
 	/** The message whose handlers are running now (its id), if any: what a message published meanwhile was caused by. */
 	private handling: string | undefined;
 
@@ -419,6 +449,13 @@ export class Hub {
 		}
 
 		set.add(handler);
+
+		const site = registeringFunction(new Error("where a subscription came from").stack);
+
+		if (site !== undefined) {
+			this.sites.set(handler, site);
+		}
+
 		this.readvertise();
 		this.emit({ "type": "topology" });
 
@@ -430,6 +467,7 @@ export class Hub {
 			}
 
 			current.delete(handler);
+			this.sites.delete(handler);
 
 			if (current.size === 0) {
 				this.handlers.delete(subject);
@@ -513,6 +551,11 @@ export class Hub {
 		return {
 			"id": this.id,
 			"subscriptions": [...this.handlers.keys()],
+			"sites": Object.fromEntries([...this.handlers].flatMap(([pattern, set]) => {
+				const names = [...new Set([...set].flatMap((handler) => this.sites.get(handler) ?? []))];
+
+				return names.length === 0 ? [] : [[pattern, names]];
+			})),
 			"links": [...this.links].map((link) => ({
 				"id": link.id,
 				"peerId": link.peerId,

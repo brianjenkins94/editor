@@ -664,6 +664,32 @@ export function isExtensionNode(id: string): boolean {
 	return id.startsWith("ext:");
 }
 
+/**
+ * A hub's components, discovered (DISCOVERED-ARCHITECTURE.md): its subscriptions grouped by the function that registered
+ * them (the hub's `sites`), or — where no name survived the build — by their subject's namespace. A call reads as
+ * `name()`; an RPC client's own reply channel is machinery, not a component's.
+ */
+export function componentsOf(hub: { "subscriptions": string[]; "sites"?: Record<string, string[]> }): { "component": string; "subjects": string[] }[] {
+	const components = new Map<string, Set<string>>();
+
+	for (const pattern of hub.subscriptions) {
+		if (pattern.startsWith("$rpc.reply.")) {
+			continue;
+		}
+
+		// A session's, a port's, a tab's own subject (`production.stop.<uuid>`, `preview.hmr.5173`) is one of a kind: `*`.
+		const general = pattern.split(".").map((token) => (/^(?:\d+|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8})$/u.test(token) ? "*" : token)).join(".");
+		const subject = general.startsWith("$rpc.call.") ? general.slice("$rpc.call.".length) + "()" : general;
+		const component = hub.sites?.[pattern]?.[0] ?? subject.split(".")[0]!;
+		const known = components.get(component) ?? new Set<string>();
+
+		known.add(subject);
+		components.set(component, known);
+	}
+
+	return [...components].map(([component, subjects]) => ({ "component": component, "subjects": [...subjects].sort() })).sort((a, b) => a.component.localeCompare(b.component));
+}
+
 /** A store, discovered by what's written and read in it (architecture-zenfs.ts, storeShape): `store:<shape>`. */
 export function isStoreNode(id: string): boolean {
 	return id.startsWith("store:");

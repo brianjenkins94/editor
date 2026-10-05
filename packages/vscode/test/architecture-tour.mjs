@@ -721,6 +721,21 @@ test("stores: discovered from what's written and read", async () => {
 	assert.ok(named("IndexedDB bablr").writers.includes("bablr"), "BABLR's cache of parses");
 });
 
+// The components inside one realm's hub, discovered (DISCOVERED-ARCHITECTURE.md): the workbench's subscriptions, grouped by
+// the function that registered them — or, in a minified build, by namespace — so core's BABLR and its runtime evidence
+// come out as two parts of the workbench, not one.
+test("components: a realm's hub, told apart by who subscribed", async () => {
+	const { componentsOf } = await import("../architecture-model.ts");
+	const workbench = session.snapshot().topology.workbench;
+	const components = componentsOf(workbench);
+	const holding = (subject) => components.find((component) => component.subjects.includes(subject));
+
+	assert.ok(holding("annotations.resolve()") !== undefined, "core's BABLR, serving annotations");
+	assert.ok(holding("evidence.observed") !== undefined, "core's runtime evidence");
+	assert.notEqual(holding("annotations.resolve()"), holding("evidence.observed"), "two components, not one");
+	assert.deepEqual(holding("annotations.resolve()").subjects.filter((subject) => subject.startsWith("annotations.")), ["annotations.refer()", "annotations.resolve()"], "what one component serves stays together");
+});
+
 test("conformance: nothing observed needs review", async () => {
 	assert.deepEqual(await session.conformance(), []);
 });
