@@ -12,7 +12,7 @@ import type { ChannelStats, FlowMessage, RuntimeNode, StoredSample, TrafficKind 
 import type { ContainerSpec, Violation } from "./architecture-model";
 import { ArchitectureStore, collectArchReports, flowsOf, requestArchSync } from "@brianjenkins94/observability";
 import type { AppLayout } from "./architecture-model";
-import { allowedOnLink, appLayout, appWindowOf, checkConformance, componentsOf, containers, declaredBetween, channels as declaredChannels, declaredOn, declaredMermaid, nodes as declaredNodes, directionOnLink, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectOfLabel, subjectMatches, subjects as subjectFamilies } from "./architecture-model";
+import { allowedOnLink, appLayout, appWindowOf, checkConformance, componentsOf, containers, declaredBetween, channels as declaredChannels, declaredOn, nodes as declaredNodes, directionOnLink, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectOfLabel, subjectMatches, subjects as subjectFamilies } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 import { windowTitle } from "./virtual-path";
 
@@ -437,7 +437,7 @@ function edgePath(from: Rect, to: Rect): string {
 	return `M ${x1} ${fromY} C ${leftToRight ? x1 + curve : x1 - curve} ${fromY} ${leftToRight ? x2 - curve : x2 + curve} ${toY} ${x2} ${toY}`;
 }
 
-/** Mermaid of what's OBSERVED (the declared one is `declaredMermaid`). */
+/** Mermaid of what's OBSERVED, counts and all (ARCHITECTURE.md's, one of a kind each, is the tour's: `tourDiagram`). */
 function observedMermaid(store: ArchitectureStore): string {
 	const id = (value: string): string => value.replaceAll(/\W/gu, "_");
 	const lines = ["flowchart LR"];
@@ -615,7 +615,6 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		button("+", "Zoom in", () => { setZoom(zoom * 1.2); }),
 		button("Reset", "Reset the counters", () => { store.resetCounters(); refreshPanel(); }),
 		button("Mermaid", "Copy the OBSERVED architecture as a Mermaid flowchart", (element) => { copy(element, observedMermaid(store)); }),
-		button("Model", "Copy the DECLARED model as a Mermaid flowchart (for ARCHITECTURE.md)", (element) => { copy(element, declaredMermaid()); }),
 		button("Export", "Download a JSON snapshot of everything recorded", () => {
 			const url = URL.createObjectURL(new Blob([JSON.stringify(store.snapshot(), null, 2)], { "type": "application/json" }));
 			const link = h("a", { "href": url, "download": "architecture-" + new Date().toISOString().replaceAll(/[:.]/gu, "-") + ".json" });
@@ -1241,7 +1240,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			declared?.type === "hub" && section(
 				"Subjects allowed across this link",
 				h("p", { "class": "arch-muted" }, "Each the way its events and calls go: → toward ", h("code", null, labelOf(store, b)), ", ← toward ", h("code", null, labelOf(store, a)), "."),
-				h("div", { "class": "arch-subjects" }, ...families.map((family) => h("span", { "class": "arch-subject", "title": `${family.description}\nfrom ${family.from.join(", ") || "nobody"} to ${family.to.join(", ") || "nobody"}` }, `${directionOnLink(family, a, b) ?? ""} ${family.pattern}`)))
+				h("div", { "class": "arch-subjects" }, ...families.map((family) => h("span", { "class": "arch-subject", "title": `from ${family.from.join(", ") || "nobody"} to ${family.to.join(", ") || "nobody"}` }, `${directionOnLink(family, a, b) ?? ""} ${family.pattern}`)))
 			)
 		];
 
@@ -1304,8 +1303,6 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 				return h("span", null, h("code", null, violation.subject), ` × ${formatCount(violation.count)} across `, link(labelOf(store, violation.a) + " ⇄ " + labelOf(store, violation.b), { "type": "edge", "id": store.between(violation.a, violation.b)?.id ?? violation.a + "|" + violation.b }), " — not among the hubs of any family that may cross it");
 			case "duplicate-peer":
 				return h("span", null, link(labelOf(store, violation.hub), { "type": "node", "id": violation.hub }), ` has ${violation.links} links to "${violation.peer}" — duplicate hub ids, or stale links`);
-			case "undeclared-store":
-				return h("span", null, "IndexedDB ", h("code", null, violation.database), " (", link(labelOf(store, violation.by), { "type": "node", "id": violation.by }), ") — not among the model's stores");
 			case "unknown-node":
 			default:
 				return h("span", null, link(labelOf(store, violation.id), { "type": "node", "id": violation.id }, "arch-link arch-violations"), " — not in the model");

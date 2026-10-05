@@ -79,7 +79,6 @@ export interface SubjectFamily {
 	"from": string[];
 	/** Who it's for: subscribes to the event, or serves the call (and so sends the reply). */
 	"to": string[];
-	"description": string;
 }
 
 export const containers: ContainerSpec[] = [
@@ -151,108 +150,108 @@ export const hubLinks: [string, string][] = [
 
 export const subjects: SubjectFamily[] = [
 	// ── observability ──
-	{ "pattern": "$sys.log.>", "from": ["*"], "to": ["root", "debug-mcp", "shell"], "description": "Structured logs: to the root collector and debug-mcp; a previewed app's to the shell, which files them under its window." },
-	{ "pattern": "$sys.metrics.>", "from": ["*"], "to": ["pod", "debug-mcp", "shell"], "description": "The metrics plane: each context's gauges, sampled once a second (editor-metrics.ts), to the pod's bridge for the insights monitor and to debug-mcp; a previewed app's to the shell first." },
-	{ "pattern": "$sys.backlog.log", "from": ["root", "preview:*"], "to": ["debug-mcp"], "description": "A page's startup records, sent once its debug-mcp link can carry them (observability's logBacklog): the editor root's, and a previewed app's through the shell." },
-	{ "pattern": "tab.discover", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"], "description": "debug-mcp asks which tabs are linked (a preview's app is one, through the shell)." },
-	{ "pattern": "tab.here", "from": ["root", "preview:*"], "to": ["debug-mcp"], "description": "A tab answers discovery with its id." },
-	{ "pattern": "page_tools.changed", "from": ["root", "shell", "preview:*"], "to": ["debug-mcp"], "description": "A tab's page tools changed (a preview window's page reloaded): re-read its manifest." },
-	{ "pattern": "page_tools.*", "from": ["debug-mcp"], "to": ["root", "preview:*"], "description": "debug-mcp reads one tab's page-tool manifest." },
-	{ "pattern": "tool.>", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"], "description": "debug-mcp calls a tab's page tools — the editor's (page-tools.ts: page_eval, the debugger, provoke, CDP, profiles, runs), an app's own (served under its tab id)." },
+	{ "pattern": "$sys.log.>", "from": ["*"], "to": ["root", "debug-mcp", "shell"] },
+	{ "pattern": "$sys.metrics.>", "from": ["*"], "to": ["pod", "debug-mcp", "shell"] },
+	{ "pattern": "$sys.backlog.log", "from": ["root", "preview:*"], "to": ["debug-mcp"] },
+	{ "pattern": "tab.discover", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"] },
+	{ "pattern": "tab.here", "from": ["root", "preview:*"], "to": ["debug-mcp"] },
+	{ "pattern": "page_tools.changed", "from": ["root", "shell", "preview:*"], "to": ["debug-mcp"] },
+	{ "pattern": "page_tools.*", "from": ["debug-mcp"], "to": ["root", "preview:*"] },
+	{ "pattern": "tool.>", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"] },
 	// ── the shell ⇄ the app and the workbench ──
-	{ "pattern": "project.>", "from": ["shell"], "to": ["root"], "description": "The project picker: the catalog (project.list) and opening one." },
-	{ "pattern": "workspace.files", "from": ["shell"], "to": ["root"], "description": "The current project's files and active editor, for a commit or a share link." },
-	{ "pattern": "workbench.init", "from": ["workbench"], "to": ["root"], "description": "The workbench's boot handshake: what to open." },
-	{ "pattern": "workbench.online", "from": ["workbench"], "to": ["root"], "description": "The workbench is up." },
-	{ "pattern": "workbench.save", "from": ["workbench"], "to": ["root"], "description": "A save, for the app frame." },
-	{ "pattern": "workbench.files", "from": ["root"], "to": ["workbench"], "description": "The app frame asks the workbench for the workspace's files and active editor." },
-	{ "pattern": "workbench.openProject", "from": ["root"], "to": ["workbench"], "description": "Switch the workbench to another project." },
-	{ "pattern": "git.status", "from": ["shell", "pod"], "to": ["workbench"], "description": "The git service's changes, for the shell's review panel and VS Code's Source Control view (the pod's)." },
-	{ "pattern": "git.file", "from": ["shell", "pod"], "to": ["workbench"], "description": "A changed file's two sides." },
-	{ "pattern": "git.classify", "from": ["shell"], "to": ["workbench"], "description": "A change's cosmetic/semantic verdicts." },
-	{ "pattern": "git.commit", "from": ["shell", "pod"], "to": ["workbench"], "description": "Commit." },
-	{ "pattern": "git.discard", "from": ["shell"], "to": ["workbench"], "description": "Discard a change." },
-	{ "pattern": "git.changed", "from": ["workbench"], "to": ["shell", "pod"], "description": "The working tree changed: refresh the review panel and the Source Control view." },
-	{ "pattern": "history.chunks", "from": ["shell"], "to": ["workbench"], "description": "Edit history for the review panel." },
-	{ "pattern": "tasks.list", "from": ["shell"], "to": ["pod"], "description": "What there is to run, for the run picker: VS Code's tasks (the workspace's package.json scripts, its own tasks), through the bridge (launch.ts)." },
-	{ "pattern": "tasks.run", "from": ["shell"], "to": ["pod"], "description": "Run one of them, as a VS Code task." },
-	{ "pattern": "terminal.run", "from": ["pod"], "to": ["workbench"], "description": "A task's terminal: the pod's task asks core for a just-bash process that runs its command once (worker-pod/tasks.ts → terminal.ts) — VS Code for the web runs tasks only through the provider's own pseudoterminal." },
-	{ "pattern": "terminal.out.*", "from": ["workbench"], "to": ["pod"], "description": "Its output, to the task's terminal." },
-	{ "pattern": "terminal.exit.*", "from": ["workbench"], "to": ["pod"], "description": "Its exit code: the task's." },
-	{ "pattern": "terminal.in.*", "from": ["pod"], "to": ["workbench"], "description": "Typed input, from the task's terminal." },
-	{ "pattern": "terminal.stop.*", "from": ["pod"], "to": ["workbench"], "description": "The task's terminal closed: stop it." },
-	{ "pattern": "runs.list", "from": ["shell", "root"], "to": ["workbench"], "description": "The core runtime's runs: the run picker's running markers, the runs page tool." },
-	{ "pattern": "runs.stop", "from": ["root"], "to": ["workbench"], "description": "Stop a run (the runs page tool)." },
-	{ "pattern": "evidence.observed", "from": ["pod"], "to": ["workbench"], "description": "What a debug session observed — its final coverage and what went through its observed sites — with the source that ran, as evidence of its run (evidence.ts)." },
-	{ "pattern": "runs.begin", "from": ["pod"], "to": ["workbench"], "description": "A debug session VS Code started (F5, Run and Debug) is a run: its id, for the session's launch config." },
-	{ "pattern": "theme.colorScheme", "from": ["shell"], "to": ["workbench"], "description": "Theme sync." },
-	{ "pattern": "dock.openWindow", "from": ["workbench"], "to": ["shell"], "description": "A VS Code window opens as a panel of the shell's dock." },
-	{ "pattern": "dock.closeWindow", "from": ["workbench"], "to": ["shell"], "description": "Its window closed." },
-	{ "pattern": "dock.hostEditor", "from": ["shell"], "to": ["workbench"], "description": "A dock panel shown as a VS Code editor." },
-	{ "pattern": "dock.closeEditor", "from": ["shell"], "to": ["workbench"], "description": "That editor closed." },
+	{ "pattern": "project.>", "from": ["shell"], "to": ["root"] },
+	{ "pattern": "workspace.files", "from": ["shell"], "to": ["root"] },
+	{ "pattern": "workbench.init", "from": ["workbench"], "to": ["root"] },
+	{ "pattern": "workbench.online", "from": ["workbench"], "to": ["root"] },
+	{ "pattern": "workbench.save", "from": ["workbench"], "to": ["root"] },
+	{ "pattern": "workbench.files", "from": ["root"], "to": ["workbench"] },
+	{ "pattern": "workbench.openProject", "from": ["root"], "to": ["workbench"] },
+	{ "pattern": "git.status", "from": ["shell", "pod"], "to": ["workbench"] },
+	{ "pattern": "git.file", "from": ["shell", "pod"], "to": ["workbench"] },
+	{ "pattern": "git.classify", "from": ["shell"], "to": ["workbench"] },
+	{ "pattern": "git.commit", "from": ["shell", "pod"], "to": ["workbench"] },
+	{ "pattern": "git.discard", "from": ["shell"], "to": ["workbench"] },
+	{ "pattern": "git.changed", "from": ["workbench"], "to": ["shell", "pod"] },
+	{ "pattern": "history.chunks", "from": ["shell"], "to": ["workbench"] },
+	{ "pattern": "tasks.list", "from": ["shell"], "to": ["pod"] },
+	{ "pattern": "tasks.run", "from": ["shell"], "to": ["pod"] },
+	{ "pattern": "terminal.run", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "terminal.out.*", "from": ["workbench"], "to": ["pod"] },
+	{ "pattern": "terminal.exit.*", "from": ["workbench"], "to": ["pod"] },
+	{ "pattern": "terminal.in.*", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "terminal.stop.*", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "runs.list", "from": ["shell", "root"], "to": ["workbench"] },
+	{ "pattern": "runs.stop", "from": ["root"], "to": ["workbench"] },
+	{ "pattern": "evidence.observed", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "runs.begin", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "theme.colorScheme", "from": ["shell"], "to": ["workbench"] },
+	{ "pattern": "dock.openWindow", "from": ["workbench"], "to": ["shell"] },
+	{ "pattern": "dock.closeWindow", "from": ["workbench"], "to": ["shell"] },
+	{ "pattern": "dock.hostEditor", "from": ["shell"], "to": ["workbench"] },
+	{ "pattern": "dock.closeEditor", "from": ["shell"], "to": ["workbench"] },
 	// ── previews ──
-	{ "pattern": "preview.start", "from": ["root", "workbench"], "to": ["node"], "description": "Start a dev server's preview in the dev-server worker." },
-	{ "pattern": "preview.provoke", "from": ["root", "workbench"], "to": ["node"], "description": "A cold transform round, for the provoke page tool." },
-	{ "pattern": "preview.open", "from": ["workbench", "shell"], "to": ["shell", "root"], "description": "Open (or resurface) a server's preview window." },
-	{ "pattern": "preview.open", "from": ["preview:*"], "to": ["shell"], "description": "A preview window's page tap hands up a page the app opened as a new window: another preview window." },
-	{ "pattern": "preview.ready", "from": ["root"], "to": ["shell"], "description": "A server is up at its address: point its windows there." },
-	{ "pattern": "preview.close", "from": ["workbench", "shell"], "to": ["root", "workbench", "node", "shell"], "description": "A server stopped, or its last window closed: close its windows, stop its preview." },
-	{ "pattern": "preview.hmr.*", "from": ["node"], "to": ["shell", "workbench"], "description": "A dev server's HMR update, into every window of its port." },
-	{ "pattern": "evidence.preview", "from": ["preview:*"], "to": ["workbench"], "description": "A preview page's runtime evidence (page-evidence.ts): what its instrumented modules observed, by file and version, its totals since it loaded — folded into its run's evidence (evidence.ts)." },
-	{ "pattern": "evidence.level", "from": ["node"], "to": ["workbench"], "description": "A starting dev server asks how much to instrument for runtime evidence (the silo.evidence.previews setting)." },
-	{ "pattern": "preview.version", "from": ["workbench"], "to": ["node"], "description": "Core asks a dev server for a module version it instrumented, by its source's blob oid: runtime evidence reads a version's counts against its own text." },
-	{ "pattern": "evidence.flush", "from": ["workbench"], "to": ["preview:*"], "description": "Core asks every preview page to report its runtime evidence now (before the preview closes)." },
-	{ "pattern": "preview.decide", "from": ["preview:*"], "to": ["shell"], "description": "A preview window's page tap asks for a capability the service worker can't see (WebSocket, WebRTC) — prompted in that window." },
-	{ "pattern": "preview.cdp", "from": ["root", "shell"], "to": ["shell"], "description": "A CDP command to a preview window's page: its docked DevTools, the preview_cdp page tool." },
-	{ "pattern": "preview.cdp.event.*", "from": ["shell"], "to": ["shell"], "description": "A preview page's CDP events, to its docked DevTools." },
-	{ "pattern": "preview.profile", "from": ["root"], "to": ["shell"], "description": "Profile a preview window's page (the preview_profile page tool)." },
-	{ "pattern": "preview.profiled", "from": ["shell"], "to": ["workbench"], "description": "A preview ran slow and was profiled: the workbench saves it, source-mapped (profile-files.ts)." },
-	{ "pattern": "virtual.request.*", "from": ["sw"], "to": ["root"], "description": "The service worker's /__virtual__/<tab>/<port>/ requests, addressed to the tab whose root relays them." },
-	{ "pattern": "virtual.request", "from": ["root", "workbench"], "to": ["node"], "description": "A preview's requests, answered by the dev-server worker." },
-	{ "pattern": "node.script.request", "from": ["node"], "to": ["node-scripts"], "description": "A request for a port no dev server has: a running script's own server, in the script worker." },
+	{ "pattern": "preview.start", "from": ["root", "workbench"], "to": ["node"] },
+	{ "pattern": "preview.provoke", "from": ["root", "workbench"], "to": ["node"] },
+	{ "pattern": "preview.open", "from": ["workbench", "shell"], "to": ["shell", "root"] },
+	{ "pattern": "preview.open", "from": ["preview:*"], "to": ["shell"] },
+	{ "pattern": "preview.ready", "from": ["root"], "to": ["shell"] },
+	{ "pattern": "preview.close", "from": ["workbench", "shell"], "to": ["root", "workbench", "node", "shell"] },
+	{ "pattern": "preview.hmr.*", "from": ["node"], "to": ["shell", "workbench"] },
+	{ "pattern": "evidence.preview", "from": ["preview:*"], "to": ["workbench"] },
+	{ "pattern": "evidence.level", "from": ["node"], "to": ["workbench"] },
+	{ "pattern": "preview.version", "from": ["workbench"], "to": ["node"] },
+	{ "pattern": "evidence.flush", "from": ["workbench"], "to": ["preview:*"] },
+	{ "pattern": "preview.decide", "from": ["preview:*"], "to": ["shell"] },
+	{ "pattern": "preview.cdp", "from": ["root", "shell"], "to": ["shell"] },
+	{ "pattern": "preview.cdp.event.*", "from": ["shell"], "to": ["shell"] },
+	{ "pattern": "preview.profile", "from": ["root"], "to": ["shell"] },
+	{ "pattern": "preview.profiled", "from": ["shell"], "to": ["workbench"] },
+	{ "pattern": "virtual.request.*", "from": ["sw"], "to": ["root"] },
+	{ "pattern": "virtual.request", "from": ["root", "workbench"], "to": ["node"] },
+	{ "pattern": "node.script.request", "from": ["node"], "to": ["node-scripts"] },
 	// ── the workspace ──
-	{ "pattern": "workspace.changed", "from": ["workbench", "node", "node-scripts"], "to": ["workbench", "node", "node-scripts"], "description": "Every change a realm makes to the shared workspace — persisted and announced by the workbench; dev servers hot-reload from it." },
-	{ "pattern": "workspace.buffer", "from": ["node", "node-scripts"], "to": ["workbench"], "description": "The node workers ask for the shared workspace buffer." },
+	{ "pattern": "workspace.changed", "from": ["workbench", "node", "node-scripts"], "to": ["workbench", "node", "node-scripts"] },
+	{ "pattern": "workspace.buffer", "from": ["node", "node-scripts"], "to": ["workbench"] },
 	// ── running node ──
-	{ "pattern": "node.start", "from": ["workbench"], "to": ["node-scripts", "pod"], "description": "Start a node run in the script worker (the pod records it)." },
-	{ "pattern": "node.ready", "from": ["node-scripts"], "to": ["workbench"], "description": "The script worker is subscribed." },
-	{ "pattern": "node.out.*", "from": ["node-scripts", "pod"], "to": ["workbench"], "description": "A run's output: the script worker's, or a debug session's (auto-attach)." },
-	{ "pattern": "node.exit.*", "from": ["node-scripts", "pod", "workbench"], "to": ["workbench", "pod"], "description": "A run ended: the script worker's, a debug session's, or an interrupted one's (the runner's own) — the pod records it." },
-	{ "pattern": "node.stdin.*", "from": ["workbench"], "to": ["node-scripts"], "description": "Typed input, to a running script." },
-	{ "pattern": "node.listening.*", "from": ["node-scripts"], "to": ["workbench"], "description": "A running script started listening on a port: it's a service." },
-	{ "pattern": "provoke.round", "from": ["node"], "to": ["provoke"], "description": "One cold transform round: the workspace buffer in, failures out." },
+	{ "pattern": "node.start", "from": ["workbench"], "to": ["node-scripts", "pod"] },
+	{ "pattern": "node.ready", "from": ["node-scripts"], "to": ["workbench"] },
+	{ "pattern": "node.out.*", "from": ["node-scripts", "pod"], "to": ["workbench"] },
+	{ "pattern": "node.exit.*", "from": ["node-scripts", "pod", "workbench"], "to": ["workbench", "pod"] },
+	{ "pattern": "node.stdin.*", "from": ["workbench"], "to": ["node-scripts"] },
+	{ "pattern": "node.listening.*", "from": ["node-scripts"], "to": ["workbench"] },
+	{ "pattern": "provoke.round", "from": ["node"], "to": ["provoke"] },
 	// ── debugging ──
-	{ "pattern": "debug.launch", "from": ["workbench"], "to": ["pod"], "description": "Auto-attach: run a terminal's `node <file>` as a tsval debug session." },
-	{ "pattern": "debug.stop", "from": ["workbench"], "to": ["pod"], "description": "Stop that session (Ctrl-C)." },
-	{ "pattern": "debug.declined.*", "from": ["pod"], "to": ["workbench"], "description": "The debugger couldn't take it: run it plainly." },
-	{ "pattern": "debug.state", "from": ["pod"], "to": ["shell"], "description": "The debug toolbar's state, for a preview window's header." },
-	{ "pattern": "debug.command", "from": ["shell"], "to": ["pod"], "description": "A preview window header's debug button." },
-	{ "pattern": "debug.sessions", "from": ["root"], "to": ["pod"], "description": "The live tsval sessions (this tab's debug_* page tools)." },
-	{ "pattern": "debug.start", "from": ["root"], "to": ["pod"], "description": "Start a tsval session, answered with its first stop (debug_start)." },
-	{ "pattern": "debug.breakpoints", "from": ["root"], "to": ["pod"], "description": "Replace a file's breakpoints (debug_breakpoints)." },
-	{ "pattern": "debug.session.*.control", "from": ["pod"], "to": ["debug-worker"], "description": "One tsval session: the adapter drives its worker." },
-	{ "pattern": "debug.session.*.event", "from": ["debug-worker"], "to": ["pod"], "description": "One tsval session: its worker reports stops, output, coverage." },
-	{ "pattern": "debug.session.*.state", "from": ["root"], "to": ["pod"], "description": "This tab's debug_state page tool reads one session." },
-	{ "pattern": "debug.session.*.step", "from": ["root"], "to": ["pod"], "description": "This tab's debug_step page tool steps one session." },
-	{ "pattern": "debug.session.*.stop", "from": ["root"], "to": ["pod"], "description": "This tab's debug_stop page tool stops one session." },
-	{ "pattern": "pod.ready", "from": ["debug-worker"], "to": ["pod"], "description": "A debug worker is up." },
-	{ "pattern": "production.launch", "from": ["workbench"], "to": ["pod"], "description": "A production (real-runtime) run starts: show it as a debug session." },
-	{ "pattern": "production.out.*", "from": ["workbench"], "to": ["pod"], "description": "Its output, for the Debug Console." },
-	{ "pattern": "production.exit.*", "from": ["workbench"], "to": ["pod"], "description": "It ended." },
-	{ "pattern": "production.stop.*", "from": ["pod"], "to": ["workbench"], "description": "Its debug session's Stop." },
-	{ "pattern": "tsval.preview.open", "from": ["pod"], "to": ["shell"], "description": "A tsval session started: open its render surface (tsval-surface.ts)." },
-	{ "pattern": "tsval.preview.close", "from": ["pod"], "to": ["shell"], "description": "It ended: close the surface." },
-	{ "pattern": "tsval.preview.stream", "from": ["debug-worker", "pod"], "to": ["pod", "shell"], "description": "A tsval session's render stream, to the surface — kept by the pod to replay to a surface that reconnects." },
-	{ "pattern": "tsval.preview.hello", "from": ["shell"], "to": ["pod"], "description": "The surface is up: replay the session." },
-	{ "pattern": "tsval.preview.event", "from": ["shell"], "to": ["pod"], "description": "A DOM event on the surface, for the session." },
-	{ "pattern": "tsval.preview.timeTravel", "from": ["shell"], "to": ["pod"], "description": "Scrub the session's history." },
+	{ "pattern": "debug.launch", "from": ["workbench"], "to": ["pod"] },
+	{ "pattern": "debug.stop", "from": ["workbench"], "to": ["pod"] },
+	{ "pattern": "debug.declined.*", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "debug.state", "from": ["pod"], "to": ["shell"] },
+	{ "pattern": "debug.command", "from": ["shell"], "to": ["pod"] },
+	{ "pattern": "debug.sessions", "from": ["root"], "to": ["pod"] },
+	{ "pattern": "debug.start", "from": ["root"], "to": ["pod"] },
+	{ "pattern": "debug.breakpoints", "from": ["root"], "to": ["pod"] },
+	{ "pattern": "debug.session.*.control", "from": ["pod"], "to": ["debug-worker"] },
+	{ "pattern": "debug.session.*.event", "from": ["debug-worker"], "to": ["pod"] },
+	{ "pattern": "debug.session.*.state", "from": ["root"], "to": ["pod"] },
+	{ "pattern": "debug.session.*.step", "from": ["root"], "to": ["pod"] },
+	{ "pattern": "debug.session.*.stop", "from": ["root"], "to": ["pod"] },
+	{ "pattern": "pod.ready", "from": ["debug-worker"], "to": ["pod"] },
+	{ "pattern": "production.launch", "from": ["workbench"], "to": ["pod"] },
+	{ "pattern": "production.out.*", "from": ["workbench"], "to": ["pod"] },
+	{ "pattern": "production.exit.*", "from": ["workbench"], "to": ["pod"] },
+	{ "pattern": "production.stop.*", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "tsval.preview.open", "from": ["pod"], "to": ["shell"] },
+	{ "pattern": "tsval.preview.close", "from": ["pod"], "to": ["shell"] },
+	{ "pattern": "tsval.preview.stream", "from": ["debug-worker", "pod"], "to": ["pod", "shell"] },
+	{ "pattern": "tsval.preview.hello", "from": ["shell"], "to": ["pod"] },
+	{ "pattern": "tsval.preview.event", "from": ["shell"], "to": ["pod"] },
+	{ "pattern": "tsval.preview.timeTravel", "from": ["shell"], "to": ["pod"] },
 	// ── capabilities ──
-	{ "pattern": "capability.decide.*", "from": ["sw"], "to": ["root"], "description": "The service worker's capability decisions, addressed to the tab whose root relays them to its pod." },
-	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"], "description": "Network/IO capability decisions, served by the pod." },
-	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"], "description": "Ask the user about a capability, served by the shell." },
+	{ "pattern": "capability.decide.*", "from": ["sw"], "to": ["root"] },
+	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"] },
+	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"] },
 	// ── workers ──
-	{ "pattern": "bablr.>", "from": ["workbench"], "to": ["bablr"], "description": "What bablr.ts asks its BABLR worker for: cosmetic/semantic verdicts, edit-burst grouping (cancellable), a text's spans, the span standing for each of its ranges (a run's evidence), where a span went between two versions of a text, and references to spans and where they are now (annotations)." },
-	{ "pattern": "annotations.>", "from": ["pod"], "to": ["workbench"], "description": "Durable annotations on code spans (SPAN-ANNOTATIONS.md), from core's BABLR (bablr.ts): references to ranges' spans, and where references' spans are now — the pod's editor.annotations.* commands, for extensions (the notes, the insights extension's evidence marks, the event sheet's anchors)." }
+	{ "pattern": "bablr.>", "from": ["workbench"], "to": ["bablr"] },
+	{ "pattern": "annotations.>", "from": ["pod"], "to": ["workbench"] }
 ];
 
 export const channels: ChannelSpec[] = [
@@ -477,9 +476,7 @@ export type Violation =
 	/** A hub message crossed from `a` to `b`, which no family's senders and receivers send that way. */
 	| { "type": "unexpected-subject"; "a": string; "b": string; "subject": string; "count": number }
 	| { "type": "duplicate-peer"; "hub": string; "peer": string; "links": number }
-	| { "type": "unknown-node"; "id": string }
-	/** An IndexedDB database nobody declared among the stores: kept out of the design's sight. */
-	| { "type": "undeclared-store"; "database": string; "by": string };
+	| { "type": "unknown-node"; "id": string };
 
 /** `hub`: how many of a label's messages rode the hub — only those are subjects; the rest came from probes. `forward`
  *  and `backward`: how many went a → b and b → a (without them, a label is checked either way). */
@@ -562,20 +559,6 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 		for (const [peer, links] of peers) {
 			if (links > 1) {
 				violations.push({ "type": "duplicate-peer", "hub": hub, "peer": peer, "links": links });
-			}
-		}
-	}
-
-	// Every IndexedDB database used: declared among the stores (its labels say `<database> › <store>.<operation>`).
-	const reported = new Set<string>();
-
-	for (const channel of observed.channels.filter((candidate) => (candidate.a === "idb" || candidate.b === "idb") && !app.has(candidate.a) && !app.has(candidate.b))) {
-		for (const label of channel.labels.keys()) {
-			const database = label.split(" › ")[0];
-
-			if (database !== label && !declaresDatabase(database) && !reported.has(database)) {
-				reported.add(database);
-				violations.push({ "type": "undeclared-store", "database": database, "by": channel.a === "idb" ? channel.b : channel.a });
 			}
 		}
 	}
@@ -779,37 +762,6 @@ export function idbOwner(database: string): string | undefined {
 	return database === "workspace-fs" || database === "silo-local" ? "zenfs" : undefined;
 }
 
-/**
- * Everything the editor keeps — where, for how long, and what — so no store is out of the design's sight (RUNTIME-
- * EVIDENCE.md; `.git/` holds git's own and nothing else). `where` is a path in the workspace or an IndexedDB database
- * (`idb:<name>`, `*` for any suffix); conformance checks every database the IndexedDB probe sees against these.
- *  - committed: in git, travels with the repo;
- *  - local: this machine only, not derivable (losing it loses something);
- *  - derived: this machine only, a cache (safe to delete at any time);
- *  - platform: VS Code's own.
- */
-export interface StoreSpec { "where": string; "kind": "committed" | "local" | "derived" | "platform"; "owner": string; "holds": string }
-
-export const stores: StoreSpec[] = [
-	{ "where": ".silo/", "kind": "committed", "owner": "workbench", "holds": "Silo's policy and capability rollups; each run's envelope (runs/) and what runs observed, keyed on BABLR spans (evidence/)." },
-	{ "where": ".git/", "kind": "committed", "owner": "workbench", "holds": "Git's own (isomorphic-git): objects, refs, the index, config. Nothing of the editor's." },
-	{ "where": ".silo/local/ = idb:silo-local", "kind": "local", "owner": "zenfs", "holds": "A zen-fs mount of its own IndexedDB store (workspace-fs.ts), only in the workbench: each file's edit history (edit-history/) and the newest raw CPU profiles (profiles/). Held in memory too, so each keeps little." },
-	{ "where": "idb:workspace-fs", "kind": "local", "owner": "zenfs", "holds": "The workspace's own writes (edits, acquired types), restored over the seed at boot." },
-	{ "where": "idb:bablr", "kind": "derived", "owner": "bablr", "holds": "The BABLR worker's parses, by parse version and git blob oid — the browser's .silo/local/bablr/ (bablr-worker.ts). Spans, verdicts and edit groups are all derived from them." },
-	{ "where": "idb:vscode-web-db", "kind": "platform", "owner": "workbench", "holds": "VS Code's user data and logs." },
-	{ "where": "idb:vscode-web-state-db*", "kind": "platform", "owner": "workbench", "holds": "VS Code's storage (global, shared, per workspace)." }
-];
-
-/** Whether the model declares IndexedDB database `name` among the stores. */
-export function declaresDatabase(name: string): boolean {
-	return stores.some((store) => store.where.split(" = ").some((where) => where.startsWith("idb:") && (where.endsWith("*") ? name.startsWith(where.slice(4, -1)) : name === where.slice(4))));
-}
-
-/** The stores, as the table ARCHITECTURE.md shows (generated: the model test checks it). */
-export function declaredStoresTable(): string {
-	return ["| Where | Kind | Owner | Holds |", "| --- | --- | --- | --- |", ...stores.map((store) => `| \`${store.where}\` | ${store.kind} | ${store.owner} | ${store.holds} |`)].join("\n");
-}
-
 /** Identity of a worker created in the workbench realm, by file name (see the monaco probes' `identifyWorker`). */
 export function identifyWorker(url: string): { "id": string; "label"?: string; "container": string; "owner"?: string } | undefined {
 	const file = url.split(/[?#]/u)[0].split("/").pop() ?? "";
@@ -868,35 +820,108 @@ export function classifyUrl(url: URL): string {
 	return url.origin === globalThis.location?.origin ? "net:origin" : "net:" + url.host;
 }
 
-/** A Mermaid flowchart of the DECLARED hub tree + channels (see ARCHITECTURE.md). */
-export function declaredMermaid(): string {
-	const id = (value: string): string => value.replaceAll(/\W/gu, "_");
-	const lines = ["flowchart LR"];
-	const writeContainer = (container: ContainerSpec, indent: string): void => {
-		lines.push(`${indent}subgraph ${id(container.id)}["${container.label}"]`);
+/** What a tour observed, as `architecture-tour.json` keeps it (the view's snapshot). */
+export interface TourSnapshot {
+	"nodes": { "id": string; "state": string; "spec"?: { "label"?: string; "container"?: string } }[];
+	"channels": { "a": string; "b": string; "medium"?: string; "labels": Record<string, { "count": number }> }[];
+	"topology": Record<string, { "subscriptions": string[] }>;
+}
 
-		for (const node of nodes.filter((candidate) => candidate.container === container.id)) {
-			lines.push(`${indent}  ${id(node.id)}["${node.label}"]`);
-		}
+/** An instance's id, as one of a kind: a port, a webview, a numbered server is the same part each run. */
+function generalId(id: string, label: string | undefined): string {
+	return id.replace(/^(preview|vite|server):\d+(?:~\d+)?$/u, "$1:*").replace(/^webview:.*$/u, `webview:${label ?? "*"}`).replace(/ #\d+$/u, "");
+}
 
-		for (const child of containers.filter((candidate) => candidate.parent === container.id)) {
-			writeContainer(child, indent + "  ");
-		}
+/** Does a store operation change the store? (A tool's file: storeShape's operations; a database: IndexedDB's.) */
+function writesStore(operation: string): boolean {
+	return /\b(?:write|create|put|add|delete|unlink|mkdir|rename|clear|touch)\b/u.test(operation);
+}
 
-		lines.push(`${indent}end`);
+/**
+ * ARCHITECTURE.md's diagram, rendered from what a tour observed (DISCOVERED-ARCHITECTURE.md) — nothing declared but where
+ * things run (the containers): every context, extension and store seen, and what joined them, as a Mermaid flowchart; then
+ * the stores, with who writes and who reads each; then each hub's components by namespace (the registering functions'
+ * names don't survive a minified build, and the diagram has to be the same from either). Instances read as one of a kind
+ * (`preview:<port>`), no counts: the same tour renders the same diagram, so a change to it is a change to the editor.
+ */
+export function tourDiagram(snapshot: TourSnapshot): string {
+	const seen = new Map(snapshot.nodes.filter((node) => node.state !== "declared" && !isAppNode(node.id)).map((node) => [node.id, node]));
+	const general = (id: string): string => generalId(id, seen.get(id)?.spec?.label);
+	const label = (id: string): string => (seen.get(id)?.spec?.label ?? nodeSpec(id)?.label ?? id).replace(/^store:/u, "").replace(/:\d{4,5}\b/u, ":*").replace(/ #\d+$/u, "");
+	// Mermaid reads `<` and `"` as its own.
+	const text = (value: string): string => value.replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "'");
+	const mermaidId = (id: string): string => "n_" + id.replaceAll(/\W/gu, "_");
+	const known = new Set(containers.map((container) => container.id));
+	const containerOf = (id: string): string | undefined => {
+		const declared = seen.get(id)?.spec?.container ?? nodeSpec(id)?.container;
+
+		return declared !== undefined && known.has(declared) ? declared : dynamicContainer(id);
 	};
 
-	for (const container of containers.filter((candidate) => candidate.parent === undefined)) {
-		writeContainer(container, "  ");
+	// The parts, one of a kind each, in their containers.
+	const parts = new Map<string, string>();
+
+	for (const id of seen.keys()) {
+		parts.set(general(id), id);
 	}
 
-	for (const [a, b] of hubLinks) {
-		lines.push(`  ${id(a)} <==>|hub| ${id(b)}`);
+	const partsIn = (container: string | undefined, indent: string): string[] => [...parts].filter(([, id]) => containerOf(id) === container).map(([part, id]) => `${indent}${mermaidId(part)}["${text(label(id))}"]`).sort();
+	// A container with nothing seen in it is left out.
+	const box = (container: ContainerSpec, indent: string): string[] => {
+		const inside = [...partsIn(container.id, indent + "  "), ...containers.filter((child) => child.parent === container.id).flatMap((child) => box(child, indent + "  "))];
+
+		return inside.length === 0 ? [] : [`${indent}subgraph c_${container.id}["${container.label}"]`, ...inside, `${indent}end`];
+	};
+	const lines = ["flowchart LR", ...containers.filter((container) => container.parent === undefined).flatMap((container) => box(container, "  ")), ...partsIn(undefined, "  ")];
+
+	// What joined them: a hub link, a declared channel's protocol, an extension's commands, a store's reads and writes.
+	const edges = new Set<string>();
+
+	for (const channel of snapshot.channels.filter((candidate) => seen.has(candidate.a) && seen.has(candidate.b))) {
+		const declared = declaredOn(channel);
+		const operations = Object.keys(channel.labels);
+		// Either way round, the same edge (but a store's, from who touched it).
+		const [a, b] = [general(channel.a), general(channel.b)].sort();
+
+		if (declared?.type === "hub") {
+			edges.add(`  ${mermaidId(a)} <==> ${mermaidId(b)}`);
+		} else if (declared?.type === "discovered" && declared.kind === "store") {
+			const [store, by] = isStoreNode(a) ? [a, b] : [b, a];
+			const how = [operations.some((operation) => !writesStore(operation)) && "reads", operations.some(writesStore) && "writes"].filter(Boolean).join(", ");
+
+			edges.add(`  ${mermaidId(by)} -->|"${how}"| ${mermaidId(store)}`);
+		} else {
+			const how = declared === undefined ? "undeclared" : declared.type === "discovered" ? "commands" : declared.spec.protocol;
+
+			edges.add(`  ${mermaidId(a)} <-.->|"${text(how + (channel.medium === undefined ? "" : " via " + channel.medium))}"| ${mermaidId(b)}`);
+		}
 	}
 
-	for (const channel of channels.filter((candidate) => !candidate.a.includes("*") && !candidate.b.includes("*"))) {
-		lines.push(`  ${id(channel.a)} <-.->|${channel.protocol}| ${id(channel.b)}`);
+	lines.push(...[...edges].sort());
+
+	const names = (ids: string[]): string => [...new Set(ids.filter((id) => seen.has(id)).map((id) => label(id)))].sort().join(", ") || "—";
+	// A database named for its workspace (`vscode-web-state-db-<hash>`) is one of a kind too.
+	const stores = new Map(discoveredStores(snapshot).map((store) => [store.store.replace(/-[0-9a-f]{8}$/u, "-*"), store]));
+	// A hub's components, one of a kind (the previews' are alike), past the observability plane every hub has (`$sys`).
+	const components = new Map<string, string>();
+
+	for (const [hub, topology] of Object.entries(snapshot.topology).filter(([candidate]) => seen.has(candidate))) {
+		for (const { component, subjects } of componentsOf({ "subscriptions": topology.subscriptions.filter((subject) => !subject.startsWith("$sys.")) })) {
+			components.set(`${label(hub)}\0${component}`, `| ${label(hub)} | ${component} | ${subjects.map((subject) => `\`${subject}\``).join(", ")} |`);
+		}
 	}
 
-	return lines.join("\n");
+	return [
+		"```mermaid",
+		...lines,
+		"```",
+		"",
+		"| Store | Written by | Read by |",
+		"| --- | --- | --- |",
+		...[...stores].sort(([a], [b]) => a.localeCompare(b)).map(([name, store]) => `| \`${name}\` | ${names(store.writers)} | ${names(store.readers)} |`),
+		"",
+		"| Hub | Component | Serves and hears |",
+		"| --- | --- | --- |",
+		...[...components].sort(([a], [b]) => a.localeCompare(b)).map(([, row]) => row)
+	].join("\n");
 }

@@ -159,7 +159,17 @@ own — and it waits until discovery has shown how far it gets alone.
    shows recent flows, the same shape counted once (×N), inferred links dimmed, narrowed to the lit feature; the
    Conformance tab adds the rules and the components no traffic touched this session. Not yet: components drawn inside
    their realm's box on the canvas (they're in the inspector), and flows longer than the store's recent log.
-6. **The diagram from the tour**, and the model trimmed to its rules.
+6. **The diagram from the tour**, and the model trimmed to its rules. Done: `tourDiagram()` renders what the tour saw —
+   every context, extension and store in its container, what joined them (a hub link, a declared channel's protocol, an
+   extension's commands, a store's reads and writes), the stores with their writers and readers, and each hub's
+   components — as ARCHITECTURE.md's generated block. Instances read as one of a kind (`Preview :*`, a webview by its
+   kind, a numbered server without its number), an edge either way round as one, no counts, and components by namespace
+   (a minified build keeps no registering functions' names) — so the same tour renders the same block (two runs in a row,
+   identical). The tour's last test rewrites the block locally and fails in CI when it differs. The model lost its 95
+   family descriptions, the stores table and its database check, and the generated declared diagram (and the view its
+   Model button); what's left is the rules — containment, the hub tree, each family's direction, each direct channel's
+   reason — with a sentence of intent on the nodes and channels. The hand-drawn narrative diagram stays: it says what
+   no run can show (what's bundled at build time).
 
 ## Decisions
 

@@ -740,6 +740,28 @@ test("conformance: nothing observed needs review", async () => {
 	assert.deepEqual(await session.conformance(), []);
 });
 
+// ARCHITECTURE.md's diagram is this tour's (DISCOVERED-ARCHITECTURE.md): rendered from what it saw, last. A local run
+// rewrites the block — a change to the editor shows up as a change to it, to commit with the change; in CI (the
+// architecture workflow) a block that differs from a fresh tour's fails.
+test("the diagram: ARCHITECTURE.md's is this tour's", async () => {
+	const { readFile, writeFile } = await import("node:fs/promises");
+	const { tourDiagram } = await import("../architecture-model.ts");
+	const file = new URL("../ARCHITECTURE.md", import.meta.url);
+	const doc = await readFile(file, "utf8");
+	const [begin, end] = ["<!-- architecture-tour:begin -->\n", "\n<!-- architecture-tour:end -->"];
+	const committed = doc.slice(doc.indexOf(begin) + begin.length, doc.indexOf(end));
+	const fresh = tourDiagram(await session.until("a last look", () => true));
+
+	if (process.env.CI === undefined) {
+		if (fresh !== committed) {
+			await writeFile(file, doc.replace(begin + committed + end, begin + fresh + end));
+			console.log("ARCHITECTURE.md: the tour's diagram changed — rewritten; commit it with the change");
+		}
+	} else {
+		assert.equal(fresh, committed, "ARCHITECTURE.md's diagram isn't this tour's: run the tour locally, which rewrites it, and commit it");
+	}
+});
+
 /** Poll `probe` (in this process) until it's truthy, waiting the way the page does. */
 function eventually(what, probe, timeoutMs = 30_000) {
 	return until(what, probe, { "timeoutMs": timeoutMs, "intervalMs": 250, "sleep": (ms) => session.page.waitForTimeout(ms) });
