@@ -39,10 +39,10 @@ also works over desktop's built-in git.
 |---|---|---|---|
 | **Shell** (top window) | `main.tsx` `renderShell()` branch, `shell.ts`, `git-panel.ts` | DOM, the shell hub; *later* the GitHub token (trust boundary) | Surrounding chrome: LHS project picker, top bar, and the RHS **git review panel** (`git-panel.ts` — GitHub-Desktop-style changes/diff/commit, a pure hub consumer of `git.*`). Loads the app in an iframe pointing back at the same page. |
 | **App iframe** (`/`) | `main.tsx` app branch, `coi.ts`, `vscode.tsx`, `samples.ts`, `pane-link.ts` | DOM, `rootHub`, COI bootstrap | Boots the workbench iframe (the preview windows live in the shell; this realm runs their backend — see below) and links it into `rootHub` over the retargeting pane-link transport; serves `project.list` + `workbench.init`, routes `project.open` → `openProject`. Owns the top of the hub tree. |
-| **Workbench iframe** (`/__vscode__/host.html`) | `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal.ts`, `node-runner.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()` (VS Code's full workbench lays itself out — its own activity bar, sashes, movable views and remembered layout, minus the menu bar and title bar, which the shell's chrome replaces), mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(the git engine and service live here too — legitimate browser parity for desktop's built-in git; VS Code's Source Control view on it is worker-pod's. The BABLR classifier welded into it is the part that should become a standalone extension.)* |
-| **Extension host** (`LocalProcess` / `LocalWebWorker`) | `extensions/*/extension.ts`, `extensions/*/ts-plugin.js` | the vscode API — **no DOM, no zen-fs singleton** | Extensions: `worker-pod` (the bridge: core's vscode API is its; spawns the LSP/debug/node workers; debug adapters, tasks, Source Control), `running` and `insights` and `event-sheet` (public API only). `eslint` + `capabilities` run in the WebWorker host *inside tsserver*, reusing tsserver's own `ts` as TS-plugins. |
-| **Workers** (`dist/lsp/*`, spawned from the workbench realm) | only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `bablr-worker` (the editor's BABLR: cosmetic verdicts, span ids for runtime evidence). (The event sheet's recognizer worker is its extension's own, spawned in the extension host.) |
-| **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (`cstSpans`, `classifyChange`), `tsval`, `util/silo` (incl. `silo/policy` — the shared policy model), and the vscode-package-local pure module `capability-breakpoints`. Built/aliased into the realms above. |
+| **Workbench iframe** (`/__vscode__/host.html`) | `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal.ts`, `node-runner.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()` (VS Code's full workbench lays itself out — its own activity bar, sashes, movable views and remembered layout, minus the menu bar and title bar, which the shell's chrome replaces), mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(Core lives here too: the git engine and service — legitimate browser parity for desktop's built-in git; VS Code's Source Control view on it is worker-pod's — the editor's BABLR (`bablr.ts`: one worker, its parses cached by blob oid, answering the git panel's verdicts, runtime evidence's span ids, and extensions' annotation references and resolutions), and runtime evidence (`evidence.ts`: each run's envelope, and what tsval sessions and preview pages observed, folded into `.silo/`). The cosmetic classifier the git service asks is the part that should become a standalone extension — see the known debt above.)* |
+| **Extension host** (`LocalProcess` / `LocalWebWorker`) | `extensions/*/extension.ts`, `extensions/*/ts-plugin.js` | the vscode API — **no DOM, no zen-fs singleton** | Extensions: `worker-pod` (the bridge: core's vscode API is its; spawns the LSP/debug/node workers; debug adapters, tasks, Source Control; core's BABLR to extensions as `editor.annotations.*`), `running`, `insights` (coverage, the evidence hover and hints), `notes`, `type-queries` and `event-sheet` (public API only). `eslint` + `capabilities` run in the WebWorker host *inside tsserver*, reusing tsserver's own `ts` as TS-plugins; the capabilities plugin also answers `_types.at` (TypeScript's types at ranges, for runtime evidence and the typed annotation strategy). |
+| **Workers** (`dist/lsp/*`, spawned from the workbench realm) | only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `bablr-worker` (the editor's BABLR, for `bablr.ts`: parses cached by blob oid in its own IndexedDB; cosmetic verdicts, span ids for runtime evidence, annotation references and resolutions). (The event sheet's recognizer worker is its extension's own, spawned in the extension host.) |
+| **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (upstream BABLR and our grammar, `bablr-language-ts`, bundled: `cstSpans`, span ids, `reidentify`/`follow`, `classifyChange`), `tsval` (the interpreter, and its `observe` hook), `almostnode` (the node runtime and previews' dev server, which instruments workspace modules for runtime evidence), `util/silo` (the shared policy model, runtime evidence and span annotations: pure models and layouts), and the vscode-package-local pure module `capability-breakpoints`. Built/aliased into the realms above. |
 
 There is also a **service worker** (`coi-serviceworker.js`, registered by `coi.ts`): one per origin, it stamps the
 COOP/COEP headers that make every realm cross-origin-isolated (SharedArrayBuffer) on a static host, and resolves the
@@ -81,10 +81,20 @@ each page's first script (`page-tap.ts`), and a window's top frame holds its one
 the shell links (confined: `previewAppPermissions`) and names as the window. Its console and errors go out on
 `$sys.log`, WebSocket/WebRTC capability requests as `preview.decide` and new windows as `preview.open` (the shell knows
 the window from the link, never from what the page says); frames nested in the window use the top frame's tap
-directly, and the app's own hub, if it has one, joins through it (observability's `linkPreviewHost`). A worker can't
-reach the editor's window, so its tap (`worker-tap.ts`) reports over a BroadcastChannel instead. A node script's fs
-writes ask the service worker synchronously (`POST /__capability__/decide`).
+directly, and the app's own hub, if it has one, joins through it (observability's `linkPreviewHost`). A worker the page
+starts joins the window's hub through the page: the page tap hands it a port as its first message (`WORKER_OFFER`), and
+its tap (`worker-tap.ts`) sends its records and capability questions through the page's (`tap.worker.log`,
+`tap.worker.decide`). A node script's fs writes ask the service worker synchronously (`POST /__capability__/decide`).
 On the live diagram: `preview:<port>` (the iframe) and `vite:<port>` (its dev server) come and go with the preview.
+
+**What a preview's code does is runtime evidence** (RUNTIME-EVIDENCE.md, the third slice). As a preview starts, the
+dev server asks core how much to instrument (`evidence.level`, the `silo.evidence.previews` setting) and compiles each
+workspace module through almostnode's instrumenting transformer, naming each version by its source's blob oid. The page
+tap carries the page runtime (`page-evidence.ts`), which counts what the modules report, by file and version, so a hot
+update's re-import counts on. Each page reports its totals on `evidence.preview` — every 10 s while they change, on a hot
+update, on `pagehide`, and when core asks (`evidence.flush`, which the `vite` command sends before the windows close).
+Core (`evidence.ts`) finds the run by the window's port, asks the dev server for each new version's source
+(`preview.version`), and when the run ends folds every version into the files' evidence in `.silo/`.
 
 **A server has as many windows as the user opens**, like browser tabs onto one dev server — and no address bar. A
 window's "new window" button opens another onto the same server; so does the app itself, opening one of its pages as
@@ -161,9 +171,9 @@ Everything that can ride the hub does. What doesn't, and why:
   service worker answers; the SW then asks the pod over the hub.
 - **the cspell server host's control port** — it speaks LSP over its worker port and has no hub; the pod hands it the
   workspace buffer once, at spawn (a respawned worker gets it again).
-- **a preview's HMR posts and its workers' tap** — HMR updates go into the iframe as plain posts; a preview's workers,
-  which can't reach the editor's window, report over a BroadcastChannel (`worker-tap.ts`). Everything else of a preview
-  window rides its hub link, confined (the previewed app is untrusted: `previewAppPermissions`).
+- **a preview's HMR posts** — HMR updates go into the iframe as plain posts. Everything else of a preview window —
+  its workers' records and questions too, through its page's tap — rides its hub link, confined (the previewed app is
+  untrusted: `previewAppPermissions`).
 - **the tsval render surface's port** — a `MessagePort` handed over in a `preview-ready` → `init` handshake, redone
   whenever the surface reloads.
 
@@ -171,49 +181,55 @@ Everything that can ride the hub does. What doesn't, and why:
 
 ```mermaid
 flowchart TB
-  SW["Service Worker — coi-serviceworker.js<br/>stamps COOP/COEP (cross-origin isolation) · node_modules CDN resolver"]
+  SW["Service Worker — coi-serviceworker.js<br/>stamps COOP/COEP (cross-origin isolation) · node_modules CDN resolver · answers /__virtual__/ from the dev servers"]
 
   subgraph SHELL["Shell · top window — main.tsx renderShell() / shell.ts"]
     S["chrome: LHS project picker · RHS history · top bar<br/>shell hub · (later: GitHub token)"]
+    PV["preview windows · /__virtual__/&lt;tab&gt;/&lt;port&gt;/<br/>page tap: console · capability gates · runtime evidence (page-evidence)"]
     subgraph APP["App iframe · / — main.tsx app branch / vscode.tsx / coi.ts / samples.ts"]
       A["rootHub · COI bootstrap<br/>serves project.list + workbench.init · routes project.open"]
       subgraph WB["Workbench iframe · /__vscode__/host.html — workbench-entry.tsx"]
         W["monaco boot · zen-fs mounted · vscodeApi captured<br/>ATA · terminal factory · debug preview"]
         GIT["git — browser parity for desktop's built-in git<br/>git-service · git-engine + isomorphic-git"]
-        COS["cosmetic-classifier (worker client + cache)"]
+        BAB["the editor's BABLR — bablr.ts<br/>one worker · verdicts · span ids · annotations"]
+        EV["runtime evidence — evidence.ts<br/>run envelopes · tsval sessions · preview pages → .silo/"]
       end
     end
   end
 
-  EXT["Extension host — LocalProcess + LocalWebWorker<br/>worker-pod (the bridge) · running · insights · event-sheet · eslint + capabilities (run inside tsserver, reuse ts)"]
+  EXT["Extension host — LocalProcess + LocalWebWorker<br/>worker-pod (the bridge) · running · insights · notes · type-queries · event-sheet · eslint + capabilities (run inside tsserver, reuse ts)"]
 
-  NW["node-worker<br/>almostnode / preview"]
-  DW["debug-worker<br/>tsval stepping / time-travel"]
+  NW["node-worker<br/>almostnode · preview dev servers (instrumented)"]
+  DW["debug-worker<br/>tsval stepping / time-travel · coverage + observe"]
   SH["server-host<br/>LSP"]
-  CW["bablr-worker<br/>BABLR: verdicts, span ids"]
+  CW["bablr-worker<br/>parses cached by blob oid · verdicts · spans · references"]
 
-  PKG["packages/* engines — pure, bundled at build time<br/>@brianjenkins94/bablr · tsval · util/silo (silo/policy) · capability-breakpoints"]
+  PKG["packages/* engines — pure, bundled at build time<br/>@brianjenkins94/bablr · tsval · almostnode · util/silo · capability-breakpoints"]
 
   S -.->|"loads iframe (src = self)"| A
   A -.->|"creates iframe (src = host.html)"| W
 
   S <-->|"hub · windowTransport — project.list (RPC), project.open"| A
+  S <-->|"hub · confined link — $sys.log, preview.decide/open, evidence.preview / evidence.flush"| PV
   A <-->|"hub · pane-link (retargets) — workbench.init/online/save/openProject + spans"| W
   W <-->|"hub · ext event/fn bridge (wireWorkbenchHub)"| EXT
 
   W ==>|"node-runner spawns · hub"| NW
   EXT ==>|"spawns · hub (portTransport)"| DW
   EXT ==>|"spawns · LSP over postMessage"| SH
-  COS ==>|"spawns · hub"| CW
-  GIT -->|"uses"| COS
+  BAB ==>|"spawns · hub"| CW
+  GIT -->|"verdicts"| BAB
+  EV -->|"span ids"| BAB
 
   W -.->|"SharedArrayBuffer — same zen-fs"| NW
   W -.->|"SharedArrayBuffer"| SH
 
   SW -.->|"COI headers · serves all assets"| S
+  SW -.->|"module requests → virtual.request"| PV
   PKG -.->|"bundled at build"| W
   PKG -.->|"bundled at build"| EXT
   PKG -.->|"bundled at build"| CW
+  PKG -.->|"bundled at build"| NW
 ```
 
 Edge styles: **solid arrows** = live message channels; **thick arrows** = a realm spawning a worker; **dotted arrows**
