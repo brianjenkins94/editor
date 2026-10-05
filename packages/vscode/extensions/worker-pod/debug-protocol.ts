@@ -20,7 +20,7 @@ export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack"
 
 /** Adapter → worker. */
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "react"?: boolean; "policy"?: Policy }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "args"?: string[] }
 	| { "type": "setBreakpoints"; "lines": number[] }
 	| { "type": "dispatch"; "id": number; "event": string }
 	| { "type": "timeTravel"; "index": number }

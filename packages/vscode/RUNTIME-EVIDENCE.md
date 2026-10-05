@@ -267,7 +267,8 @@ through it.
    shows the declared type beside it until then.
 6. **Quick fixes**: `?.` and `??`, then branches. Done (extensions/insights/fixes.ts): hints, with the evidence in the
    message, past `silo.evidence.minRuns` (3) and `silo.evidence.minSeen` (10); `?.` and `??` get a fix that removes
-   them, a branch never taken only the hint — deleting code on evidence alone is for you to decide.
+   them, a branch never taken only the hint — deleting code on evidence alone is for you to decide. (Since revised: the
+   fourth slice draws them in purple and gives a branch never taken, and a statement never reached, a fix too.)
 7. **The typed strategy**: types at ranges from the tsserver plugin, `inferred` and `observed` on references,
    `typed` in the pipeline, cases in the corpus. Done: `_types.at` (capabilities tsserver plugin) types each range as
    its site observes; `typed` re-scores same-shape candidates and treats `any` and `unknown` as saying nothing; notes
@@ -405,6 +406,36 @@ Decided 2026-10-04: every one as recommended (the **bold** option).
   observe the value after its default, tsval before; (c) no parameters in previews.
 - **P9 · The envelope's versions.** **(a) `files` keeps the last version, `versions` lists every oid that ran**; (b)
   `files` only.
+
+## Fourth slice: what could go, in purple, across inputs
+
+The point of running a program many times: what none of the runs needed is code that could go. Decided 2026-10-05.
+
+- **Purple is the evidence's color.** Everything runs suggest is drawn in it (extensions/insights/fixes.ts): an
+  operator that could go (`?.`, the right side of `??` or `&&`/`||`) with a wavy underline; code that never ran — a
+  branch's arm never taken, a statement never reached — with a tint. Each stays a Hint diagnostic too, so the lightbulb
+  offers its fix. Coverage keeps its gutter bars; its line background went, so a line that never ran isn't red and
+  purple at once.
+- **A Suggestions view, beside Problems** (extensions/insights/suggestions-view.ts): VS Code's Problems view doesn't
+  list hints, and raising them to Information would put VS Code's own squiggle under the purple. It lists every file
+  with evidence, open or not (read from disk, not opened as a document, so tsserver isn't handed it): each suggestion
+  short (`if's then never ran`), its line and its evidence (`12 times in 4 runs · at most 1 in 4`), the whole message on
+  hover; a click goes to it, a fix is on its row, and the count is the view's badge.
+- **Every suggestion has a fix**, including the arm and the statement: the `?:` or `if` replaced by the arm that always
+  ran (a block unwrapped), an `if` whose then never ran removed, a statement removed with its line. Nothing is applied
+  for you: the evidence suggests, you decide.
+- **Never isn't proof.** Each message says how rare it could still be, by the rule of three — with none in n tries, at
+  most 3/n of the time, 95% sure ("at most 1 in 4, 95% sure"), or too few tries yet under six — and the purple grows
+  stronger with the tries (under 30, under 300, more). The thresholds stay `silo.evidence.minRuns` and `minSeen`.
+- **Runs take inputs.** A tsval run's launch config takes `args`, which the program reads as `process.argv` (with an
+  `env` and a `cwd()`; nothing it can do with them); `debug.start` passes them through. *Evidence: Run with Inputs…*
+  (the editor's Run menu, or the palette) runs the file once per set of inputs, one after another — runs separated by
+  `|`, a run's arguments by spaces, quotes keeping a space — and remembers the last ones per file. What none of the
+  inputs reached is what turns purple. A stopgap: where inputs live, sets kept and reused (and shared, in `.silo/`?),
+  inputs beyond arguments (stdin, files, a function's own arguments), generated ones — that wants a design of its own.
+
+The logic is pure and tested in node (extensions/insights/suggestions.ts, worker-pod/inputs.ts); fixes.ts,
+suggestions-view.ts and run-inputs.ts are the VS Code wiring.
 
 ## Open questions
 

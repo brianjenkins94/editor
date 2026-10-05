@@ -39,7 +39,8 @@ function lines(report: CoverageReport): Map<number, { "ran": boolean; "count": n
 
 export function registerCoverage(context: vscode.ExtensionContext, store: EvidenceStore): void {
 	const ran = vscode.window.createTextEditorDecorationType({ "gutterIconPath": bar("#2ea04370"), "gutterIconSize": "contain", "overviewRulerColor": "#2ea04340", "overviewRulerLane": vscode.OverviewRulerLane.Left });
-	const missed = vscode.window.createTextEditorDecorationType({ "gutterIconPath": bar("#f85149c0"), "gutterIconSize": "contain", "overviewRulerColor": "#f85149a0", "overviewRulerLane": vscode.OverviewRulerLane.Left, "backgroundColor": "#f8514910", "isWholeLine": true });
+	// A bar, no background: code that never ran in enough runs is tinted the evidence's purple (fixes.ts), as a suggestion.
+	const missed = vscode.window.createTextEditorDecorationType({ "gutterIconPath": bar("#f85149c0"), "gutterIconSize": "contain", "overviewRulerColor": "#f85149a0", "overviewRulerLane": vscode.OverviewRulerLane.Left });
 	/** The latest session's coverage, by file path — until the file is edited. */
 	const reports = new Map<string, CoverageReport>();
 	const paint = (editor: vscode.TextEditor, marks: Iterable<[number, { "ran": boolean; "hover": string }]>): void => {

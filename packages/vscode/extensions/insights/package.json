@@ -19,6 +19,35 @@
           "title": "Insights",
           "icon": "$(pulse)"
         }
+      ],
+      "panel": [
+        {
+          "id": "suggestions",
+          "title": "Suggestions",
+          "icon": "$(lightbulb)"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "insights.applySuggestion",
+        "title": "Apply the Fix",
+        "icon": "$(lightbulb-autofix)"
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "insights.applySuggestion",
+          "when": "view == insights.suggestions && viewItem == suggestion.fixable",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "insights.applySuggestion",
+          "when": "false"
+        }
       ]
     },
     "configuration": {
@@ -51,6 +80,12 @@
       }
     },
     "views": {
+      "suggestions": [
+        {
+          "id": "insights.suggestions",
+          "name": "Suggestions"
+        }
+      ],
       "insights": [
         {
           "type": "webview",

@@ -14,6 +14,14 @@
     "onDebugResolve:tsval"
   ],
   "contributes": {
+    "commands": [
+      { "command": "editor.runWithInputs", "title": "Run with Inputs…", "category": "Evidence", "icon": "$(run-all)" }
+    ],
+    "menus": {
+      "editor/title/run": [
+        { "command": "editor.runWithInputs", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "navigation@2" }
+      ]
+    },
     "taskDefinitions": [
       {
         "type": "run",
@@ -42,7 +50,8 @@
                 "type": "string",
                 "description": "The source file to run under tsval.",
                 "default": "${file}"
-              }
+              },
+              "args": { "type": "array", "items": { "type": "string" }, "description": "Its arguments: process.argv after the node and the file.", "default": [] }
             }
           }
         },

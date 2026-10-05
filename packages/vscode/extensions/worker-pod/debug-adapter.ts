@@ -49,6 +49,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private podUnlink: (() => void) | undefined;
 	private offEvents: (() => void) | undefined;
 	private program = "";
+	/** The program's arguments (the launch config's `args`): its `process.argv` after the node and the file. */
+	private args: string[] = [];
 	private lines: number[] = [];
 	private snapshot: Snapshot | undefined;
 
@@ -270,6 +272,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 			case "launch":
 				this.program = String(args["program"] ?? "");
+				this.args = Array.isArray(args["args"]) ? (args["args"] as unknown[]).map(String) : [];
 				this.noDebug = args["noDebug"] === true;
 				this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
 				this.respond(request);
@@ -407,7 +410,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				return;
 			}
 
-			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "react": this.reactMode, "policy": this.policy }, trace);
+			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "react": this.reactMode, "policy": this.policy, "args": this.args }, trace);
 		});
 	}
 

@@ -3,7 +3,7 @@
  * debug session the way VS Code's debug UI does, and read where it stopped.
  *
  *   pod     `debug.sessions`                       → every live session's summary
- *   pod     `debug.start` { program?, breakpoints? } → starts a session and answers with its first stop
+ *   pod     `debug.start` { program?, breakpoints?, args? } → starts a session and answers with its first stop
  *   pod     `debug.breakpoints` { program?, lines }  → replaces a file's breakpoints (VS Code's own, so the UI shows them)
  *   session `debug.session.<id>.step` { action }   → resumes, and answers with the NEXT stop (or the end)
  *   session `debug.session.<id>.state`             → where it is now
@@ -133,7 +133,7 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 			return { "program": path, "lines": lines ?? [] };
 		}) },
 		{ "dispose": serve(hub, "debug.start", async (args, { signal }) => {
-			const { program, breakpoints } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[] };
+			const { program, breakpoints, "args": inputs } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[]; "args"?: string[] };
 			const path = resolveProgram(program);
 			const launchId = crypto.randomUUID();
 
@@ -149,7 +149,7 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 					reject(signal.reason);
 				}, { "once": true });
 			});
-			const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "debug " + path.split("/").pop(), "program": path, "__launchId": launchId });
+			const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "debug " + path.split("/").pop(), "program": path, ...inputs === undefined ? {} : { "args": inputs }, "__launchId": launchId });
 
 			if (!started) {
 				pendingLaunches.delete(launchId);

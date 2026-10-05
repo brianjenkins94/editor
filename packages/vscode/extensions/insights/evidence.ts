@@ -30,6 +30,10 @@ export interface EvidenceStore {
 	/** The evidence placed in `document` as it is now; undefined when it was edited while being placed (a newer look
 	 *  follows). Empty when there's none, or no editor BABLR to place it. */
 	"placed": (document: vscode.TextDocument) => Promise<Placed[] | undefined>;
+	/** The evidence placed in `text`, a file's as it is on disk (one no editor has open). */
+	"placedIn": (file: string, text: string) => Promise<Placed[]>;
+	/** Every file with evidence, workspace-relative. */
+	"files": () => Promise<string[]>;
 	/** A file's evidence (or samples) changed: the workspace-relative path. */
 	"onDidChange": vscode.Event<string>;
 }
@@ -110,28 +114,37 @@ export function evidenceStore(context: vscode.ExtensionContext): EvidenceStore {
 		return known;
 	};
 
-	const place = async (document: vscode.TextDocument): Promise<Placed[] | undefined> => {
-		const file = vscode.workspace.asRelativePath(document.uri, false);
+	/** `file`'s evidence placed in `text`: each span found there by its id (lost — or moved to another file — it fades:
+	 *  new runs make new evidence). */
+	const placeIn = async (file: string, text: string): Promise<Placed[]> => {
 		const known = await evidenceOf(file);
 
 		if (known.size === 0) {
 			return [];
 		}
 
-		const version = document.version;
 		const spans = [...known.keys()];
-		const found = await Promise.resolve(vscode.commands.executeCommand<Resolution[] | undefined>("editor.annotations.resolve", document.getText(), file, spans.map((span) => observedRef(span, file)), { "observed": true })).catch(() => undefined);
+		const found = await Promise.resolve(vscode.commands.executeCommand<Resolution[] | undefined>("editor.annotations.resolve", text, file, spans.map((span) => observedRef(span, file)), { "observed": true })).catch(() => undefined);
 
-		if (document.version !== version) {
-			return undefined;
-		}
-
-		// Found here (lost — or moved to another file — it fades: new runs make new evidence).
 		return spans.flatMap((span, index) => {
 			const at = found?.[index]?.candidate;
 
 			return at?.start === undefined || at.end === undefined || at.file !== file ? [] : [{ "start": at.start, "end": at.end, ...at.type === undefined ? {} : { "type": at.type }, "evidence": known.get(span)! }];
 		});
+	};
+
+	const place = async (document: vscode.TextDocument): Promise<Placed[] | undefined> => {
+		const version = document.version;
+		const placed = await placeIn(vscode.workspace.asRelativePath(document.uri, false), document.getText());
+
+		return document.version === version ? placed : undefined;
+	};
+
+	/** The files under one environment's evidence folder: `<file>.jsonl`, at any depth. */
+	const evidenceFiles = async (folder: vscode.Uri, prefix = ""): Promise<string[]> => {
+		const entries = await Promise.resolve(vscode.workspace.fs.readDirectory(folder)).catch(() => [] as [string, vscode.FileType][]);
+
+		return (await Promise.all(entries.map(async ([name, type]) => (type === vscode.FileType.Directory ? evidenceFiles(vscode.Uri.joinPath(folder, name), `${prefix}${name}/`) : name.endsWith(".jsonl") ? [prefix + name.slice(0, -".jsonl".length)] : [])))).flat();
 	};
 
 	const watchers = [`**/${SILO_DIR}/evidence/**/*.jsonl`, `**/${LOCAL_DIR}/samples/**/*.jsonl`].map((glob) => vscode.workspace.createFileSystemWatcher(glob));
@@ -159,6 +172,21 @@ export function evidenceStore(context: vscode.ExtensionContext): EvidenceStore {
 			}
 
 			return placing.placed;
+		},
+		"placedIn": placeIn,
+		"files": async () => {
+			const evidence = vscode.Uri.joinPath(root, `${SILO_DIR}/evidence`);
+			const found = new Set<string>();
+
+			for (const user of await folders(evidence)) {
+				for (const environment of await folders(vscode.Uri.joinPath(evidence, user))) {
+					for (const file of await evidenceFiles(vscode.Uri.joinPath(evidence, user, environment))) {
+						found.add(file);
+					}
+				}
+			}
+
+			return [...found].sort();
 		},
 		"onDidChange": changed.event
 	};

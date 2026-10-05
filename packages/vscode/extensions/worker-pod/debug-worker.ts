@@ -115,11 +115,13 @@ function nextAction(): Promise<Action> {
  * builtin (there is no real module system in the worker) BEFORE reaching a capability breakpoint — the whole point of
  * the hard-stop. Real effects belong to the almostnode "production" adapter, not to tsval's reverse-steppable VM.
  */
-function capabilitySurface(): { "globals": Record<string, unknown>; "resolveModule": (specifier: string) => unknown } {
+function capabilitySurface(fileName: string, args: string[]): { "globals": Record<string, unknown>; "resolveModule": (specifier: string) => unknown } {
 	const standins = capabilityStandins();
+	// What a script reads of its process: its arguments (a run's inputs), and a workspace to be in — nothing it can do.
+	const process = { "argv": ["node", fileName, ...args], "env": {}, "platform": "browser", "cwd": () => "/workspace" };
 
 	return {
-		"globals": { ...standins.globals, "console": guestConsole() },
+		"globals": { ...standins.globals, "console": guestConsole(), "process": process },
 		"resolveModule": (specifier: string) => (Object.hasOwn(standins.modules, specifier) ? standins.modules[specifier] : inert())
 	};
 }
@@ -485,7 +487,7 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 				break;
 			}
 
-			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "observe": observeSite, ...capabilitySurface() });
+			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "observe": observeSite, ...capabilitySurface(message.fileName, message.args ?? []) });
 
 			sourceFile = loaded.sourceFile;
 			record(loaded.vm, new Map());
