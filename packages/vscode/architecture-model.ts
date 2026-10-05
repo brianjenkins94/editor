@@ -845,7 +845,12 @@ function writesStore(operation: string): boolean {
  * (`preview:<port>`), no counts: the same tour renders the same diagram, so a change to it is a change to the editor.
  */
 export function tourDiagram(snapshot: TourSnapshot): string {
-	const seen = new Map(snapshot.nodes.filter((node) => node.state !== "declared" && !isAppNode(node.id)).map((node) => [node.id, node]));
+	// A page's own requests before the service worker controls it (a first visit's: `shell ⇄ net:*`) aren't the editor's
+	// architecture, and whether a run makes them depends on the browser's cache: left out, and a host only they reached.
+	const firstVisit = (channel: { "a": string; "b": string }): boolean => [channel.a, channel.b].some((end) => end.startsWith("net:")) && channel.a !== "sw" && channel.b !== "sw";
+	const channels = snapshot.channels.filter((channel) => !firstVisit(channel));
+	const reached = new Set(channels.flatMap((channel) => [channel.a, channel.b]));
+	const seen = new Map(snapshot.nodes.filter((node) => node.state !== "declared" && !isAppNode(node.id) && (!node.id.startsWith("net:") || reached.has(node.id))).map((node) => [node.id, node]));
 	const general = (id: string): string => generalId(id, seen.get(id)?.spec?.label);
 	const label = (id: string): string => (seen.get(id)?.spec?.label ?? nodeSpec(id)?.label ?? id).replace(/^store:/u, "").replace(/:\d{4,5}\b/u, ":*").replace(/ #\d+$/u, "");
 	// Mermaid reads `<` and `"` as its own.
@@ -877,7 +882,7 @@ export function tourDiagram(snapshot: TourSnapshot): string {
 	// What joined them: a hub link, a declared channel's protocol, an extension's commands, a store's reads and writes.
 	const edges = new Set<string>();
 
-	for (const channel of snapshot.channels.filter((candidate) => seen.has(candidate.a) && seen.has(candidate.b))) {
+	for (const channel of channels.filter((candidate) => seen.has(candidate.a) && seen.has(candidate.b))) {
 		const declared = declaredOn(channel);
 		const operations = Object.keys(channel.labels);
 		// Either way round, the same edge (but a store's, from who touched it).

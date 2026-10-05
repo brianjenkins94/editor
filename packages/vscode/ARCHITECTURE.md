@@ -314,7 +314,6 @@ flowchart LR
   subgraph c_network["Network (service worker)"]
     n_debug_mcp["debug-mcp"]
     n_net_esm_sh["esm.sh"]
-    n_net_ka_f_fontawesome_com["Font Awesome"]
     n_net_lighter_codehike_org["Code Hike"]
     n_net_open_vsx_org["Open VSX"]
     n_net_origin["Page origin"]
@@ -375,7 +374,6 @@ flowchart LR
   n_idb <-.->|"IndexedDB"| n_workbench
   n_idb <-.->|"IndexedDB"| n_zenfs
   n_net_esm_sh <-.->|"HTTP"| n_sw
-  n_net_ka_f_fontawesome_com <-.->|"HTTP"| n_shell
   n_net_lighter_codehike_org <-.->|"HTTP"| n_sw
   n_net_open_vsx_org <-.->|"HTTP"| n_sw
   n_net_origin <-.->|"HTTP"| n_sw

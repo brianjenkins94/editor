@@ -758,7 +758,10 @@ test("the diagram: ARCHITECTURE.md's is this tour's", async () => {
 			console.log("ARCHITECTURE.md: the tour's diagram changed — rewritten; commit it with the change");
 		}
 	} else {
-		assert.equal(fresh, committed, "ARCHITECTURE.md's diagram isn't this tour's: run the tour locally, which rewrites it, and commit it");
+		const [now, then] = [fresh.split("\n"), committed.split("\n")];
+		const changes = [...then.filter((line) => !now.includes(line)).map((line) => "- " + line), ...now.filter((line) => !then.includes(line)).map((line) => "+ " + line)];
+
+		assert.deepEqual(changes, [], "ARCHITECTURE.md's diagram isn't this tour's: run the tour locally, which rewrites it, and commit it");
 	}
 });
 

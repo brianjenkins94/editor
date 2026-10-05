@@ -118,10 +118,11 @@ test("the tour's diagram: what was seen, one of a kind each, without counts", as
 	const { tourDiagram } = await import("../architecture-model.ts");
 	const node = (id, extra = {}) => ({ "id": id, "state": "alive", ...extra });
 	const snapshot = (count) => ({
-		"nodes": [node("shell"), node("preview:5173", { "spec": { "label": "Preview :5173" } }), node("preview:5174", { "spec": { "label": "Preview :5174" } }), node("workbench"), node("ext:notes", { "spec": { "label": "notes", "container": "extHostWorker" } }), node("store:.silo/notes/…/<file>.jsonl"), node("net:esm.sh", { "state": "declared" })],
+		"nodes": [node("shell"), node("preview:5173", { "spec": { "label": "Preview :5173" } }), node("preview:5174", { "spec": { "label": "Preview :5174" } }), node("workbench"), node("ext:notes", { "spec": { "label": "notes", "container": "extHostWorker" } }), node("store:.silo/notes/…/<file>.jsonl"), node("net:esm.sh", { "state": "declared" }), node("net:ka-f.fontawesome.com")],
 		"channels": [
 			{ "a": "shell", "b": "preview:5173", "labels": { "hello": { "count": count } } },
 			{ "a": "shell", "b": "preview:5174", "labels": { "hello": { "count": 1 } } },
+			{ "a": "shell", "b": "net:ka-f.fontawesome.com", "labels": { "GET 200": { "count": 1 } } },
 			{ "a": "ext:notes", "b": "store:.silo/notes/…/<file>.jsonl", "labels": { "read": { "count": count }, "write": { "count": 1 } } }
 		],
 		"topology": { "preview:5173": { "subscriptions": ["evidence.flush", "$sys.arch.sync"] }, "preview:5174": { "subscriptions": ["evidence.flush"] }, "workbench": { "subscriptions": ["$rpc.call.annotations.resolve", "$rpc.reply.abc"] } }
@@ -135,6 +136,7 @@ test("the tour's diagram: what was seen, one of a kind each, without counts", as
 	assert.match(diagram, /\| `\.silo\/notes\/…\/<file>\.jsonl` \| notes \| notes \|/u);
 	assert.match(diagram, /\| Preview :\* \| evidence \| `evidence\.flush` \|\n\| Workbench \| annotations \| `annotations\.resolve\(\)` \|/u, "components by namespace, the previews' once, no $sys");
 	assert.doesNotMatch(diagram, /esm\.sh/u, "only what was seen");
+	assert.doesNotMatch(diagram, /fontawesome/u, "not a first visit's requests, past the service worker");
 });
 
 test("each pair of contexts is declared as one channel (a second one could never be seen)", async () => {
