@@ -29,6 +29,56 @@
   background: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 22%, transparent);
 }
 
+.live-values-cell.held {
+  background: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 35%, transparent);
+}
+
+.live-values-cell.turn {
+  cursor: pointer;
+}
+
+/* A value beside its label shrinks to the margin, cut short with an ellipsis. */
+.live-values-cell.inline {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* The cursor's line opens up (pane.ts lights the margin's cell at the cursor): each value whole, wrapped in its column,
+   the cell growing for it. */
+.notes-margin-cell.lit .live-values-row {
+  align-items: start;
+}
+
+.notes-margin-cell.lit .live-values-cell {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.live-values-picker {
+  flex: none;
+  margin-right: 1ch;
+  color: var(--vscode-descriptionForeground);
+}
+
+.live-values-step {
+  padding: 0 0.25ch;
+  border: none;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.live-values-step:disabled {
+  color: var(--vscode-disabledForeground);
+  cursor: default;
+}
+
+.live-values-dropped {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+
 .live-values-string {
   color: var(--vscode-debugTokenExpression-string);
 }

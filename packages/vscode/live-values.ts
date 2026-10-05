@@ -4,10 +4,12 @@
  * binary search. The debug adapter publishes them on the pod hub (`values.session.<id>` as they grow, `values.ended`);
  * this keeps the latest session's per file, shows them while the session lives, and takes them away when it ends.
  *
- * A function called more than once shows its latest call. Columns line up down a call: every line at the same loop
- * depth has the same columns, each as wide as its widest value, so a turn reads straight down; hovering one lights it on
- * every line. The margin also carries prose notes (`showNotes`, rendered by pane.tsx): both go in one `showPane` per
- * file, values first on a line.
+ * A function called more than once shows one call — its latest, or the one picked on its first line (`‹ 3/5 ›`).
+ * Columns line up down a call: every line at the same loop depth has the same columns, each as wide as its widest
+ * value, so a turn reads straight down; hovering one lights it on every line, a click holds it. The cursor's line opens
+ * up, its values whole (the margin's cell lit at the cursor: pane.ts). What the bounds left out is said under the last
+ * line. The margin also carries prose notes (`showNotes`, rendered by pane.tsx): both go in one `showPane` per file,
+ * values first on a line.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { PaneEntry } from "@brianjenkins94/monaco-vscode-api/main";
@@ -19,12 +21,17 @@ import css from "./live-values.css?raw";
 export interface Note { "id": string; "fromLine": number; "toLine": number; "text": string }
 
 /** One line of values as drawn: its label (`mid =`), then a value (`inline`) or a cell per column. */
-interface Row { "line": number; "label": string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[] }
+interface Row { "line": number; "label": string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker }
+
+/** A function's calls to pick between, on its first line: which (`function:line`), the one shown (0-based), how many. */
+interface Picker { "function": string; "index": number; "count": number }
 
 /** A cell's text and look (`string`, `number`, `boolean`, `branch`). */
 interface Cell { "text": string; "kind": string }
 
-interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number }
+/** A session's values, and what's picked in them: a function's call (by `function:line`; none, its latest) and a held
+ *  column. */
+interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string }
 
 /** A column no wider than this many characters; a longer value is cut short, whole on hover. */
 const MAX_WIDTH = 24;
@@ -78,17 +85,24 @@ function compareTurns(a: string, b: string): number {
 	return 0;
 }
 
-/** A session's rows: each function's latest call (and the top level), a row per line that has values. */
-export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>): Row[] {
-	const latest = new Map<string, number>();
+/** A session's rows: a call of each function (its latest, or the one `picked`) and the top level, a row per line that
+ *  has values; a function called more than once has its picker on its first line. */
+export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>, picked = new Map<string, number>()): Row[] {
+	const byFunction = new Map<string, LiveCall[]>();
 
 	for (const call of calls.values()) {
 		const key = `${call.name}:${call.line}`;
 
-		latest.set(key, Math.max(latest.get(key) ?? -1, call.id));
+		byFunction.set(key, [...byFunction.get(key) ?? [], call]);
 	}
 
-	const shownCalls = new Set([0, ...latest.values()]);
+	const shown = new Map([...byFunction].map(([key, each]) => {
+		const ordered = each.toSorted((left, right) => left.id - right.id);
+		const index = Math.min(picked.get(key) ?? ordered.length - 1, ordered.length - 1);
+
+		return [key, { "call": ordered[index]!, "index": index, "count": ordered.length }];
+	}));
+	const shownCalls = new Set([0, ...[...shown.values()].map((each) => each.call.id)]);
 	const byLine = new Map<number, LiveValue[]>();
 
 	for (const value of values.filter((candidate) => shownCalls.has(candidate.call))) {
@@ -133,6 +147,22 @@ export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>): Row[]
 		}), "group": group, "widths": [] });
 	}
 
+	// A function called more than once: its picker on its first line, a row of its own if nothing's there.
+	for (const [key, { call, index, count }] of shown) {
+		if (count > 1) {
+			const picker = { "function": key, "index": index, "count": count };
+			const row = rows.find((candidate) => candidate.line === call.line);
+
+			if (row === undefined) {
+				rows.push({ "line": call.line, "label": "", "cells": [], "group": `${call.id}/0`, "widths": [], "picker": picker });
+			} else {
+				row.picker = picker;
+			}
+		}
+	}
+
+	rows.sort((left, right) => left.line - right.line);
+
 	// Each group's columns as wide as their widest cell.
 	for (const group of new Set(rows.map((row) => row.group))) {
 		const members = rows.filter((row) => row.group === group);
@@ -146,8 +176,8 @@ export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>): Row[]
 	return rows;
 }
 
-/** A row's element: its label (as wide as its call's widest), then its value or its columns. */
-function renderRow(row: Row, labelWidth: number, element: HTMLElement): void {
+/** A row's element: its picker, its label (as wide as its call's widest), then its value or its columns. */
+function renderRow(row: Row, labelWidth: number, session: Session, redraw: () => void, element: HTMLElement): void {
 	const line = document.createElement("div");
 	const label = document.createElement("span");
 	const cell = (value: Cell | undefined, className: string): HTMLSpanElement => {
@@ -162,6 +192,37 @@ function renderRow(row: Row, labelWidth: number, element: HTMLElement): void {
 
 	line.className = "live-values-row";
 	line.dataset["line"] = String(row.line);
+
+	if (row.picker !== undefined) {
+		const { "function": key, index, count } = row.picker;
+		const picker = document.createElement("span");
+		const step = (by: number, text: string, title: string): HTMLButtonElement => {
+			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+			const button = document.createElement("button");
+
+			button.className = "live-values-step";
+			button.textContent = text;
+			button.title = title;
+			button.disabled = index + by < 0 || index + by >= count;
+			button.addEventListener("click", () => {
+				// The latest picked is no pick: it follows the calls still coming.
+				if (index + by === count - 1) {
+					session.picked.delete(key);
+				} else {
+					session.picked.set(key, index + by);
+				}
+
+				redraw();
+			});
+
+			return button;
+		};
+
+		picker.className = "live-values-picker";
+		picker.title = `Call ${index + 1} of ${count}`;
+		picker.append(step(-1, "‹", "The call before"), `${index + 1}/${count}`, step(1, "›", "The call after"));
+		line.append(picker);
+	}
 	label.className = "live-values-label";
 	label.textContent = row.label.padEnd(labelWidth);
 
@@ -180,13 +241,26 @@ function renderRow(row: Row, labelWidth: number, element: HTMLElement): void {
 
 		// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: a column as wide as its widest value
 		span.style.width = `${(row.widths[index] ?? 1) + 2}ch`;
+		span.classList.toggle("held", session.held === key);
 		span.addEventListener("mouseenter", () => { light(key, true); });
 		span.addEventListener("mouseleave", () => { light(key, false); });
+		span.addEventListener("click", () => { hold(session, key); });
 		columns.set(key, [...columns.get(key) ?? [], span]);
 		line.append(span);
 	}
 
 	element.append(line);
+}
+
+/** A click holds a column lit; another lets it go. */
+function hold(session: Session, key: string): void {
+	session.held = session.held === key ? undefined : key;
+
+	for (const [column, cells] of columns) {
+		for (const cell of cells) {
+			cell.classList.toggle("held", column === session.held);
+		}
+	}
 }
 
 function light(key: string, on: boolean): void {
@@ -206,7 +280,8 @@ function draw(uri: string): void {
 
 	const session = sessions.get(uri);
 	const prose = notes.get(uri) ?? [];
-	const rows = session === undefined ? [] : rowsOf(session.values, session.calls);
+	const rows = session === undefined ? [] : rowsOf(session.values, session.calls, session.picked);
+	const last = rows.at(-1);
 	const labelWidths = new Map<string, number>();
 
 	for (const row of rows) {
@@ -217,6 +292,8 @@ function draw(uri: string): void {
 
 	const entries: PaneEntry[] = [
 		...rows.map((row) => ({ "id": `values:${row.line}`, "fromLine": row.line, "toLine": row.line })),
+		// What the bounds left out, under the last line: its cell grows a line for it.
+		...last === undefined || session === undefined || session.dropped === 0 ? [] : [{ "id": "values:dropped", "fromLine": last.line, "toLine": last.line }],
 		...prose.map((note) => ({ "id": `note:${note.id}`, "fromLine": note.fromLine, "toLine": note.toLine }))
 	];
 
@@ -229,10 +306,16 @@ function draw(uri: string): void {
 	}
 
 	showPane(uri, entries, (entry, element) => {
+		if (entry.id === "values:dropped") {
+			element.append(Object.assign(document.createElement("div"), { "className": "live-values-dropped", "textContent": `… ${session!.dropped} more values not kept` }));
+
+			return undefined;
+		}
+
 		if (entry.id.startsWith("values:")) {
 			const row = rows.find((candidate) => `values:${candidate.line}` === entry.id)!;
 
-			renderRow(row, labelWidths.get(row.group.split("/")[0]!) ?? 0, element);
+			renderRow(row, labelWidths.get(row.group.split("/")[0]!) ?? 0, session!, () => { draw(uri); }, element);
 
 			return undefined;
 		}
@@ -301,7 +384,7 @@ export function installLiveValues(hub: Hub, uriOf: (path: string) => string): vo
 
 		// A new session over the file replaces the last one's values.
 		if (session?.id !== id) {
-			session = { "id": id, "values": [], "calls": new Map(), "dropped": 0 };
+			session = { "id": id, "values": [], "calls": new Map(), "dropped": 0, "picked": new Map() };
 			sessions.set(uri, session);
 		}
 

@@ -248,8 +248,12 @@ consumer of the same strip: the overlay draws what core gives it, values or a de
    a line outside a loop shows its value once, a line binding several names (parameters) names each; an `if` shows
    the arm it took. A function called more than once shows its latest call. The values go when the session ends or is
    stopped (the adapter now says so on a stop too). Seen in Brave over the binary search, paused on `return mid`.
-   Not yet: values on spans (so an edit mid-session doesn't misplace them), picking a call, the "N dropped" note, a
-   column held by a click, the cursor's row opened up.
+   Then the rest of the overlay's design: a function called more than once has a picker on its first line
+   (`‹ 7/9 ›`: the latest call unless one's picked, so a running session follows new calls); a click holds a column lit
+   down its call; the cursor's line opens up, each value whole and wrapped in its column, the margin's cell growing for
+   it (the component lights the cursor's cell); what the bounds left out is said under the last line ("… 20 more values
+   not kept"). Seen in Brave over a recursive `fib`, a long object and a 60-turn loop.
+   Not yet: values on spans (so an edit mid-session doesn't misplace them) — waits for values that outlive a session.
 7. **A tour test**: a note and a session over the binary search, read back from the pane.
    Done (test/architecture-tour.mjs, "live values"): the talk's binary search with a prose note on its first line, a
    session paused on `return mid`; each values row read back by its line — the parameters named, `mid` and `value`
