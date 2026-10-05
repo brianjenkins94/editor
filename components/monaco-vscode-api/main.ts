@@ -5,6 +5,7 @@ import type {
 import getAccessibilityServiceOverride from "@codingame/monaco-vscode-accessibility-service-override";
 import {
 	getService,
+	GroupOrientation,
 	initialize as initializeMonacoService,
 	IStorageService,
 	LogLevel
@@ -446,6 +447,7 @@ export async function boot(options: BootOptions): Promise<void> {
 		}
 	}
 
+	// eslint-disable-next-line ts/no-unsafe-enum-assignment -- the files override's provider declares the platform's file enums from its own copy of them: the same values, a distinct type
 	registerFileSystemOverlay(1, fileSystemProvider);
 
 	// Set configuration before initializing the service so it's directly available (especially
@@ -490,7 +492,7 @@ export async function boot(options: BootOptions): Promise<void> {
 				"viewColumn": index + 1
 			})),
 			"layout": openEditors.length > 0
-				? { "editors": { "orientation": 0, "groups": openEditors.map(() => ({ "size": 1 })) } }
+				? { "editors": { "orientation": GroupOrientation.HORIZONTAL, "groups": openEditors.map(() => ({ "size": 1 })) } }
 				: undefined,
 			"force": true
 		},
