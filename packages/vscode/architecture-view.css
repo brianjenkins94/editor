@@ -645,3 +645,27 @@ g.selected > .arch-edge {
   font-weight: 600;
   margin: 0 0 2px;
 }
+
+/* A hub's components: rows in its box, and the lines of the messages each handles */
+.arch-component-row rect {
+  fill: var(--arch-surface);
+  stroke: var(--arch-border);
+  stroke-width: 1;
+  cursor: pointer;
+}
+
+.arch-component-label {
+  font-size: 10px;
+  fill: var(--arch-fg);
+  pointer-events: none;
+}
+
+.arch-edge.type-component {
+  stroke: var(--arch-event);
+  stroke-opacity: 0.4;
+  stroke-width: 1.25;
+}
+
+.arch-svg.has-focus .arch-component-row:not(.focus) {
+  opacity: 0.35;
+}

@@ -664,21 +664,46 @@ export function componentsOf(hub: { "subscriptions": string[]; "sites"?: Record<
 	const components = new Map<string, Set<string>>();
 
 	for (const pattern of hub.subscriptions) {
-		if (pattern.startsWith("$rpc.reply.")) {
-			continue;
+		const subscription = subscriptionOf(hub, pattern);
+
+		if (subscription !== undefined) {
+			const known = components.get(subscription.component) ?? new Set<string>();
+
+			known.add(subscription.subject);
+			components.set(subscription.component, known);
 		}
-
-		// A session's, a port's, a tab's own subject (`production.stop.<uuid>`, `preview.hmr.5173`) is one of a kind: `*`.
-		const general = pattern.split(".").map((token) => (/^(?:\d+|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8})$/u.test(token) ? "*" : token)).join(".");
-		const subject = general.startsWith("$rpc.call.") ? general.slice("$rpc.call.".length) + "()" : general;
-		const component = hub.sites?.[pattern]?.[0] ?? subject.split(".")[0]!;
-		const known = components.get(component) ?? new Set<string>();
-
-		known.add(subject);
-		components.set(component, known);
 	}
 
 	return [...components].map(([component, subjects]) => ({ "component": component, "subjects": [...subjects].sort() })).sort((a, b) => a.component.localeCompare(b.component));
+}
+
+/** One subscription as a component's: the subject it reads as (a call as `name()`, a session's or port's own token as
+ *  `*`) and its component — or none, for an RPC client's reply channel (machinery). */
+function subscriptionOf(hub: { "sites"?: Record<string, string[]> }, pattern: string): { "subject": string; "component": string } | undefined {
+	if (pattern.startsWith("$rpc.reply.")) {
+		return undefined;
+	}
+
+	// A session's, a port's, a tab's own subject (`production.stop.<uuid>`, `preview.hmr.5173`) is one of a kind: `*`.
+	const general = pattern.split(".").map((token) => (/^(?:\d+|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8})$/u.test(token) ? "*" : token)).join(".");
+	const subject = general.startsWith("$rpc.call.") ? general.slice("$rpc.call.".length) + "()" : general;
+
+	return { "subject": subject, "component": hub.sites?.[pattern]?.[0] ?? subject.split(".")[0]! };
+}
+
+/** The component of `hub` that handles `subject` (a label's: `annotations.resolve` for a call or its reply) — the one
+ *  subscribed to it, as `componentsOf` names it — or undefined where the hub only relays it. */
+export function componentFor(hub: { "subscriptions": string[]; "sites"?: Record<string, string[]> }, subject: string): string | undefined {
+	for (const pattern of hub.subscriptions) {
+		const method = pattern.startsWith("$rpc.call.") ? pattern.slice("$rpc.call.".length) : pattern;
+
+		// Either way round: a label's own subject may be folded already (`virtual.request.*`, a tab's own).
+		if (!pattern.startsWith("$rpc.reply.") && (subjectMatches(method, subject) || subjectMatches(subject, method))) {
+			return subscriptionOf(hub, pattern)?.component;
+		}
+	}
+
+	return undefined;
 }
 
 /** A store, discovered by what's written and read in it (architecture-zenfs.ts, storeShape): `store:<shape>`. */

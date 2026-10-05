@@ -736,6 +736,30 @@ test("components: a realm's hub, told apart by who subscribed", async () => {
 	assert.deepEqual(holding("annotations.resolve()").subjects.filter((subject) => subject.startsWith("annotations.")), ["annotations.refer()", "annotations.resolve()"], "what one component serves stays together");
 });
 
+// Drawn on the view: each hub's components a row in its box, and a hub link's messages a line to the component that
+// handles them — a note's resolve lands on core's BABLR component (startBablr, or `annotations` where the build kept no
+// names), not on the workbench as a whole.
+test("components: on the view, a message's line lands on the component that handles it", async () => {
+	const { componentsOf } = await import("../architecture-model.ts");
+	const name = componentsOf(session.snapshot().topology.workbench).find((component) => component.subjects.includes("annotations.resolve()")).component;
+
+	// The tour's files have taken its tab by now: open it again.
+	await session.workbench().evaluate(() => globalThis.__editor.api.commands.executeCommand("architecture.open"));
+
+	const lines = await eventually("the resolve's component line", async () => {
+		const found = await session.workbench().evaluate(() => [...document.querySelectorAll("g[data-edge^='component:']")].map((line) => ({ "id": line.dataset.edge, "messages": line.querySelector("title")?.textContent.split("\n") ?? [] })));
+
+		return found.some((line) => line.messages.includes("annotations.resolve()")) ? found : undefined;
+	});
+	const rows = await session.workbench().evaluate(() => [...document.querySelectorAll(".arch-component-row")].map((row) => row.dataset.node));
+
+	assert.ok(rows.includes(`component:workbench:${name}`), "the component's row, in the workbench's box");
+	const row = `component:workbench:${name}`;
+	const resolve = lines.find((line) => line.messages.includes("annotations.resolve()")).id;
+
+	assert.ok(resolve.endsWith(":" + row) || resolve.includes(":" + row + ":"), "the resolve, to that row");
+});
+
 test("conformance: nothing observed needs review", async () => {
 	assert.deepEqual(await session.conformance(), []);
 });

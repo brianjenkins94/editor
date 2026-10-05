@@ -12,13 +12,15 @@ import type { ChannelStats, FlowMessage, RuntimeNode, StoredSample, TrafficKind 
 import type { ContainerSpec, Violation } from "./architecture-model";
 import { ArchitectureStore, collectArchReports, flowsOf, requestArchSync } from "@brianjenkins94/observability";
 import type { AppLayout } from "./architecture-model";
-import { allowedOnLink, appLayout, appWindowOf, checkConformance, componentsOf, containers, declaredBetween, channels as declaredChannels, declaredOn, nodes as declaredNodes, directionOnLink, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectOfLabel, subjectMatches, subjects as subjectFamilies } from "./architecture-model";
+import { allowedOnLink, appLayout, appWindowOf, checkConformance, componentFor, componentsOf, containers, declaredBetween, channels as declaredChannels, declaredOn, nodes as declaredNodes, directionOnLink, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectOfLabel, subjectMatches, subjects as subjectFamilies } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 import { windowTitle } from "./virtual-path";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const NODE_HEIGHT = 44;
 const NODE_WIDTH = 210;
+/** A hub's component, a row beneath the hub's own in its box (DISCOVERED-ARCHITECTURE.md). */
+const COMPONENT_HEIGHT = 20;
 const GAP = 8;
 const PADDING = 10;
 const HEADER = 34;
@@ -230,6 +232,8 @@ interface Layout {
 	"width": number;
 	"height": number;
 	"nodes": Map<string, Rect>;
+	/** A hub's whole box, its components' rows included (its `nodes` rect is the hub's own row, where its lines meet). */
+	"boxes": Map<string, Rect>;
 	"containers": Map<string, Rect>;
 	/** Nodes inside a collapsed box (at any depth): node id → that box. Their rect is the box's header. */
 	"hidden": Map<string, string>;
@@ -272,8 +276,15 @@ const drawnAsContainer = new Map(containers.filter((container) => container.node
 /** How far a previewed app's context is indented in its box, per level it's nested (see appLayout). */
 const APP_INDENT = 14;
 
-function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>, appInfo: AppLayout): Layout {
+/** A hub's component, as a node id: its lines meet its row. */
+function componentId(hub: string, component: string): string {
+	return `component:${hub}:${component}`;
+}
+
+/** `components`: each hub's components, drawn as rows in its box. */
+function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>, appInfo: AppLayout, components: ReadonlyMap<string, string[]>): Layout {
 	const app = appInfo.nodes;
+	const heightOf = (id: string): number => NODE_HEIGHT + ((components.get(id)?.length ?? 0) > 0 ? components.get(id)!.length * COMPONENT_HEIGHT + 4 : 0);
 	const order = new Map(declaredNodes.map((node, index) => [node.id, index]));
 	const byContainer = new Map<string, RuntimeNode[]>();
 	const visibleIds = new Set(visible.map((node) => node.id));
@@ -332,7 +343,7 @@ function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>, a
 		}
 
 		const items = [
-			...(byContainer.get(container.id) ?? []).map(() => ({ "width": NODE_WIDTH, "height": NODE_HEIGHT })),
+			...(byContainer.get(container.id) ?? []).map((node) => ({ "width": NODE_WIDTH, "height": heightOf(node.id) })),
 			...children(container).map(measure)
 		];
 		const width = Math.max(NODE_WIDTH, ...items.map((item) => item.width));
@@ -344,12 +355,12 @@ function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>, a
 		return size;
 	};
 
-	const layout: Layout = { "width": 0, "height": 0, "nodes": new Map(), "containers": new Map(), "hidden": new Map() };
+	const layout: Layout = { "width": 0, "height": 0, "nodes": new Map(), "boxes": new Map(), "containers": new Map(), "hidden": new Map() };
 	// A collapsed box's nodes, and its nested boxes', all stand at its header.
 	const hide = (container: ContainerSpec, box: string, header: Rect): void => {
-		for (const node of byContainer.get(container.id) ?? []) {
-			layout.nodes.set(node.id, header);
-			layout.hidden.set(node.id, box);
+		for (const id of (byContainer.get(container.id) ?? []).flatMap((node) => [node.id, ...(components.get(node.id) ?? []).map((component) => componentId(node.id, component))])) {
+			layout.nodes.set(id, header);
+			layout.hidden.set(id, box);
 		}
 
 		for (const child of children(container)) {
@@ -377,7 +388,19 @@ function computeLayout(visible: RuntimeNode[], collapsed: ReadonlySet<string>, a
 			const indent = (depth.get(node.id) ?? 0) * APP_INDENT;
 
 			layout.nodes.set(node.id, { "x": x + PADDING + indent, "y": cursor, "width": inner - indent, "height": NODE_HEIGHT });
-			cursor += NODE_HEIGHT + GAP;
+
+			// Its components, each a row beneath it, indented.
+			if ((components.get(node.id)?.length ?? 0) > 0) {
+				const top = cursor;
+
+				layout.boxes.set(node.id, { "x": x + PADDING + indent, "y": top, "width": inner - indent, "height": heightOf(node.id) });
+
+				for (const [index, component] of components.get(node.id)!.entries()) {
+					layout.nodes.set(componentId(node.id, component), { "x": x + PADDING + indent + 16, "y": top + NODE_HEIGHT + index * COMPONENT_HEIGHT, "width": inner - indent - 24, "height": COMPONENT_HEIGHT - 2 });
+				}
+			}
+
+			cursor += heightOf(node.id) + GAP;
 		}
 
 		for (const child of children(container)) {
@@ -500,7 +523,10 @@ interface EdgeView {
 	"a": string;
 	"b": string;
 	"channel"?: ChannelStats;
-	"type": "hub" | "channel" | "discovered" | "undeclared";
+	/** `component`: a hub link's messages that one of its ends' components handles, drawn to that component's row. */
+	"type": "hub" | "channel" | "discovered" | "undeclared" | "component";
+	/** A component line's messages (its channel carries others too). */
+	"labels"?: string[];
 	"observed": boolean;
 	"path": SVGPathElement;
 	"label"?: SVGTextElement;
@@ -664,6 +690,13 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	let app: ReadonlySet<string> = appInfo.nodes;
 	let edges = new Map<string, EdgeView>();
 	let edgesByNode = new Map<string, EdgeView[]>();
+	/** The contexts the last render drew, and each hub's components among them (DISCOVERED-ARCHITECTURE.md). */
+	let drawnIds: string[] = [];
+	let components = new Map<string, string[]>();
+	/** Which component line a hub link's message rides (`<channel>\0<label>` → edge), as of the last render. */
+	let routes = new Map<string, string>();
+	/** The hub links' messages the last render placed: a new one re-renders, so its component gets its line. */
+	const placed = new Set<string>();
 	const nodeElements = new Map<string, SVGGElement>();
 	const lastActivity = new Map<string, number>();
 	let renderScheduled = false;
@@ -747,6 +780,62 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		}
 	}
 
+	/** Each hub's components (its subscriptions by registering function, or namespace), past the reporter's own
+	 *  `$sys.arch` (every hub has it, and its traffic isn't counted) — not a previewed app's, nor a box's (sw). */
+	function componentsNow(ids: string[]): Map<string, string[]> {
+		return new Map(ids.flatMap((id) => {
+			const topology = store.topology.get(id);
+
+			if (topology === undefined || app.has(id) || drawnAsContainer.has(id)) {
+				return [];
+			}
+
+			const names = componentsOf({ ...topology, "subscriptions": topology.subscriptions.filter((subject) => !subject.startsWith("$sys.arch")) }).map(({ component }) => component);
+
+			return names.length === 0 ? [] : [[id, names] as const];
+		}));
+	}
+
+	/** A component line: `labels` of `channel` (a hub link), between `a` and `b` — its ends, or a component of either. */
+	function addComponentEdge(channel: ChannelStats, a: string, b: string, labels: string[]): void {
+		const from = layout.nodes.get(a);
+		const to = layout.nodes.get(b);
+
+		// Into a collapsed box, the link's own line says it.
+		if (from === undefined || to === undefined || layout.hidden.has(a) || layout.hidden.has(b)) {
+			return;
+		}
+
+		const id = `component:${channel.id}:${a}:${b}`;
+		const d = edgePath(from, to);
+		const path = s("path", { "d": d, "class": "arch-edge type-component status-declared" });
+		const hit = s("path", { "d": d, "class": "arch-edge-hit" });
+		const group = s("g", { "data-edge": id });
+
+		group.append(path, hit, s("title", {}, labels.join("\n")));
+		// The link it rides: its counts, its messages.
+		hit.addEventListener("click", (event) => {
+			event.stopPropagation();
+			select({ "type": "edge", "id": channel.id });
+		});
+		hit.addEventListener("mouseenter", () => { group.classList.add("hover"); });
+		hit.addEventListener("mouseleave", () => { group.classList.remove("hover"); });
+		edgeLayer.append(group);
+
+		const view: EdgeView = { "id": id, "a": a, "b": b, "channel": channel, "type": "component", "labels": labels, "observed": true, "path": path, "length": path.getTotalLength(), "inFlight": 0 };
+
+		edges.set(id, view);
+
+		for (const label of labels) {
+			routes.set(channel.id + "\0" + label, id);
+		}
+
+		// Filed under its ends, and the hubs they're in: hovering a hub lights its components' lines too.
+		for (const end of new Set([a, b, channel.a, channel.b])) {
+			edgesByNode.set(end, [...edgesByNode.get(end) ?? [], view]);
+		}
+	}
+
 	function render(): void {
 		const now = Date.now();
 		// A medium only two contexts use is drawn as the edge between them (its channel's `medium`), not as a box.
@@ -768,7 +857,9 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		const drawn = visible;
 		const visibleIds = new Set(drawn.map((node) => node.id));
 
-		layout = computeLayout(drawn, collapsed, appInfo);
+		drawnIds = drawn.map((node) => node.id);
+		components = componentsNow(drawnIds);
+		layout = computeLayout(drawn, collapsed, appInfo, components);
 		svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
 		applyZoom();
 		clearPulses();
@@ -852,6 +943,49 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			}
 		}
 
+		// A hub link's messages, each to the component on either end that handles it (componentFor): a thin line per pair
+		// of ends, beside the link's own (which keeps its counts). A message no component on either end handles — one
+		// both only relay — stays on the link alone.
+		routes = new Map();
+
+		// Where `subject` lands on hub `end`: the component handling it, or the hub itself.
+		const handlerOf = (end: string, subject: string): string => {
+			const topology = store.topology.get(end);
+			const component = topology === undefined || !components.has(end) ? undefined : componentFor(topology, subject);
+
+			return component === undefined ? end : componentId(end, component);
+		};
+
+		for (const channel of store.channels.values()) {
+			if (!visibleIds.has(channel.a) || !visibleIds.has(channel.b) || declaredOn(channel)?.type !== "hub") {
+				continue;
+			}
+
+			const pairs = new Map<string, string[]>();
+
+			for (const [label, stats] of channel.labels) {
+				const subject = (stats.hub ?? 0) > 0 ? subjectOfLabel(label) : undefined;
+
+				placed.add(channel.id + "\0" + label);
+
+				if (subject === undefined || subject.startsWith("$")) {
+					continue;
+				}
+
+				const [a, b] = [handlerOf(channel.a, subject), handlerOf(channel.b, subject)];
+
+				if (a !== channel.a || b !== channel.b) {
+					pairs.set(a + "\0" + b, [...pairs.get(a + "\0" + b) ?? [], label]);
+				}
+			}
+
+			for (const [pair, labels] of pairs) {
+				const [a, b] = pair.split("\0");
+
+				addComponentEdge(channel, a, b, labels);
+			}
+		}
+
 		nodeLayer.replaceChildren();
 		nodeElements.clear();
 
@@ -868,7 +1002,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			const group = s("g", { "class": `arch-node state-${node.state}${declared?.hub === true ? " is-hub" : ""}`, "data-node": node.id });
 
 			group.append(
-				s("rect", { "x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height, "rx": 6, "class": known ? undefined : "undeclared" }),
+				s("rect", { "x": rect.x, "y": rect.y, "width": rect.width, "height": layout.boxes.get(node.id)?.height ?? rect.height, "rx": 6, "class": known ? undefined : "undeclared" }),
 				s("circle", { "cx": rect.x + 11, "cy": rect.y + 15, "r": 4, "class": "arch-node-dot" }),
 				s("text", { "x": rect.x + 22, "y": rect.y + 19, "class": "arch-node-label" }, labelOf(store, node.id)),
 				s("text", { "x": rect.x + 22, "y": rect.y + 34, "class": "arch-node-detail" }, detailOf(node)),
@@ -882,6 +1016,26 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			group.addEventListener("mouseleave", () => { setHovered(undefined); });
 			nodeLayer.append(group);
 			nodeElements.set(node.id, group);
+
+			// Its components, each a row: hovering one lights its lines; a click picks the hub (its inspector lists them).
+			for (const component of components.get(node.id) ?? []) {
+				const id = componentId(node.id, component);
+				const row = layout.nodes.get(id);
+				const element = s("g", { "class": "arch-component-row", "data-node": id });
+
+				element.append(
+					s("rect", { "x": row.x, "y": row.y, "width": row.width, "height": row.height, "rx": 4 }),
+					s("text", { "x": row.x + 8, "y": row.y + 13, "class": "arch-component-label" }, component)
+				);
+				element.addEventListener("click", (event) => {
+					event.stopPropagation();
+					select({ "type": "node", "id": node.id });
+				});
+				element.addEventListener("mouseenter", () => { setHovered(id); });
+				element.addEventListener("mouseleave", () => { setHovered(undefined); });
+				nodeLayer.append(element);
+				nodeElements.set(id, element);
+			}
 		}
 
 		// A box that stands for a node: its header selects and highlights that node, like the node's own box would. On the
@@ -952,7 +1106,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 		// The feature lens, when nothing's hovered or picked: its edges, and the contexts at their ends.
 		if (feature !== undefined && focusNode === undefined && focusEdge === undefined) {
-			const lit = [...edges.values()].filter((edge) => edge.channel !== undefined && featureTexts(edge.channel).some((text) => wordsOf(text).includes(feature!)));
+			const texts = (edge: EdgeView): string[] => (edge.labels === undefined ? featureTexts(edge.channel!) : edge.labels.flatMap((label) => subjectOfLabel(label) ?? []));
+			const lit = [...edges.values()].filter((edge) => edge.channel !== undefined && texts(edge).some((text) => wordsOf(text).includes(feature!)));
 			const ends = new Set(lit.flatMap((edge) => [edge.a, edge.b]));
 
 			svg.classList.add("has-focus");
@@ -973,7 +1128,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		svg.classList.toggle("has-focus", focusNode !== undefined || focusEdge !== undefined);
 
 		for (const [id, element] of nodeElements) {
-			element.classList.toggle("focus", id === focusNode || id === focusEdge?.a || id === focusEdge?.b);
+			// A hub focused, its components are too.
+			element.classList.toggle("focus", id === focusNode || id === focusEdge?.a || id === focusEdge?.b || (focusNode !== undefined && id.startsWith(componentId(focusNode, ""))));
 			element.classList.toggle("selected", selection?.type === "node" && selection.id === id);
 		}
 
@@ -993,7 +1149,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		let total = 0;
 
 		for (const edge of edges.values()) {
-			if (edge.channel === undefined) {
+			// A component line's width is its own (its link's rate is the link's).
+			if (edge.channel === undefined || edge.type === "component") {
 				continue;
 			}
 
@@ -1018,6 +1175,11 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			if (badge !== null && node !== undefined) {
 				badge.textContent = node.instances > 1 ? "×" + node.instances : node.spawnCount > 1 ? node.spawnCount + " starts" : "";
 			}
+		}
+
+		// A hub's subscriptions change without a new context or channel (the store says nothing): its rows follow.
+		if (JSON.stringify([...componentsNow(drawnIds)]) !== JSON.stringify([...components])) {
+			scheduleRender();
 		}
 
 		const alive = [...store.nodes.values()].filter((node) => node.state === "alive").length;
@@ -1051,7 +1213,15 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		lastActivity.set(channel.a, now);
 		lastActivity.set(channel.b, now);
 
-		const edge = edges.get(channel.id);
+		// A message a component handles rides its line; one new to a hub link re-renders, to find it its component.
+		const key = channel.id + "\0" + sample.label;
+
+		if (!placed.has(key) && declaredOn(channel)?.type === "hub") {
+			placed.add(key);
+			scheduleRender();
+		}
+
+		const edge = edges.get(routes.get(key) ?? channel.id);
 
 		if (paused || edge === undefined || (sample.kind === "ack" && !showAcks) || edge.inFlight >= MAX_PULSES_PER_EDGE || pulses.length >= MAX_PULSES || document.hidden) {
 			return;
@@ -1157,6 +1327,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 				"How to read it",
 				h("p", null, "Boxes are where code runs: realms (windows, workers) and origins (iframes). Solid double lines are hub links — the tree every context's hub federates over; thin lines are channels the probes observe outside the hubs (workers, extension hosts, network). Dots are messages."),
 				h("p", null, "Dashed means declared in the model (", h("code", null, "packages/vscode/architecture-model.ts"), ") but not seen yet; red means seen but not declared — fix the model or the code. Green lines were discovered, not declared: an extension's commands, and what's written to a store and read from it."),
+				h("p", null, "The rows in a hub's box are its components — what subscribed to it, by the function that did (or by namespace, where the build kept no names). A thin line from a row carries the messages that component handles; the hub link beside it keeps the counts."),
 				h("p", null, "Click a context or a line to inspect it. Pick a feature beside Idle to light only its part.")
 			),
 			section("Busiest channels", table(["Channel", "Messages", "Rate"], busiest.map((channel) => [
@@ -1392,8 +1563,17 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		};
 		// With no lens, flows of more than one message; with one, every message of its feature's.
 		const flows = grouped(flowsOf(samples).filter((flow) => !flow.label.startsWith("$sys") && (feature === undefined ? flow.caused.length > 0 : everything(flow).some((message) => wordsOf(message.label).includes(feature!))))).reverse().slice(0, 40);
+		// Where a message ends: its last hub, and the component there that handles it (a reply's is its caller's machinery).
+		const handledBy = (message: FlowMessage): string => {
+			const end = message.path.at(-1)!;
+			const topology = store.topology.get(end);
+			const subject = message.label.startsWith("↩") ? undefined : subjectOfLabel(message.label);
+			const component = topology === undefined || subject === undefined ? undefined : componentFor(topology, subject);
+
+			return labelOf(store, end) + (component === undefined ? "" : " · " + component);
+		};
 		const line = (message: FlowMessage, count: number, depth: number): HTMLElement[] => [
-			h("div", { "class": "arch-flow" + (message.inferred === true ? " inferred" : ""), "style": `padding-left: ${depth * 14}px`, "title": message.inferred === true ? "linked by timing: its cause wasn't named" : "" }, h("span", { "class": "arch-flow-label" }, message.label), h("span", { "class": "arch-muted" }, " " + message.path.map((id) => labelOf(store, id)).join(" → ") + (count > 1 ? `  ×${count}` : ""))),
+			h("div", { "class": "arch-flow" + (message.inferred === true ? " inferred" : ""), "style": `padding-left: ${depth * 14}px`, "title": message.inferred === true ? "linked by timing: its cause wasn't named" : "" }, h("span", { "class": "arch-flow-label" }, message.label), h("span", { "class": "arch-muted" }, " " + [...message.path.slice(0, -1).map((id) => labelOf(store, id)), handledBy(message)].join(" → ") + (count > 1 ? `  ×${count}` : ""))),
 			...grouped(message.caused).flatMap((child) => line(child.message, child.count, depth + 1))
 		];
 

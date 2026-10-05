@@ -114,6 +114,16 @@ test("workers and URLs map to model ids", () => {
 	assert.equal(classifyUrl(new URL("https://unpkg.com/react")), "net:unpkg.com");
 });
 
+test("a subject's component: the one subscribed to it, a call or a folded subject alike", async () => {
+	const { componentFor } = await import("../architecture-model.ts");
+	const root = { "subscriptions": ["$rpc.reply.root", "$rpc.call.virtual.request.fab8e817", "project.open"], "sites": { "project.open": ["serveProjects"] } };
+
+	assert.equal(componentFor(root, "project.open"), "serveProjects", "by its registering function");
+	assert.equal(componentFor(root, "virtual.request.fab8e817"), "virtual", "a call, by namespace");
+	assert.equal(componentFor(root, "virtual.request.*"), "virtual", "a label already folded");
+	assert.equal(componentFor(root, "git.status"), undefined, "relayed, not handled");
+});
+
 test("the tour's diagram: what was seen, one of a kind each, without counts", async () => {
 	const { tourDiagram } = await import("../architecture-model.ts");
 	const node = (id, extra = {}) => ({ "id": id, "state": "alive", ...extra });

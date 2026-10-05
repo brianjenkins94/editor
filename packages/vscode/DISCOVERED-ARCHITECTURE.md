@@ -157,8 +157,12 @@ own — and it waits until discovery has shown how far it gets alone.
    (`declaredBetween` says `discovered`), drawn green, never red; a hub's inspector lists its components; the toolbar's
    feature picker, built from the subjects, commands and stores seen, lights one feature and fades the rest; a Flows tab
    shows recent flows, the same shape counted once (×N), inferred links dimmed, narrowed to the lit feature; the
-   Conformance tab adds the rules and the components no traffic touched this session. Not yet: components drawn inside
-   their realm's box on the canvas (they're in the inspector), and flows longer than the store's recent log.
+   Conformance tab adds the rules and the components no traffic touched this session. Then the components on the canvas:
+   each a row in its hub's box, and a hub link's messages a thin line to the component that handles them (`componentFor`:
+   the one subscribed), beside the link's own line, which keeps its counts; a message's pulse rides its component's line,
+   and the Flows tab names the component each message ends at. A line has a component at the receiving end only: the hub
+   knows where a subscription was registered, not where a send came from, so the sender is its hub. Not yet: flows longer
+   than the store's recent log.
 6. **The diagram from the tour**, and the model trimmed to its rules. Done: `tourDiagram()` renders what the tour saw —
    every context, extension and store in its container, what joined them (a hub link, a declared channel's protocol, an
    extension's commands, a store's reads and writes), the stores with their writers and readers, and each hub's
