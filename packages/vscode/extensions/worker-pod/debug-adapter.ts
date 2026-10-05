@@ -338,6 +338,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 					this.sendFinalCoverage(report);
 					this.endAction();
 					this.closeWorker();
+					// The session's live values go with it, as when it runs to its end.
+					podHub.publish("values.ended", { "session": this.id, "file": this.program });
 					this.respond(request);
 					this.event("terminated");
 					this.settle("terminated");

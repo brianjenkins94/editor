@@ -186,6 +186,8 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "runs.list", "from": ["shell", "root"], "to": ["workbench"] },
 	{ "pattern": "runs.stop", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "evidence.observed", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "values.session.*", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "values.ended", "from": ["pod"], "to": ["workbench"] },
 	{ "pattern": "runs.begin", "from": ["pod"], "to": ["workbench"] },
 	{ "pattern": "theme.colorScheme", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "dock.openWindow", "from": ["workbench"], "to": ["shell"] },

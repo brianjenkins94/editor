@@ -1,0 +1,63 @@
+/* The right-hand side (pane.ts): the frame beside the code, its cells and entries. */
+
+.notes-margin {
+  position: absolute;
+  top: 0;
+  overflow: hidden;
+  background: var(--vscode-editor-background);
+  border-left: 1px solid var(--vscode-editorRuler-foreground, var(--vscode-panel-border));
+  color: var(--vscode-editor-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  z-index: 5;
+}
+
+.notes-margin-sash {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 1;
+}
+
+.notes-margin-sash:hover,
+.notes-margin-sash.dragging {
+  background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder));
+}
+
+.notes-margin-cell {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-left: 2px solid transparent;
+}
+
+.notes-margin-cell.lit {
+  border-left-color: var(--vscode-charts-purple, #b180d7);
+}
+
+/* Line for line with the code (the frame sets the editor's line height): a one-line note is as tall as its line. */
+.notes-margin-entry + .notes-margin-entry {
+  margin-top: 6px;
+}
+
+.notes-margin-entry p {
+  margin: 0 0 4px;
+}
+
+.notes-margin-entry p:last-child {
+  margin-bottom: 0;
+}
+
+.notes-margin-entry code {
+  font-family: var(--notes-margin-code-font-family, monospace);
+  font-size: 0.92em;
+}
+
+.notes-margin-marked {
+  background: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 12%, transparent);
+}

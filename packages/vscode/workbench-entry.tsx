@@ -18,6 +18,7 @@ import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, openHo
 import { render } from "preact";
 import type { ShellDockHost } from "./dock-host";
 import type { PodBridge } from "./extensions/worker-pod/extension";
+import type { Note } from "./live-values";
 import type { SharedWorkspace } from "./playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
 import capabilitiesExtensionPath from "capabilities:extension";
@@ -54,6 +55,7 @@ import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { installProfileFiles } from "./profile-files";
 import { installEvidence } from "./evidence";
+import { installLiveValues, showNotes } from "./live-values";
 import { windowClientTransport } from "./pane-link";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import { createBashProcess, serveTaskTerminals } from "./terminal";
@@ -574,6 +576,8 @@ function maybeBoot(): void {
 				const bablr = startBablr(workbenchHub);
 
 				installEvidence(api as typeof import("vscode"), workbenchHub, nodeRunner.runs, bablr);
+				// A debug session's values beside the code, in the notes margin (live-values.ts).
+				installLiveValues(workbenchHub, (path) => (api as typeof import("vscode")).Uri.file(path).toString());
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
 				// And the pod's tasks' terminals: a just-bash process that runs one command, over the hub (terminal.ts).
@@ -792,6 +796,8 @@ serve(workbenchHub, "workbench.files", async (): Promise<SharedWorkspace> => {
 installDebugBridge(() => vscodeApi);
 // The live-values strip beside the code (LIVE-VALUES.md), for a script to draw on (a console, the tour).
 (globalThis as { "__liveValues"?: typeof showLiveValues }).__liveValues = showLiveValues;
+// The notes margin (LIVE-VALUES.md): prose notes beside their code, for a script to show (a console, the tour).
+(globalThis as { "__pane"?: unknown }).__pane = { "show": (uri: string, notes: Note[]) => { showNotes(uri, notes); } };
 
 render(
 	<Workbench

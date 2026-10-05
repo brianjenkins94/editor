@@ -482,6 +482,7 @@ flowchart LR
 | Workbench | runs | `runs.begin()`, `runs.list()`, `runs.stop()` |
 | Workbench | terminal | `terminal.run()` |
 | Workbench | theme | `theme.colorScheme` |
+| Workbench | values | `values.ended`, `values.session.*` |
 | Workbench | workbench | `workbench.files()`, `workbench.openProject` |
 | Workbench | workspace | `workspace.buffer()`, `workspace.changed` |
 <!-- architecture-tour:end -->

@@ -220,11 +220,36 @@ consumer of the same strip: the overlay draws what core gives it, values or a de
    debugger colors them. Hovering a column lights it on every row, a click holds it; the cursor's row opens up. No test
    page: drawn from a script in the editor (`globalThis.__liveValues`, for a console and the tour) instead.
 4. **Core between them**: the latest session's record per file, the cursor and the pointer back from the overlay.
-   Revised (above): the frame hands each entry's element to core; core renders the pane with Code Hike.
+   Revised (above): the frame hands each entry's element to core; core renders the pane with Code Hike. Done: the
+   component's `showPane(uri, entries, render)` (pane.ts) puts a cell beside each entry's span, entries on overlapping
+   spans stacked in one, and hands each entry's element to `render`; Monaco is the row sizer — a cell taller than its
+   span gets a view zone after the span's last line for the difference, resized as the cell's content settles
+   (a ResizeObserver: a code block highlights after the prose); the pane takes the editor's line height, so a one-line
+   note is exactly its line. Hovering an entry marks its span (a whole-line decoration); the cursor's cell is lit.
+   The pane is an overlay inside the editor, not an editor group of its own: one scroll, nothing to synchronize. Its
+   left edge is a divider you drag (remembered, the same for every editor; by default past the longest line, at most
+   60% of the way). Wrapping wraps at the divider: while a pane shows, the editor wraps `"bounded"` at the divider's
+   column, and Alt+Z (whose override knows only "wrap at the full width", which would put code under the pane) is
+   taken over for an editor with a pane to toggle wrapping at the divider; elsewhere it is VS Code's. A cell's span is
+   measured to its last line's bottom, so wrapped rows count.
+   Core's `renderNote` (pane.tsx, loaded on first use) renders a note's Markdown with VS Code's own renderer
+   (sanitized; the component's `renderMarkdown`) and its code blocks with Code Hike (`highlight` + `<Pre>`, the GitHub
+   theme for the workbench's light or dark). A script can show notes (`globalThis.__pane.show`) until the notes
+   extension does (step 5).
 5. **Notes in the pane**: the notes extension sends its placed notes (`editor.pane.notes`); their prose beside their
    spans, rendered with Code Hike; hover links both ways.
 6. **Values as notes**: a session's values referred to their statements' spans, placed like notes, rendered as Victor's
    columns in the same pane.
+   Done, placed by line (not yet referred to spans): core's live-values.ts follows `values.session.*` and
+   `values.ended` on the workbench hub, keeps the latest session per file, and draws it in the notes margin beside the
+   prose (`showNotes`; both in one `showPane` per file) — a row per line that has values, its label (`mid =`,
+   `return`, `if`) then a cell per turn of the loop around it: every line at the same depth in a call has the same
+   columns, each as wide as its widest value, so a turn reads straight down, and hovering one lights it down the call;
+   a line outside a loop shows its value once, a line binding several names (parameters) names each; an `if` shows
+   the arm it took. A function called more than once shows its latest call. The values go when the session ends or is
+   stopped (the adapter now says so on a stop too). Seen in Brave over the binary search, paused on `return mid`.
+   Not yet: values on spans (so an edit mid-session doesn't misplace them), picking a call, the "N dropped" note, a
+   column held by a click, the cursor's row opened up.
 7. **A tour test**: a note and a session over the binary search, read back from the pane.
 8. **Capability decisions on the line**: a capability stop's *Allow once* / *Allow always* / *Deny* on its line, the
    choice resuming the run.
