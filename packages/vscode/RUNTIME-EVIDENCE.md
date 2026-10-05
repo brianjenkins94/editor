@@ -406,6 +406,56 @@ Decided 2026-10-04: every one as recommended (the **bold** option).
 - **P9 · The envelope's versions.** **(a) `files` keeps the last version, `versions` lists every oid that ran**; (b)
   `files` only.
 
+## Open questions
+
+The three slices were built quickly, to get the architecture together; most of their decisions were taken as
+recommended. These are the ones that deserve another look as real use arrives, roughly in order of how much it would
+cost to change them later.
+
+### Before more is built on them
+
+- **Is committing evidence the right default?** D3 was decided when only tsval runs wrote evidence. Previews now
+  write it on every dev session, so ordinary work rewrites `.silo/evidence/…` constantly: noisy diffs, `merge=union`
+  folding on every branch, files that grow with every user and machine. The alternatives: evidence local by default
+  (`.silo/local/`) and a rollup committed on request; or committed at a cadence (on commit, daily) rather than per run.
+  What would settle it: a week of real use, and how the diffs read in review.
+- **One rule for which span stands for a node.** Evidence takes the innermost span without an ordinal whose range is
+  exactly the node's (bablr.ts, `anchors(…, exact)`); notes take `pickAnchor` over the selection. They agree today
+  (pickAnchor prefers ids without an ordinal, then the larger, and keeps the first of equals, which is the innermost),
+  but nothing holds them together: if either changes, a note and the evidence at its code silently stop meeting. One
+  function both use would.
+- **BABLR as the key for everything.** Notes, evidence, the hover, the hints and the event sheet all ride on
+  `spanAnchors` ids. A file its grammar doesn't take gets no evidence and no notes; a parse costs about 14 ms a line;
+  an id with an ordinal (`#n`) shifts when the same code turns up earlier in its file. Kept by choice (BABLR's
+  performance work is coming); worth watching how often each of these bites.
+
+### Defaults to revisit with real use
+
+- **Previews instrument in `full` by default.** About ×3 on a pure-JavaScript hot loop (×1.45 for `coverage`). For a
+  game at 60 frames a second, `coverage` may be the better default, with `full` on request.
+- **The quick-fix thresholds** (`silo.evidence.minRuns` 3, `minSeen` 10). Evidence covers only the paths runs took:
+  "never nullish" can hold for every path that ran and not for one that didn't. Higher thresholds, or the surrounding
+  code's coverage shown beside the hint, before a fix is trusted.
+- **The typed strategy's weights** came from reasoning and one case, not data; the corpus has six cases. Every
+  placement records the strategy and score that made it, so they can be tuned once there's something to tune against.
+
+### Bottlenecks to expect
+
+- **One BABLR worker** answers notes, the hover, the hints, every annotation's resolution and, at a preview run's end,
+  the mapping of every version of every file it ran. The pool (deferred) goes behind `Bablr.request` when this queue is
+  what's slow.
+- **More hub channels** — `annotations.*`, `evidence.observed`, `evidence.preview`, `evidence.flush`,
+  `evidence.level`, `preview.version` — against the aim of fewer connections. Some could merge (`evidence.level`
+  could ride on `preview.start`).
+- **`_types.at` lives in the capabilities tsserver plugin**, which is otherwise about capabilities: the expedient home,
+  since it holds the checker. A small types plugin of its own if it grows.
+
+### Settled since
+
+- **The node tests run in CI.** The span-annotation corpus, the evidence store, the site sums, the typed strategy and
+  the tsval-against-preview differential test weren't run anywhere but by hand; `packages/vscode` now has a `test`
+  script, which CI's test job runs.
+
 ## Decisions
 
 Decided 2026-10-03: every one as recommended (the **bold** option).

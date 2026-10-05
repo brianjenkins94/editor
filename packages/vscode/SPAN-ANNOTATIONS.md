@@ -114,6 +114,11 @@ line, folded the same way. Collections may partition further (evidence adds an e
 - **Editor core**: baseline contents from git's objects.
 - **The insights extension**: what you see, including orphans and their two actions.
 
+## Open questions
+
+RUNTIME-EVIDENCE.md keeps the open questions for both: among them, one rule for which span stands for a node (notes
+use `pickAnchor`, evidence the exact span), and BABLR as the key for everything.
+
 ## Decisions
 
 Decided 2026-10-04: every one as recommended (the **bold** option).
