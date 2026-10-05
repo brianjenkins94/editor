@@ -935,10 +935,12 @@ export function tourDiagram(snapshot: TourSnapshot): string {
 	const names = (ids: string[]): string => [...new Set(ids.filter((id) => seen.has(id)).map((id) => label(id)))].sort().join(", ") || "—";
 	// A database named for its workspace (`vscode-web-state-db-<hash>`) is one of a kind too.
 	const stores = new Map(discoveredStores(snapshot).map((store) => [store.store.replace(/-[0-9a-f]{8}$/u, "-*"), store]));
-	// A hub's components, one of a kind (the previews' are alike), past the observability plane every hub has (`$sys`).
+	// A hub's components, one of a kind (the previews' are alike), past the observability plane every hub has (`$sys`) —
+	// the hubs still running when the tour ends: one that came and went (the script worker) reports what it served, or
+	// not, as its environment does.
 	const components = new Map<string, string>();
 
-	for (const [hub, topology] of Object.entries(snapshot.topology).filter(([candidate]) => seen.has(candidate))) {
+	for (const [hub, topology] of Object.entries(snapshot.topology).filter(([candidate]) => seen.get(candidate)?.state === "alive")) {
 		for (const { component, subjects } of componentsOf({ "subscriptions": topology.subscriptions.filter((subject) => !subject.startsWith("$sys.")) })) {
 			components.set(`${label(hub)}\0${component}`, `| ${label(hub)} | ${component} | ${subjects.map((subject) => `\`${subject}\``).join(", ")} |`);
 		}
