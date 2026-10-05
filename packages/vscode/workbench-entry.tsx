@@ -14,7 +14,7 @@
  */
 import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
-import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, openHostedEditor, registerExtension, OPEN_ARCHITECTURE_COMMAND, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
+import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, openHostedEditor, registerExtension, OPEN_ARCHITECTURE_COMMAND, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory, showLiveValues } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
 import type { ShellDockHost } from "./dock-host";
 import type { PodBridge } from "./extensions/worker-pod/extension";
@@ -790,6 +790,8 @@ serve(workbenchHub, "workbench.files", async (): Promise<SharedWorkspace> => {
 
 // Dev-only host-page debug bridge (window.__editor). Reads the captured API lazily; no-op off localhost.
 installDebugBridge(() => vscodeApi);
+// The live-values strip beside the code (LIVE-VALUES.md), for a script to draw on (a console, the tour).
+(globalThis as { "__liveValues"?: typeof showLiveValues }).__liveValues = showLiveValues;
 
 render(
 	<Workbench

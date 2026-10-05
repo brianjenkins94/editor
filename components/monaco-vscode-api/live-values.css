@@ -1,0 +1,77 @@
+/* Live values (live-values.ts): the strip beside the code, its rows and cells. */
+
+.live-values {
+  position: absolute;
+  top: 0;
+  overflow: hidden;
+  background: var(--vscode-editor-background);
+  border-left: 1px solid var(--vscode-editorRuler-foreground, var(--vscode-panel-border));
+  color: var(--vscode-editor-foreground);
+  z-index: 5;
+}
+
+.live-values-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding-left: 10px;
+  white-space: pre;
+  display: flex;
+}
+
+.live-values-label {
+  color: var(--vscode-debugTokenExpression-name, var(--vscode-symbolIcon-variableForeground));
+  flex: none;
+  text-align: right;
+}
+
+.live-values-cell {
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 0.5ch;
+  border-left: 1px solid var(--vscode-editorIndentGuide-background1, transparent);
+  cursor: pointer;
+}
+
+.live-values-label + .live-values-cell,
+.live-values-cell.inline {
+  border-left: none;
+}
+
+.live-values-cell.lit {
+  background: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 22%, transparent);
+}
+
+.live-values-cell.held {
+  background: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 35%, transparent);
+}
+
+.live-values-row.open {
+  z-index: 1;
+  background: var(--vscode-editor-lineHighlightBackground, var(--vscode-editor-background));
+}
+
+.live-values-row.open .live-values-cell {
+  overflow: visible;
+}
+
+.live-values-string {
+  color: var(--vscode-debugTokenExpression-string);
+}
+
+.live-values-number {
+  color: var(--vscode-debugTokenExpression-number);
+}
+
+.live-values-boolean {
+  color: var(--vscode-debugTokenExpression-boolean);
+}
+
+.live-values-note {
+  position: absolute;
+  bottom: 4px;
+  right: 10px;
+  opacity: 0.6;
+  font-style: italic;
+}
