@@ -345,9 +345,19 @@ export function findChannel(a: string, b: string): ChannelSpec | undefined {
 }
 
 /** The declared kind of a pair: a hub link, a declared channel, or nothing. */
-export function declaredBetween(a: string, b: string): { "type": "hub" } | { "type": "channel"; "spec": ChannelSpec } | undefined {
+export function declaredBetween(a: string, b: string): { "type": "hub" } | { "type": "channel"; "spec": ChannelSpec } | { "type": "discovered"; "kind": "commands" | "store" } | undefined {
 	if (isHubLink(a, b)) {
 		return { "type": "hub" };
+	}
+
+	// Discovered rather than declared (DISCOVERED-ARCHITECTURE.md): between extensions is VS Code's command surface, and a
+	// store is what's written to it and read from it.
+	if (isExtensionNode(a) && isExtensionNode(b)) {
+		return { "type": "discovered", "kind": "commands" };
+	}
+
+	if (isStoreNode(a) || isStoreNode(b)) {
+		return { "type": "discovered", "kind": "store" };
 	}
 
 	const spec = findChannel(a, b);
@@ -506,9 +516,7 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 	// A previewed app's own contexts are its architecture, not the editor's: nothing to check them against.
 	const app = appNodes(observed);
 
-	// Between extensions is VS Code's command surface, and a store is what's written to it: discovered rather than declared
-	// (DISCOVERED-ARCHITECTURE.md).
-	for (const channel of observed.channels.filter((candidate) => !app.has(candidate.a) && !app.has(candidate.b) && !(isExtensionNode(candidate.a) && isExtensionNode(candidate.b)) && !isStoreNode(candidate.a) && !isStoreNode(candidate.b))) {
+	for (const channel of observed.channels.filter((candidate) => !app.has(candidate.a) && !app.has(candidate.b))) {
 		const declared = declaredOn(channel);
 
 		if (declared === undefined) {

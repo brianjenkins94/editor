@@ -531,6 +531,12 @@ g.selected > .arch-edge {
   fill: var(--arch-fg);
 }
 
+/* Discovered, not declared: extensions' commands, and what's written to stores and read from them */
+.arch-edge.type-discovered {
+  stroke: var(--arch-reply);
+  stroke-opacity: 0.5;
+}
+
 /* Hub links: the tree the hubs federate over — drawn heavier than probed channels */
 .arch-edge.type-hub {
   stroke: var(--arch-event);
@@ -596,4 +602,46 @@ g.selected > .arch-edge {
 
 .arch-edge-label:is(.into-collapsed *) {
   display: none;
+}
+
+/* The feature lens */
+.arch-select {
+  background: var(--arch-surface);
+  color: var(--arch-fg);
+  border: 1px solid var(--arch-border);
+  border-radius: 3px;
+  padding: 2px 4px;
+  font: inherit;
+}
+
+/* Flows: a message and the ones it caused */
+.arch-flow-group {
+  border-left: 2px solid var(--arch-border);
+  margin: 0 0 10px;
+  padding: 2px 0 2px 8px;
+}
+
+.arch-flow {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.6;
+}
+
+.arch-flow-label {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.arch-flow.inferred {
+  opacity: 0.55;
+}
+
+/* A hub's components: what registered its subscriptions */
+.arch-component {
+  margin: 0 0 8px;
+}
+
+.arch-component-name {
+  font-weight: 600;
+  margin: 0 0 2px;
 }

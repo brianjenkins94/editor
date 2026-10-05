@@ -152,7 +152,13 @@ own — and it waits until discovery has shown how far it gets alone.
    subscriptions by registrant, or by namespace where none survived, a session's or a port's own subject folded to
    `*`. The tour tells the workbench's `startBablr` (`annotations.*`) from its `installEvidence` (`evidence.*`), its git
    service, its run registry and the rest; CI's minified build falls back to namespaces, and the test holds either way.
-5. **The live view**: components in realms, stores, the feature lens, flows, the two gap lists.
+5. **The live view**: components in realms, stores, the feature lens, flows, the two gap lists. Done, a first cut:
+   discovered edges — extensions' commands, what's written to stores and read from them — are their own kind
+   (`declaredBetween` says `discovered`), drawn green, never red; a hub's inspector lists its components; the toolbar's
+   feature picker, built from the subjects, commands and stores seen, lights one feature and fades the rest; a Flows tab
+   shows recent flows, the same shape counted once (×N), inferred links dimmed, narrowed to the lit feature; the
+   Conformance tab adds the rules and the components no traffic touched this session. Not yet: components drawn inside
+   their realm's box on the canvas (they're in the inspector), and flows longer than the store's recent log.
 6. **The diagram from the tour**, and the model trimmed to its rules.
 
 ## Decisions

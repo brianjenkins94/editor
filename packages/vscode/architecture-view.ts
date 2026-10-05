@@ -8,11 +8,11 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { createRpcClient } from "@brianjenkins94/hub";
-import type { ChannelStats, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
+import type { ChannelStats, FlowMessage, RuntimeNode, StoredSample, TrafficKind } from "@brianjenkins94/observability";
 import type { ContainerSpec, Violation } from "./architecture-model";
-import { ArchitectureStore, collectArchReports, requestArchSync } from "@brianjenkins94/observability";
+import { ArchitectureStore, collectArchReports, flowsOf, requestArchSync } from "@brianjenkins94/observability";
 import type { AppLayout } from "./architecture-model";
-import { allowedOnLink, appLayout, appWindowOf, checkConformance, containers, declaredBetween, channels as declaredChannels, declaredOn, declaredMermaid, nodes as declaredNodes, directionOnLink, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectOfLabel } from "./architecture-model";
+import { allowedOnLink, appLayout, appWindowOf, checkConformance, componentsOf, containers, declaredBetween, channels as declaredChannels, declaredOn, declaredMermaid, nodes as declaredNodes, directionOnLink, DYNAMIC_PREFIXES, dynamicContainer, familiesOnLink, hubLinks, nodeSpec, seenChannels, subjectOfLabel, subjectMatches, subjects as subjectFamilies } from "./architecture-model";
 import css from "./architecture-view.css?raw";
 import { windowTitle } from "./virtual-path";
 
@@ -450,7 +450,7 @@ function observedMermaid(store: ArchitectureStore): string {
 
 	for (const channel of store.channels.values()) {
 		const declared = declaredOn(channel);
-		const label = (declared === undefined ? "UNDECLARED" : declared.type === "hub" ? "hub" : declared.spec.protocol) + (channel.medium === undefined ? "" : " via " + channel.medium) + " · " + formatCount(channel.count);
+		const label = (declared === undefined ? "UNDECLARED" : declared.type === "hub" ? "hub" : declared.type === "discovered" ? (declared.kind === "commands" ? "commands" : "store") : declared.spec.protocol) + (channel.medium === undefined ? "" : " via " + channel.medium) + " · " + formatCount(channel.count);
 
 		lines.push(`  ${id(channel.a)} ${declared?.type === "hub" ? "<==>" : "<-->"}|${label}| ${id(channel.b)}`);
 	}
@@ -461,14 +461,46 @@ function observedMermaid(store: ArchitectureStore): string {
 // ── the view ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 type Selection = { "type": "node"; "id": string } | { "type": "edge"; "id": string } | undefined;
-type Tab = "inspector" | "conformance" | "log";
+type Tab = "inspector" | "conformance" | "flows" | "log";
+
+/** The words a channel's label or a node's id is made of, as a feature lens reads them: a subject's tokens, a command's
+ *  (`cmd editor.annotations.resolve`), a store's path segments (`store:.silo/evidence/…`). */
+function wordsOf(text: string): string[] {
+	return text.replace(/^store:(.*?)(?:\.\w+)?$/u, "$1").replace(/^(?:cmd |↩ )/u, "").replaceAll("()", "").replaceAll(/<[^>]*>/gu, "").split(/[\s./·…*:]+/u).map((word) => word.replace(/^_+/u, "")).filter((word) => word.length > 2 && !word.startsWith("$"));
+}
+
+/** Words that say where a name lives, not what it's for: skipped to reach its feature. */
+const CARRIERS = new Set(["editor", "silo", "vscode", "typescript", "tsserverRequest"]);
+
+/** A label's feature: its subject's namespace (`evidence.observed` → evidence), a command's past `editor.`
+ *  (`cmd editor.annotations.resolve` → annotations), a tsserver request's (`typescript.tsserverRequest _types.at` →
+ *  types), a store's folder (`.silo/evidence/<user>/…` → evidence; a placeholder is no word). */
+function featureOf(text: string): string | undefined {
+	return wordsOf(text).find((word) => !CARRIERS.has(word));
+}
+
+/** What on a channel can name a feature: the subjects of its hub messages, the commands between extensions, and a store
+ *  at either end — not a probe's labels (HTTP statuses, VS Code's own RPC). */
+function featureTexts(channel: ChannelStats): string[] {
+	const texts = [...channel.labels].flatMap(([label, stats]) => {
+		if (label.startsWith("cmd ")) {
+			return [label];
+		}
+
+		const subject = (stats.hub ?? 0) > 0 ? subjectOfLabel(label) : undefined;
+
+		return subject === undefined || subject.startsWith("$") ? [] : [subject];
+	});
+
+	return [...texts, ...[channel.a, channel.b].filter((end) => end.startsWith("store:"))];
+}
 
 interface EdgeView {
 	"id": string;
 	"a": string;
 	"b": string;
 	"channel"?: ChannelStats;
-	"type": "hub" | "channel" | "undeclared";
+	"type": "hub" | "channel" | "discovered" | "undeclared";
 	"observed": boolean;
 	"path": SVGPathElement;
 	"label"?: SVGTextElement;
@@ -483,6 +515,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	const disposables: (() => void)[] = [];
 	let selection: Selection;
 	let tab: Tab = "inspector";
+	/** The feature the lens lights up (featureOf), or none. */
+	let feature: string | undefined;
 	let paused = false;
 	let showAcks = false;
 	let showDeclared = true;
@@ -497,6 +531,34 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 	// ── toolbar
 	const summary = h("span", { "class": "arch-summary" });
+	// The feature lens: one feature lit, the rest faded — its features found in what's on the wire, refreshed as it opens.
+	const featureSelect = h("select", { "class": "arch-select", "title": "Light up one feature — found in the subjects, commands and stores seen" });
+	const refreshFeatures = (): void => {
+		const counts = new Map<string, number>();
+
+		for (const channel of store.channels.values()) {
+			for (const text of featureTexts(channel)) {
+				const found = featureOf(text);
+
+				if (found !== undefined) {
+					counts.set(found, (counts.get(found) ?? 0) + 1);
+				}
+			}
+		}
+
+		const features = [...counts.keys()].sort();
+
+		featureSelect.replaceChildren(h("option", { "value": "" }, "All features"), ...features.map((name) => h("option", { "value": name, ...name === feature ? { "selected": "" } : {} }, name)));
+	};
+
+	refreshFeatures();
+	featureSelect.addEventListener("focus", refreshFeatures);
+	featureSelect.addEventListener("pointerdown", refreshFeatures);
+	featureSelect.addEventListener("change", () => {
+		feature = featureSelect.value === "" ? undefined : featureSelect.value;
+		applySelection();
+		refreshPanel();
+	});
 	const button = (label: string, title: string, onClick: (element: HTMLButtonElement) => void): HTMLButtonElement => {
 		const element = h("button", { "class": "arch-button", "title": title }, label);
 
@@ -547,6 +609,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			requestArchSync(hub, { "capture": value });
 		}),
 		toggle("Idle", "Show declared contexts that aren't running", showDeclared, (value) => { showDeclared = value; scheduleRender(); }),
+		featureSelect,
 		button("−", "Zoom out", () => { setZoom(zoom / 1.2); }),
 		button("Fit", "Fit the width", () => { autoFit = true; fit(); }),
 		button("+", "Zoom in", () => { setZoom(zoom * 1.2); }),
@@ -888,6 +951,26 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		const focusNode = hovered ?? (selection?.type === "node" ? selection.id : undefined);
 		const focusEdge = selection?.type === "edge" ? edges.get(selection.id) : undefined;
 
+		// The feature lens, when nothing's hovered or picked: its edges, and the contexts at their ends.
+		if (feature !== undefined && focusNode === undefined && focusEdge === undefined) {
+			const lit = [...edges.values()].filter((edge) => edge.channel !== undefined && featureTexts(edge.channel).some((text) => wordsOf(text).includes(feature!)));
+			const ends = new Set(lit.flatMap((edge) => [edge.a, edge.b]));
+
+			svg.classList.add("has-focus");
+
+			for (const [id, element] of nodeElements) {
+				element.classList.toggle("focus", ends.has(id));
+				element.classList.remove("selected");
+			}
+
+			for (const edge of edges.values()) {
+				edge.path.parentElement.classList.toggle("focus", lit.includes(edge));
+				edge.path.parentElement.classList.remove("selected");
+			}
+
+			return;
+		}
+
 		svg.classList.toggle("has-focus", focusNode !== undefined || focusEdge !== undefined);
 
 		for (const [id, element] of nodeElements) {
@@ -1074,8 +1157,8 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			section(
 				"How to read it",
 				h("p", null, "Boxes are where code runs: realms (windows, workers) and origins (iframes). Solid double lines are hub links — the tree every context's hub federates over; thin lines are channels the probes observe outside the hubs (workers, extension hosts, network). Dots are messages."),
-				h("p", null, "Dashed means declared in the model (", h("code", null, "packages/vscode/architecture-model.ts"), ") but not seen yet; red means seen but not declared — fix the model or the code."),
-				h("p", null, "Click a context or a line to inspect it.")
+				h("p", null, "Dashed means declared in the model (", h("code", null, "packages/vscode/architecture-model.ts"), ") but not seen yet; red means seen but not declared — fix the model or the code. Green lines were discovered, not declared: an extension's commands, and what's written to a store and read from it."),
+				h("p", null, "Click a context or a line to inspect it. Pick a feature beside Idle to light only its part.")
 			),
 			section("Busiest channels", table(["Channel", "Messages", "Rate"], busiest.map((channel) => [
 				link(labelOf(store, channel.a) + " ⇄ " + labelOf(store, channel.b), { "type": "edge", "id": channel.id }),
@@ -1113,6 +1196,12 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 				h("p", null, declared?.description ?? ""),
 				declared === undefined ? undeclaredNote(id, app) : h("p", { "class": "arch-muted" }, "Observed by: " + declared.observedBy)
 			),
+			// What's inside it, discovered: its subscriptions grouped by the function that registered them (DISCOVERED-ARCHITECTURE.md).
+			topology !== undefined && section(
+				"Components",
+				h("p", { "class": "arch-muted" }, "What subscribed to this hub, by the function that registered it (or, where no name survived the build, by namespace)."),
+				...componentsOf(topology).map(({ component, subjects }) => h("div", { "class": "arch-component" }, h("div", { "class": "arch-component-name" }, component), h("div", { "class": "arch-subjects" }, ...subjects.map((subject) => h("span", { "class": "arch-subject" }, subject)))))
+			),
 			topology !== undefined && section(
 				"Hub",
 				keyValues([["Subscriptions", topology.subscriptions.length === 0 ? "none" : String(topology.subscriptions.length)]]),
@@ -1147,7 +1236,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 				? h("div", { "class": "arch-state state-alive" }, "the previewed app's own — not in the editor's model")
 				: declared === undefined
 				? h("div", { "class": "arch-state state-unresponsive" }, "undeclared: neither a hub link nor a channel in the model")
-				: h("div", { "class": "arch-state " + (channel === undefined ? "state-declared" : "state-alive") }, (declared.type === "hub" ? "hub link" : "declared channel") + (channel === undefined ? ", not seen yet" : "")),
+				: h("div", { "class": "arch-state " + (channel === undefined ? "state-declared" : "state-alive") }, (declared.type === "hub" ? "hub link" : declared.type === "discovered" ? (declared.kind === "commands" ? "discovered: extensions' commands (VS Code's command surface)" : "discovered: a store, by what's written to it and read from it") : "declared channel") + (channel === undefined ? ", not seen yet" : "")),
 			declared?.type === "channel" && section(declared.spec.protocol, keyValues([["Transport", declared.spec.transport], ["Not a hub link because", declared.spec.reason]]), h("p", null, declared.spec.description)),
 			declared?.type === "hub" && section(
 				"Subjects allowed across this link",
@@ -1249,7 +1338,28 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 				`${channel.a} ⇄ ${channel.b}`,
 				channel.protocol,
 				String(seenByChannel.get(channel) ?? "no")
-			])))
+			]))),
+			...untouched(observed)
+		];
+	}
+
+	/** The gaps the other way: the rules (subject families) and the discovered components no traffic touched this session
+	 *  — untested paths, or ones this session never took (DISCOVERED-ARCHITECTURE.md). */
+	function untouched(observed: ChannelStats[]): Child[] {
+		const seenSubjects = new Set(observed.flatMap((channel) => [...channel.labels].flatMap(([label, stats]) => {
+			const subject = (stats.hub ?? 0) > 0 ? subjectOfLabel(label) : undefined;
+
+			return subject === undefined ? [] : [subject];
+		})));
+		// The reports themselves (`$sys.arch.*`) aren't counted — the reporter would be reporting its reports — but this
+		// view has them, so they ran.
+		const touched = (pattern: string): boolean => pattern.startsWith("$sys.arch.") || [...seenSubjects].some((subject) => subjectMatches(pattern, subject));
+		const rules = subjectFamilies.filter((family) => !touched(family.pattern));
+		const components = [...store.topology].flatMap(([hub, topology]) => componentsOf(topology).filter(({ subjects }) => !subjects.some((subject) => touched(subject.replace(/\(\)$/u, "")))).map(({ component, subjects }) => ({ "hub": hub, "component": component, "subjects": subjects })));
+
+		return [
+			section("Rules no traffic touched", rules.length === 0 ? h("p", { "class": "arch-muted" }, "Every subject family was seen this session.") : table(["Subject", "From → to"], rules.map((family) => [family.pattern, `${family.from.join(", ")} → ${family.to.join(", ")}`]))),
+			section("Components no traffic touched", components.length === 0 ? h("p", { "class": "arch-muted" }, "Every discovered component heard something this session.") : table(["Component", "Of", "Serves and hears"], components.map(({ hub, component, subjects }) => [component, labelOf(store, hub), subjects.join(", ")])))
 		];
 	}
 
@@ -1260,6 +1370,40 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		logFilter = filterInput.value.toLowerCase();
 		refreshPanel();
 	});
+
+	/** The flows in the recent traffic (observability's flowsOf): each message, and what it caused, across hubs —
+	 *  only those with more than one message, the newest first, and only the lens's feature's when one is lit. */
+	function renderFlows(): Child[] {
+		const samples = store.log.flatMap((sample) => {
+			const channel = store.channelById(sample.channel);
+
+			return channel === undefined ? [] : [{ ...sample, "from": sample.forward ? channel.a : channel.b, "to": sample.forward ? channel.b : channel.a }];
+		});
+		const everything = (message: FlowMessage): FlowMessage[] => [message, ...message.caused.flatMap(everything)];
+		// A flow's shape: what it is and what it caused, whatever its ids — so a flow that keeps happening reads once, ×N.
+		const shape = (message: FlowMessage): string => `${message.inferred === true ? "~" : ""}${message.label}[${message.path.join(">")}](${message.caused.map(shape).join(",")})`;
+		const grouped = <T extends FlowMessage>(messages: T[]): { "message": T; "count": number }[] => {
+			const groups = new Map<string, { "message": T; "count": number }>();
+
+			for (const message of messages) {
+				const known = groups.get(shape(message));
+
+				groups.set(shape(message), { "message": message, "count": (known?.count ?? 0) + 1 });
+			}
+
+			return [...groups.values()];
+		};
+		// With no lens, flows of more than one message; with one, every message of its feature's.
+		const flows = grouped(flowsOf(samples).filter((flow) => !flow.label.startsWith("$sys") && (feature === undefined ? flow.caused.length > 0 : everything(flow).some((message) => wordsOf(message.label).includes(feature!))))).reverse().slice(0, 40);
+		const line = (message: FlowMessage, count: number, depth: number): HTMLElement[] => [
+			h("div", { "class": "arch-flow" + (message.inferred === true ? " inferred" : ""), "style": `padding-left: ${depth * 14}px`, "title": message.inferred === true ? "linked by timing: its cause wasn't named" : "" }, h("span", { "class": "arch-flow-label" }, message.label), h("span", { "class": "arch-muted" }, " " + message.path.map((id) => labelOf(store, id)).join(" → ") + (count > 1 ? `  ×${count}` : ""))),
+			...grouped(message.caused).flatMap((child) => line(child.message, child.count, depth + 1))
+		];
+
+		return flows.length === 0
+			? [h("p", { "class": "arch-muted" }, feature === undefined ? "No flows yet: a flow is a message and the ones it caused, followed by the causes the hub names." : `No ${feature} messages in the recent traffic.`)]
+			: [h("p", { "class": "arch-muted" }, "Each message and the ones it caused, across hubs, the same shape counted once (×N); dimmed lines are linked by timing, their cause not named."), ...flows.map(({ message, count }) => h("div", { "class": "arch-flow-group" }, ...line(message, count, 0)))];
+	}
 
 	function renderLog(): Child[] {
 		const rows: HTMLElement[] = [];
@@ -1291,7 +1435,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	panel.addEventListener("mouseleave", () => { panelHovered = false; });
 
 	// Created once — rebuilding them every tick would swallow clicks landing mid-rebuild.
-	const tabButtons = new Map<Tab, HTMLButtonElement>((["inspector", "conformance", "log"] as Tab[]).map((id) => {
+	const tabButtons = new Map<Tab, HTMLButtonElement>((["inspector", "conformance", "flows", "log"] as Tab[]).map((id) => {
 		const element = h("button", { "class": "arch-tab" });
 
 		element.addEventListener("click", () => {
@@ -1305,7 +1449,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 	function refreshPanel(force = false): void {
 		const violations = conformance().length;
-		const labels: Record<Tab, string> = { "inspector": "Inspector", "conformance": violations > 0 ? `Conformance (${violations})` : "Conformance", "log": "Log" };
+		const labels: Record<Tab, string> = { "inspector": "Inspector", "conformance": violations > 0 ? `Conformance (${violations})` : "Conformance", "flows": "Flows", "log": "Log" };
 
 		for (const [id, element] of tabButtons) {
 			element.textContent = labels[id];
@@ -1318,7 +1462,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		}
 
 		const { scrollTop } = panel;
-		const content = tab === "conformance" ? renderConformance() : tab === "log" ? renderLog() : selection === undefined ? renderOverview() : selection.type === "node" ? renderNode(selection.id) : renderEdge(selection.id);
+		const content = tab === "conformance" ? renderConformance() : tab === "flows" ? renderFlows() : tab === "log" ? renderLog() : selection === undefined ? renderOverview() : selection.type === "node" ? renderNode(selection.id) : renderEdge(selection.id);
 
 		panel.replaceChildren(...content.filter((child): child is Node | string => child !== null && child !== undefined && child !== false));
 		panel.scrollTop = force ? 0 : scrollTop;

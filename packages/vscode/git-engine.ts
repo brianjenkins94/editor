@@ -51,8 +51,7 @@ export async function includeSilo(): Promise<void> {
 }
 
 /** Ensure /workspace is a git repo — `git init` on first run (idempotent), with a default `.gitignore` so the seeded
- *  dependency types under node_modules/ don't flood the status (statusMatrix honors .gitignore). The Automerge
- *  edit-history sidecars need no ignore: they live inside `.git/`, off the working tree. */
+ *  dependency types under node_modules/ don't flood the status (statusMatrix honors .gitignore). */
 export async function ensureRepo(): Promise<void> {
 	if (!fs.existsSync(DIR + "/.git")) {
 		await init({ "fs": fs, "dir": DIR, "defaultBranch": "main" });
