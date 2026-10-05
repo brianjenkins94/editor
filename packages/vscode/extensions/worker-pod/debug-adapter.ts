@@ -21,6 +21,7 @@ import { registerSession, serveDebugControl } from "./debug-control";
 import type { Control, CoverageReport, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
 import { lifecycleOfSource } from "../../lifecycle";
 import { controlSubject, eventSubject } from "./debug-protocol";
+import { inputsKey, parseInputs } from "./inputs";
 import { podHub } from "./pod";
 import { runTask } from "./tasks";
 
@@ -516,9 +517,15 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			case "terminated":
 				this.endAction();
 				exitCodes.set(this.id, message.exitCode ?? 0);
+				podHub.publish("values.ended", { "session": this.id, "file": this.program });
 				this.event("terminated");
 				this.closeWorker();
 				this.settle("terminated");
+				break;
+
+			// The session's live values (LIVE-VALUES.md), on to core: the file they're of, what's new.
+			case "values":
+				podHub.publish(`values.session.${this.id}`, { "file": this.program, ...message.batch });
 				break;
 
 			case "output":
@@ -602,12 +609,15 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 			// Every session is a run in core's registry, known by one id from start to end: a terminal's `node` brings its
 			// own (`__runId`); one VS Code started (F5, debug_start) asks for one here, once `${file}` is the real path.
 			// Without core (no answer), it runs all the same, unrecorded.
-			"resolveDebugConfigurationWithSubstitutedVariables": async (_folder, config) => {
+			"resolveDebugConfigurationWithSubstitutedVariables": async (_folder, given) => {
+				const program = typeof given["program"] === "string" ? given["program"] : "";
+				// No `args`: the first set of the inputs Run with Inputs remembers for the file, if any (LIVE-VALUES.md).
+				const remembered = Array.isArray(given["args"]) || program === "" ? undefined : context.workspaceState.get<string>(inputsKey(vscode.Uri.file(program).toString()));
+				const config = remembered === undefined ? given : { ...given, "args": parseInputs(remembered)[0] };
+
 				if (typeof config["__runId"] === "string") {
 					return config;
 				}
-
-				const program = typeof config["program"] === "string" ? config["program"] : "";
 
 				try {
 					const { id } = await rpc.request("runs.begin", { "title": program === "" ? config.name : `${config.name} — ${vscode.workspace.asRelativePath(program)}`, "cwd": program.slice(0, program.lastIndexOf("/")) || "/workspace", "entry": program }, { "timeoutMs": 5000, "waitForResponderMs": 2000 }) as { "id": string };

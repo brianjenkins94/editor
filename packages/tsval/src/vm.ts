@@ -175,8 +175,9 @@ export interface VMOptions {
  * - `branch`: an `if`'s arm — 0 its then, 1 its else (`name` is `if`).
  *
  * `node` is the declaration, the assignment, the loop, the parameter, the statement: its line is the value's. `call`
- * numbers the guest call it ran in, in the order calls are made (0: the program's top level); `loops` are the loops
- * around it in that call, outermost first, each with its turn (from 0); `step` is the machine's step count.
+ * numbers the guest call it ran in, in the order calls are made (0: the program's top level), and `callee` is that
+ * call's function (none at the top level, or in a constructor); `loops` are the loops around it in that call, outermost
+ * first, each with its turn (from 0); `step` is the machine's step count.
  */
 export interface TraceEvent {
 	"kind": "bind" | "return" | "branch";
@@ -185,6 +186,7 @@ export interface TraceEvent {
 	"value": unknown;
 	"step": number;
 	"call": number;
+	"callee"?: ts.Node;
 	"loops": { "node": ts.Node; "turn": number }[];
 }
 
@@ -427,12 +429,14 @@ export class Machine implements VM {
 
 		const loops: TraceEvent["loops"] = [];
 		let call = 0;
+		let callee: ts.Node | undefined;
 
 		for (let index = this.frames.length - 1; index >= 0; index -= 1) {
 			const frame = this.frames[index]!;
 
 			if (frame.kind === "call" || frame.kind === "construct") {
 				call = frame.call ?? 0;
+				callee = frame.node ?? undefined;
 				break;
 			}
 
@@ -441,7 +445,7 @@ export class Machine implements VM {
 			}
 		}
 
-		this.trace({ "kind": kind, "node": node, "name": name, "value": value, "step": this.steps, "call": call, "loops": loops });
+		this.trace({ "kind": kind, "node": node, "name": name, "value": value, "step": this.steps, "call": call, ...callee === undefined ? {} : { "callee": callee }, "loops": loops });
 	}
 
 	public get top(): Frame | undefined {

@@ -6,7 +6,7 @@
  * breakpoints; the last inputs given for a file are offered again.
  */
 import * as vscode from "vscode";
-import { parseInputs } from "./inputs";
+import { inputsKey, parseInputs } from "./inputs";
 
 /** Run `program` once with `args`, under tsval, not stopping; settles when the run ends. */
 async function runOnce(program: string, args: string[]): Promise<boolean> {
@@ -40,7 +40,7 @@ export function registerRunWithInputs(context: vscode.ExtensionContext): void {
 		}
 
 		const name = file.path.split("/").pop()!;
-		const remembered = `runWithInputs:${file.toString()}`;
+		const remembered = inputsKey(file.toString());
 		const text = await vscode.window.showInputBox({
 			"title": `Run ${name} with inputs`,
 			"prompt": "Runs separated by |, each run's arguments by spaces (quote one with a space in it); the program reads them as process.argv",

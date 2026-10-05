@@ -19,6 +19,7 @@
  * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
 import type { LoadedVM } from "@brianjenkins94/tsval";
+import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Control, CoverageReport, PreviewMessage, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
 import type { GuestRoot } from "./debug-react";
@@ -34,6 +35,7 @@ import { NETWORK_PROBES } from "../../architecture";
 import { observe } from "@brianjenkins94/observability";
 import { controlSubject, eventSubject, PREVIEW_STREAM } from "./debug-protocol";
 import { createGuestRoot } from "./debug-react";
+import { LiveRecord } from "./live-values";
 import { addObservation, copySums, siteObservations } from "./site-sums";
 
 // This worker's own hub, linked UP to the pod hub. The whole debug protocol rides it (debug-protocol.ts), on its
@@ -64,6 +66,10 @@ function post(message: WorkerEvent): void { hub.publish(eventSubject(SESSION), m
 function toPreview(message: PreviewMessage): void { hub.publish(PREVIEW_STREAM, message); }
 
 let sourceFile: ts.SourceFile | undefined;
+/** The session's live values (LIVE-VALUES.md): what each line bound, returned or chose, told to the adapter a few times
+ *  a second, and before each stop and the end. */
+const live = new LiveRecord();
+let liveTimer: ReturnType<typeof setInterval> | undefined;
 /** 1-based lines pre-armed as capability breakpoints (policy said stop) — so a stop there reports reason
  *  "capability" rather than "breakpoint". Computed at launch from the policy the adapter sent. */
 let capabilityLines = new Set<number>();
@@ -241,7 +247,40 @@ function functionName(pos: number | undefined): string {
 	return best.name !== undefined && ts.isIdentifier(best.name) ? best.name.text : "<anonymous>";
 }
 
+/** What tsval's trace told, into the session's live values: its line, and its call's function by name and line. */
+function traceValue(event: TraceEvent): void {
+	if (sourceFile === undefined) {
+		return;
+	}
+
+	const lineOf = (node: ts.Node): number => sourceFile!.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line;
+	const callee = event.callee === undefined ? undefined : { "name": calleeName(event.callee), "line": lineOf(event.callee) };
+
+	live.add({ "line": lineOf(event.node), "name": event.name, "value": "", "raw": event.value, "kind": event.kind, "call": event.call, "turns": event.loops.map((loop) => loop.turn), "step": event.step, ...callee === undefined ? {} : { "callee": callee } });
+}
+
+/** A function's name as the panel lists its calls: its own, a method's, or the variable an arrow was assigned to. */
+function calleeName(node: ts.Node): string {
+	const named = (node as { "name"?: ts.Node }).name;
+
+	if (named !== undefined && (ts.isIdentifier(named) || ts.isPrivateIdentifier(named))) {
+		return named.text;
+	}
+
+	return ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name) ? node.parent.name.text : "anonymous";
+}
+
+/** Tell the adapter the live values new since it was last told. */
+function flushLive(): void {
+	const batch = live.drain();
+
+	if (batch !== undefined) {
+		post({ "type": "values", "batch": batch });
+	}
+}
+
 function emitStopped(vm: Vm, reason: string, traveled = false): void {
+	flushLive();
 	post({ "type": "stopped", "reason": reason, "snapshot": { ...snapshot(vm), "traveled": traveled } });
 }
 
@@ -260,6 +299,7 @@ function onBreakpointHook(vm: Vm): void {
 	// Set WAITING before posting, so an adapter that stores 1 + notifies before we reach `wait` isn't lost:
 	// Atomics.wait returns immediately when the value is no longer 0.
 	Atomics.store(control, 0, 0);
+	flushLive();
 	post({ "type": "stopped", "reason": "breakpoint", "snapshot": { ...snapshot(vm), "traveled": false }, "atomic": true });
 	Atomics.wait(control, 0, 0);
 }
@@ -293,6 +333,8 @@ function coverageReport(): CoverageReport {
 
 /** The program is over: report its coverage, then end the session — with 1 for a program that threw, as node would. */
 function finish(exitCode = 0): void {
+	clearInterval(liveTimer);
+	flushLive();
 	post({ "type": "coverage", "report": coverageReport(), "final": true });
 	post({ "type": "terminated", "exitCode": exitCode });
 }
@@ -487,7 +529,9 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 				break;
 			}
 
-			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "observe": observeSite, ...capabilitySurface(message.fileName, message.args ?? []) });
+			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "observe": observeSite, "trace": traceValue, ...capabilitySurface(message.fileName, message.args ?? []) });
+
+			liveTimer = setInterval(flushLive, 250);
 
 			sourceFile = loaded.sourceFile;
 			record(loaded.vm, new Map());

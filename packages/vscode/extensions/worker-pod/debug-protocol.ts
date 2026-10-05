@@ -10,6 +10,7 @@
  * launch.
  */
 import type { Policy } from "@brianjenkins94/util/silo/policy";
+import type { LiveBatch } from "./live-values";
 
 export const controlSubject = (session: string): string => "debug.session." + session + ".control";
 export const eventSubject = (session: string): string => "debug.session." + session + ".event";
@@ -48,7 +49,9 @@ export type WorkerEvent =
 	| { "type": "rendered" }
 	| { "type": "history"; "length": number }
 	/** The program's statement coverage — asked for, or `final` just before `terminated`. */
-	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean };
+	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean }
+	/** The session's live values new since the last (live-values.ts): a few times a second, and before a stop or the end. */
+	| { "type": "values"; "batch": LiveBatch };
 
 /** One statement's coverage: its range (0-based line and character, as VS Code's Position) and how often it ran. */
 export interface StatementCoverage { "start": [number, number]; "end": [number, number]; "count": number }

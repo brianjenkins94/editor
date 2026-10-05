@@ -3,6 +3,9 @@
  * arguments by spaces, quotes keeping a space in one.
  */
 
+/** Where the last inputs given for a file are remembered (worker-pod's workspace state), by its URI. */
+export const inputsKey = (uri: string): string => `runWithInputs:${uri}`;
+
 /** `a "b c" | d` → [["a", "b c"], ["d"]]; nothing → one run, with none. */
 export function parseInputs(text: string): string[][] {
 	const runs: string[][] = [[]];

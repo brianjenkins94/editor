@@ -1,4 +1,5 @@
 import type { TraceEvent } from "../../src/vm.ts";
+import type ts from "typescript";
 import assert from "node:assert";
 import { test } from "node:test";
 import { createVM } from "../../src/interpret.ts";
@@ -90,6 +91,16 @@ test("loops: a for's own variable each turn, nested loops' turns outermost first
 		"4: sum = 30 [1,1]",
 		"2: i = 2 [1]"
 	]);
+});
+
+test("a call's function: the callee, told with each value of the call", () => {
+	const callees: string[] = [];
+	const { vm, sourceFile } = createVM("function twice(n) {\n\treturn n * 2;\n}\nconst a = twice(1);", {
+		"trace": (event) => { callees.push(`${event.name}: ${event.callee === undefined ? "top level" : (event.callee as ts.FunctionDeclaration).name?.getText(sourceFile)}`); }
+	});
+
+	vm.run();
+	assert.deepStrictEqual(callees, ["n: twice", "return: twice", "a: top level"]);
 });
 
 test("calls: each numbered in the order made, its loops its own", () => {
