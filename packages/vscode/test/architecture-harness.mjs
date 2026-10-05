@@ -108,6 +108,9 @@ export async function startSession(options = {}) {
 	await page.goto(URL_UNDER_TEST);
 
 	let snapshot;
+	// Every hub's subscriptions over the whole session (a snapshot's are that moment's): a context that came and went
+	// keeps what it served, as its node stays on the diagram once seen.
+	const topologySeen = {};
 	const workbench = () => page.frames().find((frame) => frame.url().includes("/__vscode__/host.html"));
 
 	/** Poll what the view observed until `ready(snapshot)` holds. */
@@ -120,6 +123,12 @@ export async function startSession(options = {}) {
 			}
 
 			snapshot = await frame.evaluate(() => globalThis.__architecture.snapshot());
+
+			for (const [hub, topology] of Object.entries(snapshot.topology)) {
+				const known = topologySeen[hub] ?? { "subscriptions": [], "sites": {} };
+
+				topologySeen[hub] = { "subscriptions": [...new Set([...known.subscriptions, ...topology.subscriptions])], "sites": { ...known.sites, ...topology.sites } };
+			}
 
 			return ready(snapshot) ? snapshot : undefined;
 		}, { "timeoutMs": timeoutMs, "intervalMs": 500, "sleep": (ms) => page.waitForTimeout(ms) });
@@ -143,6 +152,7 @@ export async function startSession(options = {}) {
 		"workbench": workbench,
 		"until": observed,
 		"snapshot": () => snapshot,
+		"topologySeen": () => topologySeen,
 		"conformance": async () => workbench().evaluate(() => globalThis.__architecture.conformance()),
 		/** An RPC into the hub tree, from the workbench realm. */
 		"request": async (subject, data, timeoutMs) => workbench().evaluate(([s, d, t]) => globalThis.__architecture.request(s, d, t), [subject, data, timeoutMs]),

@@ -46,6 +46,9 @@ export interface NodeSpec {
 	"condition"?: string;
 	/** It carries a @brianjenkins94/hub (its id is the hub id). */
 	"hub"?: boolean;
+	/** Whether a run reaches it at all, and which way, is the browser cache's and timing's (an icon's SVG): left out of
+	 *  the tour's diagram, which has to be the same every run. */
+	"cacheDependent"?: boolean;
 }
 
 /**
@@ -126,7 +129,7 @@ export const nodes: NodeSpec[] = [
 	{ "id": "net:brianjenkins94.github.io", "label": "GitHub Pages", "container": "network", "detail": "preview packages", "description": "A previewed app's tarball dependencies (a URL in its package.json — e.g. @brianjenkins94/hub), fetched once by the node worker's dev server and served from /@pkg/.", "observedBy": "the service worker's fetch probe", "condition": "when a previewed app depends on a tarball" },
 	{ "id": "net:esm.sh", "label": "esm.sh", "container": "network", "detail": "preview dependencies", "description": "The previewed app's bare imports (react, react-dom, react-refresh), mapped by the dev server's import map and fetched by the preview through the service worker.", "observedBy": "the service worker's fetch probe", "condition": "while a preview runs" },
 	{ "id": "net:cdn.jsdelivr.net", "label": "jsDelivr", "container": "network", "detail": "preview DevTools", "description": "A preview's DevTools: chobitsu (the CDP implementation added to the previewed page) and Chrome's DevTools frontend (chii's build).", "observedBy": "the service worker's fetch probe", "condition": "while a preview's DevTools is open" },
-	{ "id": "net:ka-f.fontawesome.com", "label": "Font Awesome", "container": "network", "detail": "WebAwesome icons", "description": "WebAwesome's default icon library: the shell chrome's wa-icon elements load their SVGs from the Font Awesome kit CDN, through the service worker.", "observedBy": "the service worker's fetch probe" },
+	{ "id": "net:ka-f.fontawesome.com", "label": "Font Awesome", "container": "network", "detail": "WebAwesome icons", "description": "WebAwesome's default icon library: the shell chrome's wa-icon elements load their SVGs from the Font Awesome kit CDN, through the service worker.", "observedBy": "the service worker's fetch probe", "cacheDependent": true },
 	{ "id": "net:open-vsx.org", "label": "Open VSX", "container": "network", "detail": "extension gallery", "description": "The extension gallery.", "observedBy": "the service worker's fetch probe", "condition": "when the gallery is queried" },
 	{ "id": "net:api.github.com", "label": "GitHub API", "container": "network", "detail": "shell only", "description": "Loading repos and publishing, from the shell (which holds the token).", "observedBy": "the service worker's fetch probe", "condition": "when a GitHub repo is loaded" },
 	{ "id": "net:lighter.codehike.org", "label": "Code Hike", "container": "network", "detail": "diff highlighting", "description": "Syntax highlighting for the git review diffs.", "observedBy": "the service worker's fetch probe", "condition": "when a diff opens" },
@@ -875,7 +878,7 @@ export function tourDiagram(snapshot: TourSnapshot): string {
 	const firstVisit = (channel: { "a": string; "b": string }): boolean => [channel.a, channel.b].some((end) => end.startsWith("net:")) && channel.a !== "sw" && channel.b !== "sw";
 	const channels = snapshot.channels.filter((channel) => !firstVisit(channel));
 	const reached = new Set(channels.flatMap((channel) => [channel.a, channel.b]));
-	const seen = new Map(snapshot.nodes.filter((node) => node.state !== "declared" && !isAppNode(node.id) && (!node.id.startsWith("net:") || reached.has(node.id))).map((node) => [node.id, node]));
+	const seen = new Map(snapshot.nodes.filter((node) => node.state !== "declared" && !isAppNode(node.id) && nodeSpec(node.id)?.cacheDependent !== true && (!node.id.startsWith("net:") || reached.has(node.id))).map((node) => [node.id, node]));
 	const general = (id: string): string => generalId(id, seen.get(id)?.spec?.label);
 	const label = (id: string): string => (seen.get(id)?.spec?.label ?? nodeSpec(id)?.label ?? id).replace(/^store:/u, "").replace(/:\d{4,5}\b/u, ":*").replace(/ #\d+$/u, "");
 	// Mermaid reads `<` and `"` as its own.

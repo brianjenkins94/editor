@@ -448,7 +448,7 @@ flowchart LR
 | Pod | capability | `capability.decide()` |
 | Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.launch`, `debug.session.*.event`, `debug.session.*.state()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
 | Pod | git | `git.changed` |
-| Pod | node | `node.start` |
+| Pod | node | `node.exit.*`, `node.start` |
 | Pod | pod | `pod.ready` |
 | Pod | production | `production.exit.*`, `production.launch`, `production.out.*` |
 | Pod | tasks | `tasks.list()`, `tasks.run()` |
@@ -476,7 +476,7 @@ flowchart LR
 | Workbench | evidence | `evidence.level()`, `evidence.observed`, `evidence.preview` |
 | Workbench | git | `git.classify()`, `git.commit()`, `git.discard()`, `git.file()`, `git.status()` |
 | Workbench | history | `history.chunks()` |
-| Workbench | node | `node.exit.*`, `node.out.*`, `node.ready` |
+| Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*`, `node.ready` |
 | Workbench | preview | `preview.close`, `preview.hmr.*`, `preview.profiled` |
 | Workbench | production | `production.stop.*` |
 | Workbench | runs | `runs.begin()`, `runs.list()`, `runs.stop()` |

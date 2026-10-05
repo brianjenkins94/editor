@@ -533,7 +533,9 @@ test("notes: a note follows its code, and waits in Problems when its code is gon
 	// BABLR worker (whose queue names it, though the call goes out later).
 	const { flowsOf } = await import("../../observability/src/flows.ts");
 	const everything = (message) => [message, ...message.caused.flatMap(everything)];
-	const resolve = await eventually("a resolve's flow", async () => flowsOf(session.snapshot().log.filter((sample) => sample.from !== undefined && sample.to !== undefined)).flatMap(everything).find((message) => message.label === "annotations.resolve()" && message.caused.some((child) => child.label === "bablr.resolve()")));
+	// (Polled with the view's snapshot fresh each time: session.snapshot() is the last one polled.)
+	const resolveIn = (snapshot) => flowsOf(snapshot.log.filter((sample) => sample.from !== undefined && sample.to !== undefined)).flatMap(everything).find((message) => message.label === "annotations.resolve()" && message.caused.some((child) => child.label === "bablr.resolve()"));
+	const resolve = resolveIn(await session.until("a resolve's flow", (snapshot) => resolveIn(snapshot) !== undefined));
 
 	assert.equal(resolve.caused.find((child) => child.label === "bablr.resolve()").inferred, undefined, "named, not inferred");
 });
@@ -774,7 +776,7 @@ test("the diagram: ARCHITECTURE.md's is this tour's", async () => {
 	const doc = await readFile(file, "utf8");
 	const [begin, end] = ["<!-- architecture-tour:begin -->\n", "\n<!-- architecture-tour:end -->"];
 	const committed = doc.slice(doc.indexOf(begin) + begin.length, doc.indexOf(end));
-	const fresh = tourDiagram(await session.until("a last look", () => true));
+	const fresh = tourDiagram({ ...await session.until("a last look", () => true), "topology": session.topologySeen() });
 
 	if (process.env.CI === undefined) {
 		if (fresh !== committed) {
