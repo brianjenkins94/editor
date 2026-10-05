@@ -498,6 +498,91 @@ test("live values: a session's values beside the code, as the talk's binary sear
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
+// Capability decisions on the line (LIVE-VALUES.md, step 8): a call the policy hasn't decided stops the run at its line,
+// and asks there, in the notes margin — what it would do, from the run's own values, and Allow once / Allow always / Deny.
+// Deny fails the call as the policy would; Allow once lets it run; Allow always writes my policy override, and the next
+// run goes straight through.
+test("capability decisions: a gated call asks on its line, and the choice resumes the run", async () => {
+	const workbench = session.workbench();
+	const source = [
+		"import { writeFileSync } from \"node:fs\";",
+		"",
+		"const target = \"/workspace/out.txt\";",
+		"",
+		"writeFileSync(target, \"hello\");",
+		"console.log(\"wrote\", target);",
+		""
+	].join("\n");
+	const silo = (what) => workbench.evaluate(async (action) => {
+		const { api } = globalThis.__editor;
+		const folder = api.Uri.file("/workspace/.silo");
+		const policies = (await api.workspace.fs.readDirectory(folder).then((entries) => entries, () => [])).map(([name]) => name).filter((name) => name.endsWith(".policy.json") && name !== "policy.json");
+
+		if (action === "clear") {
+			for (const name of policies) {
+				await api.workspace.fs.delete(api.Uri.joinPath(folder, name));
+			}
+
+			return [];
+		}
+
+		return Promise.all(policies.map(async (name) => JSON.parse(new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.joinPath(folder, name))))));
+	}, what);
+	// The margin's question, as shown: the call, what it reaches, and which choices it offers.
+	const asked = () => workbench.evaluate(() => {
+		const box = document.querySelector(".live-values-ask");
+
+		return box === null ? undefined : { "what": box.querySelector(".live-values-ask-what").textContent, "choices": [...box.querySelectorAll("button")].map((button) => (button.disabled ? `(${button.textContent})` : button.textContent)) };
+	});
+	const start = async () => {
+		const stopped = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, 60_000);
+
+		assert.equal(stopped.reason, "capability", "stopped by the policy, not a breakpoint");
+		assert.equal(stopped.line, 5);
+		assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow once", "Allow always", "Deny"] });
+
+		return stopped;
+	};
+
+	await silo("clear");
+	await workbench.evaluate(async (text) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/gated.js");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
+		await api.window.showTextDocument(uri);
+	}, source);
+
+	// Deny: the call fails as a denied one would, and the uncaught error ends the run.
+	const denied = await session.request(`debug.session.${(await start()).session}.decide`, { "choice": "deny" }, 60_000);
+
+	assert.equal(denied.state, "terminated");
+	assert.match(denied.output.join("\n"), /EACCES/u, "the call threw EACCES");
+	await eventually("the question gone with the run", async () => (await asked()) === undefined || undefined);
+
+	// Allow once, from the margin's own button: the call runs; nothing is written to the policy.
+	await start();
+	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-ask button")].find((button) => button.textContent === "Allow once").click(); });
+	await eventually("the question answered", async () => (await asked()) === undefined || undefined);
+	assert.deepEqual(await silo("read"), [], "Allow once writes no rule");
+
+	// Allow always: my override gets the rule, and the next run isn't stopped.
+	const always = await session.request(`debug.session.${(await start()).session}.decide`, { "choice": "allow-always" }, 60_000);
+
+	assert.equal(always.state, "terminated");
+	assert.deepEqual(always.output, ["wrote /workspace/out.txt"]);
+	assert.deepEqual((await silo("read")).flatMap((policy) => policy.rules.map(({ capability, resource, disposition }) => ({ capability, resource, disposition }))), [{ "capability": "fs:write", "resource": "/workspace/out.txt", "disposition": "allow" }]);
+
+	const again = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, 60_000);
+
+	assert.equal(again.state, "terminated", "allowed always: no stop");
+	assert.deepEqual(again.output, ["wrote /workspace/out.txt"]);
+
+	// As the next tests expect it: no override, and the Explorer back where a stop put Run and Debug.
+	await silo("clear");
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
+});
+
 test("types: the tsserver plugin types each of a file's ranges as its site observes", async () => {
 	const types = await eventually("types at ranges", () => session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;

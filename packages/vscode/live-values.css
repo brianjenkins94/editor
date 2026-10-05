@@ -95,3 +95,69 @@
   color: var(--vscode-descriptionForeground);
   font-style: italic;
 }
+
+/* A capability stop's question (step 8): the call and what it reaches, then the choices. */
+.live-values-ask {
+  margin: 2px 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--vscode-editorWarning-foreground, #bf8803);
+  background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #bf8803) 10%, var(--vscode-editor-background));
+  font-family: var(--notes-margin-code-font-family, monospace);
+  font-size: var(--notes-margin-code-font-size);
+}
+
+.live-values-ask.dangerous {
+  border-left-color: var(--vscode-editorError-foreground, #e51400);
+  background: color-mix(in srgb, var(--vscode-editorError-foreground, #e51400) 8%, var(--vscode-editor-background));
+}
+
+.live-values-ask-what {
+  overflow-wrap: anywhere;
+}
+
+.live-values-ask-callee {
+  color: var(--vscode-symbolIcon-functionForeground, var(--vscode-editor-foreground));
+}
+
+.live-values-ask-unresolved,
+.live-values-ask-capability {
+  color: var(--vscode-descriptionForeground);
+}
+
+.live-values-choices {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.live-values-choice {
+  padding: 1px 8px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  cursor: pointer;
+}
+
+.live-values-choice.allow-once {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.live-values-choice:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.live-values-choice.chosen {
+  opacity: 1;
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+.live-values-ask-error {
+  margin-top: 4px;
+  color: var(--vscode-errorForeground);
+  font-family: var(--vscode-font-family);
+}

@@ -360,7 +360,7 @@ flowchart LR
   n_ext_notes <-.->|"commands"| n_ext_vscode
   n_ext_notes <-.->|"commands"| n_ext_worker_pod
   n_ext_worker_pod -->|"reads"| n_store__git__file_
-  n_ext_worker_pod -->|"reads"| n_store__silo__file__json
+  n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__json
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__jsonl
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__gitignore
   n_exthost_LocalProcess_0 <-.->|"RPCProtocol"| n_workbench
@@ -423,7 +423,7 @@ flowchart LR
 | `.git/refs/…/<file>` | Workbench | Workbench |
 | `.silo/.gitattributes` | Workbench | Workbench, notes |
 | `.silo/.gitignore` | Workbench, worker-pod | Workbench, worker-pod |
-| `.silo/<file>.json` | Workbench, capabilities | Workbench, capabilities, worker-pod |
+| `.silo/<file>.json` | Workbench, capabilities, worker-pod | Workbench, capabilities, worker-pod |
 | `.silo/<file>.jsonl` | Workbench, worker-pod | Workbench, worker-pod |
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |
@@ -446,7 +446,7 @@ flowchart LR
 | Dev-server worker | virtual | `virtual.request()` |
 | Dev-server worker | workspace | `workspace.changed` |
 | Pod | capability | `capability.decide()` |
-| Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.launch`, `debug.session.*.event`, `debug.session.*.state()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
+| Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.event`, `debug.session.*.state()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
 | Pod | git | `git.changed` |
 | Pod | node | `node.exit.*`, `node.start` |
 | Pod | pod | `pod.ready` |
@@ -471,6 +471,7 @@ flowchart LR
 | Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready` |
 | Shell | tsval | `tsval.preview.close`, `tsval.preview.open`, `tsval.preview.stream` |
 | Workbench | annotations | `annotations.refer()`, `annotations.resolve()` |
+| Workbench | capability | `capability.ask` |
 | Workbench | debug | `debug.declined.*` |
 | Workbench | dock | `dock.closeEditor()`, `dock.hostEditor()` |
 | Workbench | evidence | `evidence.level()`, `evidence.observed`, `evidence.preview` |

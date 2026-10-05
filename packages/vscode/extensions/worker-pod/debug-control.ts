@@ -8,6 +8,7 @@
  *   session `debug.session.<id>.step` { action }   → resumes, and answers with the NEXT stop (or the end)
  *   session `debug.session.<id>.state`             → where it is now
  *   session `debug.session.<id>.stop`              → ends it
+ *   session `debug.session.<id>.decide` { choice } → at a capability stop: allow-once / allow-always / deny, then resumes
  *
  * The session methods are served by the ADAPTER (debug-adapter.ts), not the worker: a breakpoint inside a React handler
  * blocks the worker in Atomics.wait, where only the adapter (which holds the shared control word) can resume it — and
@@ -18,10 +19,11 @@ import type { Hub } from "@brianjenkins94/hub";
 import { serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 
-import type { StepAction } from "./debug-protocol";
+import type { CapabilityChoice, StepAction } from "./debug-protocol";
 
 export type DebugAction = StepAction;
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
+const CHOICES = new Set<string>(["allow-once", "allow-always", "deny"] satisfies CapabilityChoice[]);
 
 /** `starting` until the first stop; `idle` = a React app mounted and waiting for events (no stop to step from). */
 export type DebugState = "starting" | "running" | "stopped" | "idle" | "terminated";
@@ -55,6 +57,8 @@ export interface ControllableSession {
 	/** Resolve once the session has left `starting`/`running` (now, if it already has). */
 	"settled": (signal: AbortSignal) => Promise<DebugOutcome>;
 	"stop": () => Promise<DebugOutcome>;
+	/** At a capability stop, decide it and resume; resolve on the next stop, idle or end. */
+	"decide": (choice: CapabilityChoice, signal: AbortSignal) => Promise<DebugOutcome>;
 }
 
 const sessions = new Map<string, ControllableSession>();
@@ -75,7 +79,16 @@ export function registerSession(hub: Hub, session: ControllableSession): () => v
 			return session.act(action as DebugAction, signal);
 		}),
 		serve(hub, prefix + "state", () => session.outcome()),
-		serve(hub, prefix + "stop", () => session.stop())
+		serve(hub, prefix + "stop", () => session.stop()),
+		serve(hub, prefix + "decide", (args, { signal }) => {
+			const choice = (args as { "choice"?: string } | undefined)?.choice ?? "";
+
+			if (!CHOICES.has(choice)) {
+				throw new Error(`unknown choice "${choice}" — one of ${[...CHOICES].join(", ")}`);
+			}
+
+			return session.decide(choice as CapabilityChoice, signal);
+		})
 	];
 
 	sessions.set(session.id, session);

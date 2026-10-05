@@ -29,7 +29,8 @@ the core at its own call boundary. Hold to that and the seams stay put.
   │   silo-store.ts the .silo/ layout: base+override merge · observed rollup · run firehose  (decide.ts uses it) │
   ├───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
   │ run contexts (where ENFORCE lives — plural, because the app runs in different runtimes)                      │
-  │   tsval debugger  (worker-pod: debug-adapter.ts + debug-worker.ts)  → HARD-STOP breakpoint  [wiring: TODO]   │
+  │   tsval debugger  (worker-pod: debug-adapter.ts + debug-worker.ts)  → HARD-STOP breakpoint that ASKS on its   │
+  │                   line (allow once / always / deny, in the notes margin: LIVE-VALUES.md step 8)              │
   │   almostnode      (worker-pod: node-worker.ts, "production")        → block / mock at shim  [TODO]           │
   │        both consume capability-breakpoints (classifyCall + shouldBreak) at beforeCall / the shim boundary    │
   └───────────────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -20,7 +20,8 @@
  */
 import type { LoadedVM } from "@brianjenkins94/tsval";
 import type { TraceEvent } from "@brianjenkins94/tsval";
-import type { Control, CoverageReport, PreviewMessage, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
+import type { Policy } from "@brianjenkins94/util/silo/policy";
+import type { CapabilityAsk, Control, CoverageReport, PreviewMessage, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
 import type { GuestRoot } from "./debug-react";
 
@@ -29,7 +30,7 @@ import { createVM } from "@brianjenkins94/tsval";
 import React from "react";
 
 import ts from "typescript";
-import { capabilityBreakLines } from "../capabilities/capability-breakpoints";
+import { capabilityBreakLines, classifyCall, shouldBreak } from "../capabilities/capability-breakpoints";
 import { capabilityStandins, inert } from "../capabilities/canary";
 import { NETWORK_PROBES } from "../../architecture";
 import { observe } from "@brianjenkins94/observability";
@@ -73,6 +74,12 @@ let liveTimer: ReturnType<typeof setInterval> | undefined;
 /** 1-based lines pre-armed as capability breakpoints (policy said stop) — so a stop there reports reason
  *  "capability" rather than "breakpoint". Computed at launch from the policy the adapter sent. */
 let capabilityLines = new Set<number>();
+/** The policy the run is under (the adapter's, updated after an "Allow always"); none, no capability stops. */
+let policy: Policy | undefined;
+/** The user's breakpoints (1-based lines), armed beside the capability lines. */
+let userLines: number[] = [];
+/** "Deny" at a capability stop: the next capability call fails, as a denied one would. Reset at every stop. */
+let denyNext = false;
 /** Forks, one per stop reached; `index` is the currently-displayed stop. */
 let history: Vm[] = [];
 let index = -1;
@@ -122,7 +129,7 @@ function nextAction(): Promise<Action> {
  * the hard-stop. Real effects belong to the almostnode "production" adapter, not to tsval's reverse-steppable VM.
  */
 function capabilitySurface(fileName: string, args: string[]): { "globals": Record<string, unknown>; "resolveModule": (specifier: string) => unknown } {
-	const standins = capabilityStandins();
+	const standins = denying(capabilityStandins());
 	// What a script reads of its process: its arguments (a run's inputs), and a workspace to be in — nothing it can do.
 	const process = { "argv": ["node", fileName, ...args], "env": {}, "platform": "browser", "cwd": () => "/workspace" };
 
@@ -130,6 +137,94 @@ function capabilitySurface(fileName: string, args: string[]): { "globals": Recor
 		"globals": { ...standins.globals, "console": guestConsole(), "process": process },
 		"resolveModule": (specifier: string) => (Object.hasOwn(standins.modules, specifier) ? standins.modules[specifier] : inert())
 	};
+}
+
+/** The stand-ins, each failing when the user denied its call at a capability stop (`denyNext`) — with node's EACCES, as
+ *  the call would fail if the policy denied it. (A module object shared under several names stays one object.) */
+function denying(standins: ReturnType<typeof capabilityStandins>): ReturnType<typeof capabilityStandins> {
+	const wrapped = new Map<unknown, unknown>();
+	const gate = (fn: (...args: unknown[]) => unknown) => function (this: unknown, ...args: unknown[]): unknown {
+		if (denyNext) {
+			denyNext = false;
+
+			throw Object.assign(new Error("EACCES: permission denied (denied at its capability stop)"), { "code": "EACCES" });
+		}
+
+		return fn.apply(this, args);
+	};
+	const wrap = (value: unknown): unknown => {
+		if (!wrapped.has(value)) {
+			wrapped.set(value, typeof value === "function" ? gate(value as (...args: unknown[]) => unknown) : typeof value === "object" && value !== null ? Object.fromEntries(Object.entries(value).map(([key, member]) => [key, typeof member === "function" ? gate(member as (...args: unknown[]) => unknown) : member])) : value);
+		}
+
+		return wrapped.get(value);
+	};
+
+	return { "globals": Object.fromEntries(Object.entries(standins.globals).map(([key, value]) => [key, wrap(value)])), "modules": Object.fromEntries(Object.entries(standins.modules).map(([key, value]) => [key, wrap(value)])) };
+}
+
+/** Arm `vm`'s breakpoints: the user's, and the capability calls the policy gates. */
+function arm(vm: Vm): void {
+	vm.breakpoints.clear();
+	vm.addBreakpointsByLine(...userLines, ...capabilityLines);
+}
+
+/** What the capability stop at `line` (1-based) asks: the first call on it the policy gates, with the resource it would
+ *  reach as far as it's known before the line runs — undefined when the policy now lets every call on it pass. */
+function askAt(vm: Vm, line: number): CapabilityAsk | undefined {
+	const file = sourceFile;
+
+	if (file === undefined || policy === undefined) {
+		return undefined;
+	}
+
+	const calls: ts.CallExpression[] = [];
+
+	(function visit(node: ts.Node): void {
+		if (ts.isCallExpression(node) && file.getLineAndCharacterOfPosition(node.getStart(file)).line === line - 1) {
+			calls.push(node);
+		}
+
+		node.forEachChild(visit);
+	})(file);
+
+	for (const call of calls) {
+		const hit = classifyCall(call, []);
+
+		if (hit !== undefined) {
+			const { resource, resolved } = resourceOf(vm, call.arguments[hit.argIndex], file);
+
+			if (shouldBreak(policy, { ...hit, "resource": resolved ? resource : "" })) {
+				return { "line": line - 1, "capability": hit.capability, "callee": hit.callee, "resource": resource, "resolved": resolved, "dangerous": hit.dangerous };
+			}
+		}
+	}
+
+	return undefined;
+}
+
+/** An argument's value before its line runs: a literal's text, a variable's value (a string) — resolved — else the
+ *  argument as written. */
+function resourceOf(vm: Vm, argument: ts.Expression | undefined, file: ts.SourceFile): { "resource": string; "resolved": boolean } {
+	if (argument === undefined) {
+		return { "resource": "", "resolved": false };
+	}
+
+	if (ts.isStringLiteralLike(argument)) {
+		return { "resource": argument.text, "resolved": true };
+	}
+
+	if (ts.isIdentifier(argument)) {
+		for (let scope: typeof vm.rootScope | undefined = vm.top?.scope ?? vm.rootScope; scope !== undefined; scope = scope.parent) {
+			for (const [name, binding] of scope.bindings) {
+				if (name === argument.text && binding.initialized && typeof binding.value === "string") {
+					return { "resource": binding.value, "resolved": true };
+				}
+			}
+		}
+	}
+
+	return { "resource": argument.getText(file), "resolved": false };
 }
 
 /** A console argument the way node's console prints it: strings bare, everything else JSON-ish. */
@@ -279,9 +374,10 @@ function flushLive(): void {
 	}
 }
 
-function emitStopped(vm: Vm, reason: string, traveled = false): void {
+function emitStopped(vm: Vm, reason: string, traveled = false, ask?: CapabilityAsk): void {
+	denyNext = false;
 	flushLive();
-	post({ "type": "stopped", "reason": reason, "snapshot": { ...snapshot(vm), "traveled": traveled } });
+	post({ "type": "stopped", "reason": reason, "snapshot": { ...snapshot(vm), "traveled": traveled }, ...ask === undefined ? {} : { "ask": ask } });
 }
 
 /**
@@ -339,6 +435,13 @@ function finish(exitCode = 0): void {
 	post({ "type": "terminated", "exitCode": exitCode });
 }
 
+/** The 1-based line `vm` is stopped at. */
+function atLine(vm: Vm): number | undefined {
+	const location = vm.location();
+
+	return location === null ? undefined : location.line + 1;
+}
+
 /** Guest call depth: the `call`/`construct` frames on the control stack (the rest are expression/statement frames). */
 function callDepth(vm: Vm): number {
 	let depth = 0;
@@ -371,7 +474,16 @@ function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): voi
 	try {
 		try {
 			switch (action) {
-				case "continue": base.runToBreakpoint(); break;
+				case "continue":
+					base.runToBreakpoint();
+
+					// A capability line whose calls the policy now lets pass (allowed always since it was armed, or its
+					// resource allowed once known) isn't a stop: go on, unless the user has a breakpoint there too.
+					while (!base.finished && atLine(base) !== undefined && capabilityLines.has(atLine(base)!) && !userLines.includes(atLine(base)!) && askAt(base, atLine(base)!) === undefined) {
+						base.runToBreakpoint();
+					}
+
+					break;
 				case "next": base.stepStatement(); break;
 				case "stepIn": base.step(); break;
 				case "stepOut": stepOut(base); break;
@@ -407,7 +519,7 @@ function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): voi
 		// A step-out cut short by a breakpoint reports it as one, like a continue would.
 		const reason = action === "continue" || (action === "stepOut" && base.atBreakpoint()) ? (stopLine !== undefined && capabilityLines.has(stopLine) ? "capability" : "breakpoint") : "step";
 
-		emitStopped(base, reason);
+		emitStopped(base, reason, false, reason === "capability" && stopLine !== undefined ? askAt(base, stopLine) : undefined);
 	} finally {
 		span.end();
 	}
@@ -535,14 +647,13 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 
 			sourceFile = loaded.sourceFile;
 			record(loaded.vm, new Map());
-			loaded.vm.addBreakpointsByLine(...message.lines);
 			// Capability breakpoints: pre-arm a breakpoint at every capability call the policy won't let pass, so a
-			// gated call hard-stops at its line with the debugger's normal step / step-back (the runtime resource is
-			// visible in Variables at the stop). No policy → every undecided dangerous call breaks (firewall default).
-			capabilityLines = new Set(message.policy !== undefined ? capabilityBreakLines(loaded.sourceFile, message.policy) : []);
-			if (capabilityLines.size > 0) {
-				loaded.vm.addBreakpointsByLine(...capabilityLines);
-			}
+			// gated call hard-stops at its line with the debugger's normal step / step-back, and asks there (step 8 of
+			// LIVE-VALUES.md). No policy → every undecided dangerous call breaks (firewall default).
+			policy = message.policy;
+			userLines = message.lines;
+			capabilityLines = new Set(policy !== undefined ? capabilityBreakLines(loaded.sourceFile, policy) : []);
+			arm(loaded.vm);
 
 			history = [];
 			index = -1;
@@ -580,12 +691,28 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 			break;
 
 		case "setBreakpoints":
-			// Re-point breakpoints on every stored fork so time-traveled forward runs honor the new set.
+			// Re-point breakpoints on every stored fork so time-traveled forward runs honor the new set — the capability
+			// lines with them (replacing the user's alone would disarm those).
+			userLines = message.lines;
+
 			for (const vm of history) {
-				vm.breakpoints.clear();
-				vm.addBreakpointsByLine(...message.lines);
+				arm(vm);
 			}
 
+			break;
+
+		case "decide":
+			// After "Allow always": the policy now in effect, and the capability lines it still gates.
+			if (message.policy !== undefined && sourceFile !== undefined) {
+				policy = message.policy;
+				capabilityLines = new Set(capabilityBreakLines(sourceFile, policy));
+
+				for (const vm of history) {
+					arm(vm);
+				}
+			}
+
+			denyNext = message.deny === true;
 			break;
 
 		case "continue":

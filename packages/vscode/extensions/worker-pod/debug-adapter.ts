@@ -15,10 +15,10 @@ import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
 import { EMPTY_POLICY, type Policy } from "@brianjenkins94/util/silo/policy";
-import { loadEffectivePolicy } from "../capabilities/silo-store";
+import { loadEffectivePolicy, persistOverride } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
-import type { Control, CoverageReport, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
+import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
 import { lifecycleOfSource } from "../../lifecycle";
 import { controlSubject, eventSubject } from "./debug-protocol";
 import { inputsKey, parseInputs } from "./inputs";
@@ -38,6 +38,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	// waiting for its next stop. Served until the session ends.
 	private state: DebugState = "starting";
 	private stopReason: string | undefined;
+	/** What the capability stop it's at asks (LIVE-VALUES.md, step 8), until the run resumes. */
+	private ask: CapabilityAsk | undefined;
 	private output: string[] = [];
 	private readonly waiters = new Set<() => void>();
 	private readonly unregister: () => void;
@@ -136,6 +138,30 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		this.resume(action);
 
 		return next;
+	}
+
+	/** Decide the capability stop it's at, and resume: "Allow always" writes my policy override (as the preview's prompt
+	 *  does) and hands the worker the policy now in effect; "Deny" fails the call; "Allow once" just lets it run. */
+	public async decide(choice: CapabilityChoice, signal: AbortSignal): Promise<DebugOutcome> {
+		const ask = this.ask;
+
+		if (this.state !== "stopped" || ask === undefined) {
+			throw new Error("not stopped at a capability call");
+		}
+
+		if (choice === "allow-always") {
+			if (!ask.resolved) {
+				throw new Error(`"Allow always" needs the resource the call reaches, and ${ask.resource} isn't known before it runs`);
+			}
+
+			await persistOverride(ask.capability, ask.resource, "allow");
+			this.policy = await this.loadPolicy();
+			this.control({ "type": "decide", "policy": this.policy });
+		} else if (choice === "deny") {
+			this.control({ "type": "decide", "deny": true });
+		}
+
+		return this.act("continue", signal);
 	}
 
 	public settled(signal: AbortSignal): Promise<DebugOutcome> {
@@ -478,6 +504,12 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private resume(kind: StepAction): void {
 		const trace = this.startAction(kind);
 
+		// Resumed, however (a choice, VS Code's toolbar), the question's been answered.
+		if (this.ask !== undefined) {
+			this.ask = undefined;
+			podHub.publish("capability.ask", { "session": this.id, "file": this.program });
+		}
+
 		this.state = "running";
 
 		if (this.lastStopAtomic && this.sharedControl !== undefined) {
@@ -497,6 +529,13 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.lastStopAtomic = message.atomic === true;
 				this.endAction(); // the action reached a stop — close its round-trip span
 				this.stopReason = message.reason;
+				this.ask = message.ask;
+
+				// A capability stop asks on its line, in the notes margin (core: live-values.ts).
+				if (message.ask !== undefined) {
+					podHub.publish("capability.ask", { "session": this.id, "file": this.program, "ask": message.ask });
+				}
+
 				this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
 				this.settle("stopped");
 				break;

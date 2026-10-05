@@ -10,10 +10,16 @@
  * up, its values whole (the margin's cell lit at the cursor: pane.ts). What the bounds left out is said under the last
  * line. The margin also carries prose notes (`showNotes`, rendered by pane.tsx): both go in one `showPane` per file,
  * values first on a line.
+ *
+ * A capability stop asks on its line too (step 8): what the call would do — `writeFileSync '/workspace/out.txt'` — and
+ * *Allow once*, *Allow always*, *Deny*, the choice sent back to the session (`debug.session.<id>.decide`), which
+ * resumes it. *Allow always* needs the resource the call reaches: offered only when it's known before the line runs.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { PaneEntry } from "@brianjenkins94/monaco-vscode-api/main";
+import type { CapabilityAsk, CapabilityChoice } from "./extensions/worker-pod/debug-protocol";
 import type { LiveBatch, LiveCall, LiveValue } from "./extensions/worker-pod/live-values";
+import { createRpcClient } from "@brianjenkins94/hub";
 import { showPane } from "@brianjenkins94/monaco-vscode-api/main";
 import css from "./live-values.css?raw";
 
@@ -40,6 +46,10 @@ const MAX_WIDTH = 24;
 const sessions = new Map<string, Session>();
 /** Prose notes, per file URI. */
 const notes = new Map<string, Note[]>();
+/** The capability stop a session is at, per file URI: what it asks. */
+const asks = new Map<string, { "session": string; "ask": CapabilityAsk }>();
+/** Sends a capability stop's choice back to its session (set by `installLiveValues`). */
+let choose: ((session: string, choice: CapabilityChoice) => Promise<unknown>) | undefined;
 /** The cells of each column on screen, by group and column: to light a column on every line. */
 let columns = new Map<string, HTMLElement[]>();
 
@@ -269,6 +279,53 @@ function light(key: string, on: boolean): void {
 	}
 }
 
+/** A capability stop's question: the call and what it reaches, then the three choices. */
+function renderAsk(session: string, ask: CapabilityAsk, element: HTMLElement): void {
+	const box = document.createElement("div");
+	const what = document.createElement("div");
+	const callee = document.createElement("span");
+	const resource = document.createElement("span");
+	const choices = document.createElement("div");
+	const button = (label: string, choice: CapabilityChoice, title: string, enabled = true): HTMLButtonElement => {
+		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+		const each = document.createElement("button");
+
+		each.className = `live-values-choice ${choice}`;
+		each.textContent = label;
+		each.title = title;
+		each.disabled = !enabled;
+		each.addEventListener("click", () => {
+			for (const other of choices.querySelectorAll("button")) {
+				other.disabled = true;
+			}
+
+			each.classList.add("chosen");
+			void choose?.(session, choice).catch((error: unknown) => {
+				box.append(Object.assign(document.createElement("div"), { "className": "live-values-ask-error", "textContent": String(error) }));
+			});
+		});
+
+		return each;
+	};
+
+	box.className = `live-values-ask${ask.dangerous ? " dangerous" : ""}`;
+	callee.className = "live-values-ask-callee";
+	callee.textContent = ask.callee;
+	resource.className = ask.resolved ? "live-values-string" : "live-values-ask-unresolved";
+	resource.textContent = ask.resolved ? `'${ask.resource}'` : ask.resource;
+	what.className = "live-values-ask-what";
+	what.title = `${ask.capability}: the policy hasn't allowed it`;
+	what.append(callee, " ", resource, Object.assign(document.createElement("span"), { "className": "live-values-ask-capability", "textContent": ` ${ask.capability}` }));
+	choices.className = "live-values-choices";
+	choices.append(
+		button("Allow once", "allow-once", "Let this call run, and stop here again next time"),
+		button("Allow always", "allow-always", ask.resolved ? `Allow ${ask.capability} on ${ask.resource} in your policy (.silo/<you>.policy.json)` : "Needs the resource the call reaches, which isn't known before the line runs", ask.resolved),
+		button("Deny", "deny", "Fail this call, as the policy would")
+	);
+	box.append(what, choices);
+	element.append(box);
+}
+
 let styled = false;
 
 /** Show a file's values and notes in its margin, or take the margin away when it has neither. */
@@ -290,7 +347,10 @@ function draw(uri: string): void {
 		labelWidths.set(call, Math.max(labelWidths.get(call) ?? 0, row.label.length));
 	}
 
+	const asked = asks.get(uri);
 	const entries: PaneEntry[] = [
+		// A capability stop's question first on its line: it's what the run waits on.
+		...asked === undefined ? [] : [{ "id": "ask", "fromLine": asked.ask.line, "toLine": asked.ask.line }],
 		...rows.map((row) => ({ "id": `values:${row.line}`, "fromLine": row.line, "toLine": row.line })),
 		// What the bounds left out, under the last line: its cell grows a line for it.
 		...last === undefined || session === undefined || session.dropped === 0 ? [] : [{ "id": "values:dropped", "fromLine": last.line, "toLine": last.line }],
@@ -306,6 +366,12 @@ function draw(uri: string): void {
 	}
 
 	showPane(uri, entries, (entry, element) => {
+		if (entry.id === "ask") {
+			renderAsk(asked!.session, asked!.ask, element);
+
+			return undefined;
+		}
+
 		if (entry.id === "values:dropped") {
 			element.append(Object.assign(document.createElement("div"), { "className": "live-values-dropped", "textContent": `… ${session!.dropped} more values not kept` }));
 
@@ -402,9 +468,36 @@ export function installLiveValues(hub: Hub, uriOf: (path: string) => string): vo
 	hub.subscribe("values.ended", (data) => {
 		const { session, file } = (data ?? {}) as { "session"?: unknown; "file"?: unknown };
 
+		if (typeof file === "string" && asks.get(uriOf(file))?.session === session) {
+			asks.delete(uriOf(file));
+			redraw(uriOf(file));
+		}
+
 		if (typeof file === "string" && sessions.get(uriOf(file))?.id === session) {
 			sessions.delete(uriOf(file));
 			redraw(uriOf(file));
 		}
+	});
+
+	// A capability stop's question, and its answer back: the session resumes on it.
+	const rpc = createRpcClient(hub);
+
+	choose = (session, choice) => rpc.request(`debug.session.${session}.decide`, { "choice": choice }, { "timeoutMs": 24 * 60 * 60_000 });
+	hub.subscribe("capability.ask", (data) => {
+		const { session, file, ask } = (data ?? {}) as { "session"?: unknown; "file"?: unknown; "ask"?: CapabilityAsk };
+
+		if (typeof session !== "string" || typeof file !== "string") {
+			return;
+		}
+
+		const uri = uriOf(file);
+
+		if (ask !== undefined) {
+			asks.set(uri, { "session": session, "ask": ask });
+		} else if (asks.get(uri)?.session === session) {
+			asks.delete(uri);
+		}
+
+		redraw(uri);
 	});
 }

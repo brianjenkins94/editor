@@ -27,6 +27,9 @@ export type Control =
 	| { "type": "timeTravel"; "index": number }
 	/** Report the coverage so far (answered with a `coverage` event). */
 	| { "type": "coverage" }
+	/** A decision at a capability stop, before the run resumes: `deny` fails the call the stop was for; `policy`, after
+	 *  "Allow always", is the policy now in effect — what stops from here on. */
+	| { "type": "decide"; "deny"?: boolean; "policy"?: Policy }
 	| { "type": StepAction | "disconnect" };
 
 export interface Variable { "name": string; "value": string; "type": string; "variablesReference": number }
@@ -40,9 +43,17 @@ export interface Snapshot {
 	"traveled"?: boolean;
 }
 
+/** What a capability stop asks (LIVE-VALUES.md, step 8): the gated call on the line it stopped at — its capability,
+ *  its callee as written, and the resource it would reach, from the run's own values where they're known by then (a
+ *  literal, a variable's value), else the argument as written. `line` is 0-based. */
+export interface CapabilityAsk { "line": number; "capability": string; "callee": string; "resource": string; "resolved": boolean; "dangerous": boolean }
+
+/** The choices at a capability stop, as the preview's prompt words them. */
+export type CapabilityChoice = "allow-once" | "allow-always" | "deny";
+
 /** Worker → adapter. */
 export type WorkerEvent =
-	| { "type": "stopped"; "reason": string; "snapshot": Snapshot; "atomic"?: boolean }
+	| { "type": "stopped"; "reason": string; "snapshot": Snapshot; "atomic"?: boolean; "ask"?: CapabilityAsk }
 	/** The program is over: `exitCode` 1 when it threw, else 0. */
 	| { "type": "terminated"; "exitCode"?: number }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" }

@@ -262,3 +262,15 @@ consumer of the same strip: the overlay draws what core gives it, values or a de
    Run and Debug view where the Explorer was, which the tests after it open files from.
 8. **Capability decisions on the line**: a capability stop's *Allow once* / *Allow always* / *Deny* on its line, the
    choice resuming the run.
+   Done: at a capability stop the debug worker finds the call on the line the policy gates and the resource it would
+   reach — a literal, or a variable's value; the argument as written when it's only known once the line runs — and
+   sends it with the stop (`ask`); the adapter publishes it (`capability.ask`, cleared when the run resumes, however it
+   resumes) and serves the choice (`debug.session.<id>.decide`). Core draws it in the margin on its line, first in its
+   cell: `writeFileSync '/workspace/out.txt' fs:write`, then the three buttons, the choice sent back. *Allow once* lets
+   the call run (and stops there again next time); *Deny* makes it fail as a denied call would (`EACCES`, from the
+   stand-in); *Allow always* writes my override (`.silo/<me>.policy.json`, as the preview's prompt does) and hands the
+   worker the policy now in effect — offered only when the resource is known, since a rule needs one. A capability
+   line is armed from the source alone (a literal resource, or none), so a stop now checks the call's actual resource
+   against the policy and goes on when it's allowed: an *Allow always* on a variable's value holds on the next run. And
+   the worker's breakpoint updates no longer drop the capability lines (they replaced every breakpoint with the
+   user's). The tour test runs all three (test/architecture-tour.mjs, "capability decisions").
