@@ -19,6 +19,8 @@ import { flushRun } from "../capabilities/silo-store";
 import { observe } from "@brianjenkins94/observability";
 import { identifyWorker } from "../../architecture-model";
 import { ZENFS_NODE } from "../../architecture-zenfs";
+import type { CommandTotals } from "../command-tap";
+import { ARCH_COMMANDS } from "../command-tap";
 import { registerTsvalDebug, takeExitCode } from "./debug-adapter";
 import { registerLaunch } from "./launch";
 import { registerSourceControl } from "./source-control";
@@ -189,6 +191,53 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		// what spans of the text are beyond their shape (by span id: TypeScript's type, observed tags), for the typed
 		// strategy.
 		(await rpc.request("annotations.resolve", { "source": source, "file": file, "refs": refs, "observed": options?.observed === true, "types": options?.types }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "resolutions"?: unknown[] }).resolutions));
+
+	// Each extension host's command totals (extensions/command-tap.ts): the extensions, and the commands between them, on
+	// the architecture view — discovered, not declared (DISCOVERED-ARCHITECTURE.md). A host sends its totals; what's new
+	// since its last is put on the view as that many calls.
+	const seen = new Map<string, Map<string, number>>();
+	const owners = new Map<string, string>();
+	const spawned = new Set<string>();
+	const extensionNode = (name: string, host: string): string => {
+		const id = `ext:${name}`;
+
+		if (!spawned.has(id)) {
+			spawned.add(id);
+			architecture.spawn({ "id": id, "label": name === "vscode" ? "VS Code" : name, "container": name === "vscode" || host.startsWith("LocalProcess") ? "workbench" : "extHostWorker", "detail": name === "vscode" ? "its own commands and its built-in extensions'" : "extension", "dynamic": true });
+		}
+
+		return id;
+	};
+
+	context.subscriptions.push(vscode.commands.registerCommand(ARCH_COMMANDS, (raw: unknown) => {
+		const { host, registered, calls } = (raw ?? {}) as Partial<CommandTotals>;
+
+		if (typeof host !== "string" || !Array.isArray(registered) || !Array.isArray(calls)) {
+			return;
+		}
+
+		for (const [command, extension] of registered) {
+			owners.set(command, `${extension}\0${host}`);
+			extensionNode(extension, host);
+		}
+
+		const before = seen.get(host) ?? new Map<string, number>();
+
+		for (const [caller, command, count] of calls) {
+			const key = `${caller}\0${command}`;
+			const owner = owners.get(command.split(" ")[0]!)?.split("\0") ?? ["vscode", "LocalProcess"];
+			const from = extensionNode(caller, host);
+			const to = extensionNode(owner[0]!, owner[1]!);
+
+			for (let call = before.get(key) ?? 0; call < count; call += 1) {
+				architecture.record(from, to, "request", "cmd " + command);
+			}
+
+			before.set(key, count);
+		}
+
+		seen.set(host, before);
+	}));
 
 	// The production debug type — presents an almostnode run (the vite preview) as a debug session with a
 	// run-control controller (Stop + Debug Console). The run's driver publishes `production.launch` (federates

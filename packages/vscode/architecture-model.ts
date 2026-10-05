@@ -505,7 +505,8 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 	// A previewed app's own contexts are its architecture, not the editor's: nothing to check them against.
 	const app = appNodes(observed);
 
-	for (const channel of observed.channels.filter((candidate) => !app.has(candidate.a) && !app.has(candidate.b))) {
+	// Between extensions is VS Code's command surface: public API, discovered rather than declared (DISCOVERED-ARCHITECTURE.md).
+	for (const channel of observed.channels.filter((candidate) => !app.has(candidate.a) && !app.has(candidate.b) && !(isExtensionNode(candidate.a) && isExtensionNode(candidate.b)))) {
 		const declared = declaredOn(channel);
 
 		if (declared === undefined) {
@@ -653,7 +654,13 @@ export function appLayout(observed: { "channels": { "a": string; "b": string }[]
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────
 
 /** Contexts created at runtime, by id prefix, and where they live. */
-export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:", "channel:", "lock:", "rtc:", "webview:"];
+export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:", "channel:", "lock:", "rtc:", "webview:", "ext:"];
+
+/** An extension, discovered by its commands (extensions/command-tap.ts): `ext:<name>`, or `ext:vscode` for VS Code's own
+ *  commands and its built-in extensions'. */
+export function isExtensionNode(id: string): boolean {
+	return id.startsWith("ext:");
+}
 
 export function dynamicContainer(id: string): string | undefined {
 	if (isAppNode(id)) {

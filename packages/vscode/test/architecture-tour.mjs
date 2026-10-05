@@ -524,6 +524,10 @@ test("notes: a note follows its code, and waits in Problems when its code is gon
 	// Dismissed: a tombstone, so a merge can't bring it back.
 	await run("dismiss", id);
 	await eventually("the note's tombstone", async () => (await run("notes")).find((note) => note.id === id && note.dismissed === true));
+
+	// On the architecture view, discovered (DISCOVERED-ARCHITECTURE.md): the notes extension calling worker-pod's command,
+	// and the insights extension asking the TypeScript plugin for types through VS Code.
+	await session.until("notes → worker-pod, by command", hasLabel("ext:notes", "ext:worker-pod", /^cmd editor\.annotations\.resolve$/u));
 });
 
 test("notes: a note goes with its code to another file", async () => {

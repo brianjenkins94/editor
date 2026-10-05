@@ -122,7 +122,13 @@ own — and it waits until discovery has shown how far it gets alone.
 
 ## Building it
 
-1. **Extensions and commands**: the per-extension API wrap; command edges on `$sys.arch`.
+1. **Extensions and commands**: the per-extension API wrap; command edges on `$sys.arch`. Done: the build hands every
+   bundled extension a `vscode` whose `commands` are counted (extensions/command-tap.ts, build.ts's commandTap); each
+   extension host sends its totals to worker-pod (`editor.arch.commands`), which puts `ext:<name>` nodes and `cmd …`
+   edges on the view; commands nobody bundled registered belong to `ext:vscode`. The tour finds notes and insights →
+   `editor.annotations.*` → worker-pod, insights → `editor.metrics.read`, and notes, insights and eslint → the
+   TypeScript plugin's `_types.at` and `_eslint.fixAll`. Only our bundled extensions are tapped; one installed from the
+   gallery isn't (yet).
 2. **Stores**: path shapes from the zen-fs probe's writes; an `indexedDB.open` probe in each realm.
 3. **Flows**: the hub carries the trace through handlers and RPC handlers; inferred links where it's lost.
 4. **Components**: the hub records where each handler was registered; namespaces group what a context serves.
