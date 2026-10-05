@@ -535,8 +535,22 @@ test("notes: a note follows its code, and waits in Problems when its code is gon
 	const everything = (message) => [message, ...message.caused.flatMap(everything)];
 	// (Polled with the view's snapshot fresh each time: session.snapshot() is the last one polled.)
 	const resolveIn = (snapshot) => flowsOf(snapshot.log.filter((sample) => sample.from !== undefined && sample.to !== undefined)).flatMap(everything).find((message) => message.label === "annotations.resolve()" && message.caused.some((child) => child.label === "bablr.resolve()"));
-	const resolve = resolveIn(await session.until("a resolve's flow", (snapshot) => resolveIn(snapshot) !== undefined));
+	// A resolve of its own, made now: the view keeps the latest 3000 messages, and by here the note's (dismissed) may have
+	// rolled out of them — in CI, it did.
+	const resolveNow = () => workbench.evaluate(async (ref) => {
+		const { api } = globalThis.__editor;
+		const document = await api.workspace.openTextDocument(api.Uri.file("/workspace/noted.js"));
 
+		await api.commands.executeCommand("editor.annotations.resolve", document.getText(), "noted.js", [ref]);
+	}, placed.ref);
+	let resolve;
+
+	for (let attempt = 0; resolve === undefined && attempt < 5; attempt += 1) {
+		await resolveNow();
+		resolve = await session.until("a resolve's flow", (snapshot) => resolveIn(snapshot) !== undefined, 10_000).then(resolveIn, () => undefined);
+	}
+
+	assert.ok(resolve !== undefined, "a resolve's flow");
 	assert.equal(resolve.caused.find((child) => child.label === "bablr.resolve()").inferred, undefined, "named, not inferred");
 });
 
