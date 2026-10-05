@@ -20,6 +20,8 @@ interface FrameBase {
 	"scope": Scope;
 	/** value-stack depth when this frame was pushed; operands above it are truncated on unwind. */
 	"valuesBase": number;
+	/** a call's or a construction's number, in the order they're made (VMOptions.trace: which call a value is of). */
+	"call"?: number;
 }
 
 /** What a `yield*` frame received from the outer generator's caller (`next(v)` / `throw(e)` / `return(v)`). */
@@ -50,6 +52,8 @@ export interface NodeFrame extends FrameBase {
 
 	// --- loops / labels / switch (consulted by VM.unwind) ---
 	"isLoop"?: boolean;
+	/** a loop's turn: which iteration its body is on, from 0 (VMOptions.trace). */
+	"turn"?: number;
 	/** the phase `continue` resumes at. */
 	"continuePhase"?: number;
 	"isLabel"?: boolean;

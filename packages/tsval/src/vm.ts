@@ -160,7 +160,35 @@ export interface VMOptions {
 	 *  branches and types. Off by default: one check per site when it's off. See `ObserveSite` for each site's node
 	 *  and value. The callback must not run guest code (read values with `typeTag`, which never does). */
 	"observe"?: Observer;
+	/** Told each value a statement bound, returned or chose, in order, with which call and loop iteration it was in —
+	 *  what a debugger shows beside each line (a live-values panel). Off by default. See `TraceEvent`. The callback
+	 *  must not run guest code. */
+	"trace"?: Tracer;
 }
+
+/**
+ * A traced value (VMOptions.trace):
+ * - `bind`: a name's new value — a declaration's (`const x = …`, an identifier only; a pattern's names each), an
+ *   assignment's (`x = …`, `o.p += …`, `i++`: the target as written), a `for…of`/`for…in` identifier's each turn, and a
+ *   guest function's parameters on entry (identifiers without a default).
+ * - `return`: a `return` statement's value (`name` is `return`).
+ * - `branch`: an `if`'s arm — 0 its then, 1 its else (`name` is `if`).
+ *
+ * `node` is the declaration, the assignment, the loop, the parameter, the statement: its line is the value's. `call`
+ * numbers the guest call it ran in, in the order calls are made (0: the program's top level); `loops` are the loops
+ * around it in that call, outermost first, each with its turn (from 0); `step` is the machine's step count.
+ */
+export interface TraceEvent {
+	"kind": "bind" | "return" | "branch";
+	"node": ts.Node;
+	"name": string;
+	"value": unknown;
+	"step": number;
+	"call": number;
+	"loops": { "node": ts.Node; "turn": number }[];
+}
+
+export type Tracer = (event: TraceEvent) => void;
 
 /**
  * The sites `observe` is told about, with the node it's given and what `value` is:
@@ -320,6 +348,10 @@ export class Machine implements VM {
 	public coverage: Map<ts.Node, number> | undefined;
 	/** What chosen sites are told to (VMOptions.observe). */
 	public observe: Observer | undefined;
+	/** What each value bound, returned or chosen is told to (VMOptions.trace). */
+	public trace: Tracer | undefined;
+	/** How many calls and constructions have been made: the last one's number (FrameBase.call). */
+	public calls = 0;
 
 	/** The guest realm's Error constructors, so errors tsval itself throws (ReferenceError on an
 	 *  unbound name, TypeError on a bad call, …) are instances of the *guest's* classes. Resolved
@@ -376,6 +408,40 @@ export class Machine implements VM {
 		this.maxSteps = options.maxSteps;
 		this.coverage = options.coverage === true ? new Map() : undefined;
 		this.observe = options.observe;
+		this.trace = options.trace;
+	}
+
+	/** The next call's number (FrameBase.call). */
+	public nextCall(): number {
+		this.calls += 1;
+
+		return this.calls;
+	}
+
+	/** Tell the tracer (VMOptions.trace), if any, a value `node` bound, returned or chose: with the call it's in and the
+	 *  turn of each loop around it there, read off the frame stack down to that call. */
+	public traced(kind: TraceEvent["kind"], node: ts.Node, name: string, value: unknown): void {
+		if (this.trace === undefined) {
+			return;
+		}
+
+		const loops: TraceEvent["loops"] = [];
+		let call = 0;
+
+		for (let index = this.frames.length - 1; index >= 0; index -= 1) {
+			const frame = this.frames[index]!;
+
+			if (frame.kind === "call" || frame.kind === "construct") {
+				call = frame.call ?? 0;
+				break;
+			}
+
+			if (frame.kind === undefined && frame.isLoop === true && frame.turn !== undefined) {
+				loops.unshift({ "node": frame.node, "turn": frame.turn });
+			}
+		}
+
+		this.trace({ "kind": kind, "node": node, "name": name, "value": value, "step": this.steps, "call": call, "loops": loops });
 	}
 
 	public get top(): Frame | undefined {
@@ -870,6 +936,8 @@ export class Machine implements VM {
 		forked.onBreakpoint = this.onBreakpoint;
 		forked.coverage = this.coverage === undefined ? undefined : new Map(this.coverage);
 		forked.observe = this.observe;
+		forked.trace = this.trace;
+		forked.calls = this.calls;
 		forked.callSite = undefined;
 		forked.values = this.values.map(clone);
 		forked.frames = this.frames.map(cloneFrame);
@@ -924,7 +992,7 @@ export class Machine implements VM {
 	 * directly (steppable). The `frame.kind === "construct"` handler lives in handlers.ts.
 	 */
 	public constructGuestSync(ctor: GuestClass, args: unknown[], newTarget: unknown = ctor): unknown {
-		return this.runSub(() => this.frames.push({ "kind": "construct", "node": null, "phase": 0, "scope": this.rootScope, "valuesBase": 0, "ctor": ctor, "args": args, "isNew": true, "newTarget": newTarget }));
+		return this.runSub(() => this.frames.push({ "kind": "construct", "node": null, "phase": 0, "scope": this.rootScope, "valuesBase": 0, "ctor": ctor, "args": args, "isNew": true, "newTarget": newTarget, "call": this.nextCall() }));
 	}
 
 	// --- fibers: generators & async (machine suspension, ASSIGNMENT §3) -------
@@ -1174,7 +1242,8 @@ export class Machine implements VM {
 			"meta": meta,
 			"args": args,
 			"thisArg": thisArg,
-			"newTarget": newTarget
+			"newTarget": newTarget,
+			"call": this.nextCall()
 		};
 
 		this.frames.push(frame);

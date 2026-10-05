@@ -566,7 +566,7 @@ export function pushParentConstruct(vm: Machine, superClass: unknown, args: unkn
 	if (isGuestClass(superClass)) {
 		// `forSuper`: the frame leaves its final instance on the value stack — a parent constructor may
 		// `return` a different object (a Proxy, say), and that is what `super()` yields as `this`.
-		vm.pushFrame({ "kind": "construct", "node": null, "phase": 0, "scope": vm.rootScope, "valuesBase": vm.values.length, "ctor": superClass, "args": args, "instance": instance, "isNew": false, "forSuper": true, "newTarget": newTarget });
+		vm.pushFrame({ "kind": "construct", "node": null, "phase": 0, "scope": vm.rootScope, "valuesBase": vm.values.length, "ctor": superClass, "args": args, "instance": instance, "isNew": false, "forSuper": true, "newTarget": newTarget, "call": vm.nextCall() });
 
 		return undefined;
 	}

@@ -92,6 +92,15 @@ function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 	// phase encodes "which declaration are we on": phase 2*i => start decl i; phase 2*i+1 => bind decl i.
 	const index = frame.phase >> 1;
 
+	// The previous declaration's pattern, bound by now (its frame ran above this one): each name it bound, traced.
+	const previous = (frame.phase & 1) === 0 ? decls[index - 1] : undefined;
+
+	if (vm.trace !== undefined && previous?.initializer !== undefined && !ts.isIdentifier(previous.name)) {
+		for (const name of bindingNames(previous.name)) {
+			vm.traced("bind", previous, name, frame.scope.get(name));
+		}
+	}
+
 	if (index >= decls.length) {
 		vm.frames.pop();
 
@@ -123,6 +132,7 @@ function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 
 		if (ts.isIdentifier(decl.name)) {
 			bindIdentifier(frame.scope, decl.name.text, value, kind);
+			vm.traced("bind", decl, decl.name.text, value);
 		} else {
 			pushPattern(vm, frame.scope, bindingProgram(decl.name, kind), value); // a frame above this one
 		}
@@ -152,6 +162,7 @@ function ifStatement(vm: Machine, frame: NodeFrame): void {
 		const cond = vm.pop();
 
 		vm.observe?.(node, "branch", cond ? 0 : 1);
+		vm.traced("branch", node, "if", cond ? 0 : 1);
 		if (cond) {
 			vm.pushNode(node.thenStatement, frame.scope);
 		} else if (node.elseStatement) {
@@ -170,6 +181,7 @@ const returnStatement = evaluating<ts.ReturnStatement>(
 		const returned = node.expression ? value : undefined;
 
 		vm.observe?.(node, "return", returned);
+		vm.traced("return", node, "return", returned);
 		vm.raise({ "type": "return", "value": returned });
 	}
 );
@@ -221,6 +233,7 @@ function whileStatement(vm: Machine, frame: NodeFrame): void {
 			return;
 		}
 
+		frame.turn = (frame.turn ?? -1) + 1;
 		vm.pushNode(node.statement, frame.scope);
 		frame.phase = 2;
 	} else {
@@ -234,6 +247,7 @@ function doStatement(vm: Machine, frame: NodeFrame): void {
 	if (frame.phase === 0) {
 		frame.isLoop = true;
 		frame.continuePhase = 1; // `continue` in a do-while proceeds to the condition test
+		frame.turn = (frame.turn ?? -1) + 1;
 		vm.pushNode(node.statement, frame.scope);
 		frame.phase = 1;
 	} else if (frame.phase === 1) {
@@ -284,6 +298,7 @@ function forStatement(vm: Machine, frame: NodeFrame): void {
 			vm.pushNode(node.condition, scope);
 			frame.phase = 3;
 		} else {
+			frame.turn = (frame.turn ?? -1) + 1;
 			vm.pushNode(node.statement, scope);
 			frame.phase = 4;
 		}
@@ -294,6 +309,7 @@ function forStatement(vm: Machine, frame: NodeFrame): void {
 			return;
 		}
 
+		frame.turn = (frame.turn ?? -1) + 1;
 		vm.pushNode(node.statement, frame.iterScope!);
 		frame.phase = 4;
 	} else if (frame.phase === 4) {
@@ -490,6 +506,8 @@ function forInStatement(vm: Machine, frame: NodeFrame): void {
 export function bindForTarget(vm: Machine, frame: NodeFrame, initializer: ts.ForInitializer, value: unknown): void {
 	const node = frame.node as ts.ForOfStatement | ts.ForInStatement;
 	const bodyScope = new Scope(frame.scope, false);
+
+	frame.turn = (frame.turn ?? -1) + 1;
 	// A plain identifier binds directly; anything else (a pattern, a member target) is bound by a
 	// pattern frame pushed ABOVE the body, so it runs first.
 	let stepped: { "scope": Scope; "program": PatternProgram } | undefined;
@@ -510,6 +528,7 @@ export function bindForTarget(vm: Machine, frame: NodeFrame, initializer: ts.For
 
 		if (ts.isIdentifier(decl.name)) {
 			bindIdentifier(bodyScope, decl.name.text, value, kind);
+			vm.traced("bind", decl, decl.name.text, value);
 		} else {
 			stepped = { "scope": bodyScope, "program": bindingProgram(decl.name, kind) };
 		}
@@ -518,6 +537,7 @@ export function bindForTarget(vm: Machine, frame: NodeFrame, initializer: ts.For
 
 		if (ts.isIdentifier(target)) {
 			frame.scope.set(target.text, value);
+			vm.traced("bind", target, target.text, value);
 		} else {
 			stepped = { "scope": frame.scope, "program": assignProgram(target) };
 		}

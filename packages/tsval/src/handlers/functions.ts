@@ -228,6 +228,7 @@ export function bindParameters(vm: Machine, scope: Scope, node: ts.SignatureDecl
 			// either runtime must mean one thing.
 			if (param.initializer === undefined && ts.isIdentifier(param.name)) {
 				vm.observe?.(param, "parameter", param.dotDotDotToken === undefined ? args[index] : args.slice(index));
+				vm.traced("bind", param, param.name.text, param.dotDotDotToken === undefined ? args[index] : args.slice(index));
 			}
 
 			index += 1;

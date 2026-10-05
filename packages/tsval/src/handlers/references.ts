@@ -315,6 +315,46 @@ export function thisOf(scope: Scope, ref: Ref): unknown {
 	return undefined;
 }
 
+/** An assignment's target as written (`x`, `o.p`, `a[i]`), for a trace: its text in the program, or its name. */
+function targetText(vm: Machine, target: ts.Expression): string {
+	if (ts.isIdentifier(target)) {
+		return target.text;
+	}
+
+	try {
+		return target.getText(vm.sourceFile);
+	} catch {
+		return "";
+	}
+}
+
+/** The names a destructuring assignment's pattern assigns (`[a, { b }, ...c] = …`; a member target isn't a name). */
+function assignedNames(pattern: ts.Expression): string[] {
+	const target = unwrapParens(pattern);
+
+	if (ts.isIdentifier(target)) {
+		return [target.text];
+	}
+
+	if (ts.isBinaryExpression(target) && target.operatorToken.kind === Kind.EqualsToken) {
+		return assignedNames(target.left); // a default: `[a = 1] = …`
+	}
+
+	if (ts.isSpreadElement(target)) {
+		return assignedNames(target.expression);
+	}
+
+	if (ts.isArrayLiteralExpression(target)) {
+		return target.elements.flatMap(assignedNames);
+	}
+
+	if (ts.isObjectLiteralExpression(target)) {
+		return target.properties.flatMap((property) => (ts.isShorthandPropertyAssignment(property) ? [property.name.text] : ts.isPropertyAssignment(property) ? assignedNames(property.initializer) : ts.isSpreadAssignment(property) ? assignedNames(property.expression) : []));
+	}
+
+	return [];
+}
+
 /** One step of a read-modify-write (see assignThrough). */
 export type RmwStep = { "kind": "need-rhs" } | { "kind": "done"; "result": unknown } | { "kind": "store"; "value": unknown; "result": unknown };
 
@@ -347,6 +387,10 @@ export function assignThrough(vm: Machine, frame: NodeFrame, target: ts.Expressi
 		vm.frames.pop();
 		if (step.kind === "store") {
 			putValue(vm, frame.scope, ref, step.value);
+
+			if (vm.trace !== undefined) {
+				vm.traced("bind", frame.node, targetText(vm, target), step.value);
+			}
 		}
 
 		vm.push(step.result);
@@ -359,6 +403,10 @@ export function assignThrough(vm: Machine, frame: NodeFrame, target: ts.Expressi
 	vm.frames.pop();
 	if (step.kind === "store") {
 		putValue(vm, frame.scope, ref, step.value);
+
+		if (vm.trace !== undefined) {
+			vm.traced("bind", frame.node, targetText(vm, target), step.value);
+		}
 	}
 
 	vm.push(step.kind === "need-rhs" ? undefined : step.result);
@@ -546,6 +594,13 @@ export function assignmentExpression(vm: Machine, frame: NodeFrame, node: ts.Bin
 			pushPattern(vm, frame.scope, assignProgram(left), value);
 		} else {
 			vm.frames.pop();
+
+			// The pattern ran (its frame above this one): each name it assigned, traced.
+			if (vm.trace !== undefined) {
+				for (const name of assignedNames(left)) {
+					vm.traced("bind", node, name, frame.scope.get(name));
+				}
+			}
 		}
 	}
 }

@@ -111,7 +111,13 @@ consumer of the same strip: the overlay draws what core gives it, values or a de
 ## Building it
 
 1. **The trace in tsval**: `observe` for declarations, assignments, loop variables and parameters, with step, frame and
-   iteration; tested in tsval's own suite.
+   iteration; tested in tsval's own suite. Done: a `trace` option of its own beside `observe` (which runtime evidence
+   keys by node, one site each), off unless asked — each value a declaration, an assignment (`=`, `op=`, `++`; a member
+   target as written), a destructuring (each name), a `for…of`/`for…in` variable or a parameter bound, each `return`'s,
+   each `if`'s arm; with the step, the call (numbered as calls are made, 0 the top level) and each loop around it in that
+   call with its turn, read off the frame stack (a loop counts its turns as it starts its body, so a `for`'s
+   incrementor counts in the turn it ends). The binary search traces as the talk shows it (test/vm/trace.test.ts).
+   Not yet: a parameter with a default or a pattern, a `for…of` destructuring its element.
 2. **The record in the debug worker**, bounded, handed to the adapter, and on to core over the pod hub; a session's
    inputs from Run with Inputs' remembered ones when its launch config gives none.
 3. **The overlay in the component**: a strip, rows by line, columns by iteration, from data it's given; its own test

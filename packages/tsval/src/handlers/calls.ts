@@ -266,7 +266,7 @@ function newExpression(vm: Machine, frame: NodeFrame): void {
 
 		if (isGuestClass(ctor)) {
 			// Construct a guest class on the explicit stack (steppable; super() supported).
-			vm.pushFrame({ "kind": "construct", "node": null, "phase": 0, "scope": vm.rootScope, "valuesBase": vm.values.length, "ctor": ctor, "args": args, "isNew": true, "newTarget": ctor });
+			vm.pushFrame({ "kind": "construct", "node": null, "phase": 0, "scope": vm.rootScope, "valuesBase": vm.values.length, "ctor": ctor, "args": args, "isNew": true, "newTarget": ctor, "call": vm.nextCall() });
 			frame.phase = 3;
 
 			return;
