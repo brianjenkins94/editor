@@ -225,6 +225,32 @@ function isVisible(node: RuntimeNode, now: number, showDeclared: boolean): boole
 	return true;
 }
 
+/** Cut `text` (in the document, so it can be measured) to `width` with an ellipsis; the whole of it, its tooltip. */
+function fitText(text: SVGTextElement, width: number): void {
+	const full = text.textContent ?? "";
+
+	if (width <= 0 || text.getComputedTextLength() <= width) {
+		return;
+	}
+
+	let [low, high] = [0, full.length];
+
+	while (low < high) {
+		const middle = Math.ceil((low + high) / 2);
+
+		text.textContent = full.slice(0, middle) + "…";
+
+		if (text.getComputedTextLength() <= width) {
+			low = middle;
+		} else {
+			high = middle - 1;
+		}
+	}
+
+	text.textContent = full.slice(0, low).trimEnd() + "…";
+	text.append(s("title", {}, full));
+}
+
 // ── layout ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 interface Rect { "x": number; "y": number; "width": number; "height": number }
@@ -883,11 +909,13 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 					text.x = rect.x + 22;
 				}
 
+				// Standing for a node, the line beneath is that node's detail, as on a node's box (the caption is in the Inspector).
+				const caption = s("text", { "x": text.x, "y": text.caption, "class": "arch-container-caption" }, standsFor === undefined ? container.caption : detailOf(standsFor));
+
 				group.append(
 					s("rect", { "x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height, "rx": 8 }),
 					s("text", { "x": text.x, "y": text.label, "class": "arch-container-label" }, container.label),
-					// Standing for a node, the line beneath is that node's detail, as on a node's box (the caption is in the Inspector).
-					s("text", { "x": text.x, "y": text.caption, "class": "arch-container-caption" }, standsFor === undefined ? container.caption : detailOf(standsFor))
+					caption
 				);
 
 				if (standsFor !== undefined) {
@@ -908,6 +936,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 				}
 
 				containerLayer.append(group);
+				fitText(caption, rect.x + rect.width - 8 - text.x);
 			}
 		}
 
