@@ -90,6 +90,90 @@ bounds are the panel's to state ("… 980 more").
 - **Hovering a column** lights that iteration on every line; clicking it holds it.
 - Lines with nothing to show (a `{`, a comment) are blank; a line that never ran in the call shown is dimmed.
 
+## Spike: Code Hike inside Monaco
+
+Code Hike (already the review panel's diff renderer: git-codehike.tsx) is two halves. **Data**: `highlight()` gives
+shiki's tokens and the annotations — a *block* (lines `from`–`to`) or an *inline* (columns on a line), each with a
+`query` and `data` — read from `// !name(query)` comments or given directly. **Rendering**: `<Pre>` groups lines by block
+annotations and builds React through a stack of handlers, each able to wrap the `Pre`, a `Block` of lines, a `Line` /
+`AnnotatedLine`, an `Inline` range or a `Token`, calling `InnerLine`/`InnerToken` to go on — which is why handlers
+compose, and what its recipes (mark, focus, callout, tooltip, fold, diff, transitions) are built from.
+
+It can render inside Monaco (spike-codehike.tsx, `globalThis.__spikeCodeHike(uri, annotations)`): `<Pre>` in an overlay
+widget over the editor's text area, in its font, line height and tab size, moved with its scroll; Monaco's own glyphs
+transparent, so what's seen is Code Hike's rendering of the same text while Monaco keeps editing, the cursor, the
+selection, word highlights and bracket matching — all aligned. A handler that adds height (a callout under a line) gets
+a Monaco view zone as tall, under the same line, so every line below stays aligned. Tried on the binary search: `mark`
+on the loop's two lines, a callout under `mid` (`2 | 4 | 3`) and under `value` (`'c' | 'e' | 'd'`), typing on a line
+above them — Code Hike re-renders, the cursor lands where Monaco puts it.
+
+What it showed:
+
+- **Annotations must be given, not written.** Code Hike strips `// !` comments, which would put its lines out of step
+  with Monaco's; live values make annotations anyway.
+- **Columns are drawn, not counted.** Code Hike counts a tab as one column; a callout points at a token's middle as
+  drawn (tabs expanded to the editor's tab size).
+- **Anything Monaco inserts into a line breaks alignment there**: inlay hints, inline suggestions, injected text, word
+  wrap, folding (hidden areas). Each wants turning off while the overlay is on, or bringing into Code Hike (an inlay
+  hint as a token).
+- **Use Monaco's tokens, not shiki's.** `<Pre>` takes any tokens: built from Monaco's tokenization, the colors are the
+  editor theme's (shiki's github-light isn't), nothing is fetched (shiki loads grammars from lighter.codehike.org), and
+  re-rendering on each keystroke is synchronous instead of an async highlight.
+- **Render what's visible.** The spike renders the whole file; a long one wants the visible lines only, offset.
+- **A handler that adds height says how much**, so its view zone can be made first: the spike fixes a callout at two
+  lines.
+
+So the values can be Code Hike annotations — a callout of each turn's value under its variable, `mark`/`focus` on the
+lines a picked turn ran, a tooltip with a whole value, transitions to scrub through a run — rendered in the editor, not a
+pane beside it. The strip (step 3) stays the table of every line's turns; which reads better beside the code is for
+trying both on real runs.
+
+## Revised: the right-hand side is notes, rendered with Code Hike
+
+Decided 2026-10-05, after the spike: not Code Hike drawn over Monaco's text, but a right-hand side beside it — literate
+programming, explanatory prose beside the code it explains — and Victor's values are the same thing: notes. One
+pane, one kind of anchor, the machinery we have.
+
+- **The prose is notes** (extensions/notes): Markdown on a BABLR span, in `.silo/notes/<author>/<file>.jsonl`, placed
+  each time the file is shown or changes through `editor.annotations.resolve`, so it follows its code through edits
+  and moves. The pane shows each note beside its span's first line; writing one stays the notes extension's
+  (`notes.add` on a selection, its comment thread to edit, reply or dismiss).
+- **The values are notes too**: a debug session's record (step 2) becomes annotations of a kind of their own
+  (`values`), each line's values on the span of the statement that bound them — referred to with
+  `editor.annotations.refer`, placed with `resolve` like any note, so a session's values stay on their code as it's
+  edited. Kept in memory for the session, as settled above: never written to `.silo/notes`.
+- **Code Hike renders the pane**, in the editor's tokens: a note's prose, its inline code and code blocks highlighted;
+  a values note as Victor's columns (each turn a column, a picked turn lit across lines). The links run both ways —
+  hovering a note marks its span in the editor (a Monaco decoration, Code Hike's hover recipe), the cursor on a line
+  lights its note.
+- **The strip from step 3 becomes the pane's frame**: placed beside the code, scrolling with it, an entry per anchored
+  line; the component draws the frame and hands each entry's element to core, which renders Code Hike into it.
+
+What the changes pane already does with Code Hike (git-codehike.tsx), and what carries over:
+
+- It uses `highlight()` (shiki's github-light/dark, by the OS's scheme, grammars from lighter.codehike.org) and two
+  handler slots for layout — a `Pre` of `display: contents`, so lines join an outer grid, and a `Line` placing each line
+  as a subgrid row (fold chevron, commit pick, number, code, Code Hike's hanging-indent wrap). It uses no annotations:
+  its spotlight is a `highlightedLines` set, its folds computed from token colors.
+- **Carried over**: the lazy React island (`mountDiff(host, input)`, one root per host, loaded on first use), the
+  light/dark theme, and the cross-surface hover link — `setDiffHighlight`, the changes list's chunk hover spotlighting
+  the diff's lines, generalized into the store both directions of note ↔ code use.
+- **Done differently**: the notes pane uses Code Hike's annotations proper — `mark`, `focus`, callouts, tooltips as
+  annotation objects — for the code in notes and the values columns. (The changes pane's spotlight and folds could
+  move onto them later.) Code inside a note isn't in Monaco, so it's shiki's tokens there, as the changes pane's.
+
+**The grid, across the editor and the pane.** The changes pane keeps its two sides in one CSS grid, so a row is as tall
+as its taller cell; here one side is Monaco, which sizes its own lines, so Monaco is the grid's row sizer and its view
+zones are how the code side grows. Each note's cell spans its span's rows (its first line to its last), placed from
+`getTopForLineNumber` (which counts zones, so the pane and the code can't drift); a note taller than its span gets a view
+zone after the span's last line as tall as the difference — the code below moves down by that much, the pane leaves
+the same gap — so a multi-line note never spills onto lines it isn't about. Notes on overlapping spans stack in one
+cell, the zone tall enough for them all.
+
+How it fits, reusing the bridge: the notes extension sends its placed notes to core through a worker-pod command
+(`editor.pane.notes`, per file), the debug adapter its session's values (already on the pod hub); core renders both into
+the component's frame.
+
 ## Capability decisions, on the line
 
 A capability breakpoint (extensions/capabilities: a call the policy hasn't decided — a write, a fetch, a spawn — hard-
@@ -119,10 +203,28 @@ consumer of the same strip: the overlay draws what core gives it, values or a de
    incrementor counts in the turn it ends). The binary search traces as the talk shows it (test/vm/trace.test.ts).
    Not yet: a parameter with a default or a pattern, a `for…of` destructuring its element.
 2. **The record in the debug worker**, bounded, handed to the adapter, and on to core over the pod hub; a session's
-   inputs from Run with Inputs' remembered ones when its launch config gives none.
+   inputs from Run with Inputs' remembered ones when its launch config gives none. Done: tsval's trace tells each
+   value's callee too; the debug worker keeps a session's values in a `LiveRecord` (extensions/worker-pod/
+   live-values.ts, pure, tested) — each a preview as code writes it (`'d'`, `['a', 'b', …]`, own data properties only,
+   never a getter), its line, call and turns; a call named by its function once; at most 50 turns of a loop, 2000
+   values a call and 200 calls, the rest counted as dropped; a replay after stepping back not told twice — and tells
+   the adapter what's new four times a second and before each stop and the end. The adapter publishes it on the pod hub
+   as `values.session.<id>` (with the file) and `values.ended`. A launch without `args` takes the first set of the
+   file's remembered inputs. Seen in the editor: a session over the binary search, every value in its turn.
 3. **The overlay in the component**: a strip, rows by line, columns by iteration, from data it's given; its own test
-   page.
+   page. Done: `showLiveValues(uri, view)` (components/monaco-vscode-api/live-values.ts) draws a view — rows of a label
+   and a value, or a cell per column — beside every editor showing the file, now and when one opens it, through
+   `ICodeEditorService` and an overlay widget per editor; the strip starts past the file's longest line when there's
+   room (240px at least), each row placed by its line as the editor scrolls and lays out, labels right-aligned, each
+   column as wide as its widest value (24 characters at most, a value cut short with an ellipsis), values colored as the
+   debugger colors them. Hovering a column lights it on every row, a click holds it; the cursor's row opens up. No test
+   page: drawn from a script in the editor (`globalThis.__liveValues`, for a console and the tour) instead.
 4. **Core between them**: the latest session's record per file, the cursor and the pointer back from the overlay.
-5. **A tour test**: a session over a binary search, the panel's rows and columns read back.
-6. **Capability decisions on the line**: a capability stop's *Allow once* / *Allow always* / *Deny* on its line, the
+   Revised (above): the frame hands each entry's element to core; core renders the pane with Code Hike.
+5. **Notes in the pane**: the notes extension sends its placed notes (`editor.pane.notes`); their prose beside their
+   spans, rendered with Code Hike; hover links both ways.
+6. **Values as notes**: a session's values referred to their statements' spans, placed like notes, rendered as Victor's
+   columns in the same pane.
+7. **A tour test**: a note and a session over the binary search, read back from the pane.
+8. **Capability decisions on the line**: a capability stop's *Allow once* / *Allow always* / *Deny* on its line, the
    choice resuming the run.
