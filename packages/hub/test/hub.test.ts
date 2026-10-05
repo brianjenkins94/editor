@@ -1366,3 +1366,101 @@ test("dataChannelTransport: a frame past the channel's limit goes in pieces and 
 	assert.deepEqual(seen[1], { "tiles": "small" });
 	assert.ok(b.sent.length > 4, "the long one went in pieces");
 });
+
+test("a message sent while another's handlers run names it as its cause, across hubs", async () => {
+	const root = createHub({ "id": "root" });
+	const pod = createHub({ "id": "pod" });
+	const [a, b] = pipe();
+	const seen: { "subject": string; "id"?: string; "cause"?: string }[] = [];
+
+	root.link(a);
+	pod.link(b);
+	// pod answers `ping` with `pong`; root hears both.
+	pod.subscribe("ping", () => { pod.publish("pong"); });
+	root.subscribe(">", (_data, envelope) => { seen.push({ "subject": envelope.subject, "id": envelope.id, "cause": envelope.cause }); });
+	await flush();
+	root.publish("ping");
+	await flush();
+
+	const ping = seen.find((each) => each.subject === "ping");
+	const pong = seen.find((each) => each.subject === "pong");
+
+	assert.ok(ping?.id !== undefined && ping.cause === undefined, "a message nobody's handling sent has no cause");
+	assert.equal(pong?.cause, ping?.id, "pong was sent while pod handled ping");
+});
+
+test("a served call's reply, and the calls its handler makes before awaiting, name the call", async () => {
+	const root = createHub({ "id": "root" });
+	const worker = createHub({ "id": "worker" });
+	const [a, b] = pipe();
+	const calls: { "subject": string; "id"?: string; "cause"?: string }[] = [];
+
+	root.link(a);
+	worker.link(b);
+	worker.tap((event) => {
+		if (event.type === "send" && !("hub" in event.frame)) {
+			calls.push({ "subject": event.frame.subject, "id": event.frame.id, "cause": event.frame.cause });
+		}
+	});
+	root.tap((event) => {
+		if (event.type === "send" && !("hub" in event.frame)) {
+			calls.push({ "subject": event.frame.subject, "id": event.frame.id, "cause": event.frame.cause });
+		}
+	});
+	// root serves `inner`; worker serves `outer`, which asks root for `inner` first, then answers.
+	serve(root, "inner", () => 1);
+	serve(worker, "outer", async () => (await createRpcClient(worker).request("inner")) as number + 1);
+	await flush();
+
+	const answer = createRpcClient(root).request("outer");
+
+	await flush();
+	assert.equal(await answer, 2);
+
+	const outer = calls.find((each) => each.subject === "$rpc.call.outer");
+	const inner = calls.find((each) => each.subject === "$rpc.call.inner");
+	const replies = calls.filter((each) => each.subject.startsWith("$rpc.reply."));
+
+	assert.equal(inner?.cause, outer?.id, "the inner call was made while the outer one's handler ran");
+	assert.ok(replies.some((reply) => reply.cause === outer?.id), "outer's reply names its call");
+	assert.ok(replies.some((reply) => reply.cause === inner?.id), "inner's reply names its call");
+});
+
+test("a call made in a handler names its message even when it first waits for a responder, and a deferred one when told", async () => {
+	const root = createHub({ "id": "root" });
+	const worker = createHub({ "id": "worker" });
+	const [a, b] = pipe();
+	const sent: { "subject": string; "id"?: string; "cause"?: string }[] = [];
+
+	root.link(a);
+	worker.link(b);
+	root.tap((event) => {
+		if (event.type === "send" && !("hub" in event.frame)) {
+			sent.push({ "subject": event.frame.subject, "id": event.frame.id, "cause": event.frame.cause });
+		}
+	});
+	serve(worker, "work", () => "done");
+	serve(worker, "later", () => "done");
+
+	const rpc = createRpcClient(root);
+	let deferred: string | undefined;
+
+	root.subscribe("go", () => {
+		void rpc.request("work", undefined, { "waitForResponderMs": 1000 });
+		deferred = root.handlingMessage;
+	});
+	await flush();
+	root.publish("go");
+	await flush();
+	// A queue sending the call later names the message it was queued for.
+	void rpc.request("later", undefined, { "cause": deferred });
+	await flush();
+
+	const go = sent.find((each) => each.subject === "go");
+	const work = sent.find((each) => each.subject === "$rpc.call.work");
+	const later = sent.find((each) => each.subject === "$rpc.call.later");
+
+	assert.equal(work?.cause, deferred, "the call waited for its responder, and still names what it was made for");
+	assert.equal(later?.cause, deferred, "told, a deferred call names it too");
+	assert.ok(go === undefined || go.cause === undefined);
+});

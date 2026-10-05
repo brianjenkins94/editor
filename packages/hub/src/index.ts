@@ -33,6 +33,12 @@ export interface Envelope {
 	 *  causes work elsewhere. The receiving seam opens a child span under it (`parentSpanId` = the sender's
 	 *  span), so one operation stitches into a single trace across contexts and constructs an OTel span cleanly. */
 	"traceContext"?: { "traceId": string; "parentSpanId": string };
+	/** This message's id (unique to its hub's lifetime), and the id of the message whose handler sent it, when one did —
+	 *  so the messages one causes in turn, across hubs, chain into a flow an observer can follow. Set by `publish`: a
+	 *  message sent while a hub runs another's handlers names that one; work after an `await` has no handler running,
+	 *  and names one only when told (`publish`'s `cause` — `serve`'s reply names its call). */
+	"id"?: string;
+	"cause"?: string;
 }
 
 /**
@@ -370,6 +376,17 @@ export class Hub {
 	private readonly links = new Set<Link>();
 	// subject pattern → local handlers subscribed to it.
 	private readonly handlers = new Map<string, Set<Handler>>();
+	/** The message whose handlers are running now (its id), if any: what a message published meanwhile was caused by. */
+	private handling: string | undefined;
+
+	/** The id of the message whose handlers are running now, if any — for work a handler defers (a queue), to name as its
+	 *  cause when it's done later (`publish`'s and RpcRequestOptions' `cause`). */
+	public get handlingMessage(): string | undefined {
+		return this.handling;
+	}
+	/** Message ids: this hub's own prefix (random, so two hubs never share one) and a counter. */
+	private readonly idPrefix = Math.random().toString(36).slice(2, 8);
+	private sequence = 0;
 	private readonly taps = new Set<Tap>();
 	private linkIdPool = 0;
 	/** This Hub instance, as its peers tell it from another that took its place (Control.session). */
@@ -424,11 +441,15 @@ export class Hub {
 	}
 
 	/** Publish a message. It reaches every local handler and every linked subtree that wants the subject.
-	 *  Pass `traceContext` (the caller's active span) when this message causes work a receiver should trace. */
-	public publish(subject: string, data?: unknown, options: { "traceContext"?: Envelope["traceContext"] } = {}): void {
+	 *  Pass `traceContext` (the caller's active span) when this message causes work a receiver should trace, and `cause`
+	 *  (a message's id) when it's sent on account of a message whose handler has already returned (see Envelope.cause). */
+	public publish(subject: string, data?: unknown, options: { "traceContext"?: Envelope["traceContext"]; "cause"?: string } = {}): void {
 		assertValid(isSubject(subject), "subject", subject);
 
-		const envelope: Envelope = { "subject": subject, "data": data, "from": this.id, "traceContext": options.traceContext };
+		this.sequence += 1;
+
+		const cause = options.cause ?? this.handling;
+		const envelope: Envelope = { "subject": subject, "data": data, "from": this.id, "traceContext": options.traceContext, "id": `${this.idPrefix}.${this.sequence.toString(36)}`, ...cause === undefined ? {} : { "cause": cause } };
 
 		this.emit({ "type": "publish", "envelope": envelope });
 		this.route(envelope, undefined);
@@ -787,6 +808,11 @@ export class Hub {
 
 		const origin: Origin = { "link": from === undefined ? undefined : { "id": from.id, "peerId": from.peerId } };
 
+		// What the handlers publish, they publish on account of this message.
+		const previous = this.handling;
+
+		this.handling = envelope.id;
+
 		for (const handler of toInvoke) {
 			try {
 				handler(envelope.data, envelope, origin);
@@ -799,6 +825,8 @@ export class Hub {
 				} catch { /* nor may the error handler break routing */ }
 			}
 		}
+
+		this.handling = previous;
 
 		for (const link of this.links) {
 			if (link === from || !crosses(from, link)) {
@@ -1289,6 +1317,9 @@ export interface RpcRequestOptions {
 	/** Aborting rejects the call with `signal.reason` and tells the responder, whose handler sees its own signal
 	 *  abort (see `serve`) — so a long-running call can stop work nobody will read. */
 	"signal"?: AbortSignal;
+	/** The message this call is made on account of, when that message's handler has already returned (a queue that sends
+	 *  the call later): see Envelope.cause. Made while a handler runs, a call names its message without this. */
+	"cause"?: string;
 }
 
 export interface RpcClient {
@@ -1368,6 +1399,9 @@ export function createRpcClient(hub: Hub): RpcClient {
 	return {
 		"request": async (name, args, options = {}) => {
 			const { signal } = options;
+			// What this call is on account of, taken now — a wait for a responder below is an await, after which no
+			// handler is running to name.
+			const cause = options.cause ?? hub.handlingMessage;
 
 			signal?.throwIfAborted();
 
@@ -1375,7 +1409,7 @@ export function createRpcClient(hub: Hub): RpcClient {
 				throw new RpcError("no-responder", `rpc "${name}": no responder within ${options.waitForResponderMs}ms`);
 			}
 
-			return call(name, args, options.timeoutMs, signal);
+			return call(name, args, options.timeoutMs, signal, cause);
 		},
 		"dispose": () => {
 			untap();
@@ -1394,7 +1428,7 @@ export function createRpcClient(hub: Hub): RpcClient {
 		}
 	};
 
-	function call(name: string, args: unknown, timeoutMs = 15000, signal?: AbortSignal): Promise<unknown> {
+	function call(name: string, args: unknown, timeoutMs = 15000, signal?: AbortSignal, cause?: string): Promise<unknown> {
 		return new Promise((resolve, reject) => {
 			const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
 			const entry: Pending = { "resolve": resolve, "reject": reject };
@@ -1419,7 +1453,7 @@ export function createRpcClient(hub: Hub): RpcClient {
 			};
 			signal?.addEventListener("abort", onAbort, { "once": true });
 			pending.set(id, entry);
-			hub.publish(RPC_CALL + "." + name, { "id": id, "replyTo": replyTo(), "args": args } satisfies RpcCall);
+			hub.publish(RPC_CALL + "." + name, { "id": id, "replyTo": replyTo(), "args": args } satisfies RpcCall, cause === undefined ? {} : { "cause": cause });
 		});
 	}
 }
@@ -1473,11 +1507,11 @@ export function serve(hub: Hub, name: string, handler: (args: unknown, context: 
 				const result = await handler(args, { "signal": controller.signal, "from": envelope.from, "link": origin.link });
 
 				if (!controller.signal.aborted) {
-					hub.publish(RPC_REPLY + "." + replyTo, { "id": id, "result": result } satisfies RpcReply);
+					hub.publish(RPC_REPLY + "." + replyTo, { "id": id, "result": result } satisfies RpcReply, { "cause": envelope.id });
 				}
 			} catch (error) {
 				if (!controller.signal.aborted) {
-					hub.publish(RPC_REPLY + "." + replyTo, { "id": id, "error": error instanceof Error ? error.message : String(error) } satisfies RpcReply);
+					hub.publish(RPC_REPLY + "." + replyTo, { "id": id, "error": error instanceof Error ? error.message : String(error) } satisfies RpcReply, { "cause": envelope.id });
 				}
 			} finally {
 				inFlight.delete(key);

@@ -137,7 +137,14 @@ own — and it waits until discovery has shown how far it gets alone.
    `discoveredStores` reads them back, with their writers and readers. The tour finds the silo stores (evidence, notes,
    runs, samples, the capability policy and ledger), BABLR's cache and VS Code's own databases — and that the notes
    extension reads `.git/config` (for who you are).
-3. **Flows**: the hub carries the trace through handlers and RPC handlers; inferred links where it's lost.
+3. **Flows**: the hub carries the trace through handlers and RPC handlers; inferred links where it's lost. Done: every
+   hub message has an `id`, and a message sent while a hub runs another's handlers names it as its `cause` (hub's
+   Envelope); an RPC call takes its cause when it's made (a wait for a responder is an await), `serve`'s reply names
+   its call, and a call a queue defers names what it was queued for (`handlingMessage`, RpcRequestOptions' `cause` —
+   core's BABLR queue does). The reporter samples both; observability's `flowsOf` follows them into flows, a message
+   with no cause linked, inferred, to the last one its sender received within 50 ms. The tour finds a note's resolve
+   as the pod's `annotations.resolve()` causing core's `bablr.resolve()`, named. A local caveat: a `file:`
+   dependency's change doesn't reach Vite's dependency cache (`node_modules/.vite`) until it's cleared.
 4. **Components**: the hub records where each handler was registered; namespaces group what a context serves.
 5. **The live view**: components in realms, stores, the feature lens, flows, the two gap lists.
 6. **The diagram from the tour**, and the model trimmed to its rules.

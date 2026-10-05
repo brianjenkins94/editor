@@ -528,6 +528,14 @@ test("notes: a note follows its code, and waits in Problems when its code is gon
 	// On the architecture view, discovered (DISCOVERED-ARCHITECTURE.md): the notes extension calling worker-pod's command,
 	// and the insights extension asking the TypeScript plugin for types through VS Code.
 	await session.until("notes → worker-pod, by command", hasLabel("ext:notes", "ext:worker-pod", /^cmd editor\.annotations\.resolve$/u));
+
+	// And what a resolve is, as a flow followed by its messages' causes: the pod's call to core caused core's call to the
+	// BABLR worker (whose queue names it, though the call goes out later).
+	const { flowsOf } = await import("../../observability/src/flows.ts");
+	const everything = (message) => [message, ...message.caused.flatMap(everything)];
+	const resolve = await eventually("a resolve's flow", async () => flowsOf(session.snapshot().log.filter((sample) => sample.from !== undefined && sample.to !== undefined)).flatMap(everything).find((message) => message.label === "annotations.resolve()" && message.caused.some((child) => child.label === "bablr.resolve()")));
+
+	assert.equal(resolve.caused.find((child) => child.label === "bablr.resolve()").inferred, undefined, "named, not inferred");
 });
 
 test("notes: a note goes with its code to another file", async () => {

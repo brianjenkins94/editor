@@ -48,7 +48,9 @@ export interface TrafficCount {
 
 /** One observed message, sampled for the log and the animation (counts come from `traffic`, not from samples).
  *  `payload` is what it carried — a preview, size-capped — only while a viewer has payload capture on. */
-export interface TrafficSample { "t": number; "from": string; "to": string; "kind": TrafficKind; "label": string; "bytes": number; "via"?: "hub"; "payload"?: string }
+/** One message seen, as a reporter samples it. A hub message carries its `id`, and the `cause` it was sent on account of
+ *  (hub's Envelope.id / Envelope.cause), so a viewer can follow one into the messages it caused. */
+export interface TrafficSample { "t": number; "from": string; "to": string; "kind": TrafficKind; "label": string; "bytes": number; "via"?: "hub"; "payload"?: string; "id"?: string; "cause"?: string }
 
 export interface ArchReport {
 	"reporter": string;
@@ -345,7 +347,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 		});
 	}
 
-	function record(from: string, to: string, kind: TrafficKind, label: string, bytes = 0, via?: "hub", count = 1, payload?: unknown): void {
+	function record(from: string, to: string, kind: TrafficKind, label: string, bytes = 0, via?: "hub", count = 1, payload?: unknown, message: { "id"?: string; "cause"?: string } = {}): void {
 		const entry: TrafficCount = { "from": from, "to": to, "kind": kind, "label": label, "count": count, "bytes": bytes };
 
 		if (via !== undefined) {
@@ -356,7 +358,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 		add(totals, entry);
 
 		if (samples.length < MAX_SAMPLES_PER_FLUSH) {
-			samples.push({ "t": Date.now(), "from": from, "to": to, "kind": kind, "label": label, "bytes": bytes, "via": via, ...capturing && payload !== undefined ? { "payload": previewPayload(payload) } : {} });
+			samples.push({ "t": Date.now(), "from": from, "to": to, "kind": kind, "label": label, "bytes": bytes, "via": via, ...capturing && payload !== undefined ? { "payload": previewPayload(payload) } : {}, ...message.id === undefined ? {} : { "id": message.id }, ...message.cause === undefined ? {} : { "cause": message.cause } });
 		}
 
 		schedule();
@@ -416,8 +418,12 @@ export function createArchReporter(hub: Hub): ArchReporter {
 				const payload = "hub" in frame ? undefined : frame.data;
 				const peer = event.link.peerId;
 
+				// Its id and cause (read loosely: a hub without them sends neither).
+				const { id, cause } = ("hub" in frame ? {} : frame) as { "id"?: unknown; "cause"?: unknown };
+				const message = { ...typeof id === "string" ? { "id": id } : {}, ...typeof cause === "string" ? { "cause": cause } : {} };
+
 				if (peer !== undefined) {
-					record(self, peer, kind, label, bytes, "hub", 1, payload);
+					record(self, peer, kind, label, bytes, "hub", 1, payload, message);
 				} else if ((unnamed.get(event.link.id)?.length ?? 0) < MAX_SAMPLES_PER_FLUSH) {
 					unnamed.set(event.link.id, [...unnamed.get(event.link.id) ?? [], { "kind": kind, "label": label, "bytes": bytes, "payload": payload }]);
 				}

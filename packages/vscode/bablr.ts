@@ -94,8 +94,10 @@ export function startBablr(hub: Hub): Bablr {
 
 	const request = <T>(name: string, args: unknown, signal?: AbortSignal): Promise<T> => {
 		const combined = signal === undefined ? dead.signal : AbortSignal.any([signal, dead.signal]);
+		// What the call is on account of, taken now: it's sent when its turn comes, when no handler is running to name it.
+		const cause = hub.handlingMessage;
 		// An already-aborted signal skips the call unsent.
-		const run = tail.then(() => rpc.request("bablr." + name, args, { "timeoutMs": Infinity, "waitForResponderMs": 30000, "signal": combined }) as Promise<T>);
+		const run = tail.then(() => rpc.request("bablr." + name, args, { "timeoutMs": Infinity, "waitForResponderMs": 30000, "signal": combined, "cause": cause }) as Promise<T>);
 
 		tail = run.catch(() => undefined);
 

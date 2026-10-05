@@ -64,7 +64,7 @@ export interface ChannelStats {
 }
 
 /** A sampled message, as kept per channel (`payload`: its captured preview, when payload capture was on). */
-export interface StoredSample { "seq": number; "t": number; "channel": string; "forward": boolean; "kind": TrafficKind; "label": string; "bytes": number; "reporter": string; "payload"?: string }
+export interface StoredSample { "seq": number; "t": number; "channel": string; "forward": boolean; "kind": TrafficKind; "label": string; "bytes": number; "reporter": string; "payload"?: string; "id"?: string; "cause"?: string }
 
 const RECENT_PER_CHANNEL = 200;
 /** The roles of nodes that carry messages between contexts rather than being one: drawn as an edge when two use them —
@@ -428,7 +428,9 @@ export class ArchitectureStore {
 				"label": sample.label,
 				"bytes": sample.bytes,
 				"reporter": reporter,
-				...sample.payload === undefined ? {} : { "payload": sample.payload }
+				...sample.payload === undefined ? {} : { "payload": sample.payload },
+				...sample.id === undefined ? {} : { "id": sample.id },
+				...sample.cause === undefined ? {} : { "cause": sample.cause }
 			};
 
 			channel.recent.push(stored);
@@ -593,7 +595,13 @@ export class ArchitectureStore {
 			"realms": Object.fromEntries(this.realms),
 			"nodes": [...this.nodes.values()].filter((node) => !this.media().has(node.id)).map((node) => ({ ...node, "reporters": [...node.reporters] })),
 			"media": [...this.media()].map(([id, between]) => ({ "id": id, "between": between })),
-			"channels": [...this.channels.values()].map(({ labels, "window": _window, ...channel }) => ({ ...channel, "labels": Object.fromEntries(labels) }))
+			"channels": [...this.channels.values()].map(({ labels, "window": _window, ...channel }) => ({ ...channel, "labels": Object.fromEntries(labels) })),
+			// The recent messages, each with its ends (for flows: flows.ts).
+			"log": this.log.map((sample) => {
+				const channel = this.reported.get(sample.channel) ?? this.channels.get(sample.channel);
+
+				return { ...sample, "from": sample.forward ? channel?.a : channel?.b, "to": sample.forward ? channel?.b : channel?.a };
+			})
 		};
 	}
 }
