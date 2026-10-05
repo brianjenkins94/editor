@@ -37,11 +37,44 @@ const OPERATIONS: Record<string, string> = {
 
 const OBSERVED = Symbol.for("architecture.zenfs.observed");
 
+/** The operations on a file's content: what a store is made of (a directory's listing or a stat isn't). */
+const CONTENT = new Set(["read", "write", "create", "unlink", "rename"]);
+
+/**
+ * The store a workspace path belongs to, by its shape — or undefined for the project's own files. A store is what a tool
+ * keeps in a dot-directory at the workspace's root (`.silo/`, `.vscode/`, `.git/`); its shape is the directory and the
+ * first one in it, anything deeper folded, and the file's kind: `.silo/evidence/<user>/<env>/world.ts.jsonl` →
+ * `.silo/evidence/…/<file>.jsonl`. Discovered from what's written and read (DISCOVERED-ARCHITECTURE.md), not listed.
+ */
+export function storeShape(path: string): string | undefined {
+	const segments = path.split("/").filter((segment) => segment !== "");
+
+	if (segments.length < 2 || !segments[0]!.startsWith(".")) {
+		return undefined;
+	}
+
+	const name = segments.at(-1)!;
+	const kind = name.startsWith(".") ? name : name.includes(".") ? `<file>${name.slice(name.lastIndexOf("."))}` : "<file>";
+	const directories = segments.slice(0, -1);
+
+	return [...directories.slice(0, 2), ...directories.length > 2 ? ["…"] : [], kind].join("/");
+}
+
+/** A store's node on the view. */
+export function storeNode(shape: string): string {
+	return "store:" + shape;
+}
+
 export interface ZenfsObserverOptions {
 	/** Who is calling right now (a label prefix, e.g. "vscode"), or undefined for an unattributed caller. */
 	"caller"?: () => string | undefined;
 	/** The label prefix for an unattributed caller when `caller` is given (default "direct"). */
 	"unattributed"?: string;
+	/** Where `store` is mounted in the workspace, for its paths' store shapes (`.silo/local` for silo's local/; default:
+	 *  the workspace's root). */
+	"mountedAt"?: string;
+	/** Whether its operations are the shared workspace's (the `zenfs` node): false for a mount of a store of its own. */
+	"shared"?: boolean;
 }
 
 /** The byte size an operation moved: the data written, or the span read. */
@@ -74,8 +107,17 @@ export function observeZenfs(sink: ArchSink, store: object, options: ZenfsObserv
 	const wrap = (original: (...parameters: unknown[]) => unknown, operation: string) => function observed(this: unknown, ...args: unknown[]): unknown {
 		if (depth === 0) {
 			const caller = options.caller === undefined ? undefined : (options.caller() ?? options.unattributed ?? "direct");
+			const label = caller === undefined ? operation : caller + " · " + operation;
+			const shape = typeof args[0] === "string" && CONTENT.has(operation) ? storeShape((options.mountedAt === undefined ? "" : options.mountedAt + "/") + args[0]) : undefined;
 
-			sink.record(sink.self, ZENFS_NODE, "request", caller === undefined ? operation : caller + " · " + operation, bytesOf(operation, args));
+			if (options.shared !== false) {
+				sink.record(sink.self, ZENFS_NODE, "request", label, bytesOf(operation, args));
+			}
+
+			// What it touched, if it's a tool's store.
+			if (shape !== undefined) {
+				sink.record(sink.self, storeNode(shape), "request", label);
+			}
 		}
 
 		depth += 1;

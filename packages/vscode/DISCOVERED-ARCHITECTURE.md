@@ -44,8 +44,8 @@ that called it. Their names and descriptions come from each extension's manifest
   varying segments (users, environments, files) becoming placeholders: `.silo/evidence/<user>/<env>/<file>.jsonl`,
   `.silo/notes/<user>/<file>.jsonl`, `.silo/local/samples/<file>.jsonl`, `.silo/runs/<user>.jsonl`. Each store gets
   the realms and extensions that wrote and read it.
-- **Databases.** Wrapping `indexedDB.open` in each realm names every database it opens (`bablr`, `silo-local`,
-  `workspace-fs`) and which realm owns it.
+- **Databases.** The IndexedDB probe already names every database each realm reads or writes (`bablr`, `silo-local`,
+  `workspace-fs`), and who owns it.
 
 ### Flows, by causality
 
@@ -129,7 +129,14 @@ own — and it waits until discovery has shown how far it gets alone.
    `editor.annotations.*` → worker-pod, insights → `editor.metrics.read`, and notes, insights and eslint → the
    TypeScript plugin's `_types.at` and `_eslint.fixAll`. Only our bundled extensions are tapped; one installed from the
    gallery isn't (yet).
-2. **Stores**: path shapes from the zen-fs probe's writes; an `indexedDB.open` probe in each realm.
+2. **Stores**: path shapes from the zen-fs probe's writes; an `indexedDB.open` probe in each realm. Done: the zen-fs
+   probe records each read, write, create, unlink and rename of a file in a tool's dot-directory on a `store:<shape>`
+   node (architecture-zenfs.ts, storeShape — a directory's listing or a stat isn't a store's content), silo's local/
+   included (a mount of its own store); the command tap counts each extension's `workspace.fs` reads, writes and
+   deletes the same way; databases need no new probe — the IndexedDB probe already names each one it touches.
+   `discoveredStores` reads them back, with their writers and readers. The tour finds the silo stores (evidence, notes,
+   runs, samples, the capability policy and ledger), BABLR's cache and VS Code's own databases — and that the notes
+   extension reads `.git/config` (for who you are).
 3. **Flows**: the hub carries the trace through handlers and RPC handlers; inferred links where it's lost.
 4. **Components**: the hub records where each handler was registered; namespaces group what a context serves.
 5. **The live view**: components in realms, stores, the feature lens, flows, the two gap lists.

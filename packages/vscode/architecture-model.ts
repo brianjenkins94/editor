@@ -97,6 +97,7 @@ export const containers: ContainerSpec[] = [
 	{ "id": "sharedMemory", "label": "Shared memory", "caption": "SharedArrayBuffer · Atomics locks", "column": 3, "kind": "group" },
 	{ "id": "browser", "label": "Browser", "caption": "storage", "column": 3, "kind": "group" },
 	{ "id": "network", "label": "Network (service worker)", "caption": "every HTTP request goes out through the service worker · debug-mcp's WebSocket connects directly", "column": 3, "kind": "group", "node": "sw" },
+	{ "id": "stores", "label": "Stores", "caption": "what the editor keeps — tools' files by shape — discovered from what's written and read", "column": 3, "kind": "group" },
 	{ "id": "browserChannels", "label": "Browser channels", "caption": "BroadcastChannels and Web Locks — shared by every tab and worker of the origin, past the hub", "column": 3, "kind": "group" },
 	{ "id": "peers", "label": "Peer connections", "caption": "WebRTC — straight to another browser, past the service worker", "column": 3, "kind": "group" }
 ];
@@ -505,8 +506,9 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 	// A previewed app's own contexts are its architecture, not the editor's: nothing to check them against.
 	const app = appNodes(observed);
 
-	// Between extensions is VS Code's command surface: public API, discovered rather than declared (DISCOVERED-ARCHITECTURE.md).
-	for (const channel of observed.channels.filter((candidate) => !app.has(candidate.a) && !app.has(candidate.b) && !(isExtensionNode(candidate.a) && isExtensionNode(candidate.b)))) {
+	// Between extensions is VS Code's command surface, and a store is what's written to it: discovered rather than declared
+	// (DISCOVERED-ARCHITECTURE.md).
+	for (const channel of observed.channels.filter((candidate) => !app.has(candidate.a) && !app.has(candidate.b) && !(isExtensionNode(candidate.a) && isExtensionNode(candidate.b)) && !isStoreNode(candidate.a) && !isStoreNode(candidate.b))) {
 		const declared = declaredOn(channel);
 
 		if (declared === undefined) {
@@ -654,12 +656,53 @@ export function appLayout(observed: { "channels": { "a": string; "b": string }[]
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────
 
 /** Contexts created at runtime, by id prefix, and where they live. */
-export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:", "channel:", "lock:", "rtc:", "webview:", "ext:"];
+export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:", "channel:", "lock:", "rtc:", "webview:", "ext:", "store:"];
 
 /** An extension, discovered by its commands (extensions/command-tap.ts): `ext:<name>`, or `ext:vscode` for VS Code's own
  *  commands and its built-in extensions'. */
 export function isExtensionNode(id: string): boolean {
 	return id.startsWith("ext:");
+}
+
+/** A store, discovered by what's written and read in it (architecture-zenfs.ts, storeShape): `store:<shape>`. */
+export function isStoreNode(id: string): boolean {
+	return id.startsWith("store:");
+}
+
+/** What the editor keeps, discovered: each store — a tool's files by shape, or an IndexedDB database — with who wrote it
+ *  and who read it, from what was observed (DISCOVERED-ARCHITECTURE.md). */
+export function discoveredStores(observed: { "channels": { "a": string; "b": string; "labels": Map<string, unknown> | Record<string, unknown> }[] }): { "store": string; "writers": string[]; "readers": string[] }[] {
+	const stores = new Map<string, { "writers": Set<string>; "readers": Set<string> }>();
+	const touch = (store: string, by: string, operation: string): void => {
+		const known = stores.get(store) ?? { "writers": new Set(), "readers": new Set() };
+		const writes = /\b(?:write|create|put|add|delete|unlink|mkdir|rename|clear|touch)\b/u.test(operation);
+
+		(writes ? known.writers : known.readers).add(by);
+		stores.set(store, known);
+	};
+
+	for (const channel of observed.channels) {
+		const labels = channel.labels instanceof Map ? [...channel.labels.keys()] : Object.keys(channel.labels);
+
+		for (const [store, by] of [[channel.b, channel.a], [channel.a, channel.b]] as const) {
+			if (isStoreNode(store)) {
+				for (const label of labels) {
+					touch(store.slice("store:".length), by, label);
+				}
+			} else if (store === "idb") {
+				// `<database> › <object store>.<operation>`, by its owner (idbOwner) or the realm that opened it.
+				for (const label of labels) {
+					const [database, rest] = label.split(" › ");
+
+					if (rest !== undefined) {
+						touch(`IndexedDB ${database}`, by, rest);
+					}
+				}
+			}
+		}
+	}
+
+	return [...stores].map(([store, { writers, readers }]) => ({ "store": store, "writers": [...writers].sort(), "readers": [...readers].sort() })).sort((a, b) => a.store.localeCompare(b.store));
 }
 
 export function dynamicContainer(id: string): string | undefined {
@@ -683,6 +726,10 @@ export function dynamicContainer(id: string): string | undefined {
 	// the origin; a peer connection, to another browser.
 	if (id.startsWith("channel:") || id.startsWith("lock:")) {
 		return "browserChannels";
+	}
+
+	if (id.startsWith("store:")) {
+		return "stores";
 	}
 
 	if (id.startsWith("rtc:")) {

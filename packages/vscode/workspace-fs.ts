@@ -194,6 +194,11 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		reportZenfsUsage(sink, store);
 	}
 
+	// Silo's local/, a store of its own: what's kept there, by shape, on the view's stores (not the shared workspace's).
+	if (sink !== undefined && localStore !== undefined) {
+		observeZenfs(sink, localStore, { "caller": () => caller, "mountedAt": LOCAL_DIR, "shared": false });
+	}
+
 	// Paths seeded read-only (managed configs like tsconfig.json, the baked type surface, ambient files). The
 	// snapshot carries the `readonly` flag; we enforce it here — boot's own seed marks them read-only too, but this
 	// overlay sits ABOVE it and would otherwise answer their stats/writes as writable, shadowing that. A `Set`

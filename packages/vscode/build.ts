@@ -91,8 +91,9 @@ function bundledExtension(name: string): Plugin {
 /** The module an extension's `vscode` imports resolve to (commandTap). */
 const TAPPED_VSCODE = "\0vscode-tapped";
 
-/** Hand extension `name` a `vscode` whose commands are counted (extensions/command-tap.ts; DISCOVERED-ARCHITECTURE.md):
- *  every `import … from "vscode"` in it resolves to a module that is the real `vscode` but for `commands`. */
+/** Hand extension `name` a `vscode` whose commands and file operations are counted (extensions/command-tap.ts;
+ *  DISCOVERED-ARCHITECTURE.md): every `import … from "vscode"` in it resolves to a module that is the real `vscode` but
+ *  for `commands` and `workspace.fs`. */
 function commandTap(name: string): Plugin {
 	const tapped = TAPPED_VSCODE;
 	const tap = url.fileURLToPath(new URL("./extensions/command-tap.ts", import.meta.url));
@@ -102,7 +103,7 @@ function commandTap(name: string): Plugin {
 		"enforce": "pre",
 		// The tapped module's own `vscode` is the real one (external).
 		"resolveId": (source, importer) => (source === "vscode" && importer !== tapped ? tapped : undefined),
-		"load": (id) => (id === tapped ? `import * as vscode from "vscode";\nimport { tappedCommands } from ${JSON.stringify(tap)};\nexport * from "vscode";\nexport const commands = tappedCommands(vscode, ${JSON.stringify(name)});\n` : undefined)
+		"load": (id) => (id === tapped ? `import * as vscode from "vscode";\nimport { tappedCommands, tappedWorkspace } from ${JSON.stringify(tap)};\nexport * from "vscode";\nexport const commands = tappedCommands(vscode, ${JSON.stringify(name)});\nexport const workspace = tappedWorkspace(vscode, ${JSON.stringify(name)});\n` : undefined)
 	};
 }
 

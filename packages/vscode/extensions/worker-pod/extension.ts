@@ -18,7 +18,7 @@ import { type CapabilityCall, decideCapability } from "../capabilities/decide";
 import { flushRun } from "../capabilities/silo-store";
 import { observe } from "@brianjenkins94/observability";
 import { identifyWorker } from "../../architecture-model";
-import { ZENFS_NODE } from "../../architecture-zenfs";
+import { storeNode, ZENFS_NODE } from "../../architecture-zenfs";
 import type { CommandTotals } from "../command-tap";
 import { ARCH_COMMANDS } from "../command-tap";
 import { registerTsvalDebug, takeExitCode } from "./debug-adapter";
@@ -210,7 +210,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	};
 
 	context.subscriptions.push(vscode.commands.registerCommand(ARCH_COMMANDS, (raw: unknown) => {
-		const { host, registered, calls } = (raw ?? {}) as Partial<CommandTotals>;
+		const { host, registered, calls, files = [] } = (raw ?? {}) as Partial<CommandTotals>;
 
 		if (typeof host !== "string" || !Array.isArray(registered) || !Array.isArray(calls)) {
 			return;
@@ -231,6 +231,18 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 			for (let call = before.get(key) ?? 0; call < count; call += 1) {
 				architecture.record(from, to, "request", "cmd " + command);
+			}
+
+			before.set(key, count);
+		}
+
+		// And the stores each extension read and wrote (a tool's dot-directory, by shape).
+		for (const [extension, operation, shape, count] of files) {
+			const key = `${extension}\0${operation}\0${shape}`;
+			const from = extensionNode(extension, host);
+
+			for (let done = before.get(key) ?? 0; done < count; done += 1) {
+				architecture.record(from, storeNode(shape), "request", operation);
 			}
 
 			before.set(key, count);

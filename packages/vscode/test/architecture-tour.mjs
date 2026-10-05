@@ -698,6 +698,21 @@ test("dock: an editor moved into a new window lands in a panel of the shell's do
 	assert.deepEqual(await session.conformance(), [], "nothing needs review");
 });
 
+// What the editor keeps, discovered from what was written and read (DISCOVERED-ARCHITECTURE.md): by now the tour has
+// run code (evidence, samples, runs), kept notes, and parsed with BABLR.
+test("stores: discovered from what's written and read", async () => {
+	const { discoveredStores } = await import("../architecture-model.ts");
+	const stores = new Map(discoveredStores(session.snapshot()).map((store) => [store.store, store]));
+	const named = (store) => stores.get(store) ?? { "writers": [], "readers": [] };
+
+	assert.ok(named(".silo/evidence/…/<file>.jsonl").writers.includes("workbench"), "runtime evidence, written by core");
+	assert.ok(named(".silo/evidence/…/<file>.jsonl").readers.includes("ext:insights"), "and read by the insights extension");
+	assert.ok(named(".silo/notes/…/<file>.jsonl").writers.includes("ext:notes"), "notes, written by the notes extension");
+	assert.ok(named(".silo/runs/<file>.jsonl").writers.includes("workbench"), "each run's envelope");
+	assert.ok(named(".silo/local/…/<file>.jsonl").writers.length > 0, "samples, on this machine");
+	assert.ok(named("IndexedDB bablr").writers.includes("bablr"), "BABLR's cache of parses");
+});
+
 test("conformance: nothing observed needs review", async () => {
 	assert.deepEqual(await session.conformance(), []);
 });
