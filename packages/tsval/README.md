@@ -77,6 +77,7 @@ interpret(code, {
   },
   resolveModule: (specifier) => namespace,      // what `import` / `import()` resolve to
   onAsyncFiber: (promise) => {},                // every async function / async-generator invocation
+  steppedAsync: true,                           // async code on the main stack, steppable (below)
 });
 
 const { vm } = createVM(code);                  // { vm, sourceFile } — the typed layer returns the same shape plus the checker
@@ -88,6 +89,22 @@ const fork = vm.fork();                        // an independent copy of the mac
 // argumentType(i)), so it can answer a host call with a stand-in shaped like the call's DECLARED result.
 import { createTypedVM } from "./src/typed.ts";
 const { vm: typed, checker } = createTypedVM(code, { hostGuard: { beforeCall: (callee, _t, _n, site) => (site.returnType() ? () => shapeFrom(site) : callee) } });
+```
+
+With `steppedAsync`, async code runs where a host steps: an async function runs on the main stack until its first
+`await`, where its frames are cut off as a pending fiber; when what it awaited settles, the fiber is a job the machine
+resumes once its stack is empty, in the order things settled. A guest callback handed to a host promise
+(`then`/`catch`/`finally`) is a job too, and a top-level `await` suspends the program the same way. So breakpoints,
+`stepStatement`, `runToBreakpoint` and `fork()` reach into async code — a fork copies its pending fibers, and resumes
+its own. With work pending and none ready the machine is `idle`: the host awaits `vm.whenSettled()` and steps on.
+Without it (the default), fibers run on the host's promise queue, each to its next suspension at once.
+
+```ts
+const { vm } = createVM(code, { steppedAsync: true });
+vm.addBreakpointsByLine(12);                   // a line after an await
+for (vm.runToBreakpoint(); vm.idle; vm.runToBreakpoint()) {
+  await vm.whenSettled();
+}
 ```
 
 Guest→guest calls never touch the host stack, so a guard cannot be bypassed from inside the guest;
@@ -128,7 +145,7 @@ top-level `this` (`VMOptions.thisValue`) and installs `$DONE` as a global proper
 remains module semantics (top-level `this` is `undefined`, top-level bindings are not globals).
 Current standing on the full pinned corpus: **99.9 % of eligible tests pass**; the remaining 11
 failures all concern exact microtask ordering (`await` interleaving, async-generator ticks), which
-follows the host promise queue today — see the open scheduler decision in `PROGRESS.md`.
+follows the host promise queue (`steppedAsync` keeps that order, settling jobs as the host's promises do).
 
 Every destructuring pattern, parameter list and catch parameter is compiled once to a small list
 of plain-data ops run by a synthetic `pattern` frame; defaults, computed keys and member targets

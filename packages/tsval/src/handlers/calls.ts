@@ -177,7 +177,12 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 			if (meta.isAsync) {
 				vm.frames.pop();
 
-				vm.push(vm.callAsync(meta, frame.thisArg, args));
+				// Stepped async: on the main stack, until its first `await` (VM.enterAsync); else a fiber of its own.
+				if (vm.steppedHere) {
+					vm.enterAsync(meta, frame.thisArg, args);
+				} else {
+					vm.push(vm.callAsync(meta, frame.thisArg, args));
+				}
 
 				return;
 			}

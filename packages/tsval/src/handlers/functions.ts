@@ -1,7 +1,7 @@
 /**
  * Guest functions: creation (wrappers per realm, `.prototype`/`length`/`name` shapes), the synthetic `call` frame, parameter binding, NamedEvaluation helpers.
  */
-import type { CallFrame } from "../frame.ts";
+import type { AsyncFrame, CallFrame } from "../frame.ts";
 import type { GuestFunction, GuestFunctionMeta, GuestFunctionNode } from "../values.ts";
 import type { Machine, NodeHandler } from "../vm.ts";
 import ts from "typescript";
@@ -305,9 +305,25 @@ export function namedIf(value: unknown, target: ts.BindingName | ts.Expression, 
 	return ts.isIdentifier(target) ? nameAnonymous(value, target.text, from) : value;
 }
 
+/** Stepped async: the async function's body (or a host-called callback) completed with the value on top — resolve its
+ *  promise, and hand the promise to the caller if it hasn't had it (the body never suspended). */
+function asyncFrame(vm: Machine, frame: AsyncFrame): void {
+	const value = vm.values.length > frame.valuesBase ? vm.pop() : undefined;
+
+	vm.frames.pop();
+	vm.values.length = frame.valuesBase;
+	frame.resolve(value);
+
+	if (frame.delivered !== true) {
+		frame.delivered = true;
+		vm.push(frame.promise);
+	}
+}
+
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
 export function register(): void {
 	on(Kind.FunctionExpression, makeFunction);
 	on(Kind.ArrowFunction, makeFunction);
 	syntheticHandlers.call = callFrame;
+	syntheticHandlers.async = asyncFrame;
 }

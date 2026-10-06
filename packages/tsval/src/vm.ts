@@ -1,6 +1,6 @@
-import type { CallFrame, Frame, Iteration, NodeFrame, SyntheticFrame, SyntheticKind } from "./frame.ts";
+import type { AsyncFrame, CallFrame, Frame, Iteration, NodeFrame, SyntheticFrame, SyntheticKind } from "./frame.ts";
 import type { GuestClass } from "./handlers.ts";
-import type { GuestFunctionMeta } from "./values.ts";
+import type { GuestFunction, GuestFunctionMeta } from "./values.ts";
 import ts from "typescript";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
 import { syntaxKindName } from "./frontend.ts";
@@ -144,6 +144,14 @@ export interface VMOptions {
 	/** Notified with the Promise of every async guest function invoked, so a driver can track
 	 *  outstanding async work (a host that must observe every effect awaits it). */
 	"onAsyncFiber"?: (promise: Promise<unknown>) => void;
+	/** Run async code on the main stack, steppable — a debugger's stepping, breakpoints and forks reach into it. An async
+	 *  function runs until its first `await`, where its frames are cut off as a pending fiber; when what it awaited
+	 *  settles, the fiber is a job the machine resumes once its stack is empty (between jobs, in the order they
+	 *  settled). A guest callback a host promise calls (`then`/`catch`/`finally`) is a job too. With work pending and
+	 *  none ready the machine is `idle`: its host lets the event loop turn (`whenSettled`), then steps on. A top-level
+	 *  `await` suspends the program the same way. Off by default: fibers run on the host's promise queue, each to its
+	 *  next suspension at once, out of the host's sight. */
+	"steppedAsync"?: boolean;
 	/** Called at each breakpoint reached DURING a synchronous host-invoked guest call (a host callback such
 	 *  as a React event handler running through `callGuestFromHost` → `runSub`). Top-level stepping is driven
 	 *  by the host through `step`/`runToBreakpoint`, but a host→guest call runs a nested loop the host can't
@@ -263,6 +271,10 @@ export interface VM {
 	readonly "finished": boolean;
 	/** Suspended at a `yield`/`await` (resume with `runAsync`). */
 	readonly "paused": boolean;
+	/** Stepped async (VMOptions.steppedAsync): work pending and none ready — await `whenSettled`, then step on. */
+	readonly "idle": boolean;
+	/** Resolves when something pending settles (stepped async). */
+	"whenSettled": () => Promise<void>;
 	/** Monotonic count of `step()` calls — a free step budget. */
 	readonly "steps": number;
 
@@ -346,6 +358,18 @@ export class Machine implements VM {
 	public hostGuard: HostGuard | undefined;
 	public onAsyncFiber: ((promise: Promise<unknown>) => void) | undefined;
 	public onBreakpoint: ((vm: VM) => void) | undefined;
+	/** VMOptions.steppedAsync. */
+	public steppedAsync = false;
+	/** Stepped async: work pending and none ready — the host lets the event loop turn (`whenSettled`), then steps on. */
+	public idle = false;
+	/** Stepped async: this machine's suspended fibers, and the host-called callbacks waiting their turn, by id — its own
+	 *  (a fork copies them, so each timeline resumes its own). */
+	private pending = new Map<number, Pending>();
+	/** Stepped async: what settled, in the order it did — shared with forks (a host promise calls back once, into it). */
+	private scheduler: AsyncScheduler = { "settled": [], "ids": 0, "wakers": [] };
+	/** How many nested contexts (a host-called guest function's sub-run, a fiber's) the machine is inside: stepped
+	 *  async applies on the main stack only (depth 0); a nested context keeps the fiber drivers' behavior. */
+	private depth = 0;
 	/** Fuel limit (see VMOptions.maxSteps): once `steps` passes it, `step()` throws uncatchably. */
 	public maxSteps: number | undefined;
 	/** Statement execution counts (VMOptions.coverage). */
@@ -413,6 +437,7 @@ export class Machine implements VM {
 		this.hostGuard = options.hostGuard;
 		this.onAsyncFiber = options.onAsyncFiber;
 		this.onBreakpoint = options.onBreakpoint;
+		this.steppedAsync = options.steppedAsync === true;
 		this.maxSteps = options.maxSteps;
 		this.coverage = options.coverage === true ? new Map() : undefined;
 		this.observe = options.observe;
@@ -470,9 +495,20 @@ export class Machine implements VM {
 		return sanitize === undefined ? value : sanitize(value);
 	}
 
+	/** Stepped async applies here: it's on, and this is the main stack (not a nested context). */
+	public get steppedHere(): boolean {
+		return this.steppedAsync && this.depth === 0;
+	}
+
 	/** Invoke a host callable from guest code, through the guard and with `callSite` exposed. */
 	public invokeHost(callee: (...args: unknown[]) => unknown, thisArg: unknown, args: unknown[], site: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression, isConstruct: boolean): unknown {
 		const previousSite = this.callSite;
+		const { prototype } = this.realm.Promise;
+
+		// Stepped async: a guest callback a host promise will call is a job of its own, run on the main stack.
+		if (this.steppedHere && !isConstruct && (callee === prototype.then || callee === prototype.catch || callee === prototype.finally)) {
+			args = args.map((arg) => (isGuestFunction(arg) ? this.deferCallback(arg) : arg));
+		}
 
 		this.callSite = site; // (set BEFORE the guard runs: a guard may read it, or the `site` argument)
 		try {
@@ -571,6 +607,19 @@ export class Machine implements VM {
 			return;
 		}
 
+		// Stepped async, between tasks (the stack empty): the next settled job, or idle while work is pending.
+		if (this.steppedAsync && this.depth === 0 && this.frames.length === 0 && this.signal === null) {
+			if (this.resumeSettled()) {
+				return;
+			}
+
+			if (this.pending.size > 0) {
+				this.idle = true;
+
+				return;
+			}
+		}
+
 		const frame = this.top;
 
 		if (frame === undefined) {
@@ -631,6 +680,11 @@ export class Machine implements VM {
 			if (frame.kind === undefined && frame.completionMark !== undefined && this.frames[this.frames.length - 1] !== frame && !this.frames.includes(frame)) {
 				this.finishStatement(frame);
 			}
+
+			// Stepped async: an `await` on the main stack cuts its async function off, to resume when what it awaited settles.
+			if (this.paused && this.pauseKind === "await" && this.steppedAsync && this.depth === 0) {
+				this.cut();
+			}
 		} catch (error) {
 			// A guest-observable runtime error (host built-in threw, bad member access, `instanceof` on a
 			// non-object, …) becomes a catchable `throw` signal. Interpreter bugs and a host's uncatchable
@@ -665,8 +719,16 @@ export class Machine implements VM {
 	 */
 	public async runAsync(): Promise<unknown> {
 		while (!this.finished) {
-			while (!this.finished && !this.paused) {
+			this.idle = false;
+
+			while (!this.finished && !this.paused && !this.idle) {
 				this.step();
+			}
+
+			// Stepped async: work pending, none ready — let it settle.
+			if (this.idle) {
+				await this.whenSettled();
+				continue;
 			}
 
 			if (!this.paused) {
@@ -695,7 +757,9 @@ export class Machine implements VM {
 
 	/** Step until the given predicate holds, the machine suspends (`paused`), or it finishes. */
 	public runUntil(predicate: (vm: Machine) => boolean): void {
-		while (!this.finished && !this.paused && !predicate(this)) {
+		this.idle = false;
+
+		while (!this.finished && !this.paused && !this.idle && !predicate(this)) {
 			this.step();
 		}
 	}
@@ -979,8 +1043,132 @@ export class Machine implements VM {
 		forked.pauseKind = this.pauseKind;
 		forked.pauseValue = clone(this.pauseValue);
 		forked.sentValue = clone(this.sentValue);
+		forked.steppedAsync = this.steppedAsync;
+		forked.idle = this.idle;
+		forked.depth = 0;
+		// Its own pending fibers (their frames and closures, cloned), and the shared record of what settled.
+		forked.pending = new Map([...this.pending].map(([id, each]) => [id, each.kind === "fiber" ? { "kind": "fiber", "frames": each.frames.map(cloneFrame), "values": each.values.map(clone), "base": each.base } : { "kind": "callback", "fn": clone(each.fn) as GuestFunction }]));
+		forked.scheduler = this.scheduler;
 
 		return forked;
+	}
+
+	// --- stepped async (VMOptions.steppedAsync) --------------------------------
+
+	/** Stepped async: an async function call on the main stack — its async frame (which settles its promise), then its
+	 *  call. Returns nothing: the promise reaches the caller when the body first suspends, or completes. */
+	public enterAsync(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): void {
+		let resolve!: (value: unknown) => void;
+		let reject!: (reason: unknown) => void;
+		const promise = new this.realm.Promise<unknown>((settleWith, failWith) => { resolve = settleWith; reject = failWith; });
+		const frame: AsyncFrame = { "kind": "async", "node": null, "phase": 0, "scope": this.rootScope, "valuesBase": this.values.length, "promise": promise, "resolve": resolve, "reject": reject };
+
+		this.frames.push(frame);
+		this.pushCall(meta, args, thisArg);
+		this.onAsyncFiber?.(promise);
+	}
+
+	/** Stepped async: `fn` (a guest callback handed to a host promise's `then`/`catch`/`finally`) as the host calls it —
+	 *  a job of its own, run on the main stack between tasks; the host gets a promise of what it returns. */
+	public deferCallback(fn: GuestFunction): (...args: unknown[]) => Promise<unknown> {
+		this.scheduler.ids += 1;
+
+		const id = this.scheduler.ids;
+		const { scheduler } = this;
+
+		this.pending.set(id, { "kind": "callback", "fn": fn });
+
+		return (...args: unknown[]): Promise<unknown> => new this.realm.Promise<unknown>((resolve, reject) => {
+			settle(scheduler, id, { "kind": "call", "args": args, "resolve": resolve, "reject": reject });
+		});
+	}
+
+	/** Resolves when something pending settles (the host awaits it while the machine is `idle`). */
+	public whenSettled(): Promise<void> {
+		return new Promise((resolve) => { this.scheduler.wakers.push(resolve); });
+	}
+
+	/** Stepped async: an `await` on the main stack — cut the stack at the nearest async frame (or, at the top level, all
+	 *  of it) into a pending fiber; hand the call its promise the first time; resume the fiber when what it awaited
+	 *  settles. */
+	private cut(): void {
+		let at = this.frames.length - 1;
+
+		while (at >= 0 && this.frames[at]!.kind !== "async") {
+			at -= 1;
+		}
+
+		const boundary = at === -1 ? undefined : this.frames[at] as AsyncFrame;
+		const bottom = Math.max(at, 0);
+		const base = boundary?.valuesBase ?? 0;
+		this.scheduler.ids += 1;
+
+		const id = this.scheduler.ids;
+		const awaited = this.pauseValue;
+		const { scheduler } = this;
+
+		this.pending.set(id, { "kind": "fiber", "frames": this.frames.slice(bottom), "values": this.values.slice(base), "base": base });
+		this.frames.length = bottom;
+		this.values.length = base;
+		this.paused = false;
+		this.pauseKind = undefined;
+		this.pauseValue = undefined;
+
+		if (boundary !== undefined && boundary.delivered !== true) {
+			boundary.delivered = true;
+			this.values.push(boundary.promise);
+		}
+
+		Promise.resolve(awaited).then(
+			(value) => { settle(scheduler, id, { "kind": "next", "value": value }); },
+			(error: unknown) => { settle(scheduler, id, { "kind": "throw", "value": error }); }
+		);
+	}
+
+	/** Stepped async: put the first settled pending job back on the (empty) stack, to step on — true if there was one. */
+	private resumeSettled(): boolean {
+		const entry = this.scheduler.settled.find(({ id }) => this.pending.has(id));
+
+		if (entry === undefined) {
+			return false;
+		}
+
+		const job = this.pending.get(entry.id)!;
+		const { input } = entry;
+
+		this.pending.delete(entry.id);
+		this.idle = false;
+
+		if (job.kind === "callback") {
+			if (input.kind !== "call") {
+				return true;
+			}
+
+			// The callback's own async frame (it settles the promise the host got), then its call.
+			const frame: AsyncFrame = { "kind": "async", "node": null, "phase": 0, "scope": this.rootScope, "valuesBase": this.values.length, "promise": Promise.resolve(), "resolve": input.resolve, "reject": input.reject, "delivered": true };
+
+			this.frames.push(frame);
+			this.pushCall(job.fn.__tsval, input.args, undefined);
+
+			return true;
+		}
+
+		const delta = this.values.length - job.base;
+
+		for (const frame of job.frames) {
+			frame.valuesBase += delta;
+		}
+
+		this.frames.push(...job.frames);
+		this.values.push(...job.values);
+
+		if (input.kind === "next") {
+			this.sentValue = input.value;
+		} else if (input.kind === "throw") {
+			this.signal = { "type": "throw", "value": input.value };
+		}
+
+		return true;
 	}
 
 	// --- execution contexts (nested sub-runs & fibers) ------------------------
@@ -1332,6 +1520,21 @@ export class Machine implements VM {
 	 * becomes the completion value.
 	 */
 	private unwind(frame: Frame, signal: Signal): void {
+		// Stepped async: a throw out of an async function's body (or a host-called callback) rejects its promise.
+		if (frame.kind === "async" && signal.type === "throw") {
+			this.frames.pop();
+			this.values.length = frame.valuesBase;
+			this.signal = null;
+			frame.reject(signal.value);
+
+			if (frame.delivered !== true) {
+				frame.delivered = true;
+				this.values.push(frame.promise);
+			}
+
+			return;
+		}
+
 		if (frame.kind === "call" && signal.type === "return") {
 			this.frames.pop();
 			this.values.length = frame.valuesBase;
@@ -1524,10 +1727,13 @@ export class Machine implements VM {
 	}
 
 	private saveContext(): ExecContext {
+		this.depth += 1;
+
 		return { "frames": this.frames, "values": this.values, "signal": this.signal, "finished": this.finished, "paused": this.paused, "pauseKind": this.pauseKind, "pauseValue": this.pauseValue, "pauseRaw": this.pauseRaw, "sentValue": this.sentValue };
 	}
 
 	private restoreContext(ctx: ExecContext): void {
+		this.depth -= 1;
 		this.frames = ctx.frames;
 		this.values = ctx.values;
 		this.signal = ctx.signal;
@@ -1712,6 +1918,26 @@ interface Fiber {
 	"signal": Signal | null;
 	"done": boolean;
 	"started": boolean;
+}
+
+/** Stepped async: a fiber cut off at an `await` (its frames from its async frame up, their operands, and the value-stack
+ *  depth they were cut at) — or a guest callback handed to a host promise, waiting to be called. */
+type Pending = { "kind": "fiber"; "frames": Frame[]; "values": unknown[]; "base": number } | { "kind": "callback"; "fn": GuestFunction };
+
+/** How a pending job is resumed: a fiber with what it awaited (or the rejection, thrown at the `await`), a callback with
+ *  the host's call. */
+type Settlement = { "kind": "next"; "value": unknown } | { "kind": "throw"; "value": unknown } | { "kind": "call"; "args": unknown[]; "resolve": (value: unknown) => void; "reject": (reason: unknown) => void };
+
+/** Stepped async: what settled, in order, for which pending job; and who waits for the next. Shared by forks. */
+interface AsyncScheduler { "settled": { "id": number; "input": Settlement }[]; "ids": number; "wakers": (() => void)[] }
+
+/** Record what settled for job `id`, and wake whoever waits. */
+function settle(scheduler: AsyncScheduler, id: number, input: Settlement): void {
+	scheduler.settled.push({ "id": id, "input": input });
+
+	for (const wake of scheduler.wakers.splice(0)) {
+		wake();
+	}
 }
 
 /** How a fiber is resumed: with a value, or by injecting a return/throw at the suspension point. */

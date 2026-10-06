@@ -177,6 +177,19 @@ export interface PatternFrame extends FrameBase {
 	"args"?: unknown[];
 }
 
-export type SyntheticFrame = CallFrame | ConstructFrame | InitFieldsFrame | PatternFrame;
+/** Stepped async (VMOptions.steppedAsync): the bottom of an async function's invocation on the main stack — or of a
+ *  guest callback a host promise called. The body completing resolves `promise`; a throw that unwinds to it rejects
+ *  it; an `await` above it cuts the stack here into a pending fiber (VM.cut). */
+export interface AsyncFrame extends FrameBase {
+	"kind": "async";
+	"node": null;
+	"promise": Promise<unknown>;
+	"resolve": (value: unknown) => void;
+	"reject": (reason: unknown) => void;
+	/** the promise has been handed to its caller (its first suspension, or a callback's): settling it pushes nothing. */
+	"delivered"?: boolean;
+}
+
+export type SyntheticFrame = CallFrame | ConstructFrame | InitFieldsFrame | PatternFrame | AsyncFrame;
 export type Frame = NodeFrame | SyntheticFrame;
 export type SyntheticKind = SyntheticFrame["kind"];
