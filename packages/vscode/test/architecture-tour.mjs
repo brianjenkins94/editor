@@ -661,7 +661,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 
 	assert.equal(always.state, "terminated");
 	assert.deepEqual(always.output, ["wrote /workspace/out.txt"]);
-	assert.deepEqual((await silo("read")).flatMap((policy) => policy.rules.map(({ capability, resource, disposition }) => ({ capability, resource, disposition }))), [{ "capability": "fs:write", "resource": "/workspace/out.txt", "disposition": "allow" }]);
+	assert.deepEqual((await silo("read")).flatMap((policy) => policy.rules.map(({ when, then }) => ({ when, then }))), [{ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "fs:write" }, { "target_id": "resource", "operator_id": "is", "argument": "/workspace/out.txt" }] }, "then": [{ "action_id": "allow" }] }]);
 
 	const again = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, 60_000);
 
