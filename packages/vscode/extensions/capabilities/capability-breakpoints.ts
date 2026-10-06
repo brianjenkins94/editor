@@ -16,7 +16,7 @@
  */
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
-import { effectiveDisposition, type Policy } from "@brianjenkins94/util/silo/policy";
+import { effectiveDisposition, givenResult, type Policy } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
 
 /** A capability call the debugger (or the canary) reached: what it is, and the resource it targets (when a
@@ -103,7 +103,8 @@ export function classifyCall(node: ts.CallExpression, args: readonly unknown[]):
  * user hasn't cleared, firewall-style. `allow` (and non-dangerous, undecided) passes straight through.
  */
 export function shouldBreak(policy: Policy, hit: CapabilityHit): boolean {
-	return effectiveDisposition(policy, hit.capability, hit.resource, hit.dangerous) !== "allow";
+	// A call a rule gives the result of (RULES.md, slice 2) never happens: the debugger's stand-in returns it instead.
+	return effectiveDisposition(policy, hit.capability, hit.resource, hit.dangerous) !== "allow" && givenResult(policy, { "capability": hit.capability, "resource": hit.resource }) === undefined;
 }
 
 /** A static capability call site in a source file (no args yet → no resource): where a debugger could pre-mark or

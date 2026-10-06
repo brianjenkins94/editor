@@ -28,8 +28,9 @@ export type Control =
 	/** Report the coverage so far (answered with a `coverage` event). */
 	| { "type": "coverage" }
 	/** A decision at a capability stop, before the run resumes: `deny` fails the call the stop was for; `policy`, after
-	 *  "Allow always", is the policy now in effect — what stops from here on. */
-	| { "type": "decide"; "deny"?: boolean; "policy"?: Policy }
+	 *  "Allow always", is the policy now in effect — what stops from here on; `give`, the result the call returns instead
+	 *  of being made (a rule's *give result*, just this once). */
+	| { "type": "decide"; "deny"?: boolean; "policy"?: Policy; "give"?: unknown }
 	/** At a stop: set `name` (a variable in scope there) to `value`, a literal as code writes it — the run goes on with it. */
 	| { "type": "setValue"; "name": string; "value": string }
 	| { "type": StepAction | "disconnect" };
@@ -60,8 +61,9 @@ export interface CapabilityAsk { "line": number; "at"?: [number, number]; "capab
 export interface RunEnd { "kind": "crashed" | "stopped"; "line": number; "at"?: [number, number]; "message"?: string }
 
 /** The choices at a capability stop, as the preview's prompt words them — and `rule`, a rule made there (the margin's
- *  rule editor) saved in my policy, deciding the call as it does. */
-export type CapabilityChoice = "allow-once" | "allow-always" | "deny" | "rule";
+ *  rule editor) saved in my policy, deciding the call as it does (or giving its result); `give-once`, a result given the
+ *  call instead of it, just this once. */
+export type CapabilityChoice = "allow-once" | "allow-always" | "deny" | "rule" | "give-once";
 
 /** Worker → adapter. */
 export type WorkerEvent =

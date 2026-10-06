@@ -871,6 +871,135 @@ test("rules view: every rule as a sentence, opened and removed there", async () 
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
+// A rule placed in the code whose place is lost (its statement gone): broken in the Rules view, and re-placed at the
+// code selected in the editor — then found where it was put.
+test("rules view: a rule whose place is lost, re-placed at a selection", async () => {
+	const workbench = session.workbench();
+
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/placed.js");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode("let x = 1;\nlet y = 2;\nconsole.log(x, y);\n"));
+		await api.window.showTextDocument(uri);
+		await api.commands.executeCommand("silo.rules.focus");
+	});
+
+	// A place in code that isn't there any more.
+	const [gone] = await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.annotations.refer", "let gone = 0;\n", "placed.js", [{ "start": 0, "end": 13 }]));
+	const rule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": "placed.js" }, { "target_id": "at", "operator_id": "is", "argument": gone }] }, "then": [{ "action_id": "set", "target_id": "variables.x", "argument": 5 }] };
+	const listed = () => session.request("rules.list", undefined, 10_000);
+
+	await session.request("rules.set", { "rule": rule }, 10_000);
+	assert.equal((await listed()).mine.places[0].status, "orphaned");
+	assert.match(await eventually("the broken rule", () => workbench.evaluate(() => document.querySelector(".rules-view-rule.broken .rules-view-sentence")?.textContent)), /place in the code is lost/u);
+
+	// Select `let y = 2;`, open the rule, Re-place at selection.
+	await workbench.evaluate(() => {
+		const { api } = globalThis.__editor;
+		const editor = api.window.activeTextEditor;
+
+		editor.selection = new api.Selection(1, 0, 1, 10);
+	});
+	await workbench.evaluate(() => { document.querySelector(".rules-view-rule.broken").click(); });
+	await eventually("Re-place at selection", () => workbench.evaluate(() => [...document.querySelectorAll(".rules-view .live-values-rule button")].some((button) => button.textContent === "Re-place at selection") || undefined));
+	await workbench.evaluate(() => { [...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Re-place at selection").click(); });
+
+	const placed = await eventually("the rule, re-placed", async () => {
+		const { mine } = await listed();
+
+		return mine.places[0]?.status !== "orphaned" ? mine : undefined;
+	});
+
+	assert.equal(placed.places[0].line, 2);
+	assert.deepEqual(placed.rules[0].then, rule.then);
+	await session.request("rules.set", { "previous": placed.rules[0] }, 10_000);
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
+});
+
+// A call's result given instead of the call (RULES.md, slice 2): at an async fetch's capability stop (the debugger steps
+// async code — tsval's steppedAsync), Rule… — prefilled with what it returned the last time it ran for real, when
+// that's recorded — Save as rule: the run goes on with that result, and the next run isn't stopped there.
+test("mock a call's result: given at its capability stop, from what it returned for real", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/rates.js";
+	const url = "https://api.example.com/rates";
+	const source = ["async function main() {", `\tconst response = await fetch("${url}");`, "\tconst rates = await response.json();", "", "\tconsole.log(\"CA\", rates.CA);", "}", "", "main();", ""].join("\n");
+
+	await workbench.evaluate(async (text) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/rates.js");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
+		await api.window.showTextDocument(uri);
+	}, source);
+	// What it returned for real, as the service worker's net gate records a preview's fetch (.silo/local/recorded.json).
+	await workbench.evaluate(async (recorded) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file("/workspace/.silo/local/recorded.json"), new TextEncoder().encode(JSON.stringify(recorded)));
+	}, { "version": 1, "results": { [`net ${url}`]: { "value": { "CA": 0.13, "FR": 0.2 }, "at": new Date().toISOString() } } });
+
+	// Stopped inside the async function, at the fetch.
+	const stopped = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+	assert.equal(stopped.reason, "capability");
+	assert.equal(stopped.line, 2);
+	await eventually("the question", () => workbench.evaluate(() => document.querySelector(".live-values-ask") !== null || undefined));
+	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-ask button")].find((button) => button.textContent === "Rule…").click(); });
+
+	const status = () => workbench.evaluate(() => document.querySelector(".live-values-rule-status")?.textContent);
+
+	assert.match(await eventually("the rule, given what it returned", status), /^Covers this call: gives it what it returned on /u);
+	assert.equal(await workbench.evaluate(() => document.querySelector(".live-values-rule .rule-editor-then .rule-editor-action-target select").value), "result");
+	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-rule button")].find((button) => button.textContent === "Save as rule").click(); });
+
+	// Saved, the run goes on with it (and ends); the next run is given it with no stop, past both awaits.
+	await eventually("the question answered", () => workbench.evaluate(() => document.querySelector(".live-values-ask") === null || undefined));
+
+	const again = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+	assert.equal(again.state, "terminated", "given by the rule: no stop");
+	assert.deepEqual(again.output.filter((line) => !line.startsWith("→")), ["CA 0.13"]);
+
+	// And a breakpoint after the awaits stops there, in the async function.
+	const paused = await session.request("debug.start", { "program": program, "breakpoints": [5] }, 60_000);
+
+	assert.equal(paused.line, 5);
+	assert.equal(paused.function, "main");
+	await session.request(`debug.session.${paused.session}.stop`, undefined, 30_000);
+
+	const { mine } = await session.request("rules.list", undefined, 10_000);
+
+	await session.request("rules.set", { "previous": mine.rules[0] }, 10_000);
+	await session.request("debug.breakpoints", { "program": program, "lines": [] }, 30_000);
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
+});
+
+// The preview's capability prompt (shell-preview.ts): Rule… makes the rule in the Rules view, prefilled with the call,
+// and the call waits on it — saved, it decides the call.
+test("preview prompt: Rule… makes the rule in the Rules view, and the call waits on it", async () => {
+	const workbench = session.workbench();
+	// A preview's own fetch: the service worker gates it, and asks in that preview's window.
+	const preview = await eventually("a preview", () => session.page.frames().find((frame) => /\/__virtual__\/[^/]+\/\d+\//u.test(frame.url())));
+	// (A host the previews reach anyway: esm.sh.)
+	const decided = preview.evaluate(() => fetch("https://esm.sh/").then((response) => response.statusText, (error) => String(error)));
+	const rule = session.page.locator("wa-button", { "hasText": "Rule…" });
+
+	await rule.first().waitFor({ "timeout": 30_000 });
+	await rule.first().click();
+	await eventually("the rule, in the Rules view", () => workbench.evaluate(() => document.querySelector(".rules-view .live-values-rule-status")?.textContent).then((text) => (text === "Covers this call: allows it" ? text : undefined)));
+	await workbench.evaluate(() => { [...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Save as rule").click(); });
+	// Allowed: the fetch goes out (wherever it gets) instead of the gate's 403.
+	assert.notEqual(await decided, "Capability denied");
+
+	const { mine } = await session.request("rules.list", undefined, 10_000);
+
+	assert.deepEqual(mine.rules[0].when.predicates.map(({ target_id, argument }) => [target_id, argument]), [["capability", "net"], ["resource", "esm.sh"]]);
+	await session.request("rules.set", { "previous": mine.rules[0] }, 10_000);
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
+});
+
 // How the last run ended short, in the margin's strip: a ✕ on the line it crashed on (the error on hover) — through a
 // reformat too, anchored by the throw's span — gone when it runs again and finishes.
 test("run ends: a crash is marked on the line it threw on, and stays on it through a reformat", async () => {

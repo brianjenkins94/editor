@@ -465,9 +465,65 @@ async function ensureGitignore(root: vscode.Uri): Promise<void> {
 	gitignoreEnsured = true;
 
 	const uri = vscode.Uri.joinPath(root, ".gitignore");
-	const existing = (await readText(uri)) ?? "";
+	let existing = (await readText(uri)) ?? "";
 
-	if (!existing.split(/\r?\n/).some((entry) => entry.trim() === "*.runs.jsonl")) {
-		await writeText(uri, (existing === "" ? "" : existing.replace(/\n?$/, "\n")) + "*.runs.jsonl\n");
+	// The firehose, and what's this machine's alone (recorded results can hold secrets).
+	for (const entry of ["*.runs.jsonl", "local/"]) {
+		if (!existing.split(/\r?\n/).some((each) => each.trim() === entry)) {
+			existing = (existing === "" ? "" : existing.replace(/\n?$/, "\n")) + entry + "\n";
+			await writeText(uri, existing);
+		}
 	}
+}
+
+// ── recorded results: what calls returned when they ran for real (RULES.md, slice 2) ───────────────────────────────
+
+interface Recorded { "version": 1; "results": Record<string, { "value": unknown; "at": string }> }
+
+/** At most this many calls' results are kept: the oldest go first. */
+const RECORDED_MAX = 200;
+
+const recordedUri = (root: vscode.Uri): vscode.Uri => vscode.Uri.joinPath(root, "local", "recorded.json");
+
+async function loadRecorded(root: vscode.Uri): Promise<Recorded> {
+	try {
+		const parsed = JSON.parse(await readText(recordedUri(root)) ?? "{}") as Partial<Recorded>;
+
+		return { "version": 1, "results": parsed.results ?? {} };
+	} catch {
+		return { "version": 1, "results": {} };
+	}
+}
+
+/** Keep what a call returned when it ran for real (a preview's fetch: its body, parsed when it's JSON) — the latest of
+ *  each call, in `.silo/local/recorded.json`: this machine's only, never committed (a real response can hold secrets). */
+export async function recordResult(capability: string, resource: string, value: unknown): Promise<void> {
+	const root = siloRoot();
+
+	if (root === undefined) {
+		return;
+	}
+
+	await ensureGitignore(root);
+
+	const recorded = await loadRecorded(root);
+	const key = `${capability} ${resource}`;
+
+	delete recorded.results[key];
+	recorded.results[key] = { "value": value, "at": new Date().toISOString() };
+
+	const keys = Object.keys(recorded.results);
+
+	for (const old of keys.slice(0, Math.max(0, keys.length - RECORDED_MAX))) {
+		delete recorded.results[old];
+	}
+
+	await writeText(recordedUri(root), JSON.stringify(recorded, null, "\t") + "\n");
+}
+
+/** What a call returned the last time it ran for real, and when — undefined if it's never been recorded. */
+export async function recordedResult(capability: string, resource: string): Promise<{ "value": unknown; "at": string } | undefined> {
+	const root = siloRoot();
+
+	return root === undefined ? undefined : (await loadRecorded(root)).results[`${capability} ${resource}`];
 }

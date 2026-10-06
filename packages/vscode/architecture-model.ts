@@ -245,6 +245,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "rules.given", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "rules.set", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "rules.list", "from": ["workbench"], "to": ["pod"] },
+	{ "pattern": "rules.make", "from": ["pod"], "to": ["workbench"] },
 	{ "pattern": "pod.ready", "from": ["debug-worker"], "to": ["pod"] },
 	{ "pattern": "production.launch", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "production.out.*", "from": ["workbench"], "to": ["pod"] },
@@ -259,6 +260,9 @@ export const subjects: SubjectFamily[] = [
 	// ── capabilities ──
 	{ "pattern": "capability.decide.*", "from": ["sw"], "to": ["root"] },
 	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"] },
+	{ "pattern": "capability.record.*", "from": ["sw"], "to": ["root"] },
+	{ "pattern": "capability.record", "from": ["root"], "to": ["pod"] },
+	{ "pattern": "capability.recorded", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"] },
 	// ── workers ──
 	{ "pattern": "bablr.>", "from": ["workbench"], "to": ["bablr"] },

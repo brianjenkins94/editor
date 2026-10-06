@@ -130,11 +130,59 @@ async function gateAndFetch(event, request, requestUrl) {
 		}
 	}
 
-	return fetch(request).then(stamp).catch((error) => {
+	const fetched = fetch(request).then(stamp);
+
+	// What an allowed preview fetch returned, recorded (RULES.md, slice 2): a rule can give it back in the debugger.
+	if (request.destination === "" && (requestUrl.protocol === "https:" || requestUrl.protocol === "http:") && event.clientId) {
+		// (Cloned at once: the page reads its own body as soon as it has it.)
+		void fetched.then((response) => record(event, request.url, response.status === 0 ? undefined : response.clone()), () => undefined);
+	}
+
+	return fetched.catch((error) => {
 		console.error("[coi-serviceworker]", error);
 
 		return Promise.reject(error);
 	});
+}
+
+// The largest body recorded: a result to give back, not a download.
+const RECORD_MAX = 65536;
+
+// Send a preview's fetch result to its tab (capability.record.<tab> → the pod's store): a JSON body parsed, a text body
+// as text — not an error, not a body too large or not text. Best-effort: a result not recorded is only not there to give.
+async function record(event, url, response) {
+	if (response === undefined) {
+		return;
+	}
+
+	try {
+		const preview = await previewClientOf(event);
+		const type = response.headers.get("content-type") || "";
+
+		if (preview === undefined || !response.ok || !/json|text|xml|javascript/u.test(type) || Number(response.headers.get("content-length") || 0) > RECORD_MAX) {
+			return;
+		}
+
+		const text = await response.text();
+
+		if (text.length > RECORD_MAX) {
+			return;
+		}
+
+		let value = text;
+
+		if (/json/u.test(type)) {
+			try {
+				value = JSON.parse(text);
+			} catch {
+				// Not JSON after all: kept as its text.
+			}
+		}
+
+		await rpc.request("capability.record." + preview.tab, { "capability": "net", "resource": url, "value": value }, { "timeoutMs": 30000, "waitForResponderMs": RESPONDER_WAIT_MS });
+	} catch (error) {
+		swLog.warn("capability.record failed", { "url": url, "error": String(error) });
+	}
 }
 
 globalThis.addEventListener("install", () => globalThis.skipWaiting());

@@ -15,7 +15,7 @@ import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
 import { type CapabilityCall, decideCapability } from "../capabilities/decide";
-import { flushRun } from "../capabilities/silo-store";
+import { flushRun, recordedResult, recordResult } from "../capabilities/silo-store";
 import { observe } from "@brianjenkins94/observability";
 import { identifyWorker } from "../../architecture-model";
 import { storeNode, ZENFS_NODE } from "../../architecture-zenfs";
@@ -167,6 +167,23 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		}
 
 		return decideCapability(call);
+	}) });
+
+	// What a call returned when it ran for real — a preview's fetch, recorded by the service worker's net gate — kept so
+	// a rule can give it back in the debugger instead of the call (RULES.md, slice 2); and asked for by the margin's
+	// Rule… at a capability stop, to prefill it.
+	context.subscriptions.push({ "dispose": serve(podHub, "capability.record", async (data) => {
+		const { capability, resource, value } = (data ?? {}) as { "capability"?: unknown; "resource"?: unknown; "value"?: unknown };
+
+		if (typeof capability === "string" && typeof resource === "string") {
+			await recordResult(capability, resource, value);
+		}
+
+		return null;
+	}) }, { "dispose": serve(podHub, "capability.recorded", async (data) => {
+		const { capability, resource } = (data ?? {}) as { "capability"?: unknown; "resource"?: unknown };
+
+		return typeof capability === "string" && typeof resource === "string" ? await recordedResult(capability, resource) ?? null : null;
 	}) });
 
 	// The tsval debug type — a worker-backed stepping debugger (debug-adapter.ts + debug-worker.ts).

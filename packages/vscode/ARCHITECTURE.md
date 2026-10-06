@@ -332,6 +332,7 @@ flowchart LR
     n_store__silo_evidence____file__jsonl[".silo/evidence/…/&lt;file&gt;.jsonl"]
     n_store__silo_local____file__bin[".silo/local/…/&lt;file&gt;.bin"]
     n_store__silo_local____file__jsonl[".silo/local/…/&lt;file&gt;.jsonl"]
+    n_store__silo_local__file__json[".silo/local/&lt;file&gt;.json"]
     n_store__silo_notes____file__jsonl[".silo/notes/…/&lt;file&gt;.jsonl"]
     n_store__silo_runs__file__jsonl[".silo/runs/&lt;file&gt;.jsonl"]
   end
@@ -360,6 +361,7 @@ flowchart LR
   n_ext_notes <-.->|"commands"| n_ext_vscode
   n_ext_notes <-.->|"commands"| n_ext_worker_pod
   n_ext_worker_pod -->|"reads"| n_store__git__file_
+  n_ext_worker_pod -->|"reads"| n_store__silo_local__file__json
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__json
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__jsonl
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__gitignore
@@ -407,6 +409,7 @@ flowchart LR
   n_workbench -->|"reads, writes"| n_store__silo__gitignore
   n_workbench -->|"reads, writes"| n_store__silo_evidence____file__jsonl
   n_workbench -->|"reads, writes"| n_store__silo_local____file__jsonl
+  n_workbench -->|"reads, writes"| n_store__silo_local__file__json
   n_workbench -->|"reads, writes"| n_store__silo_notes____file__jsonl
   n_workbench -->|"reads, writes"| n_store__silo_runs__file__jsonl
   n_workbench -->|"writes"| n_store__silo_local____file__bin
@@ -429,6 +432,7 @@ flowchart LR
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |
 | `.silo/local/…/<file>.jsonl` | Workbench | Workbench, insights |
+| `.silo/local/<file>.json` | Workbench | Workbench, worker-pod |
 | `.silo/notes/…/<file>.jsonl` | Workbench, notes | Workbench, notes |
 | `.silo/runs/<file>.jsonl` | Workbench | Workbench |
 | `IndexedDB bablr` | BABLR worker | BABLR worker, Workbench |
@@ -446,7 +450,7 @@ flowchart LR
 | Dev-server worker | preview | `preview.close`, `preview.provoke()`, `preview.start()`, `preview.version()` |
 | Dev-server worker | virtual | `virtual.request()` |
 | Dev-server worker | workspace | `workspace.changed` |
-| Pod | capability | `capability.decide()` |
+| Pod | capability | `capability.decide()`, `capability.record()`, `capability.recorded()` |
 | Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.event`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
 | Pod | git | `git.changed` |
 | Pod | node | `node.exit.*`, `node.start` |
@@ -457,7 +461,7 @@ flowchart LR
 | Pod | tsval | `tsval.preview.event`, `tsval.preview.hello`, `tsval.preview.stream`, `tsval.preview.timeTravel` |
 | Preview :* | evidence | `evidence.flush` |
 | Preview :* | tap | `tap.worker.decide()`, `tap.worker.log` |
-| Root | capability | `capability.decide.*()` |
+| Root | capability | `capability.decide.*()`, `capability.record.*()` |
 | Root | page_tools | `page_tools.*()` |
 | Root | preview | `preview.close`, `preview.open` |
 | Root | project | `project.list()`, `project.open`, `project.openFiles` |
@@ -482,6 +486,7 @@ flowchart LR
 | Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*`, `node.ready` |
 | Workbench | preview | `preview.close`, `preview.hmr.*`, `preview.profiled` |
 | Workbench | production | `production.stop.*` |
+| Workbench | rules | `rules.make()` |
 | Workbench | runs | `runs.begin()`, `runs.list()`, `runs.stop()` |
 | Workbench | terminal | `terminal.run()` |
 | Workbench | theme | `theme.colorScheme` |

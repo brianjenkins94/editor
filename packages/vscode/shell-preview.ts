@@ -63,7 +63,7 @@ const promptScope = css({ "display": "block", "fontFamily": "var(--wa-font-famil
 const promptActions = css({ "display": "flex", "flexWrap": "wrap", "gap": "var(--wa-space-2xs)", "justifyContent": "flex-end" });
 
 /** What the prompt overlay reports back (mirrors the ext-host decider's expectations). */
-type PromptChoice = "allow-once" | "allow-always" | "deny" | "authorize";
+type PromptChoice = "allow-once" | "allow-always" | "deny" | "authorize" | "rule";
 interface PromptRequest { "kind"?: string; "scope"?: string; "resource"?: string; "dangerous"?: boolean; "redline"?: boolean }
 
 /**
@@ -667,7 +667,8 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 				// Catastrophic scope — a deliberate, one-time authorization only (never persisted; see decide.ts).
 				actions.append(button("Deny", "neutral", "deny"), button("Authorize once", "danger", "authorize"));
 			} else {
-				actions.append(button("Deny", "neutral", "deny"), button("Allow once", "brand", "allow-once"), button("Allow always", "brand", "allow-always"));
+				// Rule…: a rule made in the editor's Rules view, prefilled with this call — wider or narrower than it.
+				actions.append(button("Rule…", "neutral", "rule"), button("Deny", "neutral", "deny"), button("Allow once", "brand", "allow-once"), button("Allow always", "brand", "allow-always"));
 			}
 
 			card.append(title, scope, actions);

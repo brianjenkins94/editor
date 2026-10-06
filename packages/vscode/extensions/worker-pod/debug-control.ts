@@ -30,7 +30,7 @@ import { loadEffectivePolicy, loadPolicyFiles, replaceRule } from "../capabiliti
 
 export type DebugAction = StepAction;
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
-const CHOICES = new Set<string>(["allow-once", "allow-always", "deny", "rule"] satisfies CapabilityChoice[]);
+const CHOICES = new Set<string>(["allow-once", "allow-always", "deny", "rule", "give-once"] satisfies CapabilityChoice[]);
 
 /** `starting` until the first stop; `idle` = a React app mounted and waiting for events (no stop to step from). */
 export type DebugState = "starting" | "running" | "stopped" | "idle" | "terminated";
@@ -65,7 +65,7 @@ export interface ControllableSession {
 	"settled": (signal: AbortSignal) => Promise<DebugOutcome>;
 	"stop": () => Promise<DebugOutcome>;
 	/** At a capability stop, decide it and resume; resolve on the next stop, idle or end. */
-	"decide": (choice: CapabilityChoice, signal: AbortSignal, rule?: Rule) => Promise<DebugOutcome>;
+	"decide": (choice: CapabilityChoice, signal: AbortSignal, rule?: Rule, give?: unknown) => Promise<DebugOutcome>;
 	/** At a stop, set a variable in scope to a literal; resolve with it as the Variables view shows it. */
 	"setValue": (name: string, value: string) => Promise<string>;
 }
@@ -90,13 +90,13 @@ export function registerSession(hub: Hub, session: ControllableSession): () => v
 		serve(hub, prefix + "state", () => session.outcome()),
 		serve(hub, prefix + "stop", () => session.stop()),
 		serve(hub, prefix + "decide", (args, { signal }) => {
-			const { choice = "", rule } = (args ?? {}) as { "choice"?: string; "rule"?: Rule };
+			const { choice = "", rule, give } = (args ?? {}) as { "choice"?: string; "rule"?: Rule; "give"?: unknown };
 
 			if (!CHOICES.has(choice)) {
 				throw new Error(`unknown choice "${choice}" — one of ${[...CHOICES].join(", ")}`);
 			}
 
-			return session.decide(choice as CapabilityChoice, signal, rule);
+			return session.decide(choice as CapabilityChoice, signal, rule, give);
 		}),
 		serve(hub, prefix + "setValue", (args) => {
 			const { name, value } = (args ?? {}) as { "name"?: unknown; "value"?: unknown };

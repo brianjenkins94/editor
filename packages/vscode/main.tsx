@@ -70,6 +70,7 @@ if (isolated && window.parent === window) {
 
 	serve(rootHub, "virtual.request." + tab, (args) => tabRpc.request("virtual.request", args, { "timeoutMs": 30000, "waitForResponderMs": 10000 }));
 	serve(rootHub, "capability.decide." + tab, (args) => tabRpc.request("capability.decide", args, { "timeoutMs": 300000, "waitForResponderMs": 10000 }));
+	serve(rootHub, "capability.record." + tab, (args) => tabRpc.request("capability.record", args, { "timeoutMs": 30000, "waitForResponderMs": 10000 }));
 	linkServiceWorkerHub(rootHub);
 	linkDebugMcp(rootHub); // dev-only: federate the tree to a running @brianjenkins94/debug-mcp for MCP querying
 	// Dev-only: this tab's MCP tools, which debug-mcp registers while it's connected — under this tab's id, so it can

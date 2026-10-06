@@ -21,7 +21,7 @@
 import type { LoadedVM } from "@brianjenkins94/tsval";
 import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
-import { ruleMatches } from "@brianjenkins94/util/silo/policy";
+import { givenResult, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, PreviewMessage, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
 import type { GuestRoot } from "./debug-react";
@@ -32,7 +32,7 @@ import React from "react";
 
 import ts from "typescript";
 import { capabilityBreakLines, classifyCall, shouldBreak } from "../capabilities/capability-breakpoints";
-import { capabilityStandins, inert } from "../capabilities/canary";
+import { capabilityStandins, givenAs, inert, standinCapability } from "../capabilities/canary";
 import { NETWORK_PROBES } from "../../architecture";
 import { observe } from "@brianjenkins94/observability";
 import { controlSubject, eventSubject, PREVIEW_STREAM } from "./debug-protocol";
@@ -86,6 +86,8 @@ let setHooks = new Map<number, SetHook[]>();
 let programPath = "";
 /** "Deny" at a capability stop: the next capability call fails, as a denied one would. Reset at every stop. */
 let denyNext = false;
+/** The result the user gave the call at a capability stop, once (`decide` with `give`): the next stand-in call returns it. */
+let giveNext: { "value": unknown } | undefined;
 /** The last value traced: its call, its loops' turns and its step — where a value set at a stop is recorded. */
 let lastTraced: { "call": number; "turns": number[]; "step": number } | undefined;
 /** Forks, one per stop reached; `index` is the currently-displayed stop. */
@@ -148,7 +150,9 @@ function capabilitySurface(fileName: string, args: string[]): { "globals": Recor
 }
 
 /** The stand-ins, each failing when the user denied its call at a capability stop (`denyNext`) — with node's EACCES, as
- *  the call would fail if the policy denied it. (A module object shared under several names stays one object.) */
+ *  the call would fail if the policy denied it — and returning the result a rule gives its call (RULES.md, slice 2), or
+ *  the user gave it at the stop (`giveNext`), instead of an inert one. (A module object shared under several names stays
+ *  one object.) */
 function denying(standins: ReturnType<typeof capabilityStandins>): ReturnType<typeof capabilityStandins> {
 	const wrapped = new Map<unknown, unknown>();
 	const gate = (fn: (...args: unknown[]) => unknown) => function (this: unknown, ...args: unknown[]): unknown {
@@ -158,7 +162,19 @@ function denying(standins: ReturnType<typeof capabilityStandins>): ReturnType<ty
 			throw Object.assign(new Error("EACCES: permission denied (denied at its capability stop)"), { "code": "EACCES" });
 		}
 
-		return fn.apply(this, args);
+		const real = fn.apply(this, args);
+		const tagged = standinCapability(fn);
+
+		if (tagged === undefined) {
+			return real;
+		}
+
+		const resource = args[tagged.resourceArg];
+		const given = giveNext ?? (policy === undefined ? undefined : givenResult(policy, { "capability": tagged.capability, "resource": typeof resource === "string" ? resource : resource instanceof URL ? resource.href : "" }));
+
+		giveNext = undefined;
+
+		return given === undefined ? real : givenAs(tagged.capability, real, given.value);
 	};
 	const wrap = (value: unknown): unknown => {
 		if (!wrapped.has(value)) {
@@ -747,29 +763,50 @@ function stepOut(vm: Vm): void {
 /** Advance `base` (a VM we own) by a forward action, then record the new stop or terminate. When the action
  *  carried a `trace` (the adapter's action span), the step span CONTINUES that trace, so a debug step is one
  *  cross-context trace (adapter action → worker step) rather than an unrelated root. */
-function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): void {
+/** Do `action` on `base`, as far as it goes without waiting. */
+function act(base: Vm, action: ForwardAction): void {
+	switch (action) {
+		case "continue": runOn(base); break;
+		case "next": {
+			const from = atLine(base);
+
+			base.stepStatement();
+
+			// Stepped over a statement a rule sets after: its sets, as a run through it makes them.
+			if (from !== undefined && setHooks.has(from)) {
+				applySets(base, from);
+			}
+
+			break;
+		}
+		case "stepIn": base.step(); break;
+		case "stepOut": stepOut(base); break;
+		default: break;
+	}
+}
+
+async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): Promise<void> {
 	current = base;
 	const span = trace !== undefined ? workerLog.continueSpan(trace, "step", { "action": action }) : workerLog.span("step", { "action": action });
 
 	try {
 		try {
-			switch (action) {
-				case "continue": runOn(base); break;
-				case "next": {
-					const from = atLine(base);
+			act(base, action);
 
-					base.stepStatement();
+			// Async work pending and none ready (tsval's steppedAsync): let it settle, then go on — a continue to its next
+			// stop, a step to the next statement that runs (in whichever job runs next).
+			while (!base.finished && base.idle) {
+				await base.whenSettled();
 
-					// Stepped over a statement a rule sets after: its sets, as a run through it makes them.
-					if (from !== undefined && setHooks.has(from)) {
-						applySets(base, from);
-					}
-
-					break;
+				if (done) {
+					return;
 				}
-				case "stepIn": base.step(); break;
-				case "stepOut": stepOut(base); break;
-				default: break;
+
+				if (action === "continue") {
+					runOn(base);
+				} else {
+					base.runUntil((vm) => vm.atStatementBoundary() || vm.atBreakpoint());
+				}
 			}
 		} catch (error) {
 			post({ "type": "output", "text": "Uncaught " + String(error), "stream": "stderr" });
@@ -807,7 +844,7 @@ function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): voi
 	}
 }
 
-function handle(action: Action): void {
+async function handle(action: Action): Promise<void> {
 	switch (action) {
 		case "stepBack":
 			if (index > 0) {
@@ -840,19 +877,19 @@ function handle(action: Action): void {
 			const next = history[index].fork();
 
 			record(next, copySums(sumsOf.get(history[index])));
-			advanceFrom(next, action, actionTrace);
+			await advanceFrom(next, action, actionTrace);
 			break;
 		}
 	}
 }
 
 async function session(initial: Vm, launchTrace?: TraceContext): Promise<void> {
-	advanceFrom(initial, "continue", launchTrace); // run to the first breakpoint (or completion)
+	await advanceFrom(initial, "continue", launchTrace); // run to the first breakpoint (or completion)
 
 	while (!done) {
 		const action = await nextAction();
 
-		handle(action);
+		await handle(action);
 	}
 }
 
@@ -923,7 +960,8 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 				break;
 			}
 
-			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "observe": observeSite, "trace": traceValue, ...capabilitySurface(message.fileName, message.args ?? []) });
+			// steppedAsync: async code runs on the stack the debugger steps — its breakpoints, capability stops, rules.
+			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "observe": observeSite, "trace": traceValue, "steppedAsync": true, ...capabilitySurface(message.fileName, message.args ?? []) });
 
 			liveTimer = setInterval(flushLive, 250);
 
@@ -1008,6 +1046,7 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 			}
 
 			denyNext = message.deny === true;
+			giveNext = message.give === undefined ? undefined : { "value": message.give };
 			break;
 
 		case "continue":

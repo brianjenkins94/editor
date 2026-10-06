@@ -80,6 +80,18 @@ rule*) — the same two buttons wherever the editor opens.
   Persist / Multiple checkboxes. An action names what it acts on (`target_id`: *give process.argv*), and its argument's
   schema follows that target's. Then *Mock…* on a variable's row: *program is <file>*, *at* <this statement>, *then set*
   it — *Just this once* (at this stop) or *Save as rule*.
+- **A call's result, given instead of the call** (lib aa47ec8; slice 2): *give result* — a fetch's body, a read's
+  contents, a command's output. Only where something stands in for the call: the debugger's capability stand-ins return
+  it (and the call isn't a stop); a real call — a preview's — isn't decided by it. At a capability stop, *Rule…* starts
+  from what the call returned the last time it ran for real, when that's recorded: the service worker's net gate
+  records an allowed preview fetch's JSON or text body (`capability.record.<tab>` → the pod), the latest of each call, in
+  `.silo/local/recorded.json` — this machine's only, git-ignored (a real response can hold secrets). *Just this once*
+  gives it to this call (`give-once`); *Save as rule* to every run's.
+- **The preview's prompt** has *Rule…* too: the rule is made in the Rules view, prefilled with the call
+  (`rules.make`, pod → workbench), and the call waits on it — *Just this once*, *Save as rule*, or *Cancel* (back to the
+  prompt). *Allow always* stays, the one-click rule.
+- **A rule whose place is lost** shows broken in the Rules view; opened, *Re-place at selection* places it at the code
+  selected in the editor (a span reference made from the selection, as the margin makes one).
 - **A rule placed in the code** (lib 20f01cb): *at* is a target whose argument is a span reference (SPAN-ANNOTATIONS.md),
   shown as a chip of its code, not typed. Before a run the adapter finds each rule's place in the text that runs
   (`editor.annotations.resolve` — through edits, as an authored annotation is) and hands the worker the lines; the worker
@@ -122,7 +134,8 @@ enough to own, and it has no notion of actions. Revisit if its core grows action
 
 - Does a breakpoint condition (VS Code's own) become a rule's *when*, with *stop* as its action — one model for
   stopping and deciding?
-- Re-placing a rule whose place was lost (select the code, as notes will), and healing a re-placed one's reference in
-  the file (SPAN-ANNOTATIONS.md D4) — for now a lost one shows as broken, to remove.
-- A call's result as `give`'s target (slice 2), recorded at its seam.
+- Healing a re-placed rule's reference in the file on its own (SPAN-ANNOTATIONS.md D4): today a rule found by a
+  strategy other than its id applies, and is rewritten only when re-placed by hand.
+- Recording more seams than a preview's fetch: a node service's reads and commands (almostnode), so their results can
+  be given too.
 - How the margin shows that a rule applies on a line (a mark in the gutter column, beside coverage?).

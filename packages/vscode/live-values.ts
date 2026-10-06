@@ -16,7 +16,8 @@
  * resumes it. *Allow always* needs the resource the call reaches: offered only when it's known before the line runs.
  * *Rule…* opens the rule editor there (the component's, RULES.md), prefilled with the call — *capability is*, *resource
  * is*, *then allow* — to widen or narrow it (*resource matches* a glob) and apply it *Just this once*, or *Save as rule*
- * in my policy, the run going on as it decides.
+ * in my policy, the run going on as it decides. Or *give* the call's *result* instead of it (RULES.md, slice 2) —
+ * starting from what it returned the last time it ran for real, when that's recorded (`capability.recorded`).
  *
  * A variable's row has *Mock…* on hover (LIVE-VALUES.md, "Mocking a value"): the rule editor, prefilled *program is
  * <this file>*, *at* <this statement> (a span reference, followed through edits), *then set* it to the value the run
@@ -91,7 +92,9 @@ let api: typeof vscodeApi | undefined;
 /** Each file's latest draw: an earlier one still placing its lines gives way. */
 const drawing = new Map<string, number>();
 /** Sends a capability stop's choice back to its session (set by `installLiveValues`). */
-let choose: ((session: string, choice: CapabilityChoice, rule?: EditedRule) => Promise<unknown>) | undefined;
+let choose: ((session: string, choice: CapabilityChoice, rule?: EditedRule, give?: unknown) => Promise<unknown>) | undefined;
+/** What a call returned the last time it ran for real (a preview's fetch, recorded), or null (set by `installLiveValues`). */
+let recordedOf: ((capability: string, resource: string) => Promise<{ "value": unknown; "at": string } | null>) | undefined;
 /** Sets a variable at a session's stop (set by `installLiveValues`). */
 let setValueAt: ((session: string, name: string, value: string) => Promise<unknown>) | undefined;
 /** What a rule gives a file's process.argv, changing my policy by a rule editor's rule, and running a file with given
@@ -499,35 +502,62 @@ export function rulePanel(policy: PolicyModule, rule: EditedRule, judge: (rule: 
 }
 
 /** The first allow / deny / ask a rule has. */
-const decisionOf = (rule: EditedRule): string | undefined => rule.then.find(({ action_id }) => ["allow", "deny", "ask"].includes(action_id))?.action_id;
+export const decisionOf = (rule: EditedRule): string | undefined => rule.then.find(({ action_id }) => ["allow", "deny", "ask"].includes(action_id))?.action_id;
+
+/** What a rule as edited would do to a call: whether it covers it (`resolved`: what it reaches is known) and what it
+ *  decides — ok when it allows or denies it. */
+export function callVerdict(policy: PolicyModule, rule: EditedRule, subject: { "capability": string; "resource"?: string }, resolved = true, canGive = false): Verdict {
+	const problem = policy.problemOf(rule);
+	const covers = problem === undefined && policy.ruleMatches(rule, subject);
+	const decision = decisionOf(rule);
+	// A result given instead of the call: only where something stands in for it (the debugger), not a real call.
+	const gives = rule.then.some((action) => action.action_id === "give" && action.target_id === "result");
+
+	return {
+		"text": problem ?? (!covers
+			? `Doesn't cover this call${resolved ? "" : " — what it reaches isn't known before the line runs"}`
+			: gives ? (canGive ? "Covers this call: gives it this result instead" : "A result can only be given in the debugger, where nothing real is called")
+				: decision === "allow" ? "Covers this call: allows it" : decision === "deny" ? "Covers this call: denies it" : decision === "ask" ? "Covers this call, and asks — as now" : "Covers this call, but doesn't decide it"),
+		"ok": covers && (gives ? canGive : decision === "allow" || decision === "deny"),
+		"refused": problem !== undefined
+	};
+}
+
+/** The result a rule gives a call, when it gives one. */
+const resultOf = (rule: EditedRule): { "value": unknown } | undefined => {
+	const give = rule.then.find((action) => action.action_id === "give" && action.target_id === "result");
+
+	return give === undefined ? undefined : { "value": give.argument };
+};
+
+/** A rule about a call, as it starts: its capability, its resource (when known), then allow. */
+export const callRule = (capability: string, resource?: string): EditedRule => ({
+	"when": { "logicalType_id": "all", "predicates": [
+		{ "target_id": "capability", "operator_id": "is", "argument": capability },
+		...resource === undefined ? [] : [{ "target_id": "resource", "operator_id": "is", "argument": resource }]
+	] },
+	"then": [{ "action_id": "allow" }]
+});
 
 /** The rule editor at a capability stop, prefilled with the call: whether the rule as edited covers this call and what
  *  it decides, then *Just this once* (decide this call so), *Save as rule* (in my policy, and decide it so), *Cancel*. */
 async function openRule(session: string, ask: CapabilityAsk, close: () => void): Promise<HTMLElement> {
 	const policy = await import("@brianjenkins94/util/silo/policy");
 	const subject = ask.resolved ? { "capability": ask.capability, "resource": ask.resource } : { "capability": ask.capability };
-	const judge = (rule: EditedRule): Verdict => {
-		const problem = policy.problemOf(rule);
-		const covers = problem === undefined && policy.ruleMatches(rule, subject);
-		const decision = decisionOf(rule);
+	// What this call returned the last time it ran for real (a preview's fetch): given instead, to start with.
+	const recorded = ask.resolved ? await recordedOf?.(ask.capability, ask.resource).catch(() => null) ?? null : null;
+	const rule = callRule(ask.capability, ask.resolved ? ask.resource : undefined);
 
-		return {
-			"text": problem ?? (!covers
-				? `Doesn't cover this call${ask.resolved ? "" : " — what it reaches isn't known before the line runs"}`
-				: decision === "allow" ? "Covers this call: allows it" : decision === "deny" ? "Covers this call: denies it" : decision === "ask" ? "Covers this call, and asks — as now" : "Covers this call, but doesn't decide it"),
-			"ok": covers && (decision === "allow" || decision === "deny"),
-			"refused": problem !== undefined
-		};
-	};
+	if (recorded !== null) {
+		rule.then = [{ "action_id": "give", "target_id": "result", "argument": recorded.value }];
+	}
 
-	return rulePanel(policy, {
-		"when": { "logicalType_id": "all", "predicates": [
-			{ "target_id": "capability", "operator_id": "is", "argument": ask.capability },
-			...ask.resolved ? [{ "target_id": "resource", "operator_id": "is", "argument": ask.resource }] : []
-		] },
-		"then": [{ "action_id": "allow" }]
-	}, judge, [
-		{ "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and stop here again next time", "act": async (rule) => choose?.(session, decisionOf(rule) === "deny" ? "deny" : "allow-once") },
+	return rulePanel(policy, rule, (edited) => {
+		const verdict = callVerdict(policy, edited, subject, ask.resolved, true);
+
+		return recorded !== null && verdict.ok && JSON.stringify(resultOf(edited)?.value) === JSON.stringify(recorded.value) ? { ...verdict, "text": `Covers this call: gives it what it returned on ${new Date(recorded.at).toLocaleString()}` } : verdict;
+	}, [
+		{ "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and stop here again next time", "act": async (edited) => (resultOf(edited) === undefined ? choose?.(session, decisionOf(edited) === "deny" ? "deny" : "allow-once") : choose?.(session, "give-once", undefined, resultOf(edited)!.value)) },
 		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/<you>.policy.json), and decide this call by it", "act": async (rule) => choose?.(session, "rule", rule) },
 		{ "label": "Cancel", "className": "cancel", "title": "Back to the three choices", "act": async () => { close(); }, "always": true }
 	]);
@@ -992,7 +1022,8 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	// A capability stop's question, and its answer back: the session resumes on it.
 	const rpc = createRpcClient(hub);
 
-	choose = (session, choice, rule) => rpc.request(`debug.session.${session}.decide`, { "choice": choice, ...rule === undefined ? {} : { "rule": rule } }, { "timeoutMs": 24 * 60 * 60_000 });
+	choose = (session, choice, rule, give) => rpc.request(`debug.session.${session}.decide`, { "choice": choice, ...rule === undefined ? {} : { "rule": rule }, ...give === undefined ? {} : { "give": give } }, { "timeoutMs": 24 * 60 * 60_000 });
+	recordedOf = async (capability, resource) => rpc.request("capability.recorded", { "capability": capability, "resource": resource }, { "timeoutMs": 10_000 }) as Promise<{ "value": unknown; "at": string } | null>;
 	setValueAt = (session, name, value) => rpc.request(`debug.session.${session}.setValue`, { "name": name, "value": value }, { "timeoutMs": 30_000 });
 	rulesGiven = async (path) => rpc.request("rules.given", { "program": path, "target": "process.argv" }, { "timeoutMs": 10_000 }) as Promise<Given | null>;
 	rulesSet = async (previous, rule) => rpc.request("rules.set", { ...previous === undefined ? {} : { "previous": previous }, ...rule === undefined ? {} : { "rule": rule } }, { "timeoutMs": 10_000 });

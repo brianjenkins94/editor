@@ -586,7 +586,7 @@ function maybeBoot(): void {
 				// coverage's strip (coverage.ts), read from the evidence through the insights extension's store, here with
 				// core's own API.
 				installLiveValues(workbenchHub, api as typeof import("vscode"));
-				registerRulesView(workbenchHub);
+				registerRulesView(workbenchHub, api as typeof import("vscode"));
 				installCoverage(api as typeof import("vscode"), evidenceStore(api as typeof import("vscode"), []), showMarks);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));

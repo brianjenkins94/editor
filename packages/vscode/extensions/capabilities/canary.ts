@@ -60,6 +60,35 @@ function tag<T extends (...args: never[]) => unknown>(capability: string, fn: T,
 	return fn;
 }
 
+/** The capability a stand-in stands for, and which of its arguments is the resource — undefined for one untagged. */
+export function standinCapability(fn: unknown): { "capability": string; "resourceArg": number } | undefined {
+	const capability = typeof fn === "function" ? (fn as Tagged)[CAPABILITY] : undefined;
+
+	return capability === undefined ? undefined : { "capability": capability, "resourceArg": (fn as Tagged)[RESOURCE_ARG] ?? 0 };
+}
+
+/** A stand-in's result as a rule gives it (RULES.md, slice 2), in the shape the call returns — `real` is what the inert
+ *  stand-in returned: a fetch's response with it as its body, a read's contents, a command's output; sync or async as
+ *  the call is. A write's result isn't given (nothing reads it). */
+export function givenAs(capability: string, real: unknown, value: unknown): unknown {
+	const text = typeof value === "string" ? value : JSON.stringify(value);
+	const settle = (shaped: unknown): unknown => (real instanceof Promise ? Promise.resolve(shaped) : shaped);
+
+	if (capability === "net") {
+		return settle({ "ok": true, "status": 200, "statusText": "OK", "json": async () => (typeof value === "string" ? JSON.parse(value) as unknown : value), "text": async () => text, "arrayBuffer": async () => new TextEncoder().encode(text).buffer });
+	}
+
+	if (capability === "fs:read") {
+		return settle(text);
+	}
+
+	if (capability === "exec") {
+		return settle(typeof real === "object" && real !== null && "stdout" in real ? { ...real, "stdout": text } : text);
+	}
+
+	return real;
+}
+
 /** Aliasing fallback: when AST classification misses (`const f = fetch; f(url)` — the callee is `f`), the invoked
  *  stand-in's own tag still identifies the capability. Same CapabilityHit shape as the shared AST classifier. */
 function tagHit(callee: Tagged, site: HostCallSite): CapabilityHit | undefined {

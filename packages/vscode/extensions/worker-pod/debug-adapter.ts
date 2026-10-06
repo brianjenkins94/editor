@@ -151,7 +151,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	 *  does) and hands the worker the policy now in effect; "Deny" fails the call; "Allow once" just lets it run; a
 	 *  `rule` (made in the margin's rule editor) is saved in my policy as "Allow always" is, and decides the call as it
 	 *  does — refused, unsaved, when it doesn't cover this call or doesn't allow or deny it. */
-	public async decide(choice: CapabilityChoice, signal: AbortSignal, rule?: Rule): Promise<DebugOutcome> {
+	public async decide(choice: CapabilityChoice, signal: AbortSignal, rule?: Rule, give?: unknown): Promise<DebugOutcome> {
 		const ask = this.ask;
 
 		if (this.state !== "stopped" || ask === undefined) {
@@ -167,13 +167,18 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				throw new Error(rule === undefined ? "no rule" : problemOf(rule) ?? "the rule doesn't cover this call");
 			}
 
-			if (decision !== "allow" && decision !== "deny") {
-				throw new Error("the rule doesn't allow or deny this call");
+			// A rule giving the call's result decides it too: the call isn't made, the debugger's stand-in returns it.
+			const gives = rule.then.some((action) => action.action_id === "give" && action.target_id === "result");
+
+			if (decision !== "allow" && decision !== "deny" && !gives) {
+				throw new Error("the rule doesn't allow, deny or give this call");
 			}
 
 			await replaceRule(undefined, rule);
 			this.policy = await this.loadPolicy();
-			this.control({ "type": "decide", "policy": this.policy, "deny": decision === "deny" });
+			this.control({ "type": "decide", "policy": this.policy, "deny": !gives && decision === "deny" });
+		} else if (choice === "give-once") {
+			this.control({ "type": "decide", "give": give ?? null });
 		} else if (choice === "allow-always") {
 			if (!ask.resolved) {
 				throw new Error(`"Allow always" needs the resource the call reaches, and ${ask.resource} isn't known before it runs`);

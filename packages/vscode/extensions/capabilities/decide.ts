@@ -148,7 +148,25 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 		return { "behavior": "deny", "message": "denied by .silo policy" };
 	}
 
-	const choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request) });
+	let choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request) });
+
+	// Rule…: the rule is made in the Rules view (rules-view.ts `rules.make`), and the call waits on it; cancelled, the
+	// question comes back.
+	while (choice === "rule") {
+		let made: unknown;
+
+		try {
+			made = await shellRpc.request("rules.make", { "capability": capability, "resource": resource }, { "timeoutMs": 300000 });
+		} catch {
+			made = null;
+		}
+
+		if (made === "allow" || made === "deny") {
+			return made === "allow" ? { "behavior": "allow" } : { "behavior": "deny", "message": "denied by your rule" };
+		}
+
+		choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request) });
+	}
 
 	if (choice === "allow-always") {
 		await persistOverride(capability, resource, "allow");
