@@ -27,7 +27,7 @@
  * root `.silo` plus per-package ones without any schema change. No caller assumes a single root.
  */
 import type { CapabilityRequest } from "@brianjenkins94/util/silo/enforce/broker";
-import type { Disposition, Policy } from "@brianjenkins94/util/silo/policy";
+import type { Disposition, Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { shortHash } from "@brianjenkins94/util/hash";
 import { userSlug } from "@brianjenkins94/util/silo/evidence";
@@ -166,46 +166,28 @@ export async function persistOverride(capability: string, resource: string, disp
 	await writeText(vscode.Uri.joinPath(root, `${user}.policy.json`), JSON.stringify(overrideCache, null, "\t") + "\n");
 }
 
-// ── stubs: what a program reads from outside, mocked (LIVE-VALUES.md) ─────────────────────────────────────────
+/** The same rule, whenever it was decided. */
+const sameRule = (a: Rule, b: Rule): boolean => JSON.stringify({ "when": a.when, "then": a.then }) === JSON.stringify({ "when": b.when, "then": b.then });
 
-/** A stub: what `seam` gives `file` (workspace-relative) on every run — for `argv`, its cases, each a run's arguments
- *  (`process.argv` past node and the file). */
-export interface Stub { "seam": "argv"; "file": string; "cases": string[][] }
-
-interface Stubs { "version": 1; "stubs": Stub[] }
-
-/** My stubs, from `.silo/<user>.stubs.json` (committed, like my policy overrides: a repo's inputs travel with it). */
-export async function loadStubs(): Promise<Stub[]> {
-	const root = siloRoot();
-
-	if (root === undefined) {
-		return [];
-	}
-
-	try {
-		const parsed = JSON.parse(await readText(vscode.Uri.joinPath(root, `${await currentUser()}.stubs.json`)) ?? "{}") as Partial<Stubs>;
-
-		return Array.isArray(parsed.stubs) ? parsed.stubs.filter((stub) => stub.seam === "argv" && typeof stub.file === "string" && Array.isArray(stub.cases)) : [];
-	} catch {
-		return [];
-	}
-}
-
-/** Keep `cases` as `file`'s `seam` stub — or, with none, take it away. */
-export async function persistStub(seam: Stub["seam"], file: string, cases: string[][] | undefined): Promise<void> {
+/** Change my policy (`<user>.policy.json`) by a rule made in a rule editor: `previous` (the rule edited, if it's mine)
+ *  replaced by `rule`, in its place — or, with no `previous` of mine, `rule` added first (a rule just made is the one
+ *  meant; one edited from the shared contract shadows it); with no `rule`, `previous` removed. A new or changed rule is
+ *  stamped as decided now. */
+export async function replaceRule(previous: Rule | undefined, rule: Rule | undefined): Promise<void> {
 	const root = siloRoot();
 
 	if (root === undefined) {
 		return;
 	}
 
-	const stubs = (await loadStubs()).filter((stub) => !(stub.seam === seam && stub.file === file));
+	const user = await currentUser();
+	const override = await loadOverride(root, user);
+	const index = previous === undefined ? -1 : override.rules.findIndex((each) => sameRule(each, previous));
+	const stamped = rule === undefined ? [] : [{ ...rule, "added": new Date().toISOString() }];
+	const rules = index === -1 ? [...stamped, ...override.rules] : [...override.rules.slice(0, index), ...stamped, ...override.rules.slice(index + 1)];
 
-	if (cases !== undefined && cases.length > 0) {
-		stubs.push({ "seam": seam, "file": file, "cases": cases });
-	}
-
-	await writeText(vscode.Uri.joinPath(root, `${await currentUser()}.stubs.json`), JSON.stringify({ "version": 1, "stubs": stubs } satisfies Stubs, null, "\t") + "\n");
+	overrideCache = { "version": override.version, "rules": rules };
+	await writeText(vscode.Uri.joinPath(root, `${user}.policy.json`), JSON.stringify(overrideCache, null, "\t") + "\n");
 }
 
 // ── static facts: the capability surface (committed, shared) ─────────────────────────────────────────────────

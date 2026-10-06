@@ -54,8 +54,9 @@ export interface CapabilityAsk { "line": number; "at"?: [number, number]; "capab
  *  was stopped at. A run that finished has none. */
 export interface RunEnd { "kind": "crashed" | "stopped"; "line": number; "at"?: [number, number]; "message"?: string }
 
-/** The choices at a capability stop, as the preview's prompt words them. */
-export type CapabilityChoice = "allow-once" | "allow-always" | "deny";
+/** The choices at a capability stop, as the preview's prompt words them — and `rule`, a rule made there (the margin's
+ *  rule editor) saved in my policy, deciding the call as it does. */
+export type CapabilityChoice = "allow-once" | "allow-always" | "deny" | "rule";
 
 /** Worker → adapter. */
 export type WorkerEvent =

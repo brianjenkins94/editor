@@ -14,8 +14,8 @@ import { createRpcClient, portTransport } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
-import { EMPTY_POLICY, type Policy } from "@brianjenkins94/util/silo/policy";
-import { loadEffectivePolicy, loadStubs, persistOverride } from "../capabilities/silo-store";
+import { EMPTY_POLICY, given as givenBy, problemOf, ruleMatches, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
+import { loadEffectivePolicy, persistOverride, replaceRule } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
 import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, RunEnd, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
@@ -146,15 +146,33 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	}
 
 	/** Decide the capability stop it's at, and resume: "Allow always" writes my policy override (as the preview's prompt
-	 *  does) and hands the worker the policy now in effect; "Deny" fails the call; "Allow once" just lets it run. */
-	public async decide(choice: CapabilityChoice, signal: AbortSignal): Promise<DebugOutcome> {
+	 *  does) and hands the worker the policy now in effect; "Deny" fails the call; "Allow once" just lets it run; a
+	 *  `rule` (made in the margin's rule editor) is saved in my policy as "Allow always" is, and decides the call as it
+	 *  does — refused, unsaved, when it doesn't cover this call or doesn't allow or deny it. */
+	public async decide(choice: CapabilityChoice, signal: AbortSignal, rule?: Rule): Promise<DebugOutcome> {
 		const ask = this.ask;
 
 		if (this.state !== "stopped" || ask === undefined) {
 			throw new Error("not stopped at a capability call");
 		}
 
-		if (choice === "allow-always") {
+		if (choice === "rule") {
+			// The worker's own subject for the call: an unknown resource is "".
+			const subject = { "capability": ask.capability, "resource": ask.resolved ? ask.resource : "" };
+			const decision = rule?.then?.find(({ action_id }) => ["allow", "deny", "ask"].includes(action_id))?.action_id;
+
+			if (rule === undefined || problemOf(rule) !== undefined || !ruleMatches(rule, subject)) {
+				throw new Error(rule === undefined ? "no rule" : problemOf(rule) ?? "the rule doesn't cover this call");
+			}
+
+			if (decision !== "allow" && decision !== "deny") {
+				throw new Error("the rule doesn't allow or deny this call");
+			}
+
+			await replaceRule(undefined, rule);
+			this.policy = await this.loadPolicy();
+			this.control({ "type": "decide", "policy": this.policy, "deny": decision === "deny" });
+		} else if (choice === "allow-always") {
 			if (!ask.resolved) {
 				throw new Error(`"Allow always" needs the resource the call reaches, and ${ask.resource} isn't known before it runs`);
 			}
@@ -724,10 +742,11 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 			// Without core (no answer), it runs all the same, unrecorded.
 			"resolveDebugConfigurationWithSubstitutedVariables": async (_folder, given) => {
 				const program = typeof given["program"] === "string" ? given["program"] : "";
-				// No `args`: the file's process.argv stub, if it has one (LIVE-VALUES.md, "Mocking a value") — its first case,
-				// the rest run after it (`__cases`).
-				const stub = Array.isArray(given["args"]) || Array.isArray(given["__cases"]) || program === "" ? undefined : (await loadStubs()).find((each) => each.seam === "argv" && each.file === vscode.workspace.asRelativePath(vscode.Uri.file(program), false));
-				const config = stub === undefined ? given : { ...given, "args": stub.cases[0] ?? [], "__cases": stub.cases, "__case": 0 };
+				// No `args`: what a rule gives the file's process.argv (RULES.md; the margin's Mock), if one does — its first
+				// value, the rest each a run after it (`__cases`).
+				const mocked = Array.isArray(given["args"]) || Array.isArray(given["__cases"]) || program === "" ? undefined : givenBy(await loadEffectivePolicy(), { "program": vscode.workspace.asRelativePath(vscode.Uri.file(program), false) }, "process.argv");
+				const cases = mocked?.values.filter((each): each is string[] => Array.isArray(each));
+				const config = cases === undefined || cases.length === 0 ? given : { ...given, "args": cases[0], "__cases": cases, "__case": 0 };
 
 				if (typeof config["__runId"] === "string") {
 					return config;

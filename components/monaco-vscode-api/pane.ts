@@ -118,6 +118,13 @@ class Frame implements monaco.editor.IOverlayWidget {
 		this.wrap = editor.getOption(monaco.editor.EditorOption.wrappingInfo).wrappingColumn !== -1;
 		editor.addOverlayWidget(this);
 		editor.addOverlayWidget(this.gutterWidget);
+
+		// The workbench's UI font, as a webview has it (--vscode-font-family / -size exist only in webviews): for what's set
+		// in the UI's type, not the code's — buttons, a rule's rows.
+		const workbench = getComputedStyle(editor.getContainerDomNode().closest(".monaco-workbench") ?? document.body);
+
+		this.element.style.setProperty("--vscode-font-family", workbench.fontFamily);
+		this.element.style.setProperty("--vscode-font-size", workbench.fontSize);
 		this.listeners.push(
 			editor.onDidScrollChange(() => { this.place(); }),
 			editor.onDidLayoutChange(() => { this.place(); }),

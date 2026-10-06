@@ -56,16 +56,26 @@ rule*) — the same two buttons wherever the editor opens.
 ## Where it lives
 
 - **The model and the evaluation are silo's** (silo-is-the-engine: pure logic and layouts go there): rules extend silo's
-  policy (lib: util/silo/policy.ts) — today's `{ capability, resource, disposition }` rule is a rule with two
-  comparisons and one action, so existing policy files keep working. Saved in the same files: the shared contract
+  policy (lib: util/silo/policy.ts, 3a04418, da6a88e) — every rule is `{ when, then }`; the first shape, `{ capability,
+  resource, disposition }`, is gone (nothing depended on it), and a decision at a call (*Allow always*) is the rule
+  *capability is X, resource is Y, then allow*. silo holds the catalog too: `TARGETS` (capability, resource, program,
+  process.argv), `TYPES`, `OPERATORS` (each with what it compiles to, and its argument's schema given its target's),
+  `ACTIONS`. Saved in the same files: the shared contract
   (`.silo/policy.json`) and mine (`.silo/<you>.policy.json`); a recorded value (a real fetch response) in
   `.silo/local/`, referred to by the rule.
-- **One editor**, in the component (vanilla DOM, VS Code-styled: the workbench realm loads no Web Awesome and no React
-  but in islands): rows of selects and argument inputs, *all/any*, *+* and *−*, and an actions list.
+- **One editor**, in the component (rule-editor.ts: vanilla DOM, VS Code-styled — the workbench realm loads no Web
+  Awesome and no React but in islands): rows of selects and argument inputs, *all/any/none*, *−* and *+* (⌥: a group),
+  and an actions list. It knows no targets: its host passes the catalog, and each argument's input is drawn from its
+  schema.
 - **Two places it opens**: a **Rules** view listing every rule (replacing the Capability calls panel's editing), and
   **inline in the margin**, anchored to a line, prefilled from what's there — a capability stop opens it with the
   call's capability and resource and *allow* chosen; a value's row with its target and *give*. The margin keeps entry
-  points (one small control on a row), not forms.
+  points (one small control on a row), not forms. First: *Rule…* at a capability stop, beside the three buttons, with
+  whether the rule as edited covers the call and what it decides, then *Just this once* / *Save as rule*. Then — the one
+  used most — *Mock…* on process.argv's row (LIVE-VALUES.md): *program is <file>*, *then give process.argv* a command
+  line per run, *Run* / *Save as rule* / *Remove*; it replaced the stubs file (`.silo/<you>.stubs.json`) and the Mock /
+  Persist / Multiple checkboxes. An action names what it acts on (`target_id`: *give process.argv*), and its argument's
+  schema follows that target's.
 
 ## Toward JSON Schema
 
@@ -101,6 +111,6 @@ enough to own, and it has no notion of actions. Revisit if its core grows action
 
 - Does a breakpoint condition (VS Code's own) become a rule's *when*, with *stop* as its action — one model for
   stopping and deciding?
-- The catalog's first entries: capability, resource, program, process.argv, a variable at a stop — and which
-  argument types they need (text, glob, literal, a list of cases, a recorded value).
+- A variable at a stop as a target (named per stop, so the host adds it to the catalog) — and a *when* for "this line",
+  anchored as everything on a line is — so a variable's Mock can be a rule too; and a call's result as `give`'s target.
 - How the margin shows that a rule applies on a line (a mark in the gutter column, beside coverage?).

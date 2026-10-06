@@ -14,12 +14,17 @@
  * A capability stop asks on its line too (step 8): what the call would do — `writeFileSync '/workspace/out.txt'` — and
  * *Allow once*, *Allow always*, *Deny*, the choice sent back to the session (`debug.session.<id>.decide`), which
  * resumes it. *Allow always* needs the resource the call reaches: offered only when it's known before the line runs.
+ * *Rule…* opens the rule editor there (the component's, RULES.md), prefilled with the call — *capability is*, *resource
+ * is*, *then allow* — to widen or narrow it (*resource matches* a glob) and apply it *Just this once*, or *Save as rule*
+ * in my policy, the run going on as it decides.
  *
- * A value's row can be mocked (LIVE-VALUES.md, "Mocking a value"): a small Mock checkbox; checked, the value the run had
- * is struck through and a box takes the mocked one. A variable's, at a stop, is set now and the run goes on with it
- * (`debug.session.<id>.setValue`, as the Variables view's Set Value does). process.argv's — its row on the first line
- * that reads it, there before any run — runs the file with it, once, or, with Persist, keeps it as the file's stub for
- * every run (`stubs.set`, `.silo/<you>.stubs.json`); with Multiple, several, each a case run in turn.
+ * A variable's row can be mocked at a stop (LIVE-VALUES.md, "Mocking a value"): a small Mock checkbox; checked, the
+ * value the run had is struck through and a box takes the one to set — set now, and the run goes on with it
+ * (`debug.session.<id>.setValue`, as the Variables view's Set Value does). process.argv's row — on the first line that
+ * reads it, there before any run — has *Mock…*: the rule editor, prefilled *program is <this file>*, *then give
+ * process.argv* the run's arguments, each value a run of its own; *Run* runs the file with them, once; *Save as rule*
+ * keeps it in my policy, and every run of the file is given them (`rules.set`; the row shows what a rule gives,
+ * `rules.given`).
  *
  * The margin is always open beside a JavaScript or TypeScript file, with or without anything to show: it's the file's
  * runtime column — coverage in its gutter column, left of the code (`showMarks`, from coverage.ts), notes, values,
@@ -32,14 +37,14 @@
  */
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
-import type { PaneEntry, PaneMark } from "@brianjenkins94/monaco-vscode-api/main";
+import type { EditedRule, PaneEntry, PaneMark } from "@brianjenkins94/monaco-vscode-api/main";
 import type { CapabilityAsk, CapabilityChoice, RunEnd } from "./extensions/worker-pod/debug-protocol";
 import type { LiveBatch, LiveCall, LiveValue } from "./extensions/worker-pod/live-values";
 import type { Range } from "./anchors";
 import { Anchors } from "./anchors";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { parseInputs } from "./extensions/worker-pod/inputs";
-import { showPane } from "@brianjenkins94/monaco-vscode-api/main";
+import { ruleEditor, showPane } from "@brianjenkins94/monaco-vscode-api/main";
 import css from "./live-values.css?raw";
 
 /** A prose note: Markdown on a line span (0-based, inclusive). */
@@ -48,9 +53,11 @@ export interface Note { "id": string; "fromLine": number; "toLine": number; "tex
 /** One line of values as drawn: its label (`mid =`), then a value (`inline`) or a cell per column. */
 interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range; "input"?: boolean }
 
-/** A row's Mock: checked or not, and — for process.argv — kept as the file's stub, several cases, and what's typed;
- *  `touched` once the user has changed any of it (until then it follows the file's stub, which may load after). */
-interface Mock { "on": boolean; "persist": boolean; "multiple": boolean; "values": string[]; "touched"?: boolean }
+/** A variable's Mock at a stop: checked or not, and the value typed. */
+interface Mock { "on": boolean; "value": string }
+
+/** What a rule gives a file's process.argv: the rule, and its values, each a run's arguments. */
+interface Given { "rule": EditedRule; "values": string[][] }
 
 /** A function's calls to pick between, on its first line: which (`function:line`), the one shown (0-based), how many. */
 interface Picker { "function": string; "index": number; "count": number }
@@ -84,18 +91,18 @@ let api: typeof vscodeApi | undefined;
 /** Each file's latest draw: an earlier one still placing its lines gives way. */
 const drawing = new Map<string, number>();
 /** Sends a capability stop's choice back to its session (set by `installLiveValues`). */
-let choose: ((session: string, choice: CapabilityChoice) => Promise<unknown>) | undefined;
+let choose: ((session: string, choice: CapabilityChoice, rule?: EditedRule) => Promise<unknown>) | undefined;
 /** Sets a variable at a session's stop (set by `installLiveValues`). */
 let setValueAt: ((session: string, name: string, value: string) => Promise<unknown>) | undefined;
-/** A file's process.argv stub (its cases, or null), keeping it, and running the file with given cases (set by
- *  `installLiveValues`). */
-let stubsGet: ((path: string) => Promise<string[][] | null>) | undefined;
-let stubsSet: ((path: string, cases: string[][] | null) => Promise<unknown>) | undefined;
+/** What a rule gives a file's process.argv, changing my policy by a rule editor's rule, and running a file with given
+ *  arguments, each a run (set by `installLiveValues`). */
+let rulesGiven: ((path: string) => Promise<Given | null>) | undefined;
+let rulesSet: ((previous: EditedRule | undefined, rule: EditedRule | undefined) => Promise<unknown>) | undefined;
 let runFile: ((path: string, cases: string[][]) => Promise<unknown>) | undefined;
-/** Each row's Mock, by file and name (a variable's, or process.argv): kept across redraws. */
+/** Each variable's Mock, by file and name: kept across redraws. */
 const mocks = new Map<string, Mock>();
-/** Each file's process.argv stub as last read (undefined: not read yet). */
-const stubbed = new Map<string, string[][] | null>();
+/** What a rule gives each file's process.argv, as last read (null: nothing; undefined: not read yet). */
+const givenArgv = new Map<string, Given | null>();
 
 /** Arguments as a command line, as the Mock box takes them. */
 function commandLine(args: string[]): string {
@@ -337,108 +344,92 @@ function renderRow(row: Row, labelWidth: number, session: Session | undefined, u
 		line.append(span);
 	}
 
-	if (row.name !== undefined) {
+	if (row.input === true) {
+		renderArgv(row, uri, line, redraw);
+	} else if (row.name !== undefined) {
 		renderMock(row, row.name, session, uri, line, redraw);
 	}
 
-	element.append(line);
+	element.append(line, ...row.input === true && making.has(`${uri}#process.argv`) ? [making.get(`${uri}#process.argv`)!] : []);
 }
 
-/** A row's Mock (LIVE-VALUES.md, "Mocking a value"): the checkbox; checked, the run's value struck through and a box for
- *  the mocked one — a variable's set at the stop, process.argv's run with (and, with Persist, kept as the file's stub;
- *  with Multiple, several cases). */
+/** process.argv's row: what a rule gives it, if one does (the run's own value struck through), and *Mock…*. */
+function renderArgv(row: Row, uri: string, line: HTMLElement, redraw: () => void): void {
+	const given = givenArgv.get(uri);
+	const key = `${uri}#process.argv`;
+	const tools = Object.assign(document.createElement("span"), { "className": "live-values-mock shown" });
+	// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+	const open = Object.assign(document.createElement("button"), { "className": "live-values-choice mock", "textContent": "Mock…", "title": "Give the program arguments of your own: once, or by a rule, every run" });
+
+	line.classList.toggle("mocking", given !== null && given !== undefined);
+	line.classList.add("argv");
+
+	if (given !== null && given !== undefined) {
+		tools.append(Object.assign(document.createElement("span"), {
+			"className": "live-values-given",
+			"textContent": given.values.map(commandLine).join("  ·  "),
+			"title": `Given by a rule in your policy${given.values.length > 1 ? `: ${given.values.length} runs, one after another` : ""}`
+		}));
+	}
+
+	open.disabled = making.has(key);
+	open.addEventListener("click", () => {
+		open.disabled = true;
+		void openMock(uri, row, () => { making.delete(key); redraw(); }).then((panel) => {
+			making.set(key, panel);
+			redraw();
+		}, (error: unknown) => {
+			open.disabled = false;
+			open.title = String(error);
+		});
+	});
+	tools.append(open);
+	line.append(tools);
+}
+
+/** A variable's Mock at a stop (LIVE-VALUES.md, "Mocking a value"): the checkbox; checked, the run's value struck
+ *  through and a box for the one to set — Enter sets it, and the run goes on with it. */
 function renderMock(row: Row, name: string, session: Session | undefined, uri: string, line: HTMLElement, redraw: () => void): void {
-	const argv = row.input === true;
-	const key = `${uri}#${argv ? "process.argv" : name}`;
-	const stub = argv ? stubbed.get(uri) : null;
-	const kept = mocks.get(key);
-	const mock: Mock = kept?.touched === true ? kept : stub !== null && stub !== undefined ? { "on": true, "persist": true, "multiple": stub.length > 1, "values": stub.map(commandLine) } : { "on": false, "persist": false, "multiple": false, "values": [row.inline?.text ?? row.cells.findLast((each) => each !== undefined)?.text ?? ""] };
-	const path = (): string => api?.Uri.parse(uri).path ?? "";
-	const check = (text: string, checked: boolean, title: string, toggled: (on: boolean) => void): HTMLLabelElement => {
-		const box = Object.assign(document.createElement("label"), { "className": "live-values-check", "title": title });
-		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-		const input = Object.assign(document.createElement("input"), { "type": "checkbox", "checked": checked });
-
-		input.addEventListener("change", () => { toggled(input.checked); });
-		box.append(input, text);
-
-		return box;
-	};
-	const cases = (): string[][] => (mock.multiple ? mock.values : mock.values.slice(0, 1)).map((text) => parseInputs(text)[0] ?? []);
-	const keep = (): void => { void stubsSet?.(path(), mock.persist ? cases() : null).then(() => { stubbed.set(uri, mock.persist ? cases() : null); }); };
-	const tools = Object.assign(document.createElement("span"), { "className": `live-values-mock${argv || mock.on ? " shown" : ""}` });
+	const key = `${uri}#${name}`;
+	const mock = mocks.get(key) ?? { "on": false, "value": row.inline?.text ?? row.cells.findLast((each) => each !== undefined)?.text ?? "" };
+	const tools = Object.assign(document.createElement("span"), { "className": `live-values-mock${mock.on ? " shown" : ""}` });
+	const box = Object.assign(document.createElement("label"), { "className": "live-values-check", "title": "Give it another value, at this stop" });
+	// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+	const check = Object.assign(document.createElement("input"), { "type": "checkbox", "checked": mock.on });
 
 	mocks.set(key, mock);
-	// Any change from here is the user's: the row stops following the stub.
-	tools.addEventListener("change", () => { mock.touched = true; }, { "capture": true });
-	tools.addEventListener("input", () => { mock.touched = true; }, { "capture": true });
-	tools.addEventListener("click", () => { mock.touched = true; }, { "capture": true });
 	line.classList.toggle("mocking", mock.on);
-	line.classList.toggle("argv", argv);
-	tools.append(check("Mock", mock.on, argv ? "Give the program other arguments" : "Give it another value, at this stop", (on) => {
-		mock.on = on;
-
-		// Unmocked: a kept stub goes.
-		if (!on && argv && mock.persist) {
-			mock.persist = false;
-			keep();
-		}
-
-		redraw();
-	}));
+	check.addEventListener("change", () => { mock.on = check.checked; redraw(); });
+	box.append(check, "Mock");
+	tools.append(box);
 
 	if (mock.on) {
-		const boxes = (mock.multiple ? mock.values : mock.values.slice(0, 1)).map((value, index) => {
-			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-			const input = Object.assign(document.createElement("input"), { "className": "live-values-input", "value": value, "spellcheck": false, "placeholder": argv ? "arguments, as a command line" : "a literal", "title": argv ? "The program's arguments, as you'd type them after `node file.js` — Enter runs it with them" : "A literal: 'text', 4, true, null, [1, 2], { a: 1 } — Enter sets it at the stop" });
+		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+		const input = Object.assign(document.createElement("input"), { "className": "live-values-input", "value": mock.value, "spellcheck": false, "placeholder": "a literal", "title": "A literal: 'text', 4, true, null, [1, 2], { a: 1 } — Enter sets it at the stop" });
 
-			input.addEventListener("input", () => { mock.values[index] = input.value; });
-			input.addEventListener("keydown", (event) => {
-				if (event.key !== "Enter") {
-					return;
-				}
-
-				mock.values[index] = input.value;
-
-				if (argv) {
-					// Kept, if Persist; and run with, either way.
-					if (mock.persist) {
-						keep();
-					}
-
-					void runFile?.(path(), cases()).catch((error: unknown) => { input.classList.add("refused"); input.title = String(error); });
-				} else if (session === undefined) {
-					input.classList.add("refused");
-					input.title = "Only at a stop: start the program with a breakpoint where you want to set it";
-				} else {
-					input.disabled = true;
-					void setValueAt?.(session.id, name, input.value).then(() => { mock.on = false; redraw(); }, (error: unknown) => {
-						input.disabled = false;
-						input.classList.add("refused");
-						input.title = error instanceof Error ? error.message : String(error);
-					});
-				}
-			});
-
-			return input;
-		});
-
-		tools.append(...boxes);
-
-		if (argv) {
-			if (mock.multiple) {
-				// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-				const add = Object.assign(document.createElement("button"), { "className": "live-values-step", "textContent": "+", "title": "Another case" });
-
-				add.addEventListener("click", () => { mock.values.push(""); redraw(); });
-				tools.append(add);
+		input.addEventListener("input", () => { mock.value = input.value; });
+		input.addEventListener("keydown", (event) => {
+			if (event.key !== "Enter") {
+				return;
 			}
 
-			tools.append(
-				check("Persist", mock.persist, "Keep it for every run of this file (.silo/<you>.stubs.json)", (on) => { mock.persist = on; keep(); }),
-				check("Multiple", mock.multiple, "Several cases, each its own run", (on) => { mock.multiple = on; if (mock.persist) { keep(); } redraw(); })
-			);
-		}
+			mock.value = input.value;
+
+			if (session === undefined) {
+				input.classList.add("refused");
+				input.title = "Only at a stop: start the program with a breakpoint where you want to set it";
+
+				return;
+			}
+
+			input.disabled = true;
+			void setValueAt?.(session.id, name, input.value).then(() => { mock.on = false; redraw(); }, (error: unknown) => {
+				input.disabled = false;
+				input.classList.add("refused");
+				input.title = error instanceof Error ? error.message : String(error);
+			});
+		});
+		tools.append(input);
 	}
 
 	line.append(tools);
@@ -461,8 +452,144 @@ function light(key: string, on: boolean): void {
 	}
 }
 
-/** A capability stop's question: the call and what it reaches, then the three choices. */
-function renderAsk(session: string, ask: CapabilityAsk, element: HTMLElement): void {
+/** The rule being made, by where — a capability stop's session, or `<uri>#process.argv` — its panel, kept as it is
+ *  across the margin's redraws. */
+const making = new Map<string, HTMLElement>();
+
+type PolicyModule = typeof import("@brianjenkins94/util/silo/policy");
+
+/** What a rule as edited would do here: said under it, and whether its buttons can act on it. */
+interface Verdict { "text": string; "ok": boolean; "refused"?: boolean }
+
+/** A button under a rule: what it does with the rule as edited (resolving once done — the panel's host closes it, or
+ *  its stop goes on and takes it away); `always`, enabled whatever the verdict. */
+interface PanelButton { "label": string; "className": string; "title": string; "act": (rule: EditedRule) => Promise<unknown>; "always"?: boolean }
+
+/** The rule editor in the margin (the component's, RULES.md), with silo's catalog: under it, what the rule as edited
+ *  would do here (`judge`), then its buttons. silo's policy (and ajv with it) loads on first use, not with the
+ *  workbench. */
+function rulePanel(policy: PolicyModule, rule: EditedRule, judge: (rule: EditedRule) => Verdict, actions: PanelButton[]): HTMLElement {
+	const panel = Object.assign(document.createElement("div"), { "className": "live-values-rule" });
+	const status = Object.assign(document.createElement("div"), { "className": "live-values-rule-status" });
+	const buttons = Object.assign(document.createElement("div"), { "className": "live-values-choices" });
+	const update = (edited: EditedRule): void => {
+		const verdict = judge(edited);
+
+		status.textContent = verdict.text;
+		status.classList.toggle("refused", verdict.refused === true);
+
+		for (const [index, each] of [...buttons.children].entries()) {
+			(each as HTMLButtonElement).disabled = actions[index]?.always !== true && !verdict.ok;
+		}
+	};
+	const editor = ruleEditor({
+		"catalog": { "targets": policy.TARGETS, "types": policy.TYPES, "operators": policy.OPERATORS, "actions": policy.ACTIONS, "argumentSchema": policy.argumentSchema, "actionSchema": policy.actionSchema },
+		"rule": rule,
+		"onChange": update
+	});
+
+	for (const { label, className, title, act } of actions) {
+		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+		const each = Object.assign(document.createElement("button"), { "className": `live-values-choice ${className}`, "textContent": label, "title": title });
+
+		each.addEventListener("click", () => {
+			for (const other of buttons.querySelectorAll("button")) {
+				other.disabled = true;
+			}
+
+			void act(editor.rule()).catch((error: unknown) => {
+				update(editor.rule());
+				status.textContent = error instanceof Error ? error.message : String(error);
+				status.classList.add("refused");
+			});
+		});
+		buttons.append(each);
+	}
+
+	panel.append(editor.element, status, buttons);
+	update(editor.rule());
+
+	return panel;
+}
+
+/** The first allow / deny / ask a rule has. */
+const decisionOf = (rule: EditedRule): string | undefined => rule.then.find(({ action_id }) => ["allow", "deny", "ask"].includes(action_id))?.action_id;
+
+/** The rule editor at a capability stop, prefilled with the call: whether the rule as edited covers this call and what
+ *  it decides, then *Just this once* (decide this call so), *Save as rule* (in my policy, and decide it so), *Cancel*. */
+async function openRule(session: string, ask: CapabilityAsk, close: () => void): Promise<HTMLElement> {
+	const policy = await import("@brianjenkins94/util/silo/policy");
+	const subject = ask.resolved ? { "capability": ask.capability, "resource": ask.resource } : { "capability": ask.capability };
+	const judge = (rule: EditedRule): Verdict => {
+		const problem = policy.problemOf(rule);
+		const covers = problem === undefined && policy.ruleMatches(rule, subject);
+		const decision = decisionOf(rule);
+
+		return {
+			"text": problem ?? (!covers
+				? `Doesn't cover this call${ask.resolved ? "" : " — what it reaches isn't known before the line runs"}`
+				: decision === "allow" ? "Covers this call: allows it" : decision === "deny" ? "Covers this call: denies it" : decision === "ask" ? "Covers this call, and asks — as now" : "Covers this call, but doesn't decide it"),
+			"ok": covers && (decision === "allow" || decision === "deny"),
+			"refused": problem !== undefined
+		};
+	};
+
+	return rulePanel(policy, {
+		"when": { "logicalType_id": "all", "predicates": [
+			{ "target_id": "capability", "operator_id": "is", "argument": ask.capability },
+			...ask.resolved ? [{ "target_id": "resource", "operator_id": "is", "argument": ask.resource }] : []
+		] },
+		"then": [{ "action_id": "allow" }]
+	}, judge, [
+		{ "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and stop here again next time", "act": async (rule) => choose?.(session, decisionOf(rule) === "deny" ? "deny" : "allow-once") },
+		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/<you>.policy.json), and decide this call by it", "act": async (rule) => choose?.(session, "rule", rule) },
+		{ "label": "Cancel", "className": "cancel", "title": "Back to the three choices", "act": async () => { close(); }, "always": true }
+	]);
+}
+
+/** The rule editor on process.argv's row: the rule giving it now, or one prefilled — *program is <this file>*, *then
+ *  give process.argv* the run's own arguments — then whether it covers this file and how many runs it gives, and *Run*
+ *  (with them, once), *Save as rule* (in my policy: every run of the file is given them), *Remove* (the rule giving it
+ *  now), *Cancel*. */
+async function openMock(uri: string, row: Row, close: () => void): Promise<HTMLElement> {
+	const policy = await import("@brianjenkins94/util/silo/policy");
+	const path = api?.Uri.parse(uri).path ?? "";
+	const program = api?.workspace.asRelativePath(api.Uri.parse(uri), false) ?? path;
+	const given = givenArgv.get(uri) ?? undefined;
+	const valuesOf = (rule: EditedRule): string[][] => {
+		const give = rule.then.find((action) => action.action_id === "give" && action.target_id === "process.argv");
+
+		return Array.isArray(give?.argument) ? (give.argument as unknown[]).filter((each): each is string[] => Array.isArray(each)) : [];
+	};
+	const judge = (rule: EditedRule): Verdict => {
+		const problem = policy.problemOf(rule);
+		const covers = problem === undefined && policy.ruleMatches(rule, { "program": program });
+		const runs = valuesOf(rule).length;
+
+		return {
+			"text": problem ?? (!covers ? `Doesn't cover ${program}` : runs === 0 ? "Gives process.argv nothing" : `Gives ${program} ${runs === 1 ? "these arguments" : `${runs} runs, one after another`}`),
+			"ok": covers && runs > 0,
+			"refused": problem !== undefined
+		};
+	};
+	const saved = async (): Promise<void> => {
+		givenArgv.set(uri, await rulesGiven?.(path) ?? null);
+		close();
+	};
+
+	return rulePanel(policy, given?.rule ?? {
+		"when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": program }] },
+		"then": [{ "action_id": "give", "target_id": "process.argv", "argument": [parseInputs(row.inline?.text ?? "")[0] ?? []] }]
+	}, judge, [
+		{ "label": "Run", "className": "once", "title": "Run the file with them, once — each a run of its own", "act": async (rule) => { void runFile?.(path, valuesOf(rule)); close(); } },
+		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/<you>.policy.json): every run of the file is given them", "act": async (rule) => { await rulesSet?.(given?.rule, rule); await saved(); } },
+		...given === undefined ? [] : [{ "label": "Remove", "className": "remove", "title": "Take the rule away: the file's runs get their own arguments again", "act": async () => { await rulesSet?.(given.rule, undefined); await saved(); }, "always": true }],
+		{ "label": "Cancel", "className": "cancel", "title": "Close it, changing nothing", "act": async () => { close(); }, "always": true }
+	]);
+}
+
+/** A capability stop's question: the call and what it reaches, then the three choices — or the rule being made. */
+function renderAsk(session: string, ask: CapabilityAsk, element: HTMLElement, redraw: () => void): void {
 	const box = document.createElement("div");
 	const what = document.createElement("div");
 	const callee = document.createElement("span");
@@ -504,7 +631,22 @@ function renderAsk(session: string, ask: CapabilityAsk, element: HTMLElement): v
 		button("Allow always", "allow-always", ask.resolved ? `Allow ${ask.capability} on ${ask.resource} in your policy (.silo/<you>.policy.json)` : "Needs the resource the call reaches, which isn't known before the line runs", ask.resolved),
 		button("Deny", "deny", "Fail this call, as the policy would")
 	);
-	box.append(what, choices);
+
+	// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+	const rule = Object.assign(document.createElement("button"), { "className": "live-values-choice rule", "textContent": "Rule…", "title": "Make a rule for calls like this one: which ones, and what to do" });
+
+	rule.addEventListener("click", () => {
+		rule.disabled = true;
+		void openRule(session, ask, () => { making.delete(session); redraw(); }).then((panel) => {
+			making.set(session, panel);
+			redraw();
+		}, (error: unknown) => {
+			rule.disabled = false;
+			box.append(Object.assign(document.createElement("div"), { "className": "live-values-ask-error", "textContent": String(error) }));
+		});
+	});
+	choices.append(rule);
+	box.append(what, making.get(session) ?? choices);
 	element.append(box);
 }
 
@@ -557,17 +699,17 @@ async function place(uri: string): Promise<void> {
 	const readsArgv = text !== undefined && /\bprocess\.argv\b/u.test(text);
 	const argvAt = !readsArgv || rows.some((row) => row.input === true) ? -1 : text.split("\n").findIndex((each) => /\bprocess\.argv\b/u.test(each));
 
-	// The file's stub, read once (then kept as it's set here), for process.argv's Mock — a run's row or this one.
-	if (readsArgv && !stubbed.has(uri)) {
-		stubbed.set(uri, null);
-		void stubsGet?.(api?.Uri.parse(uri).path ?? "").then((cases) => { stubbed.set(uri, cases); draw(uri); }, () => undefined);
+	// What a rule gives the file's process.argv, read once (then again as it's changed here), for its row.
+	if (readsArgv && !givenArgv.has(uri)) {
+		givenArgv.set(uri, null);
+		void rulesGiven?.(api?.Uri.parse(uri).path ?? "").then((given) => { givenArgv.set(uri, given); draw(uri); }, () => undefined);
 	}
 
 	if (drawing.get(uri) !== token) {
 		return; // a newer draw is placing
 	}
 
-	// (No value of its own: nothing ran. A stub's cases are in its Mock.)
+	// (No value of its own: nothing ran. What a rule gives it is beside it.)
 	if (argvAt !== -1) {
 		rows.push({ "line": argvAt, "label": "process.argv =", "name": "process.argv", "cells": [], "inline": { "text": "", "kind": "argv" }, "group": "0/0", "widths": [], "input": true });
 	}
@@ -607,7 +749,7 @@ async function place(uri: string): Promise<void> {
 
 	showPane(uri, entries, (entry, element) => {
 		if (entry.id === "ask") {
-			renderAsk(asked!.session, asked!.ask, element);
+			renderAsk(asked!.session, asked!.ask, element, () => { draw(uri); });
 
 			return undefined;
 		}
@@ -760,6 +902,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		}
 
 		if (typeof file === "string" && asks.get(uriOf(file))?.session === session) {
+			making.delete(session);
 			asks.delete(uriOf(file));
 			redraw(uriOf(file));
 		}
@@ -773,10 +916,10 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	// A capability stop's question, and its answer back: the session resumes on it.
 	const rpc = createRpcClient(hub);
 
-	choose = (session, choice) => rpc.request(`debug.session.${session}.decide`, { "choice": choice }, { "timeoutMs": 24 * 60 * 60_000 });
+	choose = (session, choice, rule) => rpc.request(`debug.session.${session}.decide`, { "choice": choice, ...rule === undefined ? {} : { "rule": rule } }, { "timeoutMs": 24 * 60 * 60_000 });
 	setValueAt = (session, name, value) => rpc.request(`debug.session.${session}.setValue`, { "name": name, "value": value }, { "timeoutMs": 30_000 });
-	stubsGet = async (path) => rpc.request("stubs.get", { "program": path }, { "timeoutMs": 10_000 }) as Promise<string[][] | null>;
-	stubsSet = async (path, cases) => rpc.request("stubs.set", { "program": path, "cases": cases }, { "timeoutMs": 10_000 });
+	rulesGiven = async (path) => rpc.request("rules.given", { "program": path, "target": "process.argv" }, { "timeoutMs": 10_000 }) as Promise<Given | null>;
+	rulesSet = async (previous, rule) => rpc.request("rules.set", { ...previous === undefined ? {} : { "previous": previous }, ...rule === undefined ? {} : { "rule": rule } }, { "timeoutMs": 10_000 });
 	// A run answers at its first stop, which can be a while: nobody waits on it here.
 	runFile = async (path, cases) => rpc.request("debug.start", { "program": path, "cases": cases }, { "timeoutMs": 24 * 60 * 60_000 });
 	hub.subscribe("capability.ask", (data) => {
@@ -787,6 +930,9 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		}
 
 		const uri = uriOf(file);
+
+		// A new stop, or none: the rule being made at the last one goes.
+		making.delete(session);
 
 		if (ask !== undefined) {
 			const ran = sessions.get(uri);

@@ -588,56 +588,57 @@ test("set a value: from the margin, at a stop, and the run goes on with it", asy
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
-// Mocking process.argv in the margin (LIVE-VALUES.md, "Mocking a value"): its row is there before any run; Mock, a command
-// line and Enter run the file with it, once; Persist keeps it as the file's stub (.silo/<you>.stubs.json), Multiple makes
-// it several cases — and a plain run (F5, debug.start without args) then goes through them, one session each.
-test("mock process.argv: once, kept, several cases, and F5 runs with it", async () => {
+// Mocking process.argv in the margin (RULES.md): its row is there before any run, with Mock… — the rule editor, prefilled
+// with the file and the run's arguments. Run runs it with them, once, keeping nothing; Save as rule keeps them in my
+// policy — two values, two runs — and a plain run is given them; Remove takes the rule away.
+test("mock process.argv: a rule giving it, once or kept, several runs, and a plain run given them", async () => {
 	const workbench = session.workbench();
 	const program = "/workspace/tax.js";
 	const runsOf = async () => (await session.request("runs.list", undefined, 5000)).filter((run) => run.title.includes("tax.js"));
+	const givenNow = () => session.request("rules.given", { "program": program, "target": "process.argv" }, 10_000);
 	const row = () => workbench.evaluate(() => {
 		const line = document.querySelector('.live-values-row[data-line="0"]');
 
-		return line === null ? undefined : { "label": line.querySelector(".live-values-label")?.textContent.trim(), "mocked": line.querySelector('.live-values-mock input[type="checkbox"]')?.checked };
+		return line === null ? undefined : { "label": line.querySelector(".live-values-label")?.textContent.trim(), "given": line.querySelector(".live-values-given")?.textContent ?? null };
 	});
-	const mock = (action) => workbench.evaluate((what) => {
-		const line = document.querySelector('.live-values-row[data-line="0"]');
-		const check = (name) => [...line.querySelectorAll(".live-values-check")].find((label) => label.textContent.trim() === name).querySelector("input");
-		const type = (index, text) => {
-			const input = line.querySelectorAll(".live-values-input")[index];
-
-			input.value = text;
-			input.dispatchEvent(new Event("input"));
-
-			return input;
-		};
+	// The Mock's panel: open it, read what it says, give process.argv these runs' command lines, press a button.
+	const mock = (action, argument) => workbench.evaluate(([what, value]) => {
+		const panel = document.querySelector(".live-values-rule");
+		const outer = () => panel.querySelector(".rule-editor-then .rule-editor-list.nested");
+		const runs = () => [...outer().children].filter((child) => child.classList.contains("rule-editor-list-item"));
 
 		switch (what) {
-			case "on":
-				check("Mock").click();
-				break;
-			case "once":
-				type(0, "CA SPRING10").dispatchEvent(new KeyboardEvent("keydown", { "key": "Enter" }));
-				break;
-			case "several, kept":
-				check("Multiple").click();
-				break;
-			case "add":
-				[...line.querySelectorAll(".live-values-step")].find((button) => button.textContent === "+").click();
-				break;
-			case "second":
-				type(1, "FR");
-				check("Persist").click();
-				break;
-			case "unmock":
-				check("Mock").click();
-				break;
+			case "open":
+				[...document.querySelectorAll('.live-values-row[data-line="0"] button')].find((button) => button.textContent === "Mock…").click();
+
+				return true;
+			case "status":
+				return panel?.querySelector(".live-values-rule-status")?.textContent;
+			case "give":
+				while (runs().length < value.length) {
+					[...outer().children].at(-1).click();
+				}
+
+				// Each run's arguments, as a command line.
+				for (const [index, line] of value.entries()) {
+					const input = runs()[index].querySelector("input");
+
+					input.value = line;
+					input.dispatchEvent(new Event("input"));
+				}
+
+				return panel.querySelector(".live-values-rule-status").textContent;
 			default:
-				break;
+				[...panel.querySelectorAll(".live-values-choices button")].find((button) => button.textContent === what).click();
+
+				return true;
 		}
-	}, action);
-	// The row redraws after a checkbox or + (asynchronously): wait for its boxes.
-	const boxes = (count) => eventually(`${count} box(es)`, () => workbench.evaluate((wanted) => document.querySelectorAll('.live-values-row[data-line="0"] .live-values-input').length >= wanted || undefined, count));
+	}, [action, argument]);
+	const opened = async () => {
+		await mock("open");
+
+		return eventually("the Mock's rule editor", () => mock("status"));
+	};
 
 	await workbench.evaluate(async () => {
 		const { api } = globalThis.__editor;
@@ -646,45 +647,53 @@ test("mock process.argv: once, kept, several cases, and F5 runs with it", async 
 		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["const [, , country = \"US\", coupon] = process.argv;", "const rates = { US: 0.07, CA: 0.13, FR: 0.2 };", "const rate = rates[country] ?? 0;", "", "console.log(country, rate, coupon ?? \"no coupon\");", ""].join("\n")));
 		await api.window.showTextDocument(uri);
 	});
-	await session.request("stubs.set", { "program": program, "cases": null }, 10_000);
 
-	// Before any run: its row, unmocked.
-	assert.deepEqual(await eventually("process.argv's row", row), { "label": "process.argv =", "mocked": false });
+	// No rule left from before.
+	const before = await givenNow();
 
-	// Once: Mock, a command line, Enter — a run with it, nothing kept.
-	const before = (await runsOf()).length;
+	if (before !== null) {
+		await session.request("rules.set", { "previous": before.rule }, 10_000);
+	}
 
-	await mock("on");
-	await boxes(1);
-	await mock("once");
-	await eventually("a run with the mocked arguments", async () => (await runsOf()).length > before || undefined);
-	assert.equal(await session.request("stubs.get", { "program": program }, 10_000), null, "a one-off keeps nothing");
+	// Before any run: its row, nothing given.
+	assert.deepEqual(await eventually("process.argv's row", row), { "label": "process.argv =", "given": null });
 
-	// Several cases, kept.
-	await mock("several, kept");
-	await eventually("Multiple's +", () => workbench.evaluate(() => [...document.querySelectorAll('.live-values-row[data-line="0"] .live-values-step')].some((button) => button.textContent === "+") || undefined));
-	await mock("add");
-	await boxes(2);
-	await mock("second");
-	assert.deepEqual(await eventually("the file's stub", async () => (await session.request("stubs.get", { "program": program }, 10_000)) ?? undefined), [["CA", "SPRING10"], ["FR"]]);
+	// Run: the file with them, once — nothing kept.
+	const ran = (await runsOf()).length;
 
-	// A plain run uses it: the first case answers, the second follows as its own session.
-	const ran = await session.request("debug.start", { "program": program }, 60_000);
+	assert.equal(await opened(), "Gives tax.js these arguments");
+	assert.equal(await mock("give", ["CA SPRING10"]), "Gives tax.js these arguments");
+	await mock("Run");
+	await eventually("a run with the mocked arguments", async () => (await runsOf()).length > ran || undefined);
+	assert.equal(await givenNow(), null, "a one-off keeps nothing");
 
-	assert.equal(ran.state, "terminated");
-	assert.deepEqual(ran.output, ["CA 0.13 SPRING10"]);
-	await eventually("the second case, run after it", async () => (await runsOf()).some((run) => run.title.includes("(case 2 of 2)")) || undefined);
+	// Save as rule, two runs' arguments: kept, and shown beside the row.
+	assert.ok(await opened());
+	assert.equal(await mock("give", ["CA SPRING10", "FR"]), "Gives tax.js 2 runs, one after another");
+	await mock("Save as rule");
+	assert.deepEqual(await eventually("the rule", async () => (await givenNow())?.values), [["CA", "SPRING10"], ["FR"]]);
+	assert.equal((await eventually("the row, given", async () => (await row())?.given ?? undefined)), "CA SPRING10  ·  FR");
 
-	// Unmocked: the stub goes.
-	await mock("unmock");
-	await eventually("no stub", async () => (await session.request("stubs.get", { "program": program }, 10_000)) === null || undefined);
+	// A plain run is given them: the first answers, the second follows as its own session.
+	const plain = await session.request("debug.start", { "program": program }, 60_000);
+
+	assert.equal(plain.state, "terminated");
+	assert.deepEqual(plain.output, ["CA 0.13 SPRING10"]);
+	await eventually("the second run, after it", async () => (await runsOf()).some((run) => run.title.includes("(case 2 of 2)")) || undefined);
+
+	// Remove: the rule goes.
+	assert.ok(await opened());
+	await mock("Remove");
+	await eventually("no rule", async () => (await givenNow()) === null || undefined);
+	assert.equal(await eventually("the row, given nothing", async () => ((await row())?.given === null ? true : undefined)), true);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
 // Capability decisions on the line (LIVE-VALUES.md, step 8): a call the policy hasn't decided stops the run at its line,
 // and asks there, in the notes margin — what it would do, from the run's own values, and Allow once / Allow always / Deny.
 // Deny fails the call as the policy would; Allow once lets it run; Allow always writes my policy override, and the next
-// run goes straight through.
+// run goes straight through. Rule… opens the rule editor there (RULES.md), prefilled with the call: widened to a glob and
+// saved, it decides the call, and the next run's.
 test("capability decisions: a gated call asks on its line, and the choice resumes the run", async () => {
 	const workbench = session.workbench();
 	const source = [
@@ -722,7 +731,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 
 		assert.equal(stopped.reason, "capability", "stopped by the policy, not a breakpoint");
 		assert.equal(stopped.line, 5);
-		assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow once", "Allow always", "Deny"] });
+		assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow once", "Allow always", "Deny", "Rule…"] });
 
 		return stopped;
 	};
@@ -760,6 +769,42 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 
 	assert.equal(again.state, "terminated", "allowed always: no stop");
 	assert.deepEqual(again.output, ["wrote /workspace/out.txt"]);
+
+	// A rule: Rule… — the call's capability and resource, then allow — the resource widened to a glob, and saved.
+	const status = () => workbench.evaluate(() => document.querySelector(".live-values-rule-status")?.textContent);
+	const saveable = () => workbench.evaluate(() => [...document.querySelectorAll(".live-values-rule button")].find((button) => button.textContent === "Save as rule")?.disabled === false);
+	const resourceRow = (change) => workbench.evaluate(([selector, value, event]) => {
+		const field = document.querySelectorAll(".live-values-rule .rule-editor-group.top > .rule-editor-rows > .rule-editor-row")[1].querySelector(selector);
+
+		field.value = value;
+		field.dispatchEvent(new Event(event));
+	}, change);
+
+	// The store drops its cached grant when its file watcher reports the delete: until then a run still goes through.
+	await silo("clear");
+	await eventually("a run the policy stops again", async () => {
+		const run = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, 60_000);
+
+		return run.reason === "capability" || undefined;
+	});
+	assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow once", "Allow always", "Deny", "Rule…"] });
+	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-ask button")].find((button) => button.textContent === "Rule…").click(); });
+	assert.equal(await eventually("the rule editor, prefilled", status), "Covers this call: allows it");
+	await resourceRow([".rule-editor-operator select", "matches", "change"]);
+	await resourceRow([".rule-editor-argument", "/tmp/*", "input"]);
+	assert.equal(await status(), "Doesn't cover this call");
+	assert.equal(await saveable(), false, "a rule that doesn't cover the call can't decide it");
+	await resourceRow([".rule-editor-argument", "/workspace/*.txt", "input"]);
+	assert.equal(await status(), "Covers this call: allows it");
+	assert.equal(await saveable(), true);
+	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-rule button")].find((button) => button.textContent === "Save as rule").click(); });
+	await eventually("the question answered", async () => (await asked()) === undefined || undefined);
+	assert.deepEqual((await silo("read")).flatMap((policy) => policy.rules.map(({ when, then }) => ({ when, then }))), [{ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "fs:write" }, { "target_id": "resource", "operator_id": "matches", "argument": "/workspace/*.txt" }] }, "then": [{ "action_id": "allow" }] }]);
+
+	const ruled = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, 60_000);
+
+	assert.equal(ruled.state, "terminated", "the rule allows it: no stop");
+	assert.deepEqual(ruled.output, ["wrote /workspace/out.txt"]);
 
 	// As the next tests expect it: no override, and the Explorer back where a stop put Run and Debug.
 	await silo("clear");

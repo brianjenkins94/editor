@@ -233,25 +233,28 @@ different `process.argv`s — and a launch without `args` already took the first
 stops at breakpoints; the editor's ▷ is that too (*Run and Debug File*), the top bar's ▷ offers this file first, then
 the project's scripts and tasks. *Run with Inputs* goes.
 
-**The control, in a value's row:** a small **Mock** checkbox — nothing more until it's checked, so a row doesn't grow
-controls nobody asked for. Checked, the value the run had is struck through and an input box takes the mocked value,
-with two more checkboxes:
+**`process.argv`'s row: *Mock…*, the rule editor** (RULES.md — superseding the Mock / Persist / Multiple checkboxes
+first built here). Its row is on the first line that reads it, shown before any run, so the inputs can be written
+first. *Mock…* opens the rule editor under it, prefilled *program is <this file>*, *then give process.argv* the run's
+own arguments — each run's as a command line, *+* for another run (what Multiple was: each its own session, so runtime
+evidence comes from all of them, what Run with Inputs was for). Under it, what it gives (*Gives tax.js 2 runs, one after
+another*), then **Run** (with them, once — a one-off, nothing kept), **Save as rule** (kept in my policy: every run of
+the file is given them, and the row shows them beside the run's own value, struck through), **Remove** (when a rule
+gives it now), **Cancel**. The rule's *when* is a rule's like any other: *program matches* `scripts/*.js` gives a
+whole folder the same arguments.
 
-- **Persist** — unchecked, a one-off: at a stop, the value is set now and the run goes on with it (what Set Value did);
-  for `process.argv`, the file runs once with it. Checked, it's kept as a **stub**, used by every run until unchecked.
-- **Multiple** — more than one value, each a test case: a run goes through them in turn, each its own session (so
-  runtime evidence, and what it suggests could go, comes from all of them — what Run with Inputs was for).
+**A variable's row:** a small **Mock** checkbox, on hover — checked, the value the run had is struck through and a box
+takes one to set at the stop now, the run going on with it (what Set Value did). One-off only, for now: a rule setting
+a variable needs a *when* for "this line, in this run", anchored as everything on a line is.
 
-**The seams, in two slices.** Slice 1 is `process.argv`: program-wide, keyed by the entry file, its row on the first
-line that reads it — shown before any run, so the inputs can be written first. Slice 2 is a capability call's result
-(`fetch`, `readFile`, …): keyed by the call's span, the *record-at-seams* corpus (silo's design/fail-loud.md: what each
-call actually returned, serving live-mocking, characterization, the registry and invariant inference) and a `mock`
-disposition beside *allow* and *deny* (lib: util/silo/policy.ts, published before the editor uses it). A variable's
-value mocks one-off only, for now.
+**The seams, in two slices.** Slice 1 is `process.argv` (above). Slice 2 is a capability call's result (`fetch`,
+`readFile`, …): *give* its result, by a rule whose *when* is the call (*capability is net*, *resource matches* …) — the
+*record-at-seams* corpus (silo's design/fail-loud.md: what each call actually returned, serving live-mocking,
+characterization, the registry and invariant inference) recorded beside it.
 
-**Where stubs are kept:** what you write — `process.argv`'s cases, a hand-typed result — in `.silo/<you>.stubs.json`,
-committed like the policy overrides, so a repo's inputs travel with it; a value recorded from a real run (a real fetch
-response can hold secrets) in `.silo/local/`.
+**Where they're kept:** in the policy files, as rules — mine in `.silo/<you>.policy.json`, committed, so a repo's inputs
+travel with it; a value recorded from a real run (a real fetch response can hold secrets) in `.silo/local/`, referred
+to by the rule.
 
 ## Open
 

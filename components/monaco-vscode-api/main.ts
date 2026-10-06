@@ -652,4 +652,6 @@ export type { LiveValuesRow, LiveValuesView } from "./live-values";
 export { editorsShowing, showLiveValues } from "./live-values";
 export type { PaneEntry, PaneMark, PaneRender } from "./pane";
 export { renderMarkdown, showPane } from "./pane";
+export type { EditedRule, RuleAction, RuleCatalog, RuleComparison, RuleCompound, RuleEditor, RuleEditorOptions, RulePredicate, RuleSchema } from "./rule-editor";
+export { ruleEditor, schemaInput } from "./rule-editor";
 export { closeHostedEditor, openHostedEditor, registerHostedEditors } from "./hosted-editor";

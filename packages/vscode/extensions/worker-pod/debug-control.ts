@@ -5,11 +5,13 @@
  *   pod     `debug.sessions`                       → every live session's summary
  *   pod     `debug.start` { program?, breakpoints?, args? } → starts a session and answers with its first stop
  *   pod     `debug.breakpoints` { program?, lines }  → replaces a file's breakpoints (VS Code's own, so the UI shows them)
- *   pod     `stubs.get` { program? } / `stubs.set` { program?, cases } → a file's process.argv stub (null: none)
+ *   pod     `rules.given` { program?, target } → what a rule gives the file's `target` (process.argv): { rule, values } | null
+ *   pod     `rules.set` { previous?, rule? } → my policy changed by a rule editor: previous replaced by rule (or added, or removed)
  *   session `debug.session.<id>.step` { action }   → resumes, and answers with the NEXT stop (or the end)
  *   session `debug.session.<id>.state`             → where it is now
  *   session `debug.session.<id>.stop`              → ends it
- *   session `debug.session.<id>.decide` { choice } → at a capability stop: allow-once / allow-always / deny, then resumes
+ *   session `debug.session.<id>.decide` { choice, rule? } → at a capability stop: allow-once / allow-always / deny, or
+ *                                                     rule (saved in my policy, deciding it), then resumes
  *   session `debug.session.<id>.setValue` { name, value } → at a stop: a variable set to a literal; the run goes on with it
  *
  * The session methods are served by the ADAPTER (debug-adapter.ts), not the worker: a breakpoint inside a React handler
@@ -19,14 +21,15 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { serve } from "@brianjenkins94/hub";
+import { given, type Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 
 import type { CapabilityChoice, StepAction } from "./debug-protocol";
-import { loadStubs, persistStub } from "../capabilities/silo-store";
+import { loadEffectivePolicy, replaceRule } from "../capabilities/silo-store";
 
 export type DebugAction = StepAction;
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
-const CHOICES = new Set<string>(["allow-once", "allow-always", "deny"] satisfies CapabilityChoice[]);
+const CHOICES = new Set<string>(["allow-once", "allow-always", "deny", "rule"] satisfies CapabilityChoice[]);
 
 /** `starting` until the first stop; `idle` = a React app mounted and waiting for events (no stop to step from). */
 export type DebugState = "starting" | "running" | "stopped" | "idle" | "terminated";
@@ -61,7 +64,7 @@ export interface ControllableSession {
 	"settled": (signal: AbortSignal) => Promise<DebugOutcome>;
 	"stop": () => Promise<DebugOutcome>;
 	/** At a capability stop, decide it and resume; resolve on the next stop, idle or end. */
-	"decide": (choice: CapabilityChoice, signal: AbortSignal) => Promise<DebugOutcome>;
+	"decide": (choice: CapabilityChoice, signal: AbortSignal, rule?: Rule) => Promise<DebugOutcome>;
 	/** At a stop, set a variable in scope to a literal; resolve with it as the Variables view shows it. */
 	"setValue": (name: string, value: string) => Promise<string>;
 }
@@ -86,13 +89,13 @@ export function registerSession(hub: Hub, session: ControllableSession): () => v
 		serve(hub, prefix + "state", () => session.outcome()),
 		serve(hub, prefix + "stop", () => session.stop()),
 		serve(hub, prefix + "decide", (args, { signal }) => {
-			const choice = (args as { "choice"?: string } | undefined)?.choice ?? "";
+			const { choice = "", rule } = (args ?? {}) as { "choice"?: string; "rule"?: Rule };
 
 			if (!CHOICES.has(choice)) {
 				throw new Error(`unknown choice "${choice}" — one of ${[...CHOICES].join(", ")}`);
 			}
 
-			return session.decide(choice as CapabilityChoice, signal);
+			return session.decide(choice as CapabilityChoice, signal, rule);
 		}),
 		serve(hub, prefix + "setValue", (args) => {
 			const { name, value } = (args ?? {}) as { "name"?: unknown; "value"?: unknown };
@@ -159,19 +162,20 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 
 			return { "program": path, "lines": lines ?? [] };
 		}) },
-		// A file's process.argv stub, for the notes margin's Mock (LIVE-VALUES.md): its cases, or null.
-		{ "dispose": serve(hub, "stubs.get", async (args) => {
-			const path = resolveProgram((args as { "program"?: string } | undefined)?.program);
-
-			return (await loadStubs()).find((stub) => stub.seam === "argv" && stub.file === vscode.workspace.asRelativePath(vscode.Uri.file(path), false))?.cases ?? null;
-		}) },
-		{ "dispose": serve(hub, "stubs.set", async (args) => {
-			const { program, cases } = (args ?? {}) as { "program"?: string; "cases"?: string[][] | null };
+		// What a rule gives a file's process.argv, for the notes margin's Mock (RULES.md) — matched here, where the policy
+		// is, so the workbench loads no policy engine to draw a row.
+		{ "dispose": serve(hub, "rules.given", async (args) => {
+			const { program, target } = (args ?? {}) as { "program"?: string; "target"?: string };
 			const path = resolveProgram(program);
 
-			await persistStub("argv", vscode.workspace.asRelativePath(vscode.Uri.file(path), false), cases ?? undefined);
+			return given(await loadEffectivePolicy(), { "program": vscode.workspace.asRelativePath(vscode.Uri.file(path), false) }, target ?? "process.argv") ?? null;
+		}) },
+		{ "dispose": serve(hub, "rules.set", async (args) => {
+			const { previous, rule } = (args ?? {}) as { "previous"?: Rule; "rule"?: Rule };
 
-			return cases ?? null;
+			await replaceRule(previous, rule);
+
+			return rule ?? null;
 		}) },
 		{ "dispose": serve(hub, "debug.start", async (args, { signal }) => {
 			const { program, breakpoints, "args": inputs, cases } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[]; "args"?: string[]; "cases"?: string[][] };

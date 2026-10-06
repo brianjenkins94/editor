@@ -126,12 +126,14 @@
 
 .live-values-choices {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 4px;
 }
 
 .live-values-choice {
   padding: 1px 8px;
+  white-space: nowrap;
   border: 1px solid var(--vscode-button-border, transparent);
   border-radius: 2px;
   background: var(--vscode-button-secondaryBackground);
@@ -154,6 +156,31 @@
 .live-values-choice.chosen {
   opacity: 1;
   outline: 1px solid var(--vscode-focusBorder);
+}
+
+/* The rule being made at a capability stop (live-values.ts, the component's rule editor): its rows, whether it covers
+   the call, then its buttons. */
+.live-values-rule {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: 3px;
+  background: var(--vscode-editorWidget-background);
+}
+
+.live-values-rule-status {
+  margin-top: 6px;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-font-family);
+}
+
+.live-values-rule-status.refused {
+  color: var(--vscode-errorForeground);
+}
+
+.live-values-choice.save {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
 }
 
 .live-values-ask-error {
@@ -249,12 +276,13 @@
   font-weight: bold;
 }
 
-/* Mocking a value (live-values.ts): the Mock checkbox — process.argv's always there, a variable's on its row's hover or
-   at the cursor, so rows don't grow controls nobody asked for — and, checked, the run's value struck through, a box for
-   the mocked one, and process.argv's Persist and Multiple. */
+/* Mocking a value (live-values.ts): a variable's Mock checkbox, on its row's hover or at the cursor, so rows don't grow
+   controls nobody asked for — and, checked, the run's value struck through and a box for the one to set; process.argv's
+   Mock… always there, beside what a rule gives it. */
 .live-values-mock {
   display: inline-flex;
   flex-wrap: wrap;
+  align-self: center;
   align-items: center;
   gap: 4px;
   margin-left: 1ch;
@@ -290,9 +318,16 @@
   opacity: 0.6;
 }
 
-/* process.argv mocked: what a run had is the mock itself (nothing else to strike out), so it's left to the boxes. */
-.live-values-row.mocking.argv .live-values-cell {
-  display: none;
+/* What a rule gives process.argv, in the code's type: each run's arguments, as a command line. */
+.live-values-given {
+  font-family: var(--notes-margin-code-font-family, monospace);
+  font-size: var(--notes-margin-code-font-size, 12px);
+  color: var(--vscode-editor-foreground);
+}
+
+.live-values-choice.mock {
+  padding: 0 6px;
+  font-size: inherit;
 }
 
 .live-values-input {
