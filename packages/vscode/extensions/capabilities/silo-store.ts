@@ -151,6 +151,26 @@ export async function loadEffectivePolicy(): Promise<Policy> {
 	return { "version": base.version, "rules": [...override.rules, ...base.rules] };
 }
 
+/** The policy files, apart: mine (`.silo/<user>.policy.json`) and the shared contract (`.silo/policy.json`), each with
+ *  its workspace-relative path — for a view listing every rule. With no workspace, none. */
+export async function loadPolicyFiles(): Promise<{ "mine": { "file": string; "rules": Rule[] }; "shared": { "file": string; "rules": Rule[] } } | undefined> {
+	const root = siloRoot();
+
+	if (root === undefined) {
+		return undefined;
+	}
+
+	ensurePolicyWatcher();
+
+	const user = await currentUser();
+	const relative = (name: string): string => vscode.workspace.asRelativePath(vscode.Uri.joinPath(root, name), false);
+
+	return {
+		"mine": { "file": relative(`${user}.policy.json`), "rules": (await loadOverride(root, user)).rules },
+		"shared": { "file": relative("policy.json"), "rules": (await loadBase(root)).rules }
+	};
+}
+
 /** Persist a user decision to `<user>.policy.json` (NEVER policy.json — silo doesn't author the contract),
  *  stamping `added` on a first-time grant and preserving it across later flips. */
 export async function persistOverride(capability: string, resource: string, disposition: Disposition): Promise<void> {

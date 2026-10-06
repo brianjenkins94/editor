@@ -227,6 +227,41 @@ export function schemaInput(schema: RuleSchema | undefined, value: unknown, chan
 	return input;
 }
 
+/** A value as a sentence says it: a command line as typed, a list's items, a string as is. */
+function sayValue(schema: RuleSchema | undefined, value: unknown): string {
+	const object = typeof schema === "object" ? schema : {};
+
+	if (Array.isArray(value)) {
+		return object["format"] === "command-line" ? joinCommandLine(value) : value.map((each) => sayValue(object["items"] as RuleSchema | undefined, each)).join(object["items"] !== undefined && typeof object["items"] === "object" && (object["items"] as Record<string, unknown>)["type"] === "array" ? " · " : ", ");
+	}
+
+	return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/** A rule as a sentence, in the catalog's words: "capability is fs:write and resource matches /workspace/** → allow". */
+export function describeRule(rule: EditedRule, catalog: RuleCatalog): string {
+	const say = (predicate: RulePredicate, nested: boolean): string => {
+		if (!isCompound(predicate)) {
+			const schema = catalog.argumentSchema(predicate.target_id, predicate.operator_id);
+
+			return [catalog.targets[predicate.target_id]?.label ?? predicate.target_id, catalog.operators[predicate.operator_id]?.label ?? predicate.operator_id, ...schema === undefined ? [] : [sayValue(schema, predicate.argument)]].join(" ");
+		}
+
+		const parts = predicate.predicates.map((each) => say(each, true));
+		const joined = parts.join(predicate.logicalType_id === "any" ? " or " : " and ");
+		const said = predicate.logicalType_id === "none" ? `not (${parts.join(" or ")})` : joined;
+
+		return parts.length === 0 ? (predicate.logicalType_id === "any" ? "never" : "always") : nested && parts.length > 1 && predicate.logicalType_id !== "none" ? `(${said})` : said;
+	};
+	const actions = rule.then.map((action) => {
+		const schema = catalog.actionSchema(action.action_id, action.target_id);
+
+		return [catalog.actions[action.action_id]?.label ?? action.action_id, ...action.target_id === undefined ? [] : [catalog.targets[action.target_id]?.label ?? action.target_id], ...schema === undefined ? [] : [sayValue(schema, action.argument)]].join(" ");
+	});
+
+	return `${say(rule.when, false)} → ${actions.join(", then ")}`;
+}
+
 /** Edit a rule. */
 export function ruleEditor({ catalog, rule, onChange }: RuleEditorOptions): RuleEditor {
 	if (!styled) {

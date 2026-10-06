@@ -67,7 +67,10 @@ rule*) — the same two buttons wherever the editor opens.
   Awesome and no React but in islands): rows of selects and argument inputs, *all/any/none*, *−* and *+* (⌥: a group),
   and an actions list. It knows no targets: its host passes the catalog, and each argument's input is drawn from its
   schema.
-- **Two places it opens**: a **Rules** view listing every rule (replacing the Capability calls panel's editing), and
+- **Two places it opens**: a **Rules** view listing every rule (rules-view.ts, in the Explorer: mine, then the shared
+  contract's, each a sentence in the catalog's words, in the order they're matched; a click opens it in the same panel
+  — *Save*, *Remove* for mine, a shared rule's edit saved as mine ahead of it; *New Rule* in its title; collapsed until
+  opened, so silo's policy loads then; it and the margin redraw as the policy files change), and
   **inline in the margin**, anchored to a line, prefilled from what's there — a capability stop opens it with the
   call's capability and resource and *allow* chosen; a value's row with its target and *give*. The margin keeps entry
   points (one small control on a row), not forms. First: *Rule…* at a capability stop, beside the three buttons, with

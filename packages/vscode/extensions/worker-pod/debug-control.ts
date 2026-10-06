@@ -7,6 +7,7 @@
  *   pod     `debug.breakpoints` { program?, lines }  → replaces a file's breakpoints (VS Code's own, so the UI shows them)
  *   pod     `rules.given` { program?, target } → what a rule gives the file's `target` (process.argv): { rule, values } | null
  *   pod     `rules.set` { previous?, rule? } → my policy changed by a rule editor: previous replaced by rule (or added, or removed)
+ *   pod     `rules.list`                       → every rule, apart: { mine: { file, rules }, shared: { file, rules } } | null
  *   session `debug.session.<id>.step` { action }   → resumes, and answers with the NEXT stop (or the end)
  *   session `debug.session.<id>.state`             → where it is now
  *   session `debug.session.<id>.stop`              → ends it
@@ -25,7 +26,7 @@ import { given, type Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 
 import type { CapabilityChoice, StepAction } from "./debug-protocol";
-import { loadEffectivePolicy, replaceRule } from "../capabilities/silo-store";
+import { loadEffectivePolicy, loadPolicyFiles, replaceRule } from "../capabilities/silo-store";
 
 export type DebugAction = StepAction;
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
@@ -170,6 +171,8 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 
 			return given(await loadEffectivePolicy(), { "program": vscode.workspace.asRelativePath(vscode.Uri.file(path), false) }, target ?? "process.argv") ?? null;
 		}) },
+		// Every rule, for the Rules view (rules-view.ts): mine, then the shared contract's.
+		{ "dispose": serve(hub, "rules.list", async () => await loadPolicyFiles() ?? null) },
 		{ "dispose": serve(hub, "rules.set", async (args) => {
 			const { previous, rule } = (args ?? {}) as { "previous"?: Rule; "rule"?: Rule };
 

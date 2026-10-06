@@ -1,0 +1,90 @@
+/* The Rules view (rules-view.ts): each policy file's rules as lines, in VS Code's list look; the rule editor's panel
+   (live-values.css's .live-values-rule) under the one open. */
+
+/* Each level min-width: 0, so a narrow sidebar wraps the view rather than scrolling it sideways. */
+.rules-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 4px 0 8px;
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-foreground);
+}
+
+.rules-view-section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rules-view-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 20px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.rules-view-file {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: normal;
+  text-transform: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
+}
+
+.rules-view-rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 20px;
+  line-height: 18px;
+  cursor: pointer;
+  outline-offset: -1px;
+}
+
+.rules-view-rule:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.rules-view-rule:focus-visible {
+  outline: 1px solid var(--vscode-list-focusOutline, var(--vscode-focusBorder));
+}
+
+.rules-view-rule.open {
+  background: var(--vscode-list-inactiveSelectionBackground);
+}
+
+.rules-view-rule .codicon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--vscode-icon-foreground);
+}
+
+.rules-view-rule.broken .codicon {
+  color: var(--vscode-errorForeground);
+}
+
+.rules-view-sentence {
+  overflow-wrap: anywhere;
+}
+
+.rules-view-rule.broken .rules-view-sentence {
+  color: var(--vscode-errorForeground);
+}
+
+.rules-view-empty {
+  padding: 2px 20px;
+  color: var(--vscode-descriptionForeground);
+}
+
+/* The rule editor, under its line. */
+.rules-view .live-values-rule {
+  min-width: 0;
+  margin: 2px 12px 6px 20px;
+}

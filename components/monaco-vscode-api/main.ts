@@ -635,7 +635,7 @@ export type {
 // sidebar / panel / auxiliary bar (ViewContainerLocation) — real DOM, not a sandboxed webview iframe, so it
 // composites everywhere. (silo's review burndown; mirrors the @codingame demo's customView feature.)
 // From the modules both layouts share (each layout's override re-exports these), so importing them loads neither.
-export { registerCustomView } from "@codingame/monaco-vscode-api/service-override/tools/views";
+export { registerCustomView, viewContainerRegistry } from "@codingame/monaco-vscode-api/service-override/tools/views";
 export { ViewContainerLocation } from "@codingame/monaco-vscode-api/vscode/vs/workbench/common/views";
 
 // The live architecture diagram: probes for the channels monaco-vscode-api opens (workers, extension host RPC,
@@ -653,5 +653,5 @@ export { editorsShowing, showLiveValues } from "./live-values";
 export type { PaneEntry, PaneMark, PaneRender } from "./pane";
 export { renderMarkdown, showPane } from "./pane";
 export type { EditedRule, RuleAction, RuleCatalog, RuleComparison, RuleCompound, RuleEditor, RuleEditorOptions, RulePredicate, RuleSchema } from "./rule-editor";
-export { ruleEditor, schemaInput } from "./rule-editor";
+export { describeRule, ruleEditor, schemaInput } from "./rule-editor";
 export { closeHostedEditor, openHostedEditor, registerHostedEditors } from "./hosted-editor";

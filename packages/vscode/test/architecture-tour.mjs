@@ -811,6 +811,30 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
+// The Rules view (rules-view.ts): every rule as a sentence, mine first; a rule saved anywhere shows up in it, and one
+// opened there can be removed.
+test("rules view: every rule as a sentence, opened and removed there", async () => {
+	const workbench = session.workbench();
+	const rule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "fs:write" }, { "target_id": "resource", "operator_id": "matches", "argument": "/workspace/*.txt" }] }, "then": [{ "action_id": "allow" }] };
+	const lines = () => workbench.evaluate(() => {
+		const view = document.querySelector(".rules-view");
+
+		return view === null ? undefined : [...view.querySelectorAll(".rules-view-sentence")].map((each) => each.textContent);
+	});
+
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("silo.rules.focus"));
+	await session.request("rules.set", { "rule": rule }, 10_000);
+	assert.deepEqual(await eventually("the rule, listed", async () => ((await lines())?.length === 1 ? lines() : undefined)), ["capability is fs:write and resource matches /workspace/*.txt → allow"]);
+
+	// Opened: the rule editor under it, with Remove.
+	await workbench.evaluate(() => { document.querySelector(".rules-view-rule").click(); });
+	await eventually("its editor", () => workbench.evaluate(() => [...document.querySelectorAll(".rules-view .live-values-rule button")].some((button) => button.textContent === "Remove") || undefined));
+	await workbench.evaluate(() => { [...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Remove").click(); });
+	assert.deepEqual(await eventually("no rules", async () => ((await lines())?.length === 0 ? lines() : undefined)), []);
+	assert.deepEqual((await session.request("rules.list", undefined, 10_000)).mine.rules, []);
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
+});
+
 // How the last run ended short, in the margin's strip: a ✕ on the line it crashed on (the error on hover) — through a
 // reformat too, anchored by the throw's span — gone when it runs again and finishes.
 test("run ends: a crash is marked on the line it threw on, and stays on it through a reformat", async () => {

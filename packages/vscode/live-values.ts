@@ -37,7 +37,7 @@
  */
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
-import type { EditedRule, PaneEntry, PaneMark } from "@brianjenkins94/monaco-vscode-api/main";
+import type { EditedRule, PaneEntry, PaneMark, RuleCatalog } from "@brianjenkins94/monaco-vscode-api/main";
 import type { CapabilityAsk, CapabilityChoice, RunEnd } from "./extensions/worker-pod/debug-protocol";
 import type { LiveBatch, LiveCall, LiveValue } from "./extensions/worker-pod/live-values";
 import type { Range } from "./anchors";
@@ -103,6 +103,13 @@ let runFile: ((path: string, cases: string[][]) => Promise<unknown>) | undefined
 const mocks = new Map<string, Mock>();
 /** What a rule gives each file's process.argv, as last read (null: nothing; undefined: not read yet). */
 const givenArgv = new Map<string, Given | null>();
+/** Who's told when the policy files change (the Rules view), besides the margin. */
+const rulesChanged = new Set<() => void>();
+
+/** Be told when the policy files change — by a rule editor anywhere, or by hand. */
+export function onRulesChanged(listener: () => void): void {
+	rulesChanged.add(listener);
+}
 
 /** Arguments as a command line, as the Mock box takes them. */
 function commandLine(args: string[]): string {
@@ -456,19 +463,22 @@ function light(key: string, on: boolean): void {
  *  across the margin's redraws. */
 const making = new Map<string, HTMLElement>();
 
-type PolicyModule = typeof import("@brianjenkins94/util/silo/policy");
+export type PolicyModule = typeof import("@brianjenkins94/util/silo/policy");
 
 /** What a rule as edited would do here: said under it, and whether its buttons can act on it. */
-interface Verdict { "text": string; "ok": boolean; "refused"?: boolean }
+export interface Verdict { "text": string; "ok": boolean; "refused"?: boolean }
+
+/** silo's catalog, as the rule editor takes it. */
+export const catalogOf = (policy: PolicyModule): RuleCatalog => ({ "targets": policy.TARGETS, "types": policy.TYPES, "operators": policy.OPERATORS, "actions": policy.ACTIONS, "argumentSchema": policy.argumentSchema, "actionSchema": policy.actionSchema });
 
 /** A button under a rule: what it does with the rule as edited (resolving once done — the panel's host closes it, or
  *  its stop goes on and takes it away); `always`, enabled whatever the verdict. */
-interface PanelButton { "label": string; "className": string; "title": string; "act": (rule: EditedRule) => Promise<unknown>; "always"?: boolean }
+export interface PanelButton { "label": string; "className": string; "title": string; "act": (rule: EditedRule) => Promise<unknown>; "always"?: boolean }
 
-/** The rule editor in the margin (the component's, RULES.md), with silo's catalog: under it, what the rule as edited
- *  would do here (`judge`), then its buttons. silo's policy (and ajv with it) loads on first use, not with the
- *  workbench. */
-function rulePanel(policy: PolicyModule, rule: EditedRule, judge: (rule: EditedRule) => Verdict, actions: PanelButton[]): HTMLElement {
+/** The rule editor (the component's, RULES.md), with silo's catalog — in the margin, and in the Rules view: under it,
+ *  what the rule as edited would do here (`judge`), then its buttons. silo's policy (and ajv with it) loads on first
+ *  use, not with the workbench. */
+export function rulePanel(policy: PolicyModule, rule: EditedRule, judge: (rule: EditedRule) => Verdict, actions: PanelButton[]): HTMLElement {
 	const panel = Object.assign(document.createElement("div"), { "className": "live-values-rule" });
 	const status = Object.assign(document.createElement("div"), { "className": "live-values-rule-status" });
 	const buttons = Object.assign(document.createElement("div"), { "className": "live-values-choices" });
@@ -483,7 +493,7 @@ function rulePanel(policy: PolicyModule, rule: EditedRule, judge: (rule: EditedR
 		}
 	};
 	const editor = ruleEditor({
-		"catalog": { "targets": policy.TARGETS, "types": policy.TYPES, "operators": policy.OPERATORS, "actions": policy.ACTIONS, "argumentSchema": policy.argumentSchema, "actionSchema": policy.actionSchema },
+		"catalog": catalogOf(policy),
 		"rule": rule,
 		"onChange": update
 	});
@@ -652,6 +662,14 @@ function renderAsk(session: string, ask: CapabilityAsk, element: HTMLElement, re
 
 let styled = false;
 
+/** live-values.css in the page, once — the margin's, and the rule panel's wherever it's shown. */
+export function ensureStyled(): void {
+	if (!styled) {
+		styled = true;
+		document.head.append(Object.assign(document.createElement("style"), { "textContent": css }));
+	}
+}
+
 /** Show a file's values and notes in its margin, or take the margin away when it has neither. */
 function draw(uri: string): void {
 	void place(uri);
@@ -679,10 +697,7 @@ async function place(uri: string): Promise<void> {
 
 	drawing.set(uri, token);
 
-	if (!styled) {
-		styled = true;
-		document.head.append(Object.assign(document.createElement("style"), { "textContent": css }));
-	}
+	ensureStyled();
 
 	const session = sessions.get(uri);
 	const prose = notes.get(uri) ?? [];
@@ -922,6 +937,28 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	rulesSet = async (previous, rule) => rpc.request("rules.set", { ...previous === undefined ? {} : { "previous": previous }, ...rule === undefined ? {} : { "rule": rule } }, { "timeoutMs": 10_000 });
 	// A run answers at its first stop, which can be a while: nobody waits on it here.
 	runFile = async (path, cases) => rpc.request("debug.start", { "program": path, "cases": cases }, { "timeoutMs": 24 * 60 * 60_000 });
+	// The policy files changed: what a rule gives each file's process.argv is read anew (once the pod has), and whoever
+	// lists them is told.
+	const watcher = vscode.workspace.createFileSystemWatcher("**/.silo/*policy.json");
+	let changed: ReturnType<typeof setTimeout> | undefined;
+	const reread = (): void => {
+		clearTimeout(changed);
+		changed = setTimeout(() => {
+			givenArgv.clear();
+
+			for (const uri of open) {
+				draw(uri);
+			}
+
+			for (const listener of rulesChanged) {
+				listener();
+			}
+		}, 300);
+	};
+
+	watcher.onDidChange(reread);
+	watcher.onDidCreate(reread);
+	watcher.onDidDelete(reread);
 	hub.subscribe("capability.ask", (data) => {
 		const { session, file, source, ask } = (data ?? {}) as { "session"?: unknown; "file"?: unknown; "source"?: unknown; "ask"?: CapabilityAsk };
 

@@ -57,6 +57,7 @@ import { installProfileFiles } from "./profile-files";
 import { installEvidence } from "./evidence";
 import { installLiveValues, showMarks, showNotes } from "./live-values";
 import { installCoverage } from "./coverage";
+import { registerRulesView } from "./rules-view";
 import { evidenceStore } from "./extensions/insights/evidence";
 import { windowClientTransport } from "./pane-link";
 import { isCancellation, observe } from "@brianjenkins94/observability";
@@ -585,6 +586,7 @@ function maybeBoot(): void {
 				// coverage's strip (coverage.ts), read from the evidence through the insights extension's store, here with
 				// core's own API.
 				installLiveValues(workbenchHub, api as typeof import("vscode"));
+				registerRulesView(workbenchHub);
 				installCoverage(api as typeof import("vscode"), evidenceStore(api as typeof import("vscode"), []), showMarks);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
