@@ -269,6 +269,8 @@ export interface VM {
 	// --- position, breakpoints ---
 	readonly "currentNode": ts.Node | null;
 	"location": (node?: ts.Node | null) => { "line": number; "character": number; "pos": number } | null;
+	/** Where a value escaping the run uncaught was first thrown (null for a primitive, or one not thrown here). */
+	"throwSite": (value: unknown) => ts.Node | null;
 	readonly "breakpoints": Set<number>;
 	"addBreakpoint": (pos: number) => void;
 	"addBreakpointsByLine": (...lines: number[]) => void;
@@ -367,6 +369,10 @@ export class Machine implements VM {
 	public sourceFile: ts.SourceFile | undefined;
 	/** Breakpoints, as node start positions (see `addBreakpoint` / `addBreakpointsByLine`). */
 	public readonly breakpoints = new Set<number>();
+	/** Where each thrown value was first thrown — the node its throw started from — so a host that gets it uncaught (the
+	 *  frames unwound by then) can say where the program crashed. A rethrow keeps the first, as a stack trace would; a
+	 *  primitive thrown has none. */
+	private readonly throwSites = new WeakMap<object, ts.Node>();
 
 	public constructor(options: VMOptions = {}) {
 		this.rootScope = new Scope(undefined, true);
@@ -537,8 +543,24 @@ export class Machine implements VM {
 	}
 
 	/** Raise a non-local control transfer; the next `step()` begins unwinding. */
-	public raise(signal: Signal): void {
+	/** Raise `signal`; a throw notes `node` (the throw statement, say) as where its value was thrown. */
+	public raise(signal: Signal, node: ts.Node | null = this.currentNode): void {
+		if (signal.type === "throw") {
+			this.noteThrow(signal.value, node);
+		}
+
 		this.signal = signal;
+	}
+
+	/** Where `value` was first thrown, if it was thrown here (and is an object): `location()` of it says the line. */
+	public throwSite(value: unknown): ts.Node | null {
+		return (typeof value === "object" && value !== null) || typeof value === "function" ? this.throwSites.get(value) ?? null : null;
+	}
+
+	private noteThrow(value: unknown, node: ts.Node | null): void {
+		if (node !== null && ((typeof value === "object" && value !== null) || typeof value === "function") && !this.throwSites.has(value)) {
+			this.throwSites.set(value, node);
+		}
 	}
 
 	// --- the driver -----------------------------------------------------------
@@ -619,6 +641,7 @@ export class Machine implements VM {
 			}
 
 			this.signal = { "type": "throw", "value": this.toGuestError(error) };
+			this.noteThrow(this.signal.value, frame.node);
 		}
 	}
 
@@ -663,6 +686,7 @@ export class Machine implements VM {
 				}
 
 				this.signal = { "type": "throw", "value": error };
+				this.noteThrow(error, this.currentNode);
 			}
 		}
 
@@ -933,6 +957,8 @@ export class Machine implements VM {
 
 		(forked as { "rootScope": Scope }).rootScope = clone(this.rootScope) as Scope;
 		(forked as { "breakpoints": Set<number> }).breakpoints = new Set(this.breakpoints);
+		// Its own: the fork's guest values are clones, so the source's throw sites (keyed by its values) aren't its.
+		(forked as unknown as { "throwSites": WeakMap<object, ts.Node> }).throwSites = new WeakMap();
 		forked.sourceFile = this.sourceFile;
 		forked.resolveModule = this.resolveModule;
 		forked.hostGuard = this.hostGuard;
@@ -1328,6 +1354,7 @@ export class Machine implements VM {
 				frame.overridden = true; // (a derived constructor may then never have called super())
 			} else if (value !== undefined && frame.derived === true) {
 				this.signal = { "type": "throw", "value": this.toGuestError(new TypeError("Derived constructors may only return object or undefined")) };
+				this.noteThrow(this.signal.value, frame.node);
 			}
 
 			return;
@@ -1420,6 +1447,7 @@ export class Machine implements VM {
 				}
 
 				this.signal = { "type": "throw", "value": this.toGuestError(error) };
+				this.noteThrow(this.signal.value, this.currentNode);
 			}
 		}
 	}

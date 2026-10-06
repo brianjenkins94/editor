@@ -188,7 +188,7 @@ const returnStatement = evaluating<ts.ReturnStatement>(
 
 const throwStatement = evaluating<ts.ThrowStatement>(
 	(node) => [node.expression],
-	(vm, _frame, _node, [value]) => { vm.raise({ "type": "throw", "value": value }); }
+	(vm, _frame, node, [value]) => { vm.raise({ "type": "throw", "value": value }, node); }
 );
 
 // A hoisted function declaration is a no-op at execution time (created during hoist).
