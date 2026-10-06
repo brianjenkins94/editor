@@ -79,11 +79,17 @@ A standard instead of a private vocabulary, at three levels:
   `enum`; a resource: a string; process.argv: an array of strings), and its operators follow from it (a string: *is*,
   *is not*, *matches*, *contains*; an `enum`: *is*, *is any of*; an array: *contains*, *is*); an action declares its
   argument's schema the same way (*give* takes the target's).
-- **Maybe the *when* itself is a JSON Schema** — over what the run reached (`{ capability, resource, program, … }`):
-  *is* → `const`, *is any of* → `enum`, *matches* → `pattern` (a glob compiled to one), *contains* → `contains`, *all* /
-  *any* → `allOf` / `anyOf`. Matching is then schema validation, and a rule reads the same in any tool. The editor's
-  rows are a view of that schema; the open question is whether every row the editor offers has a faithful keyword (it
-  does for these operators; ranges, dates and negation need `minimum`, `format`, `not`).
+- **The *when* is stored as rows and compiled to JSON Schema** (decided 2026-10-06). Stored as rows — `{ logicalType_id,
+  predicates: [{ target_id, operator_id, argument }] }`, ui-predicate's shape — because rows round-trip with the editor
+  exactly and keep what was meant (*matches* `/workspace/**` stays a glob); a hand-written schema can use keywords no
+  row shows (`if`/`then`, `$ref`, a nested `not`), and a glob kept as a schema is either a regex (`^/workspace/`) or a
+  custom keyword no standard tool reads. Compiled, because then matching is schema validation — a standard validator
+  (ajv) evaluates a rule, not an evaluator of ours — and the compiled schema is what's exported to other tools. Each
+  operator in the catalog says what it compiles to: *is* → `const`, *is any of* → `enum`, *matches* → `pattern` (the
+  glob compiled), *contains* → `contains`, *all* / *any* → `allOf` / `anyOf`, a negated operator → `not`. A row whose
+  argument *is* a JSON Schema is the escape hatch for what the catalog doesn't offer. The two other levels — the files
+  validated by a published schema, and every argument's input drawn from its schema — hold either way, and are where
+  most of the tooling is.
 
 ## ui-predicate itself
 
