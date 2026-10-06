@@ -223,17 +223,37 @@ buttons on the line that provoked it, with what it would do — the resource, fr
 the prompt's does now; the prompt stays for runs nobody's debugging (a preview, a script without a session). Another
 consumer of the same strip: the overlay draws what core gives it, values or a decision.
 
-## Open
+## Mocking a value — and one way to run
 
-- **Stubbing a value: a fourth answer at a capability stop.** Silo's design already names it — the *record-at-seams*
-  corpus (silo's design/fail-loud.md): what each capability call actually returned, recorded at the seam, serving
-  live-mocking, characterization, the registry and invariant inference ("build the record atom once; four features
-  consume it"); and the capability plan's `mock` disposition, next after asking at the stop. So beside *Allow once* /
-  *Allow always* / *Deny*: *Mock* — the call returns a recorded result (or one edited in the margin) instead of
-  running; kept as a `mock` rule in my policy override, its value on this machine (`.silo/local/`, as the sampled
-  values are), never committed. Needs silo's policy layer to take a third disposition (lib: util/silo/policy.ts, today
-  `allow | deny`), and a recorder at the seam. Editing a variable's value at a stop (the Variables view's Set Value,
-  in the margin) is the other half, session-only.
+Decided 2026-10-06. There were three ways to run a file, and they didn't agree: F5 (a tsval debug session that stops at
+breakpoints), the editor's ▷ (*Run with Inputs…*: the file once per set of inputs, as `noDebug` runs that never stop),
+and the top bar's ▷ (the project's scripts and tasks, not the file). Run with Inputs existed only to give a program
+different `process.argv`s — and a launch without `args` already took the first set it remembered, a hidden stub. So:
+**what a program reads from outside is mocked in the margin, and there's one way to run it** — F5, a debug session that
+stops at breakpoints; the editor's ▷ is that too (*Run and Debug File*), the top bar's ▷ offers this file first, then
+the project's scripts and tasks. *Run with Inputs* goes.
+
+**The control, in a value's row:** a small **Mock** checkbox — nothing more until it's checked, so a row doesn't grow
+controls nobody asked for. Checked, the value the run had is struck through and an input box takes the mocked value,
+with two more checkboxes:
+
+- **Persist** — unchecked, a one-off: at a stop, the value is set now and the run goes on with it (what Set Value did);
+  for `process.argv`, the file runs once with it. Checked, it's kept as a **stub**, used by every run until unchecked.
+- **Multiple** — more than one value, each a test case: a run goes through them in turn, each its own session (so
+  runtime evidence, and what it suggests could go, comes from all of them — what Run with Inputs was for).
+
+**The seams, in two slices.** Slice 1 is `process.argv`: program-wide, keyed by the entry file, its row on the first
+line that reads it — shown before any run, so the inputs can be written first. Slice 2 is a capability call's result
+(`fetch`, `readFile`, …): keyed by the call's span, the *record-at-seams* corpus (silo's design/fail-loud.md: what each
+call actually returned, serving live-mocking, characterization, the registry and invariant inference) and a `mock`
+disposition beside *allow* and *deny* (lib: util/silo/policy.ts, published before the editor uses it). A variable's
+value mocks one-off only, for now.
+
+**Where stubs are kept:** what you write — `process.argv`'s cases, a hand-typed result — in `.silo/<you>.stubs.json`,
+committed like the policy overrides, so a repo's inputs travel with it; a value recorded from a real run (a real fetch
+response can hold secrets) in `.silo/local/`.
+
+## Open
 
 - **Live, later.** The file re-run in a session as you type (when typing pauses) is Victor's immediate connection;
   tsval is safe to re-run, and the capabilities plugin already re-runs a file on every edit. It waits on the panel

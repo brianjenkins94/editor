@@ -15,13 +15,12 @@ import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
 import { EMPTY_POLICY, type Policy } from "@brianjenkins94/util/silo/policy";
-import { loadEffectivePolicy, persistOverride } from "../capabilities/silo-store";
+import { loadEffectivePolicy, loadStubs, persistOverride } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
 import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, RunEnd, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
 import { lifecycleOfSource } from "../../lifecycle";
 import { controlSubject, eventSubject } from "./debug-protocol";
-import { inputsKey, parseInputs } from "./inputs";
 import { podHub } from "./pod";
 import { runTask } from "./tasks";
 
@@ -401,6 +400,11 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 			case "disconnect":
 			case "terminate":
+				// Stopped by hand, if it hadn't ended: a run of several cases stops here too.
+				if (!this.ended) {
+					stoppedByHand.add(this.id);
+				}
+
 				// Stopped early: ask for the coverage so far first, briefly — a worker blocked in Atomics.wait (an
 				// in-handler pause) can't answer, and then the last report stands. Then hard-stop: terminate() kills
 				// the worker even while it's blocked, which a postMessage could not reach.
@@ -687,6 +691,9 @@ export function takeExitCode(sessionId: string): number {
  * lifecycle.ts) needs the event loop tsval doesn't have, so it's run as `node <file>` in a task's terminal instead,
  * which runs it on the real runtime.
  */
+/** Sessions the user stopped (not run to their end): a run of several cases goes no further. */
+const stoppedByHand = new Set<string>();
+
 export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 	const rpc = createRpcClient(podHub);
 
@@ -717,9 +724,10 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 			// Without core (no answer), it runs all the same, unrecorded.
 			"resolveDebugConfigurationWithSubstitutedVariables": async (_folder, given) => {
 				const program = typeof given["program"] === "string" ? given["program"] : "";
-				// No `args`: the first set of the inputs Run with Inputs remembers for the file, if any (LIVE-VALUES.md).
-				const remembered = Array.isArray(given["args"]) || program === "" ? undefined : context.workspaceState.get<string>(inputsKey(vscode.Uri.file(program).toString()));
-				const config = remembered === undefined ? given : { ...given, "args": parseInputs(remembered)[0] };
+				// No `args`: the file's process.argv stub, if it has one (LIVE-VALUES.md, "Mocking a value") — its first case,
+				// the rest run after it (`__cases`).
+				const stub = Array.isArray(given["args"]) || Array.isArray(given["__cases"]) || program === "" ? undefined : (await loadStubs()).find((each) => each.seam === "argv" && each.file === vscode.workspace.asRelativePath(vscode.Uri.file(program), false));
+				const config = stub === undefined ? given : { ...given, "args": stub.cases[0] ?? [], "__cases": stub.cases, "__case": 0 };
 
 				if (typeof config["__runId"] === "string") {
 					return config;
@@ -736,6 +744,19 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 		}),
 		vscode.debug.registerDebugAdapterDescriptorFactory("tsval", {
 			"createDebugAdapterDescriptor": (session) => new vscode.DebugAdapterInlineImplementation(new TsvalDebugSession(session))
+		}),
+		// A run of several cases (process.argv mocked with Multiple): when one ends, the next starts — unless it was stopped,
+		// which stops them all. Each is its own session (and run), stopping at breakpoints like any.
+		vscode.debug.onDidTerminateDebugSession((session) => {
+			const config = session.configuration;
+			const cases = config["__cases"] as string[][] | undefined;
+			const next = (config["__case"] as number | undefined ?? 0) + 1;
+
+			if (session.type === "tsval" && Array.isArray(cases) && next < cases.length && !stoppedByHand.delete(session.id)) {
+				const { "__runId": _run, "__launchId": _launch, ...rest } = config;
+
+				void vscode.debug.startDebugging(undefined, { ...rest, "name": `${String(rest.name).replace(/ \(case \d+ of \d+\)$/u, "")} (case ${next + 1} of ${cases.length})`, "args": cases[next], "__case": next } as vscode.DebugConfiguration);
+			}
 		})
 	);
 	// Drive the debugger over the hub (debug-mcp's debug_* tools): list, start, breakpoints; each session serves its own.

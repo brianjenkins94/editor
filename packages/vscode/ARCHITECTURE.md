@@ -451,6 +451,7 @@ flowchart LR
 | Pod | node | `node.exit.*`, `node.start` |
 | Pod | pod | `pod.ready` |
 | Pod | production | `production.exit.*`, `production.launch`, `production.out.*` |
+| Pod | stubs | `stubs.get()`, `stubs.set()` |
 | Pod | tasks | `tasks.list()`, `tasks.run()` |
 | Pod | tsval | `tsval.preview.event`, `tsval.preview.hello`, `tsval.preview.stream`, `tsval.preview.timeTravel` |
 | Preview :* | evidence | `evidence.flush` |

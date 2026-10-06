@@ -554,6 +554,13 @@ function Shell() {
 		setRunOpen(false);
 	};
 
+	// The file in the editor, run as F5 runs it (LIVE-VALUES.md, "one way to run"): a debug session, stopping at
+	// breakpoints, its process.argv from the file's stub. It answers at its first stop: nobody waits on it here.
+	const runThisFile = (): void => {
+		void rpcRef.current?.request("debug.start", {}, { "timeoutMs": 24 * 60 * 60_000 }).catch(() => undefined);
+		setRunOpen(false);
+	};
+
 	// If a PAT was stored from a past session, quietly confirm it still works and show who we're connected as. A stale
 	// token just leaves us disconnected — no error surfaced until the user actively tries to connect.
 	useEffect(() => {
@@ -788,8 +795,21 @@ function Shell() {
 							<div class={runBackdrop()} onClick={() => { setRunOpen(false); }} />
 
 							<div class={runMenu()} role="menu">
+								<div
+									class={runItem()}
+									role="menuitem"
+									tabIndex={0}
+									title="Run and debug the file in the editor, as F5 does"
+									onClick={runThisFile}
+									onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); runThisFile(); } }}
+								>
+									<span class={runItemName()}>The file in the editor</span>
+
+									<span class={runItemMeta()}>F5</span>
+								</div>
+
 								{targets.length === 0 ? (
-									<div class={runEmpty()}>Nothing to run: no package.json scripts or tasks</div>
+									<div class={runEmpty()}>No package.json scripts or tasks</div>
 								) : (["service", "task"] as const).map((lifecycle) => {
 									const group = targets.filter((target) => target.lifecycle === lifecycle);
 

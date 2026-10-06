@@ -5,6 +5,7 @@
  *   pod     `debug.sessions`                       → every live session's summary
  *   pod     `debug.start` { program?, breakpoints?, args? } → starts a session and answers with its first stop
  *   pod     `debug.breakpoints` { program?, lines }  → replaces a file's breakpoints (VS Code's own, so the UI shows them)
+ *   pod     `stubs.get` { program? } / `stubs.set` { program?, cases } → a file's process.argv stub (null: none)
  *   session `debug.session.<id>.step` { action }   → resumes, and answers with the NEXT stop (or the end)
  *   session `debug.session.<id>.state`             → where it is now
  *   session `debug.session.<id>.stop`              → ends it
@@ -21,6 +22,7 @@ import { serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 
 import type { CapabilityChoice, StepAction } from "./debug-protocol";
+import { loadStubs, persistStub } from "../capabilities/silo-store";
 
 export type DebugAction = StepAction;
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
@@ -157,8 +159,22 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 
 			return { "program": path, "lines": lines ?? [] };
 		}) },
+		// A file's process.argv stub, for the notes margin's Mock (LIVE-VALUES.md): its cases, or null.
+		{ "dispose": serve(hub, "stubs.get", async (args) => {
+			const path = resolveProgram((args as { "program"?: string } | undefined)?.program);
+
+			return (await loadStubs()).find((stub) => stub.seam === "argv" && stub.file === vscode.workspace.asRelativePath(vscode.Uri.file(path), false))?.cases ?? null;
+		}) },
+		{ "dispose": serve(hub, "stubs.set", async (args) => {
+			const { program, cases } = (args ?? {}) as { "program"?: string; "cases"?: string[][] | null };
+			const path = resolveProgram(program);
+
+			await persistStub("argv", vscode.workspace.asRelativePath(vscode.Uri.file(path), false), cases ?? undefined);
+
+			return cases ?? null;
+		}) },
 		{ "dispose": serve(hub, "debug.start", async (args, { signal }) => {
-			const { program, breakpoints, "args": inputs } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[]; "args"?: string[] };
+			const { program, breakpoints, "args": inputs, cases } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[]; "args"?: string[]; "cases"?: string[][] };
 			const path = resolveProgram(program);
 			const launchId = crypto.randomUUID();
 
@@ -174,7 +190,9 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 					reject(signal.reason);
 				}, { "once": true });
 			});
-			const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "debug " + path.split("/").pop(), "program": path, ...inputs === undefined ? {} : { "args": inputs }, "__launchId": launchId });
+			// `cases`: several runs, one after another (process.argv mocked with Multiple); answered with the first's first stop.
+			const given = cases !== undefined && cases.length > 0 ? { "args": cases[0], "__cases": cases, "__case": 0 } : inputs === undefined ? {} : { "args": inputs };
+			const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "debug " + path.split("/").pop(), "program": path, ...given, "__launchId": launchId });
 
 			if (!started) {
 				pendingLaunches.delete(launchId);

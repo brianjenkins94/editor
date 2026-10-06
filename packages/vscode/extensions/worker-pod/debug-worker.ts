@@ -456,6 +456,24 @@ function traceValue(event: TraceEvent): void {
 	live.add({ "line": lineOf(event.node), "name": event.name, "value": "", "raw": event.value, "kind": event.kind, "call": event.call, "turns": lastTraced.turns, "step": event.step, "at": rangeOf(event.node), ...callee === undefined ? {} : { "callee": callee } });
 }
 
+/** The run's process.argv, as the margin shows it (a command line: what Mock takes), on the first line reading it — if
+ *  the program reads it at all. */
+function reportArgv(file: ts.SourceFile, args: string[]): void {
+	let read: ts.Node | undefined;
+
+	(function visit(node: ts.Node): void {
+		if (read === undefined && ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "process" && node.name.text === "argv") {
+			read = node;
+		}
+
+		node.forEachChild(visit);
+	})(file);
+
+	if (read !== undefined) {
+		live.add({ "line": file.getLineAndCharacterOfPosition(read.getStart(file)).line, "name": "process.argv", "value": args.map((arg) => (arg === "" || /[\s"'|]/u.test(arg) ? JSON.stringify(arg) : arg)).join(" "), "kind": "input", "call": 0, "turns": [], "step": 0, "at": [read.getStart(file), read.getEnd()] });
+	}
+}
+
 /** A node's range in the text that ran (offsets, from its first token): what the margin anchors a line's data by — for
  *  a node with a body, its head (`headOf`). */
 function rangeOf(node: ts.Node): [number, number] {
@@ -810,6 +828,8 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 			// LIVE-VALUES.md). No policy → every undecided dangerous call breaks (firewall default).
 			policy = message.policy;
 			userLines = message.lines;
+			// What it reads from outside, first: process.argv (the margin mocks it there).
+			reportArgv(loaded.sourceFile, message.args ?? []);
 			capabilityLines = new Set(policy !== undefined ? capabilityBreakLines(loaded.sourceFile, policy) : []);
 			arm(loaded.vm);
 

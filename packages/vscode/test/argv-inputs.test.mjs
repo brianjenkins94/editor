@@ -1,4 +1,4 @@
-// Run with Inputs… (extensions/worker-pod/inputs.ts): inputs read as a command line's, a run per `|`.
+// A mocked process.argv (extensions/worker-pod/inputs.ts, the notes margin's Mock): read as a command line's, a run per `|`.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 

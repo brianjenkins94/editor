@@ -480,7 +480,7 @@ test("live values: a session's values beside the code, as the talk's binary sear
 		globalThis.__pane.show(uri.toString(), shown);
 	}, [notes.length === 0 ? undefined : source, notes]);
 	// Each values row by its line (0-based): its label, then its cells, as shown.
-	const rows = () => workbench.evaluate(() => Object.fromEntries([...document.querySelectorAll(".live-values-row")].map((row) => [row.dataset.line, [...row.children].map((child) => child.textContent.trim())])));
+	const rows = () => workbench.evaluate(() => Object.fromEntries([...document.querySelectorAll(".live-values-row")].map((row) => [row.dataset.line, [...row.children].filter((child) => !child.classList.contains("live-values-mock")).map((child) => child.textContent.trim())])));
 
 	await show([{ "id": "about", "fromLine": 0, "toLine": 0, "text": "**Binary search**, as in the talk." }]);
 
@@ -540,12 +540,12 @@ test("live values: a session's values beside the code, as the talk's binary sear
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
-// Setting a value at a stop, from the margin: click a variable's name, write a literal, Enter — the run goes on with it
+// Setting a value at a stop, from the margin: Mock on a variable's row, write a literal, Enter — the run goes on with it
 // (the binary search with high set to 3 takes another path), and the row shows it as set by hand.
 test("set a value: from the margin, at a stop, and the run goes on with it", async () => {
 	const workbench = session.workbench();
 	const source = ["function binarySearch(key, array) {", "\tlet low = 0;", "\tlet high = array.length - 1;", "", "\twhile (true) {", "\t\tconst mid = Math.floor((low + high) / 2);", "\t\tconst value = array[mid];", "", "\t\tif (value < key) {", "\t\t\tlow = mid + 1;", "\t\t} else if (value > key) {", "\t\t\thigh = mid - 1;", "\t\t} else {", "\t\t\treturn mid;", "\t\t}", "\t}", "}", "", "console.log(binarySearch(\"d\", [\"a\", \"b\", \"c\", \"d\", \"e\", \"f\"]));", ""].join("\n");
-	const rows = () => workbench.evaluate(() => Object.fromEntries([...document.querySelectorAll(".live-values-row")].map((row) => [row.dataset.line, [...row.children].map((child) => child.textContent.trim())])));
+	const rows = () => workbench.evaluate(() => Object.fromEntries([...document.querySelectorAll(".live-values-row")].map((row) => [row.dataset.line, [...row.children].filter((child) => !child.classList.contains("live-values-mock")).map((child) => child.textContent.trim())])));
 
 	await workbench.evaluate(async (text) => {
 		const { api } = globalThis.__editor;
@@ -558,11 +558,11 @@ test("set a value: from the margin, at a stop, and the run goes on with it", asy
 	const started = await session.request("debug.start", { "program": "/workspace/setvalue.js", "breakpoints": [6] }, 60_000);
 
 	await eventually("high's row", async () => (await rows())["2"]?.[1] === "5" || undefined);
-	// The margin's own field: click high's name, write 3, Enter.
+	// The margin's own Mock: check it on high's row (the row redraws with its box), write 3, Enter.
+	await workbench.evaluate(() => { document.querySelector('.live-values-row[data-line="2"] .live-values-mock input[type="checkbox"]').click(); });
+	await eventually("high's box", () => workbench.evaluate(() => document.querySelector('.live-values-row[data-line="2"] .live-values-input') !== null || undefined));
 	await workbench.evaluate(() => {
-		document.querySelector('.live-values-row[data-line="2"] .live-values-label').click();
-
-		const input = document.querySelector(".live-values-input");
+		const input = document.querySelector('.live-values-row[data-line="2"] .live-values-input');
 
 		input.value = "3";
 		input.dispatchEvent(new KeyboardEvent("keydown", { "key": "Enter" }));
@@ -585,6 +585,99 @@ test("set a value: from the margin, at a stop, and the run goes on with it", asy
 	await assert.rejects(session.request(`debug.session.${started.session}.setValue`, { "name": "low", "value": "alert(1)" }, 30_000), /not a literal/u);
 	await session.request(`debug.session.${started.session}.stop`, undefined, 30_000);
 	await session.request("debug.breakpoints", { "program": "/workspace/setvalue.js", "lines": [] }, 30_000);
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
+});
+
+// Mocking process.argv in the margin (LIVE-VALUES.md, "Mocking a value"): its row is there before any run; Mock, a command
+// line and Enter run the file with it, once; Persist keeps it as the file's stub (.silo/<you>.stubs.json), Multiple makes
+// it several cases — and a plain run (F5, debug.start without args) then goes through them, one session each.
+test("mock process.argv: once, kept, several cases, and F5 runs with it", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/tax.js";
+	const runsOf = async () => (await session.request("runs.list", undefined, 5000)).filter((run) => run.title.includes("tax.js"));
+	const row = () => workbench.evaluate(() => {
+		const line = document.querySelector('.live-values-row[data-line="0"]');
+
+		return line === null ? undefined : { "label": line.querySelector(".live-values-label")?.textContent.trim(), "mocked": line.querySelector('.live-values-mock input[type="checkbox"]')?.checked };
+	});
+	const mock = (action) => workbench.evaluate((what) => {
+		const line = document.querySelector('.live-values-row[data-line="0"]');
+		const check = (name) => [...line.querySelectorAll(".live-values-check")].find((label) => label.textContent.trim() === name).querySelector("input");
+		const type = (index, text) => {
+			const input = line.querySelectorAll(".live-values-input")[index];
+
+			input.value = text;
+			input.dispatchEvent(new Event("input"));
+
+			return input;
+		};
+
+		switch (what) {
+			case "on":
+				check("Mock").click();
+				break;
+			case "once":
+				type(0, "CA SPRING10").dispatchEvent(new KeyboardEvent("keydown", { "key": "Enter" }));
+				break;
+			case "several, kept":
+				check("Multiple").click();
+				break;
+			case "add":
+				[...line.querySelectorAll(".live-values-step")].find((button) => button.textContent === "+").click();
+				break;
+			case "second":
+				type(1, "FR");
+				check("Persist").click();
+				break;
+			case "unmock":
+				check("Mock").click();
+				break;
+			default:
+				break;
+		}
+	}, action);
+	// The row redraws after a checkbox or + (asynchronously): wait for its boxes.
+	const boxes = (count) => eventually(`${count} box(es)`, () => workbench.evaluate((wanted) => document.querySelectorAll('.live-values-row[data-line="0"] .live-values-input').length >= wanted || undefined, count));
+
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/tax.js");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["const [, , country = \"US\", coupon] = process.argv;", "const rates = { US: 0.07, CA: 0.13, FR: 0.2 };", "const rate = rates[country] ?? 0;", "", "console.log(country, rate, coupon ?? \"no coupon\");", ""].join("\n")));
+		await api.window.showTextDocument(uri);
+	});
+	await session.request("stubs.set", { "program": program, "cases": null }, 10_000);
+
+	// Before any run: its row, unmocked.
+	assert.deepEqual(await eventually("process.argv's row", row), { "label": "process.argv =", "mocked": false });
+
+	// Once: Mock, a command line, Enter — a run with it, nothing kept.
+	const before = (await runsOf()).length;
+
+	await mock("on");
+	await boxes(1);
+	await mock("once");
+	await eventually("a run with the mocked arguments", async () => (await runsOf()).length > before || undefined);
+	assert.equal(await session.request("stubs.get", { "program": program }, 10_000), null, "a one-off keeps nothing");
+
+	// Several cases, kept.
+	await mock("several, kept");
+	await eventually("Multiple's +", () => workbench.evaluate(() => [...document.querySelectorAll('.live-values-row[data-line="0"] .live-values-step')].some((button) => button.textContent === "+") || undefined));
+	await mock("add");
+	await boxes(2);
+	await mock("second");
+	assert.deepEqual(await eventually("the file's stub", async () => (await session.request("stubs.get", { "program": program }, 10_000)) ?? undefined), [["CA", "SPRING10"], ["FR"]]);
+
+	// A plain run uses it: the first case answers, the second follows as its own session.
+	const ran = await session.request("debug.start", { "program": program }, 60_000);
+
+	assert.equal(ran.state, "terminated");
+	assert.deepEqual(ran.output, ["CA 0.13 SPRING10"]);
+	await eventually("the second case, run after it", async () => (await runsOf()).some((run) => run.title.includes("(case 2 of 2)")) || undefined);
+
+	// Unmocked: the stub goes.
+	await mock("unmock");
+	await eventually("no stub", async () => (await session.request("stubs.get", { "program": program }, 10_000)) === null || undefined);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 

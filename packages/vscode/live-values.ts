@@ -15,9 +15,11 @@
  * *Allow once*, *Allow always*, *Deny*, the choice sent back to the session (`debug.session.<id>.decide`), which
  * resumes it. *Allow always* needs the resource the call reaches: offered only when it's known before the line runs.
  *
- * At a stop, a variable's value can be set from its row: click its name, write a literal, Enter — the run goes on with
- * it (`debug.session.<id>.setValue`, as the Variables view's Set Value does), and the value shows in the row as set by
- * hand.
+ * A value's row can be mocked (LIVE-VALUES.md, "Mocking a value"): a small Mock checkbox; checked, the value the run had
+ * is struck through and a box takes the mocked one. A variable's, at a stop, is set now and the run goes on with it
+ * (`debug.session.<id>.setValue`, as the Variables view's Set Value does). process.argv's — its row on the first line
+ * that reads it, there before any run — runs the file with it, once, or, with Persist, keeps it as the file's stub for
+ * every run (`stubs.set`, `.silo/<you>.stubs.json`); with Multiple, several, each a case run in turn.
  *
  * The margin is always open beside a JavaScript or TypeScript file, with or without anything to show: it's the file's
  * runtime column — coverage in its gutter column, left of the code (`showMarks`, from coverage.ts), notes, values,
@@ -36,6 +38,7 @@ import type { LiveBatch, LiveCall, LiveValue } from "./extensions/worker-pod/liv
 import type { Range } from "./anchors";
 import { Anchors } from "./anchors";
 import { createRpcClient } from "@brianjenkins94/hub";
+import { parseInputs } from "./extensions/worker-pod/inputs";
 import { showPane } from "@brianjenkins94/monaco-vscode-api/main";
 import css from "./live-values.css?raw";
 
@@ -43,7 +46,11 @@ import css from "./live-values.css?raw";
 export interface Note { "id": string; "fromLine": number; "toLine": number; "text": string }
 
 /** One line of values as drawn: its label (`mid =`), then a value (`inline`) or a cell per column. */
-interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range }
+interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range; "input"?: boolean }
+
+/** A row's Mock: checked or not, and — for process.argv — kept as the file's stub, several cases, and what's typed;
+ *  `touched` once the user has changed any of it (until then it follows the file's stub, which may load after). */
+interface Mock { "on": boolean; "persist": boolean; "multiple": boolean; "values": string[]; "touched"?: boolean }
 
 /** A function's calls to pick between, on its first line: which (`function:line`), the one shown (0-based), how many. */
 interface Picker { "function": string; "index": number; "count": number }
@@ -80,11 +87,30 @@ const drawing = new Map<string, number>();
 let choose: ((session: string, choice: CapabilityChoice) => Promise<unknown>) | undefined;
 /** Sets a variable at a session's stop (set by `installLiveValues`). */
 let setValueAt: ((session: string, name: string, value: string) => Promise<unknown>) | undefined;
+/** A file's process.argv stub (its cases, or null), keeping it, and running the file with given cases (set by
+ *  `installLiveValues`). */
+let stubsGet: ((path: string) => Promise<string[][] | null>) | undefined;
+let stubsSet: ((path: string, cases: string[][] | null) => Promise<unknown>) | undefined;
+let runFile: ((path: string, cases: string[][]) => Promise<unknown>) | undefined;
+/** Each row's Mock, by file and name (a variable's, or process.argv): kept across redraws. */
+const mocks = new Map<string, Mock>();
+/** Each file's process.argv stub as last read (undefined: not read yet). */
+const stubbed = new Map<string, string[][] | null>();
+
+/** Arguments as a command line, as the Mock box takes them. */
+function commandLine(args: string[]): string {
+	return args.map((arg) => (arg === "" || /[\s"'|]/u.test(arg) ? JSON.stringify(arg) : arg)).join(" ");
+}
 /** The cells of each column on screen, by group and column: to light a column on every line. */
 let columns = new Map<string, HTMLElement[]>();
 
 /** A value's look, by what it reads as. */
 function kindOf(value: LiveValue): string {
+	// (process.argv's look is `argv`: `live-values-input` is the Mock's box.)
+	if (value.kind === "input") {
+		return "argv";
+	}
+
 	if (value.kind === "branch" || value.kind === "set") {
 		return value.kind;
 	}
@@ -190,12 +216,12 @@ export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>, picked
 		const names = [...new Set(inDepth.map((value) => value.name))];
 		const named = names.length > 1;
 		const only = inDepth[0]!;
-		const binds = !named && (only.kind === "bind" || only.kind === "set");
+		const binds = !named && (only.kind === "bind" || only.kind === "set" || only.kind === "input");
 		const label = named ? "" : binds ? `${only.name} =` : only.kind === "return" ? "return" : only.name;
 		const group = `${call}/${depth}`;
 
 		if (depth === 0) {
-			rows.push({ "line": line, "label": label, ...binds ? { "name": only.name } : {}, "cells": [], "inline": cellOf(inDepth, named), "group": group, "widths": [], ...anchorOf(inDepth) });
+			rows.push({ "line": line, "label": label, ...binds ? { "name": only.name } : {}, "cells": [], "inline": cellOf(inDepth, named), "group": group, "widths": [], ...anchorOf(inDepth), ...only.kind === "input" ? { "input": true } : {} });
 
 			continue;
 		}
@@ -239,7 +265,7 @@ export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>, picked
 }
 
 /** A row's element: its picker, its label (as wide as its call's widest), then its value or its columns. */
-function renderRow(row: Row, labelWidth: number, session: Session, redraw: () => void, element: HTMLElement): void {
+function renderRow(row: Row, labelWidth: number, session: Session | undefined, uri: string, redraw: () => void, element: HTMLElement): void {
 	const line = document.createElement("div");
 	const label = document.createElement("span");
 	const cell = (value: Cell | undefined, className: string): HTMLSpanElement => {
@@ -269,9 +295,9 @@ function renderRow(row: Row, labelWidth: number, session: Session, redraw: () =>
 			button.addEventListener("click", () => {
 				// The latest picked is no pick: it follows the calls still coming.
 				if (index + by === count - 1) {
-					session.picked.delete(key);
+					session?.picked.delete(key);
 				} else {
-					session.picked.set(key, index + by);
+					session?.picked.set(key, index + by);
 				}
 
 				redraw();
@@ -293,16 +319,6 @@ function renderRow(row: Row, labelWidth: number, session: Session, redraw: () =>
 		line.append(label);
 	}
 
-	// A variable's name: click to set its value at the stop (its latest value to start from).
-	if (row.name !== undefined) {
-		const name = row.name;
-		const latest = row.inline?.text ?? row.cells.findLast((each) => each !== undefined)?.text ?? "";
-
-		label.classList.add("editable");
-		label.title = `Set ${name} here, at the stop`;
-		label.addEventListener("click", () => { editValue(session.id, name, latest, line); });
-	}
-
 	if (row.inline !== undefined) {
 		line.append(cell(row.inline, "inline"));
 	}
@@ -313,44 +329,119 @@ function renderRow(row: Row, labelWidth: number, session: Session, redraw: () =>
 
 		// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: a column as wide as its widest value
 		span.style.width = `${(row.widths[index] ?? 1) + 2}ch`;
-		span.classList.toggle("held", session.held === key);
+		span.classList.toggle("held", session?.held === key);
 		span.addEventListener("mouseenter", () => { light(key, true); });
 		span.addEventListener("mouseleave", () => { light(key, false); });
-		span.addEventListener("click", () => { hold(session, key); });
+		span.addEventListener("click", () => { if (session !== undefined) { hold(session, key); } });
 		columns.set(key, [...columns.get(key) ?? [], span]);
 		line.append(span);
+	}
+
+	if (row.name !== undefined) {
+		renderMock(row, row.name, session, uri, line, redraw);
 	}
 
 	element.append(line);
 }
 
-/** An inline field after `line`'s label for `name`'s new value: Enter sets it at the session's stop (the run goes on
- *  with it), Escape or leaving it lets it be; what couldn't be set says why. */
-function editValue(session: string, name: string, latest: string, line: HTMLElement): void {
-	if (line.querySelector(".live-values-input") !== null) {
-		return;
+/** A row's Mock (LIVE-VALUES.md, "Mocking a value"): the checkbox; checked, the run's value struck through and a box for
+ *  the mocked one — a variable's set at the stop, process.argv's run with (and, with Persist, kept as the file's stub;
+ *  with Multiple, several cases). */
+function renderMock(row: Row, name: string, session: Session | undefined, uri: string, line: HTMLElement, redraw: () => void): void {
+	const argv = row.input === true;
+	const key = `${uri}#${argv ? "process.argv" : name}`;
+	const stub = argv ? stubbed.get(uri) : null;
+	const kept = mocks.get(key);
+	const mock: Mock = kept?.touched === true ? kept : stub !== null && stub !== undefined ? { "on": true, "persist": true, "multiple": stub.length > 1, "values": stub.map(commandLine) } : { "on": false, "persist": false, "multiple": false, "values": [row.inline?.text ?? row.cells.findLast((each) => each !== undefined)?.text ?? ""] };
+	const path = (): string => api?.Uri.parse(uri).path ?? "";
+	const check = (text: string, checked: boolean, title: string, toggled: (on: boolean) => void): HTMLLabelElement => {
+		const box = Object.assign(document.createElement("label"), { "className": "live-values-check", "title": title });
+		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+		const input = Object.assign(document.createElement("input"), { "type": "checkbox", "checked": checked });
+
+		input.addEventListener("change", () => { toggled(input.checked); });
+		box.append(input, text);
+
+		return box;
+	};
+	const cases = (): string[][] => (mock.multiple ? mock.values : mock.values.slice(0, 1)).map((text) => parseInputs(text)[0] ?? []);
+	const keep = (): void => { void stubsSet?.(path(), mock.persist ? cases() : null).then(() => { stubbed.set(uri, mock.persist ? cases() : null); }); };
+	const tools = Object.assign(document.createElement("span"), { "className": `live-values-mock${argv || mock.on ? " shown" : ""}` });
+
+	mocks.set(key, mock);
+	// Any change from here is the user's: the row stops following the stub.
+	tools.addEventListener("change", () => { mock.touched = true; }, { "capture": true });
+	tools.addEventListener("input", () => { mock.touched = true; }, { "capture": true });
+	tools.addEventListener("click", () => { mock.touched = true; }, { "capture": true });
+	line.classList.toggle("mocking", mock.on);
+	line.classList.toggle("argv", argv);
+	tools.append(check("Mock", mock.on, argv ? "Give the program other arguments" : "Give it another value, at this stop", (on) => {
+		mock.on = on;
+
+		// Unmocked: a kept stub goes.
+		if (!on && argv && mock.persist) {
+			mock.persist = false;
+			keep();
+		}
+
+		redraw();
+	}));
+
+	if (mock.on) {
+		const boxes = (mock.multiple ? mock.values : mock.values.slice(0, 1)).map((value, index) => {
+			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+			const input = Object.assign(document.createElement("input"), { "className": "live-values-input", "value": value, "spellcheck": false, "placeholder": argv ? "arguments, as a command line" : "a literal", "title": argv ? "The program's arguments, as you'd type them after `node file.js` — Enter runs it with them" : "A literal: 'text', 4, true, null, [1, 2], { a: 1 } — Enter sets it at the stop" });
+
+			input.addEventListener("input", () => { mock.values[index] = input.value; });
+			input.addEventListener("keydown", (event) => {
+				if (event.key !== "Enter") {
+					return;
+				}
+
+				mock.values[index] = input.value;
+
+				if (argv) {
+					// Kept, if Persist; and run with, either way.
+					if (mock.persist) {
+						keep();
+					}
+
+					void runFile?.(path(), cases()).catch((error: unknown) => { input.classList.add("refused"); input.title = String(error); });
+				} else if (session === undefined) {
+					input.classList.add("refused");
+					input.title = "Only at a stop: start the program with a breakpoint where you want to set it";
+				} else {
+					input.disabled = true;
+					void setValueAt?.(session.id, name, input.value).then(() => { mock.on = false; redraw(); }, (error: unknown) => {
+						input.disabled = false;
+						input.classList.add("refused");
+						input.title = error instanceof Error ? error.message : String(error);
+					});
+				}
+			});
+
+			return input;
+		});
+
+		tools.append(...boxes);
+
+		if (argv) {
+			if (mock.multiple) {
+				// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+				const add = Object.assign(document.createElement("button"), { "className": "live-values-step", "textContent": "+", "title": "Another case" });
+
+				add.addEventListener("click", () => { mock.values.push(""); redraw(); });
+				tools.append(add);
+			}
+
+			tools.append(
+				check("Persist", mock.persist, "Keep it for every run of this file (.silo/<you>.stubs.json)", (on) => { mock.persist = on; keep(); }),
+				check("Multiple", mock.multiple, "Several cases, each its own run", (on) => { mock.multiple = on; if (mock.persist) { keep(); } redraw(); })
+			);
+		}
 	}
 
-	// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-	const input = Object.assign(document.createElement("input"), { "className": "live-values-input", "value": latest, "spellcheck": false, "title": "A literal: 'text', 4, true, null, [1, 2], { a: 1 }" });
-	const close = (): void => { input.remove(); };
-
-	input.addEventListener("keydown", (event) => {
-		if (event.key === "Escape") {
-			close();
-		} else if (event.key === "Enter") {
-			input.disabled = true;
-			void setValueAt?.(session, name, input.value).then(close, (error: unknown) => {
-				input.disabled = false;
-				input.classList.add("refused");
-				input.title = error instanceof Error ? error.message : String(error);
-			});
-		}
-	});
-	input.addEventListener("blur", () => { if (!input.disabled) { close(); } });
-	line.querySelector(".live-values-label")?.after(input);
-	input.focus();
-	input.select();
+	line.append(tools);
 }
 
 /** A click holds a column lit; another lets it go. */
@@ -461,8 +552,24 @@ async function place(uri: string): Promise<void> {
 	const ending = ends.get(uri);
 	const [end] = ending === undefined ? [] : await relocate(ending.anchors, text, [ending]);
 
+	// process.argv's row, before any run (or a run that didn't read it yet): on the first line reading it, with the file's
+	// stub if it has one — so the inputs can be written first.
+	const readsArgv = text !== undefined && /\bprocess\.argv\b/u.test(text);
+	const argvAt = !readsArgv || rows.some((row) => row.input === true) ? -1 : text.split("\n").findIndex((each) => /\bprocess\.argv\b/u.test(each));
+
+	// The file's stub, read once (then kept as it's set here), for process.argv's Mock — a run's row or this one.
+	if (readsArgv && !stubbed.has(uri)) {
+		stubbed.set(uri, null);
+		void stubsGet?.(api?.Uri.parse(uri).path ?? "").then((cases) => { stubbed.set(uri, cases); draw(uri); }, () => undefined);
+	}
+
 	if (drawing.get(uri) !== token) {
 		return; // a newer draw is placing
+	}
+
+	// (No value of its own: nothing ran. A stub's cases are in its Mock.)
+	if (argvAt !== -1) {
+		rows.push({ "line": argvAt, "label": "process.argv =", "name": "process.argv", "cells": [], "inline": { "text": "", "kind": "argv" }, "group": "0/0", "widths": [], "input": true });
 	}
 
 	const last = rows.reduce<Row | undefined>((latest, row) => (latest === undefined || row.line > latest.line ? row : latest), undefined);
@@ -514,7 +621,7 @@ async function place(uri: string): Promise<void> {
 		if (entry.id.startsWith("values:")) {
 			const row = rows[Number(entry.id.slice("values:".length))]!;
 
-			renderRow(row, labelWidths.get(row.group.split("/")[0]!) ?? 0, session!, () => { draw(uri); }, element);
+			renderRow(row, labelWidths.get(row.group.split("/")[0]!) ?? 0, session, uri, () => { draw(uri); }, element);
 
 			return undefined;
 		}
@@ -668,6 +775,10 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 
 	choose = (session, choice) => rpc.request(`debug.session.${session}.decide`, { "choice": choice }, { "timeoutMs": 24 * 60 * 60_000 });
 	setValueAt = (session, name, value) => rpc.request(`debug.session.${session}.setValue`, { "name": name, "value": value }, { "timeoutMs": 30_000 });
+	stubsGet = async (path) => rpc.request("stubs.get", { "program": path }, { "timeoutMs": 10_000 }) as Promise<string[][] | null>;
+	stubsSet = async (path, cases) => rpc.request("stubs.set", { "program": path, "cases": cases }, { "timeoutMs": 10_000 });
+	// A run answers at its first stop, which can be a while: nobody waits on it here.
+	runFile = async (path, cases) => rpc.request("debug.start", { "program": path, "cases": cases }, { "timeoutMs": 24 * 60 * 60_000 });
 	hub.subscribe("capability.ask", (data) => {
 		const { session, file, source, ask } = (data ?? {}) as { "session"?: unknown; "file"?: unknown; "source"?: unknown; "ask"?: CapabilityAsk };
 

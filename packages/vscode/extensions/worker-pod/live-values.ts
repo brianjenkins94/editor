@@ -12,8 +12,9 @@ export interface LiveValue {
 	"line": number;
 	"name": string;
 	"value": string;
-	/** `set`: a value set by hand at a stop (the margin, or the Variables view), not by the program. */
-	"kind": "bind" | "return" | "branch" | "set";
+	/** `set`: a value set by hand at a stop (the margin, or the Variables view), not by the program. `input`: what the
+	 *  program read from outside — process.argv, as a command line — on the first line that reads it. */
+	"kind": "bind" | "return" | "branch" | "set" | "input";
 	"call": number;
 	"turns": number[];
 	/** The node's range in the text that ran (offsets): what the margin anchors it by, so it follows its code through a

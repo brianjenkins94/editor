@@ -55,7 +55,7 @@ export function registerSuggestionsView(context: vscode.ExtensionContext, source
 		const total = [...source.all().values()].reduce((sum, found) => sum + found.suggestions.length, 0);
 
 		view.badge = total === 0 ? undefined : { "value": total, "tooltip": `${total} suggestion${total === 1 ? "" : "s"} from runs` };
-		view.message = total === 0 ? "Nothing to suggest yet: run a program a few times (F5, or Run with Inputs…), and what none of the runs needed shows here." : undefined;
+		view.message = total === 0 ? "Nothing to suggest yet: run a program a few times (F5 — mock its process.argv in the notes margin to give it other inputs), and what none of the runs needed shows here." : undefined;
 		changed.fire(undefined);
 	};
 

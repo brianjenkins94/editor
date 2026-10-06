@@ -1,10 +1,7 @@
 /**
- * How Run with Inputs… (run-inputs.ts) reads what it's given: as a command line, runs separated by `|`, a run's
- * arguments by spaces, quotes keeping a space in one.
+ * How a mocked process.argv is read (the notes margin's Mock, LIVE-VALUES.md): as a command line, a run's arguments
+ * separated by spaces, quotes keeping a space in one; `|` separates runs.
  */
-
-/** Where the last inputs given for a file are remembered (worker-pod's workspace state), by its URI. */
-export const inputsKey = (uri: string): string => `runWithInputs:${uri}`;
 
 /** `a "b c" | d` → [["a", "b c"], ["d"]]; nothing → one run, with none. */
 export function parseInputs(text: string): string[][] {

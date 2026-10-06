@@ -23,7 +23,6 @@ import type { CommandTotals } from "../command-tap";
 import { ARCH_COMMANDS } from "../command-tap";
 import { registerTsvalDebug, takeExitCode } from "./debug-adapter";
 import { registerLaunch } from "./launch";
-import { registerRunWithInputs } from "./run-inputs";
 import { registerSourceControl } from "./source-control";
 import { registerTasks } from "./tasks";
 import { registerTsvalSurface } from "./tsval-surface";
@@ -177,8 +176,15 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// What there is to run, as tasks run by core's shell (tasks.ts); and the shell's run picker, from them (launch.ts).
 	registerTasks(context);
 	registerLaunch(context);
-	// The file in the editor, run once per set of inputs (run-inputs.ts): its evidence, across all of them.
-	registerRunWithInputs(context);
+	// The editor's ▷: the file in the editor, run as F5 runs it — a tsval debug session, stopping at breakpoints, its
+	// process.argv from the file's stub (LIVE-VALUES.md, "Mocking a value"). One way to run a file.
+	context.subscriptions.push(vscode.commands.registerCommand("editor.debugFile", async (uri?: vscode.Uri) => {
+		const file = uri instanceof vscode.Uri ? uri : vscode.window.activeTextEditor?.document.uri;
+
+		if (file !== undefined) {
+			await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `debug ${file.path.split("/").pop()}`, "program": file.path });
+		}
+	}));
 	// VS Code's Source Control view, on core's git service (source-control.ts).
 	registerSourceControl(context);
 	// Durable annotations on code spans (SPAN-ANNOTATIONS.md), from core's BABLR (bablr.ts: one worker, its parses cached

@@ -228,15 +228,7 @@
   font-size: 7px;
 }
 
-/* Setting a value at a stop: a variable's name to click, the field for its new value, and a value set by hand. */
-.live-values-label.editable {
-  cursor: text;
-}
-
-.live-values-label.editable:hover {
-  text-decoration: underline dotted;
-}
-
+/* A mocked value's box, and a value set by hand. */
 .live-values-input {
   flex: none;
   width: 14ch;
@@ -255,4 +247,54 @@
 .live-values-set {
   color: var(--vscode-charts-orange, #d18616);
   font-weight: bold;
+}
+
+/* Mocking a value (live-values.ts): the Mock checkbox — process.argv's always there, a variable's on its row's hover or
+   at the cursor, so rows don't grow controls nobody asked for — and, checked, the run's value struck through, a box for
+   the mocked one, and process.argv's Persist and Multiple. */
+.live-values-mock {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-left: 1ch;
+  visibility: hidden;
+  font-family: var(--vscode-font-family);
+  font-size: calc(var(--notes-margin-code-font-size, 12px) - 1px);
+  color: var(--vscode-descriptionForeground);
+}
+
+.live-values-mock.shown,
+.live-values-row:hover .live-values-mock,
+.notes-margin-cell.lit .live-values-mock {
+  visibility: visible;
+}
+
+.live-values-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.live-values-check input {
+  margin: 0;
+}
+
+.live-values-row.mocking {
+  flex-wrap: wrap;
+}
+
+.live-values-row.mocking .live-values-cell {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+/* process.argv mocked: what a run had is the mock itself (nothing else to strike out), so it's left to the boxes. */
+.live-values-row.mocking.argv .live-values-cell {
+  display: none;
+}
+
+.live-values-input {
+  font-family: var(--notes-margin-code-font-family, monospace);
 }

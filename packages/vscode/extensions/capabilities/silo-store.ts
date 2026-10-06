@@ -166,6 +166,48 @@ export async function persistOverride(capability: string, resource: string, disp
 	await writeText(vscode.Uri.joinPath(root, `${user}.policy.json`), JSON.stringify(overrideCache, null, "\t") + "\n");
 }
 
+// ── stubs: what a program reads from outside, mocked (LIVE-VALUES.md) ─────────────────────────────────────────
+
+/** A stub: what `seam` gives `file` (workspace-relative) on every run — for `argv`, its cases, each a run's arguments
+ *  (`process.argv` past node and the file). */
+export interface Stub { "seam": "argv"; "file": string; "cases": string[][] }
+
+interface Stubs { "version": 1; "stubs": Stub[] }
+
+/** My stubs, from `.silo/<user>.stubs.json` (committed, like my policy overrides: a repo's inputs travel with it). */
+export async function loadStubs(): Promise<Stub[]> {
+	const root = siloRoot();
+
+	if (root === undefined) {
+		return [];
+	}
+
+	try {
+		const parsed = JSON.parse(await readText(vscode.Uri.joinPath(root, `${await currentUser()}.stubs.json`)) ?? "{}") as Partial<Stubs>;
+
+		return Array.isArray(parsed.stubs) ? parsed.stubs.filter((stub) => stub.seam === "argv" && typeof stub.file === "string" && Array.isArray(stub.cases)) : [];
+	} catch {
+		return [];
+	}
+}
+
+/** Keep `cases` as `file`'s `seam` stub — or, with none, take it away. */
+export async function persistStub(seam: Stub["seam"], file: string, cases: string[][] | undefined): Promise<void> {
+	const root = siloRoot();
+
+	if (root === undefined) {
+		return;
+	}
+
+	const stubs = (await loadStubs()).filter((stub) => !(stub.seam === seam && stub.file === file));
+
+	if (cases !== undefined && cases.length > 0) {
+		stubs.push({ "seam": seam, "file": file, "cases": cases });
+	}
+
+	await writeText(vscode.Uri.joinPath(root, `${await currentUser()}.stubs.json`), JSON.stringify({ "version": 1, "stubs": stubs } satisfies Stubs, null, "\t") + "\n");
+}
+
 // ── static facts: the capability surface (committed, shared) ─────────────────────────────────────────────────
 
 /** One statically-detected capability site: what a file CAN reach (from findReach, surfaced via the plugin's

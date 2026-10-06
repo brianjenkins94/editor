@@ -15,11 +15,11 @@
   ],
   "contributes": {
     "commands": [
-      { "command": "editor.runWithInputs", "title": "Run with Inputs…", "category": "Evidence", "icon": "$(run-all)" }
+      { "command": "editor.debugFile", "title": "Run and Debug File", "category": "Debug", "icon": "$(debug-alt)" }
     ],
     "menus": {
       "editor/title/run": [
-        { "command": "editor.runWithInputs", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "navigation@2" }
+        { "command": "editor.debugFile", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "navigation@2" }
       ]
     },
     "taskDefinitions": [
