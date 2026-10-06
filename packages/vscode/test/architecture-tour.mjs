@@ -532,7 +532,8 @@ test("live values: a session's values beside the code, as the talk's binary sear
 
 	await session.request(`debug.session.${started.session}.stop`, undefined, 30_000);
 	await eventually("the values gone with the session", async () => Object.keys(await rows()).length === 0 || undefined);
-	assert.equal(await workbench.evaluate(() => document.querySelector(".notes-margin-entry strong")?.textContent), "Binary search", "the note stays");
+	// (Each draw renders the note again, asynchronously: wait for it.)
+	assert.equal(await eventually("the note, still there", () => workbench.evaluate(() => document.querySelector(".notes-margin-entry strong")?.textContent)), "Binary search", "the note stays");
 	// Leave the workbench as the next tests expect it: no note, no breakpoint, and the Explorer back where a breakpoint's
 	// stop put the Run and Debug view (they open files from its tree).
 	await show([]);
