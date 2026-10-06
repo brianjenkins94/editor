@@ -141,17 +141,32 @@ test("provoke: a cold transform round in a child worker", async () => {
 
 // A task — `node <file>` that runs to completion — runs under the tsval debugger (the debug worker), and a
 // capability-gated call pauses it.
-test("node script: a task runs under the tsval debugger, with its render surface", async () => {
+test("node script: a task runs under the tsval debugger", async () => {
 	await session.terminal(`echo "require('fs').writeFileSync('/workspace/tour-out.txt', 'tour');" > tour.js && node tour.js`, { "fresh": true });
 	await session.until("the debug worker", alive("debug-worker"));
 	await session.until("the debug session's launch", hasLabel("pod", "debug-worker", /^debug\.session\..+\.control$/u));
-	await session.until("the tsval render surface", hasLabel("shell", "tsval-preview", /^init/u));
 
 	// One run, one id: the registry's run is the debug session's (its launch config carries it).
 	const run = await eventually("the run", async () => (await session.request("runs.list", undefined, 5000)).find((each) => each.title === "node tour.js" && each.state === "running"));
 	const sessionRun = await session.workbench().evaluate(() => globalThis.__editor.api.debug.activeDebugSession?.configuration.__runId);
 
 	assert.equal(sessionRun, run.id, "the session carries the registry's run id");
+});
+
+// A program that renders opens its render surface, the shell's tsval Preview window; one that draws nothing — the task
+// above — doesn't, so it covers no code.
+test("render surface: a tsval program that renders opens it", async () => {
+	await session.workbench().evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file("/workspace/render.js"), new TextEncoder().encode("ReactDOM.createRoot(document.getElementById('root')).render(React.createElement('p', null, 'tour'));\n"));
+	});
+
+	const started = await session.request("debug.start", { "program": "/workspace/render.js", "breakpoints": [] }, 60_000);
+
+	assert.equal(started.state, "idle", "mounted, waiting for events");
+	await session.until("the tsval render surface", hasLabel("shell", "tsval-preview", /^init/u));
+	await session.request(`debug.session.${started.session}.stop`, undefined, 30_000);
 });
 
 // A session VS Code starts itself (F5, Run and Debug, debug_start) is a run in the registry too, ended with the session.
