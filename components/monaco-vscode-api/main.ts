@@ -650,6 +650,6 @@ export { OPEN_ARCHITECTURE_COMMAND, registerLiveArchitecture } from "./architect
 export type { HostedEditorOptions } from "./hosted-editor";
 export type { LiveValuesRow, LiveValuesView } from "./live-values";
 export { editorsShowing, showLiveValues } from "./live-values";
-export type { PaneEntry, PaneRender } from "./pane";
+export type { PaneEntry, PaneMark, PaneRender } from "./pane";
 export { renderMarkdown, showPane } from "./pane";
 export { closeHostedEditor, openHostedEditor, registerHostedEditors } from "./hosted-editor";

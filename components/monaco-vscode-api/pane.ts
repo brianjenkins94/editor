@@ -5,7 +5,9 @@
  * after the span's last line as tall as the difference, so the code below moves down by that much and no entry spills
  * onto lines it isn't about. Entries on overlapping spans share one cell, stacked.
  *
- * Hovering an entry marks its span in the editor; the cursor on a line lights the entry about it.
+ * Hovering an entry marks its span in the editor; the cursor on a line lights the entry about it. Beside the cells, at
+ * the pane's left edge, a mark per line the consumer gives (`marks`: a class to style it by, a title), as tall as its
+ * line wraps to — coverage's strip, say: the glyph margin stays the breakpoints'.
  *
  * The pane's left edge is a divider you drag (remembered, the same for every editor). Wrapping code wraps at it: while a
  * pane shows and wrapping is wanted, the editor wraps at a column (`wordWrap: "bounded"`) set to the divider's — and
@@ -24,8 +26,12 @@ export interface PaneEntry { "id": string; "fromLine": number; "toLine": number 
 /** Render `entry` into `element`; what it returns, if anything, is called when the entry goes. */
 export type PaneRender = (entry: PaneEntry, element: HTMLElement) => (() => void) | void;
 
-/** Each file's entries and how to render them, by URI. */
-const panes = new Map<string, { "entries": PaneEntry[]; "render": PaneRender }>();
+/** A mark beside line `line` (0-based) at the pane's left edge: `kind` its class (the consumer styles it), `title` on
+ *  hover. */
+export interface PaneMark { "line": number; "kind": string; "title"?: string }
+
+/** Each file's entries, how to render them, and its marks, by URI. */
+const panes = new Map<string, { "entries": PaneEntry[]; "render": PaneRender; "marks": PaneMark[] }>();
 /** Each editor's frame, while it shows a file with a pane. */
 const frames = new Map<monaco.editor.ICodeEditor, Frame>();
 let started: Promise<void> | undefined;
@@ -76,6 +82,8 @@ class Frame implements monaco.editor.IOverlayWidget {
 	private readonly listeners: monaco.IDisposable[] = [];
 	private readonly resize = new ResizeObserver(() => { this.layout(); });
 	private readonly sash = document.createElement("div");
+	private readonly strip = document.createElement("div");
+	private marks: { "line": number; "element": HTMLElement }[] = [];
 	private cells: Cell[] = [];
 	private disposers: (() => void)[] = [];
 	private marked: string[] = [];
@@ -89,7 +97,8 @@ class Frame implements monaco.editor.IOverlayWidget {
 		this.element.className = "notes-margin";
 		this.sash.className = "notes-margin-sash";
 		this.sash.title = "Drag to move the divider";
-		this.element.append(this.sash);
+		this.strip.className = "notes-margin-strip";
+		this.element.append(this.sash, this.strip);
 		this.sash.addEventListener("pointerdown", (event) => { this.drag(event); });
 
 		const raw = editor.getRawOptions();
@@ -139,8 +148,21 @@ class Frame implements monaco.editor.IOverlayWidget {
 		return null; // placed by `place`
 	}
 
-	public show(entries: PaneEntry[], render: PaneRender): void {
+	public show(entries: PaneEntry[], render: PaneRender, marks: PaneMark[] = []): void {
 		this.clear();
+		this.marks = marks.map((mark) => {
+			const element = document.createElement("div");
+
+			element.className = `notes-margin-mark ${mark.kind}`;
+
+			if (mark.title !== undefined) {
+				element.title = mark.title;
+			}
+
+			this.strip.append(element);
+
+			return { "line": mark.line, "element": element };
+		});
 		this.cells = cellsOf(entries).map((cell) => {
 			const element = document.createElement("div");
 
@@ -258,7 +280,9 @@ class Frame implements monaco.editor.IOverlayWidget {
 		}
 
 		this.cells = [];
-		this.element.replaceChildren(this.sash);
+		this.strip.replaceChildren();
+		this.marks = [];
+		this.element.replaceChildren(this.sash, this.strip);
 		this.mark(undefined);
 	}
 
@@ -269,13 +293,10 @@ class Frame implements monaco.editor.IOverlayWidget {
 
 	/** Size each tall cell's view zone (the code side of the row grows by the difference), then place everything. */
 	private layout(): void {
-		const lineHeight = this.editor.getOption(monaco.editor.EditorOption.lineHeight);
-
 		this.editor.changeViewZones((accessor) => {
 			for (const cell of this.cells) {
 				// The span's own height: its lines' (each as many rows as it wraps to), not counting the zone after it.
-				const bottom = (this.editor as unknown as { "getBottomForLineNumber"?: (line: number, includeViewZones?: boolean) => number }).getBottomForLineNumber?.(cell.toLine + 1, false) ?? this.editor.getTopForLineNumber(cell.toLine + 1) + lineHeight;
-				const span = bottom - this.editor.getTopForLineNumber(cell.fromLine + 1);
+				const span = this.bottomOf(cell.toLine) - this.editor.getTopForLineNumber(cell.fromLine + 1);
 				const height = Math.max(0, Math.ceil(cell.element.offsetHeight - span));
 
 				if (cell.zone?.height === height) {
@@ -294,6 +315,13 @@ class Frame implements monaco.editor.IOverlayWidget {
 
 	/** Where everything goes now: the frame at the divider (by default past the longest line, but no further than 60% of
 	 *  the way), the code wrapping there if it wraps, each cell beside its span as the editor scrolls, the cursor's lit. */
+	/** Where line `line` (0-based) ends: its last wrapped row's bottom, not counting a zone after it. */
+	private bottomOf(line: number): number {
+		const editor = this.editor as unknown as { "getBottomForLineNumber"?: (line: number, includeViewZones?: boolean) => number };
+
+		return editor.getBottomForLineNumber?.(line + 1, false) ?? this.editor.getTopForLineNumber(line + 1) + this.editor.getOption(monaco.editor.EditorOption.lineHeight);
+	}
+
 	private place(): void {
 		const model = this.editor.getModel();
 		const layout = this.editor.getLayoutInfo();
@@ -319,6 +347,13 @@ class Frame implements monaco.editor.IOverlayWidget {
 		// The editor's own font for code in a note (VS Code's --vscode-editor-font-* aren't defined in here).
 		this.element.style.setProperty("--notes-margin-code-font-family", font.fontFamily);
 		this.element.style.setProperty("--notes-margin-code-font-size", `${font.fontSize}px`);
+
+		for (const mark of this.marks) {
+			const top = this.editor.getTopForLineNumber(mark.line + 1);
+
+			// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: beside its line, as tall as it wraps to
+			Object.assign(mark.element.style, { "top": `${top - this.editor.getScrollTop()}px`, "height": `${this.bottomOf(mark.line) - top}px` });
+		}
 
 		for (const cell of this.cells) {
 			// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: beside its span, as the editor scrolls
@@ -390,16 +425,16 @@ function sync(editor: monaco.editor.ICodeEditor): void {
 		frames.set(editor, frame);
 	}
 
-	frame.show(pane.entries, pane.render);
+	frame.show(pane.entries, pane.render, pane.marks);
 }
 
 /** Show `entries` beside every editor showing `uri` (a file URI's string), each rendered by `render` — now and when one
  *  opens it — or, with none, take the pane away. */
-export function showPane(uri: string, entries: PaneEntry[] | undefined, render?: PaneRender): void {
+export function showPane(uri: string, entries: PaneEntry[] | undefined, render?: PaneRender, marks: PaneMark[] = []): void {
 	if (entries === undefined || render === undefined) {
 		panes.delete(uri);
 	} else {
-		panes.set(uri, { "entries": entries, "render": render });
+		panes.set(uri, { "entries": entries, "render": render, "marks": marks });
 	}
 
 	started ??= start();
