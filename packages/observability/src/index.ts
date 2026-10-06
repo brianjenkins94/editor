@@ -569,6 +569,71 @@ export interface PageToolsOptions {
 	"tools"?: PageTool[];
 }
 
+/** Where a page tool runs: this page (no `frame`), the tab's top-level window (`"top"` — a page framed by another, as
+ *  an editor's shell frames it), or the first frame in the tab whose name or URL contains `frame` — at any depth, inside
+ *  shadow roots too, same-origin (a cross-origin frame can't be reached). */
+function frameWindow(frame: unknown): Window {
+	if (frame === undefined || frame === "") {
+		return window;
+	}
+
+	const top = window.top ?? window;
+
+	if (frame === "top") {
+		return top;
+	}
+
+	const wanted = String(frame);
+	// By tag, not `instanceof`: another frame's elements are its own realm's HTMLIFrameElement, not this one's.
+	const frames = (root: Document | ShadowRoot): HTMLIFrameElement[] => [...root.querySelectorAll("*")].flatMap((element) => [
+		...element.tagName === "IFRAME" ? [element as HTMLIFrameElement] : [],
+		...element.shadowRoot === null ? [] : frames(element.shadowRoot)
+	]);
+	const find = (win: Window): Window | undefined => {
+		let doc: Document;
+
+		try {
+			doc = win.document;
+		} catch {
+			return undefined; // cross-origin
+		}
+
+		for (const element of frames(doc)) {
+			const child = element.contentWindow;
+
+			if (child === null) {
+				continue;
+			}
+
+			try {
+				if (element.name.includes(wanted) || child.name.includes(wanted) || child.location.href.includes(wanted)) {
+					return child;
+				}
+			} catch {
+				continue; // cross-origin
+			}
+
+			const found = find(child);
+
+			if (found !== undefined) {
+				return found;
+			}
+		}
+
+		return undefined;
+	};
+	const found = find(top);
+
+	if (found === undefined) {
+		throw new Error(`no frame in this tab whose name or URL contains "${wanted}"`);
+	}
+
+	return found;
+}
+
+/** The `frame` argument page_eval and page_query take. */
+const FRAME_ARGUMENT = { "type": "string", "description": "Where to run it: this page (omitted); \"top\", the tab's top-level window (a page framed by another — an editor's shell); or the first same-origin frame in the tab whose name or URL contains this text (e.g. a preview window's \"__virtual__\" or its name)." };
+
 /** The tools every page serves: evaluate an expression in it, and query its DOM. */
 function builtinPageTools(): PageTool[] {
 	return [{
@@ -578,7 +643,8 @@ function builtinPageTools(): PageTool[] {
 			"type": "object",
 			"properties": {
 				"expression": { "type": "string", "description": "A JS expression, e.g. `document.title` or `document.querySelectorAll('.monaco-editor').length`. May evaluate to a Promise (e.g. an async IIFE), which is awaited." },
-				"timeoutMs": { "type": "number", "description": "How long to wait for the result, including an awaited Promise (default 5000)." }
+				"timeoutMs": { "type": "number", "description": "How long to wait for the result, including an awaited Promise (default 5000)." },
+				"frame": FRAME_ARGUMENT
 			},
 			"required": ["expression"]
 		},
@@ -586,9 +652,9 @@ function builtinPageTools(): PageTool[] {
 		"handler": async (args) => {
 			// page_eval's whole purpose is to evaluate a caller-supplied expression in the tab: indirect eval runs it in global
 			// scope, not this closure. Through `globalThis` — an `eval` alias gets inlined back into a direct eval by the
-			// consumer's bundler (Rolldown's [EVAL] warning, in every app that bundles this).
-			// eslint-disable-next-line no-eval -- see above
-			const indirectEval = globalThis.eval;
+			// consumer's bundler (Rolldown's [EVAL] warning, in every app that bundles this). In another frame: that window's
+			// own eval, so the expression runs in its global scope.
+			const indirectEval = (frameWindow(args["frame"]) as unknown as typeof globalThis).eval;
 
 			// Await a thenable result: a Promise JSON-serializes to `{}`, which would hide every async answer.
 			return jsonSafe(await indirectEval(String(args["expression"])));
@@ -600,13 +666,14 @@ function builtinPageTools(): PageTool[] {
 			"type": "object",
 			"properties": {
 				"selector": { "type": "string", "description": "A CSS selector, e.g. '.monaco-editor' or '[role=tab]'." },
-				"limit": { "type": "number", "description": "Max sample entries to return (default 10)." }
+				"limit": { "type": "number", "description": "Max sample entries to return (default 10)." },
+				"frame": FRAME_ARGUMENT
 			},
 			"required": ["selector"]
 		},
 		"timeoutMs": 5000,
 		"handler": (args) => {
-			const nodes = Array.from(document.querySelectorAll(String(args["selector"])));
+			const nodes = Array.from(frameWindow(args["frame"]).document.querySelectorAll(String(args["selector"])));
 			const limit = typeof args["limit"] === "number" ? args["limit"] : 10;
 
 			return { "count": nodes.length, "sample": nodes.slice(0, limit).map((node) => (node.textContent ?? "").trim().slice(0, 120)) };
