@@ -27,24 +27,24 @@
   background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder));
 }
 
-/* The marks' column, between the divider and the cells. */
-.notes-margin-strip {
+/* The gutter column, left of the code (its own overlay): a mark per line, the consumer's to style. */
+.notes-margin-gutter {
   position: absolute;
   top: 0;
-  bottom: 0;
-  left: 2px;
-  width: 3px;
+  overflow: hidden;
 }
 
+/* A mark as VS Code draws its change bar in this lane (dirtydiffDecorator.css: 5px in, scm.diffDecorationsGutterWidth's
+   default 3px wide), so the column looks native. */
 .notes-margin-mark {
   position: absolute;
-  left: 0;
+  left: 5px;
   width: 3px;
 }
 
 .notes-margin-cell {
   position: absolute;
-  left: 6px;
+  left: 0;
   right: 0;
   padding: 0 12px;
   box-sizing: border-box;

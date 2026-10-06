@@ -5,9 +5,14 @@
  * after the span's last line as tall as the difference, so the code below moves down by that much and no entry spills
  * onto lines it isn't about. Entries on overlapping spans share one cell, stacked.
  *
- * Hovering an entry marks its span in the editor; the cursor on a line lights the entry about it. Beside the cells, at
- * the pane's left edge, a mark per line the consumer gives (`marks`: a class to style it by, a title), as tall as its
- * line wraps to — coverage's strip, say: the glyph margin stays the breakpoints'.
+ * Hovering an entry marks its span in the editor; the cursor on a line lights the entry about it.
+ *
+ * The pane has a gutter column of its own too, right of the line numbers: a mark per line the consumer gives (`marks`:
+ * a class to style it by, a title), as tall as its line wraps to — coverage's, say. It's the left end of the editor's
+ * line-decorations lane, where VS Code's change bars go (the workbench turns those off: scm.diffDecorations), folding's
+ * chevrons to its right. A mark is drawn as VS Code draws its change bar there (3px, 5px into the lane), so the column
+ * looks native. The glyph margin stays the breakpoints' (VS Code won't set one where
+ * another extension's glyph is).
  *
  * The pane's left edge is a divider you drag (remembered, the same for every editor). Wrapping code wraps at it: while a
  * pane shows and wrapping is wanted, the editor wraps at a column (`wordWrap: "bounded"`) set to the divider's — and
@@ -26,9 +31,13 @@ export interface PaneEntry { "id": string; "fromLine": number; "toLine": number 
 /** Render `entry` into `element`; what it returns, if anything, is called when the entry goes. */
 export type PaneRender = (entry: PaneEntry, element: HTMLElement) => (() => void) | void;
 
-/** A mark beside line `line` (0-based) at the pane's left edge: `kind` its class (the consumer styles it), `title` on
- *  hover. */
+/** A mark beside line `line` (0-based) in the pane's gutter column: `kind` its class (the consumer styles it), `title`
+ *  on hover. */
 export interface PaneMark { "line": number; "kind": string; "title"?: string }
+
+/** The gutter column's width, at the line-decorations lane's left end: a mark sits in it as VS Code's change bar would
+ *  (pane.css), with room for a consumer's badge centred on it. */
+const GUTTER_WIDTH = 12;
 
 /** Each file's entries, how to render them, and its marks, by URI. */
 const panes = new Map<string, { "entries": PaneEntry[]; "render": PaneRender; "marks": PaneMark[] }>();
@@ -82,7 +91,9 @@ class Frame implements monaco.editor.IOverlayWidget {
 	private readonly listeners: monaco.IDisposable[] = [];
 	private readonly resize = new ResizeObserver(() => { this.layout(); });
 	private readonly sash = document.createElement("div");
-	private readonly strip = document.createElement("div");
+	/** The gutter column, an overlay of its own left of the code. */
+	private readonly gutter = document.createElement("div");
+	private readonly gutterWidget: monaco.editor.IOverlayWidget = { "getId": () => "notes-margin-gutter", "getDomNode": () => this.gutter, "getPosition": () => null };
 	private marks: { "line": number; "element": HTMLElement }[] = [];
 	private cells: Cell[] = [];
 	private disposers: (() => void)[] = [];
@@ -97,8 +108,8 @@ class Frame implements monaco.editor.IOverlayWidget {
 		this.element.className = "notes-margin";
 		this.sash.className = "notes-margin-sash";
 		this.sash.title = "Drag to move the divider";
-		this.strip.className = "notes-margin-strip";
-		this.element.append(this.sash, this.strip);
+		this.gutter.className = "notes-margin-gutter";
+		this.element.append(this.sash);
 		this.sash.addEventListener("pointerdown", (event) => { this.drag(event); });
 
 		const raw = editor.getRawOptions();
@@ -106,6 +117,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 		this.own = { "wordWrap": raw.wordWrap, "wordWrapColumn": raw.wordWrapColumn };
 		this.wrap = editor.getOption(monaco.editor.EditorOption.wrappingInfo).wrappingColumn !== -1;
 		editor.addOverlayWidget(this);
+		editor.addOverlayWidget(this.gutterWidget);
 		this.listeners.push(
 			editor.onDidScrollChange(() => { this.place(); }),
 			editor.onDidLayoutChange(() => { this.place(); }),
@@ -159,7 +171,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 				element.title = mark.title;
 			}
 
-			this.strip.append(element);
+			this.gutter.append(element);
 
 			return { "line": mark.line, "element": element };
 		});
@@ -200,6 +212,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 		}
 
 		this.editor.removeOverlayWidget(this);
+		this.editor.removeOverlayWidget(this.gutterWidget);
 		this.editor.updateOptions(this.own as monaco.editor.IEditorOptions);
 	}
 
@@ -280,9 +293,9 @@ class Frame implements monaco.editor.IOverlayWidget {
 		}
 
 		this.cells = [];
-		this.strip.replaceChildren();
+		this.gutter.replaceChildren();
 		this.marks = [];
-		this.element.replaceChildren(this.sash, this.strip);
+		this.element.replaceChildren(this.sash);
 		this.mark(undefined);
 	}
 
@@ -347,6 +360,9 @@ class Frame implements monaco.editor.IOverlayWidget {
 		// The editor's own font for code in a note (VS Code's --vscode-editor-font-* aren't defined in here).
 		this.element.style.setProperty("--notes-margin-code-font-family", font.fontFamily);
 		this.element.style.setProperty("--notes-margin-code-font-size", `${font.fontSize}px`);
+
+		// The gutter column: the line-decorations lane's left end, right of the line numbers (where the change bars were).
+		Object.assign(this.gutter.style, { "left": `${layout.decorationsLeft}px`, "width": `${GUTTER_WIDTH}px`, "height": `${layout.height}px` });
 
 		for (const mark of this.marks) {
 			const top = this.editor.getTopForLineNumber(mark.line + 1);
