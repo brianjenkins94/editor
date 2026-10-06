@@ -14,11 +14,23 @@
  * A capability stop asks on its line too (step 8): what the call would do — `writeFileSync '/workspace/out.txt'` — and
  * *Allow once*, *Allow always*, *Deny*, the choice sent back to the session (`debug.session.<id>.decide`), which
  * resumes it. *Allow always* needs the resource the call reaches: offered only when it's known before the line runs.
+ *
+ * The margin is always open beside a JavaScript or TypeScript file, with or without anything to show: it's the file's
+ * runtime column — coverage's strip at its edge (`showMarks`, from coverage.ts), notes, values, decisions. In the strip
+ * too, how the last run ended short: ✕ on the line it crashed on (the error on hover), ■ on the one it was stopped at —
+ * until the file runs again.
+ *
+ * Everything a run put on a line follows its code through edits and cosmetic changes (a reformat, a reindent): each is
+ * anchored by its node's range in the text that ran (anchors.ts, BABLR spans) and drawn where that code is now; what
+ * lost its code goes.
  */
+import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
-import type { PaneEntry } from "@brianjenkins94/monaco-vscode-api/main";
-import type { CapabilityAsk, CapabilityChoice } from "./extensions/worker-pod/debug-protocol";
+import type { PaneEntry, PaneMark } from "@brianjenkins94/monaco-vscode-api/main";
+import type { CapabilityAsk, CapabilityChoice, RunEnd } from "./extensions/worker-pod/debug-protocol";
 import type { LiveBatch, LiveCall, LiveValue } from "./extensions/worker-pod/live-values";
+import type { Range } from "./anchors";
+import { Anchors } from "./anchors";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { showPane } from "@brianjenkins94/monaco-vscode-api/main";
 import css from "./live-values.css?raw";
@@ -27,7 +39,7 @@ import css from "./live-values.css?raw";
 export interface Note { "id": string; "fromLine": number; "toLine": number; "text": string }
 
 /** One line of values as drawn: its label (`mid =`), then a value (`inline`) or a cell per column. */
-interface Row { "line": number; "label": string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker }
+interface Row { "line": number; "label": string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range }
 
 /** A function's calls to pick between, on its first line: which (`function:line`), the one shown (0-based), how many. */
 interface Picker { "function": string; "index": number; "count": number }
@@ -37,7 +49,7 @@ interface Cell { "text": string; "kind": string }
 
 /** A session's values, and what's picked in them: a function's call (by `function:line`; none, its latest) and a held
  *  column. */
-interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string }
+interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors }
 
 /** A column no wider than this many characters; a longer value is cut short, whole on hover. */
 const MAX_WIDTH = 24;
@@ -46,8 +58,20 @@ const MAX_WIDTH = 24;
 const sessions = new Map<string, Session>();
 /** Prose notes, per file URI. */
 const notes = new Map<string, Note[]>();
+/** Each file's marks for the margin's strip (coverage), per file URI. */
+const marked = new Map<string, PaneMark[]>();
+/** How each file's last run ended short, per file URI. */
+const ends = new Map<string, RunEnd & { "anchors"?: Anchors }>();
+/** The code files shown in an editor: their margin stays open, empty or not. */
+const open = new Set<string>();
+/** The languages whose files get a margin always. */
+const CODE = new Set(["javascript", "javascriptreact", "typescript", "typescriptreact"]);
 /** The capability stop a session is at, per file URI: what it asks. */
-const asks = new Map<string, { "session": string; "ask": CapabilityAsk }>();
+const asks = new Map<string, { "session": string; "ask": CapabilityAsk; "anchors"?: Anchors }>();
+/** The workbench's extension API (set by `installLiveValues`): the documents' text, BABLR's spans. */
+let api: typeof vscodeApi | undefined;
+/** Each file's latest draw: an earlier one still placing its lines gives way. */
+const drawing = new Map<string, number>();
 /** Sends a capability stop's choice back to its session (set by `installLiveValues`). */
 let choose: ((session: string, choice: CapabilityChoice) => Promise<unknown>) | undefined;
 /** The cells of each column on screen, by group and column: to light a column on every line. */
@@ -93,6 +117,13 @@ function compareTurns(a: string, b: string): number {
 	}
 
 	return 0;
+}
+
+/** A line's anchor: the range of the first of its values that has one. */
+function anchorOf(values: LiveValue[]): { "at"?: Range } {
+	const at = values.find((value) => value.at !== undefined)?.at;
+
+	return at === undefined ? {} : { "at": at };
 }
 
 /** A session's rows: a call of each function (its latest, or the one `picked`) and the top level, a row per line that
@@ -143,7 +174,7 @@ export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>, picked
 		const group = `${call}/${depth}`;
 
 		if (depth === 0) {
-			rows.push({ "line": line, "label": label, "cells": [], "inline": cellOf(inDepth, named), "group": group, "widths": [] });
+			rows.push({ "line": line, "label": label, "cells": [], "inline": cellOf(inDepth, named), "group": group, "widths": [], ...anchorOf(inDepth) });
 
 			continue;
 		}
@@ -154,7 +185,7 @@ export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>, picked
 			const inTurn = inDepth.filter((value) => value.turns.join(".") === turn);
 
 			return inTurn.length === 0 ? undefined : cellOf(inTurn, named);
-		}), "group": group, "widths": [] });
+		}), "group": group, "widths": [], ...anchorOf(inDepth) });
 	}
 
 	// A function called more than once: its picker on its first line, a row of its own if nothing's there.
@@ -164,7 +195,7 @@ export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>, picked
 			const row = rows.find((candidate) => candidate.line === call.line);
 
 			if (row === undefined) {
-				rows.push({ "line": call.line, "label": "", "cells": [], "group": `${call.id}/0`, "widths": [], "picker": picker });
+				rows.push({ "line": call.line, "label": "", "cells": [], "group": `${call.id}/0`, "widths": [], "picker": picker, ...call.at === undefined ? {} : { "at": call.at } });
 			} else {
 				row.picker = picker;
 			}
@@ -330,6 +361,31 @@ let styled = false;
 
 /** Show a file's values and notes in its margin, or take the margin away when it has neither. */
 function draw(uri: string): void {
+	void place(uri);
+}
+
+/** `items` moved to the lines their code is on now (`anchors`, by each one's `at`), those whose code is gone dropped —
+ *  as they are when the file is as it ran, or when there's nothing to place them by. */
+async function relocate<T extends { "line": number; "at"?: Range }>(anchors: Anchors | undefined, text: string | undefined, items: T[]): Promise<T[]> {
+	if (anchors === undefined || text === undefined || text === anchors.text || items.length === 0) {
+		return items;
+	}
+
+	const lines = await anchors.lines(text, items.map((item) => item.at ?? [0, 0]));
+
+	return items.flatMap((item, index) => (item.at === undefined || lines[index] === undefined ? [] : [{ ...item, "line": lines[index] }]));
+}
+
+/** The file's text as it is now, when it's open. */
+function documentText(uri: string): string | undefined {
+	return api?.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.getText();
+}
+
+async function place(uri: string): Promise<void> {
+	const token = (drawing.get(uri) ?? 0) + 1;
+
+	drawing.set(uri, token);
+
 	if (!styled) {
 		styled = true;
 		document.head.append(Object.assign(document.createElement("style"), { "textContent": css }));
@@ -337,8 +393,19 @@ function draw(uri: string): void {
 
 	const session = sessions.get(uri);
 	const prose = notes.get(uri) ?? [];
-	const rows = session === undefined ? [] : rowsOf(session.values, session.calls, session.picked);
-	const last = rows.at(-1);
+	const text = documentText(uri);
+	// Each thing a run put on a line, on the line its code is on now.
+	const rows = await relocate(session?.anchors, text, session === undefined ? [] : rowsOf(session.values, session.calls, session.picked));
+	const asking = asks.get(uri);
+	const [askedAt] = asking === undefined ? [] : await relocate(asking.anchors, text, [asking.ask]);
+	const ending = ends.get(uri);
+	const [end] = ending === undefined ? [] : await relocate(ending.anchors, text, [ending]);
+
+	if (drawing.get(uri) !== token) {
+		return; // a newer draw is placing
+	}
+
+	const last = rows.reduce<Row | undefined>((latest, row) => (latest === undefined || row.line > latest.line ? row : latest), undefined);
 	const labelWidths = new Map<string, number>();
 
 	for (const row of rows) {
@@ -347,11 +414,11 @@ function draw(uri: string): void {
 		labelWidths.set(call, Math.max(labelWidths.get(call) ?? 0, row.label.length));
 	}
 
-	const asked = asks.get(uri);
+	const asked = askedAt === undefined ? undefined : { ...asking!, "ask": askedAt };
 	const entries: PaneEntry[] = [
 		// A capability stop's question first on its line: it's what the run waits on.
 		...asked === undefined ? [] : [{ "id": "ask", "fromLine": asked.ask.line, "toLine": asked.ask.line }],
-		...rows.map((row) => ({ "id": `values:${row.line}`, "fromLine": row.line, "toLine": row.line })),
+		...rows.map((row, index) => ({ "id": `values:${index}`, "fromLine": row.line, "toLine": row.line })),
 		// What the bounds left out, under the last line: its cell grows a line for it.
 		...last === undefined || session === undefined || session.dropped === 0 ? [] : [{ "id": "values:dropped", "fromLine": last.line, "toLine": last.line }],
 		...prose.map((note) => ({ "id": `note:${note.id}`, "fromLine": note.fromLine, "toLine": note.toLine }))
@@ -359,7 +426,13 @@ function draw(uri: string): void {
 
 	columns = new Map();
 
-	if (entries.length === 0) {
+	const marks: PaneMark[] = [
+		...marked.get(uri) ?? [],
+		...end === undefined ? [] : [{ "line": end.line, "kind": `run-${end.kind}`, "title": end.kind === "crashed" ? `The last run crashed here: ${end.message ?? "an uncaught error"}` : "The last run was stopped here" }]
+	];
+
+	// Only a file that isn't code, with nothing in it, goes without.
+	if (entries.length === 0 && !open.has(uri) && marks.length === 0) {
 		showPane(uri, undefined);
 
 		return;
@@ -379,7 +452,7 @@ function draw(uri: string): void {
 		}
 
 		if (entry.id.startsWith("values:")) {
-			const row = rows.find((candidate) => `values:${candidate.line}` === entry.id)!;
+			const row = rows[Number(entry.id.slice("values:".length))]!;
 
 			renderRow(row, labelWidths.get(row.group.split("/")[0]!) ?? 0, session!, () => { draw(uri); }, element);
 
@@ -400,7 +473,13 @@ function draw(uri: string): void {
 			gone = true;
 			dispose?.();
 		};
-	});
+	}, marks);
+}
+
+/** The marks beside `uri`'s lines in the margin's strip (coverage's), replacing its last. */
+export function showMarks(uri: string, marks: PaneMark[]): void {
+	marked.set(uri, marks);
+	draw(uri);
 }
 
 /** Prose notes beside `uri` (a file URI's string), or none. */
@@ -414,8 +493,38 @@ export function showNotes(uri: string, fileNotes: Note[] | undefined): void {
 	draw(uri);
 }
 
-/** Follow debug sessions' values: `uriOf` turns a session's program path into its file URI. */
-export function installLiveValues(hub: Hub, uriOf: (path: string) => string): void {
+/** Keep a margin beside every code file shown, and follow debug sessions' values and capability stops. */
+export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
+	api = vscode;
+
+	const uriOf = (path: string): string => vscode.Uri.file(path).toString();
+	/** The text a session ran, as anchors (the same for its values, its question and its end). */
+	const anchorsFor = (file: string, source: unknown, session?: Session): Anchors | undefined => session?.anchors ?? (typeof source === "string" ? new Anchors(vscode, file, source) : undefined);
+	const follow = (editors: readonly vscodeApi.TextEditor[]): void => {
+		for (const editor of editors) {
+			const uri = editor.document.uri.toString();
+
+			if (CODE.has(editor.document.languageId) && !open.has(uri)) {
+				open.add(uri);
+				draw(uri);
+			}
+		}
+	};
+
+	follow(vscode.window.visibleTextEditors);
+	vscode.window.onDidChangeVisibleTextEditors(follow);
+	// Edited: what a run put on lines moves with its code — drawn again once typing pauses (BABLR re-reads the file).
+	const typing = new Map<string, ReturnType<typeof setTimeout>>();
+
+	vscode.workspace.onDidChangeTextDocument((event) => {
+		const uri = event.document.uri.toString();
+
+		if (event.contentChanges.length > 0 && (sessions.has(uri) || ends.has(uri) || asks.has(uri))) {
+			clearTimeout(typing.get(uri));
+			typing.set(uri, setTimeout(() => { draw(uri); }, 300));
+		}
+	});
+
 	// The values drawn ten times a second at most, however often batches come — on a timer, not an animation frame,
 	// which a hidden tab never gives (the session's end would wait until it's looked at).
 	const pending = new Set<string>();
@@ -438,7 +547,7 @@ export function installLiveValues(hub: Hub, uriOf: (path: string) => string): vo
 	};
 
 	hub.subscribe("values.session.*", (data, envelope) => {
-		const { file, ...batch } = (data ?? {}) as Partial<LiveBatch> & { "file"?: unknown };
+		const { file, source, ...batch } = (data ?? {}) as Partial<LiveBatch> & { "file"?: unknown; "source"?: unknown };
 		const id = envelope.subject.slice("values.session.".length);
 
 		if (typeof file !== "string" || !Array.isArray(batch.values)) {
@@ -448,12 +557,14 @@ export function installLiveValues(hub: Hub, uriOf: (path: string) => string): vo
 		const uri = uriOf(file);
 		let session = sessions.get(uri);
 
-		// A new session over the file replaces the last one's values.
+		// A new session over the file replaces the last one's values, and how the last run ended.
 		if (session?.id !== id) {
 			session = { "id": id, "values": [], "calls": new Map(), "dropped": 0, "picked": new Map() };
 			sessions.set(uri, session);
+			ends.delete(uri);
 		}
 
+		session.anchors ??= anchorsFor(file, source);
 		session.values.push(...batch.values);
 
 		for (const call of batch.calls ?? []) {
@@ -466,7 +577,20 @@ export function installLiveValues(hub: Hub, uriOf: (path: string) => string): vo
 
 	// Live as long as the session: gone when it ends.
 	hub.subscribe("values.ended", (data) => {
-		const { session, file } = (data ?? {}) as { "session"?: unknown; "file"?: unknown };
+		const { session, file, source, end } = (data ?? {}) as { "session"?: unknown; "file"?: unknown; "source"?: unknown; "end"?: RunEnd };
+
+		// How it ended — crashed, or stopped on a line — replacing the last run's; a run that finished clears it.
+		if (typeof file === "string") {
+			const ran = sessions.get(uriOf(file));
+
+			if (end === undefined) {
+				ends.delete(uriOf(file));
+			} else {
+				ends.set(uriOf(file), { ...end, "anchors": anchorsFor(file, source, ran?.id === session ? ran : undefined) });
+			}
+
+			redraw(uriOf(file));
+		}
 
 		if (typeof file === "string" && asks.get(uriOf(file))?.session === session) {
 			asks.delete(uriOf(file));
@@ -484,7 +608,7 @@ export function installLiveValues(hub: Hub, uriOf: (path: string) => string): vo
 
 	choose = (session, choice) => rpc.request(`debug.session.${session}.decide`, { "choice": choice }, { "timeoutMs": 24 * 60 * 60_000 });
 	hub.subscribe("capability.ask", (data) => {
-		const { session, file, ask } = (data ?? {}) as { "session"?: unknown; "file"?: unknown; "ask"?: CapabilityAsk };
+		const { session, file, source, ask } = (data ?? {}) as { "session"?: unknown; "file"?: unknown; "source"?: unknown; "ask"?: CapabilityAsk };
 
 		if (typeof session !== "string" || typeof file !== "string") {
 			return;
@@ -493,7 +617,9 @@ export function installLiveValues(hub: Hub, uriOf: (path: string) => string): vo
 		const uri = uriOf(file);
 
 		if (ask !== undefined) {
-			asks.set(uri, { "session": session, "ask": ask });
+			const ran = sessions.get(uri);
+
+			asks.set(uri, { "session": session, "ask": ask, "anchors": anchorsFor(file, source, ran?.id === session ? ran : undefined) });
 		} else if (asks.get(uri)?.session === session) {
 			asks.delete(uri);
 		}

@@ -55,7 +55,9 @@ import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { installProfileFiles } from "./profile-files";
 import { installEvidence } from "./evidence";
-import { installLiveValues, showNotes } from "./live-values";
+import { installLiveValues, showMarks, showNotes } from "./live-values";
+import { installCoverage } from "./coverage";
+import { evidenceStore } from "./extensions/insights/evidence";
 import { windowClientTransport } from "./pane-link";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import { createBashProcess, serveTaskTerminals } from "./terminal";
@@ -576,8 +578,11 @@ function maybeBoot(): void {
 				const bablr = startBablr(workbenchHub);
 
 				installEvidence(api as typeof import("vscode"), workbenchHub, nodeRunner.runs, bablr);
-				// A debug session's values beside the code, in the notes margin (live-values.ts).
-				installLiveValues(workbenchHub, (path) => (api as typeof import("vscode")).Uri.file(path).toString());
+				// The notes margin beside every code file (live-values.ts): a debug session's values and capability stops, and
+				// coverage's strip (coverage.ts), read from the evidence through the insights extension's store, here with
+				// core's own API.
+				installLiveValues(workbenchHub, api as typeof import("vscode"));
+				installCoverage(api as typeof import("vscode"), evidenceStore(api as typeof import("vscode"), []), showMarks);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
 				// And the pod's tasks' terminals: a just-bash process that runs one command, over the hub (terminal.ts).

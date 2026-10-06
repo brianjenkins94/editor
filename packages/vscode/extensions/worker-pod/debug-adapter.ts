@@ -18,7 +18,7 @@ import { EMPTY_POLICY, type Policy } from "@brianjenkins94/util/silo/policy";
 import { loadEffectivePolicy, persistOverride } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
-import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
+import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, RunEnd, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
 import { lifecycleOfSource } from "../../lifecycle";
 import { controlSubject, eventSubject } from "./debug-protocol";
 import { inputsKey, parseInputs } from "./inputs";
@@ -38,6 +38,10 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	// waiting for its next stop. Served until the session ends.
 	private state: DebugState = "starting";
 	private stopReason: string | undefined;
+	/** Whether the end was told (`values.ended`): a stop after the program's own end doesn't tell it again. */
+	private ended = false;
+	/** Whether core has the text that ran (sent with the first values). */
+	private sourceTold = false;
 	/** What the capability stop it's at asks (LIVE-VALUES.md, step 8), until the run resumes. */
 	private ask: CapabilityAsk | undefined;
 	private output: string[] = [];
@@ -294,7 +298,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 			// The program's statement coverage so far (a CoverageReport); once it has ended, its final coverage.
 			case "getCoverage":
-				void this.currentCoverage(5000).then((report) => { this.respond(request, report as unknown as Dap); });
+				// With the text that ran, so the margin can place it on the code as it is now (coverage.ts).
+				void this.currentCoverage(5000).then((report) => { this.respond(request, { ...report, "source": this.source } as unknown as Dap); });
 				break;
 
 			case "launch":
@@ -364,8 +369,10 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 					this.sendFinalCoverage(report);
 					this.endAction();
 					this.closeWorker();
-					// The session's live values go with it, as when it runs to its end.
-					podHub.publish("values.ended", { "session": this.id, "file": this.program });
+					// The session's live values go with it, as when it runs to its end — and, stopped while paused, where it was.
+					const frame = this.state === "stopped" ? this.snapshot?.frames[0] : undefined;
+
+					this.tellEnded(frame === undefined ? undefined : { "kind": "stopped", "line": frame.line - 1, ...frame.at === undefined ? {} : { "at": frame.at } });
 					this.respond(request);
 					this.event("terminated");
 					this.settle("terminated");
@@ -478,7 +485,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private sendFinalCoverage(report: CoverageReport): void {
 		if (!this.coverageSent) {
 			this.coverageSent = true;
-			this.event("coverage", report as unknown as Dap);
+			this.event("coverage", { ...report, "source": this.source } as unknown as Dap);
 
 			// And to core, as evidence of the run (evidence.ts) — its coverage and its observed sites — with the source that
 			// ran, which the file may no longer be.
@@ -501,6 +508,15 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
 	 *  stop is driven by a control message the worker's loop is awaiting. */
+	/** The session's end, once, for core (live-values.ts): its values go, and how the run ended short, if it did, is
+	 *  marked on its line. */
+	private tellEnded(end: RunEnd | undefined): void {
+		if (!this.ended) {
+			this.ended = true;
+			podHub.publish("values.ended", { "session": this.id, "file": this.program, "source": this.source, ...end === undefined ? {} : { "end": end } });
+		}
+	}
+
 	private resume(kind: StepAction): void {
 		const trace = this.startAction(kind);
 
@@ -533,7 +549,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 				// A capability stop asks on its line, in the notes margin (core: live-values.ts).
 				if (message.ask !== undefined) {
-					podHub.publish("capability.ask", { "session": this.id, "file": this.program, "ask": message.ask });
+					podHub.publish("capability.ask", { "session": this.id, "file": this.program, "source": this.source, "ask": message.ask });
 				}
 
 				this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
@@ -558,7 +574,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			case "terminated":
 				this.endAction();
 				exitCodes.set(this.id, message.exitCode ?? 0);
-				podHub.publish("values.ended", { "session": this.id, "file": this.program });
+				this.tellEnded(message.crash === undefined ? undefined : { "kind": "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message });
 				this.event("terminated");
 				this.closeWorker();
 				this.settle("terminated");
@@ -566,7 +582,9 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 			// The session's live values (LIVE-VALUES.md), on to core: the file they're of, what's new.
 			case "values":
-				podHub.publish(`values.session.${this.id}`, { "file": this.program, ...message.batch });
+				// The text that ran, once: what core anchors the values' ranges in.
+				podHub.publish(`values.session.${this.id}`, { "file": this.program, ...this.sourceTold ? {} : { "source": this.source }, ...message.batch });
+				this.sourceTold = true;
 				break;
 
 			case "output":

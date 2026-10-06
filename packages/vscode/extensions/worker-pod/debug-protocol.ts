@@ -36,7 +36,7 @@ export interface Variable { "name": string; "value": string; "type": string; "va
 
 /** A stop, complete enough that the adapter answers stackTrace/scopes/variables with no round-trip. */
 export interface Snapshot {
-	"frames": { "id": number; "name": string; "line": number; "column": number }[];
+	"frames": { "id": number; "name": string; "line": number; "column": number; "at"?: [number, number] }[];
 	"scopes": Record<number, { "name": string; "variablesReference": number; "expensive": boolean }[]>;
 	"variables": Record<number, Variable[]>;
 	/** True when this stop is an earlier point in history (a time-travel view), for the stop reason. */
@@ -46,7 +46,11 @@ export interface Snapshot {
 /** What a capability stop asks (LIVE-VALUES.md, step 8): the gated call on the line it stopped at — its capability,
  *  its callee as written, and the resource it would reach, from the run's own values where they're known by then (a
  *  literal, a variable's value), else the argument as written. `line` is 0-based. */
-export interface CapabilityAsk { "line": number; "capability": string; "callee": string; "resource": string; "resolved": boolean; "dangerous": boolean }
+export interface CapabilityAsk { "line": number; "at"?: [number, number]; "capability": string; "callee": string; "resource": string; "resolved": boolean; "dangerous": boolean }
+
+/** How a run ended short, for the notes margin's strip: the line (0-based) it crashed on, with the error, or the one it
+ *  was stopped at. A run that finished has none. */
+export interface RunEnd { "kind": "crashed" | "stopped"; "line": number; "at"?: [number, number]; "message"?: string }
 
 /** The choices at a capability stop, as the preview's prompt words them. */
 export type CapabilityChoice = "allow-once" | "allow-always" | "deny";
@@ -55,7 +59,7 @@ export type CapabilityChoice = "allow-once" | "allow-always" | "deny";
 export type WorkerEvent =
 	| { "type": "stopped"; "reason": string; "snapshot": Snapshot; "atomic"?: boolean; "ask"?: CapabilityAsk }
 	/** The program is over: `exitCode` 1 when it threw, else 0. */
-	| { "type": "terminated"; "exitCode"?: number }
+	| { "type": "terminated"; "exitCode"?: number; "crash"?: { "line": number; "at": [number, number]; "message": string } }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" }
 	| { "type": "rendered" }
 	| { "type": "history"; "length": number }
@@ -65,7 +69,15 @@ export type WorkerEvent =
 	| { "type": "values"; "batch": LiveBatch };
 
 /** One statement's coverage: its range (0-based line and character, as VS Code's Position) and how often it ran. */
-export interface StatementCoverage { "start": [number, number]; "end": [number, number]; "count": number }
+export interface StatementCoverage {
+	"start": [number, number];
+	"end": [number, number];
+	"count": number;
+	/** What anchors it on the code (offsets in the text that ran): its head for a statement with a body — an `if`'s
+	 *  condition, a function's name — whose span outlives a reformat inside the body (a body's span changes with any
+	 *  token in it, a semicolon dropped say); the statement itself otherwise. */
+	"anchor"?: [number, number];
+}
 
 /** What went through one observed site (tsval's `observe`; RUNTIME-EVIDENCE.md, the second slice), over a run: its
  *  kind and its node's range, then — for a value site — how often a value came through, how often it was nullish, how
@@ -84,7 +96,7 @@ export interface SiteObservation {
 
 /** Every statement tsval can run in the program, with how often each ran — 0 for the ones that never did — and every
  *  observed site that ran. The body of the adapter's `getCoverage` reply and of its `coverage` event. */
-export interface CoverageReport { "file": string; "statements": StatementCoverage[]; "sites": SiteObservation[] }
+export interface CoverageReport { "file": string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "source"?: string }
 
 /** Worker → render surface (`PREVIEW_STREAM`); `reset` comes from the workbench bridge at session start. */
 export type PreviewMessage =

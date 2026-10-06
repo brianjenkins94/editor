@@ -195,7 +195,7 @@ function askAt(vm: Vm, line: number): CapabilityAsk | undefined {
 			const { resource, resolved } = resourceOf(vm, call.arguments[hit.argIndex], file);
 
 			if (shouldBreak(policy, { ...hit, "resource": resolved ? resource : "" })) {
-				return { "line": line - 1, "capability": hit.capability, "callee": hit.callee, "resource": resource, "resolved": resolved, "dangerous": hit.dangerous };
+				return { "line": line - 1, "at": rangeOf(call), "capability": hit.capability, "callee": hit.callee, "resource": resource, "resolved": resolved, "dangerous": hit.dangerous };
 			}
 		}
 	}
@@ -301,7 +301,7 @@ function snapshot(vm: Vm): Snapshot {
 	}
 
 	return {
-		"frames": [{ "id": 1, "name": functionName(loc?.pos), "line": (loc?.line ?? 0) + 1, "column": (loc?.character ?? 0) + 1 }],
+		"frames": [{ "id": 1, "name": functionName(loc?.pos), "line": (loc?.line ?? 0) + 1, "column": (loc?.character ?? 0) + 1, ...vm.currentNode === null ? {} : { "at": rangeOf(vm.currentNode) } }],
 		"scopes": { "1": [{ "name": "Locals", "variablesReference": 1000, "expensive": false }] },
 		"variables": { "1000": rows }
 	};
@@ -349,9 +349,51 @@ function traceValue(event: TraceEvent): void {
 	}
 
 	const lineOf = (node: ts.Node): number => sourceFile!.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line;
-	const callee = event.callee === undefined ? undefined : { "name": calleeName(event.callee), "line": lineOf(event.callee) };
+	const callee = event.callee === undefined ? undefined : { "name": calleeName(event.callee), "line": lineOf(event.callee), "at": rangeOf(event.callee) };
 
-	live.add({ "line": lineOf(event.node), "name": event.name, "value": "", "raw": event.value, "kind": event.kind, "call": event.call, "turns": event.loops.map((loop) => loop.turn), "step": event.step, ...callee === undefined ? {} : { "callee": callee } });
+	live.add({ "line": lineOf(event.node), "name": event.name, "value": "", "raw": event.value, "kind": event.kind, "call": event.call, "turns": event.loops.map((loop) => loop.turn), "step": event.step, "at": rangeOf(event.node), ...callee === undefined ? {} : { "callee": callee } });
+}
+
+/** A node's range in the text that ran (offsets, from its first token): what the margin anchors a line's data by — for
+ *  a node with a body, its head (`headOf`). */
+function rangeOf(node: ts.Node): [number, number] {
+	const head = headOf(node);
+
+	return [head.getStart(sourceFile), head.getEnd()];
+}
+
+/** What stands for `node` on the code through a reformat: a statement with a body by its head — an `if`'s or a loop's
+ *  condition, a `for`'s header, a function's or a class's name — since its whole span changes with any token in its
+ *  body (BABLR's identity for a node includes its children's tokens: a semicolon dropped inside orphans it); anything
+ *  else itself. The head starts the line the statement does, where its marks go. */
+function headOf(node: ts.Node): ts.Node {
+	// (Not a `do … while`: its condition ends it, on another line than its marks.)
+	if (ts.isIfStatement(node) || ts.isWhileStatement(node) || ts.isSwitchStatement(node) || ts.isWithStatement(node)) {
+		return node.expression;
+	}
+
+	if (ts.isForStatement(node)) {
+		return node.initializer ?? node.condition ?? node.incrementor ?? node;
+	}
+
+	if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
+		return node.initializer;
+	}
+
+	if (ts.isLabeledStatement(node)) {
+		return node.label;
+	}
+
+	if ((ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isClassDeclaration(node) || ts.isClassExpression(node) || ts.isMethodDeclaration(node)) && node.name !== undefined) {
+		return node.name;
+	}
+
+	// An unnamed function: its first parameter, or the variable it's assigned to.
+	if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+		return node.parameters[0] ?? (ts.isVariableDeclaration(node.parent) ? node.parent.name : node);
+	}
+
+	return node;
 }
 
 /** A function's name as the panel lists its calls: its own, a method's, or the variable an arrow was assigned to. */
@@ -416,7 +458,7 @@ function coverageReport(): CoverageReport {
 			const start = file.getLineAndCharacterOfPosition(node.getStart(file));
 			const end = file.getLineAndCharacterOfPosition(node.getEnd());
 
-			statements.push({ "start": [start.line, start.character], "end": [end.line, end.character], "count": counts?.get(node) ?? 0 });
+			statements.push({ "start": [start.line, start.character], "end": [end.line, end.character], "count": counts?.get(node) ?? 0, "anchor": rangeOf(node) });
 		}
 
 		node.forEachChild(visit);
@@ -427,12 +469,13 @@ function coverageReport(): CoverageReport {
 	return { "file": file.fileName, "statements": statements, "sites": siteObservations(current === undefined ? undefined : sumsOf.get(current), file) };
 }
 
-/** The program is over: report its coverage, then end the session — with 1 for a program that threw, as node would. */
-function finish(exitCode = 0): void {
+/** The program is over: report its coverage, then end the session — with 1 for a program that threw, as node would, and
+ *  where it threw. */
+function finish(exitCode = 0, crash?: { "line": number; "at": [number, number]; "message": string }): void {
 	clearInterval(liveTimer);
 	flushLive();
 	post({ "type": "coverage", "report": coverageReport(), "final": true });
-	post({ "type": "terminated", "exitCode": exitCode });
+	post({ "type": "terminated", "exitCode": exitCode, ...crash === undefined ? {} : { "crash": crash } });
 }
 
 /** The 1-based line `vm` is stopped at. */
@@ -440,6 +483,19 @@ function atLine(vm: Vm): number | undefined {
 	const location = vm.location();
 
 	return location === null ? undefined : location.line + 1;
+}
+
+/** Where `error` was thrown, for the margin's mark: by now the frames have unwound, so tsval's note of it, not the
+ *  current node. Best-effort — the run ends whatever this finds. */
+function crashOf(vm: Vm, error: unknown): { "line": number; "at": [number, number]; "message": string } | undefined {
+	try {
+		const site = vm.throwSite(error);
+		const at = vm.location(site);
+
+		return at === null || site === null ? undefined : { "line": at.line, "at": rangeOf(site), "message": String(error) };
+	} catch {
+		return undefined;
+	}
 }
 
 /** Guest call depth: the `call`/`construct` frames on the control stack (the rest are expression/statement frames). */
@@ -491,7 +547,7 @@ function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): voi
 			}
 		} catch (error) {
 			post({ "type": "output", "text": "Uncaught " + String(error), "stream": "stderr" });
-			finish(1);
+			finish(1, crashOf(base, error));
 			done = true;
 
 			return;

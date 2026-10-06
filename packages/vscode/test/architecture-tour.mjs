@@ -270,7 +270,8 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 	// Shown from the evidence: open the file and edit another line — the session's marks drop, the evidence's follow the
 	// statement's span; edit the statement itself, and its mark goes until it runs again.
 	const workbench = session.workbench();
-	const marks = () => workbench.evaluate(() => document.querySelectorAll(".monaco-editor .margin .cgmr").length);
+	// Coverage's marks, in the notes margin's strip (coverage.ts): the gutter is the breakpoints'.
+	const marks = () => workbench.evaluate(() => document.querySelectorAll(".notes-margin-mark.coverage-ran, .notes-margin-mark.coverage-missed").length);
 	const edit = (change) => workbench.evaluate(async (what) => {
 		const { api } = globalThis.__editor;
 		const editor = await api.window.showTextDocument(api.Uri.file("/workspace/f5.js"));
@@ -488,6 +489,32 @@ test("live values: a session's values beside the code, as the talk's binary sear
 	assert.deepEqual(shown["11"], ["high =", "", "3", ""]);
 	assert.equal(await eventually("the note beside them", () => workbench.evaluate(() => document.querySelector(".notes-margin-entry strong")?.textContent)), "Binary search");
 
+	// Reformatted while paused — blank lines above, indented with spaces, mid wrapped, no semicolons: every row moves
+	// with its code (anchored by BABLR spans, not line numbers).
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const editor = await api.window.showTextDocument(api.Uri.file("/workspace/victor.js"));
+		const text = editor.document.getText();
+		const reformatted = text.replaceAll("\t", "  ").replace("{\n", "{\n\n\n").replace("Math.floor((low + high) / 2);", "Math.floor(\n      (low + high) / 2\n    );").replaceAll(";\n", "\n");
+
+		await editor.edit((builder) => { builder.replace(new api.Range(editor.document.positionAt(0), editor.document.positionAt(text.length)), reformatted); });
+	});
+
+	const moved = await eventually("the rows moved with their code", async () => {
+		const all = await rows();
+
+		return all["15"]?.[0] === "high =" ? all : undefined;
+	});
+
+	assert.deepEqual(Object.fromEntries(Object.entries(moved).map(([line, cells]) => [line, cells[0]])), { "0": "key = 'd', array = ['a', 'b', 'c', 'd', 'e', 'f']", "3": "low =", "4": "high =", "7": "mid =", "10": "value =", "12": "if", "13": "low =", "14": "if", "15": "high =" });
+	assert.deepEqual(moved["7"], ["mid =", "2", "4", "3"], "a wrapped line keeps its columns");
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		await api.window.showTextDocument(api.Uri.file("/workspace/victor.js"));
+		await api.commands.executeCommand("workbench.action.files.revert");
+	});
+
 	await session.request(`debug.session.${started.session}.stop`, undefined, 30_000);
 	await eventually("the values gone with the session", async () => Object.keys(await rows()).length === 0 || undefined);
 	assert.equal(await workbench.evaluate(() => document.querySelector(".notes-margin-entry strong")?.textContent), "Binary search", "the note stays");
@@ -581,6 +608,52 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	// As the next tests expect it: no override, and the Explorer back where a stop put Run and Debug.
 	await silo("clear");
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
+});
+
+// How the last run ended short, in the margin's strip: a ✕ on the line it crashed on (the error on hover) — through a
+// reformat too, anchored by the throw's span — gone when it runs again and finishes.
+test("run ends: a crash is marked on the line it threw on, and stays on it through a reformat", async () => {
+	const workbench = session.workbench();
+	const crashed = () => workbench.evaluate(() => {
+		const mark = document.querySelector(".notes-margin-mark.run-crashed");
+		const lineHeight = Number.parseFloat(getComputedStyle(document.querySelector(".notes-margin")).lineHeight);
+
+		return mark === null ? undefined : { "line": Math.round(Number.parseFloat(mark.style.top) / lineHeight) + 1, "title": mark.title };
+	});
+	const write = (text) => workbench.evaluate(async (content) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/crash.js");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
+		await api.window.showTextDocument(uri);
+	}, text);
+
+	await write(["function parse(text) {", "\tconst data = JSON.parse(text);", "\treturn data.items.length;", "}", "", "console.log(parse('{\"items\": [1, 2]}'));", "console.log(parse('{}'));", ""].join("\n"));
+
+	const ran = await session.request("debug.start", { "program": "/workspace/crash.js", "breakpoints": [] }, 60_000);
+
+	assert.equal(ran.state, "terminated");
+	assert.deepEqual(await eventually("the crash's mark", crashed), { "line": 3, "title": "The last run crashed here: TypeError: Cannot read properties of undefined (reading 'length')" });
+
+	// Reformatted (unsaved): two lines above it, spaces, no semicolons — the mark is still on `data.items.length`.
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const editor = api.window.activeTextEditor;
+		const text = editor.document.getText();
+
+		await editor.edit((builder) => { builder.replace(new api.Range(editor.document.positionAt(0), editor.document.positionAt(text.length)), "// parse\n\n" + text.replaceAll("\t", "    ").replaceAll(";\n", "\n")); });
+	});
+	assert.equal((await eventually("the mark, moved with its code", async () => ((await crashed())?.line === 5 ? crashed() : undefined))).line, 5);
+
+	// Fixed and run again: it finishes, and the mark goes.
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		await api.commands.executeCommand("workbench.action.files.revert");
+	});
+	await write(["function parse(text) {", "\tconst data = JSON.parse(text);", "\treturn data.items?.length ?? 0;", "}", "", "console.log(parse('{}'));", ""].join("\n"));
+	await session.request("debug.start", { "program": "/workspace/crash.js", "breakpoints": [] }, 60_000);
+	await eventually("no mark once it finishes", async () => (await crashed()) === undefined || undefined);
 });
 
 test("types: the tsserver plugin types each of a file's ranges as its site observes", async () => {

@@ -41,7 +41,8 @@ declare module "eslint:extension" {
 	export default path;
 }
 
-/** The insights extension (every run's coverage in the gutter; the metrics monitor), bundled like the others: its path. */
+/** The insights extension (what runs say — hover, purple suggestions; the metrics monitor), bundled like the others: its
+ *  path. */
 declare module "insights:extension" {
 	const path: string;
 

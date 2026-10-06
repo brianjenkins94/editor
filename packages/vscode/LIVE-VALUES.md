@@ -174,6 +174,33 @@ How it fits, reusing the bridge: the notes extension sends its placed notes to c
 (`editor.pane.notes`, per file), the debug adapter its session's values (already on the pod hub); core renders both into
 the component's frame.
 
+## The margin, always open
+
+Decided 2026-10-05, after step 8: the margin is the file's runtime column, open beside every JavaScript or TypeScript
+file whether or not it has anything to show — notes, values, a capability stop's question, and at its edge, coverage.
+
+- **Coverage moved into the margin's strip.** Its gutter bars (gutter icons) cost breakpoints: VS Code won't set one
+  on a line whose glyph margin holds another extension's icon (`marginFreeFromNonDebugDecorations`, which lets through
+  only codicons and its own test coverage's class — a class an extension's decoration can't choose). So core draws it
+  (coverage.ts, moved from the insights extension): the same two sources — the session's own report, live at a stop
+  and final at its end; the evidence across runs, placed by BABLR through the insights extension's evidence store, run
+  here with core's own extension API — as marks in a strip the component draws beside each line (`showPane`'s
+  `marks`, as tall as the line wraps to), with the same colors kept in the scrollbar.
+- **How the last run ended short, in the strip too**: ✕ on the line it crashed on (the error on hover), ■ on the line a
+  stopped session was paused at — until the file runs again (a run that finishes clears it). tsval notes where each
+  thrown value was first thrown (`throwSite`: by the time an uncaught error reaches the host its frames have unwound,
+  so the current node can't say), and the debug worker sends it with the end.
+- **Everything a run put on a line follows its code through cosmetic changes** — a reformat, a reindent, a rewrap,
+  semicolons dropped — and through edits elsewhere: each item carries its node's range in the text that ran (`at`),
+  core anchors it there once (anchors.ts: `editor.annotations.refer`, BABLR's span) and draws it where that span is
+  found in the text now (`resolve`); what's edited past recognizing goes. That covers the values, the session's
+  coverage (no longer dropped on any edit), the capability question and the run's end. A statement with a body is
+  anchored by its head — an `if`'s condition, a loop's header, a function's name — because a body's span changes with
+  any token in it (a semicolon dropped inside orphans the whole `if`; the condition's survives). Tried in Brave on the
+  binary search, paused: blank lines above, tabs to spaces, a line wrapped over three, every semicolon dropped — every
+  row, column and coverage mark on its code; the tour test does the same, and moves a crash's mark through a reformat.
+- **It's where a value is overridden or stubbed**, next: see the open question below.
+
 ## Capability decisions, on the line
 
 A capability breakpoint (extensions/capabilities: a call the policy hasn't decided — a write, a fetch, a spawn — hard-
@@ -185,6 +212,16 @@ the prompt's does now; the prompt stays for runs nobody's debugging (a preview, 
 consumer of the same strip: the overlay draws what core gives it, values or a decision.
 
 ## Open
+
+- **Stubbing a value: a fourth answer at a capability stop.** Silo's design already names it — the *record-at-seams*
+  corpus (silo's design/fail-loud.md): what each capability call actually returned, recorded at the seam, serving
+  live-mocking, characterization, the registry and invariant inference ("build the record atom once; four features
+  consume it"); and the capability plan's `mock` disposition, next after asking at the stop. So beside *Allow once* /
+  *Allow always* / *Deny*: *Mock* — the call returns a recorded result (or one edited in the margin) instead of
+  running; kept as a `mock` rule in my policy override, its value on this machine (`.silo/local/`, as the sampled
+  values are), never committed. Needs silo's policy layer to take a third disposition (lib: util/silo/policy.ts, today
+  `allow | deny`), and a recorder at the seam. Editing a variable's value at a stop (the Variables view's Set Value,
+  in the margin) is the other half, session-only.
 
 - **Live, later.** The file re-run in a session as you type (when typing pauses) is Victor's immediate connection;
   tsval is safe to re-run, and the capabilities plugin already re-runs a file on every edit. It waits on the panel

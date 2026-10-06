@@ -1,14 +1,12 @@
 /**
  * Insights — what a program did when it ran, and what the editor is doing, shown as it happens, with nothing to ask for.
- * The monitor (the metrics plane in the status bar and a view of sparkline cards) is monitor.ts; coverage — every run's,
- * marked in the gutter of the file it ran — is coverage.ts; what went through the code under the cursor — values and
+ * The monitor (the metrics plane in the status bar and a view of sparkline cards) is monitor.ts; what went through the code under the cursor — values and
  * branches, across runs — is hover.ts; what runs say could go — an operator never needed, code never run, in purple —
  * is fixes.ts (found by suggestions.ts), and every file's, in the Suggestions view beside Problems, suggestions-view.ts;
  * all of them read the evidence kept in git through evidence.ts; a slow preview's profile, with where its time went, is
- * profiles.ts.
+ * profiles.ts. (Coverage is the notes margin's strip, drawn by core: coverage.ts, through this same evidence store.)
  */
-import type * as vscode from "vscode";
-import { registerCoverage } from "./coverage";
+import * as vscode from "vscode";
 import { evidenceStore } from "./evidence";
 import { registerFixes } from "./fixes";
 import { registerHover } from "./hover";
@@ -18,9 +16,8 @@ import { registerSuggestionsView } from "./suggestions-view";
 
 export function activate(context: vscode.ExtensionContext): void {
 	registerMonitor(context);
-	const store = evidenceStore(context);
+	const store = evidenceStore(vscode, context.subscriptions);
 
-	registerCoverage(context, store);
 	registerHover(context, store);
 	registerSuggestionsView(context, registerFixes(context, store));
 	registerProfiles(context);

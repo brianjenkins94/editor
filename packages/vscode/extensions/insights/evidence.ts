@@ -12,7 +12,7 @@ import type { Resolution } from "@brianjenkins94/util/silo/annotations";
 import type { Observation } from "@brianjenkins94/util/silo/evidence";
 import { observedRef } from "@brianjenkins94/util/silo/annotations";
 import { LOCAL_DIR, parseEvidence, parseSamples, SILO_DIR } from "@brianjenkins94/util/silo/evidence";
-import * as vscode from "vscode";
+import type * as vscodeApi from "vscode";
 
 /** What every run observed at one span, folded: strict counts summed, faded runs summed, the latest report's time. */
 export interface SpanEvidence {
@@ -29,13 +29,13 @@ export interface Placed { "start": number; "end": number; "type"?: string; "evid
 export interface EvidenceStore {
 	/** The evidence placed in `document` as it is now; undefined when it was edited while being placed (a newer look
 	 *  follows). Empty when there's none, or no editor BABLR to place it. */
-	"placed": (document: vscode.TextDocument) => Promise<Placed[] | undefined>;
+	"placed": (document: vscodeApi.TextDocument) => Promise<Placed[] | undefined>;
 	/** The evidence placed in `text`, a file's as it is on disk (one no editor has open). */
 	"placedIn": (file: string, text: string) => Promise<Placed[]>;
 	/** Every file with evidence, workspace-relative. */
 	"files": () => Promise<string[]>;
 	/** A file's evidence (or samples) changed: the workspace-relative path. */
-	"onDidChange": vscode.Event<string>;
+	"onDidChange": vscodeApi.Event<string>;
 }
 
 /** `observation` added to what's known of its span. */
@@ -72,13 +72,15 @@ function fold(known: SpanEvidence, observation: Observation): SpanEvidence {
 	}
 }
 
-export function evidenceStore(context: vscode.ExtensionContext): EvidenceStore {
+/** The store, through `vscode` — the extension API of the realm it runs in (an extension's, or core's: the workbench's
+ *  own, for the notes margin's coverage) — its watchers and emitter disposed with `subscriptions`. */
+export function evidenceStore(vscode: typeof vscodeApi, subscriptions: vscodeApi.Disposable[]): EvidenceStore {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("/workspace");
-	const text = async (uri: vscode.Uri): Promise<string> => Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => new TextDecoder().decode(bytes), () => "");
-	const folders = async (uri: vscode.Uri): Promise<string[]> => Promise.resolve(vscode.workspace.fs.readDirectory(uri)).then((entries) => entries.filter(([, type]) => type === vscode.FileType.Directory).map(([name]) => name), () => []);
+	const text = async (uri: vscodeApi.Uri): Promise<string> => Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => new TextDecoder().decode(bytes), () => "");
+	const folders = async (uri: vscodeApi.Uri): Promise<string[]> => Promise.resolve(vscode.workspace.fs.readDirectory(uri)).then((entries) => entries.filter(([, type]) => type === vscode.FileType.Directory).map(([name]) => name), () => []);
 	/** Each file's evidence, by workspace-relative path: read when first wanted, again when it changes. */
 	const byFile = new Map<string, Promise<Map<string, SpanEvidence>>>();
-	/** Each document's placed evidence, for the version it was placed in: the gutter and the hover share one placing. */
+	/** Each document's placed evidence, for the version it was placed in: the surfaces on one store share one placing. */
 	const placings = new Map<string, { "version": number; "placed": Promise<Placed[] | undefined> }>();
 	const changed = new vscode.EventEmitter<string>();
 
@@ -133,7 +135,7 @@ export function evidenceStore(context: vscode.ExtensionContext): EvidenceStore {
 		});
 	};
 
-	const place = async (document: vscode.TextDocument): Promise<Placed[] | undefined> => {
+	const place = async (document: vscodeApi.TextDocument): Promise<Placed[] | undefined> => {
 		const version = document.version;
 		const placed = await placeIn(vscode.workspace.asRelativePath(document.uri, false), document.getText());
 
@@ -141,14 +143,14 @@ export function evidenceStore(context: vscode.ExtensionContext): EvidenceStore {
 	};
 
 	/** The files under one environment's evidence folder: `<file>.jsonl`, at any depth. */
-	const evidenceFiles = async (folder: vscode.Uri, prefix = ""): Promise<string[]> => {
-		const entries = await Promise.resolve(vscode.workspace.fs.readDirectory(folder)).catch(() => [] as [string, vscode.FileType][]);
+	const evidenceFiles = async (folder: vscodeApi.Uri, prefix = ""): Promise<string[]> => {
+		const entries = await Promise.resolve(vscode.workspace.fs.readDirectory(folder)).catch(() => [] as [string, vscodeApi.FileType][]);
 
 		return (await Promise.all(entries.map(async ([name, type]) => (type === vscode.FileType.Directory ? evidenceFiles(vscode.Uri.joinPath(folder, name), `${prefix}${name}/`) : name.endsWith(".jsonl") ? [prefix + name.slice(0, -".jsonl".length)] : [])))).flat();
 	};
 
 	const watchers = [`**/${SILO_DIR}/evidence/**/*.jsonl`, `**/${LOCAL_DIR}/samples/**/*.jsonl`].map((glob) => vscode.workspace.createFileSystemWatcher(glob));
-	const onChange = (uri: vscode.Uri): void => {
+	const onChange = (uri: vscodeApi.Uri): void => {
 		// `.silo/evidence/<user>/<environment>/<file>.jsonl` or `.silo/local/samples/<file>.jsonl` → <file>
 		const file = /\/\.silo\/(?:evidence\/[^/]+\/[^/]+|local\/samples)\/(.+)\.jsonl$/u.exec(uri.path)?.[1];
 
@@ -159,7 +161,7 @@ export function evidenceStore(context: vscode.ExtensionContext): EvidenceStore {
 		}
 	};
 
-	context.subscriptions.push(changed, ...watchers, ...watchers.flatMap((watcher) => [watcher.onDidCreate(onChange), watcher.onDidChange(onChange), watcher.onDidDelete(onChange)]));
+	subscriptions.push(changed, ...watchers, ...watchers.flatMap((watcher) => [watcher.onDidCreate(onChange), watcher.onDidChange(onChange), watcher.onDidDelete(onChange)]));
 
 	return {
 		"placed": async (document) => {

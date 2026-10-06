@@ -15,10 +15,14 @@ export interface LiveValue {
 	"kind": "bind" | "return" | "branch";
 	"call": number;
 	"turns": number[];
+	/** The node's range in the text that ran (offsets): what the margin anchors it by, so it follows its code through a
+	 *  reformat (a BABLR span) rather than staying on a line number. */
+	"at"?: [number, number];
 }
 
-/** A call: its function's name and the line it's declared on (0: the program's top level is call 0, not listed). */
-export interface LiveCall { "id": number; "name": string; "line": number }
+/** A call: its function's name and the line it's declared on (0: the program's top level is call 0, not listed), and
+ *  the function's range in the text that ran. */
+export interface LiveCall { "id": number; "name": string; "line": number; "at"?: [number, number] }
 
 /** What's new since the last batch, and how many values the bounds dropped so far. */
 export interface LiveBatch { "values": LiveValue[]; "calls": LiveCall[]; "dropped": number }
@@ -27,7 +31,7 @@ export interface LiveBatch { "values": LiveValue[]; "calls": LiveCall[]; "droppe
 export interface Traced extends LiveValue {
 	"step": number;
 	/** The call's function, the first time a value of the call is told. */
-	"callee"?: { "name": string; "line": number };
+	"callee"?: { "name": string; "line": number; "at"?: [number, number] };
 	/** The trace's raw value, previewed here. */
 	"raw"?: unknown;
 }
@@ -126,7 +130,7 @@ export class LiveRecord {
 			this.calls.set(traced.call, 0);
 
 			if (traced.call !== 0) {
-				this.pendingCalls.push({ "id": traced.call, "name": traced.callee?.name ?? "anonymous", "line": traced.callee?.line ?? 0 });
+				this.pendingCalls.push({ "id": traced.call, "name": traced.callee?.name ?? "anonymous", "line": traced.callee?.line ?? 0, ...traced.callee?.at === undefined ? {} : { "at": traced.callee.at } });
 			}
 		}
 
@@ -139,7 +143,7 @@ export class LiveRecord {
 		}
 
 		this.calls.set(traced.call, count + 1);
-		this.pending.push({ "line": traced.line, "name": traced.name, "value": "raw" in traced ? preview(traced.raw) : traced.value, "kind": traced.kind, "call": traced.call, "turns": traced.turns });
+		this.pending.push({ "line": traced.line, "name": traced.name, "value": "raw" in traced ? preview(traced.raw) : traced.value, "kind": traced.kind, "call": traced.call, "turns": traced.turns, ...traced.at === undefined ? {} : { "at": traced.at } });
 	}
 
 	/** What's new since the last batch (undefined when nothing is). */

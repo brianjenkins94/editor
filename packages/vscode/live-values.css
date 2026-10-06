@@ -161,3 +161,46 @@
   color: var(--vscode-errorForeground);
   font-family: var(--vscode-font-family);
 }
+
+/* Coverage's marks in the margin's strip (coverage.ts): green beside a line that ran, red beside one that didn't. */
+.notes-margin-mark.coverage-ran {
+  background: #2ea04390;
+}
+
+.notes-margin-mark.coverage-missed {
+  background: #f85149c0;
+}
+
+/* How the last run ended short, in the strip: a badge across it, over the line it crashed on or was stopped at. */
+.notes-margin-mark.run-crashed,
+.notes-margin-mark.run-stopped {
+  left: -2px;
+  width: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: bold;
+  border-radius: 2px;
+  z-index: 1;
+}
+
+.notes-margin-mark.run-crashed {
+  background: var(--vscode-editorError-foreground, #e51400);
+  color: var(--vscode-editor-background, #fff);
+}
+
+.notes-margin-mark.run-crashed::before {
+  content: "✕";
+}
+
+.notes-margin-mark.run-stopped {
+  background: var(--vscode-editorWarning-foreground, #bf8803);
+  color: var(--vscode-editor-background, #fff);
+}
+
+.notes-margin-mark.run-stopped::before {
+  content: "■";
+  font-size: 7px;
+}

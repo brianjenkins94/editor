@@ -414,8 +414,8 @@ The point of running a program many times: what none of the runs needed is code 
 - **Purple is the evidence's color.** Everything runs suggest is drawn in it (extensions/insights/fixes.ts): an
   operator that could go (`?.`, the right side of `??` or `&&`/`||`) with a wavy underline; code that never ran — a
   branch's arm never taken, a statement never reached — with a tint. Each stays a Hint diagnostic too, so the lightbulb
-  offers its fix. Coverage keeps its gutter bars; its line background went, so a line that never ran isn't red and
-  purple at once.
+  offers its fix. Coverage keeps its bars — now in the notes margin's strip, not the gutter, which VS Code keeps for
+  breakpoints (LIVE-VALUES.md); its line background went, so a line that never ran isn't red and purple at once.
 - **A Suggestions view, beside Problems** (extensions/insights/suggestions-view.ts): VS Code's Problems view doesn't
   list hints, and raising them to Information would put VS Code's own squiggle under the purple. It lists every file
   with evidence, open or not (read from disk, not opened as a document, so tsserver isn't handed it): each suggestion
