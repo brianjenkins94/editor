@@ -17,14 +17,14 @@
  * VS Code window that's the whole workbench or the window's editors.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import type { DockviewApi, IContentRenderer } from "dockview-core";
+import type { AnchoredBox, DockviewApi, DockviewGroupPanel, IContentRenderer, IHeaderActionsRenderer } from "dockview-core";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { createDockview, getPanelData, themeDark, themeLight } from "dockview-core";
+import { DockviewComponent, getPanelData, themeDark, themeLight } from "dockview-core";
 import dockviewCss from "dockview:css";
 import type { ShellDockHost } from "./dock-host";
 import type { PaneWindowFactory } from "./window";
 import { SHELL_DOCK_HOST } from "./dock-host";
-import { css } from "./theme";
+import { css, globalCss } from "./theme";
 
 /** The editor's panel (and its iframe's) id. */
 const EDITOR_PANEL = "editor";
@@ -54,6 +54,33 @@ const dropHintCss = css({
 });
 // A window panel's header actions, shown in its group's tab bar while it's the group's active panel.
 const paneActionsCss = css({ "display": "flex", "alignItems": "center", "height": "100%", "gap": "var(--wa-space-3xs)", "paddingInline": "var(--wa-space-2xs)" });
+
+// A group's window controls, macOS style — at the head of its tab bar, or a floating window's title bar: grey where
+// they do nothing, and in a group that isn't the active one until hovered; their glyphs show on hover. In a title bar
+// they're a utility panel's (an inspector's): smaller, to match the bar.
+const trafficLightsCss = css({
+	"display": "flex", "alignItems": "center", "gap": "8px", "height": "100%", "paddingInline": "12px 8px",
+	"& > button": {
+		"display": "grid", "placeItems": "center", "width": "12px", "height": "12px", "padding": 0, "border": 0, "borderRadius": "50%",
+		"boxShadow": "inset 0 0 0 0.5px rgb(0 0 0 / 0.2)", "color": "rgb(0 0 0 / 0.55)", "cursor": "default"
+	},
+	"& > button > svg": { "width": "100%", "height": "100%", "opacity": 0 },
+	"&:hover > button:enabled > svg": { "opacity": 1 },
+	"& > [data-control=close]": { "backgroundColor": "#ff5f57" },
+	"& > [data-control=minimize]": { "backgroundColor": "#febc2e" },
+	"& > [data-control=zoom]": { "backgroundColor": "#28c840" },
+	"& > button:disabled, .dv-inactive-group &:not(:hover) > button": { "backgroundColor": "rgb(128 128 128 / 0.35)", "boxShadow": "none" },
+	".dv-floating-titlebar > &": { "gap": "5px", "paddingInline": "6px", "& > button": { "width": "9px", "height": "9px" } }
+});
+// A floating window's title bar, inspector-height (dockview's is 22px).
+const injectDockGlobals = globalCss({ ".dv-floating-titlebar": { "--dv-floating-titlebar-height": "16px" } });
+
+/** The traffic lights' glyphs, on a 12px light. */
+const GLYPHS = {
+	"close": "<path d=\"M4 4l4 4M8 4l-4 4\" stroke=\"currentColor\" stroke-width=\"1.2\" stroke-linecap=\"round\"/>",
+	"minimize": "<path d=\"M3.5 6h5\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/>",
+	"zoom": "<path d=\"M3.5 3.5H7L3.5 7zM8.5 8.5H5L8.5 5z\" fill=\"currentColor\"/>"
+};
 
 export interface ShellDock {
 	"api": DockviewApi;
@@ -106,6 +133,7 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 
 	sheet.replaceSync(dockviewCss);
 	document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+	injectDockGlobals();
 
 	const editorFrame = frameElement();
 
@@ -121,10 +149,106 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 	const panes = new Map<string, Pane>();
 	let paneCount = 0;
 
+	/**
+	 * A group's traffic lights. Close closes the group, every panel in it. Minimize folds a floating window to its tab
+	 * bar, and back. Zoom maximizes a docked group, and fills the dock with a floating window; again, restores either.
+	 * A popout group (its own browser window has its own) gets neither of the last two. A floating window's lights
+	 * sit in its title bar — dockview's blank drag handle above the tabs, which takes no content of its own — and
+	 * come back to the tab bar when it docks.
+	 */
+	const trafficLights = (group: DockviewGroupPanel): IHeaderActionsRenderer => {
+		const element = document.createElement("div");
+		const lights = document.createElement("div");
+		/** A floating window's box before minimize or zoom changed it, to restore. */
+		let restore: AnchoredBox | undefined;
+		const light = (control: keyof typeof GLYPHS, onClick: () => void): HTMLButtonElement => {
+			// eslint-disable-next-line webawesome/prefer-components -- a 12px coloured dot, not a Web Awesome button
+			const button = document.createElement("button");
+
+			button.dataset["control"] = control;
+			button.innerHTML = "<svg width=\"12\" height=\"12\" viewBox=\"0 0 12 12\">" + GLYPHS[control] + "</svg>";
+			// Not the tab bar's: a press here mustn't start dragging the group.
+			button.addEventListener("pointerdown", (event) => { event.stopPropagation(); });
+			button.addEventListener("click", (event) => {
+				event.stopPropagation();
+				onClick();
+			});
+
+			return button;
+		};
+		/** Change a floating window's box, or put back the one it had. Sizes are the ones `position` takes, its border
+		 *  not counted — `toJSON`'s count it, so restoring from those would grow the window each time. */
+		const toggle = (box: (current: AnchoredBox, border: number) => Partial<AnchoredBox>): void => {
+			const floating = component.getFloatingWindowForGroup(group);
+
+			if (floating === undefined) {
+				return;
+			}
+
+			if (restore === undefined) {
+				const { style } = floating.overlay.element;
+				const outer = floating.overlay.toJSON();
+				const width = Number.parseFloat(style.width);
+
+				restore = { ...outer, "width": width, "height": Number.parseFloat(style.height) };
+				floating.position(box(restore, outer.width - width));
+			} else {
+				floating.position(restore);
+				restore = undefined;
+			}
+		};
+		const close = light("close", () => { group.api.close(); });
+		// Down to its title and tab bars: the window's height less its group's content.
+		const minimize = light("minimize", () => { toggle(({ height }) => ({ "height": height - group.element.querySelector(".dv-content-container")!.getBoundingClientRect().height })); });
+		const zoom = light("zoom", () => {
+			if (group.api.location.type === "grid") {
+				if (group.api.isMaximized()) {
+					group.api.exitMaximized();
+				} else {
+					group.api.maximize();
+				}
+			} else {
+				toggle((_, border) => ({ "top": 0, "left": 0, "width": host.clientWidth - border, "height": host.clientHeight - border }));
+			}
+		});
+		const render = (): void => {
+			const { type } = group.api.location;
+			const floating = component.getFloatingWindowForGroup(group);
+			// The window's own group's: a window holding a nested layout has one title bar, and the rest keep theirs.
+			const titleBar = floating?.group === group ? floating.overlay.element.querySelector(":scope > .dv-floating-titlebar") : null;
+
+			(titleBar ?? element).append(lights);
+
+			restore = undefined; // a box from before a move means nothing after it
+			minimize.disabled = type !== "floating";
+			zoom.disabled = type === "popout";
+			zoom.title = type === "grid" ? "Maximize" : "Fill the dock";
+		};
+		let listener: { "dispose": () => void } | undefined;
+
+		close.title = "Close";
+		minimize.title = "Minimize";
+		lights.className = trafficLightsCss();
+		lights.append(close, minimize, zoom);
+
+		return {
+			"element": element,
+			"init": () => {
+				render();
+				listener = group.api.onDidLocationChange(render);
+			},
+			"dispose": () => {
+				listener?.dispose();
+				lights.remove();
+			}
+		};
+	};
+
 	const scheme = window.matchMedia("(prefers-color-scheme: dark)");
-	const api = createDockview(host, {
+	const component = new DockviewComponent(host, {
 		"theme": scheme.matches ? themeDark : themeLight,
 		"floatingGroupBounds": "boundedWithinViewport",
+		"createPrefixHeaderActionComponent": trafficLights,
 		// A window panel's header actions sit in its group's tab bar, the active panel's showing.
 		"createRightHeaderActionComponent": () => {
 			const element = document.createElement("div");
@@ -182,6 +306,8 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 			});
 		}
 	});
+
+	const { "api": api } = component;
 
 	scheme.addEventListener("change", () => { api.updateOptions({ "theme": scheme.matches ? themeDark : themeLight }); });
 
