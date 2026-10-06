@@ -16,7 +16,9 @@
  *
  * And, since it holds the project's real checker: the `_types.at` request (through `typescript.tsserverRequest`) says
  * what TypeScript makes of each of a file's ranges — runtime evidence's declared types and the typed strategy's
- * (RUNTIME-EVIDENCE.md).
+ * (RUNTIME-EVIDENCE.md). And `_statements`: a file's top-level statements, each with a title (what it declares or
+ * calls), the comment above it, and the types of what it declares — what the program's projection (PROJECTIONS.md)
+ * makes its cards of.
  */
 
 export default function init(modules) {
@@ -245,6 +247,113 @@ export default function init(modules) {
 
 			return { "response": { "types": types }, "responseRequired": true };
 		});
+
+		// `_statements` — a file's top-level statements, as a projection's cards (PROJECTIONS.md): each one's range, kind,
+		// title and detail (what it declares or calls), and the types of what it declares.
+		info.session.addProtocolHandler("_statements", function(request) {
+			const args = (request && request.arguments) || {};
+			const file = typeof args.file === "string" ? args.file : "";
+			const path = ts.server !== undefined && typeof ts.server.toNormalizedPath === "function" ? ts.server.toNormalizedPath(file) : file;
+			const project = info.project.projectService.getDefaultProjectForFile(path, false) || info.project;
+			const program = project.getLanguageService().getProgram();
+			const sourceFile = program === undefined ? undefined : program.getSourceFile(path);
+
+			if (sourceFile === undefined) {
+				return { "response": { "statements": null }, "responseRequired": true };
+			}
+
+			const checker = program.getTypeChecker();
+
+			function typeOf(node) {
+				try {
+					return checker.typeToString(checker.getTypeAtLocation(node), node, ts.TypeFormatFlags.NoTruncation);
+				} catch (error) {
+					return null;
+				}
+			}
+
+			return { "response": { "statements": sourceFile.statements.map(function(statement) {
+				// The `//` comment right above it, if any — a step's own title.
+				const comments = ts.getLeadingCommentRanges(sourceFile.text, statement.getFullStart()) || [];
+				const comment = comments.filter(function(range) { return range.kind === ts.SyntaxKind.SingleLineCommentTrivia; }).map(function(range) { return sourceFile.text.slice(range.pos + 2, range.end).trim(); }).join(" ");
+
+				return { "start": statement.getStart(sourceFile), "end": statement.getEnd(), "kind": ts.SyntaxKind[statement.kind], ...comment === "" ? {} : { "comment": comment }, ...describeStatement(statement, sourceFile, typeOf) };
+			}) }, "responseRequired": true };
+		});
+	}
+
+	/** A statement as a card says it: a title (the names it declares, or what it calls), a detail (how), and the types
+	 *  of what it declares. */
+	function describeStatement(statement, sourceFile, typeOf) {
+		function text(node) {
+			return node.getText(sourceFile).replace(/\s+/gu, " ");
+		}
+
+		// The callee of a call, however it's reached (`await f()`, `x = f()`, `f().then(…)` is `…then`).
+		function calleeOf(expression) {
+			let node = expression;
+
+			while (node !== undefined && (ts.isAwaitExpression(node) || ts.isParenthesizedExpression(node) || ts.isVoidExpression(node))) {
+				node = node.expression;
+			}
+
+			return node !== undefined && ts.isCallExpression(node) ? text(node.expression) : undefined;
+		}
+
+		// The names a binding declares — `[, , country = "CA", coupon]` is country and coupon.
+		function namesOf(name) {
+			return ts.isIdentifier(name) ? [name] : name.elements.flatMap(function(element) { return ts.isOmittedExpression(element) ? [] : namesOf(element.name); });
+		}
+
+		if (ts.isVariableStatement(statement)) {
+			const declarations = statement.declarationList.declarations;
+			const flags = statement.declarationList.flags;
+			const keyword = (flags & ts.NodeFlags.Const) !== 0 ? "const" : (flags & ts.NodeFlags.Let) !== 0 ? "let" : "var";
+			const callee = declarations.length === 1 && declarations[0].initializer !== undefined ? calleeOf(declarations[0].initializer) : undefined;
+
+			const names = declarations.flatMap(function(declaration) { return namesOf(declaration.name); });
+
+			return {
+				"title": names.map(function(name) { return name.text; }).join(", "),
+				"detail": callee === undefined ? keyword : keyword + " · " + callee + "()",
+				"declares": names.map(function(name) { return { "name": name.text, "type": typeOf(name) }; })
+			};
+		}
+
+		if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) {
+			const name = statement.name === undefined ? "(anonymous)" : statement.name.text;
+			const isAsync = ts.isFunctionDeclaration(statement) && statement.modifiers !== undefined && statement.modifiers.some(function(modifier) { return modifier.kind === ts.SyntaxKind.AsyncKeyword; });
+
+			return { "title": name, "detail": ts.isClassDeclaration(statement) ? "class" : isAsync ? "async function" : "function", "declares": statement.name === undefined ? [] : [{ "name": name, "type": typeOf(statement.name) }] };
+		}
+
+		if (ts.isImportDeclaration(statement)) {
+			return { "title": ts.isStringLiteral(statement.moduleSpecifier) ? statement.moduleSpecifier.text : text(statement.moduleSpecifier), "detail": "import" };
+		}
+
+		if (ts.isExpressionStatement(statement)) {
+			const expression = statement.expression;
+
+			if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+				const callee = calleeOf(expression.right);
+
+				return { "title": text(expression.left), "detail": callee === undefined ? "assigned" : "assigned · " + callee + "()" };
+			}
+
+			const callee = calleeOf(expression);
+
+			return callee === undefined ? { "title": text(expression).slice(0, 40), "detail": "expression" } : { "title": callee, "detail": "call" };
+		}
+
+		if (ts.isIfStatement(statement)) {
+			return { "title": "if " + text(statement.expression).slice(0, 40), "detail": "branch" };
+		}
+
+		if (ts.isIterationStatement(statement, false)) {
+			return { "title": text(statement).split("{")[0].trim().slice(0, 40), "detail": "loop" };
+		}
+
+		return { "title": ts.SyntaxKind[statement.kind].replace(/Statement$|Declaration$/u, "").toLowerCase(), "detail": "" };
 	}
 
 	return {

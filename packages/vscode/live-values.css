@@ -333,3 +333,25 @@
 .live-values-input {
   font-family: var(--notes-margin-code-font-family, monospace);
 }
+
+/* A step's card label (the card is the margin's, pane.css): its title, what it is, whether it ran. */
+.live-values-step-title {
+  color: var(--vscode-foreground);
+}
+
+.live-values-step-detail,
+.live-values-step-ran {
+  margin-left: 6px;
+}
+
+.live-values-step-ran.ran {
+  color: var(--vscode-testing-iconPassed, #2ea043);
+}
+
+.live-values-step-ran.missed {
+  color: var(--vscode-testing-iconFailed, #f85149);
+}
+
+.live-values-step-ran.partial {
+  color: var(--vscode-editorWarning-foreground, #d29922);
+}

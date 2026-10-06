@@ -39,18 +39,27 @@ writes an edit to a card back as code.
 - **Not only games.** The event sheet is this loop wearing a game palette; a script, a server's routes, an app's state
   are other palettes over the same machinery.
 
-## A first slice
+## The first slice: cards in the margin (built)
 
-Read-only, for a straight-line script (`tax.js`): a card per top-level statement — its code, condensed; under it, its
-values from the last run; at the bottom, a log of the run with each statement's duration and whether it ran. Every input
-exists (statements by anchor, values, coverage, timings); the work is the layout, and keeping cards and code side by
-side so selecting one lights the other.
+Read-only, and not a view of its own: the cards are drawn in the notes margin, beside the code, around the lines they
+stand for — the same column that already carries the file's values, notes and coverage, so a card's results are the
+values already level with its lines.
 
-Then: options edited on the card for a call's literal arguments (written back to the call); then a library to drag a
-call in from; then interlocking.
+- **A card is a step, not a statement.** Code is written in paragraphs: consecutive top-level statements with no blank
+  line between them are one step; a `//` comment above a statement starts one and is its title; a function or class is
+  a step of its own. Untitled, a step is named by what it starts and ends with (`country … total`).
+- **What a card says**, on its bottom border (in the blank line between steps, clear of the values): its title, what it
+  is (`2 statements`, `function`, `call`), and whether it ran — `ran`, `partly ran`, `didn't run`, or for a function
+  `called 3×` / `not called` — read from coverage's marks on its lines. The types of what it declares are on hover.
+- **Where it comes from:** the capabilities tsserver plugin's `_statements` request (each top-level statement's range,
+  the comment above it, a title and detail, the types of what it declares) — the project's own checker; live-values.ts
+  groups them into steps and hands the margin (pane.ts `showPane`'s `groups`) a card per step. The cursor in a step
+  lights its card.
+
+Next: a run's log at the file's end, with each step's duration; then options edited on the card for a call's literal
+arguments (written back to the call); then a library to drag a call in from; then interlocking.
 
 ## Open
 
-- Where it lives: an editor of its own (a custom editor beside the text), or the auxiliary bar's file augmentations.
-- What a card is in a longer function — every statement, or the calls worth one, with the rest folded as code.
+- What a card is inside a longer function — its body's paragraphs as cards within the function's, or folded as code.
 - How loops and branches look: Automator has none; the event sheet's rows and groups do.

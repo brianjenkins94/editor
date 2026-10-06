@@ -761,6 +761,123 @@ export function ensureStyled(): void {
 	}
 }
 
+/** A top-level statement, as tsserver says it (the capabilities plugin's `_statements`): its range, the `//` comment
+ *  above it, a title and detail (what it declares or calls), and the types of what it declares. */
+interface Statement { "start": number; "end": number; "kind": string; "comment"?: string; "title": string; "detail": string; "declares"?: { "name": string; "type": string | null }[] }
+
+/** A step of the program (PROJECTIONS.md): statements written together, a card around them in the margin. */
+interface Step { "fromLine": number; "toLine": number; "title": string; "detail": string; "declares": { "name": string; "type": string | null }[]; "body": boolean }
+
+/** Each file's top-level statements, by the document version they were read at. */
+const statementsRead = new Map<string, { "version": number; "statements": Promise<Statement[] | undefined> }>();
+/** Each file's tries at its statements while tsserver isn't ready (it isn't, as a file first opens). */
+const statementTries = new Map<string, number>();
+
+/** `document`'s top-level statements, from tsserver — undefined when it can't say yet (it's loading the project). */
+function statementsOf(document: vscodeApi.TextDocument): Promise<Statement[] | undefined> {
+	const uri = document.uri.toString();
+	const known = statementsRead.get(uri);
+
+	if (known?.version === document.version) {
+		return known.statements;
+	}
+
+	const statements = Promise.resolve(api!.commands.executeCommand<{ "body"?: { "statements"?: Statement[] | null } } | undefined>("typescript.tsserverRequest", "_statements", { "file": document.uri })).then((response) => response?.body?.statements ?? undefined, () => undefined);
+
+	statementsRead.set(uri, { "version": document.version, "statements": statements });
+	void statements.then((read) => {
+		// Not yet: forget it, and try again in a while (a few times).
+		if (read === undefined && statementsRead.get(uri)?.statements === statements) {
+			statementsRead.delete(uri);
+
+			const tries = statementTries.get(uri) ?? 0;
+
+			if (tries < 5) {
+				statementTries.set(uri, tries + 1);
+				setTimeout(() => { draw(uri); }, 2000);
+			}
+		}
+	});
+
+	return statements;
+}
+
+/** A file's steps: its top-level statements in paragraphs, the way code is written — those with no blank line between
+ *  them are one step, a `//` comment above a statement starts one (and titles it), and a function or class is a step of
+ *  its own. */
+function stepsOf(document: vscodeApi.TextDocument, statements: Statement[]): Step[] {
+	const text = document.getText();
+	const lines = text.split("\n");
+	const steps: (Step & { "end": number; "count": number; "names": string[] })[] = [];
+	const bodied = (statement: Statement): boolean => statement.kind === "FunctionDeclaration" || statement.kind === "ClassDeclaration";
+
+	for (const statement of statements) {
+		let fromLine = document.positionAt(statement.start).line;
+
+		// Its comment's lines are the step's too.
+		while (statement.comment !== undefined && fromLine > 0 && lines[fromLine - 1]!.trim().startsWith("//")) {
+			fromLine -= 1;
+		}
+
+		const toLine = document.positionAt(statement.end).line;
+		const previous = steps.at(-1);
+		const together = previous !== undefined && !previous.body && !bodied(statement) && statement.comment === undefined && !/\n[ \t]*\r?\n/u.test(text.slice(previous.end, statement.start));
+
+		if (together) {
+			previous.toLine = toLine;
+			previous.end = statement.end;
+			previous.count += 1;
+			previous.declares.push(...statement.declares ?? []);
+			previous.names.push(statement.title);
+			previous.detail = `${previous.count} statements`;
+		} else {
+			steps.push({ "fromLine": fromLine, "toLine": toLine, "end": statement.end, "count": 1, "title": statement.comment ?? "", "names": [statement.title], "detail": statement.detail, "declares": [...statement.declares ?? []], "body": bodied(statement) });
+		}
+	}
+
+	// Untitled, a step is named by what it starts and ends with: `country … total`.
+	return steps.map(({ fromLine, toLine, title, names, detail, declares, body }) => ({ "fromLine": fromLine, "toLine": toLine, "title": title !== "" ? title : names.length <= 2 ? names.join(", ") : `${names[0]} … ${names.at(-1)}`, "detail": detail, "declares": declares, "body": body }));
+}
+
+/** Whether a step ran, from coverage's marks on its lines (as they're drawn: on the lines their code is on now) — a
+ *  function by how often it was called (its body's first mark) — or undefined, with nothing to say. */
+function ranOf(step: Step, marks: PaneMark[]): { "kind": string; "text": string } | undefined {
+	const covered = marks.filter((mark) => mark.kind.startsWith("coverage-") && step.fromLine <= mark.line && mark.line <= step.toLine);
+
+	if (step.body) {
+		const first = covered.filter((mark) => mark.line > step.fromLine).sort((a, b) => a.line - b.line)[0];
+
+		if (first === undefined) {
+			return undefined;
+		}
+
+		const times = /(\d+)×/u.exec(first.title ?? "")?.[1];
+
+		return first.kind === "coverage-missed" ? { "kind": "missed", "text": "not called" } : { "kind": "ran", "text": times === undefined ? "called" : `called ${times}×` };
+	}
+
+	if (covered.length === 0) {
+		return undefined;
+	}
+
+	return covered.every((mark) => mark.kind === "coverage-ran") ? { "kind": "ran", "text": "ran" } : covered.every((mark) => mark.kind === "coverage-missed") ? { "kind": "missed", "text": "didn't run" } : { "kind": "partial", "text": "partly ran" };
+}
+
+/** A step's card label: its title, what it is, whether it ran; the types of what it declares on hover. */
+function renderStep(step: Step, marks: PaneMark[], element: HTMLElement): void {
+	const ran = ranOf(step, marks);
+
+	element.append(
+		Object.assign(document.createElement("span"), { "className": "live-values-step-title", "textContent": step.title }),
+		...step.detail === "" ? [] : [Object.assign(document.createElement("span"), { "className": "live-values-step-detail", "textContent": step.detail })],
+		...ran === undefined ? [] : [Object.assign(document.createElement("span"), { "className": `live-values-step-ran ${ran.kind}`, "textContent": ran.text })]
+	);
+
+	if (step.declares.length > 0) {
+		element.title = step.declares.map(({ name, type }) => (type === null ? name : `${name}: ${type}`)).join("\n");
+	}
+}
+
 /** Show a file's values and notes in its margin, or take the margin away when it has neither. */
 function draw(uri: string): void {
 	void place(uri);
@@ -799,6 +916,10 @@ async function place(uri: string): Promise<void> {
 	const [askedAt] = asking === undefined ? [] : await relocate(asking.anchors, text, [asking.ask]);
 	const ending = ends.get(uri);
 	const [end] = ending === undefined ? [] : await relocate(ending.anchors, text, [ending]);
+	// The program's steps, a card around each (PROJECTIONS.md).
+	const shown = api?.workspace.textDocuments.find((each) => each.uri.toString() === uri);
+	const read = shown === undefined || !CODE.has(shown.languageId) ? undefined : await statementsOf(shown);
+	const steps = read === undefined || shown === undefined || shown.getText() !== text ? [] : stepsOf(shown, read);
 
 	// process.argv's row, before any run (or a run that didn't read it yet): on the first line reading it, with the file's
 	// stub if it has one — so the inputs can be written first.
@@ -847,13 +968,19 @@ async function place(uri: string): Promise<void> {
 	];
 
 	// Only a file that isn't code, with nothing in it, goes without.
-	if (entries.length === 0 && !open.has(uri) && marks.length === 0) {
+	if (entries.length === 0 && !open.has(uri) && marks.length === 0 && steps.length === 0) {
 		showPane(uri, undefined);
 
 		return;
 	}
 
 	showPane(uri, entries, (entry, element) => {
+		if (entry.id.startsWith("step:")) {
+			renderStep(steps[Number(entry.id.slice("step:".length))]!, marks, element);
+
+			return undefined;
+		}
+
 		if (entry.id === "ask") {
 			renderAsk(asked!.session, asked!.ask, element, () => { draw(uri); });
 
@@ -888,7 +1015,7 @@ async function place(uri: string): Promise<void> {
 			gone = true;
 			dispose?.();
 		};
-	}, marks);
+	}, marks, steps.map((step, index) => ({ "id": `step:${index}`, "fromLine": step.fromLine, "toLine": step.toLine })));
 }
 
 /** The marks beside `uri`'s lines in the margin's gutter column (coverage's), replacing its last. */
@@ -934,7 +1061,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	vscode.workspace.onDidChangeTextDocument((event) => {
 		const uri = event.document.uri.toString();
 
-		if (event.contentChanges.length > 0 && (sessions.has(uri) || ends.has(uri) || asks.has(uri))) {
+		if (event.contentChanges.length > 0 && (sessions.has(uri) || ends.has(uri) || asks.has(uri) || open.has(uri))) {
 			clearTimeout(typing.get(uri));
 			typing.set(uri, setTimeout(() => { draw(uri); }, 300));
 		}

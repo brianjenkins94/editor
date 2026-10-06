@@ -7,6 +7,11 @@
  *
  * Hovering an entry marks its span in the editor; the cursor on a line lights the entry about it.
  *
+ * Entries can be grouped (`groups`): a group is a card drawn around the lines it spans — behind its entries, from its
+ * first line's top to its last line's bottom, view zones included — with a label its consumer renders (through `render`,
+ * handed the group) on its bottom border, in the blank line between steps; the cursor in it lights it. The program's projection (PROJECTIONS.md): a card per
+ * step, several statements long, Automator's look, its values still level with their lines.
+ *
  * The pane has a gutter column of its own too, right of the line numbers: a mark per line the consumer gives (`marks`:
  * a class to style it by, a title), as tall as its line wraps to — coverage's, say. It's the left end of the editor's
  * line-decorations lane, where VS Code's change bars go (the workbench turns those off: scm.diffDecorations), folding's
@@ -40,7 +45,7 @@ export interface PaneMark { "line": number; "kind": string; "title"?: string }
 const GUTTER_WIDTH = 12;
 
 /** Each file's entries, how to render them, and its marks, by URI. */
-const panes = new Map<string, { "entries": PaneEntry[]; "render": PaneRender; "marks": PaneMark[] }>();
+const panes = new Map<string, { "entries": PaneEntry[]; "render": PaneRender; "marks": PaneMark[]; "groups": PaneEntry[] }>();
 /** Each editor's frame, while it shows a file with a pane. */
 const frames = new Map<monaco.editor.ICodeEditor, Frame>();
 let started: Promise<void> | undefined;
@@ -96,6 +101,8 @@ class Frame implements monaco.editor.IOverlayWidget {
 	private readonly gutterWidget: monaco.editor.IOverlayWidget = { "getId": () => "notes-margin-gutter", "getDomNode": () => this.gutter, "getPosition": () => null };
 	private marks: { "line": number; "element": HTMLElement }[] = [];
 	private cells: Cell[] = [];
+	/** The cards drawn around groups of lines, behind the cells. */
+	private groups: { "fromLine": number; "toLine": number; "element": HTMLElement }[] = [];
 	private disposers: (() => void)[] = [];
 	private marked: string[] = [];
 	/** Whether the code wraps (at the divider), and the editor's own wrap options to give back when the pane goes. */
@@ -167,8 +174,26 @@ class Frame implements monaco.editor.IOverlayWidget {
 		return null; // placed by `place`
 	}
 
-	public show(entries: PaneEntry[], render: PaneRender, marks: PaneMark[] = []): void {
+	public show(entries: PaneEntry[], render: PaneRender, marks: PaneMark[] = [], groups: PaneEntry[] = []): void {
 		this.clear();
+		// The cards first, so the cells draw over them.
+		this.groups = groups.map((group) => {
+			const element = document.createElement("div");
+			const label = document.createElement("div");
+
+			element.className = "notes-margin-group";
+			label.className = "notes-margin-group-label";
+			element.append(label);
+			this.element.append(element);
+
+			const dispose = render(group, label);
+
+			if (typeof dispose === "function") {
+				this.disposers.push(dispose);
+			}
+
+			return { "fromLine": group.fromLine, "toLine": group.toLine, "element": element };
+		});
 		this.marks = marks.map((mark) => {
 			const element = document.createElement("div");
 
@@ -301,6 +326,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 
 		this.cells = [];
 		this.gutter.replaceChildren();
+		this.groups = [];
 		this.marks = [];
 		this.element.replaceChildren(this.sash);
 		this.mark(undefined);
@@ -383,6 +409,18 @@ class Frame implements monaco.editor.IOverlayWidget {
 			cell.element.style.top = `${this.editor.getTopForLineNumber(cell.fromLine + 1) - this.editor.getScrollTop()}px`;
 			cell.element.classList.toggle("lit", cell.fromLine <= cursor && cursor <= cell.toLine);
 		}
+
+		// Each card around its lines, with the view zone after its last line (an entry taller than its span) inside it.
+		const lineCount = model.getLineCount();
+
+		for (const group of this.groups) {
+			const top = this.editor.getTopForLineNumber(group.fromLine + 1);
+			const bottom = group.toLine + 2 <= lineCount ? this.editor.getTopForLineNumber(group.toLine + 2) : this.bottomOf(group.toLine) + (this.cells.find((cell) => cell.toLine === group.toLine)?.zone?.height ?? 0);
+
+			// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: around its lines, as the editor scrolls
+			Object.assign(group.element.style, { "top": `${top - this.editor.getScrollTop()}px`, "height": `${bottom - top}px` });
+			group.element.classList.toggle("lit", group.fromLine <= cursor && cursor <= group.toLine);
+		}
 	}
 }
 
@@ -448,16 +486,17 @@ function sync(editor: monaco.editor.ICodeEditor): void {
 		frames.set(editor, frame);
 	}
 
-	frame.show(pane.entries, pane.render, pane.marks);
+	frame.show(pane.entries, pane.render, pane.marks, pane.groups);
 }
 
 /** Show `entries` beside every editor showing `uri` (a file URI's string), each rendered by `render` — now and when one
- *  opens it — or, with none, take the pane away. */
-export function showPane(uri: string, entries: PaneEntry[] | undefined, render?: PaneRender, marks: PaneMark[] = []): void {
+ *  opens it — or, with none, take the pane away. `groups`: cards around spans of lines, each one's label rendered by
+ *  `render` too. */
+export function showPane(uri: string, entries: PaneEntry[] | undefined, render?: PaneRender, marks: PaneMark[] = [], groups: PaneEntry[] = []): void {
 	if (entries === undefined || render === undefined) {
 		panes.delete(uri);
 	} else {
-		panes.set(uri, { "entries": entries, "render": render, "marks": marks });
+		panes.set(uri, { "entries": entries, "render": render, "marks": marks, "groups": groups });
 	}
 
 	started ??= start();

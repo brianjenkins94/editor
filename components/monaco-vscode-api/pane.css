@@ -76,3 +76,42 @@
 .notes-margin-marked {
   background: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 12%, transparent);
 }
+
+/* A group of entries (a statement, in the program's projection): a card around its lines, behind its entries, with its
+   label in the top corner. */
+.notes-margin-group {
+  position: absolute;
+  left: 4px;
+  right: 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 55%, transparent);
+  pointer-events: none;
+}
+
+.notes-margin-group.lit {
+  border-color: var(--vscode-focusBorder);
+}
+
+.notes-margin-group.lit .notes-margin-group-label {
+  color: var(--vscode-foreground);
+}
+
+/* On the card's bottom border, like a legend: in the blank line between steps, clear of the values on its lines. */
+.notes-margin-group-label {
+  position: absolute;
+  bottom: -9px;
+  right: 8px;
+  max-width: 80%;
+  padding: 0 4px;
+  background: var(--vscode-editor-background);
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground);
+  pointer-events: auto;
+}
+

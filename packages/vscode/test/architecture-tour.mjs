@@ -1000,6 +1000,54 @@ test("preview prompt: Rule… makes the rule in the Rules view, and the call wai
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
+// The program's projection (PROJECTIONS.md): the open file's steps as cards in the notes margin — statements written
+// together (no blank line between) are one, a comment above titles one, a function is its own — each card around its
+// lines, labelled on its bottom border, the types of what it declares on hover; after a run, whether each step ran and
+// how often a function was called.
+test("projection: the margin's cards are the file's steps, each saying whether it ran", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/cards.js";
+	const cards = () => workbench.evaluate(() => [...document.querySelectorAll(".notes-margin-group")].map((card) => ({
+		"title": card.querySelector(".live-values-step-title")?.textContent,
+		"detail": card.querySelector(".live-values-step-detail")?.textContent ?? null,
+		"ran": card.querySelector(".live-values-step-ran")?.textContent ?? null,
+		"types": card.querySelector(".notes-margin-group-label")?.title ?? "",
+		"height": card.getBoundingClientRect().height
+	})));
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file(path);
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["// The order", "const base = 2;", "const doubled = base * 2;", "", "function square(n) {", "\treturn n * n;", "}", "", "console.log(square(doubled));", ""].join("\n")));
+		await api.window.showTextDocument(uri);
+	}, program);
+
+	const before = await eventually("the cards", async () => {
+		const shown = await cards();
+
+		return shown.length === 3 ? shown : undefined;
+	}, 30_000);
+
+	assert.deepEqual(before.map(({ title }) => title), ["The order", "square", "console.log"]);
+	assert.equal(before[0].detail, "2 statements");
+	assert.equal(before[0].types, "base: 2\ndoubled: number");
+	assert.ok(before[0].height > before[2].height * 2, "a card is as tall as its lines: the comment and two statements");
+
+	// Run: each card says whether its step ran.
+	const ran = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+	assert.deepEqual(ran.output, ["16"]);
+
+	const after = await eventually("whether each step ran", async () => {
+		const shown = await cards();
+
+		return shown.every(({ ran }) => ran !== null) ? shown : undefined;
+	});
+
+	assert.deepEqual(after.map(({ ran }) => ran), ["ran", "called 1×", "ran"]);
+});
+
 // How the last run ended short, in the margin's strip: a ✕ on the line it crashed on (the error on hover) — through a
 // reformat too, anchored by the throw's span — gone when it runs again and finishes.
 test("run ends: a crash is marked on the line it threw on, and stays on it through a reformat", async () => {
