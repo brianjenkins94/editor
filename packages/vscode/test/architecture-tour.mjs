@@ -540,6 +540,54 @@ test("live values: a session's values beside the code, as the talk's binary sear
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
+// Setting a value at a stop, from the margin: click a variable's name, write a literal, Enter — the run goes on with it
+// (the binary search with high set to 3 takes another path), and the row shows it as set by hand.
+test("set a value: from the margin, at a stop, and the run goes on with it", async () => {
+	const workbench = session.workbench();
+	const source = ["function binarySearch(key, array) {", "\tlet low = 0;", "\tlet high = array.length - 1;", "", "\twhile (true) {", "\t\tconst mid = Math.floor((low + high) / 2);", "\t\tconst value = array[mid];", "", "\t\tif (value < key) {", "\t\t\tlow = mid + 1;", "\t\t} else if (value > key) {", "\t\t\thigh = mid - 1;", "\t\t} else {", "\t\t\treturn mid;", "\t\t}", "\t}", "}", "", "console.log(binarySearch(\"d\", [\"a\", \"b\", \"c\", \"d\", \"e\", \"f\"]));", ""].join("\n");
+	const rows = () => workbench.evaluate(() => Object.fromEntries([...document.querySelectorAll(".live-values-row")].map((row) => [row.dataset.line, [...row.children].map((child) => child.textContent.trim())])));
+
+	await workbench.evaluate(async (text) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/setvalue.js");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
+		await api.window.showTextDocument(uri);
+	}, source);
+
+	const started = await session.request("debug.start", { "program": "/workspace/setvalue.js", "breakpoints": [6] }, 60_000);
+
+	await eventually("high's row", async () => (await rows())["2"]?.[1] === "5" || undefined);
+	// The margin's own field: click high's name, write 3, Enter.
+	await workbench.evaluate(() => {
+		document.querySelector('.live-values-row[data-line="2"] .live-values-label').click();
+
+		const input = document.querySelector(".live-values-input");
+
+		input.value = "3";
+		input.dispatchEvent(new KeyboardEvent("keydown", { "key": "Enter" }));
+	});
+	await eventually("high, set by hand", () => workbench.evaluate(() => document.querySelector('.live-values-row[data-line="2"] .live-values-set')?.textContent).then((text) => (text === "3" ? text : undefined)));
+
+	// On to the return: it went the way high = 3 sends it.
+	await session.request("debug.breakpoints", { "program": "/workspace/setvalue.js", "lines": [14] }, 30_000);
+	await session.request(`debug.session.${started.session}.step`, { "action": "continue" }, 30_000);
+
+	const after = await eventually("the values of the run it took", async () => {
+		const all = await rows();
+
+		return all["6"]?.length === 4 ? all : undefined;
+	});
+
+	assert.deepEqual(after["5"], ["mid =", "1", "2", "3"]);
+	assert.deepEqual(after["6"], ["value =", "'b'", "'c'", "'d'"]);
+	await assert.rejects(session.request(`debug.session.${started.session}.setValue`, { "name": "mid", "value": "9" }, 30_000), /mid is a const/u);
+	await assert.rejects(session.request(`debug.session.${started.session}.setValue`, { "name": "low", "value": "alert(1)" }, 30_000), /not a literal/u);
+	await session.request(`debug.session.${started.session}.stop`, undefined, 30_000);
+	await session.request("debug.breakpoints", { "program": "/workspace/setvalue.js", "lines": [] }, 30_000);
+	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
+});
+
 // Capability decisions on the line (LIVE-VALUES.md, step 8): a call the policy hasn't decided stops the run at its line,
 // and asks there, in the notes margin — what it would do, from the run's own values, and Allow once / Allow always / Deny.
 // Deny fails the call as the policy would; Allow once lets it run; Allow always writes my policy override, and the next

@@ -15,6 +15,10 @@
  * *Allow once*, *Allow always*, *Deny*, the choice sent back to the session (`debug.session.<id>.decide`), which
  * resumes it. *Allow always* needs the resource the call reaches: offered only when it's known before the line runs.
  *
+ * At a stop, a variable's value can be set from its row: click its name, write a literal, Enter — the run goes on with
+ * it (`debug.session.<id>.setValue`, as the Variables view's Set Value does), and the value shows in the row as set by
+ * hand.
+ *
  * The margin is always open beside a JavaScript or TypeScript file, with or without anything to show: it's the file's
  * runtime column — coverage's strip at its edge (`showMarks`, from coverage.ts), notes, values, decisions. In the strip
  * too, how the last run ended short: ✕ on the line it crashed on (the error on hover), ■ on the one it was stopped at —
@@ -39,7 +43,7 @@ import css from "./live-values.css?raw";
 export interface Note { "id": string; "fromLine": number; "toLine": number; "text": string }
 
 /** One line of values as drawn: its label (`mid =`), then a value (`inline`) or a cell per column. */
-interface Row { "line": number; "label": string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range }
+interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range }
 
 /** A function's calls to pick between, on its first line: which (`function:line`), the one shown (0-based), how many. */
 interface Picker { "function": string; "index": number; "count": number }
@@ -74,13 +78,15 @@ let api: typeof vscodeApi | undefined;
 const drawing = new Map<string, number>();
 /** Sends a capability stop's choice back to its session (set by `installLiveValues`). */
 let choose: ((session: string, choice: CapabilityChoice) => Promise<unknown>) | undefined;
+/** Sets a variable at a session's stop (set by `installLiveValues`). */
+let setValueAt: ((session: string, name: string, value: string) => Promise<unknown>) | undefined;
 /** The cells of each column on screen, by group and column: to light a column on every line. */
 let columns = new Map<string, HTMLElement[]>();
 
 /** A value's look, by what it reads as. */
 function kindOf(value: LiveValue): string {
-	if (value.kind === "branch") {
-		return "branch";
+	if (value.kind === "branch" || value.kind === "set") {
+		return value.kind;
 	}
 
 	return /^['"`]/u.test(value.value) ? "string" : /^-?\d/u.test(value.value) ? "number" : value.value === "true" || value.value === "false" ? "boolean" : "";
@@ -126,6 +132,20 @@ function anchorOf(values: LiveValue[]): { "at"?: Range } {
 	return at === undefined ? {} : { "at": at };
 }
 
+/** Each value set by hand at a stop, moved to its variable's own row — where it was last bound in the same call, in that
+ *  row's turn (none, outside a loop) — rather than the line the run stopped at. */
+function homed(values: LiveValue[]): LiveValue[] {
+	return values.map((value, index) => {
+		if (value.kind !== "set") {
+			return value;
+		}
+
+		const home = values.slice(0, index).findLast((other) => other.kind !== "set" && other.name === value.name && other.call === value.call);
+
+		return home === undefined ? value : { ...value, "line": home.line, "turns": home.turns.length === 0 ? [] : value.turns, ...home.at === undefined ? {} : { "at": home.at } };
+	});
+}
+
 /** A session's rows: a call of each function (its latest, or the one `picked`) and the top level, a row per line that
  *  has values; a function called more than once has its picker on its first line. */
 export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>, picked = new Map<string, number>()): Row[] {
@@ -146,7 +166,7 @@ export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>, picked
 	const shownCalls = new Set([0, ...[...shown.values()].map((each) => each.call.id)]);
 	const byLine = new Map<number, LiveValue[]>();
 
-	for (const value of values.filter((candidate) => shownCalls.has(candidate.call))) {
+	for (const value of homed(values).filter((candidate) => shownCalls.has(candidate.call))) {
 		byLine.set(value.line, [...byLine.get(value.line) ?? [], value]);
 	}
 
@@ -170,18 +190,19 @@ export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>, picked
 		const names = [...new Set(inDepth.map((value) => value.name))];
 		const named = names.length > 1;
 		const only = inDepth[0]!;
-		const label = named ? "" : only.kind === "bind" ? `${only.name} =` : only.kind === "return" ? "return" : only.name;
+		const binds = !named && (only.kind === "bind" || only.kind === "set");
+		const label = named ? "" : binds ? `${only.name} =` : only.kind === "return" ? "return" : only.name;
 		const group = `${call}/${depth}`;
 
 		if (depth === 0) {
-			rows.push({ "line": line, "label": label, "cells": [], "inline": cellOf(inDepth, named), "group": group, "widths": [], ...anchorOf(inDepth) });
+			rows.push({ "line": line, "label": label, ...binds ? { "name": only.name } : {}, "cells": [], "inline": cellOf(inDepth, named), "group": group, "widths": [], ...anchorOf(inDepth) });
 
 			continue;
 		}
 
 		const turns = ordered.get(group) ?? [];
 
-		rows.push({ "line": line, "label": label, "cells": turns.map((turn) => {
+		rows.push({ "line": line, "label": label, ...binds ? { "name": only.name } : {}, "cells": turns.map((turn) => {
 			const inTurn = inDepth.filter((value) => value.turns.join(".") === turn);
 
 			return inTurn.length === 0 ? undefined : cellOf(inTurn, named);
@@ -272,6 +293,16 @@ function renderRow(row: Row, labelWidth: number, session: Session, redraw: () =>
 		line.append(label);
 	}
 
+	// A variable's name: click to set its value at the stop (its latest value to start from).
+	if (row.name !== undefined) {
+		const name = row.name;
+		const latest = row.inline?.text ?? row.cells.findLast((each) => each !== undefined)?.text ?? "";
+
+		label.classList.add("editable");
+		label.title = `Set ${name} here, at the stop`;
+		label.addEventListener("click", () => { editValue(session.id, name, latest, line); });
+	}
+
 	if (row.inline !== undefined) {
 		line.append(cell(row.inline, "inline"));
 	}
@@ -291,6 +322,35 @@ function renderRow(row: Row, labelWidth: number, session: Session, redraw: () =>
 	}
 
 	element.append(line);
+}
+
+/** An inline field after `line`'s label for `name`'s new value: Enter sets it at the session's stop (the run goes on
+ *  with it), Escape or leaving it lets it be; what couldn't be set says why. */
+function editValue(session: string, name: string, latest: string, line: HTMLElement): void {
+	if (line.querySelector(".live-values-input") !== null) {
+		return;
+	}
+
+	// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+	const input = Object.assign(document.createElement("input"), { "className": "live-values-input", "value": latest, "spellcheck": false, "title": "A literal: 'text', 4, true, null, [1, 2], { a: 1 }" });
+	const close = (): void => { input.remove(); };
+
+	input.addEventListener("keydown", (event) => {
+		if (event.key === "Escape") {
+			close();
+		} else if (event.key === "Enter") {
+			input.disabled = true;
+			void setValueAt?.(session, name, input.value).then(close, (error: unknown) => {
+				input.disabled = false;
+				input.classList.add("refused");
+				input.title = error instanceof Error ? error.message : String(error);
+			});
+		}
+	});
+	input.addEventListener("blur", () => { if (!input.disabled) { close(); } });
+	line.querySelector(".live-values-label")?.after(input);
+	input.focus();
+	input.select();
 }
 
 /** A click holds a column lit; another lets it go. */
@@ -607,6 +667,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	const rpc = createRpcClient(hub);
 
 	choose = (session, choice) => rpc.request(`debug.session.${session}.decide`, { "choice": choice }, { "timeoutMs": 24 * 60 * 60_000 });
+	setValueAt = (session, name, value) => rpc.request(`debug.session.${session}.setValue`, { "name": name, "value": value }, { "timeoutMs": 30_000 });
 	hub.subscribe("capability.ask", (data) => {
 		const { session, file, source, ask } = (data ?? {}) as { "session"?: unknown; "file"?: unknown; "source"?: unknown; "ask"?: CapabilityAsk };
 

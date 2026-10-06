@@ -446,7 +446,7 @@ flowchart LR
 | Dev-server worker | virtual | `virtual.request()` |
 | Dev-server worker | workspace | `workspace.changed` |
 | Pod | capability | `capability.decide()` |
-| Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.event`, `debug.session.*.state()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
+| Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.event`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
 | Pod | git | `git.changed` |
 | Pod | node | `node.exit.*`, `node.start` |
 | Pod | pod | `pod.ready` |

@@ -199,7 +199,12 @@ file whether or not it has anything to show — notes, values, a capability stop
   any token in it (a semicolon dropped inside orphans the whole `if`; the condition's survives). Tried in Brave on the
   binary search, paused: blank lines above, tabs to spaces, a line wrapped over three, every semicolon dropped — every
   row, column and coverage mark on its code; the tour test does the same, and moves a crash's mark through a reformat.
-- **It's where a value is overridden or stubbed**, next: see the open question below.
+- **A value is set at a stop from its row**: click a variable's name, write a literal (`'text'`, `4`, `true`, `null`,
+  `[1, 2]`, `{ a: 1 }` — read as a literal, never run), Enter; the run goes on with it, and the row shows it, set by
+  hand, in the variable's own row and turn. The same path serves VS Code's Variables view (the adapter's
+  `setVariable`; `debug.session.<id>.setValue` for the margin); a `const`, a name not in scope, or something that isn't
+  a literal is refused with the reason. Session-only: nothing is kept.
+- **Stubbing a call's result across runs** is the open question below.
 
 ## Capability decisions, on the line
 

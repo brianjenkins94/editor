@@ -204,3 +204,32 @@
   content: "■";
   font-size: 7px;
 }
+
+/* Setting a value at a stop: a variable's name to click, the field for its new value, and a value set by hand. */
+.live-values-label.editable {
+  cursor: text;
+}
+
+.live-values-label.editable:hover {
+  text-decoration: underline dotted;
+}
+
+.live-values-input {
+  flex: none;
+  width: 14ch;
+  margin-right: 1ch;
+  padding: 0 2px;
+  border: 1px solid var(--vscode-focusBorder);
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+}
+
+.live-values-input.refused {
+  border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-editorError-foreground));
+}
+
+.live-values-set {
+  color: var(--vscode-charts-orange, #d18616);
+  font-weight: bold;
+}

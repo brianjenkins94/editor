@@ -95,6 +95,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private coverage: CoverageReport | undefined;
 	private coverageSent = false;
 	private readonly coverageWaiters = new Set<(report: CoverageReport) => void>();
+	/** A `setValue` waiting on the worker's answer. */
+	private valueWaiter: ((answer: Extract<WorkerEvent, { "type": "valueSet" }>) => void) | undefined;
 
 	private readonly session: vscode.DebugSession;
 
@@ -168,6 +170,33 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		return this.act("continue", signal);
 	}
 
+	/** At a stop, set `name` (a variable in scope there) to `value` (a literal): the run goes on with it, and the margin
+	 *  shows it beside the line. Resolves with the value as the Variables view shows it; rejects when it can't be set. */
+	public async setValue(name: string, value: string): Promise<string> {
+		if (this.state !== "stopped") {
+			throw new Error("not stopped");
+		}
+
+		if (this.lastStopAtomic) {
+			throw new Error("paused inside a handler: values can't be set there yet");
+		}
+
+		const answer = await new Promise<Extract<WorkerEvent, { "type": "valueSet" }>>((resolve) => {
+			this.valueWaiter = resolve;
+			this.control({ "type": "setValue", "name": name, "value": value });
+		});
+
+		if (!answer.ok) {
+			throw new Error(answer.error ?? "couldn't set it");
+		}
+
+		if (answer.snapshot !== undefined) {
+			this.snapshot = answer.snapshot;
+		}
+
+		return answer.value ?? value;
+	}
+
 	public settled(signal: AbortSignal): Promise<DebugOutcome> {
 		return this.state === "starting" || this.state === "running" ? this.nextSettle(signal) : Promise.resolve(this.outcome());
 	}
@@ -219,6 +248,11 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		this.send({ "type": "response", "request_seq": request.seq, "success": true, "command": request.command, "body": body ?? {} });
 	}
 
+	/** Answer `request` with an error VS Code shows. */
+	private fail(request: DapRequest, message: string): void {
+		this.send({ "type": "response", "request_seq": request.seq, "success": false, "command": request.command, "message": message, "body": {} });
+	}
+
 	private event(event: string, body?: Dap): void {
 		this.send({ "type": "event", "event": event, "body": body ?? {} });
 	}
@@ -250,7 +284,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		switch (request.command) {
 			case "initialize":
 				// supportsStepBack lights up VS Code's reverse toolbar (Step Back + Reverse) — tsval time travel.
-				this.respond(request, { "supportsConfigurationDoneRequest": true, "supportsTerminateRequest": true, "supportsStepBack": true });
+				// supportsSetVariable: the Variables view's Set Value, as the notes margin's (setValue).
+				this.respond(request, { "supportsConfigurationDoneRequest": true, "supportsTerminateRequest": true, "supportsStepBack": true, "supportsSetVariable": true });
 				this.event("initialized");
 				break;
 
@@ -324,6 +359,10 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 			case "scopes":
 				this.respond(request, { "scopes": this.snapshot?.scopes[args["frameId"] as number] ?? [] });
+				break;
+
+			case "setVariable":
+				void this.setValue(String(args["name"] ?? ""), String(args["value"] ?? "")).then((value) => { this.respond(request, { "value": value }); }, (error: unknown) => { this.fail(request, error instanceof Error ? error.message : String(error)); });
 				break;
 
 			case "variables":
@@ -598,6 +637,14 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 			// React mode: the render stream itself goes straight from the worker to the render surface; these just end
 			// the action that caused it.
+			case "valueSet": {
+				const waiter = this.valueWaiter;
+
+				this.valueWaiter = undefined;
+				waiter?.(message);
+				break;
+			}
+
 			case "rendered":
 				this.endAction(); // React mount finished — close the launch action span (React launch has no "stopped")
 				this.settle("idle");

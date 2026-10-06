@@ -80,6 +80,8 @@ let policy: Policy | undefined;
 let userLines: number[] = [];
 /** "Deny" at a capability stop: the next capability call fails, as a denied one would. Reset at every stop. */
 let denyNext = false;
+/** The last value traced: its call, its loops' turns and its step — where a value set at a stop is recorded. */
+let lastTraced: { "call": number; "turns": number[]; "step": number } | undefined;
 /** Forks, one per stop reached; `index` is the currently-displayed stop. */
 let history: Vm[] = [];
 let index = -1;
@@ -161,6 +163,105 @@ function denying(standins: ReturnType<typeof capabilityStandins>): ReturnType<ty
 	};
 
 	return { "globals": Object.fromEntries(Object.entries(standins.globals).map(([key, value]) => [key, wrap(value)])), "modules": Object.fromEntries(Object.entries(standins.modules).map(([key, value]) => [key, wrap(value)])) };
+}
+
+/** `text` as the value it writes, when it's a literal — a string, a number, a boolean, null or undefined, or an array or
+ *  object of those — so setting a value can't run code. */
+function literalOf(text: string): { "value": unknown } | { "error": string } {
+	const file = ts.createSourceFile("value.ts", `(${text})`, ts.ScriptTarget.Latest, true);
+	const [statement] = file.statements;
+	const read = (node: ts.Node): unknown => {
+		if (ts.isParenthesizedExpression(node)) {
+			return read(node.expression);
+		}
+
+		if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+			return node.text;
+		}
+
+		if (ts.isNumericLiteral(node)) {
+			return Number(node.text);
+		}
+
+		if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(node.operand)) {
+			return -Number(node.operand.text);
+		}
+
+		if (node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword) {
+			return node.kind === ts.SyntaxKind.TrueKeyword;
+		}
+
+		if (node.kind === ts.SyntaxKind.NullKeyword) {
+			return null;
+		}
+
+		if (ts.isIdentifier(node) && ["undefined", "NaN", "Infinity"].includes(node.text)) {
+			return { "undefined": undefined, "NaN": Number.NaN, "Infinity": Number.POSITIVE_INFINITY }[node.text];
+		}
+
+		if (ts.isArrayLiteralExpression(node)) {
+			return node.elements.map(read);
+		}
+
+		if (ts.isObjectLiteralExpression(node)) {
+			return Object.fromEntries(node.properties.map((property) => {
+				if (!ts.isPropertyAssignment(property) || !(ts.isIdentifier(property.name) || ts.isStringLiteral(property.name) || ts.isNumericLiteral(property.name))) {
+					throw new Error("only plain properties");
+				}
+
+				return [property.name.text, read(property.initializer)];
+			}));
+		}
+
+		throw new Error(`not a literal: ${node.getText(file)}`);
+	};
+
+	try {
+		if (file.statements.length !== 1 || statement === undefined || !ts.isExpressionStatement(statement) || file.parseDiagnostics.length > 0) {
+			throw new Error("not a value");
+		}
+
+		return { "value": read(statement.expression) };
+	} catch (error) {
+		return { "error": `${text} — ${error instanceof Error ? error.message : String(error)} (a literal: 'text', 4, true, null, [1, 2], { a: 1 })` };
+	}
+}
+
+/** At the stop `vm` is at: `name`, a variable in scope there, set to `text`'s literal — and recorded with the run's values,
+ *  on the stop's line, as set by hand. */
+function setValue(vm: Vm, name: string, text: string): Extract<WorkerEvent, { "type": "valueSet" }> {
+	const literal = literalOf(text);
+
+	if ("error" in literal) {
+		return { "type": "valueSet", "ok": false, "error": literal.error };
+	}
+
+	for (let scope: typeof vm.rootScope | undefined = vm.top?.scope ?? vm.rootScope; scope !== undefined; scope = scope.parent) {
+		const binding = scope.bindings.get(name);
+
+		if (binding !== undefined) {
+			if (binding.kind === "const") {
+				return { "type": "valueSet", "ok": false, "error": `${name} is a const` };
+			}
+
+			if (!binding.initialized) {
+				return { "type": "valueSet", "ok": false, "error": `${name} isn't declared yet here` };
+			}
+
+			binding.value = vm.fromHost(literal.value);
+
+			const at = vm.location();
+
+			if (at !== null) {
+				live.add({ "line": at.line, "name": name, "value": "", "raw": binding.value, "kind": "set", "call": lastTraced?.call ?? 0, "turns": lastTraced?.turns ?? [], "step": lastTraced?.step ?? 0, ...vm.currentNode === null ? {} : { "at": rangeOf(vm.currentNode) } });
+				flushLive();
+			}
+
+			return { "type": "valueSet", "ok": true, "value": format(binding.value), "snapshot": snapshot(vm) };
+		}
+	}
+
+	return { "type": "valueSet", "ok": false, "error": `no ${name} in scope here` };
 }
 
 /** Arm `vm`'s breakpoints: the user's, and the capability calls the policy gates. */
@@ -351,7 +452,8 @@ function traceValue(event: TraceEvent): void {
 	const lineOf = (node: ts.Node): number => sourceFile!.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line;
 	const callee = event.callee === undefined ? undefined : { "name": calleeName(event.callee), "line": lineOf(event.callee), "at": rangeOf(event.callee) };
 
-	live.add({ "line": lineOf(event.node), "name": event.name, "value": "", "raw": event.value, "kind": event.kind, "call": event.call, "turns": event.loops.map((loop) => loop.turn), "step": event.step, "at": rangeOf(event.node), ...callee === undefined ? {} : { "callee": callee } });
+	lastTraced = { "call": event.call, "turns": event.loops.map((loop) => loop.turn), "step": event.step };
+	live.add({ "line": lineOf(event.node), "name": event.name, "value": "", "raw": event.value, "kind": event.kind, "call": event.call, "turns": lastTraced.turns, "step": event.step, "at": rangeOf(event.node), ...callee === undefined ? {} : { "callee": callee } });
 }
 
 /** A node's range in the text that ran (offsets, from its first token): what the margin anchors a line's data by — for
@@ -755,6 +857,11 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 				arm(vm);
 			}
 
+			break;
+
+		case "setValue":
+			// The stop's own machine (the pristine snapshot a continue forks from), so the run goes on with the value.
+			post(done || history[index] === undefined ? { "type": "valueSet", "ok": false, "error": "not stopped" } : setValue(history[index], message.name, message.value));
 			break;
 
 		case "decide":

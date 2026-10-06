@@ -241,6 +241,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "debug.session.*.step", "from": ["root"], "to": ["pod"] },
 	{ "pattern": "debug.session.*.stop", "from": ["root"], "to": ["pod"] },
 	{ "pattern": "debug.session.*.decide", "from": ["root", "workbench"], "to": ["pod"] },
+	{ "pattern": "debug.session.*.setValue", "from": ["root", "workbench"], "to": ["pod"] },
 	{ "pattern": "pod.ready", "from": ["debug-worker"], "to": ["pod"] },
 	{ "pattern": "production.launch", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "production.out.*", "from": ["workbench"], "to": ["pod"] },

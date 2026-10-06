@@ -9,6 +9,7 @@
  *   session `debug.session.<id>.state`             → where it is now
  *   session `debug.session.<id>.stop`              → ends it
  *   session `debug.session.<id>.decide` { choice } → at a capability stop: allow-once / allow-always / deny, then resumes
+ *   session `debug.session.<id>.setValue` { name, value } → at a stop: a variable set to a literal; the run goes on with it
  *
  * The session methods are served by the ADAPTER (debug-adapter.ts), not the worker: a breakpoint inside a React handler
  * blocks the worker in Atomics.wait, where only the adapter (which holds the shared control word) can resume it — and
@@ -59,6 +60,8 @@ export interface ControllableSession {
 	"stop": () => Promise<DebugOutcome>;
 	/** At a capability stop, decide it and resume; resolve on the next stop, idle or end. */
 	"decide": (choice: CapabilityChoice, signal: AbortSignal) => Promise<DebugOutcome>;
+	/** At a stop, set a variable in scope to a literal; resolve with it as the Variables view shows it. */
+	"setValue": (name: string, value: string) => Promise<string>;
 }
 
 const sessions = new Map<string, ControllableSession>();
@@ -88,6 +91,15 @@ export function registerSession(hub: Hub, session: ControllableSession): () => v
 			}
 
 			return session.decide(choice as CapabilityChoice, signal);
+		}),
+		serve(hub, prefix + "setValue", (args) => {
+			const { name, value } = (args ?? {}) as { "name"?: unknown; "value"?: unknown };
+
+			if (typeof name !== "string" || typeof value !== "string") {
+				throw new TypeError("setValue takes { name, value }: a variable's name and a literal as code writes it");
+			}
+
+			return session.setValue(name, value);
 		})
 	];
 

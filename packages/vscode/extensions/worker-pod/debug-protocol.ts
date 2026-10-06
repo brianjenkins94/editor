@@ -30,6 +30,8 @@ export type Control =
 	/** A decision at a capability stop, before the run resumes: `deny` fails the call the stop was for; `policy`, after
 	 *  "Allow always", is the policy now in effect — what stops from here on. */
 	| { "type": "decide"; "deny"?: boolean; "policy"?: Policy }
+	/** At a stop: set `name` (a variable in scope there) to `value`, a literal as code writes it — the run goes on with it. */
+	| { "type": "setValue"; "name": string; "value": string }
 	| { "type": StepAction | "disconnect" };
 
 export interface Variable { "name": string; "value": string; "type": string; "variablesReference": number }
@@ -66,7 +68,9 @@ export type WorkerEvent =
 	/** The program's statement coverage — asked for, or `final` just before `terminated`. */
 	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean }
 	/** The session's live values new since the last (live-values.ts): a few times a second, and before a stop or the end. */
-	| { "type": "values"; "batch": LiveBatch };
+	| { "type": "values"; "batch": LiveBatch }
+	/** A `setValue` done (the new value as the Variables view shows it, and the stop's snapshot with it), or refused. */
+	| { "type": "valueSet"; "ok": boolean; "value"?: string; "error"?: string; "snapshot"?: Snapshot };
 
 /** One statement's coverage: its range (0-based line and character, as VS Code's Position) and how often it ran. */
 export interface StatementCoverage {
