@@ -481,7 +481,10 @@ function maybeBoot(): void {
 			"window.menuBarVisibility": "hidden",
 			"window.customTitleBarVisibility": "never",
 			"window.commandCenter": false,
-			"workbench.layoutControl.enabled": false
+			"workbench.layoutControl.enabled": false,
+			// No change bars in the gutter: their place is the notes margin's gutter column (coverage; live-values.ts), and
+			// the shell's Changes panel is the git UI.
+			"scm.diffDecorations": "none"
 		},
 		// Source Control and Extensions stay off the activity bar: the shell's changes panel is the git UI, and there's no
 		// extension management to do. (The Manage menu is hidden too, in Workbench.tsx.)

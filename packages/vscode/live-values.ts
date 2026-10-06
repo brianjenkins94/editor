@@ -20,9 +20,9 @@
  * hand.
  *
  * The margin is always open beside a JavaScript or TypeScript file, with or without anything to show: it's the file's
- * runtime column — coverage's strip at its edge (`showMarks`, from coverage.ts), notes, values, decisions. In the strip
- * too, how the last run ended short: ✕ on the line it crashed on (the error on hover), ■ on the one it was stopped at —
- * until the file runs again.
+ * runtime column — coverage in its gutter column, left of the code (`showMarks`, from coverage.ts), notes, values,
+ * decisions. In that column too, how the last run ended short: ✕ on the line it crashed on (the error on hover), ■ on
+ * the one it was stopped at — until the file runs again.
  *
  * Everything a run put on a line follows its code through edits and cosmetic changes (a reformat, a reindent): each is
  * anchored by its node's range in the text that ran (anchors.ts, BABLR spans) and drawn where that code is now; what
@@ -62,7 +62,7 @@ const MAX_WIDTH = 24;
 const sessions = new Map<string, Session>();
 /** Prose notes, per file URI. */
 const notes = new Map<string, Note[]>();
-/** Each file's marks for the margin's strip (coverage), per file URI. */
+/** Each file's marks for the margin's gutter column (coverage), per file URI. */
 const marked = new Map<string, PaneMark[]>();
 /** How each file's last run ended short, per file URI. */
 const ends = new Map<string, RunEnd & { "anchors"?: Anchors }>();
@@ -536,7 +536,7 @@ async function place(uri: string): Promise<void> {
 	}, marks);
 }
 
-/** The marks beside `uri`'s lines in the margin's strip (coverage's), replacing its last. */
+/** The marks beside `uri`'s lines in the margin's gutter column (coverage's), replacing its last. */
 export function showMarks(uri: string, marks: PaneMark[]): void {
 	marked.set(uri, marks);
 	draw(uri);

@@ -177,16 +177,23 @@ the component's frame.
 ## The margin, always open
 
 Decided 2026-10-05, after step 8: the margin is the file's runtime column, open beside every JavaScript or TypeScript
-file whether or not it has anything to show — notes, values, a capability stop's question, and at its edge, coverage.
+file whether or not it has anything to show — notes, values, a capability stop's question — with a gutter column of its
+own, right of the line numbers, for coverage.
 
-- **Coverage moved into the margin's strip.** Its gutter bars (gutter icons) cost breakpoints: VS Code won't set one
+- **Coverage moved into the margin's gutter column.** Its gutter bars (gutter icons) cost breakpoints: VS Code won't set one
   on a line whose glyph margin holds another extension's icon (`marginFreeFromNonDebugDecorations`, which lets through
   only codicons and its own test coverage's class — a class an extension's decoration can't choose). So core draws it
   (coverage.ts, moved from the insights extension): the same two sources — the session's own report, live at a stop
   and final at its end; the evidence across runs, placed by BABLR through the insights extension's evidence store, run
-  here with core's own extension API — as marks in a strip the component draws beside each line (`showPane`'s
-  `marks`, as tall as the line wraps to), with the same colors kept in the scrollbar.
-- **How the last run ended short, in the strip too**: ✕ on the line it crashed on (the error on hover), ■ on the line a
+  here with core's own extension API — as marks in a column the component draws in the gutter (`showPane`'s `marks`,
+  as tall as the line wraps to), with the same colors kept in the scrollbar. The column is the left end of the
+  line-decorations lane, right of the line numbers, where VS Code's change bars went — the workbench turns those off
+  (`scm.diffDecorations: none`; the shell's Changes panel is the git UI); folding's chevrons stay to its right. It looks
+  native: each mark drawn as VS Code draws the change bar there (3px, 5px into the lane), green or red (VS Code's
+  coverage colours are tints for a whole line-number cell, too faint for a 3px bar), with its coverage's stripes for a
+  line that partly ran and, in a high-contrast theme, a solid line instead of a fill. (Tried and dropped: tinting the line numbers, as VS Code's own coverage does; a
+  column left of them; one widening the lane just left of the code.)
+- **How the last run ended short, in that column too**: ✕ on the line it crashed on (the error on hover), ■ on the line a
   stopped session was paused at — until the file runs again (a run that finishes clears it). tsval notes where each
   thrown value was first thrown (`throwSite`: by the time an uncaught error reaches the host its frames have unwound,
   so the current node can't say), and the debug worker sends it with the end.

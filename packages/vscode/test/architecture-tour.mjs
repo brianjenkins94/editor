@@ -286,7 +286,7 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 	// statement's span; edit the statement itself, and its mark goes until it runs again.
 	const workbench = session.workbench();
 	// Coverage's marks, in the notes margin's strip (coverage.ts): the gutter is the breakpoints'.
-	const marks = () => workbench.evaluate(() => document.querySelectorAll(".notes-margin-mark.coverage-ran, .notes-margin-mark.coverage-missed").length);
+	const marks = () => workbench.evaluate(() => document.querySelectorAll(".notes-margin-mark.coverage-ran, .notes-margin-mark.coverage-partial, .notes-margin-mark.coverage-missed").length);
 	const edit = (change) => workbench.evaluate(async (what) => {
 		const { api } = globalThis.__editor;
 		const editor = await api.window.showTextDocument(api.Uri.file("/workspace/f5.js"));

@@ -1,9 +1,9 @@
 /**
  * Coverage, with nothing to ask for: every debug session that reports coverage — every tsval run, from the terminal or
- * F5 — leaves its file marked when it ends, and when it pauses: in the notes margin's strip (live-values.ts), a mark
- * beside each line that ran, another beside each line that didn't, and on hover how often it ran; and the same colors in
- * the scrollbar. Not in the gutter: VS Code won't set a breakpoint where another extension's icon is (its
- * `marginFreeFromNonDebugDecorations`), so the glyph margin stays the breakpoints'.
+ * F5 — leaves its file marked when it ends, and when it pauses: in the notes margin's gutter column, just left of the
+ * code (live-values.ts), a mark beside each line that ran, another beside each line that didn't, and on hover how often
+ * it ran; and the same colors in the scrollbar. Not in the glyph margin: VS Code won't set a breakpoint where another
+ * extension's icon is (its `marginFreeFromNonDebugDecorations`), so that stays the breakpoints'.
  *
  * Two sources, the freshest first:
  *  - the session's own report — its `coverage` custom event (its final coverage, just before it ends) and, when it stops,
@@ -25,12 +25,17 @@ import type { CoverageReport } from "./extensions/worker-pod/debug-protocol";
 import { Anchors, offsetOf } from "./anchors";
 
 /** What evidence says of a line: whether every evidenced statement starting on it ran, in how many runs, and when last. */
-interface LineEvidence { "ever": number; "runs": number; "lastAt": string; "ran": boolean }
+interface LineEvidence { "ever": number; "runs": number; "lastAt": string; "ran": boolean; "some": boolean }
 
-/** Each line's coverage: whether every statement that starts on it ran, and how often its first one did — each
- *  statement on the line `lineOf` says it's on now (undefined: its code is gone). */
-function lines(report: CoverageReport, lineOf: (index: number) => number | undefined): Map<number, { "ran": boolean; "count": number }> {
-	const byLine = new Map<number, { "ran": boolean; "count": number }>();
+/** A line's coverage: every statement starting on it ran, some did, or none. */
+type Covered = "ran" | "partial" | "missed";
+
+const coveredOf = (all: boolean, some: boolean): Covered => (all ? "ran" : some ? "partial" : "missed");
+
+/** Each line's coverage: whether every statement that starts on it ran, or some did, and how often its first one did —
+ *  each statement on the line `lineOf` says it's on now (undefined: its code is gone). */
+function lines(report: CoverageReport, lineOf: (index: number) => number | undefined): Map<number, { "ran": boolean; "some": boolean; "count": number }> {
+	const byLine = new Map<number, { "ran": boolean; "some": boolean; "count": number }>();
 
 	for (const [index, { count }] of report.statements.entries()) {
 		const at = lineOf(index);
@@ -38,14 +43,14 @@ function lines(report: CoverageReport, lineOf: (index: number) => number | undef
 		if (at !== undefined) {
 			const line = byLine.get(at);
 
-			byLine.set(at, line === undefined ? { "ran": count > 0, "count": count } : { "ran": line.ran && count > 0, "count": line.count });
+			byLine.set(at, line === undefined ? { "ran": count > 0, "some": count > 0, "count": count } : { "ran": line.ran && count > 0, "some": line.some || count > 0, "count": line.count });
 		}
 	}
 
 	return byLine;
 }
 
-/** Mark each editor's lines in its margin's strip (`mark`: by file URI) and its scrollbar, as sessions report and
+/** Mark each editor's lines in its margin's gutter column (`mark`: by file URI) and its scrollbar, as sessions report and
  *  evidence changes. */
 export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, mark: (uri: string, marks: PaneMark[]) => void): void {
 	// The scrollbar's marks: a decoration with no gutter icon, so breakpoints can still be set on the line.
@@ -53,15 +58,16 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 	const missed = vscode.window.createTextEditorDecorationType({ "overviewRulerColor": "#f85149a0", "overviewRulerLane": vscode.OverviewRulerLane.Left });
 	/** The latest session's coverage, by file path, with its statements' anchors in the text that ran. */
 	const reports = new Map<string, { "report": CoverageReport; "anchors"?: Anchors }>();
-	const paint = (editor: vscodeApi.TextEditor, marks: Iterable<[number, { "ran": boolean; "hover": string }]>): void => {
+	const paint = (editor: vscodeApi.TextEditor, marks: Iterable<[number, { "covered": Covered; "hover": string }]>): void => {
 		const shown: PaneMark[] = [];
 		const ranLines: vscodeApi.Range[] = [];
 		const missedLines: vscodeApi.Range[] = [];
 
-		for (const [line, { "ran": didRun, hover }] of marks) {
+		for (const [line, { covered, hover }] of marks) {
 			if (line < editor.document.lineCount) {
-				shown.push({ "line": line, "kind": didRun ? "coverage-ran" : "coverage-missed", "title": hover });
-				(didRun ? ranLines : missedLines).push(editor.document.lineAt(line).range);
+				shown.push({ "line": line, "kind": `coverage-${covered}`, "title": hover });
+				// In the scrollbar, a line that only partly ran is one with something that didn't.
+				(covered === "ran" ? ranLines : missedLines).push(editor.document.lineAt(line).range);
 			}
 		}
 
@@ -87,7 +93,7 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 				const line = document.positionAt(start).line;
 				const before = byLine.get(line);
 
-				byLine.set(line, before === undefined ? { ...span, "ran": span.ever > 0 } : { ...before, "ran": before.ran && span.ever > 0 });
+				byLine.set(line, before === undefined ? { ...span, "ran": span.ever > 0, "some": span.ever > 0 } : { ...before, "ran": before.ran && span.ever > 0, "some": before.some || span.ever > 0 });
 			}
 		}
 
@@ -106,7 +112,7 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 			// Where each statement is now (as it ran, with no text to anchor in).
 			void (anchors === undefined ? Promise.resolve(report.statements.map(({ start }) => start[0])) : anchors.lines(editor.document.getText(), ranges)).then((now) => {
 				if (editor.document.version === version && reports.get(editor.document.uri.path) === known) {
-					paint(editor, [...lines(report, (index) => now[index])].map(([line, { "ran": didRun, count }]) => [line, { "ran": didRun, "hover": didRun ? `Ran ${count}×` : "Didn't run" }]));
+					paint(editor, [...lines(report, (index) => now[index])].map(([line, { ran, some, count }]) => [line, { "covered": coveredOf(ran, some), "hover": ran ? `Ran ${count}×` : some ? "Partly ran: some of it didn't" : "Didn't run" }]));
 				}
 			});
 
@@ -115,7 +121,7 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 
 		void evidenceMarks(editor.document).then((marks) => {
 			if (marks !== undefined && !reports.has(editor.document.uri.path)) {
-				paint(editor, [...marks].map(([line, each]) => [line, { "ran": each.ran, "hover": each.ran ? `Ran in ${each.ever} run${each.ever === 1 ? "" : "s"} since it last changed · last ${new Date(each.lastAt).toLocaleString()}` : `Didn't run in ${Math.max(1, Math.round(each.runs))} recent run${Math.round(each.runs) > 1 ? "s" : ""}` }]));
+				paint(editor, [...marks].map(([line, each]) => [line, { "covered": coveredOf(each.ran, each.some), "hover": each.ran ? `Ran in ${each.ever} run${each.ever === 1 ? "" : "s"} since it last changed · last ${new Date(each.lastAt).toLocaleString()}` : each.some ? "Partly ran: some of it didn't, in recent runs" : `Didn't run in ${Math.max(1, Math.round(each.runs))} recent run${Math.round(each.runs) > 1 ? "s" : ""}` }]));
 			}
 		});
 	};

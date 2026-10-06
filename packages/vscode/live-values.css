@@ -162,7 +162,9 @@
   font-family: var(--vscode-font-family);
 }
 
-/* Coverage's marks in the margin's strip (coverage.ts): green beside a line that ran, red beside one that didn't. */
+/* Coverage's marks in the margin's gutter column (coverage.ts), shaped as VS Code's own gutter bars (pane.css): green
+   beside a line that ran, red beside one that didn't, the two striped beside one that partly ran (as its coverage
+   stripes) — and, in a high-contrast theme, a solid line rather than a fill, as its coverage does. */
 .notes-margin-mark.coverage-ran {
   background: #2ea04390;
 }
@@ -171,37 +173,58 @@
   background: #f85149c0;
 }
 
-/* How the last run ended short, in the strip: a badge across it, over the line it crashed on or was stopped at. */
+.notes-margin-mark.coverage-partial {
+  background-image: linear-gradient(45deg, #2ea04390 25%, #f85149c0 25%, #f85149c0 50%, #2ea04390 50%, #2ea04390 75%, #f85149c0 75%);
+  background-size: 6px 6px;
+}
+
+.hc-black .notes-margin-mark[class*="coverage-"],
+.hc-light .notes-margin-mark[class*="coverage-"] {
+  background: none;
+  border-left: 3px solid #2ea043;
+  box-sizing: border-box;
+}
+
+.hc-black .notes-margin-mark.coverage-missed,
+.hc-light .notes-margin-mark.coverage-missed {
+  border-left-color: #f85149;
+}
+
+/* How the last run ended short, in the gutter column: a near-square badge, centred on where its bar would be (6.5px
+   in: pane.css) and on the line, clear of the line number — beside the line it crashed on or was stopped at. The mark
+   spans the line; the badge is drawn inside it. */
 .notes-margin-mark.run-crashed,
 .notes-margin-mark.run-stopped {
-  left: -2px;
-  width: 11px;
+  left: 2px;
+  width: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  line-height: 1;
-  font-weight: bold;
-  border-radius: 2px;
   z-index: 1;
 }
 
-.notes-margin-mark.run-crashed {
-  background: var(--vscode-editorError-foreground, #e51400);
+.notes-margin-mark.run-crashed::before,
+.notes-margin-mark.run-stopped::before {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 9px;
+  height: 11px;
+  border-radius: 2px;
   color: var(--vscode-editor-background, #fff);
+  font-size: 9px;
+  line-height: 1;
+  font-weight: bold;
 }
 
 .notes-margin-mark.run-crashed::before {
   content: "✕";
-}
-
-.notes-margin-mark.run-stopped {
-  background: var(--vscode-editorWarning-foreground, #bf8803);
-  color: var(--vscode-editor-background, #fff);
+  background: var(--vscode-editorError-foreground, #e51400);
 }
 
 .notes-margin-mark.run-stopped::before {
   content: "■";
+  background: var(--vscode-editorWarning-foreground, #bf8803);
   font-size: 7px;
 }
 
