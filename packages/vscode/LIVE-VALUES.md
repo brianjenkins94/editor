@@ -243,9 +243,11 @@ the file is given them, and the row shows them beside the run's own value, struc
 gives it now), **Cancel**. The rule's *when* is a rule's like any other: *program matches* `scripts/*.js` gives a
 whole folder the same arguments.
 
-**A variable's row:** a small **Mock** checkbox, on hover — checked, the value the run had is struck through and a box
-takes one to set at the stop now, the run going on with it (what Set Value did). One-off only, for now: a rule setting
-a variable needs a *when* for "this line, in this run", anchored as everything on a line is.
+**A variable's row:** *Mock…* on hover — the rule editor, prefilled *program is <file>*, *at* <this statement> (a span
+reference, followed through edits), *then set* it to the value the run had; the run's other variables are targets too,
+to test (*when country is FR*). **Just this once** sets it at this stop and the run goes on with it (what Set Value
+did); **Save as rule** keeps it, and each run sets it each time it gets there, after the statement runs, without
+stopping (RULES.md, "A rule placed in the code").
 
 **The seams, in two slices.** Slice 1 is `process.argv` (above). Slice 2 is a capability call's result (`fetch`,
 `readFile`, …): *give* its result, by a rule whose *when* is the call (*capability is net*, *resource matches* …) — the

@@ -21,7 +21,8 @@
 import type { LoadedVM } from "@brianjenkins94/tsval";
 import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
-import type { CapabilityAsk, Control, CoverageReport, PreviewMessage, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
+import { ruleMatches } from "@brianjenkins94/util/silo/policy";
+import type { CapabilityAsk, Control, CoverageReport, PreviewMessage, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
 import type { GuestRoot } from "./debug-react";
 
@@ -78,6 +79,11 @@ let capabilityLines = new Set<number>();
 let policy: Policy | undefined;
 /** The user's breakpoints (1-based lines), armed beside the capability lines. */
 let userLines: number[] = [];
+/** The statements rules set something after (RULES.md: *set variables.<name>*, *at* a place), by 1-based line: armed
+ *  as breakpoints that aren't stops — the statement runs, the sets are made, the run goes on. */
+let setHooks = new Map<number, SetHook[]>();
+/** The program, workspace-relative: the subject's `program` at a hook. */
+let programPath = "";
 /** "Deny" at a capability stop: the next capability call fails, as a denied one would. Reset at every stop. */
 let denyNext = false;
 /** The last value traced: its call, its loops' turns and its step — where a value set at a stop is recorded. */
@@ -229,7 +235,7 @@ function literalOf(text: string): { "value": unknown } | { "error": string } {
 
 /** At the stop `vm` is at: `name`, a variable in scope there, set to `text`'s literal — and recorded with the run's values,
  *  on the stop's line, as set by hand. */
-function setValue(vm: Vm, name: string, text: string): Extract<WorkerEvent, { "type": "valueSet" }> {
+function setValue(vm: Vm, name: string, text: string, overConst = false): Extract<WorkerEvent, { "type": "valueSet" }> {
 	const literal = literalOf(text);
 
 	if ("error" in literal) {
@@ -240,7 +246,8 @@ function setValue(vm: Vm, name: string, text: string): Extract<WorkerEvent, { "t
 		const binding = scope.bindings.get(name);
 
 		if (binding !== undefined) {
-			if (binding.kind === "const") {
+			// A rule mocks it, const or not; Set Value at a stop does as code can.
+			if (binding.kind === "const" && !overConst) {
 				return { "type": "valueSet", "ok": false, "error": `${name} is a const` };
 			}
 
@@ -264,10 +271,106 @@ function setValue(vm: Vm, name: string, text: string): Extract<WorkerEvent, { "t
 	return { "type": "valueSet", "ok": false, "error": `no ${name} in scope here` };
 }
 
-/** Arm `vm`'s breakpoints: the user's, and the capability calls the policy gates. */
+/** Arm `vm`'s breakpoints: the user's, the capability calls the policy gates, and the statements rules set after. */
 function arm(vm: Vm): void {
 	vm.breakpoints.clear();
-	vm.addBreakpointsByLine(...userLines, ...capabilityLines);
+	vm.addBreakpointsByLine(...userLines, ...capabilityLines, ...setHooks.keys());
+}
+
+/** Whether a run reaching `line` stops there: a breakpoint of the user's, or a capability call the policy gates. */
+function stopsAt(vm: Vm, line: number): boolean {
+	return userLines.includes(line) || (capabilityLines.has(line) && askAt(vm, line) !== undefined);
+}
+
+/** The values of the variables in scope that a rule can test: strings, numbers, booleans, null — the innermost of a name. */
+function scopeValues(vm: Vm): Record<string, unknown> {
+	const values: Record<string, unknown> = {};
+
+	for (let scope: typeof vm.rootScope | undefined = vm.top?.scope ?? vm.rootScope; scope !== undefined; scope = scope.parent) {
+		for (const [name, binding] of scope.bindings) {
+			if (!(name in values) && binding.initialized && (binding.value === null || ["string", "number", "boolean"].includes(typeof binding.value))) {
+				values[name] = binding.value;
+			}
+		}
+	}
+
+	return values;
+}
+
+/** The statement on `line` has run: make the sets of the rules placed there that match here. */
+function applySets(vm: Vm, line: number): void {
+	const variables = scopeValues(vm);
+
+	for (const { place, rule } of setHooks.get(line) ?? []) {
+		if (!ruleMatches(rule, { "program": programPath, "at": place, "variables": variables })) {
+			continue;
+		}
+
+		for (const action of rule.then) {
+			if (action.action_id === "set" && action.target_id?.startsWith("variables.") === true) {
+				const name = action.target_id.slice("variables.".length);
+				const result = setValue(vm, name, JSON.stringify(action.argument), true);
+
+				if (!result.ok) {
+					post({ "type": "output", "text": `A rule couldn't set ${name}: ${result.error ?? ""}`, "stream": "stderr" });
+				}
+			}
+		}
+	}
+}
+
+/** At statements rules set something after, one after another: run each and make its sets. True when that lands
+ *  where the run stops (or at its end). */
+function passHooks(base: Vm): boolean {
+	let line = atLine(base);
+	let passed = false;
+
+	while (!base.finished && line !== undefined && setHooks.has(line)) {
+		if (passed && stopsAt(base, line)) {
+			return true;
+		}
+
+		base.stepStatement();
+		applySets(base, line);
+		passed = true;
+		line = atLine(base);
+	}
+
+	return passed && (base.finished || (line !== undefined && stopsAt(base, line)));
+}
+
+/** Continue: run to the next stop — through the statements rules set after (each run, then its sets made) and the
+ *  capability lines the policy now lets pass. From a stop on a statement a rule sets after, that statement first. */
+function runOn(base: Vm): void {
+	if (history.length > 0 && passHooks(base)) {
+		return;
+	}
+
+	for (;;) {
+		base.runToBreakpoint();
+
+		const line = atLine(base);
+
+		if (base.finished || line === undefined) {
+			return;
+		}
+
+		if (setHooks.has(line) && !stopsAt(base, line)) {
+			if (passHooks(base)) {
+				return;
+			}
+
+			continue;
+		}
+
+		// A capability line whose calls the policy now lets pass (allowed always since it was armed, or its resource
+		// allowed once known) isn't a stop: go on, unless the user has a breakpoint there too.
+		if (capabilityLines.has(line) && !userLines.includes(line) && askAt(base, line) === undefined) {
+			continue;
+		}
+
+		return;
+	}
 }
 
 /** What the capability stop at `line` (1-based) asks: the first call on it the policy gates, with the resource it would
@@ -637,7 +740,8 @@ function stepOut(vm: Vm): void {
 	const depth = callDepth(vm);
 
 	vm.step();
-	vm.runUntil((current) => current.atBreakpoint() || (current.atStatementBoundary() && callDepth(current) < depth));
+	// (A statement a rule only sets after isn't a stop.)
+	vm.runUntil((current) => (current.atBreakpoint() && (atLine(current) === undefined || !setHooks.has(atLine(current)!) || stopsAt(current, atLine(current)!))) || (current.atStatementBoundary() && callDepth(current) < depth));
 }
 
 /** Advance `base` (a VM we own) by a forward action, then record the new stop or terminate. When the action
@@ -650,17 +754,19 @@ function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): voi
 	try {
 		try {
 			switch (action) {
-				case "continue":
-					base.runToBreakpoint();
+				case "continue": runOn(base); break;
+				case "next": {
+					const from = atLine(base);
 
-					// A capability line whose calls the policy now lets pass (allowed always since it was armed, or its
-					// resource allowed once known) isn't a stop: go on, unless the user has a breakpoint there too.
-					while (!base.finished && atLine(base) !== undefined && capabilityLines.has(atLine(base)!) && !userLines.includes(atLine(base)!) && askAt(base, atLine(base)!) === undefined) {
-						base.runToBreakpoint();
+					base.stepStatement();
+
+					// Stepped over a statement a rule sets after: its sets, as a run through it makes them.
+					if (from !== undefined && setHooks.has(from)) {
+						applySets(base, from);
 					}
 
 					break;
-				case "next": base.stepStatement(); break;
+				}
 				case "stepIn": base.step(); break;
 				case "stepOut": stepOut(base); break;
 				default: break;
@@ -828,6 +934,12 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 			// LIVE-VALUES.md). No policy → every undecided dangerous call breaks (firewall default).
 			policy = message.policy;
 			userLines = message.lines;
+			programPath = message.program ?? message.fileName;
+			setHooks = new Map();
+
+			for (const hook of message.hooks ?? []) {
+				setHooks.set(hook.line, [...setHooks.get(hook.line) ?? [], hook]);
+			}
 			// What it reads from outside, first: process.argv (the margin mocks it there).
 			reportArgv(loaded.sourceFile, message.args ?? []);
 			capabilityLines = new Set(policy !== undefined ? capabilityBreakLines(loaded.sourceFile, policy) : []);

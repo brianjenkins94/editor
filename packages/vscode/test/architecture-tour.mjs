@@ -540,9 +540,10 @@ test("live values: a session's values beside the code, as the talk's binary sear
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
-// Setting a value at a stop, from the margin: Mock on a variable's row, write a literal, Enter — the run goes on with it
-// (the binary search with high set to 3 takes another path), and the row shows it as set by hand.
-test("set a value: from the margin, at a stop, and the run goes on with it", async () => {
+// Setting a value from the margin: Mock… on a variable's row — the rule editor, prefilled with the place and the value —
+// 3, Just this once: the run goes on with it (the binary search with high set to 3 takes another path), and the row
+// shows it as set by hand. Save as rule: each run sets it there, without stopping.
+test("set a value: from the margin, at a stop or by a rule, and the run goes on with it", async () => {
 	const workbench = session.workbench();
 	const source = ["function binarySearch(key, array) {", "\tlet low = 0;", "\tlet high = array.length - 1;", "", "\twhile (true) {", "\t\tconst mid = Math.floor((low + high) / 2);", "\t\tconst value = array[mid];", "", "\t\tif (value < key) {", "\t\t\tlow = mid + 1;", "\t\t} else if (value > key) {", "\t\t\thigh = mid - 1;", "\t\t} else {", "\t\t\treturn mid;", "\t\t}", "\t}", "}", "", "console.log(binarySearch(\"d\", [\"a\", \"b\", \"c\", \"d\", \"e\", \"f\"]));", ""].join("\n");
 	const rows = () => workbench.evaluate(() => Object.fromEntries([...document.querySelectorAll(".live-values-row")].map((row) => [row.dataset.line, [...row.children].filter((child) => !child.classList.contains("live-values-mock")).map((child) => child.textContent.trim())])));
@@ -557,16 +558,21 @@ test("set a value: from the margin, at a stop, and the run goes on with it", asy
 
 	const started = await session.request("debug.start", { "program": "/workspace/setvalue.js", "breakpoints": [6] }, 60_000);
 
-	await eventually("high's row", async () => (await rows())["2"]?.[1] === "5" || undefined);
-	// The margin's own Mock: check it on high's row (the row redraws with its box), write 3, Enter.
-	await workbench.evaluate(() => { document.querySelector('.live-values-row[data-line="2"] .live-values-mock input[type="checkbox"]').click(); });
-	await eventually("high's box", () => workbench.evaluate(() => document.querySelector('.live-values-row[data-line="2"] .live-values-input') !== null || undefined));
-	await workbench.evaluate(() => {
-		const input = document.querySelector('.live-values-row[data-line="2"] .live-values-input');
+	// high's Mock…: the rule editor under its row, its value set to 3, then a button.
+	const mockHigh = async (button) => {
+		await workbench.evaluate(() => { [...document.querySelectorAll('.live-values-row[data-line="2"] button')].find((each) => each.textContent === "Mock…").click(); });
+		await eventually("high's rule editor", () => workbench.evaluate(() => document.querySelector(".live-values-rule .rule-editor-then input") !== null || undefined));
+		await workbench.evaluate((label) => {
+			const input = document.querySelector(".live-values-rule .rule-editor-then input");
 
-		input.value = "3";
-		input.dispatchEvent(new KeyboardEvent("keydown", { "key": "Enter" }));
-	});
+			input.value = "3";
+			input.dispatchEvent(new Event("input"));
+			[...document.querySelectorAll(".live-values-rule .live-values-choices button")].find((each) => each.textContent === label).click();
+		}, button);
+	};
+
+	await eventually("high's row", async () => (await rows())["2"]?.[1] === "5" || undefined);
+	await mockHigh("Just this once");
 	await eventually("high, set by hand", () => workbench.evaluate(() => document.querySelector('.live-values-row[data-line="2"] .live-values-set')?.textContent).then((text) => (text === "3" ? text : undefined)));
 
 	// On to the return: it went the way high = 3 sends it.
@@ -584,6 +590,36 @@ test("set a value: from the margin, at a stop, and the run goes on with it", asy
 	await assert.rejects(session.request(`debug.session.${started.session}.setValue`, { "name": "mid", "value": "9" }, 30_000), /mid is a const/u);
 	await assert.rejects(session.request(`debug.session.${started.session}.setValue`, { "name": "low", "value": "alert(1)" }, 30_000), /not a literal/u);
 	await session.request(`debug.session.${started.session}.stop`, undefined, 30_000);
+
+	// Save as rule, from a stop at the loop: kept in my policy, placed at high's statement.
+	const again = await session.request("debug.start", { "program": "/workspace/setvalue.js", "breakpoints": [6] }, 60_000);
+
+	await eventually("high's row, again", async () => (await rows())["2"]?.[1] === "5" || undefined);
+	await mockHigh("Save as rule");
+
+	const [rule] = await eventually("the rule", async () => {
+		const listed = await session.request("rules.list", undefined, 10_000);
+
+		return listed.mine.rules.length === 1 ? listed.mine.rules : undefined;
+	});
+
+	assert.deepEqual(rule.then, [{ "action_id": "set", "target_id": "variables.high", "argument": 3 }]);
+	assert.equal(rule.when.predicates[1].target_id, "at");
+	await session.request(`debug.session.${again.session}.stop`, undefined, 30_000);
+
+	// A run with no stop on high's line is set by it all the same: the same path as above.
+	await session.request("debug.breakpoints", { "program": "/workspace/setvalue.js", "lines": [14] }, 30_000);
+	const third = await session.request("debug.start", { "program": "/workspace/setvalue.js", "breakpoints": [14] }, 60_000);
+
+	const ruled = await eventually("the run the rule set", async () => {
+		const all = await rows();
+
+		return all["6"]?.length === 4 ? all : undefined;
+	});
+
+	assert.deepEqual(ruled["5"], ["mid =", "1", "2", "3"]);
+	await session.request(`debug.session.${third.session}.stop`, undefined, 30_000);
+	await session.request("rules.set", { "previous": rule }, 10_000);
 	await session.request("debug.breakpoints", { "program": "/workspace/setvalue.js", "lines": [] }, 30_000);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });

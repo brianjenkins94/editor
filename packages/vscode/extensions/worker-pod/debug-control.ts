@@ -22,7 +22,7 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { serve } from "@brianjenkins94/hub";
-import { given, type Rule } from "@brianjenkins94/util/silo/policy";
+import { given, placesOf, type Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 
 import type { CapabilityChoice, StepAction } from "./debug-protocol";
@@ -148,6 +148,30 @@ function setBreakpoints(program: string, lines: number[]): void {
 }
 
 /** Serve the pod-level calls (list, start, breakpoints) on `hub`. */
+/** Where each rule's place is now (RULES.md: *at*, a span reference) — found in its file as it is, through edits, by
+ *  the editor's BABLR: its 1-based line and how it was found, or that it's lost; null for a rule with no place. */
+async function placesNow(rules: Rule[]): Promise<({ "status": string; "line"?: number } | null)[]> {
+	const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+
+	return Promise.all(rules.map(async (rule) => {
+		const [place] = placesOf(rule) as { "file"?: string }[];
+
+		if (place === undefined || root === undefined || typeof place.file !== "string") {
+			return null;
+		}
+
+		try {
+			const text = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, place.file)));
+			const [found] = await Promise.resolve(vscode.commands.executeCommand<({ "status"?: string; "candidate"?: { "start"?: number; "file"?: string } } | undefined)[] | undefined>("editor.annotations.resolve", text, place.file, [place])) ?? [];
+			const start = found?.candidate?.start;
+
+			return found?.status === undefined || found.status === "orphaned" || start === undefined || (found.candidate?.file !== undefined && found.candidate.file !== place.file) ? { "status": "orphaned" } : { "status": found.status, "line": text.slice(0, start).split("\n").length };
+		} catch {
+			return { "status": "orphaned" };
+		}
+	}));
+}
+
 export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): void {
 	context.subscriptions.push(
 		{ "dispose": serve(hub, "debug.sessions", () => [...sessions.values()].map((session) => {
@@ -171,8 +195,17 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 
 			return given(await loadEffectivePolicy(), { "program": vscode.workspace.asRelativePath(vscode.Uri.file(path), false) }, target ?? "process.argv") ?? null;
 		}) },
-		// Every rule, for the Rules view (rules-view.ts): mine, then the shared contract's.
-		{ "dispose": serve(hub, "rules.list", async () => await loadPolicyFiles() ?? null) },
+		// Every rule, for the Rules view (rules-view.ts): mine, then the shared contract's — and where each placed rule's
+		// place is now (its line, or that it's uncertain or lost).
+		{ "dispose": serve(hub, "rules.list", async () => {
+			const files = await loadPolicyFiles();
+
+			if (files === undefined) {
+				return null;
+			}
+
+			return { "mine": { ...files.mine, "places": await placesNow(files.mine.rules) }, "shared": { ...files.shared, "places": await placesNow(files.shared.rules) } };
+		}) },
 		{ "dispose": serve(hub, "rules.set", async (args) => {
 			const { previous, rule } = (args ?? {}) as { "previous"?: Rule; "rule"?: Rule };
 

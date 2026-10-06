@@ -14,11 +14,11 @@ import { createRpcClient, portTransport } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
-import { EMPTY_POLICY, given as givenBy, problemOf, ruleMatches, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
+import { EMPTY_POLICY, given as givenBy, placesOf, problemOf, ruleMatches, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
 import { loadEffectivePolicy, persistOverride, replaceRule } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
-import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, RunEnd, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
+import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, RunEnd, SetHook, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
 import { lifecycleOfSource } from "../../lifecycle";
 import { controlSubject, eventSubject } from "./debug-protocol";
 import { podHub } from "./pod";
@@ -82,6 +82,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	// it pre-arms capability breakpoints (a gated call hard-stops at its line). Empty when there's no policy — then
 	// every undecided dangerous call breaks (firewall default).
 	private policy: Policy = EMPTY_POLICY;
+	/** The rules placed in this program's code, found in the text that runs (`placeRules`). */
+	private hooks: SetHook[] = [];
 	private sourceReady = false;
 	private configDone = false;
 	private started = false;
@@ -455,6 +457,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			// than as a plain script.
 			this.reactMode = /\bReactDOM\b/u.test(this.source) || /\bReact\s*\.\s*createElement\b/u.test(this.source);
 			this.policy = await this.loadPolicy();
+			this.hooks = await this.placeRules();
 			this.sourceReady = true;
 			this.maybeStart();
 		} catch (error) {
@@ -472,6 +475,32 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		} catch (error) {
 			return EMPTY_POLICY;
 		}
+	}
+
+	/** Where the rules placed in this program's code are now (RULES.md: *at*, a span reference): each place found again
+	 *  in the text that runs — through edits, as an authored annotation is — by the editor's BABLR. One that's lost, or
+	 *  only uncertainly found, isn't applied (the Rules view says so). */
+	private async placeRules(): Promise<SetHook[]> {
+		// A span reference names its file workspace-relative.
+		const file = vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false);
+		const placed = this.policy.rules.flatMap((rule) => placesOf(rule).filter((place) => (place as { "file"?: unknown } | null)?.file === file).map((place) => ({ "rule": rule, "place": place })));
+
+		if (placed.length === 0) {
+			return [];
+		}
+
+		const found = await Promise.resolve(vscode.commands.executeCommand<({ "status"?: string; "candidate"?: { "start"?: number; "file"?: string } } | undefined)[] | undefined>("editor.annotations.resolve", this.source, file, placed.map(({ place }) => place))).catch(() => undefined);
+
+		return placed.flatMap(({ rule, place }, index) => {
+			const resolution = found?.[index];
+			const start = resolution?.candidate?.start;
+
+			if (start === undefined || resolution?.status === "orphaned" || resolution?.status === "uncertain" || (resolution?.candidate?.file !== undefined && resolution.candidate.file !== file)) {
+				return [];
+			}
+
+			return [{ "line": this.source.slice(0, start).split("\n").length, "place": place, "rule": rule }];
+		});
 	}
 
 	private maybeStart(): void {
@@ -507,7 +536,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				return;
 			}
 
-			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "react": this.reactMode, "policy": this.policy, "args": this.args }, trace);
+			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "react": this.reactMode, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks }, trace);
 		});
 	}
 

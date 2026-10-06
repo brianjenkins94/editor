@@ -18,9 +18,12 @@
  * is*, *then allow* — to widen or narrow it (*resource matches* a glob) and apply it *Just this once*, or *Save as rule*
  * in my policy, the run going on as it decides.
  *
- * A variable's row can be mocked at a stop (LIVE-VALUES.md, "Mocking a value"): a small Mock checkbox; checked, the
- * value the run had is struck through and a box takes the one to set — set now, and the run goes on with it
- * (`debug.session.<id>.setValue`, as the Variables view's Set Value does). process.argv's row — on the first line that
+ * A variable's row has *Mock…* on hover (LIVE-VALUES.md, "Mocking a value"): the rule editor, prefilled *program is
+ * <this file>*, *at* <this statement> (a span reference, followed through edits), *then set* it to the value the run
+ * had; the run's other variables are targets too. *Just this once* sets it at this stop and the run goes on with it
+ * (`debug.session.<id>.setValue`, as the Variables view's Set Value does); *Save as rule* keeps it, and each run sets it
+ * each time it gets there, without stopping (the adapter places the rule; the worker sets it after the statement runs).
+ * process.argv's row — on the first line that
  * reads it, there before any run — has *Mock…*: the rule editor, prefilled *program is <this file>*, *then give
  * process.argv* the run's arguments, each value a run of its own; *Run* runs the file with them, once; *Save as rule*
  * keeps it in my policy, and every run of the file is given them (`rules.set`; the row shows what a rule gives,
@@ -37,7 +40,7 @@
  */
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
-import type { EditedRule, PaneEntry, PaneMark, RuleCatalog } from "@brianjenkins94/monaco-vscode-api/main";
+import type { EditedRule, PaneEntry, PaneMark, RuleCatalog, RuleSchema } from "@brianjenkins94/monaco-vscode-api/main";
 import type { CapabilityAsk, CapabilityChoice, RunEnd } from "./extensions/worker-pod/debug-protocol";
 import type { LiveBatch, LiveCall, LiveValue } from "./extensions/worker-pod/live-values";
 import type { Range } from "./anchors";
@@ -52,9 +55,6 @@ export interface Note { "id": string; "fromLine": number; "toLine": number; "tex
 
 /** One line of values as drawn: its label (`mid =`), then a value (`inline`) or a cell per column. */
 interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range; "input"?: boolean }
-
-/** A variable's Mock at a stop: checked or not, and the value typed. */
-interface Mock { "on": boolean; "value": string }
 
 /** What a rule gives a file's process.argv: the rule, and its values, each a run's arguments. */
 interface Given { "rule": EditedRule; "values": string[][] }
@@ -99,8 +99,6 @@ let setValueAt: ((session: string, name: string, value: string) => Promise<unkno
 let rulesGiven: ((path: string) => Promise<Given | null>) | undefined;
 let rulesSet: ((previous: EditedRule | undefined, rule: EditedRule | undefined) => Promise<unknown>) | undefined;
 let runFile: ((path: string, cases: string[][]) => Promise<unknown>) | undefined;
-/** Each variable's Mock, by file and name: kept across redraws. */
-const mocks = new Map<string, Mock>();
 /** What a rule gives each file's process.argv, as last read (null: nothing; undefined: not read yet). */
 const givenArgv = new Map<string, Given | null>();
 /** Who's told when the policy files change (the Rules view), besides the margin. */
@@ -357,7 +355,10 @@ function renderRow(row: Row, labelWidth: number, session: Session | undefined, u
 		renderMock(row, row.name, session, uri, line, redraw);
 	}
 
-	element.append(line, ...row.input === true && making.has(`${uri}#process.argv`) ? [making.get(`${uri}#process.argv`)!] : []);
+	// The rule being made on this row, under it.
+	const panelKey = row.input === true ? `${uri}#process.argv` : row.name === undefined ? undefined : `${uri}#${row.name}`;
+
+	element.append(line, ...panelKey !== undefined && making.has(panelKey) ? [making.get(panelKey)!] : []);
 }
 
 /** process.argv's row: what a rule gives it, if one does (the run's own value struck through), and *Mock…*. */
@@ -394,51 +395,26 @@ function renderArgv(row: Row, uri: string, line: HTMLElement, redraw: () => void
 	line.append(tools);
 }
 
-/** A variable's Mock at a stop (LIVE-VALUES.md, "Mocking a value"): the checkbox; checked, the run's value struck
- *  through and a box for the one to set — Enter sets it, and the run goes on with it. */
+/** A variable's Mock (LIVE-VALUES.md, "Mocking a value"): *Mock…*, on its row's hover — the rule editor, prefilled with
+ *  this place and this value. */
 function renderMock(row: Row, name: string, session: Session | undefined, uri: string, line: HTMLElement, redraw: () => void): void {
 	const key = `${uri}#${name}`;
-	const mock = mocks.get(key) ?? { "on": false, "value": row.inline?.text ?? row.cells.findLast((each) => each !== undefined)?.text ?? "" };
-	const tools = Object.assign(document.createElement("span"), { "className": `live-values-mock${mock.on ? " shown" : ""}` });
-	const box = Object.assign(document.createElement("label"), { "className": "live-values-check", "title": "Give it another value, at this stop" });
+	const tools = Object.assign(document.createElement("span"), { "className": `live-values-mock${making.has(key) ? " shown" : ""}` });
 	// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-	const check = Object.assign(document.createElement("input"), { "type": "checkbox", "checked": mock.on });
+	const open = Object.assign(document.createElement("button"), { "className": "live-values-choice mock", "textContent": "Mock…", "title": "Give it another value: at this stop, or by a rule, each time the program gets here" });
 
-	mocks.set(key, mock);
-	line.classList.toggle("mocking", mock.on);
-	check.addEventListener("change", () => { mock.on = check.checked; redraw(); });
-	box.append(check, "Mock");
-	tools.append(box);
-
-	if (mock.on) {
-		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-		const input = Object.assign(document.createElement("input"), { "className": "live-values-input", "value": mock.value, "spellcheck": false, "placeholder": "a literal", "title": "A literal: 'text', 4, true, null, [1, 2], { a: 1 } — Enter sets it at the stop" });
-
-		input.addEventListener("input", () => { mock.value = input.value; });
-		input.addEventListener("keydown", (event) => {
-			if (event.key !== "Enter") {
-				return;
-			}
-
-			mock.value = input.value;
-
-			if (session === undefined) {
-				input.classList.add("refused");
-				input.title = "Only at a stop: start the program with a breakpoint where you want to set it";
-
-				return;
-			}
-
-			input.disabled = true;
-			void setValueAt?.(session.id, name, input.value).then(() => { mock.on = false; redraw(); }, (error: unknown) => {
-				input.disabled = false;
-				input.classList.add("refused");
-				input.title = error instanceof Error ? error.message : String(error);
-			});
+	open.disabled = making.has(key) || row.at === undefined || session?.anchors === undefined;
+	open.addEventListener("click", () => {
+		open.disabled = true;
+		void openVariableMock(uri, row, name, session!, () => { making.delete(key); redraw(); }).then((panel) => {
+			making.set(key, panel);
+			redraw();
+		}, (error: unknown) => {
+			open.disabled = false;
+			open.title = error instanceof Error ? error.message : String(error);
 		});
-		tools.append(input);
-	}
-
+	});
+	tools.append(open);
 	line.append(tools);
 }
 
@@ -478,7 +454,7 @@ export interface PanelButton { "label": string; "className": string; "title": st
 /** The rule editor (the component's, RULES.md), with silo's catalog — in the margin, and in the Rules view: under it,
  *  what the rule as edited would do here (`judge`), then its buttons. silo's policy (and ajv with it) loads on first
  *  use, not with the workbench. */
-export function rulePanel(policy: PolicyModule, rule: EditedRule, judge: (rule: EditedRule) => Verdict, actions: PanelButton[]): HTMLElement {
+export function rulePanel(policy: PolicyModule, rule: EditedRule, judge: (rule: EditedRule) => Verdict, actions: PanelButton[], catalog: RuleCatalog = catalogOf(policy)): HTMLElement {
 	const panel = Object.assign(document.createElement("div"), { "className": "live-values-rule" });
 	const status = Object.assign(document.createElement("div"), { "className": "live-values-rule-status" });
 	const buttons = Object.assign(document.createElement("div"), { "className": "live-values-choices" });
@@ -493,7 +469,7 @@ export function rulePanel(policy: PolicyModule, rule: EditedRule, judge: (rule: 
 		}
 	};
 	const editor = ruleEditor({
-		"catalog": catalogOf(policy),
+		"catalog": catalog,
 		"rule": rule,
 		"onChange": update
 	});
@@ -596,6 +572,91 @@ async function openMock(uri: string, row: Row, close: () => void): Promise<HTMLE
 		...given === undefined ? [] : [{ "label": "Remove", "className": "remove", "title": "Take the rule away: the file's runs get their own arguments again", "act": async () => { await rulesSet?.(given.rule, undefined); await saved(); }, "always": true }],
 		{ "label": "Cancel", "className": "cancel", "title": "Close it, changing nothing", "act": async () => { close(); }, "always": true }
 	]);
+}
+
+/** A value as a rule holds it, from its text in a cell: a number, a boolean, a string's text, else the text. */
+function valueOf(text: string, kind: string): unknown {
+	switch (kind) {
+		case "number":
+			return Number(text);
+		case "boolean":
+			return text === "true";
+		case "string":
+			return text.startsWith("\"") ? JSON.parse(text) as unknown : text.slice(1, -1).replace(/\\(.)/gu, "$1");
+		default:
+			return text;
+	}
+}
+
+/** The schema of a value of a cell's kind — what a rule's input for it is drawn from. */
+const schemaOfKind = (kind: string): RuleSchema => (kind === "number" || kind === "string" || kind === "boolean" ? { "type": kind } : true);
+
+/** silo's catalog, with `variables.<name>` for each variable `values` saw (its latest value's kind): what a rule placed
+ *  where they're in scope can test, and set. */
+export function withVariables(policy: PolicyModule, values: { "name": string; "kind": string }[]): RuleCatalog {
+	const base = catalogOf(policy);
+	const variables = new Map(values.map(({ name, kind }) => [`variables.${name}`, { "name": name, "kind": kind }]));
+
+	return {
+		...base,
+		"targets": { ...base.targets, ...Object.fromEntries([...variables].map(([id, { name, kind }]) => [id, { "label": name, "type_id": kind === "number" || kind === "boolean" ? kind : "string", "description": `The variable ${name}, where the rule is placed` }])) },
+		"actions": { ...base.actions, "set": { ...base.actions["set"]!, "targets": [...variables.keys()] } },
+		"argumentSchema": (target_id, operator_id) => (variables.has(target_id) ? policy.OPERATORS[operator_id]?.argument(schemaOfKind(variables.get(target_id)!.kind)) : base.argumentSchema(target_id, operator_id)),
+		"actionSchema": (action_id, target_id) => (action_id === "set" && target_id !== undefined && variables.has(target_id) ? schemaOfKind(variables.get(target_id)!.kind) : base.actionSchema(action_id, target_id))
+	};
+}
+
+/** The rule editor on a variable's row: *program is <this file>*, *at* <this statement> (a span reference, followed
+ *  through edits), *then set* <it> to the value the run had — then *Just this once* (set at this stop: the run goes on
+ *  with it), *Save as rule* (in my policy: each run sets it each time it gets here, without stopping), *Cancel*. */
+async function openVariableMock(uri: string, row: Row, name: string, session: Session, close: () => void): Promise<HTMLElement> {
+	const policy = await import("@brianjenkins94/util/silo/policy");
+	const program = api?.workspace.asRelativePath(api.Uri.parse(uri), false) ?? "";
+	const [place] = await Promise.resolve(api?.commands.executeCommand<unknown[] | undefined>("editor.annotations.refer", session.anchors!.text, program, [{ "start": row.at![0], "end": row.at![1] }])).catch(() => undefined) ?? [];
+
+	if (place === undefined || place === null) {
+		throw new Error("This line can't be placed: BABLR doesn't read this file");
+	}
+
+	// The variables the run saw, each by its latest value: targets to test, and to set.
+	const latest = new Map<string, LiveValue>();
+
+	for (const value of session.values) {
+		if (value.kind === "bind" || value.kind === "set") {
+			latest.set(value.name, value);
+		}
+	}
+
+	const cell = row.inline ?? row.cells.findLast((each) => each !== undefined);
+	const catalog = withVariables(policy, [...latest].map(([each, value]) => ({ "name": each, "kind": kindOf(value) })));
+	const variables = Object.fromEntries([...latest].map(([each, value]) => [each, valueOf(value.value, kindOf(value))]));
+	const sets = (rule: EditedRule): { "name": string; "value": unknown }[] => rule.then.filter((action) => action.action_id === "set" && action.target_id?.startsWith("variables.") === true).map((action) => ({ "name": action.target_id!.slice("variables.".length), "value": action.argument }));
+	const judge = (rule: EditedRule): Verdict => {
+		const problem = policy.problemOf(rule);
+		const covers = problem === undefined && policy.ruleMatches(rule, { "program": program, "at": place, "variables": variables });
+		const names = sets(rule).map((each) => each.name);
+
+		return {
+			"text": problem ?? (!covers ? "Doesn't cover this place, as the run is now" : names.length === 0 ? "Sets nothing" : `Sets ${names.join(", ")} each time the program gets here`),
+			"ok": covers && names.length > 0,
+			"refused": problem !== undefined
+		};
+	};
+
+	return rulePanel(policy, {
+		"when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": program }, { "target_id": "at", "operator_id": "is", "argument": place }] },
+		"then": [{ "action_id": "set", "target_id": `variables.${name}`, "argument": valueOf(cell?.text ?? "", cell?.kind ?? "") }]
+	}, judge, [
+		{ "label": "Just this once", "className": "once", "title": "Set it at this stop: the run goes on with it", "act": async (rule) => {
+			for (const each of sets(rule)) {
+				await setValueAt?.(session.id, each.name, JSON.stringify(each.value));
+			}
+
+			close();
+		} },
+		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/<you>.policy.json): each run sets it each time it gets here", "act": async (rule) => { await rulesSet?.(undefined, rule); close(); } },
+		{ "label": "Cancel", "className": "cancel", "title": "Close it, changing nothing", "act": async () => { close(); }, "always": true }
+	], catalog);
 }
 
 /** A capability stop's question: the call and what it reaches, then the three choices — or the rule being made. */

@@ -363,6 +363,7 @@ flowchart LR
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__json
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__jsonl
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__gitignore
+  n_ext_worker_pod <-.->|"commands"| n_ext_worker_pod
   n_exthost_LocalProcess_0 <-.->|"RPCProtocol"| n_workbench
   n_exthost_LocalWebWorker_0 <-.->|"HTTP"| n_sw
   n_exthost_LocalWebWorker_0 <-.->|"RPCProtocol"| n_workbench

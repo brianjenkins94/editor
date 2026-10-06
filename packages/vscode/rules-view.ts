@@ -12,18 +12,43 @@
  * Runs in the workbench realm (core).
  */
 import type { Hub } from "@brianjenkins94/hub";
-import type { EditedRule } from "@brianjenkins94/monaco-vscode-api/main";
+import type { EditedRule, RuleCatalog, RulePredicate } from "@brianjenkins94/monaco-vscode-api/main";
 import type { PanelButton, PolicyModule, Verdict } from "./live-values";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { describeRule, registerCustomView, viewContainerRegistry, ViewContainerLocation } from "@brianjenkins94/monaco-vscode-api/main";
-import { catalogOf, ensureStyled, onRulesChanged, rulePanel } from "./live-values";
+import { ensureStyled, onRulesChanged, rulePanel, withVariables } from "./live-values";
 import css from "./rules-view.css?raw";
 
-/** A policy file's rules, with its workspace-relative path. */
-interface PolicyFile { "file": string; "rules": EditedRule[] }
+/** Where a placed rule's place is now: its line, and how it was found — or lost. */
+interface Place { "status": string; "line"?: number }
+
+/** A policy file's rules, with its workspace-relative path, and where each placed rule's place is now (null: none). */
+interface PolicyFile { "file": string; "rules": EditedRule[]; "places"?: (Place | null)[] }
 
 /** A new rule, as it starts: one row to fill in, and allow. */
 const BLANK: EditedRule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "" }] }, "then": [{ "action_id": "allow" }] };
+
+/** The variables a rule tests or sets (`variables.<name>`), by name. */
+function variablesOf(rule: EditedRule): string[] {
+	const names = new Set<string>();
+	const walk = (predicate: RulePredicate): void => {
+		if ("predicates" in predicate) {
+			predicate.predicates.forEach(walk);
+		} else if (predicate.target_id.startsWith("variables.")) {
+			names.add(predicate.target_id.slice("variables.".length));
+		}
+	};
+
+	walk(rule.when);
+
+	for (const action of rule.then) {
+		if (action.target_id?.startsWith("variables.") === true) {
+			names.add(action.target_id.slice("variables.".length));
+		}
+	}
+
+	return [...names];
+}
 
 /** What a rule is, whenever it was decided: the key its open editor is kept by. */
 const keyOf = (whose: string, rule: EditedRule): string => `${whose}:${JSON.stringify({ "when": rule.when, "then": rule.then })}`;
@@ -50,11 +75,15 @@ export function registerRulesView(hub: Hub): void {
 	};
 
 	/** The editor for `rule` (whose: "mine", "shared" or "new"), its buttons by whose it is. */
+	/** silo's catalog, with the variables `rule` names. */
+	const catalogFor = (rule: EditedRule): RuleCatalog => withVariables(policy!, variablesOf(rule).map((name) => ({ "name": name, "kind": "" })));
+
 	const open = (key: string, whose: string, rule: EditedRule): void => {
+		const catalog = catalogFor(rule);
 		const judge = (edited: EditedRule): Verdict => {
 			const problem = policy!.problemOf(edited);
 
-			return problem === undefined ? { "text": describeRule(edited, catalogOf(policy!)), "ok": true } : { "text": problem, "ok": false, "refused": true };
+			return problem === undefined ? { "text": describeRule(edited, catalog), "ok": true } : { "text": problem, "ok": false, "refused": true };
 		};
 		const previous = whose === "new" ? undefined : rule;
 		const buttons: PanelButton[] = [
@@ -63,20 +92,26 @@ export function registerRulesView(hub: Hub): void {
 			{ "label": "Cancel", "className": "cancel", "title": "Close it, changing nothing", "act": async () => { close(); }, "always": true }
 		];
 
-		editing = { "key": key, "panel": rulePanel(policy!, rule, judge, buttons) };
+		editing = { "key": key, "panel": rulePanel(policy!, rule, judge, buttons, catalog) };
 		void render();
 	};
 
 	/** One rule's line: its sentence (or why it can't be matched), and the editor under it when it's open. */
-	const ruleLine = (whose: "mine" | "shared", rule: EditedRule): HTMLElement[] => {
+	const ruleLine = (whose: "mine" | "shared", rule: EditedRule, place: Place | null): HTMLElement[] => {
 		const key = keyOf(whose, rule);
-		const problem = policy!.problemOf(rule);
+		// A rule whose place in the code is lost can't apply: as broken as one that can't be matched.
+		const problem = policy!.problemOf(rule) ?? (place?.status === "orphaned" ? "Its place in the code is lost — the statement it was at is gone or changed past recognizing" : undefined);
 		const line = element("div", `rules-view-rule${problem === undefined ? "" : " broken"}${editing?.key === key ? " open" : ""}`, { "tabIndex": 0, "title": rule.added === undefined ? "" : `First decided ${new Date(rule.added).toLocaleString()}` });
 
 		line.append(
 			element("span", `codicon codicon-${problem === undefined ? "law" : "error"}`),
-			element("span", "rules-view-sentence", { "textContent": problem === undefined ? describeRule(rule, catalogOf(policy!)) : `${problem} — it matches nothing` })
+			element("span", "rules-view-sentence", { "textContent": problem === undefined ? describeRule(rule, catalogFor(rule)) : `${problem} — it matches nothing` })
 		);
+
+		// Where a placed rule is now: its line (an uncertain match marked so).
+		if (problem === undefined && place?.line !== undefined) {
+			line.append(element("span", "rules-view-where", { "textContent": `line ${place.line}${place.status === "uncertain" ? "?" : ""}`, "title": place.status === "uncertain" ? "Found by a match not sure enough to act on: it doesn't apply until it's placed again" : "Where its statement is now" }));
+		}
 		line.addEventListener("click", () => {
 			if (editing?.key === key) {
 				close();
@@ -94,13 +129,13 @@ export function registerRulesView(hub: Hub): void {
 		return editing?.key === key ? [line, editing.panel] : [line];
 	};
 
-	const section = (title: string, whose: "mine" | "shared", { file, rules }: PolicyFile, empty: string): HTMLElement => {
+	const section = (title: string, whose: "mine" | "shared", { file, rules, places }: PolicyFile, empty: string): HTMLElement => {
 		const block = element("div", "rules-view-section");
 		const head = element("div", "rules-view-head", { "title": "Matched in this order — yours first, then the shared ones: the first rule that matches decides" });
 
 		head.append(element("span", "rules-view-title", { "textContent": title }), element("span", "rules-view-file", { "textContent": file }));
 		// A new rule is made here, first: where it's saved.
-		block.append(head, ...whose === "mine" && editing?.key === "new" ? [editing.panel] : [], ...rules.length === 0 && editing?.key !== "new" ? [element("div", "rules-view-empty", { "textContent": empty })] : rules.flatMap((rule) => ruleLine(whose, rule)));
+		block.append(head, ...whose === "mine" && editing?.key === "new" ? [editing.panel] : [], ...rules.length === 0 && editing?.key !== "new" ? [element("div", "rules-view-empty", { "textContent": empty })] : rules.flatMap((rule, index) => ruleLine(whose, rule, places?.[index] ?? null)));
 
 		return block;
 	};

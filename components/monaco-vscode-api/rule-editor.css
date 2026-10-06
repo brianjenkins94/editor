@@ -119,6 +119,20 @@
   order: 1;
 }
 
+/* A place in the code: its statement, in the code's type, not editable. */
+.rule-editor-place {
+  flex: 1 1 6em;
+  min-width: 6em;
+  overflow: hidden;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: var(--vscode-textCodeBlock-background, var(--vscode-input-background));
+  font-family: var(--vscode-editor-font-family, monospace);
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A list of lists (process.argv's runs): each on a line of its own, as wide as the row, its ✕ after it; + under them. */
 .rule-editor-list.nested {
   flex-direction: column;

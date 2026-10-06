@@ -9,7 +9,7 @@
  * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at
  * launch.
  */
-import type { Policy } from "@brianjenkins94/util/silo/policy";
+import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import type { LiveBatch } from "./live-values";
 
 export const controlSubject = (session: string): string => "debug.session." + session + ".control";
@@ -21,7 +21,7 @@ export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack"
 
 /** Adapter → worker. */
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "args"?: string[] }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[] }
 	| { "type": "setBreakpoints"; "lines": number[] }
 	| { "type": "dispatch"; "id": number; "event": string }
 	| { "type": "timeTravel"; "index": number }
@@ -33,6 +33,11 @@ export type Control =
 	/** At a stop: set `name` (a variable in scope there) to `value`, a literal as code writes it — the run goes on with it. */
 	| { "type": "setValue"; "name": string; "value": string }
 	| { "type": StepAction | "disconnect" };
+
+/** A rule placed in the code (RULES.md: at, a span reference), found in the text that runs: the 1-based line its
+ *  statement starts on, the place, and the rule — whose `set`s are made each time that statement has run, if it
+ *  matches there. */
+export interface SetHook { "line": number; "place": unknown; "rule": Rule }
 
 export interface Variable { "name": string; "value": string; "type": string; "variablesReference": number }
 

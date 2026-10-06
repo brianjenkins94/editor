@@ -121,6 +121,14 @@ function splitCommandLine(text: string): string[] {
 	return [...text.matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/gu)].map(([, double, single, bare]) => (double !== undefined ? double.replace(/\\(.)/gu, "$1") : single ?? bare ?? ""));
 }
 
+/** A place in the code (a span reference: its file, and its tokens) as words: "tax.js: const rate = rates[country] ?? 0;". */
+function sayPlace(value: unknown): string {
+	const { file, shape } = (value ?? {}) as { "file"?: string; "shape"?: { "atoms"?: string[] } };
+	const code = (shape?.atoms ?? []).reduce((text, atom) => (text === "" || /^[;,.)\]}]/u.test(atom) || /[([{.]$/u.test(text) ? text + atom : `${text} ${atom}`), "");
+
+	return `${file ?? "?"}: ${code.length > 60 ? `${code.slice(0, 59)}…` : code}`;
+}
+
 /** An input for a value of `schema`, showing `value`; `changed` with each valid edit. */
 export function schemaInput(schema: RuleSchema | undefined, value: unknown, changed: (value: unknown) => void): HTMLElement {
 	const object = typeof schema === "object" ? schema : {};
@@ -130,6 +138,11 @@ export function schemaInput(schema: RuleSchema | undefined, value: unknown, chan
 		const values = object["enum"] as unknown[];
 
 		return select("rule-editor-enum", values.map((each, index) => [String(index), typeof each === "string" ? each : JSON.stringify(each)]), String(Math.max(0, values.findIndex((each) => JSON.stringify(each) === JSON.stringify(value)))), (index) => { changed(values[Number(index)]); });
+	}
+
+	// A place in the code: chosen where it is (from the line, in the margin), not typed — shown, not edited.
+	if (object["format"] === "span") {
+		return element("span", "rule-editor-place", { "textContent": sayPlace(value), "title": "A statement, followed through edits: where it is, not its line number" });
 	}
 
 	// Arguments, as you'd type them after a command (process.argv's): one box, not a box per argument.
@@ -230,6 +243,10 @@ export function schemaInput(schema: RuleSchema | undefined, value: unknown, chan
 /** A value as a sentence says it: a command line as typed, a list's items, a string as is. */
 function sayValue(schema: RuleSchema | undefined, value: unknown): string {
 	const object = typeof schema === "object" ? schema : {};
+
+	if (object["format"] === "span") {
+		return sayPlace(value);
+	}
 
 	if (Array.isArray(value)) {
 		return object["format"] === "command-line" ? joinCommandLine(value) : value.map((each) => sayValue(object["items"] as RuleSchema | undefined, each)).join(object["items"] !== undefined && typeof object["items"] === "object" && (object["items"] as Record<string, unknown>)["type"] === "array" ? " · " : ", ");

@@ -182,6 +182,9 @@ export async function persistOverride(capability: string, resource: string, disp
 
 	const user = await currentUser();
 
+	// Written from the file as it is now, not the cache: a change by hand (or a delete) the watcher hasn't reported yet
+	// must not come back.
+	overrideCache = undefined;
 	overrideCache = withRule(await loadOverride(root, user), capability, resource, disposition, new Date().toISOString());
 	await writeText(vscode.Uri.joinPath(root, `${user}.policy.json`), JSON.stringify(overrideCache, null, "\t") + "\n");
 }
@@ -201,6 +204,10 @@ export async function replaceRule(previous: Rule | undefined, rule: Rule | undef
 	}
 
 	const user = await currentUser();
+
+	// From the file as it is now, not the cache (as persistOverride).
+	overrideCache = undefined;
+
 	const override = await loadOverride(root, user);
 	const index = previous === undefined ? -1 : override.rules.findIndex((each) => sameRule(each, previous));
 	const stamped = rule === undefined ? [] : [{ ...rule, "added": new Date().toISOString() }];

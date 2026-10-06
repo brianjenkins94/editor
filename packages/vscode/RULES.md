@@ -78,7 +78,15 @@ rule*) — the same two buttons wherever the editor opens.
   used most — *Mock…* on process.argv's row (LIVE-VALUES.md): *program is <file>*, *then give process.argv* a command
   line per run, *Run* / *Save as rule* / *Remove*; it replaced the stubs file (`.silo/<you>.stubs.json`) and the Mock /
   Persist / Multiple checkboxes. An action names what it acts on (`target_id`: *give process.argv*), and its argument's
-  schema follows that target's.
+  schema follows that target's. Then *Mock…* on a variable's row: *program is <file>*, *at* <this statement>, *then set*
+  it — *Just this once* (at this stop) or *Save as rule*.
+- **A rule placed in the code** (lib 20f01cb): *at* is a target whose argument is a span reference (SPAN-ANNOTATIONS.md),
+  shown as a chip of its code, not typed. Before a run the adapter finds each rule's place in the text that runs
+  (`editor.annotations.resolve` — through edits, as an authored annotation is) and hands the worker the lines; the worker
+  arms them as breakpoints that aren't stops: the statement runs, then the rule's *set*s (`variables.<name>`) are made
+  if it matches there — the variables in scope are part of what it matches (`variables.country is FR`) — and the run
+  goes on. A const can be set by a rule (a mock overrides; Set Value at a stop still can't). One whose place is lost or
+  only uncertain doesn't apply; the Rules view shows a placed rule's line, and a lost one as broken.
 
 ## Toward JSON Schema
 
@@ -114,6 +122,7 @@ enough to own, and it has no notion of actions. Revisit if its core grows action
 
 - Does a breakpoint condition (VS Code's own) become a rule's *when*, with *stop* as its action — one model for
   stopping and deciding?
-- A variable at a stop as a target (named per stop, so the host adds it to the catalog) — and a *when* for "this line",
-  anchored as everything on a line is — so a variable's Mock can be a rule too; and a call's result as `give`'s target.
+- Re-placing a rule whose place was lost (select the code, as notes will), and healing a re-placed one's reference in
+  the file (SPAN-ANNOTATIONS.md D4) — for now a lost one shows as broken, to remove.
+- A call's result as `give`'s target (slice 2), recorded at its seam.
 - How the margin shows that a rule applies on a line (a mark in the gutter column, beside coverage?).
