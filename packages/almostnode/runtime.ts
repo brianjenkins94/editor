@@ -246,7 +246,26 @@ export interface RuntimeOptions {
 	"beforeFs"?: (op: "read" | "write", method: string, path: string) => void;
   // Told what each fs call returned (a read's contents, say), after it — for a host to record. See createFsShim.
 	"afterFs"?: (op: "read" | "write", method: string, path: string, result: unknown) => void;
+  // The program's own files — what a host may evaluate its own way (evaluateProgram) — by path. By default, any file
+  // outside node_modules: a package's never is one.
+	"isProgram"?: (filename: string) => boolean;
+  // A program file's evaluation instead of almostnode's own (eval) — for a host that runs the program's code its own
+  // way (the tsval debugger steps it): the module (cached already, so a cycle sees its partial exports), the require it
+  // resolves from, and its source as written (TypeScript included: no transform). Throw to fail the load.
+	"evaluateProgram"?: (module: Module, require: RequireFunction, source: string) => void;
+  // A built-in by who asks: the program (a program file, or a host on its behalf) or a package — undefined for
+  // almostnode's own. A debugger gives the program's code capability stand-ins and packages the real shims.
+	"builtinFor"?: (id: string, requester: Requester) => unknown;
 }
+
+/** Who asks for a module: the program's own code, or a package's. */
+export type Requester = "program" | "package";
+
+/** What a specifier resolves to: a built-in (its name), a package's file, or one of the program's own files. */
+export interface Resolved { "kind": "builtin" | "package" | "program"; "filename": string }
+
+/** A program file, by default: anything outside node_modules. */
+const outsideNodeModules = (filename: string): boolean => !filename.includes("/node_modules/");
 
 export interface RequireFunction {
 	(id: string): unknown;
@@ -454,8 +473,10 @@ function createRequire(
 	currentDir: string,
 	moduleCache: Record<string, Module>,
 	options: RuntimeOptions,
-	processedCodeCache?: Map<string, string>
+	processedCodeCache?: Map<string, string>,
+	requester: Requester = "package"
 ): RequireFunction {
+	const isProgram = options.isProgram ?? outsideNodeModules;
   // Module resolution cache for faster repeated imports
 	const resolutionCache = new Map<string, string | null>();
 
@@ -548,18 +569,20 @@ function createRequire(
 					return resolved;
 				}
 
-        // Directory - look for index.js
-				const indexPath = pathShim.join(resolved, "index.js");
+        // Directory - look for its index (a program's may be TypeScript)
+				for (const index of ["index.js", "index.ts", "index.tsx"]) {
+					const indexPath = pathShim.join(resolved, index);
 
-				if (vfs.existsSync(indexPath)) {
-					resolutionCache.set(cacheKey, indexPath);
+					if (vfs.existsSync(indexPath)) {
+						resolutionCache.set(cacheKey, indexPath);
 
-					return indexPath;
+						return indexPath;
+					}
 				}
 			}
 
-      // Try with extensions
-			const extensions = [".js", ".json"];
+      // Try with extensions — JavaScript first, then a program's TypeScript and module extensions
+			const extensions = [".js", ".json", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts", ".jsx"];
 
 			for (const ext of extensions) {
 				const withExt = resolved + ext;
@@ -780,6 +803,21 @@ function createRequire(
     // Read and execute JS file
 		const rawCode = vfs.readFileSync(resolvedPath, "utf8");
 		const dirname = pathShim.dirname(resolvedPath);
+		const program = isProgram(resolvedPath);
+
+    // A program file, evaluated by the host's own evaluator (the tsval debugger), from its source as written
+		if (program && options.evaluateProgram !== undefined) {
+			try {
+				options.evaluateProgram(module, createRequire(vfs, fsShim, process, dirname, moduleCache, options, processedCodeCache, "program"), rawCode);
+				module.loaded = true;
+			} catch (error) {
+				delete moduleCache[resolvedPath];
+
+				throw error;
+			}
+
+			return module;
+		}
 
     // Check processed code cache (useful for HMR when module cache is cleared but code hasn't changed)
     // Use a simple hash of the content for cache key to handle content changes
@@ -813,7 +851,8 @@ function createRequire(
 			dirname,
 			moduleCache,
 			options,
-			processedCodeCache
+			processedCodeCache,
+			program ? "program" : "package"
 		);
 
 		moduleRequire.cache = moduleCache;
@@ -894,6 +933,13 @@ ${code}
 			id = id.slice(5);
 		}
 
+    // The host's, for whoever asks (builtinFor): a debugger's stand-ins for the program's code
+		const override = options.builtinFor?.(id, requester);
+
+		if (override !== undefined) {
+			return override;
+		}
+
     // Built-in modules
 		if (id === "fs") {
 			return fsShim;
@@ -932,7 +978,9 @@ ${code}
 						process,
 						fromDir,
 						moduleCache,
-						options
+						options,
+						processedCodeCache,
+						isProgram(fromPath) ? "program" : "package"
 					);
 
 					newRequire.cache = moduleCache;
@@ -1377,7 +1425,8 @@ export class Runtime {
 			dirname,
 			this.moduleCache,
 			this.options,
-			this.processedCodeCache
+			this.processedCodeCache,
+			"program"
 		);
 
     // Create module object
@@ -1477,11 +1526,31 @@ ${code}
   /**
    * Run a file from the virtual file system (synchronous - backward compatible)
    */
-	/** `specifier` required as a module in `fromDir` would (the runtime's cwd by default): a built-in's shim, a package
-	 *  from node_modules, a file on the VFS — for a host that runs a program its own way (the tsval debugger) and its
-	 *  dependencies on this runtime. */
-	require(specifier: string, fromDir: string = this.process.cwd()): unknown {
-		return createRequire(this.vfs, this.fsShim, this.process, fromDir, this.moduleCache, this.options, this.processedCodeCache)(specifier);
+	/** `specifier` required as a module in `fromDir` would (the runtime's cwd by default), asked for by `requester` (the
+	 *  program, by default: a host asks on its behalf) — a built-in, a package from node_modules, a file on the VFS (a
+	 *  program file through `evaluateProgram`, when there is one). The module system for a host that runs the program's
+	 *  code its own way (the tsval debugger, MODULES.md). */
+	require(specifier: string, fromDir: string = this.process.cwd(), requester: Requester = "program"): unknown {
+		return createRequire(this.vfs, this.fsShim, this.process, fromDir, this.moduleCache, this.options, this.processedCodeCache, requester)(specifier);
+	}
+
+	/** Where `specifier` resolves from `fromDir`, and what it is: a built-in (its name), a package's file, or a program
+	 *  file — Node's resolution, as `require` does it. Throws as `require` would when nothing's there. */
+	resolve(specifier: string, fromDir: string = this.process.cwd()): Resolved {
+		const filename = createRequire(this.vfs, this.fsShim, this.process, fromDir, this.moduleCache, this.options, this.processedCodeCache, "program").resolve(specifier);
+
+		return { "kind": filename.startsWith("/") ? (this.options.isProgram ?? outsideNodeModules)(filename) ? "program" : "package" : "builtin", "filename": filename };
+	}
+
+	/** Put `module` in the module cache as `filename`'s — a module its host evaluated (a program file the debugger stepped),
+	 *  so everything that requires it after gets the same one. Before it runs: a cycle sees its partial exports. */
+	register(filename: string, module: Module): void {
+		this.moduleCache[filename] = module;
+	}
+
+	/** The module cached for `filename`, if it's been loaded (or registered). */
+	cached(filename: string): Module | undefined {
+		return this.moduleCache[filename];
 	}
 
 	runFile(filename: string): { "exports": unknown; "module": Module } {
@@ -1551,7 +1620,8 @@ ${code}
 			"/",
 			this.moduleCache,
 			this.options,
-			this.processedCodeCache
+			this.processedCodeCache,
+			"program"
 		);
 		const consoleWrapper = createConsoleWrapper(this.options.onConsole);
 		const { process } = this;

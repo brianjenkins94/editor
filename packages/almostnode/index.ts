@@ -8,7 +8,7 @@ export { ViteDevServer } from "./frameworks/vite-dev-server";
 export type { ViteDevServerOptions } from "./frameworks/vite-dev-server";
 export { execute, Runtime } from "./runtime";
 
-export type { Module, RequireFunction, RuntimeOptions } from "./runtime";
+export type { Module, RequireFunction, Requester, Resolved, RuntimeOptions } from "./runtime";
 export type { CreateRuntimeOptions, IExecuteResult, IRuntime, IRuntimeOptions, VFSSnapshot } from "./runtime-interface";
 export { getServerBridge, resetServerBridge, ServerBridge } from "./server-bridge";
 // The in-worker server registry: `http.Server.listen` registers by port here (see shims/http.ts), so the node
