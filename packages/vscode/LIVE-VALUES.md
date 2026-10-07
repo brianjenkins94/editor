@@ -99,13 +99,13 @@ annotations and builds React through a stack of handlers, each able to wrap the 
 `AnnotatedLine`, an `Inline` range or a `Token`, calling `InnerLine`/`InnerToken` to go on — which is why handlers
 compose, and what its recipes (mark, focus, callout, tooltip, fold, diff, transitions) are built from.
 
-It can render inside Monaco (spike-codehike.tsx, `globalThis.__spikeCodeHike(uri, annotations)`): `<Pre>` in an overlay
-widget over the editor's text area, in its font, line height and tab size, moved with its scroll; Monaco's own glyphs
-transparent, so what's seen is Code Hike's rendering of the same text while Monaco keeps editing, the cursor, the
-selection, word highlights and bracket matching — all aligned. A handler that adds height (a callout under a line) gets
-a Monaco view zone as tall, under the same line, so every line below stays aligned. Tried on the binary search: `mark`
-on the loop's two lines, a callout under `mid` (`2 | 4 | 3`) and under `value` (`'c' | 'e' | 'd'`), typing on a line
-above them — Code Hike re-renders, the cursor lands where Monaco puts it.
+It can render inside Monaco — a spike showed it (spike-codehike.tsx, since removed, 2026-10-06; what it showed is kept
+here): `<Pre>` in an overlay widget over the editor's text area, in its font, line height and tab size, moved with its
+scroll; Monaco's own glyphs transparent, so what's seen is Code Hike's rendering of the same text while Monaco keeps
+editing, the cursor, the selection, word highlights and bracket matching — all aligned. A handler that adds height (a
+callout under a line) got a Monaco view zone as tall, under the same line, so every line below stayed aligned. Tried on
+the binary search: `mark` on the loop's two lines, a callout under `mid` (`2 | 4 | 3`) and under `value` (`'c' | 'e' |
+'d'`), typing on a line above them — Code Hike re-rendered, the cursor landed where Monaco put it.
 
 What it showed:
 
@@ -119,8 +119,8 @@ What it showed:
 - **Use Monaco's tokens, not shiki's.** `<Pre>` takes any tokens: built from Monaco's tokenization, the colors are the
   editor theme's (shiki's github-light isn't), nothing is fetched (shiki loads grammars from lighter.codehike.org), and
   re-rendering on each keystroke is synchronous instead of an async highlight.
-- **Render what's visible.** The spike renders the whole file; a long one wants the visible lines only, offset.
-- **A handler that adds height says how much**, so its view zone can be made first: the spike fixes a callout at two
+- **Render what's visible.** The spike rendered the whole file; a long one wants the visible lines only, offset.
+- **A handler that adds height says how much**, so its view zone can be made first: the spike fixed a callout at two
   lines.
 
 So the values can be Code Hike annotations — a callout of each turn's value under its variable, `mark`/`focus` on the
