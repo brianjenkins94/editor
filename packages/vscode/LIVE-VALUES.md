@@ -293,6 +293,7 @@ to by the rule.
    column as wide as its widest value (24 characters at most, a value cut short with an ellipsis), values colored as the
    debugger colors them. Hovering a column lights it on every row, a click holds it; the cursor's row opens up. No test
    page: drawn from a script in the editor (`globalThis.__liveValues`, for a console and the tour) instead.
+   Since retired: the notes margin (step 4) draws the values, and the strip was removed (2026-10-06).
 4. **Core between them**: the latest session's record per file, the cursor and the pointer back from the overlay.
    Revised (above): the frame hands each entry's element to core; core renders the pane with Code Hike. Done: the
    component's `showPane(uri, entries, render)` (pane.ts) puts a cell beside each entry's span, entries on overlapping
