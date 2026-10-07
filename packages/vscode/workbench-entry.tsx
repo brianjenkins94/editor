@@ -56,6 +56,7 @@ import { createNodeRunner } from "./node-runner";
 import { installProfileFiles } from "./profile-files";
 import { installEvidence } from "./evidence";
 import { installLiveValues, showMarks, showNotes, showProfile } from "./live-values";
+import { installRecordedStops } from "./recorded-stops";
 import { installCoverage } from "./coverage";
 import { registerRulesView } from "./rules-view";
 import { evidenceStore } from "./extensions/insights/evidence";
@@ -586,6 +587,8 @@ function maybeBoot(): void {
 				// coverage's strip (coverage.ts), read from the evidence through the insights extension's store, here with
 				// core's own API.
 				installLiveValues(workbenchHub, api as typeof import("vscode"));
+				// A breakpoint in a page's code: a recorded stop, shown in the margin as live values are (recorded-stops.ts).
+				installRecordedStops(workbenchHub, api as typeof import("vscode"));
 				registerRulesView(workbenchHub, api as typeof import("vscode"));
 				installCoverage(api as typeof import("vscode"), evidenceStore(api as typeof import("vscode"), []), showMarks, showProfile);
 

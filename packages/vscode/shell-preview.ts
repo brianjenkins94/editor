@@ -78,7 +78,7 @@ interface PromptRequest { "kind"?: string; "scope"?: string; "resource"?: string
  */
 function previewAppPermissions(id: string): LinkPermissions {
 	return {
-		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "tab.here", "page_tools.changed", "evidence.preview", rpcReplySubject("debug-mcp"), rpcCallSubject("preview.decide"), rpcCallSubject("preview.open")],
+		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "tab.here", "page_tools.changed", "evidence.preview", "stops.preview", rpcReplySubject("debug-mcp"), rpcCallSubject("preview.decide"), rpcCallSubject("preview.open")],
 		"subscribe": ["$sys.arch.sync", "tab.discover", "evidence.flush", ...["page_tools.*", "tool.>"].map((name) => rpcCallSubject(name)), rpcReplySubject(id)]
 	};
 }

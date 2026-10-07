@@ -443,7 +443,7 @@ flowchart LR
 | Hub | Component | Serves and hears |
 | --- | --- | --- |
 | BABLR worker | bablr | `bablr.editGroups()`, `bablr.follow()`, `bablr.pick()`, `bablr.refer()`, `bablr.resolve()`, `bablr.spans()`, `bablr.verdict()` |
-| Dev-server worker | preview | `preview.close`, `preview.provoke()`, `preview.start()`, `preview.version()` |
+| Dev-server worker | preview | `preview.close`, `preview.provoke()`, `preview.start()`, `preview.stops()`, `preview.version()` |
 | Dev-server worker | virtual | `virtual.request()` |
 | Dev-server worker | workspace | `workspace.changed` |
 | Pod | capability | `capability.decide()`, `capability.record()`, `capability.recorded()` |
@@ -482,6 +482,7 @@ flowchart LR
 | Workbench | production | `production.stop.*` |
 | Workbench | rules | `rules.make()` |
 | Workbench | runs | `runs.begin()`, `runs.list()`, `runs.stop()` |
+| Workbench | stops | `stops.preview` |
 | Workbench | terminal | `terminal.in.*`, `terminal.out.*`, `terminal.run()`, `terminal.stop.*` |
 | Workbench | theme | `theme.colorScheme` |
 | Workbench | values | `values.ended`, `values.session.*` |

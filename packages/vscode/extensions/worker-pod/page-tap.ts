@@ -36,6 +36,8 @@ export interface EditorTap {
 	"adopt": (port: MessagePort) => void;
 	/** A page's runtime evidence, out on the window's hub: `page` names the page (its frame and its load). */
 	"evidence": (page: string, modules: unknown[]) => void;
+	/** A page's recorded stops (RUNNING.md: a breakpoint in a page), out on the window's hub as they're hit. */
+	"stops": (page: string, stops: unknown[]) => void;
 	/** Report now when the editor asks (each of the window's pages registers its flush). */
 	"onFlush": (flush: () => void) => void;
 }
@@ -123,6 +125,7 @@ function windowTap(host: Window, windowId: string): EditorTap {
 		},
 		"adopt": (port) => { hub.link(portTransport(port)); },
 		"evidence": (page, modules) => { hub.publish("evidence.preview", { "window": windowId, "page": page, "modules": modules }); },
+		"stops": (page, stops) => { hub.publish("stops.preview", { "window": windowId, "page": page, "stops": stops }); },
 		"onFlush": (flush) => { flushes.add(flush); }
 	};
 }
@@ -161,7 +164,7 @@ function install(): void {
 	// This page's runtime evidence, named by its frame and this load (a reload is a page of its own).
 	const page = `${windowId}${frame ?? ""}#${crypto.randomUUID()}`;
 
-	tap.onFlush(installPageEvidence((modules) => { tap.evidence(page, modules); }).flush);
+	tap.onFlush(installPageEvidence((modules) => { tap.evidence(page, modules); }, (stops) => { tap.stops(page, stops); }).flush);
 	installSocketGate(tap.decide);
 	gateWebRtc(tap.decide);
 	keepNewWindows(tap.open);

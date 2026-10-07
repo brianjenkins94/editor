@@ -148,3 +148,81 @@ test("coverage only: statements, no sites", () => {
 	assert.deepEqual(printed, [1]);
 	assert.deepEqual(events, ["statement const a = null ?? 1;", "statement if (a) { out(a); }", "statement out(a);"]);
 });
+
+/** Compile `source` with recorded stops on `lines` (1-based), run it, and return each stop's hits: its range, where it
+ *  is, what its scope read and `this`. */
+function stopsOf(source: string, lines: number[]): { "printed": unknown[]; "hits": { "at": number[]; "where": string; "scope": Record<string, unknown>; "self": unknown }[] } {
+	const instrumented = instrument("/workspace/app.ts", "oid", "coverage", new Set(lines));
+	const compiled = ts.transpileModule(source, { "compilerOptions": { "module": ts.ModuleKind.ESNext, "target": ts.ScriptTarget.ES2020 }, "transformers": { "before": [instrumented.before] } }).outputText;
+	const hits: { "at": number[]; "where": string; "scope": Record<string, unknown>; "self": unknown }[] = [];
+	const printed: unknown[] = [];
+	const runtime = { "module": () => ({ "s": () => undefined, "p": (at: number[], scope: () => Record<string, unknown>, self: () => unknown, where: string) => {
+		let me: unknown;
+
+		try {
+			me = self();
+		} catch {
+			me = "<before super()>";
+		}
+
+		// (Arrays made in the module's realm, copied into this one: deepEqual compares prototypes.)
+		hits.push({ "at": [...at], "where": where, "scope": Object.fromEntries(Object.entries(scope()).map(([name, value]) => [name, Array.isArray(value) ? [...value] : value])), "self": me });
+	} }) };
+
+	runInNewContext(instrumented.prelude() + "\n" + compiled, { "__evidence": runtime, "out": (value: unknown) => { printed.push(value); } });
+
+	return { "printed": printed, "hits": hits };
+}
+
+test("a recorded stop: what's in scope each time its line runs — parameters, what's declared before it — and where", () => {
+	const source = [
+		"const rate = 2;",
+		"function total(amount: number, { discount }: { discount: number }) {",
+		"\tconst taxed = amount * rate;",
+		"\tconst later = 1;",
+		"\treturn taxed - discount + later;",
+		"}",
+		"for (const amount of [100, 200]) {",
+		"\tout(total(amount, { discount: 10 }));",
+		"}",
+		""
+	].join("\n");
+	const { printed, hits } = stopsOf(source, [4]);
+
+	assert.deepEqual(printed, [191, 391], "it does what it did");
+	assert.deepEqual(hits.map(({ at, where }) => ({ at, where })), [{ "at": [3, 1, 3, 17], "where": "total" }, { "at": [3, 1, 3, 17], "where": "total" }], "each time its line ran");
+	assert.deepEqual(Object.keys(hits[0]!.scope), ["taxed", "amount", "discount", "rate", "total"], "innermost first; `later` (the stop's own statement) not yet");
+	assert.deepEqual([hits[0]!.scope.taxed, hits[0]!.scope.amount, hits[1]!.scope.taxed, hits[1]!.scope.amount, hits[1]!.scope.discount, hits[1]!.scope.rate], [200, 100, 400, 200, 10, 2]);
+});
+
+test("a recorded stop in a method: `this`, a loop's variable, and the functions it's in", () => {
+	const source = [
+		"class Cart {",
+		"\titems: string[] = [];",
+		"\tadd(names: string[]) {",
+		"\t\tfor (let index = 0; index < names.length; index += 1) {",
+		"\t\t\tconst name = names[index];",
+		"\t\t\tthis.items.push(name);",
+		"\t\t}",
+		"\t}",
+		"}",
+		"const cart = new Cart();",
+		"cart.add([\"tea\", \"jam\"]);",
+		"out(cart.items.join(\",\"));",
+		""
+	].join("\n");
+	const { printed, hits } = stopsOf(source, [6]);
+
+	assert.deepEqual(printed, ["tea,jam"]);
+	assert.equal(hits.length, 2);
+	assert.equal(hits[1]!.where, "add", "a method, by its name");
+	assert.deepEqual({ ...hits[1]!.scope }, { "name": "jam", "index": 1, "names": ["tea", "jam"] });
+	assert.ok(hits[0]!.self === hits[1]!.self && Array.isArray((hits[1]!.self as { "items"?: unknown }).items), "this: the cart (the runtime previews it as the stop is hit)");
+});
+
+test("no stop on a line that has none, and one per line however many statements start there", () => {
+	const { hits } = stopsOf("let a = 1; let b = a + 1;\nout(a + b);\n", [1, 9]);
+
+	assert.equal(hits.length, 1);
+	assert.deepEqual(hits[0]!.at, [0, 0, 0, 10]);
+});

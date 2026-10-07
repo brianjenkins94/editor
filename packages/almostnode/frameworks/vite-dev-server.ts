@@ -311,7 +311,10 @@ export class ViteDevServer extends DevServer {
 	private readonly options: ViteDevServerOptions;
 	private hmrTargetWindow: Window | null = null;
 	private transformErrorReporter: ((info: TransformErrorInfo) => void) | null = null;
-	private readonly transformCache = new Map<string, { "code": string; "hash": string; "level": InstrumentLevel | "off" }>();
+	private readonly transformCache = new Map<string, { "code": string; "hash": string; "level": InstrumentLevel | "off"; "stops": string }>();
+	/** The recorded stops (packages/vscode/RUNNING.md: a breakpoint in a page), by file: the lines (1-based) whose code
+	 *  records what's in scope each time it runs. A file with any is instrumented whatever the level. */
+	private stops = new Map<string, number[]>();
 	/** How much of the workspace's modules to instrument for runtime evidence (instrument.ts): off until told. */
 	private instrumentLevel: InstrumentLevel | "off" = "off";
 	/** Each version of a workspace module instrumented, by its source's git blob oid: what it was — so the evidence of
@@ -355,6 +358,24 @@ export class ViteDevServer extends DevServer {
    */
 	setInstrumentation(level: InstrumentLevel | "off"): void {
 		this.instrumentLevel = level;
+	}
+
+  /**
+   * The recorded stops, by absolute file path: the lines (1-based) whose code records what's in scope each time it
+   * runs. Answers the files whose stops changed — re-transformed when next served; the host hot-updates them.
+   */
+	setStops(stops: Record<string, number[]>): string[] {
+		const next = new Map(Object.entries(stops).filter(([, lines]) => lines.length > 0).map(([file, lines]) => [file, [...new Set(lines)].toSorted((a, b) => a - b)]));
+		const changed = [...new Set([...this.stops.keys(), ...next.keys()])].filter((file) => (this.stops.get(file) ?? []).join(",") !== (next.get(file) ?? []).join(","));
+
+		this.stops = next;
+
+		return changed;
+	}
+
+	/** `file`'s stops, as the transform cache keys them. */
+	private stopsKey(file: string): string {
+		return (this.stops.get(file) ?? []).join(",");
 	}
 
   /** A version of a workspace module this server instrumented, by its source's git blob oid. */
@@ -494,8 +515,8 @@ export class ViteDevServer extends DevServer {
 	}
 
 	private async serveRewrittenJs(filePath: string, urlPath: string): Promise<ResponseData> {
-		// Instrumented, a workspace script goes through the compile like TypeScript does (P2).
-		if (this.instrumentLevel !== "off" && !filePath.includes("/node_modules/")) {
+		// Instrumented (or with a recorded stop), a workspace script goes through the compile like TypeScript does (P2).
+		if ((this.instrumentLevel !== "off" || this.stops.has(filePath)) && !filePath.includes("/node_modules/")) {
 			return this.transformAndServe(filePath, urlPath);
 		}
 
@@ -661,7 +682,7 @@ export class ViteDevServer extends DevServer {
 			// Serve a prior transform if the source is unchanged.
 			const cached = this.transformCache.get(filePath);
 
-			if (cached && cached.hash === hash && cached.level === this.instrumentLevel) {
+			if (cached && cached.hash === hash && cached.level === this.instrumentLevel && cached.stops === this.stopsKey(filePath)) {
 				const buffer = Buffer.from(await this.packages.rewriteImports(cached.code, urlPath, ts));
 
 				return {
@@ -681,7 +702,7 @@ export class ViteDevServer extends DevServer {
 			const transformed = await this.transformCode(content, urlPath, filePath);
 
 			// Cache the transform result (before rewriting its bare imports: where they resolve follows package.json).
-			this.transformCache.set(filePath, { "code": transformed, "hash": hash, "level": this.instrumentLevel });
+			this.transformCache.set(filePath, { "code": transformed, "hash": hash, "level": this.instrumentLevel, "stops": this.stopsKey(filePath) });
 
 			const buffer = Buffer.from(await this.packages.rewriteImports(transformed, urlPath, ts));
 
@@ -748,7 +769,10 @@ export class ViteDevServer extends DevServer {
     // the old esbuild jsx:'automatic' + jsxImportSource:'react'. Bare imports (react, …) are left intact and
     // resolved by the injected import map.
 		// A workspace module (not a dependency's), instrumented for runtime evidence: its version is its source's blob oid.
-		const instrumented = this.instrumentLevel === "off" || filePath.includes("/node_modules/") ? undefined : instrument(filePath, await blobOid(code), this.instrumentLevel);
+		// One with a recorded stop is instrumented whatever the level (statements, at least: what the stop needs).
+		const stops = filePath.includes("/node_modules/") ? undefined : this.stops.get(filePath);
+		const level = this.instrumentLevel === "off" && stops !== undefined ? "coverage" : this.instrumentLevel;
+		const instrumented = level === "off" || filePath.includes("/node_modules/") ? undefined : instrument(filePath, await blobOid(code), level, new Set(stops));
 		const result = ts.transpileModule(code, {
 			"fileName": filename,
 			...instrumented === undefined ? {} : { "transformers": { "before": [instrumented.before] } },

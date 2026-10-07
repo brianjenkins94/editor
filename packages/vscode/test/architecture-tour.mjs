@@ -133,6 +133,88 @@ test("evidence: a preview run, across a hot update", async () => {
 	assert.ok(found.lines.some((line) => line.kind === "branch"), "the if's arms");
 });
 
+// A breakpoint in a page's code is a recorded stop (RUNNING.md, step 5): the page can't stop, so each time the line runs
+// what's in scope is recorded — previewed then — and shown in the margin, a column per time it ran, with the event the
+// page was handling. Set on a running app, its file is re-instrumented and hot-updated; no framework needed.
+test("recorded stops: a breakpoint in a page's handler records its scope each time it runs", async () => {
+	const workbench = session.workbench();
+	const file = "/workspace/stopsapp/src/main.ts";
+	const write = (files) => workbench.evaluate(async (all) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.createDirectory(api.Uri.file("/workspace/stopsapp/src"));
+
+		for (const [path, text] of Object.entries(all)) {
+			await api.workspace.fs.writeFile(api.Uri.file(`/workspace/stopsapp/${path}`), new TextEncoder().encode(text));
+		}
+	}, files);
+
+	await write({
+		"package.json": JSON.stringify({ "name": "stopsapp", "private": true, "type": "module", "scripts": { "dev": "vite" } }),
+		// eslint-disable-next-line webawesome/no-html-in-strings -- the test app's own page, written to the workspace as a file
+		"index.html": "<!doctype html><html><head><meta charset=\"UTF-8\"></head><body><script type=\"module\" src=\"./src/main.ts\"></script></body></html>",
+		"src/main.ts": [
+			"const button = document.createElement(\"button\");",
+			"let count = 0;",
+			"",
+			"button.id = \"add\";",
+			"button.addEventListener(\"click\", (event) => {",
+			"\tconst step = 2;",
+			"\tconst next = count + step;",
+			"",
+			"\tcount = next;",
+			"\tbutton.textContent = String(count);",
+			"});",
+			"document.body.append(button);",
+			""
+		].join("\n")
+	});
+	// What the margin is given for the file (live-values.ts draws it).
+	await workbench.evaluate((path) => {
+		globalThis.__stopsSeen = [];
+		globalThis.__stopsOff = globalThis.__architecture.hub.subscribe("values.session.*", (data) => { if (data.file === path) { globalThis.__stopsSeen.push(data); } });
+	}, file);
+	await session.terminal("cd /workspace/stopsapp && npm run dev", { "fresh": true });
+
+	const run = await eventually("its run", async () => (await session.request("runs.list", undefined, 5000)).find((each) => each.cwd === "/workspace/stopsapp" && each.state === "running"));
+
+	try {
+		const page = () => session.page.frames().find((each) => each.url().includes(`/${run.port}/`) && each.url().includes("/__virtual__/"));
+
+		await eventually("the app's button", async () => (await page()?.evaluate(() => document.getElementById("add") !== null).catch(() => false)) || undefined);
+		// The breakpoint, on the running app: its file re-instrumented, hot-updated (a full reload, for an entry).
+		await session.request("debug.breakpoints", { "program": file, "lines": [7] }, 10_000);
+		await session.page.waitForTimeout(1500);
+		await eventually("the button again", async () => (await page()?.evaluate(() => document.getElementById("add") !== null).catch(() => false)) || undefined);
+		await page().evaluate(() => { document.getElementById("add").click(); document.getElementById("add").click(); });
+
+		const values = await eventually("its stops, in the margin", async () => {
+			const seen = await workbench.evaluate(() => globalThis.__stopsSeen.at(-1)?.values ?? []);
+
+			return seen.filter((value) => value.name === "count").length === 2 ? seen : undefined;
+		});
+		const at = (name, turn) => values.find((value) => value.name === name && value.turns[0] === turn)?.value;
+
+		assert.deepEqual([at("count", 0), at("count", 1)], ["0", "2"], "count as it was each time");
+		assert.deepEqual([at("step", 0), at("step", 1)], ["2", "2"]);
+		assert.equal(at("during", 0), "click", "the event the page was handling");
+		assert.match(at("event", 0), /^(?:Pointer|Mouse)Event click$/u, "a DOM event, by what it is");
+		// eslint-disable-next-line webawesome/no-html-in-strings -- how a stop previews a DOM node, not markup
+		assert.equal(at("button", 1), "<button#add>", "a DOM node, by what it is");
+		assert.ok(values.every((value) => value.line === 6), "on the breakpoint's line");
+		assert.equal(values.find((value) => value.name === "next"), undefined, "not yet set: its own statement");
+	} finally {
+		await session.request("runs.stop", { "id": run.id }, 5000).catch(() => undefined);
+		await session.request("debug.breakpoints", { "program": file, "lines": [] }, 10_000).catch(() => undefined);
+		await workbench.evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			globalThis.__stopsOff?.();
+			await api.workspace.fs.delete(api.Uri.file("/workspace/stopsapp"), { "recursive": true }).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 test("provoke: a cold transform round in a child worker", async () => {
 	await session.request("preview.provoke", { "rounds": 1, "hardReset": true }, 90_000);
 	await session.until("node ⇄ provoke worker", hasLabel("node", "provoke", /./u));

@@ -8,14 +8,28 @@
  * would lose them on every update. A report is a page's totals since it loaded, not what changed since the last, so a
  * lost one costs nothing. A page reports every 10 seconds while its counts change, on each hot update (before the
  * module is re-imported), on `pagehide`, and whenever the editor asks (`flush`).
+ *
+ * Recorded stops (RUNNING.md: a breakpoint in a page) are told here too (`p`): each time a stop's line runs, what was in
+ * scope — each value previewed then, as the margin shows a live value — with `this`, the event the page was handling
+ * and the functions it was in; the latest of each stop's hits kept, and reported soon after (not every 10 seconds: a
+ * stop is looked at as it happens).
  */
 import type { ObserveSite } from "@brianjenkins94/tsval";
 import type { SiteObservation, StatementCoverage } from "./debug-protocol";
 import { typeTag } from "../../../tsval/src/values";
+import { preview } from "./live-values";
 
 /** What one version of a module observed in a page: its file and version, each statement with its count, each site
  *  that ran — positions in the module's original source. */
 export interface ModuleEvidence { "file": string; "version": string; "statements": StatementCoverage[]; "sites": SiteObservation[] }
+
+/** One time a recorded stop's line ran: which time, the event the page was handling, and each name in scope with its
+ *  value previewed then (`this` among them, when it's something). */
+export interface StopHit { "n": number; "event"?: string; "values": [string, string][] }
+
+/** A recorded stop of a module version: its statement's range (0-based line and character), the functions it's in,
+ *  and its latest hits. */
+export interface RecordedStop { "file": string; "version": string; "at": [number, number, number, number]; "where": string; "hits": StopHit[] }
 
 /** What a site of a module records: a statement (coverage), or one of tsval's observe sites (instrument.ts). */
 type SiteKind = "statement" | ObserveSite;
@@ -31,7 +45,31 @@ interface Ops {
 	"b": (site: number, value: unknown) => unknown;
 	"a": (site: number, value: unknown) => unknown;
 	"o": (site: number, value: unknown) => unknown;
+	"p": (at: [number, number, number, number], scope: () => Record<string, unknown>, self: () => unknown, where: string) => void;
 }
+
+/** A value as a stop shows it, previewed in the page (a value read later would be what it became): a DOM node or an
+ *  event by what it is (`<button#add.primary>`, `MouseEvent click` — their properties live on prototypes, which a plain
+ *  preview doesn't read), anything else as the margin previews a live value. */
+function stopPreview(value: unknown): string {
+	if (typeof Node !== "undefined" && value instanceof Element) {
+		return `<${value.tagName.toLowerCase()}${value.id === "" ? "" : "#" + value.id}${[...value.classList].map((name) => "." + name).join("")}>`;
+	}
+
+	if (typeof Node !== "undefined" && value instanceof Node) {
+		return value.nodeName.toLowerCase();
+	}
+
+	if (typeof Event !== "undefined" && value instanceof Event) {
+		return `${value.constructor.name} ${value.type}`;
+	}
+
+	return preview(value);
+}
+
+/** How many of a stop's hits are kept (the latest), and how soon after a hit the page reports. */
+const MAX_HITS = 20;
+const STOP_REPORT_MS = 150;
 
 /** How often a page with changes reports. */
 const REPORT_MS = 10_000;
@@ -55,7 +93,40 @@ function capped(tags: Record<string, number>): Record<string, number> {
  * Count what the page's instrumented modules tell `globalThis.__evidence`, and call `report` with every version's
  * evidence when it's time. Returns `flush`, which reports now.
  */
-export function installPageEvidence(report: (modules: ModuleEvidence[]) => void): { "flush": () => void } {
+export function installPageEvidence(report: (modules: ModuleEvidence[]) => void, reportStops: (stops: RecordedStop[]) => void = () => undefined): { "flush": () => void } {
+	const stops = new Map<string, RecordedStop & { "count": number }>();
+	let stopTimer: ReturnType<typeof setTimeout> | undefined;
+	const stopsNow = (): void => {
+		stopTimer = undefined;
+		reportStops([...stops.values()].map(({ count: _count, ...stop }) => stop));
+	};
+	/** A stop of `file`'s `version` hit: what's in scope, previewed now (a value read later would be what it became). */
+	const stopHit = (file: string, version: string, at: [number, number, number, number], scope: () => Record<string, unknown>, self: () => unknown, where: string): void => {
+		const key = `${file}\0${version}\0${at.join(",")}`;
+		const stop = stops.get(key) ?? { "file": file, "version": version, "at": at, "where": where, "hits": [], "count": 0 };
+		const values: [string, string][] = [];
+
+		try {
+			for (const [name, value] of Object.entries(scope())) {
+				values.push([name, stopPreview(value)]);
+			}
+		} catch { /* a name not readable now: what was read stands */ }
+
+		try {
+			const me = self();
+
+			if (me !== undefined && me !== globalThis) {
+				values.push(["this", stopPreview(me)]);
+			}
+		} catch { /* before super(): no this yet */ }
+
+		const event = (globalThis as { "event"?: { "type"?: unknown } }).event?.type;
+
+		stop.count += 1;
+		stop.hits = [...stop.hits, { "n": stop.count, ...typeof event === "string" ? { "event": event } : {}, "values": values }].slice(-MAX_HITS);
+		stops.set(key, stop);
+		stopTimer ??= setTimeout(stopsNow, STOP_REPORT_MS);
+	};
 	const versions = new Map<string, { "file": string; "version": string; "table": Entry[]; "counts": Uint32Array; "seen": Uint32Array; "nullish": Uint32Array; "arms": Uint32Array; "kinds": (Kinds | undefined)[]; "ops": Ops }>();
 	let changed = false;
 
@@ -126,7 +197,8 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void)
 			},
 			"b": (site, observed) => { arms[site * 2 + (observed ? 0 : 1)] += 1; changed = true; return observed; },
 			"a": (site, observed) => { arms[site * 2 + (observed ? 0 : 1)] += 1; changed = true; return observed; },
-			"o": (site, observed) => { arms[site * 2 + (observed ? 1 : 0)] += 1; changed = true; return observed; }
+			"o": (site, observed) => { arms[site * 2 + (observed ? 1 : 0)] += 1; changed = true; return observed; },
+			"p": (at, scope, self, where) => { stopHit(file, version, at, scope, self, where); }
 		};
 
 		versions.set(key, { "file": file, "version": version, "table": table, "counts": counts, "seen": seen, "nullish": nullish, "arms": arms, "kinds": kinds, "ops": ops });

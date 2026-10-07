@@ -20,6 +20,13 @@
  *
  * The module calls `__ev.<op>(site, …)`, where `__ev` is what the page runtime hands back for the module's file and
  * version (`globalThis.__evidence.module(file, version, sites)`); without a runtime, the prelude's stand-in does nothing.
+ *
+ * A recorded stop (packages/vscode/RUNNING.md: a breakpoint in a page): before the first statement starting on each of
+ * `stops`' lines, `__ev.p(range, scope, self, where)` — its range written in (not a site: the page keeps a version's
+ * table, and a breakpoint changes no source), what's in scope read by a closure (`() => ({ a, b })`: the parameters of
+ * the functions around it, its imports, and what's declared before it in the blocks around it, so nothing is read
+ * before it's set), `this` by another (`() => this`, called carefully: before `super()` it throws), and the functions it
+ * sits in by name (`App › onClick`).
  */
 import ts from "typescript";
 
@@ -35,20 +42,53 @@ export type InstrumentLevel = "full" | "coverage";
 /** The name the instrumented module calls the runtime by. */
 const EV = "__ev";
 
-/** The runtime's operations: s(statement), v(value), b(branch: if/?:), a(&&), o(||), and c(a later link of an optional
- *  chain: its value, told only if the chain's link before it didn't stop it — tsval isn't told then either). */
+/** The runtime's operations: s(statement), v(value), b(branch: if/?:), a(&&), o(||), c(a later link of an optional
+ *  chain: its value, told only if the chain's link before it didn't stop it — tsval isn't told then either), and p(a
+ *  recorded stop). */
 type Op = "s" | "v" | "b" | "a" | "o" | "c";
+
+/** At most this many names a recorded stop reads, innermost first. */
+const MAX_SCOPE = 40;
 
 /**
  * A transformer that instruments one module, and the module's sites once it has run. `prelude` is the line that goes in
  * front of the compiled module (shift its source map down one line): it fetches the module's counters from the page
  * runtime by `file` and `version`, or stands in for them.
  */
-export function instrument(file: string, version: string, level: InstrumentLevel = "full"): { "before": ts.TransformerFactory<ts.SourceFile>; "sites": () => Site[]; "prelude": () => string } {
+export function instrument(file: string, version: string, level: InstrumentLevel = "full", stops: ReadonlySet<number> = new Set()): { "before": ts.TransformerFactory<ts.SourceFile>; "sites": () => Site[]; "prelude": () => string } {
 	const sites: Site[] = [];
 
 	const before: ts.TransformerFactory<ts.SourceFile> = (context) => (sourceFile) => {
 		const { factory } = context;
+		// Each original node's parent (the compile may not have set them): what a stop reads of its scope walks up.
+		const parents = new Map<ts.Node, ts.Node>();
+
+		if (stops.size > 0) {
+			(function link(node: ts.Node): void {
+				node.forEachChild((child) => { parents.set(child, node); link(child); });
+			})(sourceFile);
+		}
+
+		/** The lines (1-based) whose stop is placed: the first statement starting on each. */
+		const placed = new Set<number>();
+		/** A recorded stop before `statement`, if one of `stops` is its line and none is placed there yet. */
+		const stopBefore = (statement: ts.Statement): ts.Statement[] => {
+			const start = statement.getStart(sourceFile);
+			const line = sourceFile.getLineAndCharacterOfPosition(start).line + 1;
+
+			if (!stops.has(line) || placed.has(line)) {
+				return [];
+			}
+
+			placed.add(line);
+
+			const { names, where } = scopeOf(statement, start, parents);
+			const range = factory.createArrayLiteralExpression([...position(start), ...position(statement.getEnd())].map((each) => factory.createNumericLiteral(each)));
+			const scope = factory.createArrowFunction(undefined, undefined, [], undefined, factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken), factory.createParenthesizedExpression(factory.createObjectLiteralExpression(names.map((name) => factory.createShorthandPropertyAssignment(name)))));
+			const self = factory.createArrowFunction(undefined, undefined, [], undefined, factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken), factory.createThis());
+
+			return [factory.createExpressionStatement(factory.createCallExpression(factory.createPropertyAccessExpression(factory.createIdentifier(EV), "p"), undefined, [range, scope, self, factory.createStringLiteral(where)]))];
+		};
 		const position = (offset: number): [number, number] => {
 			const { line, character } = sourceFile.getLineAndCharacterOfPosition(offset);
 
@@ -91,9 +131,9 @@ export function instrument(file: string, version: string, level: InstrumentLevel
 		/** A statement tsval counts: a real one (not a declaration), not ambient. */
 		const counted = (node: ts.Node): node is ts.Statement => node.kind >= ts.SyntaxKind.FirstStatement && node.kind <= ts.SyntaxKind.LastStatement && !(ts.isVariableStatement(node) && node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DeclareKeyword));
 
-		/** `statements` with each counted one preceded by its counter. */
+		/** `statements` with each counted one preceded by its counter (and, on a stop's line, its recorded stop). */
 		const counting = (statements: ts.NodeArray<ts.Statement>): ts.Statement[] => statements.flatMap((statement) => {
-			const counter = counted(statement) ? [factory.createExpressionStatement(call("s", site("statement", statement)))] : [];
+			const counter = counted(statement) ? [...stopBefore(statement), factory.createExpressionStatement(call("s", site("statement", statement)))] : [];
 
 			return [...counter, ts.visitNode(statement, visit) as ts.Statement];
 		});
@@ -265,8 +305,65 @@ export function instrument(file: string, version: string, level: InstrumentLevel
 	return {
 		"before": before,
 		"sites": () => sites,
-		"prelude": () => `const ${EV} = globalThis.__evidence?.module(${JSON.stringify(file)}, ${JSON.stringify(version)}, ${JSON.stringify(sites.map((each) => [each.kind, ...each.start, ...each.end]))}) ?? { s() {}, v(_, x) { return x; }, b(_, x) { return x; }, a(_, x) { return x; }, o(_, x) { return x; }, c(_, __, x) { return x; } };`
+		"prelude": () => `const ${EV} = globalThis.__evidence?.module(${JSON.stringify(file)}, ${JSON.stringify(version)}, ${JSON.stringify(sites.map((each) => [each.kind, ...each.start, ...each.end]))}) ?? { s() {}, v(_, x) { return x; }, b(_, x) { return x; }, a(_, x) { return x; }, o(_, x) { return x; }, c(_, __, x) { return x; }, p() {} };`
 	};
+}
+
+/** The names a binding pattern binds. */
+function boundNames(name: ts.BindingName): string[] {
+	return ts.isIdentifier(name) ? [name.text] : name.elements.flatMap((element) => (ts.isOmittedExpression(element) ? [] : boundNames(element.name)));
+}
+
+/** What a recorded stop before `statement` (starting at `start`) reads of its scope, innermost first — the parameters of
+ *  the functions around it, the loop and catch variables it's inside, its imports, functions declared in the blocks
+ *  around it, and what's declared before it there (nothing read before it's set) — and the functions it's in, by name. */
+function scopeOf(statement: ts.Statement, start: number, parents: Map<ts.Node, ts.Node>): { "names": string[]; "where": string } {
+	const names: string[] = [];
+	const functions: string[] = [];
+	const add = (...each: string[]): void => {
+		for (const name of each) {
+			if (name !== "this" && !names.includes(name) && names.length < MAX_SCOPE) {
+				names.push(name);
+			}
+		}
+	};
+
+	for (let node: ts.Node = statement, parent = parents.get(node); parent !== undefined; node = parent, parent = parents.get(node)) {
+		if (ts.isSourceFile(parent) || ts.isBlock(parent) || ts.isModuleBlock(parent) || ts.isCaseClause(parent) || ts.isDefaultClause(parent)) {
+			for (const each of parent.statements) {
+				const before = each.getEnd() <= start;
+
+				if (ts.isVariableStatement(each) && before && !each.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DeclareKeyword)) {
+					add(...each.declarationList.declarations.flatMap((declaration) => boundNames(declaration.name)));
+				} else if (ts.isFunctionDeclaration(each) && each.name !== undefined && each.body !== undefined) {
+					add(each.name.text); // hoisted
+				} else if (ts.isClassDeclaration(each) && each.name !== undefined && before) {
+					add(each.name.text);
+				} else if (ts.isImportDeclaration(each) && each.importClause !== undefined && !each.importClause.isTypeOnly) {
+					const clause = each.importClause;
+
+					add(...clause.name === undefined ? [] : [clause.name.text]);
+
+					if (clause.namedBindings !== undefined) {
+						add(...ts.isNamespaceImport(clause.namedBindings) ? [clause.namedBindings.name.text] : clause.namedBindings.elements.filter((element) => !element.isTypeOnly).map((element) => element.name.text));
+					}
+				}
+			}
+		} else if (ts.isFunctionLike(parent)) {
+			add(...parent.parameters.flatMap((parameter) => boundNames(parameter.name)));
+
+			const named = (parent as { "name"?: ts.Node }).name;
+			const holder = parents.get(parent);
+
+			functions.unshift(named !== undefined && (ts.isIdentifier(named) || ts.isPrivateIdentifier(named)) ? named.text : holder !== undefined && ts.isVariableDeclaration(holder) && ts.isIdentifier(holder.name) ? holder.name.text : holder !== undefined && ts.isPropertyAssignment(holder) && ts.isIdentifier(holder.name) ? holder.name.text : "anonymous");
+		} else if ((ts.isForStatement(parent) || ts.isForInStatement(parent) || ts.isForOfStatement(parent)) && parent.initializer !== undefined && ts.isVariableDeclarationList(parent.initializer) && node !== parent.initializer) {
+			add(...parent.initializer.declarations.flatMap((declaration) => boundNames(declaration.name)));
+		} else if (ts.isCatchClause(parent) && parent.variableDeclaration !== undefined) {
+			add(...boundNames(parent.variableDeclaration.name));
+		}
+	}
+
+	return { "names": names, "where": functions.join(" › ") };
 }
 
 /** `node` with `body` as its body — made by the compile's own `factory` (the transformer never makes nodes with another,

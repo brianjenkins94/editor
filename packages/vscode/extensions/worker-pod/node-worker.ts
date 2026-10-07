@@ -342,13 +342,26 @@ if (SCRIPTS) {
 // the tab's root); we drive the server listening on that port and return its response. The server is EITHER a preview dev server started in
 // this worker (M1, below) OR a raw http server the running script is listening with (almostnode's port
 // registry). Body crosses as a Uint8Array (structured-clone over the worker port).
-type PreviewServer = RequestHandler & { "start": () => void; "setInstrumentation": (level: "full" | "coverage" | "off") => void; "versionSource": (oid: string) => { "file": string; "source": string } | undefined; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "stop": () => void };
+type PreviewServer = RequestHandler & { "start": () => void; "setInstrumentation": (level: "full" | "coverage" | "off") => void; "versionSource": (oid: string) => { "file": string; "source": string } | undefined; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "setStops": (stops: Record<string, number[]>) => string[]; "stop": () => void };
 
 
 // Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry —
 // and the workspace root each serves.
 const previewServers = new Map<number, PreviewServer>();
 const previewRoots = new Map<number, string>();
+/** The recorded stops (RUNNING.md: a breakpoint in a page), by file: every dev server's, a new one's from its start. */
+let previewStops: Record<string, number[]> = {};
+
+/** `server` (on `port`) given the recorded stops; the files whose stops changed hot-updated, re-instrumented. */
+function applyStops(port: number, server: PreviewServer): void {
+	const root = previewRoots.get(port);
+
+	for (const file of server.setStops(previewStops)) {
+		if (root !== undefined && file.startsWith(root + "/")) {
+			server.notifyChange(file.slice(root.length));
+		}
+	}
+}
 
 // The last preview.start config, so preview.provoke (the debug affordance below) can cold-restart on the same
 // port/root without the caller having to know them.
@@ -439,6 +452,7 @@ if (!SCRIPTS) {
 		server.setInstrumentation(level === "coverage" || level === "off" ? level : "full");
 		previewServers.set(port, server);
 		previewRoots.set(port, root.replace(/\/$/u, ""));
+		applyStops(port, server);
 		architecture.spawn({ "id": "vite:" + port, "label": "Vite dev server :" + port, "container": "workers", "detail": root, "dynamic": true });
 		lastPreviewConfig = { "port": port, "root": root };
 
@@ -490,6 +504,19 @@ if (!SCRIPTS) {
 		const { port, oid } = (raw ?? {}) as { "port"?: unknown; "oid"?: unknown };
 
 		return typeof port === "number" && typeof oid === "string" ? previewServers.get(port)?.versionSource(oid) ?? {} : {};
+	});
+
+	// The recorded stops, from the editor's breakpoints (recorded-stops.ts): every dev server's from now on.
+	serve(hub, "preview.stops", (raw) => {
+		const { stops } = (raw ?? {}) as { "stops"?: unknown };
+
+		previewStops = typeof stops === "object" && stops !== null ? stops as Record<string, number[]> : {};
+
+		for (const [port, server] of previewServers) {
+			applyStops(port, server);
+		}
+
+		return true;
 	});
 
 	serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {

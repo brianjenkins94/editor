@@ -192,9 +192,23 @@ that can't start says why). And the two run ledgers become one: every run in `ru
    server a run, its preview open), or, already running, its preview shown again (launch.ts `appRootOf`/`runApp`; F5's
    resolver too). React mode is removed: its reconciler, its render window and its protocol (a live pause in a component,
    but on a fake DOM, for React alone). The page's virtual loop isn't built (*Apps: recorded stops, not live ones*).
-5. **Recorded stops in the page.** A breakpoint in an app's code records what's in scope each time its line runs, by the
-   dev server's instrumentation, mapped through source maps, and shows it in the margin — a column per time it ran.
-6. **The fallback.** The cases that remain (from step 0, and what tsval lacks) run natively behind the same session,
+5. **Recorded stops in the page** (done). A breakpoint in an app's code records what's in scope each time its line runs, by
+   the dev server's instrumentation, mapped through source maps, and shows it in the margin — a column per time it ran.
+   Done: the editor's breakpoints go to every dev server (`preview.stops`, recorded-stops.ts; on a change, its files
+   re-instrumented and hot-updated); before the first statement on a breakpoint's line the instrumenter puts
+   `__ev.p(range, () => ({ …in scope }), () => this, where)` (almostnode instrument.ts — what's in scope read off the
+   syntax: the parameters around it, its imports, what's declared before it), whatever the evidence level; the page
+   previews each value as the stop is hit (a DOM node or an event by what it is: `<button#add>`, `PointerEvent click`)
+   with the event it was handling (`during`), keeps each stop's latest twenty hits and reports them soon after
+   (`stops.preview`); and they reach the margin as a session of values for the file, anchored in the text of the version
+   that ran. Its range is written into the call, not the module's site table: the page keeps a version's table, and a
+   breakpoint changes no source.
+6. **Stepping a recorded handler.** The page can't stop, but a recorded call can be stepped afterwards: at a recorded stop
+   the page also records what the function was called with, what it closes over and what each call it makes returns,
+   and tsval runs the same function from there, fed those results — line by line, back and forth, in VS Code's debugger,
+   while the live page has gone on. Replay, at a function's grain rather than the page's: what made the page virtual
+   loop costly, without it.
+7. **The fallback.** The cases that remain (from step 0, and what tsval lacks) run natively behind the same session,
    the margin saying values aren't there; each listed here with its reason.
 
 ## Open
