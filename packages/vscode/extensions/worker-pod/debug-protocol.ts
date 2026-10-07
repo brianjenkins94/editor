@@ -101,6 +101,8 @@ export type WorkerEvent =
 	/** The program's statement coverage — asked for, or `final` just before `terminated`. */
 	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean }
 	/** The session's live values new since the last (live-values.ts): a few times a second, and before a stop or the end. */
+	/** What an allowed capability call returned (RUNNING.md, step 2), for the adapter to record (RULES.md, slice 2). */
+	| { "type": "recorded"; "capability": string; "resource": string; "value": string }
 	/** Live values, of the entry — or (`file`) another of the program's files, with its text (`source`) the first time. */
 	| { "type": "values"; "batch": LiveBatch; "file"?: string; "source"?: string }
 	/** A `setValue` done (the new value as the Variables view shows it, and the stop's snapshot with it), or refused. */

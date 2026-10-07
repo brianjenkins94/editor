@@ -21,7 +21,7 @@
 import type { LoadedVM, ModuleLoader } from "@brianjenkins94/tsval";
 import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
-import { givenResult, ruleMatches } from "@brianjenkins94/util/silo/policy";
+import { effectiveDisposition, givenResult, isDangerous, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, PreviewMessage, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
 import type { GuestRoot } from "./debug-react";
@@ -111,6 +111,11 @@ let programPath = "";
 let denyNext = false;
 /** The result the user gave the call at a capability stop, once (`decide` with `give`): the next stand-in call returns it. */
 let giveNext: { "value": unknown } | undefined;
+/** "Allow once" (or this run, or always) at a capability stop: the next capability call the policy doesn't allow happens
+ *  for real all the same — the one asked about. Reset at every stop. */
+let allowNext = false;
+/** Writes a program's allowed call is making right now: the runtime lets these through, a package's it refuses. */
+let allowingWrites = 0;
 /** The last value traced: its call, its loops' turns and its step — where a value set at a stop is recorded. */
 let lastTraced: { "call": number; "turns": number[]; "step": number } | undefined;
 /** Forks, one per stop reached; `index` is the currently-displayed stop. */
@@ -209,8 +214,8 @@ function nextAction(): Promise<Action> {
  * builtin (there is no real module system in the worker) BEFORE reaching a capability breakpoint — the whole point of
  * the hard-stop. Real effects belong to the almostnode "production" adapter, not to tsval's reverse-steppable VM.
  */
-function capabilitySurface(fileName: string, args: string[]): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
-	const standins = denying(capabilityStandins());
+function capabilitySurface(fileName: string, args: string[], real?: Runtime): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
+	const standins = gated(capabilityStandins(), real);
 	// What a script reads of its process: its arguments (a run's inputs), and a workspace to be in — nothing it can do.
 	const process = { "argv": ["node", fileName, ...args], "env": {}, "platform": "browser", "cwd": () => "/workspace", "stdin": stdin };
 
@@ -249,7 +254,8 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 	};
 
 	runtime = workspaceRuntime(await zenfs.createZenfsVFS(), {
-		"beforeFs": (op, method, path) => { if (op === "write") { write(method, path); } },
+		// (A program's own allowed write is let through while it's made: madeFor.)
+		"beforeFs": (op, method, path) => { if (op === "write" && allowingWrites === 0) { write(method, path); } },
 		// The program's code gets its stand-ins (`fs`, `child_process`); a package, almostnode's own.
 		"builtinFor": (id, requester) => (requester === "program" && Object.hasOwn(programBuiltins, id) ? programBuiltins[id] : undefined),
 		// A program file a package requires: tsval's to evaluate, on the run's machine (a nested run).
@@ -356,13 +362,16 @@ const held = new Set<unknown>();
 	"release": (handle) => { held.delete(handle); }
 };
 
-/** The stand-ins, each failing when the user denied its call at a capability stop (`denyNext`) — with node's EACCES, as
- *  the call would fail if the policy denied it — and returning the result a rule gives its call (RULES.md, slice 2), or
- *  the user gave it at the stop (`giveNext`), instead of an inert one. (A module object shared under several names stays
- *  one object.) */
-function denying(standins: ReturnType<typeof capabilityStandins>): ReturnType<typeof capabilityStandins> {
+/** The program's capabilities (RUNNING.md, step 2): its `fs`, `child_process` and `fetch`, each gated call decided as it's
+ *  made — a probe's fork gets the stand-in; a call the user denied at its stop (`denyNext`) fails with node's EACCES; a
+ *  call a rule gives the result of (RULES.md, slice 2), or the user gave it at the stop (`giveNext`), gets that; a call the
+ *  policy allows, or the user allowed at its stop (`allowNext`), happens for real through almostnode (`real`) — what it
+ *  read recorded — and any other fails as a denied one would. With no `real` (exploring orderings: a run many times
+ *  over), every call is its inert stand-in, as before. A module's other members are almostnode's own. (A module object
+ *  shared under several names stays one object.) */
+function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime): ReturnType<typeof capabilityStandins> {
 	const wrapped = new Map<unknown, unknown>();
-	const gate = (fn: (...args: unknown[]) => unknown) => function (this: unknown, ...args: unknown[]): unknown {
+	const gate = (fn: (...args: unknown[]) => unknown, effect?: (...args: unknown[]) => unknown) => function (this: unknown, ...args: unknown[]): unknown {
 		// A probe's fork (probeResource): the call it's after records what it reaches, and ends the fork there; any other
 		// call on the way is its inert self — neither touches what the run itself was given (denyNext, giveNext).
 		if (probing !== undefined) {
@@ -385,29 +394,113 @@ function denying(standins: ReturnType<typeof capabilityStandins>): ReturnType<ty
 			throw Object.assign(new Error("EACCES: permission denied (denied at its capability stop)"), { "code": "EACCES" });
 		}
 
-		const real = fn.apply(this, args);
 		const tagged = standinCapability(fn);
 
 		if (tagged === undefined) {
-			return real;
+			return fn.apply(this, args);
 		}
 
-		const resource = args[tagged.resourceArg];
-		const given = giveNext ?? (policy === undefined ? undefined : givenResult(policy, { "capability": tagged.capability, "resource": typeof resource === "string" ? resource : resource instanceof URL ? resource.href : "" }));
+		const argument = args[tagged.resourceArg];
+		const resource = typeof argument === "string" ? argument : argument instanceof URL ? argument.href : typeof argument === "object" && argument !== null && "url" in argument ? String((argument as { "url": unknown }).url) : "";
+		const given = giveNext ?? (policy === undefined ? undefined : givenResult(policy, { "capability": tagged.capability, "resource": resource }));
 
 		giveNext = undefined;
 
-		return given === undefined ? real : givenAs(tagged.capability, real, given.value);
-	};
-	const wrap = (value: unknown): unknown => {
-		if (!wrapped.has(value)) {
-			wrapped.set(value, typeof value === "function" ? gate(value as (...args: unknown[]) => unknown) : typeof value === "object" && value !== null ? Object.fromEntries(Object.entries(value).map(([key, member]) => [key, typeof member === "function" ? gate(member as (...args: unknown[]) => unknown) : member])) : value);
+		if (given !== undefined) {
+			return givenAs(tagged.capability, fn.apply(this, args), given.value);
 		}
 
-		return wrapped.get(value);
+		if (effect === undefined) {
+			return fn.apply(this, args);
+		}
+
+		const allowed = policy !== undefined && effectiveDisposition(policy, tagged.capability, resource, isDangerous(tagged.capability)) === "allow";
+
+		if (!allowed && !allowNext) {
+			throw Object.assign(new Error(`EACCES: permission denied — ${tagged.capability} ${resource} isn't allowed (the policy decides it, and it wasn't asked)`), { "code": "EACCES" });
+		}
+
+		if (!allowed) {
+			allowNext = false;
+		}
+
+		return madeFor(tagged.capability, resource, () => effect(...args));
+	};
+	// almostnode's own module (or the network) a stand-in module stands for: its members, the gated ones made real.
+	const realOf = (key: string): Record<string, unknown> | undefined => {
+		if (real === undefined) {
+			return undefined;
+		}
+
+		const id = key.replace(/^node:/u, "");
+
+		return (id === "fs/promises" ? (real.require("fs", "/workspace", "package") as { "promises": Record<string, unknown> }).promises : real.require(id, "/workspace", "package")) as Record<string, unknown>;
+	};
+	const wrap = (value: unknown, key: string): unknown => {
+		if (wrapped.has(value)) {
+			return wrapped.get(value);
+		}
+
+		let made: unknown;
+
+		if (typeof value === "function") {
+			made = gate(value as (...args: unknown[]) => unknown, real === undefined ? undefined : key === "fetch" ? (...args: unknown[]) => (fetch as (...fetchArgs: unknown[]) => unknown)(...args) : undefined);
+		} else if (typeof value === "object" && value !== null) {
+			const module = realOf(key);
+			const effectOf = (name: string): ((...args: unknown[]) => unknown) | undefined => {
+				const member = module?.[name];
+
+				return typeof member === "function" ? (...args: unknown[]) => (member as (...memberArgs: unknown[]) => unknown).apply(module, args) : undefined;
+			};
+
+			made = { ...module, ...Object.fromEntries(Object.entries(value).map(([name, member]) => [name, typeof member === "function" ? gate(member as (...args: unknown[]) => unknown, effectOf(name)) : member])) };
+		} else {
+			made = value;
+		}
+
+		wrapped.set(value, made);
+
+		return made;
 	};
 
-	return { "globals": Object.fromEntries(Object.entries(standins.globals).map(([key, value]) => [key, wrap(value)])), "modules": Object.fromEntries(Object.entries(standins.modules).map(([key, value]) => [key, wrap(value)])) };
+	return { "globals": Object.fromEntries(Object.entries(standins.globals).map(([key, value]) => [key, wrap(value, key)])), "modules": Object.fromEntries(Object.entries(standins.modules).map(([key, value]) => [key, wrap(value, key)])) };
+}
+
+/** The most of a read's result recorded (RULES.md, slice 2: what a call returned, to give back in a debugger). */
+const RECORD_MAX = 256 * 1024;
+
+/** Make `call` — a program's capability call, allowed — for real: a write let through the runtime's refusal while it's
+ *  made, what a read returned recorded (text, not too much of it). */
+function madeFor(capability: string, resource: string, call: () => unknown): unknown {
+	const record = (value: unknown): void => {
+		const text = typeof value === "string" ? value : value instanceof Uint8Array ? new TextDecoder().decode(value) : undefined;
+
+		if (text !== undefined && text !== "" && text.length <= RECORD_MAX) {
+			post({ "type": "recorded", "capability": capability, "resource": resource, "value": text });
+		}
+	};
+
+	allowingWrites += 1;
+
+	let result: unknown;
+
+	try {
+		result = call();
+	} finally {
+		allowingWrites -= 1;
+	}
+
+	if (capability === "net" && result instanceof Promise) {
+		void result.then((response: unknown) => (response instanceof Response && response.ok ? response.clone().text().then(record) : undefined), () => undefined);
+	} else if (capability === "fs:read") {
+		if (result instanceof Promise) {
+			void result.then(record, () => undefined);
+		} else {
+			record(result);
+		}
+	}
+
+	return result;
 }
 
 /** `text` as the value it writes, when it's a literal — a string, a number, a boolean, null or undefined, or an array or
@@ -997,6 +1090,7 @@ function flushLive(): void {
 
 function emitStopped(vm: Vm, reason: string, traveled = false, ask?: CapabilityAsk): void {
 	denyNext = false;
+	allowNext = false;
 	flushLive();
 	post({ "type": "stopped", "reason": reason, "snapshot": { ...snapshot(vm), "traveled": traveled }, ...ask === undefined ? {} : { "ask": ask } });
 }
@@ -1327,17 +1421,22 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	// launch can give one (an ordering explore found: its clock, seed and schedule).
 	// A server it starts keeps it alive: out of work, it idles, serving.
 	const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": "real" as const, "keepAlive": () => held.size > 0 || readsStdin() };
-	const surface = capabilitySurface(message.fileName, message.args ?? []);
 	let modules: ModuleLoader;
+	let loadedRuntime: Runtime;
 
 	try {
-		modules = programModules(await runtimeReady(message.workspace));
+		loadedRuntime = await runtimeReady(message.workspace);
+		modules = programModules(loadedRuntime);
 	} catch (error) {
 		post({ "type": "output", "text": `The program's modules can't be loaded: ${String(error)}`, "stream": "stderr" });
 		finish(1);
 
 		return;
 	}
+
+	// Its capabilities real (RUNNING.md, step 2): each gated call decided as it's made — but for a run of an ordering
+	// exploring found (its schedule given), which replays that run: its calls' results the stand-ins' it had.
+	const surface = capabilitySurface(message.fileName, message.args ?? [], message.eventLoop?.schedule === undefined ? loadedRuntime : undefined);
 
 	programBuiltins = surface.modules;
 	runtime?.clearCache();
@@ -1490,6 +1589,8 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 
 			denyNext = message.deny === true;
 			giveNext = message.give === undefined ? undefined : { "value": message.give };
+			// Allowed — once, this run, always, by a rule: the call asked about happens for real.
+			allowNext = !denyNext && giveNext === undefined;
 			break;
 
 		case "continue":

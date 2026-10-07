@@ -917,6 +917,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 
 	assert.equal(always.state, "terminated");
 	assert.deepEqual(always.output, ["wrote /workspace/out.txt"]);
+	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file("/workspace/out.txt")).then((bytes) => new TextDecoder().decode(bytes), () => undefined)), "hello", "written for real (RUNNING.md, step 2)");
 	assert.deepEqual((await silo("read")).flatMap((policy) => policy.rules.map(({ when, then }) => ({ when, then }))), [{ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "fs:write" }, { "target_id": "resource", "operator_id": "is", "argument": "/workspace/out.txt" }] }, "then": [{ "action_id": "allow" }] }]);
 
 	const again = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, 60_000);
@@ -960,9 +961,60 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	assert.equal(ruled.state, "terminated", "the rule allows it: no stop");
 	assert.deepEqual(ruled.output, ["wrote /workspace/out.txt"]);
 
-	// As the next tests expect it: no override, and the Explorer back where a stop put Run and Debug.
+	// As the next tests expect it: no override, no file it wrote, and the Explorer back where a stop put Run and Debug.
 	await silo("clear");
-	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.delete(api.Uri.file("/workspace/out.txt")).then(() => undefined, () => undefined);
+		await api.commands.executeCommand("workbench.view.explorer");
+	});
+});
+
+// Real effects (RUNNING.md, step 2): a call the policy allows happens for real — a read gets the file, and what it read
+// is recorded (a rule can give it back) — and a call nobody allowed (one the static check can't see, so never asked
+// about) fails as a denied one would, rather than quietly doing nothing.
+test("real effects: an allowed read reads the file, recorded; a call nobody allowed fails", async () => {
+	const workbench = session.workbench();
+	const write = (path, text) => workbench.evaluate(([file, body]) => globalThis.__editor.api.workspace.fs.writeFile(globalThis.__editor.api.Uri.file(file), new TextEncoder().encode(body)), [path, text]);
+
+	await write("/workspace/rates.json", "{ \"US\": 0.07, \"CA\": 0.13 }");
+	await write("/workspace/effects.js", [
+		"const fs = require(\"node:fs\");",
+		"",
+		"const rates = JSON.parse(fs.readFileSync(\"/workspace/rates.json\", \"utf8\"));",
+		"",
+		"console.log(\"rate\", rates.CA);",
+		"",
+		"const method = [\"write\", \"FileSync\"].join(\"\");",
+		"",
+		"try {",
+		"\tfs[method](\"/workspace/sneaky.txt\", \"x\");",
+		"} catch (error) {",
+		"\tconsole.log(error.code);",
+		"}",
+		""
+	].join("\n"));
+
+	try {
+		const ran = await session.request("debug.start", { "program": "/workspace/effects.js", "breakpoints": [] }, 60_000);
+
+		assert.equal(ran.state, "terminated");
+		assert.deepEqual(ran.output, ["rate 0.13", "EACCES"], "the real file read; the unasked write refused");
+		assert.equal(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.stat(globalThis.__editor.api.Uri.file("/workspace/sneaky.txt")).then(() => true, () => false)), false, "nothing written");
+
+		const recorded = await eventually("what it read, recorded", async () => (await session.request("capability.recorded", { "capability": "fs:read", "resource": "/workspace/rates.json" }, 10_000)) ?? undefined);
+
+		assert.equal(recorded.value, "{ \"US\": 0.07, \"CA\": 0.13 }", "the text it read");
+	} finally {
+		await workbench.evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			for (const path of ["/workspace/effects.js", "/workspace/rates.json", "/workspace/sneaky.txt"]) {
+				await api.workspace.fs.delete(api.Uri.file(path)).then(() => undefined, () => undefined);
+			}
+		});
+	}
 });
 
 // Allow this run: a call in a loop asks once — every call like it is allowed until the run ends, and nothing is kept.
@@ -1066,12 +1118,22 @@ test("capability decisions: Allow this run lets a loop's calls through, until th
 	assert.deepEqual(ran.output, ["wrote 3"]);
 	assert.deepEqual(await policies(), before, "nothing kept");
 
+	const written = ["/workspace/a.txt", "/workspace/b.txt", "/workspace/c.txt"];
+
+	assert.deepEqual(await workbench.evaluate((paths) => Promise.all(paths.map((path) => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file(path)).then((bytes) => new TextDecoder().decode(bytes), () => undefined))), written), ["a", "b", "c"], "written for real (RUNNING.md, step 2)");
+
 	// A new run asks again.
 	const again = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
 
 	assert.equal(again.reason, "capability");
 	await session.request(`debug.session.${again.session}.stop`, undefined, 30_000);
-	await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
+	await workbench.evaluate(async (paths) => {
+		const { api } = globalThis.__editor;
+
+		for (const path of paths) {
+			await api.workspace.fs.delete(api.Uri.file(path)).then(() => undefined, () => undefined);
+		}
+	}, [program, ...written]);
 });
 
 // The Rules view (rules-view.ts): every rule as a sentence, mine first; a rule saved anywhere shows up in it, and one

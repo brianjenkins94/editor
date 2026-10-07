@@ -15,7 +15,7 @@ import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
 import { EMPTY_POLICY, given as givenBy, placesOf, problemOf, ruleMatches, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
-import { loadEffectivePolicy, persistOverride, replaceRule } from "../capabilities/silo-store";
+import { loadEffectivePolicy, persistOverride, recordResult, replaceRule } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
 import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
@@ -765,6 +765,11 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.event("terminated");
 				this.closeWorker();
 				this.settle("terminated");
+				break;
+
+			// What a run's allowed call returned, recorded (RULES.md, slice 2): a rule can give it back.
+			case "recorded":
+				void recordResult(message.capability, message.resource, message.value).catch(() => undefined);
 				break;
 
 			// The session's live values (LIVE-VALUES.md), on to core: the file they're of, what's new.

@@ -150,8 +150,16 @@ that can't start says why). And the two run ledgers become one: every run in `ru
    already running shows its terminal rather than nothing; and a run's globals are Node's (workspace-runtime.ts'
    `programGlobals`: `URL`, `TextEncoder`, `Buffer`, … — not `performance` or `crypto`, which vary run to run). The
    debugger's type is still `tsval` in a launch.json someone writes by hand; its label is *Run*.
-2. **Real effects.** An allowed call made for real through almostnode's shims, its result recorded; asking in the
-   margin the only way; the script worker's popup path retired for runs.
+2. **Real effects** (done, but for the script worker's popups — step 3's). An allowed call made for real through
+   almostnode's shims, its result recorded; asking in the margin the only way; the script worker's popup path retired
+   for runs. Done: a program's `fs`, `child_process` and `fetch` are almostnode's own (and the network), each gated call
+   decided as it's made (debug-worker.ts `gated`) — a call the policy allows (an fs read, by default) or the user allowed
+   at its stop (Allow once, this run, always, a rule) happens for real, a write let through the runtime's refusal while
+   it's made; one denied, or that nobody allowed (a call the static check can't see, so never asked about), fails with
+   EACCES as Node's would, where it used to return an inert result; a mocked one gets its rule's value. What an allowed
+   read returned is recorded through the adapter (no call of the worker's own: a reply to `debug-worker` reaches every
+   one). A run of an ordering exploring found replays it — its calls the stand-ins they were. Not yet: a package's own
+   network is the worker's, unasked (its fs writes are refused) — a package's calls decided too is open.
 3. **The terminal.** `node f` always a run: output and stdin in its terminal, its args, cwd and env; the regex no longer
    decides anything.
 4. **Services and apps.** A run that listens opens its preview; `vite` and the dev server as runs; React mode retired.
