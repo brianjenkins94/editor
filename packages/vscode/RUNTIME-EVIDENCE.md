@@ -223,7 +223,8 @@ Same files, new lines: `value` and `branch` observations join `reached` in
 ### How it flows
 
 The path is coverage's, with nothing new: the debug worker's end-of-run report gains `sites` beside `statements`.
-The adapter publishes both on `evidence.observed` (formerly `evidence.coverage`). `evidence.ts` maps each site's
+The adapter publishes both on `evidence.observed` (formerly `evidence.coverage`) — the entry's, and (`files`) each other
+of the program's files that ran, with its own source (MODULES.md). `evidence.ts` maps each site's
 range to its exact span, and silo folds `value` and `branch` beside `reached`. The insights extension reads them back.
 
 ### The typed strategy

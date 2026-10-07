@@ -22,7 +22,7 @@ import type { LoadedVM, ModuleLoader } from "@brianjenkins94/tsval";
 import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import { givenResult, ruleMatches } from "@brianjenkins94/util/silo/policy";
-import type { CapabilityAsk, Control, CoverageReport, Explored, PreviewMessage, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
+import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, PreviewMessage, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
 import type { GuestRoot } from "./debug-react";
 
@@ -69,8 +69,22 @@ function toPreview(message: PreviewMessage): void { hub.publish(PREVIEW_STREAM, 
 
 let sourceFile: ts.SourceFile | undefined;
 /** The session's live values (LIVE-VALUES.md): what each line bound, returned or chose, told to the adapter a few times
- *  a second, and before each stop and the end. */
-const live = new LiveRecord();
+ *  a second, and before each stop and the end — by the program file they're in (MODULES.md), each its own record. */
+const live = new Map<ts.SourceFile, LiveRecord>();
+/** The program's files whose text the adapter has been told (with their first values): the entry's it has. */
+const toldSource = new Set<string>();
+
+/** `file`'s live values. */
+function liveIn(file: ts.SourceFile): LiveRecord {
+	let record = live.get(file);
+
+	if (record === undefined) {
+		record = new LiveRecord();
+		live.set(file, record);
+	}
+
+	return record;
+}
 let liveTimer: ReturnType<typeof setInterval> | undefined;
 /** 1-based lines pre-armed as capability breakpoints (policy said stop) — so a stop there reports reason
  *  "capability" rather than "breakpoint". Computed at launch from the policy the adapter sent. */
@@ -464,8 +478,8 @@ function setValue(vm: Vm, name: string, text: string, overConst = false): Extrac
 
 			const at = vm.location();
 
-			if (at !== null && at.file === sourceFile?.fileName) {
-				live.add({ "line": at.line, "name": name, "value": "", "raw": binding.value, "kind": "set", "call": lastTraced?.call ?? 0, "turns": lastTraced?.turns ?? [], "step": lastTraced?.step ?? 0, ...vm.currentNode === null ? {} : { "at": rangeOf(vm.currentNode) } });
+			if (at !== null && vm.currentNode !== null) {
+				liveIn(vm.currentNode.getSourceFile()).add({ "line": at.line, "name": name, "value": "", "raw": binding.value, "kind": "set", "call": lastTraced?.call ?? 0, "turns": lastTraced?.turns ?? [], "step": lastTraced?.step ?? 0, ...vm.currentNode === null ? {} : { "at": rangeOf(vm.currentNode) } });
 				flushLive();
 			}
 
@@ -821,15 +835,13 @@ function traceValue(event: TraceEvent): void {
 		return; // (a probe's fork didn't run)
 	}
 
-	if (event.node.getSourceFile() !== sourceFile) {
-		return; // (the program's other files: their values aren't drawn yet — MODULES.md step 3)
-	}
-
-	const lineOf = (node: ts.Node): number => sourceFile!.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line;
+	// Each in its own file: the entry's, or another of the program's (MODULES.md).
+	const file = event.node.getSourceFile();
+	const lineOf = (node: ts.Node): number => node.getSourceFile().getLineAndCharacterOfPosition(node.getStart(node.getSourceFile())).line;
 	const callee = event.callee === undefined ? undefined : { "name": calleeName(event.callee), "line": lineOf(event.callee), "at": rangeOf(event.callee) };
 
 	lastTraced = { "call": event.call, "turns": event.loops.map((loop) => loop.turn), "step": event.step };
-	live.add({ "line": lineOf(event.node), "name": event.name, "value": "", "raw": event.value, "kind": event.kind, "call": event.call, "turns": lastTraced.turns, "step": event.step, "at": rangeOf(event.node), ...callee === undefined ? {} : { "callee": callee } });
+	liveIn(file).add({ "line": lineOf(event.node), "name": event.name, "value": "", "raw": event.value, "kind": event.kind, "call": event.call, "turns": lastTraced.turns, "step": event.step, "at": rangeOf(event.node), ...callee === undefined ? {} : { "callee": callee } });
 }
 
 /** The run's process.argv, as the margin shows it (a command line: what Mock takes), on the first line reading it — if
@@ -846,7 +858,7 @@ function reportArgv(file: ts.SourceFile, args: string[]): void {
 	})(file);
 
 	if (read !== undefined) {
-		live.add({ "line": file.getLineAndCharacterOfPosition(read.getStart(file)).line, "name": "process.argv", "value": args.map((arg) => (arg === "" || /[\s"'|]/u.test(arg) ? JSON.stringify(arg) : arg)).join(" "), "kind": "input", "call": 0, "turns": [], "step": 0, "at": [read.getStart(file), read.getEnd()] });
+		liveIn(file).add({ "line": file.getLineAndCharacterOfPosition(read.getStart(file)).line, "name": "process.argv", "value": args.map((arg) => (arg === "" || /[\s"'|]/u.test(arg) ? JSON.stringify(arg) : arg)).join(" "), "kind": "input", "call": 0, "turns": [], "step": 0, "at": [read.getStart(file), read.getEnd()] });
 	}
 }
 
@@ -905,10 +917,18 @@ function calleeName(node: ts.Node): string {
 
 /** Tell the adapter the live values new since it was last told. */
 function flushLive(): void {
-	const batch = live.drain();
+	for (const [file, record] of live) {
+		const batch = record.drain();
 
-	if (batch !== undefined) {
-		post({ "type": "values", "batch": batch });
+		if (batch === undefined) {
+			continue;
+		}
+
+		// Another of the program's files: which, and its text the first time (what its values' ranges are in).
+		const other = file === sourceFile ? {} : { "file": file.fileName, ...toldSource.has(file.fileName) ? {} : { "source": file.text } };
+
+		toldSource.add(file.fileName);
+		post({ "type": "values", "batch": batch, ...other });
 	}
 }
 
@@ -990,7 +1010,7 @@ function fileCoverage(file: ts.SourceFile): CoverageReport {
 
 /** The program is over: report its coverage, then end the session — with 1 for a program that threw, as node would, and
  *  where it threw. */
-function finish(exitCode = 0, crash?: { "line": number; "at": [number, number]; "message": string }): void {
+function finish(exitCode = 0, crash?: Crash): void {
 	clearInterval(liveTimer);
 	flushLive();
 	post({ "type": "coverage", "report": coverageReport(), "final": true });
@@ -1007,12 +1027,12 @@ function atLine(vm: Vm): number | undefined {
 
 /** Where `error` was thrown, for the margin's mark: by now the frames have unwound, so tsval's note of it, not the
  *  current node. Best-effort — the run ends whatever this finds. */
-function crashOf(vm: Vm, error: unknown): { "line": number; "at": [number, number]; "message": string } | undefined {
+function crashOf(vm: Vm, error: unknown): Crash | undefined {
 	try {
 		const site = vm.throwSite(error);
 		const at = vm.location(site);
 
-		return at === null || site === null || at.file !== sourceFile?.fileName ? undefined : { "line": at.line, "at": rangeOf(site), "message": String(error) };
+		return at === null || site === null ? undefined : { "line": at.line, "at": rangeOf(site), "message": String(error), ...at.file === sourceFile?.fileName ? {} : { "file": at.file } };
 	} catch {
 		return undefined;
 	}

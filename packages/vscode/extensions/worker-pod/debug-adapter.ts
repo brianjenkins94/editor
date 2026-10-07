@@ -37,8 +37,9 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private stopReason: string | undefined;
 	/** Whether the end was told (`values.ended`): a stop after the program's own end doesn't tell it again. */
 	private ended = false;
-	/** Whether core has the text that ran (sent with the first values). */
-	private sourceTold = false;
+	/** The program's files core has values of, each with the text that ran (sent with its first values): the entry, and
+	 *  any other of the program's files (MODULES.md). */
+	private readonly told = new Map<string, string>();
 	/** What the capability stop it's at asks (LIVE-VALUES.md, step 8), until the run resumes. */
 	private ask: CapabilityAsk | undefined;
 	private output: string[] = [];
@@ -480,7 +481,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 					// The session's live values go with it, as when it runs to its end — and, stopped while paused, where it was.
 					const frame = this.state === "stopped" ? this.snapshot?.frames[0] : undefined;
 
-					this.tellEnded(frame === undefined ? undefined : { "kind": "stopped", "line": frame.line - 1, ...frame.at === undefined ? {} : { "at": frame.at } });
+					this.tellEnded(frame === undefined ? undefined : { "kind": "stopped", "line": frame.line - 1, ...frame.at === undefined ? {} : { "at": frame.at } }, frame?.file);
 					this.respond(request);
 					this.event("terminated");
 					this.settle("terminated");
@@ -637,7 +638,10 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			const runId = this.session.configuration["__runId"];
 
 			if (typeof runId === "string") {
-				podHub.publish("evidence.observed", { "runId": runId, "file": this.program, "source": this.source, "statements": report.statements, "sites": report.sites });
+				// Each of the program's files that ran, with its own source (MODULES.md).
+				const files = (report.files ?? []).map((other) => ({ "file": other.file, "source": other.source ?? "", "statements": other.statements, "sites": other.sites }));
+
+				podHub.publish("evidence.observed", { "runId": runId, "file": this.program, "source": this.source, "statements": report.statements, "sites": report.sites, ...files.length === 0 ? {} : { "files": files } });
 			}
 		}
 	}
@@ -653,12 +657,24 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
 	 *  stop is driven by a control message the worker's loop is awaiting. */
-	/** The session's end, once, for core (live-values.ts): its values go, and how the run ended short, if it did, is
-	 *  marked on its line. */
-	private tellEnded(end: RunEnd | undefined): void {
-		if (!this.ended) {
-			this.ended = true;
-			podHub.publish("values.ended", { "session": this.id, "file": this.program, "source": this.source, ...end === undefined ? {} : { "end": end } });
+	/** The session's end, once, for core (live-values.ts): its values go — from every file it had them in — and how the
+	 *  run ended short, if it did, is marked on its line, in the file that's in (`endFile`, the entry by default). */
+	private tellEnded(end: RunEnd | undefined, endFile = this.program): void {
+		if (this.ended) {
+			return;
+		}
+
+		this.ended = true;
+
+		const sources = new Map([[this.program, this.source], ...this.told]);
+
+		for (const [file, source] of sources) {
+			podHub.publish("values.ended", { "session": this.id, "file": file, "source": source, ...end === undefined || file !== endFile ? {} : { "end": end } });
+		}
+
+		// Ended short in a file it had no values from yet.
+		if (end !== undefined && !sources.has(endFile)) {
+			podHub.publish("values.ended", { "session": this.id, "file": endFile, "end": end });
 		}
 	}
 
@@ -719,18 +735,22 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			case "terminated":
 				this.endAction();
 				exitCodes.set(this.id, message.exitCode ?? 0);
-				this.tellEnded(message.crash === undefined ? undefined : { "kind": "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message });
+				this.tellEnded(message.crash === undefined ? undefined : { "kind": "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message }, message.crash?.file);
 				this.event("terminated");
 				this.closeWorker();
 				this.settle("terminated");
 				break;
 
 			// The session's live values (LIVE-VALUES.md), on to core: the file they're of, what's new.
-			case "values":
-				// The text that ran, once: what core anchors the values' ranges in.
-				podHub.publish(`values.session.${this.id}`, { "file": this.program, ...this.sourceTold ? {} : { "source": this.source }, ...message.batch });
-				this.sourceTold = true;
+			case "values": {
+				// The text that ran, once a file: what core anchors the values' ranges in.
+				const file = message.file ?? this.program;
+				const source = message.file === undefined ? this.source : message.source ?? this.told.get(file) ?? "";
+
+				podHub.publish(`values.session.${this.id}`, { "file": file, ...this.told.has(file) ? {} : { "source": source }, ...message.batch });
+				this.told.set(file, source);
 				break;
+			}
 
 			case "output":
 				this.event("output", { "category": message.stream ?? "stdout", "output": message.text + "\n" });

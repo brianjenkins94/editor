@@ -19,6 +19,9 @@ export const PREVIEW_STREAM = "tsval.preview.stream";
 
 export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue";
 
+/** Where a program threw: its line and range — in `file`, when that's another of its files than the entry. */
+export interface Crash { "line": number; "at": [number, number]; "message": string; "file"?: string }
+
 /** Adapter → worker. */
 export type Control =
 	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer }
@@ -87,14 +90,16 @@ export type CapabilityChoice = "allow-once" | "allow-run" | "allow-always" | "de
 export type WorkerEvent =
 	| { "type": "stopped"; "reason": string; "snapshot": Snapshot; "atomic"?: boolean; "ask"?: CapabilityAsk }
 	/** The program is over: `exitCode` 1 when it threw, else 0. */
-	| { "type": "terminated"; "exitCode"?: number; "crash"?: { "line": number; "at": [number, number]; "message": string } }
+	/** `crash.file`: where it threw, when that's another of the program's files than the entry. */
+	| { "type": "terminated"; "exitCode"?: number; "crash"?: Crash }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" }
 	| { "type": "rendered" }
 	| { "type": "history"; "length": number }
 	/** The program's statement coverage — asked for, or `final` just before `terminated`. */
 	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean }
 	/** The session's live values new since the last (live-values.ts): a few times a second, and before a stop or the end. */
-	| { "type": "values"; "batch": LiveBatch }
+	/** Live values, of the entry — or (`file`) another of the program's files, with its text (`source`) the first time. */
+	| { "type": "values"; "batch": LiveBatch; "file"?: string; "source"?: string }
 	/** A `setValue` done (the new value as the Variables view shows it, and the stop's snapshot with it), or refused. */
 	| { "type": "valueSet"; "ok": boolean; "value"?: string; "error"?: string; "snapshot"?: Snapshot }
 	/** What exploring the program's orderings found (asked by `explore`). */

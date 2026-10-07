@@ -101,7 +101,9 @@ calls into it isn't the program's to order. A package's callback into a program 
      (the gutter draws each). The workspace buffer comes in the launch (the pod holds it), not by a call: every debug
      worker's hub is `debug-worker`, so a reply to one reached them all. Loading almostnode costs a launch ~30 ms.
      Capability stops, rules and the argv mock stay the entry's.
-   - *Next (3b):* values, cards and the run log of each file in its own margin; evidence (`evidence.observed`) per file.
+   - *Done (3b):* each file's values, cards and run log in its own margin (a live record per file; its text sent with
+     its first values); a run's end and a crash marked in the file they're in; evidence per file — each file that ran
+     folded into its own `.silo/evidence` file and listed in the run's envelope.
 4. **One runtime setup** shared by the script worker and the debug worker.
 
 ## Open
@@ -109,6 +111,8 @@ calls into it isn't the program's to order. A package's callback into a program 
 - An importer binds an imported name to its value when it links (the exporter has run by then, but for a cycle), not
   live as ESM's bindings are; a namespace import (`import * as ns`) reads live. Live named bindings, if a program needs
   them.
-- What a per-file run log shows: each file's own steps, or the run's — its share of the whole run, per file?
+- A file's run log shows its own steps (tsval's profile counts a step to the top-level statement of the file it's in),
+  so a call's line in the importer doesn't include the work done in the file it calls into.
+- Capability stops, rules (and their set hooks) and the argv mock are still the entry's.
 - A preview page served by a debug run gets no observability tap yet (the dev-server worker injects it into what it
   serves; a debug run's server answers on its own).

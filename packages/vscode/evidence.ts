@@ -124,14 +124,17 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 
 	// How much a preview's dev server instruments (`silo.evidence.previews`), asked as each preview starts.
 	serve(hub, "evidence.level", () => vscode.workspace.getConfiguration("silo.evidence").get<string>("previews") ?? "full");
-	// Each run's coverage, until the run ends (the session's coverage comes just before its end).
-	const coverage = new Map<string, Coverage>();
+	// Each run's coverage, until the run ends (the session's coverage comes just before its end): its entry's, and each
+	// other of the program's files that ran (MODULES.md).
+	const coverage = new Map<string, Coverage[]>();
+	const coverageOf = (each: Partial<Coverage>): Coverage[] => (typeof each.file === "string" && typeof each.source === "string" && Array.isArray(each.statements) ? [{ "file": each.file, "source": each.source, "statements": each.statements, "sites": Array.isArray(each.sites) ? each.sites : [] }] : []);
 
 	hub.subscribe("evidence.observed", (data) => {
-		const { runId, ...rest } = (data ?? {}) as Coverage & { "runId"?: unknown };
+		const { runId, files, ...rest } = (data ?? {}) as Partial<Coverage> & { "runId"?: unknown; "files"?: unknown };
+		const entry = coverageOf(rest);
 
-		if (typeof runId === "string" && typeof rest.source === "string" && Array.isArray(rest.statements)) {
-			coverage.set(runId, { ...rest, "sites": Array.isArray(rest.sites) ? rest.sites : [] });
+		if (typeof runId === "string" && entry.length > 0) {
+			coverage.set(runId, [...entry, ...(Array.isArray(files) ? files as Partial<Coverage>[] : []).flatMap(coverageOf)]);
 		}
 	});
 
@@ -208,8 +211,8 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		};
 
 		// The code a session ran is the source it was given, whatever the file holds now.
-		if (covered !== undefined) {
-			envelope.files[repoRelative(covered.file)] = await blobOid(covered.source);
+		for (const each of covered ?? []) {
+			envelope.files[repoRelative(each.file)] = await blobOid(each.source);
 		}
 
 		// A preview ran every version of a module its hot updates brought: the last is the file's; all are listed.
@@ -227,8 +230,8 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		await ensureSiloFiles(vscode);
 		await vscode.workspace.fs.writeFile(uri(path), new Uint8Array([...before, ...new TextEncoder().encode(envelopeLine(envelope))]));
 
-		if (covered !== undefined) {
-			await recordFile(envelope, repoRelative(covered.file), [covered]);
+		for (const each of covered ?? []) {
+			await recordFile(envelope, repoRelative(each.file), [each]);
 		}
 
 		if (preview !== undefined) {

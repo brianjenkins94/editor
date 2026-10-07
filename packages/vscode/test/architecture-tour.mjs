@@ -312,6 +312,52 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 // What went through a run's ?., ??, parameters, returns and branches (RUNTIME-EVIDENCE.md, the second slice): folded
 // into the same evidence file as its coverage, each site under the span that is exactly its node — and the values
 // themselves only on this machine, in .silo/local/samples/.
+// The program's other files that ran are evidence too (MODULES.md): each its own file under .silo/evidence, read
+// against the source that ran, and listed in the run's envelope.
+test("evidence: a file the program imports gets its own", async () => {
+	const workbench = session.workbench();
+
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const write = (path, lines) => api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode(lines.join("\n")));
+
+		await write("/workspace/scale.js", ["function scale(value, by) {", "\treturn value * (by ?? 2);", "}", "module.exports = { scale };", ""]);
+		await write("/workspace/scaled.js", ["const { scale } = require(\"./scale.js\");", "", "console.log(scale(3), scale(3, 10));", ""]);
+	});
+
+	const ran = await session.request("debug.start", { "program": "/workspace/scaled.js", "breakpoints": [] }, 60_000);
+
+	assert.deepEqual(ran.output, ["6 30"]);
+
+	const found = await eventually("the imported file's evidence", () => workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const find = async (folder, name) => {
+			for (const [entry, type] of await api.workspace.fs.readDirectory(folder).then((all) => all, () => [])) {
+				const child = api.Uri.joinPath(folder, entry);
+				const hit = type === api.FileType.Directory ? await find(child, name) : entry === name ? new TextDecoder().decode(await api.workspace.fs.readFile(child)) : undefined;
+
+				if (hit !== undefined) {
+					return hit;
+				}
+			}
+
+			return undefined;
+		};
+		const lines = (await find(api.Uri.file("/workspace/.silo/evidence"), "scale.js.jsonl") ?? "").trim().split("\n").filter((line) => line !== "").map((line) => JSON.parse(line));
+
+		return lines.some((line) => line.kind === "value") ? lines : undefined;
+	}));
+
+	assert.ok(found.some((line) => line.kind === "reached"), "its coverage");
+	assert.ok(found.some((line) => line.kind === "value" && JSON.stringify(line.tags) === JSON.stringify({ "undefined": 1, "number": 1 })), "by ?? 2: once undefined, once a number");
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.delete(api.Uri.file("/workspace/scaled.js"));
+		await api.workspace.fs.delete(api.Uri.file("/workspace/scale.js"));
+	});
+});
+
 test("evidence: a run's values and branches, beside its coverage", async () => {
 	await session.terminal([
 		`echo 'const world = { onWin: () => 1 };' > values.js`,
@@ -1248,8 +1294,9 @@ test("debugger: a program's imports — built-ins and its other files — load",
 });
 
 // The program's other files are stepped too (MODULES.md): almostnode resolves an import, tsval evaluates the file — a
-// breakpoint in it stops there, a frame naming its file and function, and stepping in from the importer goes into it.
-test("debugger: a breakpoint in a file the program imports, and stepping into it", async () => {
+// breakpoint in it stops there, a frame naming its file and function, its values in its own margin, and stepping in
+// from the importer goes into it.
+test("debugger: a breakpoint in a file the program imports, its values, and stepping into it", async () => {
 	const workbench = session.workbench();
 	const program = "/workspace/measure.ts";
 	const imported = "/workspace/shapes.ts";
@@ -1274,6 +1321,13 @@ test("debugger: a breakpoint in a file the program imports, and stepping into it
 		assert.equal(stopped.code, "const product = width * height;");
 		assert.equal(stopped.locals.find(({ name }) => name === "width")?.value, "3", "its own locals");
 
+		// Its values in its own margin.
+		await workbench.evaluate((path) => globalThis.__editor.api.window.showTextDocument(globalThis.__editor.api.Uri.file(path)), imported);
+
+		const parameters = await eventually("the imported file's values in its margin", () => workbench.evaluate(() => document.querySelector('.live-values-row[data-line="0"]')?.textContent.trim()));
+
+		assert.equal(parameters, "width = 3, height = 4");
+
 		const ended = await session.request(`debug.session.${stopped.session}.step`, { "action": "continue" }, 30_000);
 
 		assert.equal(ended.state, "terminated");
@@ -1295,6 +1349,10 @@ test("debugger: a breakpoint in a file the program imports, and stepping into it
 		assert.equal(at.function, "area");
 		await session.request(`debug.session.${at.session}.stop`, undefined, 30_000).catch(() => undefined);
 	} finally {
+		for (const each of await session.request("debug.sessions", undefined, 10_000).catch(() => [])) {
+			await session.request(`debug.session.${each.session}.stop`, undefined, 30_000).catch(() => undefined);
+		}
+
 		await session.request("debug.breakpoints", { "program": imported, "lines": [] }, 10_000).catch(() => undefined);
 		await workbench.evaluate(async ([main, shapes]) => {
 			const { api } = globalThis.__editor;
