@@ -40,14 +40,15 @@ test("a branch site: how often each arm ran, both arms there even when one never
 
 test("tags past eight count as other; samples stop at five, strings cut short", () => {
 	const sums = new Map();
-	const node = { "getStart": () => 0, "getEnd": () => 1 };
+	const file = { "getLineAndCharacterOfPosition": () => ({ "line": 0, "character": 0 }) };
+	const node = { "getStart": () => 0, "getEnd": () => 1, "getSourceFile": () => file };
 	const values = [1, "x".repeat(100), true, null, undefined, [], {}, new Map(), new Set(), () => 1, 2, 3, 4, 5];
 
 	for (const value of values) {
 		addObservation(sums, node, "parameter", value);
 	}
 
-	const [site] = siteObservations(sums, { "getLineAndCharacterOfPosition": () => ({ "line": 0, "character": 0 }) });
+	const [site] = siteObservations(sums, file);
 
 	assert.equal(Object.keys(site.tags).length, 9);
 	assert.equal(site.tags.other, 2, "kinds past eight (a Set, a function) count as other");
@@ -64,4 +65,16 @@ test("a fork's sums go on from a copy, leaving its stop's as they were", () => {
 
 	addObservation(fork, node, "branch", 1);
 	assert.deepEqual([sums.get(node).arms, fork.get(node).arms], [[1, 0], [1, 1]]);
+});
+
+test("a file's report has only its own sites — the program's other files report theirs", () => {
+	const sums = new Map();
+	const position = () => ({ "line": 0, "character": 0 });
+	const [main, other] = [{ "getLineAndCharacterOfPosition": position }, { "getLineAndCharacterOfPosition": position }];
+
+	addObservation(sums, { "getStart": () => 0, "getEnd": () => 1, "getSourceFile": () => main }, "parameter", 1);
+	addObservation(sums, { "getStart": () => 0, "getEnd": () => 1, "getSourceFile": () => other }, "parameter", "x");
+
+	assert.deepEqual(siteObservations(sums, main).map((site) => site.samples), [[1]]);
+	assert.deepEqual(siteObservations(sums, other).map((site) => site.samples), [["x"]]);
 });

@@ -225,7 +225,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "node.script.request", "from": ["node"], "to": ["node-scripts"] },
 	// ── the workspace ──
 	{ "pattern": "workspace.changed", "from": ["workbench", "node", "node-scripts"], "to": ["workbench", "node", "node-scripts"] },
-	{ "pattern": "workspace.buffer", "from": ["node", "node-scripts", "debug-worker"], "to": ["workbench"] },
+	{ "pattern": "workspace.buffer", "from": ["node", "node-scripts"], "to": ["workbench"] },
 	// ── running node ──
 	{ "pattern": "node.start", "from": ["workbench"], "to": ["node-scripts", "pod"] },
 	{ "pattern": "node.ready", "from": ["node-scripts"], "to": ["workbench"] },

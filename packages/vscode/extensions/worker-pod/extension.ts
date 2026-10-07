@@ -28,7 +28,7 @@ import { registerTasks } from "./tasks";
 import { registerTsvalSurface } from "./tsval-surface";
 import { registerDebugToolbar } from "./debug-toolbar";
 import { registerMetricsBridge } from "./metrics-bridge";
-import { podHub } from "./pod";
+import { podHub, workspace } from "./pod";
 import { registerProductionDebug } from "./production-adapter";
 
 /** A run target's repo-relative identity — strips the /workspace root; "." for the root itself. */
@@ -73,10 +73,9 @@ const SERVERS: ServerSpec[] = [
 
 const clients: LanguageClient[] = [];
 // One control port per spawned LSP worker (the workbench end of a MessageChannel), used only to hand the worker
-// the shared workspace SharedArrayBuffer (M3b) — separate from the LSP JSON-RPC channel. `workspaceBuffer` is
+// the shared workspace SharedArrayBuffer (M3b) — separate from the LSP JSON-RPC channel. `workspace.buffer` (pod.ts) is
 // the SAB once the workbench provides it; a worker that spawns after gets it immediately.
 const controlPorts: Array<{ "port": MessagePort; "worker": string }> = [];
-let workspaceBuffer: SharedArrayBuffer | undefined;
 // The pod's logger (its spans/records ride podHub), its uncaught errors, and its hub's topology/traffic — not its
 // network: this extension host shares the workbench realm, whose network is probed there.
 const { "log": podLog, architecture } = observe(podHub);
@@ -106,8 +105,8 @@ function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
 
 	controlPorts.push(control);
 
-	if (workspaceBuffer !== undefined) {
-		shareWorkspace(control, workspaceBuffer);
+	if (workspace.buffer !== undefined) {
+		shareWorkspace(control, workspace.buffer);
 	}
 
 	const client = new LanguageClient(`lsp-${spec.id}`, spec.name, worker, { "documentSelector": spec.documentSelector });
@@ -435,7 +434,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 			return; // no COI / not shared — the workers keep their local InMemory FS
 		}
 
-		workspaceBuffer = buffer;
+		workspace.buffer = buffer;
 
 		for (const control of controlPorts) {
 			shareWorkspace(control, buffer);

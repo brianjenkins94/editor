@@ -133,7 +133,7 @@ hostile code. A real boundary needs the preview on a separate origin with its ow
 
 The workbench creates a 64 MB `SharedArrayBuffer` zen-fs store (`workspace-fs.ts`) mounted at `/workspace` and hands
 the buffer to the node worker (over the hub, `workspace.buffer`) and the cspell server host (a one-shot control port —
-it has no hub); the provoke child gets it directly. All of them read and write the same bytes under an Atomics lock.
+it has no hub); the provoke child gets it directly, and a debug run in its launch (the pod holds it). All of them read and write the same bytes under an Atomics lock.
 
 Shared memory tells nobody anything, so there is **one change stream** (`workspace-changes.ts`): each realm watches its
 own mount's mutating store operations and reports them, batched, as `workspace.changed`. The workbench persists every

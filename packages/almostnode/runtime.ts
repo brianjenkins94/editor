@@ -1548,6 +1548,11 @@ ${code}
 		this.moduleCache[filename] = module;
 	}
 
+	/** Take `filename`'s module out of the cache — its evaluation threw, so a later require tries it again. */
+	forget(filename: string): void {
+		delete this.moduleCache[filename];
+	}
+
 	/** The module cached for `filename`, if it's been loaded (or registered). */
 	cached(filename: string): Module | undefined {
 		return this.moduleCache[filename];

@@ -96,6 +96,12 @@ calls into it isn't the program's to order. A package's callback into a program 
 3. **The debug worker on almostnode.** The entry through the runtime with tsval as evaluator; the shim deleted; stand-ins
    as built-in overrides; per-file stack frames, coverage, values, cards and run log. Tour: step into an imported file,
    stop at a breakpoint in it, see its values in its own margin; the server and stdin tests unchanged.
+   - *Done (3a):* the runtime and evaluator, the shim gone; breakpoints in any file (the launch's `files`, a
+     `setBreakpoints` by file); a frame names its file, function and line text; coverage and observed sites per file
+     (the gutter draws each). The workspace buffer comes in the launch (the pod holds it), not by a call: every debug
+     worker's hub is `debug-worker`, so a reply to one reached them all. Loading almostnode costs a launch ~30 ms.
+     Capability stops, rules and the argv mock stay the entry's.
+   - *Next (3b):* values, cards and the run log of each file in its own margin; evidence (`evidence.observed`) per file.
 4. **One runtime setup** shared by the script worker and the debug worker.
 
 ## Open

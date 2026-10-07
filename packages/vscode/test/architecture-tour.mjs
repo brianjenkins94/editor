@@ -1212,9 +1212,9 @@ test("debugger: a task's timers run on tsval's deterministic event loop", async 
 	await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
 });
 
-// A debug run's dependencies (built-ins, packages, the program's other files) load natively on almostnode — not
-// stepped, as a library isn't — where before every import but fs and child_process was inert.
-test("debugger: a program's imports — built-ins and its other files — load natively", async () => {
+// A debug run's imports go through almostnode (MODULES.md): built-ins and packages load natively — not stepped, as a
+// library isn't — and the program's other files are tsval's, where before every import but fs and child_process was inert.
+test("debugger: a program's imports — built-ins and its other files — load", async () => {
 	const workbench = session.workbench();
 
 	await workbench.evaluate(async () => {
@@ -1245,6 +1245,64 @@ test("debugger: a program's imports — built-ins and its other files — load n
 		await api.workspace.fs.delete(api.Uri.file("/workspace/deps.js"));
 		await api.workspace.fs.delete(api.Uri.file("/workspace/greet.js"));
 	});
+});
+
+// The program's other files are stepped too (MODULES.md): almostnode resolves an import, tsval evaluates the file — a
+// breakpoint in it stops there, a frame naming its file and function, and stepping in from the importer goes into it.
+test("debugger: a breakpoint in a file the program imports, and stepping into it", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/measure.ts";
+	const imported = "/workspace/shapes.ts";
+
+	await workbench.evaluate(async ([main, shapes]) => {
+		const { api } = globalThis.__editor;
+		const write = (path, lines) => api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode(lines.join("\n")));
+
+		await write(shapes, ["export function area(width: number, height: number): number {", "\tconst product = width * height;", "", "\treturn product;", "}", ""]);
+		await write(main, ["import { area } from \"./shapes\";", "", "const size = area(3, 4);", "", "console.log(\"area\", size);", ""]);
+	}, [program, imported]);
+
+	try {
+		await session.request("debug.breakpoints", { "program": imported, "lines": [2] }, 10_000);
+
+		const stopped = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+		assert.equal(stopped.state, "stopped");
+		assert.equal(stopped.file, imported, "stopped in the imported file");
+		assert.equal(stopped.line, 2);
+		assert.equal(stopped.function, "area");
+		assert.equal(stopped.code, "const product = width * height;");
+		assert.equal(stopped.locals.find(({ name }) => name === "width")?.value, "3", "its own locals");
+
+		const ended = await session.request(`debug.session.${stopped.session}.step`, { "action": "continue" }, 30_000);
+
+		assert.equal(ended.state, "terminated");
+		assert.ok(ended.output.includes("area 12"), "ran on, back in the importer");
+
+		// Stepping in, from the call in the importer.
+		await session.request("debug.breakpoints", { "program": imported, "lines": [] }, 10_000);
+
+		let at = await session.request("debug.start", { "program": program, "breakpoints": [3] }, 60_000);
+
+		assert.equal(at.line, 3);
+		assert.equal(at.file, undefined, "the program's own file");
+
+		for (let steps = 0; steps < 12 && at.state === "stopped" && at.file !== imported; steps += 1) {
+			at = await session.request(`debug.session.${at.session}.step`, { "action": "stepIn" }, 30_000);
+		}
+
+		assert.equal(at.file, imported, "stepped into the imported file");
+		assert.equal(at.function, "area");
+		await session.request(`debug.session.${at.session}.stop`, undefined, 30_000).catch(() => undefined);
+	} finally {
+		await session.request("debug.breakpoints", { "program": imported, "lines": [] }, 10_000).catch(() => undefined);
+		await workbench.evaluate(async ([main, shapes]) => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file(main));
+			await api.workspace.fs.delete(api.Uri.file(shapes));
+		}, [program, imported]);
+	}
 });
 
 // A service under the debugger: a node:http server the program starts (almostnode's, in the debug worker) keeps the run

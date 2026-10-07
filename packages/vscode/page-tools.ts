@@ -62,7 +62,7 @@ export function editorPageTools(hub: Hub): PageTool[] {
 
 	return [{
 		"name": "debug_start",
-		"description": "Run a file under the editor's tsval debugger (a VS Code debug session, visible in its UI) and return where it first stops: { session, state, reason, line, code, locals, output }. Set breakpoints here or with debug_breakpoints first — with none it runs to the end (state: terminated). Policy-gated capability calls (fetch, fs, …) also stop it (reason: capability).",
+		"description": "Run a file under the editor's tsval debugger (a VS Code debug session, visible in its UI) and return where it first stops: { session, state, reason, line, code, locals, output } — and file, when that's another of the program's files (a breakpoint set with debug_breakpoints in a file it imports stops there). Set breakpoints here or with debug_breakpoints first — with none it runs to the end (state: terminated). Policy-gated capability calls (fetch, fs, …) also stop it (reason: capability).",
 		"inputSchema": schema({
 			"program": { ...PROGRAM, "description": "The file to run, absolute or relative to the workspace (e.g. src/index.ts). Default: the file open in the editor." },
 			"breakpoints": { "type": "array", "items": { "type": "number" }, "description": "1-based lines to break on in that file, replacing its existing breakpoints." },

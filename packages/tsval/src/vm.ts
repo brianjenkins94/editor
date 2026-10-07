@@ -311,6 +311,8 @@ export interface VM {
 	"addBreakpoint": (pos: number, file?: string) => void;
 	/** Add breakpoints by 1-based line in a program file (VMOptions.modules) — loaded yet or not. */
 	"addBreakpointsInFile": (file: string, ...lines: number[]) => void;
+	/** Evaluate a module its loader made and cached already (a program file a package required), in a nested run. */
+	"evaluateModule": (record: ModuleRecord) => unknown;
 	"addBreakpointsByLine": (...lines: number[]) => void;
 	"atBreakpoint": () => boolean;
 	"runToBreakpoint": () => void;
@@ -990,9 +992,9 @@ export class Machine implements VM {
 
 	/** Push `filename`'s module frame on this stack: its module registered first (a cycle sees its partial exports), its
 	 *  scope its own — `module`, `exports`, `require`, `__filename`, `__dirname`, `this` its exports. */
-	public pushModule(filename: string): ModuleFrame {
+	public pushModule(filename: string, record?: ModuleRecord): ModuleFrame {
 		const loader = this.modules!;
-		const module: ModuleRecord = { "id": filename, "filename": filename, "exports": {}, "loaded": false, "children": [], "paths": [] };
+		const module: ModuleRecord = record ?? { "id": filename, "filename": filename, "exports": {}, "loaded": false, "children": [], "paths": [] };
 		const scope = new Scope(this.rootScope, true);
 		const bindings: [string, unknown][] = [["module", module], ["exports", module.exports], ["require", makeRequire(loader, filename)], ["__filename", filename], ["__dirname", directoryOf(filename)]];
 
@@ -1003,7 +1005,10 @@ export class Machine implements VM {
 		scope.hasThis = true;
 		scope.thisVal = module.exports;
 		setModuleOf(scope, module);
-		loader.register(filename, module);
+
+		if (record === undefined) {
+			loader.register(filename, module);
+		}
 
 		const frame: ModuleFrame = { "kind": "module", "node": null, "phase": 0, "scope": scope, "valuesBase": this.values.length, "source": this.sourceOf(filename), "module": module };
 
@@ -1034,6 +1039,13 @@ export class Machine implements VM {
 		this.pushModule(resolved.filename);
 
 		return true;
+	}
+
+	/** Evaluate a module its loader made and cached already (`record`): a program file a package required — the host's
+	 *  module system calls back for it (almostnode's evaluateProgram). In a nested run: not on the main stack, so stepped
+	 *  only through a breakpoint in it. */
+	public evaluateModule(record: ModuleRecord): unknown {
+		return this.runSub(() => { this.pushModule(record.filename, record); });
 	}
 
 	/** A module's value for `from`'s code, not on a stack it can wait on: a program file's exports (evaluated now, in a

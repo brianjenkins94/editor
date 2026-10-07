@@ -150,3 +150,54 @@ test("without a loader, imports are resolveModule's, as before", async () => {
 	vm.run();
 	assert.deepStrictEqual(lines, [42]);
 });
+
+test("a program file a package requires: evaluated on the run's machine (a nested run), one module for both", async () => {
+	const files = {
+		"/w/main.js": "const config = require('./config.js');\nconst framework = require('framework');\nlog(framework.load() === config);\nlog(framework.load().name);\n",
+		"/w/config.js": "module.exports = { name: 'app' };\n"
+	};
+	const lines: unknown[] = [];
+	const loader = loaderOf(files, { "framework": undefined });
+	// A package reading the program's config: what almostnode's evaluator hook does — the cached module if it's loaded,
+	// else a record registered and evaluated by tsval.
+	const framework = { "load": (): unknown => {
+		const cached = loader.cached("/w/config.js");
+
+		if (cached !== undefined) {
+			return cached.exports;
+		}
+
+		const record: ModuleRecord = { "id": "/w/config.js", "filename": "/w/config.js", "exports": {}, "loaded": false, "children": [], "paths": [] };
+
+		loader.register(record.filename, record);
+		vm.evaluateModule(record);
+
+		return record.exports;
+	} };
+	const { vm } = createVM(files["/w/main.js"], { "fileName": "/w/main.js", "modules": { ...loader, "require": (specifier) => (specifier === "framework" ? framework : undefined) }, "globals": { "log": (value: unknown) => { lines.push(value); } }, "eventLoop": { "pace": "fast" } });
+
+	await runToEnd(vm);
+	assert.deepStrictEqual(lines, [true, "app"]);
+	assert.deepStrictEqual(loader.loads, ["/w/config.js"], "config read once (the entry's source is given)");
+});
+
+test("a program file only a package requires: tsval evaluates it there, when asked", async () => {
+	const files = {
+		"/w/main.js": "const framework = require('framework');\nlog(framework.load().name);\n",
+		"/w/config.js": "const name = 'from ' + 'config';\nmodule.exports = { name };\n"
+	};
+	const lines: unknown[] = [];
+	const loader = loaderOf(files, { "framework": undefined });
+	const framework = { "load": (): unknown => {
+		const record: ModuleRecord = { "id": "/w/config.js", "filename": "/w/config.js", "exports": {}, "loaded": false, "children": [], "paths": [] };
+
+		loader.register(record.filename, record);
+		vm.evaluateModule(record);
+
+		return record.exports;
+	} };
+	const { vm } = createVM(files["/w/main.js"], { "fileName": "/w/main.js", "modules": { ...loader, "require": () => framework }, "globals": { "log": (value: unknown) => { lines.push(value); } }, "eventLoop": { "pace": "fast" } });
+
+	await runToEnd(vm);
+	assert.deepStrictEqual(lines, ["from config"]);
+});

@@ -20,7 +20,7 @@ import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from 
 import { registerSession, serveDebugControl } from "./debug-control";
 import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
 import { controlSubject, eventSubject } from "./debug-protocol";
-import { podHub } from "./pod";
+import { podHub, workspace } from "./pod";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
 type Dap = Record<string, unknown>;
@@ -127,7 +127,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 					"line": frame.line,
 					"column": frame.column,
 					"function": frame.name,
-					"code": this.source.split("\n")[frame.line - 1]?.trim(),
+					...frame.file === undefined ? {} : { "file": frame.file },
+					"code": frame.code ?? this.source.split("\n")[frame.line - 1]?.trim(),
 					"locals": (scope === undefined ? [] : this.snapshot?.variables[scope.variablesReference] ?? []).map(({ name, value, type }) => ({ "name": name, "value": value, "type": type })),
 					...loop === undefined ? {} : { "eventLoop": (this.snapshot?.variables[loop.variablesReference] ?? []).map(({ name, value, type }) => ({ "name": name, "value": value, "type": type })) }
 				}
@@ -334,19 +335,20 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				break;
 
 			case "setBreakpoints": {
-				// Per file: only the program's own breakpoints apply (another file's lines aren't lines of this program).
+				// Per file: the program's entry's, or another file's — one of the program's own when it loads it (MODULES.md).
 				const points = (args["breakpoints"] as { "line": number }[] | undefined) ?? [];
 				const path = String((args["source"] as { "path"?: string } | undefined)?.path ?? "");
-				const applies = this.program === "" || path === this.program;
 
 				this.breakpointLines.set(path, points.map((point) => point.line));
 				this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
 
 				if (path === this.program) {
 					this.control({ "type": "setBreakpoints", "lines": this.lines });
+				} else if (!this.noDebug) {
+					this.control({ "type": "setBreakpoints", "lines": this.breakpointLines.get(path) ?? [], "file": path });
 				}
 
-				this.respond(request, { "breakpoints": points.map((point) => ({ "verified": applies, "line": point.line })) });
+				this.respond(request, { "breakpoints": points.map((point) => ({ "verified": true, "line": point.line })) });
 				break;
 			}
 
@@ -397,7 +399,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 			case "stackTrace":
 				this.respond(request, {
-					"stackFrames": (this.snapshot?.frames ?? []).map((frame) => ({ ...frame, "source": { "path": this.program } })),
+					"stackFrames": (this.snapshot?.frames ?? []).map(({ file, ...frame }) => ({ ...frame, "source": { "path": file ?? this.program } })),
 					"totalFrames": this.snapshot?.frames.length ?? 0
 				});
 				break;
@@ -584,7 +586,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				return;
 			}
 
-			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "react": this.reactMode, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
+			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "react": this.reactMode, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...workspace.buffer === undefined ? {} : { "workspace": workspace.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
 		});
 	}
 
@@ -593,6 +595,11 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		if (this.worker !== undefined) {
 			podHub.publish(controlSubject(this.id), message, { "traceContext": trace });
 		}
+	}
+
+	/** The user's breakpoints in files other than the program's entry — in a file the program loads, they stop there. */
+	private otherFileLines(): Record<string, number[]> {
+		return this.noDebug ? {} : Object.fromEntries([...this.breakpointLines].filter(([path, lines]) => path !== this.program && lines.length > 0));
 	}
 
 	/** The worker's coverage now, or — when it's gone or doesn't answer within `timeoutMs` — the last it reported. */
@@ -848,7 +855,7 @@ export async function exploreProgram(program: string, maxRuns = 100): Promise<Ex
 			throw new Error("the debug worker didn't start within 30s");
 		}
 
-		podHub.publish(controlSubject(id), { "type": "explore", "source": source, "fileName": program, "policy": policy, "args": mocked ?? [], "eventLoop": { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32) }, "maxRuns": maxRuns } satisfies Control);
+		podHub.publish(controlSubject(id), { "type": "explore", "source": source, "fileName": program, "policy": policy, "args": mocked ?? [], "eventLoop": { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32) }, "maxRuns": maxRuns, ...workspace.buffer === undefined ? {} : { "workspace": workspace.buffer } } satisfies Control);
 
 		return await Promise.race([explored, new Promise<never>((_, reject) => { setTimeout(() => { reject(new Error("exploring took over 2 minutes")); }, 120_000); })]);
 	} finally {

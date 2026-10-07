@@ -68,7 +68,7 @@ export function siteObservations(sums: SiteSums | undefined, file: ts.SourceFile
 		return [line, character];
 	};
 
-	return [...sums ?? []].sort(([a], [b]) => a.getStart(file) - b.getStart(file)).map(([node, known]) => ({ "start": position(node.getStart(file)), "end": position(node.getEnd()), ...summary(known) }));
+	return [...sums ?? []].filter(([node]) => node.getSourceFile() === file).sort(([a], [b]) => a.getStart(file) - b.getStart(file)).map(([node, known]) => ({ "start": position(node.getStart(file)), "end": position(node.getEnd()), ...summary(known) }));
 }
 
 /** What a site's sums say, as a report gives it: for a branch its arms, for a value its counts, tags and samples. */

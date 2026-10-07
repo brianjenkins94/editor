@@ -159,6 +159,11 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 				draw(editor);
 			}
 		}
+
+		// The program's other files that ran, each with its own source.
+		for (const file of report.files ?? []) {
+			show(file);
+		}
 	};
 
 	store.onDidChange(() => { redraw(); });

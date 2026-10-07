@@ -21,10 +21,11 @@ export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack"
 
 /** Adapter → worker. */
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer }
 	/** Run every ordering of the program's events (tsval's explore) instead of debugging it: answered with `explored`. */
-	| { "type": "explore"; "source": string; "fileName": string; "policy"?: Policy; "args"?: string[]; "eventLoop": LoopStart; "maxRuns"?: number }
-	| { "type": "setBreakpoints"; "lines": number[] }
+	| { "type": "explore"; "source": string; "fileName": string; "policy"?: Policy; "args"?: string[]; "eventLoop": LoopStart; "maxRuns"?: number; "workspace"?: SharedArrayBuffer }
+	/** The user's breakpoints in a file: the program's entry, or (`file`) another of its files. */
+	| { "type": "setBreakpoints"; "lines": number[]; "file"?: string }
 	| { "type": "dispatch"; "id": number; "event": string }
 	| { "type": "timeTravel"; "index": number }
 	/** Report the coverage so far (answered with a `coverage` event). */
@@ -60,7 +61,8 @@ export interface Variable { "name": string; "value": string; "type": string; "va
 
 /** A stop, complete enough that the adapter answers stackTrace/scopes/variables with no round-trip. */
 export interface Snapshot {
-	"frames": { "id": number; "name": string; "line": number; "column": number; "at"?: [number, number] }[];
+	/** `file`: the program file the frame is in (the entry when absent); `code`: its line's text. */
+	"frames": { "id": number; "name": string; "line": number; "column": number; "at"?: [number, number]; "file"?: string; "code"?: string }[];
 	"scopes": Record<number, { "name": string; "variablesReference": number; "expensive": boolean }[]>;
 	"variables": Record<number, Variable[]>;
 	/** True when this stop is an earlier point in history (a time-travel view), for the stop reason. */
@@ -134,8 +136,8 @@ export interface SiteObservation {
 }
 
 /** Every statement tsval can run in the program, with how often each ran — 0 for the ones that never did — and every
- *  observed site that ran. The body of the adapter's `getCoverage` reply and of its `coverage` event. */
-export interface CoverageReport { "file": string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "source"?: string; "profile"?: StatementProfile[] }
+ *  observed site that ran: the entry's, and (`files`) each other program file's that ran, with its source. The body of the adapter's `getCoverage` reply and of its `coverage` event. */
+export interface CoverageReport { "file": string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "source"?: string; "profile"?: StatementProfile[]; "files"?: CoverageReport[] }
 
 /** Worker → render surface (`PREVIEW_STREAM`); `reset` comes from the workbench bridge at session start. */
 export type PreviewMessage =

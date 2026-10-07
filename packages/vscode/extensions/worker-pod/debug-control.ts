@@ -48,6 +48,8 @@ export interface DebugOutcome {
 	"state": DebugState;
 	/** Why it stopped: breakpoint, step, capability (a policy-gated call), … */
 	"reason"?: string;
+	/** The file it stopped in, when it's another of the program's files than `program` (MODULES.md). */
+	"file"?: string;
 	"line"?: number;
 	"column"?: number;
 	"function"?: string;
@@ -342,6 +344,7 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 			return summary;
 		})) },
 		{ "dispose": serve(hub, "debug.breakpoints", (args) => {
+			// (`program` is any file: a breakpoint in one the program loads stops there)
 			const { program, lines } = (args ?? {}) as { "program"?: string; "lines"?: number[] };
 			const path = resolveProgram(program);
 

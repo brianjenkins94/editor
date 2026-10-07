@@ -10,3 +10,7 @@
 import { createHub } from "@brianjenkins94/hub";
 
 export const podHub = createHub({ "id": "pod" });
+
+/** The shared workspace (zen-fs's SharedArrayBuffer), once the workbench hands it over: what the pod's workers mount at
+ *  /workspace — an LSP server's through its control port, a debug run's in its launch. */
+export const workspace: { "buffer"?: SharedArrayBuffer } = {};

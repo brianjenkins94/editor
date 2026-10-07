@@ -18,7 +18,7 @@
  * On every stop the worker sends the adapter a COMPLETE snapshot (frame + Locals scope + variable values), so
  * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
-import type { LoadedVM } from "@brianjenkins94/tsval";
+import type { LoadedVM, ModuleLoader } from "@brianjenkins94/tsval";
 import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import { givenResult, ruleMatches } from "@brianjenkins94/util/silo/policy";
@@ -26,7 +26,7 @@ import type { CapabilityAsk, Control, CoverageReport, Explored, PreviewMessage, 
 import type { SiteSums } from "./site-sums";
 import type { GuestRoot } from "./debug-react";
 
-import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
+import { createHub, portTransport, serve } from "@brianjenkins94/hub";
 import { createVM, explore, runToEnd, UNCATCHABLE } from "@brianjenkins94/tsval";
 import React from "react";
 
@@ -79,6 +79,8 @@ let capabilityLines = new Set<number>();
 let policy: Policy | undefined;
 /** The user's breakpoints (1-based lines), armed beside the capability lines. */
 let userLines: number[] = [];
+/** The user's breakpoints in the program's other files (MODULES.md), by file. */
+let fileLines = new Map<string, number[]>();
 /** The statements rules set something after (RULES.md: *set variables.<name>*, *at* a place), by 1-based line: armed
  *  as breakpoints that aren't stops — the statement runs, the sets are made, the run goes on. */
 let setHooks = new Map<number, SetHook[]>();
@@ -185,33 +187,99 @@ function nextAction(): Promise<Action> {
  * builtin (there is no real module system in the worker) BEFORE reaching a capability breakpoint — the whole point of
  * the hard-stop. Real effects belong to the almostnode "production" adapter, not to tsval's reverse-steppable VM.
  */
-function capabilitySurface(fileName: string, args: string[]): { "globals": Record<string, unknown>; "resolveModule": (specifier: string) => unknown } {
+function capabilitySurface(fileName: string, args: string[]): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
 	const standins = denying(capabilityStandins());
 	// What a script reads of its process: its arguments (a run's inputs), and a workspace to be in — nothing it can do.
 	const process = { "argv": ["node", fileName, ...args], "env": {}, "platform": "browser", "cwd": () => "/workspace", "stdin": stdin };
-	const from = fileName.slice(0, fileName.lastIndexOf("/")) || "/workspace";
-	// A gated module is its stand-in; anything else — a built-in, a package, a file — is loaded natively on almostnode
-	// (hostRuntime: not stepped, as a library is), when the program has any; else it's inert.
-	const resolveModule = (specifier: string): unknown => {
-		if (Object.hasOwn(standins.modules, specifier)) {
-			return standins.modules[specifier];
+
+	return { "globals": { ...standins.globals, "console": guestConsole(), "process": process }, "modules": standins.modules };
+}
+
+/** The program's module system (MODULES.md): almostnode on the shared workspace — resolution, the module graph, the
+ *  cache — with tsval evaluating the program's own files (programModules). A package's built-ins are almostnode's, its
+ *  writes refused (a library's effects aren't stepped or asked about); the program's are its stand-ins (programBuiltins:
+ *  what a capability stop is about). Loaded at a run's start. */
+let runtime: Runtime | undefined;
+/** The built-ins the program's code gets (the run's capability stand-ins, by name) — set as a run starts. */
+let programBuiltins: Record<string, unknown> = {};
+/** The machine evaluating the program: a program file a package requires is evaluated on it (a nested run). */
+let evaluating: Vm | undefined;
+
+type Runtime = InstanceType<typeof import("@brianjenkins94/almostnode").Runtime>;
+
+/** The runtime, loaded once per worker: the shared workspace (the launch's — the pod holds it) attached, its servers
+ *  answering the preview. */
+async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<Runtime> {
+	if (runtime !== undefined) {
+		return runtime;
+	}
+
+	const [{ getServer, getServerBridge, Runtime }, zenfs] = await Promise.all([import("@brianjenkins94/almostnode"), import("./zenfs-vfs.js")]);
+
+	if (workspace !== undefined) {
+		zenfs.attachSharedWorkspace(workspace);
+	}
+
+	const write = (method: string, path: string): never => {
+		throw Object.assign(new Error(`EACCES: a library can't write in a debug run (${method} ${path})`), { "code": "EACCES" });
+	};
+
+	runtime = new Runtime(await zenfs.createZenfsVFS(), {
+		"cwd": "/workspace",
+		"env": {},
+		"beforeFs": (op, method, path) => { if (op === "write") { write(method, path); } },
+		// The program's code gets its stand-ins (`fs`, `child_process`); a package, almostnode's own.
+		"builtinFor": (id, requester) => (requester === "program" && Object.hasOwn(programBuiltins, id) ? programBuiltins[id] : undefined),
+		// A program file a package requires: tsval's to evaluate, on the run's machine (a nested run).
+		"evaluateProgram": (module) => {
+			if (evaluating === undefined) {
+				throw new Error(`no run to evaluate ${module.filename} on`);
+			}
+
+			evaluating.evaluateModule(module);
+		}
+	});
+	// A server the program starts: answering the preview for its port, the request its handler's call (not stepped on the
+	// main stack — a breakpoint in it pauses there, as in a React handler).
+	getServerBridge({ "onServerReady": (port: number) => {
+		if (listening.has(port)) {
+			return;
 		}
 
-		return hostRuntime === undefined ? inert() : hostRuntime.require(specifier, from);
-	};
-	// CommonJS: require, and a module whose exports it may set.
-	const module = { "exports": {} as unknown };
+		listening.add(port);
+		serve(hub, `virtual.debug.${port}`, async (raw) => {
+			const { method, url, headers, body } = raw as { "method": string; "url": string; "headers": Record<string, string>; "body"?: Uint8Array };
+			const server = getServer(port) as unknown as { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<{ "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }> } | undefined;
+
+			if (server === undefined) {
+				return { "status": 502, "statusText": "Bad Gateway", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`nothing listens on ${port} any more`) };
+			}
+
+			const response = await server.handleRequest(method, url, headers, body);
+
+			return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": response.body };
+		});
+		post({ "type": "listening", "port": port });
+	} });
+
+	return runtime;
+}
+
+/** The runtime as tsval's module loader (VMOptions.modules): it resolves; tsval evaluates the program's files; what isn't
+ *  the program's, almostnode loads — asked for by the program, so its built-ins are the stand-ins. */
+function programModules(loaded: Runtime): ModuleLoader {
+	const vfs = loaded.getVFS();
 
 	return {
-		"globals": { ...standins.globals, "console": guestConsole(), "process": process, "require": resolveModule, "module": module, "exports": module.exports },
-		"resolveModule": resolveModule
+		"resolve": (specifier, fromDir) => loaded.resolve(specifier, fromDir),
+		"require": (specifier, fromDir) => loaded.require(specifier, fromDir, "program"),
+		"source": (filename) => vfs.readFileSync(filename, "utf8") as string,
+		"cached": (filename) => loaded.cached(filename),
+		"register": (filename, module) => { loaded.register(filename, module as Parameters<Runtime["register"]>[1]); },
+		"forget": (filename) => { loaded.forget(filename); }
 	};
 }
 
-/** almostnode on the shared workspace, for a debug run's dependencies (capabilitySurface) — loaded only for a program
- *  that has some (hostModulesFor). Its own writes are refused: a library's effects aren't stepped or asked about, so
- *  a debug run lets it read and nothing more; the program's own calls go through its capability stops. */
-let hostRuntime: { "require": (specifier: string, fromDir?: string) => unknown } | undefined;
 /** The ports a debug run's servers listen on (node:http, from almostnode): each answers the preview (`virtual.debug.<port>`,
  *  asked by the dev-server worker) and keeps the run alive — out of work, it idles, serving. */
 const listening = new Set<number>();
@@ -253,72 +321,6 @@ const held = new Set<unknown>();
 	"retain": (handle) => { held.add(handle); },
 	"release": (handle) => { held.delete(handle); }
 };
-
-/** What `file` imports or requires (literal specifiers) that isn't a gated module. */
-function dependenciesOf(file: ts.SourceFile): string[] {
-	const gated = new Set(Object.keys(capabilityStandins().modules));
-	const found = new Set<string>();
-	const visit = (node: ts.Node): void => {
-		const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier : ts.isCallExpression(node) && ((ts.isIdentifier(node.expression) && node.expression.text === "require") || node.expression.kind === ts.SyntaxKind.ImportKeyword) ? node.arguments[0] : undefined;
-
-		if (specifier !== undefined && ts.isStringLiteralLike(specifier) && !gated.has(specifier.text)) {
-			found.add(specifier.text);
-		}
-
-		node.forEachChild(visit);
-	};
-
-	visit(file);
-
-	return [...found];
-}
-
-/** Load almostnode for `file`'s dependencies, if it has any: the shared workspace attached (packages from its
- *  node_modules), writes refused. A program with none never loads it. */
-async function hostModulesFor(file: ts.SourceFile): Promise<void> {
-	const dependencies = dependenciesOf(file);
-
-	if (dependencies.length === 0 || hostRuntime !== undefined) {
-		return;
-	}
-
-	try {
-		const [{ getServer, getServerBridge, Runtime }, zenfs] = await Promise.all([import("@brianjenkins94/almostnode"), import("./zenfs-vfs.js")]);
-
-		zenfs.attachSharedWorkspace(await createRpcClient(hub).request("workspace.buffer", undefined, { "timeoutMs": 10_000, "waitForResponderMs": 10_000 }));
-
-		const write = (method: string, path: string): never => {
-			throw Object.assign(new Error(`EACCES: a library can't write in a debug run (${method} ${path})`), { "code": "EACCES" });
-		};
-
-		hostRuntime = new Runtime(await zenfs.createZenfsVFS(), { "cwd": "/workspace", "env": {}, "beforeFs": (op, method, path) => { if (op === "write") { write(method, path); } } });
-		// A server the program starts: answering the preview for its port, the request its handler's call (not stepped on
-		// the main stack — a breakpoint in it pauses there, as in a React handler).
-		getServerBridge({ "onServerReady": (port: number) => {
-			if (listening.has(port)) {
-				return;
-			}
-
-			listening.add(port);
-			serve(hub, `virtual.debug.${port}`, async (raw) => {
-				const { method, url, headers, body } = raw as { "method": string; "url": string; "headers": Record<string, string>; "body"?: Uint8Array };
-				const server = getServer(port) as { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<{ "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }> } | undefined;
-
-				if (server === undefined) {
-					return { "status": 502, "statusText": "Bad Gateway", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`nothing listens on ${port} any more`) };
-				}
-
-				const response = await server.handleRequest(method, url, headers, body);
-
-				return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": response.body };
-			});
-			post({ "type": "listening", "port": port });
-		} });
-		workerLog.info("host modules", { "dependencies": dependencies });
-	} catch (error) {
-		workerLog.warn("no host modules — dependencies stay inert", { "error": String(error) });
-	}
-}
 
 /** The stand-ins, each failing when the user denied its call at a capability stop (`denyNext`) — with node's EACCES, as
  *  the call would fail if the policy denied it — and returning the result a rule gives its call (RULES.md, slice 2), or
@@ -462,7 +464,7 @@ function setValue(vm: Vm, name: string, text: string, overConst = false): Extrac
 
 			const at = vm.location();
 
-			if (at !== null) {
+			if (at !== null && at.file === sourceFile?.fileName) {
 				live.add({ "line": at.line, "name": name, "value": "", "raw": binding.value, "kind": "set", "call": lastTraced?.call ?? 0, "turns": lastTraced?.turns ?? [], "step": lastTraced?.step ?? 0, ...vm.currentNode === null ? {} : { "at": rangeOf(vm.currentNode) } });
 				flushLive();
 			}
@@ -478,6 +480,14 @@ function setValue(vm: Vm, name: string, text: string, overConst = false): Extrac
 function arm(vm: Vm): void {
 	vm.breakpoints.clear();
 	vm.addBreakpointsByLine(...userLines, ...capabilityLines, ...setHooks.keys());
+
+	for (const [file, lines] of fileLines) {
+		try {
+			vm.addBreakpointsInFile(file, ...lines);
+		} catch {
+			// (a file that isn't there, or doesn't parse: nothing of it runs)
+		}
+	}
 }
 
 /** Whether a run reaching `line` stops there: a breakpoint of the user's, or a capability call the policy gates. */
@@ -663,14 +673,20 @@ function formatLogArg(value: unknown): string {
  */
 async function exploreOrderings(message: Extract<Control, { "type": "explore" }>): Promise<Explored> {
 	policy = message.policy;
-	await hostModulesFor(ts.createSourceFile(message.fileName, message.source, ts.ScriptTarget.Latest, true));
+	const loaded = await runtimeReady(message.workspace);
 
 	const found = await explore(async (schedule) => {
 		const output: string[] = [];
 		const surface = capabilitySurface(message.fileName, message.args ?? []);
+
+		// Each run from scratch: its own modules (the program's evaluated again), its own stand-ins.
+		loaded.clearCache();
+		programBuiltins = surface.modules;
 		const write = (...args: unknown[]): void => { output.push(args.map(formatLogArg).join(" ")); };
 		const console = Object.fromEntries(["log", "info", "debug", "dir", "warn", "error", "trace"].map((name) => [name, write]));
-		const { vm } = createVM(message.source, { "fileName": message.fileName, "globals": { ...surface.globals, "console": console }, "resolveModule": surface.resolveModule, "eventLoop": { ...message.eventLoop, "schedule": schedule, "pace": "fast" } });
+		const { vm } = createVM(message.source, { "fileName": message.fileName, "globals": { ...surface.globals, "console": console }, "modules": programModules(loaded), "eventLoop": { ...message.eventLoop, "schedule": schedule, "pace": "fast" } });
+
+		evaluating = vm;
 		let crash: string | undefined;
 		const unhandled = (event: PromiseRejectionEvent): void => {
 			crash ??= event.reason instanceof Error ? event.reason.message : String(event.reason);
@@ -761,7 +777,7 @@ function snapshot(vm: Vm): Snapshot {
 	}
 
 	return {
-		"frames": [{ "id": 1, "name": functionName(loc?.pos), "line": (loc?.line ?? 0) + 1, "column": (loc?.character ?? 0) + 1, ...vm.currentNode === null ? {} : { "at": rangeOf(vm.currentNode) } }],
+		"frames": [{ "id": 1, "name": functionName(vm.currentNode), "line": (loc?.line ?? 0) + 1, "column": (loc?.character ?? 0) + 1, ...vm.currentNode === null ? {} : { "at": rangeOf(vm.currentNode) }, ...loc === null || loc.file === sourceFile?.fileName ? {} : { "file": loc.file, "code": vm.currentNode?.getSourceFile().text.split("\n")[loc.line]?.trim() } }],
 		"scopes": { "1": [{ "name": "Locals", "variablesReference": 1000, "expensive": false }, ...vm.loop === undefined ? [] : [{ "name": "Event loop", "variablesReference": 2000, "expensive": false }]] },
 		"variables": { "1000": rows, ...vm.loop === undefined ? {} : { "2000": loopRows(vm.loop) } }
 	};
@@ -786,44 +802,27 @@ function loopRows(loop: NonNullable<Vm["loop"]>): Variable[] {
 }
 
 /**
- * Label for the stack frame: the INNERMOST function whose source range contains the current position. The
- * continuation frames aren't 1:1 with function calls, so we resolve this off the AST by position instead.
+ * Label for the stack frame: the INNERMOST function containing the current node, in its own file. The continuation
+ * frames aren't 1:1 with function calls, so we resolve this off the AST instead.
  */
-function functionName(pos: number | undefined): string {
-	if (pos === undefined || sourceFile === undefined) {
-		return "<module>";
-	}
-
-	const isFunctionLike = (node: ts.Node): boolean => ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node);
-	let best: ts.FunctionLikeDeclaration | undefined;
-	let bestSpan = Infinity;
-
-	const visit = (node: ts.Node): void => {
-		if (isFunctionLike(node) && node.getStart(sourceFile) <= pos && pos < node.getEnd()) {
-			const span = node.getEnd() - node.getStart(sourceFile);
-
-			if (span < bestSpan) {
-				bestSpan = span;
-				best = node as ts.FunctionLikeDeclaration;
-			}
+function functionName(node: ts.Node | null): string {
+	for (let at = node ?? undefined; at !== undefined; at = at.parent) {
+		if (ts.isFunctionDeclaration(at) || ts.isFunctionExpression(at) || ts.isArrowFunction(at) || ts.isMethodDeclaration(at)) {
+			return at.name !== undefined && ts.isIdentifier(at.name) ? at.name.text : "<anonymous>";
 		}
-
-		node.forEachChild(visit);
-	};
-
-	sourceFile.forEachChild(visit);
-
-	if (best === undefined) {
-		return "<module>";
 	}
 
-	return best.name !== undefined && ts.isIdentifier(best.name) ? best.name.text : "<anonymous>";
+	return "<module>";
 }
 
 /** What tsval's trace told, into the session's live values: its line, and its call's function by name and line. */
 function traceValue(event: TraceEvent): void {
 	if (sourceFile === undefined || probing !== undefined) {
 		return; // (a probe's fork didn't run)
+	}
+
+	if (event.node.getSourceFile() !== sourceFile) {
+		return; // (the program's other files: their values aren't drawn yet — MODULES.md step 3)
 	}
 
 	const lineOf = (node: ts.Node): number => sourceFile!.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line;
@@ -856,7 +855,7 @@ function reportArgv(file: ts.SourceFile, args: string[]): void {
 function rangeOf(node: ts.Node): [number, number] {
 	const head = headOf(node);
 
-	return [head.getStart(sourceFile), head.getEnd()];
+	return [head.getStart(head.getSourceFile()), head.getEnd()];
 }
 
 /** What stands for `node` on the code through a reformat: a statement with a body by its head — an `if`'s or a loop's
@@ -940,15 +939,30 @@ function onBreakpointHook(vm: Vm): void {
 }
 
 /** Every statement tsval can run (see its isStatement: blocks and declarations never take a step of their own), with
- *  how often `current` has run each — 0 for the ones it hasn't. */
+ *  how often `current` has run each — 0 for the ones it hasn't: the entry's, and each other program file's that ran
+ *  (`files`, with its source). */
 function coverageReport(): CoverageReport {
-	const file = sourceFile;
+	if (sourceFile === undefined) {
+		return { "file": "", "statements": [], "sites": [] };
+	}
+
+	const others = new Set<ts.SourceFile>();
+
+	for (const node of current?.coverage?.keys() ?? []) {
+		others.add(node.getSourceFile());
+	}
+
+	others.delete(sourceFile);
+
+	const files = [...others].map((file) => ({ ...fileCoverage(file), "source": file.text }));
+
+	return { ...fileCoverage(sourceFile), ...files.length === 0 ? {} : { "files": files } };
+}
+
+/** One program file's coverage, its observed sites and its top-level statements' profile. */
+function fileCoverage(file: ts.SourceFile): CoverageReport {
 	const counts = current?.coverage;
 	const statements: CoverageReport["statements"] = [];
-
-	if (file === undefined) {
-		return { "file": "", "statements": statements, "sites": [] };
-	}
 
 	const visit = (node: ts.Node): void => {
 		if (node.kind >= ts.SyntaxKind.FirstStatement && node.kind <= ts.SyntaxKind.LastStatement) {
@@ -987,7 +1001,8 @@ function finish(exitCode = 0, crash?: { "line": number; "at": [number, number]; 
 function atLine(vm: Vm): number | undefined {
 	const location = vm.location();
 
-	return location === null ? undefined : location.line + 1;
+	// In another of the program's files: none of the entry's (only the user's breakpoints are armed there).
+	return location === null || location.file !== sourceFile?.fileName ? undefined : location.line + 1;
 }
 
 /** Where `error` was thrown, for the margin's mark: by now the frames have unwound, so tsval's note of it, not the
@@ -997,7 +1012,7 @@ function crashOf(vm: Vm, error: unknown): { "line": number; "at": [number, numbe
 		const site = vm.throwSite(error);
 		const at = vm.location(site);
 
-		return at === null || site === null ? undefined : { "line": at.line, "at": rangeOf(site), "message": String(error) };
+		return at === null || site === null || at.file !== sourceFile?.fileName ? undefined : { "line": at.line, "at": rangeOf(site), "message": String(error) };
 	} catch {
 		return undefined;
 	}
@@ -1217,6 +1232,65 @@ function launchReact(message: Extract<Control, { "type": "launch" }>, trace: Tra
 	toPreview({ "type": "rendered" });
 }
 
+/** A program launched for debugging: its module system ready first (almostnode: MODULES.md), then its machine — the entry
+ *  a module of the program's, its files tsval's — armed and run to its first stop. */
+async function launchProgram(message: Extract<Control, { "type": "launch" }>, trace: TraceContext | undefined): Promise<void> {
+	// tsval's event loop (steppedAsync with timers, a virtual clock and a seeded random): async code and timers run
+	// on the stack the debugger steps — its breakpoints, capability stops, rules — and the same way every time, so a
+	// step forward from any stop it travelled back to goes the way it went. Its start is logged, to run it again; a
+	// launch can give one (an ordering explore found: its clock, seed and schedule).
+	// A server it starts keeps it alive: out of work, it idles, serving.
+	const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": "real" as const, "keepAlive": () => held.size > 0 || readsStdin() };
+	const surface = capabilitySurface(message.fileName, message.args ?? []);
+	let modules: ModuleLoader;
+
+	try {
+		modules = programModules(await runtimeReady(message.workspace));
+	} catch (error) {
+		post({ "type": "output", "text": `The program's modules can't be loaded: ${String(error)}`, "stream": "stderr" });
+		finish(1);
+
+		return;
+	}
+
+	programBuiltins = surface.modules;
+	runtime?.clearCache();
+
+	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, "globals": surface.globals, "modules": modules });
+
+	evaluating = loaded.vm;
+
+	loopStart = eventLoop.now;
+	pace = "real";
+	workerLog.info("event loop", { "now": eventLoop.now, "seed": eventLoop.seed, ...eventLoop.schedule === undefined ? {} : { "schedule": eventLoop.schedule } });
+
+	liveTimer = setInterval(flushLive, 250);
+
+	sourceFile = loaded.sourceFile;
+	record(loaded.vm, new Map());
+	// Capability breakpoints: pre-arm a breakpoint at every capability call the policy won't let pass, so a
+	// gated call hard-stops at its line with the debugger's normal step / step-back, and asks there (step 8 of
+	// LIVE-VALUES.md). No policy → every undecided dangerous call breaks (firewall default).
+	policy = message.policy;
+	userLines = message.lines;
+	fileLines = new Map(Object.entries(message.files ?? {}));
+	programPath = message.program ?? message.fileName;
+	setHooks = new Map();
+
+	for (const hook of message.hooks ?? []) {
+		setHooks.set(hook.line, [...setHooks.get(hook.line) ?? [], hook]);
+	}
+	// What it reads from outside, first: process.argv (the margin mocks it there).
+	reportArgv(loaded.sourceFile, message.args ?? []);
+	capabilityLines = new Set(policy !== undefined ? capabilityBreakLines(loaded.sourceFile, policy) : []);
+	arm(loaded.vm);
+
+	history = [];
+	index = -1;
+	done = false;
+	await session(loaded.vm, trace);
+}
+
 hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 	const message = data as Control;
 	const trace = envelope.traceContext;
@@ -1239,43 +1313,7 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 				break;
 			}
 
-			// tsval's event loop (steppedAsync with timers, a virtual clock and a seeded random): async code and timers run
-			// on the stack the debugger steps — its breakpoints, capability stops, rules — and the same way every time, so a
-			// step forward from any stop it travelled back to goes the way it went. Its start is logged, to run it again; a
-			// launch can give one (an ordering explore found: its clock, seed and schedule).
-			// A server it starts keeps it alive: out of work, it idles, serving.
-			const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": "real" as const, "keepAlive": () => held.size > 0 || readsStdin() };
-			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, ...capabilitySurface(message.fileName, message.args ?? []) });
-
-			loopStart = eventLoop.now;
-			pace = "real";
-			workerLog.info("event loop", { "now": eventLoop.now, "seed": eventLoop.seed, ...eventLoop.schedule === undefined ? {} : { "schedule": eventLoop.schedule } });
-
-			liveTimer = setInterval(flushLive, 250);
-
-			sourceFile = loaded.sourceFile;
-			record(loaded.vm, new Map());
-			// Capability breakpoints: pre-arm a breakpoint at every capability call the policy won't let pass, so a
-			// gated call hard-stops at its line with the debugger's normal step / step-back, and asks there (step 8 of
-			// LIVE-VALUES.md). No policy → every undecided dangerous call breaks (firewall default).
-			policy = message.policy;
-			userLines = message.lines;
-			programPath = message.program ?? message.fileName;
-			setHooks = new Map();
-
-			for (const hook of message.hooks ?? []) {
-				setHooks.set(hook.line, [...setHooks.get(hook.line) ?? [], hook]);
-			}
-			// What it reads from outside, first: process.argv (the margin mocks it there).
-			reportArgv(loaded.sourceFile, message.args ?? []);
-			capabilityLines = new Set(policy !== undefined ? capabilityBreakLines(loaded.sourceFile, policy) : []);
-			arm(loaded.vm);
-
-			history = [];
-			index = -1;
-			done = false;
-			// Its dependencies, if it has any, loaded first (almostnode): its imports resolve as it runs.
-			void hostModulesFor(loaded.sourceFile).then(() => session(loaded.vm, trace));
+			void launchProgram(message, trace);
 			break;
 		}
 
@@ -1310,7 +1348,11 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 		case "setBreakpoints":
 			// Re-point breakpoints on every stored fork so time-traveled forward runs honor the new set — the capability
 			// lines with them (replacing the user's alone would disarm those).
-			userLines = message.lines;
+			if (message.file === undefined || message.file === sourceFile?.fileName) {
+				userLines = message.lines;
+			} else {
+				fileLines.set(message.file, message.lines);
+			}
 
 			for (const vm of history) {
 				arm(vm);
