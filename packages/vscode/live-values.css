@@ -381,3 +381,55 @@
   background: var(--vscode-editor-background, #fff);
   box-shadow: inset 0 0 0 1.5px var(--vscode-charts-purple, #b180d7);
 }
+
+/* The run log (PROJECTIONS.md), at the file's end: the last run step by step — each card's number and title, its share of
+   the work, what it waited — under how the run ended. */
+.live-values-runlog {
+  margin: 4px 0 2px;
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 55%, transparent);
+  font-family: var(--vscode-font-family);
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.live-values-runlog-head {
+  color: var(--vscode-descriptionForeground);
+}
+
+.live-values-runlog-head.crashed {
+  color: var(--vscode-editorError-foreground, #e51400);
+}
+
+.live-values-runlog-head.stopped {
+  color: var(--vscode-editorWarning-foreground, #bf8803);
+}
+
+.live-values-runlog-row {
+  display: flex;
+  gap: 8px;
+}
+
+.live-values-runlog-card {
+  width: 2ch;
+  text-align: right;
+  color: var(--vscode-descriptionForeground);
+}
+
+.live-values-runlog-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-foreground);
+}
+
+.live-values-runlog-share {
+  font-variant-numeric: tabular-nums;
+}
+
+.live-values-runlog-waited {
+  color: var(--vscode-charts-blue, #3794ff);
+}

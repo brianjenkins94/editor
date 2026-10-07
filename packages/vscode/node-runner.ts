@@ -266,8 +266,17 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 			stopped = true;
 			hub.publish("debug.stop", { "runId": run.id });
 		});
+		// A server it starts listening: a service, with its port — as a script's is.
+		const offListening = hub.subscribe(`node.listening.${run.id}`, (data) => {
+			const port = (data as { "port"?: unknown } | null)?.port;
+
+			if (typeof port === "number") {
+				run.update({ "kind": "service", "port": port });
+			}
+		});
 		const off = hub.subscribe(`node.exit.${run.id}`, (data) => {
 			off();
+			offListening();
 			run.end((data as { "exitCode"?: number } | null)?.exitCode ?? 0, stopped);
 		});
 

@@ -26,7 +26,7 @@ import type { CapabilityAsk, Control, CoverageReport, Explored, PreviewMessage, 
 import type { SiteSums } from "./site-sums";
 import type { GuestRoot } from "./debug-react";
 
-import { createHub, portTransport } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { createVM, explore, runToEnd, UNCATCHABLE } from "@brianjenkins94/tsval";
 import React from "react";
 
@@ -188,12 +188,136 @@ function nextAction(): Promise<Action> {
 function capabilitySurface(fileName: string, args: string[]): { "globals": Record<string, unknown>; "resolveModule": (specifier: string) => unknown } {
 	const standins = denying(capabilityStandins());
 	// What a script reads of its process: its arguments (a run's inputs), and a workspace to be in — nothing it can do.
-	const process = { "argv": ["node", fileName, ...args], "env": {}, "platform": "browser", "cwd": () => "/workspace" };
+	const process = { "argv": ["node", fileName, ...args], "env": {}, "platform": "browser", "cwd": () => "/workspace", "stdin": stdin };
+	const from = fileName.slice(0, fileName.lastIndexOf("/")) || "/workspace";
+	// A gated module is its stand-in; anything else — a built-in, a package, a file — is loaded natively on almostnode
+	// (hostRuntime: not stepped, as a library is), when the program has any; else it's inert.
+	const resolveModule = (specifier: string): unknown => {
+		if (Object.hasOwn(standins.modules, specifier)) {
+			return standins.modules[specifier];
+		}
+
+		return hostRuntime === undefined ? inert() : hostRuntime.require(specifier, from);
+	};
+	// CommonJS: require, and a module whose exports it may set.
+	const module = { "exports": {} as unknown };
 
 	return {
-		"globals": { ...standins.globals, "console": guestConsole(), "process": process },
-		"resolveModule": (specifier: string) => (Object.hasOwn(standins.modules, specifier) ? standins.modules[specifier] : inert())
+		"globals": { ...standins.globals, "console": guestConsole(), "process": process, "require": resolveModule, "module": module, "exports": module.exports },
+		"resolveModule": resolveModule
 	};
+}
+
+/** almostnode on the shared workspace, for a debug run's dependencies (capabilitySurface) — loaded only for a program
+ *  that has some (hostModulesFor). Its own writes are refused: a library's effects aren't stepped or asked about, so
+ *  a debug run lets it read and nothing more; the program's own calls go through its capability stops. */
+let hostRuntime: { "require": (specifier: string, fromDir?: string) => unknown } | undefined;
+/** The ports a debug run's servers listen on (node:http, from almostnode): each answers the preview (`virtual.debug.<port>`,
+ *  asked by the dev-server worker) and keeps the run alive — out of work, it idles, serving. */
+const listening = new Set<number>();
+/** The program's process.stdin: what's typed in the Debug Console arrives on it (`stdin` control) — a `data` event, a
+ *  string — and a program listening on it is kept alive, waiting for input, as by a server. */
+const stdin = ((): { "on": (event: string, listener: (...args: unknown[]) => void) => unknown; "emit": (event: string, ...args: unknown[]) => boolean; "listenerCount": (event: string) => number } => {
+	const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
+	const self = {
+		"isTTY": false,
+		"on": (event: string, listener: (...args: unknown[]) => void) => { listeners.set(event, [...listeners.get(event) ?? [], listener]); return self; },
+		"addListener": (event: string, listener: (...args: unknown[]) => void) => self.on(event, listener),
+		"once": (event: string, listener: (...args: unknown[]) => void) => {
+			const once = (...args: unknown[]): void => { self.off(event, once); listener(...args); };
+
+			return self.on(event, once);
+		},
+		"off": (event: string, listener: (...args: unknown[]) => void) => { listeners.set(event, (listeners.get(event) ?? []).filter((each) => each !== listener)); return self; },
+		"removeListener": (event: string, listener: (...args: unknown[]) => void) => self.off(event, listener),
+		"removeAllListeners": (event?: string) => { if (event === undefined) { listeners.clear(); } else { listeners.delete(event); } return self; },
+		"emit": (event: string, ...args: unknown[]) => { const each = listeners.get(event) ?? []; each.forEach((listener) => { listener(...args); }); return each.length > 0; },
+		"listenerCount": (event: string) => listeners.get(event)?.length ?? 0,
+		"setEncoding": () => self,
+		"resume": () => self,
+		"pause": () => self,
+		"setRawMode": () => self
+	};
+
+	return self;
+})();
+
+/** Whether the program waits on its stdin. */
+const readsStdin = (): boolean => stdin.listenerCount("data") + stdin.listenerCount("readable") > 0;
+
+/** What holds a debug run open — almostnode's keep-alive hook (`__nodeKeepAlive`): a server is held from the moment
+ *  it's told to listen (its port is known a microtask later), let go when it closes or is unref'd. */
+const held = new Set<unknown>();
+
+(globalThis as unknown as { "__nodeKeepAlive"?: { "retain": (handle: unknown) => void; "release": (handle: unknown) => void } }).__nodeKeepAlive = {
+	"retain": (handle) => { held.add(handle); },
+	"release": (handle) => { held.delete(handle); }
+};
+
+/** What `file` imports or requires (literal specifiers) that isn't a gated module. */
+function dependenciesOf(file: ts.SourceFile): string[] {
+	const gated = new Set(Object.keys(capabilityStandins().modules));
+	const found = new Set<string>();
+	const visit = (node: ts.Node): void => {
+		const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier : ts.isCallExpression(node) && ((ts.isIdentifier(node.expression) && node.expression.text === "require") || node.expression.kind === ts.SyntaxKind.ImportKeyword) ? node.arguments[0] : undefined;
+
+		if (specifier !== undefined && ts.isStringLiteralLike(specifier) && !gated.has(specifier.text)) {
+			found.add(specifier.text);
+		}
+
+		node.forEachChild(visit);
+	};
+
+	visit(file);
+
+	return [...found];
+}
+
+/** Load almostnode for `file`'s dependencies, if it has any: the shared workspace attached (packages from its
+ *  node_modules), writes refused. A program with none never loads it. */
+async function hostModulesFor(file: ts.SourceFile): Promise<void> {
+	const dependencies = dependenciesOf(file);
+
+	if (dependencies.length === 0 || hostRuntime !== undefined) {
+		return;
+	}
+
+	try {
+		const [{ getServer, getServerBridge, Runtime }, zenfs] = await Promise.all([import("@brianjenkins94/almostnode"), import("./zenfs-vfs.js")]);
+
+		zenfs.attachSharedWorkspace(await createRpcClient(hub).request("workspace.buffer", undefined, { "timeoutMs": 10_000, "waitForResponderMs": 10_000 }));
+
+		const write = (method: string, path: string): never => {
+			throw Object.assign(new Error(`EACCES: a library can't write in a debug run (${method} ${path})`), { "code": "EACCES" });
+		};
+
+		hostRuntime = new Runtime(await zenfs.createZenfsVFS(), { "cwd": "/workspace", "env": {}, "beforeFs": (op, method, path) => { if (op === "write") { write(method, path); } } });
+		// A server the program starts: answering the preview for its port, the request its handler's call (not stepped on
+		// the main stack — a breakpoint in it pauses there, as in a React handler).
+		getServerBridge({ "onServerReady": (port: number) => {
+			if (listening.has(port)) {
+				return;
+			}
+
+			listening.add(port);
+			serve(hub, `virtual.debug.${port}`, async (raw) => {
+				const { method, url, headers, body } = raw as { "method": string; "url": string; "headers": Record<string, string>; "body"?: Uint8Array };
+				const server = getServer(port) as { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<{ "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }> } | undefined;
+
+				if (server === undefined) {
+					return { "status": 502, "statusText": "Bad Gateway", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`nothing listens on ${port} any more`) };
+				}
+
+				const response = await server.handleRequest(method, url, headers, body);
+
+				return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": response.body };
+			});
+			post({ "type": "listening", "port": port });
+		} });
+		workerLog.info("host modules", { "dependencies": dependencies });
+	} catch (error) {
+		workerLog.warn("no host modules — dependencies stay inert", { "error": String(error) });
+	}
 }
 
 /** The stand-ins, each failing when the user denied its call at a capability stop (`denyNext`) — with node's EACCES, as
@@ -539,6 +663,7 @@ function formatLogArg(value: unknown): string {
  */
 async function exploreOrderings(message: Extract<Control, { "type": "explore" }>): Promise<Explored> {
 	policy = message.policy;
+	await hostModulesFor(ts.createSourceFile(message.fileName, message.source, ts.ScriptTarget.Latest, true));
 
 	const found = await explore(async (schedule) => {
 		const output: string[] = [];
@@ -838,7 +963,15 @@ function coverageReport(): CoverageReport {
 
 	file.forEachChild(visit);
 
-	return { "file": file.fileName, "statements": statements, "sites": siteObservations(current === undefined ? undefined : sumsOf.get(current), file) };
+	// Where the run's work went, by top-level statement — declarations too (tsval's profile).
+	const profile = file.statements.flatMap((statement) => {
+		const entry = current?.profile?.get(statement);
+		const start = file.getLineAndCharacterOfPosition(statement.getStart(file));
+
+		return entry === undefined ? [] : [{ "start": [start.line, start.character] as [number, number], "anchor": rangeOf(statement), ...entry }];
+	});
+
+	return { "file": file.fileName, "statements": statements, "sites": siteObservations(current === undefined ? undefined : sumsOf.get(current), file), ...profile.length === 0 ? {} : { "profile": profile } };
 }
 
 /** The program is over: report its coverage, then end the session — with 1 for a program that threw, as node would, and
@@ -929,6 +1062,11 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 			// Async work pending and none ready (tsval's steppedAsync): let it settle, then go on — a continue to its next
 			// stop, a step to the next statement that runs (in whichever job runs next).
 			while (!base.finished && base.idle) {
+				// Out of work but serving: the session is idle — a request (or a timer it sets) goes on from here.
+				if (held.size > 0 || readsStdin()) {
+					post({ "type": "serving", "ports": [...listening] });
+				}
+
 				await base.whenSettled();
 
 				if (done) {
@@ -1105,8 +1243,9 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 			// on the stack the debugger steps — its breakpoints, capability stops, rules — and the same way every time, so a
 			// step forward from any stop it travelled back to goes the way it went. Its start is logged, to run it again; a
 			// launch can give one (an ordering explore found: its clock, seed and schedule).
-			const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": "real" as const };
-			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, ...capabilitySurface(message.fileName, message.args ?? []) });
+			// A server it starts keeps it alive: out of work, it idles, serving.
+			const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": "real" as const, "keepAlive": () => held.size > 0 || readsStdin() };
+			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, ...capabilitySurface(message.fileName, message.args ?? []) });
 
 			loopStart = eventLoop.now;
 			pace = "real";
@@ -1135,7 +1274,8 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 			history = [];
 			index = -1;
 			done = false;
-			void session(loaded.vm, trace);
+			// Its dependencies, if it has any, loaded first (almostnode): its imports resolve as it runs.
+			void hostModulesFor(loaded.sourceFile).then(() => session(loaded.vm, trace));
 			break;
 		}
 
@@ -1176,6 +1316,12 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 				arm(vm);
 			}
 
+			break;
+
+		case "stdin":
+			// Typed in the Debug Console: the program's input — its listeners called with it, and the run woken to go on.
+			stdin.emit("data", message.data);
+			current?.loop?.wake?.();
 			break;
 
 		case "pace":

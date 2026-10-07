@@ -1212,6 +1212,123 @@ test("debugger: a task's timers run on tsval's deterministic event loop", async 
 	await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
 });
 
+// A debug run's dependencies (built-ins, packages, the program's other files) load natively on almostnode — not
+// stepped, as a library isn't — where before every import but fs and child_process was inert.
+test("debugger: a program's imports — built-ins and its other files — load natively", async () => {
+	const workbench = session.workbench();
+
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const write = (path, lines) => api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode(lines.join("\n")));
+
+		await write("/workspace/greet.js", ["module.exports = (who) => \"hello, \" + who;", ""]);
+		await write("/workspace/deps.js", [
+			"import path from \"node:path\";",
+			"import { EventEmitter } from \"node:events\";",
+			"",
+			"const greet = require(\"./greet.js\");",
+			"const events = new EventEmitter();",
+			"",
+			"events.on(\"file\", (name) => console.log(greet(name)));",
+			"events.emit(\"file\", path.basename(\"/workspace/notes/today.txt\"));",
+			""
+		]);
+	});
+
+	const ran = await session.request("debug.start", { "program": "/workspace/deps.js", "breakpoints": [] }, 60_000);
+
+	assert.equal(ran.state, "terminated");
+	assert.deepEqual(ran.output.filter((line) => !line.startsWith("→")), ["hello, today.txt"]);
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.delete(api.Uri.file("/workspace/deps.js"));
+		await api.workspace.fs.delete(api.Uri.file("/workspace/greet.js"));
+	});
+});
+
+// A service under the debugger: a node:http server the program starts (almostnode's, in the debug worker) keeps the run
+// alive — idle, serving — and answers the preview's requests for its port; the run is a service, with that port.
+test("debugger: a program's server answers the preview, and keeps the run alive", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/serve.js";
+	const get = async (url) => {
+		const reply = await session.request("virtual.request", { "port": 4321, "method": "GET", "url": url, "headers": {} }, 30_000);
+		const body = reply.body instanceof Uint8Array ? reply.body : Uint8Array.from(Array.isArray(reply.body) ? reply.body : Object.values(reply.body));
+
+		return `${reply.status} ${new TextDecoder().decode(body)}`;
+	};
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode([
+			"import http from \"node:http\";",
+			"",
+			"let hits = 0;",
+			"const server = http.createServer((request, response) => {",
+			"\thits += 1;",
+			"\tresponse.writeHead(200, { \"content-type\": \"text/plain\" });",
+			"\tresponse.end(\"hello \" + request.url + \" #\" + hits);",
+			"});",
+			"",
+			"server.listen(4321, () => console.log(\"up\"));",
+			""
+		].join("\n")));
+	}, program);
+
+	const started = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+	try {
+		assert.equal(started.state, "idle", "serving, not ended");
+		assert.equal(await get("/hello"), "200 hello /hello #1");
+		assert.equal(await get("/again"), "200 hello /again #2", "the program's state, kept between requests");
+		assert.ok((await session.request("runs.list", undefined, 5000)).some((run) => run.kind === "service" && run.port === 4321), "a service, with its port");
+	} finally {
+		await session.request(`debug.session.${started.session}.stop`, undefined, 30_000).catch(() => undefined);
+		await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
+	}
+});
+
+// stdin under the debugger: a program listening on process.stdin waits (idle) for input — the Debug Console's lines, or
+// debug.session.<id>.stdin — and goes on with each; it ends when it stops listening.
+test("debugger: a program reads its stdin from the Debug Console", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/echo.js";
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode([
+			"process.stdin.on(\"data\", (chunk) => {",
+			"\tconst line = String(chunk).trim();",
+			"",
+			"\tconsole.log(\"got \" + line.toUpperCase());",
+			"\tif (line === \"bye\") {",
+			"\t\tprocess.stdin.removeAllListeners(\"data\");",
+			"\t}",
+			"});",
+			"console.log(\"ready\");",
+			""
+		].join("\n")));
+	}, program);
+
+	const started = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+	const output = async () => (await session.request(`debug.session.${started.session}.state`, undefined, 10_000)).output;
+
+	try {
+		assert.equal(started.state, "idle", "waiting on its input");
+		assert.deepEqual(started.output, ["ready"]);
+		await session.request(`debug.session.${started.session}.stdin`, { "data": "hi\n" }, 10_000);
+		await eventually("its answer", async () => ((await output()).includes("got HI") || undefined));
+		await session.request(`debug.session.${started.session}.stdin`, { "data": "bye\n" }, 10_000);
+		await eventually("the run over, once it stops listening", async () => (!(await session.request("debug.sessions", undefined, 10_000)).some((each) => each.session === started.session && each.state !== "terminated") || undefined));
+	} finally {
+		await session.request(`debug.session.${started.session}.stop`, undefined, 30_000).catch(() => undefined);
+		await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
+	}
+});
+
 // The event loop in the debugger: its own scope in the Variables view (the virtual clock, the timers pending) — and Skip
 // Waits, from the debug toolbar: a 5s timer fires at once, its clock still reading +5000ms.
 test("debugger: the event loop's scope, and Skip Waits", async () => {
@@ -1296,6 +1413,44 @@ test("explore orderings: a race's endings, each debugged by its schedule", async
 
 	await session.request("rules.set", { "previous": rule }, 10_000);
 	await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
+});
+
+// The run log (PROJECTIONS.md), after the last card: each step that ran, in order, with its share of the run's work (the
+// interpreter's steps — a function's card gets its body's, wherever it's called from) and what it waited, on the event
+// loop's clock — and how the run ended.
+test("projection: the run log — each step's share of the work, and its waits", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/steps.js";
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file(path);
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["// Totals", "let total = 0;", "for (let i = 0; i < 300; i += 1) total += i;", "", "function square(n) {", "\treturn n * n;", "}", "", "// Later", "void setTimeout(() => console.log(square(total)), 250);", ""].join("\n")));
+		await api.window.showTextDocument(uri);
+	}, program);
+
+	const ran = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+	assert.deepEqual(ran.output, ["2011522500"]);
+
+	const log = await eventually("the run log", () => workbench.evaluate(() => {
+		const box = document.querySelector(".live-values-runlog");
+
+		return box === null ? undefined : {
+			"head": box.querySelector(".live-values-runlog-head").textContent,
+			"rows": [...box.querySelectorAll(".live-values-runlog-row")].map((row) => [row.querySelector(".live-values-runlog-title").textContent, row.querySelector(".live-values-runlog-waited")?.textContent ?? null])
+		};
+	}));
+
+	assert.match(log.head, /^Last run · [\d.]+k? steps · waited 250ms · completed$/u);
+	assert.deepEqual(log.rows, [["Totals", null], ["square", null], ["Later", "waited 250ms"]]);
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+
+		await api.commands.executeCommand("workbench.action.closeActiveEditor");
+		await api.workspace.fs.delete(api.Uri.file(path));
+	}, program);
 });
 
 // How the last run ended short, in the margin's strip: a ✕ on the line it crashed on (the error on hover) — through a
@@ -1481,7 +1636,9 @@ test("notes: a note follows its code, and waits in Problems when its code is gon
 	const { flowsOf } = await import("../../observability/src/flows.ts");
 	const everything = (message) => [message, ...message.caused.flatMap(everything)];
 	// (Polled with the view's snapshot fresh each time: session.snapshot() is the last one polled.)
-	const resolveIn = (snapshot) => flowsOf(snapshot.log.filter((sample) => sample.from !== undefined && sample.to !== undefined)).flatMap(everything).find((message) => message.label === "annotations.resolve()" && message.caused.some((child) => child.label === "bablr.resolve()"));
+	// (One whose cause is named: other resolves run alongside — the margin's placed rules, followed as it redraws — and
+	// one of those, caught mid-queue, may only be inferred; the queue naming its cause is what's under test.)
+	const resolveIn = (snapshot) => flowsOf(snapshot.log.filter((sample) => sample.from !== undefined && sample.to !== undefined)).flatMap(everything).find((message) => message.label === "annotations.resolve()" && message.caused.some((child) => child.label === "bablr.resolve()" && child.inferred === undefined));
 	// A resolve of its own, made now: the view keeps the latest 3000 messages, and by here the note's (dismissed) may have
 	// rolled out of them — in CI, it did.
 	const resolveNow = () => workbench.evaluate(async (ref) => {

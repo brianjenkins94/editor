@@ -50,9 +50,12 @@ function lines(report: CoverageReport, lineOf: (index: number) => number | undef
 	return byLine;
 }
 
+/** A top-level statement's share of the last run (tsval's profile), on the line its code is on now. */
+export interface ProfiledLine { "line": number; "steps": number; "waited": number; "first": number }
+
 /** Mark each editor's lines in its margin's gutter column (`mark`: by file URI) and its scrollbar, as sessions report and
- *  evidence changes. */
-export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, mark: (uri: string, marks: PaneMark[]) => void): void {
+ *  evidence changes — and hand on where the last run's work went (`profiled`: the run log, live-values.ts). */
+export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, mark: (uri: string, marks: PaneMark[]) => void, profiled: (uri: string, lines: ProfiledLine[] | undefined) => void = () => undefined): void {
 	// The scrollbar's marks: a decoration with no gutter icon, so breakpoints can still be set on the line.
 	const ran = vscode.window.createTextEditorDecorationType({ "overviewRulerColor": "#2ea04340", "overviewRulerLane": vscode.OverviewRulerLane.Left });
 	const missed = vscode.window.createTextEditorDecorationType({ "overviewRulerColor": "#f85149a0", "overviewRulerLane": vscode.OverviewRulerLane.Left });
@@ -113,6 +116,14 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 			void (anchors === undefined ? Promise.resolve(report.statements.map(({ start }) => start[0])) : anchors.lines(editor.document.getText(), ranges)).then((now) => {
 				if (editor.document.version === version && reports.get(editor.document.uri.path) === known) {
 					paint(editor, [...lines(report, (index) => now[index])].map(([line, { ran, some, count }]) => [line, { "covered": coveredOf(ran, some), "hover": ran ? `Ran ${count}×` : some ? "Partly ran: some of it didn't" : "Didn't run" }]));
+				}
+			});
+			// The run's work, by the statements it went to, where they are now (those whose code is gone left out).
+			const profile = report.profile ?? [];
+
+			void (anchors === undefined ? Promise.resolve(profile.map(({ start }) => start[0])) : anchors.lines(editor.document.getText(), profile.map(({ anchor }) => anchor))).then((now) => {
+				if (editor.document.version === version && reports.get(editor.document.uri.path) === known) {
+					profiled(editor.document.uri.toString(), profile.flatMap(({ steps, waited, first }, index) => (now[index] === undefined ? [] : [{ "line": now[index]!, "steps": steps, "waited": waited, "first": first }])));
 				}
 			});
 

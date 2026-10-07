@@ -475,8 +475,15 @@ if (SCRIPTS) {
 			return answered;
 		}
 
-		// Not a dev server's port: a script's own server, in the scripts worker — or nobody's.
-		return rpc.request("node.script.request", raw, { "timeoutMs": 60_000, "waitForResponderMs": 500 }).then((reply) => reply as VirtualResponse, () => notListening((raw as VirtualRequest).port));
+		// Not a dev server's port: a debug run's server (debug-worker.ts — asked only when one serves the port: `$rpc.call.`
+		// is the hub's call prefix), a script's own server in the scripts worker — or nobody's.
+		const { port } = raw as VirtualRequest;
+
+		if (hub.interested(`$rpc.call.virtual.debug.${port}`)) {
+			return rpc.request(`virtual.debug.${port}`, raw, { "timeoutMs": 60_000 }).then((reply) => reply as VirtualResponse, () => notListening(port));
+		}
+
+		return rpc.request("node.script.request", raw, { "timeoutMs": 60_000, "waitForResponderMs": 500 }).then((reply) => reply as VirtualResponse, () => notListening(port));
 	});
 }
 

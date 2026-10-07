@@ -225,14 +225,15 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "node.script.request", "from": ["node"], "to": ["node-scripts"] },
 	// ── the workspace ──
 	{ "pattern": "workspace.changed", "from": ["workbench", "node", "node-scripts"], "to": ["workbench", "node", "node-scripts"] },
-	{ "pattern": "workspace.buffer", "from": ["node", "node-scripts"], "to": ["workbench"] },
+	{ "pattern": "workspace.buffer", "from": ["node", "node-scripts", "debug-worker"], "to": ["workbench"] },
 	// ── running node ──
 	{ "pattern": "node.start", "from": ["workbench"], "to": ["node-scripts", "pod"] },
 	{ "pattern": "node.ready", "from": ["node-scripts"], "to": ["workbench"] },
 	{ "pattern": "node.out.*", "from": ["node-scripts", "pod"], "to": ["workbench"] },
 	{ "pattern": "node.exit.*", "from": ["node-scripts", "pod", "workbench"], "to": ["workbench", "pod"] },
 	{ "pattern": "node.stdin.*", "from": ["workbench"], "to": ["node-scripts"] },
-	{ "pattern": "node.listening.*", "from": ["node-scripts"], "to": ["workbench"] },
+	{ "pattern": "node.listening.*", "from": ["node-scripts", "pod"], "to": ["workbench"] },
+	{ "pattern": "virtual.debug.*", "from": ["node"], "to": ["debug-worker"] },
 	{ "pattern": "provoke.round", "from": ["node"], "to": ["provoke"] },
 	// ── debugging ──
 	{ "pattern": "debug.launch", "from": ["workbench"], "to": ["pod"] },
@@ -252,6 +253,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "debug.session.*.decide", "from": ["root", "workbench"], "to": ["pod"] },
 	{ "pattern": "debug.session.*.setValue", "from": ["root", "workbench"], "to": ["pod"] },
 	{ "pattern": "debug.session.*.pace", "from": ["root"], "to": ["pod"] },
+	{ "pattern": "debug.session.*.stdin", "from": ["root"], "to": ["pod"] },
 	{ "pattern": "rules.given", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "rules.set", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "rules.list", "from": ["workbench"], "to": ["pod"] },

@@ -17,6 +17,7 @@
  *                                                     rule (saved in my policy, deciding it), then resumes
  *   session `debug.session.<id>.setValue` { name, value } → at a stop: a variable set to a literal; the run goes on with it
  *   session `debug.session.<id>.pace` { pace }      → what a timer's wait costs from here on: real, or none (Skip Waits)
+ *   session `debug.session.<id>.stdin` { data }     → input for the program's process.stdin (as the Debug Console sends it)
  *
  * The session methods are served by the ADAPTER (debug-adapter.ts), not the worker: a breakpoint inside a React handler
  * blocks the worker in Atomics.wait, where only the adapter (which holds the shared control word) can resume it — and
@@ -77,6 +78,8 @@ export interface ControllableSession {
 	"setValue": (name: string, value: string) => Promise<string>;
 	/** What a timer's wait costs from here on: its real delay, or none (Skip Waits). */
 	"pace": (pace: "real" | "fast") => void;
+	/** Input for the program's process.stdin, as the Debug Console sends it. */
+	"stdin": (data: string) => void;
 }
 
 const sessions = new Map<string, ControllableSession>();
@@ -124,6 +127,17 @@ export function registerSession(hub: Hub, session: ControllableSession): () => v
 			}
 
 			session.pace(pace);
+
+			return null;
+		}),
+		serve(hub, prefix + "stdin", (args) => {
+			const { data } = (args ?? {}) as { "data"?: unknown };
+
+			if (typeof data !== "string") {
+				throw new TypeError("stdin takes { data }: the input, as a string");
+			}
+
+			session.stdin(data);
 
 			return null;
 		})

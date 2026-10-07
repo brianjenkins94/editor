@@ -1477,6 +1477,13 @@ ${code}
   /**
    * Run a file from the virtual file system (synchronous - backward compatible)
    */
+	/** `specifier` required as a module in `fromDir` would (the runtime's cwd by default): a built-in's shim, a package
+	 *  from node_modules, a file on the VFS — for a host that runs a program its own way (the tsval debugger) and its
+	 *  dependencies on this runtime. */
+	require(specifier: string, fromDir: string = this.process.cwd()): unknown {
+		return createRequire(this.vfs, this.fsShim, this.process, fromDir, this.moduleCache, this.options, this.processedCodeCache)(specifier);
+	}
+
 	runFile(filename: string): { "exports": unknown; "module": Module } {
 		const code = this.vfs.readFileSync(filename, "utf8");
 

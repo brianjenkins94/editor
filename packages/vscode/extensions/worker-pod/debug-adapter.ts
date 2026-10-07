@@ -19,10 +19,8 @@ import { loadEffectivePolicy, persistOverride, replaceRule } from "../capabiliti
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
 import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
-import { lifecycleOfSource } from "../../lifecycle";
 import { controlSubject, eventSubject } from "./debug-protocol";
 import { podHub } from "./pod";
-import { runTask } from "./tasks";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
 type Dap = Record<string, unknown>;
@@ -213,6 +211,11 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		this.control({ "type": "pace", "pace": pace });
 	}
 
+	/** Input for the program's process.stdin (the Debug Console's lines). */
+	public stdin(data: string): void {
+		this.control({ "type": "stdin", "data": data });
+	}
+
 	public async setValue(name: string, value: string): Promise<string> {
 		if (this.state !== "stopped") {
 			throw new Error("not stopped");
@@ -401,6 +404,17 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 			case "scopes":
 				this.respond(request, { "scopes": this.snapshot?.scopes[args["frameId"] as number] ?? [] });
+				break;
+
+			// The Debug Console is the program's stdin: what's typed there is a line of its input.
+			case "evaluate":
+				if (args["context"] === "repl") {
+					this.stdin(String(args["expression"] ?? "") + "\n");
+					this.respond(request, { "result": "", "variablesReference": 0 });
+				} else {
+					this.fail(request, "tsval evaluates nothing here: the Debug Console is the program's stdin");
+				}
+
 				break;
 
 			// Skip Waits / Wait in Real Time (tsval.skipWaits): what a timer's wait costs from here on.
@@ -735,6 +749,24 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.settle("idle");
 				break;
 
+			// A server the program started: the run is a service, with its port (the running list, its preview).
+			case "listening": {
+				const runId = this.session.configuration["__runId"];
+
+				if (typeof runId === "string") {
+					podHub.publish(`node.listening.${runId}`, { "port": message.port });
+				}
+
+				this.event("output", { "category": "console", "output": `listening on ${message.port}\n` });
+				break;
+			}
+
+			// Out of work, serving: idle, as a mounted React app is — a request goes on from here.
+			case "serving":
+				this.endAction();
+				this.settle("idle");
+				break;
+
 			case "history":
 				this.endAction(); // a dispatched re-render finished — close the dispatch action span
 				this.settle("idle");
@@ -890,18 +922,8 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 		vscode.debug.registerDebugConfigurationProvider("tsval", {
 			"resolveDebugConfiguration": (_folder, config) => {
 				if (config.type === undefined) {
-					const document = vscode.window.activeTextEditor?.document;
-
-					if (document !== undefined && document.uri.scheme === "file" && lifecycleOfSource(document.getText()).lifecycle === "service") {
-						const path = document.uri.path;
-						const cwd = path.slice(0, path.lastIndexOf("/")) || "/";
-						const command = "node " + path.slice(cwd.length + 1);
-
-						void vscode.tasks.executeTask(runTask(command, command, cwd, "file", true));
-
-						return undefined; // not a debug session: a task runs it, in a terminal
-					}
-
+					// A service too (a server, a timer, stdin): tsval serves the preview, keeps it alive, and takes the Debug
+					// Console as its input — a terminal's `node <file>` is where it runs for real.
 					// eslint-disable-next-line no-template-curly-in-string -- ${file} is a VS Code launch-config variable, not a JS template literal
 					return { "type": "tsval", "request": "launch", "name": "Debug (tsval)", "program": "${file}" };
 				}

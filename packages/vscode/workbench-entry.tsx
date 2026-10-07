@@ -55,7 +55,7 @@ import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { installProfileFiles } from "./profile-files";
 import { installEvidence } from "./evidence";
-import { installLiveValues, showMarks, showNotes } from "./live-values";
+import { installLiveValues, showMarks, showNotes, showProfile } from "./live-values";
 import { installCoverage } from "./coverage";
 import { registerRulesView } from "./rules-view";
 import { evidenceStore } from "./extensions/insights/evidence";
@@ -587,7 +587,7 @@ function maybeBoot(): void {
 				// core's own API.
 				installLiveValues(workbenchHub, api as typeof import("vscode"));
 				registerRulesView(workbenchHub, api as typeof import("vscode"));
-				installCoverage(api as typeof import("vscode"), evidenceStore(api as typeof import("vscode"), []), showMarks);
+				installCoverage(api as typeof import("vscode"), evidenceStore(api as typeof import("vscode"), []), showMarks, showProfile);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
 				// And the pod's tasks' terminals: a just-bash process that runs one command, over the hub (terminal.ts).

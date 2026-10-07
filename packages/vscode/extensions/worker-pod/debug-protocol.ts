@@ -37,6 +37,8 @@ export type Control =
 	| { "type": "setValue"; "name": string; "value": string }
 	/** What a timer's wait costs from here on: its real delay, or none (Skip Waits). */
 	| { "type": "pace"; "pace": "real" | "fast" }
+	/** Input for the program's process.stdin (typed in the Debug Console). */
+	| { "type": "stdin"; "data": string }
 	| { "type": StepAction | "disconnect" };
 
 /** Where tsval's event loop starts (its clock, its random seed) and — to run one ordering again — the choices to make. */
@@ -94,7 +96,11 @@ export type WorkerEvent =
 	/** A `setValue` done (the new value as the Variables view shows it, and the stop's snapshot with it), or refused. */
 	| { "type": "valueSet"; "ok": boolean; "value"?: string; "error"?: string; "snapshot"?: Snapshot }
 	/** What exploring the program's orderings found (asked by `explore`). */
-	| { "type": "explored"; "explored": Explored };
+	| { "type": "explored"; "explored": Explored }
+	/** A server the program started listens on `port` (it answers the preview there). */
+	| { "type": "listening"; "port": number }
+	/** Out of work, serving: the session is idle until a request (or a timer) comes. */
+	| { "type": "serving"; "ports": number[] };
 
 /** One statement's coverage: its range (0-based line and character, as VS Code's Position) and how often it ran. */
 export interface StatementCoverage {
@@ -106,6 +112,11 @@ export interface StatementCoverage {
 	 *  token in it, a semicolon dropped say); the statement itself otherwise. */
 	"anchor"?: [number, number];
 }
+
+/** A top-level statement's share of the run (tsval's profile) — a function's or class's declaration too: its range and
+ *  anchor (as a statement's coverage has), the steps run in its code, the virtual time waited before its code ran again,
+ *  and the step it first ran at. */
+export interface StatementProfile { "start": [number, number]; "anchor": [number, number]; "steps": number; "waited": number; "first": number }
 
 /** What went through one observed site (tsval's `observe`; RUNTIME-EVIDENCE.md, the second slice), over a run: its
  *  kind and its node's range, then — for a value site — how often a value came through, how often it was nullish, how
@@ -124,7 +135,7 @@ export interface SiteObservation {
 
 /** Every statement tsval can run in the program, with how often each ran — 0 for the ones that never did — and every
  *  observed site that ran. The body of the adapter's `getCoverage` reply and of its `coverage` event. */
-export interface CoverageReport { "file": string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "source"?: string }
+export interface CoverageReport { "file": string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "source"?: string; "profile"?: StatementProfile[] }
 
 /** Worker → render surface (`PREVIEW_STREAM`); `reset` comes from the workbench bridge at session start. */
 export type PreviewMessage =

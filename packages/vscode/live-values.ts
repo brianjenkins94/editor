@@ -47,6 +47,7 @@ import type { EditedRule, PaneEntry, PaneMark, RuleCatalog, RulePredicate, RuleS
 import type { CapabilityAsk, CapabilityChoice, RunEnd } from "./extensions/worker-pod/debug-protocol";
 import type { LiveBatch, LiveCall, LiveValue } from "./extensions/worker-pod/live-values";
 import type { Range } from "./anchors";
+import type { ProfiledLine } from "./coverage";
 import { Anchors } from "./anchors";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { parseInputs } from "./extensions/worker-pod/inputs";
@@ -81,6 +82,8 @@ const sessions = new Map<string, Session>();
 const notes = new Map<string, Note[]>();
 /** Each file's marks for the margin's gutter column (coverage), per file URI. */
 const marked = new Map<string, PaneMark[]>();
+/** Where each file's last run's work went (coverage.ts: tsval's profile), on the lines its statements are on now. */
+const profiles = new Map<string, ProfiledLine[]>();
 /** How each file's last run ended short, per file URI. */
 const ends = new Map<string, RunEnd & { "anchors"?: Anchors }>();
 /** The code files shown in an editor: their margin stays open, empty or not. */
@@ -934,6 +937,52 @@ function ranOf(step: Step, marks: PaneMark[]): { "kind": string; "text": string 
 	return covered.every((mark) => mark.kind === "coverage-ran") ? { "kind": "ran", "text": "ran" } : covered.every((mark) => mark.kind === "coverage-missed") ? { "kind": "missed", "text": "didn't run" } : { "kind": "partial", "text": "partly ran" };
 }
 
+/** The last run, step by step (PROJECTIONS.md: the run log): each step that ran, in the order it first did, with its
+ *  share of the run's work (the interpreter's steps in its code — the same every run) and any time it waited (a timer,
+ *  on the event loop's clock) — or undefined, with no profile for these steps. */
+interface RunLog { "rows": { "card": number; "title": string; "steps": number; "waited": number }[]; "steps": number; "waited": number }
+
+function runLogOf(steps: Step[], profiled: ProfiledLine[]): RunLog | undefined {
+	const rows = steps.map((step, card) => {
+		const inside = profiled.filter(({ line }) => step.fromLine <= line && line <= step.toLine);
+
+		return { "card": card, "title": step.title, "steps": inside.reduce((sum, each) => sum + each.steps, 0), "waited": inside.reduce((sum, each) => sum + each.waited, 0), "first": Math.min(...inside.map(({ first }) => first)) };
+	}).filter((row) => row.steps > 0).sort((a, b) => a.first - b.first);
+
+	return rows.length === 0 ? undefined : { "rows": rows.map(({ first: _first, ...row }) => row), "steps": rows.reduce((sum, row) => sum + row.steps, 0), "waited": rows.reduce((sum, row) => sum + row.waited, 0) };
+}
+
+/** A count of steps, short: 840, 1.2k, 3.4M. */
+function shortCount(count: number): string {
+	return count < 1000 ? String(count) : count < 1e6 ? `${(count / 1000).toFixed(count < 1e4 ? 1 : 0)}k` : `${(count / 1e6).toFixed(1)}M`;
+}
+
+/** The run log, at the file's end: a line per step that ran — its card's number and title, its share of the work, what
+ *  it waited — and how the run ended. */
+function renderRunLog(log: RunLog, end: RunEnd | undefined, element: HTMLElement): void {
+	const div = (className: string, text: string, title?: string): HTMLDivElement => Object.assign(document.createElement("div"), { "className": className, "textContent": text, ...title === undefined ? {} : { "title": title } });
+	const span = (className: string, text: string, title?: string): HTMLSpanElement => Object.assign(document.createElement("span"), { "className": className, "textContent": text, ...title === undefined ? {} : { "title": title } });
+	const box = div("live-values-runlog", "");
+	const ended = end === undefined ? "completed" : end.kind === "crashed" ? `crashed at line ${end.line + 1}` : `stopped at line ${end.line + 1}`;
+
+	box.append(div(`live-values-runlog-head ${end?.kind ?? "completed"}`, `Last run · ${shortCount(log.steps)} steps${log.waited > 0 ? ` · waited ${log.waited}ms` : ""} · ${ended}`, "Work in the interpreter's steps — the same every run — and waits on the event loop's clock"));
+
+	for (const row of log.rows) {
+		const share = Math.round((row.steps / log.steps) * 100);
+		const line = div("live-values-runlog-row", "");
+
+		line.append(
+			span("live-values-runlog-card", String(row.card + 1)),
+			span("live-values-runlog-title", row.title),
+			span("live-values-runlog-share", share === 0 ? "<1%" : `${share}%`, `${row.steps} steps`),
+			...row.waited > 0 ? [span("live-values-runlog-waited", `waited ${row.waited}ms`)] : []
+		);
+		box.append(line);
+	}
+
+	element.append(box);
+}
+
 /** A step's card label: its title, what it is, whether it ran; the types of what it declares on hover. */
 function renderStep(step: Step, marks: PaneMark[], element: HTMLElement): void {
 	const ran = ranOf(step, marks);
@@ -1023,13 +1072,18 @@ async function place(uri: string): Promise<void> {
 	}
 
 	const asked = askedAt === undefined ? undefined : { ...asking!, "ask": askedAt };
+	// The last run, step by step, at the file's end (after the last card).
+	const profiled = profiles.get(uri);
+	const runLog = profiled === undefined || steps.length === 0 ? undefined : runLogOf(steps, profiled);
+	const logLine = shown === undefined ? 0 : Math.max(shown.lineCount - 1, ...steps.map((step) => step.toLine));
 	const entries: PaneEntry[] = [
 		// A capability stop's question first on its line: it's what the run waits on.
 		...asked === undefined ? [] : [{ "id": "ask", "fromLine": asked.ask.line, "toLine": asked.ask.line }],
 		...rows.map((row, index) => ({ "id": `values:${index}`, "fromLine": row.line, "toLine": row.line })),
 		// What the bounds left out, under the last line: its cell grows a line for it.
 		...last === undefined || session === undefined || session.dropped === 0 ? [] : [{ "id": "values:dropped", "fromLine": last.line, "toLine": last.line }],
-		...prose.map((note) => ({ "id": `note:${note.id}`, "fromLine": note.fromLine, "toLine": note.toLine }))
+		...prose.map((note) => ({ "id": `note:${note.id}`, "fromLine": note.fromLine, "toLine": note.toLine })),
+		...runLog === undefined ? [] : [{ "id": "runlog", "fromLine": logLine, "toLine": logLine }]
 	];
 
 	columns = new Map();
@@ -1048,6 +1102,12 @@ async function place(uri: string): Promise<void> {
 	}
 
 	showPane(uri, entries, (entry, element) => {
+		if (entry.id === "runlog") {
+			renderRunLog(runLog!, end, element);
+
+			return undefined;
+		}
+
 		if (entry.id.startsWith("step:")) {
 			renderStep(steps[Number(entry.id.slice("step:".length))]!, marks, element);
 
@@ -1089,6 +1149,18 @@ async function place(uri: string): Promise<void> {
 			dispose?.();
 		};
 	}, marks, steps.map((step, index) => ({ "id": `step:${index}`, "fromLine": step.fromLine, "toLine": step.toLine })));
+}
+
+/** Where `uri`'s last run's work went (coverage.ts: tsval's profile, on the lines its statements are on now), for the
+ *  run log — or none. */
+export function showProfile(uri: string, lines: ProfiledLine[] | undefined): void {
+	if (lines === undefined || lines.length === 0) {
+		profiles.delete(uri);
+	} else {
+		profiles.set(uri, lines);
+	}
+
+	draw(uri);
 }
 
 /** The marks beside `uri`'s lines in the margin's gutter column (coverage's), replacing its last. */
