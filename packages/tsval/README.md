@@ -78,6 +78,7 @@ interpret(code, {
   resolveModule: (specifier) => namespace,      // what `import` / `import()` resolve to
   onAsyncFiber: (promise) => {},                // every async function / async-generator invocation
   steppedAsync: true,                           // async code on the main stack, steppable (below)
+  eventLoop: { now, seed, pace: "real" },       // …with a deterministic event loop of its own: timers, clock, random (below)
 });
 
 const { vm } = createVM(code);                  // { vm, sourceFile } — the typed layer returns the same shape plus the checker
@@ -105,6 +106,20 @@ vm.addBreakpointsByLine(12);                   // a line after an await
 for (vm.runToBreakpoint(); vm.idle; vm.runToBreakpoint()) {
   await vm.whenSettled();
 }
+```
+
+With `eventLoop` (it implies `steppedAsync`) the machine has an event loop of its own, deterministic: `setTimeout`,
+`setInterval`, `setImmediate`, their clears and `queueMicrotask`, with Node's ordering — the promise jobs that settled,
+then timers by due time on a **virtual clock**, each callback a steppable job on the main stack. The clock moves only
+as timers fire (to their due time); `Date` and `Date.now()` read it, and `Math.random()` is seeded. So the same program
+from the same `now` and `seed` runs the same way every time, and so does every fork: a debugger's step forward from a
+stop it travelled back to goes the way it went. `pace` is what a wait costs — `"real"` (default) waits each timer's real
+delay, `"fast"` none — never the order. The timers, clock and random generator are intrinsics acting on the machine
+that calls them (a fork's guest code reaches the fork's), ahead of `hostGuard`.
+
+```ts
+const { vm } = createVM(code, { eventLoop: { now: 0, seed: 42, pace: "fast" } });
+// setTimeout(() => log(Date.now()), 50) logs 50 — every run
 ```
 
 Guest→guest calls never touch the host stack, so a guard cannot be bypassed from inside the guest;

@@ -918,6 +918,102 @@ test("rules view: a rule whose place is lost, re-placed at a selection", async (
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
+// Where rules apply (RULES.md): a placed rule is marked in the margin's gutter column beside the code it's placed at,
+// its sentence on hover. As that code is edited it's followed — through the edit history's bursts, a small step at a
+// time — so the mark stays on it, sure, through changes that from its stored place alone would be only a weak match;
+// and saving the file keeps the rule's place there (its reference made again), mine and the shared contract's alike,
+// through ESLint's fixes on save too.
+test("placed rules: marked beside their code, followed through edits, and kept placed on save", async () => {
+	const workbench = session.workbench();
+	const marks = () => workbench.evaluate(() => [...document.querySelectorAll(".notes-margin-mark.rule-placed")].map((mark) => ({ "title": mark.title, "uncertain": mark.classList.contains("uncertain") })));
+	const listed = () => session.request("rules.list", undefined, 10_000);
+	const read = (path) => workbench.evaluate(async (file) => {
+		const { api } = globalThis.__editor;
+
+		return api.workspace.fs.readFile(api.Uri.file(file)).then((bytes) => new TextDecoder().decode(bytes), () => null);
+	}, path);
+	const write = (path, text) => workbench.evaluate(async ([file, contents]) => {
+		const { api } = globalThis.__editor;
+
+		await (contents === null ? api.workspace.fs.delete(api.Uri.file(file)) : api.workspace.fs.writeFile(api.Uri.file(file), new TextEncoder().encode(contents)));
+	}, [path, text]);
+	const edit = (fromLine, toLine, text) => workbench.evaluate(async ([from, to, contents]) => {
+		const { api } = globalThis.__editor;
+		const editor = api.window.activeTextEditor;
+
+		await editor.edit((builder) => { builder.replace(new api.Range(from, 0, to, 0), contents); });
+	}, [fromLine, toLine, text]);
+
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/marked.js");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode("let price = 10;\nlet tax = 2;\nconsole.log(price + tax);\n"));
+		await api.window.showTextDocument(uri);
+	});
+
+	const [here] = await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.annotations.refer", "let price = 10;\nlet tax = 2;\nconsole.log(price + tax);\n", "marked.js", [{ "start": 16, "end": 28 }]));
+	const rule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": "marked.js" }, { "target_id": "at", "operator_id": "is", "argument": here }] }, "then": [{ "action_id": "set", "target_id": "variables.tax", "argument": 5 }] };
+	// The shared contract's own rule, placed there too (written as a person would: silo reads the contract).
+	const shared = { ...rule, "then": [{ "action_id": "set", "target_id": "variables.tax", "argument": 7 }] };
+	const contract = await read("/workspace/.silo/policy.json");
+
+	await write("/workspace/.silo/policy.json", JSON.stringify({ "version": 1, "rules": [shared, ...contract === null ? [] : JSON.parse(contract).rules ?? []] }, null, "\t") + "\n");
+	await session.request("rules.set", { "rule": rule }, 10_000);
+
+	const [mark] = await eventually("the rules' mark", async () => {
+		const shown = await marks();
+
+		return shown.length === 1 && shown[0].title.includes("shared") ? shown : undefined;
+	});
+
+	assert.match(mark.title, /^My rule: .*tax.*\nA shared rule: .*tax/su);
+	assert.equal(mark.uncertain, false);
+
+	// Edited twice — the statement changed two lines down, then made a const (a step of its own: a burst apart) — it's
+	// followed edit by edit, each step sure, where its stored place alone would find it only uncertainly.
+	await edit(0, 2, "let price = 10;\n\n// tax, doubled\nlet tax = 2 * 2;\n");
+	await eventually("found again, by a match", async () => ((await listed()).mine.places[0]?.status === "re-placed" || undefined));
+	await session.page.waitForTimeout(1_000); // the edit history's burst closes
+	await edit(3, 4, "const tax = 2 * 2;\n");
+
+	const followed = await eventually("followed through both edits", async () => {
+		const { mine } = await listed();
+		const shown = await marks();
+
+		return mine.places[0]?.line === 4 && shown.length === 1 ? { "place": mine.places[0], "mark": shown[0] } : undefined;
+	});
+
+	assert.notEqual(followed.place.status, "uncertain");
+	assert.equal(followed.mark.uncertain, false);
+
+	// Saved — ESLint's fix makes `let price` a const too — and kept at the place it was followed to: mine, and the
+	// shared contract's, found by their own ids from then on.
+	const { added } = (await listed()).mine.rules[0];
+
+	await workbench.evaluate(() => globalThis.__editor.api.window.activeTextEditor.document.save());
+
+	const kept = await eventually("their places kept", async () => {
+		const { mine, shared: theirs } = await listed();
+		const moved = (rules, from) => rules.find((each) => JSON.stringify(each.then) === JSON.stringify(from.then) && JSON.stringify(each.when) !== JSON.stringify(from.when));
+
+		return moved(mine.rules, rule) !== undefined && moved(theirs.rules, shared) !== undefined ? { "mine": mine, "shared": theirs } : undefined;
+	});
+
+	assert.deepEqual([kept.mine.places[0].status, kept.mine.places[0].line], ["attached", 4]);
+	assert.deepEqual([kept.shared.places[0].status, kept.shared.places[0].line], ["attached", 4]);
+	assert.equal(kept.mine.rules[0].added, added, "moving a place isn't deciding anything");
+	await session.request("rules.set", { "previous": kept.mine.rules[0] }, 10_000);
+	await write("/workspace/.silo/policy.json", contract);
+	await eventually("no mark", async () => ((await marks()).length === 0 || undefined));
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		await api.commands.executeCommand("workbench.action.closeActiveEditor");
+		await api.workspace.fs.delete(api.Uri.file("/workspace/marked.js"));
+	});
+});
+
 // A call's result given instead of the call (RULES.md, slice 2): at an async fetch's capability stop (the debugger steps
 // async code — tsval's steppedAsync), Rule… — prefilled with what it returned the last time it ran for real, when
 // that's recorded — Save as rule: the run goes on with that result, and the next run isn't stopped there.
@@ -1049,6 +1145,24 @@ test("projection: the margin's cards are the file's steps, each saying whether i
 	assert.deepEqual(after.map(({ ran }) => ran), ["ran", "called 1×", "ran"]);
 });
 
+// tsval's event loop in the debugger: a task's timers run on it — steppable, on a virtual clock (so a timer measured by
+// Date.now() takes exactly its delay, every run) — where before a task's setTimeout wasn't there at all.
+test("debugger: a task's timers run on tsval's deterministic event loop", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/timers.js";
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode(["const start = Date.now();", "", "setTimeout(() => {", "\tconsole.log(\"waited\", Date.now() - start);", "}, 30);", "void Promise.resolve().then(() => console.log(\"first\"));", ""].join("\n")));
+	}, program);
+
+	const ran = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+	assert.deepEqual(ran.output, ["first", "waited 30"]);
+	await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
+});
+
 // How the last run ended short, in the margin's strip: a ✕ on the line it crashed on (the error on hover) — through a
 // reformat too, anchored by the throw's span — gone when it runs again and finishes.
 test("run ends: a crash is marked on the line it threw on, and stays on it through a reformat", async () => {
@@ -1125,6 +1239,34 @@ test("node script: a service runs on the script worker, and stopping it leaves t
 	const preview = session.page.frames().find((frame) => /__virtual__\/[^/]+\/5173\/$/u.test(frame.url()));
 
 	assert.equal(await preview?.evaluate(async () => (await fetch(location.href)).status), 200);
+});
+
+// What a node service read of the workspace is recorded (RULES.md, slice 2), as a preview's fetches are: by the path as
+// the script wrote it — what a debug run's stand-in asks for — so a rule can give a debug run what the real one read.
+// (A service runs for real, on the script worker; a task runs under the debugger, where every such call is a stand-in.)
+test("record: a node service's reads of the workspace, kept to be given back", async () => {
+	const workbench = session.workbench();
+	const rates = "{ \"US\": 0.07, \"CA\": 0.13 }\n";
+
+	await workbench.evaluate(async (text) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file("/workspace/rates.json"), new TextEncoder().encode(text));
+		await api.workspace.fs.writeFile(api.Uri.file("/workspace/read-rates.js"), new TextEncoder().encode("const fs = require('fs');\nconst rates = JSON.parse(fs.readFileSync('rates.json', 'utf8'));\nsetInterval(() => console.log(Object.keys(rates).length), 300);\n"));
+	}, rates);
+	await session.terminal("node read-rates.js", { "fresh": true });
+
+	const recorded = await eventually("the read, recorded", async () => (await session.request("capability.recorded", { "capability": "fs:read", "resource": "rates.json" }, 10_000)) ?? undefined);
+
+	assert.equal(recorded.value, rates);
+	await session.page.keyboard.press("Control+C");
+	await eventually("the service stopped", async () => (await session.request("runs.list", undefined, 5000)).some((run) => run.title === "node read-rates.js" && run.state === "stopped") || undefined);
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.delete(api.Uri.file("/workspace/rates.json"));
+		await api.workspace.fs.delete(api.Uri.file("/workspace/read-rates.js"));
+	});
 });
 
 // A note stays with its code (SPAN-ANNOTATIONS.md): kept on its span in .silo/notes/, followed when its code is edited

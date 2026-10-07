@@ -1,8 +1,10 @@
+import type { EventLoopOptions, Loop } from "./event-loop.ts";
 import type { AsyncFrame, CallFrame, Frame, Iteration, NodeFrame, SyntheticFrame, SyntheticKind } from "./frame.ts";
 import type { GuestClass } from "./handlers.ts";
 import type { GuestFunction, GuestFunctionMeta } from "./values.ts";
 import ts from "typescript";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
+import { createLoop, forkLoop, hasRefTimers, INTRINSICS, loopGlobals, takeTimer, waitForTimer } from "./event-loop.ts";
 import { syntaxKindName } from "./frontend.ts";
 import { standardGlobals } from "./globals.ts";
 import { bindIdentifier, bindingProgram, clonePrivateElements, closeIteration, createGuestFunction, isGuestClass, nodeHandlers, pushPattern, syntheticHandlers } from "./handlers.ts";
@@ -152,6 +154,11 @@ export interface VMOptions {
 	 *  `await` suspends the program the same way. Off by default: fibers run on the host's promise queue, each to its
 	 *  next suspension at once, out of the host's sight. */
 	"steppedAsync"?: boolean;
+	/** Stepped async with an event loop of its own, deterministic (event-loop.ts): timers (`setTimeout`, `setInterval`,
+	 *  `setImmediate`, their clears, `queueMicrotask`) as steppable jobs ordered on a virtual clock, which `Date` reads,
+	 *  and a seeded `Math.random` — the same run every time from the same start (`now`, `seed`), and so for every fork.
+	 *  `pace`: whether a timer waits its real delay (`"real"`, the default) or none (`"fast"`). Implies `steppedAsync`. */
+	"eventLoop"?: EventLoopOptions;
 	/** Called at each breakpoint reached DURING a synchronous host-invoked guest call (a host callback such
 	 *  as a React event handler running through `callGuestFromHost` → `runSub`). Top-level stepping is driven
 	 *  by the host through `step`/`runToBreakpoint`, but a host→guest call runs a nested loop the host can't
@@ -360,6 +367,8 @@ export class Machine implements VM {
 	public onBreakpoint: ((vm: VM) => void) | undefined;
 	/** VMOptions.steppedAsync. */
 	public steppedAsync = false;
+	/** VMOptions.eventLoop: this machine's event loop — its clock, timers and random generator (a fork copies it). */
+	public loop: Loop | undefined;
 	/** Stepped async: work pending and none ready — the host lets the event loop turn (`whenSettled`), then steps on. */
 	public idle = false;
 	/** Stepped async: this machine's suspended fibers, and the host-called callbacks waiting their turn, by id — its own
@@ -414,6 +423,12 @@ export class Machine implements VM {
 
 		const globals = this.rootScope.globalObject;
 
+		// The event loop's timers, clock and random generator, over any the host gave: they're what makes it deterministic.
+		if (options.eventLoop !== undefined) {
+			this.loop = createLoop(options.eventLoop);
+			Object.assign(globals, loopGlobals());
+		}
+
 		this.guestErrors = {};
 		for (const name of ["Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError"]) {
 			const ctor = (globals[name] ?? (globalThis as Record<string, unknown>)[name]) as new (message?: string) => Error;
@@ -437,7 +452,7 @@ export class Machine implements VM {
 		this.hostGuard = options.hostGuard;
 		this.onAsyncFiber = options.onAsyncFiber;
 		this.onBreakpoint = options.onBreakpoint;
-		this.steppedAsync = options.steppedAsync === true;
+		this.steppedAsync = options.steppedAsync === true || options.eventLoop !== undefined;
 		this.maxSteps = options.maxSteps;
 		this.coverage = options.coverage === true ? new Map() : undefined;
 		this.observe = options.observe;
@@ -502,6 +517,13 @@ export class Machine implements VM {
 
 	/** Invoke a host callable from guest code, through the guard and with `callSite` exposed. */
 	public invokeHost(callee: (...args: unknown[]) => unknown, thisArg: unknown, args: unknown[], site: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression, isConstruct: boolean): unknown {
+		// The event loop's intrinsics act on this machine (event-loop.ts) — trusted, so ahead of the guard.
+		const intrinsic = INTRINSICS.get(callee);
+
+		if (intrinsic !== undefined) {
+			return this.fromHost(intrinsic(this, thisArg, args, isConstruct));
+		}
+
 		const previousSite = this.callSite;
 		const { prototype } = this.realm.Promise;
 
@@ -609,11 +631,11 @@ export class Machine implements VM {
 
 		// Stepped async, between tasks (the stack empty): the next settled job, or idle while work is pending.
 		if (this.steppedAsync && this.depth === 0 && this.frames.length === 0 && this.signal === null) {
-			if (this.resumeSettled()) {
+			if (this.resumeSettled() || this.fireTimer()) {
 				return;
 			}
 
-			if (this.pending.size > 0) {
+			if (this.pending.size > 0 || (this.loop !== undefined && hasRefTimers(this.loop))) {
 				this.idle = true;
 
 				return;
@@ -1049,6 +1071,7 @@ export class Machine implements VM {
 		// Its own pending fibers (their frames and closures, cloned), and the shared record of what settled.
 		forked.pending = new Map([...this.pending].map(([id, each]) => [id, each.kind === "fiber" ? { "kind": "fiber", "frames": each.frames.map(cloneFrame), "values": each.values.map(clone), "base": each.base } : { "kind": "callback", "fn": clone(each.fn) as GuestFunction }]));
 		forked.scheduler = this.scheduler;
+		forked.loop = this.loop === undefined ? undefined : forkLoop(this.loop, clone);
 
 		return forked;
 	}
@@ -1083,9 +1106,33 @@ export class Machine implements VM {
 		});
 	}
 
-	/** Resolves when something pending settles (the host awaits it while the machine is `idle`). */
+	/** Resolves when something pending settles, or the next timer may fire (the host awaits it while the machine is
+	 *  `idle`). */
 	public whenSettled(): Promise<void> {
-		return new Promise((resolve) => { this.scheduler.wakers.push(resolve); });
+		const settled = new Promise<void>((resolve) => { this.scheduler.wakers.push(resolve); });
+		const timer = this.loop === undefined ? undefined : waitForTimer(this.loop);
+
+		return timer === undefined ? settled : Promise.race([settled, timer]);
+	}
+
+	/** Event loop: fire the next timer — its callback a job of its own on the (empty) stack — true if one fired. */
+	private fireTimer(): boolean {
+		const timer = this.loop === undefined ? undefined : takeTimer(this.loop);
+
+		if (timer === undefined) {
+			return false;
+		}
+
+		this.idle = false;
+		this.values.length = 0; // between tasks: nothing on it is anyone's
+
+		if (isGuestFunction(timer.fn)) {
+			this.pushCall(timer.fn.__tsval, timer.args, undefined);
+		} else {
+			(timer.fn as (...args: unknown[]) => unknown)(...timer.args);
+		}
+
+		return true;
 	}
 
 	/** Stepped async: an `await` on the main stack — cut the stack at the nearest async frame (or, at the top level, all

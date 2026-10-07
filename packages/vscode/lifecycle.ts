@@ -4,7 +4,8 @@
  *   • a package.json script that keeps running is a background task (extensions/running/tasks.ts), which the run
  *     picker groups as a service and offers its preview instead of a second copy;
  *   • `node <file>` runs a task under the tsval debugger (stepping, time travel, coverage) and a service under the
- *     real runtime — tsval has no event loop, so a server would just fall off the end of its file;
+ *     real runtime — tsval's event loop has timers but no servers or input, so a server would fall off the end of its
+ *     file (and a service's timers are better run for real than stepped);
  *   • the running list (runs.ts) shows it, and a task's result when it ends.
  *
  * It's a guess from what's written — the command, the script's name, the file's source — so it's corrected by what a

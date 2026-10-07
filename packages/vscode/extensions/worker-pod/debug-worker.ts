@@ -960,8 +960,13 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 				break;
 			}
 
-			// steppedAsync: async code runs on the stack the debugger steps — its breakpoints, capability stops, rules.
-			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "observe": observeSite, "trace": traceValue, "steppedAsync": true, ...capabilitySurface(message.fileName, message.args ?? []) });
+			// tsval's event loop (steppedAsync with timers, a virtual clock and a seeded random): async code and timers run
+			// on the stack the debugger steps — its breakpoints, capability stops, rules — and the same way every time, so a
+			// step forward from any stop it travelled back to goes the way it went. Its start is logged, to run it again.
+			const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), "pace": "real" as const };
+			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, ...capabilitySurface(message.fileName, message.args ?? []) });
+
+			workerLog.info("event loop", { "now": eventLoop.now, "seed": eventLoop.seed });
 
 			liveTimer = setInterval(flushLive, 250);
 
