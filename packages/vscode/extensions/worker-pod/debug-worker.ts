@@ -27,7 +27,7 @@ import type { SiteSums } from "./site-sums";
 import type { GuestRoot } from "./debug-react";
 
 import { createHub, portTransport } from "@brianjenkins94/hub";
-import { createVM, explore, runToEnd } from "@brianjenkins94/tsval";
+import { createVM, explore, runToEnd, UNCATCHABLE } from "@brianjenkins94/tsval";
 import React from "react";
 
 import ts from "typescript";
@@ -111,14 +111,61 @@ let guestRoot: GuestRoot | undefined;
 /** The VM on the timeline being shown — what coverage reports on. A forward step advances a fork; a step back
  *  returns to an earlier stop. */
 let current: Vm | undefined;
+/** Where the run's event loop started (its clock then), for times shown since; and what a wait costs (Skip Waits). */
+let loopStart = 0;
+let pace: "real" | "fast" = "real";
 /** What went through each observed site on each timeline (tsval's `observe`), and the sums being added to now — the
  *  timeline running. A fork starts from a copy of its stop's sums, as its coverage starts from a copy of its counts. */
 const sumsOf = new WeakMap<Vm, SiteSums>();
 let recording: SiteSums = new Map();
 
-/** tsval's `observe`: what went through a site, added to the running timeline's sums. */
+/** tsval's `observe`: what went through a site, added to the running timeline's sums (not a probe's: it didn't run). */
 function observeSite(node: ts.Node, site: Parameters<typeof addObservation>[2], value: unknown): void {
-	addObservation(recording, node, site, value);
+	if (probing === undefined) {
+		addObservation(recording, node, site, value);
+	}
+}
+
+/** A probe running (probeResource): the capability whose call it's after, and the resource that call reached. */
+let probing: { "capability": string; "resource"?: string } | undefined;
+/** What ends a probe's fork at the call — uncatchable, so the guest's own try/catch can't swallow it. */
+const PROBED = Object.assign(new Error("probe: the call reached"), { [UNCATCHABLE]: true });
+/** Each stop's probed resource, by machine and line: a stop asks more than once. */
+const probed = new WeakMap<Vm, Map<number, string | undefined>>();
+
+/**
+ * The resource a capability call on `line` reaches, when its argument is computed on the line itself
+ * (`path.join(dir, name)`, a template): the machine forked at the stop and stepped until the call — its arguments
+ * evaluated as the run will evaluate them, every capability call on the way its inert stand-in, the event loop
+ * deterministic — then thrown away. Undefined if the fork doesn't get there (it threw first, or took too long).
+ */
+function probeResource(vm: Vm, line: number, capability: string): string | undefined {
+	const known = probed.get(vm);
+
+	if (known?.has(line) === true) {
+		return known.get(line);
+	}
+
+	const fork = vm.fork();
+	let resource: string | undefined;
+
+	fork.breakpoints.clear();
+	probing = { "capability": capability };
+
+	try {
+		for (let steps = 0; steps < 20_000 && !fork.finished && !fork.idle && probing.resource === undefined; steps += 1) {
+			fork.step();
+		}
+	} catch {
+		// PROBED (the call reached), or the fork threw before it: either way, what was found is what there is.
+	} finally {
+		resource = probing.resource;
+		probing = undefined;
+	}
+
+	probed.set(vm, (known ?? new Map()).set(line, resource));
+
+	return resource;
 }
 
 /** Start recording `vm`'s observations into `sums`. */
@@ -156,6 +203,22 @@ function capabilitySurface(fileName: string, args: string[]): { "globals": Recor
 function denying(standins: ReturnType<typeof capabilityStandins>): ReturnType<typeof capabilityStandins> {
 	const wrapped = new Map<unknown, unknown>();
 	const gate = (fn: (...args: unknown[]) => unknown) => function (this: unknown, ...args: unknown[]): unknown {
+		// A probe's fork (probeResource): the call it's after records what it reaches, and ends the fork there; any other
+		// call on the way is its inert self — neither touches what the run itself was given (denyNext, giveNext).
+		if (probing !== undefined) {
+			const tagged = standinCapability(fn);
+
+			if (tagged?.capability === probing.capability) {
+				const resource = args[tagged.resourceArg];
+
+				probing.resource = typeof resource === "string" ? resource : resource instanceof URL ? resource.href : undefined;
+
+				throw PROBED;
+			}
+
+			return fn.apply(this, args);
+		}
+
 		if (denyNext) {
 			denyNext = false;
 
@@ -412,7 +475,10 @@ function askAt(vm: Vm, line: number): CapabilityAsk | undefined {
 		const hit = classifyCall(call, []);
 
 		if (hit !== undefined) {
-			const { resource, resolved } = resourceOf(vm, call.arguments[hit.argIndex], file);
+			const before = resourceOf(vm, call.arguments[hit.argIndex], file);
+			// Computed on the line: what it will be, from a fork run to the call.
+			const probe = before.resolved ? undefined : probeResource(vm, line, hit.capability);
+			const { resource, resolved } = probe === undefined ? before : { "resource": probe, "resolved": true };
 
 			if (shouldBreak(policy, { ...hit, "resource": resolved ? resource : "" })) {
 				return { "line": line - 1, "at": rangeOf(call), "capability": hit.capability, "callee": hit.callee, "resource": resource, "resolved": resolved, "dangerous": hit.dangerous };
@@ -510,7 +576,12 @@ async function exploreOrderings(message: Extract<Control, { "type": "explore" }>
 }
 
 function guestConsole(): Record<string, (...args: unknown[]) => void> {
-	const write = (stream: "stdout" | "stderr") => (...args: unknown[]): void => { post({ "type": "output", "text": args.map(formatLogArg).join(" "), "stream": stream }); };
+	// (Not a probe's: it didn't run.)
+	const write = (stream: "stdout" | "stderr") => (...args: unknown[]): void => {
+		if (probing === undefined) {
+			post({ "type": "output", "text": args.map(formatLogArg).join(" "), "stream": stream });
+		}
+	};
 
 	return { "log": write("stdout"), "info": write("stdout"), "debug": write("stdout"), "dir": write("stdout"), "warn": write("stderr"), "error": write("stderr"), "trace": write("stderr") };
 }
@@ -566,9 +637,27 @@ function snapshot(vm: Vm): Snapshot {
 
 	return {
 		"frames": [{ "id": 1, "name": functionName(loc?.pos), "line": (loc?.line ?? 0) + 1, "column": (loc?.character ?? 0) + 1, ...vm.currentNode === null ? {} : { "at": rangeOf(vm.currentNode) } }],
-		"scopes": { "1": [{ "name": "Locals", "variablesReference": 1000, "expensive": false }] },
-		"variables": { "1000": rows }
+		"scopes": { "1": [{ "name": "Locals", "variablesReference": 1000, "expensive": false }, ...vm.loop === undefined ? [] : [{ "name": "Event loop", "variablesReference": 2000, "expensive": false }]] },
+		"variables": { "1000": rows, ...vm.loop === undefined ? {} : { "2000": loopRows(vm.loop) } }
 	};
+}
+
+/** The event loop at a stop, as the Variables view shows it: the virtual clock (since the run started, and its date),
+ *  the pace, each timer pending and when it's due, each host call's result the program is owed — in, or not yet — and
+ *  how many choices were made. */
+function loopRows(loop: NonNullable<Vm["loop"]>): Variable[] {
+	const since = (ms: number): string => `+${ms - loopStart}ms`;
+	const row = (name: string, value: string, type: string): Variable => ({ "name": name, "value": value, "type": type, "variablesReference": 0 });
+	const timers = [...loop.timers.values()].sort((a, b) => a.due - b.due || a.seq - b.seq);
+
+	return [
+		row("time", `${since(loop.clock)} · ${new Date(loop.clock).toISOString()}`, "virtual clock"),
+		row("pace", loop.pace === "fast" ? "skipping waits" : "real time", ""),
+		...timers.slice(0, 20).map((timer) => row(`${timer.interval ? "setInterval" : timer.delay === 0 ? "setImmediate" : "setTimeout"} ${timer.delay}ms`, `due ${since(timer.due)}${timer.ref ? "" : " · unref'd"}`, "timer")),
+		...timers.length > 20 ? [row("…", `${timers.length - 20} more timers`, "")] : [],
+		...[...loop.results.values()].map((result) => row(result.label, result.deliver === undefined ? "not in yet" : "in — waiting its turn", "result")),
+		row("choices made", String(loop.choices.length), "")
+	];
 }
 
 /**
@@ -608,8 +697,8 @@ function functionName(pos: number | undefined): string {
 
 /** What tsval's trace told, into the session's live values: its line, and its call's function by name and line. */
 function traceValue(event: TraceEvent): void {
-	if (sourceFile === undefined) {
-		return;
+	if (sourceFile === undefined || probing !== undefined) {
+		return; // (a probe's fork didn't run)
 	}
 
 	const lineOf = (node: ts.Node): number => sourceFile!.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line;
@@ -920,6 +1009,10 @@ async function handle(action: Action): Promise<void> {
 			// observations going on from a copy of that stop's.
 			const next = history[index].fork();
 
+			if (next.loop !== undefined) {
+				next.loop.pace = pace;
+			}
+
 			record(next, copySums(sumsOf.get(history[index])));
 			await advanceFrom(next, action, actionTrace);
 			break;
@@ -1015,6 +1108,8 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 			const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": "real" as const };
 			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, ...capabilitySurface(message.fileName, message.args ?? []) });
 
+			loopStart = eventLoop.now;
+			pace = "real";
 			workerLog.info("event loop", { "now": eventLoop.now, "seed": eventLoop.seed, ...eventLoop.schedule === undefined ? {} : { "schedule": eventLoop.schedule } });
 
 			liveTimer = setInterval(flushLive, 250);
@@ -1079,6 +1174,18 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 
 			for (const vm of history) {
 				arm(vm);
+			}
+
+			break;
+
+		case "pace":
+			// From the next wait on — the machine running now, and every stop it may go on from.
+			pace = message.pace;
+
+			for (const vm of [...history, current]) {
+				if (vm?.loop !== undefined) {
+					vm.loop.pace = pace;
+				}
 			}
 
 			break;

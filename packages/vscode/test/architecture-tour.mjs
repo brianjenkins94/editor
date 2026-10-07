@@ -768,7 +768,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 
 		assert.equal(stopped.reason, "capability", "stopped by the policy, not a breakpoint");
 		assert.equal(stopped.line, 5);
-		assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow once", "Allow always", "Deny", "Rule…"] });
+		assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow once", "Allow this run", "Allow always", "Deny", "Rule…"] });
 
 		return stopped;
 	};
@@ -824,7 +824,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 
 		return run.reason === "capability" || undefined;
 	});
-	assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow once", "Allow always", "Deny", "Rule…"] });
+	assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow once", "Allow this run", "Allow always", "Deny", "Rule…"] });
 	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-ask button")].find((button) => button.textContent === "Rule…").click(); });
 	assert.equal(await eventually("the rule editor, prefilled", status), "Covers this call: allows it");
 	await resourceRow([".rule-editor-operator select", "matches", "change"]);
@@ -846,6 +846,54 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	// As the next tests expect it: no override, and the Explorer back where a stop put Run and Debug.
 	await silo("clear");
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
+});
+
+// Allow this run: a call in a loop asks once — every call like it is allowed until the run ends, and nothing is kept.
+test("capability decisions: Allow this run lets a loop's calls through, until the run ends", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/looped.js";
+	const policies = () => workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+
+		return (await api.workspace.fs.readDirectory(api.Uri.file("/workspace/.silo")).then((entries) => entries, () => [])).map(([name]) => name).filter((name) => name.endsWith(".policy.json") && name !== "policy.json");
+	});
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file(path);
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["import { writeFileSync } from \"node:fs\";", "", "for (const name of [\"a\", \"b\", \"c\"]) {", "\twriteFileSync(`/workspace/${name}.txt`, name);", "}", "console.log(\"wrote 3\");", ""].join("\n")));
+		await api.window.showTextDocument(uri);
+	}, program);
+
+	const before = await policies();
+	const stopped = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+	assert.equal(stopped.reason, "capability");
+
+	// The resource is computed on the line (a template) — known all the same, from a fork run to the call — so Allow always
+	// is offered too.
+	const question = await eventually("its question", () => workbench.evaluate(() => {
+		const box = document.querySelector(".live-values-ask");
+
+		return box === null ? undefined : { "what": box.querySelector(".live-values-ask-what").textContent, "choices": [...box.querySelectorAll("button")].map((button) => (button.disabled ? `(${button.textContent})` : button.textContent)) };
+	}));
+
+	assert.deepEqual(question, { "what": "writeFileSync '/workspace/a.txt' fs:write", "choices": ["Allow once", "Allow this run", "Allow always", "Deny", "Rule…"] });
+
+	// Every fs:write until the run ends: asked once, for the loop's three.
+	const ran = await session.request(`debug.session.${stopped.session}.decide`, { "choice": "allow-run" }, 60_000);
+
+	assert.equal(ran.state, "terminated", "no stop on the next turns");
+	assert.deepEqual(ran.output, ["wrote 3"]);
+	assert.deepEqual(await policies(), before, "nothing kept");
+
+	// A new run asks again.
+	const again = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+	assert.equal(again.reason, "capability");
+	await session.request(`debug.session.${again.session}.stop`, undefined, 30_000);
+	await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
 });
 
 // The Rules view (rules-view.ts): every rule as a sentence, mine first; a rule saved anywhere shows up in it, and one
@@ -1161,6 +1209,55 @@ test("debugger: a task's timers run on tsval's deterministic event loop", async 
 
 	assert.deepEqual(ran.output, ["first", "waited 30"]);
 	await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
+});
+
+// The event loop in the debugger: its own scope in the Variables view (the virtual clock, the timers pending) — and Skip
+// Waits, from the debug toolbar: a 5s timer fires at once, its clock still reading +5000ms.
+test("debugger: the event loop's scope, and Skip Waits", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/waits.js";
+	// The Event loop scope, as a stop reports it (the Variables view shows the same rows).
+	const loopOf = (outcome) => Object.fromEntries(outcome.eventLoop.map(({ name, value }) => [name, value]));
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode(["const start = Date.now();", "setTimeout(() => {", "\tconsole.log(\"waited\", Date.now() - start);", "}, 5000);", ""].join("\n")));
+	}, program);
+
+	const first = await session.request("debug.start", { "program": program, "breakpoints": [1, 3] }, 60_000);
+
+	// (Stopped however it goes: a session left paused would hold up the tests after this one.)
+	try {
+		assert.equal(first.line, 1);
+		assert.match(loopOf(first).time, /^\+0ms · /u);
+
+		// (The debug toolbar's Skip Waits does this for the active session.)
+		await session.request(`debug.session.${first.session}.pace`, { "pace": "fast" }, 10_000);
+
+		const started = Date.now();
+		const inTimer = await session.request(`debug.session.${first.session}.step`, { "action": "continue" }, 30_000);
+
+		const took = Date.now() - started;
+
+		assert.equal(inTimer.line, 3);
+		assert.ok(took < 4_000, `the 5s wait skipped (took ${took}ms)`);
+
+		const loop = loopOf(inTimer);
+
+		assert.match(loop.time, /^\+5000ms · /u);
+		assert.equal(loop.pace, "skipping waits");
+	} finally {
+		// Left as the other tests expect it: no session, no breakpoints, the Explorer back (a stop opens Run and Debug).
+		await session.request(`debug.session.${first.session}.stop`, undefined, 30_000).catch(() => undefined);
+		await session.request("debug.breakpoints", { "program": program, "lines": [] }, 30_000);
+		await workbench.evaluate(async (path) => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.delete(api.Uri.file(path));
+			await api.commands.executeCommand("workbench.view.explorer");
+		}, program);
+	}
 });
 
 // Exploring a race (tsval's explore): every ordering of the file's fetch results and its timer run, the distinct endings

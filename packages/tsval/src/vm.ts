@@ -286,6 +286,9 @@ export interface VM {
 	/** The choices its event loop made so far (VMOptions.eventLoop), in order — `picked` of each is a schedule to run it
 	 *  again (EventLoopOptions.schedule). Empty without one. */
 	readonly "choices": readonly Choice[];
+	/** Its event loop (VMOptions.eventLoop): the clock, the timers pending, the results waiting, the pace — undefined
+	 *  without one. A host may set `pace`. */
+	readonly "loop": Loop | undefined;
 	/** Monotonic count of `step()` calls — a free step budget. */
 	readonly "steps": number;
 

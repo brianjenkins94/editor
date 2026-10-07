@@ -84,6 +84,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	// it pre-arms capability breakpoints (a gated call hard-stops at its line). Empty when there's no policy — then
 	// every undecided dangerous call breaks (firewall default).
 	private policy: Policy = EMPTY_POLICY;
+	/** What *Allow this run* allowed: rules ahead of the policy until the session ends, written nowhere. */
+	private runRules: Rule[] = [];
 	/** The rules placed in this program's code, found in the text that runs (`placeRules`). */
 	private hooks: SetHook[] = [];
 	private sourceReady = false;
@@ -114,6 +116,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		const frame = this.snapshot?.frames[0];
 		const stopped = this.state === "stopped" && frame !== undefined;
 		const scope = stopped ? this.snapshot?.scopes[frame.id]?.[0] : undefined;
+		const loop = stopped ? this.snapshot?.scopes[frame.id]?.find(({ name }) => name === "Event loop") : undefined;
 
 		return {
 			"session": this.id,
@@ -127,7 +130,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 					"column": frame.column,
 					"function": frame.name,
 					"code": this.source.split("\n")[frame.line - 1]?.trim(),
-					"locals": (scope === undefined ? [] : this.snapshot?.variables[scope.variablesReference] ?? []).map(({ name, value, type }) => ({ "name": name, "value": value, "type": type }))
+					"locals": (scope === undefined ? [] : this.snapshot?.variables[scope.variablesReference] ?? []).map(({ name, value, type }) => ({ "name": name, "value": value, "type": type })),
+					...loop === undefined ? {} : { "eventLoop": (this.snapshot?.variables[loop.variablesReference] ?? []).map(({ name, value, type }) => ({ "name": name, "value": value, "type": type })) }
 				}
 				: {}),
 			"output": [...this.output]
@@ -181,6 +185,12 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			this.control({ "type": "decide", "policy": this.policy, "deny": !gives && decision === "deny" });
 		} else if (choice === "give-once") {
 			this.control({ "type": "decide", "give": give ?? null });
+		} else if (choice === "allow-run") {
+			// Every call of the capability, until the run ends — whatever it reaches (a loop's calls reach a different one
+			// each time round).
+			this.runRules.push({ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": ask.capability }] }, "then": [{ "action_id": "allow" }] } as Rule);
+			this.policy = await this.loadPolicy();
+			this.control({ "type": "decide", "policy": this.policy });
 		} else if (choice === "allow-always") {
 			if (!ask.resolved) {
 				throw new Error(`"Allow always" needs the resource the call reaches, and ${ask.resource} isn't known before it runs`);
@@ -198,6 +208,11 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 	/** At a stop, set `name` (a variable in scope there) to `value` (a literal): the run goes on with it, and the margin
 	 *  shows it beside the line. Resolves with the value as the Variables view shows it; rejects when it can't be set. */
+	/** What a timer's wait costs from here on (Skip Waits): its real delay, or none. */
+	public pace(pace: "real" | "fast"): void {
+		this.control({ "type": "pace", "pace": pace });
+	}
+
 	public async setValue(name: string, value: string): Promise<string> {
 		if (this.state !== "stopped") {
 			throw new Error("not stopped");
@@ -388,6 +403,12 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.respond(request, { "scopes": this.snapshot?.scopes[args["frameId"] as number] ?? [] });
 				break;
 
+			// Skip Waits / Wait in Real Time (tsval.skipWaits): what a timer's wait costs from here on.
+			case "pace":
+				this.pace(args["pace"] === "fast" ? "fast" : "real");
+				this.respond(request);
+				break;
+
 			case "setVariable":
 				void this.setValue(String(args["name"] ?? ""), String(args["value"] ?? "")).then((value) => { this.respond(request, { "value": value }); }, (error: unknown) => { this.fail(request, error instanceof Error ? error.message : String(error)); });
 				break;
@@ -478,11 +499,16 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	 *  runtime enforcer sees it — as the capability-breakpoint set, so the tsval debugger pre-arms the same rules
 	 *  that would actually gate a production run. Empty policy if absent/malformed/no workspace. */
 	private async loadPolicy(): Promise<Policy> {
+		let policy: Policy;
+
 		try {
-			return await loadEffectivePolicy();
+			policy = await loadEffectivePolicy();
 		} catch (error) {
-			return EMPTY_POLICY;
+			policy = EMPTY_POLICY;
 		}
+
+		// What this run was allowed (Allow this run), ahead of everything.
+		return this.runRules.length === 0 ? policy : { ...policy, "rules": [...this.runRules, ...policy.rules] };
 	}
 
 	/** Where the rules placed in this program's code are now (RULES.md: *at*, a span reference): each place found again
@@ -841,6 +867,17 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 				await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `debug ${name} (ordering ${picked.index + 1} of ${explored.outcomes.length})`, "program": uri.path, "eventLoop": { ...explored.eventLoop, "schedule": explored.outcomes[picked.index]!.schedule } });
 			}
 		}),
+		// Skip Waits: a tsval session's timers fire without waiting their real delay (the event loop's order unchanged) —
+		// and back. The debug toolbar shows whichever applies.
+		...(["fast", "real"] as const).map((pace) => vscode.commands.registerCommand(pace === "fast" ? "tsval.skipWaits" : "tsval.waitRealTime", async () => {
+			const session = vscode.debug.activeDebugSession;
+
+			if (session?.type === "tsval") {
+				await session.customRequest("pace", { "pace": pace });
+				await vscode.commands.executeCommand("setContext", "tsval.skipWaits", pace === "fast");
+			}
+		})),
+		vscode.debug.onDidStartDebugSession(() => { void vscode.commands.executeCommand("setContext", "tsval.skipWaits", false); }),
 		{ "dispose": serve(podHub, "debug.explore", async (args) => {
 			const { program, maxRuns } = (args ?? {}) as { "program"?: string; "maxRuns"?: number };
 

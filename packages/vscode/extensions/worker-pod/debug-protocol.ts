@@ -35,6 +35,8 @@ export type Control =
 	| { "type": "decide"; "deny"?: boolean; "policy"?: Policy; "give"?: unknown }
 	/** At a stop: set `name` (a variable in scope there) to `value`, a literal as code writes it — the run goes on with it. */
 	| { "type": "setValue"; "name": string; "value": string }
+	/** What a timer's wait costs from here on: its real delay, or none (Skip Waits). */
+	| { "type": "pace"; "pace": "real" | "fast" }
 	| { "type": StepAction | "disconnect" };
 
 /** Where tsval's event loop starts (its clock, its random seed) and — to run one ordering again — the choices to make. */
@@ -74,8 +76,8 @@ export interface RunEnd { "kind": "crashed" | "stopped"; "line": number; "at"?: 
 
 /** The choices at a capability stop, as the preview's prompt words them — and `rule`, a rule made there (the margin's
  *  rule editor) saved in my policy, deciding the call as it does (or giving its result); `give-once`, a result given the
- *  call instead of it, just this once. */
-export type CapabilityChoice = "allow-once" | "allow-always" | "deny" | "rule" | "give-once";
+ *  call instead of it, just this once; `allow-run`, calls like it allowed until the run ends (kept nowhere). */
+export type CapabilityChoice = "allow-once" | "allow-run" | "allow-always" | "deny" | "rule" | "give-once";
 
 /** Worker → adapter. */
 export type WorkerEvent =

@@ -360,6 +360,7 @@ flowchart LR
   n_ext_notes -->|"reads, writes"| n_store__silo_notes____file__jsonl
   n_ext_notes <-.->|"commands"| n_ext_vscode
   n_ext_notes <-.->|"commands"| n_ext_worker_pod
+  n_ext_vscode <-.->|"commands"| n_ext_worker_pod
   n_ext_worker_pod -->|"reads"| n_store__git__file_
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__json
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__jsonl
@@ -451,7 +452,7 @@ flowchart LR
 | Dev-server worker | virtual | `virtual.request()` |
 | Dev-server worker | workspace | `workspace.changed` |
 | Pod | capability | `capability.decide()`, `capability.record()`, `capability.recorded()` |
-| Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.explore()`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.event`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
+| Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.explore()`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.event`, `debug.session.*.pace()`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
 | Pod | git | `git.changed` |
 | Pod | node | `node.exit.*`, `node.start` |
 | Pod | pod | `pod.ready` |

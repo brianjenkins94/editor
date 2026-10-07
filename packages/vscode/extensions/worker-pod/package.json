@@ -16,9 +16,15 @@
   "contributes": {
     "commands": [
       { "command": "editor.debugFile", "title": "Run and Debug File", "category": "Debug", "icon": "$(debug-alt)" },
-      { "command": "tsval.exploreOrderings", "title": "Explore Orderings", "category": "Debug", "icon": "$(type-hierarchy)" }
+      { "command": "tsval.exploreOrderings", "title": "Explore Orderings", "category": "Debug", "icon": "$(type-hierarchy)" },
+      { "command": "tsval.skipWaits", "title": "Skip Waits", "category": "Debug", "icon": "$(rocket)", "enablement": "debugType == tsval" },
+      { "command": "tsval.waitRealTime", "title": "Wait in Real Time", "category": "Debug", "icon": "$(watch)", "enablement": "debugType == tsval" }
     ],
     "menus": {
+      "debug/toolBar": [
+        { "command": "tsval.skipWaits", "when": "debugType == tsval && !tsval.skipWaits", "group": "navigation@10" },
+        { "command": "tsval.waitRealTime", "when": "debugType == tsval && tsval.skipWaits", "group": "navigation@10" }
+      ],
       "editor/title/run": [
         { "command": "editor.debugFile", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "navigation@2" },
         { "command": "tsval.exploreOrderings", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "navigation@3" }

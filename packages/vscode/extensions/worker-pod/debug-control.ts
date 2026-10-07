@@ -13,9 +13,10 @@
  *   session `debug.session.<id>.step` { action }   → resumes, and answers with the NEXT stop (or the end)
  *   session `debug.session.<id>.state`             → where it is now
  *   session `debug.session.<id>.stop`              → ends it
- *   session `debug.session.<id>.decide` { choice, rule? } → at a capability stop: allow-once / allow-always / deny, or
+ *   session `debug.session.<id>.decide` { choice, rule? } → at a capability stop: allow-once / allow-run / allow-always / deny, or
  *                                                     rule (saved in my policy, deciding it), then resumes
  *   session `debug.session.<id>.setValue` { name, value } → at a stop: a variable set to a literal; the run goes on with it
+ *   session `debug.session.<id>.pace` { pace }      → what a timer's wait costs from here on: real, or none (Skip Waits)
  *
  * The session methods are served by the ADAPTER (debug-adapter.ts), not the worker: a breakpoint inside a React handler
  * blocks the worker in Atomics.wait, where only the adapter (which holds the shared control word) can resume it — and
@@ -33,7 +34,7 @@ import { loadEffectivePolicy, loadPolicyFiles, movePlace, replaceRule } from "..
 
 export type DebugAction = StepAction;
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
-const CHOICES = new Set<string>(["allow-once", "allow-always", "deny", "rule", "give-once"] satisfies CapabilityChoice[]);
+const CHOICES = new Set<string>(["allow-once", "allow-run", "allow-always", "deny", "rule", "give-once"] satisfies CapabilityChoice[]);
 
 /** `starting` until the first stop; `idle` = a React app mounted and waiting for events (no stop to step from). */
 export type DebugState = "starting" | "running" | "stopped" | "idle" | "terminated";
@@ -52,6 +53,9 @@ export interface DebugOutcome {
 	/** The source line it stopped on. */
 	"code"?: string;
 	"locals"?: { "name": string; "value": string; "type": string }[];
+	/** Its event loop at the stop, as the Variables view's Event loop scope shows it: the virtual clock, the pace, the
+	 *  timers pending, the results waiting. */
+	"eventLoop"?: { "name": string; "value": string; "type": string }[];
 	/** What the program printed since the action began. */
 	"output": string[];
 }
@@ -71,6 +75,8 @@ export interface ControllableSession {
 	"decide": (choice: CapabilityChoice, signal: AbortSignal, rule?: Rule, give?: unknown) => Promise<DebugOutcome>;
 	/** At a stop, set a variable in scope to a literal; resolve with it as the Variables view shows it. */
 	"setValue": (name: string, value: string) => Promise<string>;
+	/** What a timer's wait costs from here on: its real delay, or none (Skip Waits). */
+	"pace": (pace: "real" | "fast") => void;
 }
 
 const sessions = new Map<string, ControllableSession>();
@@ -109,6 +115,17 @@ export function registerSession(hub: Hub, session: ControllableSession): () => v
 			}
 
 			return session.setValue(name, value);
+		}),
+		serve(hub, prefix + "pace", (args) => {
+			const { pace } = (args ?? {}) as { "pace"?: unknown };
+
+			if (pace !== "real" && pace !== "fast") {
+				throw new TypeError("pace takes { pace: \"real\" | \"fast\" }");
+			}
+
+			session.pace(pace);
+
+			return null;
 		})
 	];
 

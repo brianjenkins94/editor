@@ -13,7 +13,9 @@
  *
  * A capability stop asks on its line too (step 8): what the call would do — `writeFileSync '/workspace/out.txt'` — and
  * *Allow once*, *Allow always*, *Deny*, the choice sent back to the session (`debug.session.<id>.decide`), which
- * resumes it. *Allow always* needs the resource the call reaches: offered only when it's known before the line runs.
+ * resumes it. *Allow this run* lets every call of the capability through until the run ends (a loop asks once), kept
+ * nowhere. *Allow always* needs the resource the call reaches — known even when the line computes it (the worker runs a
+ * fork of the stop to the call to see it).
  * *Rule…* opens the rule editor there (the component's, RULES.md), prefilled with the call — *capability is*, *resource
  * is*, *then allow* — to widen or narrow it (*resource matches* a glob) and apply it *Just this once*, or *Save as rule*
  * in my policy, the run going on as it decides. Or *give* the call's *result* instead of it (RULES.md, slice 2) —
@@ -753,6 +755,7 @@ function renderAsk(session: string, ask: CapabilityAsk, element: HTMLElement, re
 	choices.className = "live-values-choices";
 	choices.append(
 		button("Allow once", "allow-once", "Let this call run, and stop here again next time"),
+		button("Allow this run", "allow-run", `Let every ${ask.capability} call run until this run ends, whatever it reaches (kept nowhere)`),
 		button("Allow always", "allow-always", ask.resolved ? `Allow ${ask.capability} on ${ask.resource} in your policy (.silo/<you>.policy.json)` : "Needs the resource the call reaches, which isn't known before the line runs", ask.resolved),
 		button("Deny", "deny", "Fail this call, as the policy would")
 	);
