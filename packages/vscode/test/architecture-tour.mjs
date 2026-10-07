@@ -862,6 +862,7 @@ test("capability decisions: Allow this run lets a loop's calls through, until th
 		const { api } = globalThis.__editor;
 		const uri = api.Uri.file(path);
 
+		// eslint-disable-next-line no-template-curly-in-string -- the program's own template literal, as text
 		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(["import { writeFileSync } from \"node:fs\";", "", "for (const name of [\"a\", \"b\", \"c\"]) {", "\twriteFileSync(`/workspace/${name}.txt`, name);", "}", "console.log(\"wrote 3\");", ""].join("\n")));
 		await api.window.showTextDocument(uri);
 	}, program);
