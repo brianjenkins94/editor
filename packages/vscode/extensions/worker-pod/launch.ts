@@ -41,17 +41,32 @@ function targetOf(task: vscode.Task): LaunchTarget | undefined {
 
 export function registerLaunch(context: vscode.ExtensionContext): void {
 	const offList = serve(podHub, "tasks.list", async () => (await vscode.tasks.fetchTasks()).flatMap((task) => targetOf(task) ?? []));
+	// A task run (RUNNING.md: through the terminal, each `node` in it a run). Already running: its terminal shown, not a
+	// second copy. One that can't start says why, in the workbench.
 	const offRun = serve(podHub, "tasks.run", async (args) => {
 		const { id } = (args ?? {}) as { "id"?: unknown };
-		const task = (await vscode.tasks.fetchTasks()).find((candidate) => idOf(candidate) === id);
 
-		if (task === undefined) {
-			return false;
+		try {
+			const task = (await vscode.tasks.fetchTasks()).find((candidate) => idOf(candidate) === id);
+
+			if (task === undefined) {
+				throw new Error("it's no longer one of the workspace's tasks");
+			}
+
+			if (vscode.tasks.taskExecutions.some((execution) => idOf(execution.task) === id)) {
+				vscode.window.terminals.find((terminal) => terminal.name.includes(task.name))?.show();
+
+				return true;
+			}
+
+			await vscode.tasks.executeTask(task);
+
+			return true;
+		} catch (error) {
+			void vscode.window.showErrorMessage(`Couldn't run the task: ${error instanceof Error ? error.message : String(error)}`);
+
+			throw error;
 		}
-
-		await vscode.tasks.executeTask(task);
-
-		return true;
 	});
 	context.subscriptions.push({ "dispose": () => { offList(); offRun(); } });
 }

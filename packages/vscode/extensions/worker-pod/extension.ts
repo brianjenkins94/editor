@@ -22,6 +22,7 @@ import { storeNode, ZENFS_NODE } from "../../architecture-zenfs";
 import type { CommandTotals } from "../command-tap";
 import { ARCH_COMMANDS } from "../command-tap";
 import { registerTsvalDebug, takeExitCode } from "./debug-adapter";
+import { runProgram } from "./debug-control";
 import { registerLaunch } from "./launch";
 import { registerSourceControl } from "./source-control";
 import { registerTasks } from "./tasks";
@@ -193,14 +194,9 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// What there is to run, as tasks run by core's shell (tasks.ts); and the shell's run picker, from them (launch.ts).
 	registerTasks(context);
 	registerLaunch(context);
-	// The editor's ▷: the file in the editor, run as F5 runs it — a tsval debug session, stopping at breakpoints, its
-	// process.argv from the file's stub (LIVE-VALUES.md, "Mocking a value"). One way to run a file.
-	context.subscriptions.push(vscode.commands.registerCommand("editor.debugFile", async (uri?: vscode.Uri) => {
-		const file = uri instanceof vscode.Uri ? uri : vscode.window.activeTextEditor?.document.uri;
-
-		if (file !== undefined) {
-			await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `debug ${file.path.split("/").pop()}`, "program": file.path });
-		}
+	// The editor's ▷: Run (RUNNING.md) — the file, as every way in runs it.
+	context.subscriptions.push(vscode.commands.registerCommand("editor.debugFile", (uri?: vscode.Uri) => {
+		void runProgram({ ...uri instanceof vscode.Uri ? { "program": uri.path } : {} }).catch(() => undefined);
 	}));
 	// VS Code's Source Control view, on core's git service (source-control.ts).
 	registerSourceControl(context);

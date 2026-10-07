@@ -541,21 +541,23 @@ function Shell() {
 	// A target's run, if it's running now (the registry titles a run as it was typed: `npm run dev`, in its directory).
 	const runOf = (target: LaunchTarget): RunInfo | undefined => runs.find((run) => run.state === "running" && run.title === target.command && run.cwd === target.cwd);
 
-	// A running service is already there: show its preview rather than start a second copy (which `vite` refuses).
+	// A running service is already there: show its preview rather than start a second copy (which `vite` refuses). Any
+	// other is the pod's to run — or, running, to show its terminal; one that can't start says why in the workbench.
 	const runTarget = (target: LaunchTarget): void => {
 		const running = runOf(target);
 
 		if (running?.port !== undefined) {
 			hubRef.current?.publish("preview.open", { "port": running.port });
-		} else if (running === undefined) {
+		} else {
 			void rpcRef.current?.request("tasks.run", { "id": target.id }, { "timeoutMs": 10000 }).catch(() => undefined);
 		}
 
 		setRunOpen(false);
 	};
 
-	// The file in the editor, run as F5 runs it (LIVE-VALUES.md, "one way to run"): a debug session, stopping at
-	// breakpoints, its process.argv from the file's stub. It answers at its first stop: nobody waits on it here.
+	// Run (RUNNING.md): the file in the editor, as every way in runs it — stopping at breakpoints, its process.argv from
+	// the file's stub. It answers at its first stop: nobody waits on it here, and a run that can't start says why in the
+	// workbench (the pod shows it).
 	const runThisFile = (): void => {
 		void rpcRef.current?.request("debug.start", {}, { "timeoutMs": 24 * 60 * 60_000 }).catch(() => undefined);
 		setRunOpen(false);
@@ -799,13 +801,11 @@ function Shell() {
 									class={runItem()}
 									role="menuitem"
 									tabIndex={0}
-									title="Run and debug the file in the editor, as F5 does"
+									title="Run the file in the editor"
 									onClick={runThisFile}
 									onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); runThisFile(); } }}
 								>
 									<span class={runItemName()}>The file in the editor</span>
-
-									<span class={runItemMeta()}>F5</span>
 								</div>
 
 								{targets.length === 0 ? (
@@ -1029,7 +1029,7 @@ function Shell() {
 						{ "node": PanelLeft, "label": "Projects", "title": "Expand project panel", "onClick": () => { setLhsCollapsed(false); } },
 						// placeholders to preview the stacked look — settle final contents next
 						{ "node": FolderOpen, "label": "Open", "title": "Open project", "onClick": () => undefined },
-						{ "node": Play, "label": "Run", "title": "Run", "onClick": () => undefined }
+						{ "node": Play, "label": "Run", "title": "Run the file in the editor", "onClick": runThisFile }
 					]}
 					/>
 				) : (

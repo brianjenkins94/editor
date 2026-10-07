@@ -174,6 +174,18 @@ function resolveProgram(program: string | undefined): string {
 	return (vscode.workspace.workspaceFolders?.[0]?.uri.path ?? "/workspace").replace(/\/$/u, "") + "/" + path;
 }
 
+/** What Run runs: a JavaScript or TypeScript file (RUNNING.md). */
+const PROGRAM = /\.(?:m|c)?[jt]sx?$/u;
+
+/** `path`, when it's a program Run can run; else why not. */
+function runnable(path: string): string {
+	if (!PROGRAM.test(path)) {
+		throw new Error(`${path.split("/").pop()} isn't a program — Run runs a JavaScript or TypeScript file`);
+	}
+
+	return path;
+}
+
 /** Replace `program`'s breakpoints with `lines` (1-based), through VS Code so its UI and every session see them. */
 function setBreakpoints(program: string, lines: number[]): void {
 	const uri = vscode.Uri.file(program);
@@ -393,35 +405,54 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 
 			return rule ?? null;
 		}) },
-		{ "dispose": serve(hub, "debug.start", async (args, { signal }) => {
-			const { program, breakpoints, "args": inputs, cases, eventLoop } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[]; "args"?: string[]; "cases"?: string[][]; "eventLoop"?: unknown };
-			const path = resolveProgram(program);
-			const launchId = crypto.randomUUID();
-
-			// Before the launch, so they're registered by the time the session starts running.
-			if (breakpoints !== undefined) {
-				setBreakpoints(path, breakpoints);
-			}
-
-			const launched = new Promise<ControllableSession>((resolve, reject) => {
-				pendingLaunches.set(launchId, resolve);
-				signal.addEventListener("abort", () => {
-					pendingLaunches.delete(launchId);
-					reject(signal.reason);
-				}, { "once": true });
-			});
-			// `cases`: several runs, one after another (process.argv mocked with Multiple); answered with the first's first stop.
-			const given = cases !== undefined && cases.length > 0 ? { "args": cases[0], "__cases": cases, "__case": 0 } : inputs === undefined ? {} : { "args": inputs };
-			// `eventLoop`: an ordering to run again (debug.explore's: its clock, seed and schedule).
-			const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "debug " + path.split("/").pop(), "program": path, ...given, ...eventLoop === undefined ? {} : { "eventLoop": eventLoop }, "__launchId": launchId });
-
-			if (!started) {
-				pendingLaunches.delete(launchId);
-
-				throw new Error("VS Code didn't start the debug session");
-			}
-
-			return (await launched).settled(signal);
-		}) }
+		// Run (RUNNING.md): every button's, the margin's, an agent's — one path.
+		{ "dispose": serve(hub, "debug.start", async (args, { signal }) => runProgram(args, signal)) }
 	);
+}
+
+/** Run (RUNNING.md): `args.program` — the editor's file by default — as every way in runs it, answered with where it
+ *  first stops, idles or ends. A run that can't start says why, in the workbench, whoever asked (a button's caller
+ *  doesn't wait to show it). */
+export async function runProgram(args: unknown, signal: AbortSignal = new AbortController().signal): Promise<DebugOutcome> {
+	try {
+		return await startRun(args, signal);
+	} catch (error) {
+		if (!signal.aborted) {
+			void vscode.window.showErrorMessage(`Couldn't run: ${error instanceof Error ? error.message : String(error)}`);
+		}
+
+		throw error;
+	}
+}
+
+/** Start a run of `args.program` (the editor's file by default) and answer with where it first stops, idles or ends. */
+async function startRun(args: unknown, signal: AbortSignal): Promise<DebugOutcome> {
+	const { program, breakpoints, "args": inputs, cases, eventLoop } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[]; "args"?: string[]; "cases"?: string[][]; "eventLoop"?: unknown };
+	const path = runnable(resolveProgram(program));
+	const launchId = crypto.randomUUID();
+
+	// Before the launch, so they're registered by the time the session starts running.
+	if (breakpoints !== undefined) {
+		setBreakpoints(path, breakpoints);
+	}
+
+	const launched = new Promise<ControllableSession>((resolve, reject) => {
+		pendingLaunches.set(launchId, resolve);
+		signal.addEventListener("abort", () => {
+			pendingLaunches.delete(launchId);
+			reject(signal.reason);
+		}, { "once": true });
+	});
+	// `cases`: several runs, one after another (process.argv mocked with Multiple); answered with the first's first stop.
+	const given = cases !== undefined && cases.length > 0 ? { "args": cases[0], "__cases": cases, "__case": 0 } : inputs === undefined ? {} : { "args": inputs };
+	// `eventLoop`: an ordering to run again (debug.explore's: its clock, seed and schedule).
+	const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": path.split("/").pop()!, "program": path, ...given, ...eventLoop === undefined ? {} : { "eventLoop": eventLoop }, "__launchId": launchId });
+
+	if (!started) {
+		pendingLaunches.delete(launchId);
+
+		throw new Error("VS Code didn't start the debug session");
+	}
+
+	return (await launched).settled(signal);
 }

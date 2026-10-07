@@ -222,6 +222,8 @@ function capabilitySurface(fileName: string, args: string[]): { "globals": Recor
  *  writes refused (a library's effects aren't stepped or asked about); the program's are its stand-ins (programBuiltins:
  *  what a capability stop is about). Loaded at a run's start. */
 let runtime: Runtime | undefined;
+/** The globals the program has on Node beyond ECMAScript's (workspace-runtime.ts' programGlobals), once the runtime's up. */
+let nodeGlobals: Record<string, unknown> = {};
 /** The built-ins the program's code gets (the run's capability stand-ins, by name) — set as a run starts. */
 let programBuiltins: Record<string, unknown> = {};
 /** The machine evaluating the program: a program file a package requires is evaluated on it (a nested run). */
@@ -236,7 +238,7 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 		return runtime;
 	}
 
-	const [{ getServerBridge }, { answerServer, serverOn, workerTapResponse, workspaceRuntime }, zenfs] = await Promise.all([import("@brianjenkins94/almostnode"), import("./workspace-runtime"), import("./zenfs-vfs.js")]);
+	const [{ getServerBridge }, { answerServer, programGlobals, serverOn, workerTapResponse, workspaceRuntime }, zenfs] = await Promise.all([import("@brianjenkins94/almostnode"), import("./workspace-runtime"), import("./zenfs-vfs.js")]);
 
 	if (workspace !== undefined) {
 		zenfs.attachSharedWorkspace(workspace);
@@ -287,6 +289,8 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 		});
 		post({ "type": "listening", "port": port });
 	} });
+
+	nodeGlobals = programGlobals(runtime);
 
 	return runtime;
 }
@@ -757,7 +761,7 @@ async function exploreOrderings(message: Extract<Control, { "type": "explore" }>
 		programBuiltins = surface.modules;
 		const write = (...args: unknown[]): void => { output.push(args.map(formatLogArg).join(" ")); };
 		const console = Object.fromEntries(["log", "info", "debug", "dir", "warn", "error", "trace"].map((name) => [name, write]));
-		const { vm } = createVM(message.source, { "fileName": message.fileName, "globals": { ...surface.globals, "console": console }, "modules": programModules(loaded), "eventLoop": { ...message.eventLoop, "schedule": schedule, "pace": "fast" } });
+		const { vm } = createVM(message.source, { "fileName": message.fileName, "globals": { ...nodeGlobals, ...surface.globals, "console": console }, "modules": programModules(loaded), "eventLoop": { ...message.eventLoop, "schedule": schedule, "pace": "fast" } });
 
 		evaluating = vm;
 		let crash: string | undefined;
@@ -1338,7 +1342,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	programBuiltins = surface.modules;
 	runtime?.clearCache();
 
-	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, "globals": surface.globals, "modules": modules });
+	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals }, "modules": modules });
 
 	evaluating = loaded.vm;
 

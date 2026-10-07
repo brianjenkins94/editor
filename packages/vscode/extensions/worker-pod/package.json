@@ -15,7 +15,7 @@
   ],
   "contributes": {
     "commands": [
-      { "command": "editor.debugFile", "title": "Run and Debug File", "category": "Debug", "icon": "$(debug-alt)" },
+      { "command": "editor.debugFile", "title": "Run", "category": "Debug", "icon": "$(play)" },
       { "command": "tsval.exploreOrderings", "title": "Explore Orderings", "category": "Debug", "icon": "$(type-hierarchy)" },
       { "command": "tsval.skipWaits", "title": "Skip Waits", "category": "Debug", "icon": "$(rocket)", "enablement": "debugType == tsval" },
       { "command": "tsval.waitRealTime", "title": "Wait in Real Time", "category": "Debug", "icon": "$(watch)", "enablement": "debugType == tsval" }
@@ -26,8 +26,10 @@
         { "command": "tsval.waitRealTime", "when": "debugType == tsval && tsval.skipWaits", "group": "navigation@10" }
       ],
       "editor/title/run": [
-        { "command": "editor.debugFile", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "navigation@2" },
-        { "command": "tsval.exploreOrderings", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "navigation@3" }
+        { "command": "editor.debugFile", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "navigation@2" }
+      ],
+      "editor/title": [
+        { "command": "tsval.exploreOrderings", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "1_run@1" }
       ]
     },
     "taskDefinitions": [
@@ -49,7 +51,7 @@
     "debuggers": [
       {
         "type": "tsval",
-        "label": "tsval (step + time-travel)",
+        "label": "Run",
         "languages": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
         "configurationAttributes": {
           "launch": {
@@ -75,13 +77,7 @@
       {
         "type": "production",
         "label": "production (almostnode run)",
-        "initialConfigurations": [
-          {
-            "type": "production",
-            "request": "launch",
-            "name": "Production run"
-          }
-        ]
+        "hiddenWhen": "true"
       }
     ]
   }

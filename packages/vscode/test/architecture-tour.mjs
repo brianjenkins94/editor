@@ -170,6 +170,77 @@ test("render surface: a tsval program that renders opens it", async () => {
 });
 
 // A session VS Code starts itself (F5, Run and Debug, debug_start) is a run in the registry too, ended with the session.
+// Run (RUNNING.md): one way in. The shell's ▷ (its "The file in the editor"), its left rail's Run and the editor's ▷ all
+// run the file in the editor, the same way — a run each; a file that isn't a program says why. And a run has Node's
+// globals, not only ECMAScript's.
+test("run: one way in from every button, and a file that isn't a program says why", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/oneway.js";
+	const runsOf = async () => (await session.request("runs.list", undefined, 5000)).filter((run) => run.title.endsWith("oneway.js") && run.state === "exited").length;
+	const ranAgain = async (what, before) => eventually(what, async () => ((await runsOf()) > before || undefined));
+	const shown = (path) => workbench.evaluate((file) => globalThis.__editor.api.window.showTextDocument(globalThis.__editor.api.Uri.file(file)), path);
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode("console.log(\"ran\", new URL(\"https://x.dev/a?b=1\").searchParams.get(\"b\"), Buffer.from(\"hi\").toString(\"base64\"), new TextEncoder().encode(\"é\").length);\n"));
+		await api.workspace.fs.writeFile(api.Uri.file("/workspace/notes.md"), new TextEncoder().encode("# notes\n"));
+	}, program);
+
+	try {
+		const ran = await session.request("debug.start", { "program": program }, 60_000);
+
+		assert.deepEqual(ran.output, ["ran 1 aGk= 2"], "URL, Buffer and TextEncoder, as Node has them");
+
+		// The shell's ▷: its first item.
+		await shown(program);
+
+		let before = await runsOf();
+
+		await session.page.locator("wa-button[aria-label=\"Run\"]").click();
+		await session.page.getByRole("menuitem", { "name": "The file in the editor" }).click();
+		await ranAgain("the shell's ▷ ran it", before);
+
+		// The editor's ▷.
+		before = await runsOf();
+		await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.debugFile"));
+		await ranAgain("the editor's ▷ ran it", before);
+
+		// The left rail's Run (the project panel collapsed to it — as it's left, or collapsed for this).
+		before = await runsOf();
+
+		const rail = session.page.locator("wa-button[aria-label=\"Run the file in the editor\"]");
+		const collapsed = await rail.count() > 0;
+
+		if (!collapsed) {
+			await session.page.locator("wa-button[aria-label=\"Toggle project panel\"]").click();
+		}
+
+		await rail.click();
+		await ranAgain("the left rail's Run ran it", before);
+
+		if (!collapsed) {
+			await session.page.locator("wa-button[aria-label=\"Toggle project panel\"]").click();
+		}
+
+		// Not a program: why, in the workbench.
+		await shown("/workspace/notes.md");
+		await assert.rejects(session.request("debug.start", {}, 30_000), /notes\.md isn't a program/u);
+		assert.match(await eventually("why, in a notification", () => workbench.evaluate(() => [...document.querySelectorAll(".notification-toast")].map((toast) => toast.textContent).find((text) => text.includes("Couldn't run")))), /notes\.md isn't a program/u);
+	} finally {
+		await workbench.evaluate(async (path) => {
+			const { api } = globalThis.__editor;
+
+			await api.commands.executeCommand("notifications.clearAll");
+			await api.commands.executeCommand("workbench.action.closeAllEditors");
+
+			for (const file of [path, "/workspace/notes.md"]) {
+				await api.workspace.fs.delete(api.Uri.file(file)).then(() => undefined, () => undefined);
+			}
+		}, program);
+	}
+});
+
 test("debug session: one VS Code starts is a run, known by the same id", async () => {
 	await session.terminal(`echo "console.log('f5');" > f5.js`, { "fresh": true });
 	await session.request("debug.start", { "program": "/workspace/f5.js" }, 60_000);

@@ -30,6 +30,20 @@ export function workspaceRuntime(vfs: VirtualFS, options: Omit<RuntimeOptions, "
 	return new Runtime(vfs, { "cwd": "/workspace", "env": {}, ...options, "base": DEPLOY_BASE });
 }
 
+/** The web's globals Node has too (a program run natively sees the worker's, which has them). */
+const NODE_WEB_GLOBALS = ["URL", "URLSearchParams", "TextEncoder", "TextDecoder", "structuredClone", "AbortController", "AbortSignal", "atob", "btoa", "Blob", "Event", "EventTarget", "Headers", "Request", "Response", "FormData", "DOMException", "WebAssembly"];
+
+/** The globals a program has on Node beyond ECMAScript's — the web's Node has, and `Buffer` (almostnode's) — for a host
+ *  evaluating the program's files itself (the debug worker: tsval's own are ECMAScript's alone), so a program has the
+ *  same globals however it runs (RUNNING.md). Not what varies run to run (`performance`, `crypto`): a run's clock and
+ *  randomness are its event loop's. */
+export function programGlobals(runtime: Runtime): Record<string, unknown> {
+	const host = globalThis as unknown as Record<string, unknown>;
+	const web = Object.fromEntries(NODE_WEB_GLOBALS.filter((name) => name in host).map((name) => [name, host[name]]));
+
+	return { ...web, "Buffer": (runtime.require("buffer", "/workspace", "package") as { "Buffer": unknown }).Buffer };
+}
+
 /** The program's own http server listening on `port` (almostnode's port registry), if one is. */
 export function serverOn(port: number): RequestHandler | undefined {
 	return getServer(port) as unknown as RequestHandler | undefined;

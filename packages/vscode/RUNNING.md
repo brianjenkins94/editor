@@ -141,9 +141,15 @@ that can't start says why). And the two run ledgers become one: every run in `ru
    is a tenth of a millisecond, so a server answers at an interactive pace. Case 2 is narrower than feared: a program
    whose own code computes heavily (a simulation, a game's update loop, an algorithm on big data). Speed isn't the aim;
    this is where the fallback would be felt first, and where making tsval faster pays.
-1. **One Run.** Every entry point onto one path — `runs.begin`, then a tsval session — with errors shown. The shell's
+1. **One Run** (done). Every entry point onto one path — `runs.begin`, then a tsval session — with errors shown. The shell's
    and editor's buttons and the left rail run the file in the editor, program files only; the production picker entry
-   goes. (The terminal still routes, until step 3.)
+   goes. (The terminal still routes, until step 3.) Done: the shell's ▷ item, the left rail's *Run* and the editor's ▷
+   (now *Run*, alone in its menu: *Explore Orderings* moved to the editor's "…", so it can't become the button) all call
+   one `runProgram` (debug-control.ts) — a JavaScript or TypeScript file only, a run that can't start saying why in a
+   notification; a session is named by its file; the production debugger hidden from the picker (`hiddenWhen`); a task
+   already running shows its terminal rather than nothing; and a run's globals are Node's (workspace-runtime.ts'
+   `programGlobals`: `URL`, `TextEncoder`, `Buffer`, … — not `performance` or `crypto`, which vary run to run). The
+   debugger's type is still `tsval` in a launch.json someone writes by hand; its label is *Run*.
 2. **Real effects.** An allowed call made for real through almostnode's shims, its result recorded; asking in the
    margin the only way; the script worker's popup path retired for runs.
 3. **The terminal.** `node f` always a run: output and stdin in its terminal, its args, cwd and env; the regex no longer
