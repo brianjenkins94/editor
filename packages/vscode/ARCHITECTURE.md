@@ -281,8 +281,8 @@ flowchart LR
     subgraph c_workers["App workers"]
       n_bablr["BABLR worker"]
       n_node["Dev-server worker"]
-      n_node_scripts["Script worker"]
       n_provoke["Provoke worker"]
+      n_server__["server:*"]
       n_vite__["Vite dev server :*"]
     end
     subgraph c_podWorkers["Pod workers"]
@@ -347,6 +347,7 @@ flowchart LR
   n_channel_vscode_web_state_db_global <-.->|"VS Code storage sync"| n_workbench
   n_channel_vscode_web_state_db_global_shared <-.->|"VS Code storage sync"| n_workbench
   n_debug_mcp <==> n_root
+  n_debug_worker <-.->|"in-realm calls"| n_server__
   n_debug_worker <==> n_pod
   n_ext_capabilities -->|"reads, writes"| n_store__silo__file__json
   n_ext_eslint <-.->|"commands"| n_ext_vscode
@@ -386,7 +387,6 @@ flowchart LR
   n_node <-.->|"zen-fs"| n_zenfs
   n_node <==> n_provoke
   n_node <==> n_workbench
-  n_node_scripts <==> n_workbench
   n_pod <-.->|"LSP (JSON-RPC)"| n_worker_server_host
   n_pod <==> n_workbench
   n_preview__ <-.->|"HTTP"| n_sw
@@ -453,7 +453,7 @@ flowchart LR
 | Pod | capability | `capability.decide()`, `capability.record()`, `capability.recorded()` |
 | Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.explore()`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.event`, `debug.session.*.pace()`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.stdin()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
 | Pod | git | `git.changed` |
-| Pod | node | `node.exit.*`, `node.start` |
+| Pod | node | `node.start`, `node.stdin.*` |
 | Pod | pod | `pod.ready` |
 | Pod | production | `production.exit.*`, `production.launch`, `production.out.*` |
 | Pod | rules | `rules.given()`, `rules.list()`, `rules.placed()`, `rules.set()` |

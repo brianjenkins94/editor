@@ -1601,6 +1601,7 @@ test("debugger: a program's server answers the preview, and keeps the run alive"
 		assert.equal(await get("/again"), "200 hello /again #2", "the program's state, kept between requests");
 		assert.match(await get("/page"), /^200 <html><head>\n<script>.*__editorTap.*<\/script><title>p<\/title>/su, "a page it serves gets the preview's tap first, as a run's server's does");
 		assert.ok((await session.request("runs.list", undefined, 5000)).some((run) => run.kind === "service" && run.port === 4321), "a service, with its port");
+		await session.until("its server, observed", hasLabel("debug-worker", "server:4321", /./u));
 	} finally {
 		await session.request(`debug.session.${started.session}.stop`, undefined, 30_000).catch(() => undefined);
 		await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
@@ -1643,6 +1644,58 @@ test("debugger: a program reads its stdin from the Debug Console", async () => {
 	} finally {
 		await session.request(`debug.session.${started.session}.stop`, undefined, 30_000).catch(() => undefined);
 		await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
+	}
+});
+
+// `node` in the terminal is a run like any other (RUNNING.md, step 3): in the debugger, with the command line's arguments,
+// the shell's directory and environment; its output in that terminal, and what's typed there its stdin. (Through a
+// terminal's shell process, driven over the hub — `terminal.run`, as a task's terminal is — rather than typed into one.)
+test("terminal: node runs in the debugger with its args, cwd and env — output and stdin in the terminal", async () => {
+	const workbench = session.workbench();
+	const id = "tour-argv";
+	const screen = () => workbench.evaluate(() => (globalThis.__terminalSeen ?? []).join(""));
+	const type = (text) => workbench.evaluate(([terminal, keys]) => { globalThis.__architecture.hub.publish(`terminal.in.${terminal}`, keys); }, [id, text]);
+
+	await workbench.evaluate(async (terminal) => {
+		const { api } = globalThis.__editor;
+
+		globalThis.__terminalSeen = [];
+		globalThis.__terminalOff = globalThis.__architecture.hub.subscribe(`terminal.out.${terminal}`, (data) => { globalThis.__terminalSeen.push(String(data)); });
+		await api.workspace.fs.createDirectory(api.Uri.file("/workspace/sub"));
+		await api.workspace.fs.writeFile(api.Uri.file("/workspace/argv.js"), new TextEncoder().encode([
+			"console.log(\"args\", process.argv.slice(2).join(\",\"), \"in\", process.cwd(), \"with\", process.env.GREETING ?? \"none\");",
+			"process.stdin.on(\"data\", (chunk) => {",
+			"\tconst line = String(chunk).trim();",
+			"",
+			"\tconsole.log(\"got \" + line);",
+			"\tif (line === \"bye\") {",
+			"\t\tprocess.stdin.removeAllListeners(\"data\");",
+			"\t}",
+			"});",
+			""
+		].join("\n")));
+	}, id);
+
+	try {
+		assert.equal(await session.request("terminal.run", { "id": id, "command": "export GREETING=hey && cd sub && node ../argv.js one two", "cwd": "/workspace" }, 10_000), true);
+		await eventually("its output, in the terminal", async () => ((await screen()).includes("args one,two in /workspace/sub with hey") || undefined));
+		assert.ok((await session.request("runs.list", undefined, 5000)).some((run) => run.title === "node ../argv.js one two" && run.runtime === "tsval" && run.state === "running"), "a run, in the debugger");
+
+		// Typed in the terminal (a line at a time, as a terminal gives it): the program's stdin.
+		await type("hi\r");
+		await eventually("its answer", async () => ((await screen()).includes("got hi") || undefined));
+		await type("bye\r");
+		await eventually("the run over", async () => ((await session.request("runs.list", undefined, 5000)).some((run) => run.title === "node ../argv.js one two" && run.state === "exited") || undefined));
+		assert.ok(!(await screen()).includes("running in the Debug Console"), "no pointer elsewhere: it's here");
+	} finally {
+		await workbench.evaluate(async (terminal) => {
+			const { api } = globalThis.__editor;
+
+			globalThis.__terminalOff?.();
+			globalThis.__architecture.hub.publish(`terminal.stop.${terminal}`, {});
+			await api.workspace.fs.delete(api.Uri.file("/workspace/argv.js")).then(() => undefined, () => undefined);
+			await api.workspace.fs.delete(api.Uri.file("/workspace/sub"), { "recursive": true }).then(() => undefined, () => undefined);
+		}, id);
 	}
 });
 
@@ -1837,9 +1890,10 @@ test("types: the tsserver plugin types each of a file's ranges as its site obser
 	assert.deepEqual(types, ["number", "number", "{ t: string; }", "number", "number"], "a parameter, ??'s left, what ?. tested, an arrow's return, a return's value");
 });
 
-test("node script: a service runs on the script worker, and stopping it leaves the previews up", async () => {
+// A service from the terminal runs as every run does (RUNNING.md, step 3): in the debugger, its own timers keeping it going.
+test("node script: a service runs in the debugger, and stopping it leaves the previews up", async () => {
 	await session.terminal(`echo "setInterval(() => console.log('tick'), 300);" > forever.js && node forever.js`, { "fresh": true });
-	await session.until("the script worker's run", hasLabel("workbench", "node-scripts", /^node\.start$/u));
+	await session.until("its debug run", hasLabel("pod", "debug-worker", /^debug\.session\..+\.control$/u));
 	await eventually("a running service", async () => (await session.request("runs.list", undefined, 5000)).some((run) => run.title === "node forever.js" && run.kind === "service" && run.state === "running") || undefined);
 	await session.page.keyboard.press("Control+C");
 	await eventually("the service stopped", async () => (await session.request("runs.list", undefined, 5000)).some((run) => run.title === "node forever.js" && run.state === "stopped") || undefined);
@@ -1849,9 +1903,8 @@ test("node script: a service runs on the script worker, and stopping it leaves t
 	assert.equal(await preview?.evaluate(async () => (await fetch(location.href)).status), 200);
 });
 
-// What a node service read of the workspace is recorded (RULES.md, slice 2), as a preview's fetches are: by the path as
-// the script wrote it — what a debug run's stand-in asks for — so a rule can give a debug run what the real one read.
-// (A service runs for real, on the script worker; a task runs under the debugger, where every such call is a stand-in.)
+// What a run read of the workspace is recorded (RULES.md, slice 2), as a preview's fetches are: by the path as the script
+// wrote it — what a stand-in asks for — so a rule can give a run what an earlier one read.
 test("record: a node service's reads of the workspace, kept to be given back", async () => {
 	const workbench = session.workbench();
 	const rates = "{ \"US\": 0.07, \"CA\": 0.13 }\n";
@@ -2212,7 +2265,9 @@ test("the diagram: ARCHITECTURE.md's is this tour's", async () => {
 	const doc = await readFile(file, "utf8");
 	const [begin, end] = ["<!-- architecture-tour:begin -->\n", "\n<!-- architecture-tour:end -->"];
 	const committed = doc.slice(doc.indexOf(begin) + begin.length, doc.indexOf(end));
-	const fresh = tourDiagram({ ...await session.until("a last look", () => true), "topology": session.topologySeen() });
+	await session.until("a last look", () => true);
+
+	const fresh = tourDiagram(session.seen());
 
 	if (process.env.CI === undefined) {
 		if (fresh !== committed) {

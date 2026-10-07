@@ -1,8 +1,8 @@
 /**
- * The terminal's `node` command — a thin just-bash custom command that resolves the target script against the
- * shell's cwd and hands it to the node runner (node-runner.ts → the node-worker), which runs it through
- * almostnode on the shared zen-fs, off the main thread and observable over the hub. just-bash owns the shell;
- * almostnode is the runtime. `node App.tsx` works because almostnode transpiles TS/JSX.
+ * The terminal's `node` command — a thin just-bash custom command that resolves the target script against the shell's
+ * cwd and runs it as every Run does (RUNNING.md, step 3): in the debugger, its output and stdin this terminal, with the
+ * command line's arguments, the shell's directory and its environment. just-bash owns the shell. Only when the debugger
+ * can't take it does it run on the plain runtime (the node worker), so `node` never breaks.
  */
 import type { CustomCommand } from "just-bash/browser";
 import type { NodeOutput, NodeRunner } from "./node-runner";
@@ -39,7 +39,8 @@ function resolvePosix(base: string, path: string): string {
  */
 export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput, terminal: number): CustomCommand {
 	return defineCommand("node", async (args, ctx) => {
-		const target = args.find((argument) => !argument.startsWith("-"));
+		const at = args.findIndex((argument) => !argument.startsWith("-"));
+		const target = at === -1 ? undefined : args[at];
 
 		if (target === undefined) {
 			return { "stdout": "", "stderr": "usage: node <file>\n", "exitCode": 1 };
@@ -58,15 +59,15 @@ export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 			}
 		}
 
-		// Service or task, by what its source does (lifecycle.ts): a task runs under the debugger, a service — which needs
-		// an event loop the debugger doesn't have — under the real runtime. An unreadable file is left to fail as a task.
+		// Service or task, by what its source does (lifecycle.ts) — a label for the running list, not how it runs: every run
+		// is the debugger's, and one that listens becomes a service. An unreadable file is left to fail as a task.
 		const source = await ctx.fs.readFile(file).catch(() => undefined);
 		const guess = source === undefined ? undefined : lifecycleOfSource(source);
 		const kind = guess?.lifecycle ?? "task";
 		// In the running list as it was asked for (`npm run build` runs `node build.ts`). (`npm run` passes the script's
 		// name in the environment it runs it with — ctx.env, not the exported one.)
 		const event = Object.fromEntries(ctx.env)["npm_lifecycle_event"] ?? env["npm_lifecycle_event"];
-		const run = runner.runs.start({ "title": event === undefined ? "node " + args.join(" ") : "npm run " + event, "kind": kind, "cwd": ctx.cwd, "origin": { "terminal": terminal }, "entry": file, "runtime": kind === "task" ? "tsval" : "almostnode" }, () => { controller.abort(); });
+		const run = runner.runs.start({ "title": event === undefined ? "node " + args.join(" ") : "npm run " + event, "kind": kind, "cwd": ctx.cwd, "origin": { "terminal": terminal }, "entry": file, "runtime": "tsval" }, () => { controller.abort(); });
 		const ended = (exitCode: number): { "stdout": string; "stderr": string; "exitCode": number } => {
 			run.end(exitCode, controller.signal.aborted);
 
@@ -74,19 +75,16 @@ export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 		};
 
 		try {
-			// Auto-attach a task: run it under the tsval debug adapter (always debug mode) — breakpoints, step-back,
-			// capability hard-stops. If the debugger can't attach, fall back to a plain run so the command never breaks.
-			// (`npm run dev` → `vite` is a separate command and stays on the almostnode "production" path.)
-			if (kind === "task") {
-				const debugged = await runner.debug(file, ctx.cwd, env, { "runId": run.id, "onOutput": writeLive, "signal": controller.signal });
+			// In the debugger, as every Run is — breakpoints, step-back, capability stops — its output here, its stdin from
+			// here, the arguments after the file. (`npm run dev` → `vite` is a separate command, the dev server's.)
+			const debugged = await runner.debug(file, ctx.cwd, env, { "runId": run.id, "onOutput": writeLive, "signal": controller.signal, "args": args.slice(at + 1), "onListening": (port) => { run.update({ "kind": "service", "port": port }); } });
 
-				if (debugged.attached) {
-					return ended(debugged.exitCode);
-				}
+			if (debugged.attached) {
+				return ended(debugged.exitCode);
 			}
 
-			// A service, or tsval declined → run on the almostnode "production" path. Present it as a production debug session too
-			// (Run and Debug controller + Debug Console), same as the vite preview — so this path isn't a bare
+			// The debugger couldn't take it → run on the plain runtime (RUNNING.md's fallback), presented as a production debug
+			// session too (Run and Debug controller + Debug Console), same as the vite preview — so this path isn't a bare
 			// process. The debug Stop button and the shell's Ctrl-C both abort the run via one combined signal.
 			run.update({ "runtime": "almostnode" });
 

@@ -214,10 +214,11 @@ function nextAction(): Promise<Action> {
  * builtin (there is no real module system in the worker) BEFORE reaching a capability breakpoint — the whole point of
  * the hard-stop. Real effects belong to the almostnode "production" adapter, not to tsval's reverse-steppable VM.
  */
-function capabilitySurface(fileName: string, args: string[], real?: Runtime): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
-	const standins = gated(capabilityStandins(), real);
-	// What a script reads of its process: its arguments (a run's inputs), and a workspace to be in — nothing it can do.
-	const process = { "argv": ["node", fileName, ...args], "env": {}, "platform": "browser", "cwd": () => "/workspace", "stdin": stdin };
+function capabilitySurface(fileName: string, args: string[], real?: Runtime, where: { "cwd"?: string; "env"?: Record<string, string> } = {}): { "globals": Record<string, unknown>; "modules": Record<string, unknown> } {
+	const standins = gated(capabilityStandins(), real, where.cwd ?? "/workspace");
+	// What a script reads of its process: its arguments (a run's inputs), the directory it was started in and its
+	// environment (a terminal's — RUNNING.md, step 3), and its stdin — nothing it can do.
+	const process = { "argv": ["node", fileName, ...args], "env": { ...where.env }, "platform": "browser", "cwd": () => where.cwd ?? "/workspace", "stdin": stdin };
 
 	return { "globals": { ...standins.globals, "console": guestConsole(), "process": process }, "modules": standins.modules };
 }
@@ -369,7 +370,7 @@ const held = new Set<unknown>();
  *  read recorded — and any other fails as a denied one would. With no `real` (exploring orderings: a run many times
  *  over), every call is its inert stand-in, as before. A module's other members are almostnode's own. (A module object
  *  shared under several names stays one object.) */
-function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime): ReturnType<typeof capabilityStandins> {
+function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, cwd = "/workspace"): ReturnType<typeof capabilityStandins> {
 	const wrapped = new Map<unknown, unknown>();
 	const gate = (fn: (...args: unknown[]) => unknown, effect?: (...args: unknown[]) => unknown) => function (this: unknown, ...args: unknown[]): unknown {
 		// A probe's fork (probeResource): the call it's after records what it reaches, and ends the fork there; any other
@@ -424,7 +425,10 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime):
 			allowNext = false;
 		}
 
-		return madeFor(tagged.capability, resource, () => effect(...args));
+		// A relative path is the program's directory's (its process.cwd(): a terminal's), as node resolves it.
+		const made = tagged.capability.startsWith("fs:") && typeof argument === "string" && !argument.startsWith("/") ? args.map((each, index) => (index === tagged.resourceArg ? `${cwd}/${argument}` : each)) : args;
+
+		return madeFor(tagged.capability, resource, () => effect(...made));
 	};
 	// almostnode's own module (or the network) a stand-in module stands for: its members, the gated ones made real.
 	const realOf = (key: string): Record<string, unknown> | undefined => {
@@ -1436,7 +1440,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 
 	// Its capabilities real (RUNNING.md, step 2): each gated call decided as it's made — but for a run of an ordering
 	// exploring found (its schedule given), which replays that run: its calls' results the stand-ins' it had.
-	const surface = capabilitySurface(message.fileName, message.args ?? [], message.eventLoop?.schedule === undefined ? loadedRuntime : undefined);
+	const surface = capabilitySurface(message.fileName, message.args ?? [], message.eventLoop?.schedule === undefined ? loadedRuntime : undefined, { ...message.cwd === undefined ? {} : { "cwd": message.cwd }, ...message.env === undefined ? {} : { "env": message.env } });
 
 	programBuiltins = surface.modules;
 	runtime?.clearCache();
@@ -1552,8 +1556,14 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 			break;
 
 		case "stdin":
-			// Typed in the Debug Console: the program's input — its listeners called with it, and the run woken to go on.
-			stdin.emit("data", message.data);
+			// Typed in the Debug Console or the terminal it was started in: the program's input — its listeners called with
+			// it (or, at its end, told so), and the run woken to go on.
+			if (message.end === true) {
+				stdin.emit("end");
+			} else {
+				stdin.emit("data", message.data);
+			}
+
 			current?.loop?.wake?.();
 			break;
 

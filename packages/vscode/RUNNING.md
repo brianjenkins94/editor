@@ -160,8 +160,17 @@ that can't start says why). And the two run ledgers become one: every run in `ru
    read returned is recorded through the adapter (no call of the worker's own: a reply to `debug-worker` reaches every
    one). A run of an ordering exploring found replays it — its calls the stand-ins they were. Not yet: a package's own
    network is the worker's, unasked (its fs writes are refused) — a package's calls decided too is open.
-3. **The terminal.** `node f` always a run: output and stdin in its terminal, its args, cwd and env; the regex no longer
-   decides anything.
+3. **The terminal** (done). `node f` always a run: output and stdin in its terminal, its args, cwd and env; the regex no
+   longer decides anything. Done: `node f [args]` (terminal-node.ts) is always a debug run — the source's look at what it
+   does is only the running list's first label, and a run that listens becomes a service with its port; the command
+   line's arguments are its `process.argv` (none given: the margin's Mock, as before), the shell's directory its
+   `process.cwd()` (a relative path in its fs calls that directory's) and its exports its `process.env`; its output is
+   printed in the terminal (the Debug Console mirrors it, but for the script's completion value), and a line typed there
+   is its stdin, Ctrl-D the input's end. Focus stays in the terminal: a terminal's run opens neither the Run and Debug
+   view nor the Debug Console. The script worker runs a program only when the debugger can't take it (the fallback) —
+   which retires its popups for runs (step 2's last part). The tour's diagram is now drawn from everything it saw all
+   session (a look every second), not its last look: each debug run's worker reports as `debug-worker`, and the last
+   one's report replaced the others'.
 4. **Services and apps.** A run that listens opens its preview; `vite` and the dev server as runs; React mode retired.
    Then the page's virtual loop (*Apps and determinism*): its clock, randomness, timers, frames and channels the run's,
    its inputs and fetches recorded — every script in it, React included — and tsval stepping the app's own files on it.

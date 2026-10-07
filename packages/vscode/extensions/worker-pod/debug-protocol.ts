@@ -24,7 +24,7 @@ export interface Crash { "line": number; "at": [number, number]; "message": stri
 
 /** Adapter → worker. */
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string> }
 	/** Run every ordering of the program's events (tsval's explore) instead of debugging it: answered with `explored`. */
 	| { "type": "explore"; "source": string; "fileName": string; "policy"?: Policy; "args"?: string[]; "eventLoop": LoopStart; "maxRuns"?: number; "workspace"?: SharedArrayBuffer }
 	/** The user's breakpoints in a file: the program's entry, or (`file`) another of its files. */
@@ -42,7 +42,8 @@ export type Control =
 	/** What a timer's wait costs from here on: its real delay, or none (Skip Waits). */
 	| { "type": "pace"; "pace": "real" | "fast" }
 	/** Input for the program's process.stdin (typed in the Debug Console). */
-	| { "type": "stdin"; "data": string }
+	/** The program's input — or (`end`) its end, as a terminal's Ctrl-D. */
+	| { "type": "stdin"; "data": string; "end"?: boolean }
 	| { "type": StepAction | "disconnect" };
 
 /** Where tsval's event loop starts (its clock, its random seed) and — to run one ordering again — the choices to make. */

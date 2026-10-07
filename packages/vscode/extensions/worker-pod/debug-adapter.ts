@@ -56,6 +56,12 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private program = "";
 	/** The program's arguments (the launch config's `args`): its `process.argv` after the node and the file. */
 	private args: string[] = [];
+	/** Where it was started and with what environment — a terminal's (`cwd`, `env`); none, the workspace and nothing. */
+	private where: { "cwd"?: string; "env"?: Record<string, string> } = {};
+	/** The terminal run it was started as (`__runId` with `__startedBy: "terminal"`): its output goes there, its stdin
+	 *  comes from there (RUNNING.md, step 3). */
+	private terminalRun: string | undefined;
+	private offTerminal: (() => void) | undefined;
 	/** Where the event loop starts — given by a launch that runs one ordering again (exploreProgram's), else fresh. */
 	private eventLoop: LoopStart | undefined;
 	private lines: number[] = [];
@@ -216,6 +222,20 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	/** Input for the program's process.stdin (the Debug Console's lines). */
 	public stdin(data: string): void {
 		this.control({ "type": "stdin", "data": data });
+	}
+
+	/** A run started in a terminal (RUNNING.md, step 3): what it types is the program's stdin, its end (Ctrl-D) the
+	 *  input's end. Its output goes back there too (`output`). */
+	private followTerminal(runId: string | undefined): void {
+		this.terminalRun = runId;
+
+		if (runId !== undefined) {
+			this.offTerminal = podHub.subscribe(`node.stdin.${runId}`, (data) => {
+				const { "data": text, end } = (data ?? {}) as { "data"?: string; "end"?: boolean };
+
+				this.control({ "type": "stdin", "data": text ?? "", ...end === true ? { "end": true } : {} });
+			});
+		}
 	}
 
 	public async setValue(name: string, value: string): Promise<string> {
@@ -387,7 +407,9 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			case "launch":
 				this.program = String(args["program"] ?? "");
 				this.args = Array.isArray(args["args"]) ? (args["args"] as unknown[]).map(String) : [];
+				this.where = { ...typeof args["cwd"] === "string" ? { "cwd": args["cwd"] } : {}, ...typeof args["env"] === "object" && args["env"] !== null ? { "env": args["env"] as Record<string, string> } : {} };
 				this.eventLoop = loopStartOf(args["eventLoop"]);
+				this.followTerminal(args["__startedBy"] === "terminal" && typeof args["__runId"] === "string" ? args["__runId"] : undefined);
 				this.noDebug = args["noDebug"] === true;
 				this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
 				this.respond(request);
@@ -606,7 +628,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				return;
 			}
 
-			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "react": this.reactMode, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...workspace.buffer === undefined ? {} : { "workspace": workspace.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
+			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "react": this.reactMode, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...workspace.buffer === undefined ? {} : { "workspace": workspace.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
 		});
 	}
 
@@ -668,6 +690,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private closeWorker(): void {
 		this.offEvents?.();
 		this.offEvents = undefined;
+		this.offTerminal?.();
+		this.offTerminal = undefined;
 		this.podUnlink?.();
 		this.podUnlink = undefined;
 		this.worker?.terminate();
@@ -785,6 +809,12 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 			case "output":
 				this.event("output", { "category": message.stream ?? "stdout", "output": message.text + "\n" });
+
+				// Started in a terminal: printed there, as the Debug Console mirrors it — not the script's completion value
+				// (`→ …`), which the Debug Console shows as a REPL would and node doesn't print.
+				if (this.terminalRun !== undefined && !message.text.startsWith("→ ")) {
+					podHub.publish(`node.out.${this.terminalRun}`, { "stream": message.stream === "stderr" ? "err" : "out", "data": message.text + "\n" });
+				}
 
 				if (this.output.length < 200) {
 					this.output.push(message.text);

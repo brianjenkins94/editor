@@ -111,26 +111,52 @@ export async function startSession(options = {}) {
 	// Every hub's subscriptions over the whole session (a snapshot's are that moment's): a context that came and went
 	// keeps what it served, as its node stays on the diagram once seen.
 	const topologySeen = {};
+	// Every node and channel over the whole session, likewise: a context's report is replaced by the next one under its
+	// name (each debug run's worker reports as `debug-worker`), so a snapshot's are only what the last one said.
+	const nodesSeen = new Map();
+	const channelsSeen = new Map();
 	const workbench = () => page.frames().find((frame) => frame.url().includes("/__vscode__/host.html"));
+
+	/** Take the view's snapshot now, and keep what it's seen. */
+	async function look() {
+		const frame = workbench();
+
+		if (frame === undefined || !await frame.evaluate(() => globalThis.__architecture !== undefined).catch(() => false)) {
+			return undefined;
+		}
+
+		snapshot = await frame.evaluate(() => globalThis.__architecture.snapshot());
+
+		for (const [hub, topology] of Object.entries(snapshot.topology)) {
+			const known = topologySeen[hub] ?? { "subscriptions": [], "sites": {} };
+
+			topologySeen[hub] = { "subscriptions": [...new Set([...known.subscriptions, ...topology.subscriptions])], "sites": { ...known.sites, ...topology.sites } };
+		}
+
+		for (const node of snapshot.nodes) {
+			nodesSeen.set(node.id, node);
+		}
+
+		for (const channel of snapshot.channels) {
+			channelsSeen.set(channel.id, channel);
+		}
+
+		return snapshot;
+	}
+
+	// A look every second all session long, so a context that comes and goes between a test's own looks (a debug run's
+	// server) is seen all the same.
+	const looking = setInterval(() => { void look().catch(() => undefined); }, 1000);
+
+	looking.unref();
+	page.on("close", () => { clearInterval(looking); });
 
 	/** Poll what the view observed until `ready(snapshot)` holds. */
 	async function observed(what, ready, timeoutMs = TIMEOUT_MS) {
 		return until(what, async () => {
-			const frame = workbench();
+			const seen = await look();
 
-			if (frame === undefined || !await frame.evaluate(() => globalThis.__architecture !== undefined)) {
-				return undefined;
-			}
-
-			snapshot = await frame.evaluate(() => globalThis.__architecture.snapshot());
-
-			for (const [hub, topology] of Object.entries(snapshot.topology)) {
-				const known = topologySeen[hub] ?? { "subscriptions": [], "sites": {} };
-
-				topologySeen[hub] = { "subscriptions": [...new Set([...known.subscriptions, ...topology.subscriptions])], "sites": { ...known.sites, ...topology.sites } };
-			}
-
-			return ready(snapshot) ? snapshot : undefined;
+			return seen !== undefined && ready(seen) ? seen : undefined;
 		}, { "timeoutMs": timeoutMs, "intervalMs": 500, "sleep": (ms) => page.waitForTimeout(ms) });
 	}
 
@@ -153,6 +179,8 @@ export async function startSession(options = {}) {
 		"until": observed,
 		"snapshot": () => snapshot,
 		"topologySeen": () => topologySeen,
+		/** Everything seen all session: the last snapshot, with every node and channel any look saw. */
+		"seen": () => ({ ...snapshot, "nodes": [...nodesSeen.values()], "channels": [...channelsSeen.values()], "topology": topologySeen }),
 		"conformance": async () => workbench().evaluate(() => globalThis.__architecture.conformance()),
 		/** An RPC into the hub tree, from the workbench realm. */
 		"request": async (subject, data, timeoutMs) => workbench().evaluate(([s, d, t]) => globalThis.__architecture.request(s, d, t), [subject, data, timeoutMs]),

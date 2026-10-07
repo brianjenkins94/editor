@@ -27,7 +27,7 @@ export interface NodeRunHooks {
 	"runId"?: string;
 	"onOutput": NodeOutput;
 	"signal"?: AbortSignal;
-	/** The run started a server on `port` (a plain run's only — tsval has no event loop to serve from). */
+	/** The run started a server on `port`. */
 	"onListening"?: (port: number) => void;
 }
 
@@ -43,7 +43,7 @@ export interface NodeRunner {
 	 *  Resolves `{ attached: true, exitCode }` when the debug session ends, or `{ attached: false }` when the ext
 	 *  host declined (debugger unavailable) — the caller should then fall back to `run` so `node <file>` never
 	 *  breaks. Signals the ext host over the hub (`debug.launch`); Ctrl-C sends `debug.stop`. */
-	"debug": (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks) => Promise<{ "attached": boolean; "exitCode": number }>;
+	"debug": (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks & { "args"?: string[] }) => Promise<{ "attached": boolean; "exitCode": number }>;
 	/** Feed a chunk to the running process's stdin (no-op when nothing is running). */
 	"sendStdin": (data: string) => void;
 	/** Signal end-of-input (EOF) to the running process's stdin (no-op when nothing is running). */
@@ -198,7 +198,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 	// Auto-attach: launch under the tsval debug adapter (ext host) instead of the node worker. We reuse the SAME
 	// `node.out/exit.<runId>` channels — the adapter (or its terminate) relays onto them — so the terminal drives a
 	// debug run exactly like a plain one. No node worker needed; the adapter spawns its own debug worker.
-	const startDebug = (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks): Promise<{ "attached": boolean; "exitCode": number }> => new Promise((resolve) => {
+	const startDebug = (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks & { "args"?: string[] }): Promise<{ "attached": boolean; "exitCode": number }> => new Promise((resolve) => {
 		const runId = hooks.runId ?? crypto.randomUUID();
 
 		currentRunId = runId; // so the terminal treats it as running (routes Ctrl-C to the abort signal below)
@@ -209,6 +209,10 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 
 			hooks.onOutput(message.stream, message.data);
 		});
+		// It listens: a service, with its port.
+		const offListening = hub.subscribe(`node.listening.${runId}`, (data) => {
+			hooks.onListening?.((data as { "port": number }).port);
+		});
 
 		const finish = (attached: boolean, exitCode: number): void => {
 			if (settled) {
@@ -217,6 +221,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 
 			settled = true;
 			offOutput();
+			offListening();
 			offExit();
 			offDeclined();
 			if (currentRunId === runId) {
@@ -251,7 +256,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 			hooks.signal.addEventListener("abort", onAbort, { "once": true });
 		}
 
-		hub.publish("debug.launch", { "runId": runId, "file": file, "cwd": cwd, "env": env });
+		hub.publish("debug.launch", { "runId": runId, "file": file, "cwd": cwd, "env": env, ...hooks.args === undefined ? {} : { "args": hooks.args } });
 	});
 
 	const runs = createRunRegistry(hub);

@@ -231,7 +231,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "node.ready", "from": ["node-scripts"], "to": ["workbench"] },
 	{ "pattern": "node.out.*", "from": ["node-scripts", "pod"], "to": ["workbench"] },
 	{ "pattern": "node.exit.*", "from": ["node-scripts", "pod", "workbench"], "to": ["workbench", "pod"] },
-	{ "pattern": "node.stdin.*", "from": ["workbench"], "to": ["node-scripts"] },
+	{ "pattern": "node.stdin.*", "from": ["workbench"], "to": ["node-scripts", "pod"] },
 	{ "pattern": "node.listening.*", "from": ["node-scripts", "pod"], "to": ["workbench"] },
 	{ "pattern": "virtual.debug.*", "from": ["node"], "to": ["debug-worker"] },
 	{ "pattern": "provoke.round", "from": ["node"], "to": ["provoke"] },
@@ -715,7 +715,8 @@ function subscriptionOf(hub: { "sites"?: Record<string, string[]> }, pattern: st
 	}
 
 	// A session's, a port's, a tab's own subject (`production.stop.<uuid>`, `preview.hmr.5173`) is one of a kind: `*`.
-	const general = pattern.split(".").map((token) => (/^(?:\d+|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8})$/u.test(token) ? "*" : token)).join(".");
+	// (An id with a word in front — an explore's `explore-<uuid>` — is one of a kind too.)
+	const general = pattern.split(".").map((token) => (/^(?:\d+|(?:[a-z]+-)?[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8})$/u.test(token) ? "*" : token)).join(".");
 	const subject = general.startsWith("$rpc.call.") ? general.slice("$rpc.call.".length) + "()" : general;
 
 	return { "subject": subject, "component": hub.sites?.[pattern]?.[0] ?? subject.split(".")[0]! };

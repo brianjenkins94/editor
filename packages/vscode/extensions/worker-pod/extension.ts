@@ -379,7 +379,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 		context.subscriptions.push(
 			{ "dispose": podHub.subscribe("debug.launch", (data) => {
-				const info = data as { "runId": string; "file": string };
+				const info = data as { "runId": string; "file": string; "args"?: string[]; "cwd"?: string; "env"?: Record<string, string> };
 
 				// Can't track session end → decline, so the terminal falls back to a plain run (never breaks `node`).
 				if (!canTrack) {
@@ -389,12 +389,13 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 				}
 
 				void (async () => {
-					// `__startedBy`: the terminal shows this run itself (the running extension leaves the session out).
-					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file}`, "program": info.file, "__runId": info.runId, "__startedBy": "terminal" });
+					// `__startedBy`: the terminal shows this run itself (the running extension leaves the session out), and is its
+					// output and stdin (RUNNING.md, step 3) — with the command line's arguments (none: a rule's, the margin's
+					// Mock), its directory and its environment. Focus stays there: no Run and Debug view, no Debug Console opened
+					// (a breakpoint still stops it, and shows where).
+					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file.split("/").pop() ?? info.file}`, "program": info.file, ...info.args !== undefined && info.args.length > 0 ? { "args": info.args } : {}, ...info.cwd === undefined ? {} : { "cwd": info.cwd }, ...info.env === undefined ? {} : { "env": info.env }, "internalConsoleOptions": "neverOpen", "__runId": info.runId, "__startedBy": "terminal" }, { "suppressDebugView": true });
 
-					if (started === true) {
-						podHub.publish(`node.out.${info.runId}`, { "stream": "out", "data": "[debug] running in the Debug Console…\n" });
-					} else {
+					if (started !== true) {
 						podHub.publish(`debug.declined.${info.runId}`, {}); // start failed → fall back to a plain run
 					}
 				})();
