@@ -77,8 +77,8 @@
   background: color-mix(in srgb, var(--vscode-charts-purple, #b180d7) 12%, transparent);
 }
 
-/* A group of entries (a statement, in the program's projection): a card around its lines, behind its entries, with its
-   label in the top corner. */
+/* A group of entries (a step, in the program's projection): a card around its lines, behind its entries, with its
+   label on its bottom border. */
 .notes-margin-group {
   position: absolute;
   left: 4px;
@@ -115,3 +115,54 @@
   pointer-events: auto;
 }
 
+
+/* The strip on the pane's first line (the editor's top padding is that line): the pane's views, as tabs. Pinned, over the
+   rows that scroll under it. */
+.notes-margin-tabs {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 2px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  background: var(--vscode-editor-background);
+  border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  z-index: 2;
+}
+
+.notes-margin-tabs[hidden] {
+  display: none;
+}
+
+.notes-margin-tab {
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--vscode-descriptionForeground);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.notes-margin-tab:hover:not(:disabled) {
+  color: var(--vscode-foreground);
+}
+
+.notes-margin-tab[aria-selected="true"] {
+  color: var(--vscode-foreground);
+  border-bottom-color: var(--vscode-panelTitle-activeBorder, var(--vscode-focusBorder));
+}
+
+.notes-margin-tab:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.notes-margin-tab:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}

@@ -64,6 +64,13 @@ values already level with its lines.
   delay, counted to the statement whose code runs when it fires). It comes with the run's final coverage report
   (`profile`), placed on the lines its statements are on now as coverage's marks are.
 
+- **The pane's views** (2026-10-07): the pane's first line is reserved — a line's padding above the editor's first
+  line while a pane shows — for a strip of tabs, pinned as the code scrolls: *Margin* (the column as it is: values,
+  notes, cards, the run log), and the projections to come, *Cards* and *Event sheet*, shown disabled until they're built
+  (pane.ts `showPaneViews`; live-values.ts declares them). A projection is a view in that strip, not a third column: the
+  code and the pane are already a line-for-line grid, its view zones the row sizer, and a third column would split the
+  width and fight for the same zones.
+
 Next: options edited on the card for a call's literal arguments (written back to the call); then a library to drag a
 call in from; then interlocking.
 

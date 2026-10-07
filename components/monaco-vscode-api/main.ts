@@ -648,8 +648,8 @@ export { OPEN_ARCHITECTURE_COMMAND, registerLiveArchitecture } from "./architect
 
 // Editor tabs whose content is the consumer's own DOM, by slot — a panel of the page around the workbench, dropped in.
 export type { HostedEditorOptions } from "./hosted-editor";
-export type { PaneEntry, PaneMark, PaneRender } from "./pane";
-export { renderMarkdown, showPane } from "./pane";
+export type { PaneEntry, PaneMark, PaneRender, PaneView } from "./pane";
+export { renderMarkdown, showPane, showPaneViews } from "./pane";
 export type { EditedRule, RuleAction, RuleCatalog, RuleComparison, RuleCompound, RuleEditor, RuleEditorOptions, RulePredicate, RuleSchema } from "./rule-editor";
 export { describeRule, ruleEditor, schemaInput } from "./rule-editor";
 export { closeHostedEditor, openHostedEditor, registerHostedEditors } from "./hosted-editor";

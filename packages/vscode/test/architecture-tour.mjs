@@ -1645,7 +1645,8 @@ test("run ends: a crash is marked on the line it threw on, and stays on it throu
 		const mark = document.querySelector(".notes-margin-mark.run-crashed");
 		const lineHeight = Number.parseFloat(getComputedStyle(document.querySelector(".notes-margin")).lineHeight);
 
-		return mark === null ? undefined : { "line": Math.round(Number.parseFloat(mark.style.top) / lineHeight) + 1, "title": mark.title };
+		// (Line 1's top is a line down: the pane's first line is reserved, for its tabs.)
+		return mark === null ? undefined : { "line": Math.round(Number.parseFloat(mark.style.top) / lineHeight), "title": mark.title };
 	});
 	const write = (text) => workbench.evaluate(async (content) => {
 		const { api } = globalThis.__editor;

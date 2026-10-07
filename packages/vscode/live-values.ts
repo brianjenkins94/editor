@@ -51,7 +51,7 @@ import type { ProfiledLine } from "./coverage";
 import { Anchors } from "./anchors";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { parseInputs } from "./extensions/worker-pod/inputs";
-import { describeRule, ruleEditor, showPane } from "@brianjenkins94/monaco-vscode-api/main";
+import { describeRule, ruleEditor, showPane, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
 import css from "./live-values.css?raw";
 
 /** A prose note: Markdown on a line span (0-based, inclusive). */
@@ -1183,6 +1183,14 @@ export function showNotes(uri: string, fileNotes: Note[] | undefined): void {
 /** Keep a margin beside every code file shown, and follow debug sessions' values and capability stops. */
 export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	api = vscode;
+
+	// The pane's views, its tabs on its first line: the margin as it is (values, notes, cards, the run log), and the
+	// program's other projections as they come (PROJECTIONS.md) — shown, not yet chosen.
+	showPaneViews([
+		{ "id": "margin", "label": "Margin", "title": "Values, notes and cards beside the code" },
+		{ "id": "cards", "label": "Cards", "title": "Coming: the program as a column of cards, Automator's look (PROJECTIONS.md)", "disabled": true },
+		{ "id": "event-sheet", "label": "Event sheet", "title": "Coming: the program as an event sheet's conditions and actions", "disabled": true }
+	], "margin", () => undefined);
 
 	const uriOf = (path: string): string => vscode.Uri.file(path).toString();
 	/** The text a session ran, as anchors (the same for its values, its question and its end). */

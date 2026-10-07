@@ -23,6 +23,11 @@
  * pane shows and wrapping is wanted, the editor wraps at a column (`wordWrap: "bounded"`) set to the divider's — and
  * View: Toggle Word Wrap (Alt+Z), whose override knows only "on" (wrap at the editor's full width, under the pane) and
  * "off", is taken over for an editor with a pane: it toggles wrapping at the divider instead. Elsewhere it's VS Code's.
+ *
+ * The pane's first line is reserved: while a pane shows, the editor has a line's padding above its first line (given
+ * back when the pane goes), and the pane puts a strip of tabs there — the views the consumer gives (`showPaneViews`): the
+ * margin as it is, and the program's other projections (PROJECTIONS.md). The strip is pinned: it stays at the top as the
+ * code scrolls, the pane's rows passing under it.
  */
 import { getService, ICodeEditorService } from "@codingame/monaco-vscode-api";
 import { CommandsRegistry } from "@codingame/monaco-vscode-api/monaco";
@@ -39,6 +44,13 @@ export type PaneRender = (entry: PaneEntry, element: HTMLElement) => (() => void
 /** A mark beside line `line` (0-based) in the pane's gutter column: `kind` its class (the consumer styles it), `title`
  *  on hover. */
 export interface PaneMark { "line": number; "kind": string; "title"?: string }
+
+/** A view the pane can show, its tab in the strip on the pane's first line: `disabled` while it isn't built yet (its
+ *  `title` says what it will be). */
+export interface PaneView { "id": string; "label": string; "title"?: string; "disabled"?: boolean }
+
+/** The views every pane's strip offers, the one shown, and what to do when another's chosen. */
+let views: { "list": PaneView[]; "active": string; "select": (id: string) => void } = { "list": [], "active": "", "select": () => undefined };
 
 /** The gutter column's width, at the line-decorations lane's left end: a mark sits in it as VS Code's change bar would
  *  (pane.css), with room for a consumer's badge centred on it. */
@@ -96,6 +108,8 @@ class Frame implements monaco.editor.IOverlayWidget {
 	private readonly listeners: monaco.IDisposable[] = [];
 	private readonly resize = new ResizeObserver(() => { this.layout(); });
 	private readonly sash = document.createElement("div");
+	/** The tabs on the pane's first line (the editor's top padding is that line). */
+	private readonly tabs = document.createElement("div");
 	/** The gutter column, an overlay of its own left of the code. */
 	private readonly gutter = document.createElement("div");
 	private readonly gutterWidget: monaco.editor.IOverlayWidget = { "getId": () => "notes-margin-gutter", "getDomNode": () => this.gutter, "getPosition": () => null };
@@ -107,7 +121,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 	private marked: string[] = [];
 	/** Whether the code wraps (at the divider), and the editor's own wrap options to give back when the pane goes. */
 	private wrap: boolean;
-	private readonly own: { "wordWrap": unknown; "wordWrapColumn": unknown };
+	private readonly own: { "wordWrap": unknown; "wordWrapColumn": unknown; "padding": unknown };
 	private applying = false;
 
 	public constructor(editor: monaco.editor.ICodeEditor) {
@@ -116,12 +130,15 @@ class Frame implements monaco.editor.IOverlayWidget {
 		this.sash.className = "notes-margin-sash";
 		this.sash.title = "Drag to move the divider";
 		this.gutter.className = "notes-margin-gutter";
-		this.element.append(this.sash);
+		this.tabs.className = "notes-margin-tabs";
+		this.tabs.setAttribute("role", "tablist");
+		this.element.append(this.sash, this.tabs);
+		this.renderTabs();
 		this.sash.addEventListener("pointerdown", (event) => { this.drag(event); });
 
 		const raw = editor.getRawOptions();
 
-		this.own = { "wordWrap": raw.wordWrap, "wordWrapColumn": raw.wordWrapColumn };
+		this.own = { "wordWrap": raw.wordWrap, "wordWrapColumn": raw.wordWrapColumn, "padding": raw.padding };
 		this.wrap = editor.getOption(monaco.editor.EditorOption.wrappingInfo).wrappingColumn !== -1;
 		editor.addOverlayWidget(this);
 		editor.addOverlayWidget(this.gutterWidget);
@@ -138,13 +155,20 @@ class Frame implements monaco.editor.IOverlayWidget {
 			editor.onDidChangeModelContent(() => { this.layout(); }),
 			editor.onDidChangeCursorPosition(() => { this.place(); }),
 			// The configured wrap re-applied (a settings change), or Alt+Z's override turned on elsewhere: wrap at the
-			// divider again.
+			// divider again. The configured padding re-applied (VS Code gives an editor its options again as a debug session
+			// starts, say): the first line reserved again.
 			editor.onDidChangeConfiguration((event) => {
-				if (!this.applying && event.hasChanged(monaco.editor.EditorOption.wrappingInfo)) {
+				if (this.applying) {
+					return;
+				}
+
+				if (event.hasChanged(monaco.editor.EditorOption.wrappingInfo)) {
 					if (editor.getOption(monaco.editor.EditorOption.wordWrapOverride2) === "on") {
 						this.wrap = true;
 					}
 
+					this.place();
+				} else if (event.hasChanged(monaco.editor.EditorOption.padding) || event.hasChanged(monaco.editor.EditorOption.lineHeight)) {
 					this.place();
 				}
 			})
@@ -155,6 +179,34 @@ class Frame implements monaco.editor.IOverlayWidget {
 	public toggleWrap(): void {
 		this.wrap = !this.wrap;
 		this.place();
+	}
+
+	/** The strip's tabs, as `views` has them now. */
+	public renderTabs(): void {
+		this.tabs.hidden = views.list.length === 0;
+		this.tabs.replaceChildren(...views.list.map((view) => {
+			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+			const tab = document.createElement("button");
+
+			tab.className = "notes-margin-tab";
+			tab.type = "button";
+			tab.textContent = view.label;
+			tab.disabled = view.disabled === true;
+			tab.setAttribute("role", "tab");
+			tab.setAttribute("aria-selected", String(view.id === views.active));
+
+			if (view.title !== undefined) {
+				tab.title = view.title;
+			}
+
+			tab.addEventListener("click", () => {
+				if (view.id !== views.active) {
+					views.select(view.id);
+				}
+			});
+
+			return tab;
+		}));
 	}
 
 	/** Every frame laid out again (the divider moved). */
@@ -245,7 +297,8 @@ class Frame implements monaco.editor.IOverlayWidget {
 
 		this.editor.removeOverlayWidget(this);
 		this.editor.removeOverlayWidget(this.gutterWidget);
-		this.editor.updateOptions(this.own as monaco.editor.IEditorOptions);
+		// (An option that wasn't set given back as its default: updateOptions skips an undefined one.)
+		this.editor.updateOptions({ ...this.own, "padding": this.own.padding ?? { "top": 0 } } as monaco.editor.IEditorOptions);
 	}
 
 	/** Drag the divider: a share of the width past the line numbers, kept for every editor. */
@@ -279,6 +332,21 @@ class Frame implements monaco.editor.IOverlayWidget {
 
 		this.sash.addEventListener("pointermove", move);
 		this.sash.addEventListener("pointerup", end);
+	}
+
+	/** A line's padding above the editor's first line (`lineHeight` — it follows the editor's zoom): the strip's room. */
+	private reserveFirstLine(lineHeight: number): void {
+		if (this.editor.getOption(monaco.editor.EditorOption.padding).top === lineHeight) {
+			return;
+		}
+
+		this.applying = true;
+
+		try {
+			this.editor.updateOptions({ "padding": { ...this.editor.getRawOptions().padding, "top": lineHeight } });
+		} finally {
+			this.applying = false;
+		}
 	}
 
 	/** Wrap at `column` (the divider's) when wrapping's wanted — clearing Alt+Z's override, which would wrap under the
@@ -328,7 +396,7 @@ class Frame implements monaco.editor.IOverlayWidget {
 		this.gutter.replaceChildren();
 		this.groups = [];
 		this.marks = [];
-		this.element.replaceChildren(this.sash);
+		this.element.replaceChildren(this.sash, this.tabs);
 		this.mark(undefined);
 	}
 
@@ -388,8 +456,13 @@ class Frame implements monaco.editor.IOverlayWidget {
 		const left = layout.contentLeft + (divider === undefined ? Math.min((longest + 3) * font.typicalHalfwidthCharacterWidth, span * 0.6) : span * divider);
 		const cursor = (this.editor.getPosition()?.lineNumber ?? 0) - 1;
 
+		const lineHeight = this.editor.getOption(monaco.editor.EditorOption.lineHeight);
+
+		this.reserveFirstLine(lineHeight);
 		this.wrapAt(Math.max(20, Math.floor((left - layout.contentLeft) / font.typicalHalfwidthCharacterWidth) - 2));
-		Object.assign(this.element.style, { "left": `${left}px`, "width": `${right - left}px`, "height": `${layout.height}px`, "lineHeight": `${this.editor.getOption(monaco.editor.EditorOption.lineHeight)}px` });
+		Object.assign(this.element.style, { "left": `${left}px`, "width": `${right - left}px`, "height": `${layout.height}px`, "lineHeight": `${lineHeight}px` });
+		// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: the reserved first line, as tall as the editor's lines
+		this.tabs.style.height = `${lineHeight}px`;
 		// The editor's own font for code in a note (VS Code's --vscode-editor-font-* aren't defined in here).
 		this.element.style.setProperty("--notes-margin-code-font-family", font.fontFamily);
 		this.element.style.setProperty("--notes-margin-code-font-size", `${font.fontSize}px`);
@@ -505,6 +578,16 @@ export function showPane(uri: string, entries: PaneEntry[] | undefined, render?:
 			sync(editor as unknown as monaco.editor.ICodeEditor);
 		}
 	});
+}
+
+/** The views every pane's strip offers (its tabs, on the pane's first line), `active` the one shown; `select` is called
+ *  with another's id when it's chosen. None: the strip is empty (the line stays reserved). */
+export function showPaneViews(list: PaneView[], active: string, select: (id: string) => void): void {
+	views = { "list": list, "active": active, "select": select };
+
+	for (const frame of frames.values()) {
+		frame.renderTabs();
+	}
 }
 
 /** Markdown rendered as VS Code renders it (sanitized: a note may be anyone's), a code block by `codeBlock` if given. */
