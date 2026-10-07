@@ -57,32 +57,45 @@ its port answers the preview (`virtual.debug.<port>`), and a page it serves gets
 **Apps.** A web app's own code runs in a browser page — the preview's — not in a worker: its DOM, its layout, its
 events are the browser's. Its dev server is a program like any other, and runs as one; the page is observed (taps,
 evidence, instrumentation: RUNTIME-EVIDENCE.md), and its fetches decided at the service worker (the same decision, the
-same margin). React mode — tsval rendering a component into a window of its own — gives way to the real preview. An app
-is the hard case for determinism (below).
+same margin). React mode — tsval rendering a component into a window of its own — gives way to the real preview. A
+page's code isn't stepped, and its breakpoints are recorded stops, not live ones (below).
 
-## Apps and determinism
+## Apps: recorded stops, not live ones
 
-A Node program is deterministic because tsval owns everything that could vary: the clock, randomness, the order its
-jobs run in, and what each effect returned (recorded). A page owns none of that. In the preview, an app runs on the
-browser's event loop: `Date.now` and `performance.now`, `Math.random`, timers, `requestAnimationFrame`, a
-`MessageChannel`, the order its fetches come back, and when the user clicks — all real, all different each time.
+What a debugger does — stop at a line, then step from it — needs whoever runs the code to be able to stop. tsval can, for
+everything it runs: a Node program's code, its servers' handlers, its timers' callbacks (and, in a callback a library
+makes synchronously, by blocking its worker until the user goes on). A page's code is another matter, and decided by the
+page, not the framework:
 
-And tsval alone wouldn't fix it. Run an app's own files on tsval in the page and React itself is still a package — native,
-never stepped (MODULES.md) — and React is where the scheduling is: its scheduler slices work on a `MessageChannel`, it
-batches renders and runs effects in its own order, and Strict Mode runs them twice. That's the event loop's boundary
-(MODULES.md: a package's async work runs on the host's loop) — a corner for a Node program, the centre for a React app.
-(React mode had the same hole: tsval stepping the component while React scheduled natively.)
+- **Page code can't pause page code.** Only the browser's own debugger stops a page, and a page can't drive it — the
+  preview's DevTools speak the protocol through chobitsu, a JavaScript implementation that can inspect a page but not
+  stop it.
+- **The page's main thread can't wait.** A worker can block until it's told to go on (that's how tsval pauses inside a
+  library's callback); the main thread can't, and the page's code runs there.
+- **The browser calls page code synchronously.** An event listener, a custom element's lifecycle, an observer's
+  callback, a getter the browser reads — each is called from the browser's own stack. Run every script in the page on
+  tsval and a breakpoint inside a click handler still can't stop, because nothing can wait there. Every framework is
+  built on event handlers, so no framework escapes it.
 
-So an app's determinism comes from the page, not the interpreter: the page's sources of variation virtualized — its
-clock, `Math.random`, timers, `requestAnimationFrame`, `MessageChannel` and `queueMicrotask` on one virtual loop the run
-owns, as tsval's loop is; its inputs (clicks, keys, resizes) and its fetches' results delivered as events and recorded —
-for every script in the page, React included. That's replay's approach (record a page's nondeterminism, play it back),
-and it makes a page deterministic without stepping it. Stepping is then tsval's part, for the app's own files, on top:
-the page's virtual loop is the one tsval's runs on.
+So the ways to stop live inside a page's handler are the browser's debugger, which the editor can't drive, or the app
+moved into a worker with its DOM proxied from the main thread (Partytown's way): native React, real pauses, but every
+synchronous DOM read a round trip, and what must be decided in the event — `preventDefault()`, a controlled input's
+value, focus — decided too late. That's slower than the real page and different from it exactly where people debug
+(forms, inputs, focus, events), and each framework touches the DOM its own way: more proxy, more gaps.
 
-What that doesn't reach: layout and paint (the browser's, deterministic for the same inputs in practice), Web Workers
-and iframes in the app (each a page of its own to virtualize), WebSockets (an input stream, to record), WebGL and media
-timing. Those are the apps' entries in *What can't run this way*.
+**A breakpoint in a page is a recorded stop.** Each time its line runs, what's in scope — locals, arguments, `this`, the
+call stack, and which turn of the app it was (which event, which render) — is recorded and shown in the margin, as live
+values are: a column per time it ran. The dev server already instruments what it serves (RUNTIME-EVIDENCE.md), so the
+recording is its instrumentation, mapped back through the source maps the framework's compiler gives (JSX, Vue's single
+file components, Svelte, Solid all reach the page as compiled JavaScript with a map) — framework-neutral, at the page's
+own speed, in the real page. What it doesn't do is let the user step from there: a page's code is observed, and a Node
+program's is stepped.
+
+Determinism goes with it: a page isn't replayed. Making it so — its clock, randomness, timers, frames and channels on one
+virtual loop, its inputs and fetches recorded — would buy replaying a page's bug exactly and stepping back through UI
+code, but stepping back needs stopping first, and the page can't stop. Not built, and not planned.
+
+(The browser's DevTools remain for a preview popped out into its own window — the user's, outside the editor.)
 
 ## What can't run this way
 
@@ -93,8 +106,8 @@ asking at each gated call (almostnode's capability hook, the service worker), ju
 
 Known and suspected:
 
-1. **A browser page's own code** — a previewed app. It runs in the browser, which is the point; observed, not stepped,
-   until the page's virtual loop and tsval in the page (*Apps and determinism*).
+1. **A browser page's own code** — a previewed app. It runs in the browser, which is the point; observed, its
+   breakpoints recorded stops, not stepped (*Apps: recorded stops, not live ones*).
 2. **Too slow to interpret** — measured (step 0): not a build, a bundler or a server (their work is in packages, or
    light per request), but a program whose own code computes heavily — a simulation, a game's update loop. The answer
    is making tsval faster, not keeping a second world.
@@ -171,16 +184,17 @@ that can't start says why). And the two run ledgers become one: every run in `ru
    which retires its popups for runs (step 2's last part). The tour's diagram is now drawn from everything it saw all
    session (a look every second), not its last look: each debug run's worker reports as `debug-worker`, and the last
    one's report replaced the others'.
-4. **Services and apps** (first part done). A run that listens opens its preview; `vite` and the dev server as runs; React
+4. **Services and apps** (done). A run that listens opens its preview; `vite` and the dev server as runs; React
    mode retired. Done: a run's own server, listening, opens its preview window on its port (`preview.open` with `server`:
    no dev server started for it) and closes it when the run ends — a debug run's or a fallback's alike (node-runner.ts);
    and Run on an app's file — the page loads it, or it's a component (`.jsx`, `.tsx`), or it uses `react-dom` or
    `document`, with an `index.html` up from it in its own package — runs the app: its `dev` script as a task (the dev
    server a run, its preview open), or, already running, its preview shown again (launch.ts `appRootOf`/`runApp`; F5's
-   resolver too). React mode is now reached only by such code in a package with no page.
-   Then the page's virtual loop (*Apps and determinism*): its clock, randomness, timers, frames and channels the run's,
-   its inputs and fetches recorded — every script in it, React included — and tsval stepping the app's own files on it.
-5. **The fallback.** The cases that remain (from step 0, and what tsval lacks) run natively behind the same session,
+   resolver too). React mode is removed: its reconciler, its render window and its protocol (a live pause in a component,
+   but on a fake DOM, for React alone). The page's virtual loop isn't built (*Apps: recorded stops, not live ones*).
+5. **Recorded stops in the page.** A breakpoint in an app's code records what's in scope each time its line runs, by the
+   dev server's instrumentation, mapped through source maps, and shows it in the margin — a column per time it ran.
+6. **The fallback.** The cases that remain (from step 0, and what tsval lacks) run natively behind the same session,
    the margin saying values aren't there; each listed here with its reason.
 
 ## Open
@@ -190,4 +204,5 @@ that can't start says why). And the two run ledgers become one: every run in `ru
 - Replay: a run's recorded results let it run again exactly — whether *Run again* is that, or a fresh run.
 - Effects on step-back: travelling back past a real write doesn't undo it. Show where a run's real effects are, so
   stepping back past one is visible.
-- A page's code stepped by tsval in the page, for apps (case 1).
+- What a recorded stop keeps of an object (a preview, a depth, how many of a line's stops), and how one stop is told
+  from another (the event, the render, the turn).
