@@ -1,5 +1,6 @@
 import type { EventLoopOptions, Loop } from "./event-loop.ts";
-import type { AsyncFrame, CallFrame, Frame, Iteration, NodeFrame, SyntheticFrame, SyntheticKind } from "./frame.ts";
+import type { AsyncFrame, CallFrame, Frame, Iteration, ModuleFrame, NodeFrame, SyntheticFrame, SyntheticKind } from "./frame.ts";
+import type { ModuleLoader, ModuleRecord } from "./modules.ts";
 import type { GuestClass } from "./handlers.ts";
 import type { GuestFunction, GuestFunctionMeta } from "./values.ts";
 import ts from "typescript";
@@ -9,6 +10,7 @@ import { arrived, choose, createLoop, forkLoop, hasRefTimers, INTRINSICS, loopGl
 import { syntaxKindName } from "./frontend.ts";
 import { standardGlobals } from "./globals.ts";
 import { bindIdentifier, bindingProgram, clonePrivateElements, closeIteration, createGuestFunction, isGuestClass, nodeHandlers, pushPattern, syntheticHandlers } from "./handlers.ts";
+import { defineExports, directoryOf, linkedSpecifiers, makeRequire, moduleOf, requireOf, setModuleOf } from "./modules.ts";
 import { Scope } from "./scope.ts";
 import { isGuestFunction } from "./values.ts";
 
@@ -174,6 +176,11 @@ export interface VMOptions {
 	"coverage"?: boolean;
 	/** Tally where the run's work goes (see `VM.profile`): per top-level statement. Off by default: a map update a step. */
 	"profile"?: boolean;
+	/** The program's modules (modules.ts, MODULES.md): its host's loader — resolution, what isn't the program's loaded
+	 *  natively, a program file's source, the module cache. tsval evaluates the program's own files, each in a module
+	 *  frame on the stack that required or imported it, so stepping goes into them; breakpoints and locations are by
+	 *  file. Without one, an import is `resolveModule`'s. */
+	"modules"?: ModuleLoader;
 	/** Told what went through a few chosen sites as the program runs — the facts runtime evidence keeps of values,
 	 *  branches and types. Off by default: one check per site when it's off. See `ObserveSite` for each site's node
 	 *  and value. The callback must not run guest code (read values with `typeTag`, which never does). */
@@ -296,11 +303,14 @@ export interface VM {
 
 	// --- position, breakpoints ---
 	readonly "currentNode": ts.Node | null;
-	"location": (node?: ts.Node | null) => { "line": number; "character": number; "pos": number } | null;
+	"location": (node?: ts.Node | null) => { "file": string; "line": number; "character": number; "pos": number } | null;
 	/** Where a value escaping the run uncaught was first thrown (null for a primitive, or one not thrown here). */
 	"throwSite": (value: unknown) => ts.Node | null;
-	readonly "breakpoints": Set<number>;
-	"addBreakpoint": (pos: number) => void;
+	/** Breakpoints, by file and position: `file:pos`. */
+	readonly "breakpoints": Set<string>;
+	"addBreakpoint": (pos: number, file?: string) => void;
+	/** Add breakpoints by 1-based line in a program file (VMOptions.modules) — loaded yet or not. */
+	"addBreakpointsInFile": (file: string, ...lines: number[]) => void;
 	"addBreakpointsByLine": (...lines: number[]) => void;
 	"atBreakpoint": () => boolean;
 	"runToBreakpoint": () => void;
@@ -424,8 +434,11 @@ export class Machine implements VM {
 	public readonly realm: Realm;
 	/** The loaded program, kept for source-position lookups (breakpoints, `location`). */
 	public sourceFile: ts.SourceFile | undefined;
-	/** Breakpoints, as node start positions (see `addBreakpoint` / `addBreakpointsByLine`). */
-	public readonly breakpoints = new Set<number>();
+	/** VMOptions.modules: the program's module loader, and its files as parsed (shared with forks). */
+	public modules: ModuleLoader | undefined;
+	private parsed = new Map<string, ts.SourceFile>();
+	/** Breakpoints, as `file:pos` (see `addBreakpoint` / `addBreakpointsByLine` / `addBreakpointsInFile`). */
+	public readonly breakpoints = new Set<string>();
 	/** Where each thrown value was first thrown — the node its throw started from — so a host that gets it uncaught (the
 	 *  frames unwound by then) can say where the program crashed. A rethrow keeps the first, as a stack trace would; a
 	 *  primitive thrown has none. */
@@ -481,6 +494,7 @@ export class Machine implements VM {
 		this.maxSteps = options.maxSteps;
 		this.coverage = options.coverage === true ? new Map() : undefined;
 		this.profile = options.profile === true ? new Map() : undefined;
+		this.modules = options.modules;
 		this.observe = options.observe;
 		this.trace = options.trace;
 	}
@@ -570,6 +584,13 @@ export class Machine implements VM {
 
 	/** Invoke a host callable from guest code, through the guard and with `callSite` exposed. */
 	public invokeHost(callee: (...args: unknown[]) => unknown, thisArg: unknown, args: unknown[], site: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression, isConstruct: boolean): unknown {
+		// A module's require, called where its file can't be pushed on the stack (calls.ts pushes it where it can).
+		const requiring = requireOf(callee);
+
+		if (requiring !== undefined && !isConstruct) {
+			return this.fromHost(this.requireFrom(requiring, String(args[0])));
+		}
+
 		// The event loop's intrinsics act on this machine (event-loop.ts) — trusted, so ahead of the guard.
 		const intrinsic = INTRINSICS.get(callee);
 
@@ -607,8 +628,13 @@ export class Machine implements VM {
 		}
 	}
 
-	/** Resolve a module namespace, or throw a guest-catchable error if unresolved. */
-	public importModule(specifier: string): unknown {
+	/** Resolve a module namespace, or throw a guest-catchable error if unresolved — from `from`'s code, through the
+	 *  program's module loader when there is one (VMOptions.modules). */
+	public importModule(specifier: string, from?: string): unknown {
+		if (this.modules !== undefined && from !== undefined) {
+			return this.requireFrom(from, specifier);
+		}
+
 		const ns = this.resolveModule?.(specifier);
 
 		if (ns === undefined) {
@@ -621,6 +647,15 @@ export class Machine implements VM {
 	/** Seat a parsed SourceFile as the initial frame. */
 	public load(sourceFile: ts.SourceFile): void {
 		this.sourceFile = sourceFile;
+
+		// With the program's modules (VMOptions.modules), the entry is one of them: a module of its own, as Node runs it.
+		if (this.modules !== undefined) {
+			this.parsed.set(sourceFile.fileName, sourceFile);
+			this.pushModule(sourceFile.fileName);
+
+			return;
+		}
+
 		this.pushNode(sourceFile, this.rootScope);
 	}
 
@@ -870,54 +905,197 @@ export class Machine implements VM {
 	}
 
 	/** The 0-based line/character (and raw position) of a node, for debugger UIs. */
-	public location(node: ts.Node | null = this.currentNode): { "line": number; "character": number; "pos": number } | null {
-		if (node === null || node === undefined || this.sourceFile === null || this.sourceFile === undefined) {
+	public location(node: ts.Node | null = this.currentNode): { "file": string; "line": number; "character": number; "pos": number } | null {
+		if (node === null || node === undefined) {
 			return null;
 		}
 
-		const pos = node.getStart(this.sourceFile);
-		const { line, character } = this.sourceFile.getLineAndCharacterOfPosition(pos);
+		// The node's own file: the program's modules are several (VMOptions.modules).
+		const file = node.getSourceFile();
+		const pos = node.getStart(file);
+		const { line, character } = file.getLineAndCharacterOfPosition(pos);
 
-		return { "line": line, "character": character, "pos": pos };
+		return { "file": file.fileName, "line": line, "character": character, "pos": pos };
 	}
 
-	/** Add a breakpoint at a node's start position. */
-	public addBreakpoint(pos: number): void {
-		this.breakpoints.add(pos);
+	/** Add a breakpoint at a node's start position in `file` (the program's entry, by default). */
+	public addBreakpoint(pos: number, file: string | undefined = this.sourceFile?.fileName): void {
+		this.breakpoints.add(`${file}:${pos}`);
 	}
 
-	/** Add breakpoints by 1-based source line: breaks at the first statement starting on each line. */
+	/** Add breakpoints by 1-based source line in the entry: breaks at the first statement starting on each line. */
 	public addBreakpointsByLine(...lines: number[]): void {
-		if (this.sourceFile === null || this.sourceFile === undefined) {
-			return;
+		if (this.sourceFile !== null && this.sourceFile !== undefined) {
+			this.breakpointsAt(this.sourceFile, lines);
 		}
+	}
 
+	/** Add breakpoints by 1-based line in a program file (VMOptions.modules), whether it's loaded yet or not. */
+	public addBreakpointsInFile(file: string, ...lines: number[]): void {
+		if (file === this.sourceFile?.fileName) {
+			this.addBreakpointsByLine(...lines);
+		} else if (this.modules !== undefined) {
+			this.breakpointsAt(this.sourceOf(file), lines);
+		}
+	}
+
+	private breakpointsAt(source: ts.SourceFile, lines: number[]): void {
 		const wanted = new Set(lines);
 		const visit = (node: ts.Node): void => {
 			if (isStatement(node)) {
-				const line = this.sourceFile!.getLineAndCharacterOfPosition(node.getStart(this.sourceFile)).line + 1;
+				const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
 
 				if (wanted.has(line)) {
-					this.breakpoints.add(node.getStart(this.sourceFile));
+					this.breakpoints.add(`${source.fileName}:${node.getStart(source)}`);
 				}
 			}
 
 			node.forEachChild(visit);
 		};
 
-		this.sourceFile.forEachChild(visit);
+		source.forEachChild(visit);
 	}
 
 	/** True when the top frame is a fresh statement sitting on a breakpoint. */
 	public atBreakpoint(): boolean {
 		const frame = this.top;
 
-		if (frame === undefined || frame.kind !== undefined || frame.phase !== 0 || frame.node === null || this.sourceFile === undefined) {
+		if (frame === undefined || frame.kind !== undefined || frame.phase !== 0 || frame.node === null) {
 			return false;
 		}
 
 		// Statement-level only: a statement and a child expression can share a start position.
-		return isStatement(frame.node) && this.breakpoints.has(frame.node.getStart(this.sourceFile));
+		if (!isStatement(frame.node)) {
+			return false;
+		}
+
+		const file = frame.node.getSourceFile();
+
+		return this.breakpoints.has(`${file.fileName}:${frame.node.getStart(file)}`);
+	}
+
+	// --- the program's modules (VMOptions.modules, modules.ts) ------------------
+
+	/** A program file, parsed once — JSX by its extension. */
+	public sourceOf(filename: string): ts.SourceFile {
+		let source = this.parsed.get(filename);
+
+		if (source === undefined) {
+			source = ts.createSourceFile(filename, this.modules!.source(filename), ts.ScriptTarget.Latest, true, /\.[jt]sx$/u.test(filename) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+			this.parsed.set(filename, source);
+		}
+
+		return source;
+	}
+
+	/** Push `filename`'s module frame on this stack: its module registered first (a cycle sees its partial exports), its
+	 *  scope its own — `module`, `exports`, `require`, `__filename`, `__dirname`, `this` its exports. */
+	public pushModule(filename: string): ModuleFrame {
+		const loader = this.modules!;
+		const module: ModuleRecord = { "id": filename, "filename": filename, "exports": {}, "loaded": false, "children": [], "paths": [] };
+		const scope = new Scope(this.rootScope, true);
+		const bindings: [string, unknown][] = [["module", module], ["exports", module.exports], ["require", makeRequire(loader, filename)], ["__filename", filename], ["__dirname", directoryOf(filename)]];
+
+		for (const [name, value] of bindings) {
+			scope.bindings.set(name, { "value": value, "kind": "var", "initialized": true });
+		}
+
+		scope.hasThis = true;
+		scope.thisVal = module.exports;
+		setModuleOf(scope, module);
+		loader.register(filename, module);
+
+		const frame: ModuleFrame = { "kind": "module", "node": null, "phase": 0, "scope": scope, "valuesBase": this.values.length, "source": this.sourceOf(filename), "module": module };
+
+		this.frames.push(frame);
+
+		return frame;
+	}
+
+	/** A `require(specifier)` from `from`'s code, on this stack: a program file not loaded yet is its module frame pushed
+	 *  (true) — its exports the call's value when it completes; anything else is false (the host's, through invokeHost). */
+	public enterModule(from: string, specifier: unknown): boolean {
+		if (this.modules === undefined || typeof specifier !== "string") {
+			return false;
+		}
+
+		let resolved;
+
+		try {
+			resolved = this.modules.resolve(specifier, directoryOf(from));
+		} catch {
+			return false; // the host's require says so, as Node does
+		}
+
+		if (resolved.kind !== "program" || this.modules.cached(resolved.filename) !== undefined) {
+			return false;
+		}
+
+		this.pushModule(resolved.filename);
+
+		return true;
+	}
+
+	/** A module's value for `from`'s code, not on a stack it can wait on: a program file's exports (evaluated now, in a
+	 *  nested run, if it isn't loaded yet) or what the host loads. */
+	public requireFrom(from: string, specifier: string): unknown {
+		const loader = this.modules!;
+		const resolved = loader.resolve(specifier, directoryOf(from));
+
+		if (resolved.kind !== "program") {
+			return loader.require(specifier, directoryOf(from));
+		}
+
+		const cached = loader.cached(resolved.filename);
+
+		return cached !== undefined ? cached.exports : this.runSub(() => { this.pushModule(resolved.filename); });
+	}
+
+	/** A file about to run (its program node's first step): the program files it imports from, not loaded yet, pushed
+	 *  first — depth-first, each once (ESM's link order) — true if there were any (it runs again once they have). */
+	public linkImports(source: ts.SourceFile, frame: NodeFrame): boolean {
+		const loader = this.modules;
+
+		if (loader === undefined) {
+			return false;
+		}
+
+		this.values.length = frame.valuesBase; // (what the modules it waited on left)
+
+		const pending = new Set<string>();
+
+		for (const specifier of linkedSpecifiers(source)) {
+			try {
+				const resolved = loader.resolve(specifier, directoryOf(source.fileName));
+
+				if (resolved.kind === "program" && loader.cached(resolved.filename) === undefined) {
+					pending.add(resolved.filename);
+				}
+			} catch {
+				// not found: its import binding says so
+			}
+		}
+
+		for (const filename of [...pending].reverse()) {
+			this.pushModule(filename);
+		}
+
+		return pending.size > 0;
+	}
+
+	/** A file's exports, once its bindings are declared: an ES module's, on its module's `exports` (modules.ts). */
+	public linkExports(source: ts.SourceFile, scope: Scope): void {
+		const module = this.modules === undefined ? undefined : moduleOf(scope);
+
+		if (module !== undefined) {
+			defineExports(source, module, (name) => {
+				try {
+					return scope.get(name);
+				} catch {
+					return undefined; // not initialized yet (a cycle reading it early)
+				}
+			}, (specifier) => this.requireFrom(source.fileName, specifier));
+		}
 	}
 
 	/** Run until the next breakpoint (or completion). Advances at least one step. */
@@ -1111,7 +1289,9 @@ export class Machine implements VM {
 		};
 
 		(forked as { "rootScope": Scope }).rootScope = clone(this.rootScope) as Scope;
-		(forked as { "breakpoints": Set<number> }).breakpoints = new Set(this.breakpoints);
+		(forked as { "breakpoints": Set<string> }).breakpoints = new Set(this.breakpoints);
+		forked.modules = this.modules;
+		(forked as unknown as { "parsed": Map<string, ts.SourceFile> }).parsed = this.parsed; // the files as parsed: shared
 		// Its own: the fork's guest values are clones, so the source's throw sites (keyed by its values) aren't its.
 		(forked as unknown as { "throwSites": WeakMap<object, ts.Node> }).throwSites = new WeakMap();
 		forked.sourceFile = this.sourceFile;
@@ -1190,7 +1370,7 @@ export class Machine implements VM {
 	/** A host call as a person reads it, for a candidate's label: its callee as the code writes it, and its first argument
 	 *  when that's a string — `fetch("https://a.example/")`. */
 	private callLabel(site: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression, callee: unknown, args: unknown[]): string {
-		const written = this.sourceFile === undefined || ts.isTaggedTemplateExpression(site) ? undefined : site.expression.getText(this.sourceFile);
+		const written = ts.isTaggedTemplateExpression(site) ? undefined : site.expression.getText();
 		const name = written ?? (typeof callee === "function" && callee.name !== "" ? callee.name : "a host call");
 		const [first] = args;
 
@@ -1751,6 +1931,11 @@ export class Machine implements VM {
 
 		if (frame.kind === "pattern") {
 			this.closeIterations(frame.iters.splice(0).reverse(), signal); // innermost first
+		}
+
+		// A module whose evaluation threw leaves the cache (as Node's does): a later require tries it again.
+		if (frame.kind === "module" && signal.type === "throw") {
+			this.modules?.forget?.(frame.module.filename);
 		}
 
 		if (frame.kind === undefined) {

@@ -4,6 +4,7 @@
 import type { NodeFrame } from "../frame.ts";
 import type { Machine } from "../vm.ts";
 import ts from "typescript";
+import { requireOf } from "../modules.ts";
 import { isGuestFunction } from "../values.ts";
 import { isGuestClass, superCall } from "./classes.ts";
 import { cookedTemplateText, describe, normalizeTemplateLineTerminators } from "./realm.ts";
@@ -110,7 +111,7 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 			const specifier = vm.pop();
 
 			vm.frames.pop();
-			vm.push(Promise.resolve(vm.importModule(String(specifier))));
+			vm.push(Promise.resolve(vm.importModule(String(specifier), node.getSourceFile().fileName)));
 		}
 
 		return;
@@ -152,6 +153,15 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 	} else if (frame.phase === AFTER_REF + 1) {
 		const args = collectCallArguments(vm, frame);
 		const calleeVal = vm.pop();
+		const requiring = requireOf(calleeVal);
+
+		// A program file's require (MODULES.md): the file evaluated here, on this stack — stepped into — its exports the
+		// call's value, as a guest call's return is.
+		if (requiring !== undefined && vm.enterModule(requiring, args[0])) {
+			frame.phase = AFTER_REF + 2;
+
+			return;
+		}
 
 		if (isGuestFunction(calleeVal)) {
 			const meta = calleeVal.__tsval;

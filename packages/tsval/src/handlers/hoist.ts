@@ -114,7 +114,7 @@ export function bindImport(vm: Machine, scope: Scope, node: ts.ImportDeclaration
 	const clause = node.importClause;
 
 	if (clause === undefined) {
-		vm.importModule(specifier); // side-effect import
+		vm.importModule(specifier, node.getSourceFile().fileName); // side-effect import
 
 		return;
 	}
@@ -123,7 +123,7 @@ export function bindImport(vm: Machine, scope: Scope, node: ts.ImportDeclaration
 		return;
 	}
 
-	const ns = vm.importModule(specifier) as Record<string, unknown>;
+	const ns = vm.importModule(specifier, node.getSourceFile().fileName) as Record<string, unknown>;
 	const bind = (name: string, value: unknown): void => {
 		scope.declareLexical(name, "const");
 		scope.initialize(name, value);

@@ -15,6 +15,7 @@ import { register as registerPatterns } from "./handlers/patterns.ts";
 import { register as registerRealm } from "./handlers/realm.ts";
 import { register as registerReferences } from "./handlers/references.ts";
 import { register as registerStatements } from "./handlers/statements.ts";
+import { register as registerModules } from "./modules.ts";
 
 // Registration is a plain call AFTER every module has loaded — no module reads another at
 // evaluation time, so their import order (and the cycles among them) cannot matter.
@@ -28,6 +29,7 @@ registerFunctions();
 registerCalls();
 registerGenerators();
 registerStatements();
+registerModules();
 registerClasses();
 registerPatterns();
 

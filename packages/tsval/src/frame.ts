@@ -190,6 +190,16 @@ export interface AsyncFrame extends FrameBase {
 	"delivered"?: boolean;
 }
 
-export type SyntheticFrame = CallFrame | ConstructFrame | InitFieldsFrame | PatternFrame | AsyncFrame;
+/** A program file evaluated as a module (VMOptions.modules, MODULES.md): its source run in a scope of its own (`module`,
+ *  `exports`, `require`, `__filename`, `__dirname`); when it completes, `module.exports` is left on the value stack —
+ *  the result of the `require` (or the import) that loaded it. */
+export interface ModuleFrame extends FrameBase {
+	"kind": "module";
+	"node": null;
+	"source": ts.SourceFile;
+	"module": { "filename": string; "exports": unknown; "loaded": boolean };
+}
+
+export type SyntheticFrame = CallFrame | ConstructFrame | InitFieldsFrame | PatternFrame | AsyncFrame | ModuleFrame;
 export type Frame = NodeFrame | SyntheticFrame;
 export type SyntheticKind = SyntheticFrame["kind"];

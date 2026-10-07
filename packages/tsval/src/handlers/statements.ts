@@ -23,7 +23,13 @@ function sourceFile(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.SourceFile;
 
 	if (frame.phase === 0) {
+		// The program's modules (MODULES.md): the program files it imports from, evaluated first.
+		if (vm.linkImports(node, frame)) {
+			return;
+		}
+
 		hoist(vm, frame.scope, node.statements);
+		vm.linkExports(node, frame.scope);
 		pushStatementsReverse(vm, node.statements, frame.scope);
 		frame.phase = 1;
 	} else {

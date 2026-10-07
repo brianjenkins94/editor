@@ -322,7 +322,7 @@ function targetText(vm: Machine, target: ts.Expression): string {
 	}
 
 	try {
-		return target.getText(vm.sourceFile);
+		return target.getText(); // (its own file: the program's modules are several)
 	} catch {
 		return "";
 	}

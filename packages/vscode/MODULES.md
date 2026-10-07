@@ -86,10 +86,11 @@ calls into it isn't the program's to order. A package's callback into a program 
 
 ## Steps
 
-1. **almostnode's loader split.** `resolve`, `loadNative`, `register` and the evaluator hook on `Runtime`; built-ins by
+1. **almostnode's loader split** (done, 0e8c9d8). `resolve`, `loadNative`, `register` and the evaluator hook on `Runtime`; built-ins by
    requester. Tests in almostnode: resolution unchanged (its own tests), a registered module seen by a package, the hook
    called for a program file a package requires.
-2. **tsval over several files.** Frames and positions by file; module frames; the `require` intrinsic and ESM link order
+2. **tsval over several files** (done: tsval's modules.ts — the loader interface, module frames, the entry a module
+   too, ES module exports as getters on `module.exports`, breakpoints and locations by file). Frames and positions by file; module frames; the `require` intrinsic and ESM link order
    through `VMOptions.modules`. Tests: stepping from one file into another and back; a breakpoint in an imported file; a
    cycle's partial exports; import order; a fork mid-import; coverage and profile per file.
 3. **The debug worker on almostnode.** The entry through the runtime with tsval as evaluator; the shim deleted; stand-ins
@@ -99,6 +100,9 @@ calls into it isn't the program's to order. A package's callback into a program 
 
 ## Open
 
+- An importer binds an imported name to its value when it links (the exporter has run by then, but for a cycle), not
+  live as ESM's bindings are; a namespace import (`import * as ns`) reads live. Live named bindings, if a program needs
+  them.
 - What a per-file run log shows: each file's own steps, or the run's — its share of the whole run, per file?
 - A preview page served by a debug run gets no observability tap yet (the dev-server worker injects it into what it
   serves; a debug run's server answers on its own).
