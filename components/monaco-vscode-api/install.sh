@@ -4,11 +4,18 @@ CWD=$(pwd)
 
 REPO=https://github.com/CodinGame/monaco-vscode-api.git
 
-# The latest version PUBLISHED to npm (its `latest`), not the newest tag: a release is tagged before it's published, and
-# installing a tagged-but-unpublished version fails (ETARGET) — the demo's dependencies are installed from npm.
-VERSION=$(npm view @codingame/monaco-vscode-api version 2>/dev/null)
+# The newest release that's been PUBLISHED a day — not the newest tag, nor npm's latest: a release is tagged before it's
+# published, and published package by package (a couple of hundred), so mid-publish its core is out while others aren't
+# (ETARGET). A day on, all of it is.
+VERSION=$(npm view @codingame/monaco-vscode-api time --json 2>/dev/null | node -e '
+	const times = JSON.parse(require("fs").readFileSync(0, "utf8"));
+	const settled = Object.entries(times).filter(([version, at]) => /^\d+\.\d+\.\d+$/.test(version) && Date.now() - Date.parse(at) > 24 * 60 * 60 * 1000);
+	const newest = settled.sort(([, a], [, b]) => Date.parse(b) - Date.parse(a))[0];
 
-[ -n "$VERSION" ] || { echo "install.sh: could not resolve the latest published @codingame/monaco-vscode-api" >&2; exit 1; }
+	process.stdout.write(newest === undefined ? "" : newest[0]);
+')
+
+[ -n "$VERSION" ] || { echo "install.sh: could not resolve a published @codingame/monaco-vscode-api release" >&2; exit 1; }
 
 git ls-remote --exit-code --tags "$REPO" "v$VERSION" > /dev/null || { echo "install.sh: @codingame/monaco-vscode-api $VERSION has no v$VERSION tag" >&2; exit 1; }
 
