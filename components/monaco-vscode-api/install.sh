@@ -30,10 +30,12 @@ rm -rf monaco-vscode-api/
 
 cd demo
 
+# Every @codingame package at that one version, not each one's latest: a release is published package by package, so
+# mid-publish some are a version ahead of the rest — and want a core that isn't out yet.
 if [[ "$(uname -s)" == Darwin* ]]; then
-	sed -i "" "s/file:[^\"]*/latest/g" package.json
+	sed -i "" "s/file:[^\"]*/$VERSION/g" package.json
 else
-	sed -i "s/file:[^\"]*/latest/g" package.json
+	sed -i "s/file:[^\"]*/$VERSION/g" package.json
 fi
 
 npm pkg delete dependencies["@codingame/monaco-vscode-server"]
