@@ -4,11 +4,13 @@ CWD=$(pwd)
 
 REPO=https://github.com/CodinGame/monaco-vscode-api.git
 
-VERSION=$(git ls-remote --tags --refs --sort=-v:refname "$REPO" 'v[0-9]*' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+# The latest version PUBLISHED to npm (its `latest`), not the newest tag: a release is tagged before it's published, and
+# installing a tagged-but-unpublished version fails (ETARGET) — the demo's dependencies are installed from npm.
+VERSION=$(npm view @codingame/monaco-vscode-api version 2>/dev/null)
 
-VERSION=${VERSION#v}
+[ -n "$VERSION" ] || { echo "install.sh: could not resolve the latest published @codingame/monaco-vscode-api" >&2; exit 1; }
 
-[ -n "$VERSION" ] || { echo "install.sh: could not resolve latest CodinGame/monaco-vscode-api release tag" >&2; exit 1; }
+git ls-remote --exit-code --tags "$REPO" "v$VERSION" > /dev/null || { echo "install.sh: @codingame/monaco-vscode-api $VERSION has no v$VERSION tag" >&2; exit 1; }
 
 rm -rf demo/ monaco-vscode-api/
 
