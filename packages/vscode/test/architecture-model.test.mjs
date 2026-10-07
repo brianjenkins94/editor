@@ -1,8 +1,10 @@
 // The declared architecture model: subject families route along the hub tree, and conformance flags what the model
 // doesn't declare. Run: node --test test/architecture-model.test.mjs
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import * as path from "node:path";
 import test from "node:test";
-import { allowedOnLink, appLayout, appNodes, channels, checkConformance, classifyUrl, declaredBetween, declaredOn, familiesOnLink, identifyWorker, nodes, subjectOfLabel, subjects } from "../architecture-model.ts";
+import { allowedOnLink, appLayout, appNodes, channels, checkConformance, classifyUrl, declaredBetween, declaredOn, familiesOnLink, identifyWorker, nodes, subjectMatches, subjectOfLabel, subjects } from "../architecture-model.ts";
 
 const patterns = (a, b) => familiesOnLink(a, b).map((family) => family.pattern);
 
@@ -252,4 +254,74 @@ test("a pair meeting through a medium only they use is judged by the medium's de
 	const violations = checkConformance({ "nodes": [], "channels": [throughDeclared, throughUnknown], "topology": new Map() });
 
 	assert.deepEqual(violations, [{ "type": "undeclared-channel", "a": "workbench", "b": "node" }]);
+});
+
+// Every subject the editor's code names — what it serves, requests, publishes or subscribes to — is one the model
+// declares: a subject added without its family fails here, in `npm test`, rather than only in the architecture tour's
+// conformance check (which needs the editor running and the subject actually sent). Only that it's declared, not which
+// way it goes: which context a file runs in isn't in its text.
+test("every subject the source names is declared", () => {
+	const { join, relative } = path;
+	const here = new URL("..", import.meta.url).pathname;
+	const roots = [here, join(here, "../../components/monaco-vscode-api"), join(here, "../observability/src"), join(here, "../hub/src"), join(here, "../debug-mcp/src")];
+	const files = [];
+	const walk = (dir) => {
+		for (const name of readdirSync(dir)) {
+			const path = join(dir, name);
+
+			if (name.startsWith(".") || ["node_modules", "dist", "test", "demo", "vendor"].includes(name)) {
+				continue;
+			}
+
+			if (statSync(path).isDirectory()) {
+				walk(path);
+			} else if (/\.(?:ts|tsx|js|mjs)$/u.test(name) && !/\.(?:test|d)\.[^.]+$/u.test(name)) {
+				files.push(path);
+			}
+		}
+	};
+
+	roots.forEach(walk);
+
+	const texts = new Map(files.map((file) => [file, readFileSync(file, "utf8")]));
+	// String constants a subject may be built from (`ARCH_SUBJECT + "." + id`) — a name given two values is no help.
+	const constants = new Map();
+
+	for (const text of texts.values()) {
+		for (const [, name, value] of text.matchAll(/\bconst ([A-Z][A-Z0-9_]*) = "([^"]*)"/gu)) {
+			constants.set(name, constants.has(name) && constants.get(name) !== value ? undefined : value);
+		}
+	}
+
+	// A subject expression's value: literals and known constants as they are, anything else one token (`*`).
+	const valueOf = (expression) => expression.split(/\s*\+\s*/u).map((part) => {
+		const literal = /^(["'])(.*)\1$/u.exec(part) ?? /^`(.*)`$/u.exec(part);
+
+		if (literal !== null) {
+			return literal.at(-1).replaceAll(/\$\{\s*([A-Z][A-Z0-9_]*)\s*\}/gu, (whole, name) => constants.get(name) ?? "*").replaceAll(/\$\{[^}]*\}/gu, "*");
+		}
+
+		return constants.get(part) ?? "*";
+	}).join("").split(".").map((token) => (token.includes("*") && token !== "*" ? "*" : token)).join(".");
+	const named = [];
+
+	for (const [file, text] of texts) {
+		for (const match of text.matchAll(/\b(?:serve\(\s*[\w.]+\s*,|\.(?:request|publish|subscribe)\()\s*((?:"[^"\n]*"|'[^'\n]*'|`[^`\n]*`|[A-Za-z_$][\w$.]*)(?:\s*\+\s*(?:"[^"\n]*"|'[^'\n]*'|`[^`\n]*`|[A-Za-z_$][\w$.]*))*)\s*[,)]/gu)) {
+			const line = text.slice(text.lastIndexOf("\n", match.index) + 1, match.index).trim();
+			const subject = valueOf(match[1]);
+
+			// Prose (a doc comment's example), and subjects that are all variable (a helper passing its caller's on).
+			if (line.startsWith("*") || line.startsWith("//") || subject.split(".").every((token) => token === "*")) {
+				continue;
+			}
+
+			named.push({ "subject": subject, "at": `${relative(here, file)}:${text.slice(0, match.index).split("\n").length}` });
+		}
+	}
+
+	assert.ok(named.length > 100, `the scan found the source's subjects (${named.length})`);
+
+	const undeclared = named.filter(({ subject }) => !subjects.some((family) => subjectMatches(family.pattern, subject)));
+
+	assert.deepEqual(undeclared, [], "declare each in architecture-model.ts's subjects, with who sends it and who it's for");
 });

@@ -156,9 +156,16 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "$sys.log.>", "from": ["*"], "to": ["root", "debug-mcp", "shell"] },
 	{ "pattern": "$sys.metrics.>", "from": ["*"], "to": ["pod", "debug-mcp", "shell"] },
 	{ "pattern": "$sys.backlog.log", "from": ["root", "preview:*"], "to": ["debug-mcp"] },
+	// The architecture plane itself (observability's arch.ts): every context's reports, to the live view and debug-mcp, and
+	// their ask for full state. Not observed — it's what observation rides — so declared for the source scan's sake.
+	{ "pattern": "$sys.arch.sync", "from": ["workbench", "debug-mcp"], "to": ["*"] },
+	{ "pattern": "$sys.arch.>", "from": ["*"], "to": ["workbench", "debug-mcp"] },
 	{ "pattern": "tab.discover", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"] },
 	{ "pattern": "tab.here", "from": ["root", "preview:*"], "to": ["debug-mcp"] },
 	{ "pattern": "page_tools.changed", "from": ["root", "shell", "preview:*"], "to": ["debug-mcp"] },
+	// Inside a preview window: its page's workers report and ask through the page tap's hub (page-tap.ts, worker-tap.ts) —
+	// the app's own contexts, which conformance doesn't check; declared for the source scan's sake.
+	{ "pattern": "tap.worker.>", "from": ["preview:*"], "to": ["preview:*"] },
 	{ "pattern": "page_tools.*", "from": ["debug-mcp"], "to": ["root", "preview:*"] },
 	{ "pattern": "tool.>", "from": ["debug-mcp", "root"], "to": ["root", "preview:*"] },
 	// ── the shell ⇄ the app and the workbench ──
@@ -236,6 +243,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "debug.sessions", "from": ["root"], "to": ["pod"] },
 	{ "pattern": "debug.start", "from": ["root", "workbench", "shell"], "to": ["pod"] },
 	{ "pattern": "debug.breakpoints", "from": ["root"], "to": ["pod"] },
+	{ "pattern": "debug.explore", "from": ["root"], "to": ["pod"] },
 	{ "pattern": "debug.session.*.control", "from": ["pod"], "to": ["debug-worker"] },
 	{ "pattern": "debug.session.*.event", "from": ["debug-worker"], "to": ["pod"] },
 	{ "pattern": "debug.session.*.state", "from": ["root"], "to": ["pod"] },
