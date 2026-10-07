@@ -172,6 +172,8 @@ export interface VMOptions {
 	"maxSteps"?: number;
 	/** Count how often each statement runs (see `VM.coverage`). Off by default: it's one map update per statement. */
 	"coverage"?: boolean;
+	/** Tally where the run's work goes (see `VM.profile`): per top-level statement. Off by default: a map update a step. */
+	"profile"?: boolean;
 	/** Told what went through a few chosen sites as the program runs — the facts runtime evidence keeps of values,
 	 *  branches and types. Off by default: one check per site when it's off. See `ObserveSite` for each site's node
 	 *  and value. The callback must not run guest code (read values with `typeTag`, which never does). */
@@ -308,6 +310,12 @@ export interface VM {
 	 *  are its own timeline's. Statements that never ran are absent. */
 	readonly "coverage": ReadonlyMap<ts.Node, number> | undefined;
 
+	/** Where the run's work went, when created with `profile: true` (undefined otherwise): per top-level statement of the
+	 *  program, by where the code is — a function's statement gets the work done in its body, wherever it was called
+	 *  from — the steps run in its code, the virtual time waited before its code ran again (a timer firing: the event
+	 *  loop's clock moving on), and the step it first ran at. Deterministic, as the run is. A fork carries its own copy. */
+	readonly "profile": ReadonlyMap<ts.Statement, StatementProfile> | undefined;
+
 	/** An independent copy of the machine state (mid-expression if need be); host objects are shared. */
 	"fork": () => VM;
 
@@ -394,6 +402,11 @@ export class Machine implements VM {
 	public maxSteps: number | undefined;
 	/** Statement execution counts (VMOptions.coverage). */
 	public coverage: Map<ts.Node, number> | undefined;
+	/** Where the work went (VMOptions.profile), and the virtual time waited that the next step's statement is owed. */
+	public profile: Map<ts.Statement, StatementProfile> | undefined;
+	private waitedPending = 0;
+	/** Each node's top-level statement (a profile's key), as found. */
+	private readonly topOf = new WeakMap<ts.Node, ts.Statement | null>();
 	/** What chosen sites are told to (VMOptions.observe). */
 	public observe: Observer | undefined;
 	/** What each value bound, returned or chosen is told to (VMOptions.trace). */
@@ -437,6 +450,7 @@ export class Machine implements VM {
 		// The event loop's timers, clock and random generator, over any the host gave: they're what makes it deterministic.
 		if (options.eventLoop !== undefined) {
 			this.loop = createLoop(options.eventLoop);
+			this.loop.wake = () => { wake(this.scheduler); };
 			Object.assign(globals, loopGlobals());
 		}
 
@@ -466,8 +480,36 @@ export class Machine implements VM {
 		this.steppedAsync = options.steppedAsync === true || options.eventLoop !== undefined;
 		this.maxSteps = options.maxSteps;
 		this.coverage = options.coverage === true ? new Map() : undefined;
+		this.profile = options.profile === true ? new Map() : undefined;
 		this.observe = options.observe;
 		this.trace = options.trace;
+	}
+
+	/** A step in `node`'s code, to its top-level statement's profile — with the virtual time waited before it, if any. */
+	private tally(node: ts.Node): void {
+		let top = this.topOf.get(node);
+
+		if (top === undefined) {
+			let at: ts.Node | undefined = node;
+
+			while (at !== undefined && at.parent !== undefined && !ts.isSourceFile(at.parent)) {
+				at = at.parent;
+			}
+
+			top = at !== undefined && at.parent !== undefined && ts.isSourceFile(at.parent) ? at as ts.Statement : null;
+			this.topOf.set(node, top);
+		}
+
+		if (top === null) {
+			return;
+		}
+
+		const entry = this.profile!.get(top) ?? { "steps": 0, "waited": 0, "first": this.steps };
+
+		entry.steps += 1;
+		entry.waited += this.waitedPending;
+		this.waitedPending = 0;
+		this.profile!.set(top, entry);
 	}
 
 	/** The next call's number (FrameBase.call). */
@@ -657,7 +699,7 @@ export class Machine implements VM {
 				return;
 			}
 
-			if (this.pending.size > 0 || (this.loop !== undefined && (hasRefTimers(this.loop) || this.loop.results.size > 0))) {
+			if (this.pending.size > 0 || (this.loop !== undefined && (hasRefTimers(this.loop) || this.loop.results.size > 0 || this.loop.keepAlive?.() === true))) {
 				this.idle = true;
 
 				return;
@@ -695,6 +737,11 @@ export class Machine implements VM {
 			this.unwind(frame, this.signal);
 
 			return;
+		}
+
+		// Where the work goes: this step, to the top-level statement whose code it's in (with any time waited before it).
+		if (this.profile !== undefined && frame.node !== null && frame.node !== undefined) {
+			this.tally(frame.node);
 		}
 
 		// A statement's first step (phase 0) is the statement starting — the same test a breakpoint uses.
@@ -1073,6 +1120,9 @@ export class Machine implements VM {
 		forked.onAsyncFiber = this.onAsyncFiber;
 		forked.onBreakpoint = this.onBreakpoint;
 		forked.coverage = this.coverage === undefined ? undefined : new Map(this.coverage);
+		forked.profile = this.profile === undefined ? undefined : new Map([...this.profile].map(([statement, entry]) => [statement, { ...entry }]));
+		forked.waitedPending = this.waitedPending;
+		(forked as unknown as { "topOf": WeakMap<ts.Node, ts.Statement | null> }).topOf = this.topOf; // a pure cache: shared
 		forked.observe = this.observe;
 		forked.trace = this.trace;
 		forked.calls = this.calls;
@@ -1202,7 +1252,10 @@ export class Machine implements VM {
 			return true;
 		}
 
+		const before = loop.clock;
 		const fired = takeTimer(loop)!;
+
+		this.waitedPending += loop.clock - before; // the wait: the profile's, for whichever statement's code runs next
 
 		this.idle = false;
 		this.values.length = 0; // between tasks: nothing on it is anyone's
@@ -2084,6 +2137,10 @@ function settle(scheduler: AsyncScheduler, id: number, input: Settlement): void 
 	scheduler.settled.push({ "id": id, "input": input });
 	wake(scheduler);
 }
+
+/** Where a top-level statement's share of the run went (VMOptions.profile): the steps run in its code, the virtual time
+ *  waited before its code ran again, and the step it first ran at. */
+export interface StatementProfile { "steps": number; "waited": number; "first": number }
 
 /** How a fiber is resumed: with a value, or by injecting a return/throw at the suspension point. */
 type FiberInput = { "kind": "next"; "value": unknown } | { "kind": "return"; "value": unknown } | { "kind": "throw"; "value": unknown };

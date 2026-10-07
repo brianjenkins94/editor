@@ -32,6 +32,9 @@ export interface EventLoopOptions {
 	"choose"?: (candidates: Candidate[], index: number) => number;
 	/** The choices to make, by choice point (a run's `choices`, picked) — the first beyond them. */
 	"schedule"?: number[];
+	/** Whether something outside the program keeps it alive (a server it started, listening): then, out of work, it
+	 *  idles instead of ending — its host calls into it (a request) and it goes on from there. */
+	"keepAlive"?: () => boolean;
 }
 
 /** An event that could come next: a host call's result (by what was called), or the next timer. */
@@ -65,6 +68,10 @@ export interface Loop {
 	"choices": Choice[];
 	"choose": ((candidates: Candidate[], index: number) => number) | undefined;
 	"schedule": number[] | undefined;
+	"keepAlive": (() => boolean) | undefined;
+	/** Wakes the host waiting on the machine (VM.whenSettled): set by the machine, called when a timer is set — the
+	 *  host may be waiting with none (a server's handler, called from outside, sets one). */
+	"wake": (() => void) | undefined;
 }
 
 /** What an intrinsic needs of the machine calling it. */
@@ -97,7 +104,9 @@ export function createLoop(options: EventLoopOptions): Loop {
 		"token": 0,
 		"choices": [],
 		"choose": options.choose,
-		"schedule": options.schedule
+		"schedule": options.schedule,
+		"keepAlive": options.keepAlive,
+		"wake": undefined
 	};
 }
 
@@ -267,6 +276,7 @@ function setTimer(machine: LoopMachine, fn: unknown, delay: number, args: unknow
 	loop.ids += 1;
 	loop.seq += 1;
 	loop.timers.set(loop.ids, { "id": loop.ids, "due": loop.clock + delay, "seq": loop.seq, "fn": fn, "args": args, "delay": delay, "interval": interval, "ref": true });
+	loop.wake?.();
 
 	return handleFor(loop.ids);
 }
