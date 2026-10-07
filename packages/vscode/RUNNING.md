@@ -57,7 +57,32 @@ its port answers the preview (`virtual.debug.<port>`), and a page it serves gets
 **Apps.** A web app's own code runs in a browser page — the preview's — not in a worker: its DOM, its layout, its
 events are the browser's. Its dev server is a program like any other, and runs as one; the page is observed (taps,
 evidence, instrumentation: RUNTIME-EVIDENCE.md), and its fetches decided at the service worker (the same decision, the
-same margin). React mode — tsval rendering a component into a window of its own — gives way to the real preview.
+same margin). React mode — tsval rendering a component into a window of its own — gives way to the real preview. An app
+is the hard case for determinism (below).
+
+## Apps and determinism
+
+A Node program is deterministic because tsval owns everything that could vary: the clock, randomness, the order its
+jobs run in, and what each effect returned (recorded). A page owns none of that. In the preview, an app runs on the
+browser's event loop: `Date.now` and `performance.now`, `Math.random`, timers, `requestAnimationFrame`, a
+`MessageChannel`, the order its fetches come back, and when the user clicks — all real, all different each time.
+
+And tsval alone wouldn't fix it. Run an app's own files on tsval in the page and React itself is still a package — native,
+never stepped (MODULES.md) — and React is where the scheduling is: its scheduler slices work on a `MessageChannel`, it
+batches renders and runs effects in its own order, and Strict Mode runs them twice. That's the event loop's boundary
+(MODULES.md: a package's async work runs on the host's loop) — a corner for a Node program, the centre for a React app.
+(React mode had the same hole: tsval stepping the component while React scheduled natively.)
+
+So an app's determinism comes from the page, not the interpreter: the page's sources of variation virtualized — its
+clock, `Math.random`, timers, `requestAnimationFrame`, `MessageChannel` and `queueMicrotask` on one virtual loop the run
+owns, as tsval's loop is; its inputs (clicks, keys, resizes) and its fetches' results delivered as events and recorded —
+for every script in the page, React included. That's replay's approach (record a page's nondeterminism, play it back),
+and it makes a page deterministic without stepping it. Stepping is then tsval's part, for the app's own files, on top:
+the page's virtual loop is the one tsval's runs on.
+
+What that doesn't reach: layout and paint (the browser's, deterministic for the same inputs in practice), Web Workers
+and iframes in the app (each a page of its own to virtualize), WebSockets (an input stream, to record), WebGL and media
+timing. Those are the apps' entries in *What can't run this way*.
 
 ## What can't run this way
 
@@ -68,14 +93,18 @@ asking at each gated call (almostnode's capability hook, the service worker), ju
 
 Known and suspected:
 
-1. **A browser page's own code** — a previewed app. It runs in the browser, which is the point; observed, not stepped.
-   Stepping it would mean tsval in the page (a later question).
-2. **Too slow to interpret** — a build, a bundler, a heavy server. To be measured (step 0): if tsval is too slow for
-   what people run, this is the biggest case, and the answer is making tsval faster, not keeping a second world.
+1. **A browser page's own code** — a previewed app. It runs in the browser, which is the point; observed, not stepped,
+   until the page's virtual loop and tsval in the page (*Apps and determinism*).
+2. **Too slow to interpret** — measured (step 0): not a build, a bundler or a server (their work is in packages, or
+   light per request), but a program whose own code computes heavily — a simulation, a game's update loop. The answer
+   is making tsval faster, not keeping a second world.
 3. **Packages** are native already (MODULES.md: a package is never stepped) — inside the run, on almostnode, not a
    separate mode. Their own async work is on the host's loop, outside the deterministic one.
 4. **What tsval doesn't support yet** — a syntax or a builtin it lacks. Each is a bug to fix, not a mode; the run falls
-   back for that program until it's fixed, and says why.
+   back for that program until it's fixed, and says why. Found by step 0: a debug run's globals are ECMAScript's alone
+   (tsval's `standardGlobals`) plus its stand-ins — no `URL`, `TextEncoder`, `Buffer`, `structuredClone`,
+   `AbortController`, which a Node program has. A run's globals should be almostnode's (the program's `process`,
+   `Buffer`, the web globals Node has), as its built-ins are (step 1).
 
 ## Entry points, after
 
@@ -96,8 +125,22 @@ that can't start says why). And the two run ledgers become one: every run in `ru
 
 ## Steps
 
-0. **Measure.** tsval against native almostnode on what people run: a script, a server under load, a build. The answer
-   sizes case 2 above, and says whether a fallback is a corner or a road.
+0. **Measure** (done; `bench/running.ts`, Node 24, median of 5). The same program natively on almostnode, on tsval, and
+   on tsval as the debug worker runs it (coverage, profile, observed sites, the value trace):
+
+   | Workload | native | tsval | the debugger's |
+   |---|---|---|---|
+   | The program's own tight loops (primes < 20k) | 0.5ms | 1.1s (×2200) | 1.5s (×3000) |
+   | 20k records through map, filter, sort, JSON | 5ms | 250ms (×49) | 363ms (×72) |
+   | A server: 500 requests, a small JSON handler | 0.9ms | 38ms (×41) | 55ms (×60) |
+   | Build-like: the work in a package | 0.7ms | 0.9ms (×1.2) | 0.7ms (×0.9) |
+
+   Ordinary program code runs 40–70× slower than native, and tight numeric loops — what V8 compiles to machine code —
+   thousands of times slower. The debugger's instrumentation adds about 40%. But a package's work is native under tsval
+   (MODULES.md), so a build, a bundler or a type-check — whose work is in packages — costs nothing more; and a request
+   is a tenth of a millisecond, so a server answers at an interactive pace. Case 2 is narrower than feared: a program
+   whose own code computes heavily (a simulation, a game's update loop, an algorithm on big data). Speed isn't the aim;
+   this is where the fallback would be felt first, and where making tsval faster pays.
 1. **One Run.** Every entry point onto one path — `runs.begin`, then a tsval session — with errors shown. The shell's
    and editor's buttons and the left rail run the file in the editor, program files only; the production picker entry
    goes. (The terminal still routes, until step 3.)
@@ -106,6 +149,8 @@ that can't start says why). And the two run ledgers become one: every run in `ru
 3. **The terminal.** `node f` always a run: output and stdin in its terminal, its args, cwd and env; the regex no longer
    decides anything.
 4. **Services and apps.** A run that listens opens its preview; `vite` and the dev server as runs; React mode retired.
+   Then the page's virtual loop (*Apps and determinism*): its clock, randomness, timers, frames and channels the run's,
+   its inputs and fetches recorded — every script in it, React included — and tsval stepping the app's own files on it.
 5. **The fallback.** The cases that remain (from step 0, and what tsval lacks) run natively behind the same session,
    the margin saying values aren't there; each listed here with its reason.
 
