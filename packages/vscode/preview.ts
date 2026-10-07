@@ -41,19 +41,24 @@ export interface PreviewOptions {
 	"port"?: number;
 	/** This tab's id: the service worker is shared by every tab, so the URL names the tab whose dev server answers. */
 	"tab": string;
+	/** A program's own server on `port` (RUNNING.md, step 4): its window, no dev server started for it. */
+	"server"?: boolean;
 }
 
 export async function createPreview(options: PreviewOptions): Promise<Preview> {
 	const { swUrl, hub } = options;
 	const port = options.port ?? DEFAULT_PREVIEW_PORT;
 
-	// Start the dev server in the node worker, rooted at the workspace on the shared zen-fs.
-	const rpc = createRpcClient(hub);
+	// Start the dev server in the node worker, rooted at the workspace on the shared zen-fs — unless a program's own
+	// server answers the port.
+	if (options.server !== true) {
+		const rpc = createRpcClient(hub);
 
-	try {
-		await rpc.request("preview.start", { "port": port, "root": options.workspaceFolder ?? "/workspace" }, { "timeoutMs": 30000 });
-	} finally {
-		rpc.dispose();
+		try {
+			await rpc.request("preview.start", { "port": port, "root": options.workspaceFolder ?? "/workspace" }, { "timeoutMs": 30000 });
+		} finally {
+			rpc.dispose();
+		}
 	}
 
 	// Serve UNDER the deploy base (e.g. /editor/__virtual__/…), not root — the SW is scoped to the base, so a

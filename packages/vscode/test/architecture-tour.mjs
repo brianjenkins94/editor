@@ -154,19 +154,21 @@ test("node script: a task runs under the tsval debugger", async () => {
 });
 
 // A program that renders opens its render surface, the shell's tsval Preview window; one that draws nothing — the task
-// above — doesn't, so it covers no code.
+// above — doesn't, so it covers no code. (In a package of its own with no page: in an app's, Run runs the app.)
 test("render surface: a tsval program that renders opens it", async () => {
 	await session.workbench().evaluate(async () => {
 		const { api } = globalThis.__editor;
 
-		await api.workspace.fs.writeFile(api.Uri.file("/workspace/render.js"), new TextEncoder().encode("ReactDOM.createRoot(document.getElementById('root')).render(React.createElement('p', null, 'tour'));\n"));
+		await api.workspace.fs.writeFile(api.Uri.file("/workspace/renders/package.json"), new TextEncoder().encode("{ \"name\": \"renders\" }\n"));
+		await api.workspace.fs.writeFile(api.Uri.file("/workspace/renders/render.js"), new TextEncoder().encode("ReactDOM.createRoot(document.getElementById('root')).render(React.createElement('p', null, 'tour'));\n"));
 	});
 
-	const started = await session.request("debug.start", { "program": "/workspace/render.js", "breakpoints": [] }, 60_000);
+	const started = await session.request("debug.start", { "program": "/workspace/renders/render.js", "breakpoints": [] }, 60_000);
 
 	assert.equal(started.state, "idle", "mounted, waiting for events");
 	await session.until("the tsval render surface", hasLabel("shell", "tsval-preview", /^init/u));
 	await session.request(`debug.session.${started.session}.stop`, undefined, 30_000);
+	await session.workbench().evaluate(() => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file("/workspace/renders"), { "recursive": true }).then(() => undefined, () => undefined));
 });
 
 // A session VS Code starts itself (F5, Run and Debug, debug_start) is a run in the registry too, ended with the session.
@@ -1597,14 +1599,54 @@ test("debugger: a program's server answers the preview, and keeps the run alive"
 
 	try {
 		assert.equal(started.state, "idle", "serving, not ended");
-		assert.equal(await get("/hello"), "200 hello /hello #1");
-		assert.equal(await get("/again"), "200 hello /again #2", "the program's state, kept between requests");
+
+		// Its preview, opened on its port (RUNNING.md, step 4) — the program's own server answering it, no dev server.
+		const preview = await eventually("its preview window", () => session.page.frames().find((frame) => /\/__virtual__\/[^/]+\/4321\//u.test(frame.url())));
+
+		assert.match(await eventually("the page", async () => (await preview.evaluate(() => document.body?.textContent ?? "").catch(() => "")) || undefined), /^hello \/ #\d+$/u);
+
+		const first = await get("/hello");
+		const hits = Number(/#(\d+)$/u.exec(first)?.[1]);
+
+		assert.match(first, /^200 hello \/hello #\d+$/u);
+		assert.equal(await get("/again"), `200 hello /again #${hits + 1}`, "the program's state, kept between requests");
 		assert.match(await get("/page"), /^200 <html><head>\n<script>.*__editorTap.*<\/script><title>p<\/title>/su, "a page it serves gets the preview's tap first, as a run's server's does");
 		assert.ok((await session.request("runs.list", undefined, 5000)).some((run) => run.kind === "service" && run.port === 4321), "a service, with its port");
 		await session.until("its server, observed", hasLabel("debug-worker", "server:4321", /./u));
+		await session.request(`debug.session.${started.session}.stop`, undefined, 30_000);
+		await eventually("its preview closed with the run", () => !session.page.frames().some((frame) => /\/__virtual__\/[^/]+\/4321\//u.test(frame.url())) || undefined);
 	} finally {
 		await session.request(`debug.session.${started.session}.stop`, undefined, 30_000).catch(() => undefined);
 		await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
+	}
+});
+
+// An app's file runs the app (RUNNING.md, step 4): its code runs in its page, so Run starts its dev script — the dev server
+// a run, its preview open — rather than stepping the file here; Run again shows the preview it already has.
+test("run: an app's file runs the app — its dev server and its preview", async () => {
+	const apps = async () => (await session.request("runs.list", undefined, 5000)).filter((run) => run.title === "npm run dev" && run.cwd === "/workspace" && run.state === "running");
+	const app = async () => (await apps())[0];
+	// (The tour's first test left the app's dev server running: then Run shows it, and this leaves it so.)
+	const before = await app();
+	const ran = await session.request("debug.start", { "program": "/workspace/src/main.tsx" }, 60_000);
+
+	assert.equal(ran.reason, "app", "an app's, not stepped here");
+
+	const running = await eventually("its dev server, a run", app);
+
+	try {
+		assert.equal(running.kind, "service");
+		await eventually("its preview", () => session.page.frames().find((frame) => frame.url().includes(`/${running.port}/`) && frame.url().includes("/__virtual__/")));
+
+		// Again: the one it has, not a second.
+		assert.equal((await session.request("debug.start", { "program": "/workspace/src/App.tsx" }, 60_000)).reason, "app");
+		await session.page.waitForTimeout(1000);
+		assert.equal((await apps()).length, 1, "one dev server for the app");
+	} finally {
+		if (before === undefined) {
+			await session.request("runs.stop", { "id": running.id }, 10_000).catch(() => undefined);
+			await eventually("the dev server stopped", async () => ((await app()) === undefined || undefined));
+		}
 	}
 });
 
@@ -1652,7 +1694,8 @@ test("debugger: a program reads its stdin from the Debug Console", async () => {
 // terminal's shell process, driven over the hub — `terminal.run`, as a task's terminal is — rather than typed into one.)
 test("terminal: node runs in the debugger with its args, cwd and env — output and stdin in the terminal", async () => {
 	const workbench = session.workbench();
-	const id = "tour-argv";
+	// (A terminal's id as a task's is — one of a kind, so the diagram folds it: `terminal.in.*`.)
+	const id = crypto.randomUUID();
 	const screen = () => workbench.evaluate(() => (globalThis.__terminalSeen ?? []).join(""));
 	const type = (text) => workbench.evaluate(([terminal, keys]) => { globalThis.__architecture.hub.publish(`terminal.in.${terminal}`, keys); }, [id, text]);
 
@@ -1679,6 +1722,7 @@ test("terminal: node runs in the debugger with its args, cwd and env — output 
 	try {
 		assert.equal(await session.request("terminal.run", { "id": id, "command": "export GREETING=hey && cd sub && node ../argv.js one two", "cwd": "/workspace" }, 10_000), true);
 		await eventually("its output, in the terminal", async () => ((await screen()).includes("args one,two in /workspace/sub with hey") || undefined));
+		await session.until("its terminal, seen", () => true); // (the diagram sees the terminal's subjects while they're there)
 		assert.ok((await session.request("runs.list", undefined, 5000)).some((run) => run.title === "node ../argv.js one two" && run.runtime === "tsval" && run.state === "running"), "a run, in the debugger");
 
 		// Typed in the terminal (a line at a time, as a terminal gives it): the program's stdin.

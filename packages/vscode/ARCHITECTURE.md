@@ -488,7 +488,7 @@ flowchart LR
 | Workbench | production | `production.stop.*` |
 | Workbench | rules | `rules.make()` |
 | Workbench | runs | `runs.begin()`, `runs.list()`, `runs.stop()` |
-| Workbench | terminal | `terminal.run()` |
+| Workbench | terminal | `terminal.in.*`, `terminal.out.*`, `terminal.run()`, `terminal.stop.*` |
 | Workbench | theme | `theme.colorScheme` |
 | Workbench | values | `values.ended`, `values.session.*` |
 | Workbench | workbench | `workbench.files()`, `workbench.openProject` |

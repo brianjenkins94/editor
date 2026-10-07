@@ -191,7 +191,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "terminal.exit.*", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "terminal.in.*", "from": ["pod"], "to": ["workbench"] },
 	{ "pattern": "terminal.stop.*", "from": ["pod"], "to": ["workbench"] },
-	{ "pattern": "runs.list", "from": ["shell", "root"], "to": ["workbench"] },
+	{ "pattern": "runs.list", "from": ["shell", "root", "pod"], "to": ["workbench"] },
 	{ "pattern": "runs.stop", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "evidence.observed", "from": ["pod"], "to": ["workbench"] },
 	{ "pattern": "values.session.*", "from": ["pod"], "to": ["workbench"] },
@@ -206,7 +206,7 @@ export const subjects: SubjectFamily[] = [
 	// ── previews ──
 	{ "pattern": "preview.start", "from": ["root", "workbench"], "to": ["node"] },
 	{ "pattern": "preview.provoke", "from": ["root", "workbench"], "to": ["node"] },
-	{ "pattern": "preview.open", "from": ["workbench", "shell"], "to": ["shell", "root"] },
+	{ "pattern": "preview.open", "from": ["workbench", "shell", "pod"], "to": ["shell", "root"] },
 	{ "pattern": "preview.open", "from": ["preview:*"], "to": ["shell"] },
 	{ "pattern": "preview.ready", "from": ["root"], "to": ["shell"] },
 	{ "pattern": "preview.close", "from": ["workbench", "shell"], "to": ["root", "workbench", "node", "shell"] },

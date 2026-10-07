@@ -93,7 +93,7 @@ if (isolated && window.parent === window) {
 	// preview can roam beyond the editor. A repeat open on the same port just re-announces the URL for the shell to
 	// resurface. Ctrl-C on `vite` publishes `preview.close` (backend teardown here; the shell hides its window too).
 	rootHub.subscribe("preview.open", (data) => {
-		const request = data as { "root"?: string; "port"?: number } | null;
+		const request = data as { "root"?: string; "port"?: number; "server"?: boolean } | null;
 		const port = typeof request?.port === "number" ? request.port : DEFAULT_PREVIEW_PORT;
 		const existing = previews.get(port);
 
@@ -107,7 +107,8 @@ if (isolated && window.parent === window) {
 			"swUrl": base + "coi-serviceworker.js",
 			"tab": tab,
 			"hub": rootHub,
-			"port": port
+			"port": port,
+			...request?.server === true ? { "server": true } : {}
 		})).then((handle) => {
 			previews.set(handle.port, handle);
 			rootHub.publish("preview.ready", { "url": handle.url, "port": handle.port });

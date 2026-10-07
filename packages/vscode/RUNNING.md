@@ -171,7 +171,13 @@ that can't start says why). And the two run ledgers become one: every run in `ru
    which retires its popups for runs (step 2's last part). The tour's diagram is now drawn from everything it saw all
    session (a look every second), not its last look: each debug run's worker reports as `debug-worker`, and the last
    one's report replaced the others'.
-4. **Services and apps.** A run that listens opens its preview; `vite` and the dev server as runs; React mode retired.
+4. **Services and apps** (first part done). A run that listens opens its preview; `vite` and the dev server as runs; React
+   mode retired. Done: a run's own server, listening, opens its preview window on its port (`preview.open` with `server`:
+   no dev server started for it) and closes it when the run ends — a debug run's or a fallback's alike (node-runner.ts);
+   and Run on an app's file — the page loads it, or it's a component (`.jsx`, `.tsx`), or it uses `react-dom` or
+   `document`, with an `index.html` up from it in its own package — runs the app: its `dev` script as a task (the dev
+   server a run, its preview open), or, already running, its preview shown again (launch.ts `appRootOf`/`runApp`; F5's
+   resolver too). React mode is now reached only by such code in a package with no page.
    Then the page's virtual loop (*Apps and determinism*): its clock, randomness, timers, frames and channels the run's,
    its inputs and fetches recorded — every script in it, React included — and tsval stepping the app's own files on it.
 5. **The fallback.** The cases that remain (from step 0, and what tsval lacks) run natively behind the same session,

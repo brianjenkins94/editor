@@ -32,6 +32,7 @@ import * as vscode from "vscode";
 
 import type { CapabilityChoice, StepAction } from "./debug-protocol";
 import { loadEffectivePolicy, loadPolicyFiles, movePlace, replaceRule } from "../capabilities/silo-store";
+import { appRootOf, runApp } from "./launch";
 
 export type DebugAction = StepAction;
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
@@ -46,7 +47,8 @@ export interface DebugOutcome {
 	"name": string;
 	"program": string;
 	"state": DebugState;
-	/** Why it stopped: breakpoint, step, capability (a policy-gated call), … */
+	/** Why it stopped: breakpoint, step, capability (a policy-gated call), … — or `app`: the file is an app's, which runs
+	 *  in its page (its dev server started, its preview open), not stepped here. */
 	"reason"?: string;
 	/** The file it stopped in, when it's another of the program's files than `program` (MODULES.md). */
 	"file"?: string;
@@ -429,6 +431,15 @@ export async function runProgram(args: unknown, signal: AbortSignal = new AbortC
 async function startRun(args: unknown, signal: AbortSignal): Promise<DebugOutcome> {
 	const { program, breakpoints, "args": inputs, cases, eventLoop } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[]; "args"?: string[]; "cases"?: string[][]; "eventLoop"?: unknown };
 	const path = runnable(resolveProgram(program));
+	// An app's file (RUNNING.md, step 4): its code runs in its page — the app runs, its dev server a run, its preview open.
+	const app = await appRootOf(path);
+
+	if (app !== undefined) {
+		await runApp(app);
+
+		return { "session": "", "name": path.split("/").pop()!, "program": path, "state": "idle", "reason": "app", "output": [] };
+	}
+
 	const launchId = crypto.randomUUID();
 
 	// Before the launch, so they're registered by the time the session starts running.

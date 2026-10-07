@@ -20,6 +20,7 @@ import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from 
 import { registerSession, serveDebugControl } from "./debug-control";
 import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
 import { controlSubject, eventSubject } from "./debug-protocol";
+import { appRootOf, runApp } from "./launch";
 import { podHub, workspace } from "./pod";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
@@ -1023,6 +1024,18 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 			// Without core (no answer), it runs all the same, unrecorded.
 			"resolveDebugConfigurationWithSubstitutedVariables": async (_folder, given) => {
 				const program = typeof given["program"] === "string" ? given["program"] : "";
+
+				// F5 on an app's file (RUNNING.md, step 4): the app runs — its dev server, its preview — not a session here.
+				// (Run's own launches decided that already; a terminal's `node` and an ordering's replay are what they say.)
+				if (given["__launchId"] === undefined && given["__startedBy"] !== "terminal" && given["eventLoop"] === undefined && program !== "") {
+					const app = await appRootOf(program);
+
+					if (app !== undefined) {
+						await runApp(app).catch((error: unknown) => { void vscode.window.showErrorMessage(`Couldn't run: ${error instanceof Error ? error.message : String(error)}`); });
+
+						return undefined;
+					}
+				}
 				// No `args`: what a rule gives the file's process.argv (RULES.md; the margin's Mock), if one does — its first
 				// value, the rest each a run after it (`__cases`).
 				const mocked = Array.isArray(given["args"]) || Array.isArray(given["__cases"]) || program === "" ? undefined : givenBy(await loadEffectivePolicy(), { "program": vscode.workspace.asRelativePath(vscode.Uri.file(program), false) }, "process.argv");

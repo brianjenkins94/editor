@@ -261,6 +261,29 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 
 	const runs = createRunRegistry(hub);
 
+	// A run's own server, listening: its preview opens (RUNNING.md, step 4) — the window on its port, no dev server started
+	// (`server`) — and closes when the run ends.
+	const serving = new Map<string, number>();
+
+	hub.subscribe("node.listening.*", (data, envelope) => {
+		const port = (data as { "port"?: unknown } | null)?.port;
+		const runId = envelope.subject.slice("node.listening.".length);
+
+		if (typeof port === "number" && !serving.has(runId)) {
+			serving.set(runId, port);
+			hub.publish("preview.open", { "port": port, "server": true });
+		}
+	});
+	hub.subscribe("node.exit.*", (_data, envelope) => {
+		const runId = envelope.subject.slice("node.exit.".length);
+		const port = serving.get(runId);
+
+		if (port !== undefined) {
+			serving.delete(runId);
+			hub.publish("preview.close", { "port": port });
+		}
+	});
+
 	// A debug session VS Code starts itself (F5, Run and Debug, debug-mcp's debug_start) is a run too: the pod asks for
 	// its id as the session starts, and puts it in the session's launch config. Its end is the session's (`node.exit`,
 	// as for a terminal's debug run); stopping it from here stops the session (`debug.stop`).
@@ -315,7 +338,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 			await rpc.request("preview.start", { "port": port, "root": root }, { "timeoutMs": 30000, "waitForResponderMs": 10_000 });
 		},
 		"onPreviewHmr": (port, handler) => hub.subscribe(`preview.hmr.${port}`, (message) => { handler(message); }),
-		"openPreview": (root, port) => { hub.publish("preview.open", { "root": root, "mode": "production", "port": port }); },
+		"openPreview": (root, port) => { hub.publish("preview.open", { "root": root, "port": port }); },
 		"closePreview": (port) => { hub.publish("preview.close", { "port": port }); },
 		"flushPreviewEvidence": async () => {
 			hub.publish("evidence.flush", {});

@@ -128,9 +128,6 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	const nextIndex = new Map<number, number>();
 	/** Each running server (by port): where it serves, once it's up, and its one HMR subscription. */
 	const servers = new Map<number, { "url"?: string; "offHmr": () => void }>();
-	// The debug-run type shown in a window title. The live preview is the almostnode "production" run
-	// (see production-adapter.ts); `preview.open` may override it.
-	let previewMode = "production";
 	// Latest active-debug-session state, published by debug-toolbar.ts. `port` is the preview the session drives (a
 	// production run stamps its port); mirrored into that port's window's titlebar. Undefined for node/tsval sessions.
 	let debugState = { "active": false, "type": "", "paused": false, "port": undefined as number | undefined };
@@ -397,7 +394,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		const width = Math.min(520, window.innerWidth - 80);
 		const anchor = (from ?? windowsOf(port).at(-1))?.paneWindow.element.getBoundingClientRect();
 		const paneWindow = makeWindow({
-			"title": `${windowTitle(id)} · ${previewMode}`, // titlebar states the window + which debug run type drives it
+			"title": windowTitle(id), // (what runs it isn't the user's concern: RUNNING.md)
 			"storageKey": id,
 			"width": width,
 			"height": height,
@@ -490,12 +487,8 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	};
 
 	hub.subscribe("preview.open", (data) => {
-		const info = data as { "mode"?: string; "port"?: number } | null;
+		const info = data as { "port"?: number } | null;
 		const port = typeof info?.port === "number" ? info.port : DEFAULT_PORT;
-
-		if (typeof info?.mode === "string" && info.mode !== "") {
-			previewMode = info.mode;
-		}
 
 		const existing = windowFor(port);
 
