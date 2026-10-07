@@ -96,11 +96,11 @@ export const containers: ContainerSpec[] = [
 	{ "id": "extHostWorker", "label": "Web worker extension host", "caption": "LocalWebWorker extensions, tsserver", "parent": "extHostIframe", "kind": "realm" },
 	{ "id": "previews", "label": "Preview windows", "caption": "iframes in the shell, any number per server (preview:<port>, preview:<port>~<n>) · served from /__virtual__/<tab>/<port>/ by the service worker", "parent": "shell", "kind": "origin" },
 	{ "id": "previewApp", "label": "App", "caption": "the previewed app's own hubs, workers and frames, per window (joined through the shell, named <window>/<hub>) · its architecture, not the editor's", "parent": "previews", "kind": "group" },
+	{ "id": "browserChannels", "label": "Browser channels", "caption": "BroadcastChannels and Web Locks — shared by every tab and worker of the origin, past the hub", "column": 3, "kind": "group" },
+	{ "id": "stores", "label": "Stores", "caption": "what the editor keeps — tools' files by shape — discovered from what's written and read", "column": 3, "kind": "group" },
 	{ "id": "sharedMemory", "label": "Shared memory", "caption": "SharedArrayBuffer · Atomics locks", "column": 3, "kind": "group" },
 	{ "id": "browser", "label": "Browser", "caption": "storage", "column": 3, "kind": "group" },
 	{ "id": "network", "label": "Network (service worker)", "caption": "every HTTP request goes out through the service worker · debug-mcp's WebSocket connects directly", "column": 3, "kind": "group", "node": "sw" },
-	{ "id": "stores", "label": "Stores", "caption": "what the editor keeps — tools' files by shape — discovered from what's written and read", "column": 3, "kind": "group" },
-	{ "id": "browserChannels", "label": "Browser channels", "caption": "BroadcastChannels and Web Locks — shared by every tab and worker of the origin, past the hub", "column": 3, "kind": "group" },
 	{ "id": "peers", "label": "Peer connections", "caption": "WebRTC — straight to another browser, past the service worker", "column": 3, "kind": "group" }
 ];
 
@@ -176,6 +176,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "git.discard", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "git.changed", "from": ["workbench"], "to": ["shell", "pod"] },
 	{ "pattern": "history.chunks", "from": ["shell"], "to": ["workbench"] },
+	{ "pattern": "history.texts", "from": ["pod"], "to": ["workbench"] },
 	{ "pattern": "tasks.list", "from": ["shell"], "to": ["pod"] },
 	{ "pattern": "tasks.run", "from": ["shell"], "to": ["pod"] },
 	{ "pattern": "terminal.run", "from": ["pod"], "to": ["workbench"] },
@@ -245,6 +246,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "rules.given", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "rules.set", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "rules.list", "from": ["workbench"], "to": ["pod"] },
+	{ "pattern": "rules.placed", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "rules.make", "from": ["pod"], "to": ["workbench"] },
 	{ "pattern": "pod.ready", "from": ["debug-worker"], "to": ["pod"] },
 	{ "pattern": "production.launch", "from": ["workbench"], "to": ["pod"] },
@@ -261,7 +263,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.decide.*", "from": ["sw"], "to": ["root"] },
 	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"] },
 	{ "pattern": "capability.record.*", "from": ["sw"], "to": ["root"] },
-	{ "pattern": "capability.record", "from": ["root"], "to": ["pod"] },
+	{ "pattern": "capability.record", "from": ["root", "node-scripts"], "to": ["pod"] },
 	{ "pattern": "capability.recorded", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"] },
 	// ── workers ──

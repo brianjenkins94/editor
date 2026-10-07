@@ -159,6 +159,19 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifie
 		}
 	});
 
+	// A save starting: what was typed is a burst of its own, before anything the save itself changes (ESLint's fixes) —
+	// so following code through the history (placed rules, debug-control.ts) takes the two as separate small steps.
+	vscode.workspace.onWillSaveTextDocument((event) => {
+		const path = repoRelative(event.document.uri);
+		const pending = path === undefined ? undefined : timers.get(path);
+
+		if (path !== undefined && pending !== undefined) {
+			clearTimeout(pending);
+			timers.delete(path);
+			void flush(path, event.document.getText()).catch((error: unknown) => { log.error("edit-history will-save flush failed", { "path": path, "error": errText(error) }); });
+		}
+	});
+
 	// A save is a natural burst boundary — flush immediately so the timeline lines up with what's on disk.
 	vscode.workspace.onDidSaveTextDocument((document) => {
 		const path = repoRelative(document.uri);
@@ -178,13 +191,9 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifie
 	// The "your edits" timeline: the reviewer's uncommitted work SINCE the last commit, decomposed into node-grouped
 	// chunks. Base = the LAST history snapshot equal to current HEAD (self-resets on commit); the burst chain from there
 	// [HEAD, …afters] is fed to the identity core (off-thread), which returns the net-changed nodes + their line ranges.
-	serve(hub, "history.chunks", async (args) => {
-		const path = (args as { "path"?: string } | null)?.path;
-
-		if (typeof path !== "string" || !CLASSIFIABLE.test(path)) {
-			return { "groups": [], "bursts": 0, "lastTime": 0 };
-		}
-
+	/** The file's history since the last commit: [HEAD, …each burst after it] (the last, the text as it is now) — from
+	 *  the LAST snapshot equal to current HEAD, so it self-resets on commit — and when the latest burst was made. */
+	const sinceCommit = async (path: string): Promise<{ "chain": string[]; "lastTime": number }> => {
 		const AM = await automerge();
 		const doc = await docFor(path);
 		const head = await engine.headContent(path);
@@ -198,15 +207,34 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifie
 			}
 		}
 
-		if (base >= history.length - 1) {
+		return { "chain": history.slice(base).map((entry) => entry.snapshot.text), "lastTime": history.at(-1)?.change.time ?? 0 };
+	};
+
+	serve(hub, "history.chunks", async (args) => {
+		const path = (args as { "path"?: string } | null)?.path;
+
+		if (typeof path !== "string" || !CLASSIFIABLE.test(path)) {
+			return { "groups": [], "bursts": 0, "lastTime": 0 };
+		}
+
+		const { chain, lastTime } = await sinceCommit(path);
+
+		if (chain.length <= 1) {
 			return { "groups": [], "bursts": 0, "lastTime": 0 }; // nothing since the last commit
 		}
 
-		// [HEAD, …burst afters] — the last entry is the current working text, so line ranges land in working coords.
-		const chain = history.slice(base).map((entry) => entry.snapshot.text);
+		// The last entry is the current working text, so line ranges land in working coords.
 		const { groups, bursts } = await classifier.editGroups(chain);
 
-		return { "groups": groups, "bursts": bursts, "lastTime": history[history.length - 1].change.time };
+		return { "groups": groups, "bursts": bursts, "lastTime": lastTime };
+	});
+
+	// The texts a file went through since the last commit, burst by burst — for following code through them a small step
+	// at a time (placed rules, debug-control.ts), rather than from where it was placed to where it is in one jump.
+	serve(hub, "history.texts", async (args) => {
+		const path = (args as { "path"?: string } | null)?.path;
+
+		return typeof path === "string" && CLASSIFIABLE.test(path) ? (await sinceCommit(path)).chain : [];
 	});
 
 	log.info("edit history installed");

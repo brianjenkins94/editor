@@ -8,6 +8,7 @@
  *   pod     `rules.given` { program?, target } → what a rule gives the file's `target` (process.argv): { rule, values } | null
  *   pod     `rules.set` { previous?, rule? } → my policy changed by a rule editor: previous replaced by rule (or added, or removed)
  *   pod     `rules.list`                       → every rule, apart: { mine: { file, rules }, shared: { file, rules } } | null
+ *   pod     `rules.placed` { program? }        → the rules placed in a file, where they are now: [{ whose, rule, status, line, endLine }]
  *   session `debug.session.<id>.step` { action }   → resumes, and answers with the NEXT stop (or the end)
  *   session `debug.session.<id>.state`             → where it is now
  *   session `debug.session.<id>.stop`              → ends it
@@ -21,12 +22,13 @@
  * action to exactly the pod that owns the session, even with several editor tabs linked to debug-mcp.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import { serve } from "@brianjenkins94/hub";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
+
 import { given, placesOf, type Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 
 import type { CapabilityChoice, StepAction } from "./debug-protocol";
-import { loadEffectivePolicy, loadPolicyFiles, replaceRule } from "../capabilities/silo-store";
+import { loadEffectivePolicy, loadPolicyFiles, movePlace, replaceRule } from "../capabilities/silo-store";
 
 export type DebugAction = StepAction;
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
@@ -148,10 +150,89 @@ function setBreakpoints(program: string, lines: number[]): void {
 }
 
 /** Serve the pod-level calls (list, start, breakpoints) on `hub`. */
-/** Where each rule's place is now (RULES.md: *at*, a span reference) — found in its file as it is, through edits, by
- *  the editor's BABLR: its 1-based line and how it was found, or that it's lost; null for a rule with no place. */
-async function placesNow(rules: Rule[]): Promise<({ "status": string; "line"?: number } | null)[]> {
+/** Where a placed rule's place is now: how it was found (or that it's lost), its 1-based lines, and — when that isn't its
+ *  stored place (followed there through edits, moved, or re-placed by a match) — the reference as it would be made there
+ *  now. */
+interface PlaceNow { "status": string; "line"?: number; "endLine"?: number; "ref"?: unknown }
+
+/** What `editor.annotations.resolve` answers for one reference. */
+interface Found { "status"?: string; "candidate"?: { "start"?: number; "end"?: number; "file"?: string }; "ref"?: unknown }
+
+/** How a place found surely enough to act on was found: on its own span, moved, or re-placed by a strong match. */
+const SURE = new Set(["attached", "moved", "re-placed"]);
+
+/** A workspace file's text as it is now: its open document's (edits not yet saved included), else what's on disk. */
+async function textOf(uri: vscode.Uri): Promise<string> {
+	const open = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString());
+
+	return open?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+}
+
+/** Where `place` is in `text` (of `file`), by the editor's BABLR — if in `file` at all. `before`: texts it may have been
+ *  made against, for it to be followed from the one it was by the structural diff. */
+async function resolvePlace(text: string, file: string, place: unknown, before: string[] = []): Promise<Found | undefined> {
+	if (text === "") {
+		return undefined; // nothing to find it in (and BABLR reads no empty text)
+	}
+
+	const [found] = await Promise.resolve(vscode.commands.executeCommand<(Found | undefined)[] | undefined>("editor.annotations.resolve", text, file, [place], { "texts": before })).catch(() => undefined) ?? [];
+
+	return found?.status === undefined || found.status === "orphaned" || found.candidate?.start === undefined || (found.candidate.file !== undefined && found.candidate.file !== file) ? undefined : found;
+}
+
+/** How many of a file's latest edit bursts a placed rule is followed through. */
+const HISTORY_STEPS = 30;
+
+/** `place`, followed through `texts` (of `file`, oldest first) one at a time — each step from where it was last surely
+ *  found, so an edit and the fix ESLint makes on save are two small steps rather than one jump too big to be sure of —
+ *  to where it's surely found in the last (and how), or undefined if it isn't. It's followed from the latest text it's
+ *  found in by its own span id (where it was placed, or unchanged since), so no lookalike from before then can take it. */
+async function follow(place: unknown, texts: string[], file: string): Promise<{ "at": unknown; "found": Found } | undefined> {
+	let from = texts.length - 1;
+
+	while (from > 0 && (await resolvePlace(texts[from]!, file, place))?.status !== "attached") {
+		from -= 1;
+	}
+
+	let at = place;
+	let found: Found | undefined;
+
+	for (let index = from; index < texts.length; index += 1) {
+		// Each step from the texts before it — the reference was made against one of them — by the structural diff.
+		found = await resolvePlace(texts[index]!, file, at, texts.slice(from, index));
+
+		if (found !== undefined && SURE.has(found.status!) && found.ref !== undefined) {
+			at = found.ref;
+		}
+	}
+
+	return found !== undefined && SURE.has(found.status!) ? { "at": at, "found": found } : undefined;
+}
+
+/** Where each rule's place is now (RULES.md: *at*, a span reference) — followed through the edits made to its file since
+ *  the last commit (the edit history's bursts, `history.texts`) to its text as it is now (unsaved edits included), or as
+ *  saved (`saved`: for a place to be kept); looked for in it directly where it can't be followed surely (uncertain, or
+ *  lost). Null for a rule with no place. The margin's marks, the Rules view and keeping places on save all see a rule
+ *  where this finds it. */
+async function placesNow(rpc: ReturnType<typeof createRpcClient>, rules: Rule[], saved = false): Promise<(PlaceNow | null)[]> {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+	/** Each file's texts to follow through, read once for all its rules. */
+	const textsOf = new Map<string, Promise<string[]>>();
+	const texts = (file: string): Promise<string[]> => {
+		const known = textsOf.get(file) ?? (async (): Promise<string[]> => {
+			const uri = vscode.Uri.joinPath(root!, file);
+			const now = saved ? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri)) : await textOf(uri);
+			const history = await rpc.request("history.texts", { "path": file }, { "timeoutMs": 10_000 }).catch(() => []) as string[];
+
+			// The latest bursts (a long history needn't be walked from its start), ending at the text now — which the
+			// history may not have caught up with yet.
+			return [...history.slice(-HISTORY_STEPS), ...history.at(-1) === now ? [] : [now]];
+		})();
+
+		textsOf.set(file, known);
+
+		return known;
+	};
 
 	return Promise.all(rules.map(async (rule) => {
 		const [place] = placesOf(rule) as { "file"?: string }[];
@@ -161,19 +242,68 @@ async function placesNow(rules: Rule[]): Promise<({ "status": string; "line"?: n
 		}
 
 		try {
-			const text = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, place.file)));
-			const [found] = await Promise.resolve(vscode.commands.executeCommand<({ "status"?: string; "candidate"?: { "start"?: number; "file"?: string } } | undefined)[] | undefined>("editor.annotations.resolve", text, place.file, [place])) ?? [];
-			const start = found?.candidate?.start;
+			const chain = await texts(place.file);
+			const text = chain.at(-1)!;
+			const followed = await follow(place, chain, place.file);
+			const found = followed?.found ?? await resolvePlace(text, place.file, place);
 
-			return found?.status === undefined || found.status === "orphaned" || start === undefined || (found.candidate?.file !== undefined && found.candidate.file !== place.file) ? { "status": "orphaned" } : { "status": found.status, "line": text.slice(0, start).split("\n").length };
+			if (found === undefined) {
+				return { "status": "orphaned" };
+			}
+
+			const lineAt = (offset: number): number => text.slice(0, offset).split("\n").length;
+			const { start, end } = found.candidate!;
+			// The place it's at now, when that isn't the one stored: followed there, or found there by a match.
+			const at = followed === undefined ? found.ref : followed.at === place ? undefined : followed.at;
+
+			return { "status": found.status!, "line": lineAt(start!), "endLine": lineAt(end ?? start!), ...at === undefined ? {} : { "ref": at } };
 		} catch {
 			return { "status": "orphaned" };
 		}
 	}));
 }
 
+/** `rule` with its place (`at`'s argument) made `place`. */
+function withPlace(rule: Rule, place: unknown): Rule {
+	const walk = (predicate: Rule["when"]): Rule["when"] => ("predicates" in predicate ? { ...predicate, "predicates": predicate.predicates.map(walk) } : predicate.target_id === "at" && predicate.operator_id === "is" ? { ...predicate, "argument": place } : predicate) as Rule["when"];
+
+	return { ...rule, "when": walk(rule.when) };
+}
+
+/** Each rule placed in `file` (workspace-relative) — mine and the shared contract's — followed to the file as saved
+ *  (placesNow) and, surely found there somewhere other than its stored place (the statement moved, or changed but was
+ *  followed or surely matched), kept at that place: its reference made again there, so it's found by its id from then
+ *  on, rather than re-placed by hand (RULES.md). A shared rule's new place is a change to the contract, committed with
+ *  the code change that moved its code. */
+async function keepPlaces(rpc: ReturnType<typeof createRpcClient>, file: string): Promise<void> {
+	const files = await loadPolicyFiles();
+	const placed = (["mine", "shared"] as const).flatMap((whose) => (files?.[whose].rules ?? []).filter((rule) => (placesOf(rule) as { "file"?: string }[]).some((place) => place?.file === file)).map((rule) => ({ "whose": whose, "rule": rule })));
+
+	if (placed.length === 0) {
+		return;
+	}
+
+	const places = await placesNow(rpc, placed.map(({ rule }) => rule), true);
+
+	for (const [index, { whose, rule }] of placed.entries()) {
+		const place = places[index];
+
+		if (place?.ref !== undefined && SURE.has(place.status)) {
+			await movePlace(whose, rule, withPlace(rule, place.ref));
+		}
+	}
+}
+
 export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): void {
+	const rpc = createRpcClient(hub);
+
 	context.subscriptions.push(
+		// A file saved: my rules placed in it keep the places they're found at.
+		vscode.workspace.onDidSaveTextDocument((document) => {
+			if (document.uri.scheme === "file") {
+				void keepPlaces(rpc, vscode.workspace.asRelativePath(document.uri, false)).catch(() => undefined);
+			}
+		}),
 		{ "dispose": serve(hub, "debug.sessions", () => [...sessions.values()].map((session) => {
 			const { output: _output, locals: _locals, ...summary } = session.outcome();
 
@@ -204,7 +334,22 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 				return null;
 			}
 
-			return { "mine": { ...files.mine, "places": await placesNow(files.mine.rules) }, "shared": { ...files.shared, "places": await placesNow(files.shared.rules) } };
+			return { "mine": { ...files.mine, "places": await placesNow(rpc, files.mine.rules) }, "shared": { ...files.shared, "places": await placesNow(rpc, files.shared.rules) } };
+		}) },
+		// The rules placed in a file, for the notes margin's marks (live-values.ts): each one, whose it is, and where it
+		// is in the file as it is now (its lines, or uncertain) — lost ones left out (the Rules view says so).
+		{ "dispose": serve(hub, "rules.placed", async (args) => {
+			const { program } = (args ?? {}) as { "program"?: string };
+			const file = vscode.workspace.asRelativePath(vscode.Uri.file(resolveProgram(program)), false);
+			const files = await loadPolicyFiles();
+			const placed = (["mine", "shared"] as const).flatMap((whose) => (files?.[whose].rules ?? []).filter((rule) => (placesOf(rule) as { "file"?: string }[]).some((place) => place?.file === file)).map((rule) => ({ "whose": whose, "rule": rule })));
+			const places = await placesNow(rpc, placed.map(({ rule }) => rule));
+
+			return placed.flatMap(({ whose, rule }, index) => {
+				const { status, line, endLine } = places[index] ?? {};
+
+				return status === undefined || status === "orphaned" || line === undefined ? [] : [{ "whose": whose, "rule": rule, "status": status, "line": line, "endLine": endLine ?? line }];
+			});
 		}) },
 		{ "dispose": serve(hub, "rules.set", async (args) => {
 			const { previous, rule } = (args ?? {}) as { "previous"?: Rule; "rule"?: Rule };

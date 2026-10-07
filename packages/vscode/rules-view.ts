@@ -17,7 +17,7 @@ import type { EditedRule, RuleCatalog, RulePredicate } from "@brianjenkins94/mon
 import type { PanelButton, PolicyModule, Verdict } from "./live-values";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { describeRule, registerCustomView, viewContainerRegistry, ViewContainerLocation } from "@brianjenkins94/monaco-vscode-api/main";
-import { callRule, callVerdict, decisionOf, ensureStyled, onRulesChanged, rulePanel, withVariables } from "./live-values";
+import { callRule, callVerdict, decisionOf, ensureStyled, onRulesChanged, rulePanel, variablesOf, withVariables } from "./live-values";
 import css from "./rules-view.css?raw";
 
 /** Where a placed rule's place is now: its line, and how it was found — or lost. */
@@ -28,28 +28,6 @@ interface PolicyFile { "file": string; "rules": EditedRule[]; "places"?: (Place 
 
 /** A new rule, as it starts: one row to fill in, and allow. */
 const BLANK: EditedRule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "" }] }, "then": [{ "action_id": "allow" }] };
-
-/** The variables a rule tests or sets (`variables.<name>`), by name. */
-function variablesOf(rule: EditedRule): string[] {
-	const names = new Set<string>();
-	const walk = (predicate: RulePredicate): void => {
-		if ("predicates" in predicate) {
-			predicate.predicates.forEach(walk);
-		} else if (predicate.target_id.startsWith("variables.")) {
-			names.add(predicate.target_id.slice("variables.".length));
-		}
-	};
-
-	walk(rule.when);
-
-	for (const action of rule.then) {
-		if (action.target_id?.startsWith("variables.") === true) {
-			names.add(action.target_id.slice("variables.".length));
-		}
-	}
-
-	return [...names];
-}
 
 /** `rule` with its place (each `at is …`) changed to `place`. */
 function replacePlace(rule: EditedRule, place: unknown): EditedRule {

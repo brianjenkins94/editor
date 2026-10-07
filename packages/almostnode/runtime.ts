@@ -244,6 +244,8 @@ export interface RuntimeOptions {
   // propagates it as the call's error). The host implements the decision (e.g. a synchronous round-trip to a
   // service worker, fast-pathing workspace reads); almostnode only reports (op, method, path). See createFsShim.
 	"beforeFs"?: (op: "read" | "write", method: string, path: string) => void;
+  // Told what each fs call returned (a read's contents, say), after it — for a host to record. See createFsShim.
+	"afterFs"?: (op: "read" | "write", method: string, path: string, result: unknown) => void;
 }
 
 export interface RequireFunction {
@@ -1076,7 +1078,7 @@ export class Runtime {
 			"onStderr": options.onStderr
 		});
     // Create fs shim with cwd getter for relative path resolution
-		this.fsShim = createFsShim(vfs, () => this.process.cwd(), options.beforeFs);
+		this.fsShim = createFsShim(vfs, () => this.process.cwd(), options.beforeFs, options.afterFs);
 		this.options = options;
 
     // Initialize child_process with VFS for bash command support

@@ -111,6 +111,11 @@ let currentStdin: ProcessStdin | undefined;
 // The live run's id: a server it starts listening is reported as `node.listening.<runId>` { port } — it's a service.
 let currentRunId: string | undefined;
 
+/** The most of a read's text recorded (a bigger file isn't a result anyone writes a rule with), and what each path's
+ *  last recorded read was. */
+const RECORD_MAX = 64 * 1024;
+const recorded = new Map<string, string>();
+
 /** Run one script to completion (event-loop quiescence or process.exit), streaming output over the hub. */
 async function runNode(args: StartArgs): Promise<void> {
 	const { runId, file, cwd, env } = args;
@@ -180,10 +185,28 @@ async function runNode(args: StartArgs): Promise<void> {
 	// explicit allow (no SW route, a stale SW, an error page) denies. Not attached (no cross-origin isolation — so no
 	// SW to ask either) this run only has its own scratch filesystem, and the network isn't gated without the SW
 	// anyway, so there's nothing a denial would protect and the call goes through.
+	// A path as the script wrote it, made absolute against its cwd now and normalized — `rates.json` is the workspace's,
+	// `../secret` isn't.
+	const absoluteOf = (path: string): string => {
+		const here = (globalThis as unknown as { "process"?: { "cwd"?: () => string } }).process?.cwd?.() ?? cwd;
+		const segments: string[] = [];
+
+		for (const segment of (path.startsWith("/") ? path : `${here}/${path}`).split("/")) {
+			if (segment === "..") {
+				segments.pop();
+			} else if (segment !== "" && segment !== ".") {
+				segments.push(segment);
+			}
+		}
+
+		return "/" + segments.join("/");
+	};
 	const gateFs = (op: "read" | "write", method: string, path: string): void => {
 		// Fast-path workspace READS (frequent + benign): no round-trip. Writes/deletes always gate (tamper axis),
 		// and reads OUTSIDE the workspace gate (exfiltration axis — e.g. secrets on a desktop CLI's real disk).
-		if (op === "read" && (path === "/workspace" || path.startsWith("/workspace/"))) {
+		const absolute = absoluteOf(path);
+
+		if (op === "read" && (absolute === "/workspace" || absolute.startsWith("/workspace/"))) {
 			return;
 		}
 
@@ -213,11 +236,43 @@ async function runNode(args: StartArgs): Promise<void> {
 		}
 	};
 
+	// What a script read of the workspace, recorded (RULES.md, slice 2: a call's result given by a rule) — so a debug run
+	// can be given what the real one read, as a preview's fetches are: by the call's own resource (the path as the
+	// script wrote it), as the debugger's stand-in asks. Text only, and not too much of it; not node_modules (a
+	// package's own files aren't a call worth giving); each file again only when what it read changed. Vite's dev
+	// server reads the VFS directly, so its reads aren't here.
+	const recordRead = (op: "read" | "write", method: string, path: string, result: unknown): void => {
+		if (op !== "read" || (method !== "readFileSync" && method !== "readFile")) {
+			return;
+		}
+
+		const absolute = absoluteOf(path);
+
+		if (!absolute.startsWith("/workspace/") || absolute.includes("/node_modules/")) {
+			return;
+		}
+
+		let text: string;
+
+		try {
+			text = typeof result === "string" ? result : result instanceof Uint8Array ? new TextDecoder("utf-8", { "fatal": true }).decode(result) : "";
+		} catch {
+			return; // not text
+		}
+
+		if (text === "" || text.length > RECORD_MAX || recorded.get(path) === text) {
+			return;
+		}
+
+		recorded.set(path, text);
+		void rpc.request("capability.record", { "capability": "fs:read", "resource": path, "value": text }, { "timeoutMs": 10_000, "waitForResponderMs": 2_000 }).catch(() => undefined);
+	};
 	const runtime = new Runtime(vfs, {
 		"cwd": cwd,
 		"env": env,
 		"base": base,
 		"beforeFs": gateFs,
+		"afterFs": recordRead,
 		"onStdout": (data: string) => { emit("out", data); },
 		"onStderr": (data: string) => { emit("err", data); },
 		"onConsole": (method: string, methodArgs: unknown[]) => {

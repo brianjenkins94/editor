@@ -99,6 +99,28 @@ rule*) — the same two buttons wherever the editor opens.
   if it matches there — the variables in scope are part of what it matches (`variables.country is FR`) — and the run
   goes on. A const can be set by a rule (a mock overrides; Set Value at a stop still can't). One whose place is lost or
   only uncertain doesn't apply; the Rules view shows a placed rule's line, and a lost one as broken.
+- **Where rules apply is marked** (2026-10-06): a placed rule has a small purple diamond in the notes margin's gutter
+  column, beside the first line of the code it's placed at, its sentence on hover — hollow where it was found only by a
+  weak match — so a mocked variable or a given result isn't invisible (`rules.placed`, workbench → pod: the rules
+  placed in a file, found in its text as it is, unsaved edits included). A rule is found the same way everywhere — the
+  marks, the Rules view, keeping places on save: followed through the edit history (below) to the text, so the mark
+  stays on its code, sure, through edits that from its stored place alone would be only a weak match.
+- **A placed rule keeps its place on its own** (2026-10-06): on save, each rule placed in the file is followed
+  through the edits made to it since the last commit — the edit history's bursts (edit-history.ts, `history.texts`),
+  one step at a time, each from the texts before it by BABLR's structural diff (`editor.annotations.resolve`'s `texts`:
+  baselines the caller knows, as git's are for committed code) — and, surely found somewhere other than its stored
+  place, rewritten there. So an edit and the fix ESLint makes on save (`let` → `const`) are two small steps, each
+  followed exactly, where the two at once would be only a weak match. It's followed from the latest text it's found in
+  by its own id, so no lookalike from before then can take it; a save starting flushes the burst typed so far, so a
+  fix the save makes is a step of its own. The shared contract's rules are kept placed too: the one write silo makes to
+  `policy.json` (silo-store's movePlace) — not a decision but a re-anchoring, committed with the code change that moved
+  the code. Moving a place keeps the rule's `added`.
+- **A node service's reads are recorded** (2026-10-06), as a preview's fetches are: what a script on the script worker
+  read of the workspace (text, outside node_modules, 64 KB at most, again only when it changed), by the path as the
+  script wrote it — `fs:read` and that path, what the debugger's stand-in asks — so *Rule…* is prefilled with it and a
+  rule can give it to a debug run (almostnode's `afterFs`, node-worker.ts → `capability.record`). A task runs under the
+  debugger, where every such call is a stand-in, so only a service's reads are real. Commands aren't recorded: almostnode's
+  `child_process` is a stub — a service's `exec` never runs.
 
 ## Toward JSON Schema
 
@@ -134,8 +156,8 @@ enough to own, and it has no notion of actions. Revisit if its core grows action
 
 - Does a breakpoint condition (VS Code's own) become a rule's *when*, with *stop* as its action — one model for
   stopping and deciding?
-- Healing a re-placed rule's reference in the file on its own (SPAN-ANNOTATIONS.md D4): today a rule found by a
-  strategy other than its id applies, and is rewritten only when re-placed by hand.
-- Recording more seams than a preview's fetch: a node service's reads and commands (almostnode), so their results can
-  be given too.
+- Following a placed rule costs a resolve per step it walks back looking for where it was found by its own id, each
+  of which also reads the other changed files — fine for a few rules; worth caching per document version if a file
+  carries many.
+- Recording commands, once a node service can run one (almostnode's `child_process` is a stub).
 - How the margin shows that a rule applies on a line (a mark in the gutter column, beside coverage?).

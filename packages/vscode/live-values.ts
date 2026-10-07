@@ -41,14 +41,14 @@
  */
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
-import type { EditedRule, PaneEntry, PaneMark, RuleCatalog, RuleSchema } from "@brianjenkins94/monaco-vscode-api/main";
+import type { EditedRule, PaneEntry, PaneMark, RuleCatalog, RulePredicate, RuleSchema } from "@brianjenkins94/monaco-vscode-api/main";
 import type { CapabilityAsk, CapabilityChoice, RunEnd } from "./extensions/worker-pod/debug-protocol";
 import type { LiveBatch, LiveCall, LiveValue } from "./extensions/worker-pod/live-values";
 import type { Range } from "./anchors";
 import { Anchors } from "./anchors";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { parseInputs } from "./extensions/worker-pod/inputs";
-import { ruleEditor, showPane } from "@brianjenkins94/monaco-vscode-api/main";
+import { describeRule, ruleEditor, showPane } from "@brianjenkins94/monaco-vscode-api/main";
 import css from "./live-values.css?raw";
 
 /** A prose note: Markdown on a line span (0-based, inclusive). */
@@ -102,6 +102,8 @@ let setValueAt: ((session: string, name: string, value: string) => Promise<unkno
 let rulesGiven: ((path: string) => Promise<Given | null>) | undefined;
 let rulesSet: ((previous: EditedRule | undefined, rule: EditedRule | undefined) => Promise<unknown>) | undefined;
 let runFile: ((path: string, cases: string[][]) => Promise<unknown>) | undefined;
+/** The rules placed in a file, where they are in it now (set by `installLiveValues`). */
+let rulesPlaced: ((path: string) => Promise<PlacedRule[]>) | undefined;
 /** What a rule gives each file's process.argv, as last read (null: nothing; undefined: not read yet). */
 const givenArgv = new Map<string, Given | null>();
 /** Who's told when the policy files change (the Rules view), besides the margin. */
@@ -110,6 +112,28 @@ const rulesChanged = new Set<() => void>();
 /** Be told when the policy files change — by a rule editor anywhere, or by hand. */
 export function onRulesChanged(listener: () => void): void {
 	rulesChanged.add(listener);
+}
+
+/** The variables a rule tests or sets (`variables.<name>`), by name. */
+export function variablesOf(rule: EditedRule): string[] {
+	const names = new Set<string>();
+	const walk = (predicate: RulePredicate): void => {
+		if ("predicates" in predicate) {
+			predicate.predicates.forEach(walk);
+		} else if (predicate.target_id.startsWith("variables.")) {
+			names.add(predicate.target_id.slice("variables.".length));
+		}
+	};
+
+	walk(rule.when);
+
+	for (const action of rule.then) {
+		if (action.target_id?.startsWith("variables.") === true) {
+			names.add(action.target_id.slice("variables.".length));
+		}
+	}
+
+	return [...names];
 }
 
 /** Arguments as a command line, as the Mock box takes them. */
@@ -761,6 +785,50 @@ export function ensureStyled(): void {
 	}
 }
 
+/** A rule placed in a file (RULES.md: *at*), where it is now: its 1-based lines, and how it was found. */
+interface PlacedRule { "whose": "mine" | "shared"; "rule": EditedRule; "status": string; "line": number; "endLine": number }
+
+/** Each file's placed rules as marks, by the document version they were read at; cleared when the rules change. */
+const placedRead = new Map<string, { "version": number; "marks": Promise<PaneMark[]> }>();
+
+/** The marks for the rules placed in `document` — beside the first line of the code each is placed at, its sentence
+ *  on hover, so a mocked variable or a given result isn't invisible; uncertain where it was found by a weak match. */
+function placedMarks(document: vscodeApi.TextDocument): Promise<PaneMark[]> {
+	const uri = document.uri.toString();
+	const known = placedRead.get(uri);
+
+	if (known?.version === document.version) {
+		return known.marks;
+	}
+
+	const marks = (async (): Promise<PaneMark[]> => {
+		const placed = await rulesPlaced?.(document.uri.path).catch(() => []) ?? [];
+
+		if (placed.length === 0) {
+			return [];
+		}
+
+		const policy = await import("@brianjenkins94/util/silo/policy");
+		const byLine = new Map<number, { "sentences": string[]; "uncertain": boolean }>();
+
+		for (const { whose, rule, status, line, endLine } of placed) {
+			const sentence = describeRule(rule, withVariables(policy, variablesOf(rule).map((name) => ({ "name": name, "kind": "" }))));
+			const at = byLine.get(line - 1) ?? { "sentences": [], "uncertain": false };
+			const lines = endLine > line ? ` (lines ${line}–${endLine})` : "";
+
+			at.sentences.push(`${whose === "mine" ? "My rule" : "A shared rule"}${lines}: ${sentence}${status === "uncertain" ? " — found here by a weak match: open it in the Rules view to confirm or re-place it" : ""}`);
+			at.uncertain ||= status === "uncertain";
+			byLine.set(line - 1, at);
+		}
+
+		return [...byLine].map(([line, { sentences, uncertain }]) => ({ "line": line, "kind": `rule-placed${uncertain ? " uncertain" : ""}`, "title": sentences.join("\n") }));
+	})();
+
+	placedRead.set(uri, { "version": document.version, "marks": marks });
+
+	return marks;
+}
+
 /** A top-level statement, as tsserver says it (the capabilities plugin's `_statements`): its range, the `//` comment
  *  above it, a title and detail (what it declares or calls), and the types of what it declares. */
 interface Statement { "start": number; "end": number; "kind": string; "comment"?: string; "title": string; "detail": string; "declares"?: { "name": string; "type": string | null }[] }
@@ -920,6 +988,7 @@ async function place(uri: string): Promise<void> {
 	const shown = api?.workspace.textDocuments.find((each) => each.uri.toString() === uri);
 	const read = shown === undefined || !CODE.has(shown.languageId) ? undefined : await statementsOf(shown);
 	const steps = read === undefined || shown === undefined || shown.getText() !== text ? [] : stepsOf(shown, read);
+	const rulesHere = shown === undefined || !CODE.has(shown.languageId) ? [] : await placedMarks(shown);
 
 	// process.argv's row, before any run (or a run that didn't read it yet): on the first line reading it, with the file's
 	// stub if it has one — so the inputs can be written first.
@@ -964,6 +1033,7 @@ async function place(uri: string): Promise<void> {
 
 	const marks: PaneMark[] = [
 		...marked.get(uri) ?? [],
+		...rulesHere,
 		...end === undefined ? [] : [{ "line": end.line, "kind": `run-${end.kind}`, "title": end.kind === "crashed" ? `The last run crashed here: ${end.message ?? "an uncaught error"}` : "The last run was stopped here" }]
 	];
 
@@ -1153,6 +1223,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	recordedOf = async (capability, resource) => rpc.request("capability.recorded", { "capability": capability, "resource": resource }, { "timeoutMs": 10_000 }) as Promise<{ "value": unknown; "at": string } | null>;
 	setValueAt = (session, name, value) => rpc.request(`debug.session.${session}.setValue`, { "name": name, "value": value }, { "timeoutMs": 30_000 });
 	rulesGiven = async (path) => rpc.request("rules.given", { "program": path, "target": "process.argv" }, { "timeoutMs": 10_000 }) as Promise<Given | null>;
+	rulesPlaced = async (path) => rpc.request("rules.placed", { "program": path }, { "timeoutMs": 10_000 }) as Promise<PlacedRule[]>;
 	rulesSet = async (previous, rule) => rpc.request("rules.set", { ...previous === undefined ? {} : { "previous": previous }, ...rule === undefined ? {} : { "rule": rule } }, { "timeoutMs": 10_000 });
 	// A run answers at its first stop, which can be a while: nobody waits on it here.
 	runFile = async (path, cases) => rpc.request("debug.start", { "program": path, "cases": cases }, { "timeoutMs": 24 * 60 * 60_000 });
@@ -1164,6 +1235,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		clearTimeout(changed);
 		changed = setTimeout(() => {
 			givenArgv.clear();
+			placedRead.clear();
 
 			for (const uri of open) {
 				draw(uri);

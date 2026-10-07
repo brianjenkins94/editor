@@ -4,7 +4,8 @@
  * halves apart because the GAP between them is the security signal:
  *
  *   .silo/
- *     policy.json               DECISIONS · base    — the contract, human-authored (we only READ it)
+ *     policy.json               DECISIONS · base    — the contract, human-authored (we only READ it — but for keeping a
+ *                                                   placed rule's place up with its code: movePlace)
  *     <user>.policy.json        DECISIONS · mine    — overrides; "Allow always"/"Deny always" write HERE
  *     capabilities.json         FACTS · static      — what analysis says code CAN do (written by the panel side)
  *     <user>.capabilities.json  FACTS · observed    — what I actually saw FIRE (rollup, day-coarsened)
@@ -215,6 +216,33 @@ export async function replaceRule(previous: Rule | undefined, rule: Rule | undef
 
 	overrideCache = { "version": override.version, "rules": rules };
 	await writeText(vscode.Uri.joinPath(root, `${user}.policy.json`), JSON.stringify(overrideCache, null, "\t") + "\n");
+}
+
+/** Keep a placed rule's place up with its code (RULES.md: a placed rule keeps its place on its own): `previous`, in my
+ *  policy or the shared contract (`whose`), replaced in its place by `rule` — the same rule at the place its code was
+ *  followed to, its `added` kept (moving a place isn't deciding anything). The one write silo makes to the contract:
+ *  not a decision, a re-anchoring — committed with the code change that moved the code, as its reviewers would want. */
+export async function movePlace(whose: "mine" | "shared", previous: Rule, rule: Rule): Promise<void> {
+	const root = siloRoot();
+
+	if (root === undefined) {
+		return;
+	}
+
+	const name = whose === "mine" ? `${await currentUser()}.policy.json` : "policy.json";
+	const text = await readText(vscode.Uri.joinPath(root, name));
+	const policy = text === undefined ? undefined : parsePolicy(text);
+	const index = policy?.rules.findIndex((each) => sameRule(each, previous)) ?? -1;
+
+	if (policy === undefined || index === -1) {
+		return; // changed since it was read: left for the next save
+	}
+
+	const moved = { "version": policy.version, "rules": policy.rules.map((each, at) => (at === index ? rule : each)) };
+
+	baseCache = undefined;
+	overrideCache = undefined;
+	await writeText(vscode.Uri.joinPath(root, name), JSON.stringify(moved, null, "\t") + "\n");
 }
 
 // ── static facts: the capability surface (committed, shared) ─────────────────────────────────────────────────
@@ -495,9 +523,22 @@ async function loadRecorded(root: vscode.Uri): Promise<Recorded> {
 	}
 }
 
-/** Keep what a call returned when it ran for real (a preview's fetch: its body, parsed when it's JSON) — the latest of
+/** Keep what a call returned when it ran for real (a preview's fetch: its body, parsed when it's JSON; a script's read of
+ *  a workspace file: its text) — the latest of
  *  each call, in `.silo/local/recorded.json`: this machine's only, never committed (a real response can hold secrets). */
 export async function recordResult(capability: string, resource: string, value: unknown): Promise<void> {
+	// One after another: a script's reads come quickly, and each rewrites the file from what's in it.
+	const write = recording.then(() => recordNow(capability, resource, value));
+
+	recording = write.catch(() => undefined);
+
+	return write;
+}
+
+/** The record being written, which the next waits for. */
+let recording: Promise<unknown> = Promise.resolve();
+
+async function recordNow(capability: string, resource: string, value: unknown): Promise<void> {
 	const root = siloRoot();
 
 	if (root === undefined) {

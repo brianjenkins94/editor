@@ -355,3 +355,29 @@
 .live-values-step-ran.partial {
   color: var(--vscode-editorWarning-foreground, #d29922);
 }
+
+/* A placed rule, in the gutter column (RULES.md: *at*): a small purple diamond beside the first line of the code it's
+   placed at, over coverage's bar — so a mocked variable or a given result isn't invisible. Hollow where it was found by
+   a weak match. */
+.notes-margin-mark.rule-placed {
+  left: 2px;
+  width: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.notes-margin-mark.rule-placed::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  transform: rotate(45deg);
+  background: var(--vscode-charts-purple, #b180d7);
+  box-shadow: 0 0 0 1px var(--vscode-editor-background, #fff);
+}
+
+.notes-margin-mark.rule-placed.uncertain::before {
+  background: var(--vscode-editor-background, #fff);
+  box-shadow: inset 0 0 0 1.5px var(--vscode-charts-purple, #b180d7);
+}

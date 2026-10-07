@@ -169,7 +169,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		return decideCapability(call);
 	}) });
 
-	// What a call returned when it ran for real — a preview's fetch, recorded by the service worker's net gate — kept so
+	// What a call returned when it ran for real — a preview's fetch, recorded by the service worker's net gate; a node
+	// script's read of a workspace file, by the script worker (node-worker.ts) — kept so
 	// a rule can give it back in the debugger instead of the call (RULES.md, slice 2); and asked for by the margin's
 	// Rule… at a capability stop, to prefill it.
 	context.subscriptions.push({ "dispose": serve(podHub, "capability.record", async (data) => {
@@ -211,12 +212,13 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		// A reference to the span standing for each range of a text — what an annotation keeps (undefined where BABLR
 		// can't place it, or can't parse the text)…
 		((await rpc.request("annotations.refer", { "source": source, "file": file, "ranges": ranges }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "refs"?: unknown[] }).refs ?? []).map((ref) => ref ?? undefined)
-	), vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, refs: unknown, options?: { "observed"?: boolean; "types"?: unknown }) =>
+	), vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, refs: unknown, options?: { "observed"?: boolean; "types"?: unknown; "texts"?: string[] }) =>
 		// …and where each reference's span is now: attached, moved, re-placed, uncertain or orphaned, with where it
 		// landed. `observed` (runtime evidence): by its id alone — one that's lost fades, it isn't looked for. `types`:
 		// what spans of the text are beyond their shape (by span id: TypeScript's type, observed tags), for the typed
-		// strategy.
-		(await rpc.request("annotations.resolve", { "source": source, "file": file, "refs": refs, "observed": options?.observed === true, "types": options?.types }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "resolutions"?: unknown[] }).resolutions));
+		// strategy. `texts`: texts the file went through that the caller knows (its edit history's), each a baseline a
+		// reference made against it is followed from by the structural diff, as one made against a commit is.
+		(await rpc.request("annotations.resolve", { "source": source, "file": file, "refs": refs, "observed": options?.observed === true, "types": options?.types, "texts": options?.texts ?? [] }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "resolutions"?: unknown[] }).resolutions));
 
 	// Each extension host's command totals (extensions/command-tap.ts): the extensions, and the commands between them, on
 	// the architecture view — discovered, not declared (DISCOVERED-ARCHITECTURE.md). A host sends its totals; what's new

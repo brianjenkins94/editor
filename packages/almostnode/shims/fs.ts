@@ -232,7 +232,7 @@ function trackCall(method: "statSync" | "readdirSync", path: string): void {
 	}
 }
 
-export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (op: "read" | "write", method: string, path: string) => void): FsShim {
+export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (op: "read" | "write", method: string, path: string) => void, afterFs?: (op: "read" | "write", method: string, path: string, result: unknown) => void): FsShim {
   // Helper to resolve paths with cwd
 	const resolvePath = (pathLike: unknown) => toPath(pathLike, getCwd);
 	const constants: FsConstants = {
@@ -878,8 +878,9 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 	// through `beforeFs` first — which THROWS to deny (the shim propagates it as the call's error). Decoupled:
 	// almostnode only reports (op, method, path); the host decides. On a desktop CLI these hit the real disk —
 	// reads OUTSIDE the workspace (e.g. ~/.ssh) are the exfiltration axis, writes/deletes the tamper axis. The
-	// host is expected to fast-path workspace reads so this stays cheap (reads are frequent).
-	if (beforeFs !== undefined) {
+	// host is expected to fast-path workspace reads so this stays cheap (reads are frequent). `afterFs` is told what
+	// each call returned (a read's contents), for the host to record — what a run read, given back in a debugger.
+	if (beforeFs !== undefined || afterFs !== undefined) {
 		const record = shim as unknown as Record<string, ((...args: unknown[]) => unknown) | undefined>;
 
 		for (const [method, op] of Object.entries(FS_SYNC)) {
@@ -887,9 +888,13 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 
 			if (typeof original === "function") {
 				record[method] = (...args: unknown[]) => {
-					beforeFs(op, method, String(args[0]));
+					beforeFs?.(op, method, String(args[0]));
 
-					return original(...args);
+					const result = original(...args);
+
+					afterFs?.(op, method, String(args[0]), result);
+
+					return result;
 				};
 			}
 		}
@@ -901,9 +906,13 @@ export function createFsShim(vfs: VirtualFS, getCwd?: () => string, beforeFs?: (
 
 			if (typeof original === "function") {
 				promisesRecord[method] = async (...args: unknown[]) => {
-					beforeFs(op, method, String(args[0]));
+					beforeFs?.(op, method, String(args[0]));
 
-					return original(...args);
+					const result = await original(...args);
+
+					afterFs?.(op, method, String(args[0]), result);
+
+					return result;
 				};
 			}
 		}

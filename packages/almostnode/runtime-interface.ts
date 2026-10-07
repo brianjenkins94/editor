@@ -15,6 +15,8 @@ export interface IRuntimeOptions {
   // decides (e.g. a synchronous XHR to a service-worker route running the async policy check, fast-pathing
   // workspace reads); almostnode only reports (op, method, path), staying decoupled from any policy engine.
 	"beforeFs"?: (op: "read" | "write", method: string, path: string) => void;
+  // Told what each fs call returned, after it (a read's contents, say) — for the host to record.
+	"afterFs"?: (op: "read" | "write", method: string, path: string, result: unknown) => void;
 }
 
 export interface IModule {

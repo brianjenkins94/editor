@@ -305,21 +305,10 @@ flowchart LR
       end
     end
   end
-  subgraph c_sharedMemory["Shared memory"]
-    n_zenfs["Workspace (zen-fs)"]
-  end
-  subgraph c_browser["Browser"]
-    n_idb["IndexedDB"]
-  end
-  subgraph c_network["Network (service worker)"]
-    n_debug_mcp["debug-mcp"]
-    n_net_esm_sh["esm.sh"]
-    n_net_lighter_codehike_org["Code Hike"]
-    n_net_open_vsx_org["Open VSX"]
-    n_net_origin["Page origin"]
-    n_net_unpkg_com["unpkg"]
-    n_sw["Service worker"]
-    n_webview_sw["Webview service worker"]
+  subgraph c_browserChannels["Browser channels"]
+    n_channel_vscode_indexedDB_vscode_userdata_changes["vscode.indexedDB.vscode-userdata.changes"]
+    n_channel_vscode_web_state_db_global["vscode-web-state-db-global"]
+    n_channel_vscode_web_state_db_global_shared["vscode-web-state-db-global-shared"]
   end
   subgraph c_stores["Stores"]
     n_store__git__file_[".git/&lt;file&gt;"]
@@ -336,10 +325,21 @@ flowchart LR
     n_store__silo_notes____file__jsonl[".silo/notes/…/&lt;file&gt;.jsonl"]
     n_store__silo_runs__file__jsonl[".silo/runs/&lt;file&gt;.jsonl"]
   end
-  subgraph c_browserChannels["Browser channels"]
-    n_channel_vscode_indexedDB_vscode_userdata_changes["vscode.indexedDB.vscode-userdata.changes"]
-    n_channel_vscode_web_state_db_global["vscode-web-state-db-global"]
-    n_channel_vscode_web_state_db_global_shared["vscode-web-state-db-global-shared"]
+  subgraph c_sharedMemory["Shared memory"]
+    n_zenfs["Workspace (zen-fs)"]
+  end
+  subgraph c_browser["Browser"]
+    n_idb["IndexedDB"]
+  end
+  subgraph c_network["Network (service worker)"]
+    n_debug_mcp["debug-mcp"]
+    n_net_esm_sh["esm.sh"]
+    n_net_lighter_codehike_org["Code Hike"]
+    n_net_open_vsx_org["Open VSX"]
+    n_net_origin["Page origin"]
+    n_net_unpkg_com["unpkg"]
+    n_sw["Service worker"]
+    n_webview_sw["Webview service worker"]
   end
   n_bablr <-.->|"IndexedDB"| n_idb
   n_bablr <==> n_workbench
@@ -361,10 +361,10 @@ flowchart LR
   n_ext_notes <-.->|"commands"| n_ext_vscode
   n_ext_notes <-.->|"commands"| n_ext_worker_pod
   n_ext_worker_pod -->|"reads"| n_store__git__file_
-  n_ext_worker_pod -->|"reads"| n_store__silo_local__file__json
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__json
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__jsonl
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__gitignore
+  n_ext_worker_pod -->|"reads, writes"| n_store__silo_local__file__json
   n_ext_worker_pod <-.->|"commands"| n_ext_worker_pod
   n_exthost_LocalProcess_0 <-.->|"RPCProtocol"| n_workbench
   n_exthost_LocalWebWorker_0 <-.->|"HTTP"| n_sw
@@ -432,7 +432,7 @@ flowchart LR
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |
 | `.silo/local/…/<file>.jsonl` | Workbench | Workbench, insights |
-| `.silo/local/<file>.json` | Workbench | Workbench, worker-pod |
+| `.silo/local/<file>.json` | Workbench, worker-pod | Workbench, worker-pod |
 | `.silo/notes/…/<file>.jsonl` | Workbench, notes | Workbench, notes |
 | `.silo/runs/<file>.jsonl` | Workbench | Workbench |
 | `IndexedDB bablr` | BABLR worker | BABLR worker, Workbench |
@@ -456,7 +456,7 @@ flowchart LR
 | Pod | node | `node.exit.*`, `node.start` |
 | Pod | pod | `pod.ready` |
 | Pod | production | `production.exit.*`, `production.launch`, `production.out.*` |
-| Pod | rules | `rules.given()`, `rules.list()`, `rules.set()` |
+| Pod | rules | `rules.given()`, `rules.list()`, `rules.placed()`, `rules.set()` |
 | Pod | tasks | `tasks.list()`, `tasks.run()` |
 | Pod | tsval | `tsval.preview.event`, `tsval.preview.hello`, `tsval.preview.stream`, `tsval.preview.timeTravel` |
 | Preview :* | evidence | `evidence.flush` |
@@ -482,7 +482,7 @@ flowchart LR
 | Workbench | dock | `dock.closeEditor()`, `dock.hostEditor()` |
 | Workbench | evidence | `evidence.level()`, `evidence.observed`, `evidence.preview` |
 | Workbench | git | `git.classify()`, `git.commit()`, `git.discard()`, `git.file()`, `git.status()` |
-| Workbench | history | `history.chunks()` |
+| Workbench | history | `history.chunks()`, `history.texts()` |
 | Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*`, `node.ready` |
 | Workbench | preview | `preview.close`, `preview.hmr.*`, `preview.profiled` |
 | Workbench | production | `production.stop.*` |
