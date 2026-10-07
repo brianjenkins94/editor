@@ -97,8 +97,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private sourceReady = false;
 	private configDone = false;
 	private started = false;
-	/** React mode: the program renders via ReactDOM, so run it through the M3c reconciler and stream mutations. */
-	private reactMode = false;
 	/** Run Without Debugging (or a coverage run): breakpoints don't stop it. Capability breakpoints still do — they're
 	 *  the policy gate, not a debugging aid. */
 	private noDebug = false;
@@ -147,7 +145,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 	public act(action: DebugAction, signal: AbortSignal): Promise<DebugOutcome> {
 		if (this.state !== "stopped") {
-			throw new Error(`session is ${this.state}, not stopped` + (this.state === "idle" ? " (the app is mounted and waiting for events — set a breakpoint in a handler and interact with the preview)" : ""));
+			throw new Error(`session is ${this.state}, not stopped` + (this.state === "idle" ? " (it's waiting — on a request, its stdin or a timer: set a breakpoint in a handler and use it)" : ""));
 		}
 
 		const next = this.nextSettle(signal);
@@ -384,21 +382,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.maybeStart();
 				break;
 
-			// Host→adapter custom requests (via activeDebugSession.customRequest): a DOM event routed back from
-			// the render pane, and a time-travel jump. Both drive the worker.
-			case "dispatch": {
-				const trace = this.startAction("dispatch");
-
-				this.control({ "type": "dispatch", "id": args["id"] as number, "event": args["event"] as string }, trace);
-				this.respond(request);
-				break;
-			}
-
-			case "timeTravel":
-				this.control({ "type": "timeTravel", "index": args["index"] as number });
-				this.respond(request);
-				break;
-
 			// The program's statement coverage so far (a CoverageReport); once it has ended, its final coverage.
 			case "getCoverage":
 				// With the text that ran, so the margin can place it on the code as it is now (coverage.ts).
@@ -522,9 +505,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(this.program));
 
 			this.source = document.getText();
-			// React mode if the program mounts via ReactDOM — then run it through the reconciler (M3c) rather
-			// than as a plain script.
-			this.reactMode = /\bReactDOM\b/u.test(this.source) || /\bReact\s*\.\s*createElement\b/u.test(this.source);
 			this.policy = await this.loadPolicy();
 			this.hooks = await this.placeRules();
 			this.sourceReady = true;
@@ -629,7 +609,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				return;
 			}
 
-			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "react": this.reactMode, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...workspace.buffer === undefined ? {} : { "workspace": workspace.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
+			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...workspace.buffer === undefined ? {} : { "workspace": workspace.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
 		});
 	}
 
@@ -823,8 +803,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 				break;
 
-			// React mode: the render stream itself goes straight from the worker to the render surface; these just end
-			// the action that caused it.
 			case "valueSet": {
 				const waiter = this.valueWaiter;
 
@@ -832,11 +810,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				waiter?.(message);
 				break;
 			}
-
-			case "rendered":
-				this.endAction(); // React mount finished — close the launch action span (React launch has no "stopped")
-				this.settle("idle");
-				break;
 
 			// A server the program started: the run is a service, with its port (the running list, its preview).
 			case "listening": {
@@ -850,14 +823,9 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				break;
 			}
 
-			// Out of work, serving: idle, as a mounted React app is — a request goes on from here.
+			// Out of work, serving (a server, a stdin reader): idle — a request goes on from here.
 			case "serving":
 				this.endAction();
-				this.settle("idle");
-				break;
-
-			case "history":
-				this.endAction(); // a dispatched re-render finished — close the dispatch action span
 				this.settle("idle");
 				break;
 

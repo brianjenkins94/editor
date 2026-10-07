@@ -174,8 +174,6 @@ Everything that can ride the hub does. What doesn't, and why:
 - **a preview's HMR posts** — HMR updates go into the iframe as plain posts. Everything else of a preview window —
   its workers' records and questions too, through its page's tap — rides its hub link, confined (the previewed app is
   untrusted: `previewAppPermissions`).
-- **the tsval render surface's port** — a `MessagePort` handed over in a `preview-ready` → `init` handshake, redone
-  whenever the surface reloads.
 
 ## Diagram — realms & channels
 
@@ -258,7 +256,6 @@ flowchart LR
     n_shell["Shell"]
     subgraph c_previews["Preview windows"]
       n_preview__["Preview :*"]
-      n_tsval_preview["tsval preview"]
     end
   end
   subgraph c_app["App iframe"]
@@ -396,7 +393,6 @@ flowchart LR
   n_root <==> n_sw
   n_root <==> n_workbench
   n_shell <-.->|"HTTP"| n_sw
-  n_shell <-.->|"tsval render protocol"| n_tsval_preview
   n_sw <-.->|"HTTP"| n_workbench
   n_sw <-.->|"HTTP"| n_worker_TextMateWorker
   n_webview_markdown_preview <-.->|"VS Code webview protocol"| n_workbench
@@ -458,7 +454,6 @@ flowchart LR
 | Pod | production | `production.exit.*`, `production.launch`, `production.out.*` |
 | Pod | rules | `rules.given()`, `rules.list()`, `rules.placed()`, `rules.set()` |
 | Pod | tasks | `tasks.list()`, `tasks.run()` |
-| Pod | tsval | `tsval.preview.event`, `tsval.preview.hello`, `tsval.preview.stream`, `tsval.preview.timeTravel` |
 | Preview :* | evidence | `evidence.flush` |
 | Preview :* | tap | `tap.worker.decide()`, `tap.worker.log` |
 | Root | capability | `capability.decide.*()`, `capability.record.*()` |
@@ -475,7 +470,6 @@ flowchart LR
 | Shell | dock | `dock.closeWindow`, `dock.openWindow()` |
 | Shell | git | `git.changed` |
 | Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready` |
-| Shell | tsval | `tsval.preview.close`, `tsval.preview.open`, `tsval.preview.stream` |
 | Workbench | annotations | `annotations.refer()`, `annotations.resolve()` |
 | Workbench | capability | `capability.ask` |
 | Workbench | debug | `debug.declined.*` |

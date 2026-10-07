@@ -72,7 +72,7 @@ export function editorPageTools(hub: Hub): PageTool[] {
 		"handler": async ({ program, breakpoints }, { signal }) => request("debug.start", { "program": program, "breakpoints": breakpoints }, signal)
 	}, {
 		"name": "debug_sessions",
-		"description": "This tab's live tsval debug sessions: [{ session, name, program, state, reason, line, column, function, code }]. state is starting, running, stopped, idle (a React app mounted, waiting for events) or terminated.",
+		"description": "This tab's live tsval debug sessions: [{ session, name, program, state, reason, line, column, function, code }]. state is starting, running, stopped, idle (waiting on a request, its stdin or a timer — or an app's file, the app running in its preview) or terminated.",
 		"inputSchema": schema({}),
 		"timeoutMs": 5000,
 		"handler": async (_args, { signal }) => request("debug.sessions", undefined, signal)

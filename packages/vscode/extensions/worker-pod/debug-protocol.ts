@@ -2,10 +2,10 @@
  * The tsval debugger's adapter ⇄ worker protocol, over the pod hub. Each session has two subjects: control goes DOWN
  * (`debug.session.<id>.control`, adapter → worker) and events come UP (`debug.session.<id>.event`, worker → adapter),
  * so several sessions share the pod hub without crossing. A control message that starts work carries the adapter
- * action's trace context in the hub envelope, so the worker's step continues that trace. The React render stream goes
- * straight to the render surface on `tsval.preview.stream` (see tsval-surface.ts), not through the adapter.
+ * action's trace context in the hub envelope, so the worker's step continues that trace.
  *
- * The one thing that isn't a message: resuming from a breakpoint inside a host-invoked guest call (a React handler).
+ * The one thing that isn't a message: resuming from a breakpoint inside a host-invoked guest call (a server's handler,
+ * a library's callback).
  * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at
  * launch.
  */
@@ -14,8 +14,6 @@ import type { LiveBatch } from "./live-values";
 
 export const controlSubject = (session: string): string => "debug.session." + session + ".control";
 export const eventSubject = (session: string): string => "debug.session." + session + ".event";
-/** The render surface's stream (mutations, rendered, history, reset). */
-export const PREVIEW_STREAM = "tsval.preview.stream";
 
 export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue";
 
@@ -24,13 +22,11 @@ export interface Crash { "line": number; "at": [number, number]; "message": stri
 
 /** Adapter → worker. */
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string> }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string> }
 	/** Run every ordering of the program's events (tsval's explore) instead of debugging it: answered with `explored`. */
 	| { "type": "explore"; "source": string; "fileName": string; "policy"?: Policy; "args"?: string[]; "eventLoop": LoopStart; "maxRuns"?: number; "workspace"?: SharedArrayBuffer }
 	/** The user's breakpoints in a file: the program's entry, or (`file`) another of its files. */
 	| { "type": "setBreakpoints"; "lines": number[]; "file"?: string }
-	| { "type": "dispatch"; "id": number; "event": string }
-	| { "type": "timeTravel"; "index": number }
 	/** Report the coverage so far (answered with a `coverage` event). */
 	| { "type": "coverage" }
 	/** A decision at a capability stop, before the run resumes: `deny` fails the call the stop was for; `policy`, after
@@ -97,8 +93,6 @@ export type WorkerEvent =
 	/** `crash.file`: where it threw, when that's another of the program's files than the entry. */
 	| { "type": "terminated"; "exitCode"?: number; "crash"?: Crash }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" }
-	| { "type": "rendered" }
-	| { "type": "history"; "length": number }
 	/** The program's statement coverage — asked for, or `final` just before `terminated`. */
 	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean }
 	/** The session's live values new since the last (live-values.ts): a few times a second, and before a stop or the end. */
@@ -150,9 +144,3 @@ export interface SiteObservation {
  *  observed site that ran: the entry's, and (`files`) each other program file's that ran, with its source. The body of the adapter's `getCoverage` reply and of its `coverage` event. */
 export interface CoverageReport { "file": string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "source"?: string; "profile"?: StatementProfile[]; "files"?: CoverageReport[] }
 
-/** Worker → render surface (`PREVIEW_STREAM`); `reset` comes from the workbench bridge at session start. */
-export type PreviewMessage =
-	| { "type": "mutation"; "mutation": unknown }
-	| { "type": "rendered" }
-	| { "type": "history"; "length": number }
-	| { "type": "reset" };

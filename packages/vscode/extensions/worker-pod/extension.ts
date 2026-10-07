@@ -26,7 +26,6 @@ import { runProgram } from "./debug-control";
 import { registerLaunch } from "./launch";
 import { registerSourceControl } from "./source-control";
 import { registerTasks } from "./tasks";
-import { registerTsvalSurface } from "./tsval-surface";
 import { registerDebugToolbar } from "./debug-toolbar";
 import { registerMetricsBridge } from "./metrics-bridge";
 import { podHub, workspace } from "./pod";
@@ -189,8 +188,6 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 	// The tsval debug type — a worker-backed stepping debugger (debug-adapter.ts + debug-worker.ts).
 	registerTsvalDebug(context);
-	// The tsval render surface, kept in step with its sessions (tsval-surface.ts).
-	registerTsvalSurface(context);
 	// What there is to run, as tasks run by core's shell (tasks.ts); and the shell's run picker, from them (launch.ts).
 	registerTasks(context);
 	registerLaunch(context);

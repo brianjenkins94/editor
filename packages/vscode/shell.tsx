@@ -386,8 +386,8 @@ function Shell() {
 		hubRef.current = shellHub;
 		shellHub.link(windowTransport(appFrame.contentWindow));
 
-		// The preview windows live in the top frame so they can roam beyond the editor — the app dev-server previews AND
-		// the tsval debugger's render surface, all managed here. See shell-preview.ts / worker-pod's tsval-surface.ts.
+		// The preview windows live in the top frame so they can roam beyond the editor — every server's (a dev server's, a
+		// program's own), all managed here. See shell-preview.ts.
 		installShellPreview(shellHub, architecture, dock.window);
 		reportShellMetrics(shellHub); // its long frames, on the metrics plane (editor-metrics.ts)
 

@@ -35,7 +35,6 @@
     "preact": "latest",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "react-reconciler": "0.29.0",
     "theme": "file:../theme",
     "vscode-languageclient": "^10.1.1",
     "vscode-languageserver": "^10.1.1",

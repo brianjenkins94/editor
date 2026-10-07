@@ -129,7 +129,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	/** Each running server (by port): where it serves, once it's up, and its one HMR subscription. */
 	const servers = new Map<number, { "url"?: string; "offHmr": () => void }>();
 	// Latest active-debug-session state, published by debug-toolbar.ts. `port` is the preview the session drives (a
-	// production run stamps its port); mirrored into that port's window's titlebar. Undefined for node/tsval sessions.
+	// production run stamps its port); mirrored into that port's window's titlebar. Undefined for a session with none.
 	let debugState = { "active": false, "type": "", "paused": false, "port": undefined as number | undefined };
 	// For the preview shim's WS/WebRTC capability decisions — round-trips to the ext-host decider over the hub.
 	const capRpc = createRpcClient(hub);
@@ -141,13 +141,6 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	/** Where a window's page is: its frame's, or the browser window it's popped out into. */
 	const pageOf = (surface: PreviewSurface): Window | null => surface.popup?.window ?? surface.frame.contentWindow;
 	const record = (to: string, label: string, bytes?: number): void => { sink?.record(sink.self, to, "message", label, bytes); };
-
-	// The tsval debugger's render surface (debug-preview.html) gets its OWN window too — a live runtime surface, like
-	// the app previews — but it's fed a mutation stream over the hub rather than a served URL, so it's tracked apart
-	// from the server windows while reusing this module's window + debug-toolbar machinery. See
-	// tsval-surface.ts (in the pod, beside the tsval adapter). The page is served next to the shell (public/debug-preview.html).
-	const tsvalUrl = new URL("debug-preview.html", location.href).href;
-	let tsvalSurface: { "paneWindow": PaneWindow; "frame": HTMLIFrameElement; "port"?: MessagePort } | undefined;
 
 	const headerButton = (icon: Parameters<typeof iconSvg>[0], title: string, onClick: () => void, pressed?: boolean): HTMLElement => {
 		const element = document.createElement("wa-button");
@@ -169,8 +162,8 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	};
 
 	// Mirror the active debug session's toolbar (debug-toolbar.ts) into the titlebar of the window it drives —
-	// the last used window of the session's preview port, or the last used window of all for a node/tsval session
-	// with no port. VS Code has ONE active session at a time, so the toolbar lives on ONE window; clear every window
+	// the last used window of the session's preview port, or the last used window of all for a session with no port
+	// (but a stepping one's: below). VS Code has ONE active session at a time, so the toolbar lives on ONE window; clear every window
 	// first so it never lingers on a previously-active one. pause/step show only for a stepping session (tsval);
 	// restart always (no stop: closing the window does that).
 	const renderDebugToolbar = (): void => {
@@ -191,15 +184,13 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			);
 		}
 
-		tsvalSurface?.paneWindow.headerActions.replaceChildren();
-
 		if (!debugState.active) {
 			return;
 		}
 
-		// A tsval session drives the tsval render window; every other session drives an app-preview window (its port's,
-		// else the last used). So the step controls always sit on the window showing the run they drive.
-		const target = debugState.type === "tsval" ? tsvalSurface : windowFor(debugState.port) ?? windowFor(undefined);
+		// A stepping session's controls sit on the window showing its server, if it has one (else only VS Code's toolbar);
+		// any other session's on its port's window, else the last used. So they're never on a window it doesn't drive.
+		const target = debugState.type === "tsval" ? (debugState.port === undefined ? undefined : windowFor(debugState.port)) : windowFor(debugState.port) ?? windowFor(undefined);
 		const host = target?.paneWindow.headerActions;
 
 		if (host === undefined) {
@@ -545,53 +536,6 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		renderDebugToolbar();
 	});
 
-	// The tsval render window — opened on session start, torn down on stop; the pod (tsval-surface.ts)
-	// drives it over the hub. It reuses createPaneWindow + renderDebugToolbar, so the step controls land on THIS window.
-	const teardownTsval = (): void => {
-		if (tsvalSurface !== undefined) {
-			sink?.terminate("tsval-preview");
-		}
-
-		tsvalSurface?.port?.close();
-		tsvalSurface?.paneWindow.close();
-		tsvalSurface = undefined;
-		renderDebugToolbar();
-	};
-
-	const ensureTsval = (): void => {
-		if (tsvalSurface !== undefined) {
-			tsvalSurface.paneWindow.show();
-
-			return;
-		}
-
-		const paneWindow = makeWindow({
-			"title": "tsval Preview",
-			"storageKey": "tsval-preview",
-			"width": Math.min(460, window.innerWidth - 80),
-			"height": Math.min(560, window.innerHeight - 120),
-			"onClose": teardownTsval
-		});
-		const frame = document.createElement("iframe"); // .wa-win__body > iframe fills the body (window.css)
-
-		frame.title = "tsval preview";
-		frame.src = tsvalUrl;
-		paneWindow.body.appendChild(frame);
-		tsvalSurface = { "paneWindow": paneWindow, "frame": frame };
-		sink?.spawn({ "id": "tsval-preview" });
-		paneWindow.show();
-		renderDebugToolbar(); // a tsval session may already be active when the window opens
-	};
-
-	hub.subscribe("tsval.preview.open", () => { ensureTsval(); });
-	hub.subscribe("tsval.preview.close", () => { teardownTsval(); });
-	hub.subscribe("tsval.preview.stream", (message) => {
-		if (tsvalSurface?.port !== undefined) {
-			record("tsval-preview", "stream " + ((message as { "type"?: string } | null)?.type ?? "message"));
-			tsvalSurface.port.postMessage(message);
-		}
-	});
-
 	// Chrome DevTools Protocol for each preview window's page, over the hub — the docked DevTools is one client of it.
 	installPreviewCdp(hub, (key) => surfaces.get("preview:" + key)?.frame);
 	// CPU profiles of each preview window's page, docked or popped out (preview-profile.ts) — asked for, and taken when
@@ -714,10 +658,6 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		// Every message a frame posts up to the shell, by the frame it came from — known surfaces by name, anything
 		// else by its path, so a new channel shows up on the diagram (and in conformance) without being declared here.
 		installWindowMessageProbe(sink, (source) => {
-			if (tsvalSurface?.frame.contentWindow === source) {
-				return "tsval-preview";
-			}
-
 			for (const surface of surfaces.values()) {
 				if (surface.devtools !== undefined && surface.devtools.frame.contentWindow === source) {
 					return "devtools:" + surface.key;
@@ -732,34 +672,6 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	function surfaceOf(source: MessageEventSource | null): PreviewSurface | undefined {
 		return [...surfaces.values()].find((surface) => isWithin(source, pageOf(surface)));
 	}
-
-	globalThis.addEventListener("message", (event: MessageEvent) => {
-		// The tsval render surface announced itself → hand it a MessagePort and bridge that port to the hub (same-realm
-		// transfer here; the hub carries the cross-realm half to/from the workbench bridge).
-		if ((event.data as { "type"?: string } | null)?.type === "preview-ready" && tsvalSurface !== undefined && event.source === tsvalSurface.frame.contentWindow) {
-			const channel = new MessageChannel();
-
-			tsvalSurface.port = channel.port1;
-			channel.port1.onmessage = (message: MessageEvent): void => {
-				const data = message.data as { "type"?: string; "id"?: unknown; "event"?: unknown; "index"?: unknown } | null;
-
-				sink?.record("tsval-preview", sink.self, "message", (data?.type ?? typeof data) + " (port)");
-
-				if (data?.type === "event") {
-					hub.publish("tsval.preview.event", { "id": data.id, "event": data.event });
-				} else if (data?.type === "timeTravel") {
-					hub.publish("tsval.preview.timeTravel", { "index": data.index });
-				} else if (data?.type === "hello") {
-					hub.publish("tsval.preview.hello", {}); // → the workbench replays reset + buffer + history to us
-				}
-			};
-			channel.port1.start();
-			tsvalSurface.frame.contentWindow?.postMessage({ "type": "init" }, "*", [channel.port2]);
-			record("tsval-preview", "init (+MessagePort)");
-
-			return;
-		}
-	});
 
 	// A preview window's page tap asks over its window's link (page-tap.ts) — so the window is the one the link was
 	// opened for, never one the page names.

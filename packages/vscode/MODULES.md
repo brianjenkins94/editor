@@ -40,7 +40,7 @@ instance for everyone, so a package that requires a program file (a framework re
 `exports` the program has.
 
 The hook is what a native caller reaches: a package requiring a program file calls it synchronously, and tsval evaluates
-the file in a nested run — not on the main stack, so stepped only through a breakpoint in it (as a React handler is). The
+the file in a nested run — not on the main stack, so stepped only through a breakpoint in it (as any host-invoked handler is). The
 common case — the program requiring its own files — doesn't go through the hook (below).
 
 **Built-ins by who asks.** `require("fs")` resolves by the requiring file: from a program file in a debug run, the

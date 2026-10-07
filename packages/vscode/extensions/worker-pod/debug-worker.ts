@@ -1,11 +1,11 @@
 /**
  * tsval debug worker — runs the target program under tsval's stepping VM and adds TIME TRAVEL. It speaks
  * debug-protocol.ts over the pod hub: control arrives on its session's control subject, stops and output go out on its
- * event subject, and a React app's render stream goes straight to the render surface.
+ * event subject.
  *
  * Pausing is ASYNC: the whole program is driven by THIS worker's own loop (`runToBreakpoint`/`stepStatement`/`step`),
  * so to "pause" the loop simply awaits the next control message. The exception is a breakpoint inside a guest call the
- * host makes synchronously (native React calling a handler): that blocks the worker on Atomics.wait until the adapter
+ * host makes synchronously (a server's handler, a library's callback): that blocks the worker on Atomics.wait until the adapter
  * resumes it through the shared control word (see onBreakpointHook).
  *
  * Time travel is tsval's `fork()` — a full, independent snapshot of the machine (frames are plain data, so
@@ -22,22 +22,19 @@ import type { LoadedVM, ModuleLoader } from "@brianjenkins94/tsval";
 import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import { effectiveDisposition, givenResult, isDangerous, ruleMatches } from "@brianjenkins94/util/silo/policy";
-import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, PreviewMessage, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
+import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
-import type { GuestRoot } from "./debug-react";
 import type { VirtualRequest } from "./workspace-runtime";
 
 import { createHub, portTransport, serve } from "@brianjenkins94/hub";
 import { createVM, explore, runToEnd, UNCATCHABLE } from "@brianjenkins94/tsval";
-import React from "react";
 
 import ts from "typescript";
 import { capabilityBreakLines, classifyCall, shouldBreak } from "../capabilities/capability-breakpoints";
 import { capabilityStandins, givenAs, inert, standinCapability } from "../capabilities/canary";
 import { NETWORK_PROBES } from "../../architecture";
 import { observe } from "@brianjenkins94/observability";
-import { controlSubject, eventSubject, PREVIEW_STREAM } from "./debug-protocol";
-import { createGuestRoot } from "./debug-react";
+import { controlSubject, eventSubject } from "./debug-protocol";
 import { LiveRecord } from "./live-values";
 import { addObservation, copySums, siteObservations } from "./site-sums";
 
@@ -64,9 +61,6 @@ type ForwardAction = "continue" | "next" | "stepIn" | "stepOut";
 
 /** An event for the adapter, on this session's event subject. */
 function post(message: WorkerEvent): void { hub.publish(eventSubject(SESSION), message); }
-
-/** Straight to the render surface — the render stream doesn't pass through the adapter. */
-function toPreview(message: PreviewMessage): void { hub.publish(PREVIEW_STREAM, message); }
 
 let sourceFile: ts.SourceFile | undefined;
 /** The session's live values (LIVE-VALUES.md): what each line bound, returned or chose, told to the adapter a few times
@@ -128,14 +122,12 @@ let awaitAction: ((action: Action) => void) | undefined;
  *  adapter's trace (one cross-context trace per debug action). Set just before the awaited action resolves. */
 let actionTrace: TraceContext | undefined;
 /**
- * Shared control word for the SYNCHRONOUS in-handler pause (M3b). A breakpoint reached inside a host-invoked
- * guest call (e.g. React's onClick) can't pause by awaiting — the call is on a synchronous stack the worker
+ * Shared control word for the SYNCHRONOUS in-handler pause. A breakpoint reached inside a host-invoked guest call
+ * (a server's request handler, a library's callback, a program file a package requires) can't pause by awaiting — the call is on a synchronous stack the worker
  * loop doesn't drive — so the onBreakpoint hook blocks the whole worker on `Atomics.wait` while the main
  * thread stays live, and the adapter resumes it via `Atomics.notify`. control[0]: 0 = waiting, 1 = go.
  */
 let control: Int32Array | undefined;
-/** In React mode, the reconciler root the guest app renders into (see launchReact). */
-let guestRoot: GuestRoot | undefined;
 /** The VM on the timeline being shown — what coverage reports on. A forward step advances a fork; a step back
  *  returns to an earlier stop. */
 let current: Vm | undefined;
@@ -270,7 +262,7 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 		}
 	});
 	// A server the program starts: answering the preview for its port, the request its handler's call (not stepped on the
-	// main stack — a breakpoint in it pauses there, as in a React handler).
+	// main stack — a breakpoint in it pauses there, as in any host-invoked handler: onBreakpointHook).
 	getServerBridge({ "onServerReady": (port: number) => {
 		if (listening.has(port)) {
 			return;
@@ -1100,7 +1092,7 @@ function emitStopped(vm: Vm, reason: string, traveled = false, ask?: CapabilityA
 }
 
 /**
- * Pause hook for a breakpoint reached inside a synchronous host-invoked guest call (React onClick, an array
+ * Pause hook for a breakpoint reached inside a synchronous host-invoked guest call (a server handler, an array
  * callback). We can't await here — the call is running on a synchronous stack driven by tsval's runSub, not
  * by our loop — so we send the stop (tagged `atomic` so the adapter resumes via the control word, not a
  * message the blocked worker can't receive) and then BLOCK the worker on Atomics.wait until the adapter
@@ -1367,55 +1359,6 @@ async function session(initial: Vm, launchTrace?: TraceContext): Promise<void> {
 	}
 }
 
-/**
- * React launch (M3c): run the app under tsval with native React and a reconciler-backed ReactDOM shim as
- * guest globals. The app's own `ReactDOM.createRoot(...).render(<App/>)` drives our reconciler, which streams
- * mutations to the adapter. Component/handler code is guest, so a breakpoint in it pauses via onBreakpointHook
- * (the reconciler invokes them synchronously). After mount the worker is idle, servicing `dispatch` (DOM
- * events routed back from the iframe) — each re-renders and streams more mutations.
- */
-function launchReact(message: Extract<Control, { "type": "launch" }>, trace: TraceContext | undefined): void {
-	guestRoot = createGuestRoot(React, (mutation) => { toPreview({ "type": "mutation", "mutation": mutation }); });
-
-	const reactDom = {
-		"createRoot": () => ({ "render": (element: unknown) => { guestRoot?.render(element); }, "unmount": () => { guestRoot?.unmount(); } }),
-		"render": (element: unknown) => { guestRoot?.render(element); }
-	};
-	// Minimal document shim so `ReactDOM.createRoot(document.getElementById("root"))` (the idiomatic entry)
-	// doesn't throw; the container arg is ignored (our root is the reconciler container).
-	const documentShim = { "getElementById": () => ({}), "createElement": () => ({}), "body": {} };
-
-	const loaded = createVM(message.source, {
-		"fileName": message.fileName,
-		"onBreakpoint": onBreakpointHook,
-		"coverage": true,
-		"observe": observeSite,
-		"globals": { "React": React, "ReactDOM": reactDom, "document": documentShim, "console": guestConsole() }
-	});
-
-	sourceFile = loaded.sourceFile;
-	current = loaded.vm;
-	record(loaded.vm, new Map());
-	loaded.vm.addBreakpointsByLine(...message.lines);
-
-	// The initial mount is the launch's work — span it as a continuation of the adapter's launch trace, so the
-	// React app coming up is part of the same trace as `debug.launch` (see debug-adapter startAction).
-	const span = trace !== undefined
-		? workerLog.continueSpan(trace, "render", { "react": true })
-		: workerLog.span("render", { "react": true });
-
-	try {
-		loaded.vm.run(); // executes the module → guest render() → mount → mutations posted
-	} catch (error) {
-		post({ "type": "output", "text": "Uncaught " + String(error), "stream": "stderr" });
-	} finally {
-		span.end();
-	}
-
-	post({ "type": "rendered" });
-	toPreview({ "type": "rendered" });
-}
-
 /** A program launched for debugging: its module system ready first (almostnode: MODULES.md), then its machine — the entry
  *  a module of the program's, its files tsval's — armed and run to its first stop. */
 async function launchProgram(message: Extract<Control, { "type": "launch" }>, trace: TraceContext | undefined): Promise<void> {
@@ -1496,45 +1439,15 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 			break;
 
 		case "launch": {
-			// Absent without cross-origin isolation: then a breakpoint inside a React handler can't pause (see onBreakpointHook).
+			// Absent without cross-origin isolation: then a breakpoint inside a host-invoked handler can't pause (onBreakpointHook).
 			control = message.control === undefined ? undefined : new Int32Array(message.control);
 			// Announce membership to the pod hub. Safe here (not at module load): the pod's interest sub-control
 			// precedes `launch` on this ordered channel, so by now the pod is known to want `pod.ready`.
-			hub.publish("pod.ready", { "worker": hub.id, "react": message.react === true });
-			workerLog.info("launch", { "file": message.fileName, "react": message.react === true, "breakpoints": message.lines.length });
-
-			if (message.react === true) {
-				launchReact(message, trace);
-				break;
-			}
-
+			hub.publish("pod.ready", { "worker": hub.id });
+			workerLog.info("launch", { "file": message.fileName, "breakpoints": message.lines.length });
 			void launchProgram(message, trace);
 			break;
 		}
-
-		case "dispatch": {
-			// A DOM event routed back from the render pane → re-render. Span it (continuing the dispatch action's
-			// trace when present) so an interaction and the re-render it causes read as one operation.
-			const span = trace !== undefined
-				? workerLog.continueSpan(trace, "render", { "event": message.event })
-				: workerLog.span("render", { "event": message.event });
-
-			try {
-				guestRoot?.dispatch(message.id, message.event);
-			} finally {
-				span.end();
-			}
-
-			const history = guestRoot?.historyLength() ?? 0;
-
-			post({ "type": "history", "length": history });
-			toPreview({ "type": "history", "length": history });
-			break;
-		}
-
-		case "timeTravel":
-			guestRoot?.timeTravel(message.index);
-			break;
 
 		case "coverage":
 			post({ "type": "coverage", "report": coverageReport() });

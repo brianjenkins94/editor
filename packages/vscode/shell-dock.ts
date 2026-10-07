@@ -31,7 +31,7 @@ const EDITOR_PANEL = "editor";
 /** Prefix of a VS Code window's panel id and frame name. */
 const WINDOW_PREFIX = "vscode-window-";
 
-/** Prefix of a window panel's id (a preview, the tsval render surface — see `window`). */
+/** Prefix of a window panel's id (a preview — see `window`). */
 const PANE_PREFIX = "pane-";
 /** The height of a group's tab bar, above a window panel's body. */
 const TAB_BAR_HEIGHT = 35;

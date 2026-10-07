@@ -153,24 +153,6 @@ test("node script: a task runs under the tsval debugger", async () => {
 	assert.equal(sessionRun, run.id, "the session carries the registry's run id");
 });
 
-// A program that renders opens its render surface, the shell's tsval Preview window; one that draws nothing — the task
-// above — doesn't, so it covers no code. (In a package of its own with no page: in an app's, Run runs the app.)
-test("render surface: a tsval program that renders opens it", async () => {
-	await session.workbench().evaluate(async () => {
-		const { api } = globalThis.__editor;
-
-		await api.workspace.fs.writeFile(api.Uri.file("/workspace/renders/package.json"), new TextEncoder().encode("{ \"name\": \"renders\" }\n"));
-		await api.workspace.fs.writeFile(api.Uri.file("/workspace/renders/render.js"), new TextEncoder().encode("ReactDOM.createRoot(document.getElementById('root')).render(React.createElement('p', null, 'tour'));\n"));
-	});
-
-	const started = await session.request("debug.start", { "program": "/workspace/renders/render.js", "breakpoints": [] }, 60_000);
-
-	assert.equal(started.state, "idle", "mounted, waiting for events");
-	await session.until("the tsval render surface", hasLabel("shell", "tsval-preview", /^init/u));
-	await session.request(`debug.session.${started.session}.stop`, undefined, 30_000);
-	await session.workbench().evaluate(() => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file("/workspace/renders"), { "recursive": true }).then(() => undefined, () => undefined));
-});
-
 // A session VS Code starts itself (F5, Run and Debug, debug_start) is a run in the registry too, ended with the session.
 // Run (RUNNING.md): one way in. The shell's ▷ (its "The file in the editor"), its left rail's Run and the editor's ▷ all
 // run the file in the editor, the same way — a run each; a file that isn't a program says why. And a run has Node's

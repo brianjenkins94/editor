@@ -19,8 +19,8 @@
  *   session `debug.session.<id>.pace` { pace }      → what a timer's wait costs from here on: real, or none (Skip Waits)
  *   session `debug.session.<id>.stdin` { data }     → input for the program's process.stdin (as the Debug Console sends it)
  *
- * The session methods are served by the ADAPTER (debug-adapter.ts), not the worker: a breakpoint inside a React handler
- * blocks the worker in Atomics.wait, where only the adapter (which holds the shared control word) can resume it — and
+ * The session methods are served by the ADAPTER (debug-adapter.ts), not the worker: a breakpoint inside a host-invoked
+ * handler (a server's, a library's callback) blocks the worker in Atomics.wait, where only the adapter (which holds the shared control word) can resume it — and
  * the adapter owns the VS Code session, so a step from here shows in VS Code's UI too. Per-session subjects route each
  * action to exactly the pod that owns the session, even with several editor tabs linked to debug-mcp.
  */
@@ -38,7 +38,8 @@ export type DebugAction = StepAction;
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
 const CHOICES = new Set<string>(["allow-once", "allow-run", "allow-always", "deny", "rule", "give-once"] satisfies CapabilityChoice[]);
 
-/** `starting` until the first stop; `idle` = a React app mounted and waiting for events (no stop to step from). */
+/** `starting` until the first stop; `idle` = waiting — on a request, its stdin or a timer — with no stop to step from (or,
+ *  for an app's file, the app running in its page). */
 export type DebugState = "starting" | "running" | "stopped" | "idle" | "terminated";
 
 /** Where a session is — the answer to every session call. Location, code and locals only while stopped. */

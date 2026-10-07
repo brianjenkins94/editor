@@ -163,7 +163,7 @@ export interface VMOptions {
 	 *  `pace`: whether a timer waits its real delay (`"real"`, the default) or none (`"fast"`). Implies `steppedAsync`. */
 	"eventLoop"?: EventLoopOptions;
 	/** Called at each breakpoint reached DURING a synchronous host-invoked guest call (a host callback such
-	 *  as a React event handler running through `callGuestFromHost` → `runSub`). Top-level stepping is driven
+	 *  as a server's request handler running through `callGuestFromHost` → `runSub`). Top-level stepping is driven
 	 *  by the host through `step`/`runToBreakpoint`, but a host→guest call runs a nested loop the host can't
 	 *  drive — this hook is where a debugger regains control there (it may block, e.g. Atomics.wait, and read
 	 *  machine state before returning to resume). Fires just before the breakpointed statement executes. */

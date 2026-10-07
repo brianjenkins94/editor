@@ -80,8 +80,7 @@ export function realmName(url: string, scope: string, workers = new Map<string, 
 		[/\/lsp\/node-worker\.js$/u, "node"],
 		[/\/lsp\/bablr-worker\.js$/u, "bablr"],
 		[/\/lsp\/debug-worker\.js$/u, "debug-worker"],
-		[/webWorkerExtensionHostIframe/u, "exthost-iframe"],
-		[/\/debug-preview\.html$/u, "tsval-preview"]
+		[/webWorkerExtensionHostIframe/u, "exthost-iframe"]
 	];
 
 	for (const [pattern, name] of named) {
