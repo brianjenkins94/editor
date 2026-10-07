@@ -29,11 +29,9 @@
  * relayLoggerToHub, so every execution shows in the observability plane (federated up to the page's collector /
  * debug-mcp). Mirrors debug-worker.ts's hub wiring.
  */
-import { getAllServers, getServer, getServerBridge, Runtime } from "@brianjenkins94/almostnode";
+import { getAllServers, getServerBridge } from "@brianjenkins94/almostnode";
 import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { installWorkerProbe, observe } from "@brianjenkins94/observability";
-import pageTap from "worker-pod:page-tap";
-import workerTap from "worker-pod:worker-tap";
 
 import { NETWORK_PROBES } from "../../architecture";
 import { identifyWorker } from "../../architecture-model";
@@ -42,6 +40,8 @@ import type { WorkspaceChange } from "../../workspace-changes";
 import { WORKSPACE_CHANGED } from "../../workspace-changes";
 
 import { installTimerKeepAlive } from "./node-keepalive";
+import type { RequestHandler, VirtualRequest, VirtualResponse } from "./workspace-runtime";
+import { answerServer, serverOn, workerTapResponse, workspaceRuntime } from "./workspace-runtime";
 import { attachSharedWorkspace, connectWorkspace, createZenfsVFS, getSharedWorkspaceBuffer } from "./zenfs-vfs.js";
 
 // Own the worker's timers before any Runtime touches them, so keep-alive ref-counting sees every timer the script
@@ -73,11 +73,6 @@ const workspaceReady = rpc.request("workspace.buffer", undefined, { "timeoutMs":
 let vfsPromise: ReturnType<typeof createZenfsVFS> | undefined;
 const getVfs = (): ReturnType<typeof createZenfsVFS> => (vfsPromise ??= workspaceReady.then(createZenfsVFS));
 
-// The deploy base (this worker's served URL minus the "/__vscode__/…" tail), so a script's `file://` dynamic
-// import resolves under the base-scoped service worker. Same computation as server-host.
-const hereUrl = new URL(import.meta.url);
-const vscodeCut = hereUrl.pathname.indexOf("/__vscode__/");
-const base = hereUrl.origin + (vscodeCut === -1 ? "/" : hereUrl.pathname.slice(0, vscodeCut + 1));
 
 /** Format a console argument the way node's console does (strings bare, everything else JSON-ish). */
 function formatArg(value: unknown): string {
@@ -267,10 +262,9 @@ async function runNode(args: StartArgs): Promise<void> {
 		recorded.set(path, text);
 		void rpc.request("capability.record", { "capability": "fs:read", "resource": path, "value": text }, { "timeoutMs": 10_000, "waitForResponderMs": 2_000 }).catch(() => undefined);
 	};
-	const runtime = new Runtime(vfs, {
+	const runtime = workspaceRuntime(vfs, {
 		"cwd": cwd,
 		"env": env,
-		"base": base,
 		"beforeFs": gateFs,
 		"afterFs": recordRead,
 		"onStdout": (data: string) => { emit("out", data); },
@@ -348,54 +342,8 @@ if (SCRIPTS) {
 // the tab's root); we drive the server listening on that port and return its response. The server is EITHER a preview dev server started in
 // this worker (M1, below) OR a raw http server the running script is listening with (almostnode's port
 // registry). Body crosses as a Uint8Array (structured-clone over the worker port).
-interface VirtualRequest { "port": number; "method": string; "url": string; "headers": Record<string, string>; "body"?: Uint8Array; /** A worker's entry script (the service worker tells: destination worker, mode same-origin). */ "entry"?: "worker" | "sharedworker" }
-interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
-interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }
-type RequestHandler = { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> };
 type PreviewServer = RequestHandler & { "start": () => void; "setInstrumentation": (level: "full" | "coverage" | "off") => void; "versionSource": (oid: string) => { "file": string; "source": string } | undefined; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "stop": () => void };
 
-// The preview taps (page-tap.ts, worker-tap.ts — bundled to script text at build time): the dev server puts one first
-// in every page it serves (inline, so it runs before the app's own code — the errors thrown during the app's module
-// eval are exactly the ones we'd otherwise miss) and in every worker's entry script.
-/** Where the dev server serves the worker tap as a module: under the preview's own address. */
-const WORKER_TAP_PATH = "/@editor/worker-tap.js";
-// (Inlined in a <script>: nothing in it may close the element early.)
-// eslint-disable-next-line webawesome/no-html-in-strings -- the page tap SCRIPT injected into a preview page as text, not app chrome
-const PAGE_TAP_SCRIPT = "<script>" + pageTap.replaceAll("</script", "<\\/script") + "</script>";
-
-/** A worker's entry script (`body`, served at `url`) with the worker tap put first — on its FIRST LINE, no newline added,
- *  so the script's own lines (and its inline source map) don't move: a module worker imports it (the first import runs
- *  first; a relative path, so it stays under the preview's address), a classic one evaluates it inline. After a leading
- *  "use strict" directive, which must stay the script's first statement. */
-function injectWorkerTap(body: string, url: string): string {
-	const isModule = /^\s*(?:import\b|export\b)/mu.test(body);
-	const depth = url.split(/[?#]/u)[0]!.split("/").length - 2;
-	const tap = isModule ? `import "./${"../".repeat(Math.max(0, depth))}${WORKER_TAP_PATH.slice(1)}";` : `(0, eval)(${JSON.stringify(workerTap)});`;
-	const directive = /^\s*(["'])use strict\1;?/u.exec(body)?.[0] ?? "";
-
-	return directive + tap + body.slice(directive.length);
-}
-
-/** Inject the observability tap as the first thing inside <head> (fallback: after <html>, else prepend). */
-function injectObsTap(html: string): string {
-	const headMatch = /<head[^>]*>/iu.exec(html);
-
-	if (headMatch !== null) {
-		const at = headMatch.index + headMatch[0].length;
-
-		return html.slice(0, at) + "\n" + PAGE_TAP_SCRIPT + html.slice(at);
-	}
-
-	const htmlMatch = /<html[^>]*>/iu.exec(html);
-
-	if (htmlMatch !== null) {
-		const at = htmlMatch.index + htmlMatch[0].length;
-
-		return html.slice(0, at) + "\n" + PAGE_TAP_SCRIPT + html.slice(at);
-	}
-
-	return PAGE_TAP_SCRIPT + html;
-}
 
 // Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry —
 // and the workspace root each serves.
@@ -414,54 +362,27 @@ function notListening(port: number): VirtualResponse {
 /** Answer a preview's request from the server on its port in THIS worker — a dev server (the servers worker) or a
  *  script's own http.createServer (the scripts worker) — or undefined when this worker has none there. */
 async function answerVirtual(raw: unknown): Promise<VirtualResponse | undefined> {
-	const { port, method, url, headers, body, entry } = raw as VirtualRequest;
-	const server = previewServers.get(port) ?? (getServer(port) as RequestHandler | undefined);
+	const request = raw as VirtualRequest;
+	const server = previewServers.get(request.port) ?? serverOn(request.port);
+	const tap = workerTapResponse(request.url);
 
-	// The worker tap, as a module (injectWorkerTap imports it from a worker's entry).
-	if (url.split("?")[0] === WORKER_TAP_PATH) {
-		return { "status": 200, "statusText": "OK", "headers": { "content-type": "text/javascript", "cache-control": "no-cache" }, "body": new TextEncoder().encode(workerTap) };
+	if (tap !== undefined) {
+		return tap;
 	}
 
 	if (server === undefined) {
 		return undefined;
 	}
 
-	const serverNode = (previewServers.has(port) ? "vite:" : "server:") + port;
+	const serverNode = (previewServers.has(request.port) ? "vite:" : "server:") + request.port;
 
-	architecture.record(architecture.self, serverNode, "request", method + " " + url.split("?")[0], body?.byteLength ?? 0);
-	const response = await server.handleRequest(method, url, headers, body);
-
-	architecture.record(serverNode, architecture.self, response.statusCode >= 400 ? "error" : "reply", String(response.statusCode) + " " + url.split("?")[0], response.body.length);
-
-	// HTML documents get the observability tap injected as their first script (page-tap.ts). Re-encode and fix
-	// content-length; only touch text/html so assets/JS/JSON pass through untouched.
-	const contentType = response.headers["content-type"] ?? response.headers["Content-Type"] ?? "";
-
-	// A worker's entry script gets the worker tap first (worker-tap.ts) — console, errors and sockets there too.
-	if (entry !== undefined && response.statusCode < 300 && /javascript|typescript/u.test(contentType)) {
-		const bytes = new TextEncoder().encode(injectWorkerTap(new TextDecoder().decode(new Uint8Array(response.body)), url));
-		const nextHeaders = { ...response.headers };
-
-		delete nextHeaders["content-length"];
-		delete nextHeaders["Content-Length"];
-		nextHeaders["content-length"] = String(bytes.byteLength);
-
-		return { "status": response.statusCode, "statusText": response.statusMessage, "headers": nextHeaders, "body": bytes };
-	}
-
-	if (contentType.includes("text/html")) {
-		const injected = injectObsTap(new TextDecoder().decode(new Uint8Array(response.body)));
-		const bytes = new TextEncoder().encode(injected);
-		const nextHeaders = { ...response.headers };
-
-		delete nextHeaders["content-length"];
-		delete nextHeaders["Content-Length"];
-		nextHeaders["content-length"] = String(bytes.byteLength);
-
-		return { "status": response.statusCode, "statusText": response.statusMessage, "headers": nextHeaders, "body": bytes };
-	}
-
-	return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": response.body };
+	return answerServer(server, request, (direction, label, bytes) => {
+		if (direction === "request") {
+			architecture.record(architecture.self, serverNode, "request", label, bytes);
+		} else {
+			architecture.record(serverNode, architecture.self, direction, label, bytes);
+		}
+	});
 }
 
 if (SCRIPTS) {

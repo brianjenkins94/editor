@@ -447,7 +447,6 @@ flowchart LR
 | Hub | Component | Serves and hears |
 | --- | --- | --- |
 | BABLR worker | bablr | `bablr.editGroups()`, `bablr.follow()`, `bablr.pick()`, `bablr.refer()`, `bablr.resolve()`, `bablr.spans()`, `bablr.verdict()` |
-| Debug worker | debug | `debug.session.*.control` |
 | Dev-server worker | preview | `preview.close`, `preview.provoke()`, `preview.start()`, `preview.version()` |
 | Dev-server worker | virtual | `virtual.request()` |
 | Dev-server worker | workspace | `workspace.changed` |

@@ -25,6 +25,7 @@ import { givenResult, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, PreviewMessage, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
 import type { GuestRoot } from "./debug-react";
+import type { VirtualRequest } from "./workspace-runtime";
 
 import { createHub, portTransport, serve } from "@brianjenkins94/hub";
 import { createVM, explore, runToEnd, UNCATCHABLE } from "@brianjenkins94/tsval";
@@ -50,7 +51,7 @@ hub.link(portTransport(globalThis));
 // This worker's util/logger spans/records federate UP through the pod (which links our hub) to the root
 // collector — so a step's span shows up in the top-page timeline with no worker→page window path of its own.
 // (With its uncaught errors, and its hub + own requests on $sys.arch.)
-const { "log": workerLog } = observe(hub, { "network": NETWORK_PROBES });
+const { "log": workerLog, architecture } = observe(hub, { "network": NETWORK_PROBES });
 
 type Vm = LoadedVM["vm"];
 
@@ -228,7 +229,7 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 		return runtime;
 	}
 
-	const [{ getServer, getServerBridge, Runtime }, zenfs] = await Promise.all([import("@brianjenkins94/almostnode"), import("./zenfs-vfs.js")]);
+	const [{ getServerBridge }, { answerServer, serverOn, workerTapResponse, workspaceRuntime }, zenfs] = await Promise.all([import("@brianjenkins94/almostnode"), import("./workspace-runtime"), import("./zenfs-vfs.js")]);
 
 	if (workspace !== undefined) {
 		zenfs.attachSharedWorkspace(workspace);
@@ -238,9 +239,7 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 		throw Object.assign(new Error(`EACCES: a library can't write in a debug run (${method} ${path})`), { "code": "EACCES" });
 	};
 
-	runtime = new Runtime(await zenfs.createZenfsVFS(), {
-		"cwd": "/workspace",
-		"env": {},
+	runtime = workspaceRuntime(await zenfs.createZenfsVFS(), {
 		"beforeFs": (op, method, path) => { if (op === "write") { write(method, path); } },
 		// The program's code gets its stand-ins (`fs`, `child_process`); a package, almostnode's own.
 		"builtinFor": (id, requester) => (requester === "program" && Object.hasOwn(programBuiltins, id) ? programBuiltins[id] : undefined),
@@ -262,16 +261,21 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 
 		listening.add(port);
 		serve(hub, `virtual.debug.${port}`, async (raw) => {
-			const { method, url, headers, body } = raw as { "method": string; "url": string; "headers": Record<string, string>; "body"?: Uint8Array };
-			const server = getServer(port) as unknown as { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<{ "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }> } | undefined;
+			const request = raw as VirtualRequest;
+			const server = serverOn(port);
 
 			if (server === undefined) {
-				return { "status": 502, "statusText": "Bad Gateway", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`nothing listens on ${port} any more`) };
+				return workerTapResponse(request.url) ?? { "status": 502, "statusText": "Bad Gateway", "headers": { "content-type": "text/plain" }, "body": new TextEncoder().encode(`nothing listens on ${port} any more`) };
 			}
 
-			const response = await server.handleRequest(method, url, headers, body);
-
-			return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": response.body };
+			// As a run's server answers (workspace-runtime.ts): the preview's taps in what it serves.
+			return workerTapResponse(request.url) ?? answerServer(server, request, (direction, label, bytes) => {
+				if (direction === "request") {
+					architecture.record(architecture.self, `server:${port}`, "request", label, bytes);
+				} else {
+					architecture.record(`server:${port}`, architecture.self, direction, label, bytes);
+				}
+			});
 		});
 		post({ "type": "listening", "port": port });
 	} });

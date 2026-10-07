@@ -1364,7 +1364,8 @@ test("debugger: a breakpoint in a file the program imports, its values, and step
 });
 
 // A service under the debugger: a node:http server the program starts (almostnode's, in the debug worker) keeps the run
-// alive — idle, serving — and answers the preview's requests for its port; the run is a service, with that port.
+// alive — idle, serving — and answers the preview's requests for its port, a page with the preview's tap in it (as a
+// run's server's: workspace-runtime.ts); the run is a service, with that port.
 test("debugger: a program's server answers the preview, and keeps the run alive", async () => {
 	const workbench = session.workbench();
 	const program = "/workspace/serve.js";
@@ -1383,6 +1384,12 @@ test("debugger: a program's server answers the preview, and keeps the run alive"
 			"",
 			"let hits = 0;",
 			"const server = http.createServer((request, response) => {",
+			"\tif (request.url === \"/page\") {",
+			"\t\tresponse.writeHead(200, { \"content-type\": \"text/html\" });",
+			// eslint-disable-next-line webawesome/no-html-in-strings -- the served program's own page, as source text
+			"\t\tresponse.end(\"<html><head><title>p</title></head><body>hi</body></html>\");",
+			"\t\treturn;",
+			"\t}",
 			"\thits += 1;",
 			"\tresponse.writeHead(200, { \"content-type\": \"text/plain\" });",
 			"\tresponse.end(\"hello \" + request.url + \" #\" + hits);",
@@ -1399,6 +1406,7 @@ test("debugger: a program's server answers the preview, and keeps the run alive"
 		assert.equal(started.state, "idle", "serving, not ended");
 		assert.equal(await get("/hello"), "200 hello /hello #1");
 		assert.equal(await get("/again"), "200 hello /again #2", "the program's state, kept between requests");
+		assert.match(await get("/page"), /^200 <html><head>\n<script>.*__editorTap.*<\/script><title>p<\/title>/su, "a page it serves gets the preview's tap first, as a run's server's does");
 		assert.ok((await session.request("runs.list", undefined, 5000)).some((run) => run.kind === "service" && run.port === 4321), "a service, with its port");
 	} finally {
 		await session.request(`debug.session.${started.session}.stop`, undefined, 30_000).catch(() => undefined);

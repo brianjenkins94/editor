@@ -104,7 +104,12 @@ calls into it isn't the program's to order. A package's callback into a program 
    - *Done (3b):* each file's values, cards and run log in its own margin (a live record per file; its text sent with
      its first values); a run's end and a crash marked in the file they're in; evidence per file — each file that ran
      folded into its own `.silo/evidence` file and listed in the run's envelope.
-4. **One runtime setup** shared by the script worker and the debug worker.
+4. **One runtime setup** shared by the script worker and the debug worker (done: `workspace-runtime.ts` — the runtime on
+   the workspace's zen-fs with one cwd, deploy base and built-ins; a listening server found and answered one way, the
+   preview's page and worker taps put in what it serves, so a debug run's pages are observed as a run's are). What stays
+   each worker's is policy: a run's fs calls asked about (the service worker's decide), a debug run's packages refused
+   writes and its program given stand-ins; and each one's event loop and keep-alive — node's timers for a run, tsval's
+   loop for a debug run.
 
 ## Open
 
@@ -114,5 +119,3 @@ calls into it isn't the program's to order. A package's callback into a program 
 - A file's run log shows its own steps (tsval's profile counts a step to the top-level statement of the file it's in),
   so a call's line in the importer doesn't include the work done in the file it calls into.
 - Capability stops, rules (and their set hooks) and the argv mock are still the entry's.
-- A preview page served by a debug run gets no observability tap yet (the dev-server worker injects it into what it
-  serves; a debug run's server answers on its own).
