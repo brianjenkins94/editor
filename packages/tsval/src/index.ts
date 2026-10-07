@@ -1,5 +1,7 @@
 export { isUncatchable, TsvalInternalError, UNCATCHABLE } from "./errors.ts";
-export type { EventLoopOptions } from "./event-loop.ts";
+export type { Candidate, Choice, EventLoopOptions } from "./event-loop.ts";
+export { explore, runToEnd } from "./explore.ts";
+export type { Explored, Run } from "./explore.ts";
 export { parse, syntaxKindName, ts } from "./frontend.ts";
 export { standardGlobals } from "./globals.ts";
 export { createVM, interpret, interpretAsync } from "./interpret.ts";

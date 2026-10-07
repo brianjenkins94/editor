@@ -1163,6 +1163,43 @@ test("debugger: a task's timers run on tsval's deterministic event loop", async 
 	await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
 });
 
+// Exploring a race (tsval's explore): every ordering of the file's fetch results and its timer run, the distinct endings
+// found — and one of them debugged, run exactly that way (its schedule, as a launch's eventLoop).
+test("explore orderings: a race's endings, each debugged by its schedule", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/race.js";
+	const allowNet = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "net" }] }, "then": [{ "action_id": "allow" }] };
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode([
+			"let last;",
+			"fetch(\"https://a.example/\").then(() => { last = \"a\"; });",
+			"fetch(\"https://b.example/\").then(() => { last = \"b\"; });",
+			"void setTimeout(() => console.log(last ?? \"nothing yet\"), 10);",
+			""
+		].join("\n")));
+	}, program);
+	// (The fetches allowed: a debug run doesn't stop at them to ask.)
+	await session.request("rules.set", { "rule": allowNet }, 10_000);
+
+	const explored = await session.request("debug.explore", { "program": program }, 120_000);
+
+	assert.ok(explored.complete);
+	assert.deepEqual(explored.outcomes.map(({ output }) => output[0]).sort(), ["a", "b", "nothing yet"]);
+
+	const [first] = explored.outcomes.filter(({ output }) => output[0] === "a");
+	const ran = await session.request("debug.start", { "program": program, "breakpoints": [], "eventLoop": { ...explored.eventLoop, "schedule": first.schedule } }, 60_000);
+
+	assert.deepEqual(ran.output, ["a"], "the ordering, run again in the debugger");
+
+	const [rule] = (await session.request("rules.list", undefined, 10_000)).mine.rules;
+
+	await session.request("rules.set", { "previous": rule }, 10_000);
+	await workbench.evaluate((path) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(path)), program);
+});
+
 // How the last run ended short, in the margin's strip: a ✕ on the line it crashed on (the error on hover) — through a
 // reformat too, anchored by the throw's span — gone when it runs again and finishes.
 test("run ends: a crash is marked on the line it threw on, and stays on it through a reformat", async () => {

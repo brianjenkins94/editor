@@ -11,13 +11,38 @@
  *
  * The intrinsics are host functions that act on the machine calling them, not on one they close over (`INTRINSICS`,
  * which `invokeHost` checks first): a fork's guest code sets its timers on the fork, reads the fork's clock.
+ *
+ * What a host call returns as a promise (a fetch, a file read) is EXTERNAL: when it settles isn't the program's to say.
+ * Its settlement is an event of its own, delivered between tasks like a timer — and where several could come next (two
+ * results in, or a result and the next timer), which does is a CHOICE, made by `choose` (the first by default: results
+ * in the order they were asked for, then the timer), recorded, and replayable (`schedule`). So a race between results,
+ * or a result and a timeout, is a choice point, and every way it can go is a schedule to run (explore.ts).
  */
 import type { GuestFunction } from "./values.ts";
 import { isGuestFunction } from "./values.ts";
 
 /** How the event loop starts: its clock (ms since the epoch; the host's now by default), the random generator's seed
  *  (the host's random by default) — a host that wants a run again records both — and what a wait costs. */
-export interface EventLoopOptions { "now"?: number; "seed"?: number; "pace"?: "real" | "fast" }
+export interface EventLoopOptions {
+	"now"?: number;
+	"seed"?: number;
+	"pace"?: "real" | "fast";
+	/** At each choice point (more than one event could come next), which: an index into `candidates`. The first, by
+	 *  default. `index`: the choice point's number in the run. */
+	"choose"?: (candidates: Candidate[], index: number) => number;
+	/** The choices to make, by choice point (a run's `choices`, picked) — the first beyond them. */
+	"schedule"?: number[];
+}
+
+/** An event that could come next: a host call's result (by what was called), or the next timer. */
+export interface Candidate { "kind": "result" | "timer"; "label": string }
+
+/** A host call's promised result, outstanding: what was called, and — once it's in — how to deliver it (settle the
+ *  promise the program got). */
+export interface Result { "id": number; "label": string; "deliver"?: () => void }
+
+/** A choice made: how many events could have come next, and which did. */
+export interface Choice { "candidates": Candidate[]; "picked": number }
 
 /** A timer: when it's due on the virtual clock, its place among timers due then, what it calls, its delay, and whether
  *  it repeats (an interval). An unref'd one doesn't keep the program alive. */
@@ -30,10 +55,16 @@ export interface Loop {
 	"seq": number;
 	"ids": number;
 	"timers": Map<number, Timer>;
+	/** Host calls' results the program is owed, by id (the order they were asked for). */
+	"results": Map<number, Result>;
 	"rng": number;
 	"pace": "real" | "fast";
 	"checkpoint": boolean;
 	"token": number;
+	/** The choices made so far, in order. */
+	"choices": Choice[];
+	"choose": ((candidates: Candidate[], index: number) => number) | undefined;
+	"schedule": number[] | undefined;
 }
 
 /** What an intrinsic needs of the machine calling it. */
@@ -59,16 +90,36 @@ export function createLoop(options: EventLoopOptions): Loop {
 		"seq": 0,
 		"ids": 0,
 		"timers": new Map(),
+		"results": new Map(),
 		"rng": (options.seed ?? Math.floor(Math.random() * 2 ** 32)) >>> 0,
 		"pace": options.pace ?? "real",
 		"checkpoint": false,
-		"token": 0
+		"token": 0,
+		"choices": [],
+		"choose": options.choose,
+		"schedule": options.schedule
 	};
+}
+
+/** Which of `candidates` comes next — the schedule's, else the policy's, else the first — recorded when there was a
+ *  choice. */
+export function choose(loop: Loop, candidates: Candidate[]): number {
+	if (candidates.length < 2) {
+		return 0;
+	}
+
+	const index = loop.choices.length;
+	const wanted = loop.schedule?.[index] ?? loop.choose?.(candidates, index) ?? 0;
+	const picked = Number.isInteger(wanted) && wanted >= 0 && wanted < candidates.length ? wanted : 0;
+
+	loop.choices.push({ "candidates": candidates, "picked": picked });
+
+	return picked;
 }
 
 /** A copy of `loop` for a fork: its timers' callbacks and arguments cloned as the fork's other values are. */
 export function forkLoop(loop: Loop, clone: (value: unknown) => unknown): Loop {
-	return { ...loop, "timers": new Map([...loop.timers].map(([id, timer]) => [id, { ...timer, "fn": clone(timer.fn), "args": timer.args.map(clone) }])), "checkpoint": false };
+	return { ...loop, "timers": new Map([...loop.timers].map(([id, timer]) => [id, { ...timer, "fn": clone(timer.fn), "args": timer.args.map(clone) }])), "results": new Map(loop.results), "checkpoint": false, "choices": [...loop.choices] };
 }
 
 /** The next timer to fire: the earliest due, the first set among those. */
@@ -84,21 +135,24 @@ export function nextTimer(loop: Loop): Timer | undefined {
 	return next;
 }
 
+/** The results that are in, waiting to be delivered, in the order they were asked for. */
+export function arrived(loop: Loop): Result[] {
+	return [...loop.results.values()].filter((result) => result.deliver !== undefined).sort((a, b) => a.id - b.id);
+}
+
 /** Whether a timer keeps the program alive. */
 export function hasRefTimers(loop: Loop): boolean {
 	return [...loop.timers.values()].some((timer) => timer.ref);
 }
 
-/** Take the next timer off the loop to fire, the clock moved to its due time (an interval set again from there) — or
- *  undefined when none may fire yet (no real turn since the machine went idle). */
+/** Take the next timer off the loop to fire, the clock moved to its due time (an interval set again from there). */
 export function takeTimer(loop: Loop): Timer | undefined {
-	const timer = loop.checkpoint ? nextTimer(loop) : undefined;
+	const timer = nextTimer(loop);
 
 	if (timer === undefined) {
 		return undefined;
 	}
 
-	loop.checkpoint = false;
 	loop.clock = Math.max(loop.clock, timer.due);
 
 	if (timer.interval) {
@@ -111,12 +165,18 @@ export function takeTimer(loop: Loop): Timer | undefined {
 	return timer;
 }
 
-/** A wait for the next timer, when there is one: resolves after its real delay (`pace: "real"`) or the next real turn
- *  (`"fast"`), letting it fire. A newer wait makes an older one's moot. */
-export function waitForTimer(loop: Loop): Promise<void> | undefined {
+/** What a timer is, as a candidate. */
+export function timerLabel(loop: Loop, timer: Timer): string {
+	return `${timer.interval ? "setInterval" : timer.delay === 0 ? "setImmediate" : "setTimeout"} ${timer.delay}ms (at +${timer.due - loop.clock}ms)`;
+}
+
+/** A wait for the next event: the next real turn when a result is in (`ready`) or `pace` is `"fast"`, else the next
+ *  timer's real delay — after which an event may come (`checkpoint`). Undefined with nothing to wait for. A newer wait
+ *  makes an older one's moot. */
+export function waitForTurn(loop: Loop, ready: boolean): Promise<void> | undefined {
 	const timer = nextTimer(loop);
 
-	if (timer === undefined) {
+	if (timer === undefined && !ready) {
 		return undefined;
 	}
 
@@ -131,7 +191,7 @@ export function waitForTimer(loop: Loop): Promise<void> | undefined {
 			}
 
 			resolve();
-		}, loop.pace === "fast" ? 0 : Math.max(0, timer.due - loop.clock));
+		}, ready || loop.pace === "fast" || timer === undefined ? 0 : Math.max(0, timer.due - loop.clock));
 	});
 }
 

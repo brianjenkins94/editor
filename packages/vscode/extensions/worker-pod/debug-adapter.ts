@@ -10,7 +10,7 @@
  * (a DebugAdapterServer needs a socket).
  */
 import type { Span } from "@brianjenkins94/util/logger";
-import { createRpcClient, portTransport } from "@brianjenkins94/hub";
+import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
@@ -18,7 +18,7 @@ import { EMPTY_POLICY, given as givenBy, placesOf, problemOf, ruleMatches, type 
 import { loadEffectivePolicy, persistOverride, replaceRule } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
-import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, RunEnd, SetHook, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
+import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
 import { lifecycleOfSource } from "../../lifecycle";
 import { controlSubject, eventSubject } from "./debug-protocol";
 import { podHub } from "./pod";
@@ -57,6 +57,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private program = "";
 	/** The program's arguments (the launch config's `args`): its `process.argv` after the node and the file. */
 	private args: string[] = [];
+	/** Where the event loop starts — given by a launch that runs one ordering again (exploreProgram's), else fresh. */
+	private eventLoop: LoopStart | undefined;
 	private lines: number[] = [];
 	private snapshot: Snapshot | undefined;
 
@@ -364,6 +366,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			case "launch":
 				this.program = String(args["program"] ?? "");
 				this.args = Array.isArray(args["args"]) ? (args["args"] as unknown[]).map(String) : [];
+				this.eventLoop = loopStartOf(args["eventLoop"]);
 				this.noDebug = args["noDebug"] === true;
 				this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
 				this.respond(request);
@@ -541,7 +544,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				return;
 			}
 
-			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "react": this.reactMode, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks }, trace);
+			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "react": this.reactMode, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
 		});
 	}
 
@@ -746,10 +749,107 @@ export function takeExitCode(sessionId: string): number {
 /** Sessions the user stopped (not run to their end): a run of several cases goes no further. */
 const stoppedByHand = new Set<string>();
 
+/** A launch config's `eventLoop`, when it's one: its clock, its seed, the choices to make. */
+function loopStartOf(value: unknown): LoopStart | undefined {
+	const { now, seed, schedule } = (typeof value === "object" && value !== null ? value : {}) as Partial<LoopStart>;
+
+	return typeof now === "number" && typeof seed === "number" ? { "now": now, "seed": seed, ...Array.isArray(schedule) ? { "schedule": schedule.map(Number) } : {} } : undefined;
+}
+
+/**
+ * Every ordering of `program`'s events (tsval's explore, in a debug worker of its own): with the stand-ins and the rules
+ * a debug run has — the arguments a rule gives its process.argv too — each way its host calls' answers, and its timers,
+ * can come; the distinct outcomes, each with a schedule to debug it by (a launch's `eventLoop`).
+ */
+export async function exploreProgram(program: string, maxRuns = 100): Promise<Explored> {
+	const uri = vscode.Uri.file(program);
+	const source = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString())?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+	const policy = await loadEffectivePolicy();
+	const mocked = givenBy(policy, { "program": vscode.workspace.asRelativePath(uri, false) }, "process.argv")?.values.find((each): each is string[] => Array.isArray(each));
+	const id = `explore-${crypto.randomUUID()}`;
+	const workerUrl = new URL("./lsp/debug-worker.js", location.href);
+
+	workerUrl.searchParams.set("v", String(Date.now()));
+	workerUrl.searchParams.set("session", id);
+
+	let offEvents: (() => void) | undefined;
+	const explored = new Promise<Explored>((resolve) => {
+		offEvents = podHub.subscribe(eventSubject(id), (data) => {
+			const event = data as WorkerEvent;
+
+			if (event.type === "explored") {
+				resolve(event.explored);
+			}
+		});
+	});
+	const worker = new Worker(workerUrl, { "type": "module" });
+	const unlink = podHub.link(portTransport(worker));
+
+	try {
+		if (!await podHub.whenInterested(controlSubject(id), 30_000)) {
+			throw new Error("the debug worker didn't start within 30s");
+		}
+
+		podHub.publish(controlSubject(id), { "type": "explore", "source": source, "fileName": program, "policy": policy, "args": mocked ?? [], "eventLoop": { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32) }, "maxRuns": maxRuns } satisfies Control);
+
+		return await Promise.race([explored, new Promise<never>((_, reject) => { setTimeout(() => { reject(new Error("exploring took over 2 minutes")); }, 120_000); })]);
+	} finally {
+		offEvents?.();
+		unlink();
+		worker.terminate();
+	}
+}
+
+/** One outcome as the Explore Orderings list shows it: what it ends with, how many runs, the events chosen along it. */
+function orderingItem(outcome: Explored["outcomes"][number], index: number): vscode.QuickPickItem & { "index": number } {
+	const last = outcome.output.at(-1);
+
+	return {
+		"index": index,
+		"label": outcome.crash === undefined ? `$(output) ${last ?? "(printed nothing)"}` : `$(error) crashed: ${outcome.crash}`,
+		"description": `${outcome.output.length} line${outcome.output.length === 1 ? "" : "s"} · ${outcome.runs} run${outcome.runs === 1 ? "" : "s"}`,
+		"detail": outcome.path.length === 0 ? "no choice to make" : outcome.path.join("  →  ")
+	};
+}
+
 export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 	const rpc = createRpcClient(podHub);
 
 	context.subscriptions.push(
+		// Explore Orderings (tsval's explore): every way the file's async results and timers can come, run; the distinct
+		// endings listed — a race is more than one — and the one picked debugged, run exactly that way.
+		vscode.commands.registerCommand("tsval.exploreOrderings", async (target?: vscode.Uri) => {
+			const uri = target instanceof vscode.Uri ? target : vscode.window.activeTextEditor?.document.uri;
+
+			if (uri === undefined) {
+				return;
+			}
+
+			const name = uri.path.split("/").pop()!;
+			const explored = await vscode.window.withProgress({ "location": vscode.ProgressLocation.Notification, "title": `Exploring the orderings of ${name}…` }, () => exploreProgram(uri.path));
+			const runs = `${explored.runs} run${explored.runs === 1 ? "" : "s"}${explored.complete ? "" : ", cut short"}`;
+
+			if (explored.outcomes.length === 1) {
+				void vscode.window.showInformationMessage(`No race in ${name}: every ordering ends the same way (${runs}).`);
+
+				return;
+			}
+
+			const picked = await vscode.window.showQuickPick(explored.outcomes.map(orderingItem), { "title": `${name}: ${explored.outcomes.length} ways it can end (${runs}) — pick one to debug it`, "matchOnDetail": true });
+
+			if (picked !== undefined) {
+				await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `debug ${name} (ordering ${picked.index + 1} of ${explored.outcomes.length})`, "program": uri.path, "eventLoop": { ...explored.eventLoop, "schedule": explored.outcomes[picked.index]!.schedule } });
+			}
+		}),
+		{ "dispose": serve(podHub, "debug.explore", async (args) => {
+			const { program, maxRuns } = (args ?? {}) as { "program"?: string; "maxRuns"?: number };
+
+			if (typeof program !== "string") {
+				throw new TypeError("debug.explore: a program to explore");
+			}
+
+			return exploreProgram(program, maxRuns);
+		}) },
 		vscode.debug.registerDebugConfigurationProvider("tsval", {
 			"resolveDebugConfiguration": (_folder, config) => {
 				if (config.type === undefined) {

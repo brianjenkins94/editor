@@ -22,12 +22,12 @@ import type { LoadedVM } from "@brianjenkins94/tsval";
 import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import { givenResult, ruleMatches } from "@brianjenkins94/util/silo/policy";
-import type { CapabilityAsk, Control, CoverageReport, PreviewMessage, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
+import type { CapabilityAsk, Control, CoverageReport, Explored, PreviewMessage, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
 import type { GuestRoot } from "./debug-react";
 
 import { createHub, portTransport } from "@brianjenkins94/hub";
-import { createVM } from "@brianjenkins94/tsval";
+import { createVM, explore, runToEnd } from "@brianjenkins94/tsval";
 import React from "react";
 
 import ts from "typescript";
@@ -465,6 +465,50 @@ function formatLogArg(value: unknown): string {
 }
 
 /** The program's console: what it logs goes to the Debug Console (warn/error as stderr), and nothing else happens. */
+/**
+ * Every ordering of the program's events (tsval's explore): each run fresh, with the stand-ins a debug run has — so
+ * every host call answers at once, and which answer comes first, or whether one comes before a timer, is the choice —
+ * no breakpoints, no stops. Each distinct ending: what it printed (a crash too — a throw, or a rejection nothing
+ * handled), a schedule that gets there, and the events chosen along it.
+ */
+async function exploreOrderings(message: Extract<Control, { "type": "explore" }>): Promise<Explored> {
+	policy = message.policy;
+
+	const found = await explore(async (schedule) => {
+		const output: string[] = [];
+		const surface = capabilitySurface(message.fileName, message.args ?? []);
+		const write = (...args: unknown[]): void => { output.push(args.map(formatLogArg).join(" ")); };
+		const console = Object.fromEntries(["log", "info", "debug", "dir", "warn", "error", "trace"].map((name) => [name, write]));
+		const { vm } = createVM(message.source, { "fileName": message.fileName, "globals": { ...surface.globals, "console": console }, "resolveModule": surface.resolveModule, "eventLoop": { ...message.eventLoop, "schedule": schedule, "pace": "fast" } });
+		let crash: string | undefined;
+		const unhandled = (event: PromiseRejectionEvent): void => {
+			crash ??= event.reason instanceof Error ? event.reason.message : String(event.reason);
+			event.preventDefault();
+		};
+
+		globalThis.addEventListener("unhandledrejection", unhandled);
+
+		try {
+			await runToEnd(vm);
+		} catch (error) {
+			crash = error instanceof Error ? error.message : String(error);
+		} finally {
+			// A rejection nothing handled is told a turn later.
+			await new Promise((resolve) => { setTimeout(resolve, 0); });
+			globalThis.removeEventListener("unhandledrejection", unhandled);
+		}
+
+		return { "outcome": { "output": output, ...crash === undefined ? {} : { "crash": crash } }, "choices": vm.choices };
+	}, { "maxRuns": message.maxRuns ?? 100 });
+
+	return {
+		"runs": found.runs,
+		"complete": found.complete,
+		"eventLoop": message.eventLoop,
+		"outcomes": found.outcomes.map(({ outcome, schedule, choices, runs }) => ({ ...outcome, "schedule": schedule, "path": choices.map((choice) => choice.candidates[choice.picked]!.label), "runs": runs }))
+	};
+}
+
 function guestConsole(): Record<string, (...args: unknown[]) => void> {
 	const write = (stream: "stdout" | "stderr") => (...args: unknown[]): void => { post({ "type": "output", "text": args.map(formatLogArg).join(" "), "stream": stream }); };
 
@@ -947,6 +991,10 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 	const trace = envelope.traceContext;
 
 	switch (message.type) {
+		case "explore":
+			void exploreOrderings(message).then((explored) => { post({ "type": "explored", "explored": explored }); });
+			break;
+
 		case "launch": {
 			// Absent without cross-origin isolation: then a breakpoint inside a React handler can't pause (see onBreakpointHook).
 			control = message.control === undefined ? undefined : new Int32Array(message.control);
@@ -962,11 +1010,12 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 
 			// tsval's event loop (steppedAsync with timers, a virtual clock and a seeded random): async code and timers run
 			// on the stack the debugger steps — its breakpoints, capability stops, rules — and the same way every time, so a
-			// step forward from any stop it travelled back to goes the way it went. Its start is logged, to run it again.
-			const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), "pace": "real" as const };
+			// step forward from any stop it travelled back to goes the way it went. Its start is logged, to run it again; a
+			// launch can give one (an ordering explore found: its clock, seed and schedule).
+			const eventLoop = { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32), ...message.eventLoop, "pace": "real" as const };
 			const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, ...capabilitySurface(message.fileName, message.args ?? []) });
 
-			workerLog.info("event loop", { "now": eventLoop.now, "seed": eventLoop.seed });
+			workerLog.info("event loop", { "now": eventLoop.now, "seed": eventLoop.seed, ...eventLoop.schedule === undefined ? {} : { "schedule": eventLoop.schedule } });
 
 			liveTimer = setInterval(flushLive, 250);
 

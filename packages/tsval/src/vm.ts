@@ -4,7 +4,8 @@ import type { GuestClass } from "./handlers.ts";
 import type { GuestFunction, GuestFunctionMeta } from "./values.ts";
 import ts from "typescript";
 import { isUncatchable, TsvalInternalError } from "./errors.ts";
-import { createLoop, forkLoop, hasRefTimers, INTRINSICS, loopGlobals, takeTimer, waitForTimer } from "./event-loop.ts";
+import type { Choice, Result } from "./event-loop.ts";
+import { arrived, choose, createLoop, forkLoop, hasRefTimers, INTRINSICS, loopGlobals, nextTimer, takeTimer, timerLabel, waitForTurn } from "./event-loop.ts";
 import { syntaxKindName } from "./frontend.ts";
 import { standardGlobals } from "./globals.ts";
 import { bindIdentifier, bindingProgram, clonePrivateElements, closeIteration, createGuestFunction, isGuestClass, nodeHandlers, pushPattern, syntheticHandlers } from "./handlers.ts";
@@ -282,6 +283,9 @@ export interface VM {
 	readonly "idle": boolean;
 	/** Resolves when something pending settles (stepped async). */
 	"whenSettled": () => Promise<void>;
+	/** The choices its event loop made so far (VMOptions.eventLoop), in order — `picked` of each is a schedule to run it
+	 *  again (EventLoopOptions.schedule). Empty without one. */
+	readonly "choices": readonly Choice[];
 	/** Monotonic count of `step()` calls — a free step budget. */
 	readonly "steps": number;
 
@@ -369,6 +373,10 @@ export class Machine implements VM {
 	public steppedAsync = false;
 	/** VMOptions.eventLoop: this machine's event loop — its clock, timers and random generator (a fork copies it). */
 	public loop: Loop | undefined;
+
+	public get choices(): readonly Choice[] {
+		return this.loop?.choices ?? [];
+	}
 	/** Stepped async: work pending and none ready — the host lets the event loop turn (`whenSettled`), then steps on. */
 	public idle = false;
 	/** Stepped async: this machine's suspended fibers, and the host-called callbacks waiting their turn, by id — its own
@@ -527,8 +535,10 @@ export class Machine implements VM {
 		const previousSite = this.callSite;
 		const { prototype } = this.realm.Promise;
 
+		const promising = callee === prototype.then || callee === prototype.catch || callee === prototype.finally;
+
 		// Stepped async: a guest callback a host promise will call is a job of its own, run on the main stack.
-		if (this.steppedHere && !isConstruct && (callee === prototype.then || callee === prototype.catch || callee === prototype.finally)) {
+		if (this.steppedHere && !isConstruct && promising) {
 			args = args.map((arg) => (isGuestFunction(arg) ? this.deferCallback(arg) : arg));
 		}
 
@@ -536,8 +546,17 @@ export class Machine implements VM {
 		try {
 			const target = this.hostGuard?.beforeCall === undefined ? callee : this.hostGuard.beforeCall(callee, thisArg, isConstruct, { "node": site, "args": args, "isConstruct": isConstruct });
 			const result = isConstruct ? Reflect.construct(target as unknown as new (...ctorArgs: unknown[]) => unknown, args) : target.apply(thisArg, args);
+			const value = this.fromHost(result);
 
-			return this.fromHost(result);
+			// Event loop: a promise a host call returns is external — when it settles isn't the program's to say. The
+			// program gets one of its own instead, settled when the result's arrival is delivered as an event (event-loop.ts),
+			// so nothing — not even Promise.race — sees it before. (Not a promise the program makes itself — `new Promise`,
+			// a promise's methods and statics: that's the program chaining what it has.)
+			if (this.loop !== undefined && this.steppedHere && !promising && (callee as unknown) !== this.realm.Promise && !PROMISE_STATICS.some((name) => (this.realm.Promise as unknown as Record<string, unknown>)[name] === callee) && isThenable(value)) {
+				return this.awaitResult(value, this.callLabel(site, callee, args));
+			}
+
+			return value;
 		} finally {
 			this.callSite = previousSite;
 		}
@@ -631,11 +650,11 @@ export class Machine implements VM {
 
 		// Stepped async, between tasks (the stack empty): the next settled job, or idle while work is pending.
 		if (this.steppedAsync && this.depth === 0 && this.frames.length === 0 && this.signal === null) {
-			if (this.resumeSettled() || this.fireTimer()) {
+			if (this.resumeSettled() || this.fireEvent()) {
 				return;
 			}
 
-			if (this.pending.size > 0 || (this.loop !== undefined && hasRefTimers(this.loop))) {
+			if (this.pending.size > 0 || (this.loop !== undefined && (hasRefTimers(this.loop) || this.loop.results.size > 0))) {
 				this.idle = true;
 
 				return;
@@ -1110,26 +1129,85 @@ export class Machine implements VM {
 	 *  `idle`). */
 	public whenSettled(): Promise<void> {
 		const settled = new Promise<void>((resolve) => { this.scheduler.wakers.push(resolve); });
-		const timer = this.loop === undefined ? undefined : waitForTimer(this.loop);
+		const turn = this.loop === undefined ? undefined : waitForTurn(this.loop, arrived(this.loop).length > 0);
 
-		return timer === undefined ? settled : Promise.race([settled, timer]);
+		return turn === undefined ? settled : Promise.race([settled, turn]);
 	}
 
-	/** Event loop: fire the next timer — its callback a job of its own on the (empty) stack — true if one fired. */
-	private fireTimer(): boolean {
-		const timer = this.loop === undefined ? undefined : takeTimer(this.loop);
+	/** A host call as a person reads it, for a candidate's label: its callee as the code writes it, and its first argument
+	 *  when that's a string — `fetch("https://a.example/")`. */
+	private callLabel(site: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression, callee: unknown, args: unknown[]): string {
+		const written = this.sourceFile === undefined || ts.isTaggedTemplateExpression(site) ? undefined : site.expression.getText(this.sourceFile);
+		const name = written ?? (typeof callee === "function" && callee.name !== "" ? callee.name : "a host call");
+		const [first] = args;
 
-		if (timer === undefined) {
+		return typeof first === "string" ? `${name}(${JSON.stringify(first.length > 60 ? first.slice(0, 57) + "…" : first)})` : `${name}(…)`;
+	}
+
+	/** Event loop: a host call's promised `value` as the program gets it — a promise of the machine's realm, settled when
+	 *  the result, once it's in, is delivered as an event (fireEvent). */
+	private awaitResult(value: object, label: string): Promise<unknown> {
+		const loop = this.loop!;
+		const { scheduler } = this;
+		let resolve!: (value: unknown) => void;
+		let reject!: (reason: unknown) => void;
+		const promise = new this.realm.Promise<unknown>((settleWith, failWith) => { resolve = settleWith; reject = failWith; });
+
+		loop.ids += 1;
+
+		const result: Result = { "id": loop.ids, "label": label };
+
+		loop.results.set(result.id, result);
+		Promise.resolve(value).then(
+			(settled) => { result.deliver = () => { resolve(settled); }; wake(scheduler); },
+			(error: unknown) => { result.deliver = () => { reject(error); }; wake(scheduler); }
+		);
+
+		return promise;
+	}
+
+	/** Event loop: once a real turn has passed (the host's microtasks flushed), the next event — an external result, or
+	 *  the next timer, whichever is chosen (event-loop.ts: `choose`) — a job of its own on the (empty) stack; true if one
+	 *  came. */
+	private fireEvent(): boolean {
+		const { loop } = this;
+
+		if (loop === undefined || !loop.checkpoint) {
 			return false;
 		}
+
+		const results = arrived(loop);
+		const timer = nextTimer(loop);
+		const candidates = [...results.map((result) => ({ "kind": "result" as const, "label": result.label })), ...timer === undefined ? [] : [{ "kind": "timer" as const, "label": timerLabel(loop, timer) }]];
+
+		if (candidates.length === 0) {
+			return false;
+		}
+
+		const picked = choose(loop, candidates);
+
+		loop.checkpoint = false;
+		this.idle = false;
+
+		// A result: its promise settled — what was waiting on it runs as its jobs come.
+		if (picked < results.length) {
+			const result = results[picked]!;
+
+			loop.results.delete(result.id);
+			result.deliver!();
+
+			return true;
+		}
+
+		const fired = takeTimer(loop)!;
 
 		this.idle = false;
 		this.values.length = 0; // between tasks: nothing on it is anyone's
 
-		if (isGuestFunction(timer.fn)) {
-			this.pushCall(timer.fn.__tsval, timer.args, undefined);
+		if (isGuestFunction(fired.fn)) {
+			this.pushCall(fired.fn.__tsval, fired.args, undefined);
 		} else {
-			(timer.fn as (...args: unknown[]) => unknown)(...timer.args);
+			(fired.fn as (...args: unknown[]) => unknown)(...fired.args);
 		}
 
 		return true;
@@ -1180,6 +1258,13 @@ export class Machine implements VM {
 			return false;
 		}
 
+		this.resume(entry);
+
+		return true;
+	}
+
+	/** Put a settled pending job back on the (empty) stack. */
+	private resume(entry: AsyncScheduler["settled"][number]): void {
 		const job = this.pending.get(entry.id)!;
 		const { input } = entry;
 
@@ -1188,7 +1273,7 @@ export class Machine implements VM {
 
 		if (job.kind === "callback") {
 			if (input.kind !== "call") {
-				return true;
+				return;
 			}
 
 			// The callback's own async frame (it settles the promise the host got), then its call.
@@ -1197,7 +1282,7 @@ export class Machine implements VM {
 			this.frames.push(frame);
 			this.pushCall(job.fn.__tsval, input.args, undefined);
 
-			return true;
+			return;
 		}
 
 		const delta = this.values.length - job.base;
@@ -1214,8 +1299,6 @@ export class Machine implements VM {
 		} else if (input.kind === "throw") {
 			this.signal = { "type": "throw", "value": input.value };
 		}
-
-		return true;
 	}
 
 	// --- execution contexts (nested sub-runs & fibers) ------------------------
@@ -1978,13 +2061,25 @@ type Settlement = { "kind": "next"; "value": unknown } | { "kind": "throw"; "val
 /** Stepped async: what settled, in order, for which pending job; and who waits for the next. Shared by forks. */
 interface AsyncScheduler { "settled": { "id": number; "input": Settlement }[]; "ids": number; "wakers": (() => void)[] }
 
+/** What a promise's own statics make (`Promise.resolve`, `Promise.all`, …) is the program's, not external. */
+const PROMISE_STATICS = ["resolve", "reject", "all", "allSettled", "race", "any", "withResolvers"];
+
+function isThenable(value: unknown): value is object {
+	return (typeof value === "object" || typeof value === "function") && value !== null && typeof (value as { "then"?: unknown }).then === "function";
+}
+
+
+/** Wake whoever waits for something to settle. */
+function wake(scheduler: AsyncScheduler): void {
+	for (const waker of scheduler.wakers.splice(0)) {
+		waker();
+	}
+}
+
 /** Record what settled for job `id`, and wake whoever waits. */
 function settle(scheduler: AsyncScheduler, id: number, input: Settlement): void {
 	scheduler.settled.push({ "id": id, "input": input });
-
-	for (const wake of scheduler.wakers.splice(0)) {
-		wake();
-	}
+	wake(scheduler);
 }
 
 /** How a fiber is resumed: with a value, or by injecting a return/throw at the suspension point. */

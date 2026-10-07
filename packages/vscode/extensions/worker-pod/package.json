@@ -15,11 +15,13 @@
   ],
   "contributes": {
     "commands": [
-      { "command": "editor.debugFile", "title": "Run and Debug File", "category": "Debug", "icon": "$(debug-alt)" }
+      { "command": "editor.debugFile", "title": "Run and Debug File", "category": "Debug", "icon": "$(debug-alt)" },
+      { "command": "tsval.exploreOrderings", "title": "Explore Orderings", "category": "Debug", "icon": "$(type-hierarchy)" }
     ],
     "menus": {
       "editor/title/run": [
-        { "command": "editor.debugFile", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "navigation@2" }
+        { "command": "editor.debugFile", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "navigation@2" },
+        { "command": "tsval.exploreOrderings", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "navigation@3" }
       ]
     },
     "taskDefinitions": [

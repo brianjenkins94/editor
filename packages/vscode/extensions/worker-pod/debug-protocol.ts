@@ -21,7 +21,9 @@ export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack"
 
 /** Adapter → worker. */
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[] }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "react"?: boolean; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart }
+	/** Run every ordering of the program's events (tsval's explore) instead of debugging it: answered with `explored`. */
+	| { "type": "explore"; "source": string; "fileName": string; "policy"?: Policy; "args"?: string[]; "eventLoop": LoopStart; "maxRuns"?: number }
 	| { "type": "setBreakpoints"; "lines": number[] }
 	| { "type": "dispatch"; "id": number; "event": string }
 	| { "type": "timeTravel"; "index": number }
@@ -34,6 +36,16 @@ export type Control =
 	/** At a stop: set `name` (a variable in scope there) to `value`, a literal as code writes it — the run goes on with it. */
 	| { "type": "setValue"; "name": string; "value": string }
 	| { "type": StepAction | "disconnect" };
+
+/** Where tsval's event loop starts (its clock, its random seed) and — to run one ordering again — the choices to make. */
+export interface LoopStart { "now": number; "seed": number; "schedule"?: number[] }
+
+/** One way a run of the program can end, from exploring its orderings: what it printed, how it crashed if it did, a
+ *  schedule that gets there (to debug it), the events chosen along it, and how many runs ended this way. */
+export interface Ordering { "output": string[]; "crash"?: string; "schedule": number[]; "path": string[]; "runs": number }
+
+/** What exploring a program's orderings found: how many runs, whether every ordering was run, and the distinct outcomes. */
+export interface Explored { "runs": number; "complete": boolean; "outcomes": Ordering[]; "eventLoop": LoopStart }
 
 /** A rule placed in the code (RULES.md: at, a span reference), found in the text that runs: the 1-based line its
  *  statement starts on, the place, and the rule — whose `set`s are made each time that statement has run, if it
@@ -78,7 +90,9 @@ export type WorkerEvent =
 	/** The session's live values new since the last (live-values.ts): a few times a second, and before a stop or the end. */
 	| { "type": "values"; "batch": LiveBatch }
 	/** A `setValue` done (the new value as the Variables view shows it, and the stop's snapshot with it), or refused. */
-	| { "type": "valueSet"; "ok": boolean; "value"?: string; "error"?: string; "snapshot"?: Snapshot };
+	| { "type": "valueSet"; "ok": boolean; "value"?: string; "error"?: string; "snapshot"?: Snapshot }
+	/** What exploring the program's orderings found (asked by `explore`). */
+	| { "type": "explored"; "explored": Explored };
 
 /** One statement's coverage: its range (0-based line and character, as VS Code's Position) and how often it ran. */
 export interface StatementCoverage {

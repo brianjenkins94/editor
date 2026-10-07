@@ -3,7 +3,8 @@
  * debug session the way VS Code's debug UI does, and read where it stopped.
  *
  *   pod     `debug.sessions`                       → every live session's summary
- *   pod     `debug.start` { program?, breakpoints?, args? } → starts a session and answers with its first stop
+ *   pod     `debug.start` { program?, breakpoints?, args?, eventLoop? } → starts a session and answers with its first stop
+ *   pod     `debug.explore` { program, maxRuns? }  → every ordering of its events run: the distinct outcomes (debug-adapter.ts)
  *   pod     `debug.breakpoints` { program?, lines }  → replaces a file's breakpoints (VS Code's own, so the UI shows them)
  *   pod     `rules.given` { program?, target } → what a rule gives the file's `target` (process.argv): { rule, values } | null
  *   pod     `rules.set` { previous?, rule? } → my policy changed by a rule editor: previous replaced by rule (or added, or removed)
@@ -359,7 +360,7 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 			return rule ?? null;
 		}) },
 		{ "dispose": serve(hub, "debug.start", async (args, { signal }) => {
-			const { program, breakpoints, "args": inputs, cases } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[]; "args"?: string[]; "cases"?: string[][] };
+			const { program, breakpoints, "args": inputs, cases, eventLoop } = (args ?? {}) as { "program"?: string; "breakpoints"?: number[]; "args"?: string[]; "cases"?: string[][]; "eventLoop"?: unknown };
 			const path = resolveProgram(program);
 			const launchId = crypto.randomUUID();
 
@@ -377,7 +378,8 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 			});
 			// `cases`: several runs, one after another (process.argv mocked with Multiple); answered with the first's first stop.
 			const given = cases !== undefined && cases.length > 0 ? { "args": cases[0], "__cases": cases, "__case": 0 } : inputs === undefined ? {} : { "args": inputs };
-			const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "debug " + path.split("/").pop(), "program": path, ...given, "__launchId": launchId });
+			// `eventLoop`: an ordering to run again (debug.explore's: its clock, seed and schedule).
+			const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "debug " + path.split("/").pop(), "program": path, ...given, ...eventLoop === undefined ? {} : { "eventLoop": eventLoop }, "__launchId": launchId });
 
 			if (!started) {
 				pendingLaunches.delete(launchId);

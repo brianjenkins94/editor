@@ -122,6 +122,23 @@ const { vm } = createVM(code, { eventLoop: { now: 0, seed: 42, pace: "fast" } })
 // setTimeout(() => log(Date.now()), 50) logs 50 — every run
 ```
 
+A promise a host call returns (a fetch, a file read) is **external**: the guest gets one of its own, settled only when
+the result's arrival is delivered as an event between tasks — so nothing, not even `Promise.race`, sees it early. Where
+several events could come next (two results in, or a result and the next timer), which does is a **choice**: the first by
+default (results in the order they were asked for, then the timer), or `eventLoop.choose`'s, recorded in `vm.choices`,
+and replayed by `eventLoop.schedule`. `explore` runs every schedule there is, depth-first, and returns the distinct
+outcomes, each with a schedule that reaches it — a race is outcomes that differ (the editor's *Explore Orderings*).
+
+```ts
+import { createVM, explore, runToEnd } from "./src/index.ts";
+const found = await explore(async (schedule) => {
+  const { vm } = createVM(code, { globals, eventLoop: { now: 0, seed: 1, pace: "fast", schedule } });
+  await runToEnd(vm);
+  return { outcome: lines.splice(0), choices: vm.choices };
+});
+// found.outcomes: [{ outcome, schedule, choices, runs }, …] — run one again with eventLoop.schedule
+```
+
 Guest→guest calls never touch the host stack, so a guard cannot be bypassed from inside the guest;
 `[].constructor.constructor` reaches the guard like any other read.
 
