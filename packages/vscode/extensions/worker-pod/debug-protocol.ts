@@ -58,7 +58,9 @@ export interface Explored { "runs": number; "complete": boolean; "outcomes": Ord
 /** A rule placed in the code (RULES.md: at, a span reference), found in the text that runs: the 1-based line its
  *  statement starts on, the place, and the rule — whose `set`s are made each time that statement has run, if it
  *  matches there. */
-export interface SetHook { "line": number; "place": unknown; "rule": Rule }
+/** A rule's hook: the statement it sets after, by 1-based line — in `file` when that's another of the program's files
+ *  than the entry. */
+export interface SetHook { "line": number; "place": unknown; "rule": Rule; "file"?: string }
 
 export interface Variable { "name": string; "value": string; "type": string; "variablesReference": number }
 
@@ -75,7 +77,8 @@ export interface Snapshot {
 /** What a capability stop asks (LIVE-VALUES.md, step 8): the gated call on the line it stopped at — its capability,
  *  its callee as written, and the resource it would reach, from the run's own values where they're known by then (a
  *  literal, a variable's value), else the argument as written. `line` is 0-based. */
-export interface CapabilityAsk { "line": number; "at"?: [number, number]; "capability": string; "callee": string; "resource": string; "resolved": boolean; "dangerous": boolean }
+/** `file`: the program file the call is in, with its text (`source`), when it isn't the entry. */
+export interface CapabilityAsk { "line": number; "at"?: [number, number]; "capability": string; "callee": string; "resource": string; "resolved": boolean; "dangerous": boolean; "file"?: string; "source"?: string }
 
 /** How a run ended short, for the notes margin's strip: the line (0-based) it crashed on, with the error, or the one it
  *  was stopped at. A run that finished has none. */

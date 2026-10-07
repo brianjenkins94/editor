@@ -87,18 +87,24 @@ function liveIn(file: ts.SourceFile): LiveRecord {
 	return record;
 }
 let liveTimer: ReturnType<typeof setInterval> | undefined;
-/** 1-based lines pre-armed as capability breakpoints (policy said stop) — so a stop there reports reason
- *  "capability" rather than "breakpoint". Computed at launch from the policy the adapter sent. */
-let capabilityLines = new Set<number>();
+/** Where the run is: a program file and a 1-based line in it — the entry's, or another of the program's (MODULES.md). */
+interface Place { "file": string; "line": number }
+
+/** 1-based lines pre-armed as capability breakpoints (policy said stop), by program file — so a stop there reports
+ *  reason "capability" rather than "breakpoint". The entry's computed at launch from the policy the adapter sent;
+ *  another file's as it loads (noteProgramFile). */
+let capabilityLines = new Map<string, Set<number>>();
+/** The program's files known so far — the entry, and each other one as it loads — parsed for their capability calls. */
+let programFiles = new Map<string, ts.SourceFile>();
 /** The policy the run is under (the adapter's, updated after an "Allow always"); none, no capability stops. */
 let policy: Policy | undefined;
 /** The user's breakpoints (1-based lines), armed beside the capability lines. */
 let userLines: number[] = [];
 /** The user's breakpoints in the program's other files (MODULES.md), by file. */
 let fileLines = new Map<string, number[]>();
-/** The statements rules set something after (RULES.md: *set variables.<name>*, *at* a place), by 1-based line: armed
- *  as breakpoints that aren't stops — the statement runs, the sets are made, the run goes on. */
-let setHooks = new Map<number, SetHook[]>();
+/** The statements rules set something after (RULES.md: *set variables.<name>*, *at* a place), by program file and
+ *  1-based line: armed as breakpoints that aren't stops — the statement runs, the sets are made, the run goes on. */
+let setHooks = new Map<string, Map<number, SetHook[]>>();
 /** The program, workspace-relative: the subject's `program` at a hook. */
 let programPath = "";
 /** "Deny" at a capability stop: the next capability call fails, as a denied one would. Reset at every stop. */
@@ -147,8 +153,8 @@ function observeSite(node: ts.Node, site: Parameters<typeof addObservation>[2], 
 let probing: { "capability": string; "resource"?: string } | undefined;
 /** What ends a probe's fork at the call — uncatchable, so the guest's own try/catch can't swallow it. */
 const PROBED = Object.assign(new Error("probe: the call reached"), { [UNCATCHABLE]: true });
-/** Each stop's probed resource, by machine and line: a stop asks more than once. */
-const probed = new WeakMap<Vm, Map<number, string | undefined>>();
+/** Each stop's probed resource, by machine and place (`file:line`): a stop asks more than once. */
+const probed = new WeakMap<Vm, Map<string, string | undefined>>();
 
 /**
  * The resource a capability call on `line` reaches, when its argument is computed on the line itself
@@ -156,11 +162,12 @@ const probed = new WeakMap<Vm, Map<number, string | undefined>>();
  * evaluated as the run will evaluate them, every capability call on the way its inert stand-in, the event loop
  * deterministic — then thrown away. Undefined if the fork doesn't get there (it threw first, or took too long).
  */
-function probeResource(vm: Vm, line: number, capability: string): string | undefined {
+function probeResource(vm: Vm, place: Place, capability: string): string | undefined {
 	const known = probed.get(vm);
+	const key = `${place.file}:${place.line}`;
 
-	if (known?.has(line) === true) {
-		return known.get(line);
+	if (known?.has(key) === true) {
+		return known.get(key);
 	}
 
 	const fork = vm.fork();
@@ -180,7 +187,7 @@ function probeResource(vm: Vm, line: number, capability: string): string | undef
 		probing = undefined;
 	}
 
-	probed.set(vm, (known ?? new Map()).set(line, resource));
+	probed.set(vm, (known ?? new Map()).set(key, resource));
 
 	return resource;
 }
@@ -244,11 +251,12 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 		// The program's code gets its stand-ins (`fs`, `child_process`); a package, almostnode's own.
 		"builtinFor": (id, requester) => (requester === "program" && Object.hasOwn(programBuiltins, id) ? programBuiltins[id] : undefined),
 		// A program file a package requires: tsval's to evaluate, on the run's machine (a nested run).
-		"evaluateProgram": (module) => {
+		"evaluateProgram": (module, _require, source) => {
 			if (evaluating === undefined) {
 				throw new Error(`no run to evaluate ${module.filename} on`);
 			}
 
+			noteProgramFile(module.filename, () => source);
 			evaluating.evaluateModule(module);
 		}
 	});
@@ -293,7 +301,11 @@ function programModules(loaded: Runtime): ModuleLoader {
 		"require": (specifier, fromDir) => loaded.require(specifier, fromDir, "program"),
 		"source": (filename) => vfs.readFileSync(filename, "utf8") as string,
 		"cached": (filename) => loaded.cached(filename),
-		"register": (filename, module) => { loaded.register(filename, module as Parameters<Runtime["register"]>[1]); },
+		"register": (filename, module) => {
+			// Another of the program's files, about to run: its capability stops armed first.
+			noteProgramFile(filename, () => vfs.readFileSync(filename, "utf8") as string);
+			loaded.register(filename, module as Parameters<Runtime["register"]>[1]);
+		},
 		"forget": (filename) => { loaded.forget(filename); }
 	};
 }
@@ -494,23 +506,59 @@ function setValue(vm: Vm, name: string, text: string, overConst = false): Extrac
 	return { "type": "valueSet", "ok": false, "error": `no ${name} in scope here` };
 }
 
-/** Arm `vm`'s breakpoints: the user's, the capability calls the policy gates, and the statements rules set after. */
+/** The rules' hooks at `place` (none: an empty list). */
+const hooksAt = (place: Place): SetHook[] => setHooks.get(place.file)?.get(place.line) ?? [];
+/** Whether `place` is a capability call the policy gated when it was armed. */
+const capabilityAt = (place: Place): boolean => capabilityLines.get(place.file)?.has(place.line) === true;
+/** Whether the user has a breakpoint at `place`. */
+const userStopAt = (place: Place): boolean => (place.file === sourceFile?.fileName ? userLines : fileLines.get(place.file) ?? []).includes(place.line);
+
+/** Every line to arm in `file`: the user's breakpoints, the capability calls the policy gates, the statements rules set
+ *  after. */
+function linesIn(file: string): number[] {
+	return [...file === sourceFile?.fileName ? userLines : fileLines.get(file) ?? [], ...capabilityLines.get(file) ?? [], ...setHooks.get(file)?.keys() ?? []];
+}
+
+/** Arm `vm`'s breakpoints: in each of the program's files, the user's, the capability calls the policy gates, and the
+ *  statements rules set after. */
 function arm(vm: Vm): void {
 	vm.breakpoints.clear();
-	vm.addBreakpointsByLine(...userLines, ...capabilityLines, ...setHooks.keys());
 
-	for (const [file, lines] of fileLines) {
+	for (const file of new Set([sourceFile?.fileName ?? "", ...fileLines.keys(), ...capabilityLines.keys(), ...setHooks.keys()])) {
 		try {
-			vm.addBreakpointsInFile(file, ...lines);
+			vm.addBreakpointsInFile(file, ...linesIn(file));
 		} catch {
 			// (a file that isn't there, or doesn't parse: nothing of it runs)
 		}
 	}
 }
 
-/** Whether a run reaching `line` stops there: a breakpoint of the user's, or a capability call the policy gates. */
-function stopsAt(vm: Vm, line: number): boolean {
-	return userLines.includes(line) || (capabilityLines.has(line) && askAt(vm, line) !== undefined);
+/** Another of the program's files is loading (the loader's register, or a package requiring it): its capability calls
+ *  the policy gates are armed, on the machine running and each stop's, before any of it runs. */
+function noteProgramFile(filename: string, source: () => string): void {
+	if (programFiles.has(filename)) {
+		return;
+	}
+
+	let file: ts.SourceFile;
+
+	try {
+		file = ts.createSourceFile(filename, source(), ts.ScriptTarget.Latest, true, /\.[jt]sx$/u.test(filename) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+	} catch {
+		return;
+	}
+
+	programFiles.set(filename, file);
+	capabilityLines.set(filename, new Set(policy === undefined ? [] : capabilityBreakLines(file, policy)));
+
+	for (const vm of new Set([current, ...history])) {
+		vm?.addBreakpointsInFile(filename, ...linesIn(filename));
+	}
+}
+
+/** Whether a run reaching `place` stops there: a breakpoint of the user's, or a capability call the policy gates. */
+function stopsAt(vm: Vm, place: Place): boolean {
+	return userStopAt(place) || (capabilityAt(place) && askAt(vm, place) !== undefined);
 }
 
 /** The values of the variables in scope that a rule can test: strings, numbers, booleans, null — the innermost of a name. */
@@ -529,11 +577,15 @@ function scopeValues(vm: Vm): Record<string, unknown> {
 }
 
 /** The statement on `line` has run: make the sets of the rules placed there that match here. */
-function applySets(vm: Vm, line: number): void {
+function applySets(vm: Vm, at: Place): void {
 	const variables = scopeValues(vm);
 
-	for (const { place, rule } of setHooks.get(line) ?? []) {
-		if (!ruleMatches(rule, { "program": programPath, "at": place, "variables": variables })) {
+	for (const { place, rule } of hooksAt(at)) {
+		// *program is* the file the rule is placed in — as the margin makes it (another of the program's files, a rule
+		// made in its margin, holds wherever it's run from).
+		const file = (place as { "file"?: unknown } | null)?.file;
+
+		if (!ruleMatches(rule, { "program": typeof file === "string" ? file : programPath, "at": place, "variables": variables })) {
 			continue;
 		}
 
@@ -553,21 +605,21 @@ function applySets(vm: Vm, line: number): void {
 /** At statements rules set something after, one after another: run each and make its sets. True when that lands
  *  where the run stops (or at its end). */
 function passHooks(base: Vm): boolean {
-	let line = atLine(base);
+	let place = placeOf(base);
 	let passed = false;
 
-	while (!base.finished && line !== undefined && setHooks.has(line)) {
-		if (passed && stopsAt(base, line)) {
+	while (!base.finished && place !== undefined && hooksAt(place).length > 0) {
+		if (passed && stopsAt(base, place)) {
 			return true;
 		}
 
 		base.stepStatement();
-		applySets(base, line);
+		applySets(base, place);
 		passed = true;
-		line = atLine(base);
+		place = placeOf(base);
 	}
 
-	return passed && (base.finished || (line !== undefined && stopsAt(base, line)));
+	return passed && (base.finished || (place !== undefined && stopsAt(base, place)));
 }
 
 /** Continue: run to the next stop — through the statements rules set after (each run, then its sets made) and the
@@ -580,13 +632,13 @@ function runOn(base: Vm): void {
 	for (;;) {
 		base.runToBreakpoint();
 
-		const line = atLine(base);
+		const place = placeOf(base);
 
-		if (base.finished || line === undefined) {
+		if (base.finished || place === undefined) {
 			return;
 		}
 
-		if (setHooks.has(line) && !stopsAt(base, line)) {
+		if (hooksAt(place).length > 0 && !stopsAt(base, place)) {
 			if (passHooks(base)) {
 				return;
 			}
@@ -596,7 +648,7 @@ function runOn(base: Vm): void {
 
 		// A capability line whose calls the policy now lets pass (allowed always since it was armed, or its resource
 		// allowed once known) isn't a stop: go on, unless the user has a breakpoint there too.
-		if (capabilityLines.has(line) && !userLines.includes(line) && askAt(base, line) === undefined) {
+		if (capabilityAt(place) && !userStopAt(place) && askAt(base, place) === undefined) {
 			continue;
 		}
 
@@ -604,10 +656,13 @@ function runOn(base: Vm): void {
 	}
 }
 
-/** What the capability stop at `line` (1-based) asks: the first call on it the policy gates, with the resource it would
+/** What the capability stop at `place` asks: the first call on its line the policy gates, with the resource it would
  *  reach as far as it's known before the line runs — undefined when the policy now lets every call on it pass. */
-function askAt(vm: Vm, line: number): CapabilityAsk | undefined {
-	const file = sourceFile;
+function askAt(vm: Vm, place: Place): CapabilityAsk | undefined {
+	// The file as the run has it (the stop's own node's), else as it was read to arm it.
+	const here = vm.currentNode?.getSourceFile();
+	const file = here?.fileName === place.file ? here : place.file === sourceFile?.fileName ? sourceFile : programFiles.get(place.file);
+	const { line } = place;
 
 	if (file === undefined || policy === undefined) {
 		return undefined;
@@ -629,11 +684,11 @@ function askAt(vm: Vm, line: number): CapabilityAsk | undefined {
 		if (hit !== undefined) {
 			const before = resourceOf(vm, call.arguments[hit.argIndex], file);
 			// Computed on the line: what it will be, from a fork run to the call.
-			const probe = before.resolved ? undefined : probeResource(vm, line, hit.capability);
+			const probe = before.resolved ? undefined : probeResource(vm, place, hit.capability);
 			const { resource, resolved } = probe === undefined ? before : { "resource": probe, "resolved": true };
 
 			if (shouldBreak(policy, { ...hit, "resource": resolved ? resource : "" })) {
-				return { "line": line - 1, "at": rangeOf(call), "capability": hit.capability, "callee": hit.callee, "resource": resource, "resolved": resolved, "dangerous": hit.dangerous };
+				return { "line": line - 1, "at": rangeOf(call), "capability": hit.capability, "callee": hit.callee, "resource": resource, "resolved": resolved, "dangerous": hit.dangerous, ...file === sourceFile ? {} : { "file": file.fileName, "source": file.text } };
 			}
 		}
 	}
@@ -1021,12 +1076,11 @@ function finish(exitCode = 0, crash?: Crash): void {
 	post({ "type": "terminated", "exitCode": exitCode, ...crash === undefined ? {} : { "crash": crash } });
 }
 
-/** The 1-based line `vm` is stopped at. */
-function atLine(vm: Vm): number | undefined {
+/** Where `vm` is stopped: its file, and the 1-based line in it. */
+function placeOf(vm: Vm): Place | undefined {
 	const location = vm.location();
 
-	// In another of the program's files: none of the entry's (only the user's breakpoints are armed there).
-	return location === null || location.file !== sourceFile?.fileName ? undefined : location.line + 1;
+	return location === null ? undefined : { "file": location.file, "line": location.line + 1 };
 }
 
 /** Where `error` was thrown, for the margin's mark: by now the frames have unwound, so tsval's note of it, not the
@@ -1062,7 +1116,11 @@ function stepOut(vm: Vm): void {
 
 	vm.step();
 	// (A statement a rule only sets after isn't a stop.)
-	vm.runUntil((current) => (current.atBreakpoint() && (atLine(current) === undefined || !setHooks.has(atLine(current)!) || stopsAt(current, atLine(current)!))) || (current.atStatementBoundary() && callDepth(current) < depth));
+	vm.runUntil((running) => {
+		const place = running.atBreakpoint() ? placeOf(running) : undefined;
+
+		return (running.atBreakpoint() && (place === undefined || hooksAt(place).length === 0 || stopsAt(running, place))) || (running.atStatementBoundary() && callDepth(running) < depth);
+	});
 }
 
 /** Advance `base` (a VM we own) by a forward action, then record the new stop or terminate. When the action
@@ -1073,12 +1131,12 @@ function act(base: Vm, action: ForwardAction): void {
 	switch (action) {
 		case "continue": runOn(base); break;
 		case "next": {
-			const from = atLine(base);
+			const from = placeOf(base);
 
 			base.stepStatement();
 
 			// Stepped over a statement a rule sets after: its sets, as a run through it makes them.
-			if (from !== undefined && setHooks.has(from)) {
+			if (from !== undefined && hooksAt(from).length > 0) {
 				applySets(base, from);
 			}
 
@@ -1092,6 +1150,7 @@ function act(base: Vm, action: ForwardAction): void {
 
 async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): Promise<void> {
 	current = base;
+	evaluating = base; // (a program file a package requires is evaluated on the machine running)
 	const span = trace !== undefined ? workerLog.continueSpan(trace, "step", { "action": action }) : workerLog.span("step", { "action": action });
 
 	try {
@@ -1143,12 +1202,11 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 		history.push(base);
 		index = history.length - 1;
 		// A "continue" that landed on a capability line is a capability stop (the policy gated it); steps stay "step".
-		const location = base.location();
-		const stopLine = location !== null ? location.line + 1 : undefined;
+		const stop = placeOf(base);
 		// A step-out cut short by a breakpoint reports it as one, like a continue would.
-		const reason = action === "continue" || (action === "stepOut" && base.atBreakpoint()) ? (stopLine !== undefined && capabilityLines.has(stopLine) ? "capability" : "breakpoint") : "step";
+		const reason = action === "continue" || (action === "stepOut" && base.atBreakpoint()) ? (stop !== undefined && capabilityAt(stop) ? "capability" : "breakpoint") : "step";
 
-		emitStopped(base, reason, false, reason === "capability" && stopLine !== undefined ? askAt(base, stopLine) : undefined);
+		emitStopped(base, reason, false, reason === "capability" && stop !== undefined ? askAt(base, stop) : undefined);
 	} finally {
 		span.end();
 	}
@@ -1301,12 +1359,18 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	programPath = message.program ?? message.fileName;
 	setHooks = new Map();
 
+	// Each rule's hook, in the file it's placed in: the entry's, or another of the program's (the adapter places both).
 	for (const hook of message.hooks ?? []) {
-		setHooks.set(hook.line, [...setHooks.get(hook.line) ?? [], hook]);
+		const file = hook.file ?? message.fileName;
+		const inFile = setHooks.get(file) ?? new Map<number, SetHook[]>();
+
+		inFile.set(hook.line, [...inFile.get(hook.line) ?? [], hook]);
+		setHooks.set(file, inFile);
 	}
 	// What it reads from outside, first: process.argv (the margin mocks it there).
 	reportArgv(loaded.sourceFile, message.args ?? []);
-	capabilityLines = new Set(policy !== undefined ? capabilityBreakLines(loaded.sourceFile, policy) : []);
+	programFiles = new Map([[loaded.sourceFile.fileName, loaded.sourceFile]]);
+	capabilityLines = new Map([[loaded.sourceFile.fileName, new Set(policy !== undefined ? capabilityBreakLines(loaded.sourceFile, policy) : [])]]);
 	arm(loaded.vm);
 
 	history = [];
@@ -1409,9 +1473,11 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 
 		case "decide":
 			// After "Allow always": the policy now in effect, and the capability lines it still gates.
-			if (message.policy !== undefined && sourceFile !== undefined) {
-				policy = message.policy;
-				capabilityLines = new Set(capabilityBreakLines(sourceFile, policy));
+			if (message.policy !== undefined) {
+				const now = message.policy;
+
+				policy = now;
+				capabilityLines = new Map([...programFiles].map(([name, file]) => [name, new Set(capabilityBreakLines(file, now))]));
 
 				for (const vm of history) {
 					arm(vm);

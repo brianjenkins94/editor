@@ -529,29 +529,48 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	}
 
 	/** Where the rules placed in this program's code are now (RULES.md: *at*, a span reference): each place found again
-	 *  in the text that runs — through edits, as an authored annotation is — by the editor's BABLR. One that's lost, or
-	 *  only uncertainly found, isn't applied (the Rules view says so). */
+	 *  in the text that runs — through edits, as an authored annotation is — by the editor's BABLR. In the entry, and in
+	 *  any other file a rule is placed in (it hooks there when the program loads that file — MODULES.md), read as the
+	 *  run reads it. One that's lost, or only uncertainly found, isn't applied (the Rules view says so). */
 	private async placeRules(): Promise<SetHook[]> {
 		// A span reference names its file workspace-relative.
-		const file = vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false);
-		const placed = this.policy.rules.flatMap((rule) => placesOf(rule).filter((place) => (place as { "file"?: unknown } | null)?.file === file).map((place) => ({ "rule": rule, "place": place })));
+		const entry = vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false);
+		const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+		const byFile = new Map<string, { "rule": Rule; "place": unknown }[]>();
 
-		if (placed.length === 0) {
-			return [];
+		for (const rule of this.policy.rules) {
+			for (const place of placesOf(rule)) {
+				const file = (place as { "file"?: unknown } | null)?.file;
+
+				if (typeof file === "string" && (file === entry || root !== undefined)) {
+					byFile.set(file, [...byFile.get(file) ?? [], { "rule": rule, "place": place }]);
+				}
+			}
 		}
 
-		const found = await Promise.resolve(vscode.commands.executeCommand<({ "status"?: string; "candidate"?: { "start"?: number; "file"?: string } } | undefined)[] | undefined>("editor.annotations.resolve", this.source, file, placed.map(({ place }) => place))).catch(() => undefined);
+		const hooks = await Promise.all([...byFile].map(async ([file, placed]) => {
+			const absolute = file === entry ? this.program : vscode.Uri.joinPath(root!, file).path;
+			const source = file === entry ? this.source : await Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(absolute))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
 
-		return placed.flatMap(({ rule, place }, index) => {
-			const resolution = found?.[index];
-			const start = resolution?.candidate?.start;
-
-			if (start === undefined || resolution?.status === "orphaned" || resolution?.status === "uncertain" || (resolution?.candidate?.file !== undefined && resolution.candidate.file !== file)) {
+			if (source === undefined) {
 				return [];
 			}
 
-			return [{ "line": this.source.slice(0, start).split("\n").length, "place": place, "rule": rule }];
-		});
+			const found = await Promise.resolve(vscode.commands.executeCommand<({ "status"?: string; "candidate"?: { "start"?: number; "file"?: string } } | undefined)[] | undefined>("editor.annotations.resolve", source, file, placed.map(({ place }) => place))).catch(() => undefined);
+
+			return placed.flatMap(({ rule, place }, index): SetHook[] => {
+				const resolution = found?.[index];
+				const start = resolution?.candidate?.start;
+
+				if (start === undefined || resolution?.status === "orphaned" || resolution?.status === "uncertain" || (resolution?.candidate?.file !== undefined && resolution.candidate.file !== file)) {
+					return [];
+				}
+
+				return [{ "line": source.slice(0, start).split("\n").length, "place": place, "rule": rule, ...file === entry ? {} : { "file": absolute } }];
+			});
+		}));
+
+		return hooks.flat();
 	}
 
 	private maybeStart(): void {
@@ -668,6 +687,11 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 		const sources = new Map([[this.program, this.source], ...this.told]);
 
+		// A question asked in a file it had no values from (its margin's to clear).
+		if (this.ask?.file !== undefined && !sources.has(this.ask.file)) {
+			sources.set(this.ask.file, this.ask.source ?? "");
+		}
+
 		for (const [file, source] of sources) {
 			podHub.publish("values.ended", { "session": this.id, "file": file, "source": source, ...end === undefined || file !== endFile ? {} : { "end": end } });
 		}
@@ -683,8 +707,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 		// Resumed, however (a choice, VS Code's toolbar), the question's been answered.
 		if (this.ask !== undefined) {
+			podHub.publish("capability.ask", { "session": this.id, "file": this.ask.file ?? this.program });
 			this.ask = undefined;
-			podHub.publish("capability.ask", { "session": this.id, "file": this.program });
 		}
 
 		this.state = "running";
@@ -708,9 +732,11 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.stopReason = message.reason;
 				this.ask = message.ask;
 
-				// A capability stop asks on its line, in the notes margin (core: live-values.ts).
+				// A capability stop asks on its line, in the notes margin (core: live-values.ts) — of the file it's in.
 				if (message.ask !== undefined) {
-					podHub.publish("capability.ask", { "session": this.id, "file": this.program, "source": this.source, "ask": message.ask });
+					const { file, source, ...ask } = message.ask;
+
+					podHub.publish("capability.ask", { "session": this.id, "file": file ?? this.program, "source": file === undefined ? this.source : source, "ask": ask });
 				}
 
 				this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });

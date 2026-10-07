@@ -100,7 +100,7 @@ calls into it isn't the program's to order. A package's callback into a program 
      `setBreakpoints` by file); a frame names its file, function and line text; coverage and observed sites per file
      (the gutter draws each). The workspace buffer comes in the launch (the pod holds it), not by a call: every debug
      worker's hub is `debug-worker`, so a reply to one reached them all. Loading almostnode costs a launch ~30 ms.
-     Capability stops, rules and the argv mock stay the entry's.
+     Capability stops and rules then came per file too (below).
    - *Done (3b):* each file's values, cards and run log in its own margin (a live record per file; its text sent with
      its first values); a run's end and a crash marked in the file they're in; evidence per file — each file that ran
      folded into its own `.silo/evidence` file and listed in the run's envelope.
@@ -118,4 +118,7 @@ calls into it isn't the program's to order. A package's callback into a program 
   them.
 - A file's run log shows its own steps (tsval's profile counts a step to the top-level statement of the file it's in),
   so a call's line in the importer doesn't include the work done in the file it calls into.
-- Capability stops, rules (and their set hooks) and the argv mock are still the entry's.
+- Capability stops and placed rules are per file: a file's gated calls are armed as it loads (the loader's register),
+  its question asked in its own margin; a rule placed in it (its *program is* that file, as its margin makes it) sets
+  when the program gets there, whichever file the run started from. `process.argv` is the program's, so its row and
+  its Mock stay on the entry.

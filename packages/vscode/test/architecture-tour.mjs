@@ -895,6 +895,66 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 });
 
 // Allow this run: a call in a loop asks once — every call like it is allowed until the run ends, and nothing is kept.
+// The program's other files are gated and hooked as its entry is (MODULES.md): a capability call in a file it imports
+// stops there and asks in that file's margin; a rule placed in it sets its variable when the program gets there.
+test("capability decisions and placed rules: in a file the program imports, as in its entry", async () => {
+	const workbench = session.workbench();
+	const write = (path, lines) => workbench.evaluate(([file, text]) => globalThis.__editor.api.workspace.fs.writeFile(globalThis.__editor.api.Uri.file(file), new TextEncoder().encode(text)), [path, lines.join("\n")]);
+
+	await write("/workspace/store.js", ["const { writeFileSync } = require(\"node:fs\");", "", "function save(name) {", "\twriteFileSync(\"/workspace/\" + name, \"kept\");", "\treturn name;", "}", "module.exports = { save };", ""]);
+	await write("/workspace/saving.js", ["const { save } = require(\"./store.js\");", "", "console.log(\"saved\", save(\"notes.txt\"));", ""]);
+	await write("/workspace/tally.js", ["function tally(items) {", "\tlet total = 0;", "", "\tfor (const item of items) {", "\t\ttotal += item;", "\t}", "", "\treturn total;", "}", "module.exports = { tally };", ""]);
+	await write("/workspace/tallied.js", ["const { tally } = require(\"./tally.js\");", "", "console.log(tally([1, 2, 3]));", ""]);
+
+	let rule;
+
+	try {
+		const stopped = await session.request("debug.start", { "program": "/workspace/saving.js", "breakpoints": [] }, 60_000);
+
+		assert.equal(stopped.reason, "capability", "stopped by the policy, in the imported file");
+		assert.equal(stopped.file, "/workspace/store.js");
+		assert.equal(stopped.line, 4);
+
+		// Its question, in that file's margin.
+		await workbench.evaluate(() => globalThis.__editor.api.window.showTextDocument(globalThis.__editor.api.Uri.file("/workspace/store.js")));
+		assert.equal(await eventually("the question in the imported file's margin", () => workbench.evaluate(() => document.querySelector(".live-values-ask .live-values-ask-what")?.textContent)), "writeFileSync '/workspace/notes.txt' fs:write");
+
+		const ended = await session.request(`debug.session.${stopped.session}.decide`, { "choice": "deny" }, 30_000);
+
+		assert.equal(ended.state, "terminated", "denied: the call fails, the run ends");
+
+		// A rule placed in tally.js — total starts at 100 — set when the program gets there.
+		const source = (await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file("/workspace/tally.js")).then((bytes) => new TextDecoder().decode(bytes))));
+		const statement = "let total = 0;";
+		const [place] = await workbench.evaluate(([text, start, end]) => globalThis.__editor.api.commands.executeCommand("editor.annotations.refer", text, "tally.js", [{ "start": start, "end": end }]), [source, source.indexOf(statement), source.indexOf(statement) + statement.length]);
+
+		rule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": "tally.js" }, { "target_id": "at", "operator_id": "is", "argument": place }] }, "then": [{ "action_id": "set", "target_id": "variables.total", "argument": 100 }] };
+		await session.request("rules.set", { "rule": rule }, 10_000);
+
+		const ruled = await session.request("debug.start", { "program": "/workspace/tallied.js", "breakpoints": [] }, 60_000);
+
+		assert.deepEqual(ruled.output, ["106"], "total set to 100 at its statement, in the imported file");
+	} finally {
+		for (const each of await session.request("debug.sessions", undefined, 10_000).catch(() => [])) {
+			await session.request(`debug.session.${each.session}.stop`, undefined, 30_000).catch(() => undefined);
+		}
+
+		if (rule !== undefined) {
+			await session.request("rules.set", { "previous": rule }, 10_000).catch(() => undefined);
+		}
+
+		await workbench.evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			for (const path of ["/workspace/store.js", "/workspace/saving.js", "/workspace/tally.js", "/workspace/tallied.js"]) {
+				await api.workspace.fs.delete(api.Uri.file(path)).then(() => undefined, () => undefined);
+			}
+
+			await api.commands.executeCommand("workbench.view.explorer");
+		});
+	}
+});
+
 test("capability decisions: Allow this run lets a loop's calls through, until the run ends", async () => {
 	const workbench = session.workbench();
 	const program = "/workspace/looped.js";
