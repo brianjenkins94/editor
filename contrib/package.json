@@ -71,7 +71,8 @@
     ]
   },
   "scripts": {
-    "build": "tsc --noEmit && esbuild src/extension.ts --bundle --format=cjs --platform=browser --external:vscode --outfile=dist/extension.js",
+    "build": "tsc --noEmit && vite build",
+    "dev": "node scripts/dev.mjs",
     "lint": "util-lint",
     "test": "echo \"no tests yet\""
   },
@@ -79,7 +80,7 @@
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@tsconfig/node-lts": "latest",
     "@types/vscode": "^1.100.0",
-    "esbuild": "^0.28.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^8.3.0"
   }
 }

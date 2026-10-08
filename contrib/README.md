@@ -14,15 +14,15 @@ uses is public VS Code API.
 Each push builds the extension and puts it into the editor's latest build (the tarball on the editor's site); a weekly
 run picks up the editor's changes.
 
-While working on it, skip the push: build, serve it from your machine — on `localhost` itself (the editor's extension
-host takes http only from `localhost` or `127.0.0.1`) —
+While working on it, skip the push:
 
 ```bash
-npm install && npm run build && npx http-server . -p 5190 --cors -c-1
+npm install && npm run dev
 ```
 
-and open any editor with `?extension=http://localhost:5190/` — yours, or
-`https://brianjenkins94.github.io/editor/?extension=http://localhost:5190/` — reloading after each build.
+It rebuilds the extension as you change it (Vite), serves it on this machine, and opens the editor with it loaded
+(`https://brianjenkins94.github.io/editor/?extension=http%3A%2F%2F127.0.0.1%3A5190%2F`). The editor reloads each time
+a rebuild lands. `PORT`, `EDITOR_URL` and `NO_OPEN=1` change where it's served, which editor opens, and whether one does.
 
 The extension makes its debugger the one Run starts (`run.debugger`, in its package.json's `configurationDefaults`);
 rename its `contrib` debug type, and change it there too.
