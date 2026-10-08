@@ -89,23 +89,6 @@ async function decide(call, tab) {
 	}
 }
 
-// Capability decision route (fs/exec, from almostnode). A worker's SYNCHRONOUS XHR blocks on this request while
-// we run the async decision and reply — the sync-XHR ⇄ SW trick that lets a synchronous shim (writeFileSync) await
-// an async popup with no SharedArrayBuffer. Body is the raw CapabilityCall; reply is `{ allow }`.
-async function handleCapabilityDecide(request) {
-	let call;
-
-	try {
-		call = await request.json();
-	} catch (error) {
-		swLog.error("capability decide route: unreadable call — denying", { "error": String(error) });
-	}
-
-	const allow = call !== undefined && await decide(call, new URL(request.url).searchParams.get("tab"));
-
-	return new Response(JSON.stringify({ "allow": allow }), { "headers": { "content-type": "application/json" } });
-}
-
 // The preview a request belongs to ({ tab, port }): the /__virtual__/<tab>/<port>/ document that made it (or is
 // being navigated to).
 async function previewClientOf(event) {
@@ -384,14 +367,6 @@ globalThis.addEventListener("fetch", (event) => {
 	const request = event.request;
 	const requestUrl = new URL(request.url);
 	const pathname = requestUrl.pathname;
-
-	// Capability decision route: a worker's blocking sync-XHR asks here (fs/exec gate). Matched by substring so it
-	// works under any base prefix, same as the virtual marker below.
-	if (pathname.indexOf("/__capability__/decide") !== -1) {
-		event.respondWith(handleCapabilityDecide(request));
-
-		return;
-	}
 
 	// Dev-server bridge: <base>/__virtual__/<tab>/<port>/…
 	const virtual = parseVirtual(pathname);

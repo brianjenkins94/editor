@@ -465,9 +465,6 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 	await eventually("no mark on the edited statement", async () => (await marks()) === 0 || undefined);
 });
 
-// A service — it keeps running (lifecycle.ts) — needs an event loop tsval doesn't have, so it runs on the script worker
-// (the real runtime): its own worker, so stopping it (Ctrl+C terminates that worker) leaves the dev servers' worker, and
-// the previews, running.
 // What went through a run's ?., ??, parameters, returns and branches (RUNTIME-EVIDENCE.md, the second slice): folded
 // into the same evidence file as its coverage, each site under the span that is exactly its node — and the values
 // themselves only on this machine, in .silo/local/samples/.

@@ -1,9 +1,9 @@
 /**
- * almostnode on the shared workspace, set up one way for both its hosts (MODULES.md, step 4): the script worker
- * (node-worker.ts, a run) and the debug worker (debug-worker.ts, a debug run). The same filesystem — the workspace's
- * zen-fs — the same deploy base, cwd and built-ins; a listening server answered the same way, the preview's taps put in
- * what it serves. What differs is passed in: the fs policy (a run's calls asked about, a debug run's packages refused
- * writes), where output goes, and — for a debug run — the evaluator of the program's own files and its stand-ins.
+ * almostnode on the shared workspace, as a run has it (MODULES.md, step 4): the debug worker's (debug-worker.ts) — the
+ * workspace's zen-fs, the deploy base, cwd and built-ins, the program's globals; a listening server answered one way,
+ * the preview's taps put in what it serves (the dev-server worker, node-worker.ts, answers its dev servers' requests
+ * with the same `answerServer` and taps). What's passed in: the fs policy, where output goes, the evaluator of the
+ * program's own files and its stand-ins.
  */
 import type { RuntimeOptions, VirtualFS } from "@brianjenkins94/almostnode";
 import { getServer, Runtime } from "@brianjenkins94/almostnode";

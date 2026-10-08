@@ -112,8 +112,7 @@ export const nodes: NodeSpec[] = [
 	{ "id": "workbench", "label": "Workbench", "container": "workbench", "hub": true, "detail": "hub · workbench-entry.tsx", "description": "The monaco-vscode-api boot: services, editors, the main side of every extension host, the git service, run targets.", "observedBy": "its hub reporter + the monaco probes + network probes" },
 	{ "id": "exthost:LocalProcess:0", "label": "Local extension host", "container": "workbench", "detail": "worker-pod", "description": "Extension host sharing the workbench realm: worker-pod, the bridge — core's vscode API is its.", "observedBy": "RPCProtocol logger on its ExtensionHostManager" },
 	{ "id": "pod", "label": "Pod", "container": "workbench", "hub": true, "detail": "hub · worker-pod extension", "description": "The worker-pod extension's hub (in the LocalProcess extension host): spawns the LSP and debug workers, serves capability.decide.", "observedBy": "its hub reporter" },
-	{ "id": "node", "label": "Dev-server worker", "container": "workers", "hub": true, "detail": "hub · almostnode, preview dev servers", "description": "Hosts the preview dev servers (almostnode's Vite) and answers virtual.request — a script's own server's port it hands to the scripts worker. Never terminated: stopping a script can't take a dev server with it.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)" },
-	{ "id": "node-scripts", "label": "Script worker", "container": "workers", "hub": true, "detail": "hub · almostnode, node scripts", "description": "Runs the terminal's node scripts (almostnode) when the debugger doesn't: started for the first, terminated to stop one.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)", "condition": "while a node script runs outside the debugger" },
+	{ "id": "node", "label": "Dev-server worker", "container": "workers", "hub": true, "detail": "hub · almostnode, preview dev servers", "description": "Hosts the preview dev servers (almostnode's Vite) and answers virtual.request — a debug run's own server's port it hands to that run (virtual.debug.<port>). Never terminated: stopping a run can't take a dev server with it.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)" },
 	{ "id": "debug-worker", "label": "Debug worker", "container": "podWorkers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the pod's debug adapter: control and events over the hub on its session's subjects.", "observedBy": "its hub reporter + the Worker probe", "condition": "while debugging" },
 	{ "id": "worker:server-host", "label": "LSP server host", "container": "podWorkers", "detail": "cspell (vscode-languageclient)", "description": "cspell language server, spawned by the pod — JSON-RPC over postMessage plus a ws-control port for the shared filesystem.", "observedBy": "the Worker probe" },
 	{ "id": "bablr", "label": "BABLR worker", "container": "workers", "hub": true, "detail": "hub · the editor's BABLR", "description": "The editor's BABLR, off the UI thread: classifies git changes as cosmetic or semantic and groups edit bursts (the git SCM and the review panel), and finds the span ids runtime evidence keys on.", "observedBy": "its hub reporter + the Worker probe", "condition": "when git classifies a change" },
@@ -144,7 +143,6 @@ export const hubLinks: [string, string][] = [
 	["root", "debug-mcp"],
 	["workbench", "pod"],
 	["workbench", "node"],
-	["workbench", "node-scripts"],
 	["workbench", "bablr"],
 	["node", "provoke"],
 	["pod", "debug-worker"]
@@ -223,17 +221,14 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "preview.profiled", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "virtual.request.*", "from": ["sw"], "to": ["root"] },
 	{ "pattern": "virtual.request", "from": ["root", "workbench"], "to": ["node"] },
-	{ "pattern": "node.script.request", "from": ["node"], "to": ["node-scripts"] },
 	// ── the workspace ──
-	{ "pattern": "workspace.changed", "from": ["workbench", "node", "node-scripts"], "to": ["workbench", "node", "node-scripts"] },
-	{ "pattern": "workspace.buffer", "from": ["node", "node-scripts"], "to": ["workbench"] },
+	{ "pattern": "workspace.changed", "from": ["workbench", "node"], "to": ["workbench", "node"] },
+	{ "pattern": "workspace.buffer", "from": ["node"], "to": ["workbench"] },
 	// ── running node ──
-	{ "pattern": "node.start", "from": ["workbench"], "to": ["node-scripts", "pod"] },
-	{ "pattern": "node.ready", "from": ["node-scripts"], "to": ["workbench"] },
-	{ "pattern": "node.out.*", "from": ["node-scripts", "pod"], "to": ["workbench"] },
-	{ "pattern": "node.exit.*", "from": ["node-scripts", "pod", "workbench"], "to": ["workbench", "pod"] },
-	{ "pattern": "node.stdin.*", "from": ["workbench"], "to": ["node-scripts", "pod"] },
-	{ "pattern": "node.listening.*", "from": ["node-scripts", "pod"], "to": ["workbench"] },
+	{ "pattern": "node.out.*", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "node.exit.*", "from": ["pod", "workbench"], "to": ["workbench", "pod"] },
+	{ "pattern": "node.stdin.*", "from": ["workbench"], "to": ["pod"] },
+	{ "pattern": "node.listening.*", "from": ["pod"], "to": ["workbench"] },
 	{ "pattern": "virtual.debug.*", "from": ["node"], "to": ["debug-worker"] },
 	{ "pattern": "provoke.round", "from": ["node"], "to": ["provoke"] },
 	// ── debugging ──
@@ -269,7 +264,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "capability.decide.*", "from": ["sw"], "to": ["root"] },
 	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"] },
 	{ "pattern": "capability.record.*", "from": ["sw"], "to": ["root"] },
-	{ "pattern": "capability.record", "from": ["root", "node-scripts"], "to": ["pod"] },
+	{ "pattern": "capability.record", "from": ["root"], "to": ["pod"] },
 	{ "pattern": "capability.recorded", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"] },
 	// ── workers ──
@@ -304,17 +299,14 @@ export const channels: ChannelSpec[] = [
 	{ "a": "preview:*", "b": "sw", "protocol": "HTTP", "transport": "fetch, intercepted by the service worker", "reason": "platform", "description": "Everything under /__virtual__/<tab>/<port>/ (answered by the dev server over the hub), plus the app's own requests (CDN imports pass through; data fetches are capability-gated, failing closed). Same origin and unsandboxed, by necessity — see ARCHITECTURE.md." },
 	{ "a": "node", "b": "sw", "protocol": "HTTP", "transport": "fetch", "reason": "platform", "description": "The dev servers' own requests (their dependencies), like every controlled context's." },
 	{ "a": "debug-worker", "b": "sw", "protocol": "HTTP", "transport": "fetch", "reason": "platform", "description": "A run's fetches the policy allows (RUNNING.md, step 2: decided in the margin, made for real), like every controlled context's requests." },
-	{ "a": "node-scripts", "b": "sw", "protocol": "capability decision, HTTP", "transport": "synchronous XMLHttpRequest (POST /__capability__/decide), fetch", "reason": "synchronous", "description": "Every write/delete a node script makes asks the service worker, which asks the pod (capability.decide); and the worker's own requests, like every controlled context's." },
 	{ "a": "node", "b": "vite:*", "protocol": "in-realm calls", "transport": "function calls", "reason": "in-realm", "description": "almostnode's in-browser Vite dev server: requests from virtual.request, file changes, HMR updates back." },
-	{ "a": "node-scripts", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "reason": "in-realm", "description": "A node script's own http.createServer, reached from a preview at /__virtual__/<tab>/<port>/ like a dev server (the dev-server worker hands such a port's requests over)." },
-	{ "a": "debug-worker", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "reason": "in-realm", "description": "A debug run's own http.createServer, reached from a preview like a script's (the dev-server worker hands its port's requests over: virtual.debug.<port>)." },
+	{ "a": "debug-worker", "b": "server:*", "protocol": "in-realm calls", "transport": "function calls", "reason": "in-realm", "description": "A debug run's own http.createServer, reached from a preview (the dev-server worker hands its port's requests over: virtual.debug.<port>)." },
 	{ "a": "workbench", "b": "channel:vscode-web-state-db-global", "protocol": "VS Code storage sync", "transport": "BroadcastChannel", "reason": "platform", "description": "VS Code's global web storage (IndexedDB-backed) telling the editor's other tabs what changed." },
 	{ "a": "workbench", "b": "channel:vscode-web-state-db-global-shared", "protocol": "VS Code storage sync", "transport": "BroadcastChannel", "reason": "platform", "description": "VS Code's shared global web storage, the same across tabs." },
 	{ "a": "workbench", "b": "channel:vscode.indexedDB.vscode-userdata.changes", "protocol": "VS Code user-data sync", "transport": "BroadcastChannel", "reason": "platform", "description": "The user-data filesystem (settings, keybindings, snippets) announcing its changes to the editor's other tabs." },
 	// the workspace filesystem (shared memory)
 	{ "a": "workbench", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (owner)", "reason": "shared memory", "description": "The vscode provider (editor, tsserver, ATA, terminal, extensions) and direct callers (isomorphic-git, the terminal's path walk). Back the other way: provider writes announced as file-change events (5ms batches) — writes from other realms, and direct writes, are NOT announced." },
 	{ "a": "node", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "almostnode: the preview dev servers' module loading and transforms." },
-	{ "a": "node-scripts", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "almostnode: node scripts' module loading and fs." },
 	{ "a": "worker:server-host", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "Mounted by the cspell server (documents arrive over LSP, so it's mostly idle)." },
 	{ "a": "provoke", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "A cold transform round reads the workspace." },
 	{ "a": "zenfs", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (workspace-fs, silo-local)", "reason": "storage", "description": "Provider writes, flushed every 500ms and restored at boot (workspace-fs); and silo's local/, a mount of its own store (silo-local)." }
@@ -818,8 +810,7 @@ export function identifyWorker(url: string): { "id": string; "label"?: string; "
 
 	switch (file) {
 		case "node-worker.js":
-			// Two of it: the scripts worker, and the dev-server worker (node-runner.ts names its role in its URL).
-			return { "id": /[?&]role=scripts\b/u.test(url) ? "node-scripts" : "node", "container": "workers", "owner": "workbench" };
+			return { "id": "node", "container": "workers", "owner": "workbench" };
 		case "debug-worker.js":
 			return { "id": "debug-worker", "container": "podWorkers", "owner": "pod" };
 		case "server-host.js":
@@ -862,8 +853,8 @@ export function classifyUrl(url: URL): string {
 		return "sw";
 	}
 
-	// Routes only the service worker answers (a capability decision, a preview's dev-server request).
-	if (url.origin === globalThis.location?.origin && (url.pathname.includes("/__capability__/") || url.pathname.includes("/__virtual__/"))) {
+	// A route only the service worker answers (a preview's dev-server request).
+	if (url.origin === globalThis.location?.origin && url.pathname.includes("/__virtual__/")) {
 		return "sw";
 	}
 
@@ -958,8 +949,8 @@ export function tourDiagram(snapshot: TourSnapshot): string {
 	// A database named for its workspace (`vscode-web-state-db-<hash>`) is one of a kind too.
 	const stores = new Map(discoveredStores(snapshot).map((store) => [store.store.replace(/-[0-9a-f]{8}$/u, "-*"), store]));
 	// A hub's components, one of a kind (the previews' are alike), past the observability plane every hub has (`$sys`) —
-	// the hubs still running when the tour ends: one that came and went (the script worker) reports what it served, or
-	// not, as its environment does.
+	// the hubs still running when the tour ends: one that came and went reports what it served, or not, as its
+	// environment does.
 	const components = new Map<string, string>();
 
 	for (const [hub, topology] of Object.entries(snapshot.topology).filter(([candidate]) => seen.get(candidate)?.state === "alive")) {

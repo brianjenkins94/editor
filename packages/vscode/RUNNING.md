@@ -131,7 +131,7 @@ Known and suspected:
 ## What goes
 
 The source regex (`lifecycle.ts`'s service/task guess deciding the runtime — it may stay as a label); the script worker
-as a way to run a program (it keeps the dev server); the *production* debugger in VS Code's picker and launch.json;
+(gone, 2026-10-07: the dev-server worker stays); the *production* debugger in VS Code's picker and launch.json;
 the production adapter (a run is a tsval session); React mode; the left rail's placeholder; the swallowed errors (a run
 that can't start says why). And the two run ledgers become one: every run in `runs.jsonl`, with its evidence.
 
@@ -179,8 +179,7 @@ that can't start says why). And the two run ledgers become one: every run in `ru
    `process.cwd()` (a relative path in its fs calls that directory's) and its exports its `process.env`; its output is
    printed in the terminal (the Debug Console mirrors it, but for the script's completion value), and a line typed there
    is its stdin, Ctrl-D the input's end. Focus stays in the terminal: a terminal's run opens neither the Run and Debug
-   view nor the Debug Console. The script worker runs a program only when the debugger can't take it (the fallback) —
-   which retires its popups for runs (step 2's last part). The tour's diagram is now drawn from everything it saw all
+   view nor the Debug Console. (The script worker that once ran a program the debugger couldn't take is gone: step 7.) The tour's diagram is now drawn from everything it saw all
    session (a look every second), not its last look: each debug run's worker reports as `debug-worker`, and the last
    one's report replaced the others'.
 4. **Services and apps** (done). A run that listens opens its preview; `vite` and the dev server as runs; React
@@ -218,7 +217,8 @@ that can't start says why). And the two run ledgers become one: every run in `ru
 7. **Fail loudly, not fall back** (done). Something tsval can't run ends the run where it was met: tsval notes the
    site of its own gap as it notes a throw's (`throwSite`), and the debug worker says *Can't run this yet — the
    debugger doesn't support …* in the run's output and marks the line, as a crash. No native fallback (*What can't run
-   this way*).
+   this way*): the terminal's `node` says the debugger couldn't take it and exits 1, and the script worker — the plain
+   runtime's runner — is removed, with its synchronous capability route in the service worker.
 
 ## Open
 

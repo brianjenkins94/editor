@@ -573,7 +573,7 @@ function maybeBoot(): void {
 				// backend's process factory (so every terminal is this one; no fake). `node` runs in a dedicated
 				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal.ts. One node runner
 				// (worker) is shared by every terminal.
-				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer, tab);
+				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer);
 
 				// A preview that ran slow was profiled: save it, source-mapped, for whoever reads profiles (profile-files.ts).
 				installProfileFiles(api as typeof import("vscode"), workbenchHub, nodeRunner.runs);

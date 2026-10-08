@@ -73,7 +73,8 @@ It starts the entry through almostnode with tsval as the evaluator, and deletes 
 moves to every debug run, so its load is measured and kept off cold start). What the margin, coverage, the run log, live
 values and DAP show becomes per file: a stack frame names its source, and each file's margin shows its own values,
 coverage and cards. The script worker and the debug worker set the runtime up from one function — the same built-ins,
-the same filesystem, the same hooks — and differ only in the evaluator and the stand-ins.
+the same filesystem, the same hooks — and differ only in the evaluator and the stand-ins. (The script worker is gone
+since: every run is a debug run, RUNNING.md.)
 
 ## What stays
 

@@ -1,19 +1,10 @@
 /**
- * Main-thread side of the terminal's node runner: manages the node-worker (extensions/worker-pod/node-worker.ts),
- * serves it the shared workspace SharedArrayBuffer (`workspace.buffer`) so it runs on the SAME zen-fs, federates its hub into the
- * workbench hub (one link carries the run lifecycle AND the worker's observability spans up to the page
- * collector), and exposes a streaming, interactive `run` the terminal's `node` command drives. See terminal-node.ts.
- *
- * Lifecycle is pub/sub keyed by a per-run id (see node-worker.ts for the subjects): we subscribe this run's
- * output + exit, publish `node.start`, stream each chunk to the terminal as it arrives, and resolve on exit —
- * with no timeout, so a long-lived server streams until it's stopped. Interactive stdin rides `node.stdin.<id>`.
- *
- * KILL: a synchronous script body blocks the worker, so an in-band "stop" can't be read — we `terminate()` the
- * worker and respawn lazily on the next run. One process runs at a time (the terminal's foreground), so a single
- * reusable worker is enough — for scripts. The preview dev servers run in a second worker (the servers worker) that's
- * never terminated, so stopping a script can't take a dev server, and its preview, down with it. A fresh scripts
- * worker announces `node.ready` once subscribed, so the first `node.start` after a (re)spawn can't out-race the
- * worker's interest and be dropped by the router.
+ * Main-thread side of running programs and previews: every run is a debug run (RUNNING.md) — `debug` launches one under
+ * the tsval debug adapter (the ext host), its output, listening and exit on `node.out/listening/exit.<runId>`, its
+ * stdin `node.stdin.<runId>` — and the dev-server worker (extensions/worker-pod/node-worker.ts) hosts the preview dev
+ * servers. That worker is started once and never stopped, so stopping a run never takes a dev server (and its preview)
+ * down with it; it gets the shared workspace SharedArrayBuffer (`workspace.buffer`) so it runs on the SAME zen-fs, and
+ * its hub is federated into the workbench hub (its spans reach the page collector).
  */
 import type { Hub } from "@brianjenkins94/hub";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
@@ -23,7 +14,7 @@ import { createRunRegistry } from "./runs";
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
 export type NodeOutput = (stream: "out" | "err", data: string) => void;
 export interface NodeRunHooks {
-	/** The run's id in the registry (runs.ts), carried by `node.start` / `debug.launch`; a fresh one if it has none. */
+	/** The run's id in the registry (runs.ts), carried by `debug.launch`; a fresh one if it has none. */
 	"runId"?: string;
 	"onOutput": NodeOutput;
 	"signal"?: AbortSignal;
@@ -37,9 +28,7 @@ export interface VirtualResponse { "status": number; "statusText": string; "head
 export interface NodeRunner {
 	/** What's running — every terminal's runs, in one registry (runs.ts). */
 	"runs": RunRegistry;
-	/** Run `file` (already resolved against cwd) to completion, streaming output; resolves with its exit code. */
-	"run": (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks) => Promise<{ "exitCode": number }>;
-	/** Auto-attach: try to launch `file` under the tsval DEBUG adapter (breakpoints, step-back, capability stops).
+	/** Launch `file` under the tsval DEBUG adapter (breakpoints, step-back, capability stops).
 	 *  Resolves `{ attached: true, exitCode }` when the debug session ends, or `{ attached: false }` when the ext
 	 *  host declined (debugger unavailable) — the caller says so and fails (no fallback). Signals the ext host over the
 	 *  hub (`debug.launch`); Ctrl-C sends `debug.stop`. */
@@ -82,122 +71,18 @@ export interface NodeRunner {
 	"endProductionSession": (id: string) => void;
 }
 
-/** Spawn/manage the node worker, wire it into `hub`, and return the streaming runner the terminal drives. */
-/** `tab` (see main.tsx) is passed to the worker, which names it when it asks the shared service worker for a
- *  capability decision, so this tab's pod answers. */
-export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, tab?: string): NodeRunner {
-	let worker: Worker | undefined;
-	let unlink: (() => void) | undefined;
+/** Start the dev-server worker, wire it into `hub`, and return the runner the terminal and the buttons drive. */
+export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer): NodeRunner {
 	let currentRunId: string | undefined;
-	// Resolves once the freshly-spawned worker has announced it is subscribed (`node.ready`).
-	let ready: Promise<void> | undefined;
-	let resolveReady: (() => void) | undefined;
-
-	hub.subscribe("node.ready", () => { resolveReady?.(); }); // kept for the runner's life (survives respawns)
 	// The worker asks for the shared workspace SAB over the hub (a respawned worker asks again) and mounts the SAME
 	// zen-fs at /workspace. Null without cross-origin isolation — it then runs on its own root.
 	serve(hub, "workspace.buffer", () => workspaceBuffer ?? null);
 	const rpc = createRpcClient(hub); // for request/reply calls into the worker (e.g. the preview bridge relay)
-	// Two node workers: the scripts worker (`worker`, below) runs `node` scripts and is terminated to stop one; the
-	// servers worker hosts the preview dev servers and answers their requests — started once, never terminated, so
-	// stopping a script never takes a dev server (and its preview) with it.
-	const workerUrl = (role: "scripts" | "servers"): URL => new URL("./lsp/node-worker.js?role=" + role + (tab === undefined ? "" : "&tab=" + tab), location.href);
+	// The dev-server worker: the preview dev servers, answering their requests — started once, never terminated.
+	hub.link(portTransport(new Worker(new URL("./lsp/node-worker.js", location.href), { "type": "module" })));
 
-	hub.link(portTransport(new Worker(workerUrl("servers"), { "type": "module" })));
-
-	const ensureWorker = (): void => {
-		if (worker !== undefined) {
-			return;
-		}
-
-		// Resolve on the worker's `node.ready`, or after a fallback delay so a missed handshake never hangs a run
-		// (by then the worker is certainly up and interest has propagated).
-		ready = new Promise((resolve) => {
-			resolveReady = resolve;
-			setTimeout(resolve, 1500);
-		});
-		worker = new Worker(workerUrl("scripts"), { "type": "module" });
-
-		// Federate the worker's hub into the workbench hub — run lifecycle (start/out/exit/stdin) and its spans
-		// ride the one link.
-		unlink = hub.link(portTransport(worker));
-	};
-
-	const killWorker = (): void => {
-		worker?.terminate();
-		unlink?.();
-		worker = undefined;
-		unlink = undefined;
-		ready = undefined;
-	};
-
-	const startRun = (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks): Promise<{ "exitCode": number }> => new Promise((resolve) => {
-		const runId = hooks.runId ?? crypto.randomUUID();
-
-		currentRunId = runId;
-		let settled = false;
-
-		const offOutput = hub.subscribe(`node.out.${runId}`, (data) => {
-			const message = data as { "stream": "out" | "err"; "data": string };
-
-			hooks.onOutput(message.stream, message.data);
-		});
-		const offListening = hub.subscribe(`node.listening.${runId}`, (data) => {
-			const port = (data as { "port"?: unknown } | null)?.port;
-
-			if (typeof port === "number") {
-				hooks.onListening?.(port);
-			}
-		});
-
-		const finish = (exitCode: number): void => {
-			if (settled) {
-				return;
-			}
-
-			settled = true;
-			offOutput();
-			offListening();
-			offExit();
-
-			if (currentRunId === runId) {
-				currentRunId = undefined;
-			}
-
-			hooks.signal?.removeEventListener("abort", onAbort);
-			resolve({ "exitCode": exitCode });
-		};
-
-		const offExit = hub.subscribe(`node.exit.${runId}`, (data) => {
-			finish((data as { "exitCode"?: number }).exitCode ?? 0);
-		});
-
-		// Ctrl-C: the worker may be blocked in a synchronous body, so terminate it (and drop the current run);
-		// the next run lazily respawns. 130 = terminated by SIGINT. Publish the exit OURSELVES first (the killed
-		// worker can't) so the run-grain ledger still records the aborted run + releases its scope bucket — this
-		// reaches the pod via the uplink, which killWorker doesn't tear down, and our own offExit finishes the run.
-		const onAbort = (): void => {
-			hub.publish(`node.exit.${runId}`, { "exitCode": 130, "aborted": true });
-			killWorker();
-			finish(130);
-		};
-
-		if (hooks.signal !== undefined) {
-			if (hooks.signal.aborted) {
-				onAbort();
-
-				return;
-			}
-
-			hooks.signal.addEventListener("abort", onAbort, { "once": true });
-		}
-
-		hub.publish("node.start", { "runId": runId, "file": file, "cwd": cwd, "env": env });
-	});
-
-	// Auto-attach: launch under the tsval debug adapter (ext host) instead of the node worker. We reuse the SAME
-	// `node.out/exit.<runId>` channels — the adapter (or its terminate) relays onto them — so the terminal drives a
-	// debug run exactly like a plain one. No node worker needed; the adapter spawns its own debug worker.
+	// A run: launched under the tsval debug adapter (ext host), on `node.out/exit.<runId>` — the adapter (or its
+	// terminate) relays onto them. The adapter spawns its own debug worker.
 	const startDebug = (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks & { "args"?: string[] }): Promise<{ "attached": boolean; "exitCode": number }> => new Promise((resolve) => {
 		const runId = hooks.runId ?? crypto.randomUUID();
 
@@ -312,13 +197,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 
 	return {
 		"runs": runs,
-		"run": async (file, cwd, env, hooks) => {
-			ensureWorker();
-			await ready; // don't publish `node.start` until the worker has announced its subscription
-
-			return startRun(file, cwd, env, hooks);
-		},
-		"debug": (file, cwd, env, hooks) => startDebug(file, cwd, env, hooks), // runs via the debug adapter (ext host), not the node worker
+		"debug": (file, cwd, env, hooks) => startDebug(file, cwd, env, hooks),
 		"sendStdin": (data) => {
 			if (currentRunId !== undefined) {
 				hub.publish(`node.stdin.${currentRunId}`, { "data": data });
@@ -330,8 +209,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 			}
 		},
 		"isRunning": () => currentRunId !== undefined,
-		// The servers worker answers these (it's started above, so it only has to finish subscribing); the scripts worker
-		// starts only when a script runs.
+		// The dev-server worker answers these (it's started above, so it only has to finish subscribing).
 		"virtualRequest": async (port, method, url, headers, body) => rpc.request("virtual.request", { "port": port, "method": method, "url": url, "headers": headers, "body": body }, { "timeoutMs": 30000, "waitForResponderMs": 10_000 }) as Promise<VirtualResponse>,
 		"startPreview": async (port, root) => {
 			await rpc.request("preview.start", { "port": port, "root": root }, { "timeoutMs": 30000, "waitForResponderMs": 10_000 });

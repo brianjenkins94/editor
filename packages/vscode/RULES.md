@@ -115,12 +115,11 @@ rule*) — the same two buttons wherever the editor opens.
   fix the save makes is a step of its own. The shared contract's rules are kept placed too: the one write silo makes to
   `policy.json` (silo-store's movePlace) — not a decision but a re-anchoring, committed with the code change that moved
   the code. Moving a place keeps the rule's `added`.
-- **A node service's reads are recorded** (2026-10-06), as a preview's fetches are: what a script on the script worker
-  read of the workspace (text, outside node_modules, 64 KB at most, again only when it changed), by the path as the
-  script wrote it — `fs:read` and that path, what the debugger's stand-in asks — so *Rule…* is prefilled with it and a
-  rule can give it to a debug run (almostnode's `afterFs`, node-worker.ts → `capability.record`). A task runs under the
-  debugger, where every such call is a stand-in, so only a service's reads are real. Commands aren't recorded: almostnode's
-  `child_process` is a stub — a service's `exec` never runs.
+- **A node service's reads are recorded** (2026-10-06), as a preview's fetches are: what a run read of the workspace
+  for real (an allowed `fs:read`), by the path as the program wrote it — `fs:read` and that path, what the debugger's
+  stand-in asks — so *Rule…* is prefilled with it and a rule can give it to a later run (the debug worker's gated call →
+  the adapter → `capability.record`; first built on the script worker, since removed). Commands aren't recorded:
+  almostnode's `child_process` is a stub — a run's `exec` never runs.
 
 ## Toward JSON Schema
 

@@ -449,7 +449,7 @@ flowchart LR
 | Pod | capability | `capability.decide()`, `capability.record()`, `capability.recorded()` |
 | Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.explore()`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.event`, `debug.session.*.pace()`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.stdin()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
 | Pod | git | `git.changed` |
-| Pod | node | `node.start`, `node.stdin.*` |
+| Pod | node | `node.stdin.*` |
 | Pod | pod | `pod.ready` |
 | Pod | production | `production.exit.*`, `production.launch`, `production.out.*` |
 | Pod | rules | `rules.given()`, `rules.list()`, `rules.placed()`, `rules.set()` |
@@ -478,7 +478,7 @@ flowchart LR
 | Workbench | evidence | `evidence.level()`, `evidence.observed`, `evidence.preview` |
 | Workbench | git | `git.classify()`, `git.commit()`, `git.discard()`, `git.file()`, `git.status()` |
 | Workbench | history | `history.chunks()`, `history.texts()` |
-| Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*`, `node.ready` |
+| Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*` |
 | Workbench | preview | `preview.close`, `preview.hmr.*`, `preview.profiled` |
 | Workbench | production | `production.stop.*` |
 | Workbench | rules | `rules.make()` |

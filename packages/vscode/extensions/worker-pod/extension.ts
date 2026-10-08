@@ -169,8 +169,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		return decideCapability(call);
 	}) });
 
-	// What a call returned when it ran for real — a preview's fetch, recorded by the service worker's net gate; a node
-	// script's read of a workspace file, by the script worker (node-worker.ts) — kept so
+	// What a call returned when it ran for real — a preview's fetch, recorded by the service worker's net gate — kept so
 	// a rule can give it back in the debugger instead of the call (RULES.md, slice 2); and asked for by the margin's
 	// Rule… at a capability stop, to prefill it.
 	context.subscriptions.push({ "dispose": serve(podHub, "capability.record", async (data) => {
@@ -294,14 +293,12 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		const name = info.name ?? "Production run";
 
 		// Stamp the preview port into the session config so the debug-toolbar mirror can tell the shell WHICH preview
-		// window this session drives (per-port toolbar routing). Undefined for a port-less node fallback.
+		// window this session drives (per-port toolbar routing).
 		// Without debugging (noDebug): a production run can't pause or step, so VS Code greys out Pause and the steps.
 		void vscode.debug.startDebugging(undefined, { "type": "production", "request": "launch", "name": name, "__prodId": id, "__port": info.port }, { "noDebug": true });
 
 		// Run-grain bracket for the PREVIEW only (a port-bound run): the SW tags that port's gated net calls with
-		// `id`, so they accumulate in silo-store's bucket; flush them as one `mode:"preview"` run record at exit. A
-		// port-less production session (the node fallback) is already recorded via its node.start bracket — don't
-		// double-record it here.
+		// `id`, so they accumulate in silo-store's bucket; flush them as one `mode:"preview"` run record at exit.
 		if (typeof info.port !== "number") {
 			return;
 		}
@@ -315,32 +312,6 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 			off();
 			previewRunByPort.delete(port);
 			flushRun(id, { "entry": name, "mode": "preview", "exit": 0, "target": target });
-		});
-	}) });
-
-	// RUN-GRAIN ledger: an almostnode run (node-worker path — the tsval-declined fallback + explicit runs, where
-	// REAL fs effects happen) publishes `node.start` {runId, file} then `node.exit.<runId>` {exitCode}. The fs shim
-	// threads the runId to `decide`, so silo-store accumulates the run's distinct scopes; here we flush ONE record
-	// to <user>.runs.jsonl at exit. tsval runs are inert (no node.start) so they produce no record — correct, they
-	// have no real effects. Guarded: a missing lifecycle event just means no record for that run, never a crash.
-	// A hard Ctrl-C terminates the worker before it can publish node.exit, so node-runner publishes a synthetic
-	// {exitCode:130, aborted:true} on abort — the run is still recorded (marked aborted) and its bucket released.
-	context.subscriptions.push({ "dispose": podHub.subscribe("node.start", (data) => {
-		const info = data as { "runId"?: string; "file"?: string };
-
-		if (typeof info.runId !== "string") {
-			return;
-		}
-
-		const runId = info.runId;
-		const entry = typeof info.file === "string" ? info.file : "";
-		const off = podHub.subscribe(`node.exit.${runId}`, (exitData) => {
-			off();
-
-			const info = exitData as { "exitCode"?: number; "aborted"?: boolean };
-
-			// `node <file>` target = the entry, repo-relative — so repeated runs of the same file aggregate.
-			flushRun(runId, { "entry": entry, "mode": "run", "exit": info.exitCode ?? 0, "aborted": info.aborted === true, "target": repoRelative(entry) });
 		});
 	}) });
 
