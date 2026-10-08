@@ -1,8 +1,9 @@
 /**
  * editor-contrib still plugs in: contrib/ — the starting point a third party's interpreter and renderer are built from,
- * kept in brianjenkins94/editor-contrib — loaded into a real editor session by URL (`?extension=`), its debugger what
- * Run starts (`run.debugger`), each of its sessions a run, and its values and coverage reaching the editor. A change to
- * the editor that breaks any of that fails here, before contrib/ goes to editor-contrib.
+ * kept in brianjenkins94/editor-contrib — loaded into a real editor session as editor-contrib's site loads it (the
+ * site's extensions.json lists it; here a route answers for it), its debugger what Run starts (its own default for
+ * `run.debugger`), each of its sessions a run, and its values and coverage reaching the editor. A change to the editor
+ * that breaks any of that fails here, before contrib/ goes to editor-contrib.
  *
  * Needs contrib/ built (its `build` script: dist/extension.js), as the workflow's workspace build does.
  */
@@ -38,7 +39,10 @@ before(async () => {
 		});
 	});
 	await new Promise((resolve) => { server.listen(PORT, resolve); });
-	session = await startSession({ "query": "?extension=" + encodeURIComponent(EXTENSION) });
+	session = await startSession({
+		// The site's own extensions, as editor-contrib's site lists its one.
+		"prepare": (context) => context.route("**/extensions.json", (route) => route.fulfill({ "json": [EXTENSION] }))
+	});
 });
 
 after(async () => {
@@ -74,13 +78,12 @@ test("Run starts editor-contrib's interpreter: a run, telling its values and cov
 		api.debug.onDidStartDebugSession((started) => { seen.sessions.push({ "type": started.type, "runId": started.configuration.__runId }); });
 		api.debug.onDidReceiveDebugSessionCustomEvent((event) => { seen.events.push({ "type": event.session.type, "event": event.event }); });
 		await api.workspace.fs.writeFile(uri, new TextEncoder().encode("const greeting = \"hello\";\nconsole.log(greeting);\n"));
-		await api.workspace.getConfiguration("run").update("debugger", "contrib", api.ConfigurationTarget.Global);
 		await api.commands.executeCommand("editor.debugFile", uri);
 	});
 
 	const seen = await eventually("its coverage", () => workbench.evaluate(() => (globalThis.__contrib.events.some((each) => each.event === "coverage") ? globalThis.__contrib : undefined)));
 
-	assert.deepEqual(seen.sessions.map((each) => each.type), ["contrib"], "Run started editor-contrib's debugger");
+	assert.deepEqual(seen.sessions.map((each) => each.type), ["contrib"], "Run started editor-contrib's debugger (its default for run.debugger)");
 	assert.deepEqual(seen.events.map((each) => each.event), ["values", "coverage"], "it told its values, then its coverage");
 	assert.equal(typeof seen.sessions[0].runId, "string", "its session is a run");
 

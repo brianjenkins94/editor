@@ -94,6 +94,9 @@ export async function startSession(options = {}) {
 		await context.routeWebSocket(/:7378/u, (route) => { route.close(); });
 	}
 
+	// (`prepare`: what a test sets up on the browser context before the page loads — a route answering for the site, say.)
+	await options.prepare?.(context);
+
 	const page = await context.newPage();
 
 	if (process.env.CI !== undefined) {
@@ -105,8 +108,7 @@ export async function startSession(options = {}) {
 		});
 	}
 
-	// (`query`: the editor's query string, e.g. `?extension=` — an extension from outside it.)
-	await page.goto(URL_UNDER_TEST + (options.query ?? ""));
+	await page.goto(URL_UNDER_TEST);
 
 	let snapshot;
 	// Every hub's subscriptions over the whole session (a snapshot's are that moment's): a context that came and went

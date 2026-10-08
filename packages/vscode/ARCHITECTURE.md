@@ -471,7 +471,7 @@ flowchart LR
 | Shell | dock | `dock.closeWindow`, `dock.openWindow()` |
 | Shell | git | `git.changed` |
 | Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready`, `preview.windows()` |
-| Workbench | annotations | `annotations.refer()`, `annotations.resolve()` |
+| Workbench | annotations | `annotations.refer()`, `annotations.resolve()`, `annotations.spans()` |
 | Workbench | capability | `capability.ask` |
 | Workbench | debug | `debug.declined.*` |
 | Workbench | dock | `dock.closeEditor()`, `dock.hostEditor()` |

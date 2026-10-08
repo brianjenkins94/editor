@@ -122,7 +122,9 @@ Known and suspected:
 
 What Run starts is a debug type: `run.debugger`, tsval by default. Another extension's debugger can be it — an
 interpreter built from editor-contrib's starting point (`contrib/`, kept in brianjenkins94/editor-contrib), loaded by
-URL (`?extension=`, contributed-extensions.ts). The editor's ▷ and live runs then start that; its sessions are runs like
+URL (contributed-extensions.ts): listed by the site's own `extensions.json` (editor-contrib's site is this editor's
+tarball, `editor.tgz` on its site, with the extension added), or a page's `?extension=` while it's developed. Its
+manifest's `configurationDefaults` makes it `run.debugger`. The editor's ▷ and live runs then start that; its sessions are runs like
 tsval's (worker-pod's contributed-debuggers.ts asks core for each one's id), and the custom events it sends — `values`,
 `coverage` — are the margin's and the evidence's, as tsval's are. Stepping, breakpoints and the Variables view are the
 Debug Adapter Protocol's. What stays tsval's: a terminal's `node` (it's Node's semantics), capability stops, replay and

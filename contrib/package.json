@@ -14,6 +14,9 @@
     "onCustomEditor:contrib.renderer"
   ],
   "contributes": {
+    "configurationDefaults": {
+      "run.debugger": "contrib"
+    },
     "debuggers": [
       {
         "type": "contrib",

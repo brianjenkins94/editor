@@ -1,7 +1,9 @@
 /**
  * Extensions from outside the editor — an interpreter or a code renderer built from editor-contrib's template
- * (contrib/README.md), served from its own site — loaded by URL: `?extension=<url>`, once per extension, the URL its
- * package.json is at or the folder it's in. Its code runs in the web worker extension host, with the access every
+ * (contrib/README.md) — loaded by URL: the URL its package.json is at or the folder it's in. Two lists name them:
+ * the site's own `extensions.json` beside its index.html, its URLs relative to the site (a site that's the editor with
+ * extensions of its own: editor-contrib's is the editor's tarball, its extension added), and the page's `?extension=`s
+ * (one served from anywhere, while it's developed). Its code runs in the web worker extension host, with the access every
  * extension there has. Its `browser` entry is all that loads: an extension bundles its code into that one file.
  *
  * The extension host's CSP takes its code from https, or http on `localhost:*` / `127.0.0.1:*` (one under
@@ -29,9 +31,25 @@ function folderOf(given: string): URL | undefined {
 	}
 }
 
-/** Load the extensions `?extension=` names; resolves once each one is in the editor (or failed to load, and said so). */
+/** The site's own extensions (`extensions.json` at its root), as URLs; none when it lists none. */
+async function siteExtensions(): Promise<string[]> {
+	// The site's root: the workbench is at <root>/__vscode__/host.html.
+	const root = new URL(location.pathname.slice(0, location.pathname.indexOf("/__vscode__/") + 1) || "/", location.href);
+
+	try {
+		const response = await fetch(new URL("extensions.json", root));
+		const listed = response.ok ? await response.json() as unknown : undefined;
+
+		return Array.isArray(listed) ? listed.filter((each): each is string => typeof each === "string").map((each) => new URL(each, root).href) : [];
+	} catch {
+		return []; // none, or not a list (a dev server answering with its index)
+	}
+}
+
+/** Load the site's extensions and the ones `?extension=` names; resolves once each one is in the editor (or failed to
+ *  load, and said so). */
 export async function loadContributedExtensions(vscode: typeof vscodeApi, log: { "error": (message: string, fields?: Record<string, unknown>) => void }): Promise<void> {
-	for (const given of new URLSearchParams(location.search).getAll("extension")) {
+	for (const given of new Set([...await siteExtensions(), ...new URLSearchParams(location.search).getAll("extension")])) {
 		const base = folderOf(given);
 
 		if (base === undefined) {

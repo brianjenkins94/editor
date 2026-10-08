@@ -42,7 +42,7 @@ export function installDebugBridge(getApi: () => Api): void {
 
 	const bridge = {
 		"ready": readyPromise,
-		/** Resolves once the extensions `?extension=` names are loaded (contributed-extensions.ts). */
+		/** Resolves once the extensions from outside the editor are loaded (contributed-extensions.ts). */
 		"contributed": contributedPromise,
 
 		/** The raw vscode extension API namespace, for anything not wrapped below. */
@@ -126,7 +126,7 @@ export function markBridgeReady(): void {
 	resolveReady();
 }
 
-/** Resolve `__editor.contributed`: the extensions `?extension=` names are loaded. */
+/** Resolve `__editor.contributed`: the extensions from outside the editor are loaded. */
 export function markContributedLoaded(): void {
 	resolveContributed();
 }

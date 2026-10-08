@@ -6,19 +6,26 @@ uses is public VS Code API.
 
 ## Try it
 
-1. Fork this repository, and set **Settings → Pages → Source** to **GitHub Actions**. Every push to `main` builds,
-   tests and publishes the extension to `https://<you>.github.io/editor-contrib/`.
-2. Open the editor with `?extension=https://<you>.github.io/editor-contrib/`.
-3. Set `"run.debugger": "contrib"` in the editor's settings, and press Run (▷) on a file.
+1. Fork this repository, and set **Settings → Pages → Source** to **GitHub Actions**.
+2. Change `src/` — TypeScript or plain JavaScript — and push to `main`.
+3. Open `https://<you>.github.io/editor-contrib/`. It's the editor with your extension in it: press Run (▷) on a file
+   and your interpreter runs it.
 
-While working on it, serve it from your machine instead — on `localhost` itself (the editor's extension host takes
-http only from `localhost` or `127.0.0.1`):
+Each push builds the extension and puts it into the editor's latest build (the tarball on the editor's site); a weekly
+run picks up the editor's changes.
+
+While working on it, skip the push: build, serve it from your machine — on `localhost` itself (the editor's extension
+host takes http only from `localhost` or `127.0.0.1`) —
 
 ```bash
 npm install && npm run build && npx http-server . -p 5190 --cors -c-1
 ```
 
-and open the editor with `?extension=http://localhost:5190/`.
+and open any editor with `?extension=http://localhost:5190/` — yours, or
+`https://brianjenkins94.github.io/editor/?extension=http://localhost:5190/` — reloading after each build.
+
+The extension makes its debugger the one Run starts (`run.debugger`, in its package.json's `configurationDefaults`);
+rename its `contrib` debug type, and change it there too.
 
 ## The interpreter — `src/interpreter.ts`
 

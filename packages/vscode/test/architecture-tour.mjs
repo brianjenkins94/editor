@@ -2560,7 +2560,7 @@ test("components: a realm's hub, told apart by who subscribed", async () => {
 	assert.ok(holding("annotations.resolve()") !== undefined, "core's BABLR, serving annotations");
 	assert.ok(holding("evidence.observed") !== undefined, "core's runtime evidence");
 	assert.notEqual(holding("annotations.resolve()"), holding("evidence.observed"), "two components, not one");
-	assert.deepEqual(holding("annotations.resolve()").subjects.filter((subject) => subject.startsWith("annotations.")), ["annotations.refer()", "annotations.resolve()"], "what one component serves stays together");
+	assert.deepEqual(holding("annotations.resolve()").subjects.filter((subject) => subject.startsWith("annotations.")), ["annotations.refer()", "annotations.resolve()", "annotations.spans()"], "what one component serves stays together");
 });
 
 // Drawn on the view: each hub's components a row in its box, and a hub link's messages a line to the component that

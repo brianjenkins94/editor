@@ -1,8 +1,9 @@
 {
   "name": "ci",
-  # Build and test on every push and pull request; on main, publish the extension to GitHub Pages — its package.json and
-  # dist/ — where the editor loads it from: https://<owner>.github.io/<repo>/ as `?extension=`. A fork needs nothing but
-  # Settings → Pages → Source: GitHub Actions.
+  # Build and test on every push and pull request; on main, publish to GitHub Pages the editor with this extension in it —
+  # the editor's own build (its site's editor.tgz), the extension added under extensions/contrib/ and listed in
+  # extensions.json — so https://<owner>.github.io/<repo>/ is the editor, Run starting this interpreter. Weekly too, to
+  # pick up the editor's changes. A fork needs nothing but Settings → Pages → Source: GitHub Actions.
   "on": {
     "push": {
       "branches": ["main"]
@@ -10,6 +11,9 @@
     "pull_request": {
       "branches": ["main"]
     },
+    "schedule": [
+      { "cron": "0 6 * * 1" }
+    ],
     "workflow_dispatch": null
   },
   "concurrency": {
@@ -29,7 +33,7 @@
         { "run": "npm run build" },
         { "run": "npm run lint" },
         { "run": "npm test" },
-        { "run": "mkdir -p _site && cp -R package.json dist _site/" },
+        { "run": "mkdir -p _site/extensions/contrib\ncurl --fail --silent --show-error --location https://brianjenkins94.github.io/editor/editor.tgz | tar --extract --gzip --directory _site\ncp -R package.json dist _site/extensions/contrib/\necho '[\"extensions/contrib/\"]' > _site/extensions.json" },
         { "uses": "actions/upload-pages-artifact@v3", "with": { "path": "_site" } }
       ],
       "timeout-minutes": 10

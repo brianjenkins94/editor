@@ -31,7 +31,9 @@
       # tarballs, each onto its own GitHub release series (one draft; bump its package.json.version to publish).
       "uses": "brianjenkins94/lib/.github/workflows/deploy.yml@main",
       "with": {
-        "run": "npx util-publish",
+        # Then the deployable editor itself, as a tarball on its own site (docs/editor.tgz, the package tarballs left
+        # out): what editor-contrib's site unpacks, its extension added, to be an editor of its own.
+        "run": "npx util-publish\ntar --create --gzip --file /tmp/editor.tgz --exclude='*.tgz' -C docs .\nmv /tmp/editor.tgz docs/editor.tgz",
         "workspace-packages": "packages/*,components/*,contrib",
         "release": "packages/*,components/*"
       },

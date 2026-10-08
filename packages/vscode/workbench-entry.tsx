@@ -705,8 +705,8 @@ function maybeBoot(): void {
 
 			notesExt.registerFileUrl("./extension.js", new URL(notesExtensionPath, location.href).href);
 
-			// And any from outside the editor, by URL (`?extension=`) — editor-contrib's interpreters and renderers
-			// (contributed-extensions.ts).
+			// And any from outside the editor, by URL — the site's own (`extensions.json`) and `?extension=`'s:
+			// editor-contrib's interpreters and renderers (contributed-extensions.ts).
 			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
 			bootSpan.info("extensions registered", { "extensions": ["worker-pod", "eslint", "capabilities", "insights", "running", "event-sheet", "type-queries", "notes"] });
