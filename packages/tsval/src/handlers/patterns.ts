@@ -30,8 +30,7 @@ export function bindIdentifier(scope: Scope, name: string, value: unknown, kind:
 		scope.declareVar(name);
 		scope.set(name, value);
 	} else {
-		scope.declareLexical(name, kind);
-		scope.initialize(name, value);
+		scope.bindings.set(name, { "value": value, "kind": kind, "initialized": true }); // (declareLexical + initialize, as one binding)
 	}
 }
 
@@ -45,6 +44,7 @@ export function bindIdentifier(scope: Scope, name: string, value: unknown, kind:
 export type PatOp =
 	| { "op": "eval"; "node": ts.Expression } // push a node frame; its value lands on temps on resume
 	| { "op": "arg"; "index": number } // a parameter's argument → temps.push (undefined when absent)
+	| { "op": "arg-bind"; "index": number; "name": string } // `arg` then `bind` (an identifier parameter without a default)
 	| { "op": "rest-args"; "from": number } // the remaining arguments as a guest array → temps.push
 	| { "op": "iter-open" } // temps.pop() → GetIterator → iters.push
 	| { "op": "iter-step" } // IteratorStep+IteratorValue → temps.push (undefined once done)
@@ -66,8 +66,18 @@ export type PatOp =
 
 export class PatternProgram {
 	public readonly ops: readonly PatOp[];
+	/** Which of a pattern frame's stacks the ops use: a frame is made only with those (a call binds its parameters
+	 *  through one, and most bind identifiers only — no stack at all). */
+	public readonly temps: boolean;
+	public readonly iters: boolean;
+	public readonly objs: boolean;
+	public readonly keys: boolean;
 	public constructor(ops: readonly PatOp[]) {
-		this.ops = ops; // (an explicit field: Node's strip-only TS has no parameter properties)
+		this.ops = ops; // (explicit fields: Node's strip-only TS has no parameter properties)
+		this.temps = ops.some((op) => op.op !== "arg-bind");
+		this.iters = ops.some((op) => op.op.startsWith("iter-"));
+		this.objs = ops.some((op) => op.op.startsWith("obj-"));
+		this.keys = ops.some((op) => op.op === "to-key");
 	}
 }
 
@@ -118,9 +128,13 @@ export function parameterProgram(node: ts.SignatureDeclaration): PatternProgram 
 				break;
 			}
 
-			ops.push({ "op": "arg", "index": index });
-			compileDefault(param.initializer, param.name, ops);
-			compileBinding(param.name, "param", ops);
+			if (param.initializer === undefined && isIdentifier(param.name)) {
+				ops.push({ "op": "arg-bind", "index": index, "name": param.name.text });
+			} else {
+				ops.push({ "op": "arg", "index": index });
+				compileDefault(param.initializer, param.name, ops);
+				compileBinding(param.name, "param", ops);
+			}
 		}
 	});
 }
@@ -128,7 +142,15 @@ export function parameterProgram(node: ts.SignatureDeclaration): PatternProgram 
 /** Start binding through `program` in `scope`: the frame runs above the caller's. `value` seeds the
  *  temp stack (the destructured value); a parameter program reads `args` instead. */
 export function pushPattern(vm: Machine, scope: Scope, program: PatternProgram, value: unknown, args?: unknown[]): void {
-	vm.pushFrame({ "kind": "pattern", "node": null, "phase": 0, "scope": scope, "valuesBase": vm.values.length, "program": program, "pc": 0, "temps": args === undefined ? [value] : [], "iters": [], "objs": [], "keys": [], "args": args });
+	let temps;
+
+	if (args === undefined) {
+		temps = [value];
+	} else if (program.temps) {
+		temps = [];
+	}
+
+	vm.pushFrame({ "kind": "pattern", "node": null, "phase": 0, "scope": scope, "valuesBase": vm.values.length, "program": program, "pc": 0, "temps": temps, "iters": program.iters ? [] : undefined, "objs": program.objs ? [] : undefined, "keys": program.keys ? [] : undefined, "args": args });
 }
 
 // --- compilation (each compiled pattern consumes temps.top) ---
@@ -294,10 +316,11 @@ export function compileAssign(elementTarget: ts.Expression, ops: PatOp[]): void 
 
 function patternFrame(vm: Machine, frame: PatternFrame): void {
 	const { program } = frame;
-	const { temps } = frame;
-	const { iters } = frame;
-	const { objs } = frame;
-	const { keys } = frame;
+	// (a stack the program never uses is absent: its ops aren't reached)
+	const temps = frame.temps!;
+	const iters = frame.iters!;
+	const objs = frame.objs!;
+	const keys = frame.keys!;
 	const { scope } = frame;
 
 	if (frame.awaiting === true) {
@@ -325,6 +348,9 @@ function patternFrame(vm: Machine, frame: PatternFrame): void {
 				return;
 			case "arg":
 				temps.push((frame.args!)[op.index]);
+				break;
+			case "arg-bind":
+				bindIdentifier(scope, op.name, (frame.args!)[op.index], "param");
 				break;
 			case "rest-args":
 				temps.push(realmArray(vm, Array.prototype.slice.call(frame.args!, op.from)));

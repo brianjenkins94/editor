@@ -12,7 +12,7 @@ import type ts from "typescript";
 import type { ClassMeta, Construction, GuestClass, IterRecord, PatternProgram, Ref } from "./handlers.ts";
 import type { BindingKind, Scope } from "./scope.ts";
 import type { GuestFunctionMeta, GuestFunctionNode } from "./values.ts";
-import type { Signal } from "./vm.ts";
+import type { Signal, TraceContext } from "./vm.ts";
 
 interface FrameBase {
 	/** where the handler is in its evaluation; meaning is per handler. */
@@ -54,12 +54,15 @@ export interface NodeFrame extends FrameBase {
 	"isLoop"?: boolean;
 	/** a loop's turn: which iteration its body is on, from 0 (VMOptions.trace). */
 	"turn"?: number;
+	/** a loop's trace context for its turn, made at the turn's first traced value (VM.traced). */
+	"traceContext"?: TraceContext;
 	/** the phase `continue` resumes at. */
 	"continuePhase"?: number;
 	"isLabel"?: boolean;
 	"label"?: string;
 	"isSwitch"?: boolean;
-	/** `for`: the per-iteration scope, its `let`/`const` names and their kind; whether the head is an expression. */
+	/** `for`: the per-iteration scope, its `let`/`const` names and their kind; whether the head is an expression.
+	 *  (`for…of` / `for…in`: the scope its turns share, when they do — statements.ts turnScope.) */
 	"iterScope"?: Scope;
 	"lexicalNames"?: string[] | null;
 	"lexicalKind"?: BindingKind;
@@ -168,10 +171,11 @@ export interface PatternFrame extends FrameBase {
 	"node": null;
 	"program": PatternProgram;
 	"pc": number;
-	"temps": unknown[];
-	"iters": Iteration[];
-	"objs": PatternSource[];
-	"keys": PropertyKey[];
+	/** (each stack only when the program uses it: PatternProgram) */
+	"temps": unknown[] | undefined;
+	"iters": Iteration[] | undefined;
+	"objs": PatternSource[] | undefined;
+	"keys": PropertyKey[] | undefined;
 	"awaiting"?: boolean;
 	/** a parameter program's argument vector. */
 	"args"?: unknown[];

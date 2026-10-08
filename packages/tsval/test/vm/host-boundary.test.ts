@@ -200,3 +200,41 @@ test("a host Proxy that answers every property (an auto-stub) is a host callable
 	assert.strictEqual(typeof vm.run(), "function");
 	assert.deepStrictEqual(seen, ["function", "function"]); // `db()` and `.query("x")` both crossed the seam
 });
+
+test("guest callbacks a host built-in calls nest, throw and resume: each crossing gets a clean stack", () => {
+	// (an expression-body arrow runs without a call frame there; a block body, a `function`, a pattern parameter keep one)
+	const program = `(function () {
+	const out = [];
+	const grid = [1, 2, 3].map((row) => [1, 2, 3].map((col) => row * col).reduce((sum, cell) => sum + cell, 0));
+	out.push(grid.join());
+	try { [1, 2, 3].map((n) => n === 2 ? null.boom : n); } catch (error) { out.push(error instanceof TypeError); }
+	out.push([3, 1, 2].sort((a, b) => [a].map((x) => x - b)[0]).join());
+	out.push([1, 2].map(function (n) { return this.k + n; }, { "k": 10 }).join());
+	out.push([[1, 2], [3, 4]].map(([a, b] = [], i) => a * b + i).join());
+	out.push([1, 2, 3].map((n) => [...(function* () { yield n; yield n * 10; })()].join("/")).join());
+	out.push([1, 2].map((n, i, all) => all.length + n + i + arguments.length).join());
+	try { [1].forEach((n) => { throw new RangeError("from " + n); }); } catch (error) { out.push(error.message); }
+	out.push([5, 6].map((n) => n + 1).join());
+	return out.join(" | ");
+})()`;
+
+	assert.strictEqual(interpret(program), "6,12,18 | true | 1,2,3 | 11,12 | 2,13 | 1/10,2/20,3/30 | 3,5 | from 1 | 6,7");
+});
+
+test("a breakpoint in a function an expression-body callback calls fires inside the host call, the callback's frame on the stack", () => {
+	const src = ["function twice(n) {", "\treturn n * 2;", "}", "[1, 2, 3].map((n) => twice(n)).join();"].join("\n");
+	const stops: number[] = [];
+	const { vm } = createVM(src, {
+		"onBreakpoint": (paused) => {
+			stops.push(paused.frames.filter((frame) => frame.kind === "call").length);
+		}
+	});
+
+	vm.addBreakpointsByLine(2);
+	while (!vm.finished) {
+		vm.runToBreakpoint();
+	}
+
+	assert.strictEqual(vm.completion, "2,4,6");
+	assert.deepStrictEqual(stops, [2, 2, 2]); // the arrow's call, then twice's
+});

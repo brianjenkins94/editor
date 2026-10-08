@@ -4,18 +4,19 @@
 import type { AsyncFrame, CallFrame } from "../frame.ts";
 import type { GuestFunction, GuestFunctionMeta, GuestFunctionNode } from "../values.ts";
 import type { Machine, NodeHandler } from "../vm.ts";
+import type { PatternProgram } from "./patterns.ts";
 import ts from "typescript";
 import { Scope } from "../scope.ts";
 import { isGuestFunction } from "../values.ts";
 import { isGuestClass } from "./classes.ts";
-import { bindingNames, hoist } from "./hoist.ts";
-import { parameterProgram, pushPattern } from "./patterns.ts";
+import { bindingNames, hoist, hoistPlan } from "./hoist.ts";
+import { bindIdentifier, parameterProgram, pushPattern } from "./patterns.ts";
 import { createArgumentsObject } from "./realm.ts";
 import { on, syntheticHandlers } from "./registry.ts";
 
 // TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
 // functions used here are read off it once.
-const { getCombinedModifierFlags, isArrowFunction, isBlock, isClassExpression, isConstructorDeclaration, isFunctionExpression, isGetAccessorDeclaration, isIdentifier, isMethodDeclaration, isParenthesizedExpression, isPrivateIdentifier, isSetAccessorDeclaration } = ts;
+const { forEachChild, getCombinedModifierFlags, isArrowFunction, isBlock, isClassExpression, isConstructorDeclaration, isFunctionExpression, isGetAccessorDeclaration, isIdentifier, isMethodDeclaration, isParenthesizedExpression, isPrivateIdentifier, isSetAccessorDeclaration } = ts;
 
 const Kind = ts.SyntaxKind;
 const { ModifierFlags } = ts;
@@ -141,6 +142,7 @@ function callFrame(vm: Machine, frame: CallFrame): void {
 
 	if (frame.phase === 0) {
 		const fnScope = new Scope(meta.closure, /* isolated */ true);
+		const plan = parameterPlan(node);
 
 		if (!meta.isArrow) {
 			fnScope.hasThis = true;
@@ -153,19 +155,20 @@ function callFrame(vm: Machine, frame: CallFrame): void {
 				fnScope.newTarget = frame.newTarget;
 			}
 
-			fnScope.declareLexical("arguments", "var");
-			fnScope.initialize("arguments", createArgumentsObject(vm, frame.args));
+			if (plan.arguments) {
+				fnScope.declareLexical("arguments", "var");
+				fnScope.initialize("arguments", createArgumentsObject(vm, frame.args));
+			}
 		}
 
 		fnScope.functionMeta = meta;
 		frame.scope = fnScope;
 		// With non-simple parameters (defaults, patterns, rest) the body gets its own var environment:
 		// a closure in a default sees the *parameter*, not a same-named `var` declared in the body.
-		const plan = parameterPlan(node);
 		const bodyScope = plan.simple ? fnScope : new Scope(fnScope, true);
 
 		if (isBlock(node.body!)) {
-			hoist(vm, bodyScope, node.body.statements);
+			hoist(vm, bodyScope, hoistPlan(node.body.statements));
 			// Reuse the body scope for the body block (body vars live there directly).
 			const bodyFrame = vm.pushNode(node.body, bodyScope);
 
@@ -193,6 +196,40 @@ function callFrame(vm: Machine, frame: CallFrame): void {
 		vm.values.length = frame.valuesBase;
 		vm.push(value);
 	}
+}
+
+/**
+ * A guest function a host calls (map's callback, sort's comparator), seated on a fresh sub-run's stack. An arrow with
+ * plain parameters and an expression body — the usual callback — needs no call frame: it has no `this`/`arguments`, no
+ * body to hoist, and nothing in it can `return`; its parameters bind here, its body is the only frame. Anything a frame
+ * would show (a debugger's stack, the call a traced value is in) keeps the call frame.
+ */
+export function pushHostCall(vm: Machine, meta: GuestFunctionMeta, args: unknown[], thisArg: unknown, newTarget: unknown): void {
+	const { node } = meta;
+
+	if (!meta.isArrow || isBlock(node.body!) || vm.onBreakpoint !== undefined || vm.observe !== undefined || vm.trace !== undefined) {
+		vm.pushCall(meta, args, thisArg, newTarget);
+
+		return;
+	}
+
+	const plan = parameterPlan(node);
+
+	if (!plan.simple) {
+		vm.pushCall(meta, args, thisArg, newTarget);
+
+		return;
+	}
+
+	const scope = new Scope(meta.closure, /* isolated */ true);
+
+	scope.functionMeta = meta;
+	for (let index = 0; index < plan.params.length; index++) {
+		bindIdentifier(scope, plan.params[index].told!, args[index], "param");
+	}
+
+	vm.nextCall(); // (numbered as the call frame would have been)
+	vm.pushNode(node.body!, scope);
 }
 
 /** A TypeScript `this:` pseudo-parameter — types the receiver, binds nothing, takes no argument. */
@@ -242,34 +279,54 @@ export function bindParameters(vm: Machine, scope: Scope, node: ts.SignatureDecl
 		}
 	}
 
-	if (params.length > 0) {
-		pushPattern(vm, scope, parameterProgram(node), undefined, args);
+	if (plan.program !== undefined) {
+		pushPattern(vm, scope, plan.program, undefined, args);
 	}
 }
 
 /** A signature's parameters as a call binds them, worked out once per signature (a call made in a loop shouldn't redo
  *  it): each one but a `this:` pseudo-parameter, with the names it binds, its name when it's told to `observe`/`trace`
- *  (an identifier without a default), and whether it's a rest parameter; and whether they're all simple (identifiers,
- *  without a default or a rest — then the body shares their scope). */
+ *  (an identifier without a default), and whether it's a rest parameter; whether they're all simple (identifiers,
+ *  without a default or a rest — then the body shares their scope); the program that binds them (none without any);
+ *  and whether the function names `arguments` at all (else no call makes it an `arguments` object). */
 interface ParameterPlan {
 	"params": { "param": ts.ParameterDeclaration; "names": string[]; "told": string | undefined; "rest": boolean }[];
 	"simple": boolean;
+	"program": PatternProgram | undefined;
+	"arguments": boolean;
 }
 
 const parameterPlans = new WeakMap<ts.SignatureDeclaration, ParameterPlan>();
 
-function parameterPlan(node: ts.SignatureDeclaration): ParameterPlan {
+export function parameterPlan(node: ts.SignatureDeclaration): ParameterPlan {
 	let plan = parameterPlans.get(node);
 
 	if (plan === undefined) {
+		const params = node.parameters.filter((param) => !isThisParameter(param));
+
 		plan = {
-			"params": node.parameters.filter((param) => !isThisParameter(param)).map((param) => ({ "param": param, "names": bindingNames(param.name), "told": param.initializer === undefined && isIdentifier(param.name) ? param.name.text : undefined, "rest": param.dotDotDotToken !== undefined })),
-			"simple": !node.parameters.some((param) => param.initializer !== undefined || param.dotDotDotToken !== undefined || !isIdentifier(param.name))
+			"params": params.map((param) => ({ "param": param, "names": bindingNames(param.name), "told": param.initializer === undefined && isIdentifier(param.name) ? param.name.text : undefined, "rest": param.dotDotDotToken !== undefined })),
+			"simple": !node.parameters.some((param) => param.initializer !== undefined || param.dotDotDotToken !== undefined || !isIdentifier(param.name)),
+			"program": params.length > 0 ? parameterProgram(node) : undefined,
+			"arguments": namesArguments(node)
 		};
 		parameterPlans.set(node, plan);
 	}
 
 	return plan;
+}
+
+/** Whether `arguments` is named anywhere in a function — its parameters, its body, a function nested in it (an arrow
+ *  sees its parent's) — or `eval` is (a direct eval could name it unseen: the realm has none, but a host may give one).
+ *  An `arguments` object nothing names is never read, and making one each call was a tenth of a call-heavy run. */
+function namesArguments(node: ts.Node): boolean {
+	return forEachChild(node, function visit(child: ts.Node): boolean | undefined {
+		if (isIdentifier(child) && (child.text === "arguments" || child.text === "eval")) {
+			return true;
+		}
+
+		return forEachChild(child, visit);
+	}) === true;
 }
 
 // --- NamedEvaluation: an anonymous function/class takes the name it's bound or assigned to --------

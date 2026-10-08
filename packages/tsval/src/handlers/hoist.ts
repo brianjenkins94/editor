@@ -8,7 +8,7 @@ import { createGuestFunction } from "./functions.ts";
 
 // TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
 // functions used here are read off it once.
-const { canHaveModifiers, forEachChild, getModifiers, isClassLike, isEnumDeclaration, isFunctionDeclaration, isFunctionLike, isIdentifier, isImportDeclaration, isNamedImports, isNamespaceImport, isOmittedExpression, isVariableDeclarationList, isVariableStatement } = ts;
+const { canHaveModifiers, forEachChild, getModifiers, isClassDeclaration, isClassLike, isEnumDeclaration, isFunctionDeclaration, isFunctionLike, isIdentifier, isImportDeclaration, isNamedImports, isNamespaceImport, isOmittedExpression, isVariableDeclarationList, isVariableStatement } = ts;
 
 const Kind = ts.SyntaxKind;
 
@@ -26,15 +26,19 @@ type HoistStep =
  * block in a loop is entered every turn and a function's body every call — walking its statements each time was a fifth
  * of a tight loop's run.
  */
-interface HoistPlan {
+export interface HoistPlan {
 	"steps": HoistStep[];
 	"vars": string[];
 	"executed": ts.Statement[];
+	/** whether a block of these statements binds anything of its own — most don't (`{ if (…) { return false; } }`), and
+	 *  a scope made each time a loop's body is entered was a tenth of a tight loop's run. Without, it runs in the scope
+	 *  around it (the `var`s it hoists are the function's either way). */
+	"scoped": boolean;
 }
 
 const hoistPlans = new WeakMap<readonly ts.Statement[], HoistPlan>();
 
-function hoistPlan(statements: readonly ts.Statement[]): HoistPlan {
+export function hoistPlan(statements: readonly ts.Statement[]): HoistPlan {
 	let plan = hoistPlans.get(statements);
 
 	if (plan !== undefined) {
@@ -43,11 +47,16 @@ function hoistPlan(statements: readonly ts.Statement[]): HoistPlan {
 
 	const steps: HoistStep[] = [];
 	const executed: ts.Statement[] = [];
+	let classes = false;
 
 	for (const statement of statements) {
 		// Ambient (`declare`) statements never execute, so they hoist nothing.
 		if (!isAmbient(statement)) {
 			executed.push(statement);
+			if (isClassDeclaration(statement)) {
+				classes = true; // (bound when it runs: classes.ts)
+			}
+
 			if (isImportDeclaration(statement)) {
 				steps.push({ "kind": "import", "node": statement });
 			} else if (isFunctionDeclaration(statement) && statement.name) {
@@ -75,14 +84,14 @@ function hoistPlan(statements: readonly ts.Statement[]): HoistPlan {
 	// `var` is function-scoped no matter how deeply nested in blocks/loops/try/switch: collect
 	// recursively (not into nested functions/classes, which are their own var scope). Idempotent, so
 	// re-running at each block entry is harmless.
-	plan = { "steps": steps, "vars": collectVarNames(statements), "executed": executed };
+	plan = { "steps": steps, "vars": collectVarNames(statements), "executed": executed, "scoped": classes || steps.length > 0 };
 	hoistPlans.set(statements, plan);
 
 	return plan;
 }
 
-export function hoist(vm: Machine, scope: Scope, statements: readonly ts.Statement[]): void {
-	const { steps, vars } = hoistPlan(statements);
+export function hoist(vm: Machine, scope: Scope, plan: HoistPlan): void {
+	const { steps, vars } = plan;
 
 	for (const step of steps) {
 		if (step.kind === "import") {
@@ -103,10 +112,6 @@ export function hoist(vm: Machine, scope: Scope, statements: readonly ts.Stateme
 	}
 }
 
-/** The statements of `statements` that run, in order: all but the ambient (`declare`) ones. */
-export function executedStatements(statements: readonly ts.Statement[]): readonly ts.Statement[] {
-	return hoistPlan(statements).executed;
-}
 /** All identifiers bound by a (possibly destructuring) binding name. */
 export function bindingNames(name: ts.BindingName, out: string[] = []): string[] {
 	if (isIdentifier(name)) {
@@ -156,6 +161,38 @@ export function collectVarNames(statements: readonly ts.Node[], out: string[] = 
 	}
 
 	return out;
+}
+
+const capturing = new WeakMap<ts.Node, boolean>();
+
+/** Whether `node` holds a function or a class — something that can capture a binding made while it runs. A loop whose
+ *  turns nothing can capture needs no fresh scope per turn: no one could tell the turns' bindings apart. */
+export function holdsClosure(node: ts.Node): boolean {
+	let found = capturing.get(node);
+
+	if (found !== undefined) {
+		return found;
+	}
+
+	found = false;
+	// A work list, as in collectVarNames.
+	const pending: ts.Node[] = [node];
+
+	while (pending.length > 0 && !found) {
+		const current = pending.pop()!;
+
+		if (isFunctionLike(current) || isClassLike(current)) {
+			found = true;
+		} else {
+			forEachChild(current, (child) => {
+				pending.push(child);
+			});
+		}
+	}
+
+	capturing.set(node, found);
+
+	return found;
 }
 
 /** Ambient (`declare ...`) statements describe host shapes for the checker; they never execute. */

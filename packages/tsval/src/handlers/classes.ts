@@ -7,8 +7,8 @@ import ts from "typescript";
 import { unimplemented } from "../errors.ts";
 import { Scope } from "../scope.ts";
 import { collectCallArguments, pushCallArguments } from "./calls.ts";
-import { bindParameters, createGuestFunction, functionLength, nameAnonymous, setFunctionName } from "./functions.ts";
-import { hoist } from "./hoist.ts";
+import { bindParameters, createGuestFunction, functionLength, nameAnonymous, parameterPlan, setFunctionName } from "./functions.ts";
+import { hoist, hoistPlan } from "./hoist.ts";
 import { propertyName } from "./literals.ts";
 import { createArgumentsObject, defineData, isObjectLike, toPropertyKey } from "./realm.ts";
 import { THIS_TDZ, thisValue } from "./references.ts";
@@ -773,19 +773,24 @@ function constructFrame(vm: Machine, frame: ConstructFrame): void {
 			fnScope.homeObject = meta.proto;
 			fnScope.classMeta = meta;
 			fnScope.newTarget = frame.newTarget ?? ctor;
-			fnScope.declareLexical("arguments", "var");
-			fnScope.initialize("arguments", createArgumentsObject(vm, frame.args));
+			const plan = parameterPlan(meta.ctorNode);
+
+			if (plan.arguments) {
+				fnScope.declareLexical("arguments", "var");
+				fnScope.initialize("arguments", createArgumentsObject(vm, frame.args));
+			}
+
 			// Base class: fields initialize before the parameters bind and the body runs ([[Construct]]:
 			// InitializeInstanceElements precedes OrdinaryCallEvaluateBody). Derived: after super().
 			if (meta.superClass === undefined) {
 				initInstanceFields(vm, meta, instance);
 			}
 
-			hoist(vm, fnScope, (meta.ctorNode.body!).statements);
+			hoist(vm, fnScope, hoistPlan((meta.ctorNode.body!).statements));
 			const body = vm.pushNode(meta.ctorNode.body!, fnScope);
 
 			body.reuseScope = true;
-			bindParameters(vm, fnScope, meta.ctorNode, frame.args); // (above the body: runs first)
+			bindParameters(vm, fnScope, meta.ctorNode, frame.args, plan); // (above the body: runs first)
 		} else if (meta.superClass !== undefined) {
 			// Implicit derived constructor: super(...args), then this class's fields.
 			const newTarget = frame.newTarget ?? ctor;

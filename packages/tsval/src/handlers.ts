@@ -34,7 +34,8 @@ registerClasses();
 registerPatterns();
 
 export { type ClassMeta, clonePrivateElements, type Construction, createGuestClass, type GuestClass, isGuestClass } from "./handlers/classes.ts";
-export { createGuestFunction } from "./handlers/functions.ts";
+export { createGuestFunction, pushHostCall } from "./handlers/functions.ts";
+export { isSimpleTree, simpleValue } from "./handlers/operators.ts";
 export { closeIteration, closeIterator, getIterator, type IterRecord } from "./handlers/iteration.ts";
 export { assignProgram, bindIdentifier, bindingProgram, PatternProgram, pushPattern } from "./handlers/patterns.ts";
 export type { Ref } from "./handlers/references.ts";

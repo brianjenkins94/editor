@@ -152,9 +152,15 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 		}
 
 		vm.push(calleeValue);
-		pushCallArguments(vm, frame, node.arguments);
 		frame.phase = AFTER_REF + 1;
-	} else if (frame.phase === AFTER_REF + 1) {
+
+		// (all leaves — `isPrime(n)`, `push(x)` — their values on the stack already: on to the call in this step)
+		if (!pushCallArguments(vm, frame, node.arguments)) {
+			return;
+		}
+	}
+
+	if (frame.phase === AFTER_REF + 1) {
 		const args = collectCallArguments(vm, frame);
 		const calleeVal = vm.pop();
 		const requiring = requireOf(calleeVal);
@@ -227,31 +233,43 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 	}
 }
 
-// Evaluate call/new arguments left-to-right (pushed in reverse). A spread argument's operand is
-// evaluated like any other; `spreadMask` records which operands to flatten when collecting.
-export function pushCallArguments(vm: Machine, frame: NodeFrame, args: readonly ts.Expression[]): void {
-	const spreadMask: boolean[] = [];
+// Evaluate call/new arguments left-to-right (pushed in reverse; leading leaves evaluated in place, as
+// Machine.pushOperands does). A spread argument's operand is evaluated like any other; `spreadMask` records which
+// operands to flatten when collecting. True when they were all leaves: their values are on the stack already.
+export function pushCallArguments(vm: Machine, frame: NodeFrame, args: readonly ts.Expression[]): boolean {
+	frame.argCount = args.length;
 
-	for (let index = args.length - 1; index >= 0; index--) {
-		const arg = args[index];
+	// Without a spread (most calls) the arguments are the operands, and there's nothing to flatten: no mask to make.
+	if (!args.some(isSpreadElement)) {
+		frame.spreadMask = undefined;
 
-		if (isSpreadElement(arg)) {
-			vm.pushNode(arg.expression, frame.scope);
-			spreadMask[index] = true;
-		} else {
-			vm.pushNode(arg, frame.scope);
-			spreadMask[index] = false;
-		}
+		return vm.pushOperands(args, frame.scope);
 	}
 
-	frame.argCount = args.length;
+	const spreadMask: boolean[] = [];
+	const operands: ts.Expression[] = [];
+
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index];
+
+		spreadMask[index] = isSpreadElement(arg);
+		operands.push(isSpreadElement(arg) ? arg.expression : arg);
+	}
+
 	frame.spreadMask = spreadMask;
+
+	return vm.pushOperands(operands, frame.scope);
 }
 
 export function collectCallArguments(vm: Machine, frame: NodeFrame): unknown[] {
 	const argCount = frame.argCount!;
 	const raw = vm.values.splice(vm.values.length - argCount);
-	const spreadMask = frame.spreadMask!;
+	const { spreadMask } = frame;
+
+	if (spreadMask === undefined) {
+		return raw;
+	}
+
 	const args: unknown[] = [];
 
 	for (let index = 0; index < argCount; index++) {
@@ -270,12 +288,22 @@ function newExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.NewExpression;
 
 	if (frame.phase === 0) {
-		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 1;
-	} else if (frame.phase === 1) {
-		pushCallArguments(vm, frame, node.arguments ?? []);
+
+		if (!vm.pushOperand(node.expression, frame.scope)) {
+			return;
+		}
+	}
+
+	if (frame.phase === 1) {
 		frame.phase = 2;
-	} else if (frame.phase === 2) {
+
+		if (!pushCallArguments(vm, frame, node.arguments ?? [])) {
+			return;
+		}
+	}
+
+	if (frame.phase === 2) {
 		const args = collectCallArguments(vm, frame);
 		const ctor = vm.pop();
 

@@ -1,7 +1,8 @@
-import type { TraceEvent } from "../../src/vm.ts";
+import type { TraceEvent, VM } from "../../src/vm.ts";
 import type ts from "typescript";
 import assert from "node:assert";
 import { test } from "node:test";
+import { runToEnd } from "../../src/explore.ts";
 import { createVM } from "../../src/interpret.ts";
 
 /** Run `code`, each traced value as `line: name = value` (strings quoted), its call and its loops' turns after it:
@@ -137,4 +138,133 @@ test("patterns and assignments: each name a destructuring binds, a member target
 		"5: o.p = 5",
 		"6: a = 2"
 	]);
+});
+
+/** What a trace event's call and loops should be, read off the whole frame stack as it is when the event is told: the
+ *  first call (or construction) frame from the top, and the loops in a turn above it — the walk each event once made. */
+function walked(machine: VM): { "call": number; "callee"?: ts.Node; "loops": { "node": ts.Node; "turn": number }[] } {
+	const loops: { "node": ts.Node; "turn": number }[] = [];
+
+	for (let index = machine.frames.length - 1; index >= 0; index -= 1) {
+		const frame = machine.frames[index]!;
+
+		if (frame.kind === "call" || frame.kind === "construct") {
+			return frame.node === null ? { "call": frame.call ?? 0, "loops": loops } : { "call": frame.call ?? 0, "callee": frame.node, "loops": loops };
+		}
+
+		if (frame.kind === undefined && frame.isLoop === true && frame.turn !== undefined) {
+			loops.unshift({ "node": frame.node, "turn": frame.turn });
+		}
+	}
+
+	return { "call": 0, "loops": loops };
+}
+
+/** A tracer checking each event's call and loops against `walked` (of the machine running), keeping each in `seen()` as
+ *  `name @call [turns]`. */
+function checking(machine: () => VM, seen: () => string[]): (event: TraceEvent) => void {
+	return (event) => {
+		const expected = walked(machine());
+
+		assert.deepStrictEqual({ "call": event.call, "callee": event.callee, "loops": event.loops.map((loop) => ({ "node": loop.node, "turn": loop.turn })) }, { "callee": undefined, ...expected });
+		seen().push(`${event.name} @${event.call} [${event.loops.map((loop) => loop.turn).join(",")}]`);
+	};
+}
+
+const PROGRAMS: Record<string, string> = {
+	"nested loops, labels, recursion, closures called later, a host-called callback": [
+		"function fib(n) { if (n < 2) { return n; } let s = 0; for (let k = 0; k < 2; k++) { s += fib(n - 1 - k); } return s; }",
+		"const later = [];",
+		"outer: for (let i = 0; i < 3; i++) {",
+		"	let j = 0;",
+		"	while (j < 3) {",
+		"		j++;",
+		"		if (j === 2) { continue outer; }",
+		"		later.push(() => { for (const x of [i, j]) { const y = x * 2; } return i + j; });",
+		"	}",
+		"}",
+		"for (const f of later) { const r = f(); }",
+		"const total = fib(5);",
+		"let d = 0;",
+		"do { d = d + 1; } while (d < 3);",
+		"for (const key in { a: 1, b: 2 }) { const k2 = key; }",
+		"for (let m = 0; m < 2; m++) { const mapped = [1, 2, 3].map((v) => { let acc = 0; for (let q = 0; q < v; q++) { acc += q; } return acc; }); }"
+	].join("\n"),
+	"exceptions unwinding through loops, break, finally": [
+		"function thrower(n) { for (let a = 0; a < 5; a++) { if (a === n) { throw new Error('at ' + a); } } }",
+		"for (let i = 0; i < 3; i++) {",
+		"	try { for (let j = 0; j < 3; j++) { const v = j; if (j === i) { thrower(j); } } } catch (e) { const m = e.message; } finally { const f = i; }",
+		"	for (const z of [1, 2]) { if (z === 2) { break; } const zz = z; }",
+		"	const after = i;",
+		"}"
+	].join("\n"),
+	"generators resumed from other loops, constructors": [
+		"function* gen(n) { for (let i = 0; i < n; i++) { const sent = yield i; let w = sent; } }",
+		"const g = gen(3);",
+		"for (let k = 0; k < 4; k++) { const r = g.next(k); }",
+		"for (const v of gen(2)) { for (let m = 0; m < 2; m++) { const both = v + m; } }",
+		"class A { constructor(n) { for (let i = 0; i < n; i++) { this.v = i; } } }",
+		"for (let c = 0; c < 2; c++) { const a = new A(c + 1); }"
+	].join("\n")
+};
+
+for (const [name, code] of Object.entries(PROGRAMS)) {
+	test(`trace context: each event's call and loops are the frame stack's — ${name}`, () => {
+		const seen: string[] = [];
+		let machine!: VM;
+
+		({ "vm": machine } = createVM(code, { "trace": checking(() => machine, () => seen) }));
+		machine.run();
+		assert.ok(seen.some((line) => / \[\d+,\d+\]$/u.test(line)) && seen.some((line) => !line.includes(" @0 ")), "nested loops and calls were traced");
+	});
+}
+
+test("trace context: stepped async — awaits in loops, timers' callbacks — each event the frame stack's", async () => {
+	const seen: string[] = [];
+	let machine!: VM;
+
+	({ "vm": machine } = createVM([
+		"async function tick(n) { for (let i = 0; i < n; i++) { const got = await i; } return n; }",
+		"async function main() { for (let r = 0; r < 2; r++) { const t = await tick(r + 1); } }",
+		"main();",
+		"for (let x = 0; x < 2; x++) { setTimeout(() => { for (let y = 0; y < 2; y++) { const s = x + y; } }, 0); }"
+	].join("\n"), { "trace": checking(() => machine, () => seen), "eventLoop": { "pace": "fast" } }));
+	await runToEnd(machine);
+	assert.ok(seen.includes("got @3 [0]") && seen.includes("s @4 [1]"), seen.join("\n"));
+});
+
+test("trace context: a fork mid-loop traces as the original does from there", () => {
+	const code = PROGRAMS["nested loops, labels, recursion, closures called later, a host-called callback"]!;
+	const whole: string[] = [];
+	let original!: VM;
+
+	({ "vm": original } = createVM(code, { "trace": checking(() => original, () => whole) }));
+	original.run();
+
+	for (const at of [40, 400, 1500]) {
+		// (a fork shares its tracer: what's running, and where its events go, are switched as each runs)
+		const before: string[] = [];
+		const after: string[] = [];
+		const forkedAfter: string[] = [];
+		let running!: VM;
+		let seen = before;
+
+		({ "vm": running } = createVM(code, { "trace": checking(() => running, () => seen) }));
+
+		const machine = running;
+
+		for (let step = 0; step < at; step += 1) {
+			machine.step();
+		}
+
+		const fork = machine.fork();
+
+		seen = after;
+		machine.run();
+		running = fork;
+		seen = forkedAfter;
+		fork.run();
+		assert.deepStrictEqual(forkedAfter, after);
+		assert.deepStrictEqual([...before, ...after], whole);
+	}
 });

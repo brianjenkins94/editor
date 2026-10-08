@@ -7,7 +7,7 @@ import ts from "typescript";
 import { unimplemented } from "../errors.ts";
 import { createGuestFunction, nameAnonymous, setFunctionName } from "./functions.ts";
 import { cookedTemplateText, defineData, defineFresh, toPropertyKey } from "./realm.ts";
-import { evaluating, on, passThroughExpr, pushText } from "./registry.ts";
+import { evaluating, on, passThroughExpr } from "./registry.ts";
 
 // TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
 // functions used here are read off it once.
@@ -15,33 +15,11 @@ const { isBigIntLiteral, isComputedPropertyName, isGetAccessorDeclaration, isIde
 
 const Kind = ts.SyntaxKind;
 
-function numericLiteral(vm: Machine, frame: NodeFrame): void {
-	const { text } = frame.node as ts.NumericLiteral;
-
-	vm.frames.pop();
-	vm.push(Number(text.includes("_") ? text.replace(/_/gu, "") : text)); // (separators are rare: skip the regex without)
-}
-
 function bigIntLiteral(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.BigIntLiteral;
 
 	vm.frames.pop();
 	vm.push(BigInt(node.text.replace(/_/gu, "").replace(/n$/u, "")));
-}
-
-function trueKeyword(vm: Machine): void {
-	vm.frames.pop();
-	vm.push(true);
-}
-
-function falseKeyword(vm: Machine): void {
-	vm.frames.pop();
-	vm.push(false);
-}
-
-function nullKeyword(vm: Machine): void {
-	vm.frames.pop();
-	vm.push(null);
 }
 
 function regularExpressionLiteral(vm: Machine, frame: NodeFrame): void {
@@ -53,12 +31,11 @@ function regularExpressionLiteral(vm: Machine, frame: NodeFrame): void {
 	vm.push(new vm.realm.RegExp(node.text.slice(1, lastSlash), node.text.slice(lastSlash + 1)));
 }
 
-function identifier(vm: Machine, frame: NodeFrame): void {
-	const node = frame.node as ts.Identifier;
-
+/** An identifier, a literal, `true`/`false`/`null` on a frame of its own (a parent evaluates one in its own step when it
+ *  can: Machine.pushOperands). */
+function leaf(vm: Machine, frame: NodeFrame): void {
 	vm.frames.pop();
-	// Globals are host values; guest bindings pass through the guard unchanged (identity by default).
-	vm.push(vm.fromHost(frame.scope.get(node.text)));
+	vm.push(vm.leafValue(frame.node, frame.scope));
 }
 
 // `new.target` (undefined in a plain call, the constructor under `new`); `import.meta` is a module
@@ -135,13 +112,19 @@ function objectLiteralExpression(vm: Machine, frame: NodeFrame): void {
 		(frame.values!).push(operands[index - 1].isKey ? toPropertyKey(value) : value);
 	}
 
-	const next = frame.index!;
+	// (each leaf — `{ id: i, total }` — read here and taken as a finished operand is, in this step)
+	for (let next = frame.index!; next < operands.length; next++) {
+		const operand = operands[next];
 
-	if (next < operands.length) {
-		vm.pushNode(operands[next].node, frame.scope);
 		frame.index = next + 1;
 
-		return;
+		if (!vm.pushOperand(operand.node, frame.scope)) {
+			return;
+		}
+
+		const value = vm.pop();
+
+		(frame.values!).push(operand.isKey ? toPropertyKey(value) : value);
 	}
 
 	vm.frames.pop();
@@ -292,15 +275,12 @@ const voidExpression = evaluating<ts.VoidExpression>((node) => [node.expression]
 
 /** Registers this module's handlers (called by ../handlers.ts once every module has loaded). */
 export function register(): void {
-	on(Kind.NumericLiteral, numericLiteral);
+	for (const kind of [Kind.Identifier, Kind.NumericLiteral, Kind.StringLiteral, Kind.NoSubstitutionTemplateLiteral, Kind.TrueKeyword, Kind.FalseKeyword, Kind.NullKeyword]) {
+		on(kind, leaf);
+	}
+
 	on(Kind.BigIntLiteral, bigIntLiteral);
-	on(Kind.StringLiteral, pushText);
-	on(Kind.NoSubstitutionTemplateLiteral, pushText);
-	on(Kind.TrueKeyword, trueKeyword);
-	on(Kind.FalseKeyword, falseKeyword);
-	on(Kind.NullKeyword, nullKeyword);
 	on(Kind.RegularExpressionLiteral, regularExpressionLiteral);
-	on(Kind.Identifier, identifier);
 	on(Kind.MetaProperty, metaProperty);
 	on(Kind.ParenthesizedExpression, passThroughExpr);
 	on(Kind.ExpressionWithTypeArguments, passThroughExpr); // an instantiation expression `f<T>` is `f`

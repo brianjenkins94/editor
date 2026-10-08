@@ -150,10 +150,11 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 
 	if (!isPropertyAccessExpression(target) && !isElementAccessExpression(target)) {
 		if (frame.phase === 0) {
-			vm.pushNode(target, frame.scope);
 			frame.phase = 1;
 
-			return undefined;
+			if (!vm.pushOperand(target, frame.scope)) {
+				return undefined;
+			}
 		}
 
 		return resolved(frame, { "kind": "value", "value": vm.pop() });
@@ -169,16 +170,19 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 				return resolved(frame, { "kind": "super", "key": member.name.text });
 			}
 
-			vm.pushNode(member.argumentExpression, frame.scope);
 			frame.phase = 2;
 
-			return undefined;
+			if (!vm.pushOperand(member.argumentExpression, frame.scope)) {
+				return undefined;
+			}
+		} else {
+			frame.phase = 1;
+
+			// (a leaf — `items.filter`, `row.price` — its value on the stack already: on in this step)
+			if (!vm.pushOperand(member.expression, frame.scope)) {
+				return undefined;
+			}
 		}
-
-		vm.pushNode(member.expression, frame.scope);
-		frame.phase = 1;
-
-		return undefined;
 	}
 
 	if (frame.phase === 1) {
@@ -194,19 +198,21 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 			return resolved(frame, { "kind": "short" });
 		}
 
-		if (!isPropertyAccessExpression(member)) {
-			vm.pushNode(member.argumentExpression, frame.scope);
-			frame.phase = 2;
+		if (isPropertyAccessExpression(member)) {
+			vm.pop();
+			if (isPrivateIdentifier(member.name)) {
+				return resolved(frame, { "kind": "private", "obj": obj, "name": member.name.text });
+			}
 
+			return resolved(frame, { "kind": "member", "obj": obj, "key": member.name.text });
+		}
+
+		frame.phase = 2;
+
+		// (a leaf key — `xs[i]`, `row["id"]` — on the stack already: on in this step)
+		if (!vm.pushOperand(member.argumentExpression, frame.scope)) {
 			return undefined;
 		}
-
-		vm.pop();
-		if (isPrivateIdentifier(member.name)) {
-			return resolved(frame, { "kind": "private", "obj": obj, "name": member.name.text });
-		}
-
-		return resolved(frame, { "kind": "member", "obj": obj, "key": member.name.text });
 	}
 
 	const rawKey = vm.pop();
@@ -389,25 +395,27 @@ export function assignThrough(vm: Machine, frame: NodeFrame, target: ts.Expressi
 
 		const step = compute(frame.current, undefined);
 
-		if (step.kind === "need-rhs") {
-			vm.pushNode(rhs!, frame.scope);
-			frame.phase = AFTER_REF + 1;
+		if (step.kind !== "need-rhs") {
+			vm.frames.pop();
+			if (step.kind === "store") {
+				putValue(vm, frame.scope, ref, step.value);
+
+				if (vm.trace !== undefined) {
+					vm.traced("bind", frame.node, targetText(vm, target), step.value);
+				}
+			}
+
+			vm.push(step.result);
 
 			return;
 		}
 
-		vm.frames.pop();
-		if (step.kind === "store") {
-			putValue(vm, frame.scope, ref, step.value);
+		frame.phase = AFTER_REF + 1;
 
-			if (vm.trace !== undefined) {
-				vm.traced("bind", frame.node, targetText(vm, target), step.value);
-			}
+		// (a leaf — `count += 1`, `x = y` — on the stack already: on to the store in this step)
+		if (!vm.pushOperand(rhs!, frame.scope)) {
+			return;
 		}
-
-		vm.push(step.result);
-
-		return;
 	}
 
 	const step = compute(frame.current, { "value": vm.pop() });
@@ -595,9 +603,14 @@ export function assignmentExpression(vm: Machine, frame: NodeFrame, node: ts.Bin
 	// pattern frame.
 	if (isArrayLiteralExpression(left) || isObjectLiteralExpression(left)) {
 		if (frame.phase === 0) {
-			vm.pushNode(node.right, frame.scope);
 			frame.phase = 1;
-		} else if (frame.phase === 1) {
+
+			if (!vm.pushOperand(node.right, frame.scope)) {
+				return;
+			}
+		}
+
+		if (frame.phase === 1) {
 			// The pattern frame runs above; the expression's value (the RHS) is already in place.
 			const value = vm.pop();
 

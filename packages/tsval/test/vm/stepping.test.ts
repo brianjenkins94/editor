@@ -39,7 +39,8 @@ test("location + currentNode track the top frame", () => {
 });
 
 test("runUntil can pause on an operand-stack condition, then resume", () => {
-	const { vm } = createVM(`const x = 6 * 7; x;`);
+	// (`[6][0]`: an operand with a step of its own, so 42 sits on the stack between steps)
+	const { vm } = createVM(`const x = [6][0] * 7; x;`);
 
 	vm.runUntil((machine) => machine.values.includes(42));
 	assert.ok(!vm.finished, "stopped as soon as 42 was computed");

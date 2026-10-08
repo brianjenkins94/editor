@@ -17,7 +17,8 @@ export function on(kind: number, handler: NodeHandler): void {
 
 /**
  * The common handler shape — "evaluate these children, in order, then combine": phase 0 pushes the
- * child frames (reversed, so the first evaluates first) and records the operand depth; phase 1
+ * child frames (reversed, so the first evaluates first; leading leaves evaluated in place — Machine.pushOperands,
+ * and with nothing left to run it combines in the same step) and records the operand depth; phase 1
  * collects their values (one per child, in order) and hands them to `combine`, which pushes the
  * result or raises a signal. The numeric-phase form is reserved for handlers whose control flow
  * depends on intermediate values (branches, loops, try, calls, references, suspension points).
@@ -28,15 +29,12 @@ export function evaluating<N extends ts.Node>(children: (node: N) => readonly ts
 
 		if (frame.phase === 0) {
 			frame.base = vm.values.length; // depth *now* — earlier siblings are already on the stack
-			const nodes = children(node);
-
-			for (let index = nodes.length - 1; index >= 0; index--) {
-				vm.pushNode(nodes[index], frame.scope);
-			}
-
 			frame.phase = 1;
 
-			return;
+			// (all leaves: their values are on the stack already, so on to combine them in this step)
+			if (!vm.pushOperands(children(node), frame.scope)) {
+				return;
+			}
 		}
 
 		const values = vm.values.splice(frame.base!);
@@ -51,17 +49,11 @@ export function noop(vm: Machine): void {
 	vm.frames.pop();
 }
 
-export function pushText(vm: Machine, frame: NodeFrame): void {
-	vm.frames.pop();
-	vm.push((frame.node as ts.LiteralLikeNode).text);
-}
-
 // Type-only wrappers: evaluate the inner expression, ignore the type.
 export function passThroughExpr(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.ParenthesizedExpression | ts.AsExpression | ts.TypeAssertion | ts.NonNullExpression | ts.SatisfiesExpression;
 
-	if (frame.phase === 0) {
-		vm.pushNode(node.expression, frame.scope);
+	if (frame.phase === 0 && !vm.pushOperand(node.expression, frame.scope)) {
 		frame.phase = 1;
 	} else {
 		vm.frames.pop(); // inner value already on the stack

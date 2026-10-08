@@ -9,7 +9,7 @@ import type { Choice, Result } from "./event-loop.ts";
 import { arrived, choose, createLoop, forkLoop, hasRefTimers, INTRINSICS, loopGlobals, nextTimer, takeTimer, timerLabel, waitForTurn } from "./event-loop.ts";
 import { syntaxKindName } from "./frontend.ts";
 import { standardGlobals } from "./globals.ts";
-import { bindIdentifier, bindingProgram, clonePrivateElements, closeIteration, createGuestFunction, isGuestClass, nodeHandlers, pushPattern, syntheticHandlers } from "./handlers.ts";
+import { bindIdentifier, bindingProgram, clonePrivateElements, closeIteration, createGuestFunction, isGuestClass, isSimpleTree, nodeHandlers, pushHostCall, pushPattern, simpleValue, syntheticHandlers } from "./handlers.ts";
 import { defineExports, directoryOf, linkedSpecifiers, makeRequire, moduleOf, requireOf, setModuleOf } from "./modules.ts";
 import { Scope } from "./scope.ts";
 import { isGuestFunction } from "./values.ts";
@@ -20,6 +20,11 @@ const { createSourceFile, isIdentifier, isSourceFile, isTaggedTemplateExpression
 const FIRST_STATEMENT = ts.SyntaxKind.FirstStatement;
 const LAST_STATEMENT = ts.SyntaxKind.LastStatement;
 const TRY_STATEMENT = ts.SyntaxKind.TryStatement;
+const IDENTIFIER = ts.SyntaxKind.Identifier;
+const NUMERIC_LITERAL = ts.SyntaxKind.NumericLiteral;
+const TRUE_KEYWORD = ts.SyntaxKind.TrueKeyword;
+const FALSE_KEYWORD = ts.SyntaxKind.FalseKeyword;
+const NULL_KEYWORD = ts.SyntaxKind.NullKeyword;
 
 /** Statements whose completion is UpdateEmpty(body, undefined): they yield `undefined` when their body produced nothing. */
 const COMPLETION_STATEMENTS = new Uint8Array(ts.SyntaxKind.Count);
@@ -213,7 +218,7 @@ export interface VMOptions {
  * `node` is the declaration, the assignment, the loop, the parameter, the statement: its line is the value's. `call`
  * numbers the guest call it ran in, in the order calls are made (0: the program's top level), and `callee` is that
  * call's function (none at the top level, or in a constructor); `loops` are the loops around it in that call, outermost
- * first, each with its turn (from 0); `step` is the machine's step count.
+ * first, each with its turn (from 0) — shared by the events of a turn, so read-only; `step` is the machine's step count.
  */
 export interface TraceEvent {
 	"kind": "bind" | "return" | "branch";
@@ -223,8 +228,20 @@ export interface TraceEvent {
 	"step": number;
 	"call": number;
 	"callee"?: ts.Node;
-	"loops": { "node": ts.Node; "turn": number }[];
+	"loops": readonly { readonly "node": ts.Node; readonly "turn": number }[];
 }
+
+/** What a loop frame in a turn tells its turn's trace events (NodeFrame.traceContext): its call, and the loops around
+ *  the values, itself last — the same for each value of the turn. */
+export interface TraceContext {
+	"turn": number;
+	"call": number;
+	"callee": ts.Node | undefined;
+	"loops": TraceEvent["loops"];
+}
+
+/** The loops of a value in no loop (in its call). */
+const NO_LOOPS: TraceEvent["loops"] = Object.freeze([]);
 
 export type Tracer = (event: TraceEvent) => void;
 
@@ -421,6 +438,9 @@ export class Machine implements VM {
 	/** How many nested contexts (a host-called guest function's sub-run, a fiber's) the machine is inside: stepped
 	 *  async applies on the main stack only (depth 0); a nested context keeps the fiber drivers' behavior. */
 	private depth = 0;
+	/** The contexts saved on entering a nested one, by depth, reused (with the stacks a sub-run there runs on): a callback
+	 *  a host built-in calls — map's, sort's, a server's handler — enters and leaves one each call, so it allocates none. */
+	private contexts: ExecContext[] = [];
 	/** Fuel limit (see VMOptions.maxSteps): once `steps` passes it, `step()` throws uncatchably. */
 	public maxSteps: number | undefined;
 	/** Statement execution counts (VMOptions.coverage). */
@@ -567,18 +587,19 @@ export class Machine implements VM {
 	}
 
 	/** Tell the tracer (VMOptions.trace), if any, a value `node` bound, returned or chose: with the call it's in and the
-	 *  turn of each loop around it there, read off the frame stack down to that call. */
+	 *  turn of each loop around it there, from the innermost loop in a turn (or call) on the frame stack. */
 	public traced(kind: TraceEvent["kind"], node: ts.Node, name: string, value: unknown): void {
 		if (this.trace === undefined) {
 			return;
 		}
 
-		const loops: TraceEvent["loops"] = [];
+		const { frames } = this;
 		let call = 0;
 		let callee: ts.Node | undefined;
+		let loops = NO_LOOPS;
 
-		for (let index = this.frames.length - 1; index >= 0; index -= 1) {
-			const frame = this.frames[index]!;
+		for (let index = frames.length - 1; index >= 0; index -= 1) {
+			const frame = frames[index]!;
 
 			if (frame.kind === "call" || frame.kind === "construct") {
 				call = frame.call ?? 0;
@@ -587,7 +608,8 @@ export class Machine implements VM {
 			}
 
 			if (frame.kind === undefined && frame.isLoop === true && frame.turn !== undefined) {
-				loops.unshift({ "node": frame.node, "turn": frame.turn });
+				({ call, callee, loops } = this.traceContext(frame, index));
+				break;
 			}
 		}
 
@@ -597,8 +619,47 @@ export class Machine implements VM {
 			: { "kind": kind, "node": node, "name": name, "value": value, "step": this.steps, "call": call, "callee": callee, "loops": loops });
 	}
 
+	/** `loop`'s trace context (at `index` on the stack) in its current turn: made once a turn, from the next loop in a
+	 *  turn (or call) below it, and kept on the frame — the frames below a loop's don't change while it's on the stack
+	 *  (a fiber's or generator's move with their call frame, a fork's frames find their own afresh). */
+	private traceContext(loop: NodeFrame, index: number): TraceContext {
+		const kept = loop.traceContext;
+
+		if (kept !== undefined && kept.turn === loop.turn) {
+			return kept;
+		}
+
+		let call = 0;
+		let callee: ts.Node | undefined;
+		let outer = NO_LOOPS;
+
+		for (let below = index - 1; below >= 0; below -= 1) {
+			const frame = this.frames[below]!;
+
+			if (frame.kind === "call" || frame.kind === "construct") {
+				call = frame.call ?? 0;
+				callee = frame.node ?? undefined;
+				break;
+			}
+
+			if (frame.kind === undefined && frame.isLoop === true && frame.turn !== undefined) {
+				({ call, callee, "loops": outer } = this.traceContext(frame, below));
+				break;
+			}
+		}
+
+		const context: TraceContext = { "turn": loop.turn!, "call": call, "callee": callee, "loops": [...outer, { "node": loop.node, "turn": loop.turn! }] };
+
+		loop.traceContext = context;
+
+		return context;
+	}
+
 	public get top(): Frame | undefined {
-		return this.frames[this.frames.length - 1];
+		const { frames } = this;
+
+		// (never `frames[-1]`: see advance)
+		return frames.length > 0 ? frames[frames.length - 1] : undefined;
 	}
 
 	/** The node the top frame is about to work on (or is working on), for inspection/UI. */
@@ -706,6 +767,64 @@ export class Machine implements VM {
 		return frame;
 	}
 
+	/**
+	 * `nodes`, to evaluate in order, for a handler that goes on with their values: each leading simple one (a leaf — an
+	 * identifier, a literal — or leaves under plain operators: operators.ts isSimpleTree) is evaluated here, its value
+	 * pushed, and the rest pushed as frames, reversed so the first evaluates first. The values land as they would have, in
+	 * the same order — and a simple operand costs no step: a step is most of the work of reading a leaf. True when they
+	 * were all simple, their values on the stack already: the handler can go on in this step.
+	 */
+	public pushOperands(nodes: readonly ts.Node[], scope: Scope): boolean {
+		let leading = 0;
+
+		while (leading < nodes.length && isSimpleTree(nodes[leading])) {
+			this.values.push(simpleValue(this, nodes[leading], scope));
+			leading += 1;
+		}
+
+		for (let index = nodes.length - 1; index >= leading; index--) {
+			this.pushNode(nodes[index], scope);
+		}
+
+		return leading === nodes.length;
+	}
+
+	/** One operand (pushOperands): true when it was simple, its value pushed already. */
+	public pushOperand(node: ts.Node, scope: Scope): boolean {
+		if (isSimpleTree(node)) {
+			this.values.push(simpleValue(this, node, scope));
+
+			return true;
+		}
+
+		this.pushNode(node, scope);
+
+		return false;
+	}
+
+	/** A leaf's value (operators.ts LEAVES), read in `scope`: where an identifier, a literal, `true`/`false`/`null` is
+	 *  evaluated — its own frame's step (literals.ts) or its parent's (pushOperands). */
+	public leafValue(node: ts.Node, scope: Scope): unknown {
+		switch (node.kind) {
+			case IDENTIFIER:
+				// Globals are host values; guest bindings pass through the guard unchanged (identity by default).
+				return this.fromHost(scope.get((node as ts.Identifier).text));
+			case NUMERIC_LITERAL: {
+				const { text } = node as ts.NumericLiteral;
+
+				return Number(text.includes("_") ? text.replace(/_/gu, "") : text); // (separators are rare: skip the regex without)
+			}
+			case TRUE_KEYWORD:
+				return true;
+			case FALSE_KEYWORD:
+				return false;
+			case NULL_KEYWORD:
+				return null;
+			default:
+				return (node as ts.LiteralLikeNode).text; // a string, a template without substitutions
+		}
+	}
+
 	/** Statements inside a function (a call, a constructor, a field initializer / static block) never
 	 *  contribute to the program's completion value. */
 	public insideFunction(scope: Scope): boolean {
@@ -789,7 +908,8 @@ export class Machine implements VM {
 
 		const { frames } = this;
 		const at = frames.length - 1;
-		const frame = frames[at];
+		// (never `frames[-1]`: a read out of bounds turns the load megamorphic, for every later step)
+		const frame = at >= 0 ? frames[at] : undefined;
 
 		if (frame === undefined) {
 			// No frame left — but a signal may still be pending (a handler that pops itself *before*
@@ -1029,7 +1149,7 @@ export class Machine implements VM {
 			return false;
 		}
 
-		const frame = this.frames[this.frames.length - 1];
+		const frame = this.top;
 
 		if (frame === undefined || frame.kind !== undefined || frame.phase !== 0 || frame.node === null) {
 			return false;
@@ -1365,7 +1485,8 @@ export class Machine implements VM {
 			const nf = { "node": frame.node, "phase": frame.phase, "scope": clone(frame.scope), "valuesBase": frame.valuesBase } as Record<string, unknown>;
 
 			for (const key of Object.keys(frame)) {
-				if (key !== "node" && key !== "phase" && key !== "scope" && key !== "valuesBase") {
+				// (a loop's trace context is a cache of what's below it: the fork's frames find their own)
+				if (key !== "node" && key !== "phase" && key !== "scope" && key !== "valuesBase" && key !== "traceContext") {
 					nf[key] = clone((frame as unknown as Record<string, unknown>)[key]);
 				}
 			}
@@ -1406,6 +1527,7 @@ export class Machine implements VM {
 		forked.steppedAsync = this.steppedAsync;
 		forked.idle = this.idle;
 		forked.depth = 0;
+		forked.contexts = [];
 		// Its own pending fibers (their frames and closures, cloned), and the shared record of what settled.
 		forked.pending = new Map([...this.pending].map(([id, each]) => [id, each.kind === "fiber" ? { "kind": "fiber", "frames": each.frames.map(cloneFrame), "values": each.values.map(clone), "base": each.base } : { "kind": "callback", "fn": clone(each.fn) as GuestFunction }]));
 		forked.scheduler = this.scheduler;
@@ -1643,7 +1765,12 @@ export class Machine implements VM {
 			return this.callAsync(meta, thisArg, args);
 		}
 
-		return this.runSub(() => this.pushCall(meta, args, thisArg, newTarget));
+		// (runSub without its seed closure: this is the crossing a host built-in makes once per element)
+		const ctx = this.enterSub();
+
+		pushHostCall(this, meta, args, thisArg, newTarget);
+
+		return this.drainSub(ctx);
 	}
 
 	/**
@@ -2015,7 +2142,7 @@ export class Machine implements VM {
 			return;
 		}
 
-		if (frame.kind === "pattern") {
+		if (frame.kind === "pattern" && frame.iters !== undefined) {
 			this.closeIterations(frame.iters.splice(0).reverse(), signal); // innermost first
 		}
 
@@ -2184,9 +2311,28 @@ export class Machine implements VM {
 	}
 
 	private saveContext(): ExecContext {
-		this.depth += 1;
+		const { depth } = this;
+		let ctx = this.contexts[depth];
 
-		return { "frames": this.frames, "values": this.values, "signal": this.signal, "finished": this.finished, "paused": this.paused, "pauseKind": this.pauseKind, "pauseValue": this.pauseValue, "pauseRaw": this.pauseRaw, "sentValue": this.sentValue };
+		// (contexts nest, so the one saved at a depth is restored before that depth saves again: reuse it)
+		if (ctx === undefined) {
+			ctx = { "frames": this.frames, "values": this.values, "signal": this.signal, "finished": this.finished, "paused": this.paused, "pauseKind": this.pauseKind, "pauseValue": this.pauseValue, "pauseRaw": this.pauseRaw, "sentValue": this.sentValue, "subFrames": [], "subValues": [] };
+			this.contexts[depth] = ctx;
+		} else {
+			ctx.frames = this.frames;
+			ctx.values = this.values;
+			ctx.signal = this.signal;
+			ctx.finished = this.finished;
+			ctx.paused = this.paused;
+			ctx.pauseKind = this.pauseKind;
+			ctx.pauseValue = this.pauseValue;
+			ctx.pauseRaw = this.pauseRaw;
+			ctx.sentValue = this.sentValue;
+		}
+
+		this.depth = depth + 1;
+
+		return ctx;
 	}
 
 	private restoreContext(ctx: ExecContext): void {
@@ -2200,18 +2346,38 @@ export class Machine implements VM {
 		this.pauseValue = ctx.pauseValue;
 		this.pauseRaw = ctx.pauseRaw;
 		this.sentValue = ctx.sentValue;
+		// (kept for reuse: let go of the values it held)
+		ctx.signal = null;
+		ctx.pauseValue = undefined;
+		ctx.sentValue = undefined;
 	}
 
 	/** Run a fresh private context seeded by `seed`, to completion, and return the top value. */
 	private runSub(seed: () => void): unknown {
+		const ctx = this.enterSub();
+
+		seed();
+
+		return this.drainSub(ctx);
+	}
+
+	/** Enter a fresh private context, on its depth's stacks (empty: drainSub leaves them so). */
+	private enterSub(): ExecContext {
 		const ctx = this.saveContext();
 
-		this.frames = [];
-		this.values = [];
+		this.frames = ctx.subFrames;
+		this.values = ctx.subValues;
 		this.signal = null;
 		this.finished = false;
 		this.paused = false;
-		seed();
+
+		return ctx;
+	}
+
+	/** Run the context enterSub entered to completion, return the top value, and leave it. */
+	private drainSub(ctx: ExecContext): unknown {
+		const { subFrames, subValues } = ctx;
+
 		try {
 			while (!this.finished) {
 				// Regain debugger control inside a host-invoked guest call: a fresh statement on a breakpoint
@@ -2231,10 +2397,24 @@ export class Machine implements VM {
 				if (this.paused) {
 					throw new TsvalInternalError("yield/await inside a synchronously evaluated sub-expression (default value / computed key) is not supported");
 				}
+
+				// Done: no frame left, nothing propagating (what a step on the empty stack would only say)
+				if (subFrames.length === 0 && this.signal === null) {
+					break;
+				}
 			}
 
-			return this.values.pop();
+			return subValues.pop();
 		} finally {
+			// (left mid-run by a throw: empty them for the next sub-run here)
+			if (subFrames.length !== 0) {
+				subFrames.length = 0;
+			}
+
+			if (subValues.length !== 0) {
+				subValues.length = 0;
+			}
+
 			this.restoreContext(ctx);
 		}
 	}
@@ -2375,7 +2555,8 @@ function isGuestClassPrototype(value: object): boolean {
 	return isGuestClass(ctor) && ctor.prototype === value;
 }
 
-/** A full snapshot of the machine's mutable execution state, for nested sub-runs and fibers. */
+/** A full snapshot of the machine's mutable execution state, for nested sub-runs and fibers — and the stacks a sub-run
+ *  entered from it runs on. */
 interface ExecContext {
 	"frames": Frame[];
 	"values": unknown[];
@@ -2386,6 +2567,8 @@ interface ExecContext {
 	"pauseValue": unknown;
 	"pauseRaw": boolean;
 	"sentValue": unknown;
+	"subFrames": Frame[];
+	"subValues": unknown[];
 }
 
 /** A suspendable execution context — the backing store for a generator or async function. */

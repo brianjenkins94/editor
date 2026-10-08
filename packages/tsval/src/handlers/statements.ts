@@ -10,7 +10,7 @@ import { unimplemented } from "../errors.ts";
 import { Scope } from "../scope.ts";
 import { namedIf } from "./functions.ts";
 import { resumed, suspend } from "./generators.ts";
-import { bindingNames, executedStatements, hoist } from "./hoist.ts";
+import { bindingNames, hoist, hoistPlan, holdsClosure } from "./hoist.ts";
 import { getAsyncOrSyncIterator, getIterator, iterationStep, iterNext } from "./iteration.ts";
 import { propertyName } from "./literals.ts";
 import { assignProgram, bindIdentifier, bindingProgram, pushPattern } from "./patterns.ts";
@@ -19,7 +19,7 @@ import { evaluating, noop, on } from "./registry.ts";
 
 // TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
 // functions used here are read off it once.
-const { isClassExpression, isComputedPropertyName, isIdentifier, isVariableDeclarationList } = ts;
+const { isClassExpression, isComputedPropertyName, isIdentifier, isOmittedExpression, isVariableDeclarationList } = ts;
 
 const Kind = ts.SyntaxKind;
 const { NodeFlags } = ts;
@@ -33,9 +33,11 @@ function sourceFile(vm: Machine, frame: NodeFrame): void {
 			return;
 		}
 
-		hoist(vm, frame.scope, node.statements);
+		const plan = hoistPlan(node.statements);
+
+		hoist(vm, frame.scope, plan);
 		vm.linkExports(node, frame.scope);
-		pushStatementsReverse(vm, node.statements, frame.scope);
+		pushStatementsReverse(vm, plan.executed, frame.scope);
 		frame.phase = 1;
 	} else {
 		vm.frames.pop();
@@ -47,23 +49,23 @@ function block(vm: Machine, frame: NodeFrame): void {
 
 	if (frame.phase === 0) {
 		// A function-body Block runs directly in the function scope (params + body share it); a plain
-		// Block gets a fresh child scope. `frame.reuseScope` is set by the call handler.
-		const blockScope = frame.reuseScope ? frame.scope : new Scope(frame.scope, false);
+		// Block gets a fresh child scope, when it binds anything. `frame.reuseScope` is set by the call handler.
+		const plan = hoistPlan(node.statements);
+		const blockScope = frame.reuseScope || !plan.scoped ? frame.scope : new Scope(frame.scope, false);
 
 		if (!frame.reuseScope) {
-			hoist(vm, blockScope, node.statements);
+			hoist(vm, blockScope, plan);
 		}
 
-		pushStatementsReverse(vm, node.statements, blockScope);
+		pushStatementsReverse(vm, plan.executed, blockScope);
 		frame.phase = 1;
 	} else {
 		vm.frames.pop();
 	}
 }
 
-export function pushStatementsReverse(vm: Machine, statements: readonly ts.Statement[], scope: Scope): void {
-	const executed = executedStatements(statements);
-
+/** Push the statements that run (HoistPlan.executed), the first on top. */
+export function pushStatementsReverse(vm: Machine, executed: readonly ts.Statement[], scope: Scope): void {
 	for (let index = executed.length - 1; index >= 0; index--) {
 		vm.pushNode(executed[index], scope);
 	}
@@ -104,7 +106,8 @@ function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 	const index = frame.phase >> 1;
 
 	// The previous declaration's pattern, bound by now (its frame ran above this one): each name it bound, traced.
-	const previous = (frame.phase & 1) === 0 ? decls[index - 1] : undefined;
+	// (never `decls[-1]`: a read out of bounds turns the load megamorphic)
+	const previous = (frame.phase & 1) === 0 && index > 0 ? decls[index - 1] : undefined;
 
 	if (vm.trace !== undefined && previous?.initializer !== undefined && !isIdentifier(previous.name)) {
 		for (const name of bindingNames(previous.name)) {
@@ -122,13 +125,18 @@ function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 
 	if ((frame.phase & 1) === 0) {
 		if (decl.initializer) {
-			const init = vm.pushNode(decl.initializer, frame.scope);
+			frame.phase += 1; // -> bind
 
 			if (isIdentifier(decl.name) && isClassExpression(unwrapParens(decl.initializer))) {
-				init.nameHint = decl.name.text; // (see classDefinition)
+				vm.pushNode(decl.initializer, frame.scope).nameHint = decl.name.text; // (see classDefinition)
+
+				return;
 			}
 
-			frame.phase += 1; // -> bind
+			// (a leaf — `let count = 0`, `const x = y` — on the stack already: on to bind it in this step)
+			if (!vm.pushOperand(decl.initializer, frame.scope)) {
+				return;
+			}
 		} else {
 			// no initializer: `let x;` leaves the TDZ as undefined. `var x;` is a runtime no-op — it must
 			// not overwrite a hoisted `function x` (or an earlier assignment) with undefined.
@@ -138,7 +146,9 @@ function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 
 			frame.phase += 2; // -> next decl
 		}
-	} else {
+	}
+
+	if ((frame.phase & 1) === 1) {
 		const value = namedIf(vm.pop(), decl.name, decl.initializer);
 
 		if (isIdentifier(decl.name)) {
@@ -167,9 +177,14 @@ function ifStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.IfStatement;
 
 	if (frame.phase === 0) {
-		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 1;
-	} else if (frame.phase === 1) {
+
+		if (!vm.pushOperand(node.expression, frame.scope)) {
+			return;
+		}
+	}
+
+	if (frame.phase === 1) {
 		const cond = vm.pop();
 
 		vm.observe?.(node, "branch", cond ? 0 : 1);
@@ -235,9 +250,14 @@ function whileStatement(vm: Machine, frame: NodeFrame): void {
 	if (frame.phase === 0) {
 		frame.isLoop = true;
 		frame.continuePhase = 0;
-		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 1;
-	} else if (frame.phase === 1) {
+
+		if (!vm.pushOperand(node.expression, frame.scope)) {
+			return;
+		}
+	}
+
+	if (frame.phase === 1) {
 		if (!vm.pop()) {
 			vm.frames.pop();
 
@@ -280,9 +300,10 @@ function forStatement(vm: Machine, frame: NodeFrame): void {
 		const loopScope = new Scope(frame.scope, false);
 
 		frame.iterScope = loopScope;
-		// For per-iteration `let`/`const` binding (fresh binding each turn — correct closure capture).
+		// For per-iteration `let`/`const` binding (fresh binding each turn — correct closure capture), when the loop
+		// holds a closure to capture one.
 		frame.lexicalNames =
-			node.initializer !== null && node.initializer !== undefined && isVariableDeclarationList(node.initializer) && (node.initializer.flags & (NodeFlags.Let | NodeFlags.Const)) !== 0
+			node.initializer !== null && node.initializer !== undefined && isVariableDeclarationList(node.initializer) && (node.initializer.flags & (NodeFlags.Let | NodeFlags.Const)) !== 0 && holdsClosure(node)
 				? node.initializer.declarations.flatMap((decl) => bindingNames(decl.name))
 				: null;
 		// The copies keep the declaration's kind: `for (const x = 0; ; x++)` is a TypeError, not a loop.
@@ -305,38 +326,46 @@ function forStatement(vm: Machine, frame: NodeFrame): void {
 	} else if (frame.phase === 2) {
 		const scope = frame.iterScope!;
 
-		if (node.condition) {
-			vm.pushNode(node.condition, scope);
-			frame.phase = 3;
-		} else {
+		if (node.condition === undefined) {
 			frame.turn = (frame.turn ?? -1) + 1;
 			vm.pushNode(node.statement, scope);
 			frame.phase = 4;
+		} else if (vm.pushOperand(node.condition, scope)) {
+			forTurn(vm, frame, node); // (a simple condition — `n < limit` — tested in this step)
+		} else {
+			frame.phase = 3;
 		}
 	} else if (frame.phase === 3) {
-		if (!vm.pop()) {
-			vm.frames.pop();
-
-			return;
-		}
-
-		frame.turn = (frame.turn ?? -1) + 1;
-		vm.pushNode(node.statement, frame.iterScope!);
-		frame.phase = 4;
+		forTurn(vm, frame, node);
 	} else if (frame.phase === 4) {
 		// After the body: snapshot bindings into a fresh scope (so the body's closures keep their
 		// values), THEN run the incrementor in that fresh scope. (spec CreatePerIterationEnvironment.)
 		copyPerIteration(frame);
-		if (node.incrementor) {
-			vm.pushNode(node.incrementor, frame.iterScope!);
-			frame.phase = 5;
-		} else {
+		if (node.incrementor === undefined) {
 			frame.phase = 2;
+		} else if (vm.pushOperand(node.incrementor, frame.iterScope!)) {
+			vm.pop(); // (a simple incrementor — `d += 1`, `i++` — run in this step; its value discarded)
+			frame.phase = 2;
+		} else {
+			frame.phase = 5;
 		}
 	} else {
 		vm.pop(); // discard incrementor value
 		frame.phase = 2;
 	}
+}
+
+/** A `for` loop's condition tested (its value on the stack): the loop done, or its body's next turn. */
+function forTurn(vm: Machine, frame: NodeFrame, node: ts.ForStatement): void {
+	if (!vm.pop()) {
+		vm.frames.pop();
+
+		return;
+	}
+
+	frame.turn = (frame.turn ?? -1) + 1;
+	vm.pushNode(node.statement, frame.iterScope!);
+	frame.phase = 4;
 }
 
 // Snapshot the loop variables into a fresh scope so each iteration captures its own binding.
@@ -516,7 +545,7 @@ function forInStatement(vm: Machine, frame: NodeFrame): void {
 // push the body. Destructuring targets: S2 (later).
 export function bindForTarget(vm: Machine, frame: NodeFrame, initializer: ts.ForInitializer, value: unknown): void {
 	const node = frame.node as ts.ForOfStatement | ts.ForInStatement;
-	const bodyScope = new Scope(frame.scope, false);
+	const bodyScope = turnScope(frame, node);
 
 	frame.turn = (frame.turn ?? -1) + 1;
 	// A plain identifier binds directly; anything else (a pattern, a member target) is bound by a
@@ -560,15 +589,56 @@ export function bindForTarget(vm: Machine, frame: NodeFrame, initializer: ts.For
 	}
 }
 
+const sharedTurns = new WeakMap<ts.Node, boolean>();
+
+/** The scope a for-of/for-in turn binds its target in. A `var` or an assignment target binds outside it, so none; a
+ *  `let`/`const` one, a fresh scope each turn — unless nothing in the loop could capture the binding, when the turns
+ *  share one (rebinding resets it). A pattern with defaults or computed keys gets a fresh one regardless: one of them
+ *  could read a name the pattern hasn't bound yet this turn. */
+function turnScope(frame: NodeFrame, node: ts.ForOfStatement | ts.ForInStatement): Scope {
+	const { initializer } = node;
+
+	if (!isVariableDeclarationList(initializer) || (initializer.flags & (NodeFlags.Let | NodeFlags.Const)) === 0) {
+		return frame.scope;
+	}
+
+	let shared = sharedTurns.get(node);
+
+	if (shared === undefined) {
+		shared = !holdsClosure(node) && initializer.declarations.every((decl) => plainBinding(decl.name));
+		sharedTurns.set(node, shared);
+	}
+
+	if (!shared) {
+		return new Scope(frame.scope, false);
+	}
+
+	if (frame.iterScope === undefined) {
+		frame.iterScope = new Scope(frame.scope, false);
+	}
+
+	return frame.iterScope;
+}
+
+/** A binding name with no default values or computed keys in it. */
+function plainBinding(name: ts.BindingName): boolean {
+	return isIdentifier(name) || name.elements.every((element) => isOmittedExpression(element) || (element.initializer === undefined && (element.propertyName === undefined || !isComputedPropertyName(element.propertyName)) && plainBinding(element.name)));
+}
+
 function switchStatement(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.SwitchStatement;
 	const { clauses } = node.caseBlock;
 
 	if (frame.phase === 0) {
 		frame.isSwitch = true;
-		vm.pushNode(node.expression, frame.scope);
 		frame.phase = 1;
-	} else if (frame.phase === 1) {
+
+		if (!vm.pushOperand(node.expression, frame.scope)) {
+			return;
+		}
+	}
+
+	if (frame.phase === 1) {
 		frame.disc = vm.pop();
 		frame.caseIndex = 0;
 		frame.defaultIndex = clauses.findIndex((clause) => clause.kind === Kind.DefaultClause);
@@ -624,7 +694,7 @@ function switchStatement(vm: Machine, frame: NodeFrame): void {
 
 		const switchScope = frame.switchScope!;
 
-		hoist(vm, switchScope, statements);
+		hoist(vm, switchScope, hoistPlan(statements));
 		for (let index = statements.length - 1; index >= 0; index--) {
 			vm.pushNode(statements[index], switchScope);
 		}
