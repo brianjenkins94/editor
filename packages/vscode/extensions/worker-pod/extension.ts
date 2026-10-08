@@ -381,7 +381,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 			{ "dispose": podHub.subscribe("debug.launch", (data) => {
 				const info = data as { "runId": string; "file": string; "args"?: string[]; "cwd"?: string; "env"?: Record<string, string> };
 
-				// Can't track session end → decline, so the terminal falls back to a plain run (never breaks `node`).
+				// Can't track session end → decline: the terminal says the debugger couldn't take it.
 				if (!canTrack) {
 					podHub.publish(`debug.declined.${info.runId}`, {});
 
@@ -396,7 +396,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file.split("/").pop() ?? info.file}`, "program": info.file, ...info.args !== undefined && info.args.length > 0 ? { "args": info.args } : {}, ...info.cwd === undefined ? {} : { "cwd": info.cwd }, ...info.env === undefined ? {} : { "env": info.env }, "internalConsoleOptions": "neverOpen", "__runId": info.runId, "__startedBy": "terminal" }, { "suppressDebugView": true });
 
 					if (started !== true) {
-						podHub.publish(`debug.declined.${info.runId}`, {}); // start failed → fall back to a plain run
+						podHub.publish(`debug.declined.${info.runId}`, {}); // start failed → the terminal says so
 					}
 				})();
 			}) },

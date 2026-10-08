@@ -28,7 +28,7 @@ import type { SiteSums } from "./site-sums";
 import type { VirtualRequest } from "./workspace-runtime";
 
 import { createHub, portTransport, serve } from "@brianjenkins94/hub";
-import { createVM, explore, runToEnd, UNCATCHABLE } from "@brianjenkins94/tsval";
+import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@brianjenkins94/tsval";
 
 import ts from "typescript";
 import { capabilityBreakLines, classifyCall, shouldBreak } from "../capabilities/capability-breakpoints";
@@ -1243,15 +1243,28 @@ function placeOf(vm: Vm): Place | undefined {
 
 /** Where `error` was thrown, for the margin's mark: by now the frames have unwound, so tsval's note of it, not the
  *  current node. Best-effort — the run ends whatever this finds. */
-function crashOf(vm: Vm, error: unknown): Crash | undefined {
+function crashOf(vm: Vm, error: unknown, message?: string): Crash | undefined {
 	try {
 		const site = vm.throwSite(error);
 		const at = vm.location(site);
 
-		return at === null || site === null ? undefined : { "line": at.line, "at": rangeOf(site), "message": String(error), ...at.file === sourceFile?.fileName ? {} : { "file": at.file } };
+		return at === null || site === null ? undefined : { "line": at.line, "at": rangeOf(site), "message": message ?? String(error), ...at.file === sourceFile?.fileName ? {} : { "file": at.file } };
 	} catch {
 		return undefined;
 	}
+}
+
+/** What a run that stopped on something the debugger can't run says, loudly and as itself — not as the program's own
+ *  error, and without naming the interpreter: what it met (marked on its line, as a crash is). Undefined for any other
+ *  error. (RUNNING.md: no fallback — a gap is a bug to fix, shown where it was met.) */
+function unrunnable(error: unknown): string | undefined {
+	if (!(error instanceof TsvalInternalError)) {
+		return undefined;
+	}
+
+	const unimplemented = /^unimplemented: (?<what>[\s\S]*)$/u.exec(error.message)?.groups?.what;
+
+	return unimplemented === undefined ? `The debugger failed here: ${error.message}` : `Can't run this yet — the debugger doesn't support ${unimplemented}`;
 }
 
 /** Guest call depth: the `call`/`construct` frames on the control stack (the rest are expression/statement frames). */
@@ -1336,8 +1349,10 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 				}
 			}
 		} catch (error) {
-			post({ "type": "output", "text": "Uncaught " + String(error), "stream": "stderr" });
-			finish(1, crashOf(base, error));
+			const unsupported = unrunnable(error);
+
+			post({ "type": "output", "text": unsupported ?? "Uncaught " + String(error), "stream": "stderr" });
+			finish(1, crashOf(base, error, unsupported));
 			done = true;
 
 			return;

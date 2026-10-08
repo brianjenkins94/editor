@@ -1050,6 +1050,11 @@ export class Machine implements VM {
 			// aborts stay loud and propagate to the host uncaught (ASSIGNMENT working style; a host's abort must
 			// not be swallowable by guest try/catch).
 			if (isUncatchable(error)) {
+				// (an interpreter gap — something not run yet — noted where it was met, as a throw is: a host says where)
+				if (error instanceof TsvalInternalError) {
+					this.noteThrow(error, frame.node);
+				}
+
 				throw error;
 			}
 

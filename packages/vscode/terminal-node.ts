@@ -1,8 +1,8 @@
 /**
  * The terminal's `node` command — a thin just-bash custom command that resolves the target script against the shell's
  * cwd and runs it as every Run does (RUNNING.md, step 3): in the debugger, its output and stdin this terminal, with the
- * command line's arguments, the shell's directory and its environment. just-bash owns the shell. Only when the debugger
- * can't take it does it run on the plain runtime (the node worker), so `node` never breaks.
+ * command line's arguments, the shell's directory and its environment. just-bash owns the shell. When the debugger can't
+ * take it, it says so and fails (exit 1) — there's no plain-runtime fallback.
  */
 import type { CustomCommand } from "just-bash/browser";
 import type { NodeOutput, NodeRunner } from "./node-runner";
@@ -83,28 +83,11 @@ export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 				return ended(debugged.exitCode);
 			}
 
-			// The debugger couldn't take it → run on the plain runtime (RUNNING.md's fallback), presented as a production debug
-			// session too (Run and Debug controller + Debug Console), same as the vite preview — so this path isn't a bare
-			// process. The debug Stop button and the shell's Ctrl-C both abort the run via one combined signal.
-			run.update({ "runtime": "almostnode" });
+			// The debugger couldn't take it: say so, loudly — no plain-runtime fallback (RUNNING.md, *What can't run this
+			// way*: a gap is a bug to fix, not a second way to run).
+			run.end(1);
 
-			const sessionId = runner.startProductionSession(`node ${target}`, undefined, undefined, run.id);
-			const offStop = runner.onProductionStop(sessionId, () => { controller.abort(); });
-
-			try {
-				const { exitCode } = await runner.run(file, ctx.cwd, env, {
-					"runId": run.id,
-					"onOutput": (stream, data) => { writeLive(stream, data); runner.emitProductionOutput(sessionId, stream, data); },
-					"signal": controller.signal,
-					// It listens: a service, whatever it was taken for — with its port.
-					"onListening": (port) => { run.update({ "kind": "service", "port": port }); }
-				});
-
-				return ended(exitCode);
-			} finally {
-				offStop();
-				runner.endProductionSession(sessionId);
-			}
+			return { "stdout": "", "stderr": `node: couldn't start the debugger for ${target}\n`, "exitCode": 1 };
 		} catch (error) {
 			// The worker unreachable — surface it rather than hanging the shell.
 			run.end(1);

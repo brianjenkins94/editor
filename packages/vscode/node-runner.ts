@@ -41,8 +41,8 @@ export interface NodeRunner {
 	"run": (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks) => Promise<{ "exitCode": number }>;
 	/** Auto-attach: try to launch `file` under the tsval DEBUG adapter (breakpoints, step-back, capability stops).
 	 *  Resolves `{ attached: true, exitCode }` when the debug session ends, or `{ attached: false }` when the ext
-	 *  host declined (debugger unavailable) — the caller should then fall back to `run` so `node <file>` never
-	 *  breaks. Signals the ext host over the hub (`debug.launch`); Ctrl-C sends `debug.stop`. */
+	 *  host declined (debugger unavailable) — the caller says so and fails (no fallback). Signals the ext host over the
+	 *  hub (`debug.launch`); Ctrl-C sends `debug.stop`. */
 	"debug": (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks & { "args"?: string[] }) => Promise<{ "attached": boolean; "exitCode": number }>;
 	/** Feed a chunk to the running process's stdin (no-op when nothing is running). */
 	"sendStdin": (data: string) => void;
@@ -235,8 +235,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer, 
 		const offExit = hub.subscribe(`node.exit.${runId}`, (data) => {
 			finish(true, (data as { "exitCode"?: number }).exitCode ?? 0);
 		});
-		// The ext host couldn't attach a debug session (debugger API unavailable / start failed) → the caller falls
-		// back to a plain run, so `node <file>` keeps working.
+		// The ext host couldn't attach a debug session (debugger API unavailable / start failed) → the caller says so.
 		const offDeclined = hub.subscribe(`debug.declined.${runId}`, () => {
 			finish(false, 0);
 		});

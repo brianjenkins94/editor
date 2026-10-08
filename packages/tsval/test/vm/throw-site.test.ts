@@ -60,3 +60,8 @@ test("throwSite: a fork (a debugger's step from a stop) keeps its own", () => {
 		assert.strictEqual(forked.location(forked.throwSite(error))?.line, 2);
 	}
 });
+
+test("throwSite: something tsval can't run yet says where it was met — loudly, never as the program's own throw", () => {
+	assert.strictEqual(crashLine("const a = 1;\n{\n\tusing r = { [Symbol.dispose]() {} };\n}\n"), 3);
+	assert.strictEqual(crashLine("function f() {\n\treturn import.meta.url;\n}\nf();"), 2);
+});

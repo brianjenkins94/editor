@@ -100,9 +100,10 @@ code, but stepping back needs stopping first, and the page can't stop. Not built
 ## What can't run this way
 
 The hope is none; the plan is as few as possible, each a named case with a reason, kept on a list here and shrunk.
-A case that can't run on tsval runs natively on almostnode — the same session, the same controls, the same policy
-asking at each gated call (almostnode's capability hook, the service worker), just without what only stepping gives
-(values, step-back, cards) — and the margin says so where the values would be, without naming a runtime.
+There's no fallback: a program that meets something tsval can't run **fails loudly** — the run ends there, saying what
+it met (*Can't run this yet — the debugger doesn't support …*), marked on that line as a crash is, never dressed as the
+program's own error and never naming a runtime. A second, native world would be a second set of behaviours to keep
+honest, and it would hide each gap instead of making it a bug to fix.
 
 Known and suspected:
 
@@ -113,11 +114,9 @@ Known and suspected:
    is making tsval faster, not keeping a second world.
 3. **Packages** are native already (MODULES.md: a package is never stepped) — inside the run, on almostnode, not a
    separate mode. Their own async work is on the host's loop, outside the deterministic one.
-4. **What tsval doesn't support yet** — a syntax or a builtin it lacks. Each is a bug to fix, not a mode; the run falls
-   back for that program until it's fixed, and says why. Found by step 0: a debug run's globals are ECMAScript's alone
-   (tsval's `standardGlobals`) plus its stand-ins — no `URL`, `TextEncoder`, `Buffer`, `structuredClone`,
-   `AbortController`, which a Node program has. A run's globals should be almostnode's (the program's `process`,
-   `Buffer`, the web globals Node has), as its built-ins are (step 1).
+4. **What tsval doesn't support yet** — a syntax or a builtin it lacks. Each is a bug to fix, not a mode; the run fails
+   loudly where it met it (above). (Step 0 found a debug run's globals were ECMAScript's alone; a run has the globals a
+   Node program has now — the web ones and `Buffer`, workspace-runtime.ts `programGlobals`.)
 
 ## Entry points, after
 
@@ -216,13 +215,15 @@ that can't start says why). And the two run ledgers become one: every run in `ru
    handed its result by where it was made, a call given one of the program's own functions (`items.map(fn)`) made for
    real so it can be stepped into. A handler passed to a call is named by it (`addEventListener("click")`). Not yet: a
    call into another of the program's functions is handed its result rather than stepped into.
-7. **The fallback.** The cases that remain (from step 0, and what tsval lacks) run natively behind the same session,
-   the margin saying values aren't there; each listed here with its reason.
+7. **Fail loudly, not fall back** (done). Something tsval can't run ends the run where it was met: tsval notes the
+   site of its own gap as it notes a throw's (`throwSite`), and the debug worker says *Can't run this yet — the
+   debugger doesn't support …* in the run's output and marks the line, as a crash. No native fallback (*What can't run
+   this way*).
 
 ## Open
 
-- A fast path: whether case 2 is answered by making tsval faster, by stepping only what's under a breakpoint, or by a
-  native run — and if native, whether a run can move between the two (native to a breakpoint, then stepped).
+- A fast path for case 2: making tsval faster (done once: ~2.8×, 2026-10-07) or a compiled tier (tsval COMPILE.md,
+  parked until a program is actually too slow to debug).
 - Replay: a run's recorded results let it run again exactly — whether *Run again* is that, or a fresh run.
 - Effects on step-back: travelling back past a real write doesn't undo it. Show where a run's real effects are, so
   stepping back past one is visible.

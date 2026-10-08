@@ -2158,7 +2158,8 @@ test("notes: a note follows its code, and waits in Problems when its code is gon
 	}
 
 	assert.ok(resolve !== undefined, "a resolve's flow");
-	assert.equal(resolve.caused.find((child) => child.label === "bablr.resolve()").inferred, undefined, "named, not inferred");
+	// (its named child — a resolve may have another, inferred, from one alongside: resolveIn's own test)
+	assert.ok(resolve.caused.some((child) => child.label === "bablr.resolve()" && child.inferred === undefined), "named, not inferred");
 });
 
 test("notes: a note goes with its code to another file", async () => {
