@@ -33,10 +33,11 @@ const hub = createWorkerHub("bablr");
 // disk would keep the same thing in `.silo/local/bablr/`. Everything in it can go at any time: past CACHE_BYTES, the
 // least recently used go first.
 
-interface CstSpan { "type": string | null; "field": string | null; "start": number; "end": number; "token": boolean; "cover": boolean; "trivia": boolean }
-interface Cst { "spans": CstSpan[]; "length": number }
-/** A parse as kept: names once each, and five numbers a span (type, field — -1 for none — start, end, flags). */
-interface Kept { "names": string[]; "data": Int32Array; "length": number }
+interface CstSpan { "type": string | null; "field": string | null; "start": number; "end": number; "token": boolean; "cover": boolean; "trivia": boolean; "hash": string | null }
+interface Cst { "spans": CstSpan[]; "length": number; "hash": string }
+/** A parse as kept: names once each, and seven numbers a span (type, field — -1 for none — start, end, flags, and its
+ *  hash's two 32-bit halves — a trivia span has none). */
+interface Kept { "names": string[]; "data": Int32Array; "length": number; "hash": string }
 
 const CACHE_BYTES = 200 * 1024 * 1024;
 const PRUNE_EVERY = 20;
@@ -61,25 +62,30 @@ function keep(cst: Cst): Kept {
 
 		return at;
 	};
-	const data = new Int32Array(cst.spans.length * 5);
+	const data = new Int32Array(cst.spans.length * 7);
 
 	cst.spans.forEach((span, at) => {
-		data.set([name(span.type), name(span.field), span.start, span.end, (span.token ? TOKEN : 0) | (span.cover ? COVER : 0) | (span.trivia ? TRIVIA : 0)], at * 5);
+		const hash = span.hash ?? "0".repeat(16);
+
+		data.set([name(span.type), name(span.field), span.start, span.end, (span.token ? TOKEN : 0) | (span.cover ? COVER : 0) | (span.trivia ? TRIVIA : 0), Number.parseInt(hash.slice(0, 8), 16) | 0, Number.parseInt(hash.slice(8), 16) | 0], at * 7);
 	});
 
-	return { "names": names, "data": data, "length": cst.length };
+	return { "names": names, "data": data, "length": cst.length, "hash": cst.hash };
 }
 
-function unkeep({ names, data, length }: Kept): Cst {
+const half = (value: number): string => (value >>> 0).toString(16).padStart(8, "0");
+
+function unkeep({ names, data, length, hash }: Kept): Cst {
 	const spans: CstSpan[] = [];
 
-	for (let at = 0; at < data.length; at += 5) {
+	for (let at = 0; at < data.length; at += 7) {
 		const flags = data[at + 4];
+		const trivia = (flags & TRIVIA) !== 0;
 
-		spans.push({ "type": data[at] === -1 ? null : names[data[at]], "field": data[at + 1] === -1 ? null : names[data[at + 1]], "start": data[at + 2], "end": data[at + 3], "token": (flags & TOKEN) !== 0, "cover": (flags & COVER) !== 0, "trivia": (flags & TRIVIA) !== 0 });
+		spans.push({ "type": data[at] === -1 ? null : names[data[at]], "field": data[at + 1] === -1 ? null : names[data[at + 1]], "start": data[at + 2], "end": data[at + 3], "token": (flags & TOKEN) !== 0, "cover": (flags & COVER) !== 0, "trivia": trivia, "hash": trivia ? null : half(data[at + 5]) + half(data[at + 6]) });
 	}
 
-	return { "spans": spans, "length": length };
+	return { "spans": spans, "length": length, "hash": hash };
 }
 
 /** A text's git blob oid: what git calls the same content. */

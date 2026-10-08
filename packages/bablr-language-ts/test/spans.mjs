@@ -40,6 +40,19 @@ const find = (spans, type) => spans.filter((span) => span.type === type).map((sp
 	assert.deepEqual(spans.filter((span) => span.token && !span.trivia).map(text), ["f", "(", "a", ",", "b", ")"]);
 }
 
+// Merkle hashes: trivia never enters one; a shifted node holds its left operand; a subtree hashes the same anywhere
+{
+	const hashOf = (src, type, at = 0) => cstSpans(src).spans.filter((span) => span.type === type)[at].hash;
+
+	assert.equal(cstSpans("a.b(c)").hash, cstSpans("a /* x */ .b(\n\tc\n) // y").hash, "trivia leaves the whole parse's hash alone");
+	assert.notEqual(cstSpans("a.b(c)").hash, cstSpans("a.b(d)").hash, "a token's text is in it");
+	assert.notEqual(cstSpans("a - b").hash, cstSpans("b - a").hash, "so is the order of children");
+	assert.notEqual(hashOf("f()()", "CallExpression", 0), hashOf("f()()", "CallExpression", 1), "the outer call holds the inner one");
+	assert.notEqual(hashOf("x.y(1)", "CallExpression"), hashOf("z.y(1)", "CallExpression"), "a shifted node's hash holds its left operand");
+	assert.equal(hashOf("x = f(a)", "CallExpression"), hashOf("g(f(a))", "CallExpression", 0), "a subtree hashes the same wherever it is");
+	assert.ok(cstSpans("f(a) // t").spans.every((span) => (span.hash === null) === span.trivia), "every code node has a hash, trivia none");
+}
+
 // offsets are UTF-16 units (tsc's unit) and always add up
 for (const src of ["x = \"😀\"; g()", "let 𑈿 = 1 // 😀", `x = \`a\${b}c\` + "\\n"`, ""]) {
 	const { spans, length } = cstSpans(src);

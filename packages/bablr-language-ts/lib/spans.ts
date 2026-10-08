@@ -8,6 +8,12 @@
 // reference; its start is therefore the start of the node that closed just before the ShiftTag, not the current
 // offset. (2) Trivia is introduced by a `#` reference; everything under it (comments, whitespace) is flagged so
 // consumers can build formatting-insensitive views.
+//
+// The walk also gives every node a MERKLE HASH, bottom-up as the stream closes it: a token hashes its production type
+// and its literal text (straight from the tags, never sliced out of the source), any other node hashes its type and its
+// children's hashes in order. Trivia never enters a parent's hash, so a reindent or a comment edit leaves every hash
+// alone; a node's hash changes exactly when it or something under it does. A shifted node re-adopts its left operand's
+// hash where the GapTag re-adopts the operand.
 import { CloseNodeTag, GapTag, LiteralTag, OpenNodeTag, ReferenceTag, ShiftTag } from "@bablr/agast-helpers/symbols";
 import { parseTag, parseTagType } from "@bablr/agast-helpers/tree";
 import { m } from "@bablr/helpers/grammar";
@@ -37,22 +43,51 @@ function matcherFor(production) {
  * @property {boolean} token   a token node (its text is a literal)
  * @property {boolean} cover   a cover node (`<_Expression>` …) — shares its span with the node it wraps
  * @property {boolean} trivia  whitespace/comment (anything under an unnamed `#` reference; `#separatorTokens` are code)
+ * @property {string | null} hash  the node's Merkle hash (16 hex chars) — type + literal text or child hashes; null for trivia
  */
+
+/** 64 bits (two 32-bit lanes, 16 hex chars) of `text`. A content address for nodes, not a cryptographic one. */
+function hash64(text) {
+	let h1 = 0xDEADBEEF;
+	let h2 = 0x41C6CE57;
+
+	for (let index = 0; index < text.length; index += 1) {
+		const code = text.charCodeAt(index);
+
+		h1 = Math.imul(h1 ^ code, 2654435761);
+		h2 = Math.imul(h2 ^ code, 1597334677);
+	}
+
+	h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+	h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+
+	return (h1 >>> 0).toString(16).padStart(8, "0") + (h2 >>> 0).toString(16).padStart(8, "0");
+}
+
+/** A node's hash from its type and its parts (child hashes, and JSON-quoted literal text so the two can't collide). */
+function nodeHash(type, parts) {
+	return hash64((type ?? "") + "\0" + parts.join("\0"));
+}
 
 /** Running state for the tag walk, mutated tag-by-tag by `walkTag` and shared by the sync + async drivers. */
 function makeWalkState() {
 	return {
 		"spans": [],
 		"stack": [],
+		"root": { "parts": [] }, // the parts of whatever closes at the top, for the whole parse's hash
 		"offset": 0,
 		"pendingRef": null, // the ReferenceTag preceding the next open tag
 		"triviaDepth": 0, // > 0 while inside a trivia subtree
 		"shiftStart": null, // start for nodes opened after a ShiftTag, until the GapTag re-adopts the held node
-		"lastClosed": null // last closed non-trivia node (the one a ShiftTag refers to)
+		"lastClosed": null, // last closed non-trivia node (the one a ShiftTag refers to)
+		"held": null // the hash of that node between the ShiftTag and the GapTag that re-adopts it
 	};
 }
 
-/** Fold one CST tag into `state` (updates the running offset and pushes completed spans). */
+/** The parts list the next child belongs to: the open node's, or the top's. */
+const partsOf = (state) => (state.stack.length === 0 ? state.root : state.stack[state.stack.length - 1]).parts;
+
+/** Fold one CST tag into `state` (updates the running offset and pushes completed spans with their hashes). */
 // eslint-disable-next-line complexity -- an inherently branchy dispatch over the CST tag stream; splitting it would obscure the single running-offset invariant it maintains
 function walkTag(state, tag, src) {
 	const kind = parseTagType(tag);
@@ -61,8 +96,24 @@ function walkTag(state, tag, src) {
 		state.pendingRef = parseTag(tag).value;
 	} else if (kind === ShiftTag) {
 		state.shiftStart = state.lastClosed ? state.lastClosed.start : state.offset;
+
+		// the operand closed under the parent; it belongs to the node the shift opens
+		if (state.lastClosed !== null) {
+			const parts = partsOf(state);
+			const at = parts.lastIndexOf(state.lastClosed.hash);
+
+			if (at !== -1) {
+				parts.splice(at, 1);
+				state.held = state.lastClosed.hash;
+			}
+		}
 	} else if (kind === GapTag) {
 		state.shiftStart = null;
+
+		if (state.held !== null) {
+			partsOf(state).push(state.held);
+			state.held = null;
+		}
 	} else if (kind === OpenNodeTag) {
 		const { value } = parseTag(tag);
 		// trivia is what the trivia hook emits under an UNNAMED `#` reference; a named `#` reference such as
@@ -80,22 +131,35 @@ function walkTag(state, tag, src) {
 		state.pendingRef = null;
 		if (value.literalValue !== null && value.literalValue !== undefined) {
 			// self-closing token: its text is inline
+			const hash = trivia ? null : nodeHash(entry.type, [JSON.stringify(value.literalValue)]);
+
 			state.offset += value.literalValue.length;
-			state.spans.push({ ...entry, "end": state.offset });
+			state.spans.push({ ...entry, "end": state.offset, "hash": hash });
+
+			if (!trivia) {
+				partsOf(state).push(hash);
+			}
 		} else {
-			state.stack.push(entry);
+			state.stack.push({ ...entry, "parts": [] });
 
 			if (trivia) {
 				state.triviaDepth += 1;
 			}
 		}
 	} else if (kind === LiteralTag) {
-		state.offset += parseTag(tag).value.length;
+		const { value } = parseTag(tag);
+
+		state.offset += value.length;
+
+		if (state.triviaDepth === 0) {
+			partsOf(state).push(JSON.stringify(value));
+		}
 	} else if (kind === CloseNodeTag) {
 		const entry = state.stack.pop();
 
 		if (entry !== undefined) {
-			const span = { ...entry, "end": state.offset };
+			const { parts, ...node } = entry;
+			const span = { ...node, "end": state.offset, "hash": node.trivia ? null : nodeHash(node.type, parts) };
 
 			state.spans.push(span);
 
@@ -103,12 +167,13 @@ function walkTag(state, tag, src) {
 				state.triviaDepth -= 1;
 			} else {
 				state.lastClosed = span;
+				partsOf(state).push(span.hash);
 			}
 		}
 	}
 }
 
-/** @returns {{ spans: CstSpan[], length: number }} spans in close order (children before parents) */
+/** @returns {{ spans: CstSpan[], length: number, hash: string }} spans in close order (children before parents), and the whole parse's hash */
 export function cstSpans(src, production = "Program") {
 	const state = makeWalkState();
 
@@ -120,7 +185,7 @@ export function cstSpans(src, production = "Program") {
 		throw new Error(`cstSpans: walked ${state.offset} characters of a ${src.length}-character source`);
 	}
 
-	return { "spans": state.spans, "length": state.offset };
+	return { "spans": state.spans, "length": state.offset, "hash": nodeHash(null, state.root.parts) };
 }
 
 /**
@@ -131,7 +196,7 @@ export function cstSpans(src, production = "Program") {
  * @param {string} src
  * @param {string} production
  * @param {{ signal?: AbortSignal, budget?: number }} [options]
- * @returns {Promise<{ spans: CstSpan[], length: number }>}
+ * @returns {Promise<{ spans: CstSpan[], length: number, hash: string }>}
  */
 export async function cstSpansAsync(src, production = "Program", options = {}) {
 	const { signal, budget = 1500 } = options;
@@ -160,5 +225,5 @@ export async function cstSpansAsync(src, production = "Program", options = {}) {
 		throw new Error(`cstSpans: walked ${state.offset} characters of a ${src.length}-character source`);
 	}
 
-	return { "spans": state.spans, "length": state.offset };
+	return { "spans": state.spans, "length": state.offset, "hash": nodeHash(null, state.root.parts) };
 }
