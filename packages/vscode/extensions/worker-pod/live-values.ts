@@ -105,6 +105,8 @@ export class LiveRecord {
 	private pending: LiveValue[] = [];
 	private pendingCalls: LiveCall[] = [];
 	private readonly calls = new Map<number, number>();
+	/** How many calls are known, the top level aside: counted, as each value of a call past the bound asks. */
+	private listed = 0;
 	private dropped = 0;
 	private lastStep = -1;
 
@@ -121,22 +123,24 @@ export class LiveRecord {
 
 		this.lastStep = traced.step;
 
+		let count = this.calls.get(traced.call);
+
 		// A call is known from its first value told, kept or not (the top level is call 0, never listed).
-		if (!this.calls.has(traced.call)) {
-			if (traced.call !== 0 && [...this.calls.keys()].filter((call) => call !== 0).length >= this.bounds.calls) {
+		if (count === undefined) {
+			if (traced.call !== 0 && this.listed >= this.bounds.calls) {
 				this.dropped += 1;
 
 				return;
 			}
 
+			count = 0;
 			this.calls.set(traced.call, 0);
 
 			if (traced.call !== 0) {
+				this.listed += 1;
 				this.pendingCalls.push({ "id": traced.call, "name": traced.callee?.name ?? "anonymous", "line": traced.callee?.line ?? 0, ...traced.callee?.at === undefined ? {} : { "at": traced.callee.at } });
 			}
 		}
-
-		const count = this.calls.get(traced.call)!;
 
 		if (count >= this.bounds.perCall || traced.turns.some((turn) => turn >= this.bounds.turns)) {
 			this.dropped += 1;

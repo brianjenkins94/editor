@@ -23,6 +23,7 @@ import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import { effectiveDisposition, givenResult, isDangerous, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
+import type { Traced } from "./live-values";
 import type { SiteSums } from "./site-sums";
 import type { VirtualRequest } from "./workspace-runtime";
 
@@ -983,19 +984,69 @@ function functionName(node: ts.Node | null): string {
 	return "<module>";
 }
 
+/** Each traced node's file, line and range, read once: a node is traced each time it runs. */
+const tracedAt = new WeakMap<ts.Node, { "file": ts.SourceFile; "line": number; "at": [number, number] }>();
+/** Each call's function as the live values name it, read once. */
+const calleeAt = new WeakMap<ts.Node, NonNullable<Traced["callee"]>>();
+/** The turns of a trace's loops, read once: tsval shares one loops array among a turn's events. */
+const loopTurns = new WeakMap<TraceEvent["loops"], number[]>();
+
+/** `node`'s file, line and range (tracedAt). */
+function tracedPlace(node: ts.Node): { "file": ts.SourceFile; "line": number; "at": [number, number] } {
+	let place = tracedAt.get(node);
+
+	if (place === undefined) {
+		// Each in its own file: the entry's, or another of the program's (MODULES.md).
+		const file = node.getSourceFile();
+
+		place = { "file": file, "line": file.getLineAndCharacterOfPosition(node.getStart(file)).line, "at": rangeOf(node) };
+		tracedAt.set(node, place);
+	}
+
+	return place;
+}
+
+/** A call's function by name and line (calleeAt). */
+function calleeOf(node: ts.Node): NonNullable<Traced["callee"]> {
+	let callee = calleeAt.get(node);
+
+	if (callee === undefined) {
+		const { line, at } = tracedPlace(node);
+
+		callee = { "name": calleeName(node), "line": line, "at": at };
+		calleeAt.set(node, callee);
+	}
+
+	return callee;
+}
+
+/** A trace's loops' turns (loopTurns). */
+function turnsOf(loops: TraceEvent["loops"]): number[] {
+	let turns = loopTurns.get(loops);
+
+	if (turns === undefined) {
+		turns = loops.map((loop) => loop.turn);
+		loopTurns.set(loops, turns);
+	}
+
+	return turns;
+}
+
 /** What tsval's trace told, into the session's live values: its line, and its call's function by name and line. */
 function traceValue(event: TraceEvent): void {
 	if (sourceFile === undefined || probing !== undefined) {
 		return; // (a probe's fork didn't run)
 	}
 
-	// Each in its own file: the entry's, or another of the program's (MODULES.md).
-	const file = event.node.getSourceFile();
-	const lineOf = (node: ts.Node): number => node.getSourceFile().getLineAndCharacterOfPosition(node.getStart(node.getSourceFile())).line;
-	const callee = event.callee === undefined ? undefined : { "name": calleeName(event.callee), "line": lineOf(event.callee), "at": rangeOf(event.callee) };
+	const place = tracedPlace(event.node);
+	const traced: Traced = { "line": place.line, "name": event.name, "value": "", "raw": event.value, "kind": event.kind, "call": event.call, "turns": turnsOf(event.loops), "step": event.step, "at": place.at };
 
-	lastTraced = { "call": event.call, "turns": event.loops.map((loop) => loop.turn), "step": event.step };
-	liveIn(file).add({ "line": lineOf(event.node), "name": event.name, "value": "", "raw": event.value, "kind": event.kind, "call": event.call, "turns": lastTraced.turns, "step": event.step, "at": rangeOf(event.node), ...callee === undefined ? {} : { "callee": callee } });
+	if (event.callee !== undefined) {
+		traced.callee = calleeOf(event.callee);
+	}
+
+	lastTraced = traced;
+	liveIn(place.file).add(traced);
 }
 
 /** The run's process.argv, as the margin shows it (a command line: what Mock takes), on the first line reading it — if
