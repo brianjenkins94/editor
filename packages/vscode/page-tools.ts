@@ -6,6 +6,8 @@
  *   `debug.breakpoints` (extensions/worker-pod/debug-control.ts), and each session its own
  *   `debug.session.<id>.step|state|stop`. Every session answer is the same shape — state, and while stopped the line,
  *   its code, the locals — plus what the program printed;
+ * - what a file's Margin tab shows, as data — the last run's values, coverage, its end, the question asked, notes, the run
+ *   log (`margin.state`, live-values.ts) — rather than read off its DOM;
  * - the preview's cold-start transform race, provoked on demand (the node worker's `preview.provoke`);
  * - one Chrome DevTools Protocol command to a preview's page (the shell's `preview.cdp`, see preview-devtools.ts).
  *
@@ -96,6 +98,12 @@ export function editorPageTools(hub: Hub): PageTool[] {
 		"inputSchema": schema({ "session": SESSION }),
 		"timeoutMs": 5000,
 		"handler": async ({ session }, { signal }) => request(`debug.session.${await resolveSession(session, signal)}.state`, undefined, signal)
+	}, {
+		"name": "margin",
+		"description": "What a file's Margin tab shows beside its code (LIVE-VALUES.md), as data: the last run's values (each row's 1-based line, label and cells — a column per loop turn), what the bounds dropped, a capability stop's question, how the run ended, the marks in its gutter column (coverage, rules, the run's end), its cards, its notes and its run log. The file must be open in the editor.",
+		"inputSchema": schema({ "file": { "type": "string", "description": "The file, absolute or relative to the workspace. Default: the file open in the editor." } }),
+		"timeoutMs": 5000,
+		"handler": async ({ file }, { signal }) => request("margin.state", { "file": file }, signal)
 	}, {
 		"name": "debug_breakpoints",
 		"description": "Replace a file's breakpoints (VS Code's own, so they show in the editor and apply to running and future sessions). An empty list clears them.",

@@ -49,7 +49,7 @@ import type { LiveBatch, LiveCall, LiveValue } from "./extensions/worker-pod/liv
 import type { Range } from "./anchors";
 import type { ProfiledLine } from "./coverage";
 import { Anchors } from "./anchors";
-import { createRpcClient } from "@brianjenkins94/hub";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { parseInputs } from "./extensions/worker-pod/inputs";
 import { describeRule, ruleEditor, showPane, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
 import css from "./live-values.css?raw";
@@ -75,6 +75,23 @@ interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, Li
 
 /** A column no wider than this many characters; a longer value is cut short, whole on hover. */
 const MAX_WIDTH = 24;
+
+/** What a file's Margin shows, as plain data (debug-mcp's `margin` tool, through `margin.state`): set each time it's
+ *  drawn. Lines are 1-based, as an agent reads code. */
+interface MarginState {
+	"file": string;
+	"values": { "line": number; "label": string; "cells": string[] }[];
+	"dropped": number;
+	"ask"?: { "line": number; "call": string; "capability": string; "resource": string; "resolved": boolean };
+	"end"?: { "line": number; "kind": string; "message"?: string };
+	"marks": { "line": number; "kind": string; "title"?: string }[];
+	"cards": { "fromLine": number; "toLine": number; "title": string }[];
+	"notes": { "fromLine": number; "toLine": number; "text": string }[];
+	"runLog"?: RunLog;
+}
+
+/** Each drawn file's MarginState, by URI. */
+const margins = new Map<string, MarginState>();
 
 /** The latest session's values, per file URI — kept once it ends, until the next session of the file tells its own. */
 const sessions = new Map<string, Session>();
@@ -1130,6 +1147,18 @@ async function place(uri: string): Promise<void> {
 		...end === undefined ? [] : [{ "line": end.line, "kind": `run-${end.kind}`, "title": end.kind === "crashed" ? `The last run crashed here: ${end.message ?? "an uncaught error"}` : end.message === undefined ? "The last run was stopped here" : `The last run stopped here: ${end.message}` }]
 	];
 
+	margins.set(uri, {
+		"file": api?.Uri.parse(uri).path ?? uri,
+		"values": rows.map((row) => ({ "line": row.line + 1, "label": row.label, "cells": row.inline === undefined ? row.cells.map((cell) => cell?.text ?? "") : [row.inline.text] })),
+		"dropped": session?.dropped ?? 0,
+		...asked === undefined ? {} : { "ask": { "line": asked.ask.line + 1, "call": asked.ask.callee, "capability": asked.ask.capability, "resource": asked.ask.resource, "resolved": asked.ask.resolved } },
+		...end === undefined ? {} : { "end": { "line": end.line + 1, "kind": end.kind, ...end.message === undefined ? {} : { "message": end.message } } },
+		"marks": marks.map((mark) => ({ "line": mark.line + 1, "kind": mark.kind, ...mark.title === undefined ? {} : { "title": mark.title } })),
+		"cards": steps.map((step) => ({ "fromLine": step.fromLine + 1, "toLine": step.toLine + 1, "title": step.title })),
+		"notes": prose.map((note) => ({ "fromLine": note.fromLine + 1, "toLine": note.toLine + 1, "text": note.text })),
+		...runLog === undefined ? {} : { "runLog": runLog }
+	});
+
 	// Only a file that isn't code, with nothing in it, goes without.
 	if (entries.length === 0 && !open.has(uri) && marks.length === 0 && steps.length === 0) {
 		showPane(uri, undefined);
@@ -1333,6 +1362,19 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 
 	// A capability stop's question, and its answer back: the session resumes on it.
 	const rpc = createRpcClient(hub);
+
+	// What a file's Margin shows (debug-mcp's `margin` tool): the file open in the editor, or `file`, once it's been drawn.
+	serve(hub, "margin.state", (args) => {
+		const { file } = (args ?? {}) as { "file"?: unknown };
+		const path = typeof file === "string" && file !== "" ? (file.startsWith("/") ? file : `/workspace/${file}`) : vscode.window.activeTextEditor?.document.uri.path;
+		const state = path === undefined ? undefined : [...margins.values()].find((each) => each.file === path);
+
+		if (state === undefined) {
+			throw new Error(path === undefined ? "no file open in the editor — pass one" : `${path} has no Margin drawn — open it in the editor`);
+		}
+
+		return state;
+	});
 
 	choose = (session, choice, rule, give) => rpc.request(`debug.session.${session}.decide`, { "choice": choice, ...rule === undefined ? {} : { "rule": rule }, ...give === undefined ? {} : { "give": give } }, { "timeoutMs": 24 * 60 * 60_000 });
 	recordedOf = async (capability, resource) => rpc.request("capability.recorded", { "capability": capability, "resource": resource }, { "timeoutMs": 10_000 }) as Promise<{ "value": unknown; "at": string } | null>;

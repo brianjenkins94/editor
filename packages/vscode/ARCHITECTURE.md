@@ -462,7 +462,7 @@ flowchart LR
 | Root | preview | `preview.close`, `preview.open` |
 | Root | project | `project.list()`, `project.open`, `project.openFiles` |
 | Root | tab | `tab.discover` |
-| Root | tool | `tool.debug_breakpoints.*()`, `tool.debug_sessions.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.preview_cdp.*()`, `tool.preview_profile.*()`, `tool.provoke_transform.*()`, `tool.runs.*()` |
+| Root | tool | `tool.debug_breakpoints.*()`, `tool.debug_sessions.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.margin.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.preview_cdp.*()`, `tool.preview_profile.*()`, `tool.provoke_transform.*()`, `tool.runs.*()` |
 | Root | virtual | `virtual.request.*()` |
 | Root | workbench | `workbench.init()`, `workbench.online`, `workbench.save` |
 | Root | workspace | `workspace.files()` |
@@ -478,6 +478,7 @@ flowchart LR
 | Workbench | evidence | `evidence.level()`, `evidence.observed`, `evidence.preview` |
 | Workbench | git | `git.classify()`, `git.commit()`, `git.discard()`, `git.file()`, `git.status()` |
 | Workbench | history | `history.chunks()`, `history.texts()` |
+| Workbench | margin | `margin.state()` |
 | Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*` |
 | Workbench | preview | `preview.close`, `preview.hmr.*`, `preview.profiled` |
 | Workbench | production | `production.stop.*` |
