@@ -104,6 +104,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	/** Run Without Debugging (or a coverage run): breakpoints don't stop it. Capability breakpoints still do — they're
 	 *  the policy gate, not a debugging aid. */
 	private noDebug = false;
+	/** A live run (LIVE-VALUES.md, *Live runs, as you type*): launched quiet on a typing pause, stopping at nothing. */
+	private live = false;
 	/** The latest coverage the worker reported, and whether the final one has gone out as the `coverage` event. */
 	private coverage: CoverageReport | undefined;
 	private coverageSent = false;
@@ -163,7 +165,9 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	}
 
 	/** Decide the capability stop it's at, and resume: "Allow always" writes my policy override (as the preview's prompt
-	 *  does) and hands the worker the policy now in effect; "Deny" fails the call; "Allow once" just lets it run; a
+	 *  does) and hands the worker the policy now in effect; "Deny" fails the call; "Skip" doesn't make it (the run goes on
+	 *  with the stand-in's result); each for this call, this run (every call of the capability) or always (my override);
+	 *  "Allow once" just lets it run; a
 	 *  `rule` (made in the margin's rule editor) is saved in my policy as "Allow always" is, and decides the call as it
 	 *  does — refused, unsaved, when it doesn't cover this call or doesn't allow or deny it. */
 	public async decide(choice: CapabilityChoice, signal: AbortSignal, rule?: Rule, give?: unknown): Promise<DebugOutcome> {
@@ -176,7 +180,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		if (choice === "rule") {
 			// The worker's own subject for the call: an unknown resource is "".
 			const subject = { "capability": ask.capability, "resource": ask.resolved ? ask.resource : "" };
-			const decision = rule?.then?.find(({ action_id }) => ["allow", "deny", "ask"].includes(action_id))?.action_id;
+			const decision = rule?.then?.find(({ action_id }) => ["allow", "deny", "skip", "ask"].includes(action_id))?.action_id;
 
 			if (rule === undefined || problemOf(rule) !== undefined || !ruleMatches(rule, subject)) {
 				throw new Error(rule === undefined ? "no rule" : problemOf(rule) ?? "the rule doesn't cover this call");
@@ -185,21 +189,23 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			// A rule giving the call's result decides it too: the call isn't made, the debugger's stand-in returns it.
 			const gives = rule.then.some((action) => action.action_id === "give" && action.target_id === "result");
 
-			if (decision !== "allow" && decision !== "deny" && !gives) {
-				throw new Error("the rule doesn't allow, deny or give this call");
+			if (decision !== "allow" && decision !== "deny" && decision !== "skip" && !gives) {
+				throw new Error("the rule doesn't allow, deny, skip or give this call");
 			}
 
 			await replaceRule(undefined, rule);
 			this.policy = await this.loadPolicy();
-			this.control({ "type": "decide", "policy": this.policy, "deny": !gives && decision === "deny" });
+			this.control({ "type": "decide", "policy": this.policy, "deny": !gives && decision === "deny", "skip": !gives && decision === "skip" });
 		} else if (choice === "give-once") {
 			this.control({ "type": "decide", "give": give ?? null });
-		} else if (choice === "allow-run") {
+		} else if (choice === "allow-run" || choice === "skip-run" || choice === "deny-run") {
 			// Every call of the capability, until the run ends — whatever it reaches (a loop's calls reach a different one
-			// each time round).
-			this.runRules.push({ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": ask.capability }] }, "then": [{ "action_id": "allow" }] } as Rule);
+			// each time round) — allowed, skipped or denied, this one with them.
+			const action = choice.slice(0, choice.indexOf("-"));
+
+			this.runRules.push({ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": ask.capability }] }, "then": [{ "action_id": action }] } as Rule);
 			this.policy = await this.loadPolicy();
-			this.control({ "type": "decide", "policy": this.policy });
+			this.control({ "type": "decide", "policy": this.policy, "skip": action === "skip", "deny": action === "deny" });
 		} else if (choice === "allow-always") {
 			if (!ask.resolved) {
 				throw new Error(`"Allow always" needs the resource the call reaches, and ${ask.resource} isn't known before it runs`);
@@ -210,6 +216,27 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			this.control({ "type": "decide", "policy": this.policy });
 		} else if (choice === "deny") {
 			this.control({ "type": "decide", "deny": true });
+		} else if (choice === "deny-always") {
+			if (!ask.resolved) {
+				throw new Error(`"Deny always" needs the resource the call reaches, and ${ask.resource} isn't known before it runs`);
+			}
+
+			// My policy override denies it from now on: every run's call fails there (EACCES), without stopping.
+			await persistOverride(ask.capability, ask.resource, "deny");
+			this.policy = await this.loadPolicy();
+			this.control({ "type": "decide", "policy": this.policy, "deny": true });
+		} else if (choice === "skip") {
+			// Not made: the run goes on with the debugger's stand-in's result, the line saying it was skipped.
+			this.control({ "type": "decide", "skip": true });
+		} else if (choice === "skip-always") {
+			if (!ask.resolved) {
+				throw new Error(`"Skip always" needs the resource the call reaches, and ${ask.resource} isn't known before it runs`);
+			}
+
+			// My policy override skips it from now on (util/silo's `skip`): every run goes past it, never stopping here.
+			await persistOverride(ask.capability, ask.resource, "skip");
+			this.policy = await this.loadPolicy();
+			this.control({ "type": "decide", "policy": this.policy, "skip": true });
 		}
 
 		return this.act("continue", signal);
@@ -400,7 +427,9 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.eventLoop = loopStartOf(args["eventLoop"]);
 				this.followTerminal(args["__startedBy"] === "terminal" && typeof args["__runId"] === "string" ? args["__runId"] : undefined);
 				this.noDebug = args["noDebug"] === true;
-				this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
+				// A live run (LIVE-VALUES.md): the file run again as typing pauses — it stops at nothing.
+				this.live = args["__live"] === true;
+				this.lines = this.noDebug || this.live ? [] : this.breakpointLines.get(this.program) ?? [];
 				this.respond(request);
 				void this.loadSource();
 				break;
@@ -480,6 +509,19 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				// Stopped by hand, if it hadn't ended: a run of several cases stops here too.
 				if (!this.ended) {
 					stoppedByHand.add(this.id);
+				}
+
+				// A live run stopped by the next edit, or one that ran nothing: it tells nothing — no coverage, no end — and the
+				// margin keeps the last run's until the next one finishes.
+				if (this.live && (!this.ended || !this.coverageSent)) {
+					this.ended = true;
+					this.coverageSent = true;
+					this.endAction();
+					this.closeWorker();
+					this.respond(request);
+					this.event("terminated");
+					this.settle("terminated");
+					break;
 				}
 
 				// Stopped early: ask for the coverage so far first, briefly — a worker blocked in Atomics.wait (an
@@ -613,7 +655,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				return;
 			}
 
-			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } }, ...workspace.buffer === undefined ? {} : { "workspace": workspace.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
+			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } }, ...workspace.buffer === undefined ? {} : { "workspace": workspace.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop }, ...this.live ? { "live": true } : {} }, trace);
 		});
 	}
 
@@ -770,7 +812,15 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			case "terminated":
 				this.endAction();
 				exitCodes.set(this.id, message.exitCode ?? 0);
-				this.tellEnded(message.crash === undefined ? undefined : { "kind": "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message }, message.crash?.file);
+
+				// A live run that ran nothing (its text doesn't parse yet): no values, no coverage, no end — the margin keeps
+				// the last run's.
+				if (message.quiet === true) {
+					this.ended = true;
+				}
+
+				// (a live run that ran out of budget ends stopped where it got to, not crashed)
+				this.tellEnded(message.crash === undefined ? undefined : { "kind": message.crash.stopped === true ? "stopped" : "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message }, message.crash?.file);
 				this.event("terminated");
 				this.closeWorker();
 				this.settle("terminated");
@@ -999,7 +1049,7 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 
 				// F5 on an app's file (RUNNING.md, step 4): the app runs — its dev server, its preview — not a session here.
 				// (Run's own launches decided that already; a terminal's `node` and an ordering's replay are what they say.)
-				if (given["__launchId"] === undefined && given["__startedBy"] !== "terminal" && given["eventLoop"] === undefined && given["replay"] === undefined && program !== "") {
+				if (given["__launchId"] === undefined && given["__startedBy"] !== "terminal" && given["__live"] !== true && given["eventLoop"] === undefined && given["replay"] === undefined && program !== "") {
 					const app = await appRootOf(program);
 
 					if (app !== undefined) {
@@ -1012,9 +1062,10 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 				// value, the rest each a run after it (`__cases`).
 				const mocked = Array.isArray(given["args"]) || Array.isArray(given["__cases"]) || given["replay"] !== undefined || program === "" ? undefined : givenBy(await loadEffectivePolicy(), { "program": vscode.workspace.asRelativePath(vscode.Uri.file(program), false) }, "process.argv");
 				const cases = mocked?.values.filter((each): each is string[] => Array.isArray(each));
-				const config = cases === undefined || cases.length === 0 ? given : { ...given, "args": cases[0], "__cases": cases, "__case": 0 };
+				// (a live run takes the first of them alone, and isn't a run in the running list)
+				const config = cases === undefined || cases.length === 0 ? given : given["__live"] === true ? { ...given, "args": cases[0] } : { ...given, "args": cases[0], "__cases": cases, "__case": 0 };
 
-				if (typeof config["__runId"] === "string") {
+				if (typeof config["__runId"] === "string" || config["__live"] === true) {
 					return config;
 				}
 

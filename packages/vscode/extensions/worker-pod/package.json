@@ -14,6 +14,12 @@
     "onDebugResolve:tsval"
   ],
   "contributes": {
+    "configuration": {
+      "title": "tsval",
+      "properties": {
+        "tsval.liveRuns": { "type": "boolean", "default": true, "description": "Run the program file you're typing in again whenever typing pauses, so the margin shows what it did (LIVE-VALUES.md). A live run makes nothing but reads the policy allows: writes, requests and commands are skipped." }
+      }
+    },
     "commands": [
       { "command": "editor.debugFile", "title": "Run", "category": "Debug", "icon": "$(play)" },
       { "command": "tsval.exploreOrderings", "title": "Explore Orderings", "category": "Debug", "icon": "$(type-hierarchy)" },

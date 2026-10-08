@@ -148,6 +148,12 @@ async function policyDecider(request: CapabilityRequest): Promise<Verdict> {
 		return { "behavior": "deny", "message": "denied by .silo policy" };
 	}
 
+	// Skipped (util/silo's `skip`): not made. Here there's no stand-in to answer it in its place, as a debug run has — so,
+	// as an enforcer without one, the gate refuses it.
+	if (effective === "skip") {
+		return { "behavior": "deny", "message": "skipped by .silo policy" };
+	}
+
 	let choice = await promptViaShell({ "kind": request.kind, "scope": request.scope, "resource": resource, "dangerous": isDangerous(capability), ...windowOf(request) });
 
 	// Rule…: the rule is made in the Rules view (rules-view.ts `rules.make`), and the call waits on it; cancelled, the

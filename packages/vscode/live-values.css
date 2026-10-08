@@ -143,9 +143,71 @@
   cursor: pointer;
 }
 
-.live-values-choice.allow-once {
+.live-values-choice.allow {
   background: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
+}
+
+/* A verb and its ▾ (live-values.ts renderAsk's split buttons): one control, the ▾ opening how long — this call, this
+   run, always — under it. */
+.live-values-split {
+  position: relative;
+  display: inline-flex;
+}
+
+.live-values-split > .live-values-choice:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.live-values-choice.more {
+  padding: 1px 4px;
+  border-left: 1px solid var(--vscode-button-separator, rgba(128, 128, 128, 0.4));
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.live-values-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 100%;
+  margin-top: 2px;
+  padding: 2px 0;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.4)));
+  border-radius: 3px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  font-family: var(--vscode-font-family);
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+}
+
+.live-values-menu[hidden] {
+  display: none;
+}
+
+.live-values-menu-item {
+  padding: 2px 10px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.live-values-menu-item:hover:not(:disabled) {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+  color: var(--vscode-menu-selectionForeground, inherit);
+}
+
+.live-values-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .live-values-choice:disabled {
@@ -274,6 +336,12 @@
 .live-values-set {
   color: var(--vscode-charts-orange, #d18616);
   font-weight: bold;
+}
+
+/* A call that wasn't made — skipped at its stop, or by a live run (LIVE-VALUES.md): what didn't happen, muted. */
+.live-values-skip {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
 }
 
 /* Mocking a value (live-values.ts): a variable's Mock checkbox, on its row's hover or at the cursor, so rows don't grow

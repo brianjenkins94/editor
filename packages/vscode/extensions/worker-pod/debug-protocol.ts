@@ -19,11 +19,12 @@ export const eventSubject = (session: string): string => "debug.session." + sess
 export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue";
 
 /** Where a program threw: its line and range — in `file`, when that's another of its files than the entry. */
-export interface Crash { "line": number; "at": [number, number]; "message": string; "file"?: string }
+/** How a run ended short: an uncaught error where it was thrown — or, `stopped`, where a live run ran out of budget. */
+export interface Crash { "line": number; "at": [number, number]; "message": string; "file"?: string; "stopped"?: true }
 
 /** Adapter → worker. */
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string>; "replay"?: Replay }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "program"?: string; "hooks"?: SetHook[]; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string>; "replay"?: Replay; "live"?: boolean }
 	/** Run every ordering of the program's events (tsval's explore) instead of debugging it: answered with `explored`. */
 	| { "type": "explore"; "source": string; "fileName": string; "policy"?: Policy; "args"?: string[]; "eventLoop": LoopStart; "maxRuns"?: number; "workspace"?: SharedArrayBuffer }
 	/** The user's breakpoints in a file: the program's entry, or (`file`) another of its files. */
@@ -33,7 +34,7 @@ export type Control =
 	/** A decision at a capability stop, before the run resumes: `deny` fails the call the stop was for; `policy`, after
 	 *  "Allow always", is the policy now in effect — what stops from here on; `give`, the result the call returns instead
 	 *  of being made (a rule's *give result*, just this once). */
-	| { "type": "decide"; "deny"?: boolean; "policy"?: Policy; "give"?: unknown }
+	| { "type": "decide"; "deny"?: boolean; "skip"?: boolean; "policy"?: Policy; "give"?: unknown }
 	/** At a stop: set `name` (a variable in scope there) to `value`, a literal as code writes it — the run goes on with it. */
 	| { "type": "setValue"; "name": string; "value": string }
 	/** What a timer's wait costs from here on: its real delay, or none (Skip Waits). */
@@ -85,14 +86,14 @@ export interface RunEnd { "kind": "crashed" | "stopped"; "line": number; "at"?: 
 /** The choices at a capability stop, as the preview's prompt words them — and `rule`, a rule made there (the margin's
  *  rule editor) saved in my policy, deciding the call as it does (or giving its result); `give-once`, a result given the
  *  call instead of it, just this once; `allow-run`, calls like it allowed until the run ends (kept nowhere). */
-export type CapabilityChoice = "allow-once" | "allow-run" | "allow-always" | "deny" | "rule" | "give-once";
+export type CapabilityChoice = "allow-once" | "allow-run" | "allow-always" | "skip" | "skip-run" | "skip-always" | "deny" | "deny-run" | "deny-always" | "rule" | "give-once";
 
 /** Worker → adapter. */
 export type WorkerEvent =
 	| { "type": "stopped"; "reason": string; "snapshot": Snapshot; "atomic"?: boolean; "ask"?: CapabilityAsk }
 	/** The program is over: `exitCode` 1 when it threw, else 0. */
 	/** `crash.file`: where it threw, when that's another of the program's files than the entry. */
-	| { "type": "terminated"; "exitCode"?: number; "crash"?: Crash }
+	| { "type": "terminated"; "exitCode"?: number; "crash"?: Crash; "quiet"?: true }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" }
 	/** The program's statement coverage — asked for, or `final` just before `terminated`. */
 	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean }

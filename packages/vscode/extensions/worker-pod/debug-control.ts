@@ -13,7 +13,7 @@
  *   session `debug.session.<id>.step` { action }   → resumes, and answers with the NEXT stop (or the end)
  *   session `debug.session.<id>.state`             → where it is now
  *   session `debug.session.<id>.stop`              → ends it
- *   session `debug.session.<id>.decide` { choice, rule? } → at a capability stop: allow-once / allow-run / allow-always / deny, or
+ *   session `debug.session.<id>.decide` { choice, rule? } → at a capability stop: allow, skip or deny — each for this call, this run or always (allow-once / allow-run / allow-always, skip / skip-run / skip-always, deny / deny-run / deny-always), or
  *                                                     rule (saved in my policy, deciding it), then resumes
  *   session `debug.session.<id>.setValue` { name, value } → at a stop: a variable set to a literal; the run goes on with it
  *   session `debug.session.<id>.pace` { pace }      → what a timer's wait costs from here on: real, or none (Skip Waits)
@@ -36,7 +36,7 @@ import { appRootOf, runApp } from "./launch";
 
 export type DebugAction = StepAction;
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
-const CHOICES = new Set<string>(["allow-once", "allow-run", "allow-always", "deny", "rule", "give-once"] satisfies CapabilityChoice[]);
+const CHOICES = new Set<string>(["allow-once", "allow-run", "allow-always", "skip", "skip-run", "skip-always", "deny", "deny-run", "deny-always", "rule", "give-once"] satisfies CapabilityChoice[]);
 
 /** `starting` until the first stop; `idle` = waiting — on a request, its stdin or a timer — with no stop to step from (or,
  *  for an app's file, the app running in its page). */

@@ -98,13 +98,14 @@ export function classifyCall(node: ts.CallExpression, args: readonly unknown[]):
 }
 
 /**
- * Does the policy require a hard stop at this capability hit? Break on anything NOT explicitly allowed — an
- * explicit `deny`, or an undecided dangerous call (`review`) — so the debugger pauses for every capability the
- * user hasn't cleared, firewall-style. `allow` (and non-dangerous, undecided) passes straight through.
+ * Does the policy require a hard stop at this capability hit? Break on an undecided dangerous call (`review`), so the
+ * debugger pauses for every capability the user hasn't decided, firewall-style. A decided one passes: `allow` runs it,
+ * `skip` goes past it, `deny` fails it (EACCES) — a *Deny always* doesn't ask again (and non-dangerous, undecided,
+ * passes straight through).
  */
 export function shouldBreak(policy: Policy, hit: CapabilityHit): boolean {
 	// A call a rule gives the result of (RULES.md, slice 2) never happens: the debugger's stand-in returns it instead.
-	return effectiveDisposition(policy, hit.capability, hit.resource, hit.dangerous) !== "allow" && givenResult(policy, { "capability": hit.capability, "resource": hit.resource }) === undefined;
+	return effectiveDisposition(policy, hit.capability, hit.resource, hit.dangerous) === "review" && givenResult(policy, { "capability": hit.capability, "resource": hit.resource }) === undefined;
 }
 
 /** A static capability call site in a source file (no args yet → no resource): where a debugger could pre-mark or

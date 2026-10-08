@@ -459,10 +459,15 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 		});
 	}, change);
 
+	// (Live runs off: one would run the edited file again at once, and its coverage is what the margin would show.)
+	const liveRuns = (on) => workbench.evaluate((value) => globalThis.__editor.api.workspace.getConfiguration("tsval").update("liveRuns", value, true), on);
+
+	await liveRuns(false);
 	await edit("append");
 	await eventually("the evidence's mark, after an unrelated edit", async () => (await marks()) > 0 || undefined);
 	await edit("statement");
 	await eventually("no mark on the edited statement", async () => (await marks()) === 0 || undefined);
+	await liveRuns(undefined);
 });
 
 // What went through a run's ?., ??, parameters, returns and branches (RUNTIME-EVIDENCE.md, the second slice): folded
@@ -647,7 +652,7 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 // runtime evidence, and the typed strategy's signal — the type of what each site observes.
 // Live values (LIVE-VALUES.md): a debug session over the binary search of Bret Victor's *Inventing on Principle*, paused
 // on its return — each line's values in the notes margin beside it, a column per turn of the loop, a prose note beside
-// them — and gone with the session, the note staying.
+// them — and kept once the session ends (the file's last run), the note staying.
 test("live values: a session's values beside the code, as the talk's binary search", async () => {
 	const workbench = session.workbench();
 	const source = [
@@ -735,7 +740,8 @@ test("live values: a session's values beside the code, as the talk's binary sear
 	});
 
 	await session.request(`debug.session.${started.session}.stop`, undefined, 30_000);
-	await eventually("the values gone with the session", async () => Object.keys(await rows()).length === 0 || undefined);
+	await eventually("the run's end on its line", () => workbench.evaluate(() => document.querySelector(".notes-margin-mark.run-stopped") !== null || undefined));
+	assert.deepEqual((await rows())["5"], ["mid =", "2", "4", "3"], "its values kept: the file's last run");
 	// (Each draw renders the note again, asynchronously: wait for it.)
 	assert.equal(await eventually("the note, still there", () => workbench.evaluate(() => document.querySelector(".notes-margin-entry strong")?.textContent)), "Binary search", "the note stays");
 	// Leave the workbench as the next tests expect it: no note, no breakpoint, and the Explorer back where a breakpoint's
@@ -743,6 +749,66 @@ test("live values: a session's values beside the code, as the talk's binary sear
 	await show([]);
 	await session.request("debug.breakpoints", { "program": "/workspace/victor.js", "lines": [] }, 30_000);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
+});
+
+// Live runs (LIVE-VALUES.md, *Live runs, as you type*): the file in the editor runs again as typing pauses — no Run — its
+// values in the margin; a write it can't make is skipped (nothing written, the line saying so); half-typed, the last run's
+// values stay; a loop that never ends stops at its budget, saying so on its line; none of them is in the running list.
+test("live runs: typing paused, the file runs again — writes skipped, half-typed kept, an endless loop stopped", async () => {
+	const workbench = session.workbench();
+	const file = "/workspace/live.js";
+	const rows = () => workbench.evaluate(() => Object.fromEntries([...document.querySelectorAll(".live-values-row")].map((row) => [row.dataset.line, [...row.children].filter((child) => !child.classList.contains("live-values-mock")).map((child) => child.textContent.trim())])));
+	const edit = (from, to) => workbench.evaluate(async ([find, replace]) => {
+		const { api } = globalThis.__editor;
+		const editor = api.window.activeTextEditor;
+		const text = editor.document.getText();
+		const at = text.indexOf(find);
+
+		await editor.edit((builder) => { builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + find.length)), replace); });
+	}, [from, to]);
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file(path);
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode("const fs = require('fs');\nlet total = 0;\nfor (const p of [3, 4, 5]) {\n\ttotal += p;\n}\nfs.writeFileSync('out-live.txt', String(total));\nconsole.log(total);\n"));
+		await api.window.showTextDocument(uri);
+	}, file);
+	await edit("[3, 4, 5]", "[3, 4, 5, 6]");
+
+	const ran = await eventually("the edit's run, in the margin", async () => {
+		const all = await rows();
+
+		return all["3"]?.length === 5 ? all : undefined;
+	});
+
+	assert.deepEqual(ran["3"], ["total =", "3", "7", "12", "18"]);
+	assert.deepEqual(ran["5"].filter((cell) => cell !== ""), ["skipped", "fs:write out-live.txt"], "the write, skipped");
+	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.stat(globalThis.__editor.api.Uri.file("/workspace/out-live.txt")).then(() => true, () => false)), false, "nothing written");
+	assert.equal((await session.request("runs.list", undefined, 5000)).some((run) => /\(live\)/u.test(run.title)), false, "not in the running list");
+
+	// Half-typed: the run that didn't parse tells nothing; the last one's values stay where they were.
+	await edit("total += p;", "total += p *");
+	await new Promise((resolve) => { setTimeout(resolve, 2000); });
+	assert.deepEqual((await rows())["3"], ["total =", "3", "7", "12", "18"], "kept");
+
+	await edit("total += p *", "total += p * 2;");
+	assert.deepEqual(await eventually("the finished edit's run", async () => {
+		const total = (await rows())["3"];
+
+		return total?.[4] === "36" ? total : undefined;
+	}), ["total =", "6", "14", "24", "36"]);
+
+	// A loop that never ends: stopped at its budget, on its line.
+	await edit("for (const p of [3, 4, 5, 6]) {", "while (true) {\n\tconst p = 1;");
+	assert.match(await eventually("stopped at its budget", () => workbench.evaluate(() => document.querySelector(".notes-margin-mark.run-stopped")?.title)), /too long to run as you type/u);
+
+	await workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+
+		await api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+		await api.workspace.fs.delete(api.Uri.file(path));
+	}, file);
 });
 
 // Setting a value from the margin: Mock… on a variable's row — the rule editor, prefilled with the place and the value —
@@ -932,9 +998,9 @@ test("mock process.argv: a rule giving it, once or kept, several runs, and a pla
 
 // Capability decisions on the line (LIVE-VALUES.md, step 8): a call the policy hasn't decided stops the run at its line,
 // and asks there, in the notes margin — what it would do, from the run's own values, and Allow once / Allow always / Deny.
-// Deny fails the call as the policy would; Allow once lets it run; Allow always writes my policy override, and the next
-// run goes straight through. Rule… opens the rule editor there (RULES.md), prefilled with the call: widened to a glob and
-// saved, it decides the call, and the next run's.
+// Deny fails the call as the policy would; Skip doesn't make it, the run going on; Allow once lets it run; Allow always
+// writes my policy override, and the next run goes straight through. Rule… opens the rule editor there (RULES.md),
+// prefilled with the call: widened to a glob and saved, it decides the call, and the next run's.
 test("capability decisions: a gated call asks on its line, and the choice resumes the run", async () => {
 	const workbench = session.workbench();
 	const source = [
@@ -965,14 +1031,14 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	const asked = () => workbench.evaluate(() => {
 		const box = document.querySelector(".live-values-ask");
 
-		return box === null ? undefined : { "what": box.querySelector(".live-values-ask-what").textContent, "choices": [...box.querySelectorAll("button")].map((button) => (button.disabled ? `(${button.textContent})` : button.textContent)) };
+		return box === null ? undefined : { "what": box.querySelector(".live-values-ask-what").textContent, "choices": [...box.querySelectorAll(".live-values-choices > .live-values-split > .live-values-choice:not(.more), .live-values-choices > .live-values-choice.rule")].map((button) => button.textContent), "lasting": [...box.querySelectorAll(".live-values-split:first-child .live-values-menu-item")].map((item) => (item.disabled ? `(${item.textContent})` : item.textContent)) };
 	});
 	const start = async () => {
 		const stopped = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, 60_000);
 
 		assert.equal(stopped.reason, "capability", "stopped by the policy, not a breakpoint");
 		assert.equal(stopped.line, 5);
-		assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow once", "Allow this run", "Allow always", "Deny", "Rule…"] });
+		assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow", "Skip", "Deny", "Rule…"], "lasting": ["this call", "this run", "always"] });
 
 		return stopped;
 	};
@@ -993,9 +1059,17 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	assert.match(denied.output.join("\n"), /EACCES/u, "the call threw EACCES");
 	await eventually("the question gone with the run", async () => (await asked()) === undefined || undefined);
 
-	// Allow once, from the margin's own button: the call runs; nothing is written to the policy.
+	// Skip: the call isn't made, the run goes on (the stand-in answers), and its line says so.
+	const skipped = await session.request(`debug.session.${(await start()).session}.decide`, { "choice": "skip" }, 60_000);
+
+	assert.equal(skipped.state, "terminated");
+	assert.deepEqual(skipped.output, ["wrote /workspace/out.txt"], "the run went on past it");
+	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.stat(globalThis.__editor.api.Uri.file("/workspace/out.txt")).then(() => true, () => false)), false, "nothing written");
+	assert.equal(await eventually("the skipped call on its line", () => workbench.evaluate(() => [...document.querySelector('.live-values-row[data-line="4"]')?.children ?? []].map((child) => child.textContent.trim()).filter(Boolean).join(" ") || undefined)), "skipped fs:write /workspace/out.txt");
+
+	// Allow, from the margin's own button (this call): the call runs; nothing is written to the policy.
 	await start();
-	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-ask button")].find((button) => button.textContent === "Allow once").click(); });
+	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-ask button")].find((button) => button.textContent === "Allow").click(); });
 	await eventually("the question answered", async () => (await asked()) === undefined || undefined);
 	assert.deepEqual(await silo("read"), [], "Allow once writes no rule");
 
@@ -1029,7 +1103,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 
 		return run.reason === "capability" || undefined;
 	});
-	assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow once", "Allow this run", "Allow always", "Deny", "Rule…"] });
+	assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow", "Skip", "Deny", "Rule…"], "lasting": ["this call", "this run", "always"] });
 	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-ask button")].find((button) => button.textContent === "Rule…").click(); });
 	assert.equal(await eventually("the rule editor, prefilled", status), "Covers this call: allows it");
 	await resourceRow([".rule-editor-operator select", "matches", "change"]);
@@ -1165,6 +1239,83 @@ test("capability decisions and placed rules: in a file the program imports, as i
 	}
 });
 
+// Skip always (util/silo's `skip`): my override skips the call — the run asked goes past it, and every run after goes past
+// it without stopping, the call not made and its line saying it was skipped. Deny always likewise fails it, unasked.
+test("capability decisions: Skip always and Deny always — every run goes past the call, or fails at it, unasked", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/skipping.js";
+	// My policy overrides (.silo/<me>.policy.json): read, or cleared.
+	const overrides = (action) => workbench.evaluate(async (what) => {
+		const { api } = globalThis.__editor;
+		const folder = api.Uri.file("/workspace/.silo");
+		const names = (await api.workspace.fs.readDirectory(folder).then((entries) => entries, () => [])).map(([name]) => name).filter((name) => name.endsWith(".policy.json") && name !== "policy.json");
+
+		if (what === "clear") {
+			for (const name of names) {
+				await api.workspace.fs.delete(api.Uri.joinPath(folder, name));
+			}
+
+			return [];
+		}
+
+		return (await Promise.all(names.map(async (name) => JSON.parse(new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.joinPath(folder, name))))))).flatMap((policy) => policy.rules.map(({ when, then }) => ({ when, then })));
+	}, action);
+	const written = () => workbench.evaluate(() => globalThis.__editor.api.workspace.fs.stat(globalThis.__editor.api.Uri.file("/workspace/skipped.txt")).then(() => true, () => false));
+
+	try {
+		await overrides("clear");
+		await workbench.evaluate(async (path) => {
+			const { api } = globalThis.__editor;
+
+			await api.workspace.fs.writeFile(api.Uri.file(path), new TextEncoder().encode("import { writeFileSync } from \"node:fs\";\n\nwriteFileSync(\"/workspace/skipped.txt\", \"x\");\nconsole.log(\"done\");\n"));
+			await api.window.showTextDocument(api.Uri.file(path));
+		}, program);
+
+		const stopped = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+		assert.equal(stopped.reason, "capability", "asked at the write");
+
+		const skipped = await session.request(`debug.session.${stopped.session}.decide`, { "choice": "skip-always" }, 60_000);
+
+		assert.equal(skipped.state, "terminated");
+		assert.deepEqual(skipped.output, ["done"], "the run went past it");
+		assert.deepEqual(await overrides("read"), [{ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "fs:write" }, { "target_id": "resource", "operator_id": "is", "argument": "/workspace/skipped.txt" }] }, "then": [{ "action_id": "skip" }] }], "kept in my policy");
+
+		const again = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+		assert.equal(again.state, "terminated", "the next run doesn't stop there");
+		assert.deepEqual(again.output, ["done"]);
+		assert.equal(await written(), false, "never made");
+		assert.equal(await eventually("the skipped call on its line", () => workbench.evaluate(() => [...document.querySelector('.live-values-row[data-line="2"]')?.children ?? []].map((child) => child.textContent.trim()).filter(Boolean).join(" ") || undefined)), "skipped fs:write /workspace/skipped.txt");
+
+		// Deny always, as the other lasting choice: the run asked fails there, and the next one fails there without asking.
+		await overrides("clear");
+
+		// (Asked again once the policy's change is seen: a run before that still goes past it.)
+		const asked = await eventually("asked again, the skip gone", async () => {
+			const run = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+			return run.reason === "capability" ? run : undefined;
+		});
+		const denied = await session.request(`debug.session.${asked.session}.decide`, { "choice": "deny-always" }, 60_000);
+
+		assert.match(denied.output.join("\n"), /EACCES/u);
+
+		const refused = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
+
+		assert.equal(refused.state, "terminated", "denied always: no stop");
+		assert.match(refused.output.join("\n"), /EACCES/u, "the call fails, as a denied one does");
+	} finally {
+		await overrides("clear");
+		await workbench.evaluate(async (path) => {
+			const { api } = globalThis.__editor;
+
+			await api.commands.executeCommand("workbench.action.closeActiveEditor");
+			await api.workspace.fs.delete(api.Uri.file(path)).then(() => undefined, () => undefined);
+		}, program);
+	}
+});
+
 test("capability decisions: Allow this run lets a loop's calls through, until the run ends", async () => {
 	const workbench = session.workbench();
 	const program = "/workspace/looped.js";
@@ -1193,10 +1344,10 @@ test("capability decisions: Allow this run lets a loop's calls through, until th
 	const question = await eventually("its question", () => workbench.evaluate(() => {
 		const box = document.querySelector(".live-values-ask");
 
-		return box === null ? undefined : { "what": box.querySelector(".live-values-ask-what").textContent, "choices": [...box.querySelectorAll("button")].map((button) => (button.disabled ? `(${button.textContent})` : button.textContent)) };
+		return box === null ? undefined : { "what": box.querySelector(".live-values-ask-what").textContent, "choices": [...box.querySelectorAll(".live-values-choices > .live-values-split > .live-values-choice:not(.more), .live-values-choices > .live-values-choice.rule")].map((button) => button.textContent), "lasting": [...box.querySelectorAll(".live-values-split:first-child .live-values-menu-item")].map((item) => (item.disabled ? `(${item.textContent})` : item.textContent)) };
 	}));
 
-	assert.deepEqual(question, { "what": "writeFileSync '/workspace/a.txt' fs:write", "choices": ["Allow once", "Allow this run", "Allow always", "Deny", "Rule…"] });
+	assert.deepEqual(question, { "what": "writeFileSync '/workspace/a.txt' fs:write", "choices": ["Allow", "Skip", "Deny", "Rule…"], "lasting": ["this call", "this run", "always"] });
 
 	// Every fs:write until the run ends: asked once, for the loop's three.
 	const ran = await session.request(`debug.session.${stopped.session}.decide`, { "choice": "allow-run" }, 60_000);

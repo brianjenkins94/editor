@@ -76,7 +76,7 @@ interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, Li
 /** A column no wider than this many characters; a longer value is cut short, whole on hover. */
 const MAX_WIDTH = 24;
 
-/** The latest session's values, per file URI. */
+/** The latest session's values, per file URI — kept once it ends, until the next session of the file tells its own. */
 const sessions = new Map<string, Session>();
 /** Prose notes, per file URI. */
 const notes = new Map<string, Note[]>();
@@ -155,7 +155,7 @@ function kindOf(value: LiveValue): string {
 		return "argv";
 	}
 
-	if (value.kind === "branch" || value.kind === "set") {
+	if (value.kind === "branch" || value.kind === "set" || value.kind === "skip") {
 		return value.kind;
 	}
 
@@ -531,7 +531,7 @@ export function rulePanel(policy: PolicyModule, rule: EditedRule, judge: (rule: 
 }
 
 /** The first allow / deny / ask a rule has. */
-export const decisionOf = (rule: EditedRule): string | undefined => rule.then.find(({ action_id }) => ["allow", "deny", "ask"].includes(action_id))?.action_id;
+export const decisionOf = (rule: EditedRule): string | undefined => rule.then.find(({ action_id }) => ["allow", "deny", "skip", "ask"].includes(action_id))?.action_id;
 
 /** What a rule as edited would do to a call: whether it covers it (`resolved`: what it reaches is known) and what it
  *  decides — ok when it allows or denies it. */
@@ -546,8 +546,8 @@ export function callVerdict(policy: PolicyModule, rule: EditedRule, subject: { "
 		"text": problem ?? (!covers
 			? `Doesn't cover this call${resolved ? "" : " — what it reaches isn't known before the line runs"}`
 			: gives ? (canGive ? "Covers this call: gives it this result instead" : "A result can only be given in the debugger, where nothing real is called")
-				: decision === "allow" ? "Covers this call: allows it" : decision === "deny" ? "Covers this call: denies it" : decision === "ask" ? "Covers this call, and asks — as now" : "Covers this call, but doesn't decide it"),
-		"ok": covers && (gives ? canGive : decision === "allow" || decision === "deny"),
+				: decision === "allow" ? "Covers this call: allows it" : decision === "deny" ? "Covers this call: denies it" : decision === "skip" ? "Covers this call: skips it" : decision === "ask" ? "Covers this call, and asks — as now" : "Covers this call, but doesn't decide it"),
+		"ok": covers && (gives ? canGive : decision === "allow" || decision === "deny" || decision === "skip"),
 		"refused": problem !== undefined
 	};
 }
@@ -586,9 +586,9 @@ async function openRule(session: string, ask: CapabilityAsk, close: () => void):
 
 		return recorded !== null && verdict.ok && JSON.stringify(resultOf(edited)?.value) === JSON.stringify(recorded.value) ? { ...verdict, "text": `Covers this call: gives it what it returned on ${new Date(recorded.at).toLocaleString()}` } : verdict;
 	}, [
-		{ "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and stop here again next time", "act": async (edited) => (resultOf(edited) === undefined ? choose?.(session, decisionOf(edited) === "deny" ? "deny" : "allow-once") : choose?.(session, "give-once", undefined, resultOf(edited)!.value)) },
+		{ "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and stop here again next time", "act": async (edited) => (resultOf(edited) === undefined ? choose?.(session, decisionOf(edited) === "deny" ? "deny" : decisionOf(edited) === "skip" ? "skip" : "allow-once") : choose?.(session, "give-once", undefined, resultOf(edited)!.value)) },
 		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/<you>.policy.json), and decide this call by it", "act": async (rule) => choose?.(session, "rule", rule) },
-		{ "label": "Cancel", "className": "cancel", "title": "Back to the three choices", "act": async () => { close(); }, "always": true }
+		{ "label": "Cancel", "className": "cancel", "title": "Back to the choices", "act": async () => { close(); }, "always": true }
 	]);
 }
 
@@ -718,33 +718,70 @@ async function openVariableMock(uri: string, row: Row, name: string, session: Se
 	], catalog);
 }
 
-/** A capability stop's question: the call and what it reaches, then the three choices — or the rule being made. */
+/** A capability stop's question: the call and what it reaches, then the choices — or the rule being made. */
 function renderAsk(session: string, ask: CapabilityAsk, element: HTMLElement, redraw: () => void): void {
 	const box = document.createElement("div");
 	const what = document.createElement("div");
 	const callee = document.createElement("span");
 	const resource = document.createElement("span");
 	const choices = document.createElement("div");
-	const button = (label: string, choice: CapabilityChoice, title: string, enabled = true): HTMLButtonElement => {
-		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-		const each = document.createElement("button");
+	// A choice made: every button off, the one that made it marked, and the session told.
+	const decide = (choice: CapabilityChoice, chosen: HTMLElement): void => {
+		for (const other of choices.querySelectorAll("button")) {
+			other.disabled = true;
+		}
 
-		each.className = `live-values-choice ${choice}`;
-		each.textContent = label;
-		each.title = title;
-		each.disabled = !enabled;
-		each.addEventListener("click", () => {
-			for (const other of choices.querySelectorAll("button")) {
-				other.disabled = true;
-			}
-
-			each.classList.add("chosen");
-			void choose?.(session, choice).catch((error: unknown) => {
-				box.append(Object.assign(document.createElement("div"), { "className": "live-values-ask-error", "textContent": String(error) }));
-			});
+		chosen.classList.add("chosen");
+		void choose?.(session, choice).catch((error: unknown) => {
+			box.append(Object.assign(document.createElement("div"), { "className": "live-values-ask-error", "textContent": String(error) }));
 		});
+	};
+	const always = ask.resolved ? `${ask.capability} on ${ask.resource}, in your policy (.silo/<you>.policy.json)` : undefined;
+	// What to do with the call (a verb), and for how long (its menu): the button itself is this call; ▾ offers this call,
+	// every such call this run, or always — kept in your policy (for the resource the call reaches, so only once it's known).
+	const split = (verb: string, label: string, lasting: [CapabilityChoice, CapabilityChoice, CapabilityChoice], does: string): HTMLElement => {
+		const group = Object.assign(document.createElement("span"), { "className": "live-values-split" });
+		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+		const main = Object.assign(document.createElement("button"), { "className": `live-values-choice ${verb}`, "textContent": label, "title": `${does}: this call — and stop here again next time` });
+		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+		const more = Object.assign(document.createElement("button"), { "className": `live-values-choice more ${verb}`, "textContent": "▾", "title": `${label}: for how long` });
+		const menu = Object.assign(document.createElement("div"), { "className": "live-values-menu", "hidden": true });
+		const items: [string, CapabilityChoice, string | undefined][] = [
+			["this call", lasting[0], `${does}: this call`],
+			["this run", lasting[1], `${does}: every ${ask.capability} call, until this run ends (kept nowhere)`],
+			["always", lasting[2], always === undefined ? undefined : `${does}: ${always}`]
+		];
+		const close = (event: Event): void => {
+			if (!group.contains(event.target as Node) || (event instanceof KeyboardEvent && event.key === "Escape")) {
+				menu.hidden = true;
+				document.removeEventListener("pointerdown", close, true);
+				document.removeEventListener("keydown", close, true);
+			}
+		};
 
-		return each;
+		for (const [text, choice, title] of items) {
+			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+			const item = Object.assign(document.createElement("button"), { "className": "live-values-menu-item", "textContent": text, "title": title ?? "Needs the resource the call reaches, which isn't known before the line runs", "disabled": title === undefined });
+
+			item.addEventListener("click", () => {
+				menu.hidden = true;
+				decide(choice, main);
+			});
+			menu.append(item);
+		}
+
+		main.addEventListener("click", () => { decide(lasting[0], main); });
+		more.addEventListener("click", () => {
+			menu.hidden = !menu.hidden;
+
+			if (!menu.hidden) {
+				document.addEventListener("pointerdown", close, true);
+				document.addEventListener("keydown", close, true);
+			}
+		});
+		group.append(main, more, menu);
+
+		return group;
 	};
 
 	box.className = `live-values-ask${ask.dangerous ? " dangerous" : ""}`;
@@ -757,10 +794,9 @@ function renderAsk(session: string, ask: CapabilityAsk, element: HTMLElement, re
 	what.append(callee, " ", resource, Object.assign(document.createElement("span"), { "className": "live-values-ask-capability", "textContent": ` ${ask.capability}` }));
 	choices.className = "live-values-choices";
 	choices.append(
-		button("Allow once", "allow-once", "Let this call run, and stop here again next time"),
-		button("Allow this run", "allow-run", `Let every ${ask.capability} call run until this run ends, whatever it reaches (kept nowhere)`),
-		button("Allow always", "allow-always", ask.resolved ? `Allow ${ask.capability} on ${ask.resource} in your policy (.silo/<you>.policy.json)` : "Needs the resource the call reaches, which isn't known before the line runs", ask.resolved),
-		button("Deny", "deny", "Fail this call, as the policy would")
+		split("allow", "Allow", ["allow-once", "allow-run", "allow-always"], "Let it run, for real"),
+		split("skip", "Skip", ["skip", "skip-run", "skip-always"], "Don't make it: the run goes on as if it did nothing (the debugger's stand-in answers), the line saying it was skipped"),
+		split("deny", "Deny", ["deny", "deny-run", "deny-always"], "Fail it, as a denied call does (EACCES)")
 	);
 
 	// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
@@ -1091,7 +1127,7 @@ async function place(uri: string): Promise<void> {
 	const marks: PaneMark[] = [
 		...marked.get(uri) ?? [],
 		...rulesHere,
-		...end === undefined ? [] : [{ "line": end.line, "kind": `run-${end.kind}`, "title": end.kind === "crashed" ? `The last run crashed here: ${end.message ?? "an uncaught error"}` : "The last run was stopped here" }]
+		...end === undefined ? [] : [{ "line": end.line, "kind": `run-${end.kind}`, "title": end.kind === "crashed" ? `The last run crashed here: ${end.message ?? "an uncaught error"}` : end.message === undefined ? "The last run was stopped here" : `The last run stopped here: ${end.message}` }]
 	];
 
 	// Only a file that isn't code, with nothing in it, goes without.
@@ -1270,7 +1306,8 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		redraw(uri);
 	});
 
-	// Live as long as the session: gone when it ends.
+	// The run's end: how it ended goes on its line. Its values stay — the margin shows the file's last run until the next
+	// run of it tells its own (a live run as typing pauses, LIVE-VALUES.md), following its code through edits.
 	hub.subscribe("values.ended", (data) => {
 		const { session, file, source, end } = (data ?? {}) as { "session"?: unknown; "file"?: unknown; "source"?: unknown; "end"?: RunEnd };
 
@@ -1290,11 +1327,6 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		if (typeof file === "string" && asks.get(uriOf(file))?.session === session) {
 			making.delete(session);
 			asks.delete(uriOf(file));
-			redraw(uriOf(file));
-		}
-
-		if (typeof file === "string" && sessions.get(uriOf(file))?.id === session) {
-			sessions.delete(uriOf(file));
 			redraw(uriOf(file));
 		}
 	});

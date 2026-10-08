@@ -42,6 +42,26 @@ function lineOf(starts: number[], at: number): number {
 	return low;
 }
 
+/** Each line of `before` at its line in `after`, by the lines they share — the common head and tail, and the changed
+ *  middle line for line — for when `after` can't be read as code (typing paused mid-statement): what's placed follows
+ *  the lines around the edit until the code parses again. */
+function lineMap(before: string, after: string): (line: number) => number | undefined {
+	const was = before.split("\n");
+	const now = after.split("\n");
+	let head = 0;
+	let tail = 0;
+
+	while (head < was.length && head < now.length && was[head] === now[head]) {
+		head += 1;
+	}
+
+	while (tail < was.length - head && tail < now.length - head && was[was.length - 1 - tail] === now[now.length - 1 - tail]) {
+		tail += 1;
+	}
+
+	return (line) => (line < head ? line : line >= was.length - tail ? line - was.length + now.length : line - head < now.length - head - tail ? line : undefined);
+}
+
 /** Offset of `[line, character]` (0-based) in `text`. */
 export function offsetOf(text: string, [line, character]: [number, number]): number {
 	return (lineStarts(text)[line] ?? text.length) + character;
@@ -66,6 +86,13 @@ export class Anchors {
 	/** The text that ran. */
 	public get text(): string {
 		return this.source;
+	}
+
+	/** Whether BABLR reads `text` as code: only then does the whole of it refer to a span (its Program). */
+	private async parses(text: string): Promise<boolean> {
+		const [whole] = await Promise.resolve(this.vscode.commands.executeCommand<unknown[] | undefined>("editor.annotations.refer", text, this.file, [{ "start": 0, "end": text.length }])).catch(() => undefined) ?? [];
+
+		return whole !== undefined && whole !== null;
 	}
 
 	/** The line (0-based) each range starts on in `text`, the file as it is now: undefined for one whose code is gone. */
@@ -97,6 +124,14 @@ export class Anchors {
 			if (at?.start !== undefined && (at.file === undefined || at.file === this.file)) {
 				lines[index] = lineOf(starts, at.start);
 			}
+		}
+
+		// Nothing found: its code gone — or the text doesn't parse yet (typing paused mid-statement), which BABLR says by
+		// referring to nothing in it (its parse cached, as resolve's). Then follow the lines around the edit instead.
+		if (known.length > 0 && lines.every((line) => line === undefined) && !await this.parses(text)) {
+			const map = lineMap(this.source, text);
+
+			return ranges.map(([start]) => map(lineOf(this.sourceStarts, start)));
 		}
 
 		return lines;

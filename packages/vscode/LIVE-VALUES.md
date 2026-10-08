@@ -41,10 +41,11 @@ Decided 2026-10-05.
   extension API has nothing like it, so it lives in the component (components/monaco-vscode-api, where the workbench is
   composed, beside the hosted editors and the live architecture pane), on `ICodeEditorService`, and is fed what to
   draw; it knows nothing of debuggers.
-- **Its values come from a debug session, and live only as long as it does.** While a tsval session runs, the debug
-  worker records each statement's values as it executes them; the panel shows them as they come, the whole run once it
-  ends or pauses, and nothing when the session is gone. No new store, no format in `.silo/`: runtime evidence stays
-  what keeps runs, and this is what a session shows.
+- **Its values come from a debug session.** While a tsval session runs, the debug worker records each statement's
+  values as it executes them; the panel shows them as they come, and the whole run once it ends or pauses. (Revised
+  2026-10-08, with live runs: they stay once it ends — the margin shows the file's last run until the next run of it
+  tells its own.) No new store, no format in `.silo/`: runtime evidence stays what keeps runs, and this is what the
+  last run shows, in memory.
 - **It's started by F5 and a breakpoint**: an ordinary tsval debug session. Not a re-run as you type, for now.
 - **Inputs are pipe-delimited, for now**, as Run with Inputs takes them (`US | CA | FR SPRING10`: runs by `|`, a run's
   arguments by spaces, read as `process.argv`). A session runs one set: the launch config's `args`, or the first of the
@@ -258,11 +259,48 @@ characterization, the registry and invariant inference) recorded beside it.
 travel with it; a value recorded from a real run (a real fetch response can hold secrets) in `.silo/local/`, referred
 to by the rule.
 
+## Live runs, as you type
+
+Decided 2026-10-08 — Victor's immediate connection: the file you're typing in runs again whenever typing pauses, and the
+margin shows what it did, without Run. It was waiting on two things that hold now: every run is a debug run (RUNNING.md),
+and tsval is fast enough — a small file's run, session and worker included, takes 170–330ms from the workbench.
+
+- **When.** A JavaScript or TypeScript program file in the editor, typing paused (400ms), parsing clean: a live run of
+  it. An edit while one runs stops it, and the next pause starts another. None while a run of yours of the same file
+  is going (F5, ▷, the terminal) — that one is what its margin shows; a service of yours running elsewhere doesn't stop
+  them. Off with `tsval.liveRuns` (on by default).
+- **What it is.** A tsval debug session like any other, so the margin's values, coverage, run log and crash mark all
+  come from it — but quiet: no debug toolbar, status bar, Run and Debug view or Debug Console, not in the running list,
+  and it stops at nothing (breakpoints are yours to hit with F5). A rule still applies: a value it sets, a result it
+  gives.
+- **What it does to the world: nothing.** A gated call is decided without asking: a rule's given result first; a read
+  the policy allows (`fs:read`) made for real; anything else **skipped** — the call isn't made, the run goes on with the
+  debugger's inert stand-in's result (a write did nothing, a fetch got an empty response), and its line says *skipped*.
+  So retyping can't write a file, send a request or run a command, however the policy is set.
+- **Skip, at a stop too.** A capability stop's question is three verbs and how long: *Allow ▾*, *Skip ▾*, *Deny ▾* —
+  the button decides this call, its ▾ offers *this call*, *this run* (every call of the capability) or *always* (my
+  policy, for the resource the call reaches) — and *Rule…* for anything finer. *Skip*: the call isn't made, the run
+  goes on, its line saying it was skipped (util/silo's `skip` disposition, a rule's *then skip*, kept). Only an
+  undecided call stops: one decided *always* — allowed, skipped or denied — is made, skipped or fails (EACCES) without
+  asking. (Where there's no stand-in to answer in its place — the preview's network gate — a skip is refused, as an
+  enforcer without one does.)
+- **How long.** A live run ends at its first idle (a server waiting for requests opens no preview), or after a budget
+  of steps and a second of wall time, saying so where it stopped — *Run to finish* — rather than running forever.
+
+Built 2026-10-08 (worker-pod's live-run.ts; the debug worker's `liveRun`; the margin's *Skip*), with two things the
+building turned up:
+
+- **The margin keeps the last run** (revising *Settled*, above): a finished run's values stay until the next run of the
+  file tells its own — without that, a live run's values were gone as soon as it ended.
+- **Half-typed text keeps them where they were.** A live run of text that doesn't parse runs nothing and tells nothing;
+  and since BABLR can't place anything in such a text either, the margin follows the lines around the edit instead
+  (anchors.ts: the lines the two texts share, the changed one line for line) until the code parses again.
+
+A live run stopped by the next edit tells nothing either: only a run that finished replaces what the margin shows. The
+tour types, pauses and reads the margin (a write skipped, a half-typed edit, an endless loop stopped at its budget).
+
 ## Open
 
-- **Live, later.** The file re-run in a session as you type (when typing pauses) is Victor's immediate connection;
-  tsval is safe to re-run, and the capabilities plugin already re-runs a file on every edit. It waits on the panel
-  working from F5.
 - **The bounds**, and how many calls the panel lets you pick between.
 - **Previews.** A preview's code runs instrumented in the page, not under tsval: none of this, for now.
 
