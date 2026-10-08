@@ -1,0 +1,37 @@
+{
+  "name": "contrib",
+  # contrib/ is the editor-contrib template repo's content, and a workspace here, so ci builds and tests it with the
+  # rest. Once the editor has built, tested and deployed (cd ran after a successful ci), make editor-contrib match it.
+  "on": {
+    "workflow_dispatch": null,
+    "workflow_run": {
+      "workflows": ["cd"],
+      "types": ["completed"],
+      "branches": ["main"]
+    }
+  },
+  "concurrency": {
+    "group": "${{ github.workflow }}-${{ github.ref }}"
+  },
+  "jobs": {
+    "sync": {
+      "if": "${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}",
+      "runs-on": "ubuntu-latest",
+      "env": {
+        "SHA": "${{ github.event.workflow_run.head_sha || github.sha }}",
+        # A PAT that can push to editor-contrib (GITHUB_TOKEN reaches only this repo).
+        "TOKENED": "${{ secrets.EDITOR_CONTRIB_TOKEN != '' }}"
+      },
+      "steps": [
+        { "if": "${{ env.TOKENED != 'true' }}", "run": "echo \"::notice::No EDITOR_CONTRIB_TOKEN secret yet: editor-contrib not updated\"" },
+        { "if": "${{ env.TOKENED == 'true' }}", "uses": "actions/checkout@v4", "with": { "ref": "${{ env.SHA }}", "path": "editor" } },
+        { "if": "${{ env.TOKENED == 'true' }}", "uses": "actions/checkout@v4", "with": { "repository": "brianjenkins94/editor-contrib", "token": "${{ secrets.EDITOR_CONTRIB_TOKEN }}", "path": "editor-contrib" } },
+        {
+          "if": "${{ env.TOKENED == 'true' }}",
+          "run": "rsync --archive --delete --exclude .git editor/contrib/ editor-contrib/\ncd editor-contrib\ngit add --all\nif git diff --cached --quiet; then\n  echo \"editor-contrib already matches contrib/\"\n  exit 0\nfi\ngit -c user.name=\"github-actions[bot]\" -c user.email=\"41898282+github-actions[bot]@users.noreply.github.com\" commit --message \"Sync from brianjenkins94/editor@${SHA::7}\" --message \"https://github.com/brianjenkins94/editor/commit/$SHA\"\ngit push"
+        }
+      ],
+      "timeout-minutes": 5
+    }
+  }
+}

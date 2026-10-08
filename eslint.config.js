@@ -8,7 +8,8 @@ export default [
 		// when one exists, and author markup as JSX — never native elements or HTML baked into strings. (Vendored/
 		// generated paths are already dropped by the global `ignores` above.)
 		"files": ["**/*.{ts,tsx,mjs,cjs,js}"],
-		"ignores": ["packages/vscode/demo/**", "packages/vscode/Workbench.tsx"],
+		// contrib/ is the editor-contrib template: someone else's extension, drawing its own webview however it likes.
+		"ignores": ["packages/vscode/demo/**", "packages/vscode/Workbench.tsx", "contrib/**"],
 		"plugins": { "webawesome": webawesome },
 		"rules": {
 			"webawesome/prefer-components": "error",

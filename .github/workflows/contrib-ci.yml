@@ -1,0 +1,21 @@
+{
+  "name": "contrib-ci",
+  # What a contribution — a repo made from the editor-contrib template — is checked against: install, build, test.
+  # Its ci calls this, so the check moves with the editor.
+  "on": {
+    "workflow_call": {}
+  },
+  "jobs": {
+    "build": {
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        { "uses": "actions/checkout@v4" },
+        { "uses": "actions/setup-node@v4", "with": { "node-version": "lts/*" } },
+        { "run": "npm install" },
+        { "run": "npm run build" },
+        { "run": "npm test" }
+      ],
+      "timeout-minutes": 10
+    }
+  }
+}

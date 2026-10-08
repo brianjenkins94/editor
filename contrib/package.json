@@ -1,0 +1,79 @@
+{
+  "name": "editor-contrib",
+  "displayName": "Editor contribution",
+  "description": "An interpreter and a code renderer for brianjenkins94/editor, as a VS Code web extension.",
+  "publisher": "your-name",
+  "version": "0.0.1",
+  "private": true,
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "dist/extension.js",
+  "activationEvents": [
+    "onDebugResolve:contrib",
+    "onCustomEditor:contrib.renderer"
+  ],
+  "contributes": {
+    "debuggers": [
+      {
+        "type": "contrib",
+        "label": "Run (contrib)",
+        "languages": [
+          "typescript",
+          "javascript"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "The source file to run.",
+                "default": "${file}"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "contrib",
+            "request": "launch",
+            "name": "Run (contrib)",
+            "program": "${file}"
+          }
+        ]
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "typescript"
+      },
+      {
+        "language": "javascript"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "contrib.renderer",
+        "displayName": "Rendered (contrib)",
+        "selector": [
+          {
+            "filenamePattern": "*.ts"
+          },
+          {
+            "filenamePattern": "*.js"
+          }
+        ],
+        "priority": "option"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src/extension.ts --bundle --format=cjs --platform=browser --external:vscode --outfile=dist/extension.js",
+    "test": "echo \"no tests yet\""
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.100.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "ci",
+  "on": {
+    "pull_request": {
+      "branches": ["main"]
+    },
+    "push": {
+      "branches": ["main"]
+    }
+  },
+  "concurrency": {
+    "group": "${{ github.workflow }}-${{ github.ref }}",
+    "cancel-in-progress": "${{ github.event_name == 'pull_request' }}"
+  },
+  "jobs": {
+    # The editor owns this workflow, so what a contribution is checked against moves with the editor.
+    "build": {
+      "uses": "brianjenkins94/editor/.github/workflows/contrib-ci.yml@main"
+    }
+  }
+}
