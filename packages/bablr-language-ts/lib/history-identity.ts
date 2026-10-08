@@ -7,7 +7,7 @@
 // (proven in packages/vscode/test/collab-identity.test.mjs). Annotations instead resolve via reidentify(baseline→
 // current), which is content-derived and immune to oid rewrites. See [[collab-identity-durability]].)
 import type { ChangeKind, Op, Snapshot } from "./identity";
-import { lcsOps, reidentify } from "./identity";
+import { atomsOf, lcsOps, reidentify } from "./identity";
 import { cstSpansAsync } from "./spans";
 
 function atomsEqual(a: string[], b: string[]): boolean {
@@ -15,11 +15,6 @@ function atomsEqual(a: string[], b: string[]): boolean {
 }
 
 interface Span { "type": string | null; "trivia": boolean; "token": boolean; "start": number; "end": number }
-
-/** The non-trivia node atoms (aligned 1:1 with the non-trivia spans, in the same order the snapshot uses). */
-function atomsFor(src: string, spans: Span[]): string[] {
-	return spans.filter((span) => !span.trivia).map((span) => (span.type ?? "") + "\t" + (span.token ? JSON.stringify(src.slice(span.start, span.end)) : ""));
-}
 
 /** 1-based line number of a source offset. */
 function lineAt(src: string, offset: number): number {
@@ -57,10 +52,10 @@ export async function deriveIdentityAsync(contents: string[], options: IdentityO
 		let lastSpans: Span[] = [];
 
 		for (const content of contents) {
-			const spans = (await (options.parse ?? ((text: string) => cstSpansAsync(text, production, options)))(content)).spans as Span[];
+			const cst = await (options.parse ?? ((text: string) => cstSpansAsync(text, production, options)))(content);
 
-			lastSpans = spans;
-			atomsChain.push(atomsFor(content, spans));
+			lastSpans = cst.spans as Span[];
+			atomsChain.push(atomsOf(cst));
 		}
 
 		let snapshot = reidentify(null, atomsChain[0]);
@@ -276,10 +271,10 @@ export async function editGroups(contents: string[], options: IdentityOptions = 
 				continue;
 			}
 
-			const spans = (await (options.parse ?? ((text: string) => cstSpansAsync(text, production, options)))(content)).spans as Span[];
+			const cst = await (options.parse ?? ((text: string) => cstSpansAsync(text, production, options)))(content);
 
-			lastSpans = spans;
-			atomsChain.push(atomsFor(content, spans));
+			lastSpans = cst.spans as Span[];
+			atomsChain.push(atomsOf(cst));
 		}
 
 		let snapshot = reidentify(null, atomsChain[0]);

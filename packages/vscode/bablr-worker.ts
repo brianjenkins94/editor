@@ -33,10 +33,10 @@ const hub = createWorkerHub("bablr");
 // disk would keep the same thing in `.silo/local/bablr/`. Everything in it can go at any time: past CACHE_BYTES, the
 // least recently used go first.
 
-interface CstSpan { "type": string | null; "field": string | null; "start": number; "end": number; "token": boolean; "cover": boolean; "trivia": boolean; "hash": string | null }
+interface CstSpan { "type": string | null; "field": string | null; "start": number; "end": number; "token": boolean; "cover": boolean; "trivia": boolean; "hash": string | null; "text": string | null }
 interface Cst { "spans": CstSpan[]; "length": number; "hash": string }
-/** A parse as kept: names once each, and seven numbers a span (type, field — -1 for none — start, end, flags, and its
- *  hash's two 32-bit halves — a trivia span has none). */
+/** A parse as kept: names and token texts once each, and eight numbers a span (type, field — -1 for none — start, end,
+ *  flags, its hash's two 32-bit halves — a trivia span has none — and a code token's text, -1 for none). */
 interface Kept { "names": string[]; "data": Int32Array; "length": number; "hash": string }
 
 const CACHE_BYTES = 200 * 1024 * 1024;
@@ -62,12 +62,12 @@ function keep(cst: Cst): Kept {
 
 		return at;
 	};
-	const data = new Int32Array(cst.spans.length * 7);
+	const data = new Int32Array(cst.spans.length * 8);
 
 	cst.spans.forEach((span, at) => {
 		const hash = span.hash ?? "0".repeat(16);
 
-		data.set([name(span.type), name(span.field), span.start, span.end, (span.token ? TOKEN : 0) | (span.cover ? COVER : 0) | (span.trivia ? TRIVIA : 0), Number.parseInt(hash.slice(0, 8), 16) | 0, Number.parseInt(hash.slice(8), 16) | 0], at * 7);
+		data.set([name(span.type), name(span.field), span.start, span.end, (span.token ? TOKEN : 0) | (span.cover ? COVER : 0) | (span.trivia ? TRIVIA : 0), Number.parseInt(hash.slice(0, 8), 16) | 0, Number.parseInt(hash.slice(8), 16) | 0, name(span.text)], at * 8);
 	});
 
 	return { "names": names, "data": data, "length": cst.length, "hash": cst.hash };
@@ -78,11 +78,11 @@ const half = (value: number): string => (value >>> 0).toString(16).padStart(8, "
 function unkeep({ names, data, length, hash }: Kept): Cst {
 	const spans: CstSpan[] = [];
 
-	for (let at = 0; at < data.length; at += 7) {
+	for (let at = 0; at < data.length; at += 8) {
 		const flags = data[at + 4];
 		const trivia = (flags & TRIVIA) !== 0;
 
-		spans.push({ "type": data[at] === -1 ? null : names[data[at]], "field": data[at + 1] === -1 ? null : names[data[at + 1]], "start": data[at + 2], "end": data[at + 3], "token": (flags & TOKEN) !== 0, "cover": (flags & COVER) !== 0, "trivia": trivia, "hash": trivia ? null : half(data[at + 5]) + half(data[at + 6]) });
+		spans.push({ "type": data[at] === -1 ? null : names[data[at]], "field": data[at + 1] === -1 ? null : names[data[at + 1]], "start": data[at + 2], "end": data[at + 3], "token": (flags & TOKEN) !== 0, "cover": (flags & COVER) !== 0, "trivia": trivia, "hash": trivia ? null : half(data[at + 5]) + half(data[at + 6]), "text": data[at + 7] === -1 ? null : names[data[at + 7]] });
 	}
 
 	return { "spans": spans, "length": length, "hash": hash };
@@ -282,7 +282,7 @@ serve(hub, "bablr.follow", async (args, { signal }) => {
 	}
 
 	const index = spanAnchors(baseline, "Program", was).findIndex((anchor) => anchor.id === span);
-	const found = index === -1 ? undefined : follow(atomsOf(baseline, was), atomsOf(current, now), index);
+	const found = index === -1 ? undefined : follow(atomsOf(was), atomsOf(now), index);
 
 	return found === undefined ? {} : { "id": spanAnchors(current, "Program", now)[found.to].id, "how": found.how };
 });
@@ -311,7 +311,7 @@ function shapesOf(source: string, cst: Cst): SpanShape[] {
 		const atoms: string[] = [];
 
 		for (let at = firstAt(span.start); at < tokens.length && tokens[at].end <= span.end; at += 1) {
-			atoms.push(source.slice(tokens[at].start, tokens[at].end));
+			atoms.push(tokens[at].text!);
 		}
 
 		return { "id": span.id, "type": span.type!, "start": span.start, "end": span.end, "atoms": atoms };
@@ -392,7 +392,7 @@ serve(hub, "bablr.resolve", async (args, { signal }) => {
 		if (!observed && baseline !== undefined && !ids.has(ref.span)) {
 			const was = await parse(baseline, signal);
 			const index = was === undefined ? -1 : spanAnchors(baseline, "Program", was).findIndex((anchor) => anchor.id === ref.span);
-			const found = was === undefined || index === -1 ? undefined : follow(atomsOf(baseline, was), atomsOf(source, cst), index);
+			const found = was === undefined || index === -1 ? undefined : follow(atomsOf(was), atomsOf(cst), index);
 
 			reidentified = found === undefined ? undefined : { "id": anchors[found.to].id, "how": found.how };
 		}

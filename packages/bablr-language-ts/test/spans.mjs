@@ -53,6 +53,14 @@ const find = (spans, type) => spans.filter((span) => span.type === type).map((sp
 	assert.ok(cstSpans("f(a) // t").spans.every((span) => (span.hash === null) === span.trivia), "every code node has a hash, trivia none");
 }
 
+// a code token's text comes from its literals — escapes inside it included — and matches its source
+for (const src of ["f(a /* c */, b) // t", `x = "a\\u{41}b\\n" + \`p\\x41\${q}r\``]) {
+	const { spans } = cstSpans(src);
+
+	assert.ok(spans.every((span) => (span.text !== null) === (span.token && !span.trivia)), "only code tokens carry text");
+	assert.ok(spans.filter((span) => span.text !== null).every((span) => span.text === src.slice(span.start, span.end)), src);
+}
+
 // offsets are UTF-16 units (tsc's unit) and always add up
 for (const src of ["x = \"😀\"; g()", "let 𑈿 = 1 // 😀", `x = \`a\${b}c\` + "\\n"`, ""]) {
 	const { spans, length } = cstSpans(src);

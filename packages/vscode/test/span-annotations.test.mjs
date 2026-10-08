@@ -16,7 +16,7 @@ function shapesOf(source) {
 	const cst = cstSpans(source);
 	const tokens = cst.spans.filter((span) => span.token && !span.trivia);
 
-	return spanAnchors(source, "Program", cst).filter((span) => span.type !== null).map((span) => ({ "id": span.id, "type": span.type, "start": span.start, "end": span.end, "atoms": tokens.filter((token) => token.start >= span.start && token.end <= span.end).map((token) => source.slice(token.start, token.end)) }));
+	return spanAnchors(source, "Program", cst).filter((span) => span.type !== null).map((span) => ({ "id": span.id, "type": span.type, "start": span.start, "end": span.end, "atoms": tokens.filter((token) => token.start >= span.start && token.end <= span.end).map((token) => token.text) }));
 }
 
 /** The outermost span exactly covering the first `text` in `source`. */
@@ -31,7 +31,7 @@ function followed(before, after, id) {
 	const was = cstSpans(before);
 	const now = cstSpans(after);
 	const index = spanAnchors(before, "Program", was).findIndex((span) => span.id === id);
-	const found = index === -1 ? undefined : follow(atomsOf(before, was), atomsOf(after, now), index);
+	const found = index === -1 ? undefined : follow(atomsOf(was), atomsOf(now), index);
 
 	return found === undefined ? undefined : { "id": spanAnchors(after, "Program", now)[found.to].id, "how": found.how };
 }

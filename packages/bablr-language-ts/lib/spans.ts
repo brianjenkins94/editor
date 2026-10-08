@@ -13,7 +13,8 @@
 // and its literal text (straight from the tags, never sliced out of the source), any other node hashes its type and its
 // children's hashes in order. Trivia never enters a parent's hash, so a reindent or a comment edit leaves every hash
 // alone; a node's hash changes exactly when it or something under it does. A shifted node re-adopts its left operand's
-// hash where the GapTag re-adopts the operand.
+// hash where the GapTag re-adopts the operand. A code token keeps its text too — the literals it streamed, read as
+// they stream rather than sliced out of the source by offset.
 import { CloseNodeTag, GapTag, LiteralTag, OpenNodeTag, ReferenceTag, ShiftTag } from "@bablr/agast-helpers/symbols";
 import { parseTag, parseTagType } from "@bablr/agast-helpers/tree";
 import { m } from "@bablr/helpers/grammar";
@@ -44,6 +45,7 @@ function matcherFor(production) {
  * @property {boolean} cover   a cover node (`<_Expression>` …) — shares its span with the node it wraps
  * @property {boolean} trivia  whitespace/comment (anything under an unnamed `#` reference; `#separatorTokens` are code)
  * @property {string | null} hash  the node's Merkle hash (16 hex chars) — type + literal text or child hashes; null for trivia
+ * @property {string | null} text  a code token's text, from its literals; null for any other node and for trivia
  */
 
 /** 64 bits (two 32-bit lanes, 16 hex chars) of `text`. A content address for nodes, not a cryptographic one. */
@@ -80,12 +82,20 @@ function makeWalkState() {
 		"triviaDepth": 0, // > 0 while inside a trivia subtree
 		"shiftStart": null, // start for nodes opened after a ShiftTag, until the GapTag re-adopts the held node
 		"lastClosed": null, // last closed non-trivia node (the one a ShiftTag refers to)
-		"held": null // the hash of that node between the ShiftTag and the GapTag that re-adopts it
+		"held": null, // the hash of that node between the ShiftTag and the GapTag that re-adopts it
+		"tokens": [] // the open code tokens, whose text every literal streamed inside them (escapes' too) adds to
 	};
 }
 
 /** The parts list the next child belongs to: the open node's, or the top's. */
 const partsOf = (state) => (state.stack.length === 0 ? state.root : state.stack[state.stack.length - 1]).parts;
+
+/** Add streamed source text to every open code token it falls inside. */
+function addText(state, value) {
+	for (const token of state.tokens) {
+		token.text += value;
+	}
+}
 
 /** Fold one CST tag into `state` (updates the running offset and pushes completed spans with their hashes). */
 // eslint-disable-next-line complexity -- an inherently branchy dispatch over the CST tag stream; splitting it would obscure the single running-offset invariant it maintains
@@ -125,7 +135,8 @@ function walkTag(state, tag, src) {
 			"start": state.shiftStart ?? state.offset,
 			"token": Boolean(value.flags?.token),
 			"cover": value.type === COVER,
-			"trivia": trivia
+			"trivia": trivia,
+			"text": Boolean(value.flags?.token) && !trivia ? "" : null
 		};
 
 		state.pendingRef = null;
@@ -134,13 +145,20 @@ function walkTag(state, tag, src) {
 			const hash = trivia ? null : nodeHash(entry.type, [JSON.stringify(value.literalValue)]);
 
 			state.offset += value.literalValue.length;
-			state.spans.push({ ...entry, "end": state.offset, "hash": hash });
+			state.spans.push({ ...entry, "end": state.offset, "hash": hash, "text": trivia ? null : value.literalValue });
+			addText(state, value.literalValue);
 
 			if (!trivia) {
 				partsOf(state).push(hash);
 			}
 		} else {
-			state.stack.push({ ...entry, "parts": [] });
+			const open = { ...entry, "parts": [] };
+
+			state.stack.push(open);
+
+			if (open.text !== null) {
+				state.tokens.push(open);
+			}
 
 			if (trivia) {
 				state.triviaDepth += 1;
@@ -150,6 +168,7 @@ function walkTag(state, tag, src) {
 		const { value } = parseTag(tag);
 
 		state.offset += value.length;
+		addText(state, value);
 
 		if (state.triviaDepth === 0) {
 			partsOf(state).push(JSON.stringify(value));
@@ -159,6 +178,11 @@ function walkTag(state, tag, src) {
 
 		if (entry !== undefined) {
 			const { parts, ...node } = entry;
+
+			if (entry.text !== null) {
+				state.tokens.pop();
+			}
+
 			const span = { ...node, "end": state.offset, "hash": node.trivia ? null : nodeHash(node.type, parts) };
 
 			state.spans.push(span);
