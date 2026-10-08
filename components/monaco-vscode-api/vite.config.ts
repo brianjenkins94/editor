@@ -73,6 +73,28 @@ export default mergeConfig(defaults, {
 			}
 		},
 		{
+			// A background-tokenization result for a model closed while it was on its way. Upstream's
+			// `setTokensAndStates` awaits a dynamic import the first time each controller gets a result; a model
+			// disposed in that gap (an editor opened and closed quickly) is then written to, and throws an unhandled
+			// "Model is disposed!". Drop the result instead: the controller is going too. Fails loudly if upstream's
+			// shape changes (then check whether it guards this itself).
+			"name": "tokens-for-a-disposed-model",
+			"enforce": "pre",
+			"transform": function(code, id) {
+				if (!id.endsWith("/textMateWorkerTokenizerController.js")) {
+					return null;
+				}
+
+				const anchor = /this\._initialState = INITIAL;\s*\}/u;
+
+				if (!anchor.test(code)) {
+					throw new Error("tokens-for-a-disposed-model: setTokensAndStates' import of applyStateStackDiff not found in " + id);
+				}
+
+				return { "code": code.replace(anchor, (found) => found + "\n        if (this._model.isDisposed()) {\n            return;\n        }"), "map": null };
+			}
+		},
+		{
 			// Drop the ~62MB of sourcemaps @codingame ships alongside its prebuilt worker/server resources
 			// (htmlServerMain.js.map 23MB, tsserver.web.js.map 15MB, extension/css server maps, …), which vite
 			// emits as assets next to the .js. They're debug-only, never loaded at runtime — strip every emitted
