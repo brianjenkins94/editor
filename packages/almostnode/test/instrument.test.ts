@@ -156,7 +156,7 @@ function stopsOf(source: string, lines: number[]): { "printed": unknown[]; "hits
 	const compiled = ts.transpileModule(source, { "compilerOptions": { "module": ts.ModuleKind.ESNext, "target": ts.ScriptTarget.ES2020 }, "transformers": { "before": [instrumented.before] } }).outputText;
 	const hits: { "at": number[]; "where": string; "scope": Record<string, unknown>; "self": unknown }[] = [];
 	const printed: unknown[] = [];
-	const runtime = { "module": () => ({ "s": () => undefined, "p": (at: number[], scope: () => Record<string, unknown>, self: () => unknown, where: string) => {
+	const runtime = { "module": () => ({ "s": () => undefined, "e": () => undefined, "k": (_: unknown, value: unknown) => value, "x": () => undefined, "p": (at: number[], scope: () => Record<string, unknown>, self: () => unknown, where: string) => {
 		let me: unknown;
 
 		try {
@@ -225,4 +225,41 @@ test("no stop on a line that has none, and one per line however many statements 
 
 	assert.equal(hits.length, 1);
 	assert.deepEqual(hits[0]!.at, [0, 0, 0, 10]);
+});
+
+test("the function a stop is in, made replayable: what it read from outside on entry, each call's result where it was made", () => {
+	const source = [
+		"let count = 1;",
+		"const log: number[] = [];",
+		"function record(value: number) { log.push(value); return value * 10; }",
+		"const add = (step: number) => {",
+		"\tconst next = record(count + step);",
+		"\tcount = Math.max(next, count);",
+		"\treturn next;",
+		"};",
+		"out(add(2));",
+		""
+	].join("\n");
+	const instrumented = instrument("/workspace/app.ts", "oid", "coverage", new Set([5]));
+	const compiled = ts.transpileModule(source, { "compilerOptions": { "module": ts.ModuleKind.ESNext, "target": ts.ScriptTarget.ES2020 }, "transformers": { "before": [instrumented.before] } }).outputText;
+	const events: unknown[] = [];
+	const printed: unknown[] = [];
+	const runtime = { "module": () => ({
+		"s": () => undefined,
+		"p": () => { events.push("stop"); },
+		"e": (range: number[], free: () => Record<string, unknown>, _self: () => unknown, args: ArrayLike<unknown>) => { events.push(["enter", [...range], Object.keys(free()), Array.from(args)]); return "rec"; },
+		"k": (at: number[], value: unknown) => { events.push(["call", [...at], value]); return value; },
+		"x": (rec: unknown) => { events.push(["leave", rec]); }
+	}) };
+
+	runInNewContext(instrumented.prelude() + "\n" + compiled, { "__evidence": runtime, "out": (value: unknown) => { printed.push(value); } });
+
+	assert.deepEqual(printed, [30], "it does what it did");
+	assert.deepEqual(JSON.parse(JSON.stringify(events)), [
+		["enter", [3, 12, 7, 1], ["record", "count"], [2]],
+		"stop",
+		["call", [4, 14], 30],
+		["call", [5, 9], 30],
+		["leave", "rec"]
+	], "on entry what it reads from outside (not Math: the replay's own); each call's result, at the call; then it leaves");
 });

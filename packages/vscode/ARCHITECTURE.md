@@ -453,6 +453,7 @@ flowchart LR
 | Pod | pod | `pod.ready` |
 | Pod | production | `production.exit.*`, `production.launch`, `production.out.*` |
 | Pod | rules | `rules.given()`, `rules.list()`, `rules.placed()`, `rules.set()` |
+| Pod | stops | `stops.preview` |
 | Pod | tasks | `tasks.list()`, `tasks.run()` |
 | Preview :* | evidence | `evidence.flush` |
 | Preview :* | tap | `tap.worker.decide()`, `tap.worker.log` |

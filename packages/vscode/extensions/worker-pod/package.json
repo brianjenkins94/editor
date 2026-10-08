@@ -17,6 +17,7 @@
     "commands": [
       { "command": "editor.debugFile", "title": "Run", "category": "Debug", "icon": "$(play)" },
       { "command": "tsval.exploreOrderings", "title": "Explore Orderings", "category": "Debug", "icon": "$(type-hierarchy)" },
+      { "command": "tsval.stepRecordedStop", "title": "Step a Recorded Stop", "category": "Debug", "icon": "$(debug-step-into)" },
       { "command": "tsval.skipWaits", "title": "Skip Waits", "category": "Debug", "icon": "$(rocket)", "enablement": "debugType == tsval" },
       { "command": "tsval.waitRealTime", "title": "Wait in Real Time", "category": "Debug", "icon": "$(watch)", "enablement": "debugType == tsval" }
     ],

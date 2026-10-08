@@ -27,6 +27,13 @@
  * the functions around it, its imports, and what's declared before it in the blocks around it, so nothing is read
  * before it's set), `this` by another (`() => this`, called carefully: before `super()` it throws), and the functions it
  * sits in by name (`App › onClick`).
+ *
+ * And the function a stop is in, made replayable (RUNNING.md: stepping a recorded handler) — a function or an arrow, its
+ * arguments recoverable (not a method, a generator, or an arrow with a pattern for a parameter): on entry
+ * `__ev.e(range, free, self, args)` — what it reads from outside itself (`free`, by a closure: each name it uses and
+ * doesn't declare, but JavaScript's own globals, each through `typeof` so an undeclared one can't throw), `this` and its
+ * arguments — and `__ev.x(…)` as it leaves (a `finally`); each call in it `__ev.k(at, call)`, the call made as before and
+ * its result recorded where it was made, so a replay can hand a call it can't make what it returned.
  */
 import ts from "typescript";
 
@@ -50,6 +57,9 @@ type Op = "s" | "v" | "b" | "a" | "o" | "c";
 /** At most this many names a recorded stop reads, innermost first. */
 const MAX_SCOPE = 40;
 
+/** JavaScript's own globals: a replay has its own (a replayable function's free names leave them out). */
+const STANDARD = new Set(["undefined", "NaN", "Infinity", "globalThis", "Object", "Function", "Array", "String", "Number", "Boolean", "Symbol", "BigInt", "Math", "JSON", "Date", "RegExp", "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError", "EvalError", "URIError", "AggregateError", "Map", "Set", "WeakMap", "WeakSet", "WeakRef", "Promise", "Proxy", "Reflect", "Intl", "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURI", "encodeURIComponent", "decodeURI", "decodeURIComponent", "ArrayBuffer", "DataView", "Int8Array", "Uint8Array", "Uint8ClampedArray", "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array", "arguments"]);
+
 /**
  * A transformer that instruments one module, and the module's sites once it has run. `prelude` is the line that goes in
  * front of the compiled module (shift its source map down one line): it fetches the module's counters from the page
@@ -68,6 +78,38 @@ export function instrument(file: string, version: string, level: InstrumentLevel
 				node.forEachChild((child) => { parents.set(child, node); link(child); });
 			})(sourceFile);
 		}
+
+		/** The functions stops are in that a replay can step (see the header): their original nodes. */
+		const replayable = new Set<ts.Node>();
+
+		if (stops.size > 0) {
+			const firsts = new Set<number>();
+
+			(function find(node: ts.Node): void {
+				if (node.kind >= ts.SyntaxKind.FirstStatement && node.kind <= ts.SyntaxKind.LastStatement) {
+					const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+
+					if (stops.has(line) && !firsts.has(line)) {
+						firsts.add(line);
+
+						let around = parents.get(node);
+
+						while (around !== undefined && !ts.isFunctionLike(around)) {
+							around = parents.get(around);
+						}
+
+						if (around !== undefined && replayableFunction(around)) {
+							replayable.add(around);
+						}
+					}
+				}
+
+				node.forEachChild(find);
+			})(sourceFile);
+		}
+
+		/** How deep the visit is in a replayable function: each call there records its result. */
+		let replaying = 0;
 
 		/** The lines (1-based) whose stop is placed: the first statement starting on each. */
 		const placed = new Set<number>();
@@ -195,6 +237,14 @@ export function instrument(file: string, version: string, level: InstrumentLevel
 				return ts.isCaseClause(node) ? factory.updateCaseClause(node, ts.visitNode(node.expression, visit) as ts.Expression, statements) : factory.updateDefaultClause(node, statements);
 			}
 
+			// In a replayable function: each call made as before, its result recorded where it was made — but a call in an
+			// optional chain (wrapping it would change where the chain stops), `super(…)` and `import(…)`.
+			if (replaying > 0 && (ts.isCallExpression(node) || ts.isNewExpression(node)) && !ts.isOptionalChain(node) && !(ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.SuperKeyword || node.expression.kind === ts.SyntaxKind.ImportKeyword)) && !ts.isOptionalChain(parents.get(node) ?? node)) {
+				const at = factory.createArrayLiteralExpression(position(node.getStart(sourceFile)).map((each) => factory.createNumericLiteral(each)));
+
+				return factory.createCallExpression(factory.createPropertyAccessExpression(factory.createIdentifier(EV), "k"), undefined, [at, ts.visitEachChild(node, visit, context) as ts.Expression]);
+			}
+
 			if (ts.isIfStatement(node)) {
 				const condition = ts.visitNode(node.expression, visit) as ts.Expression;
 
@@ -292,11 +342,30 @@ export function instrument(file: string, version: string, level: InstrumentLevel
 
 		/** A function: its parameters' own children (defaults, decorators) visited, its body with its observed parameters. */
 		const visitFunction = (node: ts.SignatureDeclaration & { "body"?: ts.ConciseBody }): ts.Node => {
+			const replays = replayable.has(ts.getOriginalNode(node));
+
+			replaying += replays ? 1 : 0;
+
 			// Parameters are visited first, so their sites come before the body's (tsval tells them in that order).
-			const body = withParameters(node, node.body!);
+			const visited = withParameters(node, node.body!);
 			const updated = ts.visitEachChild(node, (child) => (child === node.body ? child : visit(child)), context) as ts.SignatureDeclaration & { "body"?: ts.ConciseBody };
 
-			return replaceBody(factory, updated, body);
+			replaying -= replays ? 1 : 0;
+
+			return replaceBody(factory, updated, replays ? recording(node, visited) : visited);
+		};
+
+		/** A replayable function's body, recording: `__ev.e(…)` on entry, its body in a `try`, `__ev.x(…)` as it leaves. */
+		const recording = (node: ts.SignatureDeclaration, body: ts.ConciseBody): ts.Block => {
+			const arrow = (expression: ts.Expression): ts.ArrowFunction => factory.createArrowFunction(undefined, undefined, [], undefined, factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken), expression);
+			const free = freeNames(node, parents).map((name) => factory.createPropertyAssignment(name, factory.createConditionalExpression(factory.createStrictEquality(factory.createTypeOfExpression(factory.createIdentifier(name)), factory.createStringLiteral("undefined")), undefined, factory.createVoidZero(), undefined, factory.createIdentifier(name))));
+			const args = ts.isArrowFunction(node) ? factory.createArrayLiteralExpression(node.parameters.map((parameter) => factory.createIdentifier((parameter.name as ts.Identifier).text))) : factory.createIdentifier("arguments");
+			const range = factory.createArrayLiteralExpression([...position(node.getStart(sourceFile)), ...position(node.getEnd())].map((each) => factory.createNumericLiteral(each)));
+			const entry = factory.createVariableStatement(undefined, factory.createVariableDeclarationList([factory.createVariableDeclaration("__evr", undefined, undefined, factory.createCallExpression(factory.createPropertyAccessExpression(factory.createIdentifier(EV), "e"), undefined, [range, arrow(factory.createParenthesizedExpression(factory.createObjectLiteralExpression(free))), arrow(factory.createThis()), args]))], ts.NodeFlags.Const));
+			const statements = ts.isBlock(body) ? [...body.statements] : [factory.createReturnStatement(body)];
+			const leave = factory.createBlock([factory.createExpressionStatement(factory.createCallExpression(factory.createPropertyAccessExpression(factory.createIdentifier(EV), "x"), undefined, [factory.createIdentifier("__evr")]))], true);
+
+			return factory.createBlock([entry, factory.createTryStatement(factory.createBlock(statements, true), undefined, leave)], true);
 		};
 
 		return ts.visitNode(sourceFile, visit) as ts.SourceFile;
@@ -305,8 +374,66 @@ export function instrument(file: string, version: string, level: InstrumentLevel
 	return {
 		"before": before,
 		"sites": () => sites,
-		"prelude": () => `const ${EV} = globalThis.__evidence?.module(${JSON.stringify(file)}, ${JSON.stringify(version)}, ${JSON.stringify(sites.map((each) => [each.kind, ...each.start, ...each.end]))}) ?? { s() {}, v(_, x) { return x; }, b(_, x) { return x; }, a(_, x) { return x; }, o(_, x) { return x; }, c(_, __, x) { return x; }, p() {} };`
+		"prelude": () => `const ${EV} = globalThis.__evidence?.module(${JSON.stringify(file)}, ${JSON.stringify(version)}, ${JSON.stringify(sites.map((each) => [each.kind, ...each.start, ...each.end]))}) ?? { s() {}, v(_, x) { return x; }, b(_, x) { return x; }, a(_, x) { return x; }, o(_, x) { return x; }, c(_, __, x) { return x; }, p() {}, e() {}, k(_, x) { return x; }, x() {} };`
 	};
+}
+
+/** Whether a replay can step `node`: a function or an arrow, its arguments recoverable — not a method, a constructor, an
+ *  accessor or a generator, nor an arrow with a pattern for a parameter (its arguments aren't to hand). */
+function replayableFunction(node: ts.Node): boolean {
+	if (ts.isArrowFunction(node)) {
+		return node.parameters.every((parameter) => ts.isIdentifier(parameter.name) && parameter.dotDotDotToken === undefined);
+	}
+
+	return (ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node)) && node.asteriskToken === undefined && node.body !== undefined;
+}
+
+/** What `fn` reads from outside itself: each name it uses as a value and doesn't declare (anywhere in it — a name it
+ *  declares in an inner block is taken as its own), but JavaScript's own globals. */
+function freeNames(fn: ts.SignatureDeclaration, parents: Map<ts.Node, ts.Node>): string[] {
+	const declared = new Set<string>();
+	const used = new Set<string>();
+
+	(function walk(node: ts.Node): void {
+		if (ts.isTypeNode(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) {
+			return;
+		}
+
+		if ((ts.isVariableDeclaration(node) || ts.isParameter(node) || ts.isBindingElement(node)) && !ts.isObjectBindingPattern(node.name) && !ts.isArrayBindingPattern(node.name)) {
+			declared.add((node.name as ts.Identifier).text);
+		} else if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isFunctionExpression(node) || ts.isClassExpression(node)) && node.name !== undefined) {
+			declared.add(node.name.text);
+		}
+
+		if (ts.isIdentifier(node)) {
+			const parent = parents.get(node);
+			const name = parent !== undefined && (
+				(ts.isPropertyAccessExpression(parent) && parent.name === node)
+				|| (ts.isPropertyAssignment(parent) && parent.name === node)
+				|| ((ts.isMethodDeclaration(parent) || ts.isPropertyDeclaration(parent) || ts.isGetAccessorDeclaration(parent) || ts.isSetAccessorDeclaration(parent)) && parent.name === node)
+				|| (ts.isBindingElement(parent) && parent.propertyName === node)
+				|| ts.isLabeledStatement(parent) || ts.isBreakOrContinueStatement(parent)
+				|| ((ts.isJsxAttribute(parent) || ts.isJsxNamespacedName(parent)) && parent.name === node)
+				|| ((ts.isJsxOpeningElement(parent) || ts.isJsxSelfClosingElement(parent) || ts.isJsxClosingElement(parent)) && parent.tagName === node && /^[a-z]/u.test(node.text))
+			);
+
+			if (!name) {
+				used.add(node.text);
+			}
+		}
+
+		node.forEachChild(walk);
+	})(fn);
+
+	return [...used].filter((name) => !declared.has(name) && !STANDARD.has(name)).slice(0, MAX_SCOPE);
+}
+
+/** A function passed to a call, named by the call: `addEventListener("click")`, `map`, `setTimeout`. */
+function callbackName(call: ts.CallExpression): string {
+	const callee = ts.isPropertyAccessExpression(call.expression) ? call.expression.name.text : ts.isIdentifier(call.expression) ? call.expression.text : "anonymous";
+	const first = call.arguments[0];
+
+	return first !== undefined && ts.isStringLiteral(first) ? `${callee}(${JSON.stringify(first.text)})` : callee;
 }
 
 /** The names a binding pattern binds. */
@@ -355,7 +482,7 @@ function scopeOf(statement: ts.Statement, start: number, parents: Map<ts.Node, t
 			const named = (parent as { "name"?: ts.Node }).name;
 			const holder = parents.get(parent);
 
-			functions.unshift(named !== undefined && (ts.isIdentifier(named) || ts.isPrivateIdentifier(named)) ? named.text : holder !== undefined && ts.isVariableDeclaration(holder) && ts.isIdentifier(holder.name) ? holder.name.text : holder !== undefined && ts.isPropertyAssignment(holder) && ts.isIdentifier(holder.name) ? holder.name.text : "anonymous");
+			functions.unshift(named !== undefined && (ts.isIdentifier(named) || ts.isPrivateIdentifier(named)) ? named.text : holder !== undefined && ts.isVariableDeclaration(holder) && ts.isIdentifier(holder.name) ? holder.name.text : holder !== undefined && ts.isPropertyAssignment(holder) && ts.isIdentifier(holder.name) ? holder.name.text : holder !== undefined && ts.isCallExpression(holder) ? callbackName(holder) : "anonymous");
 		} else if ((ts.isForStatement(parent) || ts.isForInStatement(parent) || ts.isForOfStatement(parent)) && parent.initializer !== undefined && ts.isVariableDeclarationList(parent.initializer) && node !== parent.initializer) {
 			add(...parent.initializer.declarations.flatMap((declaration) => boundNames(declaration.name)));
 		} else if (ts.isCatchClause(parent) && parent.variableDeclaration !== undefined) {

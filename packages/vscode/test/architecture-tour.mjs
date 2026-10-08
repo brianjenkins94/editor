@@ -203,6 +203,28 @@ test("recorded stops: a breakpoint in a page's handler records its scope each ti
 		assert.equal(at("button", 1), "<button#add>", "a DOM node, by what it is");
 		assert.ok(values.every((value) => value.line === 6), "on the breakpoint's line");
 		assert.equal(values.find((value) => value.name === "next"), undefined, "not yet set: its own statement");
+
+		// Stepping a recorded handler (RUNNING.md, step 6): the second click's call, replayed in the debugger — stopped at
+		// the stop on what it read then, and stepped on.
+		await eventually("a replay started", async () => (await workbench.evaluate((path) => globalThis.__editor.api.commands.executeCommand("tsval.stepRecordedStop", { "file": path, "n": 2 }), file)) || undefined);
+
+		const replay = await eventually("stopped at the stop", async () => (await session.request("debug.sessions", undefined, 5000)).find((each) => each.name.endsWith("(recorded)") && each.state === "stopped"));
+		const local = (outcome, name) => outcome.locals.find((each) => each.name === name)?.value;
+
+		try {
+			assert.equal(replay.line, 7, "on the breakpoint's line");
+			assert.equal(replay.name, "addEventListener(\"click\") · click #2 (recorded)", "the handler, by the call it was given to");
+
+			const stopped = await session.request(`debug.session.${replay.session}.state`, undefined, 5000);
+
+			assert.deepEqual([local(stopped, "count"), local(stopped, "step")], ["2", "2"], "as the second click had them");
+
+			const stepped = await session.request(`debug.session.${replay.session}.step`, { "action": "next" }, 30_000);
+
+			assert.equal(local(stepped, "next"), "4", "stepped on");
+		} finally {
+			await session.request(`debug.session.${replay.session}.stop`, undefined, 30_000).catch(() => undefined);
+		}
 	} finally {
 		await session.request("runs.stop", { "id": run.id }, 5000).catch(() => undefined);
 		await session.request("debug.breakpoints", { "program": file, "lines": [] }, 10_000).catch(() => undefined);
@@ -496,13 +518,15 @@ test("evidence: a file the program imports gets its own", async () => {
 });
 
 test("evidence: a run's values and branches, beside its coverage", async () => {
-	await session.terminal([
-		`echo 'const world = { onWin: () => 1 };' > values.js`,
-		`echo 'function pick(key) { return key ?? "none"; }' >> values.js`,
-		`echo 'for (const key of ["a", undefined]) { if (pick(key) === "a") { world.onWin?.(); } }' >> values.js`,
-		`echo 'const won = world.onWin ?? (() => 0);' >> values.js`,
-		`echo 'const bonus = won ? 2 : 0;' >> values.js`
-	].join(" && "), { "fresh": true });
+	// (Written through the workspace, not typed into a terminal: a debug session may have the Debug Console focused.)
+	await session.workbench().evaluate((text) => globalThis.__editor.api.workspace.fs.writeFile(globalThis.__editor.api.Uri.file("/workspace/values.js"), new TextEncoder().encode(text)), [
+		"const world = { onWin: () => 1 };",
+		"function pick(key) { return key ?? \"none\"; }",
+		"for (const key of [\"a\", undefined]) { if (pick(key) === \"a\") { world.onWin?.(); } }",
+		"const won = world.onWin ?? (() => 0);",
+		"const bonus = won ? 2 : 0;",
+		""
+	].join("\n"));
 	await session.request("debug.start", { "program": "/workspace/values.js" }, 60_000);
 
 	const found = await eventually("its values and branches, as evidence", () => session.workbench().evaluate(async () => {

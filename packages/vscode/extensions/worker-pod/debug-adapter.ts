@@ -18,6 +18,7 @@ import { EMPTY_POLICY, given as givenBy, placesOf, problemOf, ruleMatches, type 
 import { loadEffectivePolicy, persistOverride, recordResult, replaceRule } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
+import type { Replay } from "./page-evidence";
 import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
 import { controlSubject, eventSubject } from "./debug-protocol";
 import { appRootOf, runApp } from "./launch";
@@ -57,6 +58,9 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private program = "";
 	/** The program's arguments (the launch config's `args`): its `process.argv` after the node and the file. */
 	private args: string[] = [];
+	/** A recorded call to replay (RUNNING.md: stepping a recorded handler) — the text that ran, and what the call read —
+	 *  rather than the file as a program. */
+	private replay: (Replay & { "source": string }) | undefined;
 	/** Where it was started and with what environment — a terminal's (`cwd`, `env`); none, the workspace and nothing. */
 	private where: { "cwd"?: string; "env"?: Record<string, string> } = {};
 	/** The terminal run it was started as (`__runId` with `__startedBy: "terminal"`): its output goes there, its stdin
@@ -391,6 +395,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			case "launch":
 				this.program = String(args["program"] ?? "");
 				this.args = Array.isArray(args["args"]) ? (args["args"] as unknown[]).map(String) : [];
+				this.replay = typeof args["replay"] === "object" && args["replay"] !== null ? args["replay"] as Replay & { "source": string } : undefined;
 				this.where = { ...typeof args["cwd"] === "string" ? { "cwd": args["cwd"] } : {}, ...typeof args["env"] === "object" && args["env"] !== null ? { "env": args["env"] as Record<string, string> } : {} };
 				this.eventLoop = loopStartOf(args["eventLoop"]);
 				this.followTerminal(args["__startedBy"] === "terminal" && typeof args["__runId"] === "string" ? args["__runId"] : undefined);
@@ -502,9 +507,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 	private async loadSource(): Promise<void> {
 		try {
-			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(this.program));
-
-			this.source = document.getText();
+			// A replay runs the text that ran in the page (its recorded version), whatever the file holds now.
+			this.source = this.replay?.source ?? (await vscode.workspace.openTextDocument(vscode.Uri.file(this.program))).getText();
 			this.policy = await this.loadPolicy();
 			this.hooks = await this.placeRules();
 			this.sourceReady = true;
@@ -609,7 +613,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				return;
 			}
 
-			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...workspace.buffer === undefined ? {} : { "workspace": workspace.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
+			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } }, ...workspace.buffer === undefined ? {} : { "workspace": workspace.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop } }, trace);
 		});
 	}
 
@@ -995,7 +999,7 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 
 				// F5 on an app's file (RUNNING.md, step 4): the app runs — its dev server, its preview — not a session here.
 				// (Run's own launches decided that already; a terminal's `node` and an ordering's replay are what they say.)
-				if (given["__launchId"] === undefined && given["__startedBy"] !== "terminal" && given["eventLoop"] === undefined && program !== "") {
+				if (given["__launchId"] === undefined && given["__startedBy"] !== "terminal" && given["eventLoop"] === undefined && given["replay"] === undefined && program !== "") {
 					const app = await appRootOf(program);
 
 					if (app !== undefined) {
@@ -1006,7 +1010,7 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 				}
 				// No `args`: what a rule gives the file's process.argv (RULES.md; the margin's Mock), if one does — its first
 				// value, the rest each a run after it (`__cases`).
-				const mocked = Array.isArray(given["args"]) || Array.isArray(given["__cases"]) || program === "" ? undefined : givenBy(await loadEffectivePolicy(), { "program": vscode.workspace.asRelativePath(vscode.Uri.file(program), false) }, "process.argv");
+				const mocked = Array.isArray(given["args"]) || Array.isArray(given["__cases"]) || given["replay"] !== undefined || program === "" ? undefined : givenBy(await loadEffectivePolicy(), { "program": vscode.workspace.asRelativePath(vscode.Uri.file(program), false) }, "process.argv");
 				const cases = mocked?.values.filter((each): each is string[] => Array.isArray(each));
 				const config = cases === undefined || cases.length === 0 ? given : { ...given, "args": cases[0], "__cases": cases, "__case": 0 };
 

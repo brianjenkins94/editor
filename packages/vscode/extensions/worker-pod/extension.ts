@@ -24,6 +24,7 @@ import { ARCH_COMMANDS } from "../command-tap";
 import { registerTsvalDebug, takeExitCode } from "./debug-adapter";
 import { runProgram } from "./debug-control";
 import { registerLaunch } from "./launch";
+import { registerReplay } from "./replay";
 import { registerSourceControl } from "./source-control";
 import { registerTasks } from "./tasks";
 import { registerDebugToolbar } from "./debug-toolbar";
@@ -191,6 +192,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// What there is to run, as tasks run by core's shell (tasks.ts); and the shell's run picker, from them (launch.ts).
 	registerTasks(context);
 	registerLaunch(context);
+	// A recorded stop's call, stepped in the debugger (replay.ts).
+	registerReplay(context);
 	// The editor's ▷: Run (RUNNING.md) — the file, as every way in runs it.
 	context.subscriptions.push(vscode.commands.registerCommand("editor.debugFile", (uri?: vscode.Uri) => {
 		void runProgram({ ...uri instanceof vscode.Uri ? { "program": uri.path } : {} }).catch(() => undefined);

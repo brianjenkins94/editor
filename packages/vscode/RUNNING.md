@@ -203,11 +203,19 @@ that can't start says why). And the two run ledgers become one: every run in `ru
    (`stops.preview`); and they reach the margin as a session of values for the file, anchored in the text of the version
    that ran. Its range is written into the call, not the module's site table: the page keeps a version's table, and a
    breakpoint changes no source.
-6. **Stepping a recorded handler.** The page can't stop, but a recorded call can be stepped afterwards: at a recorded stop
-   the page also records what the function was called with, what it closes over and what each call it makes returns,
-   and tsval runs the same function from there, fed those results — line by line, back and forth, in VS Code's debugger,
-   while the live page has gone on. Replay, at a function's grain rather than the page's: what made the page virtual
-   loop costly, without it.
+6. **Stepping a recorded handler** (done). The page can't stop, but a recorded call can be stepped afterwards: at a recorded
+   stop the page also records what the function was called with, what it closes over and what each call it makes
+   returns, and tsval runs the same function from there, fed those results — line by line, back and forth, in VS Code's
+   debugger, while the live page has gone on. Replay, at a function's grain rather than the page's: what made the page
+   virtual loop costly, without it. Done: the function a stop is in (a function or an arrow whose arguments can be had —
+   not yet a method) is instrumented to record each call of it — on entry its free names, `this` and arguments, each
+   call's result where it was made, all as snapshots (worker-pod snapshot.ts: data as data, a function or a DOM method as
+   a named stand-in), kept with the latest five hits; *Debug: Step a Recorded Stop* (replay.ts) picks one and starts a
+   session on it (debug-worker.ts `launchReplay`, replay-run.ts): the recorded version's text, everything but the
+   function blanked so every line is the file's, its free names bound around it, each call to what it couldn't record
+   handed its result by where it was made, a call given one of the program's own functions (`items.map(fn)`) made for
+   real so it can be stepped into. A handler passed to a call is named by it (`addEventListener("click")`). Not yet: a
+   call into another of the program's functions is handed its result rather than stepped into.
 7. **The fallback.** The cases that remain (from step 0, and what tsval lacks) run natively behind the same session,
    the margin saying values aren't there; each listed here with its reason.
 

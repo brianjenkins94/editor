@@ -37,6 +37,8 @@ import { observe } from "@brianjenkins94/observability";
 import { controlSubject, eventSubject } from "./debug-protocol";
 import { LiveRecord } from "./live-values";
 import { addObservation, copySums, siteObservations } from "./site-sums";
+import { replayGuard, replayProgram } from "./replay-run";
+import { revive } from "./snapshot";
 
 // This worker's own hub, linked UP to the pod hub. The whole debug protocol rides it (debug-protocol.ts), on its
 // session's subjects — the adapter puts the session id in our URL. It announces `pod.ready` after launch.
@@ -1429,6 +1431,57 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	await session(loaded.vm, trace);
 }
 
+/** A recorded call replayed for the debugger: the function run on what it read in the page — its free names its globals,
+ *  revived — each call to something it couldn't record (a page's function, a DOM method, the network) handed the result
+ *  it had there, by where it was made and how many times; a call with a function of the program's among its arguments
+ *  (`items.map(fn)`) made for real, so the debugger steps into it. Its breakpoints are the file's, the stop among them. */
+async function launchReplay(message: Extract<Control, { "type": "launch" }>, trace: TraceContext | undefined): Promise<void> {
+	const replay = message.replay!;
+	const { standIn, hostGuard } = replayGuard(replay);
+	const self = revive(replay.self, standIn);
+	const eventLoop = { "now": Date.now(), "seed": 1, "pace": "fast" as const };
+	const loaded = createVM(replayProgram(message.source, replay.fn), {
+		"fileName": message.fileName,
+		"onBreakpoint": onBreakpointHook,
+		"coverage": true,
+		"profile": true,
+		"observe": observeSite,
+		"trace": traceValue,
+		"eventLoop": eventLoop,
+		"hostGuard": hostGuard,
+		"globals": {
+			...nodeGlobals,
+			"__self": typeof self === "object" && self !== null ? self : {},
+			"__args": replay.args.map((arg) => revive(arg, standIn)),
+			"console": guestConsole()
+		}
+	});
+
+	// What it read from outside itself, as the scope around it: bindings the debugger shows (and the call assigns to).
+	for (const [name, value] of Object.entries(replay.free)) {
+		loaded.vm.rootScope.bindings.set(name, { "value": revive(value, standIn), "kind": "let", "initialized": true });
+	}
+
+	evaluating = loaded.vm;
+	loopStart = eventLoop.now;
+	pace = "fast";
+	liveTimer = setInterval(flushLive, 250);
+	sourceFile = loaded.sourceFile;
+	record(loaded.vm, new Map());
+	policy = undefined;
+	userLines = message.lines;
+	fileLines = new Map();
+	programPath = message.program ?? message.fileName;
+	setHooks = new Map();
+	programFiles = new Map([[loaded.sourceFile.fileName, loaded.sourceFile]]);
+	capabilityLines = new Map();
+	arm(loaded.vm);
+	history = [];
+	index = -1;
+	done = false;
+	await session(loaded.vm, trace);
+}
+
 hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 	const message = data as Control;
 	const trace = envelope.traceContext;
@@ -1444,8 +1497,8 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 			// Announce membership to the pod hub. Safe here (not at module load): the pod's interest sub-control
 			// precedes `launch` on this ordered channel, so by now the pod is known to want `pod.ready`.
 			hub.publish("pod.ready", { "worker": hub.id });
-			workerLog.info("launch", { "file": message.fileName, "breakpoints": message.lines.length });
-			void launchProgram(message, trace);
+			workerLog.info("launch", { "file": message.fileName, "breakpoints": message.lines.length, "replay": message.replay !== undefined });
+			void (message.replay === undefined ? launchProgram(message, trace) : launchReplay(message, trace));
 			break;
 		}
 
