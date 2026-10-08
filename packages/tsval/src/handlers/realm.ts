@@ -6,6 +6,10 @@ import type { Machine } from "../vm.ts";
 import ts from "typescript";
 import { propertyName } from "./literals.ts";
 
+// TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
+// functions used here are read off it once.
+const { isComputedPropertyName, isIdentifier, isPropertyAccessExpression } = ts;
+
 /** GetValue on a member reference. A primitive base is boxed in the GUEST realm (its
  *  `String.prototype`, not the host's — `"".constructor === String` must hold for the guest's
  *  `String`), with the primitive itself as the receiver for getters. Same-realm: a plain read. */
@@ -34,6 +38,22 @@ export function setProperty(vm: Machine, obj: unknown, key: PropertyKey, value: 
  *  setters (notably `__proto__`, which a computed `["__proto__"]` key must not trigger). */
 export function defineData(obj: object, key: PropertyKey, value: unknown): void {
 	Object.defineProperty(obj, key, { "value": value, "writable": true, "enumerable": true, "configurable": true });
+}
+
+/**
+ * defineData on a plain object tsval itself made (an object literal, a rest object, an `arguments` object). While its
+ * prototype is still the realm's Object.prototype (an ordinary object at the end of the chain, so `in` runs no trap) and
+ * the key is nowhere on that chain, assigning it defines it exactly as CreateDataProperty would — without
+ * Object.defineProperty's descriptor and runtime call, which was most of the cost of building an object.
+ */
+export function defineFresh(vm: Machine, obj: object, key: PropertyKey, value: unknown): void {
+	if (Object.getPrototypeOf(obj) === vm.realm.Object.prototype && !(key in obj)) {
+		(obj as Record<PropertyKey, unknown>)[key] = value;
+
+		return;
+	}
+
+	defineData(obj, key, value);
 }
 
 export const normalizeTemplateLineTerminators = (text: string): string => text.replace(/\r\n?/gu, "\n");
@@ -143,18 +163,19 @@ export function createArgumentsObject(vm: Machine, args: unknown[]): object {
 	const obj = new vm.realm.Object() as Record<PropertyKey, unknown>;
 
 	for (let index = 0; index < args.length; index++) {
-		defineData(obj, index, args[index]); // CreateDataProperty (no inherited setters)
+		defineFresh(vm, obj, index, args[index]); // CreateDataProperty (no inherited setters)
 	}
 
 	Object.defineProperty(obj, "length", { "value": args.length, "writable": true, "enumerable": false, "configurable": true });
 	Object.defineProperty(obj, Symbol.iterator, { "value": vm.realm.Array.prototype.values, "writable": true, "enumerable": false, "configurable": true });
-	const thrower = (): never => {
-		throw new TypeError("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
-	};
-
-	Object.defineProperty(obj, "callee", { "get": thrower, "set": thrower, "enumerable": false, "configurable": false });
+	Object.defineProperty(obj, "callee", { "get": throwTypeError, "set": throwTypeError, "enumerable": false, "configurable": false });
 
 	return obj;
+}
+
+/** %ThrowTypeError%: one function, as the spec has it (not one per `arguments` object — a call is made in a loop). */
+function throwTypeError(): never {
+	throw new TypeError("'caller', 'callee', and 'arguments' properties may not be accessed on strict mode functions or the arguments objects for calls to them");
 }
 
 /** A guest-realm array holding `list`'s elements, copied by index — never through the iteration
@@ -175,7 +196,7 @@ export function copyRestProperties(vm: Machine, target: object, source: unknown,
 
 	for (const key of Reflect.ownKeys(src)) {
 		if (!excluded.has(key) && Object.getOwnPropertyDescriptor(src, key)?.enumerable) {
-			defineData(target, key, vm.fromHost(src[key]));
+			defineFresh(vm, target, key, vm.fromHost(src[key]));
 		}
 	}
 }
@@ -236,7 +257,7 @@ export function toPropertyKey(value: unknown): PropertyKey {
 }
 
 export function bindingKey(vm: Machine, scope: Scope, name: ts.PropertyName): PropertyKey {
-	if (ts.isComputedPropertyName(name)) {
+	if (isComputedPropertyName(name)) {
 		return toPropertyKey(vm.evalNodeSync(name.expression, scope));
 	}
 
@@ -244,11 +265,11 @@ export function bindingKey(vm: Machine, scope: Scope, name: ts.PropertyName): Pr
 }
 
 export function describe(node: ts.Node): string {
-	if (ts.isIdentifier(node)) {
+	if (isIdentifier(node)) {
 		return node.text;
 	}
 
-	if (ts.isPropertyAccessExpression(node)) {
+	if (isPropertyAccessExpression(node)) {
 		return `${describe(node.expression)}.${node.name.text}`;
 	}
 

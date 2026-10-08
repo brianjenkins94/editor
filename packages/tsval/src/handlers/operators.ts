@@ -9,6 +9,10 @@ import { lookupPrivate, privateHas } from "./classes.ts";
 import { assignmentExpression, compoundAssignment } from "./references.ts";
 import { evaluating, on } from "./registry.ts";
 
+// TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
+// functions used here are read off it once.
+const { isPrivateIdentifier } = ts;
+
 const Kind = ts.SyntaxKind;
 
 export const LOGICAL = new Set<number>([Kind.AmpersandAmpersandToken, Kind.BarBarToken, Kind.QuestionQuestionToken]);
@@ -37,39 +41,73 @@ export const privateIn = evaluating<ts.BinaryExpression>(
 	(vm, frame, node, [obj]) => { vm.push(privateHas(obj, lookupPrivate(frame.scope, (node.left as ts.PrivateIdentifier).text))); }
 );
 
-/** Plain binary: both operands, then the operator. */
-export const plainBinary = evaluating<ts.BinaryExpression>(
-	(node) => [node.left, node.right],
-	(vm, _frame, node, [left, right]) => { vm.push(applyBinary(node.operatorToken.kind, left as never, right as never)); }
-);
+/** Plain binary: both operands, then the operator. (`evaluating`'s shape, written out: the two operands are popped off
+ *  the stack rather than spliced into an array — the most common expression there is.) */
+export function plainBinary(vm: Machine, frame: NodeFrame): void {
+	const node = frame.node as ts.BinaryExpression;
+
+	if (frame.phase === 0) {
+		frame.base = vm.values.length; // (as `evaluating` records it)
+		vm.pushNode(node.right, frame.scope);
+		vm.pushNode(node.left, frame.scope);
+		frame.phase = 1;
+
+		return;
+	}
+
+	const right = vm.values.pop();
+	const left = vm.values.pop();
+
+	vm.frames.pop();
+	vm.push(applyBinary(node.operatorToken.kind, left as never, right as never));
+}
+
+/** Which of binaryExpression's forms an operator token takes, by kind (0: a plain binary). */
+const BINARY_FORM = new Uint8Array(Kind.Count);
+const ASSIGNMENT_FORM = 1;
+const COMPOUND_FORM = 2;
+const LOGICAL_FORM = 3;
+const IN_FORM = 4;
+
+for (const op of ASSIGN) {
+	BINARY_FORM[op] = COMPOUND_FORM;
+}
+
+for (const op of LOGICAL) {
+	BINARY_FORM[op] = LOGICAL_FORM;
+}
+
+BINARY_FORM[Kind.EqualsToken] = ASSIGNMENT_FORM;
+BINARY_FORM[Kind.InKeyword] = IN_FORM;
 
 function binaryExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.BinaryExpression;
 	const op = node.operatorToken.kind;
 
-	// `#x in obj` — a brand check (the left side is a private name, not an expression).
-	if (op === Kind.InKeyword && ts.isPrivateIdentifier(node.left)) {
-		privateIn(vm, frame);
+	switch (BINARY_FORM[op]) {
+		case ASSIGNMENT_FORM:
+			assignmentExpression(vm, frame, node);
 
-		return;
-	}
+			return;
+		case COMPOUND_FORM:
+			compoundAssignment(vm, frame, node, op);
 
-	if (op === Kind.EqualsToken) {
-		assignmentExpression(vm, frame, node);
+			return;
+		case LOGICAL_FORM:
+			logicalExpression(vm, frame, node, op);
 
-		return;
-	}
+			return;
+		case IN_FORM:
+			// `#x in obj` — a brand check (the left side is a private name, not an expression).
+			if (isPrivateIdentifier(node.left)) {
+				privateIn(vm, frame);
 
-	if (ASSIGN.has(op)) {
-		compoundAssignment(vm, frame, node, op);
+				return;
+			}
 
-		return;
-	}
-
-	if (LOGICAL.has(op)) {
-		logicalExpression(vm, frame, node, op);
-
-		return;
+			break;
+		default:
+			break;
 	}
 
 	plainBinary(vm, frame);

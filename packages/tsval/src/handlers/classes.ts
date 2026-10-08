@@ -14,6 +14,10 @@ import { createArgumentsObject, defineData, isObjectLike, toPropertyKey } from "
 import { THIS_TDZ, thisValue } from "./references.ts";
 import { on, syntheticHandlers } from "./registry.ts";
 
+// TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
+// functions used here are read off it once.
+const { canHaveDecorators, canHaveModifiers, getCombinedModifierFlags, getDecorators, getModifiers, isClassStaticBlockDeclaration, isComputedPropertyName, isConstructorDeclaration, isGetAccessorDeclaration, isIndexSignatureDeclaration, isMethodDeclaration, isParameterPropertyDeclaration, isPrivateIdentifier, isPropertyDeclaration, isSemicolonClassElement, isSetAccessorDeclaration } = ts;
+
 const Kind = ts.SyntaxKind;
 
 export interface ClassMeta {
@@ -205,7 +209,7 @@ export function classMetaOf(ctor: GuestClass): ClassMeta {
 }
 
 export function hasStatic(member: ts.ClassElement): boolean {
-	const modifiers = ts.canHaveModifiers(member) ? ts.getModifiers(member) : undefined;
+	const modifiers = canHaveModifiers(member) ? getModifiers(member) : undefined;
 
 	return (modifiers ?? []).some((modifier) => modifier.kind === Kind.StaticKeyword);
 }
@@ -215,7 +219,7 @@ export function memberKey(vm: Machine, name: ts.PropertyName | undefined, scope:
 		return "";
 	}
 
-	if (ts.isComputedPropertyName(name)) {
+	if (isComputedPropertyName(name)) {
 		return toPropertyKey(vm.evalNodeSync(name.expression, scope));
 	}
 
@@ -237,12 +241,12 @@ export function declarePrivateNames(node: ts.ClassLikeDeclaration, scope: Scope)
 		const { name } = member as { "name"?: ts.Node };
 
 		// a get/set pair shares one name (skipped when already present)
-		if (name !== undefined && ts.isPrivateIdentifier(name) && !privateNames.has(name.text)) {
+		if (name !== undefined && isPrivateIdentifier(name) && !privateNames.has(name.text)) {
 			let kind: PrivateName["kind"];
 
-			if (ts.isPropertyDeclaration(member)) {
+			if (isPropertyDeclaration(member)) {
 				kind = "field";
-			} else if (ts.isMethodDeclaration(member)) {
+			} else if (isMethodDeclaration(member)) {
 				kind = "method";
 			} else {
 				kind = "accessor";
@@ -266,7 +270,7 @@ export interface PreEvaluatedClass {
 }
 
 /** A method/accessor/constructor without a body is an overload signature: erased, its key never evaluated. */
-export const isSignatureOnly = (member: ts.ClassElement): boolean => (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member) || ts.isConstructorDeclaration(member)) && member.body === undefined;
+export const isSignatureOnly = (member: ts.ClassElement): boolean => (isMethodDeclaration(member) || isGetAccessorDeclaration(member) || isSetAccessorDeclaration(member) || isConstructorDeclaration(member)) && member.body === undefined;
 
 export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, outerScope: Scope, pre?: PreEvaluatedClass): GuestClass {
 	assertSupportedClassSurface(node);
@@ -325,7 +329,7 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 	const privateOf = (member: ts.ClassElement): PrivateName | undefined => {
 		const { name } = member as { "name"?: ts.Node };
 
-		return name !== undefined && ts.isPrivateIdentifier(name) ? (privateNames.get(name.text) as PrivateName) : undefined;
+		return name !== undefined && isPrivateIdentifier(name) ? (privateNames.get(name.text) as PrivateName) : undefined;
 	};
 
 	// Every (public) member key is evaluated exactly once, in source order, before any member is
@@ -333,7 +337,7 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 	// element keys first; a computed instance-field key is NOT re-evaluated per instance). A *static*
 	// ConstructorDeclaration is TypeScript's parse of `static constructor() {}` — a static method.
 	const memberKeys = new Map<ts.ClassElement, PropertyKey>();
-	const isStaticCtorMethod = (member: ts.ClassElement): member is ts.ConstructorDeclaration => ts.isConstructorDeclaration(member) && hasStatic(member);
+	const isStaticCtorMethod = (member: ts.ClassElement): member is ts.ConstructorDeclaration => isConstructorDeclaration(member) && hasStatic(member);
 	let computedIndex = 0; // walks `pre.keys` (the same source order as computedKeyNodes)
 
 	for (const member of node.members) {
@@ -341,10 +345,10 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 			// private members and type-only signatures get no public member key
 		} else if (isStaticCtorMethod(member)) {
 			memberKeys.set(member, "constructor");
-		} else if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member) || ts.isPropertyDeclaration(member)) {
+		} else if (isMethodDeclaration(member) || isGetAccessorDeclaration(member) || isSetAccessorDeclaration(member) || isPropertyDeclaration(member)) {
 			let key: PropertyKey;
 
-			if (pre !== undefined && ts.isComputedPropertyName(member.name)) {
+			if (pre !== undefined && isComputedPropertyName(member.name)) {
 				key = toPropertyKey(pre.keys[computedIndex]);
 				computedIndex += 1;
 			} else {
@@ -376,7 +380,7 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 	// static initializers run (`var C = class { static x = C.name }`).
 	Object.defineProperty(Ctor, "name", { "value": node.name?.text ?? pre?.name ?? "", "configurable": true });
 	// A class's `length` is its constructor's expected argument count (0 without an explicit one).
-	const ctorDecl = node.members.find((member): member is ts.ConstructorDeclaration => ts.isConstructorDeclaration(member) && member.body !== undefined && !hasStatic(member));
+	const ctorDecl = node.members.find((member): member is ts.ConstructorDeclaration => isConstructorDeclaration(member) && member.body !== undefined && !hasStatic(member));
 
 	Object.defineProperty(Ctor, "length", { "value": ctorDecl === undefined ? 0 : functionLength(ctorDecl.parameters), "configurable": true });
 	if (node.name) {
@@ -391,9 +395,9 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 		const target = hasStatic(member) ? (Ctor as unknown as object) : proto;
 		const pn = privateOf(member);
 
-		if (isSignatureOnly(member) || ts.isIndexSignatureDeclaration(member)) {
+		if (isSignatureOnly(member) || isIndexSignatureDeclaration(member)) {
 			// type-only: overload signatures and index signatures contribute no runtime member
-		} else if (isStaticCtorMethod(member) || ts.isMethodDeclaration(member)) {
+		} else if (isStaticCtorMethod(member) || isMethodDeclaration(member)) {
 			const fn = createGuestFunction(vm, member, scope, target);
 
 			if (pn !== undefined) {
@@ -409,15 +413,15 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 				setFunctionName(fn, key);
 				Object.defineProperty(target, key, { "value": fn, "enumerable": false, "writable": true, "configurable": true });
 			}
-		} else if (ts.isConstructorDeclaration(member)) {
+		} else if (isConstructorDeclaration(member)) {
 			if (member.body) {
 				meta.ctorNode = member;
 			}
-		} else if (ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
+		} else if (isGetAccessorDeclaration(member) || isSetAccessorDeclaration(member)) {
 			const fn = createGuestFunction(vm, member, scope, target);
 
 			if (pn !== undefined) {
-				if (ts.isGetAccessorDeclaration(member)) {
+				if (isGetAccessorDeclaration(member)) {
 					pn.get = fn;
 				} else {
 					pn.set = fn;
@@ -435,12 +439,12 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 			} else {
 				const key = keyOf(member);
 
-				setFunctionName(fn, key, ts.isGetAccessorDeclaration(member) ? "get" : "set");
+				setFunctionName(fn, key, isGetAccessorDeclaration(member) ? "get" : "set");
 				const desc: PropertyDescriptor = { ...(Object.getOwnPropertyDescriptor(target, key) ?? {}), "enumerable": false, "configurable": true };
 
 				delete desc.value;
 				delete desc.writable;
-				if (ts.isGetAccessorDeclaration(member)) {
+				if (isGetAccessorDeclaration(member)) {
 					desc.get = fn as () => unknown;
 				} else {
 					desc.set = fn as (v: unknown) => void;
@@ -448,7 +452,7 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 
 				Object.defineProperty(target, key, desc);
 			}
-		} else if (!ts.isPropertyDeclaration(member) && !ts.isClassStaticBlockDeclaration(member) && !ts.isSemicolonClassElement(member)) {
+		} else if (!isPropertyDeclaration(member) && !isClassStaticBlockDeclaration(member) && !isSemicolonClassElement(member)) {
 			unimplemented(`class member ${ts.SyntaxKind[member.kind]}`);
 		}
 	}
@@ -456,7 +460,7 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 	// Pass 2 — fields and static blocks, in source order (static ones run now; instance ones are
 	// recorded to run per construction).
 	for (const member of node.members) {
-		if (ts.isPropertyDeclaration(member)) {
+		if (isPropertyDeclaration(member)) {
 			const pn = privateOf(member);
 
 			if (hasStatic(member)) {
@@ -478,7 +482,7 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 			} else {
 				meta.instanceFields.push({ "name": keyOf(member), "initializer": member.initializer });
 			}
-		} else if (ts.isClassStaticBlockDeclaration(member)) {
+		} else if (isClassStaticBlockDeclaration(member)) {
 			// `static { … }` runs at definition time, in source order with static fields, `this` = the class.
 			vm.evalNodeSync(member.body, fieldScope(meta, Ctor, Ctor));
 		}
@@ -497,26 +501,26 @@ export function createGuestClass(vm: Machine, node: ts.ClassLikeDeclaration, out
 export function assertSupportedClassSurface(node: ts.ClassLikeDeclaration): void {
 	const refuse = (what: string): never => unimplemented(`${what} (out of scope: not standard / not erasable TypeScript)`);
 
-	if ((ts.getDecorators(node) ?? []).length > 0) {
+	if ((getDecorators(node) ?? []).length > 0) {
 		refuse("class decorators");
 	}
 
 	for (const member of node.members) {
-		if (ts.canHaveDecorators(member) && (ts.getDecorators(member) ?? []).length > 0) {
+		if (canHaveDecorators(member) && (getDecorators(member) ?? []).length > 0) {
 			refuse("member decorators");
 		}
 
-		if (ts.isPropertyDeclaration(member) && (ts.getCombinedModifierFlags(member) & ts.ModifierFlags.Accessor) !== 0) {
+		if (isPropertyDeclaration(member) && (getCombinedModifierFlags(member) & ts.ModifierFlags.Accessor) !== 0) {
 			refuse("auto-accessor fields (`accessor x`)");
 		}
 
-		if (ts.isConstructorDeclaration(member) || ts.isMethodDeclaration(member)) {
+		if (isConstructorDeclaration(member) || isMethodDeclaration(member)) {
 			for (const param of member.parameters) {
-				if ((ts.getDecorators(param) ?? []).length > 0) {
+				if ((getDecorators(param) ?? []).length > 0) {
 					refuse("parameter decorators");
 				}
 
-				if (ts.isConstructorDeclaration(member) && ts.isParameterPropertyDeclaration(param, member)) {
+				if (isConstructorDeclaration(member) && isParameterPropertyDeclaration(param, member)) {
 					refuse("parameter properties");
 				}
 			}
@@ -671,7 +675,7 @@ export function computedKeyNodes(node: ts.ClassLikeDeclaration): ts.Expression[]
 		if (!isSignatureOnly(member)) {
 			const { name } = member as { "name"?: ts.PropertyName };
 
-			if (name !== undefined && ts.isComputedPropertyName(name)) {
+			if (name !== undefined && isComputedPropertyName(name)) {
 				out.push(name.expression);
 			}
 		}

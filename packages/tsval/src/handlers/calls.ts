@@ -11,6 +11,10 @@ import { cookedTemplateText, describe, normalizeTemplateLineTerminators } from "
 import { AFTER_REF, CHAIN_BREAK, chainShort, evaluateReference, getValue, thisOf } from "./references.ts";
 import { on } from "./registry.ts";
 
+// TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
+// functions used here are read off it once.
+const { isNoSubstitutionTemplateLiteral, isParenthesizedExpression, isSpreadElement, isTemplateExpression } = ts;
+
 const Kind = ts.SyntaxKind;
 
 // Tagged templates: `tag\`a${x}b\`` → tag(strings, x) where `strings` is the cooked-strings array with
@@ -28,7 +32,7 @@ export function templateObject(vm: Machine, node: ts.TaggedTemplateExpression): 
 			raw.push(normalizeTemplateLineTerminators(lit.rawText ?? lit.text));
 		};
 
-		if (ts.isNoSubstitutionTemplateLiteral(node.template)) {
+		if (isNoSubstitutionTemplateLiteral(node.template)) {
 			add(node.template);
 		} else {
 			add(node.template.head);
@@ -48,7 +52,7 @@ export function templateObject(vm: Machine, node: ts.TaggedTemplateExpression): 
 function taggedTemplateExpression(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.TaggedTemplateExpression;
 	const { tag } = node;
-	const spans = ts.isTemplateExpression(node.template) ? node.template.templateSpans : [];
+	const spans = isTemplateExpression(node.template) ? node.template.templateSpans : [];
 
 	if (frame.phase < AFTER_REF) {
 		const ref = evaluateReference(vm, frame, tag);
@@ -92,7 +96,7 @@ function callExpression(vm: Machine, frame: NodeFrame): void {
 	// A parenthesized member callee `(a.b)()` is still a Reference: `this` is preserved.
 	let callee: ts.Expression = node.expression;
 
-	while (ts.isParenthesizedExpression(callee)) {
+	while (isParenthesizedExpression(callee)) {
 		callee = callee.expression;
 	}
 
@@ -231,7 +235,7 @@ export function pushCallArguments(vm: Machine, frame: NodeFrame, args: readonly 
 	for (let index = args.length - 1; index >= 0; index--) {
 		const arg = args[index];
 
-		if (ts.isSpreadElement(arg)) {
+		if (isSpreadElement(arg)) {
 			vm.pushNode(arg.expression, frame.scope);
 			spreadMask[index] = true;
 		} else {

@@ -14,6 +14,10 @@ import { copyRestProperties, defineData, getProperty, realmArray, toPropertyKey 
 import { isSuperRef, putValue, unwrapParens } from "./references.ts";
 import { syntheticHandlers } from "./registry.ts";
 
+// TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
+// functions used here are read off it once.
+const { isArrayBindingPattern, isArrayLiteralExpression, isBinaryExpression, isComputedPropertyName, isElementAccessExpression, isIdentifier, isObjectLiteralExpression, isOmittedExpression, isPrivateIdentifier, isPropertyAccessExpression, isPropertyAssignment, isShorthandPropertyAssignment, isSpreadAssignment, isSpreadElement } = ts;
+
 const Kind = ts.SyntaxKind;
 
 /**
@@ -134,13 +138,13 @@ export function compileDefault(init: ts.Expression | undefined, nameTarget: ts.N
 		return;
 	}
 
-	const naming: PatOp[] = ts.isIdentifier(nameTarget) ? [{ "op": "name", "name": nameTarget.text, "from": init }] : [];
+	const naming: PatOp[] = isIdentifier(nameTarget) ? [{ "op": "name", "name": nameTarget.text, "from": init }] : [];
 
 	ops.push({ "op": "jump-if-defined", "offset": 1 + naming.length }, { "op": "eval", "node": init }, ...naming);
 }
 
 export function compileKey(name: ts.PropertyName, ops: PatOp[]): void {
-	if (ts.isComputedPropertyName(name)) {
+	if (isComputedPropertyName(name)) {
 		ops.push({ "op": "eval", "node": name.expression }, { "op": "to-key" }, { "op": "obj-get" });
 	} else {
 		ops.push({ "op": "obj-get", "key": propertyName(name) });
@@ -148,16 +152,16 @@ export function compileKey(name: ts.PropertyName, ops: PatOp[]): void {
 }
 
 export function compileBinding(target: ts.BindingName, kind: BindingKind, ops: PatOp[]): void {
-	if (ts.isIdentifier(target)) {
+	if (isIdentifier(target)) {
 		ops.push({ "op": "bind", "name": target.text, "kind": kind });
 
 		return;
 	}
 
-	if (ts.isArrayBindingPattern(target)) {
+	if (isArrayBindingPattern(target)) {
 		ops.push({ "op": "iter-open" });
 		for (const element of target.elements) {
-			if (ts.isOmittedExpression(element)) {
+			if (isOmittedExpression(element)) {
 				ops.push({ "op": "iter-skip" });
 			} else if (element.dotDotDotToken) {
 				ops.push({ "op": "iter-rest" });
@@ -198,14 +202,14 @@ export function compileAssignElement(elementTarget: ts.Expression, init: ts.Expr
 		unimplemented("a super reference as a destructuring target");
 	}
 
-	const isMember = ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target);
+	const isMember = isPropertyAccessExpression(target) || isElementAccessExpression(target);
 
 	if (isMember) {
 		ops.push({ "op": "eval", "node": target.expression });
-		if (ts.isElementAccessExpression(target)) {
+		if (isElementAccessExpression(target)) {
 			ops.push({ "op": "eval", "node": target.argumentExpression }, { "op": "member-ref", "hasKey": true, "text": "" });
 		} else {
-			ops.push({ "op": "member-ref", "hasKey": false, "text": target.name.text, "privateName": ts.isPrivateIdentifier(target.name) ? target.name.text : undefined });
+			ops.push({ "op": "member-ref", "hasKey": false, "text": target.name.text, "privateName": isPrivateIdentifier(target.name) ? target.name.text : undefined });
 		}
 	}
 
@@ -221,7 +225,7 @@ export function compileAssignElement(elementTarget: ts.Expression, init: ts.Expr
 export function compileAssign(elementTarget: ts.Expression, ops: PatOp[]): void {
 	const target = unwrapParens(elementTarget);
 
-	if (ts.isIdentifier(target)) {
+	if (isIdentifier(target)) {
 		ops.push({ "op": "assign-id", "name": target.text });
 
 		return;
@@ -229,21 +233,21 @@ export function compileAssign(elementTarget: ts.Expression, ops: PatOp[]): void 
 
 	// A bare member target (`for (o.x of xs)`): the value is on the temps first (spec: the next value,
 	// THEN the reference), so the reference is evaluated above it and swapped under before the store.
-	if (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) {
+	if (isPropertyAccessExpression(target) || isElementAccessExpression(target)) {
 		compileAssignElement(target, undefined, () => ops.push({ "op": "swap" }), ops);
 
 		return;
 	}
 
-	if (ts.isArrayLiteralExpression(target)) {
+	if (isArrayLiteralExpression(target)) {
 		ops.push({ "op": "iter-open" });
 		for (const element of target.elements) {
-			if (ts.isOmittedExpression(element)) {
+			if (isOmittedExpression(element)) {
 				ops.push({ "op": "iter-skip" });
-			} else if (ts.isSpreadElement(element)) {
+			} else if (isSpreadElement(element)) {
 				compileAssignElement(element.expression, undefined, () => ops.push({ "op": "iter-rest" }), ops);
 			} else {
-				const withDefault = ts.isBinaryExpression(element) && element.operatorToken.kind === Kind.EqualsToken;
+				const withDefault = isBinaryExpression(element) && element.operatorToken.kind === Kind.EqualsToken;
 
 				compileAssignElement(withDefault ? element.left : element, withDefault ? element.right : undefined, () => ops.push({ "op": "iter-step" }), ops);
 			}
@@ -254,24 +258,24 @@ export function compileAssign(elementTarget: ts.Expression, ops: PatOp[]): void 
 		return;
 	}
 
-	if (ts.isObjectLiteralExpression(target)) {
+	if (isObjectLiteralExpression(target)) {
 		ops.push({ "op": "obj-open" });
 		for (const prop of target.properties) {
-			if (ts.isSpreadAssignment(prop)) {
+			if (isSpreadAssignment(prop)) {
 				compileAssignElement(prop.expression, undefined, () => ops.push({ "op": "obj-rest" }), ops);
-			} else if (ts.isPropertyAssignment(prop)) {
+			} else if (isPropertyAssignment(prop)) {
 				// Key (with ToPropertyKey) first, then the target reference, then GetV.
 				let source: PatOp;
 
-				if (ts.isComputedPropertyName(prop.name)) {
+				if (isComputedPropertyName(prop.name)) {
 					ops.push({ "op": "eval", "node": prop.name.expression }, { "op": "to-key" });
 					source = { "op": "obj-get" };
 				} else { source = { "op": "obj-get", "key": propertyName(prop.name) }; }
 
-				const withDefault = ts.isBinaryExpression(prop.initializer) && prop.initializer.operatorToken.kind === Kind.EqualsToken;
+				const withDefault = isBinaryExpression(prop.initializer) && prop.initializer.operatorToken.kind === Kind.EqualsToken;
 
 				compileAssignElement(withDefault ? prop.initializer.left : prop.initializer, withDefault ? prop.initializer.right : undefined, () => ops.push(source), ops);
-			} else if (ts.isShorthandPropertyAssignment(prop)) {
+			} else if (isShorthandPropertyAssignment(prop)) {
 				ops.push({ "op": "obj-get", "key": prop.name.text });
 				compileDefault(prop.objectAssignmentInitializer, prop.name, ops);
 				ops.push({ "op": "assign-id", "name": prop.name.text });

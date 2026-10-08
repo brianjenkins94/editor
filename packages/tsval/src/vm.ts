@@ -14,8 +14,19 @@ import { defineExports, directoryOf, linkedSpecifiers, makeRequire, moduleOf, re
 import { Scope } from "./scope.ts";
 import { isGuestFunction } from "./values.ts";
 
+// TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
+// functions and kinds used here are read off it once.
+const { createSourceFile, isIdentifier, isSourceFile, isTaggedTemplateExpression } = ts;
+const FIRST_STATEMENT = ts.SyntaxKind.FirstStatement;
+const LAST_STATEMENT = ts.SyntaxKind.LastStatement;
+const TRY_STATEMENT = ts.SyntaxKind.TryStatement;
+
 /** Statements whose completion is UpdateEmpty(body, undefined): they yield `undefined` when their body produced nothing. */
-const COMPLETION_STATEMENTS = new Set<number>([ts.SyntaxKind.IfStatement, ts.SyntaxKind.ForStatement, ts.SyntaxKind.ForInStatement, ts.SyntaxKind.ForOfStatement, ts.SyntaxKind.WhileStatement, ts.SyntaxKind.DoStatement, ts.SyntaxKind.TryStatement, ts.SyntaxKind.SwitchStatement]);
+const COMPLETION_STATEMENTS = new Uint8Array(ts.SyntaxKind.Count);
+
+for (const kind of [ts.SyntaxKind.IfStatement, ts.SyntaxKind.ForStatement, ts.SyntaxKind.ForInStatement, ts.SyntaxKind.ForOfStatement, ts.SyntaxKind.WhileStatement, ts.SyntaxKind.DoStatement, ts.SyntaxKind.TryStatement, ts.SyntaxKind.SwitchStatement]) {
+	COMPLETION_STATEMENTS[kind] = 1; // (a table by kind: it's read at every statement's first step)
+}
 
 /** Brand marking a live generator/async fiber object as non-cloneable (shared across forks). */
 export const FIBER_BRAND = Symbol("tsval.fiber");
@@ -419,6 +430,8 @@ export class Machine implements VM {
 	private waitedPending = 0;
 	/** Each node's top-level statement (a profile's key), as found. */
 	private readonly topOf = new WeakMap<ts.Node, ts.Statement | null>();
+	/** Each node's entry in `profile` (null: none, it's in no top-level statement), as found: a fork's are its own. */
+	private tallies: { "profile": Map<ts.Statement, StatementProfile>; "entries": WeakMap<ts.Node, StatementProfile | null> } | undefined;
 	/** What chosen sites are told to (VMOptions.observe). */
 	public observe: Observer | undefined;
 	/** What each value bound, returned or chosen is told to (VMOptions.trace). */
@@ -503,29 +516,47 @@ export class Machine implements VM {
 
 	/** A step in `node`'s code, to its top-level statement's profile — with the virtual time waited before it, if any. */
 	private tally(node: ts.Node): void {
-		let top = this.topOf.get(node);
+		const profile = this.profile!;
 
-		if (top === undefined) {
-			let at: ts.Node | undefined = node;
+		// Each node's entry, as found (null: not in a top-level statement), for the profile it's in: one lookup a step.
+		if (this.tallies?.profile !== profile) {
+			this.tallies = { "profile": profile, "entries": new WeakMap() };
+		}
 
-			while (at !== undefined && at.parent !== undefined && !ts.isSourceFile(at.parent)) {
-				at = at.parent;
+		const { entries } = this.tallies;
+		let entry = entries.get(node);
+
+		if (entry === undefined) {
+			let top = this.topOf.get(node);
+
+			if (top === undefined) {
+				let at: ts.Node | undefined = node;
+
+				while (at !== undefined && at.parent !== undefined && !isSourceFile(at.parent)) {
+					at = at.parent;
+				}
+
+				top = at !== undefined && at.parent !== undefined && isSourceFile(at.parent) ? at as ts.Statement : null;
+				this.topOf.set(node, top);
 			}
 
-			top = at !== undefined && at.parent !== undefined && ts.isSourceFile(at.parent) ? at as ts.Statement : null;
-			this.topOf.set(node, top);
+			entry = top === null ? null : profile.get(top) ?? null;
+
+			if (top !== null && entry === null) {
+				entry = { "steps": 0, "waited": 0, "first": this.steps };
+				profile.set(top, entry);
+			}
+
+			entries.set(node, entry);
 		}
 
-		if (top === null) {
+		if (entry === null) {
 			return;
 		}
-
-		const entry = this.profile!.get(top) ?? { "steps": 0, "waited": 0, "first": this.steps };
 
 		entry.steps += 1;
 		entry.waited += this.waitedPending;
 		this.waitedPending = 0;
-		this.profile!.set(top, entry);
 	}
 
 	/** The next call's number (FrameBase.call). */
@@ -560,7 +591,10 @@ export class Machine implements VM {
 			}
 		}
 
-		this.trace({ "kind": kind, "node": node, "name": name, "value": value, "step": this.steps, "call": call, ...callee === undefined ? {} : { "callee": callee }, "loops": loops });
+		// (two literals rather than a spread for the optional `callee`: an event is made for nearly every binding)
+		this.trace(callee === undefined
+			? { "kind": kind, "node": node, "name": name, "value": value, "step": this.steps, "call": call, "loops": loops }
+			: { "kind": kind, "node": node, "name": name, "value": value, "step": this.steps, "call": call, "callee": callee, "loops": loops });
 	}
 
 	public get top(): Frame | undefined {
@@ -620,7 +654,7 @@ export class Machine implements VM {
 			// program gets one of its own instead, settled when the result's arrival is delivered as an event (event-loop.ts),
 			// so nothing — not even Promise.race — sees it before. (Not a promise the program makes itself — `new Promise`,
 			// a promise's methods and statics: that's the program chaining what it has.)
-			if (this.loop !== undefined && this.steppedHere && !promising && (callee as unknown) !== this.realm.Promise && !PROMISE_STATICS.some((name) => (this.realm.Promise as unknown as Record<string, unknown>)[name] === callee) && isThenable(value)) {
+			if (this.loop !== undefined && this.steppedHere && !promising && (callee as unknown) !== this.realm.Promise && !isPromiseStatic(this.realm.Promise, callee) && isThenable(value)) {
 				return this.awaitResult(value, this.callLabel(site, callee, args));
 			}
 
@@ -664,7 +698,8 @@ export class Machine implements VM {
 	// --- frame / value helpers ------------------------------------------------
 
 	public pushNode(node: ts.Node, scope: Scope): NodeFrame {
-		const frame: NodeFrame = { "node": node, "phase": 0, "scope": scope, "valuesBase": this.values.length };
+		// (`kind` is set, if undefined, so every frame has it first: `step` reads it of each)
+		const frame: NodeFrame = { "kind": undefined, "node": node, "phase": 0, "scope": scope, "valuesBase": this.values.length };
 
 		this.frames.push(frame);
 
@@ -726,24 +761,35 @@ export class Machine implements VM {
 
 	/** Do exactly one unit of work. */
 	public step(): void {
+		this.advance(false);
+	}
+
+	/**
+	 * One step — or, with `stopAtBreakpoint`, none when the top frame is a fresh statement on a breakpoint (true then):
+	 * `atBreakpoint()` and `step()` in one, as a run to a breakpoint asks them at every step, so the frame's fields are read
+	 * once. (Reading a field of a frame here is slow: frames come in many shapes.)
+	 */
+	private advance(stopAtBreakpoint: boolean): boolean {
 		if (this.finished) {
-			return;
+			return false;
 		}
 
 		// Stepped async, between tasks (the stack empty): the next settled job, or idle while work is pending.
-		if (this.steppedAsync && this.depth === 0 && this.frames.length === 0 && this.signal === null) {
+		if (this.frames.length === 0 && this.steppedAsync && this.depth === 0 && this.signal === null) {
 			if (this.resumeSettled() || this.fireEvent()) {
-				return;
+				return false;
 			}
 
 			if (this.pending.size > 0 || (this.loop !== undefined && (hasRefTimers(this.loop) || this.loop.results.size > 0 || this.loop.keepAlive?.() === true))) {
 				this.idle = true;
 
-				return;
+				return false;
 			}
 		}
 
-		const frame = this.top;
+		const { frames } = this;
+		const at = frames.length - 1;
+		const frame = frames[at];
 
 		if (frame === undefined) {
 			// No frame left — but a signal may still be pending (a handler that pops itself *before*
@@ -760,7 +806,18 @@ export class Machine implements VM {
 				this.completion = signal.value;
 			}
 
-			return;
+			return false;
+		}
+
+		const { kind, node } = frame;
+		// (a synthetic frame has no node kind: 0, SyntaxKind.Unknown, is in none of the tables by kind)
+		const nodeKind = kind === undefined ? node.kind : 0;
+		// A fresh statement: where a breakpoint stops, and what coverage counts.
+		const statementStart = nodeKind >= FIRST_STATEMENT && nodeKind <= LAST_STATEMENT && frame.phase === 0;
+
+		// (atBreakpoint's test, on what's read already)
+		if (stopAtBreakpoint && statementStart && this.breakpoints.size > 0 && this.breakpoints.has(breakpointKey(node!))) {
+			return true;
 		}
 
 		this.steps += 1;
@@ -773,40 +830,45 @@ export class Machine implements VM {
 		if (this.signal !== null) {
 			this.unwind(frame, this.signal);
 
-			return;
+			return false;
 		}
 
 		// Where the work goes: this step, to the top-level statement whose code it's in (with any time waited before it).
-		if (this.profile !== undefined && frame.node !== null && frame.node !== undefined) {
-			this.tally(frame.node);
+		if (this.profile !== undefined && node !== null && node !== undefined) {
+			this.tally(node);
 		}
 
 		// A statement's first step (phase 0) is the statement starting — the same test a breakpoint uses.
-		if (this.coverage !== undefined && frame.kind === undefined && frame.phase === 0 && isStatement(frame.node)) {
-			this.coverage.set(frame.node, (this.coverage.get(frame.node) ?? 0) + 1);
+		if (this.coverage !== undefined && statementStart) {
+			this.coverage.set(node!, (this.coverage.get(node!) ?? 0) + 1);
 		}
 
 		// (each synthetic handler is typed for its own frame; the union is dispatched on `kind` here)
-		const handler = (frame.kind !== undefined ? syntheticHandlers[frame.kind] : nodeHandlers[frame.node.kind]) as ((vm: Machine, frame: Frame) => void) | undefined;
+		const handler = (kind !== undefined ? syntheticHandlers[kind] : nodeHandlers[nodeKind]) as ((vm: Machine, frame: Frame) => void) | undefined;
 
 		if (handler === undefined) {
-			if (frame.kind !== undefined) {
-				throw new TsvalInternalError(`unimplemented: ${frame.kind}`);
+			if (kind !== undefined) {
+				throw new TsvalInternalError(`unimplemented: ${kind}`);
 			}
 
-			throw new TsvalInternalError(`unimplemented: ${syntaxKindName(frame.node.kind)} (SyntaxKind ${frame.node.kind})`);
+			throw new TsvalInternalError(`unimplemented: ${syntaxKindName(nodeKind)} (SyntaxKind ${nodeKind})`);
 		}
+
+		// Only a compound statement's frame has a completion mark (it's set here, nowhere else): the table by kind says so
+		// before the frame is asked.
+		const compound = COMPLETION_STATEMENTS[nodeKind] === 1 ? frame as NodeFrame : undefined;
 
 		try {
 			// A compound statement takes its completion mark when it STARTS (a block pushes all its
 			// statements up front; earlier siblings run in between).
-			if (frame.kind === undefined && frame.phase === 0 && frame.completionMark === undefined && COMPLETION_STATEMENTS.has(frame.node.kind)) {
-				frame.completionMark = this.completionSerial;
+			if (compound !== undefined && compound.phase === 0 && compound.completionMark === undefined) {
+				compound.completionMark = this.completionSerial;
 			}
 
 			handler(this, frame);
-			if (frame.kind === undefined && frame.completionMark !== undefined && this.frames[this.frames.length - 1] !== frame && !this.frames.includes(frame)) {
-				this.finishStatement(frame);
+			// Still on the stack where it was (it ran a child, say) is the common case, and the cheap one to tell.
+			if (compound?.completionMark !== undefined && this.frames[at] !== compound && !this.frames.includes(compound)) {
+				this.finishStatement(compound);
 			}
 
 			// Stepped async: an `await` on the main stack cuts its async function off, to resume when what it awaited settles.
@@ -825,6 +887,8 @@ export class Machine implements VM {
 			this.signal = { "type": "throw", "value": this.toGuestError(error) };
 			this.noteThrow(this.signal.value, frame.node);
 		}
+
+		return false;
 	}
 
 	/** Run to completion, synchronously. A top-level `await` needs a driver — use `runAsync`. */
@@ -960,7 +1024,12 @@ export class Machine implements VM {
 
 	/** True when the top frame is a fresh statement sitting on a breakpoint. */
 	public atBreakpoint(): boolean {
-		const frame = this.top;
+		// (none set is the common case of a run to its end: asked at every step, so asked first)
+		if (this.breakpoints.size === 0) {
+			return false;
+		}
+
+		const frame = this.frames[this.frames.length - 1];
 
 		if (frame === undefined || frame.kind !== undefined || frame.phase !== 0 || frame.node === null) {
 			return false;
@@ -971,9 +1040,7 @@ export class Machine implements VM {
 			return false;
 		}
 
-		const file = frame.node.getSourceFile();
-
-		return this.breakpoints.has(`${file.fileName}:${frame.node.getStart(file)}`);
+		return this.breakpoints.has(breakpointKey(frame.node));
 	}
 
 	// --- the program's modules (VMOptions.modules, modules.ts) ------------------
@@ -983,7 +1050,7 @@ export class Machine implements VM {
 		let source = this.parsed.get(filename);
 
 		if (source === undefined) {
-			source = ts.createSourceFile(filename, this.modules!.source(filename), ts.ScriptTarget.Latest, true, /\.[jt]sx$/u.test(filename) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+			source = createSourceFile(filename, this.modules!.source(filename), ts.ScriptTarget.Latest, true, /\.[jt]sx$/u.test(filename) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
 			this.parsed.set(filename, source);
 		}
 
@@ -1113,7 +1180,13 @@ export class Machine implements VM {
 	/** Run until the next breakpoint (or completion). Advances at least one step. */
 	public runToBreakpoint(): void {
 		this.step();
-		this.runUntil((vm) => vm.atBreakpoint());
+		this.idle = false;
+
+		// (runUntil with atBreakpoint, written out — this loop is the whole of a run to its end — and the test made by
+		// `advance` on the frame it reads anyway)
+		while (!this.finished && !this.paused && !this.idle && !this.advance(true)) {
+			// (advance stepped)
+		}
 	}
 
 	// --- snapshot / fork (ASSIGNMENT §3, S4) ----------------------------------
@@ -1313,6 +1386,7 @@ export class Machine implements VM {
 		forked.onBreakpoint = this.onBreakpoint;
 		forked.coverage = this.coverage === undefined ? undefined : new Map(this.coverage);
 		forked.profile = this.profile === undefined ? undefined : new Map([...this.profile].map(([statement, entry]) => [statement, { ...entry }]));
+		forked.tallies = undefined; // (its entries are copies: found afresh)
 		forked.waitedPending = this.waitedPending;
 		(forked as unknown as { "topOf": WeakMap<ts.Node, ts.Statement | null> }).topOf = this.topOf; // a pure cache: shared
 		forked.observe = this.observe;
@@ -1382,7 +1456,7 @@ export class Machine implements VM {
 	/** A host call as a person reads it, for a candidate's label: its callee as the code writes it, and its first argument
 	 *  when that's a string — `fetch("https://a.example/")`. */
 	private callLabel(site: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression, callee: unknown, args: unknown[]): string {
-		const written = ts.isTaggedTemplateExpression(site) ? undefined : site.expression.getText();
+		const written = isTaggedTemplateExpression(site) ? undefined : site.expression.getText();
 		const name = written ?? (typeof callee === "function" && callee.name !== "" ? callee.name : "a host call");
 		const [first] = args;
 
@@ -1992,7 +2066,7 @@ export class Machine implements VM {
 				}
 			}
 
-			if (frame.node.kind === ts.SyntaxKind.TryStatement) {
+			if (frame.node.kind === TRY_STATEMENT) {
 				this.unwindTry(frame, signal);
 
 				return;
@@ -2070,7 +2144,7 @@ export class Machine implements VM {
 				// the block (its defaults may even suspend); a throw while binding replaces the caught error
 				// and unwinds through this frame's `catch` state, so a finally still runs.
 				if (varDecl !== null && varDecl !== undefined) {
-					if (ts.isIdentifier(varDecl.name)) {
+					if (isIdentifier(varDecl.name)) {
 						bindIdentifier(catchScope, varDecl.name.text, signal.value, "let");
 					} else {
 						pushPattern(this, catchScope, bindingProgram(varDecl.name, "let"), signal.value);
@@ -2143,11 +2217,14 @@ export class Machine implements VM {
 				// Regain debugger control inside a host-invoked guest call: a fresh statement on a breakpoint
 				// fires the hook (which may block and inspect state) before it executes. Only meaningful for
 				// statement-bearing sub-runs (a function body); expression sub-runs never hit atBreakpoint.
-				if (this.onBreakpoint !== undefined && this.atBreakpoint()) {
+				// (`advance` makes atBreakpoint's test, and steps when it doesn't hold)
+				if (this.onBreakpoint === undefined) {
+					this.step();
+				} else if (this.advance(true)) {
 					this.onBreakpoint(this);
+					this.step();
 				}
 
-				this.step();
 				// A synchronous sub-run has no driver to resume it: a `yield`/`await` here (a computed key,
 				// default value, or destructuring default containing one) cannot be honored. Fail loud
 				// rather than silently resuming with `undefined`.
@@ -2271,7 +2348,24 @@ export class Machine implements VM {
 }
 
 function isStatement(node: ts.Node): boolean {
-	return node.kind >= ts.SyntaxKind.FirstStatement && node.kind <= ts.SyntaxKind.LastStatement;
+	return node.kind >= FIRST_STATEMENT && node.kind <= LAST_STATEMENT;
+}
+
+/** Each statement's breakpoint key (`file:pos`), as found: finding its file walks up the tree and its start scans past
+ *  trivia, which a run that checks at every statement shouldn't redo. */
+const breakpointKeys = new WeakMap<ts.Node, string>();
+
+function breakpointKey(node: ts.Node): string {
+	let key = breakpointKeys.get(node);
+
+	if (key === undefined) {
+		const file = node.getSourceFile();
+
+		key = `${file.fileName}:${node.getStart(file)}`;
+		breakpointKeys.set(node, key);
+	}
+
+	return key;
 }
 
 /** True for the `prototype` object of a guest class (its own `constructor` is a branded guest class). */
@@ -2316,6 +2410,17 @@ interface AsyncScheduler { "settled": { "id": number; "input": Settlement }[]; "
 
 /** What a promise's own statics make (`Promise.resolve`, `Promise.all`, …) is the program's, not external. */
 const PROMISE_STATICS = ["resolve", "reject", "all", "allSettled", "race", "any", "withResolvers"];
+
+/** One of `Promise`'s statics, as they are now (a loop, not a closure: it's asked of every host call). */
+function isPromiseStatic(promise: PromiseConstructor, callee: unknown): boolean {
+	for (const name of PROMISE_STATICS) {
+		if ((promise as unknown as Record<string, unknown>)[name] === callee) {
+			return true;
+		}
+	}
+
+	return false;
+}
 
 function isThenable(value: unknown): value is object {
 	return (typeof value === "object" || typeof value === "function") && value !== null && typeof (value as { "then"?: unknown }).then === "function";

@@ -1,12 +1,12 @@
 /**
  * The handler registry: the per-SyntaxKind and synthetic-frame tables, `on()`, the declarative `evaluating` shape, and the shared trivial handlers. Imports nothing from the other handler modules, so it is always evaluated first (they register into it at load).
  */
-import type ts from "typescript";
 import type { NodeFrame } from "../frame.ts";
 import type { Machine, NodeHandler, SyntheticHandlers } from "../vm.ts";
+import ts from "typescript";
 
-/** Per-SyntaxKind frame handlers. */
-export const nodeHandlers: Record<number, NodeHandler> = {};
+/** Per-SyntaxKind frame handlers: a dense array by kind (looked up at every step), unregistered kinds `undefined`. */
+export const nodeHandlers: (NodeHandler | undefined)[] = Array.from({ "length": ts.SyntaxKind.Count }, () => undefined);
 
 /** Synthetic-frame handlers (frames with a `kind` tag rather than a 1:1 node). */
 export const syntheticHandlers = {} as SyntheticHandlers;

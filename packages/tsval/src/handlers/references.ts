@@ -13,6 +13,10 @@ import { assignProgram, pushPattern } from "./patterns.ts";
 import { getProperty, keyText, setProperty, stepBy, toNumeric, toPropertyKey } from "./realm.ts";
 import { evaluating, on } from "./registry.ts";
 
+// TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
+// functions used here are read off it once.
+const { isArrayLiteralExpression, isBinaryExpression, isElementAccessExpression, isIdentifier, isObjectLiteralExpression, isOptionalChain, isPrivateIdentifier, isPropertyAccessExpression, isPropertyAssignment, isShorthandPropertyAssignment, isSpreadAssignment, isSpreadElement } = ts;
+
 const Kind = ts.SyntaxKind;
 
 /** `this` in a derived constructor is uninitialized until `super()` returns (a ReferenceError). */
@@ -69,13 +73,20 @@ export function superSet(scope: Scope, key: PropertyKey, value: unknown): void {
 }
 
 export function isSuperRef(node: ts.Node): node is ts.PropertyAccessExpression | ts.ElementAccessExpression {
-	return (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && node.expression.kind === Kind.SuperKeyword;
+	return (isPropertyAccessExpression(node) || isElementAccessExpression(node)) && node.expression.kind === Kind.SuperKeyword;
+}
+
+/** unwrapParens' wrappers, as a table by kind (a reference is unwrapped at each of its steps). */
+const WRAPPERS = new Uint8Array(Kind.Count);
+
+for (const kind of [Kind.ParenthesizedExpression, Kind.AsExpression, Kind.TypeAssertionExpression, Kind.NonNullExpression, Kind.SatisfiesExpression, Kind.ExpressionWithTypeArguments]) {
+	WRAPPERS[kind] = 1;
 }
 
 /** Through parentheses and the erased type wrappers (`(x as T) = v`, `x! = v`, `x satisfies T`). */
 export function unwrapParens(expr: ts.Expression): ts.Expression {
-	while (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr) || ts.isTypeAssertionExpression(expr) || ts.isNonNullExpression(expr) || ts.isSatisfiesExpression(expr) || ts.isExpressionWithTypeArguments(expr)) {
-		expr = expr.expression;
+	while (WRAPPERS[expr.kind] === 1) {
+		expr = (expr as ts.ParenthesizedExpression | ts.AsExpression | ts.TypeAssertion | ts.NonNullExpression | ts.SatisfiesExpression | ts.ExpressionWithTypeArguments).expression;
 	}
 
 	return expr;
@@ -90,7 +101,7 @@ export const CHAIN_BREAK: unique symbol = Symbol("tsval.optional-chain-short-cir
 
 export function chainShort(node: ts.Node): unknown {
 	const { parent } = node;
-	const continues = parent !== undefined && ts.isOptionalChain(parent) && (parent as { "expression"?: ts.Node }).expression === node;
+	const continues = parent !== undefined && isOptionalChain(parent) && (parent as { "expression"?: ts.Node }).expression === node;
 
 	return continues ? CHAIN_BREAK : undefined;
 }
@@ -132,19 +143,12 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 		return frame.ref;
 	}
 
-	const done = (ref: Ref): Ref => {
-		frame.ref = ref;
-		frame.phase = AFTER_REF;
-
-		return ref;
-	};
-
 	target = unwrapParens(target);
-	if (ts.isIdentifier(target)) {
-		return done({ "kind": "id", "name": target.text });
+	if (isIdentifier(target)) {
+		return resolved(frame, { "kind": "id", "name": target.text });
 	}
 
-	if (!ts.isPropertyAccessExpression(target) && !ts.isElementAccessExpression(target)) {
+	if (!isPropertyAccessExpression(target) && !isElementAccessExpression(target)) {
 		if (frame.phase === 0) {
 			vm.pushNode(target, frame.scope);
 			frame.phase = 1;
@@ -152,7 +156,7 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 			return undefined;
 		}
 
-		return done({ "kind": "value", "value": vm.pop() });
+		return resolved(frame, { "kind": "value", "value": vm.pop() });
 	}
 
 	const member = target;
@@ -161,8 +165,8 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 	if (frame.phase === 0) {
 		if (isSuper) {
 			thisValue(frame.scope);
-			if (ts.isPropertyAccessExpression(member)) {
-				return done({ "kind": "super", "key": member.name.text });
+			if (isPropertyAccessExpression(member)) {
+				return resolved(frame, { "kind": "super", "key": member.name.text });
 			}
 
 			vm.pushNode(member.argumentExpression, frame.scope);
@@ -187,10 +191,10 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 		if (obj === CHAIN_BREAK || ((obj === null || obj === undefined) && member.questionDotToken)) {
 			vm.pop();
 
-			return done({ "kind": "short" });
+			return resolved(frame, { "kind": "short" });
 		}
 
-		if (!ts.isPropertyAccessExpression(member)) {
+		if (!isPropertyAccessExpression(member)) {
 			vm.pushNode(member.argumentExpression, frame.scope);
 			frame.phase = 2;
 
@@ -198,20 +202,28 @@ export function evaluateReference(vm: Machine, frame: NodeFrame, target: ts.Expr
 		}
 
 		vm.pop();
-		if (ts.isPrivateIdentifier(member.name)) {
-			return done({ "kind": "private", "obj": obj, "name": member.name.text });
+		if (isPrivateIdentifier(member.name)) {
+			return resolved(frame, { "kind": "private", "obj": obj, "name": member.name.text });
 		}
 
-		return done({ "kind": "member", "obj": obj, "key": member.name.text });
+		return resolved(frame, { "kind": "member", "obj": obj, "key": member.name.text });
 	}
 
 	const rawKey = vm.pop();
 
 	if (isSuper) {
-		return done({ "kind": "super", "key": rawKey });
+		return resolved(frame, { "kind": "super", "key": rawKey });
 	}
 
-	return done({ "kind": "member", "obj": vm.pop(), "key": rawKey });
+	return resolved(frame, { "kind": "member", "obj": vm.pop(), "key": rawKey });
+}
+
+/** A reference resolved: cached on its frame, which continues at AFTER_REF. */
+function resolved(frame: NodeFrame, ref: Ref): Ref {
+	frame.ref = ref;
+	frame.phase = AFTER_REF;
+
+	return ref;
 }
 
 /** A super reference's key at use: ToPropertyKey once, memoized on the record. */
@@ -317,7 +329,7 @@ export function thisOf(scope: Scope, ref: Ref): unknown {
 
 /** An assignment's target as written (`x`, `o.p`, `a[i]`), for a trace: its text in the program, or its name. */
 function targetText(vm: Machine, target: ts.Expression): string {
-	if (ts.isIdentifier(target)) {
+	if (isIdentifier(target)) {
 		return target.text;
 	}
 
@@ -332,24 +344,24 @@ function targetText(vm: Machine, target: ts.Expression): string {
 function assignedNames(pattern: ts.Expression): string[] {
 	const target = unwrapParens(pattern);
 
-	if (ts.isIdentifier(target)) {
+	if (isIdentifier(target)) {
 		return [target.text];
 	}
 
-	if (ts.isBinaryExpression(target) && target.operatorToken.kind === Kind.EqualsToken) {
+	if (isBinaryExpression(target) && target.operatorToken.kind === Kind.EqualsToken) {
 		return assignedNames(target.left); // a default: `[a = 1] = …`
 	}
 
-	if (ts.isSpreadElement(target)) {
+	if (isSpreadElement(target)) {
 		return assignedNames(target.expression);
 	}
 
-	if (ts.isArrayLiteralExpression(target)) {
+	if (isArrayLiteralExpression(target)) {
 		return target.elements.flatMap(assignedNames);
 	}
 
-	if (ts.isObjectLiteralExpression(target)) {
-		return target.properties.flatMap((property) => (ts.isShorthandPropertyAssignment(property) ? [property.name.text] : ts.isPropertyAssignment(property) ? assignedNames(property.initializer) : ts.isSpreadAssignment(property) ? assignedNames(property.expression) : []));
+	if (isObjectLiteralExpression(target)) {
+		return target.properties.flatMap((property) => (isShorthandPropertyAssignment(property) ? [property.name.text] : isPropertyAssignment(property) ? assignedNames(property.initializer) : isSpreadAssignment(property) ? assignedNames(property.expression) : []));
 	}
 
 	return [];
@@ -496,7 +508,7 @@ function typeOfExpression(vm: Machine, frame: NodeFrame): void {
 		// `typeof undeclaredVar` (also parenthesized) must not throw; guard identifier reads.
 		const inner = unwrapParens(node.expression);
 
-		if (ts.isIdentifier(inner) && !frame.scope.has(inner.text)) {
+		if (isIdentifier(inner) && !frame.scope.has(inner.text)) {
 			vm.frames.pop();
 
 			vm.push("undefined");
@@ -556,8 +568,8 @@ export function assignmentExpression(vm: Machine, frame: NodeFrame, node: ts.Bin
 	// no NamedEvaluation through parentheses).
 	const left = unwrapParens(node.left);
 
-	if (!ts.isArrayLiteralExpression(left) && !ts.isObjectLiteralExpression(left)) {
-		const names = left === node.left && ts.isIdentifier(left); // NamedEvaluation: a bare identifier target only
+	if (!isArrayLiteralExpression(left) && !isObjectLiteralExpression(left)) {
+		const names = left === node.left && isIdentifier(left); // NamedEvaluation: a bare identifier target only
 
 		assignThrough(
 			vm,
@@ -581,7 +593,7 @@ export function assignmentExpression(vm: Machine, frame: NodeFrame, node: ts.Bin
 
 	// Destructuring assignment: `[a, b] = x`, `({ x } = o)`. Evaluate the RHS, then bind through a
 	// pattern frame.
-	if (ts.isArrayLiteralExpression(left) || ts.isObjectLiteralExpression(left)) {
+	if (isArrayLiteralExpression(left) || isObjectLiteralExpression(left)) {
 		if (frame.phase === 0) {
 			vm.pushNode(node.right, frame.scope);
 			frame.phase = 1;
@@ -627,7 +639,7 @@ export function logicalShortCircuits(op: ts.SyntaxKind, current: unknown): boole
 // RHS at all when the current value decides.
 export function compoundAssignment(vm: Machine, frame: NodeFrame, node: ts.BinaryExpression, op: ts.SyntaxKind): void {
 	const left = unwrapParens(node.left);
-	const names = left === node.left && ts.isIdentifier(left); // (`x ??= () => {}` names the function `x`)
+	const names = left === node.left && isIdentifier(left); // (`x ??= () => {}` names the function `x`)
 
 	assignThrough(
 		vm,

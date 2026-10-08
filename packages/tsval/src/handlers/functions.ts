@@ -13,24 +13,29 @@ import { parameterProgram, pushPattern } from "./patterns.ts";
 import { createArgumentsObject } from "./realm.ts";
 import { on, syntheticHandlers } from "./registry.ts";
 
+// TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
+// functions used here are read off it once.
+const { getCombinedModifierFlags, isArrowFunction, isBlock, isClassExpression, isConstructorDeclaration, isFunctionExpression, isGetAccessorDeclaration, isIdentifier, isMethodDeclaration, isParenthesizedExpression, isPrivateIdentifier, isSetAccessorDeclaration } = ts;
+
 const Kind = ts.SyntaxKind;
+const { ModifierFlags } = ts;
 
 export function createGuestFunction(vm: Machine, node: GuestFunctionNode, closure: Scope, homeObject?: object): GuestFunction {
-	const modifierFlags = ts.getCombinedModifierFlags(node);
+	const modifierFlags = getCombinedModifierFlags(node);
 	const meta: GuestFunctionMeta = {
 		"node": node,
 		"closure": closure,
-		"name": node.name !== null && node.name !== undefined && (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name)) ? node.name.text : "",
+		"name": node.name !== null && node.name !== undefined && (isIdentifier(node.name) || isPrivateIdentifier(node.name)) ? node.name.text : "",
 		"isArrow": node.kind === Kind.ArrowFunction,
 		"isGenerator": (node).asteriskToken !== null && (node).asteriskToken !== undefined,
-		"isAsync": (modifierFlags & ts.ModifierFlags.Async) !== 0,
+		"isAsync": (modifierFlags & ModifierFlags.Async) !== 0,
 		"homeObject": homeObject
 	};
 	// The host-invoked wrapper (array callbacks, host-supplied functions, host-mediated `new`) runs a nested loop to
 	// completion. Its *shape* mirrors the guest function's: an arrow (no `this`, no `prototype`, not
 	// constructible), a concise method (has `this`, no `prototype`, not constructible), or a plain
 	// function (constructible; `new.target` forwarded so the body can observe construction).
-	const isMethodLike = ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node) || ts.isConstructorDeclaration(node);
+	const isMethodLike = isMethodDeclaration(node) || isGetAccessorDeclaration(node) || isSetAccessorDeclaration(node) || isConstructorDeclaration(node);
 	const fn = makeWrapper(vm, meta, isMethodLike);
 
 	fn.__tsval = meta;
@@ -65,7 +70,7 @@ export function createGuestFunction(vm: Machine, node: GuestFunctionNode, closur
 	Object.defineProperty(fn, "name", { "value": meta.name, "configurable": true });
 	// A named function *expression* binds its own name inside itself, immutably (assigning to it is a
 	// TypeError in strict code).
-	if (ts.isFunctionExpression(node) && node.name !== undefined) {
+	if (isFunctionExpression(node) && node.name !== undefined) {
 		const inner = new Scope(closure, false);
 
 		inner.declareLexical(node.name.text, "const");
@@ -156,9 +161,10 @@ function callFrame(vm: Machine, frame: CallFrame): void {
 		frame.scope = fnScope;
 		// With non-simple parameters (defaults, patterns, rest) the body gets its own var environment:
 		// a closure in a default sees the *parameter*, not a same-named `var` declared in the body.
-		const bodyScope = node.parameters.some((param) => param.initializer !== undefined || param.dotDotDotToken !== undefined || !ts.isIdentifier(param.name)) ? new Scope(fnScope, true) : fnScope;
+		const plan = parameterPlan(node);
+		const bodyScope = plan.simple ? fnScope : new Scope(fnScope, true);
 
-		if (ts.isBlock(node.body!)) {
+		if (isBlock(node.body!)) {
 			hoist(vm, bodyScope, node.body.statements);
 			// Reuse the body scope for the body block (body vars live there directly).
 			const bodyFrame = vm.pushNode(node.body, bodyScope);
@@ -171,7 +177,7 @@ function callFrame(vm: Machine, frame: CallFrame): void {
 			frame.phase = 2;
 		}
 
-		bindParameters(vm, fnScope, node, frame.args); // (the parameter frame runs before the body)
+		bindParameters(vm, fnScope, node, frame.args, plan); // (the parameter frame runs before the body)
 	} else if (frame.phase === 1) {
 		// Body completed with no explicit return.
 		vm.frames.pop();
@@ -191,7 +197,7 @@ function callFrame(vm: Machine, frame: CallFrame): void {
 
 /** A TypeScript `this:` pseudo-parameter — types the receiver, binds nothing, takes no argument. */
 export function isThisParameter(param: ts.ParameterDeclaration): boolean {
-	return ts.isIdentifier(param.name) && param.name.text === "this";
+	return isIdentifier(param.name) && param.name.text === "this";
 }
 
 /** JS `Function.length`: params before the first default/rest, excluding a `this:` pseudo-param. */
@@ -217,42 +223,64 @@ export function functionLength(params: readonly ts.ParameterDeclaration[]): numb
  * ReferenceError); the parameter program then binds them in order, as a pattern frame pushed ABOVE
  * the body's (call AFTER pushing the body). Defaults are ordinary guest expressions on the stack.
  */
-export function bindParameters(vm: Machine, scope: Scope, node: ts.SignatureDeclaration, args: unknown[]): void {
-	let any = false;
-	let index = 0;
+export function bindParameters(vm: Machine, scope: Scope, node: ts.SignatureDeclaration, args: unknown[], plan = parameterPlan(node)): void {
+	const { params } = plan;
 
-	for (const param of node.parameters) {
-		if (!isThisParameter(param)) {
-			// What was passed for it, or what a rest parameter collects — not for one with a default or a pattern: what a
-			// preview's instrumented code can see of those isn't the same (RUNTIME-EVIDENCE.md, P8), and evidence from
-			// either runtime must mean one thing.
-			if (param.initializer === undefined && ts.isIdentifier(param.name)) {
-				vm.observe?.(param, "parameter", param.dotDotDotToken === undefined ? args[index] : args.slice(index));
-				vm.traced("bind", param, param.name.text, param.dotDotDotToken === undefined ? args[index] : args.slice(index));
-			}
+	for (let index = 0; index < params.length; index++) {
+		const { param, names, told, rest } = params[index];
 
-			index += 1;
-			any = true;
-			for (const name of bindingNames(param.name)) {
-				scope.declareLexical(name, "let");
-			}
+		// What was passed for it, or what a rest parameter collects — not for one with a default or a pattern: what a
+		// preview's instrumented code can see of those isn't the same (RUNTIME-EVIDENCE.md, P8), and evidence from
+		// either runtime must mean one thing.
+		if (told !== undefined && (vm.observe !== undefined || vm.trace !== undefined)) {
+			vm.observe?.(param, "parameter", rest ? args.slice(index) : args[index]);
+			vm.traced("bind", param, told, rest ? args.slice(index) : args[index]);
+		}
+
+		for (const name of names) {
+			scope.declareLexical(name, "let");
 		}
 	}
 
-	if (any) {
+	if (params.length > 0) {
 		pushPattern(vm, scope, parameterProgram(node), undefined, args);
 	}
+}
+
+/** A signature's parameters as a call binds them, worked out once per signature (a call made in a loop shouldn't redo
+ *  it): each one but a `this:` pseudo-parameter, with the names it binds, its name when it's told to `observe`/`trace`
+ *  (an identifier without a default), and whether it's a rest parameter; and whether they're all simple (identifiers,
+ *  without a default or a rest — then the body shares their scope). */
+interface ParameterPlan {
+	"params": { "param": ts.ParameterDeclaration; "names": string[]; "told": string | undefined; "rest": boolean }[];
+	"simple": boolean;
+}
+
+const parameterPlans = new WeakMap<ts.SignatureDeclaration, ParameterPlan>();
+
+function parameterPlan(node: ts.SignatureDeclaration): ParameterPlan {
+	let plan = parameterPlans.get(node);
+
+	if (plan === undefined) {
+		plan = {
+			"params": node.parameters.filter((param) => !isThisParameter(param)).map((param) => ({ "param": param, "names": bindingNames(param.name), "told": param.initializer === undefined && isIdentifier(param.name) ? param.name.text : undefined, "rest": param.dotDotDotToken !== undefined })),
+			"simple": !node.parameters.some((param) => param.initializer !== undefined || param.dotDotDotToken !== undefined || !isIdentifier(param.name))
+		};
+		parameterPlans.set(node, plan);
+	}
+
+	return plan;
 }
 
 // --- NamedEvaluation: an anonymous function/class takes the name it's bound or assigned to --------
 
 /** `function () {}`, `() => {}`, `class {}` — possibly parenthesized (the cover grammar). */
 export function isAnonymousFunctionDefinition(node: ts.Node): boolean {
-	while (ts.isParenthesizedExpression(node)) {
+	while (isParenthesizedExpression(node)) {
 		node = node.expression;
 	}
 
-	return (ts.isFunctionExpression(node) && node.name === undefined) || ts.isArrowFunction(node) || (ts.isClassExpression(node) && node.name === undefined);
+	return (isFunctionExpression(node) && node.name === undefined) || isArrowFunction(node) || (isClassExpression(node) && node.name === undefined);
 }
 
 /** SetFunctionName's text for a property key: a symbol's description in brackets, an optional `get`/`set` prefix. */
@@ -302,7 +330,7 @@ export function nameAnonymous(value: unknown, name: PropertyKey, from: ts.Node |
 
 /** NamedEvaluation for a binding target: only a plain identifier names the value. */
 export function namedIf(value: unknown, target: ts.BindingName | ts.Expression, from: ts.Node | undefined): unknown {
-	return ts.isIdentifier(target) ? nameAnonymous(value, target.text, from) : value;
+	return isIdentifier(target) ? nameAnonymous(value, target.text, from) : value;
 }
 
 /** Stepped async: the async function's body (or a host-called callback) completed with the value on top — resolve its

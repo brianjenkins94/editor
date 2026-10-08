@@ -6,16 +6,20 @@ import type { Machine } from "../vm.ts";
 import ts from "typescript";
 import { unimplemented } from "../errors.ts";
 import { createGuestFunction, nameAnonymous, setFunctionName } from "./functions.ts";
-import { cookedTemplateText, defineData, toPropertyKey } from "./realm.ts";
+import { cookedTemplateText, defineData, defineFresh, toPropertyKey } from "./realm.ts";
 import { evaluating, on, passThroughExpr, pushText } from "./registry.ts";
+
+// TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
+// functions used here are read off it once.
+const { isBigIntLiteral, isComputedPropertyName, isGetAccessorDeclaration, isIdentifier, isMethodDeclaration, isNumericLiteral, isOmittedExpression, isPrivateIdentifier, isPropertyAssignment, isSetAccessorDeclaration, isShorthandPropertyAssignment, isSpreadAssignment, isSpreadElement, isStringLiteral } = ts;
 
 const Kind = ts.SyntaxKind;
 
 function numericLiteral(vm: Machine, frame: NodeFrame): void {
-	const node = frame.node as ts.NumericLiteral;
+	const { text } = frame.node as ts.NumericLiteral;
 
 	vm.frames.pop();
-	vm.push(Number(node.text.replace(/_/gu, "")));
+	vm.push(Number(text.includes("_") ? text.replace(/_/gu, "") : text)); // (separators are rare: skip the regex without)
 }
 
 function bigIntLiteral(vm: Machine, frame: NodeFrame): void {
@@ -85,16 +89,16 @@ const templateExpression = evaluating<ts.TemplateExpression>(
 
 const arrayLiteralExpression = evaluating<ts.ArrayLiteralExpression>(
 	// Elisions (`[1, , 3]`) are OmittedExpressions: they produce no operand and leave a hole.
-	(node) => node.elements.filter((el) => !ts.isOmittedExpression(el)).map((el) => (ts.isSpreadElement(el) ? el.expression : el)),
+	(node) => node.elements.filter((el) => !isOmittedExpression(el)).map((el) => (isSpreadElement(el) ? el.expression : el)),
 	(vm, _frame, node, raw) => {
 		const out = new vm.realm.Array() as unknown[];
 		let cursor = 0;
 		let index = 0; // elements are *defined* (CreateDataProperty): an inherited setter on an index never runs
 
 		for (const el of node.elements) {
-			if (ts.isOmittedExpression(el)) {
+			if (isOmittedExpression(el)) {
 				index += 1;
-			} else if (ts.isSpreadElement(el)) {
+			} else if (isSpreadElement(el)) {
 				const iterable = raw[cursor] as Iterable<unknown>;
 
 				cursor += 1;
@@ -146,23 +150,37 @@ function objectLiteralExpression(vm: Machine, frame: NodeFrame): void {
 
 /** The value-producing nodes of an object literal, in source order: a computed key before its
  *  value. Methods/accessors produce no operand — their functions are created in the build step. */
+const literalOperands = new WeakMap<ts.ObjectLiteralExpression, { "node": ts.Node; "isKey": boolean }[]>();
+
 export function objectLiteralOperands(node: ts.ObjectLiteralExpression): { "node": ts.Node; "isKey": boolean }[] {
+	// (asked at each of the literal's steps: worked out once)
+	let out = literalOperands.get(node);
+
+	if (out === undefined) {
+		out = findObjectLiteralOperands(node);
+		literalOperands.set(node, out);
+	}
+
+	return out;
+}
+
+function findObjectLiteralOperands(node: ts.ObjectLiteralExpression): { "node": ts.Node; "isKey": boolean }[] {
 	const out: { "node": ts.Node; "isKey": boolean }[] = [];
 
 	for (const prop of node.properties) {
 		const { name } = prop as { "name"?: ts.PropertyName };
 
-		if (name !== undefined && ts.isComputedPropertyName(name)) {
+		if (name !== undefined && isComputedPropertyName(name)) {
 			out.push({ "node": name.expression, "isKey": true });
 		}
 
-		if (ts.isPropertyAssignment(prop)) {
+		if (isPropertyAssignment(prop)) {
 			out.push({ "node": prop.initializer, "isKey": false });
-		} else if (ts.isShorthandPropertyAssignment(prop)) {
+		} else if (isShorthandPropertyAssignment(prop)) {
 			out.push({ "node": prop.name, "isKey": false });
-		} else if (ts.isSpreadAssignment(prop)) {
+		} else if (isSpreadAssignment(prop)) {
 			out.push({ "node": prop.expression, "isKey": false });
-		} else if (!ts.isMethodDeclaration(prop) && !ts.isGetAccessorDeclaration(prop) && !ts.isSetAccessorDeclaration(prop)) {
+		} else if (!isMethodDeclaration(prop) && !isGetAccessorDeclaration(prop) && !isSetAccessorDeclaration(prop)) {
 			unimplemented(`${ts.SyntaxKind[(prop as ts.Node).kind]} in ObjectLiteral`);
 		}
 	}
@@ -174,7 +192,7 @@ export function buildObjectLiteral(vm: Machine, frame: NodeFrame, node: ts.Objec
 	const obj = new vm.realm.Object() as Record<PropertyKey, unknown>;
 	let cursor = 0; // advances over the evaluated keys (already property keys) and values, in source order
 	const keyOf = (name: ts.PropertyName): PropertyKey => {
-		if (ts.isComputedPropertyName(name)) {
+		if (isComputedPropertyName(name)) {
 			const computed = values[cursor] as PropertyKey;
 
 			cursor += 1;
@@ -186,9 +204,9 @@ export function buildObjectLiteral(vm: Machine, frame: NodeFrame, node: ts.Objec
 	};
 
 	for (const prop of node.properties) {
-		if (ts.isPropertyAssignment(prop)) {
+		if (isPropertyAssignment(prop)) {
 			// `__proto__: v` (non-computed) sets the prototype instead of defining a property.
-			if (!ts.isComputedPropertyName(prop.name) && propertyName(prop.name) === "__proto__") {
+			if (!isComputedPropertyName(prop.name) && propertyName(prop.name) === "__proto__") {
 				const value = values[cursor];
 
 				cursor += 1;
@@ -200,31 +218,31 @@ export function buildObjectLiteral(vm: Machine, frame: NodeFrame, node: ts.Objec
 				const value = values[cursor];
 
 				cursor += 1;
-				defineData(obj, key, nameAnonymous(value, key, prop.initializer));
+				defineFresh(vm, obj, key, nameAnonymous(value, key, prop.initializer));
 			}
-		} else if (ts.isShorthandPropertyAssignment(prop)) {
-			defineData(obj, prop.name.text, values[cursor]);
+		} else if (isShorthandPropertyAssignment(prop)) {
+			defineFresh(vm, obj, prop.name.text, values[cursor]);
 			cursor += 1;
-		} else if (ts.isSpreadAssignment(prop)) {
+		} else if (isSpreadAssignment(prop)) {
 			spreadInto(vm, obj, values[cursor]); // own enumerable props, each through the guard
 			cursor += 1;
-		} else if (ts.isMethodDeclaration(prop)) {
+		} else if (isMethodDeclaration(prop)) {
 			const key = keyOf(prop.name);
 			const fn = createGuestFunction(vm, prop, frame.scope, obj);
 
 			setFunctionName(fn, key);
 			Object.defineProperty(obj, key, { "value": fn, "writable": true, "enumerable": true, "configurable": true });
-		} else if (ts.isGetAccessorDeclaration(prop) || ts.isSetAccessorDeclaration(prop)) {
+		} else if (isGetAccessorDeclaration(prop) || isSetAccessorDeclaration(prop)) {
 			const key = keyOf(prop.name);
 			const fn = createGuestFunction(vm, prop, frame.scope, obj);
 
-			setFunctionName(fn, key, ts.isGetAccessorDeclaration(prop) ? "get" : "set");
+			setFunctionName(fn, key, isGetAccessorDeclaration(prop) ? "get" : "set");
 			// An accessor replaces an earlier data property of the same name (and vice versa).
 			const desc: PropertyDescriptor = { ...(Object.getOwnPropertyDescriptor(obj, key) ?? {}), "enumerable": true, "configurable": true };
 
 			delete desc.value;
 			delete desc.writable;
-			if (ts.isGetAccessorDeclaration(prop)) {
+			if (isGetAccessorDeclaration(prop)) {
 				desc.get = fn as () => unknown;
 			} else {
 				desc.set = fn as (value: unknown) => void;
@@ -247,21 +265,21 @@ export function spreadInto(vm: Machine, target: Record<PropertyKey, unknown>, so
 
 	for (const key of Reflect.ownKeys(src)) {
 		if (Object.getOwnPropertyDescriptor(src, key)?.enumerable) {
-			defineData(target, key, vm.fromHost(src[key]));
+			defineFresh(vm, target, key, vm.fromHost(src[key]));
 		}
 	}
 }
 
 export function propertyName(name: ts.PropertyName | ts.Identifier): string {
-	if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
+	if (isIdentifier(name) || isStringLiteral(name) || isNumericLiteral(name)) {
 		return name.text;
 	}
 
-	if (ts.isBigIntLiteral(name)) {
+	if (isBigIntLiteral(name)) {
 		return String(BigInt(name.text.slice(0, -1))); // `{ 1n: v }` → "1"
 	}
 
-	if (ts.isPrivateIdentifier(name)) {
+	if (isPrivateIdentifier(name)) {
 		return name.text;
 	}
 

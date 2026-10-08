@@ -10,14 +10,19 @@ import { unimplemented } from "../errors.ts";
 import { Scope } from "../scope.ts";
 import { namedIf } from "./functions.ts";
 import { resumed, suspend } from "./generators.ts";
-import { bindingNames, hoist, isAmbient } from "./hoist.ts";
+import { bindingNames, executedStatements, hoist } from "./hoist.ts";
 import { getAsyncOrSyncIterator, getIterator, iterationStep, iterNext } from "./iteration.ts";
 import { propertyName } from "./literals.ts";
 import { assignProgram, bindIdentifier, bindingProgram, pushPattern } from "./patterns.ts";
 import { unwrapParens } from "./references.ts";
 import { evaluating, noop, on } from "./registry.ts";
 
+// TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
+// functions used here are read off it once.
+const { isClassExpression, isComputedPropertyName, isIdentifier, isVariableDeclarationList } = ts;
+
 const Kind = ts.SyntaxKind;
+const { NodeFlags } = ts;
 
 function sourceFile(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.SourceFile;
@@ -57,10 +62,10 @@ function block(vm: Machine, frame: NodeFrame): void {
 }
 
 export function pushStatementsReverse(vm: Machine, statements: readonly ts.Statement[], scope: Scope): void {
-	for (let index = statements.length - 1; index >= 0; index--) {
-		if (!isAmbient(statements[index])) {
-			vm.pushNode(statements[index], scope);
-		}
+	const executed = executedStatements(statements);
+
+	for (let index = executed.length - 1; index >= 0; index--) {
+		vm.pushNode(executed[index], scope);
 	}
 }
 
@@ -79,12 +84,12 @@ function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 	const list = frame.node as ts.VariableDeclarationList;
 	const decls = list.declarations;
 
-	if ((list.flags & ts.NodeFlags.Using) !== 0) {
+	if ((list.flags & NodeFlags.Using) !== 0) {
 		unimplemented("`using` / `await using` declarations (explicit resource management: disposal is not modeled)");
 	}
 
-	const isConst = (list.flags & ts.NodeFlags.Const) !== 0;
-	const isLet = (list.flags & ts.NodeFlags.Let) !== 0;
+	const isConst = (list.flags & NodeFlags.Const) !== 0;
+	const isLet = (list.flags & NodeFlags.Let) !== 0;
 	let kind: BindingKind;
 
 	if (isConst) {
@@ -101,7 +106,7 @@ function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 	// The previous declaration's pattern, bound by now (its frame ran above this one): each name it bound, traced.
 	const previous = (frame.phase & 1) === 0 ? decls[index - 1] : undefined;
 
-	if (vm.trace !== undefined && previous?.initializer !== undefined && !ts.isIdentifier(previous.name)) {
+	if (vm.trace !== undefined && previous?.initializer !== undefined && !isIdentifier(previous.name)) {
 		for (const name of bindingNames(previous.name)) {
 			vm.traced("bind", previous, name, frame.scope.get(name));
 		}
@@ -119,7 +124,7 @@ function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 		if (decl.initializer) {
 			const init = vm.pushNode(decl.initializer, frame.scope);
 
-			if (ts.isIdentifier(decl.name) && ts.isClassExpression(unwrapParens(decl.initializer))) {
+			if (isIdentifier(decl.name) && isClassExpression(unwrapParens(decl.initializer))) {
 				init.nameHint = decl.name.text; // (see classDefinition)
 			}
 
@@ -136,7 +141,7 @@ function variableDeclarationList(vm: Machine, frame: NodeFrame): void {
 	} else {
 		const value = namedIf(vm.pop(), decl.name, decl.initializer);
 
-		if (ts.isIdentifier(decl.name)) {
+		if (isIdentifier(decl.name)) {
 			bindIdentifier(frame.scope, decl.name.text, value, kind);
 			vm.traced("bind", decl, decl.name.text, value);
 		} else {
@@ -277,15 +282,15 @@ function forStatement(vm: Machine, frame: NodeFrame): void {
 		frame.iterScope = loopScope;
 		// For per-iteration `let`/`const` binding (fresh binding each turn — correct closure capture).
 		frame.lexicalNames =
-			node.initializer !== null && node.initializer !== undefined && ts.isVariableDeclarationList(node.initializer) && (node.initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) !== 0
+			node.initializer !== null && node.initializer !== undefined && isVariableDeclarationList(node.initializer) && (node.initializer.flags & (NodeFlags.Let | NodeFlags.Const)) !== 0
 				? node.initializer.declarations.flatMap((decl) => bindingNames(decl.name))
 				: null;
 		// The copies keep the declaration's kind: `for (const x = 0; ; x++)` is a TypeError, not a loop.
-		frame.lexicalKind = node.initializer !== null && node.initializer !== undefined && (node.initializer.flags & ts.NodeFlags.Const) !== 0 ? "const" : "let";
+		frame.lexicalKind = node.initializer !== null && node.initializer !== undefined && (node.initializer.flags & NodeFlags.Const) !== 0 ? "const" : "let";
 
 		if (node.initializer) {
 			vm.pushNode(node.initializer, loopScope);
-			frame.initIsExpr = !ts.isVariableDeclarationList(node.initializer);
+			frame.initIsExpr = !isVariableDeclarationList(node.initializer);
 			frame.phase = 1;
 		} else {
 			frame.phase = 2;
@@ -518,10 +523,10 @@ export function bindForTarget(vm: Machine, frame: NodeFrame, initializer: ts.For
 	// pattern frame pushed ABOVE the body, so it runs first.
 	let stepped: { "scope": Scope; "program": PatternProgram } | undefined;
 
-	if (ts.isVariableDeclarationList(initializer)) {
+	if (isVariableDeclarationList(initializer)) {
 		const [decl] = initializer.declarations;
-		const isConst = (initializer.flags & ts.NodeFlags.Const) !== 0;
-		const isLet = (initializer.flags & ts.NodeFlags.Let) !== 0;
+		const isConst = (initializer.flags & NodeFlags.Const) !== 0;
+		const isLet = (initializer.flags & NodeFlags.Let) !== 0;
 		let kind: BindingKind;
 
 		if (isConst) {
@@ -532,7 +537,7 @@ export function bindForTarget(vm: Machine, frame: NodeFrame, initializer: ts.For
 			kind = "var";
 		}
 
-		if (ts.isIdentifier(decl.name)) {
+		if (isIdentifier(decl.name)) {
 			bindIdentifier(bodyScope, decl.name.text, value, kind);
 			vm.traced("bind", decl, decl.name.text, value);
 		} else {
@@ -541,7 +546,7 @@ export function bindForTarget(vm: Machine, frame: NodeFrame, initializer: ts.For
 	} else {
 		const target = unwrapParens(initializer);
 
-		if (ts.isIdentifier(target)) {
+		if (isIdentifier(target)) {
 			frame.scope.set(target.text, value);
 			vm.traced("bind", target, target.text, value);
 		} else {
@@ -727,7 +732,7 @@ export function buildEnum(vm: Machine, scope: Scope, node: ts.EnumDeclaration, i
 	}
 
 	for (const member of node.members) {
-		if (!ts.isComputedPropertyName(member.name)) {
+		if (!isComputedPropertyName(member.name)) {
 			declareMember(propertyName(member.name), enumObject[propertyName(member.name)]);
 		}
 	}
@@ -735,7 +740,7 @@ export function buildEnum(vm: Machine, scope: Scope, node: ts.EnumDeclaration, i
 	let auto = 0;
 
 	for (const member of node.members) {
-		const key = ts.isComputedPropertyName(member.name) ? String(vm.evalNodeSync(member.name.expression, memberScope)) : propertyName(member.name);
+		const key = isComputedPropertyName(member.name) ? String(vm.evalNodeSync(member.name.expression, memberScope)) : propertyName(member.name);
 		const value = member.initializer !== undefined ? (vm.evalNodeSync(member.initializer, memberScope) as string | number) : auto;
 
 		enumObject[key] = value;
@@ -753,7 +758,7 @@ export function buildEnum(vm: Machine, scope: Scope, node: ts.EnumDeclaration, i
 /** The loop head's `let`/`const` names are in the TDZ while the iterable expression evaluates
  *  (`for (const x of x)` is a ReferenceError). */
 export function headTdzScope(scope: Scope, initializer: ts.ForInitializer): Scope {
-	if (!ts.isVariableDeclarationList(initializer) || (initializer.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const)) === 0) {
+	if (!isVariableDeclarationList(initializer) || (initializer.flags & (NodeFlags.Let | NodeFlags.Const)) === 0) {
 		return scope;
 	}
 
