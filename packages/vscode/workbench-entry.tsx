@@ -36,9 +36,10 @@ import { SHELL_DOCK_HOST } from "./dock-host";
 import { classifyUrl, identifyWorker } from "./architecture-model";
 import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
-import { installDebugBridge, markBridgeReady } from "./debug-bridge";
+import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { reportWorkbenchMetrics } from "./editor-metrics";
 import { startBablr } from "./bablr";
+import { loadContributedExtensions } from "./contributed-extensions";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
 import * as gitEngine from "./git-engine";
 import { installEditHistory } from "./edit-history";
@@ -703,6 +704,10 @@ function maybeBoot(): void {
 			const notesExt = registerExtension(notesManifest, ExtensionHostKind.LocalWebWorker);
 
 			notesExt.registerFileUrl("./extension.js", new URL(notesExtensionPath, location.href).href);
+
+			// And any from outside the editor, by URL (`?extension=`) — editor-contrib's interpreters and renderers
+			// (contributed-extensions.ts).
+			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
 			bootSpan.info("extensions registered", { "extensions": ["worker-pod", "eslint", "capabilities", "insights", "running", "event-sheet", "type-queries", "notes"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration

@@ -105,7 +105,8 @@ export async function startSession(options = {}) {
 		});
 	}
 
-	await page.goto(URL_UNDER_TEST);
+	// (`query`: the editor's query string, e.g. `?extension=` — an extension from outside it.)
+	await page.goto(URL_UNDER_TEST + (options.query ?? ""));
 
 	let snapshot;
 	// Every hub's subscriptions over the whole session (a snapshot's are that moment's): a context that came and went

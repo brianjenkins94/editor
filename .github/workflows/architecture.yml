@@ -18,7 +18,8 @@
   },
   # The live architecture view's end-to-end suites (packages/vscode/test/architecture-*.mjs): a real editor session in
   # headless Chromium — boot, a preview + HMR, two dev servers, a cold provoke round, a node script under the tsval
-  # debugger, a webview, the git review diff, this checkout's debug-mcp — checked against the declared model. They catch
+  # debugger, a webview, the git review diff, this checkout's debug-mcp, editor-contrib's extension (contrib/) loaded and
+  # run — checked against the declared model. They catch
   # a wiring regression or an upstream monaco-vscode-api release (the component installs the latest) before it ships.
   # Its own workflow, not a job in `ci`, so it doesn't gate the deploy until it has proven stable there. The last suite
   # (test/performance.mjs) holds boot, a typed hover, a 1000-file load and memory by realm to performance-budgets.json,
@@ -30,7 +31,7 @@
       "permissions": { "contents": "read", "actions": "read" },
       "steps": [
         { "uses": "actions/checkout@v4" },
-        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*" } },
+        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
         # The dev server the suites start (dev.ts) needs the monaco-vscode-api component's dist and the built sibling
         # packages; it prebuilds packages/vscode itself (whose full build would need the component first anyway).
         { "run": "pnpm --recursive --if-present --filter '!./packages/vscode' run build" },

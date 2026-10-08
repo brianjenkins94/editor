@@ -1,12 +1,24 @@
 {
+  "extends": "@tsconfig/node-lts/tsconfig.json",
   "compilerOptions": {
-    "target": "ES2022",
+    // JavaScript is as welcome as TypeScript: a .js file is bundled the same, and not type-checked.
+    "allowJs": true,
+    "alwaysStrict": true,
+    "forceConsistentCasingInFileNames": false,
+    "isolatedModules": true,
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "lib": ["ES2022", "WebWorker"],
-    "types": ["vscode"],
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "strict": false,
+    "target": "ESNext",
+    "types": ["vscode"]
   },
-  "include": ["src"]
+  "exclude": ["node_modules", "dist"]
 }

@@ -168,13 +168,13 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		}
 	});
 
-	// A debug session VS Code starts itself (F5, Run and Debug, debug-mcp's debug_start) is a run too: the pod asks for
-	// its id as the session starts, and puts it in the session's launch config. Its end is the session's (`node.exit`,
+	// A debug session VS Code starts itself (F5, Run and Debug, debug-mcp's debug_start) is a run too — tsval's, or another
+	// extension's debugger's (its debug type the run's runtime): the pod asks for its id as the session starts, and puts it in the session's launch config. Its end is the session's (`node.exit`,
 	// as for a terminal's debug run); stopping it from here stops the session (`debug.stop`).
 	serve(hub, "runs.begin", (args) => {
-		const { title, cwd, entry } = (args ?? {}) as { "title"?: unknown; "cwd"?: unknown; "entry"?: unknown };
+		const { title, cwd, entry, runtime } = (args ?? {}) as { "title"?: unknown; "cwd"?: unknown; "entry"?: unknown; "runtime"?: unknown };
 		let stopped = false;
-		const run = runs.start({ "title": typeof title === "string" ? title : "debug", "kind": "task", "cwd": typeof cwd === "string" ? cwd : "/workspace", "origin": { "other": "Run and Debug" }, "runtime": "tsval", ...typeof entry === "string" && entry !== "" ? { "entry": entry } : {} }, () => {
+		const run = runs.start({ "title": typeof title === "string" ? title : "debug", "kind": "task", "cwd": typeof cwd === "string" ? cwd : "/workspace", "origin": { "other": "Run and Debug" }, "runtime": typeof runtime === "string" ? runtime : "tsval", ...typeof entry === "string" && entry !== "" ? { "entry": entry } : {} }, () => {
 			stopped = true;
 			hub.publish("debug.stop", { "runId": run.id });
 		});

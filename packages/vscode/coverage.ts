@@ -173,10 +173,14 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 			show(event.body as CoverageReport);
 		}
 	});
-	// Paused: what has run so far.
+	// Paused: what has run so far — from any debugger that answers `getCoverage` (tsval does; another may not).
 	vscode.debug.onDidChangeActiveStackItem((item) => {
-		if (item !== undefined && item.session.type === "tsval") {
-			void Promise.resolve(item.session.customRequest("getCoverage")).then((report) => { show(report as CoverageReport); }, () => undefined);
+		if (item !== undefined) {
+			void Promise.resolve(item.session.customRequest("getCoverage")).then((report) => {
+				if (Array.isArray((report as Partial<CoverageReport> | undefined)?.statements)) {
+					show(report as CoverageReport);
+				}
+			}, () => undefined);
 		}
 	});
 	vscode.window.onDidChangeVisibleTextEditors((editors) => {

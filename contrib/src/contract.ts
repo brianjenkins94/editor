@@ -1,9 +1,14 @@
-// What the editor reads from a run, as custom debug events (`DebugSession.sendEvent` with a DAP `event` message).
-// Every position is in the text that ran: 0-based lines, and `[start, end)` offsets that the editor maps to its BABLR
-// span ids, so a value or a count follows its code through edits and reformats.
+// What the editor reads from a run, as custom debug events (a DAP `event` message). Every position is in the text that
+// ran: 0-based lines, and `[start, end)` offsets that the editor maps to its BABLR span ids, so a value or a count
+// follows its code through edits and reformats.
 //
-// Status: `coverage` is read by the editor today. `values` and `evidence` are what tsval sends on the editor's
-// internal hub; reading them from any debug session is the next change on the editor's side.
+// - `values`: shown in the margin beside their code, as they come.
+// - `coverage`: marks the lines that ran, and is kept as the run's evidence.
+// - While stopped, the editor may ask for coverage so far with a `getCoverage` custom request (answer with a
+//   `CoverageEvent`, or fail it if you don't keep one).
+//
+// A live run — the editor runs the file again whenever typing pauses — has `__live: true` in its launch configuration.
+// It must not have effects (writes, requests, commands): skip them.
 
 /** One value on a line: a name bound, a function's return, or the arm a branch chose. */
 export interface LiveValue {

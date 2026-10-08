@@ -9,7 +9,7 @@ export class Renderer implements vscode.CustomTextEditorProvider {
 
 		const render = (): void => {
 			// TODO: parse `document.getText()` and render it. Stub: the text, escaped.
-			const escaped = document.getText().replace(/[&<>]/gu, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[character]!);
+			const escaped = document.getText().replace(/[&<>]/gu, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[character]);
 
 			panel.webview.html = `<!doctype html><meta charset="utf-8"><pre>${escaped}</pre>`;
 		};

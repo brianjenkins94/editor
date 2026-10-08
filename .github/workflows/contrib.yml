@@ -1,11 +1,15 @@
 {
   "name": "contrib",
-  # contrib/ is the editor-contrib template repo's content, and a workspace here, so ci builds and tests it with the
-  # rest. Once the editor has built, tested and deployed (cd ran after a successful ci), make editor-contrib match it.
+  # contrib/ is where editor-contrib's starting point is made. Once the editor has built, tested and deployed (cd, after a
+  # successful ci) and the architecture suites — contrib/ run in a real editor among them (test/contrib.mjs) — have passed
+  # on the commit, whichever finishes second: the changes made under contrib/ since the editor commit editor-contrib last
+  # took from — and
+  # nothing else — go to editor-contrib as a commit: applied as a patch (three-way), so what editor-contrib has of its
+  # own stays. A change of its own that conflicts with one from here fails the run, to be resolved there by hand.
   "on": {
     "workflow_dispatch": null,
     "workflow_run": {
-      "workflows": ["cd"],
+      "workflows": ["cd", "architecture"],
       "types": ["completed"],
       "branches": ["main"]
     }
@@ -13,22 +17,35 @@
   "concurrency": {
     "group": "${{ github.workflow }}-${{ github.ref }}"
   },
+  # actions: read, to see how cd and architecture went on the commit.
+  "permissions": {
+    "contents": "read",
+    "actions": "read"
+  },
   "jobs": {
     "sync": {
       "if": "${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}",
       "runs-on": "ubuntu-latest",
       "env": {
         "SHA": "${{ github.event.workflow_run.head_sha || github.sha }}",
-        # A PAT that can push to editor-contrib (GITHUB_TOKEN reaches only this repo).
+        # A PAT that can push to editor-contrib, workflow files included (GITHUB_TOKEN reaches only this repo).
         "TOKENED": "${{ secrets.EDITOR_CONTRIB_TOKEN != '' }}"
       },
       "steps": [
         { "if": "${{ env.TOKENED != 'true' }}", "run": "echo \"::notice::No EDITOR_CONTRIB_TOKEN secret yet: editor-contrib not updated\"" },
-        { "if": "${{ env.TOKENED == 'true' }}", "uses": "actions/checkout@v4", "with": { "ref": "${{ env.SHA }}", "path": "editor" } },
-        { "if": "${{ env.TOKENED == 'true' }}", "uses": "actions/checkout@v4", "with": { "repository": "brianjenkins94/editor-contrib", "token": "${{ secrets.EDITOR_CONTRIB_TOKEN }}", "path": "editor-contrib" } },
         {
+          # Both cd and architecture succeeded on the commit (by hand, it goes as it is).
+          "id": "passed",
           "if": "${{ env.TOKENED == 'true' }}",
-          "run": "rsync --archive --delete --exclude .git editor/contrib/ editor-contrib/\ncd editor-contrib\ngit add --all\nif git diff --cached --quiet; then\n  echo \"editor-contrib already matches contrib/\"\n  exit 0\nfi\ngit -c user.name=\"github-actions[bot]\" -c user.email=\"41898282+github-actions[bot]@users.noreply.github.com\" commit --message \"Sync from brianjenkins94/editor@${SHA::7}\" --message \"https://github.com/brianjenkins94/editor/commit/$SHA\"\ngit push"
+          "env": { "GH_TOKEN": "${{ github.token }}", "BY_HAND": "${{ github.event_name == 'workflow_dispatch' }}" },
+          "run": "if [ \"$BY_HAND\" = true ]; then echo \"go=true\" >> \"$GITHUB_OUTPUT\"; exit 0; fi\nfor workflow in cd architecture; do\n  conclusion=$(gh run list --repo \"$GITHUB_REPOSITORY\" --workflow \"$workflow\" --commit \"$SHA\" --json status,conclusion --jq '[.[] | select(.status == \"completed\")][0].conclusion')\n  if [ \"$conclusion\" != success ]; then\n    echo \"::notice::$workflow hasn't succeeded on ${SHA::7} (${conclusion:-not finished}): editor-contrib not updated from it\"\n    echo \"go=false\" >> \"$GITHUB_OUTPUT\"\n    exit 0\n  fi\ndone\necho \"go=true\" >> \"$GITHUB_OUTPUT\""
+        },
+        { "if": "${{ steps.passed.outputs.go == 'true' }}", "uses": "actions/checkout@v4", "with": { "ref": "${{ env.SHA }}", "path": "editor", "fetch-depth": 0 } },
+        { "if": "${{ steps.passed.outputs.go == 'true' }}", "uses": "actions/checkout@v4", "with": { "repository": "brianjenkins94/editor-contrib", "token": "${{ secrets.EDITOR_CONTRIB_TOKEN }}", "path": "editor-contrib", "fetch-depth": 0 } },
+        {
+          "if": "${{ steps.passed.outputs.go == 'true' }}",
+          # The editor commit editor-contrib last took from: what its sync commits name.
+          "run": "since=$(git -C editor-contrib log --format=%B | grep -m1 -oE 'brianjenkins94/editor/commit/[0-9a-f]{40}' | sed 's|.*/||')\nif [ -z \"$since\" ]; then\n  echo \"::error::editor-contrib names no editor commit it took contrib/ from\"\n  exit 1\nfi\nif git -C editor diff --quiet \"$since\" \"$SHA\" -- contrib; then\n  echo \"Nothing changed under contrib/ since $since\"\n  exit 0\nfi\ngit -C editor diff --binary \"$since\" \"$SHA\" -- contrib > contrib.patch\ncd editor-contrib\ngit apply -p2 --3way --index ../contrib.patch\ngit -c user.name=\"github-actions[bot]\" -c user.email=\"41898282+github-actions[bot]@users.noreply.github.com\" commit --message \"Sync from brianjenkins94/editor@${SHA::7}\" --message \"$(git -C ../editor log --format='- %h %s' \"$since..$SHA\" -- contrib)\" --message \"https://github.com/brianjenkins94/editor/commit/$SHA\"\ngit push"
         }
       ],
       "timeout-minutes": 5

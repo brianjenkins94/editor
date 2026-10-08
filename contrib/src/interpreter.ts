@@ -2,10 +2,10 @@
 // runs as you type all go through `vscode.debug.startDebugging`. It speaks the Debug Adapter Protocol, so breakpoints,
 // stepping, the Variables view and the Debug Console are VS Code's own. What the editor draws on top of the code —
 // values in the margin, coverage — comes from the custom events in contract.ts.
-import * as vscode from "vscode";
 import type { Events } from "./contract";
+import * as vscode from "vscode";
 
-type Message = { "seq": number; "type": string; "command"?: string; "arguments"?: Record<string, unknown> };
+interface Message { "seq": number; "type": string; "command"?: string; "arguments"?: Record<string, unknown> }
 
 export class InterpreterSession implements vscode.DebugAdapter {
 	private readonly emitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
@@ -71,12 +71,12 @@ export class InterpreterSession implements vscode.DebugAdapter {
 
 	private event(event: string, body?: unknown): void {
 		this.seq += 1;
-		this.emitter.fire({ "seq": this.seq, "type": "event", "event": event, ...body === undefined ? {} : { "body": body } } as vscode.DebugProtocolMessage);
+		this.emitter.fire({ "seq": this.seq, "type": "event", "event": event, ...body === undefined ? {} : { "body": body } });
 	}
 
 	private respond(request: Message, body?: unknown): void {
 		this.seq += 1;
-		this.emitter.fire({ "seq": this.seq, "type": "response", "request_seq": request.seq, "success": true, "command": request.command, ...body === undefined ? {} : { "body": body } } as vscode.DebugProtocolMessage);
+		this.emitter.fire({ "seq": this.seq, "type": "response", "request_seq": request.seq, "success": true, "command": request.command, ...body === undefined ? {} : { "body": body } });
 	}
 
 	dispose(): void {

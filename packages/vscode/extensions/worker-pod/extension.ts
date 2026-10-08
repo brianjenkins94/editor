@@ -21,6 +21,7 @@ import { identifyWorker } from "../../architecture-model";
 import { storeNode, ZENFS_NODE } from "../../architecture-zenfs";
 import type { CommandTotals } from "../command-tap";
 import { ARCH_COMMANDS } from "../command-tap";
+import { registerContributedDebuggers } from "./contributed-debuggers";
 import { registerTsvalDebug, takeExitCode } from "./debug-adapter";
 import { runProgram } from "./debug-control";
 import { registerLaunch } from "./launch";
@@ -189,6 +190,9 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 	// The tsval debug type — a worker-backed stepping debugger (debug-adapter.ts + debug-worker.ts).
 	registerTsvalDebug(context);
+	// Another extension's debugger (`run.debugger`: an interpreter plugged in from editor-contrib): its sessions runs, and
+	// its values and coverage the margin's and the evidence's, as tsval's are (contributed-debuggers.ts).
+	registerContributedDebuggers(context);
 	// What there is to run, as tasks run by core's shell (tasks.ts); and the shell's run picker, from them (launch.ts).
 	registerTasks(context);
 	registerLaunch(context);
@@ -204,8 +208,12 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// Durable annotations on code spans (SPAN-ANNOTATIONS.md), from core's BABLR (bablr.ts: one worker, its parses cached
 	// by content, so an unchanged file is never parsed twice) — for extensions, everything they attach to code: notes,
 	// the insights extension's evidence, the event sheet's anchors. Commands: what an extension can call.
-	context.subscriptions.push(vscode.commands.registerCommand("editor.annotations.refer", async (source: unknown, file: unknown, ranges: unknown) =>
-		// A reference to the span standing for each range of a text — what an annotation keeps (undefined where BABLR
+	context.subscriptions.push(vscode.commands.registerCommand("editor.annotations.spans", async (source: unknown) =>
+		// The spans of a text an annotation can attach to — each one's id (its BABLR Merkle hash) and offsets, from the
+		// text's cached parse; punctuation left out — or undefined when BABLR's grammar doesn't take the text…
+		((await rpc.request("annotations.spans", { "source": source }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "spans"?: unknown[] | null }).spans ?? undefined)
+	), vscode.commands.registerCommand("editor.annotations.refer", async (source: unknown, file: unknown, ranges: unknown) =>
+		// …a reference to the span standing for each range of a text — what an annotation keeps (undefined where BABLR
 		// can't place it, or can't parse the text)…
 		((await rpc.request("annotations.refer", { "source": source, "file": file, "ranges": ranges }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "refs"?: unknown[] }).refs ?? []).map((ref) => ref ?? undefined)
 	), vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, refs: unknown, options?: { "observed"?: boolean; "types"?: unknown; "texts"?: string[] }) =>

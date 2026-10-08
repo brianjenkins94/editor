@@ -7,7 +7,7 @@
     "dev": "tsx dev.ts",
     "lint": "util-lint",
     "test": "node -e \"process.exit(require('fs').existsSync('../bablr/dist/index.js') ? 0 : 1)\" || npm --prefix ../bablr run build && node --import tsx --test --test-concurrency=4 test/*.test.mjs",
-    "test:architecture": "node --test --test-concurrency=1 test/architecture-smoke.mjs test/architecture-tour.mjs test/architecture-app.mjs test/performance.mjs",
+    "test:architecture": "node --test --test-concurrency=1 test/architecture-smoke.mjs test/architecture-tour.mjs test/architecture-app.mjs test/contrib.mjs test/performance.mjs",
     "postinstall": "node patches/apply.mjs"
   },
   "dependencies": {

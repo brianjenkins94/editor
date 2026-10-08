@@ -164,7 +164,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	// Mirror the active debug session's toolbar (debug-toolbar.ts) into the titlebar of the window it drives —
 	// the last used window of the session's preview port, or the last used window of all for a session with no port
 	// (but a stepping one's: below). VS Code has ONE active session at a time, so the toolbar lives on ONE window; clear every window
-	// first so it never lingers on a previously-active one. pause/step show only for a stepping session (tsval);
+	// first so it never lingers on a previously-active one. pause/step show only for a stepping session (any but a production run);
 	// restart always (no stop: closing the window does that).
 	const renderDebugToolbar = (): void => {
 		for (const surface of surfaces.values()) {
@@ -188,9 +188,11 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			return;
 		}
 
-		// A stepping session's controls sit on the window showing its server, if it has one (else only VS Code's toolbar);
-		// any other session's on its port's window, else the last used. So they're never on a window it doesn't drive.
-		const target = debugState.type === "tsval" ? (debugState.port === undefined ? undefined : windowFor(debugState.port)) : windowFor(debugState.port) ?? windowFor(undefined);
+		// A stepping session's controls (tsval's, or another extension's interpreter's — anything but a production run) sit
+		// on the window showing its server, if it has one (else only VS Code's toolbar); a production run's on its port's
+		// window, else the last used. So they're never on a window it doesn't drive.
+		const stepping = debugState.type !== "production";
+		const target = stepping ? (debugState.port === undefined ? undefined : windowFor(debugState.port)) : windowFor(debugState.port) ?? windowFor(undefined);
 		const host = target?.paneWindow.headerActions;
 
 		if (host === undefined) {
@@ -207,7 +209,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			return element;
 		};
 
-		if (debugState.type === "tsval") {
+		if (stepping) {
 			host.append(
 				debugState.paused ? button(Play, "continue", "Continue") : button(Pause, "pause", "Pause"),
 				button(Redo2, "stepOver", "Step Over", debugState.paused),

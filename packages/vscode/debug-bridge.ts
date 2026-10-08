@@ -20,6 +20,8 @@ type Api = any;
 
 let resolveReady: () => void;
 const readyPromise = new Promise<void>((resolve) => { resolveReady = resolve; });
+let resolveContributed: () => void;
+const contributedPromise = new Promise<void>((resolve) => { resolveContributed = resolve; });
 
 /** Install `window.__editor`. `getApi` is read lazily so the bridge exists before the API is captured;
  *  `ready` resolves once it is (call `markBridgeReady`). No-op off localhost. */
@@ -40,6 +42,8 @@ export function installDebugBridge(getApi: () => Api): void {
 
 	const bridge = {
 		"ready": readyPromise,
+		/** Resolves once the extensions `?extension=` names are loaded (contributed-extensions.ts). */
+		"contributed": contributedPromise,
 
 		/** The raw vscode extension API namespace, for anything not wrapped below. */
 		get "api"(): Api { return requireApi(); },
@@ -120,4 +124,9 @@ export function installDebugBridge(getApi: () => Api): void {
 /** Resolve `window.__editor.ready` — call once the extension API is captured. */
 export function markBridgeReady(): void {
 	resolveReady();
+}
+
+/** Resolve `__editor.contributed`: the extensions `?extension=` names are loaded. */
+export function markContributedLoaded(): void {
+	resolveContributed();
 }

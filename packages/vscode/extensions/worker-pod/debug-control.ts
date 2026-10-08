@@ -32,7 +32,7 @@ import * as vscode from "vscode";
 
 import type { CapabilityChoice, StepAction } from "./debug-protocol";
 import { loadEffectivePolicy, loadPolicyFiles, movePlace, replaceRule } from "../capabilities/silo-store";
-import { appRootOf, runApp } from "./launch";
+import { appRootOf, runApp, runDebugger } from "./launch";
 
 export type DebugAction = StepAction;
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
@@ -446,6 +446,18 @@ async function startRun(args: unknown, signal: AbortSignal): Promise<DebugOutcom
 	// Before the launch, so they're registered by the time the session starts running.
 	if (breakpoints !== undefined) {
 		setBreakpoints(path, breakpoints);
+	}
+
+	const type = runDebugger();
+
+	// Another extension's debugger (`run.debugger`): started as any session is. Where it stops is its own to tell — there's
+	// no tsval session here to answer with, so a run of it is answered as running.
+	if (type !== "tsval") {
+		if (!await vscode.debug.startDebugging(undefined, { "type": type, "request": "launch", "name": path.split("/").pop()!, "program": path, ...inputs === undefined ? {} : { "args": inputs } })) {
+			throw new Error(`VS Code didn't start a ${type} debug session`);
+		}
+
+		return { "session": "", "name": path.split("/").pop()!, "program": path, "state": "running", "output": [] };
 	}
 
 	const launched = new Promise<ControllableSession>((resolve, reject) => {

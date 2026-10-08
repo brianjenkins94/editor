@@ -118,6 +118,16 @@ Known and suspected:
    loudly where it met it (above). (Step 0 found a debug run's globals were ECMAScript's alone; a run has the globals a
    Node program has now — the web ones and `Buffer`, workspace-runtime.ts `programGlobals`.)
 
+## Another interpreter
+
+What Run starts is a debug type: `run.debugger`, tsval by default. Another extension's debugger can be it — an
+interpreter built from editor-contrib's starting point (`contrib/`, kept in brianjenkins94/editor-contrib), loaded by
+URL (`?extension=`, contributed-extensions.ts). The editor's ▷ and live runs then start that; its sessions are runs like
+tsval's (worker-pod's contributed-debuggers.ts asks core for each one's id), and the custom events it sends — `values`,
+`coverage` — are the margin's and the evidence's, as tsval's are. Stepping, breakpoints and the Variables view are the
+Debug Adapter Protocol's. What stays tsval's: a terminal's `node` (it's Node's semantics), capability stops, replay and
+orderings. test/contrib.mjs runs contrib/ in a real editor, so a change here that breaks it fails there.
+
 ## Entry points, after
 
 | Started by | Does |

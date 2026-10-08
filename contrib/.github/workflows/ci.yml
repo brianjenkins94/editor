@@ -1,21 +1,55 @@
 {
   "name": "ci",
+  # Build and test on every push and pull request; on main, publish the extension to GitHub Pages — its package.json and
+  # dist/ — where the editor loads it from: https://<owner>.github.io/<repo>/ as `?extension=`. A fork needs nothing but
+  # Settings → Pages → Source: GitHub Actions.
   "on": {
+    "push": {
+      "branches": ["main"]
+    },
     "pull_request": {
       "branches": ["main"]
     },
-    "push": {
-      "branches": ["main"]
-    }
+    "workflow_dispatch": null
   },
   "concurrency": {
     "group": "${{ github.workflow }}-${{ github.ref }}",
     "cancel-in-progress": "${{ github.event_name == 'pull_request' }}"
   },
+  "permissions": {
+    "contents": "read"
+  },
   "jobs": {
-    # The editor owns this workflow, so what a contribution is checked against moves with the editor.
     "build": {
-      "uses": "brianjenkins94/editor/.github/workflows/contrib-ci.yml@main"
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        { "uses": "actions/checkout@v4" },
+        { "uses": "actions/setup-node@v4", "with": { "node-version": "lts/*" } },
+        { "run": "npm install" },
+        { "run": "npm run build" },
+        { "run": "npm run lint" },
+        { "run": "npm test" },
+        { "run": "mkdir -p _site && cp -R package.json dist _site/" },
+        { "uses": "actions/upload-pages-artifact@v3", "with": { "path": "_site" } }
+      ],
+      "timeout-minutes": 10
+    },
+    "deploy": {
+      "needs": "build",
+      "if": "${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}",
+      "runs-on": "ubuntu-latest",
+      "permissions": {
+        "pages": "write",
+        "id-token": "write"
+      },
+      "environment": {
+        "name": "github-pages",
+        "url": "${{ steps.deployment.outputs.page_url }}"
+      },
+      "steps": [
+        { "id": "deployment", "uses": "actions/deploy-pages@v4" }
+      ],
+      "timeout-minutes": 10
     }
   }
 }

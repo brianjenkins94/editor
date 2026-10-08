@@ -92,8 +92,15 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 
 	// Explicit host page (not the directory root): monaco's own dist/index.html is the webview pre-page, so
 	// the workbench host ships as host.html alongside it. `?pane` gives the entry its identity from the URL,
-	// so a popped-out reload still announces as the same pane (the pane-link channel; see pane-link.ts).
-	iframe.src = base + "__vscode__/host.html?pane=" + PANE_ID;
+	// so a popped-out reload still announces as the same pane (the pane-link channel; see pane-link.ts). The page's own
+	// `?extension=`s go along: the extensions from outside the editor it loads (contributed-extensions.ts).
+	const query = new URLSearchParams({ "pane": PANE_ID });
+
+	for (const extension of new URLSearchParams(location.search).getAll("extension")) {
+		query.append("extension", extension);
+	}
+
+	iframe.src = base + "__vscode__/host.html?" + query.toString();
 
 	// The editor IS the shell's middle space: the iframe fills `mountInto` directly, giving it the laid-out box it
 	// must measure at boot. (The iframe fill is intrinsic geometry, not chrome — so it's inline style by necessity.)

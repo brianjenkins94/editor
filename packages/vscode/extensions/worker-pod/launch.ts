@@ -39,6 +39,12 @@ function targetOf(task: vscode.Task): LaunchTarget | undefined {
 	return { "id": idOf(task), "name": task.name, "package": task.source === "npm" ? path || "." : undefined, "command": line, "cwd": where, "lifecycle": task.isBackground ? "service" : "task" };
 }
 
+/** The debugger a run of a file starts — Run (▷), and live runs as you type (`run.debugger`): tsval, or another
+ *  extension's debug type, an interpreter plugged in from editor-contrib's template (contrib/README.md). */
+export function runDebugger(): string {
+	return vscode.workspace.getConfiguration("run").get<string>("debugger") || "tsval";
+}
+
 /** Where a file's app is (RUNNING.md, step 4: an app's code runs in its page, its dev server a run): the folder of the
  *  nearest `index.html` up from it, in its own package (the search stops at a `package.json`) — when the page loads the
  *  file, or the file is a component (`.jsx`, `.tsx`) or a page's code (it uses `react-dom` or `document`). A file that's

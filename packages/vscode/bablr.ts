@@ -201,9 +201,14 @@ export function startBablr(hub: Hub): Bablr {
 
 		return first;
 	};
-	// The pod's `editor.annotations.refer` and `editor.annotations.resolve` (for extensions) ask here, so they share the
-	// worker and its cache.
+	// The pod's `editor.annotations.spans`, `editor.annotations.refer` and `editor.annotations.resolve` (for extensions)
+	// ask here, so they share the worker and its cache.
 	const offServe = [
+		serve(hub, "annotations.spans", async (args) => {
+			const { source } = (args ?? {}) as { "source"?: unknown };
+
+			return typeof source === "string" && source !== "" ? { "spans": await spans(source) ?? null } : { "spans": null };
+		}),
 		serve(hub, "annotations.refer", async (args) => {
 			const { source, file, ranges } = (args ?? {}) as { "source"?: unknown; "file"?: unknown; "ranges"?: unknown };
 

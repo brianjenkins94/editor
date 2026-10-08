@@ -34,9 +34,10 @@ export interface RunInfo {
 	"exitCode"?: number;
 	/** A service's port (a dev server's preview). */
 	"port"?: number;
-	/** The file it runs (a dev server: its folder), and what runs it — tsval's interpreter, almostnode, or the browser. */
+	/** The file it runs (a dev server: its folder), and what runs it — tsval's interpreter, almostnode, the browser, or
+	 *  another extension's debugger (its debug type: `run.debugger`). */
 	"entry"?: string;
-	"runtime"?: "tsval" | "almostnode" | "preview";
+	"runtime"?: "tsval" | "almostnode" | "preview" | (string & {});
 }
 
 /** What starts a run hands back: change it as it goes, end it once. */
