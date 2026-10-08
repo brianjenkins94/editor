@@ -1338,13 +1338,14 @@ test("agent tools: the editor, its problems, notifications, rules, terminals and
 		assert.deepEqual({ "file": shown.active.file, "language": shown.active.language, "cursor": shown.active.cursor, "selections": shown.active.selections }, { "file": "agent.ts", "language": "typescript", "cursor": { "line": 2, "column": 12 }, "selections": [{ "start": { "line": 2, "column": 7 }, "end": { "line": 2, "column": 12 }, "text": "total" }] }, "1-based, as an agent reads code");
 		assert.ok(shown.tabs.some((tab) => tab.file === "agent.ts" && tab.active), "its tab, active");
 
-		const problems = await eventually("its type error", async () => {
-			const listed = await session.request("problems.list", { "file": "agent.ts" }, 5000);
+		// (TypeScript's error, whenever it lands — cspell may say something about the file first)
+		const typeErrors = await eventually("its type error", async () => {
+			const found = (await session.request("problems.list", { "file": "agent.ts" }, 5000)).problems.filter((problem) => problem.source === "ts");
 
-			return listed.total > 0 ? listed : undefined;
+			return found.length > 0 ? found : undefined;
 		});
 
-		assert.deepEqual(problems.problems.map(({ line, column, severity, source, code }) => ({ line, column, severity, source, code })), [{ "line": 1, "column": 7, "severity": "error", "source": "ts", "code": "2322" }]);
+		assert.deepEqual(typeErrors.map(({ line, column, severity, code }) => ({ line, column, severity, code })), [{ "line": 1, "column": 7, "severity": "error", "code": "2322" }]);
 
 		// A run that can't start says why only in a toast.
 		await workbench.evaluate(() => { void globalThis.__editor.api.commands.executeCommand("editor.debugFile", globalThis.__editor.api.Uri.file("/workspace/package.json")); });
