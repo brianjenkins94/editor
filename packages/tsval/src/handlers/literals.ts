@@ -5,6 +5,7 @@ import type { NodeFrame } from "../frame.ts";
 import type { Machine } from "../vm.ts";
 import ts from "typescript";
 import { unimplemented } from "../errors.ts";
+import { directoryOf } from "../modules.ts";
 import { createGuestFunction, nameAnonymous, setFunctionName } from "./functions.ts";
 import { cookedTemplateText, defineData, defineFresh, toPropertyKey } from "./realm.ts";
 import { evaluating, on, passThroughExpr } from "./registry.ts";
@@ -38,10 +39,16 @@ function leaf(vm: Machine, frame: NodeFrame): void {
 	vm.push(vm.leafValue(frame.node, frame.scope));
 }
 
-// `new.target` (undefined in a plain call, the constructor under `new`); `import.meta` is a module
-// concept this program-runner doesn't model.
+// `new.target` (undefined in a plain call, the constructor under `new`), and `import.meta` (its module's: importMeta).
 function metaProperty(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.MetaProperty;
+
+	if (node.keywordToken === Kind.ImportKeyword && node.name.text === "meta") {
+		vm.frames.pop();
+		vm.push(importMeta(vm, node.getSourceFile().fileName));
+
+		return;
+	}
 
 	if (node.keywordToken !== Kind.NewKeyword || node.name.text !== "target") {
 		unimplemented(`${ts.SyntaxKind[node.keywordToken]}.${node.name.text}`);
@@ -49,6 +56,45 @@ function metaProperty(vm: Machine, frame: NodeFrame): void {
 
 	vm.frames.pop();
 	vm.push(frame.scope.getNewTarget());
+}
+
+/** Each realm's `import.meta` objects, by module file: one per module, the same object every time it's read (a fork's
+ *  too — it shares the realm, as it does every host object). */
+const importMetas = new WeakMap<object, Map<string, object>>();
+
+/**
+ * A module's `import.meta`, as Node makes it: a null-prototype object with the module's `url` (a `file:` URL), its
+ * `filename` and `dirname`, and `resolve(specifier)` — where an import of `specifier` from this module would load
+ * from, as a URL (`node:fs` for a built-in), through the program's module loader when it has one.
+ */
+function importMeta(vm: Machine, filename: string): object {
+	let metas = importMetas.get(vm.realm);
+
+	if (metas === undefined) {
+		metas = new Map();
+		importMetas.set(vm.realm, metas);
+	}
+
+	let meta = metas.get(filename);
+
+	if (meta === undefined) {
+		const url = new URL(filename, "file://").href;
+		const dirname = directoryOf(filename);
+		const resolve = (specifier: string): string => {
+			if (vm.modules === undefined) {
+				return new URL(specifier, url).href;
+			}
+
+			const resolved = vm.modules.resolve(String(specifier), dirname);
+
+			return resolved.kind === "builtin" ? `node:${resolved.filename.replace(/^node:/u, "")}` : new URL(resolved.filename, "file://").href;
+		};
+
+		meta = Object.assign(Object.create(null) as object, { "dirname": dirname, "filename": filename, "resolve": resolve, "url": url });
+		metas.set(filename, meta);
+	}
+
+	return meta;
 }
 
 const templateExpression = evaluating<ts.TemplateExpression>(

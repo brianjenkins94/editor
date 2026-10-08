@@ -201,3 +201,16 @@ test("a program file only a package requires: tsval evaluates it there, when ask
 	await runToEnd(vm);
 	assert.deepStrictEqual(lines, ["from config"]);
 });
+
+test("import.meta: each module's own — its URL, file and directory, the same object every read; resolve() as an import would", async () => {
+	const lines = await run({
+		"/workspace/main.js": "import { where } from \"./lib/util.js\";\nlog([import.meta.url, import.meta.filename, import.meta.dirname, import.meta === import.meta, Object.getPrototypeOf(import.meta)]);\nlog(where());\nlog(import.meta.resolve(\"./lib/util.js\"));\n",
+		"/workspace/lib/util.js": "export function where() { return import.meta.url; }\n"
+	}, "/workspace/main.js");
+
+	assert.deepStrictEqual(lines, [
+		["file:///workspace/main.js", "/workspace/main.js", "/workspace", true, null],
+		"file:///workspace/lib/util.js",
+		"file:///workspace/lib/util.js"
+	]);
+});
