@@ -1945,7 +1945,7 @@ test("projection: the run log — each step's share of the work, and its waits",
 		};
 	}));
 
-	assert.match(log.head, /^Last run · [\d.]+k? steps · waited 250ms · completed$/u);
+	assert.match(log.head, /^Last run · [\d.]+k? statements · waited 250ms · completed$/u);
 	assert.deepEqual(log.rows, [["Totals", null], ["square", null], ["Later", "waited 250ms"]]);
 	await workbench.evaluate(async (path) => {
 		const { api } = globalThis.__editor;

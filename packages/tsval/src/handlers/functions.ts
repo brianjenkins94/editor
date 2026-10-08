@@ -229,6 +229,11 @@ export function pushHostCall(vm: Machine, meta: GuestFunctionMeta, args: unknown
 	}
 
 	vm.nextCall(); // (numbered as the call frame would have been)
+
+	if (vm.profile !== undefined) {
+		vm.tally(node); // (a concise body's entry, as the call frame would have tallied it)
+	}
+
 	vm.pushNode(node.body!, scope);
 }
 

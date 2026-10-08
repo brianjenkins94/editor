@@ -51,7 +51,7 @@ function lines(report: CoverageReport, lineOf: (index: number) => number | undef
 }
 
 /** A top-level statement's share of the last run (tsval's profile), on the line its code is on now. */
-export interface ProfiledLine { "line": number; "steps": number; "waited": number; "first": number }
+export interface ProfiledLine { "line": number; "statements": number; "waited": number; "first": number }
 
 /** Mark each editor's lines in its margin's gutter column (`mark`: by file URI) and its scrollbar, as sessions report and
  *  evidence changes — and hand on where the last run's work went (`profiled`: the run log, live-values.ts). */
@@ -123,7 +123,7 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 
 			void (anchors === undefined ? Promise.resolve(profile.map(({ start }) => start[0])) : anchors.lines(editor.document.getText(), profile.map(({ anchor }) => anchor))).then((now) => {
 				if (editor.document.version === version && reports.get(editor.document.uri.path) === known) {
-					profiled(editor.document.uri.toString(), profile.flatMap(({ steps, waited, first }, index) => (now[index] === undefined ? [] : [{ "line": now[index]!, "steps": steps, "waited": waited, "first": first }])));
+					profiled(editor.document.uri.toString(), profile.flatMap(({ statements, waited, first }, index) => (now[index] === undefined ? [] : [{ "line": now[index]!, "statements": statements, "waited": waited, "first": first }])));
 				}
 			});
 

@@ -4,7 +4,7 @@ import { runToEnd } from "../../src/explore.ts";
 import { createVM } from "../../src/interpret.ts";
 
 /** A program's profile, by its top-level statements' first lines (1-based). */
-async function profileOf(source: string): Promise<Map<number, { "steps": number; "waited": number; "first": number }>> {
+async function profileOf(source: string): Promise<Map<number, { "statements": number; "waited": number; "first": number }>> {
 	const { vm, sourceFile } = createVM(source, { "profile": true, "eventLoop": { "now": 0, "pace": "fast" }, "globals": { "log": () => undefined } });
 
 	await runToEnd(vm);
@@ -12,7 +12,7 @@ async function profileOf(source: string): Promise<Map<number, { "steps": number;
 	return new Map([...vm.profile!].map(([statement, entry]) => [sourceFile.getLineAndCharacterOfPosition(statement.getStart(sourceFile)).line + 1, entry]));
 }
 
-test("profile: each top-level statement's steps, by where the code is — a function's own, wherever it's called from", async () => {
+test("profile: each top-level statement's statements run, by where the code is — a function's own, wherever it's called from", async () => {
 	const profile = await profileOf([
 		"function work(n) {",
 		"  let total = 0;",
@@ -24,8 +24,8 @@ test("profile: each top-level statement's steps, by where the code is — a func
 		""
 	].join("\n"));
 
-	assert.ok(profile.get(1)!.steps > profile.get(7)!.steps * 10, "the loop's work is the function's, not the call's");
-	assert.ok(profile.get(6)!.steps < 10);
+	assert.ok(profile.get(1)!.statements > profile.get(7)!.statements * 10, "the loop's work is the function's, not the call's");
+	assert.ok(profile.get(6)!.statements < 10);
 	assert.ok(profile.get(6)!.first < profile.get(7)!.first, "first run, in order (a function declaration's is its hoisting, at the start)");
 });
 
@@ -39,6 +39,15 @@ test("profile: a timer's wait is the statement whose code it runs — on the vir
 	assert.deepStrictEqual([...first], [...second], "deterministic");
 });
 
+test("profile: in the order the code first ran — a function's declaration where it stands, a concise callback's waits its own", async () => {
+	const profile = await profileOf(["let total = 0;", "for (let i = 0; i < 30; i += 1) total += i;", "function square(n) {", "\treturn n * n;", "}", "void setTimeout(() => log(square(total)), 250);", ""].join("\n"));
+	const order = [...profile].sort(([, a], [, b]) => a.first - b.first).map(([line]) => line);
+
+	assert.deepStrictEqual(order, [1, 2, 3, 6], "the declaration's step, between the loop and the timer");
+	assert.strictEqual(profile.get(6)!.waited, 250, "the timer's wait, to the callback's own statement (`() => …` stands for one)");
+	assert.ok(profile.get(3)!.statements >= 2, "square's declaration and its body's `return`");
+});
+
 test("profile: a fork carries its own copy", async () => {
 	const { vm } = createVM("let n = 0;\nfor (let i = 0; i < 50; i += 1) n += i;\nlog(n);\n", { "profile": true, "eventLoop": { "pace": "fast" }, "globals": { "log": () => undefined } });
 
@@ -46,9 +55,9 @@ test("profile: a fork carries its own copy", async () => {
 	vm.runToBreakpoint();
 
 	const fork = vm.fork();
-	const [before] = [...vm.profile!.values()].map((entry) => entry.steps);
+	const [before] = [...vm.profile!.values()].map((entry) => entry.statements);
 
 	await runToEnd(fork);
-	assert.strictEqual([...vm.profile!.values()][0]!.steps, before, "the original's untouched");
+	assert.strictEqual([...vm.profile!.values()][0]!.statements, before, "the original's untouched");
 	assert.ok(fork.profile!.size >= vm.profile!.size);
 });

@@ -99,6 +99,9 @@ function previewOf(value: unknown, depth: number): string {
 	return `{ ${shown.join(", ")}${keys.length > shown.length ? ", …" : ""} }`;
 }
 
+/** Where a record's telling is: the last value's step and its place among that step's values. */
+export interface Told { "step": number; "place": number }
+
 /** The record: values added as they're traced, drained a batch at a time. */
 export class LiveRecord {
 	private readonly bounds: Bounds;
@@ -108,20 +111,42 @@ export class LiveRecord {
 	/** How many calls are known, the top level aside: counted, as each value of a call past the bound asks. */
 	private listed = 0;
 	private dropped = 0;
+	/** The last value's step, and its place among that step's values (0 the first) — a statement tells several, and a
+	 *  replay retells them in the same order, so (step, place) names a value. */
+	private toldStep = -1;
+	private toldPlace = -1;
+	/** The latest (step, place) taken: anything not after it is a replay (see resume). */
 	private lastStep = -1;
+	private lastPlace = -1;
 
 	public constructor(bounds: Bounds = BOUNDS) {
 		this.bounds = bounds;
 	}
 
-	/** A traced value. One from an earlier step than the last kept is a replay — the debugger stepped back and ran
-	 *  forward again — and is told already. */
+	/** A traced value. One from no later than the last taken — an earlier step, or the same step's same place or an
+	 *  earlier one — is a replay (the debugger stepped back and ran forward again) and is told already. */
+	/** Where the telling is now — a stop keeps it, for a run that goes on from that stop again (resume). */
+	public told(): Told {
+		return { "step": this.toldStep, "place": this.toldPlace };
+	}
+
+	/** A run going on from a stop: its values are told again from where they were at that stop (`told`; none told yet,
+	 *  without one) — so a value of the same step as ones told before the step back is known by its place among them. */
+	public resume(told: Told = { "step": -1, "place": -1 }): void {
+		this.toldStep = told.step;
+		this.toldPlace = told.place;
+	}
+
 	public add(traced: Traced): void {
-		if (traced.step < this.lastStep) {
+		this.toldPlace = traced.step === this.toldStep ? this.toldPlace + 1 : 0;
+		this.toldStep = traced.step;
+
+		if (traced.step < this.lastStep || (traced.step === this.lastStep && this.toldPlace <= this.lastPlace)) {
 			return;
 		}
 
 		this.lastStep = traced.step;
+		this.lastPlace = this.toldPlace;
 
 		let count = this.calls.get(traced.call);
 

@@ -938,21 +938,21 @@ function ranOf(step: Step, marks: PaneMark[]): { "kind": string; "text": string 
 }
 
 /** The last run, step by step (PROJECTIONS.md: the run log): each step that ran, in the order it first did, with its
- *  share of the run's work (the interpreter's steps in its code — the same every run) and any time it waited (a timer,
- *  on the event loop's clock) — or undefined, with no profile for these steps. */
-interface RunLog { "rows": { "card": number; "title": string; "steps": number; "waited": number }[]; "steps": number; "waited": number }
+ *  share of the run's work (the statements run in its code — the same every run) and any time it waited (a timer, on the
+ *  event loop's clock) — or undefined, with no profile for these steps. */
+interface RunLog { "rows": { "card": number; "title": string; "statements": number; "waited": number }[]; "statements": number; "waited": number }
 
 function runLogOf(steps: Step[], profiled: ProfiledLine[]): RunLog | undefined {
 	const rows = steps.map((step, card) => {
 		const inside = profiled.filter(({ line }) => step.fromLine <= line && line <= step.toLine);
 
-		return { "card": card, "title": step.title, "steps": inside.reduce((sum, each) => sum + each.steps, 0), "waited": inside.reduce((sum, each) => sum + each.waited, 0), "first": Math.min(...inside.map(({ first }) => first)) };
-	}).filter((row) => row.steps > 0).sort((a, b) => a.first - b.first);
+		return { "card": card, "title": step.title, "statements": inside.reduce((sum, each) => sum + each.statements, 0), "waited": inside.reduce((sum, each) => sum + each.waited, 0), "first": Math.min(...inside.map(({ first }) => first)) };
+	}).filter((row) => row.statements > 0).sort((a, b) => a.first - b.first);
 
-	return rows.length === 0 ? undefined : { "rows": rows.map(({ first: _first, ...row }) => row), "steps": rows.reduce((sum, row) => sum + row.steps, 0), "waited": rows.reduce((sum, row) => sum + row.waited, 0) };
+	return rows.length === 0 ? undefined : { "rows": rows.map(({ first: _first, ...row }) => row), "statements": rows.reduce((sum, row) => sum + row.statements, 0), "waited": rows.reduce((sum, row) => sum + row.waited, 0) };
 }
 
-/** A count of steps, short: 840, 1.2k, 3.4M. */
+/** A count, short: 840, 1.2k, 3.4M. */
 function shortCount(count: number): string {
 	return count < 1000 ? String(count) : count < 1e6 ? `${(count / 1000).toFixed(count < 1e4 ? 1 : 0)}k` : `${(count / 1e6).toFixed(1)}M`;
 }
@@ -965,16 +965,16 @@ function renderRunLog(log: RunLog, end: RunEnd | undefined, element: HTMLElement
 	const box = div("live-values-runlog", "");
 	const ended = end === undefined ? "completed" : end.kind === "crashed" ? `crashed at line ${end.line + 1}` : `stopped at line ${end.line + 1}`;
 
-	box.append(div(`live-values-runlog-head ${end?.kind ?? "completed"}`, `Last run · ${shortCount(log.steps)} steps${log.waited > 0 ? ` · waited ${log.waited}ms` : ""} · ${ended}`, "Work in the interpreter's steps — the same every run — and waits on the event loop's clock"));
+	box.append(div(`live-values-runlog-head ${end?.kind ?? "completed"}`, `Last run · ${shortCount(log.statements)} statements${log.waited > 0 ? ` · waited ${log.waited}ms` : ""} · ${ended}`, "Work in statements run — the same every run — and waits on the event loop's clock"));
 
 	for (const row of log.rows) {
-		const share = Math.round((row.steps / log.steps) * 100);
+		const share = Math.round((row.statements / log.statements) * 100);
 		const line = div("live-values-runlog-row", "");
 
 		line.append(
 			span("live-values-runlog-card", String(row.card + 1)),
 			span("live-values-runlog-title", row.title),
-			span("live-values-runlog-share", share === 0 ? "<1%" : `${share}%`, `${row.steps} steps`),
+			span("live-values-runlog-share", share === 0 ? "<1%" : `${share}%`, `${row.statements} statements`),
 			...row.waited > 0 ? [span("live-values-runlog-waited", `waited ${row.waited}ms`)] : []
 		);
 		box.append(line);

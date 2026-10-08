@@ -137,7 +137,7 @@ test("a profile is per file: each module's top-level statements", async () => {
 	const byFile = new Map<string, number>();
 
 	for (const [statement, entry] of vm.profile!) {
-		byFile.set(statement.getSourceFile().fileName, (byFile.get(statement.getSourceFile().fileName) ?? 0) + entry.steps);
+		byFile.set(statement.getSourceFile().fileName, (byFile.get(statement.getSourceFile().fileName) ?? 0) + entry.statements);
 	}
 
 	assert.ok(byFile.get("/w/work.js")! > byFile.get("/w/main.js")!, "the loop's work is work.js's");

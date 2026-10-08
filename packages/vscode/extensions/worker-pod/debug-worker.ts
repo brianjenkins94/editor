@@ -23,7 +23,7 @@ import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import { effectiveDisposition, givenResult, isDangerous, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
-import type { Traced } from "./live-values";
+import type { Told, Traced } from "./live-values";
 import type { SiteSums } from "./site-sums";
 import type { VirtualRequest } from "./workspace-runtime";
 
@@ -71,6 +71,9 @@ let sourceFile: ts.SourceFile | undefined;
 const live = new Map<ts.SourceFile, LiveRecord>();
 /** The program's files whose text the adapter has been told (with their first values): the entry's it has. */
 const toldSource = new Set<string>();
+
+/** Each stop's place in each record's telling (LiveRecord.told), for a run that goes on from that stop again. */
+const toldAt = new WeakMap<Vm, Map<LiveRecord, Told>>();
 
 /** `file`'s live values. */
 function liveIn(file: ts.SourceFile): LiveRecord {
@@ -1174,8 +1177,8 @@ function coverageReport(): CoverageReport {
 
 	const others = new Set<ts.SourceFile>();
 
-	for (const node of current?.coverage?.keys() ?? []) {
-		others.add(node.getSourceFile());
+	for (const file of current?.coverage?.keys() ?? []) {
+		others.add(file);
 	}
 
 	others.delete(sourceFile);
@@ -1187,21 +1190,29 @@ function coverageReport(): CoverageReport {
 
 /** One program file's coverage, its observed sites and its top-level statements' profile. */
 function fileCoverage(file: ts.SourceFile): CoverageReport {
-	const counts = current?.coverage;
-	const statements: CoverageReport["statements"] = [];
+	// (tsval's statements of the file and a count for each, in source order — or, for a file nothing ran in yet, its
+	// statements found the same way, each at 0)
+	const covered = current?.coverage?.get(file);
+	const nodes: ts.Node[] = covered === undefined ? [] : [...covered.statements];
 
-	const visit = (node: ts.Node): void => {
-		if (node.kind >= ts.SyntaxKind.FirstStatement && node.kind <= ts.SyntaxKind.LastStatement) {
-			const start = file.getLineAndCharacterOfPosition(node.getStart(file));
-			const end = file.getLineAndCharacterOfPosition(node.getEnd());
+	if (covered === undefined) {
+		const visit = (node: ts.Node): void => {
+			if (node.kind >= ts.SyntaxKind.FirstStatement && node.kind <= ts.SyntaxKind.LastStatement) {
+				nodes.push(node);
+			}
 
-			statements.push({ "start": [start.line, start.character], "end": [end.line, end.character], "count": counts?.get(node) ?? 0, "anchor": rangeOf(node) });
-		}
+			node.forEachChild(visit);
+		};
 
-		node.forEachChild(visit);
-	};
+		file.forEachChild(visit);
+	}
 
-	file.forEachChild(visit);
+	const statements: CoverageReport["statements"] = nodes.map((node, index) => {
+		const start = file.getLineAndCharacterOfPosition(node.getStart(file));
+		const end = file.getLineAndCharacterOfPosition(node.getEnd());
+
+		return { "start": [start.line, start.character], "end": [end.line, end.character], "count": covered?.counts[index] ?? 0, "anchor": rangeOf(node) };
+	});
 
 	// Where the run's work went, by top-level statement — declarations too (tsval's profile).
 	const profile = file.statements.flatMap((statement) => {
@@ -1347,6 +1358,7 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 		// stepped, so it stays a pristine snapshot we can return to.
 		history = history.slice(0, index + 1);
 		history.push(base);
+		toldAt.set(base, new Map([...live.values()].map((record) => [record, record.told()])));
 		index = history.length - 1;
 		// A "continue" that landed on a capability line is a capability stop (the policy gated it); steps stay "step".
 		const stop = placeOf(base);
@@ -1396,6 +1408,12 @@ async function handle(action: Action): Promise<void> {
 			}
 
 			record(next, copySums(sumsOf.get(history[index])));
+
+			// (its values told from where they were at this stop: after a step back, the ones told already are replays)
+			for (const each of live.values()) {
+				each.resume(toldAt.get(history[index])?.get(each));
+			}
+
 			await advanceFrom(next, action, actionTrace);
 			break;
 		}

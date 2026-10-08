@@ -39,7 +39,7 @@ test("a call takes the steps it did: async, stepped or not", async () => {
 	}
 });
 
-test("a parameter is observed and traced as it was, at the step it was", () => {
+test("a parameter is observed and traced as it was, at the step and the statement it was", () => {
 	const told: string[] = [];
 	const { vm } = createVM("function f(a, ...rest) { return a + rest.length; }\nf(1, 2, 3) + f(1);", {
 		"observe": (node, site, value) => {
@@ -56,14 +56,15 @@ test("a parameter is observed and traced as it was, at the step it was", () => {
 
 	vm.run();
 	assert.deepStrictEqual(told, [
+		// (an observation by `vm.steps`; a trace event by the statement clock — statement 1, then the first call's `return`)
 		"observe a=1 @6",
-		"bind a=1 @6",
+		"bind a=1 @1",
 		"observe rest=[2,3] @6",
-		"bind rest=[2,3] @6",
+		"bind rest=[2,3] @1",
 		"observe a=1 @18",
-		"bind a=1 @18",
+		"bind a=1 @2",
 		"observe rest=[] @18",
-		"bind rest=[] @18"
+		"bind rest=[] @2"
 	]);
 });
 

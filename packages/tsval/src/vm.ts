@@ -20,6 +20,14 @@ const { createSourceFile, isIdentifier, isSourceFile, isTaggedTemplateExpression
 const FIRST_STATEMENT = ts.SyntaxKind.FirstStatement;
 const LAST_STATEMENT = ts.SyntaxKind.LastStatement;
 const TRY_STATEMENT = ts.SyntaxKind.TryStatement;
+const BLOCK = ts.SyntaxKind.Block;
+
+/** The declarations that take a step of their own without being of a statement kind (the profile tallies them). */
+const DECLARATIONS = new Uint8Array(ts.SyntaxKind.Count);
+
+for (const kind of [ts.SyntaxKind.FunctionDeclaration, ts.SyntaxKind.ClassDeclaration, ts.SyntaxKind.EnumDeclaration]) {
+	DECLARATIONS[kind] = 1;
+}
 const IDENTIFIER = ts.SyntaxKind.Identifier;
 const NUMERIC_LITERAL = ts.SyntaxKind.NumericLiteral;
 const TRUE_KEYWORD = ts.SyntaxKind.TrueKeyword;
@@ -188,9 +196,9 @@ export interface VMOptions {
 	 *  can't swallow it). Lets a host run untrusted code with a bounded cost — e.g. a language-server-resident
 	 *  driver that must never hang on a `while (true)`. Default undefined = unlimited (existing behavior). */
 	"maxSteps"?: number;
-	/** Count how often each statement runs (see `VM.coverage`). Off by default: it's one map update per statement. */
+	/** Count how often each statement runs (see `VM.coverage`). Off by default: it's one count per statement. */
 	"coverage"?: boolean;
-	/** Tally where the run's work goes (see `VM.profile`): per top-level statement. Off by default: a map update a step. */
+	/** Tally where the run's work goes (see `VM.profile`): per top-level statement. Off by default: a count a statement. */
 	"profile"?: boolean;
 	/** The program's modules (modules.ts, MODULES.md): its host's loader — resolution, what isn't the program's loaded
 	 *  natively, a program file's source, the module cache. tsval evaluates the program's own files, each in a module
@@ -218,7 +226,8 @@ export interface VMOptions {
  * `node` is the declaration, the assignment, the loop, the parameter, the statement: its line is the value's. `call`
  * numbers the guest call it ran in, in the order calls are made (0: the program's top level), and `callee` is that
  * call's function (none at the top level, or in a constructor); `loops` are the loops around it in that call, outermost
- * first, each with its turn (from 0) — shared by the events of a turn, so read-only; `step` is the machine's step count.
+ * first, each with its turn (from 0) — shared by the events of a turn, so read-only; `step` is the statement clock's
+ * reading (VM.statements): the events of one statement share it.
  */
 export interface TraceEvent {
 	"kind": "bind" | "return" | "branch";
@@ -326,8 +335,12 @@ export interface VM {
 	/** Its event loop (VMOptions.eventLoop): the clock, the timers pending, the results waiting, the pace — undefined
 	 *  without one. A host may set `pace`. */
 	readonly "loop": Loop | undefined;
-	/** Monotonic count of `step()` calls — a free step budget. */
+	/** Monotonic count of `step()` calls — a free step budget. How many steps a stretch of code takes is the frame
+	 *  machine's own business (an operand may be read in its parent's step); for a position in the run, `statements`. */
 	readonly "steps": number;
+	/** The statement clock: how many statements have started. The engine-independent reading of where a run is
+	 *  (COMPILE.md) — a trace event's `step`, the profile's. */
+	readonly "statements": number;
 
 	// --- position, breakpoints ---
 	readonly "currentNode": ts.Node | null;
@@ -346,14 +359,16 @@ export interface VM {
 	"runToBreakpoint": () => void;
 
 	/** How often each statement has run, when created with `coverage: true` (undefined otherwise) — exact, not
-	 *  sampled: every statement execution passes through `step()`. A fork carries its own copy, so a fork's counts
-	 *  are its own timeline's. Statements that never ran are absent. */
-	readonly "coverage": ReadonlyMap<ts.Node, number> | undefined;
+	 *  sampled: every statement execution passes through `step()`. By program file, for each file a statement of it ran
+	 *  in: its statements in source order and a count for each (0, never ran). A fork carries its own copy, so a fork's
+	 *  counts are its own timeline's. */
+	readonly "coverage": ReadonlyMap<ts.SourceFile, FileCoverage> | undefined;
 
 	/** Where the run's work went, when created with `profile: true` (undefined otherwise): per top-level statement of the
 	 *  program, by where the code is — a function's statement gets the work done in its body, wherever it was called
-	 *  from — the steps run in its code, the virtual time waited before its code ran again (a timer firing: the event
-	 *  loop's clock moving on), and the step it first ran at. Deterministic, as the run is. A fork carries its own copy. */
+	 *  from — the statements run in its code, the virtual time waited before its code ran again (a timer firing: the
+	 *  event loop's clock moving on), and the statement clock's reading when it first ran (`statements`). Deterministic,
+	 *  as the run is. A fork carries its own copy. */
 	readonly "profile": ReadonlyMap<ts.Statement, StatementProfile> | undefined;
 
 	/** An independent copy of the machine state (mid-expression if need be); host objects are shared. */
@@ -399,6 +414,8 @@ export class Machine implements VM {
 	public finished = false;
 	/** monotonic count of `step()` calls — a free step budget (ASSIGNMENT §3). */
 	public steps = 0;
+	/** The statement clock (VM.statements): statements started. */
+	public statements = 0;
 	/** set by a `yield`/`await` handler to suspend the current fiber (generator/async). */
 	public paused = false;
 	/** which kind of suspension: an async generator can do both, and its driver must know. */
@@ -443,8 +460,10 @@ export class Machine implements VM {
 	private contexts: ExecContext[] = [];
 	/** Fuel limit (see VMOptions.maxSteps): once `steps` passes it, `step()` throws uncatchably. */
 	public maxSteps: number | undefined;
-	/** Statement execution counts (VMOptions.coverage). */
-	public coverage: Map<ts.Node, number> | undefined;
+	/** Statement execution counts (VMOptions.coverage), by file. */
+	public coverage: Map<ts.SourceFile, FileCoverage> | undefined;
+	/** The file statements last counted in, and its counts (cover): a run stays in one file for long stretches. */
+	private covering: { "table": StatementTable; "counts": number[] } | undefined;
 	/** Where the work went (VMOptions.profile), and the virtual time waited that the next step's statement is owed. */
 	public profile: Map<ts.Statement, StatementProfile> | undefined;
 	private waitedPending = 0;
@@ -534,8 +553,29 @@ export class Machine implements VM {
 		this.trace = options.trace;
 	}
 
-	/** A step in `node`'s code, to its top-level statement's profile — with the virtual time waited before it, if any. */
-	private tally(node: ts.Node): void {
+	/** A statement started (`node`), to its file's coverage: its counts found once per change of file. */
+	private cover(node: ts.Node): void {
+		const { table, index } = statementPoint(node);
+		let covering = this.covering;
+
+		if (covering?.table !== table) {
+			let entry = this.coverage!.get(table.file);
+
+			if (entry === undefined) {
+				entry = { "statements": table.statements, "counts": Array.from(table.statements, () => 0) };
+				this.coverage!.set(table.file, entry);
+			}
+
+			covering = { "table": table, "counts": entry.counts };
+			this.covering = covering;
+		}
+
+		covering.counts[index] += 1;
+	}
+
+	/** A statement started in `node`'s code (or a declaration's step, a concise arrow body entered), to its top-level
+	 *  statement's profile — with the virtual time waited before it, if any. */
+	public tally(node: ts.Node): void {
 		const profile = this.profile!;
 
 		// Each node's entry, as found (null: not in a top-level statement), for the profile it's in: one lookup a step.
@@ -563,7 +603,7 @@ export class Machine implements VM {
 			entry = top === null ? null : profile.get(top) ?? null;
 
 			if (top !== null && entry === null) {
-				entry = { "steps": 0, "waited": 0, "first": this.steps };
+				entry = { "statements": 0, "waited": 0, "first": this.statements };
 				profile.set(top, entry);
 			}
 
@@ -574,7 +614,7 @@ export class Machine implements VM {
 			return;
 		}
 
-		entry.steps += 1;
+		entry.statements += 1;
 		entry.waited += this.waitedPending;
 		this.waitedPending = 0;
 	}
@@ -615,8 +655,8 @@ export class Machine implements VM {
 
 		// (two literals rather than a spread for the optional `callee`: an event is made for nearly every binding)
 		this.trace(callee === undefined
-			? { "kind": kind, "node": node, "name": name, "value": value, "step": this.steps, "call": call, "loops": loops }
-			: { "kind": kind, "node": node, "name": name, "value": value, "step": this.steps, "call": call, "callee": callee, "loops": loops });
+			? { "kind": kind, "node": node, "name": name, "value": value, "step": this.statements, "call": call, "loops": loops }
+			: { "kind": kind, "node": node, "name": name, "value": value, "step": this.statements, "call": call, "callee": callee, "loops": loops });
 	}
 
 	/** `loop`'s trace context (at `index` on the stack) in its current turn: made once a turn, from the next loop in a
@@ -953,14 +993,23 @@ export class Machine implements VM {
 			return false;
 		}
 
-		// Where the work goes: this step, to the top-level statement whose code it's in (with any time waited before it).
-		if (this.profile !== undefined && node !== null && node !== undefined) {
-			this.tally(node);
-		}
+		// A statement's first step (phase 0) is the statement starting — the same test a breakpoint uses. It moves the
+		// statement clock; coverage counts it, and the profile gives it to the top-level statement whose code it's in
+		// (with any time waited before it) — as it does a declaration's step (a function's or class's: not a statement
+		// kind, but the step that puts its card in order) and a concise arrow body's entry, for the statement it stands
+		// for (`() => f(x)`'s `return f(x)`: otherwise its work and its waits would be no one's).
+		if (statementStart) {
+			this.statements += 1;
 
-		// A statement's first step (phase 0) is the statement starting — the same test a breakpoint uses.
-		if (this.coverage !== undefined && statementStart) {
-			this.coverage.set(node!, (this.coverage.get(node!) ?? 0) + 1);
+			if (this.profile !== undefined) {
+				this.tally(node!);
+			}
+
+			if (this.coverage !== undefined) {
+				this.cover(node!);
+			}
+		} else if (this.profile !== undefined && frame.phase === 0 && (kind === "call" ? node!.body!.kind !== BLOCK : DECLARATIONS[nodeKind] === 1)) {
+			this.tally(node!);
 		}
 
 		// (each synthetic handler is typed for its own frame; the union is dispatched on `kind` here)
@@ -1505,7 +1554,9 @@ export class Machine implements VM {
 		forked.hostGuard = this.hostGuard;
 		forked.onAsyncFiber = this.onAsyncFiber;
 		forked.onBreakpoint = this.onBreakpoint;
-		forked.coverage = this.coverage === undefined ? undefined : new Map(this.coverage);
+		forked.statements = this.statements;
+		forked.coverage = this.coverage === undefined ? undefined : new Map([...this.coverage].map(([file, entry]) => [file, { "statements": entry.statements, "counts": [...entry.counts] }]));
+		forked.covering = undefined; // (its counts are copies: found afresh)
 		forked.profile = this.profile === undefined ? undefined : new Map([...this.profile].map(([statement, entry]) => [statement, { ...entry }]));
 		forked.tallies = undefined; // (its entries are copies: found afresh)
 		forked.waitedPending = this.waitedPending;
@@ -2623,9 +2674,43 @@ function settle(scheduler: AsyncScheduler, id: number, input: Settlement): void 
 	wake(scheduler);
 }
 
-/** Where a top-level statement's share of the run went (VMOptions.profile): the steps run in its code, the virtual time
- *  waited before its code ran again, and the step it first ran at. */
-export interface StatementProfile { "steps": number; "waited": number; "first": number }
+/** Where a top-level statement's share of the run went (VMOptions.profile): the statements run in its code (a
+ *  declaration's step and a concise arrow body's entry one each), the virtual time waited before its code ran again,
+ *  and the statement clock's reading when it first ran. */
+export interface StatementProfile { "statements": number; "waited": number; "first": number }
+
+/** A program file's coverage (VM.coverage): its statements in source order — every node of a statement kind, blocks and
+ *  declarations among them — and how often each has run, by index. */
+export interface FileCoverage { readonly "statements": readonly ts.Statement[]; readonly "counts": number[] }
+
+/** A file's statements in source order, as coverage indexes them (statementPoint). */
+interface StatementTable { "file": ts.SourceFile; "statements": ts.Statement[] }
+
+/** Each statement's place in its file's table, found when the file is first indexed: the AST doesn't change, and a
+ *  compiled unit would know it statically (COMPILE.md). */
+const statementPoints = new WeakMap<ts.Node, { "table": StatementTable; "index": number }>();
+
+function statementPoint(node: ts.Node): { "table": StatementTable; "index": number } {
+	let point = statementPoints.get(node);
+
+	if (point === undefined) {
+		const file = node.getSourceFile();
+		const table: StatementTable = { "file": file, "statements": [] };
+		const visit = (child: ts.Node): void => {
+			if (isStatement(child)) {
+				statementPoints.set(child, { "table": table, "index": table.statements.length });
+				table.statements.push(child as ts.Statement);
+			}
+
+			child.forEachChild(visit);
+		};
+
+		file.forEachChild(visit);
+		point = statementPoints.get(node)!;
+	}
+
+	return point;
+}
 
 /** How a fiber is resumed: with a value, or by injecting a return/throw at the suspension point. */
 type FiberInput = { "kind": "next"; "value": unknown } | { "kind": "return"; "value": unknown } | { "kind": "throw"; "value": unknown };

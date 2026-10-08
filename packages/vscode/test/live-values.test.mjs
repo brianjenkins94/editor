@@ -74,3 +74,40 @@ test("stepping back: a replayed value isn't told twice", () => {
 
 	assert.deepEqual(record.drain().values.map((each) => each.value), ["1", "2"]);
 });
+
+test("stepping back into a statement told already: its values aren't told twice, and what's after them is", () => {
+	const record = new LiveRecord();
+
+	// A stop before statement 4 (kept), which tells three values; the run stops at the next statement before it tells
+	// any, steps back to the first stop, and goes on from it — told again from where it was there.
+	const atStop = record.told();
+
+	for (const raw of [1, 2, 3]) {
+		record.add(value({ "raw": raw, "step": 4 }));
+	}
+
+	record.resume(atStop);
+
+	for (const raw of [1, 2, 3, 4]) {
+		record.add(value({ "raw": raw, "step": 4 }));
+	}
+
+	record.add(value({ "raw": 5, "step": 5 }));
+
+	assert.deepEqual(record.drain().values.map((each) => each.value), ["1", "2", "3", "4", "5"]);
+});
+
+test("a stop in the middle of a statement: going on from it, the statement's later values are new", () => {
+	const record = new LiveRecord();
+
+	record.add(value({ "raw": 1, "step": 7 }));
+
+	const atStop = record.told(); // (a capability stop, say: inside statement 7)
+
+	record.add(value({ "raw": 2, "step": 7 }));
+	record.resume(atStop); // (stepped back to it, and on again)
+	record.add(value({ "raw": 2, "step": 7 }));
+	record.add(value({ "raw": 3, "step": 7 }));
+
+	assert.deepEqual(record.drain().values.map((each) => each.value), ["1", "2", "3"]);
+});

@@ -152,11 +152,16 @@ but now met without the user stepping back.
   per node), those numbers diverge and the replay test misfires. The engine-independent clock is the **statement
   count**: incremented at every statement start in both engines — coverage's own points, identical by construction. The
   trace's `step`, the profile and a re-execution's target use it; `steps` stays the frame machine's fuel and budget.
+  (Built: `VM.statements`. Several events share a reading now, so the live record tells a replay by an event's place
+  among its statement's events too, and a run going on from a stop resumes that count from where the stop left it.)
 - **Virtual time is untouched.** The clock moves only between tasks, as timers fire; a compiled unit runs inside one step
   of one task. `Date`, `Math.random` and the timers are intrinsics reached through `invokeHost`, the same values in either
   engine; the loop's choices are made between tasks, recorded and replayed the same.
 - **Coverage, the profile and observed sites** are counters at points known when compiling (a statement's top-level
-  statement is known statically), so they compile to array increments — cheaper than the frame machine's map updates.
+  statement is known statically), so they compile to array increments. Coverage is kept that way already — per file,
+  a count for each statement by its index in source order (`VM.coverage`) — and the profile is tallied at the same
+  points: a statement's start, plus a declaration's step and a concise arrow body's entry (`() => f(x)` stands for
+  `return f(x)`; without it, a callback's work and its timer's wait would be no one's).
 - **The trace** needs the call number and the loops' turns the frame machine reads off its frames; compiled code keeps a
   side stack (the prototype's). With every event told, tracing costs compiled code 1.7× — so the consumer's bounds should
   reach the producer: a tracer that can say "no more for this call" lets compiled code stop building events it would
@@ -176,9 +181,8 @@ felt first) and the differential corpora can run every unit compiled as cheaply 
 it needs no exit mechanism at all and keeps "at every stop the machine is all frames" — and add (c) to lift its
 restriction. Reach for (b) only if re-executed segments prove too slow or the native-state caveat bites.
 
-0. **Before compiling** (~1 week, pays off alone). (The trace consumer's cost: done, above.) The statement count as the
-   shared clock: the trace's `step`, the profile — `steps` already shrank once when operands moved into their parents'
-   steps. Coverage counts in per-file arrays, not a map keyed by node.
+0. **Before compiling** — done 2026-10-07. The trace consumer's cost (above); the statement count as the shared clock
+   (the trace's `step`, the profile, the run log's work); coverage counts in per-file arrays, not a map keyed by node.
 1. **The closure tier over today's `Scope`** (~3 weeks). Plain sync function bodies, compiled lazily, entered from call
    frames and host wrappers, instrumentation specialized; only while the machine has no armed line (a). Shared scopes mean
    nothing to convert: a fork, the Locals view, setting a value and closures made by either engine called by the other all

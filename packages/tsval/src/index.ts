@@ -15,4 +15,4 @@ export type { GuestFunction, GuestFunctionMeta } from "./values.ts";
  * `@brianjenkins94/tsval/typed` (the interpreter itself knows no TypeChecker).
  */
 export { VM } from "./vm.ts";
-export type { Frame, HostCallSite, HostGuard, Observer, ObserveSite, Signal, StatementProfile, TraceEvent, Tracer, VMOptions } from "./vm.ts";
+export type { FileCoverage, Frame, HostCallSite, HostGuard, Observer, ObserveSite, Signal, StatementProfile, TraceEvent, Tracer, VMOptions } from "./vm.ts";

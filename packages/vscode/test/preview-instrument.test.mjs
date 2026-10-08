@@ -26,10 +26,12 @@ function tsvalEvents(source) {
 
 	vm.run();
 
-	for (const [node, count] of vm.coverage) {
+	const { statements, counts } = vm.coverage.get(sourceFile);
+
+	for (const [index, node] of statements.entries()) {
 		const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
 
-		for (let n = 0; n < count; n += 1) {
+		for (let n = 0; n < counts[index]; n += 1) {
 			events.push(`statement ${line}:${character}`);
 		}
 	}

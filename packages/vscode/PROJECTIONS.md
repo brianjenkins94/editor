@@ -58,8 +58,9 @@ values already level with its lines.
 
 - **The run log** (2026-10-07), after the last card: the last debug run step by step — each step that ran, in the order
   it first did, its card's number and title, its share of the run's work, and any time it waited — under how the run
-  ended. Work is the interpreter's steps (tsval's `profile`: per top-level statement, by where the code is — a
-  function's card gets its body's work, wherever it's called from), not wall time, which a debugger inflates and varies;
+  ended. Work is the statements run (tsval's `profile`: per top-level statement, by where the code is — a
+  function's card gets its body's work, wherever it's called from; the statement clock, as a compiled tier would keep
+  it: tsval COMPILE.md), not wall time, which a debugger inflates and varies;
   so it's the same every run, comparable between steps and runs. Waits are on the event loop's virtual clock (a timer's
   delay, counted to the statement whose code runs when it fires). It comes with the run's final coverage report
   (`profile`), placed on the lines its statements are on now as coverage's marks are.

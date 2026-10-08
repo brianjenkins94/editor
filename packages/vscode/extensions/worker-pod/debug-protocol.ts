@@ -122,9 +122,9 @@ export interface StatementCoverage {
 }
 
 /** A top-level statement's share of the run (tsval's profile) — a function's or class's declaration too: its range and
- *  anchor (as a statement's coverage has), the steps run in its code, the virtual time waited before its code ran again,
- *  and the step it first ran at. */
-export interface StatementProfile { "start": [number, number]; "anchor": [number, number]; "steps": number; "waited": number; "first": number }
+ *  anchor (as a statement's coverage has), the statements run in its code, the virtual time waited before its code ran
+ *  again, and the statement clock's reading when it first ran. */
+export interface StatementProfile { "start": [number, number]; "anchor": [number, number]; "statements": number; "waited": number; "first": number }
 
 /** What went through one observed site (tsval's `observe`; RUNTIME-EVIDENCE.md, the second slice), over a run: its
  *  kind and its node's range, then — for a value site — how often a value came through, how often it was nullish, how
