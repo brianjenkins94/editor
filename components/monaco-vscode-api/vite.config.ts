@@ -95,6 +95,32 @@ export default mergeConfig(defaults, {
 			}
 		},
 		{
+			// VS Code's webview service worker controls the workbench's frames (it's served from the same folder), and it
+			// holds a request to another `localhost:<port>` for a webview port mapping. A worker's request has no webview to
+			// ask — upstream skips the error for it but still waits on the never-sent ask, so the request takes its 30s
+			// timeout: an extension served from localhost (editor-contrib's, under development) took 30s to load. Fetch it
+			// straight away instead. The worker is an asset (copied, not transformed), so it's patched as emitted; fails
+			// loudly if upstream's shape changes (then check whether it handles this itself).
+			"name": "localhost-requests-from-workers",
+			"generateBundle": function(_options, bundle) {
+				const worker = Object.values(bundle).find((output) => output.type === "asset" && /^service-worker-[\w-]+\.js$/u.test(output.fileName));
+
+				if (worker === undefined || worker.type !== "asset") {
+					throw new Error("localhost-requests-from-workers: no service-worker asset in the bundle");
+				}
+
+				const source = String(worker.source);
+				// processLocalhostRequest's (the resource handler has the same check, answering notFound)
+				const anchor = /if \(!webviewId && client\.type !== 'worker' && client\.type !== 'sharedworker'\) \{(\s*)console\.error\('Could not resolve webview id'\);(\s*)return fetch\(event\.request\);/u;
+
+				if (!anchor.test(source)) {
+					throw new Error("localhost-requests-from-workers: processLocalhostRequest's webview-id check not found in " + worker.fileName);
+				}
+
+				worker.source = source.replace(anchor, "if (!webviewId) {$1if (client.type !== 'worker' && client.type !== 'sharedworker') { console.error('Could not resolve webview id'); }$2return fetch(event.request);");
+			}
+		},
+		{
 			// Drop the ~62MB of sourcemaps @codingame ships alongside its prebuilt worker/server resources
 			// (htmlServerMain.js.map 23MB, tsserver.web.js.map 15MB, extension/css server maps, …), which vite
 			// emits as assets next to the .js. They're debug-only, never loaded at runtime — strip every emitted
