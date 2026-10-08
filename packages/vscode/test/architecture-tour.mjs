@@ -1316,6 +1316,60 @@ test("capability decisions: Skip always and Deny always — every run goes past 
 	}
 });
 
+// What an agent reads, as data rather than off the DOM (debug-mcp's page tools, page-tools.ts): the editor in front of
+// you, its problems, the notifications showing, the rules, the terminals' output and the preview windows.
+test("agent tools: the editor, its problems, notifications, rules, terminals and previews — as data", async () => {
+	const workbench = session.workbench();
+
+	await workbench.evaluate(async () => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file("/workspace/agent.ts");
+
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode("const count: number = 'three';\nconst total = count + 1;\nconsole.log(total);\n"));
+
+		const editor = await api.window.showTextDocument(uri);
+
+		editor.selection = new api.Selection(1, 6, 1, 11);
+	});
+
+	try {
+		const shown = await session.request("editor.state", undefined, 5000);
+
+		assert.deepEqual({ "file": shown.active.file, "language": shown.active.language, "cursor": shown.active.cursor, "selections": shown.active.selections }, { "file": "agent.ts", "language": "typescript", "cursor": { "line": 2, "column": 12 }, "selections": [{ "start": { "line": 2, "column": 7 }, "end": { "line": 2, "column": 12 }, "text": "total" }] }, "1-based, as an agent reads code");
+		assert.ok(shown.tabs.some((tab) => tab.file === "agent.ts" && tab.active), "its tab, active");
+
+		const problems = await eventually("its type error", async () => {
+			const listed = await session.request("problems.list", { "file": "agent.ts" }, 5000);
+
+			return listed.total > 0 ? listed : undefined;
+		});
+
+		assert.deepEqual(problems.problems.map(({ line, column, severity, source, code }) => ({ line, column, severity, source, code })), [{ "line": 1, "column": 7, "severity": "error", "source": "ts", "code": "2322" }]);
+
+		// A run that can't start says why only in a toast.
+		await workbench.evaluate(() => { void globalThis.__editor.api.commands.executeCommand("editor.debugFile", globalThis.__editor.api.Uri.file("/workspace/package.json")); });
+		assert.ok((await eventually("the toast", async () => {
+			const shownNow = await session.request("notifications.list", undefined, 5000);
+
+			return shownNow.some((each) => each.message.includes("isn't a program")) ? shownNow : undefined;
+		})).some((each) => each.severity === "error"));
+
+		await session.request("terminal.run", { "id": "agent-tools", "command": "echo from the terminal", "cwd": "/workspace" }, 10_000);
+		assert.match(await eventually("its output", async () => (await session.request("terminal.state", undefined, 5000)).find((each) => each.command === "echo from the terminal" && each.output.includes("\nfrom the terminal"))?.output), /from the terminal/u);
+
+		assert.ok(Array.isArray((await session.request("rules.state", undefined, 15_000)).rules), "the rules, each with its sentence");
+		assert.ok(Array.isArray(await session.request("preview.windows", undefined, 5000)), "the preview windows");
+	} finally {
+		await workbench.evaluate(async () => {
+			const { api } = globalThis.__editor;
+
+			await api.commands.executeCommand("notifications.clearAll");
+			await api.commands.executeCommand("workbench.action.closeActiveEditor");
+			await api.workspace.fs.delete(api.Uri.file("/workspace/agent.ts")).then(() => undefined, () => undefined);
+		});
+	}
+});
+
 test("capability decisions: Allow this run lets a loop's calls through, until the run ends", async () => {
 	const workbench = session.workbench();
 	const program = "/workspace/looped.js";

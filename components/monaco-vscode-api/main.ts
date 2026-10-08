@@ -7,6 +7,7 @@ import {
 	getService,
 	GroupOrientation,
 	initialize as initializeMonacoService,
+	INotificationService,
 	IStorageService,
 	LogLevel
 } from "@codingame/monaco-vscode-api";
@@ -154,6 +155,24 @@ import "@codingame/monaco-vscode-yaml-default-extension";
 
 // The editor registers the default terminal's process factory (just-bash on the workspace fs). See terminal.ts.
 export { setTerminalProcessFactory } from "./terminal-backend";
+
+/** A notification showing: its severity, its message, where it's from, and its buttons. */
+export interface ShownNotification { "severity": "info" | "warning" | "error"; "message": string; "source"?: string; "actions": string[] }
+
+/** The notifications showing now — the toasts and the notification center's — as data: VS Code's extension API can't list
+ *  them, so an agent (debug-mcp's `notifications`) would otherwise read them off the DOM. From the notification
+ *  service's own model (its implementation's `model`: the interface has no list). */
+export async function shownNotifications(): Promise<ShownNotification[]> {
+	const service = await getService(INotificationService) as unknown as { "model"?: { "notifications": readonly { "severity": number; "message": { "raw"?: string; "original"?: unknown }; "source"?: string | { "label"?: string }; "actions"?: { "primary"?: readonly { "label": string }[]; "secondary"?: readonly { "label": string }[] } }[] } };
+	const severities = ["info", "info", "warning", "error"] as const;
+
+	return (service.model?.notifications ?? []).map((each) => ({
+		"severity": severities[each.severity] ?? "info",
+		"message": each.message.raw ?? String(each.message.original ?? ""),
+		...each.source === undefined ? {} : { "source": typeof each.source === "string" ? each.source : each.source.label ?? "" },
+		"actions": [...each.actions?.primary ?? [], ...each.actions?.secondary ?? []].map((action) => action.label)
+	}));
+}
 export type { TerminalProcess, TerminalProcessFactory } from "./terminal-backend";
 
 /** A file seeded into the workbench's in-memory workspace. */

@@ -462,7 +462,7 @@ flowchart LR
 | Root | preview | `preview.close`, `preview.open` |
 | Root | project | `project.list()`, `project.open`, `project.openFiles` |
 | Root | tab | `tab.discover` |
-| Root | tool | `tool.debug_breakpoints.*()`, `tool.debug_sessions.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.margin.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.preview_cdp.*()`, `tool.preview_profile.*()`, `tool.provoke_transform.*()`, `tool.runs.*()` |
+| Root | tool | `tool.debug_breakpoints.*()`, `tool.debug_sessions.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor.*()`, `tool.margin.*()`, `tool.notifications.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.preview_cdp.*()`, `tool.preview_profile.*()`, `tool.previews.*()`, `tool.problems.*()`, `tool.provoke_transform.*()`, `tool.rules.*()`, `tool.runs.*()`, `tool.terminal.*()` |
 | Root | virtual | `virtual.request.*()` |
 | Root | workbench | `workbench.init()`, `workbench.online`, `workbench.save` |
 | Root | workspace | `workspace.files()` |
@@ -470,22 +470,25 @@ flowchart LR
 | Shell | debug | `debug.state` |
 | Shell | dock | `dock.closeWindow`, `dock.openWindow()` |
 | Shell | git | `git.changed` |
-| Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready` |
+| Shell | preview | `preview.cdp()`, `preview.close`, `preview.decide()`, `preview.hmr.*`, `preview.open`, `preview.open()`, `preview.profile()`, `preview.ready`, `preview.windows()` |
 | Workbench | annotations | `annotations.refer()`, `annotations.resolve()` |
 | Workbench | capability | `capability.ask` |
 | Workbench | debug | `debug.declined.*` |
 | Workbench | dock | `dock.closeEditor()`, `dock.hostEditor()` |
+| Workbench | editor | `editor.state()` |
 | Workbench | evidence | `evidence.level()`, `evidence.observed`, `evidence.preview` |
 | Workbench | git | `git.classify()`, `git.commit()`, `git.discard()`, `git.file()`, `git.status()` |
 | Workbench | history | `history.chunks()`, `history.texts()` |
 | Workbench | margin | `margin.state()` |
 | Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*` |
+| Workbench | notifications | `notifications.list()` |
 | Workbench | preview | `preview.close`, `preview.hmr.*`, `preview.profiled` |
+| Workbench | problems | `problems.list()` |
 | Workbench | production | `production.stop.*` |
-| Workbench | rules | `rules.make()` |
+| Workbench | rules | `rules.make()`, `rules.state()` |
 | Workbench | runs | `runs.begin()`, `runs.list()`, `runs.stop()` |
 | Workbench | stops | `stops.preview` |
-| Workbench | terminal | `terminal.in.*`, `terminal.out.*`, `terminal.run()`, `terminal.stop.*` |
+| Workbench | terminal | `terminal.in.*`, `terminal.out.*`, `terminal.run()`, `terminal.state()`, `terminal.stop.*` |
 | Workbench | theme | `theme.colorScheme` |
 | Workbench | values | `values.ended`, `values.session.*` |
 | Workbench | workbench | `workbench.files()`, `workbench.openProject` |

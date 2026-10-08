@@ -205,6 +205,23 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 	// The policy files changed — by a rule editor anywhere, or by hand: redraw.
 	onRulesChanged(() => { void render(); });
 
+	// Every rule as the view shows it, as data (debug-mcp's `rules` tool): mine, then the shared contract's — each one's
+	// sentence, its JSON, the problem that makes it match nothing, and where a placed one's place is now.
+	serve(hub, "rules.state", async () => {
+		const files = await list();
+
+		policy ??= await import("@brianjenkins94/util/silo/policy");
+
+		const listed = (whose: "mine" | "shared", { file, rules, places }: PolicyFile): unknown[] => rules.map((rule, index) => {
+			const place = places?.[index] ?? null;
+			const problem = policy!.problemOf(rule) ?? (place?.status === "orphaned" ? "its place in the code is lost" : undefined);
+
+			return { "whose": whose, "file": file, "sentence": problem === undefined ? describeRule(rule, catalogFor(rule)) : `${problem} — it matches nothing`, ...problem === undefined ? {} : { "problem": problem }, ...place === null ? {} : { "place": place.line === undefined ? { "status": place.status } : { "status": place.status, "line": place.line } }, "rule": rule };
+		});
+
+		return files === null ? { "rules": [] } : { "rules": [...listed("mine", files.mine), ...listed("shared", files.shared)] };
+	});
+
 	// A preview's capability prompt (decide.ts): its Rule… makes the rule here — a new one, prefilled with the call —
 	// and the call waits on it: Just this once (decided by it, not kept), Save as rule (kept, and decided by it), or
 	// Cancel (back to the prompt's choices). Answers the decision, or null.

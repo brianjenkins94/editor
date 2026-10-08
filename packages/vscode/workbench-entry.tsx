@@ -55,6 +55,7 @@ import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { installProfileFiles } from "./profile-files";
 import { installEvidence } from "./evidence";
+import { installEditorState } from "./editor-state";
 import { installLiveValues, showMarks, showNotes, showProfile } from "./live-values";
 import { installRecordedStops } from "./recorded-stops";
 import { installCoverage } from "./coverage";
@@ -62,7 +63,7 @@ import { registerRulesView } from "./rules-view";
 import { evidenceStore } from "./extensions/insights/evidence";
 import { windowClientTransport } from "./pane-link";
 import { isCancellation, observe } from "@brianjenkins94/observability";
-import { createBashProcess, serveTaskTerminals } from "./terminal";
+import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./terminal";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 import { installWorkspaceFs } from "./workspace-fs";
@@ -587,6 +588,7 @@ function maybeBoot(): void {
 				// coverage's strip (coverage.ts), read from the evidence through the insights extension's store, here with
 				// core's own API.
 				installLiveValues(workbenchHub, api as typeof import("vscode"));
+				installEditorState(workbenchHub, api as typeof import("vscode"));
 				// A breakpoint in a page's code: a recorded stop, shown in the margin as live values are (recorded-stops.ts).
 				installRecordedStops(workbenchHub, api as typeof import("vscode"));
 				registerRulesView(workbenchHub, api as typeof import("vscode"));
@@ -595,6 +597,7 @@ function maybeBoot(): void {
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
 				// And the pod's tasks' terminals: a just-bash process that runs one command, over the hub (terminal.ts).
 				serveTaskTerminals(api as typeof import("vscode"), nodeRunner, workbenchHub);
+				serveTerminalState(nodeRunner, workbenchHub);
 
 				// Uplink the extension pod to the page: a workbench hub bridges the pod (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the

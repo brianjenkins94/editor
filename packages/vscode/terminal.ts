@@ -58,13 +58,32 @@ function longestCommonPrefix(items: string[]): string {
 /** Terminals opened so far: each one's number names it as the origin of what it runs (runs.ts). */
 let terminalsOpened = 0;
 
+/** How much of a terminal's output is kept, its latest: what an agent reads of it (debug-mcp's `terminal`). */
+const TAIL = 8000;
+
+/** Each terminal's latest output (ANSI escapes stripped), by its number — and whether it's still open, and the one
+ *  command it runs (a task's). VS Code's extension API can't read a terminal's buffer, but every byte it shows goes
+ *  through here. */
+const tails = new Map<number, { "terminal": number; "command"?: string; "open": boolean; "text": string }>();
+
+// eslint-disable-next-line no-control-regex -- escapes are what's being stripped
+const ESCAPES = /\u001B(?:\[[^A-Za-z@~]*[A-Za-z@~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)|[A-Z=>\\^_])/gu;
+
 /** A terminal opened to run one command (a task's, serveTaskTerminals), and how it exits when that's done. */
 export interface TerminalCommand { "command": string; "exit": (code: number) => void }
 
-export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (data: string) => void, cwd0: string, run?: TerminalCommand): TerminalProcess {
+export function createBashProcess(api: VscodeApi, runner: NodeRunner, show: (data: string) => void, cwd0: string, run?: TerminalCommand): TerminalProcess {
 	terminalsOpened += 1;
 
 	const terminal = terminalsOpened;
+	const tail: { "terminal": number; "command"?: string; "open": boolean; "text": string } = { "terminal": terminal, ...run === undefined ? {} : { "command": run.command }, "open": true, "text": "" };
+	// What the terminal shows, kept (its latest) as it's shown.
+	const fire = (data: string): void => {
+		tail.text = (tail.text + data.replaceAll(ESCAPES, "").replaceAll("\r\n", "\n")).slice(-TAIL);
+		show(data);
+	};
+
+	tails.set(terminal, tail);
 	let sessionPromise: Promise<BashSession> | undefined;
 	const getSession = (): Promise<BashSession> => {
 		// just-bash, and the custom commands (which build on its defineCommand), load with the first command run.
@@ -156,6 +175,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 				fire(runs ? commandFinished(signal.aborted ? 130 : exitCode) : commandFinished());
 				prompt();
 			} else {
+				tail.open = false; // (its command done, the terminal's finished)
 				run.exit(signal.aborted ? 130 : exitCode);
 			}
 		}
@@ -445,7 +465,27 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, fire: (dat
 	};
 
 	// The terminal closing stops what it's running — a dev server, a script — rather than leaving it running unseen.
-	return { "start": start, "input": input, "shutdown": () => { controller?.abort(); } };
+	return { "start": start, "input": input, "shutdown": () => {
+		tail.open = false;
+		controller?.abort();
+	} };
+}
+
+/** The terminals, as data (debug-mcp's `terminal` tool): each one's number, whether it's open, the command it runs (a
+ *  task's), its latest output (`lines` of it, 50 by default) and what it's running (runs.ts, by its origin). */
+export function serveTerminalState(runner: NodeRunner, hub: Hub): void {
+	serve(hub, "terminal.state", (args) => {
+		const { terminal, lines = 50 } = (args ?? {}) as { "terminal"?: number; "lines"?: number };
+		const runs = runner.runs.list();
+
+		return [...tails.values()].filter((each) => terminal === undefined || each.terminal === terminal).map((each) => ({
+			"terminal": each.terminal,
+			"open": each.open,
+			...each.command === undefined ? {} : { "command": each.command },
+			"output": each.text.split("\n").slice(-Math.max(1, lines)).join("\n"),
+			"runs": runs.filter((run) => "terminal" in run.origin && run.origin.terminal === each.terminal).map((run) => ({ "id": run.id, "title": run.title, "state": run.state }))
+		}));
+	});
 }
 
 /**

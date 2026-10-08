@@ -692,6 +692,20 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			.then((allow) => allow !== false, () => false); // can't reach the decider ⇒ fail closed
 	});
 
+	// The preview windows, as data (debug-mcp's `previews` tool): each one's id, its server's port and address, the page
+	// it's on, whether its page is popped out into a browser window of its own or has DevTools open, and when it was used.
+	serve(hub, "preview.windows", () => [...surfaces.values()].toSorted((a, b) => a.port - b.port || a.index - b.index).map((surface) => {
+		let page: string | undefined;
+
+		try {
+			page = surface.popup?.window.location.href ?? surface.frame.contentWindow?.location.href;
+		} catch { /* not readable: where it was pointed */ }
+
+		page ??= surface.popup?.url ?? surface.frame.src;
+
+		return { "id": surface.id, "port": surface.port, "window": surface.index, ...servers.get(surface.port)?.url === undefined ? {} : { "server": servers.get(surface.port)!.url }, ...page === "" ? {} : { "page": previewPageOf(page)?.url ?? page }, "poppedOut": surface.popup !== undefined, "devtools": surface.devtools !== undefined, "usedAt": new Date(surface.usedAt).toISOString() };
+	}));
+
 	// The app opened a page of a server as a new window (`window.open`, a `target="_blank"` link — the tap hands it up
 	// instead of opening a browser tab): another preview window, onto that page. Only a page of a server that's running
 	// here (this origin's `/__virtual__/<tab>/<port>/…`); anything else was left to the browser.

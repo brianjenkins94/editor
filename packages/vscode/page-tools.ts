@@ -7,7 +7,9 @@
  *   `debug.session.<id>.step|state|stop`. Every session answer is the same shape — state, and while stopped the line,
  *   its code, the locals — plus what the program printed;
  * - what a file's Margin tab shows, as data — the last run's values, coverage, its end, the question asked, notes, the run
- *   log (`margin.state`, live-values.ts) — rather than read off its DOM;
+ *   log (`margin.state`, live-values.ts) — rather than read off its DOM; likewise the editor's state, its problems and
+ *   notifications (editor-state.ts), the rules (rules-view.ts), the terminals (terminal.ts) and the preview windows
+ *   (shell-preview.ts);
  * - the preview's cold-start transform race, provoked on demand (the node worker's `preview.provoke`);
  * - one Chrome DevTools Protocol command to a preview's page (the shell's `preview.cdp`, see preview-devtools.ts).
  *
@@ -104,6 +106,48 @@ export function editorPageTools(hub: Hub): PageTool[] {
 		"inputSchema": schema({ "file": { "type": "string", "description": "The file, absolute or relative to the workspace. Default: the file open in the editor." } }),
 		"timeoutMs": 5000,
 		"handler": async ({ file }, { signal }) => request("margin.state", { "file": file }, signal)
+	}, {
+		"name": "editor",
+		"description": "What's in front of you in the editor, as data: the active file (its language, line count, whether it's unsaved), the cursor, any selections with their text, and the lines in view — all 1-based — and every editor tab open, by group.",
+		"inputSchema": schema({}),
+		"timeoutMs": 5000,
+		"handler": async (_args, { signal }) => request("editor.state", undefined, signal)
+	}, {
+		"name": "problems",
+		"description": "The Problems view, as data: each diagnostic's file, 1-based range, severity, source (ts, eslint, notes, a capability tripwire) and message — errors first. `total` says how many there are in all.",
+		"inputSchema": schema({
+			"file": { "type": "string", "description": "Only this file's (absolute or relative to the workspace)." },
+			"limit": { "type": "number", "description": "At most this many (default 200)." }
+		}),
+		"timeoutMs": 5000,
+		"handler": async ({ file, limit }, { signal }) => request("problems.list", { "file": file, "limit": limit }, signal)
+	}, {
+		"name": "rules",
+		"description": "Every rule, as the Rules view shows it (RULES.md): mine, then the shared contract's — each one's sentence, its JSON, the problem that makes it match nothing if there is one, and for a rule placed in the code where its place is now (its line, or that it's uncertain or lost).",
+		"inputSchema": schema({}),
+		"timeoutMs": 15000,
+		"handler": async (_args, { signal }) => request("rules.state", undefined, signal)
+	}, {
+		"name": "notifications",
+		"description": "The notifications showing now — the toasts and the notification center's: each one's severity, message, source and buttons. (Errors like \"Couldn't run: …\" appear only there.)",
+		"inputSchema": schema({}),
+		"timeoutMs": 5000,
+		"handler": async (_args, { signal }) => request("notifications.list", undefined, signal)
+	}, {
+		"name": "terminal",
+		"description": "The terminals, as data: each one's number, whether it's open, the command it runs (a task's terminal), its latest output (ANSI escapes stripped) and what it's running (its runs: id, title, state). Run a command in one with the editor's own terminal; read what it printed here.",
+		"inputSchema": schema({
+			"terminal": { "type": "number", "description": "Only this terminal (its number, from 1)." },
+			"lines": { "type": "number", "description": "The latest this many lines of each one's output (default 50)." }
+		}),
+		"timeoutMs": 5000,
+		"handler": async ({ terminal, lines }, { signal }) => request("terminal.state", { "terminal": terminal, "lines": lines }, signal)
+	}, {
+		"name": "previews",
+		"description": "The preview windows open: each one's id (what preview_cdp and page_eval's frame take), its server's port and address, the page it's on, whether its page is popped out into a browser window of its own or has DevTools open, and when it was last used.",
+		"inputSchema": schema({}),
+		"timeoutMs": 5000,
+		"handler": async (_args, { signal }) => request("preview.windows", undefined, signal)
 	}, {
 		"name": "debug_breakpoints",
 		"description": "Replace a file's breakpoints (VS Code's own, so they show in the editor and apply to running and future sessions). An empty list clears them.",
