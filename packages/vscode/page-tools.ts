@@ -8,8 +8,8 @@
  *   its code, the locals — plus what the program printed;
  * - what a file's Margin tab shows, as data — the last run's values, coverage, its end, the question asked, notes, the run
  *   log (`margin.state`, live-values.ts) — rather than read off its DOM; likewise the editor's state, its problems and
- *   notifications (editor-state.ts), the rules (rules-view.ts), the terminals (terminal.ts) and the preview windows
- *   (shell-preview.ts);
+ *   notifications (editor-state.ts), the rules (rules-view.ts), the terminals (terminal.ts), the preview windows
+ *   (shell-preview.ts) and the run ledger (evidence.ts);
  * - the preview's cold-start transform race, provoked on demand (the node worker's `preview.provoke`);
  * - one Chrome DevTools Protocol command to a preview's page (the shell's `preview.cdp`, see preview-devtools.ts).
  *
@@ -207,6 +207,20 @@ export function editorPageTools(hub: Hub): PageTool[] {
 
 			return request("runs.list", undefined, signal);
 		}
+	}, {
+		"name": "run_ledger",
+		"description": "The run ledger (.silo/runs/<user>.jsonl, kept in git): every run that ended — terminal tasks and services, debug sessions, previews — each with its id, title, entry, start/end, exit, who and where it ran, the commit and the blob oid of each file it ran, and its effects: each gated call (capability fs:read / fs:write / net / exec / …, the resource it reached) with how it went — made, denied, skipped or given (a rule's result in its place) — and how many calls. Ask it what touched what: the runs with such an effect, and their effects added up ({ capability, resource, how, calls, runs, first, last }). Returns { total, runs (newest first), effects }.",
+		"inputSchema": schema({
+			"file": { "type": "string", "description": "Runs that ran this file — their entry, or any file they ran (repo-relative, e.g. src/index.ts)." },
+			"capability": { "type": "string", "description": "Effects of this capability: fs:read, fs:write, net, exec, eval, net.ws, net.webrtc — or a family (fs)." },
+			"resource": { "type": "string", "description": "Effects whose resource (a path, a host, a command) contains this." },
+			"how": { "type": "string", "enum": ["made", "denied", "skipped", "given"], "description": "Effects that went this way." },
+			"since": { "type": "string", "description": "Runs that ended at or after this ISO time." },
+			"user": { "type": "string", "description": "One user's runs (the slug of their git identity)." },
+			"limit": { "type": "number", "description": "Runs to return (default 20); the effects add up every run that matched." }
+		}),
+		"timeoutMs": 15000,
+		"handler": async (query, { signal }) => request("runs.ledger", query, signal)
 	}, {
 		"name": "preview_profile",
 		"description": "CPU-profile the PREVIEWED APP's page for a while (the JS Self-Profiling API, in that page's own realm) and return where its time went: the busiest functions by self time (selfMs) and with what they called (totalMs), each with its script url and line, plus idleMs and durationMs. A docked preview shares the editor's thread, so editor functions can appear too — the app's are the ones whose url is under /__virtual__/. Set `full` for the whole Chrome .cpuprofile as well (it can be large). Requires that preview to be open (run the app first); a page from before the editor served the profiling policy needs a reload.",

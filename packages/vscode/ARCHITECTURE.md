@@ -459,7 +459,7 @@ flowchart LR
 | Root | preview | `preview.close`, `preview.open` |
 | Root | project | `project.list()`, `project.open`, `project.openFiles` |
 | Root | tab | `tab.discover` |
-| Root | tool | `tool.debug_breakpoints.*()`, `tool.debug_sessions.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor.*()`, `tool.margin.*()`, `tool.notifications.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.preview_cdp.*()`, `tool.preview_profile.*()`, `tool.previews.*()`, `tool.problems.*()`, `tool.provoke_transform.*()`, `tool.rules.*()`, `tool.runs.*()`, `tool.terminal.*()` |
+| Root | tool | `tool.debug_breakpoints.*()`, `tool.debug_sessions.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor.*()`, `tool.margin.*()`, `tool.notifications.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.preview_cdp.*()`, `tool.preview_profile.*()`, `tool.previews.*()`, `tool.problems.*()`, `tool.provoke_transform.*()`, `tool.rules.*()`, `tool.run_ledger.*()`, `tool.runs.*()`, `tool.terminal.*()` |
 | Root | virtual | `virtual.request.*()` |
 | Root | workbench | `workbench.init()`, `workbench.online`, `workbench.save` |
 | Root | workspace | `workspace.files()` |
@@ -483,7 +483,7 @@ flowchart LR
 | Workbench | problems | `problems.list()` |
 | Workbench | production | `production.stop.*` |
 | Workbench | rules | `rules.make()`, `rules.state()` |
-| Workbench | runs | `runs.begin()`, `runs.list()`, `runs.stop()` |
+| Workbench | runs | `runs.begin()`, `runs.ledger()`, `runs.list()`, `runs.stop()` |
 | Workbench | stops | `stops.preview` |
 | Workbench | terminal | `terminal.in.*`, `terminal.out.*`, `terminal.run()`, `terminal.state()`, `terminal.stop.*` |
 | Workbench | theme | `theme.colorScheme` |

@@ -1189,6 +1189,12 @@ test("real effects: an allowed read reads the file, recorded; a call nobody allo
 			{ "capability": "fs:read", "resource": "/workspace/rates.json", "how": "made", "calls": 1 },
 			{ "capability": "fs:write", "resource": "/workspace/sneaky.txt", "how": "denied", "calls": 1 }
 		], "its effects: the read made, the write refused");
+
+		// The ledger, asked what tried to write sneaky.txt (debug-mcp's run_ledger): this run, and its refused write.
+		const asked = await session.request("runs.ledger", { "capability": "fs", "resource": "sneaky.txt" }, 10_000);
+
+		assert.equal(asked.runs[0]?.id, run.id, "the run that tried it, newest first");
+		assert.deepEqual(asked.effects.map(({ capability, how }) => `${capability} ${how}`), ["fs:write denied"], "only the effects asked about");
 	} finally {
 		await workbench.evaluate(async () => {
 			const { api } = globalThis.__editor;

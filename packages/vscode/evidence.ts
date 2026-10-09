@@ -16,13 +16,13 @@
  */
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
-import type { Effect, Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
+import type { Effect, Environment, RunEnvelope, RunQuery } from "@brianjenkins94/util/silo/evidence";
 import type { SiteObservation, StatementCoverage } from "./extensions/worker-pod/debug-protocol";
 import type { ModuleEvidence } from "./extensions/worker-pod/page-evidence";
 import type { Bablr } from "./bablr";
 import type { RunInfo, RunRegistry } from "./runs";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, GITATTRIBUTES, GITIGNORE, parseEvidence, parseSamples, runsPath, samplesPath, samplesText, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, GITATTRIBUTES, GITIGNORE, parseEvidence, parseRuns, parseSamples, queryRuns, runsPath, samplesPath, samplesText, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { blobOid, headCommit } from "./git-engine";
 
 const ROOT = "/workspace";
@@ -330,5 +330,17 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 
 	runs.onEnd((run) => {
 		writing = writing.then(async () => record(run)).catch(() => { /* evidence never breaks a run */ });
+	});
+
+	// The run ledger asked (silo's RunQuery — debug-mcp's `run_ledger`): every user's runs, once the ones that just ended
+	// are written.
+	serve(hub, "runs.ledger", async (query) => {
+		await writing;
+
+		const folder = uri(`${SILO_DIR}/runs`);
+		const files = await vscode.workspace.fs.readDirectory(folder).then((found) => found, () => []);
+		const texts = await Promise.all(files.filter(([name]) => name.endsWith(".jsonl")).map(async ([name]) => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(folder, name)))));
+
+		return queryRuns(texts.flatMap((text) => parseRuns(text)), (query ?? {}) as RunQuery);
 	});
 }

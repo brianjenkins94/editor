@@ -252,6 +252,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "notifications.list", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "rules.state", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "terminal.state", "from": ["root"], "to": ["workbench"] },
+	{ "pattern": "runs.ledger", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "preview.windows", "from": ["root", "workbench"], "to": ["shell"] },
 	{ "pattern": "debug.session.*.stop", "from": ["root"], "to": ["pod"] },
 	{ "pattern": "debug.session.*.decide", "from": ["root", "workbench"], "to": ["pod"] },
