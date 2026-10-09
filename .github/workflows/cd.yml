@@ -27,13 +27,13 @@
       "if": "${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}",
       # lib's reusable app-deploy workflow: setup → run → pages-deploy(docs). workspace-packages makes CI an
       # ephemeral pnpm workspace so sibling packages link (bablr → its bablr-language-ts sibling). util-publish
-      # builds every workspace (the private workbench app → docs/), then publishes the `release` workspaces'
-      # tarballs, each onto its own GitHub release series (one draft; bump its package.json.version to publish).
+      # builds every workspace (packages/editor's workbench app → docs/), then publishes the `release` workspaces'
+      # tarballs, each onto its own GitHub release series (one draft; bump its package.json.version to publish) —
+      # packages/editor's being the built site itself (its publishConfig.directory, docs/): what editor-contrib's
+      # site unpacks, its extension added, to be an editor of its own.
       "uses": "brianjenkins94/lib/.github/workflows/deploy.yml@main",
       "with": {
-        # Then the deployable editor itself, as a tarball on its own site (docs/editor.tgz, the package tarballs left
-        # out): what editor-contrib's site unpacks, its extension added, to be an editor of its own.
-        "run": "npx util-publish\ntar --create --gzip --file /tmp/editor.tgz --exclude='*.tgz' -C docs .\nmv /tmp/editor.tgz docs/editor.tgz",
+        "run": "npx util-publish",
         "workspace-packages": "packages/*,components/*,contrib",
         "release": "packages/*,components/*"
       },

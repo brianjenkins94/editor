@@ -1,5 +1,5 @@
 /**
- * The right-hand side (packages/vscode/LIVE-VALUES.md): a pane beside every editor showing a file, each entry beside
+ * The right-hand side (packages/editor/LIVE-VALUES.md): a pane beside every editor showing a file, each entry beside
  * the span of lines it's about. The consumer renders an entry into the element it's handed (`showPane`'s `render`);
  * this frame only places it — and makes Monaco the grid's row sizer: an entry taller than its span gets a view zone
  * after the span's last line as tall as the difference, so the code below moves down by that much and no entry spills

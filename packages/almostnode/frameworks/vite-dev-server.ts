@@ -312,7 +312,7 @@ export class ViteDevServer extends DevServer {
 	private hmrTargetWindow: Window | null = null;
 	private transformErrorReporter: ((info: TransformErrorInfo) => void) | null = null;
 	private readonly transformCache = new Map<string, { "code": string; "hash": string; "level": InstrumentLevel | "off"; "stops": string }>();
-	/** The recorded stops (packages/vscode/RUNNING.md: a breakpoint in a page), by file: the lines (1-based) whose code
+	/** The recorded stops (packages/editor/RUNNING.md: a breakpoint in a page), by file: the lines (1-based) whose code
 	 *  records what's in scope each time it runs. A file with any is instrumented whatever the level. */
 	private stops = new Map<string, number[]>();
 	/** How much of the workspace's modules to instrument for runtime evidence (instrument.ts): off until told. */

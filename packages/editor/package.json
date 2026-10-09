@@ -1,7 +1,11 @@
 {
-  "name": "vscode",
-  "private": true,
+  "name": "editor",
+  "description": "The editor, built: its site — unpack it on a static host (an extension added in extensions.json) to serve an editor of its own.",
+  "version": "0.0.0",
   "type": "module",
+  "publishConfig": {
+    "directory": "../../docs"
+  },
   "scripts": {
     "build": "tsx build.ts",
     "dev": "tsx dev.ts",

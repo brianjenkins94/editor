@@ -33,7 +33,7 @@ Just three, all on the core runtime path: `acorn`, `resolve.exports`, `pako`. `c
 - `runtime.ts` — `createDynamicImport` routes a `file://` dynamic import (e.g. eslint's flat-config loader)
   to a NATIVE `import()` of the real same-origin path, handing it to the service-worker module resolver
   (serves the workspace at `/workspace/…`) instead of re-executing it through almostnode's require/VFS path.
-  This replaced the `packages/vscode/patch-almostnode.mjs` `file://`→VFS stopgap (now deleted).
+  This replaced the `packages/editor/patch-almostnode.mjs` `file://`→VFS stopgap (now deleted).
 - `shims/zlib.ts` — the `brotli-wasm` dynamic import is `@vite-ignore`d.
 - `frameworks/esm-cjs.ts` — `transformEsmToCjsSimple` (the only thing `runtime.ts` used from the old
   `frameworks/code-transforms.ts`) split out so the csstree-backed CSS-modules helper is no longer in the

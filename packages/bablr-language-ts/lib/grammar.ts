@@ -42,7 +42,7 @@
 // ║ W5  perf: record validation (@bablr/record's recursive `validate` walk) is ~25-30% of parse time. It is         ║
 // ║     tree-shaken from the shipped bundle — packages/bablr aliases @bablr/record to shims/record.js, whose        ║
 // ║     `__BABLR_RECORD_STRICT__` build define folds to false (set it true to opt back in); stock speed elsewhere.  ║
-// ║     Record FREEZING (the other ~half) is no-op'd in the parse workers: packages/vscode/bablr-fast-freeze.ts.    ║
+// ║     Record FREEZING (the other ~half) is no-op'd in the parse workers: packages/editor/bablr-fast-freeze.ts.    ║
 // ║                                                                                                             ║
 // ║ RUNTIME PATCHES (patches/, this repo only; consumers get stock packages and lose exactly these inputs):     ║
 // ║ U1  astral characters (regex-vm `fromCharCode` truncation + bablr-vm UTF-16 `getSourceLength`).             ║

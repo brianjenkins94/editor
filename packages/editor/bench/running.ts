@@ -5,7 +5,7 @@
  * built-ins; a server answering requests (its handler stepped, called from almostnode's http); and a build-like run
  * whose heavy work is in a package (native under tsval too: MODULES.md).
  *
- *   node --experimental-strip-types packages/vscode/bench/running.ts [rounds]
+ *   node --experimental-strip-types packages/editor/bench/running.ts [rounds]
  */
 import { register } from "node:module";
 

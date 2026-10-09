@@ -1,5 +1,5 @@
 /**
- * A rule editor (packages/vscode/RULES.md): macOS's predicate editor — Finder's smart folders, Mail's rules — for a rule
+ * A rule editor (packages/editor/RULES.md): macOS's predicate editor — Finder's smart folders, Mail's rules — for a rule
  * `{ when, then }`. WHEN is rows of *target / operator / argument*, combined *all*, *any* or *none*, nestable; THEN is a
  * list of actions. Each row has − and +; ⌥-click on + adds a group. The model is ui-predicate's (kept JSON-compatible):
  * a compound `{ logicalType_id, predicates }` of comparisons `{ target_id, operator_id, argument }`.

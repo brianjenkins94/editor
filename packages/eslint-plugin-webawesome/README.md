@@ -37,8 +37,8 @@ import webawesome from "./packages/eslint-plugin-webawesome/src/index.js";
 
 export default [
   {
-    "files": ["packages/vscode/shell.ts", "packages/vscode/window.ts", "packages/vscode/git-panel.ts", "packages/vscode/**/*.tsx"],
-    "ignores": ["packages/vscode/demo/**", "**/*.test.*"],
+    "files": ["packages/editor/shell.ts", "packages/editor/window.ts", "packages/editor/git-panel.ts", "packages/editor/**/*.tsx"],
+    "ignores": ["packages/editor/demo/**", "**/*.test.*"],
     "plugins": { "webawesome": webawesome },
     "rules": {
       "webawesome/prefer-components": "error",

@@ -1,9 +1,9 @@
 {
   "name": "ci",
   # Build and test on every push and pull request; on main, publish to GitHub Pages the editor with this extension in it —
-  # the editor's own build (its site's editor.tgz), the extension added under extensions/contrib/ and listed in
-  # extensions.json — so https://<owner>.github.io/<repo>/ is the editor, Run starting this interpreter. Weekly too, to
-  # pick up the editor's changes. A fork needs nothing but Settings → Pages → Source: GitHub Actions.
+  # the editor's own build (its package, editor@latest.tgz: the editor's current release, or main until its first), the
+  # extension added under extensions/contrib/ and listed in extensions.json — so https://<owner>.github.io/<repo>/ is the
+  # editor, Run starting this interpreter. Weekly too, to pick up the editor's releases. A fork needs nothing but Settings → Pages → Source: GitHub Actions.
   "on": {
     "push": {
       "branches": ["main"]
@@ -33,7 +33,7 @@
         { "run": "npm run build" },
         { "run": "npm run lint" },
         { "run": "npm test" },
-        { "run": "mkdir -p _site/extensions/contrib\ncurl --fail --silent --show-error --location https://brianjenkins94.github.io/editor/editor.tgz | tar --extract --gzip --directory _site\ncp -R package.json dist _site/extensions/contrib/\necho '[\"extensions/contrib/\"]' > _site/extensions.json" },
+        { "run": "mkdir -p _site/extensions/contrib\ncurl --fail --silent --show-error --location https://brianjenkins94.github.io/editor/packages/editor@latest.tgz | tar --extract --gzip --strip-components=1 --directory _site\ncp -R package.json dist _site/extensions/contrib/\necho '[\"extensions/contrib/\"]' > _site/extensions.json" },
         { "uses": "actions/upload-pages-artifact@v3", "with": { "path": "_site" } }
       ],
       "timeout-minutes": 10

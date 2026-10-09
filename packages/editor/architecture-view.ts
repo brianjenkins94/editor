@@ -1355,7 +1355,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 			section(
 				"How to read it",
 				h("p", null, "Boxes are where code runs: realms (windows, workers) and origins (iframes). Solid double lines are hub links — the tree every context's hub federates over; thin lines are channels the probes observe outside the hubs (workers, extension hosts, network). Dots are messages."),
-				h("p", null, "Dashed means declared in the model (", h("code", null, "packages/vscode/architecture-model.ts"), ") but not seen yet; red means seen but not declared — fix the model or the code. Green lines were discovered, not declared: an extension's commands, and what's written to a store and read from it."),
+				h("p", null, "Dashed means declared in the model (", h("code", null, "packages/editor/architecture-model.ts"), ") but not seen yet; red means seen but not declared — fix the model or the code. Green lines were discovered, not declared: an extension's commands, and what's written to a store and read from it."),
 				h("p", null, "The rows in a hub's box are its components — what subscribed to it, by the function that did (or by namespace, where the build kept no names). A thin line from a row carries the messages that component handles; the hub link beside it keeps the counts."),
 				h("p", null, "Click a context or a line to inspect it. Pick a feature beside Idle to light only its part.")
 			),
@@ -1523,7 +1523,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 					["Channels", `${declaredChannels.filter((channel) => seenByChannel.has(channel)).length} / ${declaredChannels.length} seen`],
 					["To review", String(violations.length)]
 				]),
-				h("p", { "class": "arch-muted" }, "The model: packages/vscode/architecture-model.ts. Change it with the architecture.")
+				h("p", { "class": "arch-muted" }, "The model: packages/editor/architecture-model.ts. Change it with the architecture.")
 			),
 			section("To review", violations.length === 0 ? h("p", { "class": "arch-muted" }, "Nothing — everything observed matches the model.") : h("ul", { "class": "arch-list" }, ...violations.map((violation) => h("li", null, describeViolation(violation))))),
 			section("Hub links", table(["Link", "Messages"], hubLinks.map(([a, b]) => {

@@ -16,7 +16,7 @@ export default mergeConfig(defaults, {
 		// Minify with vite's own (oxc) minifier — fast and within the default node heap.
 		// Kept on isCI: the post-build patch-esm-ext-host.mjs step matches a pattern that only exists in the
 		// MINIFIED ext-host worker chunk, so a false here fails the component build. (Our own bundles — where the
-		// e.with bad URI originates — are unminified via packages/vscode/build.ts instead.)
+		// e.with bad URI originates — are unminified via packages/editor/build.ts instead.)
 		"minify": isCI,
 		// Sourcemaps for local debugging only — NEVER in CI (they're ~62MB of @codingame maps + our chunk maps,
 		// debug-only and never fetched at runtime; drop-sourcemaps below strips the copied ones in CI too).

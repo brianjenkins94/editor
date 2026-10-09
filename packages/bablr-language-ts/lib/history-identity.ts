@@ -4,7 +4,7 @@
 // (History: this file used to implement content-defined chunking over the COMMIT CHAIN — isCommitBoundary/selectBase/
 // headIdentity — to pick a coordination-free shared base without full history. It was removed: CDC solved cross-peer
 // CONVERGENCE but not temporal DURABILITY — its oid-based base selection churned ids on rebase/force-push/base-jump
-// (proven in packages/vscode/test/collab-identity.test.mjs). Annotations instead resolve via reidentify(baseline→
+// (proven in packages/editor/test/collab-identity.test.mjs). Annotations instead resolve via reidentify(baseline→
 // current), which is content-derived and immune to oid rewrites. See [[collab-identity-durability]].)
 import type { ChangeKind, Op, Snapshot } from "./identity";
 import { atomsOf, lcsOps, reidentify } from "./identity";

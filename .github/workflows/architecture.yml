@@ -16,7 +16,7 @@
     "group": "${{ github.workflow }}-${{ github.ref }}",
     "cancel-in-progress": "${{ github.event_name == 'pull_request' }}"
   },
-  # The live architecture view's end-to-end suites (packages/vscode/test/architecture-*.mjs): a real editor session in
+  # The live architecture view's end-to-end suites (packages/editor/test/architecture-*.mjs): a real editor session in
   # headless Chromium — boot, a preview + HMR, two dev servers, a cold provoke round, a node script under the tsval
   # debugger, a webview, the git review diff, this checkout's debug-mcp, editor-contrib's extension (contrib/) loaded and
   # run — checked against the declared model. They catch
@@ -33,9 +33,9 @@
         { "uses": "actions/checkout@v4" },
         { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
         # The dev server the suites start (dev.ts) needs the monaco-vscode-api component's dist and the built sibling
-        # packages; it prebuilds packages/vscode itself (whose full build would need the component first anyway).
-        { "run": "pnpm --recursive --if-present --filter '!./packages/vscode' run build" },
-        { "run": "pnpm --filter ./packages/vscode exec playwright install --with-deps chromium" },
+        # packages; it prebuilds packages/editor itself (whose full build would need the component first anyway).
+        { "run": "pnpm --recursive --if-present --filter '!./packages/editor' run build" },
+        { "run": "pnpm --filter ./packages/editor exec playwright install --with-deps chromium" },
         # The baseline the performance suite compares against: the last green run on main's results (none on a first run).
         {
           "continue-on-error": true,
@@ -46,7 +46,7 @@
         # either publishes only after ci passes, so @latest would race it). util-publish with CI unset just packs them
         # into docs/packages (no release); a static server hands them to the editor in the browser.
         {
-          "run": "CI= npx util-publish packages/hub packages/observability\n(npx -y http-server docs/packages -p 5198 --cors -c-1 --silent &)\nnpx -y wait-on -t 30000 http-get://localhost:5198/hub@0.0.0.tgz\npnpm --filter ./packages/vscode run test:architecture",
+          "run": "CI= npx util-publish packages/hub packages/observability\n(npx -y http-server docs/packages -p 5198 --cors -c-1 --silent &)\nnpx -y wait-on -t 30000 http-get://localhost:5198/hub@0.0.0.tgz\npnpm --filter ./packages/editor run test:architecture",
           "env": {
             "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}",
             "ARCH_HUB_TGZ": "http://localhost:5198/hub@0.0.0.tgz",

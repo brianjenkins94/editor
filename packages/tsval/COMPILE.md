@@ -8,7 +8,7 @@ ratios below are against that.
 
 ## Why
 
-Every program the editor runs runs on tsval, in the debugger (packages/vscode/RUNNING.md). RUNNING.md's step 0 found
+Every program the editor runs runs on tsval, in the debugger (packages/editor/RUNNING.md). RUNNING.md's step 0 found
 ordinary code 40–70× slower than native and a program's own tight loops thousands of times slower, and named "too slow to
 interpret" — a simulation, a game's update loop — as the case that falls back to running natively without values. Its
 answer was "making tsval faster, not keeping a second world". A compiled tier is the large version of that answer: the

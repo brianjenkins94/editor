@@ -154,7 +154,7 @@ debug-mcp can answer the same questions for an agent: what ran, what was slow, w
 - **silo** (`lib/util/silo`): the model and the files: envelope and observation types, decayed merge, the
   duplicate-line fold, reading and writing the layout through an fs it's given. Pure, so a CLI, CI or a desktop
   extension can use it too. Its whole-file confidence ratchet becomes per-span.
-- **Editor core** (`packages/vscode`): capture and identity: the run registry's id carried everywhere, tsval's observe
+- **Editor core** (`packages/editor`): capture and identity: the run registry's id carried everywhere, tsval's observe
   hook, mapping profiles and capability calls to spans, handing the finished record to silo.
 - **The extension** (`extensions/insights`): what you see: reads the evidence files through `vscode.workspace.fs`,
   re-derives span ids for the open document, and draws the surfaces. Public API only.
@@ -485,7 +485,7 @@ cost to change them later.
 ### Settled since
 
 - **The node tests run in CI.** The span-annotation corpus, the evidence store, the site sums, the typed strategy and
-  the tsval-against-preview differential test weren't run anywhere but by hand; `packages/vscode` now has a `test`
+  the tsval-against-preview differential test weren't run anywhere but by hand; `packages/editor` now has a `test`
   script, which CI's test job runs.
 
 ## Decisions

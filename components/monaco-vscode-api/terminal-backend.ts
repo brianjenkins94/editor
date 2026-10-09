@@ -1,7 +1,7 @@
 /**
  * The default terminal backend, with a pluggable process factory.
  *
- * The editor registers the real process (just-bash on the workspace filesystem — see packages/vscode/terminal.ts)
+ * The editor registers the real process (just-bash on the workspace filesystem — see packages/editor/terminal.ts)
  * via setTerminalProcessFactory; this backend delegates every terminal to it. Both this and that factory run in
  * the workbench realm, so a module-level registration bridges them without the component importing UP into the
  * editor.

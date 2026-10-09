@@ -14,7 +14,7 @@ import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, 
 import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./vite";
 
 /**
- * The whole packages/vscode build, in ONE file — the five vite passes that used to be separate `-c` configs
+ * The whole packages/editor build, in ONE file — the five vite passes that used to be separate `-c` configs
  * (entry / lsp / eslint.engine / host / sw). `preBuild()` runs the four that emit into dist/ + docs/ (workbench
  * entry, lsp workers, eslint engine, sw); `hostBuild()` is the host site that serves the accumulated dist/ +
  * component under /__vscode__/. Order is load-bearing: the workbench entry empties dist/ FIRST, every later

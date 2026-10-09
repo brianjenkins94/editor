@@ -1,5 +1,5 @@
 /**
- * Instrumenting a workspace module for runtime evidence (packages/vscode/RUNTIME-EVIDENCE.md, the third slice): a
+ * Instrumenting a workspace module for runtime evidence (packages/editor/RUNTIME-EVIDENCE.md, the third slice): a
  * TypeScript `before` transformer for the dev server's compile. It sees the original source's syntax tree, so every
  * range it records is in the original file's lines and characters, and the source map the compile emits stays right.
  *
@@ -21,7 +21,7 @@
  * The module calls `__ev.<op>(site, …)`, where `__ev` is what the page runtime hands back for the module's file and
  * version (`globalThis.__evidence.module(file, version, sites)`); without a runtime, the prelude's stand-in does nothing.
  *
- * A recorded stop (packages/vscode/RUNNING.md: a breakpoint in a page): before the first statement starting on each of
+ * A recorded stop (packages/editor/RUNNING.md: a breakpoint in a page): before the first statement starting on each of
  * `stops`' lines, `__ev.p(range, scope, self, where)` — its range written in (not a site: the page keeps a version's
  * table, and a breakpoint changes no source), what's in scope read by a closure (`() => ({ a, b })`: the parameters of
  * the functions around it, its imports, and what's declared before it in the blocks around it, so nothing is read
