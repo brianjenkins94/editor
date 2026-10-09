@@ -23,7 +23,7 @@ import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import { effectiveDisposition, givenResult, isDangerous, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
-import type { Effect } from "@brianjenkins94/util/silo/evidence";
+import type { Effect } from "@brianjenkins94/run-contract";
 import type { Told, Traced } from "./live-values";
 import type { SiteSums } from "./site-sums";
 import type { VirtualRequest } from "./workspace-runtime";
@@ -121,7 +121,7 @@ let skipNext = false;
 /** A live run (LIVE-VALUES.md, *Live runs, as you type*): the file run again as typing pauses — it stops at nothing,
  *  asks nothing (what it can't make it skips), runs its timers at once, ends at its first idle or its step budget. */
 let liveRun = false;
-/** The run's effects (util/silo/evidence's `Effect`): each gated call it made, was denied, skipped or was given, by its
+/** The run's effects (the run contract's `Effect`): each gated call it made, was denied, skipped or was given, by its
  *  capability and resource — told the adapter as the run ends, for the run ledger (its envelope's `effects`). */
 const effects = new Map<string, Effect>();
 let tallying = false;

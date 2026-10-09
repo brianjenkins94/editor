@@ -21,6 +21,7 @@
     "@brianjenkins94/bablr": "file:../bablr",
     "@brianjenkins94/hub": "file:../hub",
     "@brianjenkins94/observability": "file:../observability",
+    "@brianjenkins94/run-contract": "file:../run-contract",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@stitches/core": "latest",
     "@typescript-eslint/parser": "^8.70.0",

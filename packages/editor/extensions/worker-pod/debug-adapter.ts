@@ -10,13 +10,13 @@
  * (a DebugAdapterServer needs a socket).
  */
 import type { Span } from "@brianjenkins94/util/logger";
-import type { Effect } from "@brianjenkins94/util/silo/evidence";
+import type { Events } from "@brianjenkins94/run-contract";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
 import { EMPTY_POLICY, given as givenBy, placesOf, problemOf, ruleMatches, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
-import { loadEffectivePolicy, persistOverride, recordEffect, recordResult, replaceRule } from "../capabilities/silo-store";
+import { loadEffectivePolicy, persistOverride, recordResult, replaceRule } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
 import type { Replay } from "./page-evidence";
@@ -111,8 +111,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private coverage: CoverageReport | undefined;
 	private coverageSent = false;
 	private readonly coverageWaiters = new Set<(report: CoverageReport) => void>();
-	/** The run's effects as the worker last told them (all of them so far), recorded for its envelope with the final coverage. */
-	private effects: Effect[] = [];
 	/** A `setValue` waiting on the worker's answer. */
 	private valueWaiter: ((answer: Extract<WorkerEvent, { "type": "valueSet" }>) => void) | undefined;
 
@@ -354,6 +352,12 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 	private event(event: string, body?: Dap): void {
 		this.send({ "type": "event", "event": event, "body": body ?? {} });
+	}
+
+	/** One of the run contract's events (@brianjenkins94/run-contract): what the editor reads from a run, whichever
+	 *  debugger's — debug-events.ts turns it into the margin's values, the run's evidence and its effects. */
+	private tell<Name extends keyof Events>(name: Name, body: Events[Name]): void {
+		this.event(name, body as unknown as Dap);
 	}
 
 	/** Open the span for a DAP action and return its traceContext to hand the worker (so its step continues this
@@ -702,23 +706,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private sendFinalCoverage(report: CoverageReport): void {
 		if (!this.coverageSent) {
 			this.coverageSent = true;
-			this.event("coverage", { ...report, "source": this.source } as unknown as Dap);
-
-			// And to core, as evidence of the run (evidence.ts) — its coverage and its observed sites — with the source that
-			// ran, which the file may no longer be.
-			const runId = this.session.configuration["__runId"];
-
-			if (typeof runId === "string") {
-				// Each of the program's files that ran, with its own source (MODULES.md).
-				const files = (report.files ?? []).map((other) => ({ "file": other.file, "source": other.source ?? "", "statements": other.statements, "sites": other.sites }));
-
-				podHub.publish("evidence.observed", { "runId": runId, "file": this.program, "source": this.source, "statements": report.statements, "sites": report.sites, ...files.length === 0 ? {} : { "files": files } });
-
-				// What it did to the world, for its envelope (evidence.ts asks for them as it writes it).
-				for (const effect of this.effects) {
-					recordEffect(runId, effect.capability, effect.resource, effect.how, effect.calls);
-				}
-			}
+			// (with the source that ran, which the file may no longer be: the run's evidence is of that)
+			this.tell("coverage", { ...report, "file": this.program, "source": this.source });
 		}
 	}
 
@@ -735,7 +724,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 	/** Resume the worker. An in-handler (atomic) stop is unblocked via the control word + notify; a top-level
 	 *  stop is driven by a control message the worker's loop is awaiting. */
-	/** The session's end, once, for core (live-values.ts): its values go — from every file it had them in — and how the
+	/** The session's end, once, for core (live-values.ts, through debug-events.ts): its values go — from every file it had them in — and how the
 	 *  run ended short, if it did, is marked on its line, in the file that's in (`endFile`, the entry by default). */
 	private tellEnded(end: RunEnd | undefined, endFile = this.program): void {
 		if (this.ended) {
@@ -752,12 +741,12 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		}
 
 		for (const [file, source] of sources) {
-			podHub.publish("values.ended", { "session": this.id, "file": file, "source": source, ...end === undefined || file !== endFile ? {} : { "end": end } });
+			this.tell("ended", { "file": file, "source": source, ...end === undefined || file !== endFile ? {} : { "end": end } });
 		}
 
 		// Ended short in a file it had no values from yet.
 		if (end !== undefined && !sources.has(endFile)) {
-			podHub.publish("values.ended", { "session": this.id, "file": endFile, "end": end });
+			this.tell("ended", { "file": endFile, "end": end });
 		}
 	}
 
@@ -802,8 +791,9 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.settle("stopped");
 				break;
 
+			// What the run did to the world so far (each telling has it all), for its envelope in the run ledger.
 			case "effects":
-				this.effects = message.effects;
+				this.tell("effects", { "effects": message.effects });
 				break;
 
 			case "coverage":
@@ -843,13 +833,13 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				void recordResult(message.capability, message.resource, message.value).catch(() => undefined);
 				break;
 
-			// The session's live values (LIVE-VALUES.md), on to core: the file they're of, what's new.
+			// The session's live values (LIVE-VALUES.md), on to core (through debug-events.ts): the file they're of, what's new.
 			case "values": {
 				// The text that ran, once a file: what core anchors the values' ranges in.
 				const file = message.file ?? this.program;
 				const source = message.file === undefined ? this.source : message.source ?? this.told.get(file) ?? "";
 
-				podHub.publish(`values.session.${this.id}`, { "file": file, ...this.told.has(file) ? {} : { "source": source }, ...message.batch });
+				this.tell("values", { "file": file, ...this.told.has(file) ? {} : { "source": source }, ...message.batch });
 				this.told.set(file, source);
 				break;
 			}

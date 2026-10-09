@@ -343,7 +343,7 @@ async function loadObserved(root: vscode.Uri, user: string): Promise<ObservedSur
 // resource once per way it went, with how many calls went that way.
 const runEffects = new Map<string, Map<string, Effect>>();
 
-/** A gated call `runId` made (a debug run's, reported by its adapter; a preview's, by the gate), and how it went. */
+/** A gated call `runId` made (a preview's, as its gate decides each), and how it went. */
 export function recordEffect(runId: string, capability: string, resource: string, how: Effect["how"], calls = 1): void {
 	let effects = runEffects.get(runId);
 
@@ -359,6 +359,16 @@ export function recordEffect(runId: string, capability: string, resource: string
 		effects.set(key, { "capability": capability, "resource": resource, "how": how, "calls": calls });
 	} else {
 		known.calls += calls;
+	}
+}
+
+/** Every gated call `runId` made so far, as its debugger tells them (the run contract's `effects` event: each telling
+ *  has them all), in place of what it told before. */
+export function setEffects(runId: string, effects: readonly Effect[]): void {
+	runEffects.delete(runId);
+
+	for (const effect of effects) {
+		recordEffect(runId, effect.capability, effect.resource, effect.how, effect.calls);
 	}
 }
 

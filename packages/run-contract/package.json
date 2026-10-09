@@ -1,0 +1,13 @@
+{
+  "name": "@brianjenkins94/run-contract",
+  "version": "0.0.0",
+  "description": "What brianjenkins94/editor reads from a run: the custom debug events (values, coverage, effects, ended) a debugger sends — tsval's, and any interpreter plugged in as run.debugger.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

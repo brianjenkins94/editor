@@ -9,10 +9,13 @@
  * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at
  * launch.
  */
-import type { Effect } from "@brianjenkins94/util/silo/evidence";
+import type { CoverageEvent, Effect } from "@brianjenkins94/run-contract";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import type { LiveBatch } from "./live-values";
 import type { Replay } from "./page-evidence";
+
+// The run contract's own (what a debugger tells the editor), as tsval's worker and adapter speak it too.
+export type { RunEnd, SiteObservation, StatementCoverage, StatementProfile } from "@brianjenkins94/run-contract";
 
 export const controlSubject = (session: string): string => "debug.session." + session + ".control";
 export const eventSubject = (session: string): string => "debug.session." + session + ".event";
@@ -80,10 +83,6 @@ export interface Snapshot {
 /** `file`: the program file the call is in, with its text (`source`), when it isn't the entry. */
 export interface CapabilityAsk { "line": number; "at"?: [number, number]; "capability": string; "callee": string; "resource": string; "resolved": boolean; "dangerous": boolean; "file"?: string; "source"?: string }
 
-/** How a run ended short, for the notes margin's strip: the line (0-based) it crashed on, with the error, or the one it
- *  was stopped at. A run that finished has none. */
-export interface RunEnd { "kind": "crashed" | "stopped"; "line": number; "at"?: [number, number]; "message"?: string }
-
 /** The choices at a capability stop, as the preview's prompt words them — and `rule`, a rule made there (the margin's
  *  rule editor) saved in my policy, deciding the call as it does (or giving its result); `give-once`, a result given the
  *  call instead of it, just this once; `allow-run`, calls like it allowed until the run ends (kept nowhere). */
@@ -115,38 +114,7 @@ export type WorkerEvent =
 	/** Out of work, serving: the session is idle until a request (or a timer) comes. */
 	| { "type": "serving"; "ports": number[] };
 
-/** One statement's coverage: its range (0-based line and character, as VS Code's Position) and how often it ran. */
-export interface StatementCoverage {
-	"start": [number, number];
-	"end": [number, number];
-	"count": number;
-	/** What anchors it on the code (offsets in the text that ran): its head for a statement with a body — an `if`'s
-	 *  condition, a function's name — whose span outlives a reformat inside the body (a body's span changes with any
-	 *  token in it, a semicolon dropped say); the statement itself otherwise. */
-	"anchor"?: [number, number];
-}
-
-/** A top-level statement's share of the run (tsval's profile) — a function's or class's declaration too: its range and
- *  anchor (as a statement's coverage has), the statements run in its code, the virtual time waited before its code ran
- *  again, and the statement clock's reading when it first ran. */
-export interface StatementProfile { "start": [number, number]; "anchor": [number, number]; "statements": number; "waited": number; "first": number }
-
-/** What went through one observed site (tsval's `observe`; RUNTIME-EVIDENCE.md, the second slice), over a run: its
- *  kind and its node's range, then — for a value site — how often a value came through, how often it was nullish, how
- *  often each type tag, and a few distinct primitives (kept on this machine, never committed); for a branch, how often
- *  each arm ran. */
-export interface SiteObservation {
-	"site": "optional" | "nullish" | "branch" | "parameter" | "return";
-	"start": [number, number];
-	"end": [number, number];
-	"seen"?: number;
-	"nullish"?: number;
-	"tags"?: Record<string, number>;
-	"samples"?: (string | number | boolean)[];
-	"arms"?: number[];
-}
-
-/** Every statement tsval can run in the program, with how often each ran — 0 for the ones that never did — and every
- *  observed site that ran: the entry's, and (`files`) each other program file's that ran, with its source. The body of the adapter's `getCoverage` reply and of its `coverage` event. */
-export interface CoverageReport { "file": string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "source"?: string; "profile"?: StatementProfile[]; "files"?: CoverageReport[] }
+/** Coverage, and the observed sites, as the run contract has them (@brianjenkins94/run-contract): the body of the
+ *  adapter's `getCoverage` reply and of its `coverage` event. */
+export type CoverageReport = CoverageEvent;
 

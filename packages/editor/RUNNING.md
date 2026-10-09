@@ -125,8 +125,9 @@ interpreter built from editor-contrib's starting point (`contrib/`, kept in bria
 URL (contributed-extensions.ts): listed by the site's own `extensions.json` (editor-contrib's site is this editor's
 package, `packages/editor@latest.tgz` on its site — the built site itself — with the extension added), or a page's `?extension=` while it's developed. Its
 manifest's `configurationDefaults` makes it `run.debugger`. The editor's ▷ and live runs then start that; its sessions are runs like
-tsval's (worker-pod's contributed-debuggers.ts asks core for each one's id), and the custom events it sends — `values`,
-`coverage` — are the margin's and the evidence's, as tsval's are. Stepping, breakpoints and the Variables view are the
+tsval's (worker-pod's debug-events.ts asks core for each one's id), and the custom events it sends — the run contract's
+(packages/run-contract: `values`, `coverage`, `effects`, `ended`) — are the margin's, the evidence's and the run ledger's,
+read the one way tsval's are: tsval tells the editor through the same contract. Stepping, breakpoints and the Variables view are the
 Debug Adapter Protocol's. What stays tsval's: a terminal's `node` (it's Node's semantics), capability stops, replay and
 orderings. test/contrib.mjs runs contrib/ in a real editor, so a change here that breaks it fails there.
 

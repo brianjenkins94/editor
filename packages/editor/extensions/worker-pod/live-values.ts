@@ -5,30 +5,10 @@
  *
  * Kept for the session only, in the worker's memory; nothing is written anywhere.
  */
+import type { LiveBatch, LiveCall, LiveValue } from "@brianjenkins94/run-contract";
 
-/** One value on a line: a name bound (`low`), returned (`return`) or chosen (`if`, 0 its then), in a call, in the turn
- *  of each loop around it there (outermost first). Lines are 0-based, as VS Code's. */
-export interface LiveValue {
-	"line": number;
-	"name": string;
-	"value": string;
-	/** `set`: a value set by hand at a stop (the margin, or the Variables view), not by the program. `input`: what the
-	 *  program read from outside — process.argv, as a command line — on the first line that reads it. `skip`: a call that
-	 *  wasn't made (skipped at its stop, or by a live run), its capability and resource the value. */
-	"kind": "bind" | "return" | "branch" | "set" | "input" | "skip";
-	"call": number;
-	"turns": number[];
-	/** The node's range in the text that ran (offsets): what the margin anchors it by, so it follows its code through a
-	 *  reformat (a BABLR span) rather than staying on a line number. */
-	"at"?: [number, number];
-}
-
-/** A call: its function's name and the line it's declared on (0: the program's top level is call 0, not listed), and
- *  the function's range in the text that ran. */
-export interface LiveCall { "id": number; "name": string; "line": number; "at"?: [number, number] }
-
-/** What's new since the last batch, and how many values the bounds dropped so far. */
-export interface LiveBatch { "values": LiveValue[]; "calls": LiveCall[]; "dropped": number }
+// A value, a call and a batch are the run contract's (@brianjenkins94/run-contract): what any debugger tells the margin.
+export type { LiveBatch, LiveCall, LiveValue } from "@brianjenkins94/run-contract";
 
 /** What one trace event says, with its line and its call's function already read off its nodes. */
 export interface Traced extends LiveValue {
