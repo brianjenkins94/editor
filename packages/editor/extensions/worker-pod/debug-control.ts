@@ -14,7 +14,7 @@
  *   session `debug.session.<id>.state`             → where it is now
  *   session `debug.session.<id>.stop`              → ends it
  *   session `debug.session.<id>.decide` { choice, rule? } → at a capability stop: allow, skip or deny — each for this call, this run or always (allow-once / allow-run / allow-always, skip / skip-run / skip-always, deny / deny-run / deny-always), or
- *                                                     rule (saved in my policy, deciding it), then resumes
+ *                                                     rule (saved in my policy, deciding it), then resumes — served for every debugger's sessions (capability-stops.ts)
  *   session `debug.session.<id>.setValue` { name, value } → at a stop: a variable set to a literal; the run goes on with it
  *   session `debug.session.<id>.pace` { pace }      → what a timer's wait costs from here on: real, or none (Skip Waits)
  *   session `debug.session.<id>.stdin` { data }     → input for the program's process.stdin (as the Debug Console sends it)
@@ -30,13 +30,12 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { given, placesOf, type Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 
-import type { CapabilityChoice, StepAction } from "./debug-protocol";
+import type { StepAction } from "./debug-protocol";
 import { loadEffectivePolicy, loadPolicyFiles, movePlace, replaceRule } from "../capabilities/silo-store";
 import { appRootOf, runApp, runDebugger } from "./launch";
 
 export type DebugAction = StepAction;
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
-const CHOICES = new Set<string>(["allow-once", "allow-run", "allow-always", "skip", "skip-run", "skip-always", "deny", "deny-run", "deny-always", "rule", "give-once"] satisfies CapabilityChoice[]);
 
 /** `starting` until the first stop; `idle` = waiting — on a request, its stdin or a timer — with no stop to step from (or,
  *  for an app's file, the app running in its page). */
@@ -77,8 +76,8 @@ export interface ControllableSession {
 	/** Resolve once the session has left `starting`/`running` (now, if it already has). */
 	"settled": (signal: AbortSignal) => Promise<DebugOutcome>;
 	"stop": () => Promise<DebugOutcome>;
-	/** At a capability stop, decide it and resume; resolve on the next stop, idle or end. */
-	"decide": (choice: CapabilityChoice, signal: AbortSignal, rule?: Rule, give?: unknown) => Promise<DebugOutcome>;
+	/** Resolve on the next stop, idle or end (a capability stop's answer resumes it: capability-stops.ts). */
+	"next": (signal: AbortSignal) => Promise<DebugOutcome>;
 	/** At a stop, set a variable in scope to a literal; resolve with it as the Variables view shows it. */
 	"setValue": (name: string, value: string) => Promise<string>;
 	/** What a timer's wait costs from here on: its real delay, or none (Skip Waits). */
@@ -88,6 +87,11 @@ export interface ControllableSession {
 }
 
 const sessions = new Map<string, ControllableSession>();
+
+/** The tsval session `id`, while it runs. */
+export function controllable(id: string): ControllableSession | undefined {
+	return sessions.get(id);
+}
 /** `debug.start` calls waiting for the session their launch config marks. */
 const pendingLaunches = new Map<string, (session: ControllableSession) => void>();
 
@@ -106,15 +110,6 @@ export function registerSession(hub: Hub, session: ControllableSession): () => v
 		}),
 		serve(hub, prefix + "state", () => session.outcome()),
 		serve(hub, prefix + "stop", () => session.stop()),
-		serve(hub, prefix + "decide", (args, { signal }) => {
-			const { choice = "", rule, give } = (args ?? {}) as { "choice"?: string; "rule"?: Rule; "give"?: unknown };
-
-			if (!CHOICES.has(choice)) {
-				throw new Error(`unknown choice "${choice}" — one of ${[...CHOICES].join(", ")}`);
-			}
-
-			return session.decide(choice as CapabilityChoice, signal, rule, give);
-		}),
 		serve(hub, prefix + "setValue", (args) => {
 			const { name, value } = (args ?? {}) as { "name"?: unknown; "value"?: unknown };
 

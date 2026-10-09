@@ -7,15 +7,20 @@
  * - `ended`: a file's values go, and how the run ended short is marked (`values.ended`) — for a debugger that tells none,
  *   the program's, as its session ends;
  * - `coverage`: the run's evidence (`evidence.observed`, evidence.ts — coverage.ts reads the event itself);
- * - `effects`: what the run did to the world, kept for its envelope in the run ledger (silo-store's setEffects).
+ * - `effects`: what the run did to the world, kept for its envelope in the run ledger (silo-store's setEffects);
+ * - `ask`: a capability stop's question, on its line — answered as capability-stops.ts says;
+ * - `recorded`: what an allowed call returned, for a rule to give back (silo-store's recordResult).
+ *
+ * Every debugger is given the policy its calls are decided by as it launches (`__policy`).
  *
  * Another extension's debugger is also made a run in core's registry here (`runs.begin`, as tsval's launch asks for its
  * own; its end the run's, extension.ts's `node.exit`, as any session's).
  */
-import type { CoverageEvent, EffectsEvent, EndedEvent, ValuesEvent } from "@brianjenkins94/run-contract";
+import type { AskEvent, CoverageEvent, EffectsEvent, EndedEvent, RecordedEvent, ValuesEvent } from "@brianjenkins94/run-contract";
 import { createRpcClient } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
-import { setEffects } from "../capabilities/silo-store";
+import { recordResult, setEffects } from "../capabilities/silo-store";
+import { asked, policyFor } from "./capability-stops";
 import { podHub } from "./pod";
 
 /** This extension's own debuggers, which make their runs themselves: tsval (its launch), and a production run (a
@@ -30,7 +35,10 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		// A run in the running list, known by one id from start to end — but a live run, which isn't one (live-run.ts).
 		vscode.debug.registerDebugConfigurationProvider("*", {
-			"resolveDebugConfigurationWithSubstitutedVariables": async (_folder, config) => {
+			"resolveDebugConfigurationWithSubstitutedVariables": async (_folder, given) => {
+				// Every debugger decides its gated calls by the editor's policy (the run contract's `__policy`).
+				const config = { ...given, "__policy": await policyFor() };
+
 				if (OWN.has(config.type) || typeof config["__runId"] === "string" || config["__live"] === true) {
 					return config;
 				}
@@ -78,6 +86,17 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 					}
 
 					break;
+
+				case "ask":
+					asked(podHub, session, body as AskEvent);
+					break;
+
+				case "recorded": {
+					const { capability, resource, value } = body as RecordedEvent;
+
+					void recordResult(capability, resource, value).catch(() => undefined);
+					break;
+				}
 
 				default:
 					break;

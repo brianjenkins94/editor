@@ -10,17 +10,17 @@
  * (a DebugAdapterServer needs a socket).
  */
 import type { Span } from "@brianjenkins94/util/logger";
-import type { Events } from "@brianjenkins94/run-contract";
+import type { DecideRequest, Events } from "@brianjenkins94/run-contract";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
-import { EMPTY_POLICY, given as givenBy, placesOf, problemOf, ruleMatches, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
-import { loadEffectivePolicy, persistOverride, recordResult, replaceRule } from "../capabilities/silo-store";
+import { EMPTY_POLICY, given as givenBy, placesOf, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
+import { loadEffectivePolicy } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
 import type { Replay } from "./page-evidence";
-import type { CapabilityAsk, CapabilityChoice, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
+import type { CapabilityAsk, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
 import { controlSubject, eventSubject } from "./debug-protocol";
 import { appRootOf, runApp } from "./launch";
 import { podHub, workspace } from "./pod";
@@ -91,12 +91,11 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	// The program runs only once BOTH the source is loaded (launch) and configuration is done — so breakpoints
 	// set between the `initialized` event and `configurationDone` are registered before the first step.
 	private source = "";
-	// Effective capability policy snapshot (.silo base + my overrides), read at launch and handed to the worker so
-	// it pre-arms capability breakpoints (a gated call hard-stops at its line). Empty when there's no policy — then
-	// every undecided dangerous call breaks (firewall default).
+	// The capability policy the run decides its calls by — the editor's, given at launch (`__policy`, the run contract)
+	// and with each answer that changes it (`decide`) — handed to the worker so it pre-arms capability breakpoints (a
+	// gated call hard-stops at its line). Empty when there's none — then every undecided dangerous call breaks
+	// (firewall default).
 	private policy: Policy = EMPTY_POLICY;
-	/** What *Allow this run* allowed: rules ahead of the policy until the session ends, written nowhere. */
-	private runRules: Rule[] = [];
 	/** The rules placed in this program's code, found in the text that runs (`placeRules`). */
 	private hooks: SetHook[] = [];
 	private sourceReady = false;
@@ -157,90 +156,22 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 		const next = this.nextSettle(signal);
 
-		this.output = [];
-		// The action didn't come from VS Code's UI, so tell it (and the toolbar mirror) the session is running again.
-		this.event("continued", { "threadId": 1, "allThreadsContinued": true });
-		this.resume(action);
+		this.goOn(action);
 
 		return next;
 	}
 
-	/** Decide the capability stop it's at, and resume: "Allow always" writes my policy override (as the preview's prompt
-	 *  does) and hands the worker the policy now in effect; "Deny" fails the call; "Skip" doesn't make it (the run goes on
-	 *  with the stand-in's result); each for this call, this run (every call of the capability) or always (my override);
-	 *  "Allow once" just lets it run; a
-	 *  `rule` (made in the margin's rule editor) is saved in my policy as "Allow always" is, and decides the call as it
-	 *  does — refused, unsaved, when it doesn't cover this call or doesn't allow or deny it. */
-	public async decide(choice: CapabilityChoice, signal: AbortSignal, rule?: Rule, give?: unknown): Promise<DebugOutcome> {
-		const ask = this.ask;
+	/** Resume with `action`, from somewhere other than VS Code's UI (an agent, an answer at a capability stop). */
+	private goOn(action: DebugAction): void {
+		this.output = [];
+		// The action didn't come from VS Code's UI, so tell it (and the toolbar mirror) the session is running again.
+		this.event("continued", { "threadId": 1, "allThreadsContinued": true });
+		this.resume(action);
+	}
 
-		if (this.state !== "stopped" || ask === undefined) {
-			throw new Error("not stopped at a capability call");
-		}
-
-		if (choice === "rule") {
-			// The worker's own subject for the call: an unknown resource is "".
-			const subject = { "capability": ask.capability, "resource": ask.resolved ? ask.resource : "" };
-			const decision = rule?.then?.find(({ action_id }) => ["allow", "deny", "skip", "ask"].includes(action_id))?.action_id;
-
-			if (rule === undefined || problemOf(rule) !== undefined || !ruleMatches(rule, subject)) {
-				throw new Error(rule === undefined ? "no rule" : problemOf(rule) ?? "the rule doesn't cover this call");
-			}
-
-			// A rule giving the call's result decides it too: the call isn't made, the debugger's stand-in returns it.
-			const gives = rule.then.some((action) => action.action_id === "give" && action.target_id === "result");
-
-			if (decision !== "allow" && decision !== "deny" && decision !== "skip" && !gives) {
-				throw new Error("the rule doesn't allow, deny, skip or give this call");
-			}
-
-			await replaceRule(undefined, rule);
-			this.policy = await this.loadPolicy();
-			this.control({ "type": "decide", "policy": this.policy, "deny": !gives && decision === "deny", "skip": !gives && decision === "skip" });
-		} else if (choice === "give-once") {
-			this.control({ "type": "decide", "give": give ?? null });
-		} else if (choice === "allow-run" || choice === "skip-run" || choice === "deny-run") {
-			// Every call of the capability, until the run ends — whatever it reaches (a loop's calls reach a different one
-			// each time round) — allowed, skipped or denied, this one with them.
-			const action = choice.slice(0, choice.indexOf("-"));
-
-			this.runRules.push({ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": ask.capability }] }, "then": [{ "action_id": action }] } as Rule);
-			this.policy = await this.loadPolicy();
-			this.control({ "type": "decide", "policy": this.policy, "skip": action === "skip", "deny": action === "deny" });
-		} else if (choice === "allow-always") {
-			if (!ask.resolved) {
-				throw new Error(`"Allow always" needs the resource the call reaches, and ${ask.resource} isn't known before it runs`);
-			}
-
-			await persistOverride(ask.capability, ask.resource, "allow");
-			this.policy = await this.loadPolicy();
-			this.control({ "type": "decide", "policy": this.policy });
-		} else if (choice === "deny") {
-			this.control({ "type": "decide", "deny": true });
-		} else if (choice === "deny-always") {
-			if (!ask.resolved) {
-				throw new Error(`"Deny always" needs the resource the call reaches, and ${ask.resource} isn't known before it runs`);
-			}
-
-			// My policy override denies it from now on: every run's call fails there (EACCES), without stopping.
-			await persistOverride(ask.capability, ask.resource, "deny");
-			this.policy = await this.loadPolicy();
-			this.control({ "type": "decide", "policy": this.policy, "deny": true });
-		} else if (choice === "skip") {
-			// Not made: the run goes on with the debugger's stand-in's result, the line saying it was skipped.
-			this.control({ "type": "decide", "skip": true });
-		} else if (choice === "skip-always") {
-			if (!ask.resolved) {
-				throw new Error(`"Skip always" needs the resource the call reaches, and ${ask.resource} isn't known before it runs`);
-			}
-
-			// My policy override skips it from now on (util/silo's `skip`): every run goes past it, never stopping here.
-			await persistOverride(ask.capability, ask.resource, "skip");
-			this.policy = await this.loadPolicy();
-			this.control({ "type": "decide", "policy": this.policy, "skip": true });
-		}
-
-		return this.act("continue", signal);
+	/** Resolve on the next stop, idle or end — or `signal.reason` if the caller gives up first. */
+	public next(signal: AbortSignal): Promise<DebugOutcome> {
+		return this.nextSettle(signal);
 	}
 
 	/** At a stop, set `name` (a variable in scope there) to `value` (a literal): the run goes on with it, and the margin
@@ -434,12 +365,33 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.eventLoop = loopStartOf(args["eventLoop"]);
 				this.followTerminal(args["__startedBy"] === "terminal" && typeof args["__runId"] === "string" ? args["__runId"] : undefined);
 				this.noDebug = args["noDebug"] === true;
+				this.policy = typeof args["__policy"] === "object" && args["__policy"] !== null ? args["__policy"] as Policy : EMPTY_POLICY;
 				// A live run (LIVE-VALUES.md): the file run again as typing pauses — it stops at nothing.
 				this.live = args["__live"] === true;
 				this.lines = this.noDebug || this.live ? [] : this.breakpointLines.get(this.program) ?? [];
 				this.respond(request);
 				void this.loadSource();
 				break;
+
+			// At a capability stop, the editor's answer (the run contract's `decide`, capability-stops.ts): how the call goes,
+			// and the policy from now on when the answer changed it. Then the run goes on.
+			case "decide": {
+				if (this.state !== "stopped" || this.ask === undefined) {
+					this.fail(request, "not stopped at a capability call");
+					break;
+				}
+
+				const { verdict, value, policy } = args as unknown as DecideRequest;
+
+				if (policy !== undefined) {
+					this.policy = policy;
+				}
+
+				this.control({ "type": "decide", ...policy === undefined ? {} : { "policy": policy }, "deny": verdict === "deny", "skip": verdict === "skip", ...verdict === "give" ? { "give": value ?? null } : {} });
+				this.respond(request);
+				this.goOn("continue");
+				break;
+			}
 
 			case "threads":
 				this.respond(request, { "threads": [{ "id": 1, "name": "tsval" }] });
@@ -558,7 +510,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		try {
 			// A replay runs the text that ran in the page (its recorded version), whatever the file holds now.
 			this.source = this.replay?.source ?? (await vscode.workspace.openTextDocument(vscode.Uri.file(this.program))).getText();
-			this.policy = await this.loadPolicy();
 			this.hooks = await this.placeRules();
 			this.sourceReady = true;
 			this.maybeStart();
@@ -566,22 +517,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			this.event("output", { "category": "stderr", "output": `Failed to read ${this.program}: ${String(error)}\n` });
 			this.event("terminated");
 		}
-	}
-
-	/** The effective `.silo/` policy — base `policy.json` + my `<user>.policy.json` overrides, exactly as the
-	 *  runtime enforcer sees it — as the capability-breakpoint set, so the tsval debugger pre-arms the same rules
-	 *  that would actually gate a production run. Empty policy if absent/malformed/no workspace. */
-	private async loadPolicy(): Promise<Policy> {
-		let policy: Policy;
-
-		try {
-			policy = await loadEffectivePolicy();
-		} catch (error) {
-			policy = EMPTY_POLICY;
-		}
-
-		// What this run was allowed (Allow this run), ahead of everything.
-		return this.runRules.length === 0 ? policy : { ...policy, "rules": [...this.runRules, ...policy.rules] };
 	}
 
 	/** Where the rules placed in this program's code are now (RULES.md: *at*, a span reference): each place found again
@@ -753,11 +688,9 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private resume(kind: StepAction): void {
 		const trace = this.startAction(kind);
 
-		// Resumed, however (a choice, VS Code's toolbar), the question's been answered.
-		if (this.ask !== undefined) {
-			podHub.publish("capability.ask", { "session": this.id, "file": this.ask.file ?? this.program });
-			this.ask = undefined;
-		}
+		// Resumed, however (an answer, VS Code's toolbar), the question's been answered (capability-stops.ts takes it off
+		// the margin).
+		this.ask = undefined;
 
 		this.state = "running";
 
@@ -780,11 +713,13 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.stopReason = message.reason;
 				this.ask = message.ask;
 
-				// A capability stop asks on its line, in the notes margin (core: live-values.ts) — of the file it's in.
+				// A capability stop asks on its line (the run contract's `ask`: the margin shows it — capability-stops.ts) — in
+				// the file it's in.
 				if (message.ask !== undefined) {
 					const { file, source, ...ask } = message.ask;
+					const text = file === undefined ? this.source : source;
 
-					podHub.publish("capability.ask", { "session": this.id, "file": file ?? this.program, "source": file === undefined ? this.source : source, "ask": ask });
+					this.tell("ask", { ...ask, "file": file ?? this.program, ...text === undefined ? {} : { "source": text } });
 				}
 
 				this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
@@ -830,7 +765,7 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 			// What a run's allowed call returned, recorded (RULES.md, slice 2): a rule can give it back.
 			case "recorded":
-				void recordResult(message.capability, message.resource, message.value).catch(() => undefined);
+				this.tell("recorded", { "capability": message.capability, "resource": message.resource, "value": message.value });
 				break;
 
 			// The session's live values (LIVE-VALUES.md), on to core (through debug-events.ts): the file they're of, what's new.

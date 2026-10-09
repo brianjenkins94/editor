@@ -21,6 +21,7 @@ import { identifyWorker } from "../../architecture-model";
 import { storeNode, ZENFS_NODE } from "../../architecture-zenfs";
 import type { CommandTotals } from "../command-tap";
 import { ARCH_COMMANDS } from "../command-tap";
+import { registerCapabilityStops } from "./capability-stops";
 import { registerDebugEvents } from "./debug-events";
 import { registerTsvalDebug, takeExitCode } from "./debug-adapter";
 import { runProgram } from "./debug-control";
@@ -188,6 +189,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// What every debugger's runs tell core — tsval's, and another extension's (`run.debugger`: an interpreter plugged in
 	// from editor-contrib) — the run contract's events, read the one way; and another's sessions made runs (debug-events.ts).
 	registerDebugEvents(context);
+	// Every debugger's capability stops: the question in the margin, the answer back to the run (capability-stops.ts).
+	registerCapabilityStops(context, podHub);
 	// What there is to run, as tasks run by core's shell (tasks.ts); and the shell's run picker, from them (launch.ts).
 	registerTasks(context);
 	registerLaunch(context);

@@ -1,7 +1,7 @@
 {
   "name": "@brianjenkins94/run-contract",
   "version": "0.0.0",
-  "description": "What brianjenkins94/editor reads from a run: the custom debug events (values, coverage, effects, ended) a debugger sends — tsval's, and any interpreter plugged in as run.debugger.",
+  "description": "What brianjenkins94/editor reads from a run, and asks of it: the custom debug events a debugger sends (values, coverage, effects, ended, ask, recorded) and the requests it answers (decide, getCoverage) — tsval's, and any interpreter plugged in as run.debugger.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
@@ -9,5 +9,11 @@
   "license": "MIT",
   "scripts": {
     "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz"
+  },
+  "peerDependencies": {
+    "@brianjenkins94/util": "*"
   }
 }

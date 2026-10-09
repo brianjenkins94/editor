@@ -40,6 +40,12 @@ the same events its tsval debugger sends:
 | `coverage` | marks the lines that ran, and keeps it as the run's evidence |
 | `effects` | keeps what the run did to the world — each file read or written, request, command — in the run ledger |
 | `ended` | clears a file's values, and marks the line the run crashed or was stopped on |
+| `ask` | asks about a gated call on its line (send it as you stop there): the answer comes back as a `decide` request |
+| `recorded` | keeps what an allowed call returned, so a rule can give it back in its place |
+
+A run that makes gated calls — writes files, makes requests, runs commands — decides each by the policy the editor gives
+it as `__policy` in its launch configuration (read it with `@brianjenkins94/util/silo/policy`), and asks about the ones it
+says to ask about.
 
 Positions are in the text that ran: 0-based lines and `[start, end)` offsets. The editor maps offsets to its BABLR span
 ids, so what you report follows its code through edits. Each run is listed in the editor's Running view.

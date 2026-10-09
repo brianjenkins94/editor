@@ -8,10 +8,20 @@
  * - `effects`: what the run did to the world — each gated call, and how it went — kept in its envelope in the run ledger
  *   (`.silo/runs/`);
  * - `ended`: the run's values go from a file's margin, and how it ended short, if it did, is marked on its line. A
- *   debugger that sends none has its values cleared from the program's margin as its session ends.
+ *   debugger that sends none has its values cleared from the program's margin as its session ends;
+ * - `ask`: a gated call the policy says to ask about — sent as the debugger stops there (a `stopped` event, reason
+ *   `capability`): the question shows on its line, and the answer comes back as a `decide` request;
+ * - `recorded`: what an allowed call returned for real, kept so a rule can give it back in its place later.
  *
- * While stopped, the editor may ask for coverage so far with a `getCoverage` custom request: answer with a
- * `CoverageEvent`, or fail it if you don't keep one.
+ * The editor's requests (custom requests, `Requests`):
+ *
+ * - `decide`, at a capability stop: how the call goes — and, when the answer changed it (a rule saved, a call allowed
+ *   for the rest of the run), the policy in effect from now on. Apply it to the call, then continue;
+ * - `getCoverage`, while stopped: answer with a `CoverageEvent`, or fail it if you don't keep one.
+ *
+ * Gating: a debugger whose runs make gated calls (files written, requests, commands) decides each by the policy the
+ * editor gives it — `__policy` in its launch configuration, a silo policy (@brianjenkins94/util/silo/policy, whose
+ * `effectiveDisposition` and `givenResult` read it) — and asks about what it says to ask.
  *
  * Every position is in the text that ran: 0-based lines and characters, and `[start, end)` offsets that the editor maps
  * to its BABLR span ids, so a value or a count follows its code through edits and reformats.
@@ -19,6 +29,7 @@
  * A live run — the editor runs the file again whenever typing pauses — has `__live: true` in its launch configuration.
  * It must not have effects (writes, requests, commands): skip them. A run the editor records has its id as `__runId`.
  */
+import type { Policy } from "@brianjenkins94/util/silo/policy";
 
 /** One value on a line: a name bound (`low`), returned (`return`) or chosen (`if`, 0 its then), in a call, in the turn
  *  of each loop around it there (outermost first). */
@@ -95,10 +106,32 @@ export interface RunEnd { "kind": "crashed" | "stopped"; "line": number; "at"?: 
 /** The `ended` event, once a file the run told values of (or ended short in): its values go, and its end is marked. */
 export interface EndedEvent { "file": string; "source"?: string; "end"?: RunEnd }
 
+/** The `ask` event: a gated call stopped at — on `line` (at `at`) of `file`, whose text that ran is `source` — the
+ *  capability, the callee as written, and the resource it would reach (`resolved`: known from the run's own values,
+ *  not just the argument as written); `dangerous` when the capability is (a write, a command). */
+export interface AskEvent { "file": string; "source"?: string; "line": number; "at"?: [number, number]; "capability": string; "callee": string; "resource": string; "resolved": boolean; "dangerous": boolean }
+
+/** The `recorded` event: what an allowed call returned, for a rule to give back. */
+export interface RecordedEvent { "capability": string; "resource": string; "value": unknown }
+
 /** Every event, by its name. */
 export interface Events {
 	"values": ValuesEvent;
 	"coverage": CoverageEvent;
 	"effects": EffectsEvent;
 	"ended": EndedEvent;
+	"ask": AskEvent;
+	"recorded": RecordedEvent;
+}
+
+/** The `decide` request: the call made (`allow`), failed as a refused call does (`deny`), not made — the program going on
+ *  as if it had done nothing (`skip`) — or `give`n `value` as its result in its place. `policy`, when the answer changed
+ *  it, is the run's from now on: its rules come first (one covering this call decides it — a rule giving its result
+ *  gives it), the verdict after. */
+export interface DecideRequest { "verdict": "allow" | "deny" | "skip" | "give"; "value"?: unknown; "policy"?: Policy }
+
+/** Every request the editor makes of a debugger, by its name. */
+export interface Requests {
+	"decide": DecideRequest;
+	"getCoverage": Record<string, never>;
 }

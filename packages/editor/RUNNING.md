@@ -128,8 +128,9 @@ manifest's `configurationDefaults` makes it `run.debugger`. The editor's ▷ and
 tsval's (worker-pod's debug-events.ts asks core for each one's id), and the custom events it sends — the run contract's
 (packages/run-contract: `values`, `coverage`, `effects`, `ended`) — are the margin's, the evidence's and the run ledger's,
 read the one way tsval's are: tsval tells the editor through the same contract. Stepping, breakpoints and the Variables view are the
-Debug Adapter Protocol's. What stays tsval's: a terminal's `node` (it's Node's semantics), capability stops, replay and
-orderings. test/contrib.mjs runs contrib/ in a real editor, so a change here that breaks it fails there.
+Debug Adapter Protocol's. Capability stops are the contract's too: every debugger is given the policy (`__policy`), asks
+about a gated call with `ask`, and is answered with a `decide` request (capability-stops.ts says what each answer means).
+What stays tsval's: a terminal's `node` (it's Node's semantics), replay and orderings. test/contrib.mjs runs contrib/ in a real editor, so a change here that breaks it fails there.
 
 ## Entry points, after
 
