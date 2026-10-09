@@ -1,8 +1,8 @@
 // The interpreter: a debug adapter the editor starts for every run of a file — the ▷ button, the terminal, and live
 // runs as you type all go through `vscode.debug.startDebugging`. It speaks the Debug Adapter Protocol, so breakpoints,
 // stepping, the Variables view and the Debug Console are VS Code's own. What the editor draws on top of the code —
-// values in the margin, coverage — comes from the custom events in contract.ts.
-import type { Events } from "./contract";
+// values in the margin, coverage — comes from the run contract's custom events (@brianjenkins94/run-contract).
+import type { Events } from "@brianjenkins94/run-contract";
 import * as vscode from "vscode";
 
 interface Message { "seq": number; "type": string; "command"?: string; "arguments"?: Record<string, unknown> }

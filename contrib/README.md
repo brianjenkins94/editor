@@ -31,12 +31,15 @@ rename its `contrib` debug type, and change it there too.
 
 A debug adapter (the Debug Adapter Protocol, inline in the extension). The editor runs every file as a debug session,
 so breakpoints, stepping, the Variables view and the Debug Console come with the protocol. What the editor draws over
-the code comes from the custom events in `src/contract.ts`:
+the code comes from the custom events of the run contract — `@brianjenkins94/run-contract`, the editor's own package,
+the same events its tsval debugger sends:
 
 | Event | What the editor does with it |
 | --- | --- |
 | `values` | shows each value in the margin beside its code |
 | `coverage` | marks the lines that ran, and keeps it as the run's evidence |
+| `effects` | keeps what the run did to the world — each file read or written, request, command — in the run ledger |
+| `ended` | clears a file's values, and marks the line the run crashed or was stopped on |
 
 Positions are in the text that ran: 0-based lines and `[start, end)` offsets. The editor maps offsets to its BABLR span
 ids, so what you report follows its code through edits. Each run is listed in the editor's Running view.
