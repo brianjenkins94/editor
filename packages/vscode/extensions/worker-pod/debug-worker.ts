@@ -23,6 +23,7 @@ import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import { effectiveDisposition, givenResult, isDangerous, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
+import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import type { Told, Traced } from "./live-values";
 import type { SiteSums } from "./site-sums";
 import type { VirtualRequest } from "./workspace-runtime";
@@ -120,6 +121,34 @@ let skipNext = false;
 /** A live run (LIVE-VALUES.md, *Live runs, as you type*): the file run again as typing pauses — it stops at nothing,
  *  asks nothing (what it can't make it skips), runs its timers at once, ends at its first idle or its step budget. */
 let liveRun = false;
+/** The run's effects (util/silo/evidence's `Effect`): each gated call it made, was denied, skipped or was given, by its
+ *  capability and resource — told the adapter as the run ends, for the run ledger (its envelope's `effects`). */
+const effects = new Map<string, Effect>();
+let tallying = false;
+
+/** A gated call, counted among the run's effects. */
+function tally(capability: string, resource: string, how: Effect["how"]): void {
+	if (!tallying) {
+		return;
+	}
+
+	const key = `${how}\0${capability}\0${resource}`;
+	const known = effects.get(key);
+
+	if (known === undefined) {
+		effects.set(key, { "capability": capability, "resource": resource, "how": how, "calls": 1 });
+	} else {
+		known.calls += 1;
+	}
+}
+
+/** The run's effects so far, told the adapter (each telling has them all; its last is the run's). */
+function tellEffects(): void {
+	if (effects.size > 0) {
+		post({ "type": "effects", "effects": [...effects.values()].map((effect) => ({ ...effect })) });
+	}
+}
+
 /** A live run's step budget: past it, the run stops there rather than running on (tsval's maxSteps). */
 const LIVE_STEPS = 5_000_000;
 /** Writes a program's allowed call is making right now: the runtime lets these through, a package's it refuses. */
@@ -379,6 +408,9 @@ const held = new Set<unknown>();
  *  shared under several names stays one object.) */
 function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, cwd = "/workspace"): ReturnType<typeof capabilityStandins> {
 	const wrapped = new Map<unknown, unknown>();
+
+	// (only a run that can make calls has effects to tell: exploring orderings, every call is its stand-in)
+	tallying = real !== undefined;
 	const gate = (fn: (...args: unknown[]) => unknown, effect?: (...args: unknown[]) => unknown) => function (this: unknown, ...args: unknown[]): unknown {
 		// A probe's fork (probeResource): the call it's after records what it reaches, and ends the fork there; any other
 		// call on the way is its inert self — neither touches what the run itself was given (denyNext, giveNext).
@@ -396,12 +428,6 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			return fn.apply(this, args);
 		}
 
-		if (denyNext) {
-			denyNext = false;
-
-			throw Object.assign(new Error("EACCES: permission denied (denied at its capability stop)"), { "code": "EACCES" });
-		}
-
 		const tagged = standinCapability(fn);
 
 		if (tagged === undefined) {
@@ -410,11 +436,24 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 
 		const argument = args[tagged.resourceArg];
 		const resource = typeof argument === "string" ? argument : argument instanceof URL ? argument.href : typeof argument === "object" && argument !== null && "url" in argument ? String((argument as { "url": unknown }).url) : "";
+		const denied = (why: string): never => {
+			tally(tagged.capability, resource, "denied");
+
+			throw Object.assign(new Error(why), { "code": "EACCES" });
+		};
+
+		if (denyNext) {
+			denyNext = false;
+			denied("EACCES: permission denied (denied at its capability stop)");
+		}
+
 		const given = giveNext ?? (policy === undefined ? undefined : givenResult(policy, { "capability": tagged.capability, "resource": resource }));
 
 		giveNext = undefined;
 
 		if (given !== undefined) {
+			tally(tagged.capability, resource, "given");
+
 			return givenAs(tagged.capability, fn.apply(this, args), given.value);
 		}
 
@@ -443,7 +482,7 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		}
 
 		if (!allowed && !allowNext) {
-			throw Object.assign(new Error(`EACCES: permission denied — ${tagged.capability} ${resource} isn't allowed (the policy decides it, and it wasn't asked)`), { "code": "EACCES" });
+			denied(`EACCES: permission denied — ${tagged.capability} ${resource} isn't allowed (the policy decides it, and it wasn't asked)`);
 		}
 
 		if (!allowed) {
@@ -452,6 +491,8 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 
 		// A relative path is the program's directory's (its process.cwd(): a terminal's), as node resolves it.
 		const made = tagged.capability.startsWith("fs:") && typeof argument === "string" && !argument.startsWith("/") ? args.map((each, index) => (index === tagged.resourceArg ? `${cwd}/${argument}` : each)) : args;
+
+		tally(tagged.capability, resource, "made");
 
 		return madeFor(tagged.capability, resource, () => effect(...made));
 	};
@@ -536,6 +577,8 @@ function madeFor(capability: string, resource: string, call: () => unknown): unk
  *  value of its own, so the margin says what didn't happen there. */
 function skipped(capability: string, resource: string, result: unknown): unknown {
 	const node = evaluating?.currentNode;
+
+	tally(capability, resource, "skipped");
 
 	if (evaluating !== undefined && node !== null && node !== undefined) {
 		const file = node.getSourceFile();
@@ -1293,6 +1336,8 @@ function fileCoverage(file: ts.SourceFile): CoverageReport {
 function finish(exitCode = 0, crash?: Crash): void {
 	clearInterval(liveTimer);
 	flushLive();
+
+	tellEffects();
 	post({ "type": "coverage", "report": coverageReport(), "final": true });
 	post({ "type": "terminated", "exitCode": exitCode, ...crash === undefined ? {} : { "crash": crash } });
 }
@@ -1678,6 +1723,8 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 		}
 
 		case "coverage":
+			// (asked as a session stops, too: its effects so far go with it)
+			tellEffects();
 			post({ "type": "coverage", "report": coverageReport() });
 			break;
 

@@ -1167,6 +1167,28 @@ test("real effects: an allowed read reads the file, recorded; a call nobody allo
 		const recorded = await eventually("what it read, recorded", async () => (await session.request("capability.recorded", { "capability": "fs:read", "resource": "/workspace/rates.json" }, 10_000)) ?? undefined);
 
 		assert.equal(recorded.value, "{ \"US\": 0.07, \"CA\": 0.13 }", "the text it read");
+
+		// Both, in its envelope in the run ledger: what it did to the world, and what it was refused.
+		const run = await eventually("its run, ended", async () => (await session.request("runs.list", undefined, 5000)).find((each) => each.title.endsWith(" effects.js") && each.state === "exited"));
+		const envelope = await eventually("its envelope", () => workbench.evaluate(async (id) => {
+			const { api } = globalThis.__editor;
+			const folder = api.Uri.file("/workspace/.silo/runs");
+
+			for (const [name] of await api.workspace.fs.readDirectory(folder).then((found) => found, () => [])) {
+				const line = new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.joinPath(folder, name))).split("\n").find((each) => each.includes(id));
+
+				if (line !== undefined) {
+					return JSON.parse(line);
+				}
+			}
+
+			return undefined;
+		}, run.id));
+
+		assert.deepEqual(envelope.effects, [
+			{ "capability": "fs:read", "resource": "/workspace/rates.json", "how": "made", "calls": 1 },
+			{ "capability": "fs:write", "resource": "/workspace/sneaky.txt", "how": "denied", "calls": 1 }
+		], "its effects: the read made, the write refused");
 	} finally {
 		await workbench.evaluate(async () => {
 			const { api } = globalThis.__editor;

@@ -15,7 +15,7 @@ import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
 import { type CapabilityCall, decideCapability } from "../capabilities/decide";
-import { flushRun, recordedResult, recordResult } from "../capabilities/silo-store";
+import { recordedResult, recordResult, takeEffects } from "../capabilities/silo-store";
 import { observe } from "@brianjenkins94/observability";
 import { identifyWorker } from "../../architecture-model";
 import { storeNode, ZENFS_NODE } from "../../architecture-zenfs";
@@ -33,11 +33,6 @@ import { registerDebugToolbar } from "./debug-toolbar";
 import { registerMetricsBridge } from "./metrics-bridge";
 import { podHub, workspace } from "./pod";
 import { registerProductionDebug } from "./production-adapter";
-
-/** A run target's repo-relative identity — strips the /workspace root; "." for the root itself. */
-function repoRelative(path: string): string {
-	return path.replace(/^\/workspace\/?/u, "") || ".";
-}
 
 /** This extension's exports — the pod->workbench half of the hub uplink (ext host is an isolated realm, so it
  *  rides the exported API rather than a window transport). See activate + workbench-entry's bridge. */
@@ -307,8 +302,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		// Without debugging (noDebug): a production run can't pause or step, so VS Code greys out Pause and the steps.
 		void vscode.debug.startDebugging(undefined, { "type": "production", "request": "launch", "name": name, "__prodId": id, "__port": info.port }, { "noDebug": true });
 
-		// Run-grain bracket for the PREVIEW only (a port-bound run): the SW tags that port's gated net calls with
-		// `id`, so they accumulate in silo-store's bucket; flush them as one `mode:"preview"` run record at exit.
+		// A preview's run (a port-bound one): the SW tags that port's gated net calls with `id`, so they're counted among
+		// its effects (silo-store's recordEffect), which its envelope takes when it ends (`run.effects`).
 		if (typeof info.port !== "number") {
 			return;
 		}
@@ -317,12 +312,18 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 		previewRunByPort.set(port, id);
 
-		const target = typeof info.target === "string" ? repoRelative(info.target) : name;
 		const off = podHub.subscribe(`production.exit.${id}`, () => {
 			off();
 			previewRunByPort.delete(port);
-			flushRun(id, { "entry": name, "mode": "preview", "exit": 0, "target": target });
 		});
+	}) });
+
+	// A run's effects, as its envelope is written (evidence.ts): what it made, was denied, skipped or was given — and gone
+	// from here once taken.
+	context.subscriptions.push({ "dispose": serve(podHub, "run.effects", (data) => {
+		const { id } = (data ?? {}) as { "id"?: unknown };
+
+		return typeof id === "string" ? takeEffects(id) : [];
 	}) });
 
 	// AUTO-ATTACH: a terminal `node <file>` (node-runner's startDebug) publishes `debug.launch`; start a tsval

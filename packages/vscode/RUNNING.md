@@ -145,7 +145,9 @@ orderings. test/contrib.mjs runs contrib/ in a real editor, so a change here tha
 The source regex (`lifecycle.ts`'s service/task guess deciding the runtime — it may stay as a label); the script worker
 (gone, 2026-10-07: the dev-server worker stays); the *production* debugger in VS Code's picker and launch.json;
 the production adapter (a run is a tsval session); React mode; the left rail's placeholder; the swallowed errors (a run
-that can't start says why). And the two run ledgers become one: every run in `runs.jsonl`, with its evidence.
+that can't start says why). And the two run ledgers become one: every run in `runs.jsonl`, with its evidence (done,
+2026-10-08: the envelope's `effects` — each gated call it made, was denied, skipped or given — replaced silo's
+`<user>.runs.jsonl`).
 
 ## Steps
 

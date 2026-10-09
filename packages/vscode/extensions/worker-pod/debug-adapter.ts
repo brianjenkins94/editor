@@ -10,12 +10,13 @@
  * (a DebugAdapterServer needs a socket).
  */
 import type { Span } from "@brianjenkins94/util/logger";
+import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
 import { EMPTY_POLICY, given as givenBy, placesOf, problemOf, ruleMatches, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
-import { loadEffectivePolicy, persistOverride, recordResult, replaceRule } from "../capabilities/silo-store";
+import { loadEffectivePolicy, persistOverride, recordEffect, recordResult, replaceRule } from "../capabilities/silo-store";
 import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
 import { registerSession, serveDebugControl } from "./debug-control";
 import type { Replay } from "./page-evidence";
@@ -110,6 +111,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private coverage: CoverageReport | undefined;
 	private coverageSent = false;
 	private readonly coverageWaiters = new Set<(report: CoverageReport) => void>();
+	/** The run's effects as the worker last told them (all of them so far), recorded for its envelope with the final coverage. */
+	private effects: Effect[] = [];
 	/** A `setValue` waiting on the worker's answer. */
 	private valueWaiter: ((answer: Extract<WorkerEvent, { "type": "valueSet" }>) => void) | undefined;
 
@@ -710,6 +713,11 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				const files = (report.files ?? []).map((other) => ({ "file": other.file, "source": other.source ?? "", "statements": other.statements, "sites": other.sites }));
 
 				podHub.publish("evidence.observed", { "runId": runId, "file": this.program, "source": this.source, "statements": report.statements, "sites": report.sites, ...files.length === 0 ? {} : { "files": files } });
+
+				// What it did to the world, for its envelope (evidence.ts asks for them as it writes it).
+				for (const effect of this.effects) {
+					recordEffect(runId, effect.capability, effect.resource, effect.how, effect.calls);
+				}
 			}
 		}
 	}
@@ -792,6 +800,10 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 
 				this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
 				this.settle("stopped");
+				break;
+
+			case "effects":
+				this.effects = message.effects;
 				break;
 
 			case "coverage":

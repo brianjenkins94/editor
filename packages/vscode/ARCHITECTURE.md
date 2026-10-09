@@ -312,7 +312,6 @@ flowchart LR
     n_store__git_objects____file_[".git/objects/…/&lt;file&gt;"]
     n_store__git_refs____file_[".git/refs/…/&lt;file&gt;"]
     n_store__silo__file__json[".silo/&lt;file&gt;.json"]
-    n_store__silo__file__jsonl[".silo/&lt;file&gt;.jsonl"]
     n_store__silo__gitattributes[".silo/.gitattributes"]
     n_store__silo__gitignore[".silo/.gitignore"]
     n_store__silo_evidence____file__jsonl[".silo/evidence/…/&lt;file&gt;.jsonl"]
@@ -360,9 +359,8 @@ flowchart LR
   n_ext_notes <-.->|"commands"| n_ext_worker_pod
   n_ext_vscode <-.->|"commands"| n_ext_worker_pod
   n_ext_worker_pod -->|"reads"| n_store__git__file_
+  n_ext_worker_pod -->|"reads"| n_store__silo__gitignore
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__json
-  n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__jsonl
-  n_ext_worker_pod -->|"reads, writes"| n_store__silo__gitignore
   n_ext_worker_pod -->|"reads, writes"| n_store__silo_local__file__json
   n_ext_worker_pod <-.->|"commands"| n_ext_worker_pod
   n_exthost_LocalProcess_0 <-.->|"RPCProtocol"| n_workbench
@@ -401,7 +399,6 @@ flowchart LR
   n_workbench -->|"reads, writes"| n_store__git_objects____file_
   n_workbench -->|"reads, writes"| n_store__git_refs____file_
   n_workbench -->|"reads, writes"| n_store__silo__file__json
-  n_workbench -->|"reads, writes"| n_store__silo__file__jsonl
   n_workbench -->|"reads, writes"| n_store__silo__gitattributes
   n_workbench -->|"reads, writes"| n_store__silo__gitignore
   n_workbench -->|"reads, writes"| n_store__silo_evidence____file__jsonl
@@ -423,9 +420,8 @@ flowchart LR
 | `.git/objects/…/<file>` | Workbench | Workbench |
 | `.git/refs/…/<file>` | Workbench | Workbench |
 | `.silo/.gitattributes` | Workbench | Workbench, notes |
-| `.silo/.gitignore` | Workbench, worker-pod | Workbench, worker-pod |
+| `.silo/.gitignore` | Workbench | Workbench, worker-pod |
 | `.silo/<file>.json` | Workbench, capabilities, worker-pod | Workbench, capabilities, worker-pod |
-| `.silo/<file>.jsonl` | Workbench, worker-pod | Workbench, worker-pod |
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |
 | `.silo/local/…/<file>.jsonl` | Workbench | Workbench, insights |
@@ -453,6 +449,7 @@ flowchart LR
 | Pod | pod | `pod.ready` |
 | Pod | production | `production.exit.*`, `production.launch`, `production.out.*` |
 | Pod | rules | `rules.given()`, `rules.list()`, `rules.placed()`, `rules.set()` |
+| Pod | run | `run.effects()` |
 | Pod | stops | `stops.preview` |
 | Pod | tasks | `tasks.list()`, `tasks.run()` |
 | Preview :* | evidence | `evidence.flush` |

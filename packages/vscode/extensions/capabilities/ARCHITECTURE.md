@@ -54,13 +54,15 @@ signal** (a scope OBSERVED with no matching STATIC entry is the alarm; silo must
   <user>.policy.json        DECISIONS · mine      per-user overrides — the "Allow always" popup writes here; committed, conflict-free
   capabilities.json         FACTS · static        what analysis (findReach) says code CAN do
   <user>.capabilities.json  FACTS · observed      what actually FIRED for this user — a day-coarsened rollup
-  <user>.runs.jsonl         FACTS · observed      raw observation firehose — the exposure ledger (gitignored)
-  .gitignore                silo-managed          ignores *.runs.jsonl
+  runs/<user>.jsonl         FACTS · observed      the run ledger (evidence.ts): each run's envelope, with its `effects`
+  .gitignore                silo-managed          ignores local/
 ```
 
 Enforcement reads the **effective** policy = `<user>.policy.json` layered over `policy.json` (override wins,
 contract next, computed default last). Timestamps land per axis: `added` (when I authorized) on the override rule;
-`firstObserved`/`lastObserved` on the observed rollup; the fine-grained stream in `<user>.runs.jsonl`. "lastAllowed"
+`firstObserved`/`lastObserved` on the observed rollup; each run's own in its envelope's `effects` (a debug run's from
+its worker, a preview's from `decide`, counted by run in `silo-store.ts` and asked for over `run.effects` as the
+envelope is written). "lastAllowed"
 and "was I exposed to compromised dep X in window W" are QUERIES over the observed side, never stored decision state.
 `silo-store.ts` owns all of this I/O; `policy.ts` handles only the base file the panel curates.
 
@@ -104,8 +106,8 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
   (panel with allow/deny/review dispositions + a view badge) · TRIPWIRE surface (denied call → error squiggle) ·
   the pure core (`policy-core`, `capability-breakpoints`) · unified classification · ENFORCE round-trip
   (`decide.ts` endpoint; net gate in the SW, fs write/delete + read gate in the almostnode shim) · the `.silo/`
-  layout (`silo-store.ts`: base+override policy, observed rollup, run firehose) · production debug adapter.
+  layout (`silo-store.ts`: base+override policy, observed rollup, each run's effects) · production debug adapter.
 - **Next:** persist the STATIC surface to `.silo/capabilities.json` (the panel/engine side) so static-vs-observed
-  drift is queryable · run-grain records in `<user>.runs.jsonl` (correlate a run's entry/sha with the scopes it
-  exercised, for the "was I exposed to compromised dep X" audit) · the elicitation/AI decider behind the
+  drift is queryable · the "was I exposed to compromised dep X" audit, a query over the run ledger (each envelope has its
+  files' oids and its effects) · the elicitation/AI decider behind the
   `policyDecider` seam · `gate`/`mock` dispositions.

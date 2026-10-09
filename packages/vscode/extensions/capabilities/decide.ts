@@ -35,9 +35,8 @@ export interface CapabilityCall {
 	"op"?: "read" | "write";
 	"resource"?: string;
 	"args"?: readonly unknown[];
-	/** The almostnode run this call belongs to, when known (the fs shim threads it). Lets the observation attribute
-	 *  to a run so `<user>.runs.jsonl` gets one run-grain record instead of a line per call. Absent for a preview
-	 *  app's own fetch (which belongs to no single run) — those stay call-grain. */
+	/** The run this call belongs to, when known (a preview's, by its port): counted among that run's effects, which its
+	 *  envelope in the run ledger lists (silo-store's recordEffect). */
 	"runId"?: string;
 	/** The preview port a shell-forwarded call (the WS/WebRTC shim) originates from — the ext host resolves it to
 	 *  the run that owns the port (mirroring the SW's runId for net), since the shim can't know the runId itself. */

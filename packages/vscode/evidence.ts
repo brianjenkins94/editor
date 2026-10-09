@@ -16,7 +16,7 @@
  */
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
-import type { Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
+import type { Effect, Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
 import type { SiteObservation, StatementCoverage } from "./extensions/worker-pod/debug-protocol";
 import type { ModuleEvidence } from "./extensions/worker-pod/page-evidence";
 import type { Bablr } from "./bablr";
@@ -222,6 +222,13 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			if (oids.length > 1) {
 				envelope.versions = { ...envelope.versions, [repoRelative(file)]: oids };
 			}
+		}
+
+		// What it did to the world: the pod counted each gated call (silo-store's recordEffect), for whichever run it was.
+		const effects = await rpc.request("run.effects", { "id": run.id }, { "timeoutMs": 5_000, "waitForResponderMs": 2_000 }).catch(() => []);
+
+		if (Array.isArray(effects) && effects.length > 0) {
+			envelope.effects = effects as Effect[];
 		}
 
 		const path = runsPath(envelope.user);

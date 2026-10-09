@@ -9,6 +9,7 @@
  * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at
  * launch.
  */
+import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import type { LiveBatch } from "./live-values";
 import type { Replay } from "./page-evidence";
@@ -94,6 +95,9 @@ export type WorkerEvent =
 	/** The program is over: `exitCode` 1 when it threw, else 0. */
 	/** `crash.file`: where it threw, when that's another of the program's files than the entry. */
 	| { "type": "terminated"; "exitCode"?: number; "crash"?: Crash; "quiet"?: true }
+	/** The run's effects so far — each gated call made, denied, skipped or given — told with its coverage, for its envelope
+	 *  in the run ledger (each telling has them all). */
+	| { "type": "effects"; "effects": Effect[] }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" }
 	/** The program's statement coverage — asked for, or `final` just before `terminated`. */
 	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean }
