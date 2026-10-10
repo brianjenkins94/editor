@@ -1,24 +1,25 @@
-// Every CST node's source span [start, end), computed by walking the parse tag stream with a running offset. The
-// CST is lossless (every source char is a LiteralTag or a self-closing token's literalValue), so the offsets are
-// exact; the walk checks that they add up to the source length. This is the CST side of the CST↔tsc span bridge
-// (../lib/util/silo/bridge in the lib repo).
+// Every CST node's source span [start, end), read off the agAST tree BABLR parses (treeParse, or the same parse paced:
+// cstSpansAsync): an index of the tree for what it doesn't carry — source offsets, where the bridge to tsc's ranges and
+// every position the editor keeps meet (../lib/util/silo/bridge in the lib repo), and a content hash per node — in a
+// shape a cache can keep (the bablr worker's IndexedDB; a tree can't go there, and reading its CSTML back costs a parse).
+// The CST is lossless (every source char is a token's text or a literal), so the offsets are exact; the walk checks
+// that they add up to the source length.
 //
-// Two stream details matter here. (1) A node produced by a SHIFT (member, call, binary, assignment, …) opens in
-// the stream AFTER its left operand has already streamed, and re-adopts it through a GapTag at the first field
-// reference; its start is therefore the start of the node that closed just before the ShiftTag, not the current
-// offset. (2) Trivia is introduced by a `#` reference; everything under it (comments, whitespace) is flagged so
-// consumers can build formatting-insensitive views.
+// The tree's structure is BABLR's: a node's fields are its properties, in order. A field a SHIFT built (a member, a
+// call, a binary, an assignment — left-recursive) holds one property per step, each later one the whole expression so
+// far, its left operand inside it: the last is the field's node. Trivia is what sits under an unnamed `#` reference
+// (comments, whitespace) and is flagged, so consumers can build formatting-insensitive views; a cover node (`_`) shares
+// its span with the node it wraps.
 //
-// The walk also gives every node a MERKLE HASH, bottom-up as the stream closes it: a token hashes its production type
-// and its literal text (straight from the tags, never sliced out of the source), any other node hashes its type and its
+// Every node gets a MERKLE HASH: a token hashes its production type and its text, any other node its type and its
 // children's hashes in order. Trivia never enters a parent's hash, so a reindent or a comment edit leaves every hash
-// alone; a node's hash changes exactly when it or something under it does. A shifted node re-adopts its left operand's
-// hash where the GapTag re-adopts the operand. A code token keeps its text too — the literals it streamed, read as
-// they stream rather than sliced out of the source by offset.
-import { CloseNodeTag, GapTag, LiteralTag, OpenNodeTag, ReferenceTag, ShiftTag } from "@bablr/agast-helpers/symbols";
-import { parseTag, parseTagType } from "@bablr/agast-helpers/tree";
+// alone; a node's hash changes exactly when it or something under it does. A code token keeps its text too.
+import { freezeRecord } from "@bablr/agast-helpers/object";
+import { LiteralTag, NullNode, Property, TreeNode } from "@bablr/agast-helpers/symbols";
+import * as Tags from "@bablr/agast-helpers/tags";
+import { getOpenTag, parseTag, parseTagType } from "@bablr/agast-helpers/tree";
 import { m } from "@bablr/helpers/grammar";
-import { streamParse } from "bablr";
+import { streamParse, treeParse } from "bablr";
 import TypeScript from "./grammar";
 
 const COVER = Symbol.for("_");
@@ -71,152 +72,114 @@ function nodeHash(type, parts) {
 	return hash64((type ?? "") + "\0" + parts.join("\0"));
 }
 
-/** Running state for the tag walk, mutated tag-by-tag by `walkTag` and shared by the sync + async drivers. */
-function makeWalkState() {
-	return {
-		"spans": [],
-		"stack": [],
-		"root": { "parts": [] }, // the parts of whatever closes at the top, for the whole parse's hash
-		"offset": 0,
-		"pendingRef": null, // the ReferenceTag preceding the next open tag
-		"triviaDepth": 0, // > 0 while inside a trivia subtree
-		"shiftStart": null, // start for nodes opened after a ShiftTag, until the GapTag re-adopts the held node
-		"lastClosed": null, // last closed non-trivia node (the one a ShiftTag refers to)
-		"held": null, // the hash of that node between the ShiftTag and the GapTag that re-adopts it
-		"tokens": [] // the open code tokens, whose text every literal streamed inside them (escapes' too) adds to
-	};
-}
+/** A node's parts in order: its children (a shifted field's last step only) and its own literals. */
+function partsOfNode(node) {
+	const parts = [];
 
-/** The parts list the next child belongs to: the open node's, or the top's. */
-const partsOf = (state) => (state.stack.length === 0 ? state.root : state.stack[state.stack.length - 1]).parts;
+	for (const tag of Tags.traverse(node.value.tags)) {
+		if (tag.type === Property) {
+			const { reference, node: child, shift } = tag.value;
 
-/** Add streamed source text to every open code token it falls inside. */
-function addText(state, value) {
-	for (const token of state.tokens) {
-		token.text += value;
-	}
-}
+			// a shift's step replaces the field's step before it: the expression so far, its left operand inside it
+			if (shift !== undefined && shift !== null) {
+				const at = parts.findLastIndex((part) => part.node !== undefined && !(part.reference?.type === "#" && (part.reference.name === null || part.reference.name === undefined)));
 
-/** Fold one CST tag into `state` (updates the running offset and pushes completed spans with their hashes). */
-// eslint-disable-next-line complexity -- an inherently branchy dispatch over the CST tag stream; splitting it would obscure the single running-offset invariant it maintains
-function walkTag(state, tag, src) {
-	const kind = parseTagType(tag);
-
-	if (kind === ReferenceTag) {
-		state.pendingRef = parseTag(tag).value;
-	} else if (kind === ShiftTag) {
-		state.shiftStart = state.lastClosed ? state.lastClosed.start : state.offset;
-
-		// the operand closed under the parent; it belongs to the node the shift opens
-		if (state.lastClosed !== null) {
-			const parts = partsOf(state);
-			const at = parts.lastIndexOf(state.lastClosed.hash);
-
-			if (at !== -1) {
-				parts.splice(at, 1);
-				state.held = state.lastClosed.hash;
+				parts[at] = { "reference": parts[at].reference, "node": child };
+			} else {
+				parts.push({ "reference": reference, "node": child });
 			}
+		} else if (parseTagType(tag) === LiteralTag) {
+			parts.push({ "literal": parseTag(tag).value });
 		}
-	} else if (kind === GapTag) {
-		state.shiftStart = null;
+	}
 
-		if (state.held !== null) {
-			partsOf(state).push(state.held);
-			state.held = null;
-		}
-	} else if (kind === OpenNodeTag) {
-		const { value } = parseTag(tag);
-		// trivia is what the trivia hook emits under an UNNAMED `#` reference; a named `#` reference such as
-		// `#separatorTokens` is a code token the grammar keeps unbound
-		const trivia = state.triviaDepth > 0 || (state.pendingRef?.type === "#" && (state.pendingRef.name === null || state.pendingRef.name === undefined));
-		const entry = {
-			"type": value.name?.description ?? null,
-			"field": state.pendingRef?.name ?? null,
-			"start": state.shiftStart ?? state.offset,
-			"token": Boolean(value.flags?.token),
-			"cover": value.type === COVER,
-			"trivia": trivia,
-			"text": Boolean(value.flags?.token) && !trivia ? "" : null
-		};
+	return parts;
+}
 
-		state.pendingRef = null;
-		if (value.literalValue !== null && value.literalValue !== undefined) {
-			// self-closing token: its text is inline
-			const hash = trivia ? null : nodeHash(entry.type, [JSON.stringify(value.literalValue)]);
+/** Index `node` (under `reference`) from `offset` into `spans`, children before parents; its hash and where it ends. */
+function indexNode(node, reference, offset, inTrivia, spans) {
+	// trivia is what the trivia hook emits under an UNNAMED `#` reference; a named `#` reference such as
+	// `#separatorTokens` is a code token the grammar keeps unbound
+	const trivia = inTrivia || (reference?.type === "#" && (reference.name === null || reference.name === undefined));
+	const { value } = node;
+	const entry = {
+		"type": value.name?.description ?? null,
+		"field": reference?.name ?? null,
+		"start": offset,
+		"token": Boolean(value.flags?.token),
+		"cover": value.type === COVER,
+		"trivia": trivia
+	};
+	const open = getOpenTag(node);
+	const literalValue = open === null || open === undefined ? undefined : parseTag(open).value.literalValue;
 
-			state.offset += value.literalValue.length;
-			state.spans.push({ ...entry, "end": state.offset, "hash": hash, "text": trivia ? null : value.literalValue });
-			addText(state, value.literalValue);
+	// a self-closing token: its text is inline
+	if (literalValue !== null && literalValue !== undefined) {
+		const end = offset + literalValue.length;
+		const hash = trivia ? null : nodeHash(entry.type, [JSON.stringify(literalValue)]);
+
+		spans.push({ ...entry, "text": trivia || !entry.token ? null : literalValue, "end": end, "hash": hash });
+
+		return { "hash": hash, "end": end, "text": literalValue };
+	}
+
+	const hashed = [];
+	let text = "";
+	let at = offset;
+
+	for (const part of partsOfNode(node)) {
+		if (part.literal !== undefined) {
+			at += part.literal.length;
+			text += part.literal;
 
 			if (!trivia) {
-				partsOf(state).push(hash);
+				hashed.push(JSON.stringify(part.literal));
 			}
-		} else {
-			const open = { ...entry, "parts": [] };
+		} else if (part.node?.type === TreeNode) {
+			const child = indexNode(part.node, part.reference, at, trivia, spans);
+			const childTrivia = trivia || (part.reference?.type === "#" && (part.reference.name === null || part.reference.name === undefined));
 
-			state.stack.push(open);
+			at = child.end;
+			text += child.text;
 
-			if (open.text !== null) {
-				state.tokens.push(open);
+			if (!childTrivia) {
+				hashed.push(child.hash);
 			}
-
-			if (trivia) {
-				state.triviaDepth += 1;
-			}
-		}
-	} else if (kind === LiteralTag) {
-		const { value } = parseTag(tag);
-
-		state.offset += value.length;
-		addText(state, value);
-
-		if (state.triviaDepth === 0) {
-			partsOf(state).push(JSON.stringify(value));
-		}
-	} else if (kind === CloseNodeTag) {
-		const entry = state.stack.pop();
-
-		if (entry !== undefined) {
-			const { parts, ...node } = entry;
-
-			if (entry.text !== null) {
-				state.tokens.pop();
-			}
-
-			const span = { ...node, "end": state.offset, "hash": node.trivia ? null : nodeHash(node.type, parts) };
-
-			state.spans.push(span);
-
-			if (entry.trivia) {
-				state.triviaDepth -= 1;
-			} else {
-				state.lastClosed = span;
-				partsOf(state).push(span.hash);
-			}
+		} else if (part.node !== undefined && part.node.type !== NullNode) {
+			throw new Error(`cstSpans: a ${String(part.node.type?.description ?? part.node.type)} where a node was expected`);
 		}
 	}
+
+	const hash = trivia ? null : nodeHash(entry.type, hashed);
+
+	spans.push({ ...entry, "text": trivia || !entry.token ? null : text, "end": at, "hash": hash });
+
+	return { "hash": hash, "end": at, "text": text };
+}
+
+/** The index of a parse's tree of `src`. */
+function indexTree(tree, src) {
+	const spans = [];
+	const root = indexNode(tree, null, 0, false, spans);
+
+	if (root.end !== src.length) {
+		throw new Error(`cstSpans: walked ${root.end} characters of a ${src.length}-character source`);
+	}
+
+	return { "spans": spans, "length": root.end, "hash": nodeHash(null, root.hash === null ? [] : [root.hash]) };
 }
 
 /** @returns {{ spans: CstSpan[], length: number, hash: string }} spans in close order (children before parents), and the whole parse's hash */
 export function cstSpans(src, production = "Program") {
-	const state = makeWalkState();
-
-	for (const tag of streamParse(TypeScript, matcherFor(production), src)) {
-		walkTag(state, tag, src);
-	}
-
-	if (state.offset !== src.length) {
-		throw new Error(`cstSpans: walked ${state.offset} characters of a ${src.length}-character source`);
-	}
-
-	return { "spans": state.spans, "length": state.offset, "hash": nodeHash(null, state.root.parts) };
+	return indexTree(treeParse(TypeScript, matcherFor(production), src), src);
 }
 
 /**
  * Yielding variant of {@link cstSpans}: `streamParse` is a lazy tag generator, so pulling one tag at a time and
  * awaiting a macrotask every `budget` tags PACES THE PARSE — the BABLR VM only advances when we pull. That keeps a
  * long parse from monopolising the thread and lets the host process messages between chunks; `signal`, checked at
- * each yield, makes it cooperatively cancellable (throws AbortError) without killing the worker.
+ * each yield, makes it cooperatively cancellable (throws AbortError) without killing the worker. The parse is
+ * treeParse's (`tree: true`): the tree it returns when its stream ends is indexed as cstSpans indexes treeParse's.
  * @param {string} src
  * @param {string} production
  * @param {{ signal?: AbortSignal, budget?: number }} [options]
@@ -229,13 +192,10 @@ export async function cstSpansAsync(src, production = "Program", options = {}) {
 		throw new DOMException("cstSpans aborted", "AbortError");
 	}
 
-	const state = makeWalkState();
-	let seen = 0;
+	const parse = streamParse(TypeScript, matcherFor(production), src, undefined, freezeRecord({ "tree": true, "emitEffects": false, "spans": null, "holdShiftedNodes": false, "holdUndefinedAttributes": false }))[Symbol.iterator]();
+	let step = parse.next();
 
-	for (const tag of streamParse(TypeScript, matcherFor(production), src)) {
-		walkTag(state, tag, src);
-		seen += 1;
-
+	for (let seen = 1; step.done !== true; seen += 1) {
 		if (seen % budget === 0) {
 			if (signal?.aborted === true) {
 				throw new DOMException("cstSpans aborted", "AbortError");
@@ -243,11 +203,9 @@ export async function cstSpansAsync(src, production = "Program", options = {}) {
 
 			await new Promise((resolve) => { setTimeout(resolve, 0); });
 		}
+
+		step = parse.next();
 	}
 
-	if (state.offset !== src.length) {
-		throw new Error(`cstSpans: walked ${state.offset} characters of a ${src.length}-character source`);
-	}
-
-	return { "spans": state.spans, "length": state.offset, "hash": nodeHash(null, state.root.parts) };
+	return indexTree(step.value, src);
 }
