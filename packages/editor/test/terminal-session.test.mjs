@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Bash, defineCommand } from "just-bash";
 
-import { execInSession } from "../terminal-session.ts";
+import { execInSession, statementsOf } from "../terminal-session.ts";
 
 /** A long-running command, like `vite`: runs until Ctrl-C, then exits 130. */
 const waiter = defineCommand("waiter", async (_args, ctx) => {
@@ -71,4 +71,23 @@ test("an interrupted command's own cd doesn't reach the session (it never gets t
 	await interrupted(bash, state, "cd games/netsim && waiter");
 	assert.equal(state.cwd, "/workspace");
 	assert.equal((await execInSession(bash, state, "pwd")).stdout, "/workspace\n");
+});
+
+// A line with a streaming command (`node`) is run a statement at a time, so what it prints before the command shows
+// before it (just-bash hands back a line's output only when the whole line's done): its top-level statements, each with
+// what joins it to the next — or none, when splitting it could change what it means.
+test("statementsOf: a streaming line's statements, and the lines run whole", () => {
+	assert.deepEqual(statementsOf("echo first; node x.js; echo last"), [{ "text": "echo first", "then": ";" }, { "text": " node x.js", "then": ";" }, { "text": " echo last", "then": "" }]);
+	assert.deepEqual(statementsOf("npm test && echo ok || echo failed").map(({ then }) => then), ["&&", "||", ""]);
+	assert.deepEqual(statementsOf("echo 'a; b' && node x.js 2>&1").map(({ text }) => text), ["echo 'a; b' ", " node x.js 2>&1"], "quoted separators and a redirect stay put");
+	assert.deepEqual(statementsOf("echo a &&\nnode x.js").map(({ text, then }) => [text.trim(), then]), [["echo a", "&&"], ["node x.js", ""]]);
+
+	assert.equal(statementsOf("echo a; echo b"), undefined, "no streaming command: whole");
+	assert.equal(statementsOf("node x.js"), undefined, "one statement: whole");
+	assert.equal(statementsOf("for f in *.js; do node $f; done"), undefined, "a compound command spans statements");
+	assert.equal(statementsOf("(cd sub; node x.js)"), undefined, "a subshell");
+	assert.equal(statementsOf("echo $(pwd); node x.js"), undefined, "a command substitution");
+	assert.equal(statementsOf("node server.js & echo started"), undefined, "a background job");
+	assert.equal(statementsOf("node x.js || exit 1; echo after"), undefined, "exit would end only its statement");
+	assert.equal(statementsOf("echo 'unclosed; node x.js"), undefined, "an unclosed quote");
 });

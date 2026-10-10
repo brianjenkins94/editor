@@ -25,7 +25,7 @@ import type { BashSession, SessionState } from "./terminal-session";
 import { serve } from "@brianjenkins94/hub";
 import { createWorkspaceTerminalFs } from "./terminal-fs";
 import { commandExecuted, commandFinished, commandLine, commandStart, promptStart, workingDirectory } from "./terminal-integration";
-import { execInSession } from "./terminal-session";
+import { execInSession, statementsOf } from "./terminal-session";
 
 type VscodeApi = typeof import("vscode");
 
@@ -66,8 +66,9 @@ const TAIL = 8000;
  *  through here. */
 const tails = new Map<number, { "terminal": number; "command"?: string; "open": boolean; "text": string }>();
 
+/** The escapes a terminal's output carries (colors, cursor moves, shell integration), for reading it as text. */
 // eslint-disable-next-line no-control-regex -- escapes are what's being stripped
-const ESCAPES = /\u001B(?:\[[^A-Za-z@~]*[A-Za-z@~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)|[A-Z=>\\^_])/gu;
+export const ESCAPES = /\u001B(?:\[[^A-Za-z@~]*[A-Za-z@~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)|[A-Z=>\\^_])/gu;
 
 /** A terminal opened to run one command (a task's, serveTaskTerminals), and how it exits when that's done. */
 export interface TerminalCommand { "command": string; "exit": (code: number) => void }
@@ -134,28 +135,51 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, show: (dat
 
 		try {
 			const session = await getSession();
-			// `signal` is the shell's Ctrl-C: just-bash stops at the next statement boundary and forwards it to a
-			// custom command's `ctx.signal` (so `node` kills its worker). An interrupted run may not reach the PROBE.
-			const result = await execInSession(session, state, input, signal);
-			const { stdout } = result;
+			// Whether what's been written for this line ends a line: a statement's output after another's goes on a new one.
+			let fresh = true;
+			// stdout then stderr, each with its trailing newline trimmed (the prompt supplies one), joined so the two streams
+			// land on separate lines rather than run together. (A streamed `node` wrote its output live and returns empty.)
+			const show = (result: { "stdout": string; "stderr": string }): void => {
+				const blocks: string[] = [];
 
-			exitCode = result.exitCode;
+				if (result.stdout !== "") {
+					blocks.push(result.stdout.replace(/\n$/u, ""));
+				}
 
-			// stdout then stderr, each with its trailing newline trimmed (the prompt supplies one), joined so the
-			// two streams land on separate lines rather than run together. (A streamed `node` wrote its output
-			// live and returns empty here.)
-			const blocks: string[] = [];
+				if (result.stderr !== "") {
+					blocks.push(`[31m${result.stderr.replace(/\n$/u, "")}[0m`);
+				}
 
-			if (stdout !== "") {
-				blocks.push(stdout.replace(/\n$/u, ""));
-			}
+				if (blocks.length > 0 && !signal.aborted) { // on Ctrl-C the output already streamed; skip abort noise
+					write((fresh ? "" : "\n") + blocks.join("\n"));
+					fresh = false;
+				}
+			};
+			// A line with a streaming command (`node`) runs a statement at a time (terminal-session.ts statementsOf): just-bash
+			// hands back a line's output only when the whole line's done, so what came before the command would otherwise
+			// show after it. `;`, `&&` and `||` keep their meaning: a statement after `&&` runs if the last one ran succeeded,
+			// after `||` if it failed. Any other line runs whole.
+			const statements = statementsOf(input) ?? [{ "text": input, "then": "" as const }];
 
-			if (result.stderr !== "") {
-				blocks.push(`[31m${result.stderr.replace(/\n$/u, "")}[0m`);
-			}
+			for (let index = 0; index < statements.length && !signal.aborted; index += 1) {
+				const joined = statements[index - 1]?.then;
 
-			if (blocks.length > 0 && !signal.aborted) { // on Ctrl-C the output already streamed; skip abort noise
-				write(blocks.join("\n"));
+				if ((joined === "&&" && exitCode !== 0) || (joined === "||" && exitCode === 0)) {
+					continue;
+				}
+
+				// (a streaming command's output, written as it runs, starts on a line of its own)
+				if (!fresh) {
+					write("\n");
+					fresh = true;
+				}
+
+				// `signal` is the shell's Ctrl-C: just-bash stops at the next statement boundary and forwards it to a custom
+				// command's `ctx.signal` (so `node` kills its worker). An interrupted run may not reach the PROBE.
+				const result = await execInSession(session, state, statements[index]!.text, signal);
+
+				exitCode = result.exitCode;
+				show(result);
 			}
 		} catch (error) {
 			exitCode = 1;
