@@ -54,6 +54,7 @@ import type { Range } from "./anchors";
 import type { ProfiledLine } from "./coverage";
 import { Anchors } from "./anchors";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
+import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { parseInputs } from "./extensions/worker-pod/inputs";
 import { describeRule, ruleEditor, showPane, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
 import css from "./live-values.css?raw";
@@ -695,7 +696,7 @@ export function withVariables(policy: PolicyModule, values: { "name": string; "k
 async function openVariableMock(uri: string, row: Row, name: string, session: Session, close: () => void): Promise<HTMLElement> {
 	const policy = await import("@brianjenkins94/util/silo/policy");
 	const program = api?.workspace.asRelativePath(api.Uri.parse(uri), false) ?? "";
-	const [place] = await Promise.resolve(api?.commands.executeCommand<unknown[] | undefined>("editor.annotations.refer", session.anchors!.text, program, [{ "start": row.at![0], "end": row.at![1] }])).catch(() => undefined) ?? [];
+	const [place] = api === undefined ? [] : await annotations(api.commands).refer(session.anchors!.text, program, [{ "start": row.at![0], "end": row.at![1] }]) ?? [];
 
 	if (place === undefined || place === null) {
 		throw new Error("This line can't be placed: BABLR doesn't read this file");

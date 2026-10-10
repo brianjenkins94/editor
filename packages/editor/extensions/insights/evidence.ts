@@ -8,7 +8,7 @@
  * editor's BABLR, by its id alone (worker-pod's `editor.annotations.resolve`), and one that isn't there fades rather
  * than being looked for. A file BABLR's grammar doesn't take yet has none.
  */
-import type { Resolution } from "@brianjenkins94/util/silo/annotations";
+import { annotations } from "@brianjenkins94/run-contract/annotations";
 import type { Observation } from "@brianjenkins94/util/silo/evidence";
 import { observedRef } from "@brianjenkins94/util/silo/annotations";
 import { LOCAL_DIR, parseEvidence, parseSamples, SILO_DIR } from "@brianjenkins94/util/silo/evidence";
@@ -126,7 +126,7 @@ export function evidenceStore(vscode: typeof vscodeApi, subscriptions: vscodeApi
 		}
 
 		const spans = [...known.keys()];
-		const found = await Promise.resolve(vscode.commands.executeCommand<Resolution[] | undefined>("editor.annotations.resolve", text, file, spans.map((span) => observedRef(span, file)), { "observed": true })).catch(() => undefined);
+		const found = await annotations(vscode.commands).resolve(text, file, spans.map((span) => observedRef(span, file)), { "observed": true });
 
 		return spans.flatMap((span, index) => {
 			const at = found?.[index]?.candidate;

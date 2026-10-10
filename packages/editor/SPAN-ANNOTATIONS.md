@@ -110,7 +110,8 @@ line, folded the same way. Collections may partition further (evidence adds an e
 - **The editor's BABLR** (bablr.ts, the worker): spans of a text with their shapes and neighbours, references for
   ranges, and re-identification from a baseline (strategy 3), all from its cached parses. Extensions reach it through
   two commands, both batched — one call a file: `editor.annotations.refer(text, file, ranges)` and
-  `editor.annotations.resolve(text, file, refs, { observed })`.
+  `editor.annotations.resolve(text, file, refs, { observed })` — typed, with their contract, in
+  `@brianjenkins94/run-contract/annotations` (`annotations(vscode.commands)`), which every caller goes through.
 - **Editor core**: baseline contents from git's objects.
 - **The insights extension**: what you see, including orphans and their two actions.
 

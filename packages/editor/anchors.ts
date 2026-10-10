@@ -9,6 +9,7 @@
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
 import type * as vscodeApi from "vscode";
+import { annotations, type SpanRef } from "@brianjenkins94/run-contract/annotations";
 
 /** A range of offsets, `[start, end)`. */
 export type Range = [number, number];
@@ -73,7 +74,7 @@ export class Anchors {
 	private readonly source: string;
 	private readonly sourceStarts: number[];
 	/** Each range's reference, by `start:end`, referred to in batches as ranges are first asked about. */
-	private readonly refs = new Map<string, Promise<unknown>>();
+	private readonly refs = new Map<string, Promise<SpanRef | undefined>>();
 
 	/** `path`'s ranges in `source`, the text that ran. */
 	public constructor(vscode: typeof vscodeApi, path: string, source: string) {
@@ -90,7 +91,7 @@ export class Anchors {
 
 	/** Whether BABLR reads `text` as code: only then does the whole of it refer to a span (its Program). */
 	private async parses(text: string): Promise<boolean> {
-		const [whole] = await Promise.resolve(this.vscode.commands.executeCommand<unknown[] | undefined>("editor.annotations.refer", text, this.file, [{ "start": 0, "end": text.length }])).catch(() => undefined) ?? [];
+		const [whole] = await annotations(this.vscode.commands).refer(text, this.file, [{ "start": 0, "end": text.length }]) ?? [];
 
 		return whole !== undefined && whole !== null;
 	}
@@ -104,7 +105,7 @@ export class Anchors {
 		const unseen = [...new Map(ranges.filter(([start, end]) => !this.refs.has(`${start}:${end}`)).map((range) => [`${range[0]}:${range[1]}`, range])).values()];
 
 		if (unseen.length > 0) {
-			const referred = Promise.resolve(this.vscode.commands.executeCommand<unknown[] | undefined>("editor.annotations.refer", this.source, this.file, unseen.map(([start, end]) => ({ "start": start, "end": end })))).catch(() => undefined);
+			const referred = annotations(this.vscode.commands).refer(this.source, this.file, unseen.map(([start, end]) => ({ "start": start, "end": end })));
 
 			for (const [index, [start, end]] of unseen.entries()) {
 				this.refs.set(`${start}:${end}`, referred.then((all) => all?.[index]));
@@ -114,7 +115,7 @@ export class Anchors {
 		const refs = await Promise.all(ranges.map(([start, end]) => this.refs.get(`${start}:${end}`)));
 		// Only the ranges BABLR found a span for are looked for (one it couldn't — a file its grammar doesn't take — is gone).
 		const known = refs.flatMap((ref, index) => (ref === undefined ? [] : [index]));
-		const found = known.length === 0 ? [] : await Promise.resolve(this.vscode.commands.executeCommand<({ "candidate"?: { "start"?: number; "file"?: string } } | undefined)[] | undefined>("editor.annotations.resolve", text, this.file, known.map((index) => refs[index]), { "observed": true })).catch(() => undefined);
+		const found = await annotations(this.vscode.commands).resolve(text, this.file, known.map((index) => refs[index]!), { "observed": true });
 		const starts = lineStarts(text);
 		const lines: (number | undefined)[] = ranges.map(() => undefined);
 

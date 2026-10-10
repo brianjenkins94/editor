@@ -14,13 +14,14 @@
  * Dismissing writes a tombstone, so a branch merge can't bring the note back. Only a note's author changes it. Public
  * API only: everything it knows of the code comes from the editor's BABLR, through commands.
  */
-import type { Annotation, Resolution, SpanRef } from "@brianjenkins94/util/silo/annotations";
+import type { Resolved } from "@brianjenkins94/run-contract/annotations";
+import { annotations } from "@brianjenkins94/run-contract/annotations";
+import type { Annotation, SpanRef } from "@brianjenkins94/util/silo/annotations";
 import { annotationsPath, annotationsText, parseAnnotations } from "@brianjenkins94/util/silo/annotations";
 import { GITATTRIBUTES, parseEvidence, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
 import * as vscode from "vscode";
 
 type Note = Annotation<{ "text": string }>;
-type Resolved = Resolution & { "ref"?: SpanRef };
 
 const COLLECTION = "notes";
 const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
@@ -140,7 +141,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		const version = document.version;
 		const source = document.getText();
 		const notes = (await notesOn(file)).filter(({ note }) => note.dismissed !== true);
-		const resolve = async (refs: SpanRef[], types?: Record<string, { "inferred"?: string; "observed"?: string[] }>): Promise<Resolved[] | undefined> => (refs.length === 0 ? [] : Promise.resolve(vscode.commands.executeCommand<Resolved[] | undefined>("editor.annotations.resolve", source, file, refs, types === undefined ? undefined : { "types": types })).catch(() => undefined));
+		const resolve = async (refs: SpanRef[], types?: Record<string, { "inferred"?: string; "observed"?: string[] }>): Promise<Resolved[] | undefined> => annotations(vscode.commands).resolve(source, file, refs, types === undefined ? {} : { "types": types });
 		const resolutions = await resolve(notes.map(({ note }) => note.ref)) ?? [];
 		// A note found only by its shape (asked about, or lost) that knows what its span was — its type, the kinds of value
 		// runs saw there — is looked for again with the same of the places it might be: the typed strategy lifts the one
@@ -280,7 +281,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 
 			const file = relative(editor.document.uri);
-			const [ref] = await vscode.commands.executeCommand<(SpanRef | undefined)[]>("editor.annotations.refer", editor.document.getText(), file, [{ "start": editor.document.offsetAt(editor.selection.start), "end": editor.document.offsetAt(editor.selection.end) }]);
+			const [ref] = await annotations(vscode.commands).refer(editor.document.getText(), file, [{ "start": editor.document.offsetAt(editor.selection.start), "end": editor.document.offsetAt(editor.selection.end) }]) ?? [];
 
 			if (ref === undefined) {
 				void vscode.window.showInformationMessage("A note needs BABLR to understand this file, and it can't parse it yet.");
@@ -334,7 +335,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 
 			const file = relative(editor.document.uri);
-			const [ref] = await vscode.commands.executeCommand<(SpanRef | undefined)[]>("editor.annotations.refer", editor.document.getText(), file, [{ "start": editor.document.offsetAt(editor.selection.start), "end": editor.document.offsetAt(editor.selection.end) }]);
+			const [ref] = await annotations(vscode.commands).refer(editor.document.getText(), file, [{ "start": editor.document.offsetAt(editor.selection.start), "end": editor.document.offsetAt(editor.selection.end) }]) ?? [];
 
 			if (ref !== undefined) {
 				const { note } = pending;

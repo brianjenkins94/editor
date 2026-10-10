@@ -1,11 +1,12 @@
 {
   "name": "@brianjenkins94/run-contract",
   "version": "0.0.0",
-  "description": "What brianjenkins94/editor reads from a run, and asks of it — the custom debug events a debugger sends (values, coverage, effects, ended, ask, recorded, listening, idle) and the requests it answers (decide, stdin, getCoverage) — and the workspace runtime a debugger's worker connects to (./runtime). tsval's, and any interpreter plugged in as run.debugger.",
+  "description": "What brianjenkins94/editor reads from a run, and asks of it — the custom debug events a debugger sends (values, coverage, effects, ended, ask, recorded, listening, idle) and the requests it answers (decide, stdin, getCoverage) — and the workspace runtime a debugger's worker connects to (./runtime), and span annotations — placing something on code so it stays on that code (./annotations). tsval's, and any interpreter plugged in as run.debugger.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./runtime": "./src/runtime.ts"
+    "./runtime": "./src/runtime.ts",
+    "./annotations": "./src/annotations.ts"
   },
   "license": "MIT",
   "scripts": {

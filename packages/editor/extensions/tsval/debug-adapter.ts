@@ -16,6 +16,8 @@ import * as vscode from "vscode";
 
 import { EMPTY_POLICY, given as givenBy, placesOf, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
 import type { WorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
+import type { SpanRef } from "@brianjenkins94/run-contract/annotations";
+import { annotations } from "@brianjenkins94/run-contract/annotations";
 import type { Replay } from "../worker-pod/page-evidence";
 import type { CapabilityAsk, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
 
@@ -438,7 +440,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				return [];
 			}
 
-			const found = await Promise.resolve(vscode.commands.executeCommand<({ "status"?: string; "candidate"?: { "start"?: number; "file"?: string } } | undefined)[] | undefined>("editor.annotations.resolve", source, file, placed.map(({ place }) => place))).catch(() => undefined);
+			const found = await annotations(vscode.commands).resolve(source, file, placed.map(({ place }) => place as SpanRef));
 
 			return placed.flatMap(({ rule, place }, index): SetHook[] => {
 				const resolution = found?.[index];

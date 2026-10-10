@@ -30,6 +30,7 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 
 import { given, placesOf, type Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
+import { annotations, type Resolved, type SpanRef } from "@brianjenkins94/run-contract/annotations";
 
 import { loadEffectivePolicy, loadPolicyFiles, movePlace, replaceRule } from "../capabilities/silo-store";
 import { appRootOf, runApp, runDebugger } from "./launch";
@@ -450,9 +451,6 @@ function setBreakpoints(program: string, lines: number[]): void {
  *  now. */
 interface PlaceNow { "status": string; "line"?: number; "endLine"?: number; "ref"?: unknown }
 
-/** What `editor.annotations.resolve` answers for one reference. */
-interface Found { "status"?: string; "candidate"?: { "start"?: number; "end"?: number; "file"?: string }; "ref"?: unknown }
-
 /** How a place found surely enough to act on was found: on its own span, moved, or re-placed by a strong match. */
 const SURE = new Set(["attached", "moved", "re-placed"]);
 
@@ -465,12 +463,12 @@ async function textOf(uri: vscode.Uri): Promise<string> {
 
 /** Where `place` is in `text` (of `file`), by the editor's BABLR — if in `file` at all. `before`: texts it may have been
  *  made against, for it to be followed from the one it was by the structural diff. */
-async function resolvePlace(text: string, file: string, place: unknown, before: string[] = []): Promise<Found | undefined> {
+async function resolvePlace(text: string, file: string, place: unknown, before: string[] = []): Promise<Resolved | undefined> {
 	if (text === "") {
 		return undefined; // nothing to find it in (and BABLR reads no empty text)
 	}
 
-	const [found] = await Promise.resolve(vscode.commands.executeCommand<(Found | undefined)[] | undefined>("editor.annotations.resolve", text, file, [place], { "texts": before })).catch(() => undefined) ?? [];
+	const [found] = await annotations(vscode.commands).resolve(text, file, [place as SpanRef], { "texts": before }) ?? [];
 
 	return found?.status === undefined || found.status === "orphaned" || found.candidate?.start === undefined || (found.candidate.file !== undefined && found.candidate.file !== file) ? undefined : found;
 }
@@ -482,7 +480,7 @@ const HISTORY_STEPS = 30;
  *  found, so an edit and the fix ESLint makes on save are two small steps rather than one jump too big to be sure of —
  *  to where it's surely found in the last (and how), or undefined if it isn't. It's followed from the latest text it's
  *  found in by its own span id (where it was placed, or unchanged since), so no lookalike from before then can take it. */
-async function follow(place: unknown, texts: string[], file: string): Promise<{ "at": unknown; "found": Found } | undefined> {
+async function follow(place: unknown, texts: string[], file: string): Promise<{ "at": unknown; "found": Resolved } | undefined> {
 	let from = texts.length - 1;
 
 	while (from > 0 && (await resolvePlace(texts[from]!, file, place))?.status !== "attached") {
@@ -490,7 +488,7 @@ async function follow(place: unknown, texts: string[], file: string): Promise<{ 
 	}
 
 	let at = place;
-	let found: Found | undefined;
+	let found: Resolved | undefined;
 
 	for (let index = from; index < texts.length; index += 1) {
 		// Each step from the texts before it — the reference was made against one of them — by the structural diff.

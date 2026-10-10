@@ -6,7 +6,7 @@
  * its own (recognizer-worker.ts) so parsing doesn't hold up the extension host — anchoring what it recognizes with the
  * editor's BABLR (anchors.ts).
  */
-import type { SpanRef } from "@brianjenkins94/util/silo/annotations";
+import { annotations } from "@brianjenkins94/run-contract/annotations";
 import type { EventSheetHost, HostMessage, ViewMessage } from "./view";
 import type { GameModel } from "./recognizer";
 import * as vscode from "vscode";
@@ -125,7 +125,7 @@ function recognizer(context: vscode.ExtensionContext): { "project": (root: strin
 
 			// Durable span references, from the editor's BABLR (one worker, one cache of parses): worker-pod's command,
 			// each file named as the workspace does. Without it (VS Code without the editor), the nodes go unanchored.
-			return anchorGame(files, model, async (source, path, ranges) => vscode.commands.executeCommand<(SpanRef | undefined)[]>("editor.annotations.refer", source, vscode.workspace.asRelativePath(vscode.Uri.file(root + "/" + path), false), ranges));
+			return anchorGame(files, model, async (source, path, ranges) => annotations(vscode.commands).refer(source, vscode.workspace.asRelativePath(vscode.Uri.file(root + "/" + path), false), ranges));
 		},
 		"dispose": () => { worker?.worker.terminate(); }
 	};

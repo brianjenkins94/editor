@@ -20,6 +20,7 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { EditedRule, RuleCatalog, RulePredicate } from "@brianjenkins94/monaco-vscode-api/main";
 import type { PanelButton, PolicyModule, Verdict } from "./live-values";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
+import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { describeRule, registerCustomView, viewContainerRegistry, ViewContainerLocation } from "@brianjenkins94/monaco-vscode-api/main";
 import { callRule, callVerdict, decisionOf, ensureStyled, rulePanel, variablesOf, withVariables } from "./live-values";
 import css from "./rules-view.css?raw";
@@ -101,7 +102,7 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 		}
 
 		const { document, selection } = editor;
-		const [place] = await Promise.resolve(vscode.commands.executeCommand<unknown[] | undefined>("editor.annotations.refer", document.getText(), vscode.workspace.asRelativePath(document.uri, false), [{ "start": document.offsetAt(selection.start), "end": document.offsetAt(selection.end) }])).catch(() => undefined) ?? [];
+		const [place] = await annotations(vscode.commands).refer(document.getText(), vscode.workspace.asRelativePath(document.uri, false), [{ "start": document.offsetAt(selection.start), "end": document.offsetAt(selection.end) }]) ?? [];
 
 		if (place === undefined || place === null) {
 			throw new Error("That code can't be placed: BABLR doesn't read this file");
