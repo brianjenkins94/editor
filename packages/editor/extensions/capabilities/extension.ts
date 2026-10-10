@@ -20,6 +20,7 @@ import * as vscode from "vscode";
 
 import { type Disposition, type Effective, type Policy, effectiveDisposition, policyUri, readPolicy, withRule, withoutRule, writePolicy } from "./policy";
 import { type StaticEntry, type StaticSurface, loadStaticSurface, writeStaticSurface } from "./silo-store";
+import { registerRulesTree } from "./rules-tree";
 
 interface Row {
 	"capability": string;
@@ -332,6 +333,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	);
 
 	void refresh();
+	// The Rules view, beside this one: the policy's rules as a tree (rules-tree.ts).
+	registerRulesTree(context);
 }
 
 export function deactivate(): void { /* subscriptions disposed by the host */ }

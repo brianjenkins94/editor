@@ -1,13 +1,17 @@
 /**
- * The Rules view (RULES.md): every rule in the policy files, in the Explorer beside Capability calls — mine first
- * (`.silo/<you>.policy.json`), then the shared contract's (`.silo/policy.json`) — each a sentence in the catalog's words,
- * in the order they're matched: the first that matches decides. A click opens it in the rule editor, the margin's own
- * panel (live-values.ts): *Save* (mine, in its place; a shared rule edited is a rule of mine, ahead of it), *Remove*
- * (mine only: silo doesn't author the contract), *Cancel*. *New Rule*, in the view's title, starts one. A rule that
- * can't be matched says why.
+ * Rules (RULES.md), the editor's half: the rule editor — the margin's own panel (live-values.ts) — in the Rule view under
+ * the Rules tree, and the commands the tree (the capabilities extension's rules-tree.ts, VS Code's own tree view) runs:
  *
- * Collapsed until it's opened: silo's policy (and ajv with it) loads when the view first renders, not with the
- * workbench. It redraws as the policy files change — by a rule editor anywhere, or by hand.
+ * - `silo.rules.list`: every rule in the policy files — mine (`.silo/<you>.policy.json`), then the shared contract's
+ *   (`.silo/policy.json`) — each a sentence in the catalog's words, the problem that makes it match nothing, and where a
+ *   placed one's place is now;
+ * - `silo.rules.open` (a listed rule), `silo.rules.new`: the rule in the editor — *Save* (mine, in its place; a shared
+ *   rule edited is a rule of mine, ahead of it), *Remove* (mine only: silo doesn't author the contract), *Re-place at
+ *   selection* (a lost place), *Cancel*;
+ * - `silo.rules.remove`, `silo.rules.replace`: a rule's inline actions.
+ *
+ * And a preview's capability prompt makes its rule here (`rules.make`). silo's policy (and ajv with it) loads when a rule
+ * is first listed or opened, not with the workbench.
  *
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
@@ -17,7 +21,7 @@ import type { EditedRule, RuleCatalog, RulePredicate } from "@brianjenkins94/mon
 import type { PanelButton, PolicyModule, Verdict } from "./live-values";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { describeRule, registerCustomView, viewContainerRegistry, ViewContainerLocation } from "@brianjenkins94/monaco-vscode-api/main";
-import { callRule, callVerdict, decisionOf, ensureStyled, onRulesChanged, rulePanel, variablesOf, withVariables } from "./live-values";
+import { callRule, callVerdict, decisionOf, ensureStyled, rulePanel, variablesOf, withVariables } from "./live-values";
 import css from "./rules-view.css?raw";
 
 /** Where a placed rule's place is now: its line, and how it was found — or lost. */
@@ -25,6 +29,9 @@ interface Place { "status": string; "line"?: number }
 
 /** A policy file's rules, with its workspace-relative path, and where each placed rule's place is now (null: none). */
 interface PolicyFile { "file": string; "rules": EditedRule[]; "places"?: (Place | null)[] }
+
+/** A rule as the Rules tree lists it (`silo.rules.list`, and debug-mcp's `rules`). */
+interface Listed { "whose": "mine" | "shared"; "file": string; "sentence": string; "problem"?: string; "place"?: Place; "rule": EditedRule }
 
 /** A new rule, as it starts: one row to fill in, and allow. */
 const BLANK: EditedRule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "" }] }, "then": [{ "action_id": "allow" }] };
@@ -36,31 +43,52 @@ function replacePlace(rule: EditedRule, place: unknown): EditedRule {
 	return { ...rule, "when": walk(rule.when) as EditedRule["when"] };
 }
 
-/** What a rule is, whenever it was decided: the key its open editor is kept by. */
-const keyOf = (whose: string, rule: EditedRule): string => `${whose}:${JSON.stringify({ "when": rule.when, "then": rule.then })}`;
-
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, properties: Partial<HTMLElementTagNameMap[K]> = {}): HTMLElementTagNameMap[K] {
 	return Object.assign(document.createElement(tag), { "className": className, ...properties });
 }
 
-/** Register the Rules view; it lists and edits the rules once it's opened. */
+/** Register the rule editor (the Rule view) and the Rules tree's commands. */
 export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 	const rpc = createRpcClient(hub);
 	const list = async (): Promise<{ "mine": PolicyFile; "shared": PolicyFile } | null> => rpc.request("rules.list", undefined, { "timeoutMs": 10_000 }) as Promise<{ "mine": PolicyFile; "shared": PolicyFile } | null>;
-	const set = async (previous: EditedRule | undefined, rule: EditedRule | undefined): Promise<unknown> => rpc.request("rules.set", { ...previous === undefined ? {} : { "previous": previous }, ...rule === undefined ? {} : { "rule": rule } }, { "timeoutMs": 10_000 });
-	/** The view's body, once rendered. */
+	const set = async (previous: EditedRule | undefined, rule: EditedRule | undefined): Promise<unknown> => {
+		const answer = await rpc.request("rules.set", { ...previous === undefined ? {} : { "previous": previous }, ...rule === undefined ? {} : { "rule": rule } }, { "timeoutMs": 10_000 });
+
+		// (the tree redraws as the file changes; this is sooner)
+		void Promise.resolve(vscode.commands.executeCommand("silo.rules.refresh")).catch(() => undefined);
+
+		return answer;
+	};
+	/** The Rule view's body, once rendered. */
 	let root: HTMLElement | undefined;
 	let policy: PolicyModule | undefined;
-	/** The rule open in the editor — by `keyOf`, or "new" — and its panel, kept as it is across redraws. */
-	let editing: { "key": string; "panel": HTMLElement } | undefined;
-	let rendering = 0;
+	/** The rule open in the editor, and its panel, kept as it is across redraws. */
+	let editing: { "panel": HTMLElement } | undefined;
 
-	const close = (): void => {
-		editing = undefined;
-		void render();
+	const loadPolicy = async (): Promise<PolicyModule> => {
+		policy ??= await import("@brianjenkins94/util/silo/policy");
+
+		return policy;
 	};
 
-	/** The editor for `rule` (whose: "mine", "shared" or "new"), its buttons by whose it is. */
+	const render = (): void => {
+		root?.replaceChildren(editing?.panel ?? element("div", "rules-view-empty", { "textContent": "Open a rule in Rules above — or make one with New Rule." }));
+	};
+
+	/** The editor shown, in front. */
+	const show = (panel: HTMLElement): void => {
+		editing = { "panel": panel };
+		render();
+		void Promise.resolve(vscode.commands.executeCommand("silo.rule.focus")).catch(() => undefined);
+	};
+
+	// (and the view goes, until a rule's opened again: the Explorer keeps its room)
+	const close = (): void => {
+		editing = undefined;
+		render();
+		void Promise.resolve(vscode.commands.executeCommand("silo.rule.removeView")).catch(() => undefined);
+	};
+
 	/** silo's catalog, with the variables `rule` names. */
 	const catalogFor = (rule: EditedRule): RuleCatalog => withVariables(policy!, variablesOf(rule).map((name) => ({ "name": name, "kind": "" })));
 
@@ -82,7 +110,8 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 		return place;
 	};
 
-	const open = (key: string, whose: string, rule: EditedRule, place: Place | null = null): void => {
+	/** `rule` (whose: "mine", "shared" or "new") in the editor, its buttons by whose it is. */
+	const open = (whose: "mine" | "shared" | "new", rule: EditedRule, place: Place | null = null): void => {
 		const catalog = catalogFor(rule);
 		const judge = (edited: EditedRule): Verdict => {
 			const problem = policy!.problemOf(edited);
@@ -98,129 +127,90 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 			{ "label": "Cancel", "className": "cancel", "title": "Close it, changing nothing", "act": async () => { close(); }, "always": true }
 		];
 
-		editing = { "key": key, "panel": rulePanel(policy!, rule, judge, buttons, catalog) };
-		void render();
+		show(rulePanel(policy!, rule, judge, buttons, catalog));
 	};
 
-	/** One rule's line: its sentence (or why it can't be matched), and the editor under it when it's open. */
-	const ruleLine = (whose: "mine" | "shared", rule: EditedRule, place: Place | null): HTMLElement[] => {
-		const key = keyOf(whose, rule);
-		// A rule whose place in the code is lost can't apply: as broken as one that can't be matched.
-		const problem = policy!.problemOf(rule) ?? (place?.status === "orphaned" ? "Its place in the code is lost — the statement it was at is gone or changed past recognizing; open it to re-place it" : undefined);
-		const line = element("div", `rules-view-rule${problem === undefined ? "" : " broken"}${editing?.key === key ? " open" : ""}`, { "tabIndex": 0, "title": rule.added === undefined ? "" : `First decided ${new Date(rule.added).toLocaleString()}` });
+	/** Every rule, as the tree lists it: mine, then the shared contract's — or null without a folder. */
+	const listed = async (): Promise<Listed[] | null> => {
+		const files = await list().catch(() => null);
 
-		line.append(
-			element("span", `codicon codicon-${problem === undefined ? "law" : "error"}`),
-			element("span", "rules-view-sentence", { "textContent": problem === undefined ? describeRule(rule, catalogFor(rule)) : `${problem} — it matches nothing` })
-		);
-
-		// Where a placed rule is now: its line (an uncertain match marked so).
-		if (problem === undefined && place?.line !== undefined) {
-			line.append(element("span", "rules-view-where", { "textContent": `line ${place.line}${place.status === "uncertain" ? "?" : ""}`, "title": place.status === "uncertain" ? "Found by a match not sure enough to act on: it doesn't apply until it's placed again" : "Where its statement is now" }));
+		if (files === null) {
+			return null;
 		}
-		line.addEventListener("click", () => {
-			if (editing?.key === key) {
-				close();
-			} else {
-				open(key, whose, rule, place);
-			}
-		});
-		line.addEventListener("keydown", (event) => {
-			if (event.key === "Enter" || event.key === " ") {
-				event.preventDefault();
-				line.click();
-			}
+
+		await loadPolicy();
+
+		const each = (whose: "mine" | "shared", { file, rules, places }: PolicyFile): Listed[] => rules.map((rule, index) => {
+			const place = places?.[index] ?? null;
+			// A rule whose place in the code is lost can't apply: as broken as one that can't be matched.
+			const problem = policy!.problemOf(rule) ?? (place?.status === "orphaned" ? "Its place in the code is lost — the statement it was at is gone or changed past recognizing" : undefined);
+
+			return { "whose": whose, "file": file, "sentence": problem === undefined ? describeRule(rule, catalogFor(rule)) : `${problem} — it matches nothing`, ...problem === undefined ? {} : { "problem": problem }, ...place === null ? {} : { "place": place }, "rule": rule };
 		});
 
-		return editing?.key === key ? [line, editing.panel] : [line];
+		return [...each("mine", files.mine), ...each("shared", files.shared)];
 	};
 
-	const section = (title: string, whose: "mine" | "shared", { file, rules, places }: PolicyFile, empty: string): HTMLElement => {
-		const block = element("div", "rules-view-section");
-		const head = element("div", "rules-view-head", { "title": "Matched in this order — yours first, then the shared ones: the first rule that matches decides" });
+	/** A command's rule: the tree's listed rule — or its node, from an inline action. */
+	const ruleOf = (argument: unknown): Listed | undefined => {
+		const value = argument as { "listed"?: Listed } & Partial<Listed> | undefined;
 
-		head.append(element("span", "rules-view-title", { "textContent": title }), element("span", "rules-view-file", { "textContent": file }));
-		// A new rule is made here, first: where it's saved.
-		block.append(head, ...whose === "mine" && editing?.key === "new" ? [editing.panel] : [], ...rules.length === 0 && editing?.key !== "new" ? [element("div", "rules-view-empty", { "textContent": empty })] : rules.flatMap((rule, index) => ruleLine(whose, rule, places?.[index] ?? null)));
-
-		return block;
+		return value?.listed ?? (value?.rule === undefined ? undefined : value as Listed);
 	};
-
-	async function render(): Promise<void> {
-		if (root === undefined) {
-			return;
-		}
-
-		rendering += 1;
-
-		const token = rendering;
-
-		policy ??= await import("@brianjenkins94/util/silo/policy");
-
-		const listing = await list().catch(() => null);
-
-		if (token !== rendering) {
-			return; // a newer render is drawing
-		}
-
-		if (listing === null) {
-			root.replaceChildren(element("div", "rules-view-empty", { "textContent": "Open a folder to keep rules: they live in its .silo/ folder." }));
-
-			return;
-		}
-
-		root.replaceChildren(
-			section("Yours", "mine", listing.mine, "None yet — make one with New Rule above, Rule… at a capability stop, or Mock… on process.argv's row."),
-			...listing.shared.rules.length === 0 ? [] : [section("Shared", "shared", listing.shared, "")]
-		);
-	}
 
 	registerCustomView({
-		"id": "silo.rules",
-		"name": "Rules",
+		"id": "silo.rule",
+		"name": "Rule",
 		"location": ViewContainerLocation.Sidebar,
 		"viewContainer": viewContainerRegistry.get("workbench.view.explorer"),
 		"canToggleVisibility": true,
-		"collapsed": true,
+		// Shown while a rule's open in it (`show`), gone again when it's closed.
+		"hideByDefault": true,
 		"renderBody": (container) => {
 			ensureStyled();
 			document.head.append(Object.assign(document.createElement("style"), { "textContent": css }));
 			root = element("div", "rules-view");
 			container.append(root);
-			void render();
+			render();
 
 			return { "dispose": () => { root = undefined; } };
-		},
-		"actions": [{
-			"id": "silo.rules.new",
-			"title": "New Rule",
-			"icon": "add",
-			"run": async () => {
-				policy ??= await import("@brianjenkins94/util/silo/policy");
-				open("new", "new", structuredClone(BLANK));
+		}
+	});
+
+	vscode.commands.registerCommand("silo.rules.list", listed);
+	vscode.commands.registerCommand("silo.rules.open", async (argument: unknown) => {
+		const rule = ruleOf(argument);
+
+		if (rule !== undefined) {
+			await loadPolicy();
+			open(rule.whose, rule.rule, rule.place ?? null);
+		}
+	});
+	vscode.commands.registerCommand("silo.rules.new", async () => {
+		await loadPolicy();
+		open("new", structuredClone(BLANK));
+	});
+	vscode.commands.registerCommand("silo.rules.remove", async (argument: unknown) => {
+		const rule = ruleOf(argument);
+
+		if (rule?.whose === "mine") {
+			await set(rule.rule, undefined);
+		}
+	});
+	vscode.commands.registerCommand("silo.rules.replace", async (argument: unknown) => {
+		const rule = ruleOf(argument);
+
+		if (rule !== undefined) {
+			try {
+				await set(rule.whose === "mine" ? rule.rule : undefined, replacePlace(rule.rule, await selected()));
+			} catch (error) {
+				void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
 			}
-		}]
+		}
 	});
 
-	// The policy files changed — by a rule editor anywhere, or by hand: redraw.
-	onRulesChanged(() => { void render(); });
-
-	// Every rule as the view shows it, as data (debug-mcp's `rules` tool): mine, then the shared contract's — each one's
-	// sentence, its JSON, the problem that makes it match nothing, and where a placed one's place is now.
-	serve(hub, "rules.state", async () => {
-		const files = await list();
-
-		policy ??= await import("@brianjenkins94/util/silo/policy");
-
-		const listed = (whose: "mine" | "shared", { file, rules, places }: PolicyFile): unknown[] => rules.map((rule, index) => {
-			const place = places?.[index] ?? null;
-			const problem = policy!.problemOf(rule) ?? (place?.status === "orphaned" ? "its place in the code is lost" : undefined);
-
-			return { "whose": whose, "file": file, "sentence": problem === undefined ? describeRule(rule, catalogFor(rule)) : `${problem} — it matches nothing`, ...problem === undefined ? {} : { "problem": problem }, ...place === null ? {} : { "place": place.line === undefined ? { "status": place.status } : { "status": place.status, "line": place.line } }, "rule": rule };
-		});
-
-		return files === null ? { "rules": [] } : { "rules": [...listed("mine", files.mine), ...listed("shared", files.shared)] };
-	});
+	// Every rule as the tree lists it, as data (debug-mcp's `rules` tool).
+	serve(hub, "rules.state", async () => ({ "rules": await listed() ?? [] }));
 
 	// A preview's capability prompt (decide.ts): its Rule… makes the rule here — a new one, prefilled with the call —
 	// and the call waits on it: Just this once (decided by it, not kept), Save as rule (kept, and decided by it), or
@@ -232,7 +222,7 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 			return null;
 		}
 
-		policy ??= await import("@brianjenkins94/util/silo/policy");
+		await loadPolicy();
 
 		const subject = { "capability": capability, "resource": resource ?? "" };
 
@@ -242,13 +232,11 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 				close();
 			};
 
-			editing = { "key": "new", "panel": rulePanel(policy!, callRule(capability, resource), (rule) => callVerdict(policy!, rule, subject), [
+			show(rulePanel(policy!, callRule(capability, resource), (rule) => callVerdict(policy!, rule, subject), [
 				{ "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and ask again next time", "act": async (rule) => { done(decisionOf(rule) ?? null); } },
 				{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/<you>.policy.json), and decide this call by it", "act": async (rule) => { await set(undefined, rule); done(decisionOf(rule) ?? null); } },
 				{ "label": "Cancel", "className": "cancel", "title": "Back to the preview's question", "act": async () => { done(null); }, "always": true }
-			]) };
-			void render();
-			void vscode.commands.executeCommand("silo.rules.focus");
+			]));
 		});
 	});
 }

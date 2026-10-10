@@ -107,10 +107,10 @@ workbench, the chat service isn't.
 
 | Ours | VS Code's | Decision |
 | --- | --- | --- |
-| The Rules view (core UI) | A tree view (`contributes.views`, a TreeDataProvider, inline actions) | **Move.** It lists rules and where they are now (`rules.placed` resolves them), so anchoring is untouched; the rule editor stays ours — nothing native edits predicates |
+| The Rules view (core UI) | A tree view (`contributes.views`, a TreeDataProvider, inline actions) | **Moved** (2026-10-10): the capabilities extension's tree (rules-tree.ts) beside Capability calls — Yours / Shared, a rule's sentence and its line, Remove and Re-place at selection inline, New Rule in its title — from the editor's commands (`silo.rules.list`, `.open`, `.new`, `.remove`, `.replace`). The rule editor stays ours, in the Rule view under it — nothing native edits predicates |
 | Live values at a stop | `InlineValuesProvider`, the debugger's own contract for values beside the code | **Add**, beside the margin: values of one session, mapped from the text that ran, so durability doesn't come into it |
 | Margin entries — the question, a run's end, coverage counts | CodeLens, inlay hints, decorations | **Later, with 4 and 5:** entries as data, drawn richly by the pane and natively by these — the margin's desktop face |
-| Agent tools (page-tools.ts, every tool in one place) | `contributes.languageModelTools`, `vscode.lm.registerTool` | **Check first:** the tools registry likely needs the chat service, which our workbench leaves off. Then each extension declares its own (the rules view its `rules`, evidence its `run_ledger`) and debug-mcp serves what's contributed, editor-contrib's included |
+| Agent tools (page-tools.ts, every tool in one place) | `contributes.languageModelTools`, `vscode.lm.registerTool` | **Not adopted:** those are tools for an agent inside VS Code — its chat — and VS Code isn't an MCP server that hands them to one outside. Our agent is outside: debug-mcp reaches the tab over the hub. A contributed tool would connect nothing we have |
 | Notes | The Comments API | **Not adopted.** A thread is a file and a range the controller owns; VS Code keeps nothing and follows nothing past typing — no reformat, branch or move to another file. Our span anchors would survive only as the truth behind it, our resolver setting each thread's range: two trackers moving one thread (VS Code's as you type, ours after), a thread rebuilt whenever its code moves files, and the display losing the span's precision. And the contract buys no interop — a controller's threads are its own, no extension can read another's. Revisit only as a second view on a desktop build |
 | Coverage marks | `TestController` with `FileCoverage` | **Not adopted:** the beaker and TestController were removed by choice, for ambient marks of our own |
 
@@ -145,6 +145,17 @@ breaks is what worker-pod reaches over the hub, because core isn't there:
 1. ~~The run contract, editor-contrib onto it, tsval through it; the gated call's round trip; terminal runs and agent
    control through it~~ — done (2026-10-08 → 10).
 2. ~~The workspace runtime; tsval its own extension (2)~~ — done (2026-10-10).
-3. The Rules view as a tree view; inline values (6).
-4. Pane views, with Margin and the event sheet as its first two providers; margin entries and their native rendering.
-5. The decider; agent tools — when a second decider or tool contributor needs them.
+3. ~~The Rules view as a tree view~~ — done (2026-10-10); inline values (6).
+4. Workspace tools for an agent (below), so one develops in the workspace as on a local machine.
+5. Pane views, with Margin and the event sheet as its first two providers; margin entries and their native rendering.
+6. The decider — when a second decider needs it.
+
+## Workspace tools
+
+debug-mcp's tools watch and debug — the editor, problems, runs, previews, the debugger, the margin — but an agent can't
+yet do the work itself, as it would on a local machine: read and write files (what's open, unsaved, included), edit one
+by an exact string, find files and search their text, run a command and read its output, and use git. Each a page tool
+of core's (the workspace and the shell are core's), served over the hub like the others: read through VS Code's
+documents then zen-fs; write and edit as a `WorkspaceEdit` (so an open editor, undo, the edit history and format on save
+see it, as typing); find with `findFiles`; run in core's just-bash, as the terminal does (`node` and `npm` as there); git
+through the git service.

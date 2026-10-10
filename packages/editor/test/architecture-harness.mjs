@@ -205,7 +205,16 @@ export async function startSession(options = {}) {
 		},
 		/** Open a workspace file from the Explorer (quick open can't find the workspace's files). */
 		"open": async (name) => {
-			// A double click opens it pinned and focuses the editor (a preview window may be covering the editor area).
+			// Revealed first — the Explorer's list draws only the rows in view, and other views share its height — then a double
+			// click opens it pinned and focuses the editor (a preview window may be covering the editor area).
+			await workbench().evaluate(async (file) => {
+				const { api } = globalThis.__editor;
+				const [found] = await api.workspace.findFiles(`**/${file}`, "**/node_modules/**", 1);
+
+				if (found !== undefined) {
+					await api.commands.executeCommand("revealInExplorer", found);
+				}
+			}, name);
 			await workbench().getByRole("treeitem", { "name": name, "exact": true }).first().dblclick();
 			await page.waitForTimeout(1000);
 		},

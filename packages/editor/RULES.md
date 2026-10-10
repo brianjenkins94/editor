@@ -87,11 +87,12 @@ rule*) — the same two buttons wherever the editor opens.
   records an allowed preview fetch's JSON or text body (`capability.record.<tab>` → the pod), the latest of each call, in
   `.silo/local/recorded.json` — this machine's only, git-ignored (a real response can hold secrets). *Just this once*
   gives it to this call (`give-once`); *Save as rule* to every run's.
-- **The preview's prompt** has *Rule…* too: the rule is made in the Rules view, prefilled with the call
+- **The preview's prompt** has *Rule…* too: the rule is made in the rule editor (the Rule view, under the Rules tree), prefilled with the call
   (`rules.make`, pod → workbench), and the call waits on it — *Just this once*, *Save as rule*, or *Cancel* (back to the
   prompt). *Allow always* stays, the one-click rule.
-- **A rule whose place is lost** shows broken in the Rules view; opened, *Re-place at selection* places it at the code
-  selected in the editor (a span reference made from the selection, as the margin makes one).
+- **A rule whose place is lost** shows broken in the Rules view (VS Code's own tree, the capabilities extension's);
+  *Re-place at selection* — inline, or in the rule editor once it's opened — places it at the code selected in the
+  editor (a span reference made from the selection, as the margin makes one).
 - **A rule placed in the code** (lib 20f01cb): *at* is a target whose argument is a span reference (SPAN-ANNOTATIONS.md),
   shown as a chip of its code, not typed. Before a run the adapter finds each rule's place in the text that runs
   (`editor.annotations.resolve` — through edits, as an authored annotation is) and hands the worker the lines; the worker

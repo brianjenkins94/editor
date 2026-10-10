@@ -1458,23 +1458,38 @@ test("capability decisions: Allow this run lets a loop's calls through, until th
 	}, [program, ...written]);
 });
 
-// The Rules view (rules-view.ts): every rule as a sentence, mine first; a rule saved anywhere shows up in it, and one
-// opened there can be removed.
+/** The Rules tree's rule rows (VS Code's own tree view, the capabilities extension's): each one's label, as shown. */
+function ruleRows(workbench) {
+	return workbench.evaluate(() => {
+		const pane = [...document.querySelectorAll(".pane")].find((each) => each.querySelector(".pane-header .title")?.textContent?.trim() === "Rules");
+
+		return pane === undefined ? undefined : [...pane.querySelectorAll(".monaco-list-row[aria-level=\"2\"]")].map((row) => row.querySelector(".label-name")?.textContent ?? "");
+	});
+}
+
+/** Open the listed rule `which` picks in the rule editor (the Rule view), as its row does: `silo.rules.open`. */
+function openRule(workbench, which) {
+	return workbench.evaluate(async (pick) => {
+		const { api } = globalThis.__editor;
+		const listed = await api.commands.executeCommand("silo.rules.list");
+
+		await api.commands.executeCommand("silo.rules.open", listed.find((each) => (pick === "broken" ? each.problem !== undefined : true)));
+	}, which);
+}
+
+// The Rules view (the capabilities extension's tree, rules-tree.ts; its editor, rules-view.ts): every rule as a sentence,
+// mine first; a rule saved anywhere shows up in it, and one opened can be removed.
 test("rules view: every rule as a sentence, opened and removed there", async () => {
 	const workbench = session.workbench();
 	const rule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "fs:write" }, { "target_id": "resource", "operator_id": "matches", "argument": "/workspace/*.txt" }] }, "then": [{ "action_id": "allow" }] };
-	const lines = () => workbench.evaluate(() => {
-		const view = document.querySelector(".rules-view");
-
-		return view === null ? undefined : [...view.querySelectorAll(".rules-view-sentence")].map((each) => each.textContent);
-	});
+	const lines = () => ruleRows(workbench);
 
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("silo.rules.focus"));
 	await session.request("rules.set", { "rule": rule }, 10_000);
 	assert.deepEqual(await eventually("the rule, listed", async () => ((await lines())?.length === 1 ? lines() : undefined)), ["capability is fs:write and resource matches /workspace/*.txt → allow"]);
 
-	// Opened: the rule editor under it, with Remove.
-	await workbench.evaluate(() => { document.querySelector(".rules-view-rule").click(); });
+	// Opened: the rule editor (the Rule view), with Remove.
+	await openRule(workbench, "first");
 	await eventually("its editor", () => workbench.evaluate(() => [...document.querySelectorAll(".rules-view .live-values-rule button")].some((button) => button.textContent === "Remove") || undefined));
 	await workbench.evaluate(() => { [...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Remove").click(); });
 	assert.deepEqual(await eventually("no rules", async () => ((await lines())?.length === 0 ? lines() : undefined)), []);
@@ -1503,7 +1518,7 @@ test("rules view: a rule whose place is lost, re-placed at a selection", async (
 
 	await session.request("rules.set", { "rule": rule }, 10_000);
 	assert.equal((await listed()).mine.places[0].status, "orphaned");
-	assert.match(await eventually("the broken rule", () => workbench.evaluate(() => document.querySelector(".rules-view-rule.broken .rules-view-sentence")?.textContent)), /place in the code is lost/u);
+	assert.match(await eventually("the broken rule", async () => (await ruleRows(workbench))?.find((label) => /place in the code is lost/u.test(label))), /place in the code is lost/u);
 
 	// Select `let y = 2;`, open the rule, Re-place at selection.
 	await workbench.evaluate(() => {
@@ -1512,7 +1527,7 @@ test("rules view: a rule whose place is lost, re-placed at a selection", async (
 
 		editor.selection = new api.Selection(1, 0, 1, 10);
 	});
-	await workbench.evaluate(() => { document.querySelector(".rules-view-rule.broken").click(); });
+	await openRule(workbench, "broken");
 	await eventually("Re-place at selection", () => workbench.evaluate(() => [...document.querySelectorAll(".rules-view .live-values-rule button")].some((button) => button.textContent === "Re-place at selection") || undefined));
 	await workbench.evaluate(() => { [...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Re-place at selection").click(); });
 

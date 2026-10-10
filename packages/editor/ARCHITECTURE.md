@@ -347,6 +347,7 @@ flowchart LR
   n_debug_worker <-.->|"in-realm calls"| n_server__
   n_debug_worker <==> n_pod
   n_ext_capabilities -->|"reads, writes"| n_store__silo__file__json
+  n_ext_capabilities <-.->|"commands"| n_ext_vscode
   n_ext_eslint <-.->|"commands"| n_ext_vscode
   n_ext_insights -->|"reads"| n_store__silo_evidence____file__jsonl
   n_ext_insights -->|"reads"| n_store__silo_local____file__jsonl
