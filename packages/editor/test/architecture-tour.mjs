@@ -1384,7 +1384,8 @@ test("agent tools: the editor, its problems, notifications, rules, terminals and
 			return shownNow.some((each) => each.message.includes("isn't a program")) ? shownNow : undefined;
 		})).some((each) => each.severity === "error"));
 
-		await session.request("terminal.run", { "id": "agent-tools", "command": "echo from the terminal", "cwd": "/workspace" }, 10_000);
+		// (an id as a task's terminal has one — the architecture view folds it into terminal.in.*, whenever it sees it)
+		await session.request("terminal.run", { "id": crypto.randomUUID(), "command": "echo from the terminal", "cwd": "/workspace" }, 10_000);
 		assert.match(await eventually("its output", async () => (await session.request("terminal.state", undefined, 5000)).find((each) => each.command === "echo from the terminal" && each.output.includes("\nfrom the terminal"))?.output), /from the terminal/u);
 
 		assert.ok(Array.isArray((await session.request("rules.state", undefined, 15_000)).rules), "the rules, each with its sentence");
