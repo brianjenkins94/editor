@@ -461,7 +461,7 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 	}, change);
 
 	// (Live runs off: one would run the edited file again at once, and its coverage is what the margin would show.)
-	const liveRuns = (on) => workbench.evaluate((value) => globalThis.__editor.api.workspace.getConfiguration("tsval").update("liveRuns", value, true), on);
+	const liveRuns = (on) => workbench.evaluate((value) => globalThis.__editor.api.workspace.getConfiguration("run").update("liveRuns", value, true), on);
 
 	await liveRuns(false);
 	await edit("append");

@@ -4,7 +4,7 @@
  * view or console; stopping at nothing; not in the running list) and harmless (what it can't make it skips: the debug
  * worker's `live`; another debugger is told `__live`, and should do the same). An edit while one runs stops it; none starts while a run of yours (F5, ▷, the terminal) of the
  * same file is going — that run is what its margin shows (a service of yours running elsewhere doesn't stop them).
- * Off with `tsval.liveRuns`.
+ * Off with `run.liveRuns`.
  */
 import * as vscode from "vscode";
 import { appRootOf, runDebugger } from "./launch";
@@ -21,7 +21,7 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 	const running = new Map<string, vscode.DebugSession>();
 	/** Every debug session going. */
 	const sessions = new Set<vscode.DebugSession>();
-	const enabled = (): boolean => vscode.workspace.getConfiguration("tsval").get<boolean>("liveRuns", true);
+	const enabled = (): boolean => vscode.workspace.getConfiguration("run").get<boolean>("liveRuns", true);
 	const isLive = (session: vscode.DebugSession): boolean => session.configuration["__live"] === true;
 	/** A run of yours of `path` going (anything but a live run): it's what that file's margin shows, so a live run waits. */
 	const yours = (path: string): boolean => [...sessions].some((session) => !isLive(session) && session.configuration["program"] === path);

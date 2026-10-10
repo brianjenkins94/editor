@@ -272,7 +272,7 @@ and tsval is fast enough — a small file's run, session and worker included, ta
 - **When.** A JavaScript or TypeScript program file in the editor, typing paused (400ms), parsing clean: a live run of
   it. An edit while one runs stops it, and the next pause starts another. None while a run of yours of the same file
   is going (F5, ▷, the terminal) — that one is what its margin shows; a service of yours running elsewhere doesn't stop
-  them. Off with `tsval.liveRuns` (on by default).
+  them. Off with `run.liveRuns` (on by default).
 - **What it is.** A tsval debug session like any other, so the margin's values, coverage, run log and crash mark all
   come from it — but quiet: no debug toolbar, status bar, Run and Debug view or Debug Console, not in the running list,
   and it stops at nothing (breakpoints are yours to hit with F5). A rule still applies: a value it sets, a result it
