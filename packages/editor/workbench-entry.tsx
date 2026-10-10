@@ -31,6 +31,7 @@ import notesExtensionPath from "notes:extension";
 import settingsDefaults from "editor:settings-defaults";
 import eslintExtensionPath from "eslint:extension";
 import workerPodExtensionPath from "worker-pod:extension";
+import tsvalExtensionPath from "tsval:extension";
 import { NETWORK_PROBES } from "./architecture";
 import { SHELL_DOCK_HOST } from "./dock-host";
 import { classifyUrl, identifyWorker } from "./architecture-model";
@@ -52,6 +53,7 @@ import runningManifest from "./extensions/running/package.json";
 import typeQueriesManifest from "./extensions/type-queries/package.json";
 import notesManifest from "./extensions/notes/package.json";
 import workerPodManifest from "./extensions/worker-pod/package.json";
+import tsvalManifest from "./extensions/tsval/package.json";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
 import { installProfileFiles } from "./profile-files";
@@ -634,6 +636,13 @@ function maybeBoot(): void {
 					themeMq.addEventListener("change", () => { applyEditorTheme(themeMq.matches); });
 					bootSpan.info("the bridge's vscode api, for core");
 			}).catch((error: unknown) => { bootSpan.error("the bridge's setup failed", { "error": errText(error) }); });
+
+			// tsval, the stepping debugger — an extension of its own, in the bridge's host (LocalProcess: it spawns its debug
+			// workers top-level, as the bridge does its servers). It reaches the editor as any debugger does: the run contract,
+			// and the workspace runtime worker-pod exports.
+			const tsvalExt = registerExtension(tsvalManifest, ExtensionHostKind.LocalProcess);
+
+			tsvalExt.registerFileUrl("./extension.js", new URL(tsvalExtensionPath, location.href).href);
 
 			// The eslint extension — a TS server plugin that lints inside tsserver, reusing tsserver's own `ts`
 			// (no bundled copy). Registered in the WEB-WORKER host (where tsserver runs) so the ext-host worker's

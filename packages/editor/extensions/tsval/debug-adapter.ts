@@ -11,21 +11,20 @@
  */
 import type { Span } from "@brianjenkins94/util/logger";
 import type { DecideRequest, Events, StdinRequest } from "@brianjenkins94/run-contract";
-import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
 import { EMPTY_POLICY, given as givenBy, placesOf, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
-import { loadEffectivePolicy } from "../capabilities/silo-store";
-import type { DebugAction, DebugState } from "./debug-control";
-import type { Replay } from "./page-evidence";
-import type { CapabilityAsk, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
-import { controlSubject, eventSubject } from "./debug-protocol";
-import { appRootOf, runApp } from "./launch";
-import { podHub, workspace } from "./pod";
+import type { WorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
+import type { Replay } from "../worker-pod/page-evidence";
+import type { CapabilityAsk, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
 type Dap = Record<string, unknown>;
+
+/** Where a session is: `starting` until its first stop; `idle`, waiting — on a request, its stdin or a timer. */
+type DebugState = "starting" | "running" | "stopped" | "idle" | "terminated";
+type DebugAction = StepAction;
 
 class TsvalDebugSession implements vscode.DebugAdapter {
 	private readonly sendEmitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
@@ -45,10 +44,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private readonly breakpointLines = new Map<string, number[]>();
 
 	private seq = 1;
-	private worker: Worker | undefined;
-	// The debug worker links into the pod hub, and the whole protocol rides that link on this session's subjects.
-	private podUnlink: (() => void) | undefined;
-	private offEvents: (() => void) | undefined;
+	// The debug worker: the run, interpreted — the adapter's own, by messages (debug-protocol.ts' ToWorker / WorkerEvent).
+	private worker: ReturnType<typeof startWorker> | undefined;
 	private program = "";
 	/** The program's arguments (the launch config's `args`): its `process.argv` after the node and the file. */
 	private args: string[] = [];
@@ -102,8 +99,12 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	/** A `setValue` waiting on the worker's answer. */
 	private valueWaiter: ((answer: Extract<WorkerEvent, { "type": "valueSet" }>) => void) | undefined;
 
-	public constructor(session: vscode.DebugSession) {
+	/** The workspace runtime its worker connects to (worker-pod's export, as any debugger's). */
+	private readonly runtime: WorkspaceRuntime;
+
+	public constructor(session: vscode.DebugSession, runtime: WorkspaceRuntime) {
 		this.id = session.id;
+		this.runtime = runtime;
 	}
 
 	/** Resume with `action`, from somewhere other than VS Code's UI (an agent, an answer at a capability stop). */
@@ -360,11 +361,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 			case "disconnect":
 			case "terminate":
-				// Stopped by hand, if it hadn't ended: a run of several cases stops here too.
-				if (!this.ended) {
-					stoppedByHand.add(this.id);
-				}
-
 				// A live run stopped by the next edit, or one that ran nothing: it tells nothing — no coverage, no end — and the
 				// margin keeps the last run's until the next one finishes.
 				if (this.live && (!this.ended || !this.coverageSent)) {
@@ -467,40 +463,16 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.started = true;
 		// Cache-bust so a rebuilt worker is picked up (the Worker constructor may reuse the browser's module
 		// cache for an unchanged URL even after a rebuild); harmless in production.
-		const workerUrl = new URL("./lsp/debug-worker.js", location.href);
-
-		workerUrl.searchParams.set("v", String(Date.now()));
-		workerUrl.searchParams.set("session", this.id); // the worker's subjects are this session's
-		// Want its events BEFORE linking it: link() sends our interest first, so its first event already reaches us.
-		this.offEvents = podHub.subscribe(eventSubject(this.id), (data) => { this.onWorker(data as WorkerEvent); });
-		this.worker = new Worker(workerUrl, { "type": "module" });
-		this.worker.onerror = (event) => { this.event("output", { "category": "stderr", "output": `[debug-worker] ${event.message}\n` }); };
-		this.podUnlink = podHub.link(portTransport(this.worker));
+		this.worker = startWorker(this.runtime, (event) => { this.onWorker(event); }, (message) => { this.event("output", { "category": "stderr", "output": `[debug-worker] ${message}\n` }); });
 
 		const trace = this.startAction("launch");
 
-		// A message nobody has subscribed to yet goes nowhere, so launch once the worker's control subscription has
-		// reached us (it subscribes as its module loads, which includes the shared typescript chunk).
-		void podHub.whenInterested(controlSubject(this.id), 30000).then((ready) => {
-			if (!ready) {
-				this.endAction();
-				this.event("output", { "category": "stderr", "output": "[debug-worker] didn't start within 30s\n" });
-				this.closeWorker();
-				this.event("terminated");
-				this.settle("terminated");
-
-				return;
-			}
-
-			this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } }, ...workspace.buffer === undefined ? {} : { "workspace": workspace.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop }, ...this.live ? { "live": true } : {} }, trace);
-		});
+		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "hooks": this.hooks, "files": this.otherFileLines(), ...this.where, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } }, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop }, ...this.live ? { "live": true } : {} }, trace);
 	}
 
 	/** A control message for this session's worker; `trace` continues an adapter action's trace in the work it starts. */
 	private control(message: Control, trace?: { "traceId": string; "parentSpanId": string }): void {
-		if (this.worker !== undefined) {
-			podHub.publish(controlSubject(this.id), message, { "traceContext": trace });
-		}
+		this.worker?.send(message, trace);
 	}
 
 	/** The user's breakpoints in files other than the program's entry — in a file the program loads, they stop there. */
@@ -542,11 +514,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	}
 
 	private closeWorker(): void {
-		this.offEvents?.();
-		this.offEvents = undefined;
-		this.podUnlink?.();
-		this.podUnlink = undefined;
-		this.worker?.terminate();
+		this.worker?.close();
 		this.worker = undefined;
 	}
 
@@ -640,7 +608,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 			case "terminated":
 				this.endAction();
-				exitCodes.set(this.id, message.exitCode ?? 0);
 
 				// A live run that ran nothing (its text doesn't parse yet): no values, no coverage, no end — the margin keeps
 				// the last run's.
@@ -650,6 +617,8 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 				// (a live run that ran out of budget ends stopped where it got to, not crashed)
 				this.tellEnded(message.crash === undefined ? undefined : { "kind": message.crash.stopped === true ? "stopped" : "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message }, message.crash?.file);
+				// (DAP's own: the run's end, with its exit code — the editor's run ends with it)
+				this.event("exited", { "exitCode": message.exitCode ?? 0 });
 				this.event("terminated");
 				this.closeWorker();
 				this.settle("terminated");
@@ -709,28 +678,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 }
 
 /** How each session's program ended (by session id), for whoever reports its end — a terminal's run waits on it. */
-const exitCodes = new Map<string, number>();
-
-/** A finished session's exit code (0 if it never said), forgotten once read. */
-export function takeExitCode(sessionId: string): number {
-	const code = exitCodes.get(sessionId) ?? 0;
-
-	exitCodes.delete(sessionId);
-
-	return code;
-}
-
-/**
- * Register the `tsval` debug type: a config provider that supplies a default launch config (bare F5 / the
- * green Run button, no launch.json), and the descriptor factory that hands back a worker-backed session.
- *
- * Bare F5 runs the file you have open. A task runs under tsval; a service (it listens, ticks, reads input —
- * lifecycle.ts) needs the event loop tsval doesn't have, so it's run as `node <file>` in a task's terminal instead,
- * which runs it on the real runtime.
- */
-/** Sessions the user stopped (not run to their end): a run of several cases goes no further. */
-const stoppedByHand = new Set<string>();
-
 /** A launch config's `eventLoop`, when it's one: its clock, its seed, the choices to make. */
 function loopStartOf(value: unknown): LoopStart | undefined {
 	const { now, seed, schedule } = (typeof value === "object" && value !== null ? value : {}) as Partial<LoopStart>;
@@ -743,42 +690,59 @@ function loopStartOf(value: unknown): LoopStart | undefined {
  * a debug run has — the arguments a rule gives its process.argv too — each way its host calls' answers, and its timers,
  * can come; the distinct outcomes, each with a schedule to debug it by (a launch's `eventLoop`).
  */
-export async function exploreProgram(program: string, maxRuns = 100): Promise<Explored> {
+/** A debug worker: started, given its link into the editor's runtime (the workspace runtime — its servers answer the
+ *  preview through it, its log and spans are the editor's), then sent control messages; its events go to `onEvent`, a
+ *  failure to start or an uncaught error to `onError`. */
+function startWorker(runtime: WorkspaceRuntime, onEvent: (event: WorkerEvent) => void, onError: (message: string) => void): { "buffer": SharedArrayBuffer | undefined; "send": (control: Control, trace?: { "traceId": string; "parentSpanId": string }) => void; "close": () => void } {
+	// Cache-bust so a rebuilt worker is picked up (the Worker constructor may reuse the browser's module cache for an
+	// unchanged URL even after a rebuild); harmless in production.
+	const url = new URL("./lsp/debug-worker.js", location.href);
+
+	url.searchParams.set("v", String(Date.now()));
+
+	const link = runtime.connect();
+	const worker = new Worker(url, { "type": "module" });
+	const post = (message: ToWorker, transfer: Transferable[] = []): void => { worker.postMessage(message, transfer); };
+
+	worker.onmessage = (event: MessageEvent<WorkerEvent>) => { onEvent(event.data); };
+	worker.onerror = (event) => { onError(event.message); };
+	// (posted before it loads: queued, and delivered once its module is evaluated — the runtime link first)
+	post({ "kind": "runtime", "port": link.port }, [link.port]);
+
+	return {
+		"buffer": runtime.buffer,
+		"send": (control, trace) => { post({ "kind": "control", "control": control, ...trace === undefined ? {} : { "trace": trace } }); },
+		"close": () => {
+			worker.terminate();
+			link.dispose();
+		}
+	};
+}
+
+export async function exploreProgram(runtime: WorkspaceRuntime, program: string, maxRuns = 100): Promise<Explored> {
 	const uri = vscode.Uri.file(program);
 	const source = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString())?.getText() ?? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-	const policy = await loadEffectivePolicy();
+	// (the policy a launch is given as `__policy` — this runs outside a session, so it asks for it)
+	const policy = await Promise.resolve(vscode.commands.executeCommand<Policy | undefined>("run.policy")).catch(() => undefined) ?? EMPTY_POLICY;
 	const mocked = givenBy(policy, { "program": vscode.workspace.asRelativePath(uri, false) }, "process.argv")?.values.find((each): each is string[] => Array.isArray(each));
-	const id = `explore-${crypto.randomUUID()}`;
-	const workerUrl = new URL("./lsp/debug-worker.js", location.href);
-
-	workerUrl.searchParams.set("v", String(Date.now()));
-	workerUrl.searchParams.set("session", id);
-
-	let offEvents: (() => void) | undefined;
-	const explored = new Promise<Explored>((resolve) => {
-		offEvents = podHub.subscribe(eventSubject(id), (data) => {
-			const event = data as WorkerEvent;
-
-			if (event.type === "explored") {
-				resolve(event.explored);
-			}
-		});
+	let failed: ((reason: Error) => void) | undefined;
+	let resolveExplored: ((explored: Explored) => void) | undefined;
+	const explored = new Promise<Explored>((resolve, reject) => {
+		resolveExplored = resolve;
+		failed = reject;
 	});
-	const worker = new Worker(workerUrl, { "type": "module" });
-	const unlink = podHub.link(portTransport(worker));
+	const worker = startWorker(runtime, (event) => {
+		if (event.type === "explored") {
+			resolveExplored?.(event.explored);
+		}
+	}, (message) => { failed?.(new Error(`the debug worker failed: ${message}`)); });
 
 	try {
-		if (!await podHub.whenInterested(controlSubject(id), 30_000)) {
-			throw new Error("the debug worker didn't start within 30s");
-		}
-
-		podHub.publish(controlSubject(id), { "type": "explore", "source": source, "fileName": program, "policy": policy, "args": mocked ?? [], "eventLoop": { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32) }, "maxRuns": maxRuns, ...workspace.buffer === undefined ? {} : { "workspace": workspace.buffer } } satisfies Control);
+		worker.send({ "type": "explore", "source": source, "fileName": program, "policy": policy, "args": mocked ?? [], "eventLoop": { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32) }, "maxRuns": maxRuns, ...worker.buffer === undefined ? {} : { "workspace": worker.buffer } });
 
 		return await Promise.race([explored, new Promise<never>((_, reject) => { setTimeout(() => { reject(new Error("exploring took over 2 minutes")); }, 120_000); })]);
 	} finally {
-		offEvents?.();
-		unlink();
-		worker.terminate();
+		worker.close();
 	}
 }
 
@@ -794,9 +758,7 @@ function orderingItem(outcome: Explored["outcomes"][number], index: number): vsc
 	};
 }
 
-export function registerTsvalDebug(context: vscode.ExtensionContext): void {
-	const rpc = createRpcClient(podHub);
-
+export function registerTsvalDebug(context: vscode.ExtensionContext, runtime: WorkspaceRuntime): void {
 	context.subscriptions.push(
 		// Explore Orderings (tsval's explore): every way the file's async results and timers can come, run; the distinct
 		// endings listed — a race is more than one — and the one picked debugged, run exactly that way.
@@ -808,7 +770,7 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 			}
 
 			const name = uri.path.split("/").pop()!;
-			const explored = await vscode.window.withProgress({ "location": vscode.ProgressLocation.Notification, "title": `Exploring the orderings of ${name}…` }, () => exploreProgram(uri.path));
+			const explored = await vscode.window.withProgress({ "location": vscode.ProgressLocation.Notification, "title": `Exploring the orderings of ${name}…` }, () => exploreProgram(runtime, uri.path));
 			const runs = `${explored.runs} run${explored.runs === 1 ? "" : "s"}${explored.complete ? "" : ", cut short"}`;
 
 			if (explored.outcomes.length === 1) {
@@ -823,6 +785,14 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 				await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `debug ${name} (ordering ${picked.index + 1} of ${explored.outcomes.length})`, "program": uri.path, "eventLoop": { ...explored.eventLoop, "schedule": explored.outcomes[picked.index]!.schedule } });
 			}
 		}),
+		// The same, as data (worker-pod's `debug.explore`, for an agent): the distinct outcomes, each with its schedule.
+		vscode.commands.registerCommand("tsval.explore", async (program: unknown, maxRuns?: unknown) => {
+			if (typeof program !== "string") {
+				throw new TypeError("tsval.explore: a program to explore");
+			}
+
+			return exploreProgram(runtime, program, typeof maxRuns === "number" ? maxRuns : undefined);
+		}),
 		// Skip Waits: a tsval session's timers fire without waiting their real delay (the event loop's order unchanged) —
 		// and back. The debug toolbar shows whichever applies.
 		...(["fast", "real"] as const).map((pace) => vscode.commands.registerCommand(pace === "fast" ? "tsval.skipWaits" : "tsval.waitRealTime", async () => {
@@ -834,79 +804,20 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 			}
 		})),
 		vscode.debug.onDidStartDebugSession(() => { void vscode.commands.executeCommand("setContext", "tsval.skipWaits", false); }),
-		{ "dispose": serve(podHub, "debug.explore", async (args) => {
-			const { program, maxRuns } = (args ?? {}) as { "program"?: string; "maxRuns"?: number };
-
-			if (typeof program !== "string") {
-				throw new TypeError("debug.explore: a program to explore");
-			}
-
-			return exploreProgram(program, maxRuns);
-		}) },
+		// Bare F5, no launch.json: the file open. (What Run means beyond that — an app's file, a rule's process.argv, its
+		// run in the running list — is the editor's, for any debugger: worker-pod's debug-events.ts.)
 		vscode.debug.registerDebugConfigurationProvider("tsval", {
 			"resolveDebugConfiguration": (_folder, config) => {
 				if (config.type === undefined) {
-					// A service too (a server, a timer, stdin): tsval serves the preview, keeps it alive, and takes the Debug
-					// Console as its input — a terminal's `node <file>` is where it runs for real.
 					// eslint-disable-next-line no-template-curly-in-string -- ${file} is a VS Code launch-config variable, not a JS template literal
 					return { "type": "tsval", "request": "launch", "name": "Debug (tsval)", "program": "${file}" };
 				}
 
 				return config;
-			},
-			// Every session is a run in core's registry, known by one id from start to end: a terminal's `node` brings its
-			// own (`__runId`); one VS Code started (F5, debug_start) asks for one here, once `${file}` is the real path.
-			// Without core (no answer), it runs all the same, unrecorded.
-			"resolveDebugConfigurationWithSubstitutedVariables": async (_folder, given) => {
-				const program = typeof given["program"] === "string" ? given["program"] : "";
-
-				// F5 on an app's file (RUNNING.md, step 4): the app runs — its dev server, its preview — not a session here.
-				// (Run's own launches decided that already; a terminal's `node` and an ordering's replay are what they say.)
-				if (given["__launchId"] === undefined && given["__startedBy"] !== "terminal" && given["__live"] !== true && given["eventLoop"] === undefined && given["replay"] === undefined && program !== "") {
-					const app = await appRootOf(program);
-
-					if (app !== undefined) {
-						await runApp(app).catch((error: unknown) => { void vscode.window.showErrorMessage(`Couldn't run: ${error instanceof Error ? error.message : String(error)}`); });
-
-						return undefined;
-					}
-				}
-				// No `args`: what a rule gives the file's process.argv (RULES.md; the margin's Mock), if one does — its first
-				// value, the rest each a run after it (`__cases`).
-				const mocked = Array.isArray(given["args"]) || Array.isArray(given["__cases"]) || given["replay"] !== undefined || program === "" ? undefined : givenBy(await loadEffectivePolicy(), { "program": vscode.workspace.asRelativePath(vscode.Uri.file(program), false) }, "process.argv");
-				const cases = mocked?.values.filter((each): each is string[] => Array.isArray(each));
-				// (a live run takes the first of them alone, and isn't a run in the running list)
-				const config = cases === undefined || cases.length === 0 ? given : given["__live"] === true ? { ...given, "args": cases[0] } : { ...given, "args": cases[0], "__cases": cases, "__case": 0 };
-
-				if (typeof config["__runId"] === "string" || config["__live"] === true) {
-					return config;
-				}
-
-				try {
-					const { id } = await rpc.request("runs.begin", { "title": program === "" ? config.name : `${config.name} — ${vscode.workspace.asRelativePath(program)}`, "cwd": program.slice(0, program.lastIndexOf("/")) || "/workspace", "entry": program }, { "timeoutMs": 5000, "waitForResponderMs": 2000 }) as { "id": string };
-
-					return { ...config, "__runId": id };
-				} catch {
-					return config;
-				}
 			}
 		}),
 		vscode.debug.registerDebugAdapterDescriptorFactory("tsval", {
-			"createDebugAdapterDescriptor": (session) => new vscode.DebugAdapterInlineImplementation(new TsvalDebugSession(session))
-		}),
-		// A run of several cases (process.argv mocked with Multiple): when one ends, the next starts — unless it was stopped,
-		// which stops them all. Each is its own session (and run), stopping at breakpoints like any.
-		vscode.debug.onDidTerminateDebugSession((session) => {
-			const config = session.configuration;
-			const cases = config["__cases"] as string[][] | undefined;
-			const next = (config["__case"] as number | undefined ?? 0) + 1;
-
-			if (session.type === "tsval" && Array.isArray(cases) && next < cases.length && !stoppedByHand.delete(session.id)) {
-				const { "__runId": _run, "__launchId": _launch, ...rest } = config;
-
-				void vscode.debug.startDebugging(undefined, { ...rest, "name": `${String(rest.name).replace(/ \(case \d+ of \d+\)$/u, "")} (case ${next + 1} of ${cases.length})`, "args": cases[next], "__case": next } as vscode.DebugConfiguration);
-			}
+			"createDebugAdapterDescriptor": (session) => new vscode.DebugAdapterInlineImplementation(new TsvalDebugSession(session, runtime))
 		})
 	);
-	// Drive the debugger over the hub (debug-mcp's debug_* tools): list, start, breakpoints; each session serves its own.
 }

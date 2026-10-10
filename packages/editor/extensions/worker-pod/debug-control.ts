@@ -5,7 +5,7 @@
  *
  *   pod     `debug.sessions`                       → every live session's summary
  *   pod     `debug.start` { program?, breakpoints?, args?, eventLoop? } → starts a session and answers with its first stop
- *   pod     `debug.explore` { program, maxRuns? }  → every ordering of its events run: the distinct outcomes (debug-adapter.ts)
+ *   pod     `debug.explore` { program, maxRuns? }  → every ordering of its events run: the distinct outcomes (tsval's `tsval.explore`)
  *   pod     `debug.breakpoints` { program?, lines }  → replaces a file's breakpoints (VS Code's own, so the UI shows them)
  *   pod     `rules.given` { program?, target } → what a rule gives the file's `target` (process.argv): { rule, values } | null
  *   pod     `rules.set` { previous?, rule? } → my policy changed by a rule editor: previous replaced by rule (or added, or removed)
@@ -31,11 +31,11 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { given, placesOf, type Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 
-import type { StepAction } from "./debug-protocol";
 import { loadEffectivePolicy, loadPolicyFiles, movePlace, replaceRule } from "../capabilities/silo-store";
 import { appRootOf, runApp, runDebugger } from "./launch";
 
-export type DebugAction = StepAction;
+/** How a stopped session resumes: DAP's own requests. */
+export type DebugAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue";
 const ACTIONS = new Set<string>(["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"] satisfies DebugAction[]);
 
 /** `starting` until the first stop; `idle` = waiting — on a request, its stdin or a timer — with no stop to step from (or,
@@ -657,7 +657,17 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 			return rule ?? null;
 		}) },
 		// Run (RUNNING.md): every button's, the margin's, an agent's — one path.
-		{ "dispose": serve(hub, "debug.start", async (args, { signal }) => runProgram(args, signal)) }
+		{ "dispose": serve(hub, "debug.start", async (args, { signal }) => runProgram(args, signal)) },
+		// Every ordering of a program's events, run (tsval's Explore Orderings, its command).
+		{ "dispose": serve(hub, "debug.explore", async (args) => {
+			const { program, maxRuns } = (args ?? {}) as { "program"?: string; "maxRuns"?: number };
+
+			if (typeof program !== "string") {
+				throw new TypeError("debug.explore: a program to explore");
+			}
+
+			return vscode.commands.executeCommand("tsval.explore", resolveProgram(program), maxRuns);
+		}) }
 	);
 }
 

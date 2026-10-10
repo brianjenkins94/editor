@@ -48,6 +48,13 @@ A run that makes gated calls — writes files, makes requests, runs commands —
 it as `__policy` in its launch configuration (read it with `@brianjenkins94/util/silo/policy`), and asks about the ones it
 says to ask about.
 
+To run real programs against the workspace, ask the editor's bridge extension for the workspace runtime —
+`(await vscode.extensions.getExtension("brianjenkins94.worker-pod").activate()).workspaceRuntime()` — and hand your
+interpreter's worker its `connect().port` and `buffer`: in the worker, `connectRuntime(port, { "name": "my-interpreter" })`
+from `@brianjenkins94/run-contract/runtime` (it needs `@brianjenkins94/hub` and `@brianjenkins94/observability`
+beside it), then `serve(port, request => response)` for a server your program listens with. The buffer is the workspace
+(zen-fs's SingleBuffer), for synchronous reads and writes. The editor's own debugger, tsval, gets the workspace this way.
+
 Positions are in the text that ran: 0-based lines and `[start, end)` offsets. The editor maps offsets to its BABLR span
 ids, so what you report follows its code through edits. Each run is listed in the editor's Running view.
 

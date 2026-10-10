@@ -1,19 +1,32 @@
 {
   "name": "@brianjenkins94/run-contract",
   "version": "0.0.0",
-  "description": "What brianjenkins94/editor reads from a run, and asks of it: the custom debug events a debugger sends (values, coverage, effects, ended, ask, recorded) and the requests it answers (decide, getCoverage) — tsval's, and any interpreter plugged in as run.debugger.",
+  "description": "What brianjenkins94/editor reads from a run, and asks of it — the custom debug events a debugger sends (values, coverage, effects, ended, ask, recorded, listening, idle) and the requests it answers (decide, stdin, getCoverage) — and the workspace runtime a debugger's worker connects to (./runtime). tsval's, and any interpreter plugged in as run.debugger.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./runtime": "./src/runtime.ts"
   },
   "license": "MIT",
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz"
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
+    "@brianjenkins94/hub": "https://brianjenkins94.github.io/editor/packages/hub@latest.tgz",
+    "@brianjenkins94/observability": "https://brianjenkins94.github.io/editor/packages/observability@latest.tgz"
   },
   "peerDependencies": {
-    "@brianjenkins94/util": "*"
+    "@brianjenkins94/util": "*",
+    "@brianjenkins94/hub": "*",
+    "@brianjenkins94/observability": "*"
+  },
+  "peerDependenciesMeta": {
+    "@brianjenkins94/hub": {
+      "optional": true
+    },
+    "@brianjenkins94/observability": {
+      "optional": true
+    }
   }
 }

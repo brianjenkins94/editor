@@ -21,7 +21,7 @@
 import type * as vscodeApi from "vscode";
 import type { PaneMark } from "@brianjenkins94/monaco-vscode-api/main";
 import type { EvidenceStore } from "./extensions/insights/evidence";
-import type { CoverageReport } from "./extensions/worker-pod/debug-protocol";
+import type { CoverageEvent as CoverageReport } from "@brianjenkins94/run-contract";
 import { Anchors, offsetOf } from "./anchors";
 
 /** What evidence says of a line: whether every evidenced statement starting on it ran, in how many runs, and when last. */

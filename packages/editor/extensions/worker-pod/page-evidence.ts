@@ -15,7 +15,7 @@
  * stop is looked at as it happens).
  */
 import type { ObserveSite } from "@brianjenkins94/tsval";
-import type { SiteObservation, StatementCoverage } from "./debug-protocol";
+import type { SiteObservation, StatementCoverage } from "@brianjenkins94/run-contract";
 import { typeTag } from "../../../tsval/src/values";
 import { preview } from "./live-values";
 import type { Encoded } from "./snapshot";

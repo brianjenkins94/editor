@@ -3,10 +3,10 @@
  * the calls it can't make. Pure — the debug worker runs it (debug-worker.ts `launchReplay`), node tests it.
  */
 import type ts from "typescript";
-import type { Replay } from "./page-evidence";
-import type { Encoded } from "./snapshot";
+import type { Replay } from "../worker-pod/page-evidence";
+import type { Encoded } from "../worker-pod/snapshot";
 import { isGuestFunction } from "@brianjenkins94/tsval";
-import { revive } from "./snapshot";
+import { revive } from "../worker-pod/snapshot";
 
 /** The program a replay runs (RUNNING.md: stepping a recorded handler): the recorded version's text with everything but
  *  the function blanked (newlines kept, so every line and column is the file's), the function made the callee of a call

@@ -5,6 +5,13 @@ declare module "worker-pod:extension" {
 	export default path;
 }
 
+/** The tsval extension (the stepping debugger), bundled like the others: its path. */
+declare module "tsval:extension" {
+	const path: string;
+
+	export default path;
+}
+
 /** The user's eslint preset as data (see extensions/eslint/preset-build.ts). */
 declare module "eslint:preset" {
 	const preset: { "source": string; "version": string; "blocks": unknown[] };

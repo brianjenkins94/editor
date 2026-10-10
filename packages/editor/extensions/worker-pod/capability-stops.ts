@@ -15,8 +15,12 @@ import { serve } from "@brianjenkins94/hub";
 import { EMPTY_POLICY, problemOf, ruleMatches, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { loadEffectivePolicy, persistOverride, replaceRule } from "../capabilities/silo-store";
-import type { CapabilityChoice } from "./debug-protocol";
 import { controllable, type DebugOutcome } from "./debug-control";
+
+/** The choices at a capability stop, as the preview's prompt words them — and `rule`, a rule made there (the margin's
+ *  rule editor) saved in my policy, deciding the call as it does (or giving its result); `give-once`, a result given the
+ *  call instead of it, just this once; `allow-run`, calls like it allowed until the run ends (kept nowhere). */
+export type CapabilityChoice = "allow-once" | "allow-run" | "allow-always" | "skip" | "skip-run" | "skip-always" | "deny" | "deny-run" | "deny-always" | "rule" | "give-once";
 
 const CHOICES = new Set<string>(["allow-once", "allow-run", "allow-always", "skip", "skip-run", "skip-always", "deny", "deny-run", "deny-always", "rule", "give-once"] satisfies CapabilityChoice[]);
 
@@ -126,6 +130,9 @@ export function registerCapabilityStops(context: vscode.ExtensionContext, hub: H
 	const served = new Map<string, () => void>();
 
 	context.subscriptions.push(
+		// The policy a run's gated calls are decided by, for a debugger that decides calls outside a session (tsval's
+		// Explore Orderings): what `__policy` gives a launch.
+		vscode.commands.registerCommand("run.policy", async () => policyFor()),
 		vscode.debug.onDidStartDebugSession((session) => {
 			served.set(session.id, serve(hub, `debug.session.${session.id}.decide`, async (args, { signal }): Promise<DebugOutcome | { "session": string; "state": "running" }> => {
 				const { choice = "", rule, give } = (args ?? {}) as { "choice"?: string; "rule"?: Rule; "give"?: unknown };

@@ -17,7 +17,7 @@
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Effect, Environment, RunEnvelope, RunQuery } from "@brianjenkins94/util/silo/evidence";
-import type { SiteObservation, StatementCoverage } from "./extensions/worker-pod/debug-protocol";
+import type { SiteObservation, StatementCoverage } from "@brianjenkins94/run-contract";
 import type { ModuleEvidence } from "./extensions/worker-pod/page-evidence";
 import type { Bablr } from "./bablr";
 import type { RunInfo, RunRegistry } from "./runs";

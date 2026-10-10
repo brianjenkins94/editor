@@ -2,7 +2,7 @@
  * The dev-server worker — almostnode's preview dev servers, off the workbench main thread and in their own globalThis:
  * started for the first preview, never stopped, so its servers outlive any run. It answers the service worker's
  * preview requests (`/__virtual__/<tab>/<port>/…`) from a dev server here, or relays them to a debug run that serves the
- * port (debug-worker.ts). (Programs run in the debugger, always — RUNNING.md; there's no plain-runtime script runner.)
+ * port (extensions/tsval/debug-worker.ts). (Programs run in the debugger, always — RUNNING.md; there's no plain-runtime script runner.)
  *
  * Same almostnode-on-zen-fs pattern as the debug worker: it runs on the SHARED workspace zen-fs (the SAB arrives over the
  * hub, `workspace.buffer`), so a dev server sees exactly the files the editor, type-checker and debugger see — one
@@ -107,7 +107,7 @@ serve(hub, "virtual.request", async (raw): Promise<VirtualResponse> => {
 		return answered;
 	}
 
-	// Not a dev server's port: a debug run's server (debug-worker.ts — asked only when one serves the port: `$rpc.call.`
+	// Not a dev server's port: a debug run's server (extensions/tsval/debug-worker.ts — asked only when one serves the port: `$rpc.call.`
 	// is the hub's call prefix) — or nobody's.
 	const { port } = raw as VirtualRequest;
 

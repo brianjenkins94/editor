@@ -1,0 +1,117 @@
+{
+  "name": "tsval",
+  "displayName": "tsval",
+  "description": "The stepping debugger — a program run by tsval's interpreter in a worker: breakpoints, steps back as well as forward, the margin's values, capability stops, Explore Orderings, a deterministic event loop (Skip Waits). An extension of the editor like any debugger's: the run contract (@brianjenkins94/run-contract) is how it tells the editor what a run did, and the workspace runtime — worker-pod's export — is how its worker reads the workspace and answers the preview.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onDebug",
+    "onDebugResolve:tsval",
+    "onStartupFinished"
+  ],
+  "extensionDependencies": [
+    "brianjenkins94.worker-pod"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "tsval.exploreOrderings",
+        "title": "Explore Orderings",
+        "category": "Debug",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "tsval.skipWaits",
+        "title": "Skip Waits",
+        "category": "Debug",
+        "icon": "$(rocket)",
+        "enablement": "debugType == tsval"
+      },
+      {
+        "command": "tsval.waitRealTime",
+        "title": "Wait in Real Time",
+        "category": "Debug",
+        "icon": "$(watch)",
+        "enablement": "debugType == tsval"
+      }
+    ],
+    "menus": {
+      "debug/toolBar": [
+        {
+          "command": "tsval.skipWaits",
+          "when": "debugType == tsval && !tsval.skipWaits",
+          "group": "navigation@10"
+        },
+        {
+          "command": "tsval.waitRealTime",
+          "when": "debugType == tsval && tsval.skipWaits",
+          "group": "navigation@10"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "tsval.exploreOrderings",
+          "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/",
+          "group": "1_run@1"
+        }
+      ]
+    },
+    "breakpoints": [
+      {
+        "language": "typescript"
+      },
+      {
+        "language": "typescriptreact"
+      },
+      {
+        "language": "javascript"
+      },
+      {
+        "language": "javascriptreact"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "tsval",
+        "label": "Run",
+        "languages": [
+          "typescript",
+          "typescriptreact",
+          "javascript",
+          "javascriptreact"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "The source file to run under tsval.",
+                "default": "${file}"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Its arguments: process.argv after the node and the file.",
+                "default": []
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "tsval",
+            "request": "launch",
+            "name": "Debug (tsval)",
+            "program": "${file}"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -135,7 +135,8 @@ there is its `stdin` request, and a server it starts is a `listening` event (deb
 it drives tsval (debug-control.ts): followed by its DAP messages — or, in another extension host, by what VS Code tells
 every host (its start, the frame it stops at, the contract's events, its end; its output, there, an agent doesn't see) —
 and stepped and read with DAP's own requests. What stays tsval's: that a terminal's `node` runs on tsval (it's Node's
-semantics), replay and orderings. test/contrib.mjs runs contrib/ in a real editor, so a change here that breaks it fails there.
+semantics), replay and orderings. tsval itself is an extension of its own (extensions/tsval): the contract, and the
+workspace runtime worker-pod exports to any debugger (EXTENSION-POINTS.md, 2), are all it reaches the editor through. test/contrib.mjs runs contrib/ in a real editor, so a change here that breaks it fails there.
 
 ## Entry points, after
 

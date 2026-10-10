@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { createVM, runToEnd } from "@brianjenkins94/tsval";
-import { replayGuard, replayProgram } from "../extensions/worker-pod/replay-run.ts";
+import { replayGuard, replayProgram } from "../extensions/tsval/replay-run.ts";
 import { encode, revive } from "../extensions/worker-pod/snapshot.ts";
 
 const named = (name) => Object.defineProperty(() => undefined, "name", { "value": name });

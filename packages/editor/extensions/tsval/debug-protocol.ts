@@ -11,14 +11,18 @@
  */
 import type { CoverageEvent, Effect } from "@brianjenkins94/run-contract";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
-import type { LiveBatch } from "./live-values";
-import type { Replay } from "./page-evidence";
+import type { LiveBatch } from "../worker-pod/live-values";
+import type { Replay } from "../worker-pod/page-evidence";
 
 // The run contract's own (what a debugger tells the editor), as tsval's worker and adapter speak it too.
 export type { RunEnd, SiteObservation, StatementCoverage, StatementProfile } from "@brianjenkins94/run-contract";
 
-export const controlSubject = (session: string): string => "debug.session." + session + ".control";
-export const eventSubject = (session: string): string => "debug.session." + session + ".event";
+/** What the adapter posts its worker: first its link into the editor's runtime (run-contract's workspace runtime: its
+ *  servers answer the preview through it, its log and spans are the editor's), then control messages — each with the
+ *  adapter action's trace, which the work it starts continues. The worker posts back `WorkerEvent`s. */
+export type ToWorker =
+	| { "kind": "runtime"; "port": MessagePort }
+	| { "kind": "control"; "control": Control; "trace"?: { "traceId": string; "parentSpanId": string } };
 
 export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue";
 
@@ -82,11 +86,6 @@ export interface Snapshot {
  *  literal, a variable's value), else the argument as written. `line` is 0-based. */
 /** `file`: the program file the call is in, with its text (`source`), when it isn't the entry. */
 export interface CapabilityAsk { "line": number; "at"?: [number, number]; "capability": string; "callee": string; "resource": string; "resolved": boolean; "dangerous": boolean; "file"?: string; "source"?: string }
-
-/** The choices at a capability stop, as the preview's prompt words them — and `rule`, a rule made there (the margin's
- *  rule editor) saved in my policy, deciding the call as it does (or giving its result); `give-once`, a result given the
- *  call instead of it, just this once; `allow-run`, calls like it allowed until the run ends (kept nowhere). */
-export type CapabilityChoice = "allow-once" | "allow-run" | "allow-always" | "skip" | "skip-run" | "skip-always" | "deny" | "deny-run" | "deny-always" | "rule" | "give-once";
 
 /** Worker → adapter. */
 export type WorkerEvent =

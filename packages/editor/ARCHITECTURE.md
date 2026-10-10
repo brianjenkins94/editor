@@ -264,6 +264,7 @@ flowchart LR
   subgraph c_workbenchIframe["Workbench iframe"]
     n_webview_markdown_preview["markdown.preview"]
     subgraph c_workbench["Main thread"]
+      n_ext_tsval["tsval"]
       n_ext_vscode["VS Code"]
       n_ext_worker_pod["worker-pod"]
       n_exthost_LocalProcess_0["Local extension host"]
@@ -357,7 +358,8 @@ flowchart LR
   n_ext_notes -->|"reads, writes"| n_store__silo_notes____file__jsonl
   n_ext_notes <-.->|"commands"| n_ext_vscode
   n_ext_notes <-.->|"commands"| n_ext_worker_pod
-  n_ext_vscode <-.->|"commands"| n_ext_worker_pod
+  n_ext_tsval <-.->|"commands"| n_ext_vscode
+  n_ext_tsval <-.->|"commands"| n_ext_worker_pod
   n_ext_worker_pod -->|"reads"| n_store__git__file_
   n_ext_worker_pod -->|"reads"| n_store__silo__gitignore
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__json
@@ -443,7 +445,7 @@ flowchart LR
 | Dev-server worker | virtual | `virtual.request()` |
 | Dev-server worker | workspace | `workspace.changed` |
 | Pod | capability | `capability.decide()`, `capability.record()`, `capability.recorded()` |
-| Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.explore()`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.event`, `debug.session.*.pace()`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.stdin()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
+| Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.explore()`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.pace()`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.stdin()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
 | Pod | git | `git.changed` |
 | Pod | node | `node.stdin.*` |
 | Pod | pod | `pod.ready` |

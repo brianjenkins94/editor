@@ -1,7 +1,7 @@
 {
   "name": "worker-pod",
   "displayName": "Worker Pod",
-  "description": "One extension hosting a pod of workers: almostnode-backed language servers (cspell, eslint) and a tsval debug adapter.",
+  "description": "The bridge between the editor's core runtime and VS Code: almostnode-backed language servers (cspell, eslint), the debug adapters' plumbing — every debugger's run-contract events, capability stops, agent control, and the workspace runtime it exports to a debugger (tsval, an interpreter plugged in) — tasks, Source Control and the run picker.",
   "publisher": "brianjenkins94",
   "version": "0.0.1",
   "engines": {
@@ -10,78 +10,66 @@
   "browser": "extension.js",
   "activationEvents": [
     "onStartupFinished",
-    "onDebug",
-    "onDebugResolve:tsval"
+    "onDebug"
   ],
   "contributes": {
     "configuration": {
       "title": "tsval",
       "properties": {
-        "run.debugger": { "type": "string", "default": "tsval", "description": "The debugger Run (▷) and live runs start: tsval, or another extension's debug type — an interpreter plugged in from editor-contrib. Its `values` and `coverage` events show in the margin as tsval's do." },
-        "tsval.liveRuns": { "type": "boolean", "default": true, "description": "Run the program file you're typing in again whenever typing pauses, so the margin shows what it did (LIVE-VALUES.md). A live run makes nothing but reads the policy allows: writes, requests and commands are skipped." }
+        "run.debugger": {
+          "type": "string",
+          "default": "tsval",
+          "description": "The debugger Run (▷) and live runs start: tsval, or another extension's debug type — an interpreter plugged in from editor-contrib. Its `values` and `coverage` events show in the margin as tsval's do."
+        },
+        "tsval.liveRuns": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the program file you're typing in again whenever typing pauses, so the margin shows what it did (LIVE-VALUES.md). A live run makes nothing but reads the policy allows: writes, requests and commands are skipped."
+        }
       }
     },
     "commands": [
-      { "command": "editor.debugFile", "title": "Run", "category": "Debug", "icon": "$(play)" },
-      { "command": "tsval.exploreOrderings", "title": "Explore Orderings", "category": "Debug", "icon": "$(type-hierarchy)" },
-      { "command": "tsval.stepRecordedStop", "title": "Step a Recorded Stop", "category": "Debug", "icon": "$(debug-step-into)" },
-      { "command": "tsval.skipWaits", "title": "Skip Waits", "category": "Debug", "icon": "$(rocket)", "enablement": "debugType == tsval" },
-      { "command": "tsval.waitRealTime", "title": "Wait in Real Time", "category": "Debug", "icon": "$(watch)", "enablement": "debugType == tsval" }
+      {
+        "command": "editor.debugFile",
+        "title": "Run",
+        "category": "Debug",
+        "icon": "$(play)"
+      },
+      {
+        "command": "tsval.stepRecordedStop",
+        "title": "Step a Recorded Stop",
+        "category": "Debug",
+        "icon": "$(debug-step-into)"
+      }
     ],
     "menus": {
-      "debug/toolBar": [
-        { "command": "tsval.skipWaits", "when": "debugType == tsval && !tsval.skipWaits", "group": "navigation@10" },
-        { "command": "tsval.waitRealTime", "when": "debugType == tsval && tsval.skipWaits", "group": "navigation@10" }
-      ],
       "editor/title/run": [
-        { "command": "editor.debugFile", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "navigation@2" }
-      ],
-      "editor/title": [
-        { "command": "tsval.exploreOrderings", "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/", "group": "1_run@1" }
+        {
+          "command": "editor.debugFile",
+          "when": "resourceExtname =~ /\\.(m|c)?[jt]sx?$/",
+          "group": "navigation@2"
+        }
       ]
     },
     "taskDefinitions": [
       {
         "type": "run",
-        "required": ["command"],
+        "required": [
+          "command"
+        ],
         "properties": {
-          "command": { "type": "string", "description": "The command to run, as typed in a terminal (npm run dev)." },
-          "cwd": { "type": "string", "description": "Where to run it (the workspace, by default)." }
+          "command": {
+            "type": "string",
+            "description": "The command to run, as typed in a terminal (npm run dev)."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Where to run it (the workspace, by default)."
+          }
         }
       }
     ],
-    "breakpoints": [
-      { "language": "typescript" },
-      { "language": "typescriptreact" },
-      { "language": "javascript" },
-      { "language": "javascriptreact" }
-    ],
     "debuggers": [
-      {
-        "type": "tsval",
-        "label": "Run",
-        "languages": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
-        "configurationAttributes": {
-          "launch": {
-            "properties": {
-              "program": {
-                "type": "string",
-                "description": "The source file to run under tsval.",
-                "default": "${file}"
-              },
-              "args": { "type": "array", "items": { "type": "string" }, "description": "Its arguments: process.argv after the node and the file.", "default": [] }
-            }
-          }
-        },
-        "initialConfigurations": [
-          {
-            "type": "tsval",
-            "request": "launch",
-            "name": "Debug (tsval)",
-            "program": "${file}"
-          }
-        ]
-      },
       {
         "type": "production",
         "label": "production (almostnode run)",

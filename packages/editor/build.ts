@@ -287,7 +287,7 @@ export async function preBuild(): Promise<void> {
 		// just-bash chunk as /browser.js → index.html, "Failed to load module script") — the import itself, relative,
 		// still worked.
 		"base": "./",
-		"plugins": [bundledExtension("worker-pod"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledModule("event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin()],
+		"plugins": [bundledExtension("worker-pod"), bundledExtension("tsval"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledModule("event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin()],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
 		// `buffer` → the node-stdlib-browser polyfill: isomorphic-git (the git SCM engine) uses the `Buffer` global,
@@ -315,7 +315,9 @@ export async function preBuild(): Promise<void> {
 		// manualChunks below emits a single ~7MB ts chunk both workers share, not two copies in one 14MB chunk.
 		// `@brianjenkins94/bablr` → its BUILT, browser-safe dist (the BABLR worker's CST engine): the alias uses
 		// the fresh dist directly, sidestepping the pnpm file:-dep store staleness that bites workspace packages.
-		"resolve": { "alias": { "@brianjenkins94/tsval": resolvePath("../tsval/src/index.ts"), "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript"] },
+		// (and hub/observability to the editor's own: a debugger's worker connects through run-contract's runtime helper,
+		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
+		"resolve": { "alias": { "@brianjenkins94/tsval": resolvePath("../tsval/src/index.ts"), "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
 		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
 		"plugins": [bundledNodeServer("worker-pod"), bundledModule("worker-pod", "page-tap.ts", "page-tap", "iife", []), bundledModule("worker-pod", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
 		"build": {
@@ -330,7 +332,7 @@ export async function preBuild(): Promise<void> {
 				"preserveEntrySignatures": "strict",
 				"input": {
 					"lsp/server-host": resolvePath("./extensions/worker-pod/server-host.ts"),
-					"lsp/debug-worker": resolvePath("./extensions/worker-pod/debug-worker.ts"),
+					"lsp/debug-worker": resolvePath("./extensions/tsval/debug-worker.ts"),
 					"lsp/node-worker": resolvePath("./extensions/worker-pod/node-worker.ts"),
 					// provoke child worker (debug affordance): node-worker spawns it per hardReset round to get a cold
 					// almostnode + ts realm. Served at lsp/provoke-worker.js so node-worker's `new URL` resolves it.

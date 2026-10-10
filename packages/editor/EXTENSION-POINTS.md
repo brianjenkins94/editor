@@ -16,7 +16,7 @@ That's for VS Code augmentations; core's own runtime UI — the shell, previews,
 one.
 
 What an extension author imports is one package, `packages/run-contract` (released like hub, on the site as
-`packages/run-contract@latest.tgz`): the run contract's types today. Span references and pane views join it as they're
+`packages/run-contract@latest.tgz`): the run contract's types, and the workspace runtime's (`./runtime`). Span references and pane views join it as they're
 published — it's renamed `editor-api` then. editor-contrib depends on it; worker-pod and tsval import the same types.
 
 ## 1. The run contract — done
@@ -38,18 +38,24 @@ an agent with DAP's own requests. A debugger in another extension host (editor-c
 tells every host — no tracker sees it — so an agent doesn't see its output. The performance budgets held with tsval's
 values going to the workbench and back.
 
-## 2. The workspace runtime — next (decided 2026-10-10)
+## 2. The workspace runtime — done (2026-10-10)
 
-What tsval needs that the contract can't carry: its worker reads the workspace synchronously (`require`,
-`readFileSync` — zen-fs over a SharedArrayBuffer) and its servers answer the preview. **Any debugger may have it**, not
-just tsval — an interpreter like editor-contrib's should be able to run real programs against the workspace.
+What the contract can't carry: a debugger's worker reads the workspace synchronously (`require`, `readFileSync` —
+zen-fs over a SharedArrayBuffer) and its servers answer the preview. **Any debugger may have it**, not just tsval — an
+interpreter like editor-contrib's should be able to run real programs against the workspace.
 
-**The extension point:** a narrow, typed export from worker-pod — the workspace's buffer and a link for a runtime's
-servers, handed to the runtime's worker — documented beside the run contract. Not the hub: worker-pod stays the one
-bridge.
+**The extension point** (packages/run-contract's `./runtime`): worker-pod's exports give `workspaceRuntime()` — the
+workspace's `buffer`, and `connect()`, a port for the debugger's worker. The worker calls `connectRuntime(port, { name })`
+and answers the preview for a port its program listens on with `serve(port, request => response)`; no subject names.
+Underneath, the port is a link into the editor's hub, so the worker stays a realm of its own: its spans (each step, each
+request its servers answer), its logs and each server's traffic (`server:<port>`) are the editor's to see. The
+extension's own code never joins the hub; worker-pod stays the one bridge.
 
-**Dogfood:** tsval moves to an extension of its own (`extensions/tsval`), contributing the `tsval` debugger, using only
-VS Code's API, the contract and this export. On a desktop build the same interface is Node's own `fs` and `net`.
+**Dogfooded:** tsval is an extension of its own (`extensions/tsval`), in the bridge's host, contributing the `tsval`
+debugger: VS Code's API, the contract and this export, nothing else — its adapter drives its worker by messages of their
+own. What Run means for any debugger moved to worker-pod (an app's file runs the app, a rule's process.argv and its
+cases, the run's registration, its exit code from DAP's `exited`). On a desktop build the same interface is Node's own
+`fs` and `net`.
 
 ## 3. Span annotations
 
@@ -138,7 +144,7 @@ breaks is what worker-pod reaches over the hub, because core isn't there:
 
 1. ~~The run contract, editor-contrib onto it, tsval through it; the gated call's round trip; terminal runs and agent
    control through it~~ — done (2026-10-08 → 10).
-2. The workspace runtime; tsval its own extension (2).
+2. ~~The workspace runtime; tsval its own extension (2)~~ — done (2026-10-10).
 3. The Rules view as a tree view; inline values (6).
 4. Pane views, with Margin and the event sheet as its first two providers; margin entries and their native rendering.
 5. The decider; agent tools — when a second decider or tool contributor needs them.

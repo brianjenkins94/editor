@@ -44,7 +44,11 @@
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
 import type { EditedRule, PaneEntry, PaneMark, RuleCatalog, RulePredicate, RuleSchema } from "@brianjenkins94/monaco-vscode-api/main";
-import type { CapabilityAsk, CapabilityChoice, RunEnd } from "./extensions/worker-pod/debug-protocol";
+import type { AskEvent, RunEnd } from "@brianjenkins94/run-contract";
+import type { CapabilityChoice } from "./extensions/worker-pod/capability-stops";
+
+/** A capability stop's question, as the margin shows it on its line (the run contract's `ask`, its file and text apart). */
+type CapabilityAsk = Omit<AskEvent, "file" | "source">;
 import type { LiveBatch, LiveCall, LiveValue } from "./extensions/worker-pod/live-values";
 import type { Range } from "./anchors";
 import type { ProfiledLine } from "./coverage";

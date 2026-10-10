@@ -1,7 +1,8 @@
 /**
  * Worker Pod — the manager extension (runs in the extension host, LocalProcess) that hosts a pod of workers
  * behind one extension. Today it runs NODE language servers off-thread and connects each to the editor with
- * a vscode-languageclient; a tsval-backed debug adapter is the next pod member (see debug-adapter.ts).
+ * a vscode-languageclient. Debuggers are extensions of their own (tsval: extensions/tsval) — this one gives each the
+ * workspace runtime (its export) and reads their runs the one way (debug-events.ts).
  *
  * Each language server worker (a server-host) runs under an almostnode runtime on a zen-fs VFS, so a
  * node-only server (cspell reading its dictionary) works in-browser. It's built + served separately
@@ -10,6 +11,7 @@
  * it spawns them by URL relative to the workbench origin (`location.href`). (eslint moved OUT of this pod to a
  * tsserver plugin — extensions/eslint — that reuses tsserver's typescript; only cspell remains here.)
  */
+import type { WorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
@@ -23,7 +25,6 @@ import type { CommandTotals } from "../command-tap";
 import { ARCH_COMMANDS } from "../command-tap";
 import { registerCapabilityStops } from "./capability-stops";
 import { registerDebugEvents } from "./debug-events";
-import { registerTsvalDebug, takeExitCode } from "./debug-adapter";
 import { runProgram, serveDebugControl } from "./debug-control";
 import { registerLaunch } from "./launch";
 import { registerLiveRuns } from "./live-run";
@@ -32,7 +33,7 @@ import { registerSourceControl } from "./source-control";
 import { registerTasks } from "./tasks";
 import { registerDebugToolbar } from "./debug-toolbar";
 import { registerMetricsBridge } from "./metrics-bridge";
-import { podHub, workspace } from "./pod";
+import { podHub, workspace, workspaceRuntime } from "./pod";
 import { registerProductionDebug } from "./production-adapter";
 
 /** This extension's exports — the pod->workbench half of the hub uplink (ext host is an isolated realm, so it
@@ -44,6 +45,10 @@ export interface PodBridge {
 	 *  LSP worker over its control port, so they mount the SAME filesystem at /workspace. SAB survives the exports
 	 *  marshaling (spike-verified). No-op off cross-origin isolation (buffer is undefined). */
 	"attachWorkspaceBuffer": (buffer: unknown) => void;
+	/** The workspace runtime, for any debugger (EXTENSION-POINTS.md, 2; run-contract's `WorkspaceRuntime`): the workspace's
+	 *  buffer, and a port into the editor's runtime for a debugger's worker — which connects with run-contract's
+	 *  `connectRuntime`. Another extension asks for it through this extension's exports. */
+	"workspaceRuntime": () => WorkspaceRuntime;
 }
 
 interface ServerSpec {
@@ -184,10 +189,10 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		return typeof capability === "string" && typeof resource === "string" ? await recordedResult(capability, resource) ?? null : null;
 	}) });
 
-	// The tsval debug type — a worker-backed stepping debugger (debug-adapter.ts + debug-worker.ts).
-	registerTsvalDebug(context);
+	// (tsval, the stepping debugger, is an extension of its own — extensions/tsval — given the workspace runtime through
+	// this extension's exports, as any debugger is.)
 	// What every debugger's runs tell core — tsval's, and another extension's (`run.debugger`: an interpreter plugged in
-	// from editor-contrib) — the run contract's events, read the one way; and another's sessions made runs (debug-events.ts).
+	// from editor-contrib) — the run contract's events, read the one way; and what Run means for each (debug-events.ts).
 	registerDebugEvents(context);
 	// Every debugger's capability stops: the question in the margin, the answer back to the run (capability-stops.ts).
 	registerCapabilityStops(context, podHub);
@@ -356,9 +361,9 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 				vscode.debug.onDidTerminateDebugSession((session) => {
 					const runId = session.configuration["__runId"] as string | undefined;
 
+					// (its run's end, with its exit code, is debug-events.ts')
 					if (typeof runId === "string") {
 						debugSessionsByRunId.delete(runId);
-						podHub.publish(`node.exit.${runId}`, { "exitCode": takeExitCode(session.id) });
 					}
 				})
 			);
@@ -427,7 +432,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		podLog.info("workspace buffer shared with LSP workers", { "workers": controlPorts.length, "mb": Math.round(buffer.byteLength / 1048576) });
 	};
 
-	return { "toWorkbench": outgoing.event, "fromWorkbench": (message: unknown) => { incoming.fire(message); }, "attachWorkspaceBuffer": attachWorkspaceBuffer };
+	return { "toWorkbench": outgoing.event, "fromWorkbench": (message: unknown) => { incoming.fire(message); }, "attachWorkspaceBuffer": attachWorkspaceBuffer, "workspaceRuntime": workspaceRuntime };
 }
 
 export function deactivate(): Promise<void> {

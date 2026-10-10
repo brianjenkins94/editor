@@ -248,7 +248,8 @@ test("provoke: a cold transform round in a child worker", async () => {
 test("node script: a task runs under the tsval debugger", async () => {
 	await session.terminal(`echo "require('fs').writeFileSync('/workspace/tour-out.txt', 'tour');" > tour.js && node tour.js`, { "fresh": true });
 	await session.until("the debug worker", alive("debug-worker"));
-	await session.until("the debug session's launch", hasLabel("pod", "debug-worker", /^debug\.session\..+\.control$/u));
+	// (its worker joins the pod through the workspace runtime's link: the debug protocol itself is the adapter's messages)
+	await session.until("the debug worker joined", hasLabel("pod", "debug-worker", /^pod\.ready$/u));
 
 	// One run, one id: the registry's run is the debug session's (its launch config carries it).
 	const run = await eventually("the run", async () => (await session.request("runs.list", undefined, 5000)).find((each) => each.title === "node tour.js" && each.state === "running"));
@@ -2256,7 +2257,7 @@ test("types: the tsserver plugin types each of a file's ranges as its site obser
 // A service from the terminal runs as every run does (RUNNING.md, step 3): in the debugger, its own timers keeping it going.
 test("node script: a service runs in the debugger, and stopping it leaves the previews up", async () => {
 	await session.terminal(`echo "setInterval(() => console.log('tick'), 300);" > forever.js && node forever.js`, { "fresh": true });
-	await session.until("its debug run", hasLabel("pod", "debug-worker", /^debug\.session\..+\.control$/u));
+	await session.until("its debug run", hasLabel("pod", "debug-worker", /^pod\.ready$/u));
 	await eventually("a running service", async () => (await session.request("runs.list", undefined, 5000)).some((run) => run.title === "node forever.js" && run.kind === "service" && run.state === "running") || undefined);
 	await session.page.keyboard.press("Control+C");
 	await eventually("the service stopped", async () => (await session.request("runs.list", undefined, 5000)).some((run) => run.title === "node forever.js" && run.state === "stopped") || undefined);

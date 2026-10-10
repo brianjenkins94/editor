@@ -22,37 +22,34 @@ import type { LoadedVM, ModuleLoader } from "@brianjenkins94/tsval";
 import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 import { effectiveDisposition, givenResult, isDangerous, ruleMatches } from "@brianjenkins94/util/silo/policy";
-import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, Variable, WorkerEvent } from "./debug-protocol";
+import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, ToWorker, Variable, WorkerEvent } from "./debug-protocol";
 import type { Effect } from "@brianjenkins94/run-contract";
-import type { Told, Traced } from "./live-values";
+import type { Told, Traced } from "../worker-pod/live-values";
 import type { SiteSums } from "./site-sums";
-import type { VirtualRequest } from "./workspace-runtime";
+import type { VirtualRequest } from "../worker-pod/workspace-runtime";
 
-import { createHub, portTransport, serve } from "@brianjenkins94/hub";
+import { connectRuntime, type RuntimeConnection } from "@brianjenkins94/run-contract/runtime";
 import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@brianjenkins94/tsval";
 
 import ts from "typescript";
 import { capabilityBreakLines, classifyCall, shouldBreak } from "../capabilities/capability-breakpoints";
 import { capabilityStandins, givenAs, inert, standinCapability } from "../capabilities/canary";
 import { NETWORK_PROBES } from "../../architecture";
-import { observe } from "@brianjenkins94/observability";
-import { controlSubject, eventSubject } from "./debug-protocol";
-import { LiveRecord } from "./live-values";
+import { LiveRecord } from "../worker-pod/live-values";
 import { addObservation, copySums, siteObservations } from "./site-sums";
 import { replayGuard, replayProgram } from "./replay-run";
-import { revive } from "./snapshot";
+import { revive } from "../worker-pod/snapshot";
 
-// This worker's own hub, linked UP to the pod hub. The whole debug protocol rides it (debug-protocol.ts), on its
-// session's subjects — the adapter puts the session id in our URL. It announces `pod.ready` after launch.
-const hub = createHub({ "id": "debug-worker" });
-const SESSION = new URL(location.href).searchParams.get("session") ?? "";
+// This worker's link into the editor's runtime (run-contract's workspace runtime), the port the adapter hands over first
+// thing: a server the program starts answers the preview through it, and its log and spans — a step's, its uncaught
+// errors, its own requests — are the editor's, as this worker's (the top page's timeline, debug-mcp). The debug protocol
+// itself is the adapter's and this worker's own: their messages (debug-protocol.ts' ToWorker / WorkerEvent).
+let editorLink: RuntimeConnection | undefined;
 
-hub.link(portTransport(globalThis));
-
-// This worker's util/logger spans/records federate UP through the pod (which links our hub) to the root
-// collector — so a step's span shows up in the top-page timeline with no worker→page window path of its own.
-// (With its uncaught errors, and its hub + own requests on $sys.arch.)
-const { "log": workerLog, architecture } = observe(hub, { "network": NETWORK_PROBES });
+/** This worker's log, once it's linked (always, by the time a control message comes: the link comes first). */
+function workerLog(): RuntimeConnection["log"] {
+	return editorLink!.log;
+}
 
 type Vm = LoadedVM["vm"];
 
@@ -64,7 +61,7 @@ type Action = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverse
 type ForwardAction = "continue" | "next" | "stepIn" | "stepOut";
 
 /** An event for the adapter, on this session's event subject. */
-function post(message: WorkerEvent): void { hub.publish(eventSubject(SESSION), message); }
+function post(message: WorkerEvent): void { globalThis.postMessage(message); }
 
 let sourceFile: ts.SourceFile | undefined;
 /** The session's live values (LIVE-VALUES.md): what each line bound, returned or chose, told to the adapter a few times
@@ -279,7 +276,7 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 		return runtime;
 	}
 
-	const [{ getServerBridge }, { answerServer, programGlobals, serverOn, workerTapResponse, workspaceRuntime }, zenfs] = await Promise.all([import("@brianjenkins94/almostnode"), import("./workspace-runtime"), import("./zenfs-vfs.js")]);
+	const [{ getServerBridge }, { answerServer, programGlobals, serverOn, workerTapResponse, workspaceRuntime }, zenfs] = await Promise.all([import("@brianjenkins94/almostnode"), import("../worker-pod/workspace-runtime"), import("../worker-pod/zenfs-vfs.js")]);
 
 	if (workspace !== undefined) {
 		zenfs.attachSharedWorkspace(workspace);
@@ -313,8 +310,8 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 		}
 
 		listening.add(port);
-		serve(hub, `virtual.debug.${port}`, async (raw) => {
-			const request = raw as VirtualRequest;
+		// (the runtime link records each request and its answer as this server's traffic)
+		editorLink?.serve(port, async (request) => {
 			const server = serverOn(port);
 
 			if (server === undefined) {
@@ -322,13 +319,7 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 			}
 
 			// As a run's server answers (workspace-runtime.ts): the preview's taps in what it serves.
-			return workerTapResponse(request.url) ?? answerServer(server, request, (direction, label, bytes) => {
-				if (direction === "request") {
-					architecture.record(architecture.self, `server:${port}`, "request", label, bytes);
-				} else {
-					architecture.record(`server:${port}`, architecture.self, direction, label, bytes);
-				}
-			});
+			return workerTapResponse(request.url) ?? answerServer(server, request as VirtualRequest);
 		});
 		post({ "type": "listening", "port": port });
 	} });
@@ -1438,7 +1429,7 @@ function act(base: Vm, action: ForwardAction): void {
 async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext): Promise<void> {
 	current = base;
 	evaluating = base; // (a program file a package requires is evaluated on the machine running)
-	const span = trace !== undefined ? workerLog.continueSpan(trace, "step", { "action": action }) : workerLog.span("step", { "action": action });
+	const span = trace !== undefined ? workerLog().continueSpan(trace, "step", { "action": action }) : workerLog().span("step", { "action": action });
 
 	try {
 		try {
@@ -1616,7 +1607,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 
 	loopStart = eventLoop.now;
 	pace = liveRun ? "fast" : "real";
-	workerLog.info("event loop", { "now": eventLoop.now, "seed": eventLoop.seed, ...eventLoop.schedule === undefined ? {} : { "schedule": eventLoop.schedule } });
+	workerLog().info("event loop", { "now": eventLoop.now, "seed": eventLoop.seed, ...eventLoop.schedule === undefined ? {} : { "schedule": eventLoop.schedule } });
 
 	liveTimer = setInterval(flushLive, 250);
 
@@ -1703,9 +1694,15 @@ async function launchReplay(message: Extract<Control, { "type": "launch" }>, tra
 	await session(loaded.vm, trace);
 }
 
-hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
-	const message = data as Control;
-	const trace = envelope.traceContext;
+globalThis.addEventListener("message", (event: MessageEvent<ToWorker>): void => {
+	if (event.data.kind === "runtime") {
+		editorLink = connectRuntime(event.data.port, { "name": "debug-worker", "network": NETWORK_PROBES });
+
+		return;
+	}
+
+	const message = event.data.control;
+	const trace = event.data.trace;
 
 	switch (message.type) {
 		case "explore":
@@ -1715,10 +1712,7 @@ hub.subscribe(controlSubject(SESSION), (data, envelope): void => {
 		case "launch": {
 			// Absent without cross-origin isolation: then a breakpoint inside a host-invoked handler can't pause (onBreakpointHook).
 			control = message.control === undefined ? undefined : new Int32Array(message.control);
-			// Announce membership to the pod hub. Safe here (not at module load): the pod's interest sub-control
-			// precedes `launch` on this ordered channel, so by now the pod is known to want `pod.ready`.
-			hub.publish("pod.ready", { "worker": hub.id });
-			workerLog.info("launch", { "file": message.fileName, "breakpoints": message.lines.length, "replay": message.replay !== undefined });
+			workerLog().info("launch", { "file": message.fileName, "breakpoints": message.lines.length, "replay": message.replay !== undefined });
 			void (message.replay === undefined ? launchProgram(message, trace) : launchReplay(message, trace));
 			break;
 		}

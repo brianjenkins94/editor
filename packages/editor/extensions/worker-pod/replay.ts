@@ -2,7 +2,7 @@
  * Stepping a recorded handler (RUNNING.md): a page's code can't stop, but a call of the function a recorded stop is in is
  * recorded whole — what it read from outside itself, `this`, its arguments, what each of its calls returned
  * (page-evidence.ts) — and *Step a Recorded Stop* runs it again in the debugger: a tsval session on that call
- * (debug-worker.ts `launchReplay`), stopping at the stop, stepped back and forth while the page has gone on.
+ * (extensions/tsval/debug-worker.ts `launchReplay`), stopping at the stop, stepped back and forth while the page has gone on.
  *
  * The pod hears what the preview pages report (`stops.preview`, as the margin does: recorded-stops.ts) and keeps each
  * file's latest; the text of the version that ran comes from the dev server that served it (`preview.version`).

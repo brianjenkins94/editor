@@ -1,10 +1,10 @@
-// What the debug worker sums of a tsval run's observed sites (extensions/worker-pod/site-sums.ts): values, branches,
+// What the debug worker sums of a tsval run's observed sites (extensions/tsval/site-sums.ts): values, branches,
 // type tags and a few primitives per site, and a fork that goes on from a copy. Run:
 //   node --import tsx --test test/site-sums.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createVM } from "@brianjenkins94/tsval";
-import { addObservation, copySums, siteObservations } from "../extensions/worker-pod/site-sums.ts";
+import { addObservation, copySums, siteObservations } from "../extensions/tsval/site-sums.ts";
 
 /** Run `code` under tsval, summing its observed sites, and return the sums and the source file. */
 function run(code) {
