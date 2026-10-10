@@ -97,6 +97,9 @@ interface MarginState {
 /** Each drawn file's MarginState, by URI. */
 const margins = new Map<string, MarginState>();
 
+/** When each file's latest batch of values came (inline values wait for a stop's to come in). */
+const batchedAt = new Map<string, number>();
+
 /** The latest session's values, per file URI — kept once it ends, until the next session of the file tells its own. */
 const sessions = new Map<string, Session>();
 /** Prose notes, per file URI. */
@@ -1261,6 +1264,37 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		{ "id": "event-sheet", "label": "Event sheet", "title": "Coming: the program as an event sheet's conditions and actions", "disabled": true }
 	], "margin", () => undefined);
 
+	// At a stop, the values as VS Code's own inline values too (its InlineValuesProvider: the debugger's documented contract
+	// for values beside the code) — each row's latest at the end of its line, on the line its code is on now, as the margin
+	// places it. For the session VS Code stopped in, its frame in focus — whichever debugger's. (A desktop build would show values this way,
+	// with no pane beside the editor.) VS Code asks as it stops, while the stop's last values may still be on their way (by
+	// the hub, not with the stop): so it's answered once they're in — that session's values here, and a moment's quiet.
+	vscode.languages.registerInlineValuesProvider({ "scheme": "file" }, {
+		"provideInlineValues": async (document, viewport) => {
+			const uri = document.uri.toString();
+			// (the session VS Code asks for: its focused frame's — a live run, or another session, may be the active one)
+			const stopped = vscode.debug.activeStackItem?.session.id ?? vscode.debug.activeDebugSession?.id;
+
+			for (let waited = 0; waited < 2000 && (sessions.get(uri)?.id !== stopped || Date.now() - (batchedAt.get(uri) ?? 0) < 200); waited += 50) {
+				await new Promise((resolve) => { setTimeout(resolve, 50); });
+			}
+
+			const session = sessions.get(uri);
+
+			if (session === undefined || session.id !== stopped) {
+				return [];
+			}
+
+			const rows = await relocate(session.anchors, document.getText(), rowsOf(session.values, session.calls, session.picked));
+
+			return rows.flatMap((row) => {
+				const latest = row.inline?.text ?? row.cells.findLast((cell) => cell !== undefined && cell.text !== "")?.text;
+
+				return latest === undefined || row.line < viewport.start.line || row.line > viewport.end.line || row.line >= document.lineCount ? [] : [new vscode.InlineValueText(document.lineAt(row.line).range, row.label === "" ? latest : `${row.label} ${latest}`)];
+			});
+		}
+	});
+
 	const uriOf = (path: string): string => vscode.Uri.file(path).toString();
 	/** The text a session ran, as anchors (the same for its values, its question and its end). */
 	const anchorsFor = (file: string, source: unknown, session?: Session): Anchors | undefined => session?.anchors ?? (typeof source === "string" ? new Anchors(vscode, file, source) : undefined);
@@ -1336,6 +1370,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		}
 
 		session.dropped = batch.dropped ?? session.dropped;
+		batchedAt.set(uri, Date.now());
 		redraw(uri);
 	});
 

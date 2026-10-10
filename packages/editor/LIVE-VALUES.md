@@ -181,6 +181,10 @@ Decided 2026-10-05, after step 8: the margin is the file's runtime column, open 
 file whether or not it has anything to show — notes, values, a capability stop's question — with a gutter column of its
 own, right of the line numbers, for coverage.
 
+- **At a stop, its values are VS Code's own inline values too** (2026-10-10, EXTENSION-POINTS.md 6): an
+  `InlineValuesProvider` gives each line's latest value at the end of the line, on the line its code is on now — so a
+  debugger's values show the native way as well, and would with no pane beside the editor (a desktop build).
+
 - **Coverage moved into the margin's gutter column.** Its gutter bars (gutter icons) cost breakpoints: VS Code won't set one
   on a line whose glyph margin holds another extension's icon (`marginFreeFromNonDebugDecorations`, which lets through
   only codicons and its own test coverage's class — a class an extension's decoration can't choose). So core draws it

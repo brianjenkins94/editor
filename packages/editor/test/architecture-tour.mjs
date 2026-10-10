@@ -752,6 +752,41 @@ test("live values: a session's values beside the code, as the talk's binary sear
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
 
+// At a stop, the margin's values are VS Code's own inline values too (live-values.ts's InlineValuesProvider): each line's
+// latest at its end, as VS Code draws a debugger's — whichever debugger it is, and with no pane beside the editor.
+test("inline values: at a stop, each line's latest value at its end, as VS Code draws them", async () => {
+	const workbench = session.workbench();
+	const program = "/workspace/inline-values.js";
+
+	await workbench.evaluate(async (file) => {
+		const { api } = globalThis.__editor;
+
+		await api.workspace.fs.writeFile(api.Uri.file(file), new TextEncoder().encode("function total(prices) {\n\tlet sum = 0;\n\n\tfor (const price of prices) {\n\t\tsum += price;\n\t}\n\n\tconst tax = sum * 0.08;\n\n\treturn sum + tax;\n}\n\nconsole.log(total([12, 30, 8]));\n"));
+		await api.window.showTextDocument(api.Uri.file(file));
+	}, program);
+
+	// (inline values are the focused frame's: a session an earlier test left paused would keep the focus)
+	for (const each of await session.request("debug.sessions", undefined, 10_000).catch(() => [])) {
+		await session.request(`debug.session.${each.session}.stop`, undefined, 30_000).catch(() => undefined);
+	}
+
+	try {
+		const stopped = await session.request("debug.start", { "program": program, "breakpoints": [10] }, 60_000);
+
+		assert.equal(stopped.line, 10);
+		assert.deepEqual(await eventually("the inline values", async () => {
+			// (VS Code draws them with non-breaking spaces)
+			const shown = await workbench.evaluate(() => [...document.querySelectorAll(".monaco-editor .debug-inline-value")].map((each) => each.textContent.replaceAll("\u00A0", " ")));
+
+			return shown.includes("tax = 4") ? shown : undefined;
+		}), ["prices = [12, 30, 8]", "sum = 0", "price = 8", "sum = 50", "tax = 4"]);
+
+		await session.request(`debug.session.${stopped.session}.stop`, undefined, 30_000);
+	} finally {
+		await workbench.evaluate((file) => globalThis.__editor.api.workspace.fs.delete(globalThis.__editor.api.Uri.file(file)).then(() => undefined, () => undefined), program);
+	}
+});
+
 // Live runs (LIVE-VALUES.md, *Live runs, as you type*): the file in the editor runs again as typing pauses — no Run — its
 // values in the margin; a write it can't make is skipped (nothing written, the line saying so); half-typed, the last run's
 // values stay; a loop that never ends stops at its budget, saying so on its line; none of them is in the running list.
