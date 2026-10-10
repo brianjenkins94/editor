@@ -42,6 +42,7 @@ the same events its tsval debugger sends:
 | `ended` | clears a file's values, and marks the line the run crashed or was stopped on |
 | `ask` | asks about a gated call on its line (send it as you stop there): the answer comes back as a `decide` request |
 | `recorded` | keeps what an allowed call returned, so a rule can give it back in its place |
+| `listening` | a server the program started: the run is a service, and its port the preview's |
 
 A run that makes gated calls — writes files, makes requests, runs commands — decides each by the policy the editor gives
 it as `__policy` in its launch configuration (read it with `@brianjenkins94/util/silo/policy`), and asks about the ones it

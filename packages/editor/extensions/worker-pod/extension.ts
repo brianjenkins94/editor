@@ -24,7 +24,7 @@ import { ARCH_COMMANDS } from "../command-tap";
 import { registerCapabilityStops } from "./capability-stops";
 import { registerDebugEvents } from "./debug-events";
 import { registerTsvalDebug, takeExitCode } from "./debug-adapter";
-import { runProgram } from "./debug-control";
+import { runProgram, serveDebugControl } from "./debug-control";
 import { registerLaunch } from "./launch";
 import { registerLiveRuns } from "./live-run";
 import { registerReplay } from "./replay";
@@ -191,6 +191,8 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	registerDebugEvents(context);
 	// Every debugger's capability stops: the question in the margin, the answer back to the run (capability-stops.ts).
 	registerCapabilityStops(context, podHub);
+	// Every debugger's sessions driven over the hub (debug-mcp's debug_* tools): followed and stepped through DAP.
+	serveDebugControl(context, podHub);
 	// What there is to run, as tasks run by core's shell (tasks.ts); and the shell's run picker, from them (launch.ts).
 	registerTasks(context);
 	registerLaunch(context);

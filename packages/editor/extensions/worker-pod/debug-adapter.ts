@@ -10,15 +10,14 @@
  * (a DebugAdapterServer needs a socket).
  */
 import type { Span } from "@brianjenkins94/util/logger";
-import type { DecideRequest, Events } from "@brianjenkins94/run-contract";
+import type { DecideRequest, Events, StdinRequest } from "@brianjenkins94/run-contract";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
 import { EMPTY_POLICY, given as givenBy, placesOf, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
 import { loadEffectivePolicy } from "../capabilities/silo-store";
-import type { ControllableSession, DebugAction, DebugOutcome, DebugState } from "./debug-control";
-import { registerSession, serveDebugControl } from "./debug-control";
+import type { DebugAction, DebugState } from "./debug-control";
 import type { Replay } from "./page-evidence";
 import type { CapabilityAsk, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, WorkerEvent } from "./debug-protocol";
 import { controlSubject, eventSubject } from "./debug-protocol";
@@ -28,16 +27,13 @@ import { podHub, workspace } from "./pod";
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
 type Dap = Record<string, unknown>;
 
-class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
+class TsvalDebugSession implements vscode.DebugAdapter {
 	private readonly sendEmitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
 	public readonly onDidSendMessage = this.sendEmitter.event;
 
 	public readonly id: string;
-	public readonly launchId: string | undefined;
-	// Hub control (debug-control.ts): where the session is, what it printed since the last action, and the callers
-	// waiting for its next stop. Served until the session ends.
+	// Where the session is (an agent follows it by its DAP messages: debug-control.ts).
 	private state: DebugState = "starting";
-	private stopReason: string | undefined;
 	/** Whether the end was told (`values.ended`): a stop after the program's own end doesn't tell it again. */
 	private ended = false;
 	/** The program's files core has values of, each with the text that ran (sent with its first values): the entry, and
@@ -45,9 +41,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private readonly told = new Map<string, string>();
 	/** What the capability stop it's at asks (LIVE-VALUES.md, step 8), until the run resumes. */
 	private ask: CapabilityAsk | undefined;
-	private output: string[] = [];
-	private readonly waiters = new Set<() => void>();
-	private readonly unregister: () => void;
 	/** Breakpoint lines by source path — VS Code sends them per file, and tsval runs one program. */
 	private readonly breakpointLines = new Map<string, number[]>();
 
@@ -64,10 +57,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private replay: (Replay & { "source": string }) | undefined;
 	/** Where it was started and with what environment — a terminal's (`cwd`, `env`); none, the workspace and nothing. */
 	private where: { "cwd"?: string; "env"?: Record<string, string> } = {};
-	/** The terminal run it was started as (`__runId` with `__startedBy: "terminal"`): its output goes there, its stdin
-	 *  comes from there (RUNNING.md, step 3). */
-	private terminalRun: string | undefined;
-	private offTerminal: (() => void) | undefined;
 	/** Where the event loop starts — given by a launch that runs one ordering again (exploreProgram's), else fresh. */
 	private eventLoop: LoopStart | undefined;
 	private lines: number[] = [];
@@ -113,94 +102,30 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	/** A `setValue` waiting on the worker's answer. */
 	private valueWaiter: ((answer: Extract<WorkerEvent, { "type": "valueSet" }>) => void) | undefined;
 
-	private readonly session: vscode.DebugSession;
-
 	public constructor(session: vscode.DebugSession) {
-		this.session = session;
 		this.id = session.id;
-		this.launchId = session.configuration["__launchId"] as string | undefined;
-		this.unregister = registerSession(podHub, this);
-	}
-
-	public outcome(): DebugOutcome {
-		const frame = this.snapshot?.frames[0];
-		const stopped = this.state === "stopped" && frame !== undefined;
-		const scope = stopped ? this.snapshot?.scopes[frame.id]?.[0] : undefined;
-		const loop = stopped ? this.snapshot?.scopes[frame.id]?.find(({ name }) => name === "Event loop") : undefined;
-
-		return {
-			"session": this.id,
-			"name": this.session.name,
-			"program": this.program,
-			"state": this.state,
-			...(stopped
-				? {
-					"reason": this.stopReason,
-					"line": frame.line,
-					"column": frame.column,
-					"function": frame.name,
-					...frame.file === undefined ? {} : { "file": frame.file },
-					"code": frame.code ?? this.source.split("\n")[frame.line - 1]?.trim(),
-					"locals": (scope === undefined ? [] : this.snapshot?.variables[scope.variablesReference] ?? []).map(({ name, value, type }) => ({ "name": name, "value": value, "type": type })),
-					...loop === undefined ? {} : { "eventLoop": (this.snapshot?.variables[loop.variablesReference] ?? []).map(({ name, value, type }) => ({ "name": name, "value": value, "type": type })) }
-				}
-				: {}),
-			"output": [...this.output]
-		};
-	}
-
-	public act(action: DebugAction, signal: AbortSignal): Promise<DebugOutcome> {
-		if (this.state !== "stopped") {
-			throw new Error(`session is ${this.state}, not stopped` + (this.state === "idle" ? " (it's waiting — on a request, its stdin or a timer: set a breakpoint in a handler and use it)" : ""));
-		}
-
-		const next = this.nextSettle(signal);
-
-		this.goOn(action);
-
-		return next;
 	}
 
 	/** Resume with `action`, from somewhere other than VS Code's UI (an agent, an answer at a capability stop). */
 	private goOn(action: DebugAction): void {
-		this.output = [];
 		// The action didn't come from VS Code's UI, so tell it (and the toolbar mirror) the session is running again.
 		this.event("continued", { "threadId": 1, "allThreadsContinued": true });
 		this.resume(action);
 	}
 
-	/** Resolve on the next stop, idle or end — or `signal.reason` if the caller gives up first. */
-	public next(signal: AbortSignal): Promise<DebugOutcome> {
-		return this.nextSettle(signal);
-	}
-
 	/** At a stop, set `name` (a variable in scope there) to `value` (a literal): the run goes on with it, and the margin
 	 *  shows it beside the line. Resolves with the value as the Variables view shows it; rejects when it can't be set. */
 	/** What a timer's wait costs from here on (Skip Waits): its real delay, or none. */
-	public pace(pace: "real" | "fast"): void {
+	private pace(pace: "real" | "fast"): void {
 		this.control({ "type": "pace", "pace": pace });
 	}
 
 	/** Input for the program's process.stdin (the Debug Console's lines). */
-	public stdin(data: string): void {
+	private stdin(data: string): void {
 		this.control({ "type": "stdin", "data": data });
 	}
 
-	/** A run started in a terminal (RUNNING.md, step 3): what it types is the program's stdin, its end (Ctrl-D) the
-	 *  input's end. Its output goes back there too (`output`). */
-	private followTerminal(runId: string | undefined): void {
-		this.terminalRun = runId;
-
-		if (runId !== undefined) {
-			this.offTerminal = podHub.subscribe(`node.stdin.${runId}`, (data) => {
-				const { "data": text, end } = (data ?? {}) as { "data"?: string; "end"?: boolean };
-
-				this.control({ "type": "stdin", "data": text ?? "", ...end === true ? { "end": true } : {} });
-			});
-		}
-	}
-
-	public async setValue(name: string, value: string): Promise<string> {
+	private async setValue(name: string, value: string): Promise<string> {
 		if (this.state !== "stopped") {
 			throw new Error("not stopped");
 		}
@@ -225,46 +150,8 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 		return answer.value ?? value;
 	}
 
-	public settled(signal: AbortSignal): Promise<DebugOutcome> {
-		return this.state === "starting" || this.state === "running" ? this.nextSettle(signal) : Promise.resolve(this.outcome());
-	}
-
-	public async stop(): Promise<DebugOutcome> {
-		await vscode.debug.stopDebugging(this.session);
-
-		return this.outcome();
-	}
-
-	/** The outcome once the session next stops, goes idle or ends — or `signal.reason` if the caller gives up first. */
-	private nextSettle(signal: AbortSignal): Promise<DebugOutcome> {
-		return new Promise((resolve, reject) => {
-			const waiter = (): void => {
-				signal.removeEventListener("abort", onAbort);
-				resolve(this.outcome());
-			};
-			const onAbort = (): void => {
-				this.waiters.delete(waiter);
-				reject(signal.reason);
-			};
-
-			this.waiters.add(waiter);
-			signal.addEventListener("abort", onAbort, { "once": true });
-		});
-	}
-
-	/** Enter `state` and answer everyone waiting for the next stop; a session that ended stops being served. */
 	private settle(state: DebugState): void {
 		this.state = state;
-
-		for (const waiter of [...this.waiters]) {
-			waiter();
-		}
-
-		this.waiters.clear();
-
-		if (state === "terminated") {
-			this.unregister();
-		}
 	}
 
 	private send(message: Dap): void {
@@ -352,6 +239,15 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				break;
 
 			// The program's statement coverage so far (a CoverageReport); once it has ended, its final coverage.
+			// Input for the program's process.stdin — a terminal's run's typing (the run contract's `stdin`, debug-events.ts).
+			case "stdin": {
+				const { data, end } = args as unknown as StdinRequest;
+
+				this.control({ "type": "stdin", "data": data ?? "", ...end === true ? { "end": true } : {} });
+				this.respond(request);
+				break;
+			}
+
 			case "getCoverage":
 				// With the text that ran, so the margin can place it on the code as it is now (coverage.ts).
 				void this.currentCoverage(5000).then((report) => { this.respond(request, { ...report, "source": this.source } as unknown as Dap); });
@@ -363,7 +259,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.replay = typeof args["replay"] === "object" && args["replay"] !== null ? args["replay"] as Replay & { "source": string } : undefined;
 				this.where = { ...typeof args["cwd"] === "string" ? { "cwd": args["cwd"] } : {}, ...typeof args["env"] === "object" && args["env"] !== null ? { "env": args["env"] as Record<string, string> } : {} };
 				this.eventLoop = loopStartOf(args["eventLoop"]);
-				this.followTerminal(args["__startedBy"] === "terminal" && typeof args["__runId"] === "string" ? args["__runId"] : undefined);
 				this.noDebug = args["noDebug"] === true;
 				this.policy = typeof args["__policy"] === "object" && args["__policy"] !== null ? args["__policy"] as Policy : EMPTY_POLICY;
 				// A live run (LIVE-VALUES.md): the file run again as typing pauses — it stops at nothing.
@@ -649,8 +544,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	private closeWorker(): void {
 		this.offEvents?.();
 		this.offEvents = undefined;
-		this.offTerminal?.();
-		this.offTerminal = undefined;
 		this.podUnlink?.();
 		this.podUnlink = undefined;
 		this.worker?.terminate();
@@ -710,7 +603,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				this.snapshot = message.snapshot;
 				this.lastStopAtomic = message.atomic === true;
 				this.endAction(); // the action reached a stop — close its round-trip span
-				this.stopReason = message.reason;
 				this.ask = message.ask;
 
 				// A capability stop asks on its line (the run contract's `ask`: the margin shows it — capability-stops.ts) — in
@@ -779,19 +671,9 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 				break;
 			}
 
+			// (started in a terminal, its stdout and stderr are printed there too: debug-events.ts)
 			case "output":
 				this.event("output", { "category": message.stream ?? "stdout", "output": message.text + "\n" });
-
-				// Started in a terminal: printed there, as the Debug Console mirrors it — not the script's completion value
-				// (`→ …`), which the Debug Console shows as a REPL would and node doesn't print.
-				if (this.terminalRun !== undefined && !message.text.startsWith("→ ")) {
-					podHub.publish(`node.out.${this.terminalRun}`, { "stream": message.stream === "stderr" ? "err" : "out", "data": message.text + "\n" });
-				}
-
-				if (this.output.length < 200) {
-					this.output.push(message.text);
-				}
-
 				break;
 
 			case "valueSet": {
@@ -803,21 +685,16 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 			}
 
 			// A server the program started: the run is a service, with its port (the running list, its preview).
-			case "listening": {
-				const runId = this.session.configuration["__runId"];
-
-				if (typeof runId === "string") {
-					podHub.publish(`node.listening.${runId}`, { "port": message.port });
-				}
-
+			case "listening":
+				this.tell("listening", { "port": message.port });
 				this.event("output", { "category": "console", "output": `listening on ${message.port}\n` });
 				break;
-			}
 
-			// Out of work, serving (a server, a stdin reader): idle — a request goes on from here.
+			// Out of work, serving (a server, a stdin reader): idle — a request goes on from here (the run contract's `idle`).
 			case "serving":
 				this.endAction();
 				this.settle("idle");
+				this.tell("idle", {});
 				break;
 
 			default:
@@ -826,7 +703,6 @@ class TsvalDebugSession implements vscode.DebugAdapter, ControllableSession {
 	}
 
 	public dispose(): void {
-		this.unregister();
 		this.closeWorker();
 		this.sendEmitter.dispose();
 	}
@@ -1033,5 +909,4 @@ export function registerTsvalDebug(context: vscode.ExtensionContext): void {
 		})
 	);
 	// Drive the debugger over the hub (debug-mcp's debug_* tools): list, start, breakpoints; each session serves its own.
-	serveDebugControl(context, podHub);
 }

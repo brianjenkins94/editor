@@ -11,13 +11,24 @@
  *   debugger that sends none has its values cleared from the program's margin as its session ends;
  * - `ask`: a gated call the policy says to ask about — sent as the debugger stops there (a `stopped` event, reason
  *   `capability`): the question shows on its line, and the answer comes back as a `decide` request;
- * - `recorded`: what an allowed call returned for real, kept so a rule can give it back in its place later.
+ * - `recorded`: what an allowed call returned for real, kept so a rule can give it back in its place later;
+ * - `listening`: a server the program started listens on a port — the run is a service, its preview there;
+ * - `idle`: the run is waiting — on a request, its stdin or a timer — with no stop to step from (until it stops, or ends).
+ *
+ * A run started in a terminal (`__startedBy: "terminal"` in its launch configuration) prints there: its `output` events'
+ * `stdout` and `stderr` (not `console`, which only the Debug Console shows).
  *
  * The editor's requests (custom requests, `Requests`):
  *
  * - `decide`, at a capability stop: how the call goes — and, when the answer changed it (a rule saved, a call allowed
  *   for the rest of the run), the policy in effect from now on. Apply it to the call, then continue;
- * - `getCoverage`, while stopped: answer with a `CoverageEvent`, or fail it if you don't keep one.
+ * - `getCoverage`, while stopped: answer with a `CoverageEvent`, or fail it if you don't keep one;
+ * - `stdin`: what was typed for the program's standard input (a terminal's run, the Debug Console, an agent) — `end`
+ *   when it's closed (Ctrl-D).
+ *
+ * Agents drive a session with DAP's own requests (continue, next, the steps, setVariable) and read it with stackTrace,
+ * scopes and variables — a scope named `Event loop` is shown as the run's event loop — so a debugger that answers those
+ * is driven like tsval; one with a virtual clock may answer `pace` (`real`, or `fast`: timers don't wait).
  *
  * Gating: a debugger whose runs make gated calls (files written, requests, commands) decides each by the policy the
  * editor gives it — `__policy` in its launch configuration, a silo policy (@brianjenkins94/util/silo/policy, whose
@@ -114,6 +125,12 @@ export interface AskEvent { "file": string; "source"?: string; "line": number; "
 /** The `recorded` event: what an allowed call returned, for a rule to give back. */
 export interface RecordedEvent { "capability": string; "resource": string; "value": unknown }
 
+/** The `listening` event: a server the program started listens on `port`. */
+export interface ListeningEvent { "port": number }
+
+/** The `idle` event. */
+export type IdleEvent = Record<string, never>;
+
 /** Every event, by its name. */
 export interface Events {
 	"values": ValuesEvent;
@@ -122,6 +139,8 @@ export interface Events {
 	"ended": EndedEvent;
 	"ask": AskEvent;
 	"recorded": RecordedEvent;
+	"listening": ListeningEvent;
+	"idle": IdleEvent;
 }
 
 /** The `decide` request: the call made (`allow`), failed as a refused call does (`deny`), not made — the program going on
@@ -130,8 +149,12 @@ export interface Events {
  *  gives it), the verdict after. */
 export interface DecideRequest { "verdict": "allow" | "deny" | "skip" | "give"; "value"?: unknown; "policy"?: Policy }
 
+/** The `stdin` request: input for the program's standard input; `end`, it's closed. */
+export interface StdinRequest { "data": string; "end"?: boolean }
+
 /** Every request the editor makes of a debugger, by its name. */
 export interface Requests {
 	"decide": DecideRequest;
 	"getCoverage": Record<string, never>;
+	"stdin": StdinRequest;
 }

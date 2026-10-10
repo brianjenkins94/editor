@@ -97,7 +97,7 @@ export type WorkerEvent =
 	/** The run's effects so far — each gated call made, denied, skipped or given — told with its coverage, for its envelope
 	 *  in the run ledger (each telling has them all). */
 	| { "type": "effects"; "effects": Effect[] }
-	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" }
+	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" | "console" }
 	/** The program's statement coverage — asked for, or `final` just before `terminated`. */
 	| { "type": "coverage"; "report": CoverageReport; "final"?: boolean }
 	/** The session's live values new since the last (live-values.ts): a few times a second, and before a stop or the end. */

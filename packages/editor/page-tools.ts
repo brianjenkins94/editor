@@ -66,7 +66,7 @@ export function editorPageTools(hub: Hub): PageTool[] {
 
 	return [{
 		"name": "debug_start",
-		"description": "Run a file under the editor's tsval debugger (a VS Code debug session, visible in its UI) and return where it first stops: { session, state, reason, line, code, locals, output } — and file, when that's another of the program's files (a breakpoint set with debug_breakpoints in a file it imports stops there). Set breakpoints here or with debug_breakpoints first — with none it runs to the end (state: terminated). Policy-gated capability calls (fetch, fs, …) also stop it (reason: capability).",
+		"description": "Run a file under the editor's debugger — the one Run uses (run.debugger: tsval, or an interpreter an extension plugs in) — as a VS Code debug session, visible in its UI, and return where it first stops: { session, state, reason, line, code, locals, output } — and file, when that's another of the program's files (a breakpoint set with debug_breakpoints in a file it imports stops there). Set breakpoints here or with debug_breakpoints first — with none it runs to the end (state: terminated). Policy-gated capability calls (fetch, fs, …) also stop it (reason: capability).",
 		"inputSchema": schema({
 			"program": { ...PROGRAM, "description": "The file to run, absolute or relative to the workspace (e.g. src/index.ts). Default: the file open in the editor." },
 			"breakpoints": { "type": "array", "items": { "type": "number" }, "description": "1-based lines to break on in that file, replacing its existing breakpoints." },
@@ -76,7 +76,7 @@ export function editorPageTools(hub: Hub): PageTool[] {
 		"handler": async ({ program, breakpoints }, { signal }) => request("debug.start", { "program": program, "breakpoints": breakpoints }, signal)
 	}, {
 		"name": "debug_sessions",
-		"description": "This tab's live tsval debug sessions: [{ session, name, program, state, reason, line, column, function, code }]. state is starting, running, stopped, idle (waiting on a request, its stdin or a timer — or an app's file, the app running in its preview) or terminated.",
+		"description": "This tab's live debug sessions (any debugger's but a preview's run): [{ session, name, program, state, reason, line, column, function, code }]. state is starting, running, stopped, idle (waiting on a request, its stdin or a timer — or an app's file, the app running in its preview) or terminated.",
 		"inputSchema": schema({}),
 		"timeoutMs": 5000,
 		"handler": async (_args, { signal }) => request("debug.sessions", undefined, signal)

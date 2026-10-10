@@ -1484,7 +1484,8 @@ async function advanceFrom(base: Vm, action: ForwardAction, trace?: TraceContext
 
 		if (base.finished) {
 			if (base.completion !== undefined) {
-				post({ "type": "output", "text": "→ " + format(base.completion) });
+				// (the Debug Console shows it, as a REPL would; node doesn't print it, so a terminal doesn't either)
+				post({ "type": "output", "text": "→ " + format(base.completion), "stream": "console" });
 			}
 
 			finish();

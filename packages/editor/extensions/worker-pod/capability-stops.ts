@@ -60,7 +60,7 @@ function answered(hub: Hub, session: string): void {
 }
 
 /** What `choice` means for the call `session` is stopped at, told the debugger (`decide`), which continues. */
-async function decide(session: vscode.DebugSession, choice: CapabilityChoice, rule?: Rule, give?: unknown): Promise<void> {
+async function decide(hub: Hub, session: vscode.DebugSession, choice: CapabilityChoice, rule?: Rule, give?: unknown): Promise<void> {
 	const ask = asks.get(session.id);
 
 	if (ask === undefined) {
@@ -115,6 +115,8 @@ async function decide(session: vscode.DebugSession, choice: CapabilityChoice, ru
 	}
 
 	await session.customRequest("decide", request);
+	// (answered, the run goes on — a debugger in another extension host is seen by no tracker resuming)
+	answered(hub, session.id);
 }
 
 /** Every session's capability stops: answered over `debug.session.<id>.decide` (the margin's buttons, an agent's
@@ -135,7 +137,7 @@ export function registerCapabilityStops(context: vscode.ExtensionContext, hub: H
 				// (waiting from before it's told, so the stop it reaches isn't missed)
 				const next = controllable(session.id)?.next(signal);
 
-				await decide(session, choice as CapabilityChoice, rule, give);
+				await decide(hub, session, choice as CapabilityChoice, rule, give);
 
 				return next ?? { "session": session.id, "state": "running" };
 			}));

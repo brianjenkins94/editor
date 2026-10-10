@@ -130,7 +130,12 @@ tsval's (worker-pod's debug-events.ts asks core for each one's id), and the cust
 read the one way tsval's are: tsval tells the editor through the same contract. Stepping, breakpoints and the Variables view are the
 Debug Adapter Protocol's. Capability stops are the contract's too: every debugger is given the policy (`__policy`), asks
 about a gated call with `ask`, and is answered with a `decide` request (capability-stops.ts says what each answer means).
-What stays tsval's: a terminal's `node` (it's Node's semantics), replay and orderings. test/contrib.mjs runs contrib/ in a real editor, so a change here that breaks it fails there.
+So is a terminal's run: what it prints (its `output` events' stdout and stderr) shows in the terminal, what's typed
+there is its `stdin` request, and a server it starts is a `listening` event (debug-events.ts). An agent drives any of them as
+it drives tsval (debug-control.ts): followed by its DAP messages — or, in another extension host, by what VS Code tells
+every host (its start, the frame it stops at, the contract's events, its end; its output, there, an agent doesn't see) —
+and stepped and read with DAP's own requests. What stays tsval's: that a terminal's `node` runs on tsval (it's Node's
+semantics), replay and orderings. test/contrib.mjs runs contrib/ in a real editor, so a change here that breaks it fails there.
 
 ## Entry points, after
 

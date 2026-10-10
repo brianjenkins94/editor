@@ -93,6 +93,17 @@ test("Run starts editor-contrib's interpreter: a run, telling its values and cov
 	assert.equal(run.state, "exited");
 });
 
+// An agent drives editor-contrib's debugger as it drives tsval (debug-mcp's debug_start) — followed, in its own extension
+// host, by what VS Code tells every host: it started, where it stopped, its custom events, its end. (Its output isn't
+// told to other extensions: the Debug Console shows it, an agent doesn't see it.)
+test("an agent's run of editor-contrib's interpreter answers with how it ended", async () => {
+	const ran = await session.request("debug.start", { "program": "/workspace/contrib-probe.ts", "breakpoints": [] }, 30_000);
+
+	assert.equal(ran.state, "terminated");
+	assert.match(ran.session, /\S/u, "its session");
+	assert.equal(ran.program, "/workspace/contrib-probe.ts");
+});
+
 test("editor.annotations.spans gives an extension the editor's spans for a text", async () => {
 	const spans = await session.workbench().evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.annotations.spans", "const greeting = \"hello\";\n"));
 
