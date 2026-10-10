@@ -146,16 +146,21 @@ breaks is what worker-pod reaches over the hub, because core isn't there:
    control through it~~ — done (2026-10-08 → 10).
 2. ~~The workspace runtime; tsval its own extension (2)~~ — done (2026-10-10).
 3. ~~The Rules view as a tree view~~ — done (2026-10-10); inline values (6).
-4. Workspace tools for an agent (below), so one develops in the workspace as on a local machine.
+4. ~~Workspace tools for an agent (below), so one develops in the workspace as on a local machine~~ — done (2026-10-10).
 5. Pane views, with Margin and the event sheet as its first two providers; margin entries and their native rendering.
 6. The decider — when a second decider needs it.
 
-## Workspace tools
+## Workspace tools — done (2026-10-10)
 
-debug-mcp's tools watch and debug — the editor, problems, runs, previews, the debugger, the margin — but an agent can't
-yet do the work itself, as it would on a local machine: read and write files (what's open, unsaved, included), edit one
-by an exact string, find files and search their text, run a command and read its output, and use git. Each a page tool
-of core's (the workspace and the shell are core's), served over the hub like the others: read through VS Code's
-documents then zen-fs; write and edit as a `WorkspaceEdit` (so an open editor, undo, the edit history and format on save
-see it, as typing); find with `findFiles`; run in core's just-bash, as the terminal does (`node` and `npm` as there); git
-through the git service.
+debug-mcp's tools watched and debugged — the editor, problems, runs, previews, the debugger, the margin — but an agent
+couldn't do the work itself, as it would on a local machine. Now it can (workspace-tools.ts, git-service.ts; the page
+tools in page-tools.ts):
+
+- `files_read`: a file numbered as `cat -n` does — what's open in an editor (unsaved edits included), else what's on
+  disk; `files_write` and `files_edit` (an exact string, once or every time): as a `WorkspaceEdit`, so an open editor,
+  undo, the edit history and format on save see it as typing, then saved;
+- `files_glob` (`findFiles`) and `files_grep` (a regular expression, line by line);
+- `shell`: a command line in core's just-bash, as the terminal runs it (`node` in the debugger, `npm`), its output and
+  exit code — each call its own shell;
+- `git`: status, a unified diff of the working tree against the last commit (jsdiff's — the `diff` package, already
+  bundled for just-bash — in git's format), commit. isomorphic-git has no text diff of its own.

@@ -67,6 +67,7 @@ import { evidenceStore } from "./extensions/insights/evidence";
 import { windowClientTransport } from "./pane-link";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./terminal";
+import { installWorkspaceTools } from "./workspace-tools";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 import { installWorkspaceFs } from "./workspace-fs";
@@ -600,6 +601,9 @@ function maybeBoot(): void {
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
 				// And the pod's tasks' terminals: a just-bash process that runs one command, over the hub (terminal.ts).
 				serveTaskTerminals(api as typeof import("vscode"), nodeRunner, workbenchHub);
+				// The workspace as an agent works in it, as on a local machine — its files read, written, edited, found and
+				// searched; a command run in its shell (workspace-tools.ts; debug-mcp's files_* and shell tools).
+				installWorkspaceTools(api as typeof import("vscode"), workbenchHub, nodeRunner);
 				serveTerminalState(nodeRunner, workbenchHub);
 
 				// Uplink the extension pod to the page: a workbench hub bridges the pod (via the extension's

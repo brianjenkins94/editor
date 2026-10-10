@@ -10,6 +10,8 @@
  *   log (`margin.state`, live-values.ts) — rather than read off its DOM; likewise the editor's state, its problems and
  *   notifications (editor-state.ts), the rules (rules-view.ts), the terminals (terminal.ts), the preview windows
  *   (shell-preview.ts) and the run ledger (evidence.ts);
+ * - the workspace, as an agent works in it — files read, written, edited, found and searched (`files.*`), a command run
+ *   in its shell (`shell.run`, workspace-tools.ts), and git's status, diff and commit (git-service.ts);
  * - the preview's cold-start transform race, provoked on demand (the node worker's `preview.provoke`);
  * - one Chrome DevTools Protocol command to a preview's page (the shell's `preview.cdp`, see preview-devtools.ts).
  *
@@ -121,6 +123,91 @@ export function editorPageTools(hub: Hub): PageTool[] {
 		}),
 		"timeoutMs": 5000,
 		"handler": async ({ file, limit }, { signal }) => request("problems.list", { "file": file, "limit": limit }, signal)
+	}, {
+		"name": "files_read",
+		"description": "Read a workspace file, numbered as `cat -n` numbers it (`line<TAB>text`): what's open in an editor — unsaved edits included — else what's on disk. Returns { path, lines (in all), from, to, dirty (unsaved edits), content }. Read a long file in pieces with offset and limit.",
+		"inputSchema": schema({
+			"path": { "type": "string", "description": "The file, relative to the workspace (src/index.ts) or absolute under it (/workspace/src/index.ts)." },
+			"offset": { "type": "number", "description": "The 1-based line to start at (default 1)." },
+			"limit": { "type": "number", "description": "Lines to read (default 2000)." }
+		}, ["path"]),
+		"timeoutMs": 10000,
+		"handler": async ({ path, offset, limit }, { signal }) => request("files.read", { "path": path, "offset": offset, "limit": limit }, signal)
+	}, {
+		"name": "files_write",
+		"description": "Make a workspace file, or replace its whole text. An open editor shows the change and undo takes it back, as if it were typed; then it's saved (format on save runs). Prefer files_edit to change part of a file. Returns { path, created, lines }.",
+		"inputSchema": schema({
+			"path": { "type": "string", "description": "The file, relative to the workspace or absolute under it. Its folders are made as needed." },
+			"content": { "type": "string", "description": "The file's whole text." }
+		}, ["path", "content"]),
+		"timeoutMs": 15000,
+		"handler": async ({ path, content }, { signal }) => request("files.write", { "path": path, "content": content }, signal)
+	}, {
+		"name": "files_edit",
+		"description": "Replace an exact string in a workspace file — found once (else it fails: give more of the text around it), or every time with all. Matched against the file as the editor has it (unsaved edits included), whitespace and all — not files_read's line numbers. An open editor shows the change, undo takes it back; then it's saved. Returns { path, replaced }.",
+		"inputSchema": schema({
+			"path": { "type": "string", "description": "The file, relative to the workspace or absolute under it." },
+			"old": { "type": "string", "description": "The exact text to replace." },
+			"new": { "type": "string", "description": "What replaces it." },
+			"all": { "type": "boolean", "description": "Replace every occurrence (default: there must be exactly one)." }
+		}, ["path", "old", "new"]),
+		"timeoutMs": 15000,
+		"handler": async ({ path, old, "new": replacement, all }, { signal }) => request("files.edit", { "path": path, "old": old, "new": replacement, "all": all }, signal)
+	}, {
+		"name": "files_glob",
+		"description": "The workspace's files a glob matches, relative to the workspace, sorted — node_modules and .git left out unless the glob names them. Returns { files, truncated }.",
+		"inputSchema": schema({
+			"pattern": { "type": "string", "description": "A glob: src/**/*.ts, **/package.json, *.md." },
+			"limit": { "type": "number", "description": "At most this many (default 500)." }
+		}, ["pattern"]),
+		"timeoutMs": 15000,
+		"handler": async ({ pattern, limit }, { signal }) => request("files.glob", { "pattern": pattern, "limit": limit }, signal)
+	}, {
+		"name": "files_grep",
+		"description": "Search the workspace's files for a regular expression (JavaScript syntax), line by line — open files as the editor has them. Returns { matches: [{ file, line (1-based), text }], total }.",
+		"inputSchema": schema({
+			"pattern": { "type": "string", "description": "A regular expression, e.g. `function \\w+Run`." },
+			"glob": { "type": "string", "description": "Only the files this glob matches (default: every file but node_modules and .git)." },
+			"ignoreCase": { "type": "boolean", "description": "Match regardless of case." },
+			"limit": { "type": "number", "description": "At most this many matches (default 200); total says how many there are." }
+		}, ["pattern"]),
+		"timeoutMs": 30000,
+		"handler": async ({ pattern, glob, ignoreCase, limit }, { signal }) => request("files.grep", { "pattern": pattern, "glob": glob, "ignoreCase": ignoreCase, "limit": limit }, signal)
+	}, {
+		"name": "shell",
+		"description": "Run a command line in the workspace's shell — just-bash on the workspace's files, as the terminal runs it: ls, cat, grep, sed, find, mkdir, mv, rm, echo > file; `node` runs a program in the debugger (its output here); `npm` installs and runs scripts. Each call is its own shell: cd and export don't carry over (pass cwd). Returns { exitCode, output (stdout and stderr, as printed), timedOut }.",
+		"inputSchema": schema({
+			"command": { "type": "string", "description": "The command line." },
+			"cwd": { "type": "string", "description": "Where it runs, relative to the workspace or absolute under it (default /workspace)." },
+			"timeoutMs": { "type": "number", "description": "Stop it after this long (default 120000)." }
+		}, ["command"]),
+		"timeoutMs": 600000,
+		"handler": async ({ command, cwd, timeoutMs }, { signal }) => request("shell.run", { "command": command, "cwd": cwd, "timeoutMs": timeoutMs }, signal)
+	}, {
+		"name": "git",
+		"description": "The workspace's git: status (each changed file — A, M or D — staged or not), diff (a unified diff of the working tree against the last commit: one file's, or every changed file's), or commit (a message, and every change, or the files given). Returns { files } for status, { diff } for diff, { oid } for commit.",
+		"inputSchema": schema({
+			"action": { "type": "string", "enum": ["status", "diff", "commit"], "description": "What to do." },
+			"path": { "type": "string", "description": "diff: one file's (relative to the workspace)." },
+			"message": { "type": "string", "description": "commit: its message." },
+			"files": { "type": "array", "items": { "type": "string" }, "description": "commit: only these files (relative to the workspace); default, every change." }
+		}, ["action"]),
+		"timeoutMs": 60000,
+		"handler": async ({ action, path, message, files }, { signal }) => {
+			if (action === "status") {
+				return request("git.status", undefined, signal);
+			}
+
+			if (action === "diff") {
+				return request("git.diff", { "path": path }, signal);
+			}
+
+			if (action === "commit") {
+				return request("git.commit", { "message": message, ...Array.isArray(files) ? { "files": files.map((file) => ({ "path": String(file) })) } : {} }, signal);
+			}
+
+			throw new Error(`unknown git action "${String(action)}" — status, diff or commit`);
+		}
 	}, {
 		"name": "rules",
 		"description": "Every rule, as the Rules view shows it (RULES.md): mine, then the shared contract's — each one's sentence, its JSON, the problem that makes it match nothing if there is one, and for a rule placed in the code where its place is now (its line, or that it's uncertain or lost).",

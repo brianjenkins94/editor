@@ -5,6 +5,7 @@
  * realm (where zen-fs lives); the shell reaches it shell → app → workbench, the Source Control view pod → workbench.
  */
 import type * as vscodeApi from "vscode";
+import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type { CosmeticClassifier } from "./cosmetic-classifier";
@@ -24,7 +25,22 @@ export interface GitFileChange {
 	"cosmetic": boolean;
 }
 
-/** Serve `git.status` / `git.file` / `git.commit` and publish `git.changed` on the given hub. */
+/** Past this many changed lines a diff says so rather than listing them (a rewrite, a generated file). */
+const MOST_EDITS = 5000;
+
+/** `before` → `after` as a unified diff of `path`, as `git diff` writes one — jsdiff's (`diff`), three lines of context. */
+export function unifiedDiff(path: string, before: string, after: string): string {
+	if (before === after) {
+		return "";
+	}
+
+	const [from, to] = [before === "" ? "/dev/null" : `a/${path}`, after === "" ? "/dev/null" : `b/${path}`];
+	const patch = structuredPatch(from, to, before, after, undefined, undefined, { "context": 3, "maxEditLength": MOST_EDITS });
+
+	return patch === undefined ? `--- ${from}\n+++ ${to}\n(more than ${MOST_EDITS} lines differ)\n` : formatPatch(patch, FILE_HEADERS_ONLY);
+}
+
+/** Serve `git.status` / `git.file` / `git.diff` / `git.commit` and publish `git.changed` on the given hub. */
 export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier: CosmeticClassifier, log: Logger): void {
 	const readWorking = async (path: string): Promise<string> =>
 		new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
@@ -67,6 +83,16 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		return { "files": [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path)) };
 	});
 
+	// What changed, as `git diff HEAD` says it: one file's (`path`), or every changed file's — a unified diff of the
+	// working tree against the last commit (debug-mcp's git tool).
+	serve(hub, "git.diff", async (args) => {
+		const path = (args as { "path"?: string } | null)?.path;
+		const status = typeof path === "string" && path !== "" ? undefined : await engine.status();
+		const paths = status === undefined ? [path!] : [...status.unstaged, ...status.staged].map((change) => change.path);
+		const diffs = await Promise.all([...new Set(paths)].sort().map(async (each) => unifiedDiff(each, await engine.headContent(each).catch(() => ""), await readWorking(each).catch(() => ""))));
+
+		return { "diff": diffs.join("") };
+	});
 	serve(hub, "git.file", async (args) => {
 		const path = (args as { "path"?: string } | null)?.path;
 
