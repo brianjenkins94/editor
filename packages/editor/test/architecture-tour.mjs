@@ -1661,7 +1661,8 @@ test("placed rules: marked beside their code, followed through edits, and kept p
 	const [mark] = await eventually("the rules' mark", async () => {
 		const shown = await marks();
 
-		return shown.length === 1 && shown[0].title.includes("shared") ? shown : undefined;
+		// Both rules on it: each policy file's write redraws the margin, and the first can land between the two.
+		return shown.length === 1 && shown[0].title.includes("My rule") && shown[0].title.includes("shared") ? shown : undefined;
 	});
 
 	assert.match(mark.title, /^My rule: .*tax.*\nA shared rule: .*tax/su);
