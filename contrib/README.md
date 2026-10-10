@@ -48,12 +48,11 @@ A run that makes gated calls — writes files, makes requests, runs commands —
 it as `__policy` in its launch configuration (read it with `@brianjenkins94/util/silo/policy`), and asks about the ones it
 says to ask about.
 
-To run real programs against the workspace, ask the editor's bridge extension for the workspace runtime —
-`(await vscode.extensions.getExtension("brianjenkins94.worker-pod").activate()).workspaceRuntime()` — and hand your
-interpreter's worker its `connect().port` and `buffer`: in the worker, `connectRuntime(port, { "name": "my-interpreter" })`
-from `@brianjenkins94/run-contract/runtime` (it needs `@brianjenkins94/hub` and `@brianjenkins94/observability`
-beside it), then `serve(port, request => response)` for a server your program listens with. The buffer is the workspace
-(zen-fs's SingleBuffer), for synchronous reads and writes. The editor's own debugger, tsval, gets the workspace this way.
+The editor's own debugger, tsval, runs real programs against the workspace through the workspace runtime
+(`@brianjenkins94/run-contract/runtime`): synchronous reads and writes of the workspace's files, and the preview's
+requests to a server the program starts. It isn't reachable from this extension yet — the editor runs an extension loaded
+from outside it in an extension host of its own, and the runtime is handed out in another — so read files with
+`vscode.workspace.fs` for now.
 
 Positions are in the text that ran: 0-based lines and `[start, end)` offsets. The editor maps offsets to its BABLR span
 ids, so what you report follows its code through edits. Each run is listed in the editor's Running view.
@@ -70,7 +69,9 @@ const spans = await vscode.commands.executeCommand("editor.annotations.spans", s
 
 Each `id` is the node's Merkle hash (its type over its tokens' text and its children's hashes, whitespace and comments
 left out), so it survives the node moving and changes when the node does. `editor.annotations.refer` and
-`editor.annotations.resolve` keep something attached to a span across edits.
+`editor.annotations.resolve` keep something attached to a span across edits — typed, and their contract documented, in
+`@brianjenkins94/run-contract/annotations` (`annotations(vscode.commands)`): what the editor's notes, evidence and placed
+rules use.
 
 ## The renderer — `src/renderer.ts`
 

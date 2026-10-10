@@ -57,14 +57,39 @@ own. What Run means for any debugger moved to worker-pod (an app's file runs the
 cases, the run's registration, its exit code from DAP's `exited`). On a desktop build the same interface is Node's own
 `fs` and `net`.
 
-## 3. Span annotations
+**Not yet for editor-contrib.** An extension loaded from outside the editor runs in the web worker extension host
+(contributed-extensions.ts — its code kept out of the workbench realm), and an extension's exports reach only its own
+host: `workspaceRuntime()` reaches tsval, beside worker-pod, but not editor-contrib's interpreter. Handing it across
+means getting a port from one host to the other, which VS Code's RPC (JSON) doesn't carry. Until then the template sends
+the contract's events (`effects` and `ended` among them) from the adapter, with no worker.
+
+What a handoff would meet (measured 2026-10-10, Brave, the dev build):
+
+- **The workspace's buffer would cross.** The web worker host's iframe is same-origin (`allow-same-origin`,
+  `cross-origin-isolated`) and the host is cross-origin isolated (`SharedArrayBuffer` there). A `SharedArrayBuffer`
+  posted from the workbench down a `MessagePort` to a worker that iframe made is the same memory both ways — a write
+  on either side is read on the other. So synchronous reads and writes of the workspace come with a port.
+- **An extension can't open the way itself.** VS Code blocks `postMessage` for that host's extensions (the global is
+  replaced by one that only logs, and the prototype's is gone), so an extension can't send a port out. Core has to be in
+  the worker before that: as the architecture probe is (its bootstrap runs first and posts a port up through the iframe,
+  probes.ts), or in the worker bundle core already patches (patch-esm-ext-host.mjs). From there, a host's extensions
+  share its global scope, and an extension posting to a worker of its own (tsval's way) isn't blocked.
+- **`BroadcastChannel` is no way round:** it delivers a `SharedArrayBuffer` as `null`, even within one realm, and carries
+  no ports.
+
+## 3. Span annotations — done (2026-10-10)
 
 Placing something on code that survives edits and reformatting (SPAN-ANNOTATIONS.md): `editor.annotations.refer`,
-`resolve` and `spans`, commands worker-pod registers. Notes, insights, the event sheet and the debugger already use
-them, and `SpanRef` comes from util/silo's `annotations`.
+`resolve` and `spans`, commands worker-pod registers.
 
-**To do:** nothing to move — publish it: its types in the package, and its contract documented there (batched refer and
-resolve, what a lost reference looks like).
+**The extension point** (packages/run-contract's `./annotations`): `annotations(vscode.commands)` gives typed `spans`,
+`refer` and `resolve`, and the contract is documented there — batch them (one call per text), what each status means
+(`attached`, `moved`, `re-placed` — store its new `ref` —, `uncertain`, `orphaned`: lost, kept to be re-placed or
+dismissed), how a lost reference is looked for before it's orphaned, and `undefined` without the editor. `SpanRef` and
+`Resolution` are util/silo's, re-exported.
+
+**Dogfooded:** notes, insights' evidence, tsval's placed rules, worker-pod's rule places and core's run anchors
+(anchors.ts) all call through it — no extension calls the commands by hand.
 
 ## 4. Pane views (the Margin pane's tabs)
 

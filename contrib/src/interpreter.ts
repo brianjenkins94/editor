@@ -54,8 +54,12 @@ export class InterpreterSession implements vscode.DebugAdapter {
 		// TODO: interpret `source`. Write what it prints with `output`, and tell values as they happen:
 		this.output(`would run ${program} (${source.length} characters)\n`);
 		this.tell("values", { "file": program, "source": source, "values": [], "calls": [], "dropped": 0 });
-		// …and, as it ends, every statement that could run with how often it did.
+		// …every statement that could run, with how often it did…
 		this.tell("coverage", { "file": program, "source": source, "statements": [], "sites": [] });
+		// …what it did to the world: each gated call (a file read or written, a request, a command) and how it went…
+		this.tell("effects", { "effects": [] });
+		// …and that it's over: its values go from the margin, and where it crashed or was stopped (`end`) is marked.
+		this.tell("ended", { "file": program, "source": source });
 		this.event("exited", { "exitCode": 0 });
 		this.event("terminated");
 	}

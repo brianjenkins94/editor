@@ -55,7 +55,7 @@ function eventually(what, probe, timeoutMs = 60_000) {
 	return until(what, probe, { "timeoutMs": timeoutMs, "intervalMs": 250, "sleep": (ms) => session.page.waitForTimeout(ms) });
 }
 
-test("Run starts editor-contrib's interpreter: a run, telling its values and coverage", async () => {
+test("Run starts editor-contrib's interpreter: a run, telling its values, coverage, effects and end", async () => {
 	const workbench = await eventually("the workbench", async () => session.workbench());
 
 	await eventually("the extension loaded", () => workbench.evaluate(async () => {
@@ -81,10 +81,10 @@ test("Run starts editor-contrib's interpreter: a run, telling its values and cov
 		await api.commands.executeCommand("editor.debugFile", uri);
 	});
 
-	const seen = await eventually("its coverage", () => workbench.evaluate(() => (globalThis.__contrib.events.some((each) => each.event === "coverage") ? globalThis.__contrib : undefined)));
+	const seen = await eventually("its end", () => workbench.evaluate(() => (globalThis.__contrib.events.some((each) => each.event === "ended") ? globalThis.__contrib : undefined)));
 
 	assert.deepEqual(seen.sessions.map((each) => each.type), ["contrib"], "Run started editor-contrib's debugger (its default for run.debugger)");
-	assert.deepEqual(seen.events.map((each) => each.event), ["values", "coverage"], "it told its values, then its coverage");
+	assert.deepEqual(seen.events.map((each) => each.event), ["values", "coverage", "effects", "ended"], "it told its values, its coverage, its effects and its end");
 	assert.equal(typeof seen.sessions[0].runId, "string", "its session is a run");
 
 	const run = await eventually("its run, ended", async () => (await session.request("runs.list", undefined, 5000)).find((each) => each.id === seen.sessions[0].runId && each.state !== "running"));
