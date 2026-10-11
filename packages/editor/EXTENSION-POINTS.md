@@ -44,9 +44,10 @@ What the contract can't carry: a debugger's worker reads the workspace synchrono
 zen-fs over a SharedArrayBuffer) and its servers answer the preview. **Any debugger may have it**, not just tsval — an
 interpreter like editor-contrib's should be able to run real programs against the workspace.
 
-**The extension point** (packages/run-contract's `./runtime`): worker-pod's exports give `workspaceRuntime()` — the
-workspace's `buffer`, and `connect()`, a port for the debugger's worker. The worker calls `connectRuntime(port, { name })`
-and answers the preview for a port its program listens on with `serve(port, request => response)`; no subject names.
+**The extension point** (packages/run-contract's `./runtime`): `workspaceRuntime()` — `connect(name)`, a port for the
+debugger's worker, and (for the editor's own debugger) the workspace's `buffer`. The worker calls `connectRuntime(port,
+{ name, session })`, reads and writes the workspace through its `fs` (below), and answers the preview for a port its
+program listens on with `serve(port, request => response)`; no subject names.
 Underneath, the port is a link into the editor's hub, so the worker stays a realm of its own: its spans (each step, each
 request its servers answer), its logs and each server's traffic (`server:<port>`) are the editor's to see. The
 extension's own code never joins the hub; worker-pod stays the one bridge.
@@ -57,13 +58,10 @@ own. What Run means for any debugger moved to worker-pod (an app's file runs the
 cases, the run's registration, its exit code from DAP's `exited`). On a desktop build the same interface is Node's own
 `fs` and `net`.
 
-**Not yet for editor-contrib.** An extension loaded from outside the editor runs in the web worker extension host
-(contributed-extensions.ts — its code kept out of the workbench realm), and an extension's exports reach only its own
-host: `workspaceRuntime()` reaches tsval, beside worker-pod, but not editor-contrib's interpreter. Handing it across
-means getting a port from one host to the other, which VS Code's RPC (JSON) doesn't carry. Until then the template sends
-the contract's events (`effects` and `ended` among them) from the adapter, with no worker.
-
-What a handoff would meet (measured 2026-10-10, Brave, the dev build):
+**For editor-contrib too** (2026-10-11). An extension loaded from outside the editor runs in the web worker extension
+host (contributed-extensions.ts — its code kept out of the workbench realm), and an extension's exports reach only its
+own host — so the runtime is put in each host by core, not exported (below), and the template's interpreter runs in a
+worker on it. What handing a port across hosts meets (measured 2026-10-10, Brave, the dev build):
 
 - **The workspace's buffer would cross.** The web worker host's iframe is same-origin (`allow-same-origin`,
   `cross-origin-isolated`) and the host is cross-origin isolated (`SharedArrayBuffer` there). A `SharedArrayBuffer`
@@ -100,7 +98,12 @@ It gets **synchronous files through core** instead, each call answered by worker
 - **Reaching it from either host.** `workspaceRuntime()` (run-contract's `./runtime`) finds it where core put it: in the
   bridge's host, worker-pod's — the buffer included, for tsval, our own code built with the same zen-fs; in the web
   worker host, core's bootstrap's (the architecture probe's, which runs first there and already holds a port to the
-  workbench) — no buffer. Its `connect(session)` gives a port either way.
+  workbench) — no buffer. Its `connect(name)` gives a port either way.
+- **One way to link it** (run-contract's `linkRuntime`), whichever host the port comes from — into the pod's hub or the
+  workbench's: the editor names the worker `<name>#<instance>`, its own id (an answer goes to that worker alone, not to
+  every worker of the name; the architecture view counts each as an instance of `<name>`), and the link carries only the
+  runtime — the worker's log, architecture and metrics, its mailbox handed over, its servers' requests and answers. No
+  other service of the editor's, tsval's worker's included.
 - **tsval** keeps the buffer until it's measured on the calls (its module loading makes many small reads); moving it
   over would make the gate tsval's too.
 

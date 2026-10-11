@@ -37,8 +37,8 @@ export interface MonacoProbeOptions {
 	 *  it controls this page (and so the workers it spawns). */
 	"classifyUrl"?: (url: URL) => string;
 	/** Link a debugger's port from the web worker extension host into the editor's runtime (probe.worker.ts's
-	 *  `workspaceRuntime()`), answering with how to unlink it. */
-	"linkRuntime"?: (port: MessagePort, id: string) => () => void;
+	 *  `workspaceRuntime()`) — its worker known as `name` — answering with how to unlink it. */
+	"linkRuntime"?: (port: MessagePort, name: string) => () => void;
 }
 
 export const EXT_HOST_IFRAME = "exthost-iframe";
@@ -72,7 +72,7 @@ function fileName(url: string): string {
 // Set once by installMonacoProbes: where a nested worker's request goes (see MonacoProbeOptions.classifyUrl).
 let classifyChildUrl: ((url: URL) => string) | undefined;
 // Set once by installMonacoProbes: where the extension host's runtime ports go (see MonacoProbeOptions.linkRuntime).
-let linkRuntime: ((port: MessagePort, id: string) => () => void) | undefined;
+let linkRuntime: ((port: MessagePort, name: string) => () => void) | undefined;
 
 function attachChildProbe(sink: ArchSink, port: MessagePort, ownerId: string, container: string): void {
 	const nested = new Map<string, string>();
@@ -124,7 +124,7 @@ function attachChildProbe(sink: ArchSink, port: MessagePort, ownerId: string, co
 				// A debugger's worker in the extension host, connecting to the editor's runtime (only the extension host's).
 				case "runtime":
 					if (container === "extHostWorker" && linkRuntime !== undefined) {
-						runtimes.set(message.id, linkRuntime(message.port, message.id));
+						runtimes.set(message.id, linkRuntime(message.port, message.name));
 					}
 
 					break;

@@ -65,11 +65,11 @@ report({ "type": "hello", "name": self.name, "url": self.location.href });
 // (installMonacoProbes' `linkRuntime`). No buffer: the workspace's own bytes are for the editor's own debugger.
 (self as unknown as Record<symbol, unknown>)[Symbol.for("@brianjenkins94/run-contract/workspaceRuntime")] = {
 	"buffer": undefined,
-	"connect": () => {
+	"connect": (name: string) => {
 		const link = new MessageChannel();
 		const id = crypto.randomUUID();
 
-		channel.port1.postMessage([{ "type": "runtime", "id": id, "port": link.port1 }] satisfies ProbeMessage[], [link.port1]);
+		channel.port1.postMessage([{ "type": "runtime", "id": id, "name": name, "port": link.port1 }] satisfies ProbeMessage[], [link.port1]);
 
 		return { "port": link.port2, "dispose": () => { channel.port1.postMessage([{ "type": "runtime-close", "id": id }] satisfies ProbeMessage[]); link.port2.close(); } };
 	}

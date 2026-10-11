@@ -8,7 +8,8 @@
  * subjects and degrades to a standalone root when nothing is above it.
  */
 import type { WorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
-import { createHub, portTransport } from "@brianjenkins94/hub";
+import { createHub } from "@brianjenkins94/hub";
+import { linkRuntime } from "@brianjenkins94/run-contract/runtime";
 
 export const podHub = createHub({ "id": "pod" });
 
@@ -16,15 +17,15 @@ export const podHub = createHub({ "id": "pod" });
  *  /workspace — an LSP server's through its control port, a debug run's in its launch. */
 export const workspace: { "buffer"?: SharedArrayBuffer } = {};
 
-/** The workspace runtime, for any debugger (EXTENSION-POINTS.md, 2; run-contract's `WorkspaceRuntime`): the workspace's
- *  buffer as it is when asked for, and a port into the pod hub per worker — which connects with run-contract's
- *  `connectRuntime`. worker-pod exports it (extension.ts) for another extension's debugger. */
+/** The workspace runtime, for any debugger in this extension host (EXTENSION-POINTS.md, 2; run-contract's
+ *  `WorkspaceRuntime`): the workspace's buffer as it is when asked for, and a port into the pod hub per worker — linked
+ *  as every runtime link is (run-contract's `linkRuntime`), and connected with its `connectRuntime`. */
 export function workspaceRuntime(): WorkspaceRuntime {
 	return {
 		get "buffer"() { return workspace.buffer; },
-		"connect": () => {
+		"connect": (name) => {
 			const channel = new MessageChannel();
-			const unlink = podHub.link(portTransport(channel.port1));
+			const unlink = linkRuntime(podHub, channel.port1, name);
 
 			return { "port": channel.port2, "dispose": () => { unlink(); channel.port1.close(); } };
 		}

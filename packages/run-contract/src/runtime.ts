@@ -4,8 +4,8 @@
  * program starts. Any debugger may have it — tsval's, and an interpreter plugged in as `run.debugger`.
  *
  * - The extension asks for it with `workspaceRuntime()` — a `WorkspaceRuntime`, wherever its extension host is (core
- *   puts it in each), or undefined outside the editor. `connect()` gives a port into the editor's runtime, for the
- *   debugger's worker. `buffer` is the workspace itself (zen-fs's SingleBuffer) — given only to the editor's own
+ *   puts it in each), or undefined outside the editor. `connect(name)` gives a port into the editor's runtime, for the
+ *   debugger's worker — `name` what the editor knows it by (each worker of that name one instance of it). `buffer` is the workspace itself (zen-fs's SingleBuffer) — given only to the editor's own
  *   debugger, built with the same zen-fs; anyone else's reads and writes go through `fs`.
  * - The worker connects with `connectRuntime(port, { "name": …, "session": … })`, the session being its debug
  *   session's id. Its `fs` reads and writes the workspace synchronously, each call answered by the editor: an open
@@ -18,8 +18,9 @@
  * The extension's own code never joins the editor's hub: only its worker's runtime link does, through this.
  */
 import type { Observed, ObserveOptions } from "@brianjenkins94/observability";
+import type { Hub } from "@brianjenkins94/hub";
 import type { Effect } from "./index.ts";
-import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, portTransport, rpcCallSubject, rpcReplySubject, serve } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
 
 /** What `workspaceRuntime()` gives a debugger's extension. */
@@ -27,9 +28,23 @@ export interface WorkspaceRuntime {
 	/** The workspace, for the editor's own debugger to mount at /workspace — absent for anyone else's, and without
 	 *  cross-origin isolation. */
 	readonly "buffer": SharedArrayBuffer | undefined;
-	/** A port into the editor's runtime, for one worker (transfer it there, and `connectRuntime` it); `dispose` when the
-	 *  worker's gone. */
-	"connect": () => { "port": MessagePort; "dispose": () => void };
+	/** A port into the editor's runtime, for one worker known as `name` (transfer it there, and `connectRuntime` it as
+	 *  the same name); `dispose` when the worker's gone. */
+	"connect": (name: string) => { "port": MessagePort; "dispose": () => void };
+}
+
+/** Core: link a debugger's worker's port into `hub` — the one way every runtime link is made, whichever extension host
+ *  the worker's debugger is in. The editor names the worker `<name>#<instance>` (its own, so an answer goes to it alone;
+ *  the architecture view counts each as an instance of `name`), and the link carries only the runtime: the worker's
+ *  log, architecture and metrics, its mailbox handed over, its servers' requests and their answers — no other service
+ *  of the editor's. */
+export function linkRuntime(hub: Hub, port: MessagePort, name: string): () => void {
+	const id = `${name}#${crypto.randomUUID().slice(0, 8)}`;
+
+	return hub.link(portTransport(port), { "peer": id, "permissions": {
+		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "pod.ready", rpcCallSubject("runtime.fs.attach"), rpcReplySubject("node")],
+		"subscribe": ["$sys.arch.sync", rpcCallSubject("virtual.debug.*"), rpcReplySubject(id)]
+	} });
 }
 
 /** A request the preview makes of a server the program listens with, on `port`. `entry`: a worker's entry script. */
@@ -84,7 +99,7 @@ export interface RuntimeConnection {
 	"log": Observed["log"];
 }
 
-/** Connect a debugger's worker to the editor's runtime through `port` (`WorkspaceRuntime.connect()`'s), as `name` — what
+/** Connect a debugger's worker to the editor's runtime through `port` (`WorkspaceRuntime.connect(name)`'s), as `name` — what
  *  the editor knows it by. `network`: probes for the worker's own requests, as observability's `observe` takes them. */
 export function connectRuntime(port: MessagePort, { name, session, network = false }: { "name": string; "session"?: string; "network"?: ObserveOptions["network"] }): RuntimeConnection {
 	const hub = createHub({ "id": name });

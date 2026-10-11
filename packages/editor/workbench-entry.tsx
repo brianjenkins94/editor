@@ -13,7 +13,8 @@
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
 import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
-import { createHub, createRpcClient, portTransport, rpcCallSubject, rpcReplySubject, serve } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
+import { linkRuntime } from "@brianjenkins94/run-contract/runtime";
 import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, openHostedEditor, registerExtension, OPEN_ARCHITECTURE_COMMAND, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
 import { render } from "preact";
 import type { ShellDockHost } from "./dock-host";
@@ -122,17 +123,9 @@ const { "log": paneLog, architecture } = observe(workbenchHub, { "network": NETW
 
 // A debugger's worker in the web worker extension host (an extension loaded from outside, editor-contrib's) reaches the
 // editor's runtime through the probe there — VS Code leaves its extensions no other way out — linked into this hub, and
-// answered as tsval's is (EXTENSION-POINTS.md, 2: its file calls by worker-pod, its servers by the preview). Confined to
-// the runtime: its log and architecture, its mailbox handed over, its servers' requests and their answers — no other
-// service of the editor's.
-installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl, "linkRuntime": (port, id) => {
-	const peer = `runtime:${id.slice(0, 8)}`;
-
-	return workbenchHub.link(portTransport(port), { "peer": peer, "permissions": {
-		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "pod.ready", rpcCallSubject("runtime.fs.attach"), rpcReplySubject("node")],
-		"subscribe": ["$sys.arch.sync", rpcCallSubject("virtual.debug.*"), rpcReplySubject(peer)]
-	} });
-} });
+// answered as tsval's is (EXTENSION-POINTS.md, 2: its file calls by worker-pod, its servers by the preview) — linked as
+// every runtime link is (run-contract's linkRuntime: its own id, carrying only the runtime).
+installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl, "linkRuntime": (port, name) => linkRuntime(workbenchHub, port, name) });
 registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });
 
 // A dock panel of the shell dropped into the editor area (shell-dock.ts): an editor per panel, whose content the shell

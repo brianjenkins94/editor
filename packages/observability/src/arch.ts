@@ -195,6 +195,14 @@ export function approxSize(value: unknown, depth = 0): number {
 
 /** `node.out.12` → `node.out.*`: ids in subjects (and in RPC names) would make every run a new label. An id is a
  *  number, a UUID, 8+ hex digits, or 12+ lowercase letters and digits with at least one digit (a word isn't). */
+/** The context a hub id is: `<name>#<instance>` — an id an edge gave one of several hubs of one name (each worker a
+ *  debugger starts, run-contract's linkRuntime) — is an instance of `<name>`, the rest themselves. */
+export function contextOf(id: string): string {
+	const at = id.indexOf("#");
+
+	return at === -1 ? id : id.slice(0, at);
+}
+
 export function normalizeSubject(subject: string): string {
 	return subject
 		.split(".")
@@ -229,6 +237,12 @@ export function createArchReporter(hub: Hub): ArchReporter {
 	// rpc call id → name, to label the replies — kept past the first: a reply goes out on every link whose peer has the
 	// id it's addressed to (several workers of one name), and each copy is labelled. The oldest go past RPC_NAMES.
 	const rpcNames = new Map<string, string>();
+	// This hub's links, each peer named as the context it is (contextOf).
+	const topology = (): HubSnapshot => {
+		const inspected = hub.inspect();
+
+		return { ...inspected, "links": inspected.links.map((link) => (link.peerId === undefined ? link : { ...link, "peerId": contextOf(link.peerId) })) };
+	};
 	const nameCall = (id: string, name: string): void => {
 		rpcNames.set(id, name);
 
@@ -243,7 +257,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 	const unnamed = new Map<string, { "kind": TrafficKind; "label": string; "bytes": number; "payload"?: unknown }[]>();
 
 	function nameHeldTraffic(): void {
-		const links = new Map(hub.inspect().links.map((link) => [link.id, link.peerId]));
+		const links = new Map(topology().links.map((link) => [link.id, link.peerId]));
 
 		for (const [link, held] of unnamed) {
 			const peer = links.get(link);
@@ -305,7 +319,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 		const report: ArchReport = { "reporter": self, "time": Date.now() };
 
 		if (topologyDirty) {
-			report.topology = hub.inspect();
+			report.topology = topology();
 			report.realm = realm;
 			topologyDirty = false;
 		}
@@ -422,7 +436,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 				const { kind, label } = "hub" in frame ? { "kind": "lifecycle" as const, "label": LIFECYCLE_LABELS[frame.hub] ?? frame.hub } : describe(frame);
 				const bytes = "hub" in frame ? 0 : approxSize(frame.data);
 				const payload = "hub" in frame ? undefined : frame.data;
-				const peer = event.link.peerId;
+				const peer = event.link.peerId === undefined ? undefined : contextOf(event.link.peerId);
 
 				// Its id and cause (read loosely: a hub without them sends neither).
 				const { id, cause } = ("hub" in frame ? {} : frame) as { "id"?: unknown; "cause"?: unknown };
@@ -477,7 +491,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 				"reporter": self,
 				"time": Date.now(),
 				"full": true,
-				"topology": hub.inspect(),
+				"topology": topology(),
 				"realm": realm,
 				"nodes": currentNodeOps(),
 				"traffic": [...totals.values()]

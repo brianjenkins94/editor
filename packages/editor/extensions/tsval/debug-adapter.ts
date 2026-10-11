@@ -702,7 +702,7 @@ function startWorker(runtime: WorkspaceRuntime, onEvent: (event: WorkerEvent) =>
 
 	url.searchParams.set("v", String(Date.now()));
 
-	const link = runtime.connect();
+	const link = runtime.connect("debug-worker");
 	const worker = new Worker(url, { "type": "module" });
 	const post = (message: ToWorker, transfer: Transferable[] = []): void => { worker.postMessage(message, transfer); };
 
