@@ -48,11 +48,16 @@ A run that makes gated calls — writes files, makes requests, runs commands —
 it as `__policy` in its launch configuration (read it with `@brianjenkins94/util/silo/policy`), and asks about the ones it
 says to ask about.
 
-The editor's own debugger, tsval, runs real programs against the workspace through the workspace runtime
-(`@brianjenkins94/run-contract/runtime`): synchronous reads and writes of the workspace's files, and the preview's
-requests to a server the program starts. It isn't reachable from this extension yet — the editor runs an extension loaded
-from outside it in an extension host of its own, and the runtime is handed out in another — so read files with
-`vscode.workspace.fs` for now.
+The program runs in a worker of its own (`src/worker.ts`), linked into the editor's workspace runtime
+(`@brianjenkins94/run-contract/runtime`, which needs `@brianjenkins94/hub` and `@brianjenkins94/observability` beside
+it): `workspaceRuntime().connect(name)` in the extension gives the worker a port, and `connectRuntime(port, { name,
+session })` in the worker connects it. Its `fs` reads and writes the workspace synchronously, as `require` and
+`readFileSync` need — an open editor's unsaved text included — each call answered by the editor: a call the program makes
+is decided by the policy, as every run's is (allowed, skipped, or failing with `EACCES`), and counted in `effects()` for
+the `effects` event; `{ load: true }` marks the interpreter's own reads (the program, what it imports). `serve(port,
+request => response)` answers the preview for a server the program listens on, and the worker's log is the editor's.
+The worker is a classic one (`worker.format: "iife"` in `vite.config.mjs`): VS Code starts an extension's workers with
+`importScripts`.
 
 Positions are in the text that ran: 0-based lines and `[start, end)` offsets. The editor maps offsets to its BABLR span
 ids, so what you report follows its code through edits. Each run is listed in the editor's Running view.

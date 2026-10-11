@@ -18,7 +18,7 @@
     "skipLibCheck": true,
     "strict": false,
     "target": "ESNext",
-    "types": ["vscode"]
+    "types": ["vscode", "vite/client"]
   },
   "exclude": ["node_modules", "dist"]
 }

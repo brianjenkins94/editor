@@ -55,7 +55,7 @@ function eventually(what, probe, timeoutMs = 60_000) {
 	return until(what, probe, { "timeoutMs": timeoutMs, "intervalMs": 250, "sleep": (ms) => session.page.waitForTimeout(ms) });
 }
 
-test("Run starts editor-contrib's interpreter: a run, telling its values, coverage, effects and end", async () => {
+test("Run starts editor-contrib's interpreter: a run in its worker, the program read through the editor's runtime, telling its values, coverage, effects and end", async () => {
 	const workbench = await eventually("the workbench", async () => session.workbench());
 
 	await eventually("the extension loaded", () => workbench.evaluate(async () => {
@@ -72,11 +72,13 @@ test("Run starts editor-contrib's interpreter: a run, telling its values, covera
 	await workbench.evaluate(async () => {
 		const { api } = globalThis.__editor;
 		const uri = api.Uri.file("/workspace/contrib-probe.ts");
-		const seen = { "sessions": [], "events": [] };
+		const seen = { "sessions": [], "events": [], "records": [] };
 
 		globalThis.__contrib = seen;
 		api.debug.onDidStartDebugSession((started) => { seen.sessions.push({ "type": started.type, "runId": started.configuration.__runId }); });
-		api.debug.onDidReceiveDebugSessionCustomEvent((event) => { seen.events.push({ "type": event.session.type, "event": event.event }); });
+		api.debug.onDidReceiveDebugSessionCustomEvent((event) => { seen.events.push({ "type": event.session.type, "event": event.event, "source": event.body?.source }); });
+		// The editor's log plane: the worker's log, and the runtime's answers to its file calls.
+		globalThis.__architecture.hub.subscribe("$sys.log.>", (record) => { seen.records.push(JSON.stringify(record)); });
 		await api.workspace.fs.writeFile(uri, new TextEncoder().encode("const greeting = \"hello\";\nconsole.log(greeting);\n"));
 		await api.commands.executeCommand("editor.debugFile", uri);
 	});
@@ -86,6 +88,17 @@ test("Run starts editor-contrib's interpreter: a run, telling its values, covera
 	assert.deepEqual(seen.sessions.map((each) => each.type), ["contrib"], "Run started editor-contrib's debugger (its default for run.debugger)");
 	assert.deepEqual(seen.events.map((each) => each.event), ["values", "coverage", "effects", "ended"], "it told its values, its coverage, its effects and its end");
 	assert.equal(typeof seen.sessions[0].runId, "string", "its session is a run");
+	assert.equal(seen.events[0].source, "const greeting = \"hello\";\nconsole.log(greeting);\n", "its worker read the program through the editor's runtime");
+	assert.ok(seen.records.some((record) => record.includes("runtime.fs") && record.includes("/workspace/contrib-probe.ts")), "the editor answered that read (runtime-fs.ts)");
+	assert.ok(seen.records.some((record) => record.includes("running /workspace/contrib-probe.ts")), "its worker's log is the editor's — over its runtime link");
+
+	const contexts = await eventually("its worker on the architecture", async () => {
+		const nodes = session.seen().nodes.map((node) => node.id);
+
+		return nodes.includes("contrib-interpreter") ? nodes : undefined;
+	});
+
+	assert.deepEqual(contexts.filter((id) => id.startsWith("contrib-interpreter#") || id.startsWith("runtime:")), [], "one context, whatever id the editor gave each of its workers");
 
 	const run = await eventually("its run, ended", async () => (await session.request("runs.list", undefined, 5000)).find((each) => each.id === seen.sessions[0].runId && each.state !== "running"));
 

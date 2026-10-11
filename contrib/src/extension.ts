@@ -5,7 +5,7 @@ import { Renderer } from "./renderer";
 export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.debug.registerDebugAdapterDescriptorFactory("contrib", {
-			"createDebugAdapterDescriptor": () => new vscode.DebugAdapterInlineImplementation(new InterpreterSession())
+			"createDebugAdapterDescriptor": (session) => new vscode.DebugAdapterInlineImplementation(new InterpreterSession(session))
 		}),
 		vscode.window.registerCustomEditorProvider("contrib.renderer", new Renderer())
 	);

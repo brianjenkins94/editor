@@ -1,9 +1,12 @@
 // The interpreter: a debug adapter the editor starts for every run of a file — the ▷ button, the terminal, and live
 // runs as you type all go through `vscode.debug.startDebugging`. It speaks the Debug Adapter Protocol, so breakpoints,
 // stepping, the Variables view and the Debug Console are VS Code's own. What the editor draws on top of the code —
-// values in the margin, coverage — comes from the run contract's custom events (@brianjenkins94/run-contract).
-import type { Events } from "@brianjenkins94/run-contract";
+// values in the margin, coverage — comes from the run contract's custom events (@brianjenkins94/run-contract). The
+// program itself runs in a worker (worker.ts), linked into the editor's runtime.
+import { workspaceRuntime } from "@brianjenkins94/run-contract/runtime";
 import * as vscode from "vscode";
+import type { FromWorker, ToWorker } from "./worker";
+import InterpreterWorker from "./worker?worker&inline";
 
 interface Message { "seq": number; "type": string; "command"?: string; "arguments"?: Record<string, unknown> }
 
@@ -11,6 +14,13 @@ export class InterpreterSession implements vscode.DebugAdapter {
 	private readonly emitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
 	readonly onDidSendMessage = this.emitter.event;
 	private seq = 0;
+	private worker: Worker | undefined;
+	private link: { "dispose": () => void } | undefined;
+	private readonly session: vscode.DebugSession;
+
+	constructor(session: vscode.DebugSession) {
+		this.session = session;
+	}
 
 	handleMessage(message: vscode.DebugProtocolMessage): void {
 		const request = message as Message;
@@ -47,26 +57,51 @@ export class InterpreterSession implements vscode.DebugAdapter {
 		}
 	}
 
-	/** Run `program` — read it, interpret it — telling the editor what happened as it goes. */
+	/** Run `program` in a worker of its own, passing on what it tells — or, if it can't, why. */
 	private async run(program: string): Promise<void> {
-		const source = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(program)));
+		try {
+			await this.start(program);
+		} catch (error) {
+			this.failed(error instanceof Error ? error.message : String(error));
+		}
+	}
 
-		// TODO: interpret `source`. Write what it prints with `output`, and tell values as they happen:
-		this.output(`would run ${program} (${source.length} characters)\n`);
-		this.tell("values", { "file": program, "source": source, "values": [], "calls": [], "dropped": 0 });
-		// …every statement that could run, with how often it did…
-		this.tell("coverage", { "file": program, "source": source, "statements": [], "sites": [] });
-		// …what it did to the world: each gated call (a file read or written, a request, a command) and how it went…
-		this.tell("effects", { "effects": [] });
-		// …and that it's over: its values go from the margin, and where it crashed or was stopped (`end`) is marked.
-		this.tell("ended", { "file": program, "source": source });
-		this.event("exited", { "exitCode": 0 });
+	private failed(why: string): void {
+		this.event("output", { "category": "stderr", "output": `${why}\n` });
+		this.event("exited", { "exitCode": 1 });
 		this.event("terminated");
 	}
 
-	/** Tell the editor one of the contract's events. */
-	private tell<Name extends keyof Events>(name: Name, body: Events[Name]): void {
-		this.event(name, body);
+	private async start(program: string): Promise<void> {
+		const worker = new InterpreterWorker();
+		const post = (message: ToWorker, transfer: Transferable[] = []): void => { worker.postMessage(message, transfer); };
+		// The editor's workspace runtime (undefined outside the editor): the worker's way into it.
+		const runtime = workspaceRuntime();
+
+		this.worker = worker;
+		worker.addEventListener("error", (event) => { this.failed(`the interpreter's worker failed: ${event.message}`); });
+		worker.addEventListener("message", (event: MessageEvent<FromWorker>) => {
+			const message = event.data;
+
+			if (message.kind === "event") {
+				this.event(message.name, message.body);
+			} else if (message.kind === "output") {
+				this.output(message.text);
+			} else {
+				this.event("exited", { "exitCode": message.exitCode });
+				this.event("terminated");
+			}
+		});
+
+		if (runtime !== undefined) {
+			const { port, dispose } = runtime.connect("contrib-interpreter");
+
+			this.link = { "dispose": dispose };
+			post({ "kind": "runtime", "port": port, "session": this.session.id }, [port]);
+		}
+
+		// (outside the editor, the worker runs what the extension reads)
+		post({ "kind": "run", "program": program, "source": runtime === undefined ? new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(program))) : "" });
 	}
 
 	private output(text: string): void {
@@ -84,6 +119,8 @@ export class InterpreterSession implements vscode.DebugAdapter {
 	}
 
 	dispose(): void {
+		this.worker?.terminate();
+		this.link?.dispose();
 		this.emitter.dispose();
 	}
 }
