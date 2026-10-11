@@ -21,7 +21,7 @@
 import type { LoadedVM, ModuleLoader } from "@brianjenkins94/tsval";
 import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
-import { effectiveDisposition, givenResult, isDangerous, ruleMatches } from "@brianjenkins94/util/silo/policy";
+import { givenResult, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, ToWorker, Variable, WorkerEvent } from "./debug-protocol";
 import type { Effect } from "@brianjenkins94/run-contract";
 import type { Told, Traced } from "../worker-pod/live-values";
@@ -33,6 +33,7 @@ import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@b
 
 import ts from "typescript";
 import { capabilityBreakLines, classifyCall, shouldBreak } from "../capabilities/capability-breakpoints";
+import { verdictOf } from "../worker-pod/gate";
 import { capabilityStandins, givenAs, inert, standinCapability } from "../capabilities/canary";
 import { NETWORK_PROBES } from "../../architecture";
 import { LiveRecord } from "../worker-pod/live-values";
@@ -458,25 +459,19 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 			return fn.apply(this, args);
 		}
 
-		const disposition = policy === undefined ? undefined : effectiveDisposition(policy, tagged.capability, resource, isDangerous(tagged.capability));
-		const allowed = disposition === "allow";
+		// Skipped (by the policy, or a live run's: not made, the run going on — as at its stop), made, or refused — as any
+		// debugger's calls through the runtime's files are (gate.ts).
+		const verdict = verdictOf(policy, tagged.capability, resource, liveRun);
 
-		// Skipped by the policy (a *Skip always*, a rule that skips): not made, the run going on — as at its stop.
-		if (disposition === "skip") {
+		if (verdict === "skip") {
 			return skipped(tagged.capability, resource, fn.apply(this, args));
 		}
 
-		// A live run makes nothing but a read the policy allows: a write, a request, a command — or a read nobody decided —
-		// is skipped, however the policy is set (retyping mustn't touch the world).
-		if (liveRun && !(allowed && tagged.capability === "fs:read")) {
-			return skipped(tagged.capability, resource, fn.apply(this, args));
-		}
-
-		if (!allowed && !allowNext) {
+		if (verdict === "deny" && !allowNext) {
 			denied(`EACCES: permission denied — ${tagged.capability} ${resource} isn't allowed (the policy decides it, and it wasn't asked)`);
 		}
 
-		if (!allowed) {
+		if (verdict === "deny") {
 			allowNext = false;
 		}
 

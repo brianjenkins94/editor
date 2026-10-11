@@ -28,6 +28,22 @@ const CHOICES = new Set<string>(["allow-once", "allow-run", "allow-always", "ski
 const asks = new Map<string, AskEvent>();
 /** What each session was allowed, skipped or denied for the rest of its run (… this run), ahead of every other rule. */
 const runRules = new Map<string, Rule[]>();
+/** The call each session was just told to make, skip or fail (… once): for the editor to decide that call by, when it
+ *  makes it (runtime-fs.ts) — once. */
+const onceFor = new Map<string, { "capability": string; "resource": string; "verdict": "allow" | "skip" | "deny" }>();
+
+/** What `session` was told for the call of `capability` on `resource` it's making now, if it was told just this once. */
+export function takeOnce(session: string, capability: string, resource: string): "allow" | "skip" | "deny" | undefined {
+	const once = onceFor.get(session);
+
+	if (once === undefined || once.capability !== capability || once.resource !== resource) {
+		return undefined;
+	}
+
+	onceFor.delete(session);
+
+	return once.verdict;
+}
 
 /** The policy a run decides its calls by: base `policy.json` and my overrides, as the enforcer reads them — and, for a
  *  session already running, what it was told for the rest of its run. */
@@ -115,7 +131,10 @@ async function decide(hub: Hub, session: vscode.DebugSession, choice: Capability
 		request = { "verdict": disposition, "policy": await always(disposition) };
 	} else {
 		// This call only: allowed, skipped (the run goes on as if it did nothing), or denied (it fails, as refused).
-		request = { "verdict": choice === "allow-once" ? "allow" : choice };
+		const verdict = choice === "allow-once" ? "allow" : choice as "skip" | "deny";
+
+		onceFor.set(session.id, { "capability": ask.capability, "resource": ask.resource, "verdict": verdict });
+		request = { "verdict": verdict };
 	}
 
 	await session.customRequest("decide", request);
@@ -167,6 +186,7 @@ export function registerCapabilityStops(context: vscode.ExtensionContext, hub: H
 		vscode.debug.onDidTerminateDebugSession((session) => {
 			answered(hub, session.id);
 			runRules.delete(session.id);
+			onceFor.delete(session.id);
 			served.get(session.id)?.();
 			served.delete(session.id);
 		})

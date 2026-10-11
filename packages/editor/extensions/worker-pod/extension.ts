@@ -11,7 +11,7 @@
  * it spawns them by URL relative to the workbench origin (`location.href`). (eslint moved OUT of this pod to a
  * tsserver plugin — extensions/eslint — that reuses tsserver's typescript; only cspell remains here.)
  */
-import type { WorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
+import { provideWorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
@@ -24,6 +24,7 @@ import { storeNode, ZENFS_NODE } from "../../architecture-zenfs";
 import type { CommandTotals } from "../command-tap";
 import { ARCH_COMMANDS } from "../command-tap";
 import { registerCapabilityStops } from "./capability-stops";
+import { serveRuntimeFiles } from "./runtime-fs";
 import { registerDebugEvents } from "./debug-events";
 import { runProgram, serveDebugControl } from "./debug-control";
 import { registerLaunch } from "./launch";
@@ -45,10 +46,6 @@ export interface PodBridge {
 	 *  LSP worker over its control port, so they mount the SAME filesystem at /workspace. SAB survives the exports
 	 *  marshaling (spike-verified). No-op off cross-origin isolation (buffer is undefined). */
 	"attachWorkspaceBuffer": (buffer: unknown) => void;
-	/** The workspace runtime, for any debugger (EXTENSION-POINTS.md, 2; run-contract's `WorkspaceRuntime`): the workspace's
-	 *  buffer, and a port into the editor's runtime for a debugger's worker — which connects with run-contract's
-	 *  `connectRuntime`. Another extension asks for it through this extension's exports. */
-	"workspaceRuntime": () => WorkspaceRuntime;
 }
 
 interface ServerSpec {
@@ -189,8 +186,12 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		return typeof capability === "string" && typeof resource === "string" ? await recordedResult(capability, resource) ?? null : null;
 	}) });
 
-	// (tsval, the stepping debugger, is an extension of its own — extensions/tsval — given the workspace runtime through
-	// this extension's exports, as any debugger is.)
+	// The workspace runtime, for any debugger in this extension host (EXTENSION-POINTS.md, 2; run-contract's
+	// `workspaceRuntime()`): tsval's — an extension of its own, extensions/tsval — with the workspace's buffer, ours. Its
+	// workers' file calls are answered by runtime-fs.ts, a debugger's anywhere (the web worker host's come by core's
+	// bootstrap there).
+	provideWorkspaceRuntime(workspaceRuntime());
+	serveRuntimeFiles(context, podHub, podLog);
 	// What every debugger's runs tell core — tsval's, and another extension's (`run.debugger`: an interpreter plugged in
 	// from editor-contrib) — the run contract's events, read the one way; and what Run means for each (debug-events.ts).
 	registerDebugEvents(context);
@@ -432,7 +433,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		podLog.info("workspace buffer shared with LSP workers", { "workers": controlPorts.length, "mb": Math.round(buffer.byteLength / 1048576) });
 	};
 
-	return { "toWorkbench": outgoing.event, "fromWorkbench": (message: unknown) => { incoming.fire(message); }, "attachWorkspaceBuffer": attachWorkspaceBuffer, "workspaceRuntime": workspaceRuntime };
+	return { "toWorkbench": outgoing.event, "fromWorkbench": (message: unknown) => { incoming.fire(message); }, "attachWorkspaceBuffer": attachWorkspaceBuffer };
 }
 
 export function deactivate(): Promise<void> {

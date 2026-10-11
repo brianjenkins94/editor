@@ -77,6 +77,33 @@ What a handoff would meet (measured 2026-10-10, Brave, the dev build):
 - **`BroadcastChannel` is no way round:** it delivers a `SharedArrayBuffer` as `null`, even within one realm, and carries
   no ports.
 
+### The runtime's files, through core (decided 2026-10-10)
+
+A contributed debugger doesn't get the workspace's buffer: it's our storage format (patched zen-fs's SingleBuffer — a
+second zen-fs mounting it can break the filesystem's structure, `.git` and `.silo` with it), and the bytes are below
+everything the editor keeps around a file: an open editor's unsaved text, change events, the policy, the run's effects.
+It gets **synchronous files through core** instead, each call answered by worker-pod:
+
+- **The wire.** `connectRuntime(port, { name, session })` hands worker-pod a small `SharedArrayBuffer` of its own — a
+  mailbox — once (`runtime.fs.attach`, over the runtime's hub link). After that a call is the worker writing its request
+  into the mailbox and waiting on it (`Atomics.wait`); worker-pod, watching it (`Atomics.waitAsync`), makes the call and
+  writes the answer back. No message a call; one connection (the port), as before. VS Code's TypeScript server on the
+  web reads its files the same way. What doesn't fit the mailbox goes in pieces.
+- **The calls** (`runtime.fs`): `readFile`, `writeFile`, `stat`, `readdir`, `mkdir`, `rm` — `/workspace` paths,
+  failing as node's do (`ENOENT`, `EACCES`, …). A read is an open editor's text when it's open, else what's on disk; a
+  write is the workspace's (so editors, Source Control and watchers see it).
+- **The gate.** A call is the program's unless it says it's the debugger's own load (`{ load: true }`: the program and
+  what it imports, read-only). The program's are decided by the session's policy as tsval decides its own
+  (`policyFor(session)`, "this run" answers included): allowed, skipped, or failing with `EACCES`; a live run makes no
+  write. The gate protects the workspace from the *program*, uniformly, whichever debugger runs it — it isn't a wall
+  against the extension, which has `vscode.workspace.fs` like any extension.
+- **Reaching it from either host.** `workspaceRuntime()` (run-contract's `./runtime`) finds it where core put it: in the
+  bridge's host, worker-pod's — the buffer included, for tsval, our own code built with the same zen-fs; in the web
+  worker host, core's bootstrap's (the architecture probe's, which runs first there and already holds a port to the
+  workbench) — no buffer. Its `connect(session)` gives a port either way.
+- **tsval** keeps the buffer until it's measured on the calls (its module loading makes many small reads); moving it
+  over would make the gate tsval's too.
+
 ## 3. Span annotations — done (2026-10-10)
 
 Placing something on code that survives edits and reformatting (SPAN-ANNOTATIONS.md): `editor.annotations.refer`,

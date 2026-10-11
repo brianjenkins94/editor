@@ -453,6 +453,7 @@ flowchart LR
 | Pod | production | `production.exit.*`, `production.launch`, `production.out.*` |
 | Pod | rules | `rules.given()`, `rules.list()`, `rules.placed()`, `rules.set()` |
 | Pod | run | `run.effects()` |
+| Pod | runtime | `runtime.fs.attach()` |
 | Pod | stops | `stops.preview` |
 | Pod | tasks | `tasks.list()`, `tasks.run()` |
 | Preview :* | evidence | `evidence.flush` |

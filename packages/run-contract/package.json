@@ -10,7 +10,8 @@
   },
   "license": "MIT",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",

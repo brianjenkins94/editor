@@ -36,6 +36,9 @@ export interface MonacoProbeOptions {
 	/** The node a nested worker's request goes to (default: `net:origin` / `net:<host>`) — e.g. the service worker, when
 	 *  it controls this page (and so the workers it spawns). */
 	"classifyUrl"?: (url: URL) => string;
+	/** Link a debugger's port from the web worker extension host into the editor's runtime (probe.worker.ts's
+	 *  `workspaceRuntime()`), answering with how to unlink it. */
+	"linkRuntime"?: (port: MessagePort, id: string) => () => void;
 }
 
 export const EXT_HOST_IFRAME = "exthost-iframe";
@@ -68,9 +71,12 @@ function fileName(url: string): string {
 
 // Set once by installMonacoProbes: where a nested worker's request goes (see MonacoProbeOptions.classifyUrl).
 let classifyChildUrl: ((url: URL) => string) | undefined;
+// Set once by installMonacoProbes: where the extension host's runtime ports go (see MonacoProbeOptions.linkRuntime).
+let linkRuntime: ((port: MessagePort, id: string) => () => void) | undefined;
 
 function attachChildProbe(sink: ArchSink, port: MessagePort, ownerId: string, container: string): void {
 	const nested = new Map<string, string>();
+	const runtimes = new Map<string, () => void>();
 
 	port.onmessage = (event: MessageEvent<ProbeMessage[]>) => {
 		for (const message of event.data) {
@@ -114,6 +120,19 @@ function attachChildProbe(sink: ArchSink, port: MessagePort, ownerId: string, co
 
 					break;
 				}
+
+				// A debugger's worker in the extension host, connecting to the editor's runtime (only the extension host's).
+				case "runtime":
+					if (container === "extHostWorker" && linkRuntime !== undefined) {
+						runtimes.set(message.id, linkRuntime(message.port, message.id));
+					}
+
+					break;
+
+				case "runtime-close":
+					runtimes.get(message.id)?.();
+					runtimes.delete(message.id);
+					break;
 
 				// The worker's own URL, on its node — so a measurement that attributes memory by URL can name it.
 				case "hello":
@@ -639,6 +658,7 @@ export function installMonacoProbes(sink: ArchSink, options: MonacoProbeOptions 
 
 	installed = true;
 	classifyChildUrl = options.classifyUrl;
+	linkRuntime = options.linkRuntime;
 
 	for (const [label, name] of Object.entries(MONACO_WORKERS)) {
 		// Only the workers this build can actually start (the timer service's blob worker always can).

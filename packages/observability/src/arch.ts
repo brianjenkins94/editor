@@ -137,6 +137,8 @@ export const SILENCE_MS = 15_000;
  *  `Worker` there (the editor's preview tap), and read by the worker's reporter (describeRealm). */
 export const REALM_PARENT = "realm-parent";
 const MAX_SAMPLES_PER_FLUSH = 120;
+/** Calls whose names are kept to label their replies — enough for every call in flight. */
+const RPC_NAMES = 2000;
 /** How each kind of hub control frame reads in the traffic. */
 const LIFECYCLE_LABELS: Record<string, string> = { "hello": "hello", "sub": "interest (sub)", "unsub": "interest (unsub)", "ping": "heartbeat", "pong": "heartbeat" };
 /** Node ops held while nobody listens (see flush), past which they're collapsed into the nodes' current state. */
@@ -224,8 +226,16 @@ export function createArchReporter(hub: Hub): ArchReporter {
 	let topologyDirty = true;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let disposed = false;
-	// rpc call id → name, to label the replies
+	// rpc call id → name, to label the replies — kept past the first: a reply goes out on every link whose peer has the
+	// id it's addressed to (several workers of one name), and each copy is labelled. The oldest go past RPC_NAMES.
 	const rpcNames = new Map<string, string>();
+	const nameCall = (id: string, name: string): void => {
+		rpcNames.set(id, name);
+
+		if (rpcNames.size > RPC_NAMES) {
+			rpcNames.delete(rpcNames.keys().next().value!);
+		}
+	};
 	// Payload capture (a viewer's opt-in, via requestArchSync): samples keep what each message carried.
 	let capturing = false;
 	// A hub sends its interest before its hello, so a call can go out on a link whose peer hasn't said who it is yet (a
@@ -378,7 +388,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 			const id = (data as { "id"?: unknown } | undefined)?.id;
 
 			if (typeof id === "string") {
-				rpcNames.set(id, name);
+				nameCall(id, name);
 			}
 
 			return { "kind": "request", "label": name + "()" };
@@ -387,10 +397,6 @@ export function createArchReporter(hub: Hub): ArchReporter {
 		if (subject.startsWith(RPC_REPLY)) {
 			const reply = data as { "id"?: unknown; "error"?: unknown } | undefined;
 			const name = typeof reply?.id === "string" ? rpcNames.get(reply.id) : undefined;
-
-			if (typeof reply?.id === "string") {
-				rpcNames.delete(reply.id);
-			}
 
 			return { "kind": reply?.error === undefined ? "reply" : "error", "label": "↩ " + (name ?? "rpc") + "()" };
 		}
@@ -439,7 +445,7 @@ export function createArchReporter(hub: Hub): ArchReporter {
 					const id = (frame.data as { "id"?: unknown } | undefined)?.id;
 
 					if (typeof id === "string") {
-						rpcNames.set(id, normalizeSubject(frame.subject.slice(RPC_CALL.length)));
+						nameCall(id, normalizeSubject(frame.subject.slice(RPC_CALL.length)));
 					}
 				}
 
