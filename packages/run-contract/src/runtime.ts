@@ -123,9 +123,8 @@ export interface RuntimeConnection {
 
 /** Connect a debugger's worker to the editor's runtime through `port` (`WorkspaceRuntime.connect(name, session)`'s), as
  *  `name` — what the editor knows it by. `network`: probes for the worker's own requests, as observability's `observe`
- *  takes them. `session`: its debug session, for an extension that didn't name it to `connect` — the editor takes the
- *  link's when it has one. */
-export function connectRuntime(port: MessagePort, { name, session, network = false }: { "name": string; "session"?: string; "network"?: ObserveOptions["network"] }): RuntimeConnection {
+ *  takes them. */
+export function connectRuntime(port: MessagePort, { name, network = false }: { "name": string; "network"?: ObserveOptions["network"] }): RuntimeConnection {
 	const hub = createHub({ "id": name });
 
 	// (up, to the editor: the id it knows the worker by is the worker's — its calls are answered there)
@@ -143,7 +142,7 @@ export function connectRuntime(port: MessagePort, { name, session, network = fal
 	const mailbox = createMailbox();
 	let attached = false;
 	// (once the editor has said who the worker is: a call made before goes out under the name its answer isn't sent to)
-	const ready = link.ready.then(async () => createRpcClient(hub).request("runtime.fs.attach", { "mailbox": mailbox, ...session === undefined ? {} : { "session": session } }, { "timeoutMs": 30_000, "waitForResponderMs": 30_000 })).then(() => { attached = true; });
+	const ready = link.ready.then(async () => createRpcClient(hub).request("runtime.fs.attach", { "mailbox": mailbox }, { "timeoutMs": 30_000, "waitForResponderMs": 30_000 })).then(() => { attached = true; });
 	const call = (meta: Record<string, unknown>, payload?: Uint8Array): Decoded => {
 		if (!attached) {
 			throw Object.assign(new Error("the workspace runtime isn't connected yet: await its `ready`"), { "code": "ENOTCONN" });

@@ -8,7 +8,7 @@ import { connectRuntime } from "@brianjenkins94/run-contract/runtime";
 
 /** What the adapter sends: the runtime link (inside the editor), then a program to run. */
 export type ToWorker =
-	| { "kind": "runtime"; "port": MessagePort; "session": string }
+	| { "kind": "runtime"; "port": MessagePort }
 	| { "kind": "run"; "program": string; "source": string };
 
 /** What the worker sends back: one of the contract's events, what the program printed, or that it's done. */
@@ -54,7 +54,7 @@ addEventListener("message", (event: MessageEvent<ToWorker>) => {
 	const message = event.data;
 
 	if (message.kind === "runtime") {
-		runtime = connectRuntime(message.port, { "name": "contrib-interpreter", "session": message.session });
+		runtime = connectRuntime(message.port, { "name": "contrib-interpreter" });
 	} else {
 		void run(message.program, message.source);
 	}

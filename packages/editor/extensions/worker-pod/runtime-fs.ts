@@ -176,14 +176,14 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 			stops.delete(session.id);
 		}),
 		{ "dispose": serve(hub, "runtime.fs.attach", (args, { from }) => {
-			const { mailbox, session } = (args ?? {}) as { "mailbox"?: unknown; "session"?: unknown };
+			const { mailbox } = (args ?? {}) as { "mailbox"?: unknown };
 
 			if (!(mailbox instanceof SharedArrayBuffer)) {
 				throw new TypeError("runtime.fs.attach: a mailbox (a SharedArrayBuffer)");
 			}
 
-			// The session its link was made for (the extension named it to `connect`) — the worker's word only where none was.
-			const bound = (from === undefined ? undefined : runtimeSession(from)) ?? (typeof session === "string" ? session : undefined);
+			// The session its link was made for: the extension named it to `connect` — never the worker's word.
+			const bound = from === undefined ? undefined : runtimeSession(from);
 			const stop = answerMailbox(mailbox, async (meta, payload) => {
 				const span = log.span("runtime.fs", { "op": String(meta["op"]), "path": String(meta["path"]), ...bound === undefined ? {} : { "session": bound } });
 

@@ -50,11 +50,12 @@ says to ask about.
 
 The program runs in a worker of its own (`src/worker.ts`), linked into the editor's workspace runtime
 (`@brianjenkins94/run-contract/runtime`, which needs `@brianjenkins94/hub` and `@brianjenkins94/observability` beside
-it): `workspaceRuntime().connect(name)` in the extension gives the worker a port, and `connectRuntime(port, { name,
-session })` in the worker connects it. Its `fs` reads and writes the workspace synchronously, as `require` and
+it): `workspaceRuntime().connect(name, session)` in the extension gives the worker a port — bound to the debug session
+VS Code made the adapter for — and `connectRuntime(port, { name })` in the worker connects it. Its `fs` reads and writes the workspace synchronously, as `require` and
 `readFileSync` need — an open editor's unsaved text included — each call answered by the editor: a call the program makes
-is decided by the policy, as every run's is (allowed, skipped, or failing with `EACCES`), and counted in `effects()` for
-the `effects` event; `{ load: true }` marks the interpreter's own reads (the program, what it imports). `serve(port,
+is decided by that session's policy, as every run's is (allowed, skipped, or failing with `EACCES`), and kept among the
+run's effects by the editor — your `effects` event tells only what it didn't see (requests, commands); `{ load: true }`
+marks the interpreter's own reads (the program, what it imports). `serve(port,
 request => response)` answers the preview for a server the program listens on, and the worker's log is the editor's.
 The worker is a classic one (`worker.format: "iife"` in `vite.config.mjs`): VS Code starts an extension's workers with
 `importScripts`.

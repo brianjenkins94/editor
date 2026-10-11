@@ -94,10 +94,11 @@ export class InterpreterSession implements vscode.DebugAdapter {
 		});
 
 		if (runtime !== undefined) {
-			const { port, dispose } = runtime.connect("contrib-interpreter");
+			// (its session named here, where VS Code made it: the worker's calls are decided by that session's policy)
+			const { port, dispose } = runtime.connect("contrib-interpreter", this.session.id);
 
 			this.link = { "dispose": dispose };
-			post({ "kind": "runtime", "port": port, "session": this.session.id }, [port]);
+			post({ "kind": "runtime", "port": port }, [port]);
 		}
 
 		// (outside the editor, the worker runs what the extension reads)
