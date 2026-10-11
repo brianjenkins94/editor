@@ -1242,6 +1242,52 @@ test("real effects: an allowed read reads the file, recorded; a call nobody allo
 	}
 });
 
+// A program's file calls are the editor's to make (EXTENSION-POINTS.md, 2: the runtime's files, through core) — so a read
+// is what the editor has: an open editor's unsaved text, not what's on disk.
+test("a program's read is the editor's: an open editor's unsaved text", async () => {
+	const workbench = session.workbench();
+
+	try {
+		await workbench.evaluate(async () => {
+			const { api } = globalThis.__editor;
+			const data = api.Uri.file("/workspace/unsaved-rates.json");
+
+			await api.workspace.fs.writeFile(data, new TextEncoder().encode("{ \"CA\": 0.13 }"));
+			await api.workspace.fs.writeFile(api.Uri.file("/workspace/unsaved-read.js"), new TextEncoder().encode("const fs = require(\"node:fs\");\n\nconsole.log(fs.readFileSync(\"/workspace/unsaved-rates.json\", \"utf8\"));\n"));
+
+			// Edited in its editor, not saved.
+			const document = await api.workspace.openTextDocument(data);
+			const edit = new api.WorkspaceEdit();
+
+			edit.replace(data, new api.Range(0, 0, document.lineCount, 0), "{ \"CA\": 0.15 }");
+			await api.workspace.applyEdit(edit);
+		});
+
+		const ran = await session.request("debug.start", { "program": "/workspace/unsaved-read.js", "breakpoints": [] }, 60_000);
+
+		assert.deepEqual(ran.output, ["{ \"CA\": 0.15 }"], "the editor's text, unsaved");
+	} finally {
+		await workbench.evaluate(async () => {
+			const { api } = globalThis.__editor;
+			const data = api.Uri.file("/workspace/unsaved-rates.json");
+			const document = api.workspace.textDocuments.find((each) => each.uri.toString() === data.toString());
+
+			// (its edit undone, then the files gone)
+			if (document?.isDirty === true) {
+				const edit = new api.WorkspaceEdit();
+
+				edit.replace(data, new api.Range(0, 0, document.lineCount, 0), "{ \"CA\": 0.13 }");
+				await api.workspace.applyEdit(edit);
+				await document.save();
+			}
+
+			for (const path of ["/workspace/unsaved-read.js", "/workspace/unsaved-rates.json"]) {
+				await api.workspace.fs.delete(api.Uri.file(path)).then(() => undefined, () => undefined);
+			}
+		});
+	}
+});
+
 // Allow this run: a call in a loop asks once — every call like it is allowed until the run ends, and nothing is kept.
 // The program's other files are gated and hooked as its entry is (MODULES.md): a capability call in a file it imports
 // stops there and asks in that file's margin; a rule placed in it sets its variable when the program gets there.

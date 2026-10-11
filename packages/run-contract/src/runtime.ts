@@ -107,6 +107,8 @@ export interface RuntimeFs {
 	"mkdir": (path: string) => void;
 	/** With what's in it. */
 	"rm": (path: string) => void;
+	/** In place of what's at `to`. */
+	"rename": (path: string, to: string) => void;
 }
 
 /** A worker's link into the editor's runtime. */
@@ -166,7 +168,8 @@ export function connectRuntime(port: MessagePort, { name, network = false }: { "
 			"stat": (path, options) => (call({ "op": "stat", "path": path, "load": options?.load === true }).meta as { "stat"?: RuntimeStat }).stat,
 			"readdir": (path, options) => (call({ "op": "readdir", "path": path, "load": options?.load === true }).meta as { "entries": string[] }).entries,
 			"mkdir": (path) => { call({ "op": "mkdir", "path": path }); },
-			"rm": (path) => { call({ "op": "rm", "path": path }); }
+			"rm": (path) => { call({ "op": "rm", "path": path }); },
+			"rename": (path, to) => { call({ "op": "rename", "path": path, "to": to }); }
 		},
 		"ready": ready,
 		"log": log,

@@ -18,6 +18,7 @@
  * On every stop the worker sends the adapter a COMPLETE snapshot (frame + Locals scope + variable values), so
  * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
+import type { FsShim } from "@brianjenkins94/almostnode";
 import type { LoadedVM, ModuleLoader } from "@brianjenkins94/tsval";
 import type { TraceEvent } from "@brianjenkins94/tsval";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
@@ -261,6 +262,10 @@ function capabilitySurface(fileName: string, args: string[], real?: Runtime, whe
  *  writes refused (a library's effects aren't stepped or asked about); the program's are its stand-ins (programBuiltins:
  *  what a capability stop is about). Loaded at a run's start. */
 let runtime: Runtime | undefined;
+/** The program's own `fs` for a run in `cwd`: almostnode's over the editor's runtime files (runtime-vfs.ts) — each of
+ *  its calls on a workspace file the editor's to decide, make and keep among the run's effects, as any debugger's
+ *  program's are. Undefined outside the editor (no runtime link): the program's `fs` is then the runtime's own. */
+let programFsFor: ((cwd: string) => FsShim) | undefined;
 /** The globals the program has on Node beyond ECMAScript's (workspace-runtime.ts' programGlobals), once the runtime's up. */
 let nodeGlobals: Record<string, unknown> = {};
 /** The built-ins the program's code gets (the run's capability stand-ins, by name) — set as a run starts. */
@@ -277,7 +282,14 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 		return runtime;
 	}
 
-	const [{ getServerBridge }, { answerServer, programGlobals, serverOn, workerTapResponse, workspaceRuntime }, zenfs] = await Promise.all([import("@brianjenkins94/almostnode"), import("../worker-pod/workspace-runtime"), import("../worker-pod/zenfs-vfs.js")]);
+	const [{ createFsShim, getServerBridge }, { answerServer, programGlobals, serverOn, workerTapResponse, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../worker-pod/workspace-runtime"), import("../worker-pod/zenfs-vfs.js"), import("../worker-pod/runtime-vfs")]);
+
+	// (its files answered once the editor has the worker's mailbox — without it, the runtime's own)
+	if (editorLink !== undefined) {
+		const link = editorLink;
+
+		await link.ready.then(() => { programFsFor = (cwd) => createFsShim(new RuntimeVfs(link.fs), () => cwd); }, () => undefined);
+	}
 
 	if (workspace !== undefined) {
 		zenfs.attachSharedWorkspace(workspace);
@@ -400,6 +412,7 @@ const held = new Set<unknown>();
  *  shared under several names stays one object.) */
 function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, cwd = "/workspace"): ReturnType<typeof capabilityStandins> {
 	const wrapped = new Map<unknown, unknown>();
+	const programFs = real === undefined ? undefined : programFsFor?.(cwd);
 
 	// (only a run that can make calls has effects to tell: exploring orderings, every call is its stand-in)
 	tallying = real !== undefined;
@@ -477,8 +490,12 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 
 		// A relative path is the program's directory's (its process.cwd(): a terminal's), as node resolves it.
 		const made = tagged.capability.startsWith("fs:") && typeof argument === "string" && !argument.startsWith("/") ? args.map((each, index) => (index === tagged.resourceArg ? `${cwd}/${argument}` : each)) : args;
+		const path = made[tagged.resourceArg];
 
-		tally(tagged.capability, resource, "made");
+		// (a workspace file's call the editor makes, and keeps among the run's effects itself)
+		if (!(programFs !== undefined && tagged.capability.startsWith("fs:") && typeof path === "string" && (path === "/workspace" || path.startsWith("/workspace/")))) {
+			tally(tagged.capability, resource, "made");
+		}
 
 		return madeFor(tagged.capability, resource, () => effect(...made));
 	};
@@ -489,6 +506,11 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		}
 
 		const id = key.replace(/^node:/u, "");
+
+		// The program's `fs`: its workspace files through the editor.
+		if (programFs !== undefined && (id === "fs" || id === "fs/promises")) {
+			return (id === "fs" ? programFs : programFs.promises) as unknown as Record<string, unknown>;
+		}
 
 		return (id === "fs/promises" ? (real.require("fs", "/workspace", "package") as { "promises": Record<string, unknown> }).promises : real.require(id, "/workspace", "package")) as Record<string, unknown>;
 	};

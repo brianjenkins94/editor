@@ -21,7 +21,7 @@ import { policyFor, takeOnce } from "./capability-stops";
 import { verdictOf } from "./gate";
 
 const READS = new Set(["readFile", "stat", "readdir"]);
-const WRITES = new Set(["writeFile", "mkdir", "rm"]);
+const WRITES = new Set(["writeFile", "mkdir", "rm", "rename"]);
 
 /** VS Code's file errors, as node names them. */
 const CODES: Record<string, string> = { "FileNotFound": "ENOENT", "FileExists": "EEXIST", "FileIsADirectory": "EISDIR", "FileNotADirectory": "ENOTDIR", "NoPermissions": "EACCES", "Unavailable": "EAGAIN" };
@@ -53,8 +53,8 @@ function workspacePath(path: unknown): string | undefined {
 	return normal === "/workspace" || normal.startsWith("/workspace/") ? normal : undefined;
 }
 
-/** The call, made. */
-async function perform(op: string, path: string, payload: Uint8Array): Promise<Answer> {
+/** The call, made (`to`: where a rename goes). */
+async function perform(op: string, path: string, payload: Uint8Array, to?: string): Promise<Answer> {
 	const uri = vscode.Uri.file(path);
 
 	try {
@@ -81,6 +81,10 @@ async function perform(op: string, path: string, payload: Uint8Array): Promise<A
 				return { "meta": {} };
 			case "rm":
 				await vscode.workspace.fs.delete(uri, { "recursive": true, "useTrash": false });
+
+				return { "meta": {} };
+			case "rename":
+				await vscode.workspace.fs.rename(uri, vscode.Uri.file(to!), { "overwrite": true });
 
 				return { "meta": {} };
 			default:
@@ -136,8 +140,11 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 			throw failure(`unknown call "${op}"`, "EINVAL");
 		}
 
-		if (path === undefined) {
-			throw failure(`EACCES: ${String(meta["path"])} isn't in the workspace`, "EACCES");
+		// (a rename's both ends, each in the workspace)
+		const to = op === "rename" ? workspacePath(meta["to"]) : undefined;
+
+		if (path === undefined || (op === "rename" && to === undefined)) {
+			throw failure(`EACCES: ${String(path === undefined ? meta["path"] : meta["to"])} isn't in the workspace`, "EACCES");
 		}
 
 		// The debugger's own: the program and what it imports, read.
@@ -146,22 +153,26 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 		}
 
 		const capability = READS.has(op) ? "fs:read" : "fs:write";
-		const verdict = await decide(session, capability, path);
+		// Each path it reaches decided (a rename: both, refused if either is) — and counted.
+		const paths = to === undefined ? [path] : [path, to];
+		const verdicts = await Promise.all(paths.map(async (each) => decide(session, capability, each)));
+		const verdict = verdicts.includes("deny") ? "deny" : verdicts.includes("skip") ? "skip" : "allow";
+		const count = (how: Effect["how"]): Effect["how"] => paths.map((each) => counted(session, capability, each, how))[0]!;
 
 		if (verdict === "skip") {
-			return { ...skipped(op), "how": counted(session, capability, path, "skipped") };
+			return { ...skipped(op), "how": count("skipped") };
 		}
 
 		if (verdict === "deny") {
-			counted(session, capability, path, "denied");
+			count("denied");
 
-			throw failure(`EACCES: permission denied — ${capability} ${path} isn't allowed (the policy decides it, and it wasn't asked)`, "EACCES");
+			throw failure(`EACCES: permission denied — ${capability} ${paths.join(" → ")} isn't allowed (the policy decides it, and it wasn't asked)`, "EACCES");
 		}
 
 		// (made — a call that then fails, as node's would, was made all the same)
-		const how = counted(session, capability, path, "made");
+		const how = count("made");
 
-		return { ...await perform(op, path, payload), "how": how };
+		return { ...await perform(op, path, payload, to), "how": how };
 	};
 
 	context.subscriptions.push(

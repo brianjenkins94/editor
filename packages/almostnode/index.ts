@@ -28,3 +28,7 @@ export type { BridgeOptions, InitServiceWorkerOptions, IVirtualServer, VirtualSe
  */
 export { VirtualFS } from "./virtual-fs";
 export type { FSNode, FSWatcher, Stats, WatchEventType, WatchListener } from "./virtual-fs";
+// Node's `fs` over a VirtualFS of the host's: the editor's debugger gives a program's own calls one whose workspace
+// files go through the editor (the run contract's runtime files), its module loading staying on the shared workspace.
+export { createFsShim } from "./shims/fs";
+export type { FsShim } from "./shims/fs";

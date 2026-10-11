@@ -87,7 +87,7 @@ It gets **synchronous files through core** instead, each call answered by worker
   into the mailbox and waiting on it (`Atomics.wait`); worker-pod, watching it (`Atomics.waitAsync`), makes the call and
   writes the answer back. No message a call; one connection (the port), as before. VS Code's TypeScript server on the
   web reads its files the same way. What doesn't fit the mailbox goes in pieces.
-- **The calls** (`runtime.fs`): `readFile`, `writeFile`, `stat`, `readdir`, `mkdir`, `rm` — `/workspace` paths,
+- **The calls** (`runtime.fs`): `readFile`, `writeFile`, `stat`, `readdir`, `mkdir`, `rm`, `rename` — `/workspace` paths,
   failing as node's do (`ENOENT`, `EACCES`, …). A read is an open editor's text when it's open, else what's on disk; a
   write is the workspace's (so editors, Source Control and watchers see it).
 - **The gate.** A call is the program's unless it says it's the debugger's own load (`{ load: true }`: the program and
@@ -108,10 +108,12 @@ It gets **synchronous files through core** instead, each call answered by worker
   every worker of the name; the architecture view counts each as an instance of `<name>`), and the link carries only the
   runtime — the worker's log, architecture and metrics, its mailbox handed over, its servers' requests and answers. No
   other service of the editor's, tsval's worker's included.
-- **tsval** keeps the buffer. Measured (2026-10-11): a call through the mailbox costs ~0.5–0.7 ms (the read itself
-  ~0.17 ms of it); a tsval run makes 2 (a script) to 10 (two local modules) calls, 32 for one package it couldn't find —
-  a program with real packages hundreds, every live run again. Its module loading is never gated, so it stays on the
-  buffer; moving only the program's own (gated, rare) file calls over would make core the one gate for them too.
+- **tsval's program's calls too** (2026-10-11): its `fs` is almostnode's over runtime-vfs.ts (a VirtualFS whose
+  workspace paths go through `runtime.fs`; others — temp files — stay in the worker's memory), so core is the one gate
+  for every debugger's programs. tsval still stops and asks at a call (a debugger's job), and gives a rule's result in
+  a call's place; core decides, makes and keeps the call. Its module loading stays on the buffer: never gated, and
+  measured, a mailbox call costs ~0.5–0.7 ms (the read ~0.17 ms of it) and a run's loading makes 2 (a script) to 10
+  (two local modules) calls — 32 for one package it couldn't find, hundreds with real packages, every live run again.
 
 ## 3. Span annotations — done (2026-10-10)
 
