@@ -716,6 +716,9 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	let app: ReadonlySet<string> = appInfo.nodes;
 	let edges = new Map<string, EdgeView>();
 	let edgesByNode = new Map<string, EdgeView[]>();
+	/** The Stores box's header, its stores, and the contexts with a line to every one of them — whose lines end at the
+	 *  header, as into a collapsed box: one strand, not one a store (as of the last render). */
+	let toStores: { "header": Rect; "stores": Set<string>; "contexts": Set<string> } | undefined;
 	/** The contexts the last render drew, and each hub's components among them (DISCOVERED-ARCHITECTURE.md). */
 	let drawnIds: string[] = [];
 	let components = new Map<string, string[]>();
@@ -759,8 +762,10 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 	}
 
 	function addEdge(id: string, a: string, b: string, channel: ChannelStats | undefined): void {
-		const from = layout.nodes.get(a);
-		const to = layout.nodes.get(b);
+		// A context's line to a store, when it has one to every store: to the Stores box's header instead.
+		const toAll = toStores !== undefined && ((toStores.contexts.has(a) && toStores.stores.has(b)) || (toStores.contexts.has(b) && toStores.stores.has(a)));
+		const from = toAll && toStores!.stores.has(a) ? toStores!.header : layout.nodes.get(a);
+		const to = toAll && toStores!.stores.has(b) ? toStores!.header : layout.nodes.get(b);
 
 		// Both ends inside one collapsed box: nothing to draw.
 		if (from === undefined || to === undefined || from === to) {
@@ -774,7 +779,7 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		const d = edgePath(from, to);
 		const path = s("path", { "d": d, "class": `arch-edge type-${type} status-${type === "undeclared" ? "undeclared" : observed ? "declared" : "ghost"}` });
 		const hit = s("path", { "d": d, "class": "arch-edge-hit" });
-		const intoCollapsed = layout.hidden.has(a) || layout.hidden.has(b);
+		const intoCollapsed = layout.hidden.has(a) || layout.hidden.has(b) || toAll;
 		// Into a collapsed box, a box's lines overlap: their numbers would too, so they go unlabelled.
 		const group = s("g", { "data-edge": id, "class": intoCollapsed ? "into-collapsed" : undefined });
 		let label: SVGTextElement | undefined;
@@ -800,8 +805,9 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 
 		edges.set(id, view);
 
-		// A collapsed box's header highlights its nodes' lines: they're filed under the box too.
-		for (const end of [a, b, ...[a, b].map((node) => layout.hidden.get(node)).filter((box) => box !== undefined).map((box) => "box:" + box)]) {
+		// A collapsed box's header highlights its nodes' lines: they're filed under the box too (and the Stores box's, the
+		// lines that end at it).
+		for (const end of [a, b, ...[a, b].map((node) => layout.hidden.get(node)).filter((box) => box !== undefined).map((box) => "box:" + box), ...toAll ? ["box:stores"] : []]) {
 			edgesByNode.set(end, [...edgesByNode.get(end) ?? [], view]);
 		}
 	}
@@ -943,6 +949,24 @@ export function renderArchitectureView(root: HTMLElement, hub: Hub): { "dispose"
 		edgeLayer.replaceChildren();
 		edges = new Map();
 		edgesByNode = new Map();
+
+		// The contexts with a line to every store in the Stores box (open, with more than one store): those lines end at
+		// its header — one strand from each (a box's lines to a collapsed box do the same).
+		const storesBox = layout.containers.get("stores");
+		const storeIds = new Set(drawn.filter((node) => containerOf(node, app) === "stores" && !layout.hidden.has(node.id)).map((node) => node.id));
+		const reached = new Map<string, Set<string>>();
+
+		for (const { a, b } of store.channels.values()) {
+			for (const [context, other] of [[a, b], [b, a]]) {
+				if (storeIds.has(other) && !storeIds.has(context) && visibleIds.has(context)) {
+					reached.set(context, (reached.get(context) ?? new Set()).add(other));
+				}
+			}
+		}
+
+		const toEvery = [...reached].filter(([, stores]) => stores.size === storeIds.size).map(([context]) => context);
+
+		toStores = storesBox === undefined || storeIds.size < 2 || toEvery.length === 0 ? undefined : { "header": { ...storesBox, "height": HEADER }, "stores": storeIds, "contexts": new Set(toEvery) };
 
 		// One line per pair of ends, whichever side reported it.
 		const drawnPairs = new Set<string>();
