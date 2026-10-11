@@ -7,7 +7,7 @@
  * - `ended`: a file's values go, and how the run ended short is marked (`values.ended`) — for a debugger that tells none,
  *   the program's, as its session ends;
  * - `coverage`: the run's evidence (`evidence.observed`, evidence.ts — coverage.ts reads the event itself);
- * - `effects`: what the run did to the world, kept for its envelope in the run ledger (silo-store's setEffects);
+ * - `effects`: what the run did to the world, kept for its envelope in the run ledger (run-effects.ts's setEffects);
  * - `ask`: a capability stop's question, on its line — answered as capability-stops.ts says;
  * - `recorded`: what an allowed call returned, for a rule to give back (silo-store's recordResult);
  * - `listening`: the run is a service on a port (`node.listening.<run>`: the running list, its preview).
@@ -28,7 +28,8 @@ import type { AskEvent, CoverageEvent, EffectsEvent, EndedEvent, ListeningEvent,
 import { createRpcClient } from "@brianjenkins94/hub";
 import { given as givenBy } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { recordResult, setEffects } from "../capabilities/silo-store";
+import { setEffects } from "../capabilities/run-effects";
+import { recordResult } from "../capabilities/silo-store";
 import { asked, policyFor } from "./capability-stops";
 import { appRootOf, runApp } from "./launch";
 import { podHub } from "./pod";

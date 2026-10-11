@@ -4,7 +4,8 @@
  * here — an open editor's unsaved text for a read, a write as the workspace's (editors, Source Control and watchers see
  * it). A call of the program's (not the debugger's own `load`) is decided as tsval decides its own: by the session's
  * policy (`policyFor`, its "this run" answers included, and a call it was just told to make once), and a live run makes
- * nothing but a read the policy allows. What a call did goes back with its answer, for the debugger's `effects`.
+ * nothing but a read the policy allows. What a call did is kept among the run's effects here (run-effects.ts's recordEffect)
+ * — the debugger doesn't tell it.
  *
  * The gate keeps the program to the policy, whichever debugger runs it; the debugger's extension is trusted as any
  * extension is (it has `vscode.workspace.fs`).
@@ -13,8 +14,9 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { Observed } from "@brianjenkins94/observability";
 import type { Effect } from "@brianjenkins94/run-contract";
 import { serve } from "@brianjenkins94/hub";
-import { answerMailbox } from "@brianjenkins94/run-contract/runtime";
+import { answerMailbox, runtimeSession } from "@brianjenkins94/run-contract/runtime";
 import * as vscode from "vscode";
+import { recordEffect } from "../capabilities/run-effects";
 import { policyFor, takeOnce } from "./capability-stops";
 import { verdictOf } from "./gate";
 
@@ -26,8 +28,8 @@ const CODES: Record<string, string> = { "FileNotFound": "ENOENT", "FileExists": 
 
 type Answer = { "meta": Record<string, unknown>; "payload"?: Uint8Array };
 
-function failure(message: string, code: string, extra: Record<string, unknown> = {}): Error {
-	return Object.assign(new Error(message), { "code": code }, extra);
+function failure(message: string, code: string): Error {
+	return Object.assign(new Error(message), { "code": code });
 }
 
 /** `path`, normalized — if it's in the workspace. */
@@ -115,7 +117,18 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 		return verdictOf(await policyFor(session), capability, path, session !== undefined && sessions.get(session)?.configuration["__live"] === true);
 	};
 
-	const answer = async (session: string | undefined, meta: Record<string, unknown>, payload: Uint8Array): Promise<Answer> => {
+	/** A call of the program's in `session`, among its run's effects — how it went. */
+	const counted = (session: string | undefined, capability: string, path: string, how: Effect["how"]): Effect["how"] => {
+		const runId = session === undefined ? undefined : sessions.get(session)?.configuration["__runId"];
+
+		if (typeof runId === "string") {
+			recordEffect(runId, capability, path, how);
+		}
+
+		return how;
+	};
+
+	const answer = async (session: string | undefined, meta: Record<string, unknown>, payload: Uint8Array): Promise<Answer & { "how"?: Effect["how"] }> => {
 		const op = String(meta["op"]);
 		const path = workspacePath(meta["path"]);
 
@@ -134,25 +147,21 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 
 		const capability = READS.has(op) ? "fs:read" : "fs:write";
 		const verdict = await decide(session, capability, path);
-		const told = (how: Effect["how"]): Record<string, unknown> => ({ "how": how, "capability": capability });
 
 		if (verdict === "skip") {
-			const answered = skipped(op);
-
-			return { ...answered, "meta": { ...answered.meta, ...told("skipped") } };
+			return { ...skipped(op), "how": counted(session, capability, path, "skipped") };
 		}
 
 		if (verdict === "deny") {
-			throw failure(`EACCES: permission denied — ${capability} ${path} isn't allowed (the policy decides it, and it wasn't asked)`, "EACCES", told("denied"));
+			counted(session, capability, path, "denied");
+
+			throw failure(`EACCES: permission denied — ${capability} ${path} isn't allowed (the policy decides it, and it wasn't asked)`, "EACCES");
 		}
 
-		try {
-			const made = await perform(op, path, payload);
+		// (made — a call that then fails, as node's would, was made all the same)
+		const how = counted(session, capability, path, "made");
 
-			return { ...made, "meta": { ...made.meta, ...told("made") } };
-		} catch (error) {
-			throw Object.assign(error as Error, told("made"));
-		}
+		return { ...await perform(op, path, payload), "how": how };
 	};
 
 	context.subscriptions.push(
@@ -166,21 +175,22 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 
 			stops.delete(session.id);
 		}),
-		{ "dispose": serve(hub, "runtime.fs.attach", (args) => {
+		{ "dispose": serve(hub, "runtime.fs.attach", (args, { from }) => {
 			const { mailbox, session } = (args ?? {}) as { "mailbox"?: unknown; "session"?: unknown };
 
 			if (!(mailbox instanceof SharedArrayBuffer)) {
 				throw new TypeError("runtime.fs.attach: a mailbox (a SharedArrayBuffer)");
 			}
 
-			const bound = typeof session === "string" ? session : undefined;
+			// The session its link was made for (the extension named it to `connect`) — the worker's word only where none was.
+			const bound = (from === undefined ? undefined : runtimeSession(from)) ?? (typeof session === "string" ? session : undefined);
 			const stop = answerMailbox(mailbox, async (meta, payload) => {
 				const span = log.span("runtime.fs", { "op": String(meta["op"]), "path": String(meta["path"]), ...bound === undefined ? {} : { "session": bound } });
 
 				try {
-					const answered = await answer(bound, meta, payload);
+					const { how, ...answered } = await answer(bound, meta, payload);
 
-					span.end({ ...answered.meta["how"] === undefined ? {} : { "how": answered.meta["how"] }, "bytes": answered.payload?.length ?? 0 });
+					span.end({ ...how === undefined ? {} : { "how": how }, "bytes": answered.payload?.length ?? 0 });
 
 					return answered;
 				} catch (error) {

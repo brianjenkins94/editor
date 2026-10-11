@@ -224,7 +224,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			}
 		}
 
-		// What it did to the world: the pod counted each gated call (silo-store's recordEffect), for whichever run it was.
+		// What it did to the world: the pod counted each gated call (run-effects.ts), for whichever run it was.
 		const effects = await rpc.request("run.effects", { "id": run.id }, { "timeoutMs": 5_000, "waitForResponderMs": 2_000 }).catch(() => []);
 
 		if (Array.isArray(effects) && effects.length > 0) {

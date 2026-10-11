@@ -125,7 +125,7 @@ const { "log": paneLog, architecture } = observe(workbenchHub, { "network": NETW
 // editor's runtime through the probe there — VS Code leaves its extensions no other way out — linked into this hub, and
 // answered as tsval's is (EXTENSION-POINTS.md, 2: its file calls by worker-pod, its servers by the preview) — linked as
 // every runtime link is (run-contract's linkRuntime: its own id, carrying only the runtime).
-installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl, "linkRuntime": (port, name) => linkRuntime(workbenchHub, port, name) });
+installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl, "linkRuntime": (port, name, session) => linkRuntime(workbenchHub, port, name, session) });
 registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });
 
 // A dock panel of the shell dropped into the editor area (shell-dock.ts): an editor per panel, whose content the shell

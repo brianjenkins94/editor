@@ -23,9 +23,9 @@ export const workspace: { "buffer"?: SharedArrayBuffer } = {};
 export function workspaceRuntime(): WorkspaceRuntime {
 	return {
 		get "buffer"() { return workspace.buffer; },
-		"connect": (name) => {
+		"connect": (name, session) => {
 			const channel = new MessageChannel();
-			const unlink = linkRuntime(podHub, channel.port1, name);
+			const unlink = linkRuntime(podHub, channel.port1, name, session);
 
 			return { "port": channel.port2, "dispose": () => { unlink(); channel.port1.close(); } };
 		}

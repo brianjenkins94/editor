@@ -17,7 +17,8 @@ import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
 import { type CapabilityCall, decideCapability } from "../capabilities/decide";
-import { recordedResult, recordResult, takeEffects } from "../capabilities/silo-store";
+import { takeEffects } from "../capabilities/run-effects";
+import { recordedResult, recordResult } from "../capabilities/silo-store";
 import { observe } from "@brianjenkins94/observability";
 import { identifyWorker } from "../../architecture-model";
 import { storeNode, ZENFS_NODE } from "../../architecture-zenfs";
@@ -314,7 +315,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		void vscode.debug.startDebugging(undefined, { "type": "production", "request": "launch", "name": name, "__prodId": id, "__port": info.port }, { "noDebug": true });
 
 		// A preview's run (a port-bound one): the SW tags that port's gated net calls with `id`, so they're counted among
-		// its effects (silo-store's recordEffect), which its envelope takes when it ends (`run.effects`).
+		// its effects (run-effects.ts's recordEffect), which its envelope takes when it ends (`run.effects`).
 		if (typeof info.port !== "number") {
 			return;
 		}

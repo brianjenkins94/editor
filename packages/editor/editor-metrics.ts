@@ -25,7 +25,7 @@ import { longFrameGauge, memoryGauge, reportMetrics, spanMetrics } from "@brianj
 /** zen-fs SingleBuffer's superblock: magic (u32 at 4), used_bytes and total_bytes (u64 at 16 and 24), little-endian. */
 const SUPERBLOCK_MAGIC = 0x62732e7a;
 
-/** A URL without its fragment: a worker loaded through the probe bootstrap carries its target there, and a memory
+/** A URL without its fragment: a worker loaded through core's bootstrap (workerBootstrap.worker.ts) carries its target there, and a memory
  *  attribution may not. */
 const withoutFragment = (url: string): string => url.split("#")[0];
 

@@ -465,7 +465,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.started = true;
 		// Cache-bust so a rebuilt worker is picked up (the Worker constructor may reuse the browser's module
 		// cache for an unchanged URL even after a rebuild); harmless in production.
-		this.worker = startWorker(this.runtime, (event) => { this.onWorker(event); }, (message) => { this.event("output", { "category": "stderr", "output": `[debug-worker] ${message}\n` }); });
+		this.worker = startWorker(this.runtime, this.id, (event) => { this.onWorker(event); }, (message) => { this.event("output", { "category": "stderr", "output": `[debug-worker] ${message}\n` }); });
 
 		const trace = this.startAction("launch");
 
@@ -693,16 +693,16 @@ function loopStartOf(value: unknown): LoopStart | undefined {
  * can come; the distinct outcomes, each with a schedule to debug it by (a launch's `eventLoop`).
  */
 /** A debug worker: started, given its link into the editor's runtime (the workspace runtime — its servers answer the
- *  preview through it, its log and spans are the editor's), then sent control messages; its events go to `onEvent`, a
- *  failure to start or an uncaught error to `onError`. */
-function startWorker(runtime: WorkspaceRuntime, onEvent: (event: WorkerEvent) => void, onError: (message: string) => void): { "buffer": SharedArrayBuffer | undefined; "send": (control: Control, trace?: { "traceId": string; "parentSpanId": string }) => void; "close": () => void } {
+ *  preview through it, its log and spans are the editor's) — for debug session `session`, when it runs one — then sent
+ *  control messages; its events go to `onEvent`, a failure to start or an uncaught error to `onError`. */
+function startWorker(runtime: WorkspaceRuntime, session: string | undefined, onEvent: (event: WorkerEvent) => void, onError: (message: string) => void): { "buffer": SharedArrayBuffer | undefined; "send": (control: Control, trace?: { "traceId": string; "parentSpanId": string }) => void; "close": () => void } {
 	// Cache-bust so a rebuilt worker is picked up (the Worker constructor may reuse the browser's module cache for an
 	// unchanged URL even after a rebuild); harmless in production.
 	const url = new URL("./lsp/debug-worker.js", location.href);
 
 	url.searchParams.set("v", String(Date.now()));
 
-	const link = runtime.connect("debug-worker");
+	const link = runtime.connect("debug-worker", session);
 	const worker = new Worker(url, { "type": "module" });
 	const post = (message: ToWorker, transfer: Transferable[] = []): void => { worker.postMessage(message, transfer); };
 
@@ -733,7 +733,7 @@ export async function exploreProgram(runtime: WorkspaceRuntime, program: string,
 		resolveExplored = resolve;
 		failed = reject;
 	});
-	const worker = startWorker(runtime, (event) => {
+	const worker = startWorker(runtime, undefined, (event) => {
 		if (event.type === "explored") {
 			resolveExplored?.(event.explored);
 		}

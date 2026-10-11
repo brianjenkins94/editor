@@ -37,8 +37,9 @@ export type ProbeMessage =
 	| { "type": "end"; "id": string }
 	| { "type": "traffic"; "peer": ProbePeer; "outgoing": boolean; "kind": TrafficKind; "label": string; "bytes": number; "count"?: number }
 	/** A debugger's worker in the extension host connecting to the editor's runtime (the probe's `workspaceRuntime()`):
-	 *  its port and the name it connects as, to link into the workbench's hub — until the matching `runtime-close`. */
-	| { "type": "runtime"; "id": string; "name": string; "port": MessagePort }
+	 *  its port, the name it connects as and the debug session it runs, to link into the workbench's hub — until the
+	 *  matching `runtime-close`. */
+	| { "type": "runtime"; "id": string; "name": string; "session"?: string; "port": MessagePort }
 	| { "type": "runtime-close"; "id": string };
 
 export function approxSize(value: unknown, depth = 0): number {

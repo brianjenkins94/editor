@@ -4,22 +4,22 @@
  * program starts. Any debugger may have it — tsval's, and an interpreter plugged in as `run.debugger`.
  *
  * - The extension asks for it with `workspaceRuntime()` — a `WorkspaceRuntime`, wherever its extension host is (core
- *   puts it in each), or undefined outside the editor. `connect(name)` gives a port into the editor's runtime, for the
- *   debugger's worker — `name` what the editor knows it by (each worker of that name one instance of it). `buffer` is the workspace itself (zen-fs's SingleBuffer) — given only to the editor's own
- *   debugger, built with the same zen-fs; anyone else's reads and writes go through `fs`.
- * - The worker connects with `connectRuntime(port, { "name": …, "session": … })`, the session being its debug
- *   session's id. Its `fs` reads and writes the workspace synchronously, each call answered by the editor: an open
- *   editor's unsaved text, a write as the workspace's, and a call of the program's decided by the session's policy, as
- *   the editor decides every run's (a `{ load: true }` call is the debugger's own: the program and what it imports).
- *   `effects()` is what the program's calls did, for the `effects` event. A server its program listens with answers the
- *   preview through `serve(port, request => response)`. Its log, its spans and each server's traffic are the editor's
- *   to see, as its own (debug-mcp, the architecture view).
+ *   puts it in each), or undefined outside the editor. `connect(name, session)` gives a port into the editor's runtime,
+ *   for the debugger's worker: `name` what the editor knows it by (each worker of that name one instance of it),
+ *   `session` the id of the debug session it runs — bound to the link, so the worker (and the program in it) can't run
+ *   under another. `buffer` is the workspace itself (zen-fs's SingleBuffer) — given only to the editor's own debugger,
+ *   built with the same zen-fs; anyone else's reads and writes go through `fs`.
+ * - The worker connects with `connectRuntime(port, { "name": … })`. Its `fs` reads and writes the workspace
+ *   synchronously, each call answered by the editor: an open editor's unsaved text, a write as the workspace's, and a
+ *   call of the program's decided by the session's policy, as the editor decides every run's, and kept among the run's
+ *   effects by the editor itself (a `{ load: true }` call is the debugger's own: the program and what it imports). A
+ *   server its program listens with answers the preview through `serve(port, request => response)`. Its log, its spans
+ *   and each server's traffic are the editor's to see, as its own (debug-mcp, the architecture view).
  *
  * The extension's own code never joins the editor's hub: only its worker's runtime link does, through this.
  */
 import type { Observed, ObserveOptions } from "@brianjenkins94/observability";
 import type { Hub } from "@brianjenkins94/hub";
-import type { Effect } from "./index.ts";
 import { createHub, createRpcClient, portTransport, rpcCallSubject, rpcReplySubject, serve } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
 
@@ -28,23 +28,47 @@ export interface WorkspaceRuntime {
 	/** The workspace, for the editor's own debugger to mount at /workspace — absent for anyone else's, and without
 	 *  cross-origin isolation. */
 	readonly "buffer": SharedArrayBuffer | undefined;
-	/** A port into the editor's runtime, for one worker known as `name` (transfer it there, and `connectRuntime` it as
-	 *  the same name); `dispose` when the worker's gone. */
-	"connect": (name: string) => { "port": MessagePort; "dispose": () => void };
+	/** A port into the editor's runtime, for one worker known as `name`, running debug session `session` (transfer it
+	 *  there, and `connectRuntime` it as the same name); `dispose` when the worker's gone. */
+	"connect": (name: string, session?: string) => { "port": MessagePort; "dispose": () => void };
+}
+
+/** Where core keeps each runtime link's session, by the id it gave the worker — in core's realm, which both ends that
+ *  link runtime ports share (worker-pod's host and the workbench). */
+const LINKS = Symbol.for("@brianjenkins94/run-contract/runtimeLinks");
+
+function links(): Map<string, string | undefined> {
+	const realm = globalThis as { [LINKS]?: Map<string, string | undefined> };
+
+	realm[LINKS] ??= new Map();
+
+	return realm[LINKS];
+}
+
+/** Core: the debug session the runtime link the editor named `id` was made for — undefined when none was named. */
+export function runtimeSession(id: string): string | undefined {
+	return links().get(id);
 }
 
 /** Core: link a debugger's worker's port into `hub` — the one way every runtime link is made, whichever extension host
  *  the worker's debugger is in. The editor names the worker `<name>#<instance>` (its own, so an answer goes to it alone;
- *  the architecture view counts each as an instance of `name`), and the link carries only the runtime: the worker's
- *  log, architecture and metrics, its mailbox handed over, its servers' requests and their answers — no other service
- *  of the editor's. */
-export function linkRuntime(hub: Hub, port: MessagePort, name: string): () => void {
+ *  the architecture view counts each as an instance of `name`), bound to `session` (runtimeSession), and the link carries
+ *  only the runtime: the worker's log, architecture and metrics, its mailbox handed over, its servers' requests and
+ *  their answers — no other service of the editor's. */
+export function linkRuntime(hub: Hub, port: MessagePort, name: string, session?: string): () => void {
 	const id = `${name}#${crypto.randomUUID().slice(0, 8)}`;
 
-	return hub.link(portTransport(port), { "peer": id, "permissions": {
+	links().set(id, session);
+
+	const unlink = hub.link(portTransport(port), { "peer": id, "permissions": {
 		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "pod.ready", rpcCallSubject("runtime.fs.attach"), rpcReplySubject("node")],
 		"subscribe": ["$sys.arch.sync", rpcCallSubject("virtual.debug.*"), rpcReplySubject(id)]
 	} });
+
+	return () => {
+		unlink();
+		links().delete(id);
+	};
 }
 
 /** A request the preview makes of a server the program listens with, on `port`. `entry`: a worker's entry script. */
@@ -71,7 +95,7 @@ export function provideWorkspaceRuntime(runtime: WorkspaceRuntime): void {
 export interface RuntimeStat { "type": "file" | "directory"; "size": number; "mtime": number }
 
 /** The workspace's files, synchronously, each call answered by the editor. A call is the program's — decided by the
- *  session's policy, and counted in `effects()` — unless `load` says it's the debugger's own (reads only). Failures
+ *  session's policy, and kept among the run's effects — unless `load` says it's the debugger's own (reads only). Failures
  *  are node's: an `Error` with its `code` (`ENOENT`, `EACCES`, …). Paths are absolute, under `/workspace`. */
 export interface RuntimeFs {
 	"readFile": (path: string, options?: { "load"?: boolean }) => Uint8Array;
@@ -91,16 +115,16 @@ export interface RuntimeConnection {
 	"fs": RuntimeFs;
 	/** `fs` answered from here on: the editor has the worker's mailbox. */
 	"ready": Promise<void>;
-	/** What the program's calls did so far — each capability, resource and outcome, and how many times. */
-	"effects": () => Effect[];
 	/** Answer the preview's requests to `port` with `handler` until the returned disposer runs. */
 	"serve": (port: number, handler: (request: RuntimeRequest) => Promise<RuntimeResponse>) => () => void;
 	/** The worker's logger: its records and spans are the editor's, as this worker's. */
 	"log": Observed["log"];
 }
 
-/** Connect a debugger's worker to the editor's runtime through `port` (`WorkspaceRuntime.connect(name)`'s), as `name` — what
- *  the editor knows it by. `network`: probes for the worker's own requests, as observability's `observe` takes them. */
+/** Connect a debugger's worker to the editor's runtime through `port` (`WorkspaceRuntime.connect(name, session)`'s), as
+ *  `name` — what the editor knows it by. `network`: probes for the worker's own requests, as observability's `observe`
+ *  takes them. `session`: its debug session, for an extension that didn't name it to `connect` — the editor takes the
+ *  link's when it has one. */
 export function connectRuntime(port: MessagePort, { name, session, network = false }: { "name": string; "session"?: string; "network"?: ObserveOptions["network"] }): RuntimeConnection {
 	const hub = createHub({ "id": name });
 
@@ -117,7 +141,6 @@ export function connectRuntime(port: MessagePort, { name, session, network = fal
 	});
 
 	const mailbox = createMailbox();
-	const tally = new Map<string, Effect>();
 	let attached = false;
 	// (once the editor has said who the worker is: a call made before goes out under the name its answer isn't sent to)
 	const ready = link.ready.then(async () => createRpcClient(hub).request("runtime.fs.attach", { "mailbox": mailbox, ...session === undefined ? {} : { "session": session } }, { "timeoutMs": 30_000, "waitForResponderMs": 30_000 })).then(() => { attached = true; });
@@ -127,14 +150,6 @@ export function connectRuntime(port: MessagePort, { name, session, network = fal
 		}
 
 		const answer = askMailbox(mailbox, meta, payload);
-		const { how, capability } = answer.meta as { "how"?: Effect["how"]; "capability"?: string };
-
-		if (how !== undefined && capability !== undefined) {
-			const key = `${capability}\u0000${String(meta["path"])}\u0000${how}`;
-			const known = tally.get(key);
-
-			tally.set(key, { "capability": capability, "resource": String(meta["path"]), "how": how, "calls": (known?.calls ?? 0) + 1 });
-		}
 
 		if (answer.failed) {
 			const { message, code } = answer.meta as { "message"?: string; "code"?: string };
@@ -155,7 +170,6 @@ export function connectRuntime(port: MessagePort, { name, session, network = fal
 			"rm": (path) => { call({ "op": "rm", "path": path }); }
 		},
 		"ready": ready,
-		"effects": () => [...tally.values()],
 		"log": log,
 		"serve": (listening, handler) => serve(hub, `virtual.debug.${listening}`, async (raw) => {
 			const request = raw as RuntimeRequest;
@@ -343,7 +357,7 @@ export function answerMailbox(mailbox: SharedArrayBuffer, answer: (meta: Record<
 				outgoing = encode(meta, payload);
 			} catch (error) {
 				header[FAILED] = 1;
-				outgoing = encode({ "message": error instanceof Error ? error.message : String(error), "code": (error as { "code"?: unknown }).code ?? "EIO", ...(error as { "how"?: unknown }).how === undefined ? {} : { "how": (error as { "how"?: unknown }).how, "capability": (error as { "capability"?: unknown }).capability } });
+				outgoing = encode({ "message": error instanceof Error ? error.message : String(error), "code": (error as { "code"?: unknown }).code ?? "EIO" });
 			}
 
 			sent = 0;

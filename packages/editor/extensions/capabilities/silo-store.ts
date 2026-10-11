@@ -20,7 +20,7 @@
  * Timestamps land per axis, each answering a different question: `added` (when I authorized) on the override
  * rule; firstObserved/lastObserved (when it fired) on the observed rollup; and per run, in the one run ledger: each
  * run's envelope (`.silo/runs/<user>.jsonl`, evidence.ts) lists its effects — what it made, was denied, skipped or was
- * given — kept here while it runs (recordEffect) and taken when its envelope is written (takeEffects, `run.effects`).
+ * given — kept while it runs (run-effects.ts) and taken when its envelope is written (`run.effects`).
  * "lastAllowed" and "was I exposed to compromised dep X in window W" are QUERIES over the observed side, never stored
  * decision state.
  *
@@ -31,8 +31,8 @@
 import type { CapabilityRequest } from "@brianjenkins94/util/silo/enforce/broker";
 import type { Disposition, Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import type { Effect } from "@brianjenkins94/util/silo/evidence";
 import { userSlug } from "@brianjenkins94/util/silo/evidence";
+import { recordEffect } from "./run-effects";
 import { EMPTY_POLICY, parsePolicy, withRule } from "@brianjenkins94/util/silo/policy";
 
 // ── paths ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -337,49 +337,6 @@ async function loadObserved(root: vscode.Uri, user: string): Promise<ObservedSur
 	}
 
 	return observedCache;
-}
-
-// Each run's effects (util/silo/evidence's `Effect`), by run id, until its envelope is written: each capability and
-// resource once per way it went, with how many calls went that way.
-const runEffects = new Map<string, Map<string, Effect>>();
-
-/** A gated call `runId` made (a preview's, as its gate decides each), and how it went. */
-export function recordEffect(runId: string, capability: string, resource: string, how: Effect["how"], calls = 1): void {
-	let effects = runEffects.get(runId);
-
-	if (effects === undefined) {
-		effects = new Map();
-		runEffects.set(runId, effects);
-	}
-
-	const key = `${how}\0${capability}\0${resource}`;
-	const known = effects.get(key);
-
-	if (known === undefined) {
-		effects.set(key, { "capability": capability, "resource": resource, "how": how, "calls": calls });
-	} else {
-		known.calls += calls;
-	}
-}
-
-/** Every gated call `runId` made so far, as its debugger tells them (the run contract's `effects` event: each telling
- *  has them all), in place of what it told before. */
-export function setEffects(runId: string, effects: readonly Effect[]): void {
-	runEffects.delete(runId);
-
-	for (const effect of effects) {
-		recordEffect(runId, effect.capability, effect.resource, effect.how, effect.calls);
-	}
-}
-
-/** `runId`'s effects, taken (as its envelope is written: `run.effects`) — made first, then denied, skipped, given. */
-export function takeEffects(runId: string): Effect[] {
-	const effects = [...runEffects.get(runId)?.values() ?? []];
-	const order = ["made", "denied", "skipped", "given"];
-
-	runEffects.delete(runId);
-
-	return effects.toSorted((a, b) => order.indexOf(a.how) - order.indexOf(b.how) || a.capability.localeCompare(b.capability) || a.resource.localeCompare(b.resource));
 }
 
 /**

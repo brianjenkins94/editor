@@ -3,21 +3,13 @@
  * Probe running INSIDE a worker (the monaco editor workers, the web worker extension host): reports what the
  * workbench can't see from outside — the worker's own requests and the workers IT spawns (the extension host's
  * language servers), including the MessagePorts it talks to them over (tsserver: its protocol, the @vscode/sync-api
- * file system bridge, the file watcher) — through a MessagePort posted as the worker's first message.
- *
- * Being first is also what lets core give the web worker extension host's extensions the editor's workspace runtime
- * (EXTENSION-POINTS.md, 2): VS Code takes `postMessage` away from them, so their debuggers' ports into the editor go up
- * this one, which core already holds.
+ * file system bridge, the file watcher) — over core's port into the worker (workerPort.ts).
  */
 import type { ProbeMessage, ProbePeer, TrafficKind } from "./protocol";
 import { approxSize, describeMessage } from "./protocol";
+import { toCore } from "./workerPort";
 
 declare const self: DedicatedWorkerGlobalScope;
-
-const channel = new MessageChannel();
-
-// MUST be the worker's first message: the parent recognizes the probe that way.
-self.postMessage(channel.port2, [channel.port2]);
 
 let queue: ProbeMessage[] = [];
 // Traffic is aggregated per batch: a language server's ports carry thousands of messages a second.
@@ -34,7 +26,7 @@ function schedule(): void {
 
 			queue = [];
 			tallies = new Map();
-			channel.port1.postMessage(batch);
+			toCore(batch);
 		}, 100);
 	}
 }
@@ -59,21 +51,6 @@ function traffic(peer: ProbePeer, outgoing: boolean, kind: TrafficKind, label: s
 }
 
 report({ "type": "hello", "name": self.name, "url": self.location.href });
-
-// The workspace runtime, where run-contract's `workspaceRuntime()` looks for it (its `RUNTIME` symbol): a port into the
-// editor's runtime for each debugger's worker — linked into the workbench's hub by whoever holds this probe's port
-// (installMonacoProbes' `linkRuntime`). No buffer: the workspace's own bytes are for the editor's own debugger.
-(self as unknown as Record<symbol, unknown>)[Symbol.for("@brianjenkins94/run-contract/workspaceRuntime")] = {
-	"buffer": undefined,
-	"connect": (name: string) => {
-		const link = new MessageChannel();
-		const id = crypto.randomUUID();
-
-		channel.port1.postMessage([{ "type": "runtime", "id": id, "name": name, "port": link.port1 }] satisfies ProbeMessage[], [link.port1]);
-
-		return { "port": link.port2, "dispose": () => { channel.port1.postMessage([{ "type": "runtime-close", "id": id }] satisfies ProbeMessage[]); link.port2.close(); } };
-	}
-};
 
 const nativeFetch = self.fetch;
 
@@ -102,7 +79,7 @@ self.fetch = async function(input: RequestInfo | URL, init?: RequestInit): Promi
 };
 
 // Which MessageChannel ends pair up, so the end this worker KEEPS can be attributed to the worker the other end is
-// sent to. (The probe's own channel, created above, predates this.)
+// sent to. (Core's own channel, workerPort.ts, predates this.)
 const partners = new WeakMap<MessagePort, MessagePort>();
 const observedPorts = new WeakSet<MessagePort>();
 

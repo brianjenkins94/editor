@@ -82,7 +82,7 @@ second zen-fs mounting it can break the filesystem's structure, `.git` and `.sil
 everything the editor keeps around a file: an open editor's unsaved text, change events, the policy, the run's effects.
 It gets **synchronous files through core** instead, each call answered by worker-pod:
 
-- **The wire.** `connectRuntime(port, { name, session })` hands worker-pod a small `SharedArrayBuffer` of its own — a
+- **The wire.** `connectRuntime(port, { name })` hands worker-pod a small `SharedArrayBuffer` of its own — a
   mailbox — once (`runtime.fs.attach`, over the runtime's hub link). After that a call is the worker writing its request
   into the mailbox and waiting on it (`Atomics.wait`); worker-pod, watching it (`Atomics.waitAsync`), makes the call and
   writes the answer back. No message a call; one connection (the port), as before. VS Code's TypeScript server on the
@@ -93,19 +93,25 @@ It gets **synchronous files through core** instead, each call answered by worker
 - **The gate.** A call is the program's unless it says it's the debugger's own load (`{ load: true }`: the program and
   what it imports, read-only). The program's are decided by the session's policy as tsval decides its own
   (`policyFor(session)`, "this run" answers included): allowed, skipped, or failing with `EACCES`; a live run makes no
-  write. The gate protects the workspace from the *program*, uniformly, whichever debugger runs it — it isn't a wall
-  against the extension, which has `vscode.workspace.fs` like any extension.
+  write. The session is the one the extension named to `connect(name, session)`, bound to the link — the worker, and
+  the program in it, can't run under another. The gate protects the workspace from the *program*, uniformly, whichever
+  debugger runs it — it isn't a wall against the extension, which has `vscode.workspace.fs` like any extension.
+- **Effects, kept by core.** Each program call is counted among its run's effects as it's answered (run-effects.ts), so
+  a debugger's `effects` event tells only what the editor didn't see — the requests and commands it made itself.
 - **Reaching it from either host.** `workspaceRuntime()` (run-contract's `./runtime`) finds it where core put it: in the
   bridge's host, worker-pod's — the buffer included, for tsval, our own code built with the same zen-fs; in the web
-  worker host, core's bootstrap's (the architecture probe's, which runs first there and already holds a port to the
-  workbench) — no buffer. Its `connect(name)` gives a port either way.
+  worker host, core's (runtime.worker.ts, loaded by core's bootstrap before VS Code's extension host, its ports going up
+  core's port into that worker, workerPort.ts — the one the architecture probe reports over too) — no buffer. Its
+  `connect(name, session)` gives a port either way.
 - **One way to link it** (run-contract's `linkRuntime`), whichever host the port comes from — into the pod's hub or the
   workbench's: the editor names the worker `<name>#<instance>`, its own id (an answer goes to that worker alone, not to
   every worker of the name; the architecture view counts each as an instance of `<name>`), and the link carries only the
   runtime — the worker's log, architecture and metrics, its mailbox handed over, its servers' requests and answers. No
   other service of the editor's, tsval's worker's included.
-- **tsval** keeps the buffer until it's measured on the calls (its module loading makes many small reads); moving it
-  over would make the gate tsval's too.
+- **tsval** keeps the buffer. Measured (2026-10-11): a call through the mailbox costs ~0.5–0.7 ms (the read itself
+  ~0.17 ms of it); a tsval run makes 2 (a script) to 10 (two local modules) calls, 32 for one package it couldn't find —
+  a program with real packages hundreds, every live run again. Its module loading is never gated, so it stays on the
+  buffer; moving only the program's own (gated, rare) file calls over would make core the one gate for them too.
 
 ## 3. Span annotations — done (2026-10-10)
 

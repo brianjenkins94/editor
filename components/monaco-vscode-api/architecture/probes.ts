@@ -16,7 +16,7 @@ import { ChannelClient } from "@codingame/monaco-vscode-api/vscode/vs/base/parts
 import { RPCProtocol } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/extensions/common/rpcProtocol";
 import { ExtensionHostManager } from "@codingame/monaco-vscode-extensions-service-override/vscode/vs/workbench/services/extensions/common/extensionHostManager";
 import { WebviewElement } from "@codingame/monaco-vscode-view-common-service-override/vscode/vs/workbench/contrib/webview/browser/webviewElement";
-import { probeBootstrapUrl } from "./bootstrapUrl";
+import { workerBootstrapUrl } from "./bootstrapUrl";
 import { approxSize, describeMessage, isHubFrame, isMessagePort } from "./protocol";
 
 /** How a Worker created in this realm is shown — the app's own workers (a hub-carrying worker keeps its hub id). */
@@ -36,9 +36,10 @@ export interface MonacoProbeOptions {
 	/** The node a nested worker's request goes to (default: `net:origin` / `net:<host>`) — e.g. the service worker, when
 	 *  it controls this page (and so the workers it spawns). */
 	"classifyUrl"?: (url: URL) => string;
-	/** Link a debugger's port from the web worker extension host into the editor's runtime (probe.worker.ts's
-	 *  `workspaceRuntime()`) — its worker known as `name` — answering with how to unlink it. */
-	"linkRuntime"?: (port: MessagePort, name: string) => () => void;
+	/** Link a debugger's port from the web worker extension host into the editor's runtime (runtime.worker.ts's
+	 *  `workspaceRuntime()`) — its worker known as `name`, running debug session `session` — answering with how to unlink
+	 *  it. */
+	"linkRuntime"?: (port: MessagePort, name: string, session?: string) => () => void;
 }
 
 export const EXT_HOST_IFRAME = "exthost-iframe";
@@ -72,7 +73,7 @@ function fileName(url: string): string {
 // Set once by installMonacoProbes: where a nested worker's request goes (see MonacoProbeOptions.classifyUrl).
 let classifyChildUrl: ((url: URL) => string) | undefined;
 // Set once by installMonacoProbes: where the extension host's runtime ports go (see MonacoProbeOptions.linkRuntime).
-let linkRuntime: ((port: MessagePort, name: string) => () => void) | undefined;
+let linkRuntime: ((port: MessagePort, name: string, session?: string) => () => void) | undefined;
 
 function attachChildProbe(sink: ArchSink, port: MessagePort, ownerId: string, container: string): void {
 	const nested = new Map<string, string>();
@@ -124,7 +125,7 @@ function attachChildProbe(sink: ArchSink, port: MessagePort, ownerId: string, co
 				// A debugger's worker in the extension host, connecting to the editor's runtime (only the extension host's).
 				case "runtime":
 					if (container === "extHostWorker" && linkRuntime !== undefined) {
-						runtimes.set(message.id, linkRuntime(message.port, message.name));
+						runtimes.set(message.id, linkRuntime(message.port, message.name, message.session));
 					}
 
 					break;
@@ -151,7 +152,7 @@ function attachChildProbe(sink: ArchSink, port: MessagePort, ownerId: string, co
 
 // ── workers created in this realm ─────────────────────────────────────────────────────────────────────────────
 
-/** Worker labels loaded through the probe bootstrap: their first message is the probe's port. */
+/** Worker labels loaded through core's bootstrap (workerBootstrap.worker.ts): their first message is core's port. */
 const probedLabels = new Set<string>();
 
 interface WorkerProtocolMessage {
@@ -306,7 +307,7 @@ function instrumentWorker(sink: ArchSink, worker: Worker, url: string, workerOpt
 	};
 }
 
-/** Load monaco's workers through the probe bootstrap, so a probe runs inside them. */
+/** Load monaco's workers through core's bootstrap, so core's code (the probe, the workspace runtime) runs inside them first. */
 function wrapWorkerUrls(): void {
 	const environment = window.MonacoEnvironment;
 	const getWorkerUrl = environment?.getWorkerUrl;
@@ -324,7 +325,7 @@ function wrapWorkerUrls(): void {
 
 		probedLabels.add(label);
 
-		return probeBootstrapUrl + "#target=" + encodeURIComponent(url);
+		return workerBootstrapUrl + "#target=" + encodeURIComponent(url);
 	};
 }
 

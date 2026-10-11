@@ -42,8 +42,9 @@ async function run(program: string, given: string): Promise<void> {
 	tell("values", { "file": program, "source": source, "values": [], "calls": [], "dropped": 0 });
 	// …every statement that could run, with how often it did…
 	tell("coverage", { "file": program, "source": source, "statements": [], "sites": [] });
-	// …what the program's calls did to the world (the runtime counts them)…
-	tell("effects", { "effects": runtime?.effects() ?? [] });
+	// …what it did to the world that the editor didn't see — requests and commands it made itself (its calls through
+	// `runtime.fs` the editor keeps among the run's effects already)…
+	tell("effects", { "effects": [] });
 	// …and that it's over: its values go from the margin, and where it crashed or was stopped (`end`) is marked.
 	tell("ended", { "file": program, "source": source });
 	send({ "kind": "exited", "exitCode": 0 });
