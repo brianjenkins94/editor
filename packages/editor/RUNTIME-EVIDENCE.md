@@ -482,6 +482,17 @@ cost to change them later.
 - **`_types.at` lives in the capabilities tsserver plugin**, which is otherwise about capabilities: the expedient home,
   since it holds the checker. A small types plugin of its own if it grows.
 
+### Not built, worth considering
+
+- **An evidence diff: what an edit changed at runtime.** Evidence is kept per span, spans survive edits, and runs
+  record the version of each file they ran (its blob oid). Comparing a span's evidence before and after a version
+  would answer "what did this edit change?": a branch arm that stopped firing, a value or observed type that's new at
+  a span, a `catch` body that started running, coverage lost. It's a fold over what's already recorded, not new capture,
+  and it would check an edit — an agent's especially — without a test written for it. A tool on debug-mcp beside the
+  hover. (Shrike's `compare_actions` diffs two recorded clicks; this diffs a span's history across a code change.)
+  Open: what "before" is when recency already blends versions (the last run of the previous version, or everything
+  before it), and how few runs after an edit are enough to say something stopped.
+
 ### Settled since
 
 - **The node tests run in CI.** The span-annotation corpus, the evidence store, the site sums, the typed strategy and
