@@ -129,7 +129,7 @@ dismissed), how a lost reference is looked for before it's orphaned, and `undefi
 **Dogfooded:** notes, insights' evidence, tsval's placed rules, worker-pod's rule places and core's run anchors
 (anchors.ts) all call through it — no extension calls the commands by hand.
 
-## 4. Pane views (the Margin pane's tabs) — steps 1–4 done (2026-10-12)
+## 4. Pane views (the Margin pane's tabs) — done (2026-10-12)
 
 The pane beside every editor (components/monaco-vscode-api/pane.ts) has a strip of tabs on its first line. VS Code has no
 API for anything like it. Today one consumer owns all of it: live-values.ts lists the tabs (Margin, and two disabled
@@ -256,8 +256,12 @@ what makes the second face possible.
    game's projection is cached until one of its files is saved. Its map and builder stay the webview view they are.
    Core's placeholder tabs (Cards, Event sheet) went; Cards waits for the cards projection (PROJECTIONS.md). A view with
    nothing for a file keeps its pane, so its tabs stay to switch back.
-5. **The native face** (6): the same content as inlay hints, hovers, CodeLens and decorations — on in a desktop build, and
-   wherever the pane is hidden.
+5. ~~**The native face**~~ — done (2026-10-12): pane-native.ts draws the shown view's content with VS Code's own
+   contribution points, the pane hidden — a row as an inlay hint (its label and latest value, every cell on hover),
+   prose as a CodeLens (its first line) and a hover (whole), buttons as CodeLenses (a menu's ways in a quick pick), an
+   input as a CodeLens asking for it, a card as a CodeLens above it, a mark in the overview ruler. *Pane: Toggle Pane /
+   VS Code Annotations* switches (remembered), *Pane: Show View…* picks the view with no tabs to pick it. Public API
+   only: what a desktop build would draw. At a stop the values show twice (VS Code's inline values too).
 
 ## 6. VS Code's own contribution points
 
@@ -290,7 +294,8 @@ breaks is what worker-pod reaches over the hub, because core isn't there:
 - **The workspace runtime** → Node's `fs` and `net` (2's interface); tsval's worker → `worker_threads`.
 - **Core's services that are just code** — the run registry, the evidence and run ledger, BABLR's spans, the edit
   history, git → moved into an extension (git: VS Code's own).
-- **Core's UI** — the margin, the Rules view → 6's native renderings; the margin's pane itself has no counterpart.
+- **Core's UI** — the margin, the Rules view → 6's native renderings (the Rules view is a tree view already; every pane
+  view's content has its native face, pane-native.ts); the margin's pane itself has no counterpart.
 - **The browser runtime** — previews and their dev servers, the service worker's gate, just-bash, isomorphic-git →
   dropped for the real thing (Simple Browser, the terminal, git).
 - **Agent tools** → `languageModelTools` or an MCP server.

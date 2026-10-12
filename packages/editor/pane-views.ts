@@ -16,6 +16,7 @@ import type { SpanRef } from "@brianjenkins94/run-contract/annotations";
 import { extensionContributions, onExtensionsChanged, renderMarkdown, showPane, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
 import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { Anchors } from "./anchors";
+import { installNativeFace, type NativeDrawing } from "./pane-native";
 
 /** The Margin: core's own view (live-values.ts provides it, as `margin.paneView`). */
 const MARGIN = "margin";
@@ -46,6 +47,17 @@ interface DrawState { "columns": Map<string, HTMLElement[]> }
 
 let api: typeof vscodeApi | undefined;
 let active = MARGIN;
+/** Where the shown view is drawn: beside the code (the pane), or with VS Code's own annotations (pane-native.ts) — the
+ *  pane hidden. Remembered, the same for every editor. */
+const NATIVE_KEY = "pane.native";
+let native = ((): boolean => {
+	try {
+		return localStorage.getItem(NATIVE_KEY) === "true";
+	} catch {
+		return false; // no storage: the pane
+	}
+})();
+let nativeFace: ReturnType<typeof installNativeFace> | undefined;
 let declared: PaneViewDeclaration[] = [];
 /** Each text that ran, its anchors (by file and text). */
 const anchored = new Map<string, Anchors>();
@@ -339,7 +351,8 @@ async function draw(uri: string): Promise<void> {
 	// Nothing: the Margin's no pane (a file that isn't code); another view's an empty one, its tabs still there.
 	if (contents.length === 0) {
 		if (drawing.get(uri) === token) {
-			showPane(uri, active === MARGIN ? undefined : [], () => undefined);
+			nativeFace?.show(uri, undefined);
+			showPane(uri, active === MARGIN || native ? undefined : [], () => undefined);
 		}
 
 		return;
@@ -385,6 +398,25 @@ async function draw(uri: string): Promise<void> {
 		return undefined;
 	};
 
+	// With VS Code's own annotations instead, the pane hidden.
+	if (native) {
+		const nativeDrawing: NativeDrawing = {
+			"items": placed,
+			"groups": placedGroups,
+			"marks": marks.flatMap((mark, index) => {
+				const at = places[items.length + groups.length + index];
+
+				return at === undefined ? [] : [{ "line": at[0], "kind": mark.kind, ...mark.title === undefined ? {} : { "title": mark.title } }];
+			})
+		};
+
+		nativeFace?.show(uri, nativeDrawing);
+		showPane(uri, undefined);
+
+		return;
+	}
+
+	nativeFace?.show(uri, undefined);
 	// (the pane stays, its tabs with it, whatever the view has: an empty view is still shown)
 	showPane(uri, placed.map(({ item, fromLine, toLine }) => ({ "id": `item:${item.id}`, "fromLine": fromLine, "toLine": toLine })), render, frameMarks, placedGroups.map(({ group, fromLine, toLine }) => ({ "id": `group:${group.id}`, "fromLine": fromLine, "toLine": toLine })));
 }
@@ -394,18 +426,24 @@ function shownFiles(): string[] {
 	return [...new Set((api?.window.visibleTextEditors ?? []).filter((editor) => editor.document.uri.scheme === "file").map((editor) => editor.document.uri.toString()))];
 }
 
-/** The strip: core's views, then each extension's own (a view `into` another has no tab). */
+/** The views with tabs: core's, then each extension's own (a view `into` another has none). */
+function tabs(): PaneView[] {
+	return [...CORE_VIEWS, ...declared.filter((view) => view.into === undefined && !CORE_VIEWS.some((core) => core.id === view.id)).map((view) => ({ "id": view.id, "label": view.label ?? view.id, ...view.title === undefined ? {} : { "title": view.title } }))];
+}
+
+/** Show view `id`, every shown file's. */
+function choose(id: string): void {
+	active = id;
+	showStrip();
+
+	for (const uri of shownFiles()) {
+		void draw(uri);
+	}
+}
+
+/** The strip: the views with tabs, the one shown chosen. */
 function showStrip(): void {
-	const views = [...CORE_VIEWS, ...declared.filter((view) => view.into === undefined && !CORE_VIEWS.some((core) => core.id === view.id)).map((view) => ({ "id": view.id, "label": view.label ?? view.id, ...view.title === undefined ? {} : { "title": view.title } }))];
-
-	showPaneViews(views, active, (id) => {
-		active = id;
-		showStrip();
-
-		for (const uri of shownFiles()) {
-			void draw(uri);
-		}
-	});
+	showPaneViews(tabs(), active, choose);
 }
 
 /** Draw `uri` again — or every shown file — for `view`, if it's the one shown (or in it): its provider's word that its
@@ -445,8 +483,34 @@ export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable
 	showStrip();
 	void read();
 	void onExtensionsChanged(() => { void read(); });
+	nativeFace = installNativeFace(vscode);
 
 	return [
+		...nativeFace.disposables,
+		// Beside the code, or as VS Code's own annotations (the pane hidden): the shown view drawn the other way.
+		vscode.commands.registerCommand("editor.pane.toggleNative", () => {
+			native = !native;
+
+			try {
+				localStorage.setItem(NATIVE_KEY, String(native));
+			} catch { /* no storage: just this session */ }
+
+			for (const uri of shownFiles()) {
+				void draw(uri);
+			}
+
+			return native;
+		}),
+		// Which view is shown — the pane's tabs, when there's no pane to show them.
+		vscode.commands.registerCommand("editor.pane.chooseView", async (id?: unknown) => {
+			const picked = typeof id === "string" ? id : (await vscode.window.showQuickPick(tabs().filter((view) => view.disabled !== true).map((view) => ({ "label": view.label, ...view.title === undefined ? {} : { "detail": view.title }, "id": view.id, ...view.id === active ? { "description": "shown" } : {} }))))?.id;
+
+			if (picked !== undefined) {
+				choose(picked);
+			}
+
+			return active;
+		}),
 		// A provider's word that its content changed: one file's, or every file's.
 		vscode.commands.registerCommand("editor.pane.refresh", (view: unknown, uri?: unknown) => {
 			if (typeof view === "string") {

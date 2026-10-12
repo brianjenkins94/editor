@@ -40,6 +40,16 @@
         "title": "Step a Recorded Stop",
         "category": "Debug",
         "icon": "$(debug-step-into)"
+      },
+      {
+        "command": "editor.pane.toggleNative",
+        "title": "Toggle Pane / VS Code Annotations",
+        "category": "Pane"
+      },
+      {
+        "command": "editor.pane.chooseView",
+        "title": "Show View…",
+        "category": "Pane"
       }
     ],
     "menus": {

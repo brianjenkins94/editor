@@ -53,7 +53,7 @@ function cells(workbench) {
 	return workbench.evaluate(() => [...document.querySelectorAll(".notes-margin-cell")].map((cell) => ({ "line": Number(cell.dataset.line), "text": cell.textContent })));
 }
 
-test("an extension's pane view: its tab, its items level with their code, followed as it changes, its buttons and input", async () => {
+test("an extension's pane view: its tab, its items level with their code, followed as it changes, its buttons and input — and natively, the pane hidden", async () => {
 	const workbench = await eventually("the workbench", async () => session.workbench());
 
 	await eventually("the extension loaded", () => workbench.evaluate(async () => {
@@ -127,6 +127,32 @@ test("an extension's pane view: its tab, its items level with their code, follow
 	await input.fill("hi there");
 	await input.press("Enter");
 	await eventually("what was typed, in its content", () => workbench.evaluate(() => document.querySelector(".notes-margin-cell input.live-values-input")?.value === "hi there"));
+
+	// The native face (step 5): the pane hidden, the same content as VS Code's own annotations — a row as an inlay hint
+	// (its label and latest value), prose, buttons, the input and the card as CodeLenses, prose whole on hover.
+	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.pane.toggleNative")), true);
+	await eventually("no pane", async () => (await cells(workbench)).length === 0 || undefined);
+
+	const native = await eventually("its annotations", () => workbench.evaluate(async (path) => {
+		const { api } = globalThis.__editor;
+		const uri = api.Uri.file(path);
+		const hints = await api.commands.executeCommand("vscode.executeInlayHintProvider", uri, new api.Range(0, 0, 20, 0));
+		const lenses = await api.commands.executeCommand("vscode.executeCodeLensProvider", uri);
+		const hovers = await api.commands.executeCommand("vscode.executeHoverProvider", uri, new api.Position(0, 3));
+		const label = (hint) => (typeof hint.label === "string" ? hint.label : hint.label.map((part) => part.value).join(""));
+		const shown = { "hints": hints.map(label).map((text) => text.trim()), "lenses": lenses.map((lens) => lens.command?.title).filter(Boolean), "hover": hovers.flatMap((hover) => hover.contents.map((content) => content.value ?? String(content))).join("\n") };
+
+		return shown.hints.length > 0 && shown.lenses.length > 0 ? shown : undefined;
+	}, PROBE));
+
+	assert.ok(native.hints.includes("x = 22"), `a row's label and latest value: ${JSON.stringify(native.hints)}`);
+	assert.ok(native.lenses.some((title) => title.startsWith("hello")), "prose's first line");
+	assert.ok(native.lenses.includes("Click"), "its button");
+	assert.ok(native.lenses.includes("typed hi there ✎"), "its input, as typed");
+	assert.ok(native.lenses.includes("a step · ran"), "its card");
+	assert.match(native.hover, /\*\*hello\*\*/u, "prose, whole, on hover");
+	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.pane.toggleNative")), false);
+	await eventually("the pane again", async () => (await cells(workbench)).some((cell) => cell.text.includes("followed from the run")) || undefined);
 
 	// Back to the Margin.
 	await workbench.locator(".notes-margin-tab", { "hasText": "Margin" }).click();
