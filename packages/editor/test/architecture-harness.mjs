@@ -2,7 +2,9 @@
  * Drives a real editor session in a fresh headless Chromium for the architecture tests, and reads what the live
  * architecture view observed (`globalThis.__architecture` in the workbench realm — see architecture-view.ts).
  *
- * Uses the dev server at ARCH_URL (default http://localhost:5173/), starting `tsx dev.ts` if nothing answers. Needs
+ * Uses the dev server at ARCH_URL (default http://localhost:5173/), starting `tsx dev.ts` if nothing answers — once for
+ * a whole run when it's the run's global setup (`node --test --test-global-setup=test/architecture-harness.mjs`), else
+ * once per session. Needs
  * a Chromium: Playwright's own, else CHROME_PATH, else the newest one in Playwright's browser cache. A developer's
  * own debug-mcp on :7378 is kept out (it may be an older build); `debugMcp: true` starts this checkout's instead.
  */
@@ -69,6 +71,29 @@ export function between(snapshot, a, b) {
 
 export const alive = (id) => (snapshot) => snapshot.nodes.some((node) => matches(id, node.id) && node.state === "alive");
 export const hasLabel = (a, b, label) => (snapshot) => between(snapshot, a, b).some((channel) => Object.keys(channel.labels).some((name) => label.test(name)));
+
+// ── one dev server for a whole run ────────────────────────────────────────────────────────────────────────────
+
+/** The dev server the run's global setup started, if it had to: every suite file's sessions find it answering and use it. */
+let runServer;
+
+/** As `node --test`'s global setup: start the dev server once, before any suite file, unless one already answers. */
+export async function globalSetup() {
+	if (!await reachable(URL_UNDER_TEST)) {
+		runServer = await startProcess("npx", ["tsx", "dev.ts"], new URL("..", import.meta.url), "Local:");
+	}
+}
+
+/** As `node --test`'s global teardown: stop the dev server the setup started (one that already answered stays up). */
+export async function globalTeardown() {
+	try {
+		if (runServer !== undefined) {
+			process.kill(-runServer.pid);
+		}
+	} catch {
+		// already gone
+	}
+}
 
 // ── the session ───────────────────────────────────────────────────────────────────────────────────────────────
 
