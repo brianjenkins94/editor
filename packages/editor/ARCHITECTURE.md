@@ -317,11 +317,13 @@ flowchart LR
     n_store__silo__file__json[".silo/&lt;file&gt;.json"]
     n_store__silo__gitattributes[".silo/.gitattributes"]
     n_store__silo__gitignore[".silo/.gitignore"]
+    n_store__silo_capabilities__file__json[".silo/capabilities/&lt;file&gt;.json"]
     n_store__silo_evidence____file__jsonl[".silo/evidence/…/&lt;file&gt;.jsonl"]
     n_store__silo_local____file__bin[".silo/local/…/&lt;file&gt;.bin"]
     n_store__silo_local____file__jsonl[".silo/local/…/&lt;file&gt;.jsonl"]
     n_store__silo_local__file__json[".silo/local/&lt;file&gt;.json"]
     n_store__silo_notes____file__jsonl[".silo/notes/…/&lt;file&gt;.jsonl"]
+    n_store__silo_policy__file__json[".silo/policy/&lt;file&gt;.json"]
     n_store__silo_runs__file__jsonl[".silo/runs/&lt;file&gt;.jsonl"]
   end
   subgraph c_sharedMemory["Shared memory"]
@@ -368,7 +370,9 @@ flowchart LR
   n_ext_worker_pod -->|"reads"| n_store__git__file_
   n_ext_worker_pod -->|"reads"| n_store__silo__gitignore
   n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__json
+  n_ext_worker_pod -->|"reads, writes"| n_store__silo_capabilities__file__json
   n_ext_worker_pod -->|"reads, writes"| n_store__silo_local__file__json
+  n_ext_worker_pod -->|"reads, writes"| n_store__silo_policy__file__json
   n_ext_worker_pod <-.->|"commands"| n_ext_worker_pod
   n_exthost_LocalProcess_0 <-.->|"RPCProtocol"| n_workbench
   n_exthost_LocalWebWorker_0 <-.->|"HTTP"| n_sw
@@ -409,10 +413,12 @@ flowchart LR
   n_workbench -->|"reads, writes"| n_store__silo__file__json
   n_workbench -->|"reads, writes"| n_store__silo__gitattributes
   n_workbench -->|"reads, writes"| n_store__silo__gitignore
+  n_workbench -->|"reads, writes"| n_store__silo_capabilities__file__json
   n_workbench -->|"reads, writes"| n_store__silo_evidence____file__jsonl
   n_workbench -->|"reads, writes"| n_store__silo_local____file__jsonl
   n_workbench -->|"reads, writes"| n_store__silo_local__file__json
   n_workbench -->|"reads, writes"| n_store__silo_notes____file__jsonl
+  n_workbench -->|"reads, writes"| n_store__silo_policy__file__json
   n_workbench -->|"reads, writes"| n_store__silo_runs__file__jsonl
   n_workbench -->|"writes"| n_store__silo_local____file__bin
   n_workbench <-.->|"WebWorker protocol / postMessage"| n_worker_TextMateWorker
@@ -430,11 +436,13 @@ flowchart LR
 | `.silo/.gitattributes` | Workbench | Workbench, notes |
 | `.silo/.gitignore` | Workbench | Workbench, worker-pod |
 | `.silo/<file>.json` | Workbench, capabilities, worker-pod | Workbench, capabilities, worker-pod |
+| `.silo/capabilities/<file>.json` | Workbench, worker-pod | Workbench, worker-pod |
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |
 | `.silo/local/…/<file>.jsonl` | Workbench | Workbench, insights |
 | `.silo/local/<file>.json` | Workbench, worker-pod | Workbench, worker-pod |
 | `.silo/notes/…/<file>.jsonl` | Workbench, notes | Workbench, notes |
+| `.silo/policy/<file>.json` | Workbench, worker-pod | Workbench, worker-pod |
 | `.silo/runs/<file>.jsonl` | Workbench | Workbench |
 | `IndexedDB bablr` | BABLR worker | BABLR worker, Workbench |
 | `IndexedDB silo-local` | Workspace (zen-fs) | Workspace (zen-fs) |
