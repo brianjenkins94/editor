@@ -54,31 +54,6 @@
   overflow-wrap: anywhere;
 }
 
-.live-values-picker {
-  flex: none;
-  margin-right: 1ch;
-  color: var(--vscode-descriptionForeground);
-}
-
-.live-values-step {
-  padding: 0 0.25ch;
-  border: none;
-  background: none;
-  color: var(--vscode-textLink-foreground);
-  font: inherit;
-  cursor: pointer;
-}
-
-.live-values-step:disabled {
-  color: var(--vscode-disabledForeground);
-  cursor: default;
-}
-
-.live-values-dropped {
-  color: var(--vscode-descriptionForeground);
-  font-style: italic;
-}
-
 .live-values-string {
   color: var(--vscode-debugTokenExpression-string);
 }
@@ -94,34 +69,6 @@
 .live-values-branch {
   color: var(--vscode-descriptionForeground);
   font-style: italic;
-}
-
-/* A capability stop's question (step 8): the call and what it reaches, then the choices. */
-.live-values-ask {
-  margin: 2px 0;
-  padding: 4px 8px;
-  border-left: 3px solid var(--vscode-editorWarning-foreground, #bf8803);
-  background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #bf8803) 10%, var(--vscode-editor-background));
-  font-family: var(--notes-margin-code-font-family, monospace);
-  font-size: var(--notes-margin-code-font-size);
-}
-
-.live-values-ask.dangerous {
-  border-left-color: var(--vscode-editorError-foreground, #e51400);
-  background: color-mix(in srgb, var(--vscode-editorError-foreground, #e51400) 8%, var(--vscode-editor-background));
-}
-
-.live-values-ask-what {
-  overflow-wrap: anywhere;
-}
-
-.live-values-ask-callee {
-  color: var(--vscode-symbolIcon-functionForeground, var(--vscode-editor-foreground));
-}
-
-.live-values-ask-unresolved,
-.live-values-ask-capability {
-  color: var(--vscode-descriptionForeground);
 }
 
 .live-values-choices {
@@ -450,58 +397,6 @@
   box-shadow: inset 0 0 0 1.5px var(--vscode-charts-purple, #b180d7);
 }
 
-/* The run log (PROJECTIONS.md), at the file's end: the last run step by step — each card's number and title, its share of
-   the work, what it waited — under how the run ended. */
-.live-values-runlog {
-  margin: 4px 0 2px;
-  padding: 4px 8px;
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--vscode-editorWidget-background) 55%, transparent);
-  font-family: var(--vscode-font-family);
-  font-size: 11px;
-  line-height: 17px;
-}
-
-.live-values-runlog-head {
-  color: var(--vscode-descriptionForeground);
-}
-
-.live-values-runlog-head.crashed {
-  color: var(--vscode-editorError-foreground, #e51400);
-}
-
-.live-values-runlog-head.stopped {
-  color: var(--vscode-editorWarning-foreground, #bf8803);
-}
-
-.live-values-runlog-row {
-  display: flex;
-  gap: 8px;
-}
-
-.live-values-runlog-card {
-  width: 2ch;
-  text-align: right;
-  color: var(--vscode-descriptionForeground);
-}
-
-.live-values-runlog-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--vscode-foreground);
-}
-
-.live-values-runlog-share {
-  font-variant-numeric: tabular-nums;
-}
-
-.live-values-runlog-waited {
-  color: var(--vscode-charts-blue, #3794ff);
-}
-
 /* A pane view's item (pane-views.ts), marked by its tone. */
 .pane-item.tone-question,
 .pane-item.tone-info,
@@ -515,3 +410,22 @@
 .pane-item.tone-info { --tone: var(--vscode-editorHint-foreground, var(--vscode-editorInfo-foreground)); }
 .pane-item.tone-warning { --tone: var(--vscode-editorWarning-foreground); }
 .pane-item.tone-error { --tone: var(--vscode-editorError-foreground); }
+
+/* A row's lead cells (a function's call picker: ‹ 2/5 ›), and any cell that does something when clicked. */
+.live-values-cell.lead {
+  flex: none;
+  padding: 0 0.25ch;
+  color: var(--vscode-descriptionForeground);
+}
+
+.live-values-cell.lead + .live-values-label {
+  margin-left: 1ch;
+}
+
+.live-values-cell.lead.clickable {
+  color: var(--vscode-textLink-foreground);
+}
+
+.live-values-cell.clickable {
+  cursor: pointer;
+}

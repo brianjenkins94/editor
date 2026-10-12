@@ -1,39 +1,40 @@
 /**
  * Live values, as notes (LIVE-VALUES.md, step 6): a debug session's values — what each line bound, returned or chose,
- * a column per turn of the loop around it — beside the code in the component's notes margin (`showPane`), Bret Victor's
- * binary search. The debug adapter publishes them on the pod hub (`values.session.<id>` as they grow, `values.ended`);
+ * a column per turn of the loop around it — beside the code in the pane's Margin, Bret Victor's binary search. The
+ * Margin is a pane view like any extension's (EXTENSION-POINTS.md, 4): this answers `margin.paneView` with its content
+ * as data (marginOf), each thing placed by its range in the text that ran, and pane-views.ts draws it; its buttons and
+ * cells run `margin.*` commands. The debug adapter publishes them on the pod hub (`values.session.<id>` as they grow, `values.ended`);
  * this keeps the latest session's per file, shows them while the session lives, and takes them away when it ends.
  *
  * A function called more than once shows one call — its latest, or the one picked on its first line (`‹ 3/5 ›`).
  * Columns line up down a call: every line at the same loop depth has the same columns, each as wide as its widest
  * value, so a turn reads straight down; hovering one lights it on every line, a click holds it. The cursor's line opens
  * up, its values whole (the margin's cell lit at the cursor: pane.ts). What the bounds left out is said under the last
- * line. The margin also carries prose notes (`showNotes`, rendered by pane.tsx): both go in one `showPane` per file,
- * values first on a line.
+ * line.
  *
  * A capability stop asks on its line too (step 8): what the call would do — `writeFileSync '/workspace/out.txt'` — and
  * *Allow once*, *Allow always*, *Deny*, the choice sent back to the session (`debug.session.<id>.decide`), which
  * resumes it. *Allow this run* lets every call of the capability through until the run ends (a loop asks once), kept
  * nowhere. *Allow always* needs the resource the call reaches — known even when the line computes it (the worker runs a
  * fork of the stop to the call to see it).
- * *Rule…* opens the rule editor there (the component's, RULES.md), prefilled with the call — *capability is*, *resource
+ * *Rule…* opens the rule editor in the Rule view (the component's, RULES.md; editInRuleView), prefilled with the call — *capability is*, *resource
  * is*, *then allow* — to widen or narrow it (*resource matches* a glob) and apply it *Just this once*, or *Save as rule*
  * in my policy, the run going on as it decides. Or *give* the call's *result* instead of it (RULES.md, slice 2) —
  * starting from what it returned the last time it ran for real, when that's recorded (`capability.recorded`).
  *
- * A variable's row has *Mock…* on hover (LIVE-VALUES.md, "Mocking a value"): the rule editor, prefilled *program is
+ * A variable's row has *Mock…* on hover (LIVE-VALUES.md, "Mocking a value"): the rule editor, in the Rule view, prefilled *program is
  * <this file>*, *at* <this statement> (a span reference, followed through edits), *then set* it to the value the run
  * had; the run's other variables are targets too. *Just this once* sets it at this stop and the run goes on with it
  * (`debug.session.<id>.setValue`, as the Variables view's Set Value does); *Save as rule* keeps it, and each run sets it
  * each time it gets there, without stopping (the adapter places the rule; the worker sets it after the statement runs).
  * process.argv's row — on the first line that
- * reads it, there before any run — has *Mock…*: the rule editor, prefilled *program is <this file>*, *then give
+ * reads it, there before any run — has *Mock…*: the rule editor, in the Rule view, prefilled *program is <this file>*, *then give
  * process.argv* the run's arguments, each value a run of its own; *Run* runs the file with them, once; *Save as rule*
  * keeps it in my policy, and every run of the file is given them (`rules.set`; the row shows what a rule gives,
  * `rules.given`).
  *
  * The margin is always open beside a JavaScript or TypeScript file, with or without anything to show: it's the file's
- * runtime column — coverage in its gutter column, left of the code (`showMarks`, from coverage.ts), notes, values,
+ * runtime column — coverage in its gutter column, left of the code (`showMarks`, from coverage.ts), values,
  * decisions. In that column too, how the last run ended short: ✕ on the line it crashed on (the error on hover), ■ on
  * the one it was stopped at — until the file runs again.
  *
@@ -43,7 +44,8 @@
  */
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
-import type { EditedRule, PaneEntry, PaneMark, RuleCatalog, RulePredicate, RuleSchema } from "@brianjenkins94/monaco-vscode-api/main";
+import type { EditedRule, PaneMark, RuleCatalog, RulePredicate, RuleSchema } from "@brianjenkins94/monaco-vscode-api/main";
+import type { PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem, PaneMark as ContentMark } from "@brianjenkins94/run-contract/pane";
 import type { AskEvent, RunEnd } from "@brianjenkins94/run-contract";
 import type { CapabilityChoice } from "./extensions/worker-pod/capability-stops";
 
@@ -53,15 +55,14 @@ import type { LiveBatch, LiveCall, LiveValue } from "./extensions/worker-pod/liv
 import type { Range } from "./anchors";
 import type { ProfiledLine } from "./coverage";
 import { Anchors } from "./anchors";
-import { showMargin } from "./pane-views";
+import { refreshView } from "./pane-views";
+import { editInRuleView } from "./rules-view";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { parseInputs } from "./extensions/worker-pod/inputs";
 import { describeRule, ruleEditor } from "@brianjenkins94/monaco-vscode-api/main";
 import css from "./live-values.css?raw";
 
-/** A prose note: Markdown on a line span (0-based, inclusive). */
-export interface Note { "id": string; "fromLine": number; "toLine": number; "text": string }
 
 /** One line of values as drawn: its label (`mid =`), then a value (`inline`) or a cell per column. */
 interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range; "input"?: boolean }
@@ -92,7 +93,6 @@ interface MarginState {
 	"end"?: { "line": number; "kind": string; "message"?: string };
 	"marks": { "line": number; "kind": string; "title"?: string }[];
 	"cards": { "fromLine": number; "toLine": number; "title": string }[];
-	"notes": { "fromLine": number; "toLine": number; "text": string }[];
 	"runLog"?: RunLog;
 }
 
@@ -104,8 +104,6 @@ const batchedAt = new Map<string, number>();
 
 /** The latest session's values, per file URI — kept once it ends, until the next session of the file tells its own. */
 const sessions = new Map<string, Session>();
-/** Prose notes, per file URI. */
-const notes = new Map<string, Note[]>();
 /** Each file's marks for the margin's gutter column (coverage), per file URI. */
 const marked = new Map<string, PaneMark[]>();
 /** Where each file's last run's work went (coverage.ts: tsval's profile), on the lines its statements are on now. */
@@ -120,8 +118,6 @@ const CODE = new Set(["javascript", "javascriptreact", "typescript", "typescript
 const asks = new Map<string, { "session": string; "ask": CapabilityAsk; "anchors"?: Anchors }>();
 /** The workbench's extension API (set by `installLiveValues`): the documents' text, BABLR's spans. */
 let api: typeof vscodeApi | undefined;
-/** Each file's latest draw: an earlier one still placing its lines gives way. */
-const drawing = new Map<string, number>();
 /** Sends a capability stop's choice back to its session (set by `installLiveValues`). */
 let choose: ((session: string, choice: CapabilityChoice, rule?: EditedRule, give?: unknown) => Promise<unknown>) | undefined;
 /** What a call returned the last time it ran for real (a preview's fetch, recorded), or null (set by `installLiveValues`). */
@@ -171,8 +167,6 @@ export function variablesOf(rule: EditedRule): string[] {
 function commandLine(args: string[]): string {
 	return args.map((arg) => (arg === "" || /[\s"'|]/u.test(arg) ? JSON.stringify(arg) : arg)).join(" ");
 }
-/** The cells of each column on screen, by group and column: to light a column on every line. */
-let columns = new Map<string, HTMLElement[]>();
 
 /** A value's look, by what it reads as. */
 function kindOf(value: LiveValue): string {
@@ -334,168 +328,9 @@ export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>, picked
 	return rows;
 }
 
-/** A row's element: its picker, its label (as wide as its call's widest), then its value or its columns. */
-function renderRow(row: Row, labelWidth: number, session: Session | undefined, uri: string, redraw: () => void, element: HTMLElement): void {
-	const line = document.createElement("div");
-	const label = document.createElement("span");
-	const cell = (value: Cell | undefined, className: string): HTMLSpanElement => {
-		const span = document.createElement("span");
-
-		span.className = `live-values-cell ${className}${value === undefined || value.kind === "" ? "" : ` live-values-${value.kind}`}`;
-		span.textContent = value?.text ?? "";
-		span.title = value?.text ?? "";
-
-		return span;
-	};
-
-	line.className = "live-values-row";
-	line.dataset["line"] = String(row.line);
-
-	if (row.picker !== undefined) {
-		const { "function": key, index, count } = row.picker;
-		const picker = document.createElement("span");
-		const step = (by: number, text: string, title: string): HTMLButtonElement => {
-			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-			const button = document.createElement("button");
-
-			button.className = "live-values-step";
-			button.textContent = text;
-			button.title = title;
-			button.disabled = index + by < 0 || index + by >= count;
-			button.addEventListener("click", () => {
-				// The latest picked is no pick: it follows the calls still coming.
-				if (index + by === count - 1) {
-					session?.picked.delete(key);
-				} else {
-					session?.picked.set(key, index + by);
-				}
-
-				redraw();
-			});
-
-			return button;
-		};
-
-		picker.className = "live-values-picker";
-		picker.title = `Call ${index + 1} of ${count}`;
-		picker.append(step(-1, "‹", "The call before"), `${index + 1}/${count}`, step(1, "›", "The call after"));
-		line.append(picker);
-	}
-	label.className = "live-values-label";
-	label.textContent = row.label.padEnd(labelWidth);
-
-	// A line binding several names (a function's parameters) names each in its value: no label to line up.
-	if (row.label !== "") {
-		line.append(label);
-	}
-
-	if (row.inline !== undefined) {
-		line.append(cell(row.inline, "inline"));
-	}
-
-	for (const [index, value] of row.cells.entries()) {
-		const span = cell(value, "turn");
-		const key = `${row.group}#${index}`;
-
-		// eslint-disable-next-line webawesome/no-inline-styles -- dynamic geometry: a column as wide as its widest value
-		span.style.width = `${(row.widths[index] ?? 1) + 2}ch`;
-		span.classList.toggle("held", session?.held === key);
-		span.addEventListener("mouseenter", () => { light(key, true); });
-		span.addEventListener("mouseleave", () => { light(key, false); });
-		span.addEventListener("click", () => { if (session !== undefined) { hold(session, key); } });
-		columns.set(key, [...columns.get(key) ?? [], span]);
-		line.append(span);
-	}
-
-	if (row.input === true) {
-		renderArgv(row, uri, line, redraw);
-	} else if (row.name !== undefined) {
-		renderMock(row, row.name, session, uri, line, redraw);
-	}
-
-	// The rule being made on this row, under it.
-	const panelKey = row.input === true ? `${uri}#process.argv` : row.name === undefined ? undefined : `${uri}#${row.name}`;
-
-	element.append(line, ...panelKey !== undefined && making.has(panelKey) ? [making.get(panelKey)!] : []);
-}
-
-/** process.argv's row: what a rule gives it, if one does (the run's own value struck through), and *Mock…*. */
-function renderArgv(row: Row, uri: string, line: HTMLElement, redraw: () => void): void {
-	const given = givenArgv.get(uri);
-	const key = `${uri}#process.argv`;
-	const tools = Object.assign(document.createElement("span"), { "className": "live-values-mock shown" });
-	// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-	const open = Object.assign(document.createElement("button"), { "className": "live-values-choice mock", "textContent": "Mock…", "title": "Give the program arguments of your own: once, or by a rule, every run" });
-
-	line.classList.toggle("mocking", given !== null && given !== undefined);
-	line.classList.add("argv");
-
-	if (given !== null && given !== undefined) {
-		tools.append(Object.assign(document.createElement("span"), {
-			"className": "live-values-given",
-			"textContent": given.values.map(commandLine).join("  ·  "),
-			"title": `Given by a rule in your policy${given.values.length > 1 ? `: ${given.values.length} runs, one after another` : ""}`
-		}));
-	}
-
-	open.disabled = making.has(key);
-	open.addEventListener("click", () => {
-		open.disabled = true;
-		void openMock(uri, row, () => { making.delete(key); redraw(); }).then((panel) => {
-			making.set(key, panel);
-			redraw();
-		}, (error: unknown) => {
-			open.disabled = false;
-			open.title = String(error);
-		});
-	});
-	tools.append(open);
-	line.append(tools);
-}
-
-/** A variable's Mock (LIVE-VALUES.md, "Mocking a value"): *Mock…*, on its row's hover — the rule editor, prefilled with
- *  this place and this value. */
-function renderMock(row: Row, name: string, session: Session | undefined, uri: string, line: HTMLElement, redraw: () => void): void {
-	const key = `${uri}#${name}`;
-	const tools = Object.assign(document.createElement("span"), { "className": `live-values-mock${making.has(key) ? " shown" : ""}` });
-	// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-	const open = Object.assign(document.createElement("button"), { "className": "live-values-choice mock", "textContent": "Mock…", "title": "Give it another value: at this stop, or by a rule, each time the program gets here" });
-
-	open.disabled = making.has(key) || row.at === undefined || session?.anchors === undefined;
-	open.addEventListener("click", () => {
-		open.disabled = true;
-		void openVariableMock(uri, row, name, session!, () => { making.delete(key); redraw(); }).then((panel) => {
-			making.set(key, panel);
-			redraw();
-		}, (error: unknown) => {
-			open.disabled = false;
-			open.title = error instanceof Error ? error.message : String(error);
-		});
-	});
-	tools.append(open);
-	line.append(tools);
-}
-
-/** A click holds a column lit; another lets it go. */
-function hold(session: Session, key: string): void {
-	session.held = session.held === key ? undefined : key;
-
-	for (const [column, cells] of columns) {
-		for (const cell of cells) {
-			cell.classList.toggle("held", column === session.held);
-		}
-	}
-}
-
-function light(key: string, on: boolean): void {
-	for (const cell of columns.get(key) ?? []) {
-		cell.classList.toggle("lit", on);
-	}
-}
-
-/** The rule being made, by where — a capability stop's session, or `<uri>#process.argv` — its panel, kept as it is
- *  across the margin's redraws. */
-const making = new Map<string, HTMLElement>();
+/** The rules being made in the Rule view (editInRuleView), by where — a capability stop's session, `<uri>#process.argv`,
+ *  `<uri>#<variable>` — each with how to close it: its button here waits while it's open. */
+const making = new Map<string, () => void>();
 
 export type PolicyModule = typeof import("@brianjenkins94/util/silo/policy");
 
@@ -744,105 +579,6 @@ async function openVariableMock(uri: string, row: Row, name: string, session: Se
 	], catalog);
 }
 
-/** A capability stop's question: the call and what it reaches, then the choices — or the rule being made. */
-function renderAsk(session: string, ask: CapabilityAsk, element: HTMLElement, redraw: () => void): void {
-	const box = document.createElement("div");
-	const what = document.createElement("div");
-	const callee = document.createElement("span");
-	const resource = document.createElement("span");
-	const choices = document.createElement("div");
-	// A choice made: every button off, the one that made it marked, and the session told.
-	const decide = (choice: CapabilityChoice, chosen: HTMLElement): void => {
-		for (const other of choices.querySelectorAll("button")) {
-			other.disabled = true;
-		}
-
-		chosen.classList.add("chosen");
-		void choose?.(session, choice).catch((error: unknown) => {
-			box.append(Object.assign(document.createElement("div"), { "className": "live-values-ask-error", "textContent": String(error) }));
-		});
-	};
-	const always = ask.resolved ? `${ask.capability} on ${ask.resource}, in your policy (.silo/<you>.policy.json)` : undefined;
-	// What to do with the call (a verb), and for how long (its menu): the button itself is this call; ▾ offers this call,
-	// every such call this run, or always — kept in your policy (for the resource the call reaches, so only once it's known).
-	const split = (verb: string, label: string, lasting: [CapabilityChoice, CapabilityChoice, CapabilityChoice], does: string): HTMLElement => {
-		const group = Object.assign(document.createElement("span"), { "className": "live-values-split" });
-		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-		const main = Object.assign(document.createElement("button"), { "className": `live-values-choice ${verb}`, "textContent": label, "title": `${does}: this call — and stop here again next time` });
-		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-		const more = Object.assign(document.createElement("button"), { "className": `live-values-choice more ${verb}`, "textContent": "▾", "title": `${label}: for how long` });
-		const menu = Object.assign(document.createElement("div"), { "className": "live-values-menu", "hidden": true });
-		const items: [string, CapabilityChoice, string | undefined][] = [
-			["this call", lasting[0], `${does}: this call`],
-			["this run", lasting[1], `${does}: every ${ask.capability} call, until this run ends (kept nowhere)`],
-			["always", lasting[2], always === undefined ? undefined : `${does}: ${always}`]
-		];
-		const close = (event: Event): void => {
-			if (!group.contains(event.target as Node) || (event instanceof KeyboardEvent && event.key === "Escape")) {
-				menu.hidden = true;
-				document.removeEventListener("pointerdown", close, true);
-				document.removeEventListener("keydown", close, true);
-			}
-		};
-
-		for (const [text, choice, title] of items) {
-			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-			const item = Object.assign(document.createElement("button"), { "className": "live-values-menu-item", "textContent": text, "title": title ?? "Needs the resource the call reaches, which isn't known before the line runs", "disabled": title === undefined });
-
-			item.addEventListener("click", () => {
-				menu.hidden = true;
-				decide(choice, main);
-			});
-			menu.append(item);
-		}
-
-		main.addEventListener("click", () => { decide(lasting[0], main); });
-		more.addEventListener("click", () => {
-			menu.hidden = !menu.hidden;
-
-			if (!menu.hidden) {
-				document.addEventListener("pointerdown", close, true);
-				document.addEventListener("keydown", close, true);
-			}
-		});
-		group.append(main, more, menu);
-
-		return group;
-	};
-
-	box.className = `live-values-ask${ask.dangerous ? " dangerous" : ""}`;
-	callee.className = "live-values-ask-callee";
-	callee.textContent = ask.callee;
-	resource.className = ask.resolved ? "live-values-string" : "live-values-ask-unresolved";
-	resource.textContent = ask.resolved ? `'${ask.resource}'` : ask.resource;
-	what.className = "live-values-ask-what";
-	what.title = `${ask.capability}: the policy hasn't allowed it`;
-	what.append(callee, " ", resource, Object.assign(document.createElement("span"), { "className": "live-values-ask-capability", "textContent": ` ${ask.capability}` }));
-	choices.className = "live-values-choices";
-	choices.append(
-		split("allow", "Allow", ["allow-once", "allow-run", "allow-always"], "Let it run, for real"),
-		split("skip", "Skip", ["skip", "skip-run", "skip-always"], "Don't make it: the run goes on as if it did nothing (the debugger's stand-in answers), the line saying it was skipped"),
-		split("deny", "Deny", ["deny", "deny-run", "deny-always"], "Fail it, as a denied call does (EACCES)")
-	);
-
-	// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-	const rule = Object.assign(document.createElement("button"), { "className": "live-values-choice rule", "textContent": "Rule…", "title": "Make a rule for calls like this one: which ones, and what to do" });
-
-	rule.addEventListener("click", () => {
-		rule.disabled = true;
-		void openRule(session, ask, () => { making.delete(session); redraw(); }).then((panel) => {
-			making.set(session, panel);
-			redraw();
-		}, (error: unknown) => {
-			rule.disabled = false;
-			box.append(Object.assign(document.createElement("div"), { "className": "live-values-ask-error", "textContent": String(error) }));
-		});
-	});
-	choices.append(rule);
-	box.append(what, making.get(session) ?? choices);
-	element.append(box);
-}
-
 let styled = false;
 
 /** live-values.css in the page, once — the margin's, and the rule panel's wherever it's shown. */
@@ -1019,54 +755,14 @@ function shortCount(count: number): string {
 	return count < 1000 ? String(count) : count < 1e6 ? `${(count / 1000).toFixed(count < 1e4 ? 1 : 0)}k` : `${(count / 1e6).toFixed(1)}M`;
 }
 
-/** The run log, at the file's end: a line per step that ran — its card's number and title, its share of the work, what
- *  it waited — and how the run ended. */
-function renderRunLog(log: RunLog, end: RunEnd | undefined, element: HTMLElement): void {
-	const div = (className: string, text: string, title?: string): HTMLDivElement => Object.assign(document.createElement("div"), { "className": className, "textContent": text, ...title === undefined ? {} : { "title": title } });
-	const span = (className: string, text: string, title?: string): HTMLSpanElement => Object.assign(document.createElement("span"), { "className": className, "textContent": text, ...title === undefined ? {} : { "title": title } });
-	const box = div("live-values-runlog", "");
-	const ended = end === undefined ? "completed" : end.kind === "crashed" ? `crashed at line ${end.line + 1}` : `stopped at line ${end.line + 1}`;
-
-	box.append(div(`live-values-runlog-head ${end?.kind ?? "completed"}`, `Last run · ${shortCount(log.statements)} statements${log.waited > 0 ? ` · waited ${log.waited}ms` : ""} · ${ended}`, "Work in statements run — the same every run — and waits on the event loop's clock"));
-
-	for (const row of log.rows) {
-		const share = Math.round((row.statements / log.statements) * 100);
-		const line = div("live-values-runlog-row", "");
-
-		line.append(
-			span("live-values-runlog-card", String(row.card + 1)),
-			span("live-values-runlog-title", row.title),
-			span("live-values-runlog-share", share === 0 ? "<1%" : `${share}%`, `${row.statements} statements`),
-			...row.waited > 0 ? [span("live-values-runlog-waited", `waited ${row.waited}ms`)] : []
-		);
-		box.append(line);
-	}
-
-	element.append(box);
-}
-
-/** A step's card label: its title, what it is, whether it ran; the types of what it declares on hover. */
-function renderStep(step: Step, marks: PaneMark[], element: HTMLElement): void {
-	const ran = ranOf(step, marks);
-
-	element.append(
-		Object.assign(document.createElement("span"), { "className": "live-values-step-title", "textContent": step.title }),
-		...step.detail === "" ? [] : [Object.assign(document.createElement("span"), { "className": "live-values-step-detail", "textContent": step.detail })],
-		...ran === undefined ? [] : [Object.assign(document.createElement("span"), { "className": `live-values-step-ran ${ran.kind}`, "textContent": ran.text })]
-	);
-
-	if (step.declares.length > 0) {
-		element.title = step.declares.map(({ name, type }) => (type === null ? name : `${name}: ${type}`)).join("\n");
-	}
-}
-
-/** Show a file's values and notes in its margin, or take the margin away when it has neither. */
+/** The Margin of `uri` drawn again: pane-views asks for it (`margin.paneView`, marginOf). */
 function draw(uri: string): void {
-	void place(uri);
+	refreshView("margin", uri);
 }
 
 /** `items` moved to the lines their code is on now (`anchors`, by each one's `at`), those whose code is gone dropped —
- *  as they are when the file is as it ran, or when there's nothing to place them by. */
+ *  as they are when the file is as it ran, or when there's nothing to place them by. (For margin.state, an agent's
+ *  lines: what's drawn is placed by pane-views, from each item's range in the text that ran.) */
 async function relocate<T extends { "line": number; "at"?: Range }>(anchors: Anchors | undefined, text: string | undefined, items: T[]): Promise<T[]> {
 	if (anchors === undefined || text === undefined || text === anchors.text || items.length === 0) {
 		return items;
@@ -1082,22 +778,98 @@ function documentText(uri: string): string | undefined {
 	return api?.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.getText();
 }
 
-async function place(uri: string): Promise<void> {
-	const token = (drawing.get(uri) ?? 0) + 1;
+/** Where something a run put on its line `line` is: its range `at` in the text that ran (`anchors`), followed from it to
+ *  the file as it is by the editor (pane-views) — or, with nothing to follow it from, that line. */
+function placeOf(anchors: Anchors | undefined, line: number, at: Range | undefined): PaneAt {
+	return anchors !== undefined && at !== undefined ? { "ran": { "source": anchors.text, "start": at[0], "end": at[1] } } : { "lines": [line, line] };
+}
 
-	drawing.set(uri, token);
+/** A gutter mark's kind, as the contract names it (from the Margin's classes: coverage's, a placed rule's). */
+const MARK_KINDS: Record<string, ContentMark["kind"]> = { "coverage-ran": "ran", "coverage-partial": "partial", "coverage-missed": "missed", "run-crashed": "crashed", "run-stopped": "stopped", "rule-placed": "rule", "rule-placed uncertain": "rule-uncertain" };
 
+/** A cell's look, as the contract names it — the kinds it knows; any other, plain. */
+const CELL_KINDS = new Set(["number", "string", "boolean", "object", "error", "undefined", "branch", "set", "skip", "given"]);
+
+function cellKind(kind: string | undefined): PaneCell["kind"] {
+	return kind !== undefined && CELL_KINDS.has(kind) ? kind as PaneCell["kind"] : undefined;
+}
+
+/** A capability stop's question, as data: the call and what it reaches, then the choices — each for this call, this
+ *  run or always — and *Rule…* (made in the Rule view). */
+function askItem(uri: string, asking: { "session": string; "ask": CapabilityAsk; "anchors"?: Anchors }): PaneItem {
+	const { session, ask } = asking;
+	const always = ask.resolved ? `${ask.capability} on ${ask.resource}, in your policy (.silo/<you>.policy.json)` : undefined;
+	const choice = (verb: string, label: string, lasting: [CapabilityChoice, CapabilityChoice, CapabilityChoice], does: string): PaneAction => ({
+		"title": label,
+		"command": "margin.decide",
+		"arguments": [session, lasting[0]],
+		"tooltip": `${does}: this call — and stop here again next time`,
+		"more": [
+			{ "title": "this call", "command": "margin.decide", "arguments": [session, lasting[0]], "tooltip": `${does}: this call` },
+			{ "title": "this run", "command": "margin.decide", "arguments": [session, lasting[1]], "tooltip": `${does}: every ${ask.capability} call, until this run ends (kept nowhere)` },
+			{ "title": "always", "command": "margin.decide", "arguments": [session, lasting[2]], "tooltip": always === undefined ? "Needs the resource the call reaches, which isn't known before the line runs" : `${does}: ${always}`, ...always === undefined ? { "disabled": true } : {} }
+		]
+	});
+	const code = (text: string): string => `\`${text.replaceAll("`", "'")}\``;
+
+	return {
+		"id": "ask",
+		"at": placeOf(asking.anchors, ask.line, ask.at),
+		"content": { "markdown": `${code(ask.callee)} ${ask.resolved ? code(`'${ask.resource}'`) : `_${ask.resource}_`} ${ask.capability}` },
+		"tone": ask.dangerous ? "warning" : "question",
+		"actions": [
+			choice("allow", "Allow", ["allow-once", "allow-run", "allow-always"], "Let it run, for real"),
+			choice("skip", "Skip", ["skip", "skip-run", "skip-always"], "Don't make it: the run goes on as if it did nothing (the debugger's stand-in answers), the line saying it was skipped"),
+			choice("deny", "Deny", ["deny", "deny-run", "deny-always"], "Fail it, as a denied call does (EACCES)"),
+			{ "title": "Rule…", "command": "margin.rule", "arguments": [uri], "tooltip": making.has(session) ? "Its rule is open in the Rule view" : "Make a rule for calls like this one: which ones, and what to do", ...making.has(session) ? { "disabled": true } : {} }
+		]
+	};
+}
+
+/** A row a run put on a line, as data: a function's call picker, its label, the line's own value, a column a turn of a
+ *  loop (one held lit), and *Mock…* — process.argv's, or a variable's (made in the Rule view). */
+function rowItem(uri: string, row: Row, index: number, session: Session | undefined): PaneItem {
+	const picker = row.picker;
+	const step = (by: number, text: string, title: string): PaneCell => {
+		const to = picker === undefined ? -1 : picker.index + by;
+
+		return { "text": text, "title": title, ...picker !== undefined && to >= 0 && to < picker.count ? { "command": { "title": title, "command": "margin.pick", "arguments": [uri, picker.function, to, picker.count] } } : {} };
+	};
+	const given = row.input === true ? givenArgv.get(uri) : undefined;
+	const key = row.input === true ? `${uri}#process.argv` : row.name === undefined ? undefined : `${uri}#${row.name}`;
+	const mock: PaneAction | undefined = row.input === true
+		? { "title": "Mock…", "command": "margin.mockArgv", "arguments": [uri, row.inline?.text ?? ""], "tooltip": "Give the program arguments of your own: once, or by a rule, every run", ...making.has(key!) ? { "disabled": true } : {} }
+		: row.name === undefined
+			? undefined
+			: { "title": "Mock…", "command": "margin.mockVariable", "arguments": [uri, row.name, row.at ?? null, (row.inline ?? row.cells.findLast((each) => each !== undefined))?.text ?? "", (row.inline ?? row.cells.findLast((each) => each !== undefined))?.kind ?? ""], "tooltip": "Give it another value: at this stop, or by a rule, each time the program gets here", ...making.has(key!) || row.at === undefined || session?.anchors === undefined ? { "disabled": true } : {} };
+
+	return {
+		"id": `values:${index}`,
+		"at": row.input === true && row.at === undefined ? { "lines": [row.line, row.line] } : placeOf(session?.anchors, row.line, row.at),
+		"content": {
+			...row.label === "" ? {} : { "label": row.label },
+			...picker === undefined ? {} : { "lead": [step(-1, "‹", "The call before"), { "text": `${picker.index + 1}/${picker.count}`, "title": `Call ${picker.index + 1} of ${picker.count}` }, step(1, "›", "The call after")] },
+			...row.inline === undefined ? {} : { "value": { "text": row.inline.text, "kind": cellKind(row.inline.kind) } },
+			"cells": given === null || given === undefined
+				? row.cells.map((cell, column) => (cell === undefined ? { "text": "" } : { "text": cell.text, "kind": cellKind(cell.kind), "picked": session?.held === `${row.group}#${column}`, "command": { "title": "Hold", "command": "margin.hold", "arguments": [uri, `${row.group}#${column}`] } }))
+				: [{ "text": given.values.map(commandLine).join("  ·  "), "kind": "given", "title": `Given by a rule in your policy${given.values.length > 1 ? `: ${given.values.length} runs, one after another` : ""}` }]
+		},
+		...mock === undefined ? {} : { "actions": [mock] }
+	};
+}
+
+/** What `uri`'s Margin shows, as data (the contract's PaneContent: pane-views draws it) — or nothing, for a file that
+ *  isn't code with nothing on it. And margin.state's plain account of it, an agent's. */
+async function marginOf(uri: string): Promise<PaneContent | undefined> {
 	ensureStyled();
 
 	const session = sessions.get(uri);
-	const prose = notes.get(uri) ?? [];
 	const text = documentText(uri);
-	// Each thing a run put on a line, on the line its code is on now.
-	const rows = await relocate(session?.anchors, text, session === undefined ? [] : rowsOf(session.values, session.calls, session.picked));
+	// (a run's rows with nothing to follow them by, once the file's changed from what ran, are gone)
+	const moved = session?.anchors !== undefined && text !== undefined && text !== session.anchors.text;
+	const rows = session === undefined ? [] : rowsOf(session.values, session.calls, session.picked).filter((row) => !moved || row.at !== undefined);
 	const asking = asks.get(uri);
-	const [askedAt] = asking === undefined ? [] : await relocate(asking.anchors, text, [asking.ask]);
 	const ending = ends.get(uri);
-	const [end] = ending === undefined ? [] : await relocate(ending.anchors, text, [ending]);
 	// The program's steps, a card around each (PROJECTIONS.md).
 	const shown = api?.workspace.textDocuments.find((each) => each.uri.toString() === uri);
 	const read = shown === undefined || !CODE.has(shown.languageId) ? undefined : await statementsOf(shown);
@@ -1115,114 +887,74 @@ async function place(uri: string): Promise<void> {
 		void rulesGiven?.(api?.Uri.parse(uri).path ?? "").then((given) => { givenArgv.set(uri, given); draw(uri); }, () => undefined);
 	}
 
-	if (drawing.get(uri) !== token) {
-		return; // a newer draw is placing
-	}
-
 	// (No value of its own: nothing ran. What a rule gives it is beside it.)
 	if (argvAt !== -1) {
 		rows.push({ "line": argvAt, "label": "process.argv =", "name": "process.argv", "cells": [], "inline": { "text": "", "kind": "argv" }, "group": "0/0", "widths": [], "input": true });
 	}
 
 	const last = rows.reduce<Row | undefined>((latest, row) => (latest === undefined || row.line > latest.line ? row : latest), undefined);
-	const labelWidths = new Map<string, number>();
-
-	for (const row of rows) {
-		const call = row.group.split("/")[0]!;
-
-		labelWidths.set(call, Math.max(labelWidths.get(call) ?? 0, row.label.length));
-	}
-
-	const asked = askedAt === undefined ? undefined : { ...asking!, "ask": askedAt };
 	// The last run, step by step, at the file's end (after the last card).
 	const profiled = profiles.get(uri);
 	const runLog = profiled === undefined || steps.length === 0 ? undefined : runLogOf(steps, profiled);
 	const logLine = shown === undefined ? 0 : Math.max(shown.lineCount - 1, ...steps.map((step) => step.toLine));
-	const entries: PaneEntry[] = [
+	const lineMarks: PaneMark[] = [...marked.get(uri) ?? [], ...rulesHere];
+	const ended = ending?.kind === "crashed" ? `crashed at line ${ending.line + 1}` : ending?.kind === "stopped" ? `stopped at line ${ending.line + 1}` : "completed";
+	const items: PaneItem[] = [
 		// A capability stop's question first on its line: it's what the run waits on.
-		...asked === undefined ? [] : [{ "id": "ask", "fromLine": asked.ask.line, "toLine": asked.ask.line }],
-		...rows.map((row, index) => ({ "id": `values:${index}`, "fromLine": row.line, "toLine": row.line })),
-		// What the bounds left out, under the last line: its cell grows a line for it.
-		...last === undefined || session === undefined || session.dropped === 0 ? [] : [{ "id": "values:dropped", "fromLine": last.line, "toLine": last.line }],
-		...prose.map((note) => ({ "id": `note:${note.id}`, "fromLine": note.fromLine, "toLine": note.toLine })),
-		...runLog === undefined ? [] : [{ "id": "runlog", "fromLine": logLine, "toLine": logLine }]
-	];
+		...asking === undefined ? [] : [askItem(uri, asking)],
+		...rows.map((row, index) => rowItem(uri, row, index, session)),
+		// What the bounds left out, under the last line.
+		...last === undefined || session === undefined || session.dropped === 0 ? [] : [{ "id": "values:dropped", "at": rowItem(uri, last, -1, session).at, "content": { "markdown": `… ${session.dropped} more values not kept` }, "tone": "info" } satisfies PaneItem],
+		// The run log: how the run ended, and a line per step that ran — its card's number and title, its share of the
+		// work (statements run, the same every run), what it waited.
+		...runLog === undefined ? [] : [
+			{ "id": "runlog", "at": { "lines": [logLine, logLine] }, "content": { "markdown": `**Last run** · ${shortCount(runLog.statements)} statements${runLog.waited > 0 ? ` · waited ${runLog.waited}ms` : ""} · ${ended}` }, ...ending === undefined ? {} : { "tone": "error" } } satisfies PaneItem,
+			...runLog.rows.map((row, index): PaneItem => {
+				const share = Math.round((row.statements / runLog.statements) * 100);
 
-	columns = new Map();
-
-	const marks: PaneMark[] = [
-		...marked.get(uri) ?? [],
-		...rulesHere,
-		...end === undefined ? [] : [{ "line": end.line, "kind": `run-${end.kind}`, "title": end.kind === "crashed" ? `The last run crashed here: ${end.message ?? "an uncaught error"}` : end.message === undefined ? "The last run was stopped here" : `The last run stopped here: ${end.message}` }]
+				return { "id": `runlog:${index}`, "at": { "lines": [logLine, logLine] }, "content": { "lead": [{ "text": String(row.card + 1) }], "label": row.title, "cells": [{ "text": share === 0 ? "<1%" : `${share}%`, "title": `${row.statements} statements` }, ...row.waited > 0 ? [{ "text": `waited ${row.waited}ms` }] : []] } };
+			})
+		]
 	];
+	const marks: ContentMark[] = [
+		...lineMarks.map((mark): ContentMark => ({ "at": { "lines": [mark.line, mark.line] }, "kind": MARK_KINDS[mark.kind] ?? "ran", ...mark.title === undefined ? {} : { "title": mark.title } })),
+		...ending === undefined ? [] : [{ "at": placeOf(ending.anchors, ending.line, ending.at), "kind": ending.kind, "title": ending.kind === "crashed" ? `The last run crashed here: ${ending.message ?? "an uncaught error"}` : ending.message === undefined ? "The last run was stopped here" : `The last run stopped here: ${ending.message}` } satisfies ContentMark]
+	];
+	const groups = steps.map((step, index): PaneGroup => {
+		const ran = ranOf(step, lineMarks);
+
+		return {
+			"id": `step:${index}`,
+			"at": { "lines": [step.fromLine, step.toLine] },
+			"label": step.title,
+			...step.detail === "" ? {} : { "detail": step.detail },
+			...step.declares.length === 0 ? {} : { "title": step.declares.map(({ name, type }) => (type === null ? name : `${name}: ${type}`)).join("\n") },
+			...ran === undefined ? {} : { "state": ran.kind as PaneGroup["state"], "stateText": ran.text }
+		};
+	});
+
+	// What an agent reads of it (margin.state): on the lines each is on now.
+	const stated = await relocate(session?.anchors, text, rows);
+	const [askedAt] = asking === undefined ? [] : await relocate(asking.anchors, text, [asking.ask]);
+	const [end] = ending === undefined ? [] : await relocate(ending.anchors, text, [ending]);
 
 	margins.set(uri, {
 		"file": api?.Uri.parse(uri).path ?? uri,
-		"values": rows.map((row) => ({ "line": row.line + 1, "label": row.label, "cells": row.inline === undefined ? row.cells.map((cell) => cell?.text ?? "") : [row.inline.text] })),
+		"values": stated.map((row) => ({ "line": row.line + 1, "label": row.label, "cells": row.inline === undefined ? row.cells.map((cell) => cell?.text ?? "") : [row.inline.text] })),
 		"dropped": session?.dropped ?? 0,
-		...asked === undefined ? {} : { "ask": { "line": asked.ask.line + 1, "call": asked.ask.callee, "capability": asked.ask.capability, "resource": asked.ask.resource, "resolved": asked.ask.resolved } },
+		...askedAt === undefined ? {} : { "ask": { "line": askedAt.line + 1, "call": askedAt.callee, "capability": askedAt.capability, "resource": askedAt.resource, "resolved": askedAt.resolved } },
 		...end === undefined ? {} : { "end": { "line": end.line + 1, "kind": end.kind, ...end.message === undefined ? {} : { "message": end.message } } },
-		"marks": marks.map((mark) => ({ "line": mark.line + 1, "kind": mark.kind, ...mark.title === undefined ? {} : { "title": mark.title } })),
+		"marks": [...lineMarks, ...end === undefined ? [] : [{ "line": end.line, "kind": `run-${end.kind}`, ...end.message === undefined ? {} : { "title": end.message } }]].map((mark) => ({ "line": mark.line + 1, "kind": mark.kind, ...mark.title === undefined ? {} : { "title": mark.title } })),
 		"cards": steps.map((step) => ({ "fromLine": step.fromLine + 1, "toLine": step.toLine + 1, "title": step.title })),
-		"notes": prose.map((note) => ({ "fromLine": note.fromLine + 1, "toLine": note.toLine + 1, "text": note.text })),
 		...runLog === undefined ? {} : { "runLog": runLog }
 	});
 
 	// Only a file that isn't code, with nothing in it, goes without.
-	if (entries.length === 0 && !open.has(uri) && marks.length === 0 && steps.length === 0) {
-		showMargin(uri, undefined);
-
-		return;
+	if (items.length === 0 && !open.has(uri) && marks.length === 0 && steps.length === 0) {
+		return undefined;
 	}
 
-	showMargin(uri, { "entries": entries, "marks": marks, "groups": steps.map((step, index) => ({ "id": `step:${index}`, "fromLine": step.fromLine, "toLine": step.toLine })), "render": (entry, element) => {
-		if (entry.id === "runlog") {
-			renderRunLog(runLog!, end, element);
-
-			return undefined;
-		}
-
-		if (entry.id.startsWith("step:")) {
-			renderStep(steps[Number(entry.id.slice("step:".length))]!, marks, element);
-
-			return undefined;
-		}
-
-		if (entry.id === "ask") {
-			renderAsk(asked!.session, asked!.ask, element, () => { draw(uri); });
-
-			return undefined;
-		}
-
-		if (entry.id === "values:dropped") {
-			element.append(Object.assign(document.createElement("div"), { "className": "live-values-dropped", "textContent": `… ${session!.dropped} more values not kept` }));
-
-			return undefined;
-		}
-
-		if (entry.id.startsWith("values:")) {
-			const row = rows[Number(entry.id.slice("values:".length))]!;
-
-			renderRow(row, labelWidths.get(row.group.split("/")[0]!) ?? 0, session, uri, () => { draw(uri); }, element);
-
-			return undefined;
-		}
-
-		const text = prose.find((note) => `note:${note.id}` === entry.id)?.text ?? "";
-		let dispose: (() => void) | undefined;
-		let gone = false;
-
-		void import("./pane").then(({ renderNote }) => {
-			if (!gone) {
-				dispose = renderNote(element, text);
-			}
-		});
-
-		return () => {
-			gone = true;
-			dispose?.();
-		};
-	} });
+	return { "items": items, "groups": groups, "marks": marks };
 }
 
 /** Where `uri`'s last run's work went (coverage.ts: tsval's profile, on the lines its statements are on now), for the
@@ -1243,20 +975,89 @@ export function showMarks(uri: string, marks: PaneMark[]): void {
 	draw(uri);
 }
 
-/** Prose notes beside `uri` (a file URI's string), or none. */
-export function showNotes(uri: string, fileNotes: Note[] | undefined): void {
-	if (fileNotes === undefined || fileNotes.length === 0) {
-		notes.delete(uri);
-	} else {
-		notes.set(uri, fileNotes);
-	}
-
-	draw(uri);
-}
-
 /** Keep a margin beside every code file shown, and follow debug sessions' values and capability stops. */
 export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	api = vscode;
+
+	// The Margin, a pane view (EXTENSION-POINTS.md, 4): its content, asked for by pane-views — and what its buttons and
+	// cells run. Each rule it makes opens in the Rule view (editInRuleView); its button waits while it's open there.
+	const uriArg = (value: unknown): string => {
+		if (typeof value !== "string") {
+			throw new TypeError("a file's URI");
+		}
+
+		return value;
+	};
+	const editing = (key: string, uri: string): () => void => () => {
+		making.get(key)?.();
+		making.delete(key);
+		draw(uri);
+	};
+
+	vscode.commands.registerCommand("margin.paneView", async (uri: unknown) => (typeof uri === "string" ? marginOf(uri) : undefined));
+	vscode.commands.registerCommand("margin.decide", async (session: unknown, choice: unknown) => {
+		if (typeof session !== "string" || typeof choice !== "string") {
+			throw new TypeError("margin.decide: a session and a choice");
+		}
+
+		return choose?.(session, choice as CapabilityChoice);
+	});
+	vscode.commands.registerCommand("margin.rule", async (value: unknown) => {
+		const uri = uriArg(value);
+		const asking = asks.get(uri);
+
+		if (asking === undefined) {
+			throw new Error("not stopped at a capability call");
+		}
+
+		making.set(asking.session, editInRuleView(await openRule(asking.session, asking.ask, editing(asking.session, uri))));
+		draw(uri);
+	});
+	vscode.commands.registerCommand("margin.mockArgv", async (value: unknown, text: unknown) => {
+		const uri = uriArg(value);
+		const key = `${uri}#process.argv`;
+
+		making.set(key, editInRuleView(await openMock(uri, { "inline": { "text": typeof text === "string" ? text : "", "kind": "argv" } } as Row, editing(key, uri))));
+		draw(uri);
+	});
+	vscode.commands.registerCommand("margin.mockVariable", async (value: unknown, name: unknown, at: unknown, text: unknown, kind: unknown) => {
+		const uri = uriArg(value);
+		const session = sessions.get(uri);
+
+		if (typeof name !== "string" || !Array.isArray(at) || session === undefined) {
+			throw new Error("nothing to mock here: the run's values are gone");
+		}
+
+		const key = `${uri}#${name}`;
+
+		making.set(key, editInRuleView(await openVariableMock(uri, { "at": at as Range, "inline": { "text": String(text ?? ""), "kind": String(kind ?? "") }, "cells": [] } as unknown as Row, name, session, editing(key, uri))));
+		draw(uri);
+	});
+	// A function's call picked on its first line (the latest is no pick: it follows the calls still coming).
+	vscode.commands.registerCommand("margin.pick", (value: unknown, key: unknown, index: unknown, count: unknown) => {
+		const uri = uriArg(value);
+		const session = sessions.get(uri);
+
+		if (session !== undefined && typeof key === "string" && typeof index === "number" && typeof count === "number") {
+			if (index === count - 1) {
+				session.picked.delete(key);
+			} else {
+				session.picked.set(key, index);
+			}
+
+			draw(uri);
+		}
+	});
+	// A click holds a column lit; another lets it go.
+	vscode.commands.registerCommand("margin.hold", (value: unknown, key: unknown) => {
+		const uri = uriArg(value);
+		const session = sessions.get(uri);
+
+		if (session !== undefined && typeof key === "string") {
+			session.held = session.held === key ? undefined : key;
+			draw(uri);
+		}
+	});
 
 	// At a stop, the values as VS Code's own inline values too (its InlineValuesProvider: the debugger's documented contract
 	// for values beside the code) — each row's latest at the end of its line, on the line its code is on now, as the margin
@@ -1386,7 +1187,8 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 			redraw(uriOf(file));
 		}
 
-		if (typeof file === "string" && asks.get(uriOf(file))?.session === session) {
+		if (typeof file === "string" && typeof session === "string" && asks.get(uriOf(file))?.session === session) {
+			making.get(session)?.();
 			making.delete(session);
 			asks.delete(uriOf(file));
 			redraw(uriOf(file));
@@ -1450,6 +1252,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		const uri = uriOf(file);
 
 		// A new stop, or none: the rule being made at the last one goes.
+		making.get(session)?.();
 		making.delete(session);
 
 		if (ask !== undefined) {

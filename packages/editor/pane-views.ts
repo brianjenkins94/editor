@@ -1,28 +1,28 @@
 /**
  * Pane views (EXTENSION-POINTS.md, 4): the tabs on the pane's first line, and what each draws beside the code. A view
- * is core's (the Margin, drawn by live-values.ts until it's a provider too) or an extension's — declared in its manifest
- * (`contributes.paneViews`) and provided by its command `<id>.paneView`, run with a file's URI whenever the view is
- * shown, the file is, or it changes (or the provider says so: `editor.pane.refresh`). Its content is data
- * (@brianjenkins94/run-contract/pane): drawn here, in the Margin's look, each item on the lines its `at` is on now —
- * lines as given, a span reference resolved by the editor's BABLR, or a range in a text that ran followed from it
- * (anchors.ts). A view declared `into` another adds its items to that one's.
+ * is core's (the Margin, live-values.ts's) or an extension's — declared in its manifest (`contributes.paneViews`) — and
+ * either way provided by its command `<id>.paneView`, run with a file's URI whenever the view is shown, the file is, or
+ * it changes (or the provider says so: `editor.pane.refresh`). Its content is data (@brianjenkins94/run-contract/pane):
+ * drawn here, in the Margin's look, each item on the lines its `at` is on now — lines as given, a span reference
+ * resolved by the editor's BABLR, or a range in a text that ran followed from it (anchors.ts). A view declared `into`
+ * another adds its items to that one's.
  *
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
 import type * as vscodeApi from "vscode";
 import type { PaneEntry, PaneMark as FrameMark, PaneView } from "@brianjenkins94/monaco-vscode-api/main";
-import type { PaneAt, PaneCell, PaneCommand, PaneContent, PaneItem, PaneViewDeclaration } from "@brianjenkins94/run-contract/pane";
+import type { PaneAction, PaneAt, PaneCell, PaneCommand, PaneContent, PaneGroup, PaneItem, PaneViewDeclaration } from "@brianjenkins94/run-contract/pane";
 import type { SpanRef } from "@brianjenkins94/run-contract/annotations";
 import { extensionContributions, onExtensionsChanged, renderMarkdown, showPane, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
 import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { Anchors } from "./anchors";
 
-/** The Margin: core's own view, drawn by live-values.ts. */
+/** The Margin: core's own view (live-values.ts provides it, as `margin.paneView`). */
 const MARGIN = "margin";
 
 /** Core's views, before any extension's: the Margin, and what's still to come. */
 const CORE_VIEWS: PaneView[] = [
-	{ "id": MARGIN, "label": "Margin", "title": "Values, notes and cards beside the code" },
+	{ "id": MARGIN, "label": "Margin", "title": "Values, cards and the run beside the code" },
 	{ "id": "cards", "label": "Cards", "title": "Coming: the program as a column of cards, Automator's look (PROJECTIONS.md)", "disabled": true },
 	{ "id": "event-sheet", "label": "Event sheet", "title": "Coming: the program as an event sheet's conditions and actions", "disabled": true }
 ];
@@ -33,16 +33,18 @@ const MARK_CLASSES: Record<string, string> = { "ran": "coverage-ran", "partial":
 /** How a group's state reads on its card. */
 const STATE_TEXT: Record<string, string> = { "ran": "ran", "partial": "partly ran", "missed": "didn't run" };
 
-/** What live-values.ts draws in the Margin for a file — handed here, and shown while the Margin is. */
-interface MarginDrawing { "entries": PaneEntry[]; "render": (entry: PaneEntry, element: HTMLElement) => (() => void) | void; "marks": FrameMark[]; "groups": PaneEntry[] }
-
 /** An item placed: on the lines it's on now. */
 interface Placed { "item": PaneItem; "fromLine": number; "toLine": number }
+
+/** A row's place among the rows lined up with it: its run of rows (by its first row's id), and their column widths. */
+interface Columns { "run": string; "label": number; "cells": number[] }
+
+/** What one draw of a file shares among its items: each column's cells, lit together as one is hovered. */
+interface DrawState { "columns": Map<string, HTMLElement[]> }
 
 let api: typeof vscodeApi | undefined;
 let active = MARGIN;
 let declared: PaneViewDeclaration[] = [];
-const margins = new Map<string, MarginDrawing>();
 /** Each text that ran, its anchors (by file and text). */
 const anchored = new Map<string, Anchors>();
 /** The latest draw of each file, so an older one finishing late doesn't overwrite it. */
@@ -101,38 +103,38 @@ async function placeAll(document: vscodeApi.TextDocument, ats: PaneAt[]): Promis
 }
 
 /** Run `command` (a click on an item's button or cell), with `last` after its own arguments. */
-function run(command: PaneCommand, ...last: unknown[]): void {
-	void Promise.resolve(api?.commands.executeCommand(command.command, ...command.arguments ?? [], ...last)).catch(() => undefined);
+async function run(command: PaneCommand, ...last: unknown[]): Promise<unknown> {
+	return api?.commands.executeCommand(command.command, ...command.arguments ?? [], ...last);
 }
 
-/** Each row's column widths, lined up with the rows on the lines next to it: label width, then a width a cell. */
-function columnsOf(placed: Placed[]): Map<string, { "label": number; "cells": number[] }> {
+/** Each row's column widths, lined up with the rows on the lines next to it (or its own line). */
+function columnsOf(placed: Placed[]): Map<string, Columns> {
 	const rows = placed.filter(({ item }) => "cells" in item.content).toSorted((a, b) => a.fromLine - b.fromLine);
-	const widths = new Map<string, { "label": number; "cells": number[] }>();
-	let run: Placed[] = [];
+	const widths = new Map<string, Columns>();
+	let group: Placed[] = [];
 	const close = (): void => {
-		const label = Math.max(0, ...run.map(({ item }) => ("cells" in item.content ? item.content.label?.length ?? 0 : 0)));
+		const label = Math.max(0, ...group.map(({ item }) => ("cells" in item.content ? item.content.label?.length ?? 0 : 0)));
 		const cells: number[] = [];
 
-		for (const { item } of run) {
+		for (const { item } of group) {
 			if ("cells" in item.content) {
 				item.content.cells.forEach((cell, index) => { cells[index] = Math.max(cells[index] ?? 0, cell.text.length); });
 			}
 		}
 
-		for (const { item } of run) {
-			widths.set(item.id, { "label": label, "cells": cells });
+		for (const { item } of group) {
+			widths.set(item.id, { "run": group[0]!.item.id, "label": label, "cells": cells });
 		}
 
-		run = [];
+		group = [];
 	};
 
 	for (const row of rows) {
-		if (run.length > 0 && row.fromLine > run.at(-1)!.toLine + 1) {
+		if (group.length > 0 && row.fromLine > group.at(-1)!.toLine + 1) {
 			close();
 		}
 
-		run.push(row);
+		group.push(row);
 	}
 
 	close();
@@ -140,22 +142,10 @@ function columnsOf(placed: Placed[]): Map<string, { "label": number; "cells": nu
 	return widths;
 }
 
-function button(command: PaneCommand, className: string): HTMLButtonElement {
-	// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
-	const element = document.createElement("button");
-
-	element.className = className;
-	element.textContent = command.title;
-	element.title = command.tooltip ?? command.title;
-	element.addEventListener("click", () => { run(command); });
-
-	return element;
-}
-
-function cellOf(cell: PaneCell, width: number | undefined): HTMLSpanElement {
+function cellOf(cell: PaneCell, className: string, width?: number): HTMLSpanElement {
 	const span = document.createElement("span");
 
-	span.className = `live-values-cell turn${cell.kind === undefined ? "" : ` live-values-${cell.kind}`}${cell.picked === true ? " held" : ""}`;
+	span.className = `live-values-cell ${className}${cell.kind === undefined ? "" : ` live-values-${cell.kind}`}${cell.picked === true ? " held" : ""}`;
 	span.textContent = cell.text;
 	span.title = cell.title ?? cell.text;
 
@@ -167,35 +157,123 @@ function cellOf(cell: PaneCell, width: number | undefined): HTMLSpanElement {
 	if (cell.command !== undefined) {
 		const { command } = cell;
 
-		span.addEventListener("click", () => { run(command); });
+		span.classList.add("clickable");
+		span.addEventListener("click", () => { void run(command).catch(() => undefined); });
 	}
 
 	return span;
 }
 
-/** Draw `item` into `element`, in the Margin's look; what it returns is called when it goes. */
-function renderItem(item: PaneItem, element: HTMLElement, columns: { "label": number; "cells": number[] } | undefined): (() => void) | undefined {
+/** Draw `item` into `element`, in the Margin's look, level with line `line`; what it returns is called when it goes. */
+function renderItem(item: PaneItem, element: HTMLElement, line: number, columns: Columns | undefined, state: DrawState): (() => void) | undefined {
 	const { content } = item;
+	const buttons: HTMLButtonElement[] = [];
 	let dispose: (() => void) | undefined;
+	// A button's command: the item's buttons off until it's drawn again, this one marked — and why, if it fails.
+	const act = (command: PaneCommand, chosen: HTMLButtonElement): void => {
+		for (const each of buttons) {
+			each.disabled = true;
+		}
+
+		chosen.classList.add("chosen");
+		void run(command).catch((error: unknown) => {
+			element.append(Object.assign(document.createElement("div"), { "className": "live-values-ask-error", "textContent": error instanceof Error ? error.message : String(error) }));
+		});
+	};
+	const button = (command: PaneCommand, className: string, onClick: (self: HTMLButtonElement) => void): HTMLButtonElement => {
+		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+		const made = Object.assign(document.createElement("button"), { "className": className, "textContent": command.title, "title": command.tooltip ?? command.title, "disabled": command.disabled === true });
+
+		made.addEventListener("click", () => { onClick(made); });
+		buttons.push(made);
+
+		return made;
+	};
+	// A button — and, with `more`, ▾ beside it, a menu of the ways it can go.
+	const actionOf = (action: PaneAction): HTMLElement => {
+		const main = button(action, "live-values-choice", (self) => { act(action, self); });
+
+		if (action.more === undefined || action.more.length === 0) {
+			return main;
+		}
+
+		const group = Object.assign(document.createElement("span"), { "className": "live-values-split" });
+		const menu = Object.assign(document.createElement("div"), { "className": "live-values-menu", "hidden": true });
+		const close = (event: Event): void => {
+			if (!group.contains(event.target as Node) || (event instanceof KeyboardEvent && event.key === "Escape")) {
+				menu.hidden = true;
+				document.removeEventListener("pointerdown", close, true);
+				document.removeEventListener("keydown", close, true);
+			}
+		};
+		const more = button({ "title": "▾", "command": "", "tooltip": `${action.title}: for how long` }, "live-values-choice more", () => {
+			menu.hidden = !menu.hidden;
+
+			if (!menu.hidden) {
+				document.addEventListener("pointerdown", close, true);
+				document.addEventListener("keydown", close, true);
+			}
+		});
+
+		for (const way of action.more) {
+			menu.append(button(way, "live-values-menu-item", () => {
+				menu.hidden = true;
+				act(way, main);
+			}));
+		}
+
+		group.append(main, more, menu);
+
+		return group;
+	};
 
 	element.classList.add("pane-item", ...item.tone === undefined ? [] : [`tone-${item.tone}`]);
+	element.dataset["item"] = item.id;
 
 	if ("markdown" in content) {
 		const rendered = renderMarkdown(content.markdown);
 
+		rendered.element.classList.add("pane-markdown");
 		element.append(rendered.element);
 		dispose = rendered.dispose;
 	} else {
-		const line = document.createElement("div");
+		const row = document.createElement("div");
 
-		line.className = "live-values-row";
+		row.className = "live-values-row";
+		row.dataset["line"] = String(line);
+
+		if ("cells" in content) {
+			for (const cell of content.lead ?? []) {
+				row.append(cellOf(cell, "lead"));
+			}
+		}
 
 		if (content.label !== undefined && content.label !== "") {
-			line.append(Object.assign(document.createElement("span"), { "className": "live-values-label", "textContent": content.label.padEnd(columns?.label ?? 0) }));
+			row.append(Object.assign(document.createElement("span"), { "className": "live-values-label", "textContent": content.label.padEnd(columns?.label ?? 0) }));
 		}
 
 		if ("cells" in content) {
-			content.cells.forEach((cell, index) => { line.append(cellOf(cell, columns?.cells[index])); });
+			if (content.value !== undefined) {
+				row.append(cellOf(content.value, "inline"));
+			}
+
+			content.cells.forEach((cell, index) => {
+				const span = cellOf(cell, "turn", columns?.cells[index]);
+				const key = `${columns?.run ?? item.id}#${index}`;
+
+				state.columns.set(key, [...state.columns.get(key) ?? [], span]);
+				span.addEventListener("mouseenter", () => { for (const each of state.columns.get(key) ?? []) { each.classList.add("lit"); } });
+				span.addEventListener("mouseleave", () => { for (const each of state.columns.get(key) ?? []) { each.classList.remove("lit"); } });
+				row.append(span);
+			});
+
+			// A row's buttons at its end, shown as it's hovered.
+			if (item.actions !== undefined && item.actions.length > 0) {
+				const tools = Object.assign(document.createElement("span"), { "className": "live-values-mock" });
+
+				tools.append(...item.actions.map(actionOf));
+				row.append(tools);
+			}
 		} else {
 			const { input } = content;
 			// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
@@ -203,34 +281,47 @@ function renderItem(item: PaneItem, element: HTMLElement, columns: { "label": nu
 
 			field.addEventListener("keydown", (event) => {
 				if (event.key === "Enter") {
-					run(input.submit, field.value);
+					void run(input.submit, field.value).catch(() => undefined);
 				}
 			});
-			line.append(field);
+			row.append(field);
 		}
 
-		element.append(line);
+		element.append(row);
 	}
 
-	if (item.actions !== undefined && item.actions.length > 0) {
+	if (!("cells" in content) && item.actions !== undefined && item.actions.length > 0) {
 		const choices = Object.assign(document.createElement("div"), { "className": "live-values-choices" });
 
-		choices.append(...item.actions.map((action) => button(action, "live-values-choice")));
+		choices.append(...item.actions.map(actionOf));
 		element.append(choices);
 	}
 
 	return dispose;
 }
 
-/** What `view` and the views `into` it provide for `uri` — undefined from one that has nothing, or isn't there. */
-async function contentOf(view: string, uri: string): Promise<PaneContent[]> {
-	const providers = [view, ...declared.filter((each) => each.into === view).map((each) => each.id)];
-	const answers = await Promise.all(providers.map(async (id) => (id === MARGIN ? undefined : Promise.resolve(api?.commands.executeCommand<PaneContent | undefined>(`${id}.paneView`, uri)).catch(() => undefined))));
+/** A card's label: its title, its detail, how it ran; its title on hover. */
+function renderGroup(group: PaneGroup, element: HTMLElement): void {
+	element.append(
+		Object.assign(document.createElement("span"), { "className": "live-values-step-title", "textContent": group.label }),
+		...group.detail === undefined || group.detail === "" ? [] : [Object.assign(document.createElement("span"), { "className": "live-values-step-detail", "textContent": group.detail })],
+		...group.state === undefined ? [] : [Object.assign(document.createElement("span"), { "className": `live-values-step-ran ${group.state}`, "textContent": group.stateText ?? STATE_TEXT[group.state] })]
+	);
 
-	return answers.filter((answer): answer is PaneContent => answer !== undefined && Array.isArray(answer.items));
+	if (group.title !== undefined) {
+		element.title = group.title;
+	}
 }
 
-/** Draw `uri`'s pane: the shown view's content (the Margin's, live-values.ts's own, with what's `into` it). */
+/** What `view` and the views `into` it provide for `uri` — none from one that has nothing, or isn't there. */
+async function contentOf(view: string, uri: string): Promise<PaneContent[]> {
+	const providers = [view, ...declared.filter((each) => each.into === view).map((each) => each.id)];
+	const answers = await Promise.all(providers.map(async (id) => Promise.resolve(api?.commands.executeCommand<PaneContent | undefined>(`${id}.paneView`, uri)).catch(() => undefined)));
+
+	return answers.filter((answer): answer is PaneContent => answer !== undefined && answer !== null && Array.isArray(answer.items));
+}
+
+/** Draw `uri`'s pane: the shown view's content, with what's `into` it — or, with none, no pane. */
 async function draw(uri: string): Promise<void> {
 	const file = api?.workspace.textDocuments.find((each) => each.uri.toString() === uri);
 	const token = (drawing.get(uri) ?? 0) + 1;
@@ -242,6 +333,15 @@ async function draw(uri: string): Promise<void> {
 	}
 
 	const contents = await contentOf(active, uri);
+
+	if (contents.length === 0) {
+		if (drawing.get(uri) === token) {
+			showPane(uri, undefined);
+		}
+
+		return;
+	}
+
 	const items = contents.flatMap((content) => content.items);
 	const groups = contents.flatMap((content) => content.groups ?? []);
 	const marks = contents.flatMap((content) => content.marks ?? []);
@@ -263,34 +363,27 @@ async function draw(uri: string): Promise<void> {
 		return at === undefined ? [] : [{ "line": at[0], "kind": MARK_CLASSES[mark.kind] ?? mark.kind, ...mark.title === undefined ? {} : { "title": mark.title } }];
 	});
 	const columns = columnsOf(placed);
-	const byId = new Map(placed.map((each) => [`item:${each.item.id}`, each.item]));
+	const byId = new Map(placed.map((each) => [`item:${each.item.id}`, each]));
 	const groupsById = new Map(placedGroups.map((each) => [`group:${each.group.id}`, each.group]));
+	const state: DrawState = { "columns": new Map() };
 	const render = (entry: PaneEntry, element: HTMLElement): (() => void) | void => {
-		const item = byId.get(entry.id);
+		const each = byId.get(entry.id);
 
-		if (item !== undefined) {
-			return renderItem(item, element, columns.get(item.id));
+		if (each !== undefined) {
+			return renderItem(each.item, element, each.fromLine, columns.get(each.item.id), state);
 		}
 
 		const group = groupsById.get(entry.id);
 
 		if (group !== undefined) {
-			element.append(
-				Object.assign(document.createElement("span"), { "className": "live-values-step-title", "textContent": group.label }),
-				...group.state === undefined ? [] : [Object.assign(document.createElement("span"), { "className": `live-values-step-ran ${group.state}`, "textContent": STATE_TEXT[group.state] })]
-			);
-
-			return undefined;
+			renderGroup(group, element);
 		}
 
-		return margins.get(uri)?.render(entry, element);
+		return undefined;
 	};
-	const entries = placed.map(({ item, fromLine, toLine }) => ({ "id": `item:${item.id}`, "fromLine": fromLine, "toLine": toLine }));
-	const frameGroups = placedGroups.map(({ group, fromLine, toLine }) => ({ "id": `group:${group.id}`, "fromLine": fromLine, "toLine": toLine }));
-	const margin = active === MARGIN ? margins.get(uri) : undefined;
 
 	// (the pane stays, its tabs with it, whatever the view has: an empty view is still shown)
-	showPane(uri, [...margin?.entries ?? [], ...entries], render, [...margin?.marks ?? [], ...frameMarks], [...margin?.groups ?? [], ...frameGroups]);
+	showPane(uri, placed.map(({ item, fromLine, toLine }) => ({ "id": `item:${item.id}`, "fromLine": fromLine, "toLine": toLine })), render, frameMarks, placedGroups.map(({ group, fromLine, toLine }) => ({ "id": `group:${group.id}`, "fromLine": fromLine, "toLine": toLine })));
 }
 
 /** Every file shown in an editor. */
@@ -306,32 +399,21 @@ function showStrip(): void {
 		active = id;
 		showStrip();
 
-		for (const uri of new Set([...shownFiles(), ...margins.keys()])) {
+		for (const uri of shownFiles()) {
 			void draw(uri);
 		}
 	});
 }
 
-/** The Margin's drawing of `uri` (live-values.ts's), or none: shown while the Margin is, with what's `into` it. */
-export function showMargin(uri: string, drawn: MarginDrawing | undefined): void {
-	if (drawn === undefined) {
-		margins.delete(uri);
-
-		if (active === MARGIN) {
-			showPane(uri, undefined);
-		}
-
+/** Draw `uri` again — or every shown file — for `view`, if it's the one shown (or in it): its provider's word that its
+ *  content changed (core's views say so this way; an extension's through `editor.pane.refresh`). */
+export function refreshView(view: string, uri?: string): void {
+	if (view !== active && !declared.some((each) => each.id === view && each.into === active)) {
 		return;
 	}
 
-	margins.set(uri, drawn);
-
-	if (active === MARGIN) {
-		if (declared.some((view) => view.into === MARGIN)) {
-			void draw(uri);
-		} else {
-			showPane(uri, drawn.entries, drawn.render, drawn.marks, drawn.groups);
-		}
+	for (const each of uri === undefined ? shownFiles() : [uri]) {
+		void draw(each);
 	}
 }
 
@@ -342,6 +424,10 @@ export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable
 	const read = async (): Promise<void> => {
 		declared = (await extensionContributions("paneViews")).flatMap(({ value }) => (Array.isArray(value) ? value.filter((view): view is PaneViewDeclaration => typeof view?.id === "string") : []));
 		showStrip();
+
+		for (const uri of shownFiles()) {
+			void draw(uri);
+		}
 	};
 	const changed = new Map<string, ReturnType<typeof setTimeout>>();
 	// (typing paused: a file's content asked for again)
@@ -360,24 +446,18 @@ export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable
 	return [
 		// A provider's word that its content changed: one file's, or every file's.
 		vscode.commands.registerCommand("editor.pane.refresh", (view: unknown, uri?: unknown) => {
-			if (view !== active && !declared.some((each) => each.id === view && each.into === active)) {
-				return;
-			}
-
-			for (const each of typeof uri === "string" ? [uri] : shownFiles()) {
-				void draw(each);
+			if (typeof view === "string") {
+				refreshView(view, typeof uri === "string" ? uri : undefined);
 			}
 		}),
-		// The shown view's content, for a file as it's shown and as it changes (the Margin draws itself).
+		// The shown view's content, for a file as it's shown and as it changes.
 		vscode.window.onDidChangeVisibleTextEditors(() => {
-			if (active !== MARGIN || declared.some((view) => view.into === MARGIN)) {
-				for (const uri of shownFiles()) {
-					void draw(uri);
-				}
+			for (const uri of shownFiles()) {
+				void draw(uri);
 			}
 		}),
 		vscode.workspace.onDidChangeTextDocument(({ document }) => {
-			if ((active !== MARGIN || declared.some((view) => view.into === MARGIN)) && shownFiles().includes(document.uri.toString())) {
+			if (shownFiles().includes(document.uri.toString())) {
 				redrawLater(document.uri.toString());
 			}
 		})

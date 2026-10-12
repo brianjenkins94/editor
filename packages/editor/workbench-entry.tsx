@@ -19,7 +19,6 @@ import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, openHo
 import { render } from "preact";
 import type { ShellDockHost } from "./dock-host";
 import type { PodBridge } from "./extensions/worker-pod/extension";
-import type { Note } from "./live-values";
 import type { SharedWorkspace } from "./playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
 import capabilitiesExtensionPath from "capabilities:extension";
@@ -60,7 +59,7 @@ import { createNodeRunner } from "./node-runner";
 import { installProfileFiles } from "./profile-files";
 import { installEvidence } from "./evidence";
 import { installEditorState } from "./editor-state";
-import { installLiveValues, showMarks, showNotes, showProfile } from "./live-values";
+import { installLiveValues, showMarks, showProfile } from "./live-values";
 import { installPaneViews } from "./pane-views";
 import { installRecordedStops } from "./recorded-stops";
 import { installCoverage } from "./coverage";
@@ -836,8 +835,6 @@ serve(workbenchHub, "workbench.files", async (): Promise<SharedWorkspace> => {
 
 // Dev-only host-page debug bridge (window.__editor). Reads the captured API lazily; no-op off localhost.
 installDebugBridge(() => vscodeApi);
-// The notes margin (LIVE-VALUES.md): prose notes beside their code, for a script to show (a console, the tour).
-(globalThis as { "__pane"?: unknown }).__pane = { "show": (uri: string, notes: Note[]) => { showNotes(uri, notes); } };
 
 render(
 	<Workbench

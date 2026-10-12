@@ -1,6 +1,7 @@
 /**
- * Rules (RULES.md), the editor's half: the rule editor — the margin's own panel (live-values.ts) — in the Rule view under
- * the Rules tree, and the commands the tree (the capabilities extension's rules-tree.ts, VS Code's own tree view) runs:
+ * Rules (RULES.md), the editor's half: the rule editor — live-values.ts's panel — in the Rule view under the Rules tree
+ * (where the Margin's Rule… and Mock… make theirs too: editInRuleView), and the commands the tree (the capabilities
+ * extension's rules-tree.ts, VS Code's own tree view) runs:
  *
  * - `silo.rules.list`: every rule in the policy files — mine (`.silo/<you>.policy.json`), then the shared contract's
  *   (`.silo/policy.json`) — each a sentence in the catalog's words, the problem that makes it match nothing, and where a
@@ -42,6 +43,22 @@ function replacePlace(rule: EditedRule, place: unknown): EditedRule {
 	const walk = (predicate: RulePredicate): RulePredicate => ("predicates" in predicate ? { ...predicate, "predicates": predicate.predicates.map(walk) } : predicate.target_id === "at" && predicate.operator_id === "is" ? { ...predicate, "argument": place } : predicate);
 
 	return { ...rule, "when": walk(rule.when) as EditedRule["when"] };
+}
+
+/** The Rule view's editor, once registered: show a panel in it, close it, and the one shown. */
+let host: { "show": (panel: HTMLElement) => void; "close": () => void; "shown": () => HTMLElement | undefined } | undefined;
+
+/** Edit in the Rule view: `panel` (a rule editor, rulePanel's) shown there, in front — answered with how to close it,
+ *  which does only while it's still the one shown. The Margin's Rule… and Mock… make their rules here, not inline
+ *  (EXTENSION-POINTS.md, 4: a pane view's items are data). */
+export function editInRuleView(panel: HTMLElement): () => void {
+	host?.show(panel);
+
+	return () => {
+		if (host?.shown() === panel) {
+			host.close();
+		}
+	};
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, properties: Partial<HTMLElementTagNameMap[K]> = {}): HTMLElementTagNameMap[K] {
@@ -89,6 +106,8 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 		render();
 		void Promise.resolve(vscode.commands.executeCommand("silo.rule.removeView")).catch(() => undefined);
 	};
+
+	host = { "show": show, "close": close, "shown": () => editing?.panel };
 
 	/** silo's catalog, with the variables `rule` names. */
 	const catalogFor = (rule: EditedRule): RuleCatalog => withVariables(policy!, variablesOf(rule).map((name) => ({ "name": name, "kind": "" })));

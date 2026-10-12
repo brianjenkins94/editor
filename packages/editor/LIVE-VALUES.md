@@ -349,17 +349,15 @@ tour types, pauses and reads the margin (a write skipped, a half-typed edit, an 
    column, and Alt+Z (whose override knows only "wrap at the full width", which would put code under the pane) is
    taken over for an editor with a pane to toggle wrapping at the divider; elsewhere it is VS Code's. A cell's span is
    measured to its last line's bottom, so wrapped rows count.
-   Core's `renderNote` (pane.tsx, loaded on first use) renders a note's Markdown with VS Code's own renderer
-   (sanitized; the component's `renderMarkdown`) and its code blocks with Code Hike (`highlight` + `<Pre>`, the GitHub
-   theme for the workbench's light or dark). A script can show notes (`globalThis.__pane.show`) until the notes
-   extension does (step 5).
-5. **Notes in the pane**: the notes extension sends its placed notes (`editor.pane.notes`); their prose beside their
-   spans, rendered with Code Hike; hover links both ways.
+   Since 2026-10-12 the pane's tabs are pane views (EXTENSION-POINTS.md, 4): the Margin is live-values.ts's view,
+   its content data that pane-views.ts draws, and any extension can add a view or add to the Margin.
+5. ~~**Notes in the pane**~~ — not done, and dropped (2026-10-12): notes are the notes extension's comment threads
+   (VS Code drawing each where our resolver places it); the Margin's prose notes and `__pane.show` went.
 6. **Values as notes**: a session's values referred to their statements' spans, placed like notes, rendered as Victor's
    columns in the same pane.
    Done, placed by line (not yet referred to spans): core's live-values.ts follows `values.session.*` and
-   `values.ended` on the workbench hub, keeps the latest session per file, and draws it in the notes margin beside the
-   prose (`showNotes`; both in one `showPane` per file) — a row per line that has values, its label (`mid =`,
+   `values.ended` on the workbench hub, keeps the latest session per file, and draws it in the Margin (now as data:
+   `margin.paneView`) — a row per line that has values, its label (`mid =`,
    `return`, `if`) then a cell per turn of the loop around it: every line at the same depth in a call has the same
    columns, each as wide as its widest value, so a turn reads straight down, and hovering one lights it down the call;
    a line outside a loop shows its value once, a line binding several names (parameters) names each; an `if` shows

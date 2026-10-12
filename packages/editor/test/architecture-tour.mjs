@@ -678,21 +678,17 @@ test("live values: a session's values beside the code, as the talk's binary sear
 		"console.log(binarySearch(\"d\", [\"a\", \"b\", \"c\", \"d\", \"e\", \"f\"]));",
 		""
 	].join("\n");
-	const show = (notes) => workbench.evaluate(async ([text, shown]) => {
+	const show = () => workbench.evaluate(async (text) => {
 		const { api } = globalThis.__editor;
 		const uri = api.Uri.file("/workspace/victor.js");
 
-		if (text !== undefined) {
-			await api.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
-			await api.window.showTextDocument(uri);
-		}
-
-		globalThis.__pane.show(uri.toString(), shown);
-	}, [notes.length === 0 ? undefined : source, notes]);
+		await api.workspace.fs.writeFile(uri, new TextEncoder().encode(text));
+		await api.window.showTextDocument(uri);
+	}, source);
 	// Each values row by its line (0-based): its label, then its cells, as shown.
 	const rows = () => workbench.evaluate(() => Object.fromEntries([...document.querySelectorAll(".live-values-row")].map((row) => [row.dataset.line, [...row.children].filter((child) => !child.classList.contains("live-values-mock")).map((child) => child.textContent.trim())])));
 
-	await show([{ "id": "about", "fromLine": 0, "toLine": 0, "text": "**Binary search**, as in the talk." }]);
+	await show();
 
 	const started = await session.request("debug.start", { "program": "/workspace/victor.js", "breakpoints": [14] }, 60_000);
 
@@ -712,7 +708,6 @@ test("live values: a session's values beside the code, as the talk's binary sear
 	assert.deepEqual(shown["8"], ["if", "then", "else", "else"], "the arm each turn took");
 	assert.deepEqual(shown["9"], ["low =", "3", "", ""], "only in the turn that ran it");
 	assert.deepEqual(shown["11"], ["high =", "", "3", ""]);
-	assert.equal(await eventually("the note beside them", () => workbench.evaluate(() => document.querySelector(".notes-margin-entry strong")?.textContent)), "Binary search");
 
 	// Reformatted while paused — blank lines above, indented with spaces, mid wrapped, no semicolons: every row moves
 	// with its code (anchored by BABLR spans, not line numbers).
@@ -743,11 +738,8 @@ test("live values: a session's values beside the code, as the talk's binary sear
 	await session.request(`debug.session.${started.session}.stop`, undefined, 30_000);
 	await eventually("the run's end on its line", () => workbench.evaluate(() => document.querySelector(".notes-margin-mark.run-stopped") !== null || undefined));
 	assert.deepEqual((await rows())["5"], ["mid =", "2", "4", "3"], "its values kept: the file's last run");
-	// (Each draw renders the note again, asynchronously: wait for it.)
-	assert.equal(await eventually("the note, still there", () => workbench.evaluate(() => document.querySelector(".notes-margin-entry strong")?.textContent)), "Binary search", "the note stays");
-	// Leave the workbench as the next tests expect it: no note, no breakpoint, and the Explorer back where a breakpoint's
-	// stop put the Run and Debug view (they open files from its tree).
-	await show([]);
+	// Leave the workbench as the next tests expect it: no breakpoint, and the Explorer back where a breakpoint's stop put
+	// the Run and Debug view (they open files from its tree).
 	await session.request("debug.breakpoints", { "program": "/workspace/victor.js", "lines": [] }, 30_000);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
@@ -1065,9 +1057,9 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	}, what);
 	// The margin's question, as shown: the call, what it reaches, and which choices it offers.
 	const asked = () => workbench.evaluate(() => {
-		const box = document.querySelector(".live-values-ask");
+		const box = document.querySelector('[data-item="ask"]');
 
-		return box === null ? undefined : { "what": box.querySelector(".live-values-ask-what").textContent, "choices": [...box.querySelectorAll(".live-values-choices > .live-values-split > .live-values-choice:not(.more), .live-values-choices > .live-values-choice.rule")].map((button) => button.textContent), "lasting": [...box.querySelectorAll(".live-values-split:first-child .live-values-menu-item")].map((item) => (item.disabled ? `(${item.textContent})` : item.textContent)) };
+		return box === null ? undefined : { "what": box.querySelector(".pane-markdown").textContent.trim(), "choices": [...box.querySelectorAll(".live-values-choices > .live-values-split > .live-values-choice:not(.more), .live-values-choices > .live-values-choice")].map((button) => button.textContent), "lasting": [...box.querySelectorAll(".live-values-split:first-child .live-values-menu-item")].map((item) => (item.disabled ? `(${item.textContent})` : item.textContent)) };
 	});
 	const start = async () => {
 		const stopped = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, 60_000);
@@ -1105,7 +1097,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 
 	// Allow, from the margin's own button (this call): the call runs; nothing is written to the policy.
 	await start();
-	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-ask button")].find((button) => button.textContent === "Allow").click(); });
+	await workbench.evaluate(() => { [...document.querySelectorAll('[data-item="ask"] button')].find((button) => button.textContent === "Allow").click(); });
 	await eventually("the question answered", async () => (await asked()) === undefined || undefined);
 	assert.deepEqual(await silo("read"), [], "Allow once writes no rule");
 
@@ -1140,7 +1132,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 		return run.reason === "capability" || undefined;
 	});
 	assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow", "Skip", "Deny", "Rule…"], "lasting": ["this call", "this run", "always"] });
-	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-ask button")].find((button) => button.textContent === "Rule…").click(); });
+	await workbench.evaluate(() => { [...document.querySelectorAll('[data-item="ask"] button')].find((button) => button.textContent === "Rule…").click(); });
 	assert.equal(await eventually("the rule editor, prefilled", status), "Covers this call: allows it");
 	await resourceRow([".rule-editor-operator select", "matches", "change"]);
 	await resourceRow([".rule-editor-argument", "/tmp/*", "input"]);
@@ -1311,7 +1303,7 @@ test("capability decisions and placed rules: in a file the program imports, as i
 
 		// Its question, in that file's margin.
 		await workbench.evaluate(() => globalThis.__editor.api.window.showTextDocument(globalThis.__editor.api.Uri.file("/workspace/store.js")));
-		assert.equal(await eventually("the question in the imported file's margin", () => workbench.evaluate(() => document.querySelector(".live-values-ask .live-values-ask-what")?.textContent)), "writeFileSync '/workspace/notes.txt' fs:write");
+		assert.equal(await eventually("the question in the imported file's margin", () => workbench.evaluate(() => document.querySelector('[data-item="ask"] .pane-markdown')?.textContent.trim())), "writeFileSync '/workspace/notes.txt' fs:write");
 
 		const ended = await session.request(`debug.session.${stopped.session}.decide`, { "choice": "deny" }, 30_000);
 
@@ -1544,9 +1536,9 @@ test("capability decisions: Allow this run lets a loop's calls through, until th
 	// The resource is computed on the line (a template) — known all the same, from a fork run to the call — so Allow always
 	// is offered too.
 	const question = await eventually("its question", () => workbench.evaluate(() => {
-		const box = document.querySelector(".live-values-ask");
+		const box = document.querySelector('[data-item="ask"]');
 
-		return box === null ? undefined : { "what": box.querySelector(".live-values-ask-what").textContent, "choices": [...box.querySelectorAll(".live-values-choices > .live-values-split > .live-values-choice:not(.more), .live-values-choices > .live-values-choice.rule")].map((button) => button.textContent), "lasting": [...box.querySelectorAll(".live-values-split:first-child .live-values-menu-item")].map((item) => (item.disabled ? `(${item.textContent})` : item.textContent)) };
+		return box === null ? undefined : { "what": box.querySelector(".pane-markdown").textContent.trim(), "choices": [...box.querySelectorAll(".live-values-choices > .live-values-split > .live-values-choice:not(.more), .live-values-choices > .live-values-choice")].map((button) => button.textContent), "lasting": [...box.querySelectorAll(".live-values-split:first-child .live-values-menu-item")].map((item) => (item.disabled ? `(${item.textContent})` : item.textContent)) };
 	}));
 
 	assert.deepEqual(question, { "what": "writeFileSync '/workspace/a.txt' fs:write", "choices": ["Allow", "Skip", "Deny", "Rule…"], "lasting": ["this call", "this run", "always"] });
@@ -1786,8 +1778,8 @@ test("mock a call's result: given at its capability stop, from what it returned 
 
 	assert.equal(stopped.reason, "capability");
 	assert.equal(stopped.line, 2);
-	await eventually("the question", () => workbench.evaluate(() => document.querySelector(".live-values-ask") !== null || undefined));
-	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-ask button")].find((button) => button.textContent === "Rule…").click(); });
+	await eventually("the question", () => workbench.evaluate(() => document.querySelector('[data-item="ask"]') !== null || undefined));
+	await workbench.evaluate(() => { [...document.querySelectorAll('[data-item="ask"] button')].find((button) => button.textContent === "Rule…").click(); });
 
 	const status = () => workbench.evaluate(() => document.querySelector(".live-values-rule-status")?.textContent);
 
@@ -1796,7 +1788,7 @@ test("mock a call's result: given at its capability stop, from what it returned 
 	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-rule button")].find((button) => button.textContent === "Save as rule").click(); });
 
 	// Saved, the run goes on with it (and ends); the next run is given it with no stop, past both awaits.
-	await eventually("the question answered", () => workbench.evaluate(() => document.querySelector(".live-values-ask") === null || undefined));
+	await eventually("the question answered", () => workbench.evaluate(() => document.querySelector('[data-item="ask"]') === null || undefined));
 
 	const again = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
 
@@ -2302,12 +2294,13 @@ test("projection: the run log — each step's share of the work, and its waits",
 
 	assert.deepEqual(ran.output, ["2011522500"]);
 
+	// The run log, as the Margin draws it: its head, then a row a step — its title, and what it waited.
 	const log = await eventually("the run log", () => workbench.evaluate(() => {
-		const box = document.querySelector(".live-values-runlog");
+		const head = document.querySelector('[data-item="runlog"] .pane-markdown');
 
-		return box === null ? undefined : {
-			"head": box.querySelector(".live-values-runlog-head").textContent,
-			"rows": [...box.querySelectorAll(".live-values-runlog-row")].map((row) => [row.querySelector(".live-values-runlog-title").textContent, row.querySelector(".live-values-runlog-waited")?.textContent ?? null])
+		return head === null ? undefined : {
+			"head": head.textContent.trim(),
+			"rows": [...document.querySelectorAll('[data-item^="runlog:"] .live-values-row')].map((row) => [row.querySelector(".live-values-label").textContent.trim(), [...row.querySelectorAll(".live-values-cell.turn")].map((cell) => cell.textContent).find((text) => text.startsWith("waited")) ?? null])
 		};
 	}));
 

@@ -129,7 +129,7 @@ dismissed), how a lost reference is looked for before it's orphaned, and `undefi
 **Dogfooded:** notes, insights' evidence, tsval's placed rules, worker-pod's rule places and core's run anchors
 (anchors.ts) all call through it — no extension calls the commands by hand.
 
-## 4. Pane views (the Margin pane's tabs) — step 1 done (2026-10-12)
+## 4. Pane views (the Margin pane's tabs) — steps 1 and 2 done (2026-10-12)
 
 The pane beside every editor (components/monaco-vscode-api/pane.ts) has a strip of tabs on its first line. VS Code has no
 API for anything like it. Today one consumer owns all of it: live-values.ts lists the tabs (Margin, and two disabled
@@ -192,16 +192,17 @@ interface PaneItem {
 	id: string;
 	at: At;
 	content:
-		| { markdown: string }                                    // prose: a note, a hint (sanitized, VS Code's renderer)
-		| { label?: string; cells: PaneCell[] }                   // a row: a label, then cells (a run's values, a turn each)
-		| { label: string; input: { value: string; placeholder?: string; submit: Command } };  // one line typed in (process.argv's)
-	actions?: Command[];      // buttons under it (Allow, Skip, Deny…; Rule…, Mock…)
+		| { markdown: string }                                    // prose: a question, a hint (sanitized, VS Code's renderer)
+		| { label?: string; lead?: PaneCell[]; value?: PaneCell; cells: PaneCell[] }  // a row: a picker, a label, the line's value, a turn each
+		| { label: string; input: { value: string; placeholder?: string; submit: Command } };  // one line typed in
+	actions?: Action[];       // buttons under it (Allow ▾, Skip ▾, Deny ▾, Rule…) — at a row's end, on hover (Mock…)
 	tone?: "info" | "question" | "warning" | "error";
 }
-interface PaneCell { text: string; kind?: "number" | "string" | "boolean" | "object" | "error" | "undefined"; title?: string; command?: Command; picked?: boolean }
-interface PaneGroup { id: string; at: At; label: string; state?: "ran" | "partial" | "missed" }   // a step's card, and how it ran
+type Action = Command & { more?: Command[] };                 // ▾: the ways it can go (this call, this run, always)
+interface PaneCell { text: string; kind?: "number" | "string" | "boolean" | "object" | "error" | "undefined" | "branch" | "set" | "skip" | "given"; title?: string; command?: Command; picked?: boolean }
+interface PaneGroup { id: string; at: At; label: string; detail?: string; title?: string; state?: "ran" | "partial" | "missed"; stateText?: string }   // a step's card, and how it ran
 interface PaneMark { at: At; kind: "ran" | "partial" | "missed" | "crashed" | "stopped" | "rule" | "rule-uncertain"; title?: string }
-// Command: VS Code's own shape — { title, command, arguments?, tooltip? }
+// Command: VS Code's own shape — { title, command, arguments?, tooltip? } — and disabled?, shown but not offered
 ```
 
 Rows in a run of consecutive lines align their cells into columns (a turn of a loop each), as the Margin's do now;
@@ -236,9 +237,13 @@ what makes the second face possible.
    resolved, its content drawn in the Margin's look; the Margin still live-values.ts's drawing, handed to pane-views
    (`showMargin`) with what's `into` it. Proved by an extension from outside the editor (test/pane-views.mjs and its
    fixture): its tab, each item kind and placement, followed through an edit, its button and input.
-2. **The Margin becomes the first provider**: values, the input row, the question (its editors opening in the Rule view),
-   a run's end, the run log, the steps' cards — data through the contract; live-values.ts keeps the hub side (sessions,
-   anchors) and answers `margin.paneView`. Nothing changes on screen but where the editors open. The tour keeps passing.
+2. ~~**The Margin becomes the first provider**~~ — done (2026-10-12): the rule and mock editors (Rule…, Mock… on
+   process.argv and on a variable) open in the Rule view (rules-view.ts's `editInRuleView`); live-values.ts answers
+   `margin.paneView` with its values, the question, a run's end, the run log and the steps' cards as data — each placed
+   by its range in the text that ran — and its buttons and cells run `margin.*` commands (decide, rule, mockArgv,
+   mockVariable, pick, hold). It keeps the hub side (sessions, anchors) and margin.state. The contract grew what the
+   Margin needed: a row's lead cells and own value, an action's menu, disabled actions, a card's detail, title and
+   state text. The Margin's prose notes went (decided: notes are the notes extension's comment threads).
 3. **Coverage contributes into the Margin** (its marks and counts), and placed rules (the capabilities extension's).
 4. **The event sheet takes its tab** — the game's conditions and actions beside the code they're in; its map and builder
    stay the webview view they are. The Cards placeholder goes until the cards projection (PROJECTIONS.md) is built.

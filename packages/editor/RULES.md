@@ -71,9 +71,10 @@ rule*) — the same two buttons wherever the editor opens.
   contract's, each a sentence in the catalog's words, in the order they're matched; a click opens it in the same panel
   — *Save*, *Remove* for mine, a shared rule's edit saved as mine ahead of it; *New Rule* in its title; collapsed until
   opened, so silo's policy loads then; it and the margin redraw as the policy files change), and
-  **inline in the margin**, anchored to a line, prefilled from what's there — a capability stop opens it with the
-  call's capability and resource and *allow* chosen; a value's row with its target and *give*. The margin keeps entry
-  points (one small control on a row), not forms. First: *Rule…* at a capability stop, beside the three buttons, with
+  **from the margin**, prefilled from what's on a line — a capability stop opens it with the call's capability and
+  resource and *allow* chosen; a value's row with its target and *give* — in the same Rule view (since 2026-10-12: a pane
+  view's items are data, EXTENSION-POINTS.md 4, so the margin keeps entry points, one small control on a row, and no
+  forms at all). First: *Rule…* at a capability stop, beside the three buttons, with
   whether the rule as edited covers the call and what it decides, then *Just this once* / *Save as rule*. Then — the one
   used most — *Mock…* on process.argv's row (LIVE-VALUES.md): *program is <file>*, *then give process.argv* a command
   line per run, *Run* / *Save as rule* / *Remove*; it replaced the stubs file (`.silo/<you>.stubs.json`) and the Mock /
