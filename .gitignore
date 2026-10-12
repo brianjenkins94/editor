@@ -183,6 +183,7 @@ mono_crash.*
 
 # Build results
 [Dd]ebug/
+!packages/editor/tools/debug/
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
