@@ -26,7 +26,7 @@ import type { NodeOutput, NodeRunner } from "../node-runner";
 import type { CommandFactory, CommandHost } from "./catalog";
 import type { BashSession, SessionState } from "./session";
 import { serve } from "@brianjenkins94/hub";
-import { COMMANDS, STREAMING } from "./catalog";
+import { COMMANDS, helpOf, PRESENT, STREAMING } from "./catalog";
 import { createWorkspaceTerminalFs } from "./fs";
 import { commandExecuted, commandFinished, commandLine, commandStart, promptStart, workingDirectory } from "./integration";
 import { execInSession, statementsOf } from "./session";
@@ -41,7 +41,7 @@ const BUILTINS = ["cd", "eval", "exit", "export", "read", "set", "source", "test
 
 /** What Tab offers in command position: the shell's builtins, just-bash's commands (as this build has them — no
  *  `tar` in a browser), and ours. Known once just-bash has loaded (with the first command, or warmed at start). */
-let completions: string[] = [...BUILTINS, ...COMMANDS.map((command) => command.name)];
+let completions: string[] = [...BUILTINS, ...PRESENT.map((command) => command.name)];
 
 /** The longest string that every item starts with (for extending a partial to the common prefix on Tab). */
 function longestCommonPrefix(items: string[]): string {
@@ -94,11 +94,28 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, show: (dat
 	const getSession = (): Promise<BashSession> => {
 		// just-bash, and the custom commands (which build on its defineCommand), load with the first command run.
 		sessionPromise ??= import("just-bash/browser").then((module) => {
-			const host: CommandHost = { "api": api, "runner": runner, "writeLive": writeLive, "terminal": terminal, "session": getSession };
-			// Ours, each loaded the first time it runs (just-bash's lazy command).
-			const commands = COMMANDS.map((command) => ({ "name": command.name, "load": async () => (await implementations[`./commands/${command.name}/${command.name}.ts`]!())(host) }));
+			const host: CommandHost = { "api": api, "runner": runner, "writeLive": writeLive, "terminal": terminal, "session": getSession, "history": () => history };
+			// Ours, each loaded the first time it runs (just-bash's lazy command): `--help` answered from its definition, a
+			// missing one's message said, and everything else its implementation's.
+			const theirs = new Set(module.getCommandNames());
+			// (A command that isn't here stays out of the way of one just-bash comes to have: its `python`, say.)
+			const commands = COMMANDS.filter((command) => command.missing === undefined || !theirs.has(command.name)).map((command) => ({ "name": command.name, "load": async () => {
+				const implementation = command.missing === undefined ? (await implementations[`./commands/${command.name}/${command.name}.ts`]!())(host) : undefined;
 
-			completions = [...new Set([...BUILTINS, ...module.getCommandNames(), ...COMMANDS.map((command) => command.name)])];
+				return module.defineCommand(command.name, async (args, ctx) => {
+					if (command.missing !== undefined) {
+						return { "stdout": "", "stderr": `${command.name}: ${command.missing}\n`, "exitCode": 127 };
+					}
+
+					if (args[0] === "--help" || args[0] === "-h") {
+						return { "stdout": helpOf(command), "stderr": "", "exitCode": 0 };
+					}
+
+					return implementation!.execute(args, ctx);
+				});
+			} }));
+
+			completions = [...new Set([...BUILTINS, ...theirs, ...PRESENT.map((command) => command.name)])];
 
 			return new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": commands }) as unknown as BashSession;
 		});

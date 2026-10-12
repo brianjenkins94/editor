@@ -10,7 +10,7 @@
  * a plain `npm install` is a no-op you never need, and `npm install lodash` just adds it to package.json (the
  * next preview load resolves it). The registry proper is still out of scope.
  */
-import type { CustomCommand } from "just-bash/browser";
+import type { Command } from "just-bash/browser";
 import type { CommandHost } from "../../catalog";
 import { defineCommand } from "just-bash/browser";
 
@@ -26,7 +26,7 @@ function parseSpec(spec: string): { "name": string; "version": string } {
 
 /** The `npm` command. A script runs in the shell itself (the host's `session`, created lazily — see ../../index.ts), with
  *  the shell's Ctrl-C forwarded so it reaches a long-running script (`npm run dev` → the blocking `vite` command). */
-export function create({ session: getSession }: CommandHost): CustomCommand {
+export function create({ session: getSession }: CommandHost): Command {
 	return defineCommand("npm", async (args, ctx) => {
 		const subcommand = args[0];
 

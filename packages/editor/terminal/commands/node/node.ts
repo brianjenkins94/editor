@@ -4,7 +4,7 @@
  * command line's arguments, the shell's directory and its environment. just-bash owns the shell. When the debugger can't
  * take it, it says so and fails (exit 1) — there's no plain-runtime fallback.
  */
-import type { CustomCommand } from "just-bash/browser";
+import type { Command } from "just-bash/browser";
 import type { CommandHost } from "../../catalog";
 
 import { defineCommand } from "just-bash/browser";
@@ -37,7 +37,7 @@ function resolvePosix(base: string, path: string): string {
  * written); a consequence is that a streamed `node …` doesn't feed a shell pipe/redirect. `ctx.signal` is the
  * shell's Ctrl-C, forwarded to the runner so the worker is killed.
  */
-export function create({ runner, writeLive, terminal }: CommandHost): CustomCommand {
+export function create({ runner, writeLive, terminal }: CommandHost): Command {
 	return defineCommand("node", async (args, ctx) => {
 		const at = args.findIndex((argument) => !argument.startsWith("-"));
 		const target = at === -1 ? undefined : args[at];
