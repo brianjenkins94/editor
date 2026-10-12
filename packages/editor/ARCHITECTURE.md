@@ -292,6 +292,7 @@ flowchart LR
       subgraph c_extHostWorker["Web worker extension host"]
         n_ext_capabilities["capabilities"]
         n_ext_eslint["eslint"]
+        n_ext_event_sheet["event-sheet"]
         n_ext_insights["insights"]
         n_ext_notes["notes"]
         n_ext_running["running"]
@@ -299,6 +300,7 @@ flowchart LR
         n_nested_TS_semantic_server["TS semantic server"]
         n_nested_TS_syntax_server["TS syntax server"]
         n_nested_jsonServerMain_js["jsonServerMain.js"]
+        n_nested_recognizer_js["recognizer.js"]
         n_nested_serverWorkerMain_js["serverWorkerMain.js"]
       end
     end
@@ -349,6 +351,8 @@ flowchart LR
   n_ext_capabilities -->|"reads, writes"| n_store__silo__file__json
   n_ext_capabilities <-.->|"commands"| n_ext_vscode
   n_ext_eslint <-.->|"commands"| n_ext_vscode
+  n_ext_event_sheet <-.->|"commands"| n_ext_vscode
+  n_ext_event_sheet <-.->|"commands"| n_ext_worker_pod
   n_ext_insights -->|"reads"| n_store__silo_evidence____file__jsonl
   n_ext_insights -->|"reads"| n_store__silo_local____file__jsonl
   n_ext_insights <-.->|"commands"| n_ext_vscode
@@ -372,6 +376,7 @@ flowchart LR
   n_exthost_LocalWebWorker_0 <-.->|"extension defined (LSP, tsserver)"| n_nested_TS_semantic_server
   n_exthost_LocalWebWorker_0 <-.->|"extension defined (LSP, tsserver)"| n_nested_TS_syntax_server
   n_exthost_LocalWebWorker_0 <-.->|"extension defined (LSP, tsserver)"| n_nested_jsonServerMain_js
+  n_exthost_LocalWebWorker_0 <-.->|"extension defined (LSP, tsserver)"| n_nested_recognizer_js
   n_exthost_LocalWebWorker_0 <-.->|"extension defined (LSP, tsserver)"| n_nested_serverWorkerMain_js
   n_exthost_iframe <-.->|"bootstrap handshake"| n_workbench
   n_idb <-.->|"IndexedDB"| n_workbench

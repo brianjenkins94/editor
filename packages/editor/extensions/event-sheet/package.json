@@ -9,7 +9,8 @@
   },
   "browser": "extension.js",
   "activationEvents": [
-    "onView:eventSheet.view"
+    "onView:eventSheet.view",
+    "onCommand:eventSheet.paneView"
   ],
   "contributes": {
     "viewsContainers": {
@@ -29,6 +30,13 @@
           "name": "Event Sheet"
         }
       ]
-    }
+    },
+    "paneViews": [
+      {
+        "id": "eventSheet",
+        "label": "Event sheet",
+        "title": "The game's rules, objects and behaviors beside the code they're in"
+      }
+    ]
   }
 }

@@ -20,12 +20,8 @@ import { Anchors } from "./anchors";
 /** The Margin: core's own view (live-values.ts provides it, as `margin.paneView`). */
 const MARGIN = "margin";
 
-/** Core's views, before any extension's: the Margin, and what's still to come. */
-const CORE_VIEWS: PaneView[] = [
-	{ "id": MARGIN, "label": "Margin", "title": "Values, cards and the run beside the code" },
-	{ "id": "cards", "label": "Cards", "title": "Coming: the program as a column of cards, Automator's look (PROJECTIONS.md)", "disabled": true },
-	{ "id": "event-sheet", "label": "Event sheet", "title": "Coming: the program as an event sheet's conditions and actions", "disabled": true }
-];
+/** Core's views, before any extension's: the Margin. */
+const CORE_VIEWS: PaneView[] = [{ "id": MARGIN, "label": "Margin", "title": "Values, cards and the run beside the code" }];
 
 /** Core's views into another: coverage's marks, into the Margin (coverage.ts). */
 const CORE_INTO: PaneViewDeclaration[] = [{ "id": "coverage", "into": MARGIN }];
@@ -340,9 +336,10 @@ async function draw(uri: string): Promise<void> {
 
 	const contents = await contentOf(active, uri);
 
+	// Nothing: the Margin's no pane (a file that isn't code); another view's an empty one, its tabs still there.
 	if (contents.length === 0) {
 		if (drawing.get(uri) === token) {
-			showPane(uri, undefined);
+			showPane(uri, active === MARGIN ? undefined : [], () => undefined);
 		}
 
 		return;

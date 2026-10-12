@@ -5,10 +5,17 @@
  * tells the view when to refresh (the active editor changed, a file was saved), and runs the recognizer in a worker of
  * its own (recognizer-worker.ts) so parsing doesn't hold up the extension host — anchoring what it recognizes with the
  * editor's BABLR (anchors.ts).
+ *
+ * And a pane view, its tab beside the editor (EXTENSION-POINTS.md, 4): the open file's part of the game beside the code
+ * it's in — each rule a card around its function, each of its conditions and actions on its line, each object,
+ * behavior and composite behavior on its declaration — placed by the span references anchoring gives them, so they
+ * follow their code; projected again as the game's files are saved.
  */
+import type { PaneContent, PaneItem } from "@brianjenkins94/run-contract/pane";
 import { annotations } from "@brianjenkins94/run-contract/annotations";
+import { refreshPane } from "@brianjenkins94/run-contract/pane";
 import type { EventSheetHost, HostMessage, ViewMessage } from "./view";
-import type { GameModel } from "./recognizer";
+import type { GameModel, NodeLoc } from "./recognizer";
 import * as vscode from "vscode";
 import { anchorGame } from "./anchors";
 
@@ -174,6 +181,45 @@ function hostFor(projection: ReturnType<typeof recognizer>): EventSheetHost {
 	};
 }
 
+/** The pane view (`eventSheet.paneView`): `uri`'s part of its game, beside the code it's in. `modelOf` projects a
+ *  game (cached until its files are saved). */
+async function sheetBeside(uri: string, modelOf: (root: string) => Promise<GameModel>): Promise<PaneContent | undefined> {
+	const path = vscode.Uri.parse(uri).path;
+
+	if (!CODE_FILE.test(path)) {
+		return undefined;
+	}
+
+	const root = await gameRoot(path);
+
+	if (root === undefined) {
+		return { "items": [{ "id": "none", "at": { "lines": [0, 0] }, "content": { "markdown": "_No game here: no package.json above this file._" }, "tone": "info" }] };
+	}
+
+	const model = await modelOf(root);
+	const file = path.slice(root.length + 1);
+	// (by its span when anchoring gave it one — it follows its code — else on its line)
+	const at = (node: NodeLoc): PaneItem["at"] => (node.ref === undefined ? { "lines": [node.defLine - 1, node.defLine - 1] } : { "ref": node.ref });
+	const code = (text: string): string => `\`${text.replaceAll("`", "'")}\``;
+	const here = <T extends NodeLoc>(nodes: T[]): T[] => nodes.filter((node) => node.defPath === file);
+
+	return {
+		"items": [
+			...here(model.behaviors).map((behavior): PaneItem => ({ "id": `behavior:${behavior.name}`, "at": at(behavior), "content": { "markdown": `**behavior** ${code(behavior.name)} — ${behavior.kind === "tag" ? "a tag" : `fields ${behavior.fields.map(code).join(", ")}`}` } })),
+			...here(model.composites).map((composite): PaneItem => ({ "id": `composite:${composite.name}`, "at": at(composite), "content": { "markdown": `**composite behavior** ${code(composite.name)}${composite.uses.length === 0 ? "" : ` — uses ${composite.uses.map(code).join(", ")}`}${composite.composes.length === 0 ? "" : `; composes ${composite.composes.map(code).join(", ")}`}` } })),
+			...here(model.objects).map((object): PaneItem => ({ "id": `object:${object.name}`, "at": at(object), "content": { "markdown": `**object** ${code(object.name)}${object.behaviors.length === 0 ? "" : ` — ${object.behaviors.map(code).join(", ")}`}${object.depth === undefined ? "" : `, depth ${object.depth}`}` } })),
+			...here(model.rules).flatMap((rule) => rule.rows.map((row, index): PaneItem => ({ "id": `row:${rule.name}:${index}`, "at": at(row), "content": { "markdown": `**when** ${code(row.event)} **do** ${row.actions.map(code).join(", ")}` } })))
+		],
+		"groups": here(model.rules).map((rule) => ({
+			"id": `rule:${rule.name}`,
+			"at": at(rule),
+			"label": rule.name,
+			...rule.queries.length === 0 ? {} : { "detail": `for each ${rule.queries.map((query) => query.join(" + ")).join(" · ")}` },
+			...rule.composes.length === 0 ? {} : { "title": `Composes ${rule.composes.join(", ")}` }
+		}))
+	};
+}
+
 /** The webview's page: the view's script inline (a webview here can't load its resources by URL), behind a strict policy. */
 async function page(context: vscode.ExtensionContext, webview: vscode.Webview): Promise<string> {
 	const script = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(context.extensionUri, "view.js")));
@@ -187,6 +233,32 @@ async function page(context: vscode.ExtensionContext, webview: vscode.Webview): 
 export function activate(context: vscode.ExtensionContext): void {
 	const projection = recognizer(context);
 	const host = hostFor(projection);
+	/** Each game's projection, by its root — until one of its files is saved. */
+	const models = new Map<string, Promise<GameModel>>();
+	const modelOf = (root: string): Promise<GameModel> => {
+		const known = models.get(root);
+
+		if (known !== undefined) {
+			return known;
+		}
+
+		const model = gameFiles(root).then(async (files) => projection.project(root, files));
+
+		models.set(root, model);
+		model.catch(() => { models.delete(root); });
+
+		return model;
+	};
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand("eventSheet.paneView", async (uri: unknown) => (typeof uri === "string" ? sheetBeside(uri, modelOf) : undefined)),
+		vscode.workspace.onDidSaveTextDocument((document) => {
+			if (CODE_FILE.test(document.uri.path)) {
+				models.clear();
+				void refreshPane(vscode.commands, "eventSheet");
+			}
+		})
+	);
 
 	context.subscriptions.push({ "dispose": projection.dispose }, vscode.window.registerWebviewViewProvider("eventSheet.view", {
 		"resolveWebviewView": async (view) => {

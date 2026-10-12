@@ -2597,6 +2597,78 @@ test("search: findFiles keeps to its glob, and to files.exclude unless told not 
 	assert.ok(found.everything.length > found.all.length, "and not when excludes are turned off");
 });
 
+// The event sheet's tab (EXTENSION-POINTS.md, 4: a pane view, the event-sheet extension's): the open file's part of its
+// game beside the code it's in — a rule a card around its function, its condition and action on their line, each
+// behavior on its declaration — placed by the span references anchoring gives them, so they follow their code.
+test("event sheet: its tab — a game's rule a card around its code, its condition and action on their line, its behaviors on theirs", async () => {
+	const workbench = session.workbench();
+	const root = "/workspace/sheet-game";
+	const cells = () => workbench.evaluate(() => [...document.querySelectorAll(".notes-margin-cell")].map((cell) => ({ "line": Number(cell.dataset.line), "text": cell.textContent })));
+
+	await workbench.evaluate(async (dir) => {
+		const { api } = globalThis.__editor;
+		const write = async (path, text) => api.workspace.fs.writeFile(api.Uri.file(`${dir}/${path}`), new TextEncoder().encode(text));
+
+		await api.workspace.fs.createDirectory(api.Uri.file(`${dir}/src`));
+		await write("package.json", "{ \"name\": \"sheet-game\" }\n");
+		await write("src/game.ts", [
+			"import { query } from \"bitecs\";",
+			"",
+			"export const Position = { \"x\": new Float32Array(100), \"y\": new Float32Array(100) };",
+			"export const Player = [];",
+			"",
+			"export function move(world) {",
+			"\tfor (const eid of query(world, [Position, Player])) {",
+			"\t\tif (Position.x[eid] > 10) {",
+			"\t\t\tPosition.x[eid] = 0;",
+			"\t\t}",
+			"\t}",
+			"}",
+			""
+		].join("\n"));
+		await api.window.showTextDocument(api.Uri.file(`${dir}/src/game.ts`));
+	}, root);
+
+	try {
+		await workbench.locator(".notes-margin-tab", { "hasText": "Event sheet" }).click();
+
+		const shown = await eventually("the game beside its code", async () => {
+			const now = await cells();
+
+			return now.some((cell) => cell.text.includes("when")) && now.some((cell) => cell.text.includes("Player")) ? now : undefined;
+		}, 60_000);
+		const at = (text) => shown.find((cell) => cell.text.includes(text))?.line;
+
+		assert.equal(at("behavior Position"), 2, "a behavior on its declaration");
+		assert.match(shown.find((cell) => cell.line === 3)?.text ?? "", /behavior Player — a tag/u);
+		assert.equal(at("when Position.x[eid] > 10"), 7, "a condition and its action, on their line");
+		assert.match(await workbench.evaluate(() => [...document.querySelectorAll(".notes-margin-group-label")].map((label) => label.textContent).join("|")), /move.*for each Position \+ Player/u, "the rule, a card around its function");
+
+		// Two lines above: each follows its code.
+		await workbench.evaluate(async (dir) => {
+			const { api } = globalThis.__editor;
+			const edit = new api.WorkspaceEdit();
+
+			edit.insert(api.Uri.file(`${dir}/src/game.ts`), new api.Position(1, 0), "// one\n// two\n");
+			await api.workspace.applyEdit(edit);
+		}, root);
+		await eventually("each part followed its code", async () => {
+			const now = await cells();
+			const line = (text) => now.find((cell) => cell.text.includes(text))?.line;
+
+			return line("behavior Position") === 4 && line("when Position.x[eid] > 10") === 9 || undefined;
+		});
+	} finally {
+		await workbench.locator(".notes-margin-tab", { "hasText": "Margin" }).click();
+		await workbench.evaluate(async (dir) => {
+			const { api } = globalThis.__editor;
+
+			await api.commands.executeCommand("workbench.action.revertAndCloseActiveEditor");
+			await api.workspace.fs.delete(api.Uri.file(dir), { "recursive": true }).then(() => undefined, () => undefined);
+		}, root);
+	}
+});
+
 test("webview: a markdown preview", async () => {
 	await session.terminal(`echo "# Tour" > TOUR.md`, { "fresh": true });
 	await session.page.waitForTimeout(1000);

@@ -429,3 +429,8 @@
 .live-values-cell.clickable {
   cursor: pointer;
 }
+
+/* A pane view's prose sits on its line: no paragraph margins. */
+.pane-item .pane-markdown p {
+	margin: 0;
+}

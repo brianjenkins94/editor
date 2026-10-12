@@ -129,7 +129,7 @@ dismissed), how a lost reference is looked for before it's orphaned, and `undefi
 **Dogfooded:** notes, insights' evidence, tsval's placed rules, worker-pod's rule places and core's run anchors
 (anchors.ts) all call through it — no extension calls the commands by hand.
 
-## 4. Pane views (the Margin pane's tabs) — steps 1–3 done (2026-10-12)
+## 4. Pane views (the Margin pane's tabs) — steps 1–4 done (2026-10-12)
 
 The pane beside every editor (components/monaco-vscode-api/pane.ts) has a strip of tabs on its first line. VS Code has no
 API for anything like it. Today one consumer owns all of it: live-values.ts lists the tabs (Margin, and two disabled
@@ -249,8 +249,13 @@ what makes the second face possible.
    `"into": "margin"`) from `silo.rules.list` — whose, sentence, lines and how sure, as the editor found each; the hub's
    `rules.placed` went. The Margin keeps coverage's marks only to say how each card ran; margin.state lists coverage and
    the run's end (placed rules are the rules tool's).
-4. **The event sheet takes its tab** — the game's conditions and actions beside the code they're in; its map and builder
-   stay the webview view they are. The Cards placeholder goes until the cards projection (PROJECTIONS.md) is built.
+4. ~~**The event sheet takes its tab**~~ — done (2026-10-12): the event-sheet extension declares `eventSheet` (its
+   manifest's `paneViews`, activated on `onCommand:eventSheet.paneView`) and answers it with the open file's part of its
+   game — each rule a card around its function (what it's for each of), each condition → action on its `if`, each
+   object, behavior and composite behavior on its declaration — placed by the span references anchoring gives them; the
+   game's projection is cached until one of its files is saved. Its map and builder stay the webview view they are.
+   Core's placeholder tabs (Cards, Event sheet) went; Cards waits for the cards projection (PROJECTIONS.md). A view with
+   nothing for a file keeps its pane, so its tabs stay to switch back.
 5. **The native face** (6): the same content as inlay hints, hovers, CodeLens and decorations — on in a desktop build, and
    wherever the pane is hidden.
 
