@@ -7,7 +7,6 @@ import { hostLog } from "./logging";
 import { consoleCollector, installHubCollector, installWindowMessageProbe, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "@brianjenkins94/observability";
 import { reportArchitecture } from "./architecture";
 import { reportSpanMetrics } from "./editor-metrics";
-import { editorPageTools } from "./page-tools";
 import { describeCommands } from "./terminal/catalog";
 import { sampleById, sampleList } from "./samples";
 import { createVscodeWindow } from "./vscode";
@@ -76,8 +75,9 @@ if (isolated && window.parent === window) {
 	linkDebugMcp(rootHub); // dev-only: federate the tree to a running @brianjenkins94/debug-mcp for MCP querying
 	// Dev-only: this tab's MCP tools, which debug-mcp registers while it's connected — under this tab's id, so it can
 	// address one tab of several: every page's page_eval / page_query, and the editor's own (the debugger, the preview's
-	// cold-start provoke, a preview page's Chrome DevTools Protocol — see page-tools.ts).
-	servePageTools(rootHub, { "tab": tab, "tools": editorPageTools(rootHub, { "commands": describeCommands() }) });
+	// cold-start provoke, a preview page's Chrome DevTools Protocol — see tools/).
+	// (tools/: a folder per family, each util/mcp's own tools — loaded after boot, so the MCP SDK and zod stay off its path)
+	void import("./tools").then(({ editorTools }) => { servePageTools(rootHub, { "tab": tab, "tools": editorTools(rootHub, { "commands": describeCommands() }) }); });
 
 	// The live preview BACKEND: runs the demo (a Vite React app) through an in-browser dev server in the node worker,
 	// which hot-reloads on workspace changes. Display-free — the movable window + iframe live in the shell (top

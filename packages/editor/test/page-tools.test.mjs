@@ -1,6 +1,6 @@
 /**
- * The editor tab's own MCP tools (page-tools.ts) end to end: an MCP client → debug-mcp → a stand-in editor tab serving
- * them as page tools, over its root, to stand-ins for what its tree answers (the pod's debug.*, each session's own
+ * The editor tab's own MCP tools (tools/: a folder per family, util/mcp's own tools) end to end: an MCP client →
+ * debug-mcp → a stand-in editor tab serving them as page tools, over its root, to stand-ins for what its tree answers (the pod's debug.*, each session's own
  * debug.session.<id>.*, the shell's preview.cdp).
  *
  *   node --import tsx --test test/page-tools.test.mjs
@@ -13,7 +13,19 @@ import { until } from "@brianjenkins94/util/until";
 import { createDebugMcp } from "../../debug-mcp/src/server.ts";
 import { connectTestClient } from "../../debug-mcp/src/testing.ts";
 import { OBSERVABILITY_PROTOCOL, servePageToolSet, TAB_DISCOVER, TAB_HERE } from "../../observability/src/index.ts";
-import { editorPageTools } from "../page-tools.ts";
+import debug from "../tools/debug/tools.ts";
+import editor from "../tools/editor/tools.ts";
+import files from "../tools/files/tools.ts";
+import git from "../tools/git/tools.ts";
+import margin from "../tools/margin/tools.ts";
+import { createToolHost, toPageTools } from "../tools/page-tools.ts";
+import previews from "../tools/previews/tools.ts";
+import rules from "../tools/rules/tools.ts";
+import runs from "../tools/runs/tools.ts";
+import terminal from "../tools/terminal/tools.ts";
+
+/** Every family's tools, as the tab serves them (tools/index.ts finds the families; Node can't read its glob). */
+const FAMILIES = [debug, editor, files, git, margin, previews, rules, runs, terminal];
 
 let debugMcp;
 let mcp;
@@ -43,7 +55,9 @@ before(async () => {
 			? { "id": command.id, "error": { "code": -32601, "message": "unknown method" } }
 			: { "id": command.id, "result": { ...args.window === undefined ? { "port": args.port } : { "window": args.window }, "method": command.method } });
 	});
-	servePageToolSet(root, "t1", editorPageTools(root));
+	const host = createToolHost(root);
+
+	servePageToolSet(root, "t1", toPageTools(FAMILIES.flatMap((family) => family(host))));
 	// (What answerTabDiscovery says in a page.)
 	root.subscribe(TAB_DISCOVER, (data) => {
 		root.publish(TAB_HERE, { "query": data.query, "tab": "t1", "url": "http://localhost:5173/", "title": "editor", "visible": true, "focused": true, "protocol": OBSERVABILITY_PROTOCOL });
@@ -72,9 +86,20 @@ test("the editor's tools are listed while its tab is connected", async () => {
 		return listed.includes("debug_start") ? listed : undefined;
 	});
 
-	for (const name of ["debug_start", "debug_sessions", "debug_step", "debug_state", "debug_breakpoints", "debug_stop", "provoke_transform", "preview_cdp"]) {
+	for (const name of ["debug_start", "debug_sessions", "debug_step", "debug_state", "debug_breakpoints", "debug_stop", "margin", "editor", "problems", "files_read", "files_write", "files_edit", "files_glob", "files_grep", "shell", "git", "rules", "notifications", "terminal", "previews", "provoke_transform", "preview_cdp", "runs", "run_ledger", "preview_profile"]) {
 		assert.ok(names.includes(name), name + " in " + names.join(", "));
 	}
+});
+
+test("a tool's input survives the trip: zod in the tab, JSON Schema on the wire, zod in debug-mcp", async () => {
+	const { tools } = await mcp.client.listTools();
+	const edit = tools.find((tool) => tool.name === "files_edit").inputSchema;
+	const step = tools.find((tool) => tool.name === "debug_step").inputSchema;
+
+	assert.deepEqual([...edit.required].sort(), ["new", "old", "path"], "required stays required, optional stays optional");
+	assert.equal(edit.properties.old.description, "The exact text to replace.");
+	assert.deepEqual(step.properties.action.enum, ["continue", "next", "stepIn", "stepOut", "stepBack", "reverseContinue"]);
+	assert.ok("tab" in step.properties, "debug-mcp's own tab argument added");
 });
 
 test("debug_start runs in the tab, and debug_step finds the only session without being told", async () => {

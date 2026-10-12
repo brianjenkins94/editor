@@ -10,6 +10,7 @@
  * linked tab didn't answer in time (a page busy starting up), until it does. A tool no connected tab serves any more is
  * removed (the client is told: tools/list_changed).
  */
+import type { ToolResult } from "@brianjenkins94/util/mcp/tool";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PageToolSpec } from "../../observability/src/page-tools.ts";
 import type { DebugMcp } from "./server.ts";
@@ -28,9 +29,9 @@ const GRACE_MS = 1000;
 /** The raw zod shape for a tool's JSON Schema input (util's tools take a shape). An unusable schema: no arguments. */
 function shapeOf(schema: Record<string, unknown>): Record<string, z.ZodType> {
 	try {
-		const parsed = z.fromJSONSchema(schema as Parameters<typeof z.fromJSONSchema>[0]);
+		const parsed = z.fromJSONSchema(schema);
 
-		return parsed instanceof z.ZodObject ? parsed.shape as Record<string, z.ZodType> : {};
+		return parsed instanceof z.ZodObject ? parsed.shape : {};
 	} catch {
 		return {};
 	}
@@ -43,6 +44,12 @@ export interface PageToolSync {
 }
 
 /** Keep `server`'s page tools in step with the tabs linked to `debugMcp`. Call once debug-mcp's own tools are on it. */
+
+/** An answer that's already a tool's result (`ok` / `fail`): its content parts, each text. */
+function isToolResult(answer: unknown): answer is ToolResult {
+	return typeof answer === "object" && answer !== null && Array.isArray((answer as ToolResult).content) && (answer as ToolResult).content.every((part) => typeof part === "object" && part !== null && part.type === "text" && typeof part.text === "string");
+}
+
 export function syncPageTools(server: McpServer, debugMcp: DebugMcp): PageToolSync {
 	// debug-mcp's own tools, already on `server`: a page may not take one over.
 	const reserved = new Set(toolNames(server));
@@ -124,14 +131,17 @@ export function syncPageTools(server: McpServer, debugMcp: DebugMcp): PageToolSy
 					"inputSchema": { ...shapeOf(spec.inputSchema ?? {}), "tab": z.string().optional().describe("The tab (from list_tabs) serving this tool. Omit when only one serves it.") }
 				},
 				"handler": async (args) => {
-					const { tab, _approved: _ignored, ...rest } = (args ?? {}) as Record<string, unknown> & { "tab"?: string };
+					const { tab, "_approved": _ignored, ...rest } = (args ?? {}) as Record<string, unknown> & { "tab"?: string };
 					const tabs = servedBy.get(name) ?? [];
 					// The call's own timeout, else the tool's, else ours — and a moment more, so a tool that times out its own
 					// work says so itself.
 					const timeoutMs = (typeof rest["timeoutMs"] === "number" ? rest["timeoutMs"] : spec.timeoutMs ?? CALL_MS) + GRACE_MS;
 
 					try {
-						return await ok(await callTab(debugMcp, PAGE_TOOL + "." + name, tab ?? (tabs.length === 1 ? tabs[0] : undefined), rest, timeoutMs));
+						const answer = await callTab(debugMcp, PAGE_TOOL + "." + name, tab ?? (tabs.length === 1 ? tabs[0] : undefined), rest, timeoutMs);
+
+						// A tool written with util/mcp (the editor's) answers with its own ToolResult; any other answer is the value.
+						return isToolResult(answer) ? answer : await ok(answer);
 					} catch (error) {
 						return fail(error instanceof Error ? error.message : String(error));
 					}

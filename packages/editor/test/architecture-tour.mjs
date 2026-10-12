@@ -1418,7 +1418,7 @@ test("capability decisions: Skip always and Deny always — every run goes past 
 	}
 });
 
-// What an agent reads, as data rather than off the DOM (debug-mcp's page tools, page-tools.ts): the editor in front of
+// What an agent reads, as data rather than off the DOM (debug-mcp's page tools, tools/): the editor in front of
 // you, its problems, the notifications showing, the rules, the terminals' output and the preview windows.
 test("agent tools: the editor, its problems, notifications, rules, terminals and previews — as data", async () => {
 	const workbench = session.workbench();

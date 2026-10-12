@@ -1,5 +1,5 @@
 /**
- * What the editor shows, as data — for agents (debug-mcp's `editor`, `problems` and `notifications` tools, page-tools.ts),
+ * What the editor shows, as data — for agents (debug-mcp's `editor`, `problems` and `notifications` tools, tools/),
  * which would otherwise read it off the DOM or know VS Code's API and which frame it's in:
  *
  * - `editor.state`: the file in front of you — its cursor, selections and the lines in view, unsaved or not — and every

@@ -167,6 +167,17 @@ packages/debug-mcp/src/tools/
   logs.ts  spans.ts  tabs.ts  architecture.ts  metrics.ts  …   one file per family, registered from a list
 ```
 
+### Step 3 (built)
+
+The editor tab's 25 tools are families under `tools/<family>/tools.ts`, each a list of util/mcp `defineTool`s (zod,
+`ok`/`fail`) over a `ToolHost` (the hub request, with its timeout); `tools/index.ts` finds them by glob and
+`tools/page-tools.ts` serves them as page tools. debug-mcp's own 8 are `src/tools/<family>.ts`, registered from a list,
+and a page tool that answers with a `ToolResult` passes it through. Names, descriptions and timeouts are unchanged; the
+backends still live with their owning modules (moving them in is step 4's, with the renames).
+
+Found on the way: util/mcp's tool module loaded its capability broker (an `AsyncLocalStorage`) as it loaded, so a page
+importing it for `defineTool` threw in the browser; the broker now loads only when a server brokers a handler.
+
 ### The naming rule
 
 `<family>_<verb>`, where the family is the folder: `files_read`, `git_status`, `runs_stop`, `editor_problems`,
