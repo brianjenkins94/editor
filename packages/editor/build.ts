@@ -32,9 +32,18 @@ const nodeBuiltins = [...builtinModules, ...builtinModules.map((name) => `node:$
 // Virtual-module bundlers (extensions + almostnode node servers), formerly entry.config.ts helpers.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** A browser-flavored `process` (no `versions.node`), prepended to bundles that run where there is none: silo's reach chain
+ *  and util's env read the global at module eval. (polyfillNode injects a `process`, but napi-rs's runtime detection must
+ *  still pick its browser path.) */
+const PROCESS_SHIM = "globalThis.process=globalThis.process||{\"env\":{},\"argv\":[],\"platform\":\"browser\",\"cwd\":function(){return \"/\";}};";
+
+/** The same `process`, but the bundle's own: an extension's bundle runs as a CommonJS module in the extension host, a realm
+ *  every extension shares, where a global `process` makes other extensions (VS Code's TypeScript) take it for Node. */
+const MODULE_PROCESS_SHIM = "var process=globalThis.process||{\"env\":{},\"argv\":[],\"platform\":\"browser\",\"cwd\":function(){return \"/\";}};";
+
 /** Bundle `extensions/<name>/<file>.ts` (deps inlined) into a virtual module `<name>:<id>` exposing the built
  *  code as a default-export string. `externals` stay unbundled. `configFile:false` isolates the nested build. */
-function bundledModule(name: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[] | ((source: string, importer: string | undefined) => boolean), served = false, plugins: Plugin[] = []): Plugin {
+function bundledModule(name: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[] | ((source: string, importer: string | undefined) => boolean), served = false, plugins: Plugin[] = [], banner?: string): Plugin {
 	const virtual = `${name}:${id}`;
 	const resolved = "\0" + virtual;
 	const dir = url.fileURLToPath(new URL(`./extensions/${name}/`, import.meta.url));
@@ -61,7 +70,7 @@ function bundledModule(name: string, file: string, id: string, format: "cjs" | "
 					"lib": { "entry": dir + file, "formats": [format], "fileName": id, ...format === "iife" ? { "name": id.replaceAll("-", "_") } : {} },
 					// One self-contained chunk: large servers have dynamic imports that would otherwise code-split
 					// into siblings we don't capture (we grab only the entry chunk as a string).
-					"rollupOptions": { "external": externals, "output": { "inlineDynamicImports": true } }
+					"rollupOptions": { "external": externals, "output": { "inlineDynamicImports": true, ...banner === undefined ? {} : { "banner": banner } } }
 				}
 			}) as RollupOutput[];
 
@@ -87,7 +96,8 @@ function bundledModule(name: string, file: string, id: string, format: "cjs" | "
  *  (commandTap): the architecture view discovers its commands. */
 function bundledExtension(name: string): Plugin {
 	// `vscode` is external only from the tapped module: the extension's own imports of it go to that module first.
-	return bundledModule(name, "extension.ts", "extension", "cjs", (source, importer) => source === "vscode" && importer === TAPPED_VSCODE, true, [commandTap(name)]);
+	// The extension host has no `process`; util reads it as it loads.
+	return bundledModule(name, "extension.ts", "extension", "cjs", (source, importer) => source === "vscode" && importer === TAPPED_VSCODE, true, [commandTap(name)], MODULE_PROCESS_SHIM);
 }
 
 /** The module an extension's `vscode` imports resolve to (commandTap). */
@@ -416,10 +426,6 @@ export async function preBuild(): Promise<void> {
 	// polyfill): polyfillNode would otherwise stub it to an empty module (→ "__nodeWASI is not a constructor"),
 	// clobbering oxc's own browser WASI. An empty stub set also avoids polyfillNode's stub-loader syntax errors.
 	const oxcPolyfills = polyfillNode(builtinModules.filter((builtin) => stdlib[builtin] !== undefined));
-
-	// silo's reach chain also reads the `process.env` global at module eval. polyfillNode injects a `process`, but we
-	// prepend a browser-flavored one (no `versions.node`) so napi-rs's runtime detection still picks its browser path.
-	const PROCESS_SHIM = "globalThis.process=globalThis.process||{\"env\":{},\"argv\":[],\"platform\":\"browser\",\"cwd\":function(){return \"/\";}};";
 
 	await buildPackage(root, {
 		"base": "./",
