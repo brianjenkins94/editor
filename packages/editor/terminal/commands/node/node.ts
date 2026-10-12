@@ -8,10 +8,9 @@
  * runs files, so the code goes in one under `.silo/local/`, which stays out of git, removed after); `-v` asks the runtime
  * itself (`-p process.version`); `--test` and a bare `node` (a REPL) say they aren't here yet rather than misbehave.
  */
-import type { Command } from "just-bash/browser";
-import type { CommandHost } from "../../catalog";
+import type { Juvy } from "@brianjenkins94/util/juvy";
+import type { CommandHost, Handler } from "../../catalog";
 
-import { defineCommand } from "just-bash/browser";
 import { lifecycleOfSource } from "../../../lifecycle";
 
 /** POSIX resolve of `path` against `base` (collapsing `.`/`..`). */
@@ -44,43 +43,41 @@ function resolvePosix(base: string, path: string): string {
 /** Where `-e` / `-p` code is run from: silo's machine-local folder, out of git (and out of the way). */
 const EVAL_DIR = "/workspace/.silo/local/node-eval";
 
-/** How `node`'s arguments ask to be run: a file (and its arguments), code (`-e`, `-p`), or something not here. */
-export type NodeInvocation = { "file": string; "args": string[] } | { "code": string; "print": boolean; "args": string[] } | { "unsupported": string };
+/** How `node`'s arguments (as juvy parsed them) ask to be run: a file and its arguments, code (`-e`, `-p`), or
+ *  something not here. */
+export type NodeInvocation = { "file": string; "args": string[] } | { "code": string; "print": boolean; "args": string[] } | { "unsupported": string; "exitCode": number };
 
-/** Read `node`'s arguments as node does: options before the file (or the code), the program's own arguments after. */
-export function invocationOf(args: string[]): NodeInvocation {
-	for (let index = 0; index < args.length; index += 1) {
-		const argument = args[index];
+export function invocationOf(config: Juvy): NodeInvocation {
+	const program = config.get("program") as string[];
 
-		if (argument === "-e" || argument === "--eval" || argument === "-p" || argument === "--print") {
-			const code = args[index + 1];
-
-			return code === undefined ? { "unsupported": `node: ${argument} requires an argument` } : { "code": code, "print": argument === "-p" || argument === "--print", "args": args.slice(index + 2) };
-		}
-
-		if (argument === "-v" || argument === "--version") {
-			return { "code": "process.version", "print": true, "args": [] };
-		}
-
-		if (argument === "--test") {
-			return { "unsupported": "node: --test isn't here yet — this runtime has no node:test. Run a test file as a program: node <file>" };
-		}
-
-		if (!argument.startsWith("-")) {
-			return { "file": argument, "args": args.slice(index + 1) };
-		}
+	if (config.get("version") === true) {
+		return { "code": "process.version", "print": true, "args": [] };
 	}
 
-	return { "unsupported": "node: there's no REPL here yet — `node -e` runs a line of code, `node` with a file runs a program" };
+	if (config.get("eval") !== "" || config.get("print") !== "") {
+		const print = config.get("print") !== "";
+
+		return { "code": config.get(print ? "print" : "eval") as string, "print": print, "args": program };
+	}
+
+	if (config.get("test") === true) {
+		return { "unsupported": "node: --test isn't here yet — this runtime has no node:test. Run a test file as a program: node <file>", "exitCode": 1 };
+	}
+
+	if (program.length === 0) {
+		// (Asking for nothing failed — there's just no REPL — so it isn't an error.)
+		return { "unsupported": "node: there's no REPL here yet — `node -e` runs a line of code, `node` with a file runs a program", "exitCode": 0 };
+	}
+
+	return { "file": program[0]!, "args": program.slice(1) };
 }
 
-export function create({ runner, writeLive, terminal }: CommandHost): Command {
-	return defineCommand("node", async (args, ctx) => {
-		const invocation = invocationOf(args);
+export function create({ runner, writeLive, terminal }: CommandHost): Handler {
+	return async (config, ctx) => {
+		const invocation = invocationOf(config);
 
 		if ("unsupported" in invocation) {
-			// (A bare `node` asked for nothing that failed — there's just no REPL — so it isn't an error.)
-			return { "stdout": "", "stderr": invocation.unsupported + "\n", "exitCode": args.length === 0 ? 0 : 1 };
+			return { "stdout": "", "stderr": invocation.unsupported + "\n", "exitCode": invocation.exitCode };
 		}
 
 		// Code runs from a file of its own, removed once it's run.
@@ -93,14 +90,17 @@ export function create({ runner, writeLive, terminal }: CommandHost): Command {
 		}
 
 		try {
-			return await runFile("code" in invocation ? scratch : invocation.file, invocation.args, "code" in invocation ? `node ${args.join(" ")}` : undefined);
+			// In the running list as it was asked for: `node app.ts a b`, `node -e …`.
+			const title = "code" in invocation ? `node ${invocation.print ? "-p" : "-e"} ${invocation.code}` : ["node", invocation.file, ...invocation.args].join(" ");
+
+			return await runFile("code" in invocation ? scratch! : invocation.file, invocation.args, title);
 		} finally {
 			if (scratch !== undefined) {
 				await ctx.fs.rm(scratch, { "force": true }).catch(() => undefined);
 			}
 		}
 
-		async function runFile(target: string, programArgs: string[], title: string | undefined): Promise<{ "stdout": string; "stderr": string; "exitCode": number }> {
+		async function runFile(target: string, programArgs: string[], title: string): Promise<{ "stdout": string; "stderr": string; "exitCode": number }> {
 			const env = ctx.exportedEnv ?? Object.fromEntries(ctx.env);
 			const file = resolvePosix(ctx.cwd, target);
 			// One way to stop it, whoever asks: the shell's Ctrl-C (or the terminal closing), the running list, the debug Stop.
@@ -122,7 +122,7 @@ export function create({ runner, writeLive, terminal }: CommandHost): Command {
 			// In the running list as it was asked for (`npm run build` runs `node build.ts`). (`npm run` passes the script's
 			// name in the environment it runs it with — ctx.env, not the exported one.)
 			const event = Object.fromEntries(ctx.env)["npm_lifecycle_event"] ?? env["npm_lifecycle_event"];
-			const run = runner.runs.start({ "title": title ?? (event === undefined ? "node " + args.join(" ") : "npm run " + event), "kind": kind, "cwd": ctx.cwd, "origin": { "terminal": terminal }, "entry": file, "runtime": "tsval" }, () => { controller.abort(); });
+			const run = runner.runs.start({ "title": event === undefined ? title : "npm run " + event, "kind": kind, "cwd": ctx.cwd, "origin": { "terminal": terminal }, "entry": file, "runtime": "tsval" }, () => { controller.abort(); });
 			const ended = (exitCode: number): { "stdout": string; "stderr": string; "exitCode": number } => {
 				run.end(exitCode, controller.signal.aborted);
 
@@ -150,5 +150,5 @@ export function create({ runner, writeLive, terminal }: CommandHost): Command {
 				return { "stdout": "", "stderr": `node: ${error instanceof Error ? error.message : String(error)}\n`, "exitCode": 1 };
 			}
 		}
-	});
+	};
 }

@@ -150,6 +150,13 @@ function eslintNodeModule(): Plugin {
  *  which uses the `Buffer` global, and the shell's bundle otherwise has no `buffer` to resolve (the package isn't a
  *  direct dependency). As the workbench pass's alias does for git-engine.ts; in dev, Vite pre-bundles it (it resolves
  *  into node_modules) into ESM. */
+/** @pkgjs/parseargs (Node's parseArgs, for juvy in the terminal — terminal/node-util.ts) reads Node's `global` as it
+ *  loads; in the browser that's `globalThis`. Rewritten in that package alone, rather than a page-wide `global` that
+ *  other code would take for Node. */
+function parseargsGlobal(): Plugin {
+	return { "name": "parseargs-global", "transform": (code, id) => (id.includes("@pkgjs/parseargs") ? code.replaceAll(/\bglobal\b/gu, "globalThis") : undefined) };
+}
+
 function shellBuffer(): Plugin {
 	return { "name": "shell-buffer", "config": () => ({ "resolve": { "alias": { "buffer": stdlib["buffer"] as string } } }) };
 }
@@ -287,7 +294,7 @@ export async function preBuild(): Promise<void> {
 		// just-bash chunk as /browser.js → index.html, "Failed to load module script") — the import itself, relative,
 		// still worked.
 		"base": "./",
-		"plugins": [bundledExtension("worker-pod"), bundledExtension("tsval"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledModule("event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin()],
+		"plugins": [bundledExtension("worker-pod"), bundledExtension("tsval"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledModule("event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin(), parseargsGlobal()],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
 		// `buffer` → the node-stdlib-browser polyfill: isomorphic-git (the git SCM engine) uses the `Buffer` global,
@@ -296,7 +303,9 @@ export async function preBuild(): Promise<void> {
 		// `@automerge/automerge` → its base64-INLINED-WASM entry (fullfat_base64): the default browser condition wants a
 		// bundler to serve a separate `automerge.wasm`, which our static Pages deploy can't; the base64 build carries the
 		// wasm inline, so the lazily-imported edit-history chunk is self-contained. Resolve via package.json → sibling.
-		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "buffer": stdlib["buffer"] as string, "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
+		// `node:util` → what juvy and cmd-ts read of it, for the terminal's commands (terminal/node-util.ts); `util` → the
+		// browser polyfill it takes `inspect` from.
+		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "buffer": stdlib["buffer"] as string, "node:util": resolvePath("./terminal/node-util.ts"), "util": stdlib["util"] as string, "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
 		"build": {
 			"outDir": "dist",
 			"minify": isCI,

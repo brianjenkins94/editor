@@ -3,9 +3,7 @@
  * the editor, at a line when it's given as `file:line[:column]` (as compilers and test runners print them), a file that
  * doesn't exist yet as a new one that saves there, and a folder revealed in the Explorer.
  */
-import type { Command } from "just-bash/browser";
-import type { CommandHost } from "../../catalog";
-import { defineCommand } from "just-bash/browser";
+import type { CommandHost, Handler } from "../../catalog";
 
 /** POSIX resolve of `path` against `base`. */
 function resolve(base: string, path: string): string {
@@ -23,13 +21,13 @@ function resolve(base: string, path: string): string {
 }
 
 /** The opener, named `name` (`code`, `open`); `urls` opens a URL in the browser too (`open https://…`). */
-export function opener(name: string, { api }: CommandHost, { urls = false }: { "urls"?: boolean } = {}): Command {
-	return defineCommand(name, async (args, ctx) => {
-		const targets = args.filter((argument) => !argument.startsWith("-"));
+export function opener(name: string, { api }: CommandHost, { urls = false }: { "urls"?: boolean } = {}): Handler {
+	return async (config, ctx) => {
+		const targets = config.get("targets") as string[];
 		const errors: string[] = [];
 
 		if (targets.length === 0) {
-			return { "stdout": "", "stderr": `usage: ${name} <file>[:line[:column]]… | ${name} <folder>\n`, "exitCode": 1 };
+			return { "stdout": "", "stderr": `${name}: what should it open? (${name} --help)\n`, "exitCode": 1 };
 		}
 
 		for (const target of targets) {
@@ -68,9 +66,9 @@ export function opener(name: string, { api }: CommandHost, { urls = false }: { "
 		}
 
 		return { "stdout": "", "stderr": errors.map((error) => error + "\n").join(""), "exitCode": errors.length === 0 ? 0 : 1 };
-	});
+	};
 }
 
-export function create(host: CommandHost): Command {
+export function create(host: CommandHost): Handler {
 	return opener("code", host);
 }

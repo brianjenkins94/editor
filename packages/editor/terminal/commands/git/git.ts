@@ -1,43 +1,24 @@
 /**
  * The terminal's `git`: the workspace's one git (isomorphic-git, git-engine.ts — the same that Source Control and the
- * review panel show), spoken as git is: status, diff, log, add, restore, commit and branch, printed as git prints them.
- * What changes the repository says so (`git.changed`), as git-service does, so Source Control and the review panel
- * refresh. What isn't here yet (switch, stash, push…) says so, and what to do instead.
+ * review panel show), spoken as git is: status, diff, log, add, restore, commit and branch, printed as git prints them,
+ * each a subcommand juvy routes and parses (command.ts — where what isn't here yet, switch, stash, push…, says what to do
+ * instead). What changes the repository says so (`git.changed`), as git-service does, so Source Control and the review
+ * panel refresh.
  *
  * `diff` compares the working tree with HEAD: without `--staged` the files with unstaged changes, with it the staged
  * ones. A file staged and then changed again shows all of its changes either way — the index's own version isn't read.
  */
-import type { Command } from "just-bash/browser";
-import type { CommandHost } from "../../catalog";
+import type { Juvy } from "@brianjenkins94/util/juvy";
+import type { CommandHost, CommandResult, Handler } from "../../catalog";
 import { version } from "isomorphic-git";
-import { defineCommand } from "just-bash/browser";
 import * as engine from "../../../git-engine";
 import { unifiedDiff } from "../../../git-service";
 
-type Result = { "stdout": string; "stderr": string; "exitCode": number };
+type Result = CommandResult;
 
 const ROOT = "/workspace";
 const ok = (stdout: string): Result => ({ "stdout": stdout, "stderr": "", "exitCode": 0 });
 const fail = (stderr: string, exitCode = 1): Result => ({ "stdout": "", "stderr": stderr + "\n", "exitCode": exitCode });
-
-/** What isn't here yet, and what to do instead. */
-const NOT_HERE: Record<string, string> = {
-	"switch": "switching branches isn't here yet — git branch lists them",
-	"checkout": "switching branches isn't here yet — git restore <path> undoes a file's changes",
-	"merge": "merging isn't here yet",
-	"rebase": "rebasing isn't here yet",
-	"stash": "stashing isn't here yet — commit, or restore what you don't want",
-	"reset": "reset isn't here — git restore --staged <path> unstages, git restore <path> undoes",
-	"push": "this workspace's git is local — the Commit button sends it to GitHub",
-	"pull": "this workspace's git is local — load the repository again for what's new",
-	"fetch": "this workspace's git is local — load the repository again for what's new",
-	"clone": "load a repository from the Open button instead",
-	"remote": "this workspace's git is local, with no remotes",
-	"show": "show isn't here yet — git log lists the commits",
-	"rm": "delete the file (rm <path>), then git add it",
-	"mv": "move the file (mv <from> <to>), then git add both",
-	"init": "this workspace is a repository already"
-};
 
 /** `path`, as typed in `cwd`, relative to the repository — or undefined outside it. */
 function inRepo(cwd: string, path: string): string | undefined {
@@ -61,12 +42,12 @@ const under = (file: string, path: string): boolean => path === "" || file === p
 
 const VERBS = { "A": "new file", "M": "modified", "D": "deleted" } as const;
 
-async function status(args: string[]): Promise<Result> {
+async function status(config: Juvy): Promise<Result> {
 	const { staged, unstaged } = await engine.status();
 	const untracked = unstaged.filter((change) => change.status === "A" && !staged.some((each) => each.path === change.path));
 	const changed = unstaged.filter((change) => !untracked.includes(change));
 
-	if (args.includes("-s") || args.includes("--short")) {
+	if (config.get("short") === true) {
 		const paths = [...new Set([...staged, ...changed].map((change) => change.path))].sort();
 
 		return ok([...paths.map((path) => `${staged.find((each) => each.path === path)?.status ?? " "}${changed.find((each) => each.path === path)?.status ?? " "} ${path}`), ...untracked.map((change) => `?? ${change.path}`)].map((line) => line + "\n").join(""));
@@ -93,9 +74,9 @@ async function status(args: string[]): Promise<Result> {
 	return ok(lines.join("\n").replace(/\n?$/u, "\n"));
 }
 
-async function diff(args: string[], cwd: string): Promise<Result> {
-	const wantStaged = args.includes("--staged") || args.includes("--cached");
-	const paths = args.filter((argument) => !argument.startsWith("-")).map((path) => inRepo(cwd, path) ?? "\u0000");
+async function diff(config: Juvy, cwd: string): Promise<Result> {
+	const wantStaged = config.get("staged") === true || config.get("cached") === true;
+	const paths = (config.get("paths") as string[]).map((path) => inRepo(cwd, path) ?? "\u0000");
 	const { staged, unstaged } = await engine.status();
 	const changes = (wantStaged ? staged : unstaged.filter((change) => !(change.status === "A" && !staged.some((each) => each.path === change.path)))).filter((change) => paths.length === 0 || paths.some((path) => under(change.path, path)));
 	let out = "";
@@ -109,15 +90,20 @@ async function diff(args: string[], cwd: string): Promise<Result> {
 	return ok(out);
 }
 
-async function log(args: string[]): Promise<Result> {
-	const count = args.find((argument) => /^-\d+$/u.test(argument))?.slice(1) ?? args[args.indexOf("-n") + 1];
-	const entries = await engine.history(args.includes("-n") || args.some((argument) => /^-\d+$/u.test(argument)) ? Number(count) : undefined);
+async function log(config: Juvy): Promise<Result> {
+	const count = config.get("maxCount") as string;
+
+	if (count !== "" && !/^\d+$/u.test(count)) {
+		return fail(`fatal: '${count}': not an integer`, 128);
+	}
+
+	const entries = await engine.history(count === "" ? undefined : Number(count));
 
 	if (entries.length === 0) {
 		return fail("fatal: your current branch does not have any commits yet", 128);
 	}
 
-	if (args.includes("--oneline")) {
+	if (config.get("oneline") === true) {
 		return ok(entries.map((entry) => `${entry.oid.slice(0, 7)} ${entry.message.split("\n")[0]}\n`).join(""));
 	}
 
@@ -148,118 +134,109 @@ async function changedUnder(paths: string[], cwd: string): Promise<string[] | Re
 	return [...new Set(files)];
 }
 
-export function create({ hub }: CommandHost): Command {
+export function create({ hub }: CommandHost): Record<string, Handler> {
 	const changed = (): void => { hub.publish("git.changed"); };
-
-	return defineCommand("git", async (args, ctx) => {
-		const [subcommand, ...rest] = args;
-
+	// Each handler's failure is git's: `fatal: …`, 128.
+	const guarded = (handler: Handler): Handler => async (config, ctx) => {
 		try {
-			switch (subcommand) {
-				case undefined:
-					return fail("usage: git status | diff | log | add | restore | commit | branch (git --help for more)");
-				case "--version":
-				case "version":
-					return ok(`git version isomorphic-git ${version()}\n`);
-				case "status":
-					return await status(rest);
-				case "diff":
-					return await diff(rest, ctx.cwd);
-				case "log":
-					return await log(rest);
-				case "add": {
-					const paths = rest.includes("-A") || rest.includes("--all") ? ["/workspace"] : rest.filter((argument) => !argument.startsWith("-"));
-
-					if (paths.length === 0) {
-						return fail("Nothing specified, nothing added.\nhint: Maybe you wanted to say 'git add .'?");
-					}
-
-					const files = await changedUnder(paths, ctx.cwd);
-
-					if (!Array.isArray(files)) {
-						return files;
-					}
-
-					await engine.stagePaths(files);
-					changed();
-
-					return ok("");
-				}
-				case "restore": {
-					const staged = rest.includes("--staged") || rest.includes("-S");
-					const paths = rest.filter((argument) => !argument.startsWith("-"));
-
-					if (paths.length === 0) {
-						return fail("fatal: you must specify path(s) to restore");
-					}
-
-					const { staged: stagedChanges, unstaged } = await engine.status();
-
-					for (const path of paths) {
-						const relative = inRepo(ctx.cwd, path) ?? "\u0000";
-						const files = (staged ? stagedChanges : unstaged).filter((change) => under(change.path, relative) && (staged || !(change.status === "A" && !stagedChanges.some((each) => each.path === change.path))));
-
-						if (files.length === 0) {
-							return fail(`error: pathspec '${path}' did not match any file(s) known to git`);
-						}
-
-						for (const file of files) {
-							await (staged ? engine.unstage(file.path) : engine.discardFile(file.path));
-						}
-					}
-
-					changed();
-
-					return ok("");
-				}
-				case "commit": {
-					const messages = rest.flatMap((argument, index) => (rest[index - 1] === "-m" || rest[index - 1] === "--message" ? [argument] : []));
-
-					if (rest.includes("--amend")) {
-						return fail("git: --amend isn't here yet");
-					}
-
-					if (messages.length === 0) {
-						return fail("git: commit needs a message here (-m \"…\") — there's no editor to write one in");
-					}
-
-					if (rest.includes("-a") || rest.includes("--all")) {
-						const { unstaged, staged } = await engine.status();
-
-						await engine.stagePaths(unstaged.filter((change) => !(change.status === "A" && !staged.some((each) => each.path === change.path))).map((change) => change.path));
-					}
-
-					const { staged } = await engine.status();
-
-					if (staged.length === 0) {
-						return fail("nothing added to commit (use \"git add\" to stage, or git commit -a)");
-					}
-
-					const oid = await engine.commitIndex(messages.join("\n\n"));
-
-					changed();
-
-					return ok(`[${(await engine.branches()).current ?? "HEAD"} ${oid.slice(0, 7)}] ${messages[0]!.split("\n")[0]}\n ${staged.length} file${staged.length === 1 ? "" : "s"} changed\n`);
-				}
-				case "branch": {
-					const name = rest.find((argument) => !argument.startsWith("-"));
-
-					if (name !== undefined) {
-						await engine.createBranch(name);
-						changed();
-
-						return ok("");
-					}
-
-					const { current, all } = await engine.branches();
-
-					return ok(all.map((each) => `${each === current ? "*" : " "} ${each}\n`).join(""));
-				}
-				default:
-					return fail(subcommand in NOT_HERE ? `git ${subcommand}: ${NOT_HERE[subcommand]}` : `git: '${subcommand}' is not a git command here — status, diff, log, add, restore, commit and branch are`);
-			}
+			return await handler(config, ctx);
 		} catch (error) {
 			return fail(`fatal: ${error instanceof Error ? error.message : String(error)}`, 128);
 		}
-	});
+	};
+
+	return Object.fromEntries(Object.entries({
+		"version": async () => ok(`git version isomorphic-git ${version()}\n`),
+		"status": async (config) => status(config),
+		"diff": async (config, ctx) => diff(config, ctx.cwd),
+		"log": async (config) => log(config),
+		"add": async (config, ctx) => {
+			const paths = config.get("all") === true ? ["/workspace"] : config.get("paths") as string[];
+
+			if (paths.length === 0) {
+				return fail("Nothing specified, nothing added.\nhint: Maybe you wanted to say 'git add .'?");
+			}
+
+			const files = await changedUnder(paths, ctx.cwd);
+
+			if (!Array.isArray(files)) {
+				return files;
+			}
+
+			await engine.stagePaths(files);
+			changed();
+
+			return ok("");
+		},
+		"restore": async (config, ctx) => {
+			const staged = config.get("staged") === true;
+			const paths = config.get("paths") as string[];
+
+			if (paths.length === 0) {
+				return fail("fatal: you must specify path(s) to restore");
+			}
+
+			const { "staged": stagedChanges, unstaged } = await engine.status();
+
+			for (const path of paths) {
+				const relative = inRepo(ctx.cwd, path) ?? "\u0000";
+				const files = (staged ? stagedChanges : unstaged).filter((change) => under(change.path, relative) && (staged || !(change.status === "A" && !stagedChanges.some((each) => each.path === change.path))));
+
+				if (files.length === 0) {
+					return fail(`error: pathspec '${path}' did not match any file(s) known to git`);
+				}
+
+				for (const file of files) {
+					await (staged ? engine.unstage(file.path) : engine.discardFile(file.path));
+				}
+			}
+
+			changed();
+
+			return ok("");
+		},
+		"commit": async (config) => {
+			const message = config.get("message") as string;
+
+			if (config.get("amend") === true) {
+				return fail("git: --amend isn't here yet");
+			}
+
+			if (message === "") {
+				return fail("git: commit needs a message here (-m \"…\") — there's no editor to write one in");
+			}
+
+			if (config.get("all") === true) {
+				const { unstaged, staged } = await engine.status();
+
+				await engine.stagePaths(unstaged.filter((change) => !(change.status === "A" && !staged.some((each) => each.path === change.path))).map((change) => change.path));
+			}
+
+			const { staged } = await engine.status();
+
+			if (staged.length === 0) {
+				return fail("nothing added to commit (use \"git add\" to stage, or git commit -a)");
+			}
+
+			const oid = await engine.commitIndex(message);
+
+			changed();
+
+			return ok(`[${(await engine.branches()).current ?? "HEAD"} ${oid.slice(0, 7)}] ${message.split("\n")[0]}\n ${staged.length} file${staged.length === 1 ? "" : "s"} changed\n`);
+		},
+		"branch": async (config) => {
+			const name = config.get("name") as string;
+
+			if (name !== "") {
+				await engine.createBranch(name);
+				changed();
+
+				return ok("");
+			}
+
+			const { current, all } = await engine.branches();
+
+			return ok(all.map((each) => `${each === current ? "*" : " "} ${each}\n`).join(""));
+		}
+	} satisfies Record<string, Handler>).map(([name, handler]) => [name, guarded(handler)]));
 }

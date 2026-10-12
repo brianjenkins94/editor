@@ -5,10 +5,12 @@ import { fs } from "@zenfs/core";
 import { Bash } from "just-bash/browser";
 
 import { ensureRepo } from "../../../git-engine.ts";
+import { toCommand } from "../../invoke.ts";
+import definition from "./command.ts";
 import { create } from "./git.ts";
 
 const announced = [];
-const bash = new Bash({ "cwd": "/workspace", "customCommands": [create({ "hub": { "publish": (subject) => { announced.push(subject); } } })] });
+const bash = new Bash({ "cwd": "/workspace", "customCommands": [toCommand(definition, create({ "hub": { "publish": (subject) => { announced.push(subject); } } }))] });
 const git = async (line) => bash.exec("git " + line, { "cwd": "/workspace" });
 
 fs.mkdirSync("/workspace", { "recursive": true });
@@ -22,6 +24,7 @@ test("status, add, commit, log: a first commit", async () => {
 	assert.match((await git("status -s")).stdout, /^A {2}app\.ts$/mu);
 	assert.match((await git("commit -m 'the first'")).stdout, /^\[main [0-9a-f]{7}\] the first\n 2 files changed\n$/u);
 	assert.match((await git("log --oneline")).stdout, /^[0-9a-f]{7} the first\n$/u);
+	assert.match((await git("log -n 1")).stdout, /^commit [0-9a-f]{40}\nAuthor: editor <editor@localhost>\n/u);
 	assert.match((await git("status")).stdout, /nothing to commit, working tree clean/u);
 	assert.ok(announced.length >= 2, "add and commit say the repository changed");
 });
@@ -54,6 +57,8 @@ test("branch, and what isn't here says what to do", async () => {
 	await git("branch feature");
 	assert.equal((await git("branch")).stdout, "  feature\n* main\n");
 	assert.match((await git("push")).stderr, /local — the Commit button/u);
-	assert.match((await git("frobnicate")).stderr, /not a git command here/u);
+	assert.match((await git("frobnicate")).stderr, /unknown git command 'frobnicate'/u, "juvy's routing");
+	assert.match((await git("stats")).stderr, /Did you mean 'status'\?/u);
+	assert.match((await git("status --bogus")).stderr, /Unknown option '--bogus'/u, "juvy's parsing");
 	assert.match((await git("--version")).stdout, /^git version isomorphic-git /u);
 });

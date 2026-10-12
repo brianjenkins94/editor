@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Bash } from "just-bash/browser";
 
+import { toCommand } from "../../invoke.ts";
+import killDefinition from "../kill/command.ts";
 import { create as kill } from "../kill/kill.ts";
+import definition from "./command.ts";
 import { create as ps } from "./ps.ts";
 
 function registry() {
@@ -19,7 +22,7 @@ function registry() {
 
 test("ps: what's running, a short id each; -a adds what ended", async () => {
 	const { runs } = registry();
-	const bash = new Bash({ "customCommands": [ps({ "runner": { runs } })] });
+	const bash = new Bash({ "customCommands": [toCommand(definition, ps({ "runner": { runs } }))] });
 	const running = (await bash.exec("ps")).stdout.split("\n");
 
 	assert.match(running[0], /^ID\s+STATE\s+KIND\s+PORT\s+FROM\s+COMMAND$/u);
@@ -30,11 +33,13 @@ test("ps: what's running, a short id each; -a adds what ended", async () => {
 
 test("kill: by any unique beginning of the id; an ambiguous or unknown one says so", async () => {
 	const { runs, stopped } = registry();
-	const bash = new Bash({ "customCommands": [kill({ "runner": { runs } })] });
+	const bash = new Bash({ "customCommands": [toCommand(killDefinition, kill({ "runner": { runs } }))] });
 
 	assert.equal((await bash.exec("kill -9 aaaa2")).exitCode, 0);
 	assert.deepEqual(stopped, ["aaaa2222-0000"]);
 	assert.match((await bash.exec("kill aaaa")).stderr, /more than one run/u);
 	assert.match((await bash.exec("kill bbbb")).stderr, /nothing running by that id/u, "an ended run isn't running");
 	assert.equal((await bash.exec("kill")).exitCode, 1);
+	assert.match((await bash.exec("kill --help")).stdout, /Stop runs by their id/u, "juvy's help, from the definition");
+	assert.equal((await bash.exec("kill --bogus")).stderr, "kill: Unknown option '--bogus'.\n", "juvy's complaint, said as the command's");
 });

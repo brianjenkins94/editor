@@ -10,7 +10,8 @@
  * Only `command.ts` is read here, eagerly — it's a few lines and imports nothing — so anything can ask what the
  * commands are without loading a command (index.ts loads the implementations, lazily).
  */
-import type { Command } from "just-bash/browser";
+import type { Juvy, Schema } from "@brianjenkins94/util/juvy";
+import type { ResolvedCommandContext } from "just-bash/browser";
 import type { Hub } from "@brianjenkins94/hub";
 import type { NodeOutput, NodeRunner } from "../node-runner";
 import type { BashSession } from "./session";
@@ -21,8 +22,14 @@ export interface CommandDefinition {
 	"name": string;
 	/** What it does, in a line: shown to people (`--help`) and to agents (the `shell` tool). */
 	"summary": string;
-	/** How it's called, for `--help`: `node <file> [args…]`. */
-	"usage"?: string;
+	/** Its options and arguments, as a juvy schema: juvy parses them (strictly), validates them and makes `--help` of
+	 *  them, so the command gets them parsed (invoke.ts). */
+	"options"?: Schema;
+	/** Parse only up to the first argument: it and everything after it are passed on as they are — a command that runs
+	 *  another (`node app.ts --port 3`). */
+	"stopEarly"?: boolean;
+	/** In place of `options`, its subcommands (`git status`), each with its own — routed, and helped, by juvy. */
+	"subcommands"?: Record<string, SubcommandDefinition>;
 	/** It isn't here, and this says what to do instead (`vim` → the editor). Such a command has no implementation: it
 	 *  says so and fails as a missing command does (127), so what people reach for out of habit is answered, not "not
 	 *  found". */
@@ -30,6 +37,16 @@ export interface CommandDefinition {
 	/** Its output goes to the terminal as it's produced rather than through just-bash's stdout (node, vite) — or it runs
 	 *  lines that may (npm): a line with it runs a statement at a time, so what came before shows first (session.ts). */
 	"streaming"?: boolean;
+}
+
+/** One of a command's subcommands. */
+export interface SubcommandDefinition {
+	"summary": string;
+	"options"?: Schema;
+	"stopEarly"?: boolean;
+	"aliases"?: string[];
+	/** It isn't here: this says what to do instead (`git push` → the Commit button). */
+	"missing"?: string;
 }
 
 /** What a command's implementation is given: the terminal it runs in, and what it may use there. */
@@ -48,8 +65,18 @@ export interface CommandHost {
 	"history": () => readonly string[];
 }
 
-/** A command's implementation: its `<name>.ts` exports `create`. */
-export type CommandFactory = (host: CommandHost) => Command;
+/** A command's output, as just-bash takes it. */
+export interface CommandResult { "stdout": string; "stderr": string; "exitCode": number }
+
+/** What a command does with what juvy parsed of its arguments. */
+export type Handler = (config: Juvy, ctx: ResolvedCommandContext) => Promise<CommandResult>;
+
+/** A command's implementation: its handler — or, for a command with subcommands, one per subcommand (a missing one
+ *  needs none). */
+export type Implementation = Handler | Record<string, Handler>;
+
+/** A command's implementation module: its `<name>.ts` exports `create`. */
+export type CommandFactory = (host: CommandHost) => Implementation;
 
 const found = import.meta.glob<CommandDefinition>("./commands/*/command.ts", { "eager": true, "import": "default" });
 
@@ -77,7 +104,4 @@ export function describeCommands(): string {
 	return PRESENT.map((command) => `\`${command.name}\` (${command.summary.replace(/\.$/u, "")})`).join(", ") + (missing.length === 0 ? "" : `. Not here: ${missing.join(", ")}`);
 }
 
-/** A command's `--help`: what it does and how it's called. */
-export function helpOf(command: CommandDefinition): string {
-	return `${command.summary}\n${command.usage === undefined ? "" : `\nusage: ${command.usage}\n`}`;
-}
+

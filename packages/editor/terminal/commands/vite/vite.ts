@@ -4,9 +4,7 @@
  * browser), then BLOCKS, streaming HMR activity as log lines, until Ctrl-C, which stops the dev server and
  * closes the pane. A project's `dev` script (`"dev": "vite"`) maps here, so `npm run dev` composes onto it.
  */
-import type { Command } from "just-bash/browser";
-import type { CommandHost } from "../../catalog";
-import { defineCommand } from "just-bash/browser";
+import type { CommandHost, Handler } from "../../catalog";
 
 // The first preview port; concurrent `vite` runs (a multi-server app, two packages' dev servers) each claim the
 // next free one so their previews, HMR channels and SW port→run attribution never collide.
@@ -32,8 +30,8 @@ function stamp(): string {
 }
 
 /** The `vite` command. `runner` drives the worker preview; `writeLive` streams to the terminal as it runs. */
-export function create({ runner, writeLive, terminal }: CommandHost): Command {
-	return defineCommand("vite", async (_args, ctx) => {
+export function create({ runner, writeLive, terminal }: CommandHost): Handler {
+	return async (_config, ctx) => {
 		// One dev server per directory: a second `vite` here would only start a copy on the next port, unseen beside the
 		// first. Say where the first is instead.
 		const serving = runner.runs.runningService((run) => run.cwd === ctx.cwd);
@@ -98,5 +96,5 @@ export function create({ runner, writeLive, terminal }: CommandHost): Command {
 		writeLive("out", "\n  [2mvite: dev server stopped[0m\n");
 
 		return { "stdout": "", "stderr": "", "exitCode": 130 };
-	});
+	};
 }

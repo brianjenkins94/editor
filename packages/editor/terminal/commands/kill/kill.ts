@@ -1,18 +1,16 @@
 /**
  * The terminal's `kill`: stop runs (runs.ts) by their id, or any unique beginning of it, as `ps` shows them — the same
- * stop as the running list's and the debug toolbar's. Signals (`-9`) are accepted and mean nothing: a run is stopped,
+ * stop as the running list's and the debug toolbar's. `-9` is accepted and means nothing more: a run is stopped,
  * however it's asked.
  */
-import type { Command } from "just-bash/browser";
-import type { CommandHost } from "../../catalog";
-import { defineCommand } from "just-bash/browser";
+import type { CommandHost, Handler } from "../../catalog";
 
-export function create({ runner }: CommandHost): Command {
-	return defineCommand("kill", async (args) => {
-		const ids = args.filter((argument) => !argument.startsWith("-"));
+export function create({ runner }: CommandHost): Handler {
+	return async (config) => {
+		const ids = config.get("ids") as string[];
 
 		if (ids.length === 0) {
-			return { "stdout": "", "stderr": "usage: kill <id>… (the ids are ps's)\n", "exitCode": 1 };
+			return { "stdout": "", "stderr": "kill: which run? (ps lists them)\n", "exitCode": 1 };
 		}
 
 		const running = runner.runs.list().filter((run) => run.state === "running");
@@ -29,5 +27,5 @@ export function create({ runner }: CommandHost): Command {
 		}
 
 		return { "stdout": "", "stderr": errors.map((error) => error + "\n").join(""), "exitCode": errors.length === 0 ? 0 : 1 };
-	});
+	};
 }

@@ -3,19 +3,17 @@
  * first characters of the run's, which `kill` takes), its state, task or service, its port, where it was started, and
  * what was run. The running ones by default, as `ps` shows live processes; `-a` adds the ones that ended.
  */
-import type { Command } from "just-bash/browser";
 import type { RunInfo } from "../../../runs";
-import type { CommandHost } from "../../catalog";
-import { defineCommand } from "just-bash/browser";
+import type { CommandHost, Handler } from "../../catalog";
 
 /** How much of a run's id `ps` shows and `kill` needs (any unique prefix will do). */
 export const SHORT_ID = 8;
 
 const where = (run: RunInfo): string => ("terminal" in run.origin ? `terminal ${run.origin.terminal}` : run.origin.other);
 
-export function create({ runner }: CommandHost): Command {
-	return defineCommand("ps", async (args) => {
-		const all = args.includes("-a") || args.includes("--all");
+export function create({ runner }: CommandHost): Handler {
+	return async (config) => {
+		const all = config.get("all") as boolean;
 		const runs = runner.runs.list().filter((run) => all || run.state === "running");
 
 		if (runs.length === 0) {
@@ -26,5 +24,5 @@ export function create({ runner }: CommandHost): Command {
 		const widths = rows[0]!.map((_, column) => Math.max(...rows.map((row) => row[column]!.length)));
 
 		return { "stdout": rows.map((row) => row.map((cell, column) => (column === row.length - 1 ? cell : cell.padEnd(widths[column]!))).join("  ") + "\n").join(""), "stderr": "", "exitCode": 0 };
-	});
+	};
 }

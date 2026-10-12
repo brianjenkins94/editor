@@ -3,5 +3,8 @@ import type { CommandDefinition } from "../../catalog";
 export default {
 	"name": "more",
 	"summary": "Print files (or what's piped in) — the terminal scrolls, so there's nothing to page.",
-	"usage": "more [file…]"
+	"options": {
+		"raw": { "format": Boolean, "default": false, "short": "R", "doc": "Accepted: colors pass through anyway." },
+		"files": { "format": Array, "default": [], "positional": "rest", "doc": "The files (none: what's piped in)." }
+	}
 } satisfies CommandDefinition;
