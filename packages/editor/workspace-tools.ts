@@ -243,7 +243,7 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub, runner
 
 				resolve({ "exitCode": exitCode, "output": printed.length > SHELL_OUTPUT ? "…" + printed.slice(-SHELL_OUTPUT) : printed, "timedOut": timedOut });
 			};
-			const process = createBashProcess(vscode, runner, (data) => { output += data; }, directory, { "command": command, "exit": (code) => { finish(code, false); } });
+			const process = createBashProcess(vscode, runner, hub, (data) => { output += data; }, directory, { "command": command, "exit": (code) => { finish(code, false); } });
 			const stop = (): void => {
 				process.shutdown?.();
 				finish(null, true);

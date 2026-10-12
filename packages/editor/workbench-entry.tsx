@@ -605,7 +605,7 @@ function maybeBoot(): void {
 				registerRulesView(workbenchHub, api as typeof import("vscode"));
 				installCoverage(api as typeof import("vscode"), evidenceStore(api as typeof import("vscode"), []), showMarks, showProfile);
 
-				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
+				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));
 				// And the pod's tasks' terminals: a just-bash process that runs one command, over the hub (terminal/index.ts).
 				serveTaskTerminals(api as typeof import("vscode"), nodeRunner, workbenchHub);
 				// The workspace as an agent works in it, as on a local machine — its files read, written, edited, found and

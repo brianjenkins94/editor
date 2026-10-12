@@ -12,7 +12,7 @@
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
 import { Buffer } from "buffer";
 import { fs } from "@zenfs/core";
-import { add, commit, hashBlob, init, readBlob, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
+import { add, branch, commit, currentBranch, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism); the browser has none and the workbench bundle doesn't
 // polyfill node globals, so provide it. The `buffer` import resolves to the node-stdlib-browser polyfill via the
@@ -118,6 +118,44 @@ export async function unstage(path: string): Promise<void> {
 	await resetIndex({ "fs": fs, "dir": DIR, "filepath": path });
 }
 
+/** Stage these paths (repo-relative): a file that's gone is staged as removed, as `git add` does. */
+export async function stagePaths(paths: string[]): Promise<void> {
+	for (const path of paths) {
+		if (fs.existsSync(DIR + "/" + path)) {
+			await add({ "fs": fs, "dir": DIR, "filepath": path });
+		} else {
+			await remove({ "fs": fs, "dir": DIR, "filepath": path });
+		}
+	}
+}
+
+/** Commit what's staged, and only that (`git commit`). Returns the new commit oid. */
+export async function commitIndex(message: string): Promise<string> {
+	return commit({ "fs": fs, "dir": DIR, "message": message, "author": AUTHOR });
+}
+
+/** One commit, as `git log` shows it. */
+export interface LogEntry { "oid": string; "message": string; "author": { "name": string; "email": string; "timestamp": number; "timezoneOffset": number } }
+
+/** The commits from HEAD back, newest first; at most `depth`. None before the first commit. */
+export async function history(depth?: number): Promise<LogEntry[]> {
+	try {
+		return (await log({ "fs": fs, "dir": DIR, ...depth === undefined ? {} : { "depth": depth } })).map(({ oid, commit: entry }) => ({ "oid": oid, "message": entry.message, "author": entry.author }));
+	} catch {
+		return [];
+	}
+}
+
+/** The branches, and which one HEAD is on. */
+export async function branches(): Promise<{ "current": string | undefined; "all": string[] }> {
+	return { "current": await currentBranch({ "fs": fs, "dir": DIR }) ?? undefined, "all": await listBranches({ "fs": fs, "dir": DIR }) };
+}
+
+/** Make a branch at HEAD (without switching to it, as `git branch <name>` does). */
+export async function createBranch(name: string): Promise<void> {
+	await branch({ "fs": fs, "dir": DIR, "ref": name });
+}
+
 /** Stage all changes, then commit. Returns the new commit oid. */
 export async function commitAll(message: string): Promise<string> {
 	await stageAll();
@@ -212,6 +250,11 @@ export async function blobOid(content: string): Promise<string> {
 	return (await hashBlob({ "object": new TextEncoder().encode(content) })).oid;
 }
 
+
+/** A file's text in the working tree; "" when it's gone. */
+export async function workingContent(path: string): Promise<string> {
+	return fs.existsSync(DIR + "/" + path) ? fs.promises.readFile(DIR + "/" + path, "utf8") : "";
+}
 
 /** The HEAD version of a file, for quick-diff gutters + the diff view. "" when the repo is unborn or the file is
  *  new (no HEAD blob), which is exactly what a diff against "nothing" wants. */

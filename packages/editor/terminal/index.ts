@@ -78,7 +78,7 @@ export const ESCAPES = /\u001B(?:\[[^A-Za-z@~]*[A-Za-z@~]|\][^\u0007\u001B]*(?:\
 /** A terminal opened to run one command (a task's, serveTaskTerminals), and how it exits when that's done. */
 export interface TerminalCommand { "command": string; "exit": (code: number) => void }
 
-export function createBashProcess(api: VscodeApi, runner: NodeRunner, show: (data: string) => void, cwd0: string, run?: TerminalCommand): TerminalProcess {
+export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, show: (data: string) => void, cwd0: string, run?: TerminalCommand): TerminalProcess {
 	terminalsOpened += 1;
 
 	const terminal = terminalsOpened;
@@ -94,7 +94,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, show: (dat
 	const getSession = (): Promise<BashSession> => {
 		// just-bash, and the custom commands (which build on its defineCommand), load with the first command run.
 		sessionPromise ??= import("just-bash/browser").then((module) => {
-			const host: CommandHost = { "api": api, "runner": runner, "writeLive": writeLive, "terminal": terminal, "session": getSession, "history": () => history };
+			const host: CommandHost = { "api": api, "runner": runner, "hub": hub, "writeLive": writeLive, "terminal": terminal, "session": getSession, "history": () => history };
 			// Ours, each loaded the first time it runs (just-bash's lazy command): `--help` answered from its definition, a
 			// missing one's message said, and everything else its implementation's.
 			const theirs = new Set(module.getCommandNames());
@@ -557,7 +557,7 @@ export function serveTaskTerminals(api: VscodeApi, runner: NodeRunner, hub: Hub)
 		}
 
 		const offs: (() => void)[] = [];
-		const process = createBashProcess(api, runner, (data) => { hub.publish(`terminal.out.${id}`, data); }, typeof cwd === "string" ? cwd : "/workspace", {
+		const process = createBashProcess(api, runner, hub, (data) => { hub.publish(`terminal.out.${id}`, data); }, typeof cwd === "string" ? cwd : "/workspace", {
 			"command": command,
 			"exit": (code) => {
 				hub.publish(`terminal.exit.${id}`, { "code": code });

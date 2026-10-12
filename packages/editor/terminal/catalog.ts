@@ -11,6 +11,7 @@
  * commands are without loading a command (index.ts loads the implementations, lazily).
  */
 import type { Command } from "just-bash/browser";
+import type { Hub } from "@brianjenkins94/hub";
 import type { NodeOutput, NodeRunner } from "../node-runner";
 import type { BashSession } from "./session";
 
@@ -35,6 +36,8 @@ export interface CommandDefinition {
 export interface CommandHost {
 	"api": typeof import("vscode");
 	"runner": NodeRunner;
+	/** The workbench's hub: to say what a command changed (`git` → `git.changed`, so Source Control refreshes). */
+	"hub": Hub;
 	/** Write to this terminal now, as it's produced (stderr in red). */
 	"writeLive": NodeOutput;
 	/** This terminal's number: what it runs is attributed to it (runs.ts). */
