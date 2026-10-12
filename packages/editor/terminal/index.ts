@@ -1,6 +1,8 @@
+/// <reference types="vite/client" />
 /**
- * The workspace terminal — just-bash (a pure-TS bash interpreter) on the editor's own filesystem (terminal-fs.ts),
- * with `node` dispatched to a worker (terminal-node.ts / node-runner.ts). It IS the default terminal: the editor
+ * The workspace terminal — just-bash (a pure-TS bash interpreter) on the editor's own filesystem (fs.ts), with the
+ * editor's own commands beside its (catalog.ts: a folder each under commands/ — `node` runs a program in the debugger,
+ * through node-runner.ts). It IS the default terminal: the editor
  * registers this as the vendored backend's process factory (setTerminalProcessFactory, in workbench-entry), so
  * every terminal the workbench opens is this one — `> tsconfig.json` hits the read-only guard (permission denied)
  * and files the shell creates show up in the explorer.
@@ -14,29 +16,32 @@
  * round-trips via the result (`BashExecResult.env` — the only state just-bash returns); cwd is read back with a
  * `$PWD` probe appended to each command — the same technique VS Code's own shell integration uses (emit `$PWD`
  * after each command), and semantically correct (it captures the top-level shell's final dir and respects
- * subshell isolation, which intercepting `cd` would not) — see terminal-session.ts. One line editor, one prompt, sync
+ * subshell isolation, which intercepting `cd` would not) — see session.ts. One line editor, one prompt, sync
  * input handling.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { TerminalProcess } from "@brianjenkins94/monaco-vscode-api/main";
 
-import type { NodeOutput, NodeRunner } from "./node-runner";
-import type { BashSession, SessionState } from "./terminal-session";
+import type { NodeOutput, NodeRunner } from "../node-runner";
+import type { CommandFactory, CommandHost } from "./catalog";
+import type { BashSession, SessionState } from "./session";
 import { serve } from "@brianjenkins94/hub";
-import { createWorkspaceTerminalFs } from "./terminal-fs";
-import { commandExecuted, commandFinished, commandLine, commandStart, promptStart, workingDirectory } from "./terminal-integration";
-import { execInSession, statementsOf } from "./terminal-session";
+import { COMMANDS, STREAMING } from "./catalog";
+import { createWorkspaceTerminalFs } from "./fs";
+import { commandExecuted, commandFinished, commandLine, commandStart, promptStart, workingDirectory } from "./integration";
+import { execInSession, statementsOf } from "./session";
 
 type VscodeApi = typeof import("vscode");
 
-/** Build the just-bash terminal process for one terminal. `fire` writes to the terminal; `cwd0` is the start dir. */
-// Tab-completion candidates for the first word (command position): the custom commands (node/npm/vite) plus the
-// just-bash builtins users actually reach for. just-bash exposes no command registry, so this is curated.
-const COMMANDS = [
-	"alias", "basename", "cat", "cd", "clear", "cp", "dirname", "echo", "env", "export", "false", "find", "grep",
-	"head", "history", "ls", "mkdir", "more", "mv", "node", "npm", "printenv", "printf", "pwd", "rm", "rmdir",
-	"sed", "seq", "sleep", "sort", "tail", "tee", "test", "touch", "true", "uniq", "unalias", "vite", "wc", "which"
-];
+/** Each command's implementation (`commands/<name>/<name>.ts`), loaded the first time the command runs. */
+const implementations = import.meta.glob<CommandFactory>(["./commands/*/*.ts", "!./commands/*/command.ts", "!./commands/**/*.test.*"], { "import": "create" });
+
+/** The shell's own words that aren't commands (just-bash's `getCommandNames` lists commands): offered on Tab too. */
+const BUILTINS = ["cd", "eval", "exit", "export", "read", "set", "source", "test", "type", "unset"];
+
+/** What Tab offers in command position: the shell's builtins, just-bash's commands (as this build has them — no
+ *  `tar` in a browser), and ours. Known once just-bash has loaded (with the first command, or warmed at start). */
+let completions: string[] = [...BUILTINS, ...COMMANDS.map((command) => command.name)];
 
 /** The longest string that every item starts with (for extending a partial to the common prefix on Tab). */
 function longestCommonPrefix(items: string[]): string {
@@ -88,13 +93,20 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, show: (dat
 	let sessionPromise: Promise<BashSession> | undefined;
 	const getSession = (): Promise<BashSession> => {
 		// just-bash, and the custom commands (which build on its defineCommand), load with the first command run.
-		sessionPromise ??= Promise.all([import("just-bash/browser"), import("./terminal-node"), import("./terminal-npm"), import("./terminal-vite")])
-			.then(([module, { createNodeCommand }, { createNpmCommand }, { createViteCommand }]) => new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": [createNodeCommand(runner, writeLive, terminal), createNpmCommand(getSession), createViteCommand(runner, writeLive, terminal)] }) as unknown as BashSession);
+		sessionPromise ??= import("just-bash/browser").then((module) => {
+			const host: CommandHost = { "api": api, "runner": runner, "writeLive": writeLive, "terminal": terminal, "session": getSession };
+			// Ours, each loaded the first time it runs (just-bash's lazy command).
+			const commands = COMMANDS.map((command) => ({ "name": command.name, "load": async () => (await implementations[`./commands/${command.name}/${command.name}.ts`]!())(host) }));
+
+			completions = [...new Set([...BUILTINS, ...module.getCommandNames(), ...COMMANDS.map((command) => command.name)])];
+
+			return new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": commands }) as unknown as BashSession;
+		});
 
 		return sessionPromise;
 	};
 
-	// The session: cwd + env, carried from command to command (terminal-session.ts).
+	// The session: cwd + env, carried from command to command (session.ts).
 	const state: SessionState = { "cwd": cwd0, "env": {} };
 	let line = "";
 	let pos = 0; // cursor position within `line`
@@ -116,7 +128,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, show: (dat
 		fire(stream === "err" ? `[31m${text}[0m` : text);
 	};
 
-	// Marked for VS Code's shell integration (terminal-integration.ts), as a desktop shell's prompt is: where it is, where
+	// Marked for VS Code's shell integration (integration.ts), as a desktop shell's prompt is: where it is, where
 	// the prompt starts, where the command line starts. (A redrawn prompt is marked again, as a shell's PS1 would be.)
 	const prompt = (): void => { fire(`\r\n${workingDirectory(state.cwd)}${promptStart()}[1;36m${state.cwd}[0m $ ${commandStart()}`); };
 
@@ -155,11 +167,11 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, show: (dat
 					fresh = false;
 				}
 			};
-			// A line with a streaming command (`node`) runs a statement at a time (terminal-session.ts statementsOf): just-bash
+			// A line with a streaming command (`node`) runs a statement at a time (session.ts statementsOf): just-bash
 			// hands back a line's output only when the whole line's done, so what came before the command would otherwise
 			// show after it. `;`, `&&` and `||` keep their meaning: a statement after `&&` runs if the last one ran succeeded,
 			// after `||` if it failed. Any other line runs whole.
-			const statements = statementsOf(input) ?? [{ "text": input, "then": "" as const }];
+			const statements = statementsOf(input, STREAMING) ?? [{ "text": input, "then": "" as const }];
 
 			for (let index = 0; index < statements.length && !signal.aborted; index += 1) {
 				const joined = statements[index - 1]?.then;
@@ -349,7 +361,8 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, show: (dat
 		const isDir = new Map<string, boolean>();
 
 		if (isCommand) {
-			matches.push(...COMMANDS.filter((name) => name.startsWith(base)));
+			await getSession(); // (just-bash's own command names come with it)
+			matches.push(...completions.filter((name) => name.startsWith(base)));
 		} else {
 			try {
 				for (const [name, type] of await api.workspace.fs.readDirectory(api.Uri.file(resolveDir(dirPrefix)))) {

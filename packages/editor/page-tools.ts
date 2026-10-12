@@ -8,7 +8,7 @@
  *   its code, the locals — plus what the program printed;
  * - what a file's Margin tab shows, as data — the last run's values, coverage, its end, the question asked, notes, the run
  *   log (`margin.state`, live-values.ts) — rather than read off its DOM; likewise the editor's state, its problems and
- *   notifications (editor-state.ts), the rules (rules-view.ts), the terminals (terminal.ts), the preview windows
+ *   notifications (editor-state.ts), the rules (rules-view.ts), the terminals (terminal/index.ts), the preview windows
  *   (shell-preview.ts) and the run ledger (evidence.ts);
  * - the workspace, as an agent works in it — files read, written, edited, found and searched (`files.*`), a command run
  *   in its shell (`shell.run`, workspace-tools.ts), and git's status, diff and commit (git-service.ts);
@@ -32,7 +32,9 @@ function schema(properties: Record<string, unknown>, required: string[] = []): R
 	return { "type": "object", "properties": properties, ...required.length === 0 ? {} : { "required": required } };
 }
 
-export function editorPageTools(hub: Hub): PageTool[] {
+/** `commands`: the terminal's own commands, as a sentence (terminal/catalog.ts `describeCommands`, which only the Vite
+ *  build can read) — named in the `shell` tool's description. */
+export function editorPageTools(hub: Hub, { commands = "" }: { "commands"?: string } = {}): PageTool[] {
 	const rpc = createRpcClient(hub);
 
 	/** Request `name` in this tab's tree, for as long as the caller waits (`signal`) — or `timeoutMs`, past which it says
@@ -175,7 +177,7 @@ export function editorPageTools(hub: Hub): PageTool[] {
 		"handler": async ({ pattern, glob, ignoreCase, limit }, { signal }) => request("files.grep", { "pattern": pattern, "glob": glob, "ignoreCase": ignoreCase, "limit": limit }, signal)
 	}, {
 		"name": "shell",
-		"description": "Run a command line in the workspace's shell — just-bash on the workspace's files, as the terminal runs it: ls, cat, grep, sed, find, mkdir, mv, rm, echo > file; `node` runs a program in the debugger (its output here); `npm` installs and runs scripts. Each call is its own shell: cd and export don't carry over (pass cwd). Returns { exitCode, output (stdout and stderr, as printed), timedOut }.",
+		"description": "Run a command line in the workspace's shell — just-bash on the workspace's files, as the terminal runs it: ls, cat, grep, rg, sed, awk, find, jq, diff, mkdir, mv, rm, echo > file" + (commands === "" ? "" : "; and the editor's own: " + commands) + ". Each call is its own shell: cd and export don't carry over (pass cwd). Returns { exitCode, output (stdout and stderr, as printed), timedOut }.",
 		"inputSchema": schema({
 			"command": { "type": "string", "description": "The command line." },
 			"cwd": { "type": "string", "description": "Where it runs, relative to the workspace or absolute under it (default /workspace)." },

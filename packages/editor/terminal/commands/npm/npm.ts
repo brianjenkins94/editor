@@ -11,14 +11,11 @@
  * next preview load resolves it). The registry proper is still out of scope.
  */
 import type { CustomCommand } from "just-bash/browser";
+import type { CommandHost } from "../../catalog";
 import { defineCommand } from "just-bash/browser";
 
 const LIFECYCLE = new Set(["start", "stop", "test", "restart"]);
 const INSTALL = new Set(["install", "i", "add"]);
-
-/** Re-enter the shell to run a script line — the lazily-created Bash session (see terminal.ts). `signal` is
- *  forwarded so Ctrl-C reaches a long-running script (e.g. `npm run dev` → the blocking `vite` command). */
-export type ShellRunner = () => Promise<{ "exec": (commandLine: string, options: { "cwd": string; "env": Record<string, string>; "signal"?: AbortSignal }) => Promise<{ "stdout": string; "stderr": string; "exitCode": number; "env": Record<string, string> }> }>;
 
 /** Split a spec into name + version: `lodash` → latest, `lodash@4` → 4, `@scope/pkg@1` → 1 (scoped-name safe). */
 function parseSpec(spec: string): { "name": string; "version": string } {
@@ -27,8 +24,9 @@ function parseSpec(spec: string): { "name": string; "version": string } {
 	return at > 0 ? { "name": spec.slice(0, at), "version": spec.slice(at + 1) } : { "name": spec, "version": "latest" };
 }
 
-/** The `npm` command. `getSession` re-enters the shell to run the resolved script. */
-export function createNpmCommand(getSession: ShellRunner): CustomCommand {
+/** The `npm` command. A script runs in the shell itself (the host's `session`, created lazily — see ../../index.ts), with
+ *  the shell's Ctrl-C forwarded so it reaches a long-running script (`npm run dev` → the blocking `vite` command). */
+export function create({ session: getSession }: CommandHost): CustomCommand {
 	return defineCommand("npm", async (args, ctx) => {
 		const subcommand = args[0];
 

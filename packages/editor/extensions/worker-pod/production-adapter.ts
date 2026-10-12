@@ -6,7 +6,7 @@
  * here — it's RUN-CONTROL: running / Stop / terminate, plus output in the Debug Console. Full stepping stays
  * tsval's job (`node <file>` auto-attaches there).
  *
- * The run itself lives where it always did (terminal-vite → node-runner). This adapter just rides hub channels the
+ * The run itself lives where it always did (the terminal's `vite` → node-runner). This adapter just rides hub channels the
  * run's driver publishes — `production.out.<id>` (→ Debug Console), `production.exit.<id>` (→ terminated) — and on
  * Stop publishes `production.stop.<id>` so the driver tears the run down. One brain, thin adapter — the same shape as
  * the capability interceptors. It's declared a LAUNCH, though it starts nothing itself: Stop does end the run, and

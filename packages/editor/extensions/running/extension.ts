@@ -1,7 +1,7 @@
 /**
  * Running — what's running, in one place, from VS Code's public API alone, so it works the same in a desktop VS Code:
  *   • commands in a terminal, from shell integration (`window.onDidStart/EndTerminalShellExecution`: the command line,
- *     where it ran, its exit code) — our terminal speaks it (terminal-integration.ts), as desktop shells do;
+ *     where it ran, its exit code) — our terminal speaks it (terminal/integration.ts), as desktop shells do;
  *   • debug sessions (F5, an agent's), from `vscode.debug` — not the ones a terminal command or a dev server started for
  *     itself, which that command already stands for;
  *   • tasks, from `vscode.tasks` (a background task is a service).

@@ -581,7 +581,7 @@ function maybeBoot(): void {
 				installTypeAcquisition(api as typeof import("vscode"), workspaceFolder ?? "/workspace", moduleVersions ?? {}, (path) => workspaceFs?.has(path) ?? false, paneLog);
 				// The workspace terminal — just-bash on the workspace filesystem, registered as the DEFAULT terminal
 				// backend's process factory (so every terminal is this one; no fake). `node` runs in a dedicated
-				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal.ts. One node runner
+				// worker over the SAME zen-fs, dispatched + observed over the hub. See terminal/index.ts. One node runner
 				// (worker) is shared by every terminal.
 				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer);
 
@@ -606,7 +606,7 @@ function maybeBoot(): void {
 				installCoverage(api as typeof import("vscode"), evidenceStore(api as typeof import("vscode"), []), showMarks, showProfile);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, fire, cwd));
-				// And the pod's tasks' terminals: a just-bash process that runs one command, over the hub (terminal.ts).
+				// And the pod's tasks' terminals: a just-bash process that runs one command, over the hub (terminal/index.ts).
 				serveTaskTerminals(api as typeof import("vscode"), nodeRunner, workbenchHub);
 				// The workspace as an agent works in it, as on a local machine — its files read, written, edited, found and
 				// searched; a command run in its shell (workspace-tools.ts; debug-mcp's files_* and shell tools).

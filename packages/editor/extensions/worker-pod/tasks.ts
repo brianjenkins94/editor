@@ -6,7 +6,7 @@
  *
  * It's the bridge's because of how a task runs here: VS Code for the web runs a task only through a pseudoterminal its
  * provider supplies (no shell of its own), and the shell is the core runtime's — so each task's pseudoterminal asks core
- * for a just-bash process that runs its command (terminal.ts's serveTaskTerminals), over the hub.
+ * for a just-bash process that runs its command (terminal/index.ts's serveTaskTerminals), over the hub.
  */
 import type { TaskDefinition } from "vscode";
 import { createRpcClient } from "@brianjenkins94/hub";

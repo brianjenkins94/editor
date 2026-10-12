@@ -5,10 +5,10 @@
  * take it, it says so and fails (exit 1) — there's no plain-runtime fallback.
  */
 import type { CustomCommand } from "just-bash/browser";
-import type { NodeOutput, NodeRunner } from "./node-runner";
+import type { CommandHost } from "../../catalog";
 
 import { defineCommand } from "just-bash/browser";
-import { lifecycleOfSource } from "./lifecycle";
+import { lifecycleOfSource } from "../../../lifecycle";
 
 /** POSIX resolve of `path` against `base` (collapsing `.`/`..`). */
 function resolvePosix(base: string, path: string): string {
@@ -37,7 +37,7 @@ function resolvePosix(base: string, path: string): string {
  * written); a consequence is that a streamed `node …` doesn't feed a shell pipe/redirect. `ctx.signal` is the
  * shell's Ctrl-C, forwarded to the runner so the worker is killed.
  */
-export function createNodeCommand(runner: NodeRunner, writeLive: NodeOutput, terminal: number): CustomCommand {
+export function create({ runner, writeLive, terminal }: CommandHost): CustomCommand {
 	return defineCommand("node", async (args, ctx) => {
 		const at = args.findIndex((argument) => !argument.startsWith("-"));
 		const target = at === -1 ? undefined : args[at];

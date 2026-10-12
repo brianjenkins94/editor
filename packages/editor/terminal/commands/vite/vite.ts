@@ -5,9 +5,8 @@
  * closes the pane. A project's `dev` script (`"dev": "vite"`) maps here, so `npm run dev` composes onto it.
  */
 import type { CustomCommand } from "just-bash/browser";
+import type { CommandHost } from "../../catalog";
 import { defineCommand } from "just-bash/browser";
-
-import type { NodeOutput, NodeRunner } from "./node-runner";
 
 // The first preview port; concurrent `vite` runs (a multi-server app, two packages' dev servers) each claim the
 // next free one so their previews, HMR channels and SW port→run attribution never collide.
@@ -33,7 +32,7 @@ function stamp(): string {
 }
 
 /** The `vite` command. `runner` drives the worker preview; `writeLive` streams to the terminal as it runs. */
-export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput, terminal: number): CustomCommand {
+export function create({ runner, writeLive, terminal }: CommandHost): CustomCommand {
 	return defineCommand("vite", async (_args, ctx) => {
 		// One dev server per directory: a second `vite` here would only start a copy on the next port, unseen beside the
 		// first. Say where the first is instead.
@@ -69,7 +68,7 @@ export function createViteCommand(runner: NodeRunner, writeLive: NodeOutput, ter
 		});
 
 		// Block like a real dev server until the shell's Ctrl-C (ctx.signal, also forwarded through `npm run dev` — see
-		// terminal-npm.ts), the debug session's Stop button (production.stop), or the server's last preview window
+		// ../npm/npm.ts), the debug session's Stop button (production.stop), or the server's last preview window
 		// closing (which stops the server) — whichever comes first.
 		let offStop = (): void => { /* set below */ };
 		let offClosed = (): void => { /* set below */ };

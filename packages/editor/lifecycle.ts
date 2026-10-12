@@ -9,7 +9,7 @@
  *   • the running list (runs.ts) shows it, and a task's result when it ends.
  *
  * It's a guess from what's written — the command, the script's name, the file's source — so it's corrected by what a
- * run actually does: a task that opens a port is a service from then on (terminal-node.ts).
+ * run actually does: a task that opens a port is a service from then on (terminal/commands/node/node.ts).
  */
 export type Lifecycle = "service" | "task";
 

@@ -1,5 +1,5 @@
 /**
- * One command of the terminal's session over just-bash (see terminal.ts for why the session is ours to keep): run it
+ * One command of the terminal's session over just-bash (see index.ts for why the session is ours to keep): run it
  * with the session's cwd + env, then read back what just-bash can't hand us itself — the cwd, from a `$PWD` probe
  * appended to the command, and the env, from the result.
  */
@@ -45,9 +45,12 @@ export async function execInSession(session: BashSession, state: SessionState, i
 	return { "stdout": stdout, "stderr": result.stderr, "exitCode": match === null ? result.exitCode : Number(match[2]) };
 }
 
-/** Commands that write their output live — to the terminal as they run — rather than into just-bash's stdout, which it
- *  hands back only when the whole line's done: in a line with one, what the line printed before it would come after. */
-const STREAMING = /(?:^|[\s;&|])(?:node|npm|vite)(?=\s|$)/u;
+/** Whether `input` names one of the `streaming` commands — those that write their output live, to the terminal as they
+ *  run, rather than into just-bash's stdout, which it hands back only when the whole line's done: in a line with one,
+ *  what the line printed before it would come after. (Which commands stream is the catalog's: catalog.ts.) */
+function namesStreaming(input: string, streaming: ReadonlySet<string>): boolean {
+	return input.split(/[\s;&|]+/u).some((word) => streaming.has(word));
+}
 
 /** First words a line run statement by statement would mean something else with: compound commands (their bodies span
  *  statements), and builtins that act on the line's shell itself (`exit` would end only its statement). */
@@ -57,13 +60,13 @@ const WHOLE = new Set(["if", "then", "elif", "else", "fi", "for", "while", "unti
 export type Then = ";" | "&&" | "||" | "";
 
 /**
- * `input` as its top-level statements, each with what joins it to the next — so a line with a streaming command (`node`)
- * can be run a statement at a time, each one's output shown before the next runs. Undefined — run it whole — when it has
- * no streaming command, one statement, or anything a statement-by-statement run would change the meaning of: a compound
- * command or a subshell, a here-document, a background job, or a builtin that acts on the shell itself.
+ * `input` as its top-level statements, each with what joins it to the next — so a line with a `streaming` command
+ * (`node`) can be run a statement at a time, each one's output shown before the next runs. Undefined — run it whole —
+ * when it has no streaming command, one statement, or anything a statement-by-statement run would change the meaning
+ * of: a compound command or a subshell, a here-document, a background job, or a builtin that acts on the shell itself.
  */
-export function statementsOf(input: string): { "text": string; "then": Then }[] | undefined {
-	if (!STREAMING.test(input)) {
+export function statementsOf(input: string, streaming: ReadonlySet<string>): { "text": string; "then": Then }[] | undefined {
+	if (!namesStreaming(input, streaming)) {
 		return undefined;
 	}
 
