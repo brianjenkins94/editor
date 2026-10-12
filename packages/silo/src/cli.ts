@@ -53,8 +53,8 @@ export async function historyOf(repo: string, options: { "since"?: string; "unti
 	return steps;
 }
 
-const repoArgument = { "format": String, "default": ".", "positional": true, "env": false, "doc": "A directory in the repository (default: the current one)." } as const;
-const jsonFlag = { "format": Boolean, "default": false, "env": false, "doc": "Print the data as JSON instead of a document." } as const;
+const repoArgument = { "format": String, "default": ".", "positional": true, "doc": "A directory in the repository (default: the current one)." } as const;
+const jsonFlag = { "format": Boolean, "default": false, "doc": "Print the data as JSON instead of a document." } as const;
 
 export const app = subcommands({
 	"name": "silo",
@@ -76,9 +76,9 @@ export const app = subcommands({
 			"description": "What changed, told from the code's snapshots (git's first-parent history) — never from commit messages.",
 			"config": juvy({
 				"repo": repoArgument,
-				"since": { "format": String, "default": "", "env": false, "doc": "Start of the span: anything git's --since takes (\"7 days ago\", 2026-10-05). Default: the whole history." },
-				"until": { "format": String, "default": "", "env": false, "doc": "End of the span, as git's --until takes it. Default: now." },
-				"ref": { "format": String, "default": "HEAD", "env": false, "doc": "The branch or commit to walk back from." },
+				"since": { "format": String, "default": "", "doc": "Start of the span: anything git's --since takes (\"7 days ago\", 2026-10-05). Default: the whole history." },
+				"until": { "format": String, "default": "", "doc": "End of the span, as git's --until takes it. Default: now." },
+				"ref": { "format": String, "default": "HEAD", "doc": "The branch or commit to walk back from." },
 				"json": jsonFlag
 			}),
 			"handler": async (config) => {

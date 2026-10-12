@@ -65,18 +65,49 @@ Limits, by design of a first cut:
 - **"Changed" is file-level and token-level,** not span-level. A feature counts as changed when its registration (with
   its inline handler) or the module a core `install*` comes from changes in tokens. The real version is spans (layer 1).
 - **No reach yet.** 457 of the 706 commits change code that no registration contains directly. Reach (layer 2) is what
-  places them.
+  places them. (Built since: see *Reach*, below.)
 - **No runs yet,** so nothing is "exercised" or "dormant".
 - **The ways in are this repo's:** VS Code extension APIs, the hub, MCP tools, shell buttons. Another repo has others:
   routes, CLI commands, a library's exports. Recognizing ways in should be pluggable.
 - **Unnamed providers** (`registerHoverProvider` with only a selector) get keyed by file.
 
+## Reach (built)
+
+A feature is now what it reaches: lib's `util/silo/graph.ts` is the program's declaration graph, and a change anywhere a
+feature's code leads is a change to it.
+
+- **Declarations, not files.** A node is a top-level declaration (a function, a class, a variable, an enum), an import,
+  or a module's body. A declaration's edges are the names its code uses; an import's is what it resolves to: a relative
+  module, or one of the program's own packages by name (through package.json `exports`), through re-exports and
+  namespace imports. Each declaration carries its AST fingerprint, so formatting isn't a change. A whole-file import
+  graph would make every command registered in an `extension.ts` reach the whole extension.
+- **A feature's roots** are the names its registration uses. A local of the function it's registered in
+  (`const runner = makeRunner(); registerCommand("x", () => runner.go())`) counts as what it's made from.
+- **A module's body runs when it's imported,** and runs what it imports, so a registry filled as its modules load (tsval's
+  handlers) is reached. A program's entry, which nothing imports (`main.tsx`), isn't: its boot isn't one feature's.
+- **Two more ways in** that reach needed: a worker's top-level message listener (workers start from a URL, so nothing
+  imports them), and hub names made at run time (``serve(hub, `virtual.debug.${port}`, …)``), keyed by how they're
+  written.
+- **Walking back, not forward.** Each snapshot finds the declarations that changed (not ones that only moved: the same
+  name and code was somewhere before) and walks the graph backwards to the features that reach them. The event says
+  which declaration: `changed … via reach (file#name)`.
+- **A shared change is told once.** A declaration whose change reaches five or more features in one snapshot is told as
+  its own ("Changed `createArchReporter`, which 26 features use"), not as a change to each of them.
+
+On this repo, Oct 5–11: commits with nothing to say went from 62 to 42 of 117, and 22 of those 42 touch no code (docs,
+tests). Over the whole history, from 457 to 335 of ~720, in 24 seconds. Of today's 3,326 declarations, 1,525 are
+reached by some feature. What's left unreached is mostly the boot (workbench-entry), the architecture model's tables, the
+vendored monaco component and the contrib template (separate programs), and build configs.
+
+Still to do for reach: the run side (the spans recorded runs reached, step 4), and a call graph inside a declaration
+(today using any name in a function is reaching all of it).
+
 ## Building it
 
 In order, each useful on its own:
 
-1. **Reach.** Each feature's static reach from its registration (the import graph, then the call graph), plus the spans
-   recorded runs reached. "Changed" becomes "a span it reaches changed".
+1. **Reach** (static: built, above). Each feature's static reach from its registration, plus the spans recorded runs
+   reached. "Changed" becomes "a span it reaches changed".
 2. **Spans in place of tokens.** Span identity and the cosmetic verdict from BABLR in place of the token compare.
 3. **Live, not only from commits.** Derive from edit bursts as you work. Keep the derived facts in `.silo/`, and the
    bursts only as long as they're needed (today edit-history.ts drops them at each commit).
@@ -88,8 +119,8 @@ In order, each useful on its own:
 ## Where it lives
 
 - **The logic** is in lib's `util/silo`, pure and browser-portable on oxc: `features.ts` (the ways in, the features they
-  make), `history.ts` (the replay, the events, the sentences), and `git-snapshots.ts` (a git history as snapshots, the
-  Node one).
+  make), `graph.ts` (the declaration graph: what a feature reaches), `history.ts` (the replay, the events, the
+  sentences), and `git-snapshots.ts` (a git history as snapshots, the Node one).
 - **The command line** is `packages/silo` in this repo, published from here as `@brianjenkins94/silo` (bin `silo`):
   `silo features [repo]` and `silo history [repo] [--since …] [--until …]`, each with `--json`. It runs in any desktop
   terminal, VS Code's included.
