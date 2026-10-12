@@ -68,6 +68,12 @@ test("history --since: the commit before the span is its baseline", async () => 
 	assert.deepEqual(steps[1]!.events.map((event) => event.type), ["changed"], "Oct 3 is compared with Oct 2");
 });
 
+test("history --since a bare date: the whole day, not from the current time of day", async () => {
+	const steps = await historyOf(repo, { "since": "2026-10-03" });
+
+	assert.equal(steps.length, 4, "the baseline (Oct 2), then Oct 3, 4 and 5 — Oct 3 included at any time of day");
+});
+
 test("the command line: silo history", () => {
 	const output = execFileSync(process.execPath, ["--import", "tsx", CLI, "history", repo, "--since", "2026-10-02T00:00:00Z"], { "encoding": "utf8" });
 
