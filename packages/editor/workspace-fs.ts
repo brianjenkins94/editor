@@ -28,7 +28,7 @@ import type { ArchSink } from "@brianjenkins94/observability";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type { WorkspaceChange } from "./workspace-changes";
 import { FileChangeType, FileSystemProviderCapabilities, FileType, registerFileSystemOverlay, Uri } from "@brianjenkins94/monaco-vscode-api/main";
-import { LOCAL_DIR } from "@brianjenkins94/util/silo/evidence";
+import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
 import { configure, fs, InMemory, mounts, resolveMountConfig, SingleBuffer } from "@zenfs/core";
 import { IndexedDB } from "@zenfs/dom";
 

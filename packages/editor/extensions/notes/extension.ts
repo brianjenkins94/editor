@@ -17,8 +17,9 @@
 import type { Resolved } from "@brianjenkins94/run-contract/annotations";
 import { annotations } from "@brianjenkins94/run-contract/annotations";
 import type { Annotation, SpanRef } from "@brianjenkins94/util/silo/annotations";
-import { annotationsPath, annotationsText, parseAnnotations } from "@brianjenkins94/util/silo/annotations";
-import { GITATTRIBUTES, parseEvidence, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { annotationsText, parseAnnotations } from "@brianjenkins94/util/silo/annotations";
+import { parseEvidence, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { annotationsPath, GITATTRIBUTES, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
 
 type Note = Annotation<{ "text": string }>;

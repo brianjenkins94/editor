@@ -259,7 +259,7 @@ stopping (RULES.md, "A rule placed in the code").
 *record-at-seams* corpus (silo's design/fail-loud.md: what each call actually returned, serving live-mocking,
 characterization, the registry and invariant inference) recorded beside it.
 
-**Where they're kept:** in the policy files, as rules — mine in `.silo/<you>.policy.json`, committed, so a repo's inputs
+**Where they're kept:** in the policy files, as rules — mine in `.silo/policy/<you>.json`, committed, so a repo's inputs
 travel with it; a value recorded from a real run (a real fetch response can hold secrets) in `.silo/local/`, referred
 to by the rule.
 

@@ -62,6 +62,7 @@ import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { parseInputs } from "./extensions/worker-pod/inputs";
 import { describeRule, ruleEditor } from "@brianjenkins94/monaco-vscode-api/main";
 import css from "./live-values.css?raw";
+import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
 
 
 /** One line of values as drawn: its label (`mid =`), then a value (`inline`) or a cell per column. */
@@ -446,7 +447,7 @@ async function openRule(session: string, ask: CapabilityAsk, close: () => void):
 		return recorded !== null && verdict.ok && JSON.stringify(resultOf(edited)?.value) === JSON.stringify(recorded.value) ? { ...verdict, "text": `Covers this call: gives it what it returned on ${new Date(recorded.at).toLocaleString()}` } : verdict;
 	}, [
 		{ "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and stop here again next time", "act": async (edited) => (resultOf(edited) === undefined ? choose?.(session, decisionOf(edited) === "deny" ? "deny" : decisionOf(edited) === "skip" ? "skip" : "allow-once") : choose?.(session, "give-once", undefined, resultOf(edited)!.value)) },
-		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/<you>.policy.json), and decide this call by it", "act": async (rule) => choose?.(session, "rule", rule) },
+		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json), and decide this call by it", "act": async (rule) => choose?.(session, "rule", rule) },
 		{ "label": "Cancel", "className": "cancel", "title": "Back to the choices", "act": async () => { close(); }, "always": true }
 	]);
 }
@@ -486,7 +487,7 @@ async function openMock(uri: string, row: Row, close: () => void): Promise<HTMLE
 		"then": [{ "action_id": "give", "target_id": "process.argv", "argument": [parseInputs(row.inline?.text ?? "")[0] ?? []] }]
 	}, judge, [
 		{ "label": "Run", "className": "once", "title": "Run the file with them, once — each a run of its own", "act": async (rule) => { void runFile?.(path, valuesOf(rule)); close(); } },
-		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/<you>.policy.json): every run of the file is given them", "act": async (rule) => { await rulesSet?.(given?.rule, rule); await saved(); } },
+		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json): every run of the file is given them", "act": async (rule) => { await rulesSet?.(given?.rule, rule); await saved(); } },
 		...given === undefined ? [] : [{ "label": "Remove", "className": "remove", "title": "Take the rule away: the file's runs get their own arguments again", "act": async () => { await rulesSet?.(given.rule, undefined); await saved(); }, "always": true }],
 		{ "label": "Cancel", "className": "cancel", "title": "Close it, changing nothing", "act": async () => { close(); }, "always": true }
 	]);
@@ -572,7 +573,7 @@ async function openVariableMock(uri: string, row: Row, name: string, session: Se
 
 			close();
 		} },
-		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/<you>.policy.json): each run sets it each time it gets here", "act": async (rule) => { await rulesSet?.(undefined, rule); close(); } },
+		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json): each run sets it each time it gets here", "act": async (rule) => { await rulesSet?.(undefined, rule); close(); } },
 		{ "label": "Cancel", "className": "cancel", "title": "Close it, changing nothing", "act": async () => { close(); }, "always": true }
 	], catalog);
 }
@@ -749,7 +750,7 @@ function cellKind(kind: string | undefined): PaneCell["kind"] {
  *  run or always — and *Rule…* (made in the Rule view). */
 function askItem(uri: string, asking: { "session": string; "ask": CapabilityAsk; "anchors"?: Anchors }): PaneItem {
 	const { session, ask } = asking;
-	const always = ask.resolved ? `${ask.capability} on ${ask.resource}, in your policy (.silo/<you>.policy.json)` : undefined;
+	const always = ask.resolved ? `${ask.capability} on ${ask.resource}, in your policy (.silo/policy/<you>.json)` : undefined;
 	const choice = (verb: string, label: string, lasting: [CapabilityChoice, CapabilityChoice, CapabilityChoice], does: string): PaneAction => ({
 		"title": label,
 		"command": "margin.decide",
@@ -1170,7 +1171,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	runFile = async (path, cases) => rpc.request("debug.start", { "program": path, "cases": cases }, { "timeoutMs": 24 * 60 * 60_000 });
 	// The policy files changed: what a rule gives each file's process.argv is read anew (once the pod has), and whoever
 	// lists them is told.
-	const watcher = vscode.workspace.createFileSystemWatcher("**/.silo/*policy.json");
+	const watcher = vscode.workspace.createFileSystemWatcher(POLICY_GLOB);
 	let changed: ReturnType<typeof setTimeout> | undefined;
 	const reread = (): void => {
 		clearTimeout(changed);

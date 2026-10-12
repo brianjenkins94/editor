@@ -1042,8 +1042,8 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	].join("\n");
 	const silo = (what) => workbench.evaluate(async (action) => {
 		const { api } = globalThis.__editor;
-		const folder = api.Uri.file("/workspace/.silo");
-		const policies = (await api.workspace.fs.readDirectory(folder).then((entries) => entries, () => [])).map(([name]) => name).filter((name) => name.endsWith(".policy.json") && name !== "policy.json");
+		const folder = api.Uri.file("/workspace/.silo/policy");
+		const policies = (await api.workspace.fs.readDirectory(folder).then((entries) => entries, () => [])).map(([name]) => name).filter((name) => name.endsWith(".json"));
 
 		if (action === "clear") {
 			for (const name of policies) {
@@ -1346,11 +1346,11 @@ test("capability decisions and placed rules: in a file the program imports, as i
 test("capability decisions: Skip always and Deny always — every run goes past the call, or fails at it, unasked", async () => {
 	const workbench = session.workbench();
 	const program = "/workspace/skipping.js";
-	// My policy overrides (.silo/<me>.policy.json): read, or cleared.
+	// My policy overrides (.silo/policy/<me>.json): read, or cleared.
 	const overrides = (action) => workbench.evaluate(async (what) => {
 		const { api } = globalThis.__editor;
-		const folder = api.Uri.file("/workspace/.silo");
-		const names = (await api.workspace.fs.readDirectory(folder).then((entries) => entries, () => [])).map(([name]) => name).filter((name) => name.endsWith(".policy.json") && name !== "policy.json");
+		const folder = api.Uri.file("/workspace/.silo/policy");
+		const names = (await api.workspace.fs.readDirectory(folder).then((entries) => entries, () => [])).map(([name]) => name).filter((name) => name.endsWith(".json"));
 
 		if (what === "clear") {
 			for (const name of names) {
@@ -1516,7 +1516,7 @@ test("capability decisions: Allow this run lets a loop's calls through, until th
 	const policies = () => workbench.evaluate(async () => {
 		const { api } = globalThis.__editor;
 
-		return (await api.workspace.fs.readDirectory(api.Uri.file("/workspace/.silo")).then((entries) => entries, () => [])).map(([name]) => name).filter((name) => name.endsWith(".policy.json") && name !== "policy.json");
+		return (await api.workspace.fs.readDirectory(api.Uri.file("/workspace/.silo/policy")).then((entries) => entries, () => [])).map(([name]) => name).filter((name) => name.endsWith(".json"));
 	});
 
 	await workbench.evaluate(async (path) => {

@@ -1,6 +1,6 @@
 /**
  * The Rules view (RULES.md), as VS Code's own tree view, in the Explorer beside Capability calls: every rule in the
- * policy files — mine first (`.silo/<you>.policy.json`), then the shared contract's (`.silo/policy.json`) — each a
+ * policy files — mine first (`.silo/policy/<you>.json`), then the shared contract's (`.silo/policy.json`) — each a
  * sentence in the catalog's words, in the order they're matched: the first that matches decides. A placed rule says the
  * line its statement is on now; one that can't be matched, or whose place is lost, says why.
  *
@@ -10,6 +10,7 @@
  * files change, and as files are saved (a placed rule follows its code).
  */
 import * as vscode from "vscode";
+import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
 
 /** A rule as the editor lists it (`silo.rules.list`). */
 interface Listed {
@@ -93,7 +94,7 @@ export function registerRulesTree(context: vscode.ExtensionContext): void {
 		listing = undefined;
 		changed.fire();
 	};
-	const watcher = vscode.workspace.createFileSystemWatcher("**/.silo/*policy.json");
+	const watcher = vscode.workspace.createFileSystemWatcher(POLICY_GLOB);
 
 	context.subscriptions.push(
 		changed,

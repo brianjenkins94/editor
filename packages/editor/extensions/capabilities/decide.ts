@@ -128,7 +128,7 @@ async function promptViaShell(request: { "kind": string; "scope": string; "resou
 	}
 }
 
-/** The decider: consult the effective policy FIRST — my `<user>.policy.json` overrides layered over the base
+/** The decider: consult the effective policy FIRST — my `policy/<user>.json` overrides layered over the base
  *  `policy.json` contract — and allow / deny with NO prompt (so pre-approved scopes and default-allow patterns
  *  like fs:read under the workspace never nag). For an undecided (review) capability, raise the WebAwesome prompt
  *  overlay in the preview window. "Allow always" writes an allow rule to MY override file (never the shared

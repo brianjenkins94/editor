@@ -61,7 +61,7 @@ rule*) — the same two buttons wherever the editor opens.
   *capability is X, resource is Y, then allow*. silo holds the catalog too: `TARGETS` (capability, resource, program,
   process.argv), `TYPES`, `OPERATORS` (each with what it compiles to, and its argument's schema given its target's),
   `ACTIONS`. Saved in the same files: the shared contract
-  (`.silo/policy.json`) and mine (`.silo/<you>.policy.json`); a recorded value (a real fetch response) in
+  (`.silo/policy.json`) and mine (`.silo/policy/<you>.json`); a recorded value (a real fetch response) in
   `.silo/local/`, referred to by the rule.
 - **One editor**, in the component (rule-editor.ts: vanilla DOM, VS Code-styled — the workbench realm loads no Web
   Awesome and no React but in islands): rows of selects and argument inputs, *all/any/none*, *−* and *+* (⌥: a group),
@@ -129,7 +129,7 @@ rule*) — the same two buttons wherever the editor opens.
 A standard instead of a private vocabulary, at three levels:
 
 - **The files are validated by a schema** — silo publishes the policy file's JSON Schema; VS Code's JSON support then
-  completes and checks `.silo/policy.json` and `.silo/<you>.policy.json` by hand, with nothing of ours to build.
+  completes and checks `.silo/policy.json` and `.silo/policy/<you>.json` by hand, with nothing of ours to build.
 - **An argument's input is drawn from its schema**, not a component per argument type: a string is a text box (with
   `format: "glob"`, a glob), an `enum` a select, an array a list with *+* and *−*, an object its fields — one renderer,
   as JSON Forms and react-jsonschema-form do. A target declares the schema of the value it yields (a capability: an

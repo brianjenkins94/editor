@@ -17,7 +17,7 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { Resolution, SpanRef } from "@brianjenkins94/util/silo/annotations";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
-import { LOCAL_DIR } from "@brianjenkins94/util/silo/evidence";
+import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
 import { fs } from "@zenfs/core";
 import { blobText, status } from "./git-engine";
 

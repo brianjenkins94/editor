@@ -6,10 +6,12 @@
  *   .silo/
  *     policy.json               DECISIONS · base    — the contract, human-authored (we only READ it — but for keeping a
  *                                                   placed rule's place up with its code: movePlace)
- *     <user>.policy.json        DECISIONS · mine    — overrides; "Allow always"/"Deny always" write HERE
+ *     policy/<user>.json        DECISIONS · mine    — overrides; "Allow always"/"Deny always" write HERE
  *     capabilities.json         FACTS · static      — what analysis says code CAN do (written by the panel side)
- *     <user>.capabilities.json  FACTS · observed    — what I actually saw FIRE (rollup, day-coarsened)
+ *     capabilities/<user>.json  FACTS · observed    — what I actually saw FIRE (rollup, day-coarsened)
  *     .gitignore                silo-managed        — ignores local/ (recorded results: this machine's alone)
+ *
+ * (The whole `.silo/` layout, and who writes what, is silo's: @brianjenkins94/util/silo/layout.)
  *
  * Why never merge the axes:
  *   • base vs override — silo must never rewrite the reviewable CONTRACT; a person's grants land in their own
@@ -32,6 +34,7 @@ import type { CapabilityRequest } from "@brianjenkins94/util/silo/enforce/broker
 import type { Disposition, Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { userSlug } from "@brianjenkins94/util/silo/evidence";
+import { capabilitiesPath, GITIGNORE, observedCapabilitiesPath, POLICY_GLOB, policyPath, SILO_DIR, userPolicyPath, withLines } from "@brianjenkins94/util/silo/layout";
 import { recordEffect } from "./run-effects";
 import { EMPTY_POLICY, parsePolicy, withRule } from "@brianjenkins94/util/silo/policy";
 
@@ -44,6 +47,9 @@ function siloRoot(): vscode.Uri | undefined {
 
 	return folder === undefined ? undefined : vscode.Uri.joinPath(folder.uri, ".silo");
 }
+
+/** A layout path (`.silo/…`, silo's layout) as a file under the responsible `.silo`. */
+const fileIn = (root: vscode.Uri, layoutPath: string): vscode.Uri => vscode.Uri.joinPath(root, layoutPath.slice(SILO_DIR.length + 1));
 
 // ── file I/O (workspace.fs; tolerant of absence) ─────────────────────────────────────────────────────────────
 
@@ -94,16 +100,16 @@ let baseCache: Policy | undefined;
 let overrideCache: Policy | undefined;
 let policyWatcher: vscode.Disposable | undefined;
 
-/** Invalidate the policy caches when a `.silo/…policy.json` changes UNDER US — the panel edits the base contract
+/** Invalidate the policy caches when a policy file changes UNDER US — the panel edits the base contract
  *  from a SEPARATE extension bundle (so its writes don't touch these caches), and a user may hand-edit either
- *  file. Lazily installed for the session; matches both `policy.json` and `<user>.policy.json`. */
+ *  file. Lazily installed for the session; matches both `policy.json` and `policy/<user>.json`. */
 function ensurePolicyWatcher(): void {
 	if (policyWatcher !== undefined) {
 		return;
 	}
 
 	try {
-		const watcher = vscode.workspace.createFileSystemWatcher("**/.silo/*policy.json");
+		const watcher = vscode.workspace.createFileSystemWatcher(POLICY_GLOB);
 		const invalidate = (): void => { baseCache = undefined; overrideCache = undefined; };
 
 		watcher.onDidChange(invalidate);
@@ -117,7 +123,7 @@ function ensurePolicyWatcher(): void {
 
 async function loadBase(root: vscode.Uri): Promise<Policy> {
 	if (baseCache === undefined) {
-		const text = await readText(vscode.Uri.joinPath(root, "policy.json"));
+		const text = await readText(fileIn(root, policyPath()));
 
 		baseCache = text === undefined ? { ...EMPTY_POLICY } : parsePolicy(text);
 	}
@@ -127,7 +133,7 @@ async function loadBase(root: vscode.Uri): Promise<Policy> {
 
 async function loadOverride(root: vscode.Uri, user: string): Promise<Policy> {
 	if (overrideCache === undefined) {
-		const text = await readText(vscode.Uri.joinPath(root, `${user}.policy.json`));
+		const text = await readText(fileIn(root, userPolicyPath(user)));
 
 		overrideCache = text === undefined ? { ...EMPTY_POLICY } : parsePolicy(text);
 	}
@@ -153,7 +159,7 @@ export async function loadEffectivePolicy(): Promise<Policy> {
 	return { "version": base.version, "rules": [...override.rules, ...base.rules] };
 }
 
-/** The policy files, apart: mine (`.silo/<user>.policy.json`) and the shared contract (`.silo/policy.json`), each with
+/** The policy files, apart: mine (`.silo/policy/<user>.json`) and the shared contract (`.silo/policy.json`), each with
  *  its workspace-relative path — for a view listing every rule. With no workspace, none. */
 export async function loadPolicyFiles(): Promise<{ "mine": { "file": string; "rules": Rule[] }; "shared": { "file": string; "rules": Rule[] } } | undefined> {
 	const root = siloRoot();
@@ -165,15 +171,15 @@ export async function loadPolicyFiles(): Promise<{ "mine": { "file": string; "ru
 	ensurePolicyWatcher();
 
 	const user = await currentUser();
-	const relative = (name: string): string => vscode.workspace.asRelativePath(vscode.Uri.joinPath(root, name), false);
+	const relative = (file: vscode.Uri): string => vscode.workspace.asRelativePath(file, false);
 
 	return {
-		"mine": { "file": relative(`${user}.policy.json`), "rules": (await loadOverride(root, user)).rules },
-		"shared": { "file": relative("policy.json"), "rules": (await loadBase(root)).rules }
+		"mine": { "file": relative(fileIn(root, userPolicyPath(user))), "rules": (await loadOverride(root, user)).rules },
+		"shared": { "file": relative(fileIn(root, policyPath())), "rules": (await loadBase(root)).rules }
 	};
 }
 
-/** Persist a user decision to `<user>.policy.json` (NEVER policy.json — silo doesn't author the contract),
+/** Persist a user decision to `policy/<user>.json` (NEVER policy.json — silo doesn't author the contract),
  *  stamping `added` on a first-time grant and preserving it across later flips. */
 export async function persistOverride(capability: string, resource: string, disposition: Disposition): Promise<void> {
 	const root = siloRoot();
@@ -188,13 +194,13 @@ export async function persistOverride(capability: string, resource: string, disp
 	// must not come back.
 	overrideCache = undefined;
 	overrideCache = withRule(await loadOverride(root, user), capability, resource, disposition, new Date().toISOString());
-	await writeText(vscode.Uri.joinPath(root, `${user}.policy.json`), JSON.stringify(overrideCache, null, "\t") + "\n");
+	await writeText(fileIn(root, userPolicyPath(user)), JSON.stringify(overrideCache, null, "\t") + "\n");
 }
 
 /** The same rule, whenever it was decided. */
 const sameRule = (a: Rule, b: Rule): boolean => JSON.stringify({ "when": a.when, "then": a.then }) === JSON.stringify({ "when": b.when, "then": b.then });
 
-/** Change my policy (`<user>.policy.json`) by a rule made in a rule editor: `previous` (the rule edited, if it's mine)
+/** Change my policy (`policy/<user>.json`) by a rule made in a rule editor: `previous` (the rule edited, if it's mine)
  *  replaced by `rule`, in its place — or, with no `previous` of mine, `rule` added first (a rule just made is the one
  *  meant; one edited from the shared contract shadows it); with no `rule`, `previous` removed. A new or changed rule is
  *  stamped as decided now. */
@@ -216,7 +222,7 @@ export async function replaceRule(previous: Rule | undefined, rule: Rule | undef
 	const rules = index === -1 ? [...stamped, ...override.rules] : [...override.rules.slice(0, index), ...stamped, ...override.rules.slice(index + 1)];
 
 	overrideCache = { "version": override.version, "rules": rules };
-	await writeText(vscode.Uri.joinPath(root, `${user}.policy.json`), JSON.stringify(overrideCache, null, "\t") + "\n");
+	await writeText(fileIn(root, userPolicyPath(user)), JSON.stringify(overrideCache, null, "\t") + "\n");
 }
 
 /** Keep a placed rule's place up with its code (RULES.md: a placed rule keeps its place on its own): `previous`, in my
@@ -230,8 +236,8 @@ export async function movePlace(whose: "mine" | "shared", previous: Rule, rule: 
 		return;
 	}
 
-	const name = whose === "mine" ? `${await currentUser()}.policy.json` : "policy.json";
-	const text = await readText(vscode.Uri.joinPath(root, name));
+	const file = fileIn(root, whose === "mine" ? userPolicyPath(await currentUser()) : policyPath());
+	const text = await readText(file);
 	const policy = text === undefined ? undefined : parsePolicy(text);
 	const index = policy?.rules.findIndex((each) => sameRule(each, previous)) ?? -1;
 
@@ -243,7 +249,7 @@ export async function movePlace(whose: "mine" | "shared", previous: Rule, rule: 
 
 	baseCache = undefined;
 	overrideCache = undefined;
-	await writeText(vscode.Uri.joinPath(root, name), JSON.stringify(moved, null, "\t") + "\n");
+	await writeText(file, JSON.stringify(moved, null, "\t") + "\n");
 }
 
 // ── static facts: the capability surface (committed, shared) ─────────────────────────────────────────────────
@@ -270,7 +276,7 @@ export async function loadStaticSurface(): Promise<StaticSurface> {
 		return { "version": 1, "capabilities": {} };
 	}
 
-	const text = await readText(vscode.Uri.joinPath(root, "capabilities.json"));
+	const text = await readText(fileIn(root, capabilitiesPath()));
 
 	if (text !== undefined) {
 		try {
@@ -301,7 +307,7 @@ export async function writeStaticSurface(surface: StaticSurface): Promise<void> 
 			(a.capability + a.callee + a.resource).localeCompare(b.capability + b.callee + b.resource));
 	}
 
-	await writeText(vscode.Uri.joinPath(root, "capabilities.json"), JSON.stringify(sorted, null, "\t") + "\n");
+	await writeText(fileIn(root, capabilitiesPath()), JSON.stringify(sorted, null, "\t") + "\n");
 }
 
 // ── observed facts: the rollup + each run's effects ────────────────────────────────────────────────────────────────
@@ -323,7 +329,7 @@ async function loadObserved(root: vscode.Uri, user: string): Promise<ObservedSur
 	if (observedCache === undefined) {
 		observedCache = { "version": 1, "observed": {} };
 
-		const text = await readText(vscode.Uri.joinPath(root, `${user}.capabilities.json`));
+		const text = await readText(fileIn(root, observedCapabilitiesPath(user)));
 
 		if (text !== undefined) {
 			try {
@@ -341,7 +347,7 @@ async function loadObserved(root: vscode.Uri, user: string): Promise<ObservedSur
 
 /**
  * Record one gated decision on the OBSERVED axis (best-effort, never blocks or fails a decision):
- *   • fold ALLOWED scopes into `<user>.capabilities.json` — the committed rollup, day-coarsened (rewritten only
+ *   • fold ALLOWED scopes into `capabilities/<user>.json` — the committed rollup, day-coarsened (rewritten only
  *     when a scope is first seen or its last-seen DATE advances) so the tracked file stays quiet in git.
  *   • when `runId` is known (a preview's run), count it among that run's effects (recordEffect) — made, or denied.
  * A denied call fired nothing, so it's kept out of the observed surface.
@@ -378,7 +384,7 @@ export function recordObservation(request: CapabilityRequest, disposition: Dispo
 				return; // same scope, same day → the rollup already reflects this
 			}
 
-			await writeText(vscode.Uri.joinPath(root, `${user}.capabilities.json`), JSON.stringify(surface, null, "\t") + "\n");
+			await writeText(fileIn(root, observedCapabilitiesPath(user)), JSON.stringify(surface, null, "\t") + "\n");
 		} catch { /* observation is advisory; a failure must never affect enforcement */ }
 	})();
 }
@@ -393,15 +399,12 @@ async function ensureGitignore(root: vscode.Uri): Promise<void> {
 
 	gitignoreEnsured = true;
 
+	// What's this machine's alone (recorded results can hold secrets): silo's own `.gitignore` lines, a person's kept.
 	const uri = vscode.Uri.joinPath(root, ".gitignore");
-	let existing = (await readText(uri)) ?? "";
+	const updated = withLines((await readText(uri)) ?? "", GITIGNORE);
 
-	// What's this machine's alone (recorded results can hold secrets).
-	for (const entry of ["local/"]) {
-		if (!existing.split(/\r?\n/).some((each) => each.trim() === entry)) {
-			existing = (existing === "" ? "" : existing.replace(/\n?$/, "\n")) + entry + "\n";
-			await writeText(uri, existing);
-		}
+	if (updated !== undefined) {
+		await writeText(uri, updated);
 	}
 }
 

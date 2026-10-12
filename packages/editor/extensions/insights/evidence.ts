@@ -11,7 +11,8 @@
 import { annotations } from "@brianjenkins94/run-contract/annotations";
 import type { Observation } from "@brianjenkins94/util/silo/evidence";
 import { observedRef } from "@brianjenkins94/util/silo/annotations";
-import { LOCAL_DIR, parseEvidence, parseSamples, SILO_DIR } from "@brianjenkins94/util/silo/evidence";
+import { parseEvidence, parseSamples } from "@brianjenkins94/util/silo/evidence";
+import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import type * as vscodeApi from "vscode";
 
 /** What every run observed at one span, folded: strict counts summed, faded runs summed, the latest report's time. */

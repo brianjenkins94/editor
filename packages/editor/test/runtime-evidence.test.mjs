@@ -3,7 +3,8 @@
 //   node --test test/runtime-evidence.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { evidenceText, foldBranches, foldReached, foldSamples, foldValues, HALF_LIFE_RUNS, MAX_SAMPLES, MAX_TAGS, parseEvidence, parseSamples, samplesPath, samplesText } from "@brianjenkins94/util/silo/evidence";
+import { evidenceText, foldBranches, foldReached, foldSamples, foldValues, HALF_LIFE_RUNS, MAX_SAMPLES, MAX_TAGS, parseEvidence, parseSamples, samplesText } from "@brianjenkins94/util/silo/evidence";
+import { samplesPath } from "@brianjenkins94/util/silo/layout";
 
 const run = (n) => ({ "id": `run-${n}`, "at": `2026-10-04T00:00:0${n}Z` });
 const fade = 2 ** (-1 / HALF_LIFE_RUNS);

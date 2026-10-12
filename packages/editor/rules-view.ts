@@ -3,7 +3,7 @@
  * (where the Margin's Rule… and Mock… make theirs too: editInRuleView), and the commands the tree (the capabilities
  * extension's rules-tree.ts, VS Code's own tree view) runs:
  *
- * - `silo.rules.list`: every rule in the policy files — mine (`.silo/<you>.policy.json`), then the shared contract's
+ * - `silo.rules.list`: every rule in the policy files — mine (`.silo/policy/<you>.json`), then the shared contract's
  *   (`.silo/policy.json`) — each a sentence in the catalog's words, the problem that makes it match nothing, and where a
  *   placed one's place is now;
  * - `silo.rules.open` (a listed rule), `silo.rules.new`: the rule in the editor — *Save* (mine, in its place; a shared
@@ -140,7 +140,7 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 		};
 		const previous = whose === "new" ? undefined : rule;
 		const buttons: PanelButton[] = [
-			{ "label": "Save", "className": "save", "title": whose === "shared" ? "Save it as a rule of yours, ahead of the shared one (.silo/<you>.policy.json)" : "Save it in your policy (.silo/<you>.policy.json)", "act": async (edited) => { await set(previous, edited); close(); } },
+			{ "label": "Save", "className": "save", "title": whose === "shared" ? "Save it as a rule of yours, ahead of the shared one (.silo/policy/<you>.json)" : "Save it in your policy (.silo/policy/<you>.json)", "act": async (edited) => { await set(previous, edited); close(); } },
 			// Lost, or found only uncertainly: placed again at the code selected in the editor.
 			...place !== null && place.status !== "attached" && place.status !== "moved" && place.status !== "re-placed" ? [{ "label": "Re-place at selection", "className": "replace", "title": "Select the statement it belongs at in the editor, then this: the rule is placed there", "act": async (edited: EditedRule) => { await set(previous, replacePlace(edited, await selected())); close(); }, "always": true }] : [],
 			...whose === "mine" ? [{ "label": "Remove", "className": "remove", "title": "Take it out of your policy", "act": async () => { await set(rule, undefined); close(); }, "always": true }] : [],
@@ -254,7 +254,7 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 
 			show(rulePanel(policy!, callRule(capability, resource), (rule) => callVerdict(policy!, rule, subject), [
 				{ "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and ask again next time", "act": async (rule) => { done(decisionOf(rule) ?? null); } },
-				{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/<you>.policy.json), and decide this call by it", "act": async (rule) => { await set(undefined, rule); done(decisionOf(rule) ?? null); } },
+				{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json), and decide this call by it", "act": async (rule) => { await set(undefined, rule); done(decisionOf(rule) ?? null); } },
 				{ "label": "Cancel", "className": "cancel", "title": "Back to the preview's question", "act": async () => { done(null); }, "always": true }
 			]));
 		});

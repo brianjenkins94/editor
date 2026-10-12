@@ -22,7 +22,7 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type { CosmeticClassifier } from "./cosmetic-classifier";
 import { serve } from "@brianjenkins94/hub";
-import { LOCAL_DIR } from "@brianjenkins94/util/silo/evidence";
+import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
 import { fs } from "@zenfs/core";
 import * as engine from "./git-engine";
 

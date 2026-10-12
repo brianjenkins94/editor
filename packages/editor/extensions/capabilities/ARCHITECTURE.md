@@ -51,14 +51,14 @@ signal** (a scope OBSERVED with no matching STATIC entry is the alarm; silo must
 ```
 .silo/
   policy.json               DECISIONS · base      the shared contract — human-authored (panel edits it; silo never writes)
-  <user>.policy.json        DECISIONS · mine      per-user overrides — the "Allow always" popup writes here; committed, conflict-free
+  policy/<user>.json        DECISIONS · mine      per-user overrides — the "Allow always" popup writes here; committed, conflict-free
   capabilities.json         FACTS · static        what analysis (findReach) says code CAN do
-  <user>.capabilities.json  FACTS · observed      what actually FIRED for this user — a day-coarsened rollup
+  capabilities/<user>.json  FACTS · observed      what actually FIRED for this user — a day-coarsened rollup
   runs/<user>.jsonl         FACTS · observed      the run ledger (evidence.ts): each run's envelope, with its `effects`
   .gitignore                silo-managed          ignores local/
 ```
 
-Enforcement reads the **effective** policy = `<user>.policy.json` layered over `policy.json` (override wins,
+Enforcement reads the **effective** policy = `policy/<user>.json` layered over `policy.json` (override wins,
 contract next, computed default last). Timestamps land per axis: `added` (when I authorized) on the override rule;
 `firstObserved`/`lastObserved` on the observed rollup; each run's own in its envelope's `effects` (a debug run's from
 its worker, a preview's from `decide`, counted by run in `silo-store.ts` and asked for over `run.effects` as the

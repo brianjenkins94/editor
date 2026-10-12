@@ -155,7 +155,7 @@ The source regex (`lifecycle.ts`'s service/task guess deciding the runtime — i
 the production adapter (a run is a tsval session); React mode; the left rail's placeholder; the swallowed errors (a run
 that can't start says why). And the two run ledgers become one: every run in `runs.jsonl`, with its evidence (done,
 2026-10-08: the envelope's `effects` — each gated call it made, was denied, skipped or given — replaced silo's
-`<user>.runs.jsonl`).
+`runs/<user>.jsonl`).
 
 ## Steps
 

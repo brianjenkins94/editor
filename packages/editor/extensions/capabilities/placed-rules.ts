@@ -9,6 +9,7 @@ import type { PaneContent, PaneMark } from "@brianjenkins94/run-contract/pane";
 import { refreshPane } from "@brianjenkins94/run-contract/pane";
 import { placesOf } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
+import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
 
 /** The view's id: its provider is `placedRules.paneView`. */
 const VIEW = "placedRules";
@@ -44,7 +45,7 @@ async function placedIn(uri: string): Promise<PaneContent | undefined> {
 }
 
 export function registerPlacedRules(context: vscode.ExtensionContext): void {
-	const watcher = vscode.workspace.createFileSystemWatcher("**/.silo/*policy.json");
+	const watcher = vscode.workspace.createFileSystemWatcher(POLICY_GLOB);
 	const changed = (): void => { void refreshPane(vscode.commands, VIEW); };
 
 	context.subscriptions.push(

@@ -22,7 +22,8 @@ import type { ModuleEvidence } from "./extensions/worker-pod/page-evidence";
 import type { Bablr } from "./bablr";
 import type { RunInfo, RunRegistry } from "./runs";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, GITATTRIBUTES, GITIGNORE, parseEvidence, parseRuns, parseSamples, queryRuns, runsPath, samplesPath, samplesText, SILO_DIR, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { blobOid, headCommit } from "./git-engine";
 
 const ROOT = "/workspace";

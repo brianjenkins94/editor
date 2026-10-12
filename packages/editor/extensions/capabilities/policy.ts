@@ -6,7 +6,7 @@
  *
  * This panel edits the BASE policy — the shared, human-authored contract at `.silo/policy.json`. A person clicking
  * a disposition here IS the human authoring it (silo itself never writes this file). Per-user runtime grants (the
- * "Allow always" popup) land separately in `.silo/<user>.policy.json`, which the enforcer layers ON TOP of this
+ * "Allow always" popup) land separately in `.silo/policy/<user>.json`, which the enforcer layers ON TOP of this
  * base; the enforcer sees the merge, this panel curates the contract half.
  *
  * Policy-as-code on purpose: the file is under `.silo/`, human-readable, shows up in the explorer, and is

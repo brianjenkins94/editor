@@ -23,7 +23,7 @@ in git.
 |---|---|---|---|---|
 | Coverage | tsval `coverage: true` (statement hit counts); the debug adapter's `coverage` event | An in-memory map in the insights extension; gone on reload | File path and statement range | Gutter bars and hover counts |
 | CPU profiles | The shell profiles a preview that keeps running slow | `.silo/profiles/<port>-<time>.cpuprofile`, source-mapped | Port and time; tied to no run | A notification, then a hotspot picker |
-| Capabilities | almostnode shims and the preview's gated fetches, via `decide` | `.silo/<user>.runs.jsonl` (one line per run; since 2026-10-08 each run's envelope's `effects`) and a day-coarsened rollup | Entry file and its whole-file sha | The capabilities panel |
+| Capabilities | almostnode shims and the preview's gated fetches, via `decide` | `.silo/runs/<user>.jsonl` (one line per run; since 2026-10-08 each run's envelope's `effects`) and a day-coarsened rollup | Entry file and its whole-file sha | The capabilities panel |
 
 - **Four run identities.** The core registry's `run-N` (terminal `node` and `vite`, last 10 in memory), the runner's
   UUID (`node.start`, `debug.launch`), the VS Code debug session, and a preview's port.
@@ -94,9 +94,9 @@ means designing for merges and for size.
 ```
 .silo/
   policy.json                      decisions · shared      (as today)
-  <user>.policy.json               decisions · mine        (as today)
+  policy/<user>.json               decisions · mine        (as today)
   capabilities.json                facts · static          (as today)
-  <user>.capabilities.json         facts · observed rollup (as today)
+  capabilities/<user>.json         facts · observed rollup (as today)
   runs/<user>.jsonl                one envelope per run · append-only · merge=union
   evidence/<user>/<env>/<path>.jsonl
                                    one line per (span, kind) · sorted · merge=union

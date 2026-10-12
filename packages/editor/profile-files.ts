@@ -20,7 +20,7 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { CpuProfile } from "./cpuprofile";
 import type { PreviewProfile } from "./preview-profile";
 import type { RunRegistry } from "./runs";
-import { LOCAL_DIR } from "@brianjenkins94/util/silo/evidence";
+import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
 import { ensureSiloFiles } from "./evidence";
 import { PREVIEW_PROFILED } from "./preview-profile";
 import { inlineSourceMap, originalPosition } from "./sourcemap";
