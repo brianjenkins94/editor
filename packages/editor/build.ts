@@ -55,6 +55,8 @@ function bundledModule(name: string, file: string, id: string, format: "cjs" | "
 				"build": {
 					"write": false,
 					"minify": isCI,
+					// Script text, not a file: its map rides inline (locally only, as every pass's).
+					"sourcemap": isCI ? false : "inline",
 					"target": "esnext",
 					"lib": { "entry": dir + file, "formats": [format], "fileName": id, ...format === "iife" ? { "name": id.replaceAll("-", "_") } : {} },
 					// One self-contained chunk: large servers have dynamic imports that would otherwise code-split
@@ -303,6 +305,9 @@ export async function preBuild(): Promise<void> {
 		"build": {
 			"outDir": "dist",
 			"minify": isCI,
+			// Locally, every bundle of ours carries a source map — so a debugger, and V8 coverage from a session, map back to
+			// the repo's files; never in CI.
+			"sourcemap": !isCI,
 			"rollupOptions": {
 				"input": { "workbench": "workbench-entry.tsx" },
 				"external": ["@brianjenkins94/monaco-vscode-api/main"],
@@ -323,9 +328,11 @@ export async function preBuild(): Promise<void> {
 		"resolve": { "alias": { "@brianjenkins94/tsval": resolvePath("../tsval/src/index.ts"), "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
 		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
 		"plugins": [bundledNodeServer("worker-pod"), bundledModule("worker-pod", "page-tap.ts", "page-tap", "iife", []), bundledModule("worker-pod", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
+		"worker": { "rollupOptions": { "output": { "sourcemap": !isCI } } },
 		"build": {
 			"outDir": "dist",
 			"emptyOutDir": false,
+			"sourcemap": !isCI,
 			"assetsInlineLimit": 0,
 			// These run as Web Workers (no DOM). Vite's default dynamic-import preload helper injects a
 			// <link rel=modulepreload> via `document`, which throws in a worker — so the node worker's lazy
@@ -430,7 +437,7 @@ export async function preBuild(): Promise<void> {
 				{ "find": /^@oxc-parser\/binding-wasm32-wasi(?:p1)?$/u, "replacement": oxcWasiBrowser() }
 			]
 		},
-		"worker": { "format": "es", "rollupOptions": { "output": { "banner": PROCESS_SHIM, "entryFileNames": "lsp/[name]-[hash].js", "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" } } },
+		"worker": { "format": "es", "rollupOptions": { "output": { "sourcemap": !isCI, "banner": PROCESS_SHIM, "entryFileNames": "lsp/[name]-[hash].js", "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" } } },
 		"plugins": [oxcPolyfills, capabilitiesTsPlugin()],
 		"build": {
 			"outDir": "dist",
