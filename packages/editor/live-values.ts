@@ -129,8 +129,6 @@ let setValueAt: ((session: string, name: string, value: string) => Promise<unkno
 let rulesGiven: ((path: string) => Promise<Given | null>) | undefined;
 let rulesSet: ((previous: EditedRule | undefined, rule: EditedRule | undefined) => Promise<unknown>) | undefined;
 let runFile: ((path: string, cases: string[][]) => Promise<unknown>) | undefined;
-/** The rules placed in a file, where they are in it now (set by `installLiveValues`). */
-let rulesPlaced: ((path: string) => Promise<PlacedRule[]>) | undefined;
 /** What a rule gives each file's process.argv, as last read (null: nothing; undefined: not read yet). */
 const givenArgv = new Map<string, Given | null>();
 /** Who's told when the policy files change (the Rules view), besides the margin. */
@@ -589,50 +587,6 @@ export function ensureStyled(): void {
 	}
 }
 
-/** A rule placed in a file (RULES.md: *at*), where it is now: its 1-based lines, and how it was found. */
-interface PlacedRule { "whose": "mine" | "shared"; "rule": EditedRule; "status": string; "line": number; "endLine": number }
-
-/** Each file's placed rules as marks, by the document version they were read at; cleared when the rules change. */
-const placedRead = new Map<string, { "version": number; "marks": Promise<PaneMark[]> }>();
-
-/** The marks for the rules placed in `document` — beside the first line of the code each is placed at, its sentence
- *  on hover, so a mocked variable or a given result isn't invisible; uncertain where it was found by a weak match. */
-function placedMarks(document: vscodeApi.TextDocument): Promise<PaneMark[]> {
-	const uri = document.uri.toString();
-	const known = placedRead.get(uri);
-
-	if (known?.version === document.version) {
-		return known.marks;
-	}
-
-	const marks = (async (): Promise<PaneMark[]> => {
-		const placed = await rulesPlaced?.(document.uri.path).catch(() => []) ?? [];
-
-		if (placed.length === 0) {
-			return [];
-		}
-
-		const policy = await import("@brianjenkins94/util/silo/policy");
-		const byLine = new Map<number, { "sentences": string[]; "uncertain": boolean }>();
-
-		for (const { whose, rule, status, line, endLine } of placed) {
-			const sentence = describeRule(rule, withVariables(policy, variablesOf(rule).map((name) => ({ "name": name, "kind": "" }))));
-			const at = byLine.get(line - 1) ?? { "sentences": [], "uncertain": false };
-			const lines = endLine > line ? ` (lines ${line}–${endLine})` : "";
-
-			at.sentences.push(`${whose === "mine" ? "My rule" : "A shared rule"}${lines}: ${sentence}${status === "uncertain" ? " — found here by a weak match: open it in the Rules view to confirm or re-place it" : ""}`);
-			at.uncertain ||= status === "uncertain";
-			byLine.set(line - 1, at);
-		}
-
-		return [...byLine].map(([line, { sentences, uncertain }]) => ({ "line": line, "kind": `rule-placed${uncertain ? " uncertain" : ""}`, "title": sentences.join("\n") }));
-	})();
-
-	placedRead.set(uri, { "version": document.version, "marks": marks });
-
-	return marks;
-}
-
 /** A top-level statement, as tsserver says it (the capabilities plugin's `_statements`): its range, the `//` comment
  *  above it, a title and detail (what it declares or calls), and the types of what it declares. */
 interface Statement { "start": number; "end": number; "kind": string; "comment"?: string; "title": string; "detail": string; "declares"?: { "name": string; "type": string | null }[] }
@@ -784,9 +738,6 @@ function placeOf(anchors: Anchors | undefined, line: number, at: Range | undefin
 	return anchors !== undefined && at !== undefined ? { "ran": { "source": anchors.text, "start": at[0], "end": at[1] } } : { "lines": [line, line] };
 }
 
-/** A gutter mark's kind, as the contract names it (from the Margin's classes: coverage's, a placed rule's). */
-const MARK_KINDS: Record<string, ContentMark["kind"]> = { "coverage-ran": "ran", "coverage-partial": "partial", "coverage-missed": "missed", "run-crashed": "crashed", "run-stopped": "stopped", "rule-placed": "rule", "rule-placed uncertain": "rule-uncertain" };
-
 /** A cell's look, as the contract names it — the kinds it knows; any other, plain. */
 const CELL_KINDS = new Set(["number", "string", "boolean", "object", "error", "undefined", "branch", "set", "skip", "given"]);
 
@@ -874,7 +825,6 @@ async function marginOf(uri: string): Promise<PaneContent | undefined> {
 	const shown = api?.workspace.textDocuments.find((each) => each.uri.toString() === uri);
 	const read = shown === undefined || !CODE.has(shown.languageId) ? undefined : await statementsOf(shown);
 	const steps = read === undefined || shown === undefined || shown.getText() !== text ? [] : stepsOf(shown, read);
-	const rulesHere = shown === undefined || !CODE.has(shown.languageId) ? [] : await placedMarks(shown);
 
 	// process.argv's row, before any run (or a run that didn't read it yet): on the first line reading it, with the file's
 	// stub if it has one — so the inputs can be written first.
@@ -897,7 +847,8 @@ async function marginOf(uri: string): Promise<PaneContent | undefined> {
 	const profiled = profiles.get(uri);
 	const runLog = profiled === undefined || steps.length === 0 ? undefined : runLogOf(steps, profiled);
 	const logLine = shown === undefined ? 0 : Math.max(shown.lineCount - 1, ...steps.map((step) => step.toLine));
-	const lineMarks: PaneMark[] = [...marked.get(uri) ?? [], ...rulesHere];
+	// Coverage's marks (coverage.ts draws them, into the Margin): each card says from them how its code ran.
+	const lineMarks: PaneMark[] = marked.get(uri) ?? [];
 	const ended = ending?.kind === "crashed" ? `crashed at line ${ending.line + 1}` : ending?.kind === "stopped" ? `stopped at line ${ending.line + 1}` : "completed";
 	const items: PaneItem[] = [
 		// A capability stop's question first on its line: it's what the run waits on.
@@ -917,7 +868,6 @@ async function marginOf(uri: string): Promise<PaneContent | undefined> {
 		]
 	];
 	const marks: ContentMark[] = [
-		...lineMarks.map((mark): ContentMark => ({ "at": { "lines": [mark.line, mark.line] }, "kind": MARK_KINDS[mark.kind] ?? "ran", ...mark.title === undefined ? {} : { "title": mark.title } })),
 		...ending === undefined ? [] : [{ "at": placeOf(ending.anchors, ending.line, ending.at), "kind": ending.kind, "title": ending.kind === "crashed" ? `The last run crashed here: ${ending.message ?? "an uncaught error"}` : ending.message === undefined ? "The last run was stopped here" : `The last run stopped here: ${ending.message}` } satisfies ContentMark]
 	];
 	const groups = steps.map((step, index): PaneGroup => {
@@ -1215,7 +1165,6 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	recordedOf = async (capability, resource) => rpc.request("capability.recorded", { "capability": capability, "resource": resource }, { "timeoutMs": 10_000 }) as Promise<{ "value": unknown; "at": string } | null>;
 	setValueAt = (session, name, value) => rpc.request(`debug.session.${session}.setValue`, { "name": name, "value": value }, { "timeoutMs": 30_000 });
 	rulesGiven = async (path) => rpc.request("rules.given", { "program": path, "target": "process.argv" }, { "timeoutMs": 10_000 }) as Promise<Given | null>;
-	rulesPlaced = async (path) => rpc.request("rules.placed", { "program": path }, { "timeoutMs": 10_000 }) as Promise<PlacedRule[]>;
 	rulesSet = async (previous, rule) => rpc.request("rules.set", { ...previous === undefined ? {} : { "previous": previous }, ...rule === undefined ? {} : { "rule": rule } }, { "timeoutMs": 10_000 });
 	// A run answers at its first stop, which can be a while: nobody waits on it here.
 	runFile = async (path, cases) => rpc.request("debug.start", { "program": path, "cases": cases }, { "timeoutMs": 24 * 60 * 60_000 });
@@ -1227,7 +1176,6 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 		clearTimeout(changed);
 		changed = setTimeout(() => {
 			givenArgv.clear();
-			placedRead.clear();
 
 			for (const uri of open) {
 				draw(uri);

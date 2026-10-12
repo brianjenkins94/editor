@@ -129,7 +129,7 @@ dismissed), how a lost reference is looked for before it's orphaned, and `undefi
 **Dogfooded:** notes, insights' evidence, tsval's placed rules, worker-pod's rule places and core's run anchors
 (anchors.ts) all call through it — no extension calls the commands by hand.
 
-## 4. Pane views (the Margin pane's tabs) — steps 1 and 2 done (2026-10-12)
+## 4. Pane views (the Margin pane's tabs) — steps 1–3 done (2026-10-12)
 
 The pane beside every editor (components/monaco-vscode-api/pane.ts) has a strip of tabs on its first line. VS Code has no
 API for anything like it. Today one consumer owns all of it: live-values.ts lists the tabs (Margin, and two disabled
@@ -141,8 +141,8 @@ Margin, whoever's it is:
 | A run's values (rows of cells, a column per turn), `process.argv`'s input row, values dropped | worker-pod's run contract → core | the hub (`values.session.*`), placed by live-values.ts |
 | A capability stop's question, its buttons, the rule and mock editors it opens | worker-pod → core | the hub (`capability.ask`) |
 | A run's end (crashed, stopped) | worker-pod → core | the hub (`values.ended`) — a gutter mark |
-| Coverage marks and how often each line ran; the run log | core (coverage.ts) | a function call (`showMarks`, `showProfile`) |
-| Placed rules | the capabilities extension's rules → core | `rules.placed` — a gutter mark |
+| Coverage marks and how often each line ran; the run log | core (coverage.ts) | a function call (`showMarks`, `showProfile`) — since step 3 coverage's own view into the Margin (`coverage.paneView`) |
+| Placed rules | the capabilities extension's rules → core | `rules.placed` — a gutter mark (since step 3: the capabilities extension's own view into the Margin, from `silo.rules.list`) |
 | The program's steps, a card around each | core (tsserver's `_statements`) | computed in live-values.ts |
 | Prose notes | nothing in production: the notes extension shows notes as comment threads; only a tour test feeds the Margin's (`__pane.show`) | |
 
@@ -244,7 +244,11 @@ what makes the second face possible.
    mockVariable, pick, hold). It keeps the hub side (sessions, anchors) and margin.state. The contract grew what the
    Margin needed: a row's lead cells and own value, an action's menu, disabled actions, a card's detail, title and
    state text. The Margin's prose notes went (decided: notes are the notes extension's comment threads).
-3. **Coverage contributes into the Margin** (its marks and counts), and placed rules (the capabilities extension's).
+3. ~~**Coverage contributes into the Margin**~~ — done (2026-10-12): coverage.ts answers `coverage.paneView` (core
+   declares it into the Margin), and the capabilities extension `placedRules.paneView` (its manifest's
+   `"into": "margin"`) from `silo.rules.list` — whose, sentence, lines and how sure, as the editor found each; the hub's
+   `rules.placed` went. The Margin keeps coverage's marks only to say how each card ran; margin.state lists coverage and
+   the run's end (placed rules are the rules tool's).
 4. **The event sheet takes its tab** — the game's conditions and actions beside the code they're in; its map and builder
    stay the webview view they are. The Cards placeholder goes until the cards projection (PROJECTIONS.md) is built.
 5. **The native face** (6): the same content as inlay hints, hovers, CodeLens and decorations — on in a desktop build, and

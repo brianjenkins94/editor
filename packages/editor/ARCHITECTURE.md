@@ -451,7 +451,7 @@ flowchart LR
 | Pod | node | `node.stdin.*` |
 | Pod | pod | `pod.ready` |
 | Pod | production | `production.exit.*`, `production.launch`, `production.out.*` |
-| Pod | rules | `rules.given()`, `rules.list()`, `rules.placed()`, `rules.set()` |
+| Pod | rules | `rules.given()`, `rules.list()`, `rules.set()` |
 | Pod | run | `run.effects()` |
 | Pod | runtime | `runtime.fs.attach()` |
 | Pod | stops | `stops.preview` |

@@ -103,8 +103,9 @@ rule*) — the same two buttons wherever the editor opens.
   only uncertain doesn't apply; the Rules view shows a placed rule's line, and a lost one as broken.
 - **Where rules apply is marked** (2026-10-06): a placed rule has a small purple diamond in the notes margin's gutter
   column, beside the first line of the code it's placed at, its sentence on hover — hollow where it was found only by a
-  weak match — so a mocked variable or a given result isn't invisible (`rules.placed`, workbench → pod: the rules
-  placed in a file, found in its text as it is, unsaved edits included). A rule is found the same way everywhere — the
+  weak match — so a mocked variable or a given result isn't invisible (since 2026-10-12 the capabilities extension's
+  pane view into the Margin, from `silo.rules.list`: each rule's place found in its file's text as it is, unsaved edits
+  included; `rules.placed` went). A rule is found the same way everywhere — the
   marks, the Rules view, keeping places on save: followed through the edit history (below) to the text, so the mark
   stays on its code, sure, through edits that from its stored place alone would be only a weak match.
 - **A placed rule keeps its place on its own** (2026-10-06): on save, each rule placed in the file is followed

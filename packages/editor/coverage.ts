@@ -1,7 +1,7 @@
 /**
  * Coverage, with nothing to ask for: every debug session that reports coverage — every tsval run, from the terminal or
- * F5 — leaves its file marked when it ends, and when it pauses: in the notes margin's gutter column, just left of the
- * code (live-values.ts), a mark beside each line that ran, another beside each line that didn't, and on hover how often
+ * F5 — leaves its file marked when it ends, and when it pauses: in the Margin's gutter column, just left of the code (a
+ * pane view of its own into the Margin, `coverage.paneView`: EXTENSION-POINTS.md, 4), a mark beside each line that ran, another beside each line that didn't, and on hover how often
  * it ran; and the same colors in the scrollbar. Not in the glyph margin: VS Code won't set a breakpoint where another
  * extension's icon is (its `marginFreeFromNonDebugDecorations`), so that stays the breakpoints'.
  *
@@ -22,7 +22,12 @@ import type * as vscodeApi from "vscode";
 import type { PaneMark } from "@brianjenkins94/monaco-vscode-api/main";
 import type { EvidenceStore } from "./extensions/insights/evidence";
 import type { CoverageEvent as CoverageReport } from "@brianjenkins94/run-contract";
+import type { PaneMark as ContentMark } from "@brianjenkins94/run-contract/pane";
 import { Anchors, offsetOf } from "./anchors";
+import { refreshView } from "./pane-views";
+
+/** A mark's kind, as the pane-view contract names it. */
+const KINDS: Record<string, ContentMark["kind"]> = { "coverage-ran": "ran", "coverage-partial": "partial", "coverage-missed": "missed" };
 
 /** What evidence says of a line: whether every evidenced statement starting on it ran, in how many runs, and when last. */
 interface LineEvidence { "ever": number; "runs": number; "lastAt": string; "ran": boolean; "some": boolean }
@@ -59,6 +64,15 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 	// The scrollbar's marks: a decoration with no gutter icon, so breakpoints can still be set on the line.
 	const ran = vscode.window.createTextEditorDecorationType({ "overviewRulerColor": "#2ea04340", "overviewRulerLane": vscode.OverviewRulerLane.Left });
 	const missed = vscode.window.createTextEditorDecorationType({ "overviewRulerColor": "#f85149a0", "overviewRulerLane": vscode.OverviewRulerLane.Left });
+	/** Each file's marks as last painted: coverage's pane view, into the Margin (`coverage.paneView`). */
+	const marked = new Map<string, PaneMark[]>();
+
+	vscode.commands.registerCommand("coverage.paneView", (uri: unknown) => {
+		const marks = typeof uri === "string" ? marked.get(uri) : undefined;
+
+		return marks === undefined || marks.length === 0 ? undefined : { "items": [], "marks": marks.map((each): ContentMark => ({ "at": { "lines": [each.line, each.line] }, "kind": KINDS[each.kind] ?? "ran", ...each.title === undefined ? {} : { "title": each.title } })) };
+	});
+
 	/** The latest session's coverage, by file path, with its statements' anchors in the text that ran. */
 	const reports = new Map<string, { "report": CoverageReport; "anchors"?: Anchors }>();
 	const paint = (editor: vscodeApi.TextEditor, marks: Iterable<[number, { "covered": Covered; "hover": string }]>): void => {
@@ -75,6 +89,8 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 		}
 
 		mark(editor.document.uri.toString(), shown);
+		marked.set(editor.document.uri.toString(), shown);
+		refreshView("coverage", editor.document.uri.toString());
 		editor.setDecorations(ran, ranLines);
 		editor.setDecorations(missed, missedLines);
 	};

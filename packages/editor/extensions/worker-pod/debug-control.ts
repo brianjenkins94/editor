@@ -10,7 +10,6 @@
  *   pod     `rules.given` { program?, target } → what a rule gives the file's `target` (process.argv): { rule, values } | null
  *   pod     `rules.set` { previous?, rule? } → my policy changed by a rule editor: previous replaced by rule (or added, or removed)
  *   pod     `rules.list`                       → every rule, apart: { mine: { file, rules }, shared: { file, rules } } | null
- *   pod     `rules.placed` { program? }        → the rules placed in a file, where they are now: [{ whose, rule, status, line, endLine }]
  *   session `debug.session.<id>.step` { action }   → resumes, and answers with the NEXT stop (or the end)
  *   session `debug.session.<id>.state`             → where it is now
  *   session `debug.session.<id>.stop`              → ends it
@@ -631,21 +630,6 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 			}
 
 			return { "mine": { ...files.mine, "places": await placesNow(rpc, files.mine.rules) }, "shared": { ...files.shared, "places": await placesNow(rpc, files.shared.rules) } };
-		}) },
-		// The rules placed in a file, for the notes margin's marks (live-values.ts): each one, whose it is, and where it
-		// is in the file as it is now (its lines, or uncertain) — lost ones left out (the Rules view says so).
-		{ "dispose": serve(hub, "rules.placed", async (args) => {
-			const { program } = (args ?? {}) as { "program"?: string };
-			const file = vscode.workspace.asRelativePath(vscode.Uri.file(resolveProgram(program)), false);
-			const files = await loadPolicyFiles();
-			const placed = (["mine", "shared"] as const).flatMap((whose) => (files?.[whose].rules ?? []).filter((rule) => (placesOf(rule) as { "file"?: string }[]).some((place) => place?.file === file)).map((rule) => ({ "whose": whose, "rule": rule })));
-			const places = await placesNow(rpc, placed.map(({ rule }) => rule));
-
-			return placed.flatMap(({ whose, rule }, index) => {
-				const { status, line, endLine } = places[index] ?? {};
-
-				return status === undefined || status === "orphaned" || line === undefined ? [] : [{ "whose": whose, "rule": rule, "status": status, "line": line, "endLine": endLine ?? line }];
-			});
 		}) },
 		{ "dispose": serve(hub, "rules.set", async (args) => {
 			const { previous, rule } = (args ?? {}) as { "previous"?: Rule; "rule"?: Rule };

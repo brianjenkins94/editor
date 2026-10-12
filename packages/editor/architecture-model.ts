@@ -263,7 +263,6 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "rules.given", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "rules.set", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "rules.list", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "rules.placed", "from": ["workbench"], "to": ["pod"] },
 	{ "pattern": "rules.make", "from": ["pod"], "to": ["workbench"] },
 	{ "pattern": "pod.ready", "from": ["debug-worker"], "to": ["pod"] },
 	{ "pattern": "runtime.fs.attach", "from": ["debug-worker"], "to": ["pod"] },

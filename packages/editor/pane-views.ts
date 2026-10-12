@@ -27,6 +27,12 @@ const CORE_VIEWS: PaneView[] = [
 	{ "id": "event-sheet", "label": "Event sheet", "title": "Coming: the program as an event sheet's conditions and actions", "disabled": true }
 ];
 
+/** Core's views into another: coverage's marks, into the Margin (coverage.ts). */
+const CORE_INTO: PaneViewDeclaration[] = [{ "id": "coverage", "into": MARGIN }];
+
+/** Every view declared: core's into another, then each extension's. */
+const allDeclared = (): PaneViewDeclaration[] => [...CORE_INTO, ...declared];
+
 /** How a mark's kind is styled in the pane's gutter column (live-values.css). */
 const MARK_CLASSES: Record<string, string> = { "ran": "coverage-ran", "partial": "coverage-partial", "missed": "coverage-missed", "crashed": "run-crashed", "stopped": "run-stopped", "rule": "rule-placed", "rule-uncertain": "rule-placed uncertain" };
 
@@ -315,7 +321,7 @@ function renderGroup(group: PaneGroup, element: HTMLElement): void {
 
 /** What `view` and the views `into` it provide for `uri` — none from one that has nothing, or isn't there. */
 async function contentOf(view: string, uri: string): Promise<PaneContent[]> {
-	const providers = [view, ...declared.filter((each) => each.into === view).map((each) => each.id)];
+	const providers = [view, ...allDeclared().filter((each) => each.into === view).map((each) => each.id)];
 	const answers = await Promise.all(providers.map(async (id) => Promise.resolve(api?.commands.executeCommand<PaneContent | undefined>(`${id}.paneView`, uri)).catch(() => undefined)));
 
 	return answers.filter((answer): answer is PaneContent => answer !== undefined && answer !== null && Array.isArray(answer.items));
@@ -408,7 +414,7 @@ function showStrip(): void {
 /** Draw `uri` again — or every shown file — for `view`, if it's the one shown (or in it): its provider's word that its
  *  content changed (core's views say so this way; an extension's through `editor.pane.refresh`). */
 export function refreshView(view: string, uri?: string): void {
-	if (view !== active && !declared.some((each) => each.id === view && each.into === active)) {
+	if (view !== active && !allDeclared().some((each) => each.id === view && each.into === active)) {
 		return;
 	}
 
