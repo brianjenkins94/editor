@@ -165,7 +165,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		run.state = run.stopping || exitCode === 130 ? "stopped" : exitCode === undefined ? "ended" : exitCode === 0 ? "exited" : "failed";
 		refresh();
 
-		if (!run.counted) {
+		// (127 is a shell's "not found": nothing ran, so nothing failed — the terminal already says what to do instead.)
+		if (!run.counted || exitCode === 127) {
 			return;
 		}
 

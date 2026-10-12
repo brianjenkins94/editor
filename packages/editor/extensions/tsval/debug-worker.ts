@@ -252,7 +252,9 @@ function capabilitySurface(fileName: string, args: string[], real?: Runtime, whe
 	const standins = gated(capabilityStandins(), real, where.cwd ?? "/workspace");
 	// What a script reads of its process: its arguments (a run's inputs), the directory it was started in and its
 	// environment (a terminal's — RUNNING.md, step 3), and its stdin — nothing it can do.
-	const process = { "argv": ["node", fileName, ...args], "env": { ...where.env }, "platform": "browser", "cwd": () => where.cwd ?? "/workspace", "stdin": stdin };
+	// (Its version is the one almostnode's process reports, packages/almostnode/shims/process.ts, so a run reads the same
+	// version whichever runtime it's in.)
+	const process = { "argv": ["node", fileName, ...args], "env": { ...where.env }, "platform": "browser", "version": "v20.0.0", "versions": { "node": "20.0.0" }, "cwd": () => where.cwd ?? "/workspace", "stdin": stdin };
 
 	return { "globals": { ...standins.globals, "console": guestConsole(), "process": process }, "modules": standins.modules };
 }
