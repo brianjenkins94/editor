@@ -1,0 +1,30 @@
+{
+  "name": "@brianjenkins94/silo",
+  "version": "0.0.0",
+  "description": "silo's command line: what a program's code says about it, derived and never kept by hand — its features (every way in, found in the code) and their history (told from the code's snapshots, not commit messages). The logic is @brianjenkins94/util/silo; this is the desktop front end, and the editor uses the same internals.",
+  "type": "module",
+  "bin": {
+    "silo": "./cli.js"
+  },
+  "exports": {
+    "./cli": "./src/cli.ts"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "silo": "tsx src/cli.ts",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
+    "cmd-ts": "^0.15.0",
+    "oxc-parser": "0.151.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.23.13"
+  }
+}
