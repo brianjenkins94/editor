@@ -66,6 +66,19 @@ Derived from the catalog: Tab completion (the shell's builtins, just-bash's own 
 them, and ours), which commands stream, and the `shell` tool's description. just-bash's `help` lists only builtins, so
 listing our commands with their summaries is still to do (step 2).
 
+### Step 2 (built)
+
+The first-minute commands are in, each a folder with its test beside it: `git` (status, diff, log, add, restore,
+commit, branch — over git-engine, saying `git.changed` so Source Control refreshes), `node -e`/`-p`/`-v` (and `--test`
+and a bare `node` saying they aren't here yet), `npm ls`/`ci`/`exec` and a bare `npm run`'s script list, `npx`,
+`pnpm` and `yarn` (npm in their words), `code` and `open` (file:line in the editor, a folder in the Explorer, a URL),
+`history`, `ps` and `kill` (the runs, by a short id), and `less`/`more`. Every command of ours answers `--help` from its
+definition. The "never" list is folders too: vim, vi, nano, python, python3, pip, ssh, make, docker, deno, bun, sudo and
+tar say what to do instead and exit 127 — which the Running extension no longer counts as a failed run.
+
+Found on the way: the debugger's `process` had no `version` (now almostnode's, so both runtimes agree), and
+isomorphic-git misses a same-size rewrite within the second it was staged ("racy git"; a task of its own).
+
 ### What people will expect, by how soon they'll be annoyed
 
 **In the first minute**: these get typed out of habit, and failing is the first impression.
