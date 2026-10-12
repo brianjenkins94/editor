@@ -8,7 +8,7 @@ import type { ToolFamily, ToolHost } from "../host";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
 
-const SESSION = z.string().optional().describe("The session id (from debug_sessions or debug_start). Omit when exactly one session is running.");
+const SESSION = z.string().optional().describe("The session id (from debug_list or debug_start). Omit when exactly one session is running.");
 const PROGRAM = z.string().optional().describe("The file, absolute or relative to the workspace (e.g. src/index.ts). Default: the file open in the editor.");
 
 /** The session to act on: `session` if given, else this tab's only live one. */
@@ -45,7 +45,7 @@ const debug: ToolFamily = (host) => [{
 }, {
 	"timeoutMs": 5000,
 	"tool": defineTool({
-		"name": "debug_sessions",
+		"name": "debug_list",
 		"config": {
 			"description": "This tab's live debug sessions (any debugger's but a preview's run): [{ session, name, program, state, reason, line, column, function, code }]. state is starting, running, stopped, idle (waiting on a request, its stdin or a timer — or an app's file, the app running in its preview) or terminated.",
 			"inputSchema": {}

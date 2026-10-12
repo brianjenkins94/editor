@@ -4,8 +4,8 @@ import type { ToolsContext } from "./context.ts";
 import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
 
-export default ({ store, TAB_FILTER, named, scoped, withTab }: ToolsContext) => [defineTool({
-	"name": "query_spans",
+export default ({ store, FROM, named, scoped, withTab }: ToolsContext) => [defineTool({
+	"name": "spans_query",
 	"config": {
 		"title": "Query spans",
 		"description": "Query timed spans reconstructed from the stream — each with source, name, duration, and trace ids. Includes spans that are still OPEN (e.g. a debug step paused at a breakpoint) when onlyOpen is set.",
@@ -16,12 +16,12 @@ export default ({ store, TAB_FILTER, named, scoped, withTab }: ToolsContext) => 
 			"onlyOpen": z.boolean().optional().describe("Only spans with no close yet (in progress)."),
 			"sinceMs": z.number().optional().describe("Only spans that started in the last N milliseconds."),
 			"limit": z.number().optional().describe("Max rows, default 200."),
-			"tab": TAB_FILTER
+			"from": FROM
 		}
 	},
 	"handler": async (args) => {
-		const { tab, ...input } = args as QuerySpansInput & { "tab"?: string };
+		const { from, ...input } = args as QuerySpansInput & { "from"?: string };
 
-		return withTab(tab, async (link) => ok(await named(store.querySpans({ ...input, ...link === undefined ? {} : { "link": link }, ...scoped(tab) }))));
+		return withTab(from, async (link) => ok(await named(store.querySpans({ ...input, ...link === undefined ? {} : { "link": link }, ...scoped(from) }))));
 	}
 })];

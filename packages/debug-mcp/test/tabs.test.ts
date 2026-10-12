@@ -62,11 +62,11 @@ type Row = { "message": string; "source": string; "tab"?: string };
 type Architecture = { "nodes": { "id": string }[] };
 
 async function queryLogs(args: Record<string, unknown>): Promise<Row[]> {
-	return (await call("query_logs", args)).value as Row[];
+	return (await call("logs_query", args)).value as Row[];
 }
 
 async function architecture(args: Record<string, unknown> = {}): Promise<{ "isError"?: boolean; "value": Architecture }> {
-	const { isError, value } = await call("get_architecture", args);
+	const { isError, value } = await call("architecture_state", args);
 
 	return { "isError": isError, "value": value as Architecture };
 }
@@ -93,7 +93,7 @@ after(async () => {
 	await debugMcp.close();
 });
 
-test("each record names the tab it came from, and query_logs can take one tab's", async () => {
+test("each record names the tab it came from, and logs_query can take one tab's", async () => {
 	const rows = await until("both tabs' records", async () => {
 		const value = await queryLogs({ "source": "root", "textIncludes": "hello from" });
 
@@ -101,15 +101,15 @@ test("each record names the tab it came from, and query_logs can take one tab's"
 	});
 
 	assert.deepEqual(rows.map((row) => [row.message, row.tab ?? ""]).sort(([left], [right]) => left.localeCompare(right)), [["hello from t1", "t1"], ["hello from t2", "t2"]]);
-	assert.deepEqual((await queryLogs({ "source": "root", "textIncludes": "hello from", "tab": "t2" })).map((row) => row.message), ["hello from t2"], "same-named sources, one tab's");
+	assert.deepEqual((await queryLogs({ "source": "root", "textIncludes": "hello from", "from": "t2" })).map((row) => row.message), ["hello from t2"], "same-named sources, one tab's");
 
-	const unknown = await call("query_logs", { "tab": "nope" });
+	const unknown = await call("logs_query", { "from": "nope" });
 
 	assert.equal(unknown.isError, true);
 });
 
-test("get_architecture shows one tab's contexts, never the two merged — and asks which, when several are connected", async () => {
-	const ambiguous = await call("get_architecture");
+test("architecture_state shows one tab's contexts, never the two merged — and asks which, when several are connected", async () => {
+	const ambiguous = await call("architecture_state");
 
 	assert.equal(ambiguous.isError, true);
 	assert.match(String(ambiguous.value), /several editor tabs/u);
@@ -127,32 +127,32 @@ test("get_architecture shows one tab's contexts, never the two merged — and as
 	}
 });
 
-test("query_spans keeps two tabs' same-id spans apart, and takes one tab's", async () => {
+test("spans_query keeps two tabs' same-id spans apart, and takes one tab's", async () => {
 	type Span = { "name"?: string; "open": boolean; "tab"?: string };
 	const spans = await until("both tabs' spans", async () => {
-		const value = (await call("query_spans", { "name": "load" })).value as Span[];
+		const value = (await call("spans_query", { "name": "load" })).value as Span[];
 
 		return value.length === 2 ? value : undefined;
 	});
 
 	assert.deepEqual(spans.map((span) => [span.tab, span.open]).sort(([left], [right]) => String(left).localeCompare(String(right))), [["t1", true], ["t2", true]]);
-	assert.deepEqual(((await call("query_spans", { "name": "load", "tab": "t2" })).value as Span[]).map((span) => span.tab), ["t2"]);
+	assert.deepEqual(((await call("spans_query", { "name": "load", "from": "t2" })).value as Span[]).map((span) => span.tab), ["t2"]);
 });
 
-test("get_tree_state shows each tab's contexts separately, or one tab's", async () => {
+test("tree_state shows each tab's contexts separately, or one tab's", async () => {
 	type Tree = { "sources": { "source": string; "tab"?: string }[]; "openSpans": { "name"?: string; "tab"?: string }[] };
-	const all = (await call("get_tree_state")).value as Tree;
+	const all = (await call("tree_state")).value as Tree;
 
 	assert.deepEqual(all.sources.filter((row) => row.source === "root").map((row) => row.tab ?? "").sort((left, right) => left.localeCompare(right)), ["t1", "t2"], "one `root` per tab, not one merged");
 
-	const one = (await call("get_tree_state", { "tab": "t1" })).value as Tree;
+	const one = (await call("tree_state", { "from": "t1" })).value as Tree;
 
 	assert.deepEqual([...new Set(one.sources.map((row) => row.tab))], ["t1"]);
 	assert.deepEqual(one.openSpans.map((span) => [span.name, span.tab]), [["load", "t1"]]);
 });
 
-test("wait_for with a tab waits for that tab's record, not the other's", async () => {
-	const waiting = call("wait_for", { "textIncludes": "ping", "tab": "t2", "timeoutMs": 5000 });
+test("logs_wait with a tab waits for that tab's record, not the other's", async () => {
+	const waiting = call("logs_wait", { "textIncludes": "ping", "from": "t2", "timeoutMs": 5000 });
 
 	await new Promise((resolve) => { setTimeout(resolve, 100); });
 
@@ -165,9 +165,9 @@ test("wait_for with a tab waits for that tab's record, not the other's", async (
 	assert.deepEqual([(value as Row).message, (value as Row).tab], ["ping from t2", "t2"]);
 });
 
-test("query_metrics summarizes one tab's metrics plane — two tabs' same-named sources kept apart", async () => {
+test("metrics_query summarizes one tab's metrics plane — two tabs' same-named sources kept apart", async () => {
 	type Series = { "series": string; "latest": number; "samples": number; "points"?: [number, number][] };
-	const ambiguous = await call("query_metrics");
+	const ambiguous = await call("metrics_query");
 
 	assert.equal(ambiguous.isError, true, "several tabs: which?");
 
@@ -177,7 +177,7 @@ test("query_metrics summarizes one tab's metrics plane — two tabs' same-named 
 			root.publish("$sys.metrics.root", { "source": "root", "t": Date.now(), "values": { "memory.total": tab === "t1" ? 100 : 200, "spans.sw/cdn.errors": 0 } });
 		}
 
-		const [t1, t2] = await Promise.all(["t1", "t2"].map(async (tab) => (await call("query_metrics", { "tab": tab, "match": "memory", "points": 5 })).value as Series[]));
+		const [t1, t2] = await Promise.all(["t1", "t2"].map(async (tab) => (await call("metrics_query", { "tab": tab, "match": "memory", "points": 5 })).value as Series[]));
 
 		return Array.isArray(t1) && Array.isArray(t2) && t1[0]?.samples >= 2 && t2[0]?.samples >= 2 ? { t1, t2 } : undefined;
 	});
@@ -185,7 +185,7 @@ test("query_metrics summarizes one tab's metrics plane — two tabs' same-named 
 	assert.deepEqual(series.t1.map((row) => [row.series, row.latest]), [["root:memory.total", 100]]);
 	assert.deepEqual(series.t2.map((row) => [row.series, row.latest]), [["root:memory.total", 200]]);
 	assert.ok((series.t1[0].points?.length ?? 0) >= 2, "points when asked");
-	assert.deepEqual(((await call("query_metrics", { "tab": "t1", "match": "spans" })).value as Series[]).map((row) => row.series), ["root:spans.sw/cdn.errors"]);
+	assert.deepEqual(((await call("metrics_query", { "tab": "t1", "match": "spans" })).value as Series[]).map((row) => row.series), ["root:spans.sw/cdn.errors"]);
 });
 
 test("once a tab goes, its architecture goes with it, and the one left needs no `tab`", async () => {
@@ -198,5 +198,5 @@ test("once a tab goes, its architecture goes with it, and the one left needs no 
 	assert.ok(value.nodes.some((node) => node.id === "worker-b"));
 	assert.equal(debugMcp.archOf("t1"), undefined);
 	// Its records stay, still filed under it.
-	assert.deepEqual((await queryLogs({ "tab": "t1", "textIncludes": "hello from" })).map((row) => row.message), ["hello from t1"]);
+	assert.deepEqual((await queryLogs({ "from": "t1", "textIncludes": "hello from" })).map((row) => row.message), ["hello from t1"]);
 });

@@ -4,7 +4,7 @@
  * holding everything about it — `command.ts` (what it is: its name, a line saying what it does, whether it streams),
  * `<name>.ts` (the implementation, loaded the first time the command runs) and its tests. Adding a command is adding a
  * folder; everything that enumerates commands derives from here — tab completion, which commands make a line run a
- * statement at a time (session.ts), and the agent's `shell` tool's description (tools/) — so none of them is a
+ * statement at a time (session.ts), and the agent's `terminal_run` tool's description (tools/) — so none of them is a
  * list to keep up by hand. (COMMANDS-AND-TOOLS.md has the layout and what's expected next.)
  *
  * Only `command.ts` is read here, eagerly — it's a few lines and imports nothing — so anything can ask what the
@@ -20,7 +20,7 @@ import type { BashSession } from "./session";
 export interface CommandDefinition {
 	/** The command's name, and its folder's. */
 	"name": string;
-	/** What it does, in a line: shown to people (`--help`) and to agents (the `shell` tool). */
+	/** What it does, in a line: shown to people (`--help`) and to agents (the `terminal_run` tool). */
 	"summary": string;
 	/** Its options and arguments, as a juvy schema: juvy parses them (strictly), validates them and makes `--help` of
 	 *  them, so the command gets them parsed (invoke.ts). */

@@ -694,7 +694,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			.then((allow) => allow !== false, () => false); // can't reach the decider ⇒ fail closed
 	});
 
-	// The preview windows, as data (debug-mcp's `previews` tool): each one's id, its server's port and address, the page
+	// The preview windows, as data (the `previews_list` tool): each one's id, its server's port and address, the page
 	// it's on, whether its page is popped out into a browser window of its own or has DevTools open, and when it was used.
 	serve(hub, "preview.windows", () => [...surfaces.values()].toSorted((a, b) => a.port - b.port || a.index - b.index).map((surface) => {
 		let page: string | undefined;

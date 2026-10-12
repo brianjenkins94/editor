@@ -128,7 +128,7 @@ export function syncPageTools(server: McpServer, debugMcp: DebugMcp): PageToolSy
 				"config": {
 					"title": name,
 					"description": `${String(spec.description)} (Served by a connected page; pass \`tab\` when several serve it.)`,
-					"inputSchema": { ...shapeOf(spec.inputSchema ?? {}), "tab": z.string().optional().describe("The tab (from list_tabs) serving this tool. Omit when only one serves it.") }
+					"inputSchema": { ...shapeOf(spec.inputSchema ?? {}), "tab": z.string().optional().describe("The tab serving this tool (from tabs_list). Omit for the editor tab, or when only one tab serves it.") }
 				},
 				"handler": async (args) => {
 					const { tab, "_approved": _ignored, ...rest } = (args ?? {}) as Record<string, unknown> & { "tab"?: string };

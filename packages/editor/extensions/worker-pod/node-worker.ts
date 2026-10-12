@@ -179,7 +179,7 @@ async function provokeColdChild(buffer: SharedArrayBuffer, root: string, port: n
 }
 
 // Debug affordance: provoke the cold-start transform race on demand, so an agent can loop it via debug-mcp
-// (provoke_transform) instead of hand-driving full-page cold boots. Two modes:
+// (previews_provoke) instead of hand-driving full-page cold boots. Two modes:
 //   • default (warm): each round tears down the in-process dev server (→ a fresh, EMPTY transform cache) and fires
 //     the whole src/ graph's transforms CONCURRENTLY. Fast, but the worker's typescript stays hot across rounds.
 //   • hardReset: each round spawns a fresh CHILD worker (cold almostnode + ts) that does one concurrent transform

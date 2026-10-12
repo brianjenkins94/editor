@@ -248,7 +248,7 @@ what makes the second face possible.
    declares it into the Margin), and the capabilities extension `placedRules.paneView` (its manifest's
    `"into": "margin"`) from `silo.rules.list` — whose, sentence, lines and how sure, as the editor found each; the hub's
    `rules.placed` went. The Margin keeps coverage's marks only to say how each card ran; margin.state lists coverage and
-   the run's end (placed rules are the rules tool's).
+   the run's end (placed rules are rules_list's).
 4. ~~**The event sheet takes its tab**~~ — done (2026-10-12): the event-sheet extension declares `eventSheet` (its
    manifest's `paneViews`, activated on `onCommand:eventSheet.paneView`) and answers it with the open file's part of its
    game — each rule a card around its function (what it's for each of), each condition → action on its `if`, each

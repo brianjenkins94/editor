@@ -5,7 +5,7 @@
  * that shape without the store ever constructing a logger — the "construct downstream from Roarr" line.
  *
  * It answers three questions an agent would otherwise need a screenshot for: what happened (query), what is the
- * tree doing right now (tree state — sources seen, spans still open), and "tell me when X happens" (wait_for,
+ * tree doing right now (tree state — sources seen, spans still open), and "tell me when X happens" (logs_wait,
  * so the agent synchronizes on a real event instead of polling or sleeping).
  */
 

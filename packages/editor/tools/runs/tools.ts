@@ -5,23 +5,26 @@ import { z } from "zod";
 
 const runs: ToolFamily = ({ request }) => [{
 	"tool": defineTool({
-		"name": "runs",
+		"name": "runs_list",
 		"config": {
-			"description": "What's running in the editor, and what ran lately: every terminal's runs — a SERVICE runs until stopped (a dev server: `vite`, `npm run dev`, with its preview port), a TASK runs to completion (a `node` script) — each with its id, title, cwd, the terminal it came from, state (running / exited / failed / stopped), start and end times and exit code. Pass `stop` with a run's id to stop it.",
-			"inputSchema": { "stop": z.string().optional().describe("A running run's id, to stop it.") }
+			"description": "What's running in the editor, and what ran lately: every terminal's runs — a SERVICE runs until stopped (a dev server: `vite`, `npm run dev`, with its preview port), a TASK runs to completion (a `node` script) — each with its id, title, cwd, the terminal it came from, state (running / exited / failed / stopped), start and end times and exit code.",
+			"inputSchema": {}
 		},
-		"handler": async ({ stop }, { signal }) => {
-			if (typeof stop === "string") {
-				return ok({ "stopped": await request("runs.stop", { "id": stop }, signal) });
-			}
-
-			return ok(request("runs.list", undefined, signal));
-		}
+		"handler": async (_args, { signal }) => ok(request("runs.list", undefined, signal))
+	})
+}, {
+	"tool": defineTool({
+		"name": "runs_stop",
+		"config": {
+			"description": "Stop a running run (its id from runs_list). Returns { stopped }.",
+			"inputSchema": { "id": z.string().describe("The run's id.") }
+		},
+		"handler": async ({ id }, { signal }) => ok({ "stopped": await request("runs.stop", { "id": id }, signal) })
 	})
 }, {
 	"timeoutMs": 15000,
 	"tool": defineTool({
-		"name": "run_ledger",
+		"name": "runs_ledger",
 		"config": {
 			"description": "The run ledger (.silo/runs/<user>.jsonl, kept in git): every run that ended — terminal tasks and services, debug sessions, previews — each with its id, title, entry, start/end, exit, who and where it ran, the commit and the blob oid of each file it ran, and its effects: each gated call (capability fs:read / fs:write / net / exec / …, the resource it reached) with how it went — made, denied, skipped or given (a rule's result in its place) — and how many calls. Ask it what touched what: the runs with such an effect, and their effects added up ({ capability, resource, how, calls, runs, first, last }). Returns { total, runs (newest first), effects }.",
 			"inputSchema": {

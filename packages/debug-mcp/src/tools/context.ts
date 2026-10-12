@@ -1,6 +1,6 @@
 /**
  * What debug-mcp's own tools (one file per family here; index.ts lists them) are given: the collector and its store, and
- * the helpers a tool that takes a `tab` needs — which link a tab's records arrive on, each row named by its tab, a preview
+ * the helpers a tool that takes a tab (`from`, its filter; `tab`, its target) needs — which link a tab's records arrive on, each row named by its tab, a preview
  * app narrowed to its own records — with the input schemas they share.
  */
 import type { ok } from "@brianjenkins94/util/mcp/tool";
@@ -15,7 +15,7 @@ export type ToolsContext = ReturnType<typeof createToolsContext>;
 
 export function createToolsContext(debugMcp: DebugMcp) {
 	const { store } = debugMcp;
-	const TAB_FILTER = z.string().optional().describe("Only this tab's (from list_tabs). Each row names its tab: several tabs can have contexts of the same name.");
+	const FROM = z.string().optional().describe("Only this tab's records (a tab from tabs_list); omitted, every tab's. Each row names its tab: several tabs can have contexts of the same name.");
 
 	/** The link a tab's records arrive on — asking the tabs if it isn't known yet. Throws for a tab that never connected. */
 	async function linkFor(tab: string | undefined): Promise<string | undefined> {
@@ -31,7 +31,7 @@ export function createToolsContext(debugMcp: DebugMcp) {
 		const link = debugMcp.linkOf(tab);
 
 		if (link === undefined) {
-			throw new Error(`no tab "${tab}" has connected (list_tabs shows the ones that are)`);
+			throw new Error(`no tab "${tab}" has connected (tabs_list shows the ones that are)`);
 		}
 
 		return link;
@@ -67,5 +67,5 @@ export function createToolsContext(debugMcp: DebugMcp) {
 		return body(link);
 	}
 
-	return { "debugMcp": debugMcp, "store": store, "TAB_FILTER": TAB_FILTER, "linkFor": linkFor, "named": named, "scoped": scoped, "withTab": withTab };
+	return { "debugMcp": debugMcp, "store": store, "FROM": FROM, "linkFor": linkFor, "named": named, "scoped": scoped, "withTab": withTab };
 }

@@ -64,7 +64,7 @@ after(async () => {
 
 test("the app is a tab of its own (marked a preview), riding its editor tab's link", async () => {
 	const tabs = await until("both tabs", async () => {
-		const { value } = await call("list_tabs");
+		const { value } = await call("tabs_list");
 
 		return Array.isArray(value) && value.length === 2 ? value as { "tab": string; "preview"?: boolean }[] : undefined;
 	});
@@ -80,14 +80,14 @@ test("a tool only the app serves needs no tab; the editor tab stays the default 
 	assert.deepEqual(await call("app_status"), { "isError": undefined, "value": "app" });
 	assert.deepEqual(await call("editor_thing"), { "isError": undefined, "value": "editor" });
 	// A tool that isn't a page tool (the tab defaults to the editor's, though two tabs answered).
-	assert.doesNotMatch(String((await call("get_architecture")).value), /several editor tabs/u);
+	assert.doesNotMatch(String((await call("architecture_state")).value), /several editor tabs/u);
 });
 
 test("the app's logs arrive over its editor tab's link, filed under that tab", async () => {
 	app.publish("$sys.log.page", { "kind": "log", "level": "info", "message": "from the app", "context": { "source": "page" }, "time": Date.now(), "depth": 0 });
 
 	const records = await until("the app's record", async () => {
-		const { value } = await call("query_logs", { "source": "page" });
+		const { value } = await call("logs_query", { "source": "page" });
 
 		return Array.isArray(value) && value.length > 0 ? value as { "tab"?: string }[] : undefined;
 	});
@@ -103,15 +103,15 @@ test("a query for the app's tab returns the app's records — its window's scope
 	app.publish("$sys.log.preview:5173", record("preview:5173", "the app's console"));
 
 	const messages = await until("the app's scoped records", async () => {
-		const { value } = await call("query_logs", { "tab": "app1", "textIncludes": "the app" });
+		const { value } = await call("logs_query", { "from": "app1", "textIncludes": "the app" });
 
 		return Array.isArray(value) && value.length === 2 ? (value as { "message": string }[]).map((entry) => entry.message).sort() : undefined;
 	});
 
 	assert.deepEqual(messages, ["the app's console", "the app's page"]);
 
-	const { value } = await call("query_logs", { "tab": "app1" });
+	const { value } = await call("logs_query", { "from": "app1" });
 
 	assert.ok((value as { "source": string }[]).every((entry) => entry.source === "preview:5173" || entry.source.startsWith("preview:5173/")), "nothing of the editor tab's");
-	assert.ok(((await call("query_logs", { "tab": "ed", "textIncludes": "the app" })).value as unknown[]).length >= 2, "while the editor tab's query still has everything on its link");
+	assert.ok(((await call("logs_query", { "from": "ed", "textIncludes": "the app" })).value as unknown[]).length >= 2, "while the editor tab's query still has everything on its link");
 });

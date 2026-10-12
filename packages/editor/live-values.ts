@@ -83,7 +83,7 @@ interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, Li
 /** A column no wider than this many characters; a longer value is cut short, whole on hover. */
 const MAX_WIDTH = 24;
 
-/** What a file's Margin shows, as plain data (debug-mcp's `margin` tool, through `margin.state`): set each time it's
+/** What a file's Margin shows, as plain data (the `margin_state` tool, through `margin.state`): set each time it's
  *  drawn. Lines are 1-based, as an agent reads code. */
 interface MarginState {
 	"file": string;
@@ -1148,7 +1148,7 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	// A capability stop's question, and its answer back: the session resumes on it.
 	const rpc = createRpcClient(hub);
 
-	// What a file's Margin shows (debug-mcp's `margin` tool): the file open in the editor, or `file`, once it's been drawn.
+	// What a file's Margin shows (the `margin_state` tool): the file open in the editor, or `file`, once it's been drawn.
 	serve(hub, "margin.state", (args) => {
 		const { file } = (args ?? {}) as { "file"?: unknown };
 		const path = typeof file === "string" && file !== "" ? (file.startsWith("/") ? file : `/workspace/${file}`) : vscode.window.activeTextEditor?.document.uri.path;

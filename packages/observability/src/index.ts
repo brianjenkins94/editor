@@ -569,21 +569,21 @@ export interface PageToolsOptions {
 	"tools"?: PageTool[];
 }
 
-/** Where a page tool runs: this page (no `frame`), the tab's top-level window (`"top"` — a page framed by another, as
- *  an editor's shell frames it), or the first frame in the tab whose name or URL contains `frame` — at any depth, inside
- *  shadow roots too, same-origin (a cross-origin frame can't be reached). */
-function frameWindow(frame: unknown): Window {
-	if (frame === undefined || frame === "") {
+/** Where a page tool runs: this page (no `window`), the tab's top-level window (`"top"` — a page framed by another, as
+ *  an editor's shell frames it), or the frame in the tab named `window` (an editor's preview window is named by its id,
+ *  `preview:5173~2`) — at any depth, inside shadow roots too, same-origin (a cross-origin frame can't be reached). */
+function frameWindow(named: unknown): Window {
+	if (named === undefined || named === "") {
 		return window;
 	}
 
 	const top = window.top ?? window;
 
-	if (frame === "top") {
+	if (named === "top") {
 		return top;
 	}
 
-	const wanted = String(frame);
+	const wanted = String(named);
 	// By tag, not `instanceof`: another frame's elements are its own realm's HTMLIFrameElement, not this one's.
 	const frames = (root: Document | ShadowRoot): HTMLIFrameElement[] => [...root.querySelectorAll("*")].flatMap((element) => [
 		...element.tagName === "IFRAME" ? [element as HTMLIFrameElement] : [],
@@ -606,7 +606,7 @@ function frameWindow(frame: unknown): Window {
 			}
 
 			try {
-				if (element.name.includes(wanted) || child.name.includes(wanted) || child.location.href.includes(wanted)) {
+				if (element.name === wanted || child.name === wanted) {
 					return child;
 				}
 			} catch {
@@ -625,14 +625,14 @@ function frameWindow(frame: unknown): Window {
 	const found = find(top);
 
 	if (found === undefined) {
-		throw new Error(`no frame in this tab whose name or URL contains "${wanted}"`);
+		throw new Error(`no frame in this tab named "${wanted}"`);
 	}
 
 	return found;
 }
 
-/** The `frame` argument page_eval and page_query take. */
-const FRAME_ARGUMENT = { "type": "string", "description": "Where to run it: this page (omitted); \"top\", the tab's top-level window (a page framed by another — an editor's shell); or the first same-origin frame in the tab whose name or URL contains this text (e.g. a preview window's \"__virtual__\" or its name)." };
+/** The `window` argument page_eval and page_query take. */
+const WINDOW_ARGUMENT = { "type": "string", "description": "Where to run it: this page (omitted); \"top\", the tab's top-level window (a page framed by another — an editor's shell); or the same-origin frame in the tab by its name — an editor's preview window by its id (preview:5173~2, from previews_list)." };
 
 /** The tools every page serves: evaluate an expression in it, and query its DOM. */
 function builtinPageTools(): PageTool[] {
@@ -644,7 +644,7 @@ function builtinPageTools(): PageTool[] {
 			"properties": {
 				"expression": { "type": "string", "description": "A JS expression, e.g. `document.title` or `document.querySelectorAll('.monaco-editor').length`. May evaluate to a Promise (e.g. an async IIFE), which is awaited." },
 				"timeoutMs": { "type": "number", "description": "How long to wait for the result, including an awaited Promise (default 5000)." },
-				"frame": FRAME_ARGUMENT
+				"window": WINDOW_ARGUMENT
 			},
 			"required": ["expression"]
 		},
@@ -654,7 +654,7 @@ function builtinPageTools(): PageTool[] {
 			// scope, not this closure. Through `globalThis` — an `eval` alias gets inlined back into a direct eval by the
 			// consumer's bundler (Rolldown's [EVAL] warning, in every app that bundles this). In another frame: that window's
 			// own eval, so the expression runs in its global scope.
-			const indirectEval = (frameWindow(args["frame"]) as unknown as typeof globalThis).eval;
+			const indirectEval = (frameWindow(args["window"]) as unknown as typeof globalThis).eval;
 
 			// Await a thenable result: a Promise JSON-serializes to `{}`, which would hide every async answer.
 			return jsonSafe(await indirectEval(String(args["expression"])));
@@ -667,13 +667,13 @@ function builtinPageTools(): PageTool[] {
 			"properties": {
 				"selector": { "type": "string", "description": "A CSS selector, e.g. '.monaco-editor' or '[role=tab]'." },
 				"limit": { "type": "number", "description": "Max sample entries to return (default 10)." },
-				"frame": FRAME_ARGUMENT
+				"window": WINDOW_ARGUMENT
 			},
 			"required": ["selector"]
 		},
 		"timeoutMs": 5000,
 		"handler": (args) => {
-			const nodes = Array.from(frameWindow(args["frame"]).document.querySelectorAll(String(args["selector"])));
+			const nodes = Array.from(frameWindow(args["window"]).document.querySelectorAll(String(args["selector"])));
 			const limit = typeof args["limit"] === "number" ? args["limit"] : 10;
 
 			return { "count": nodes.length, "sample": nodes.slice(0, limit).map((node) => (node.textContent ?? "").trim().slice(0, 120)) };
@@ -712,8 +712,8 @@ export const DEBUG_MCP_URL = "ws://localhost:7378";
 
 /**
  * Dev-only: link the page's rootHub to a running `@brianjenkins94/debug-mcp` over a WebSocket, so the whole tree's
- * `$sys.log.>` stream federates out to the Node collector and becomes queryable over MCP (query_logs /
- * query_spans / get_tree_state / wait_for) — no screenshots. Enabled per `debugEnabled` (localhost, or `?debug`
+ * `$sys.log.>` stream federates out to the Node collector and becomes queryable over MCP (logs_query /
+ * spans_query / tree_state / logs_wait) — no screenshots. Enabled per `debugEnabled` (localhost, or `?debug`
  * on the deployed site). By default it makes ONE quiet attempt: if no debug-mcp is running the failed connect is left
  * alone (a browser prints every failed WebSocket connect, which no page can silence — so retrying is asked for:
  * `retryMs`, for a debug-mcp started after the page); once it HAS connected, a later drop reconnects with a short

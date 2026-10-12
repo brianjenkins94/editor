@@ -229,7 +229,7 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 		}
 	});
 
-	// Every rule as the tree lists it, as data (debug-mcp's `rules` tool).
+	// Every rule as the tree lists it, as data (the `rules_list` tool).
 	serve(hub, "rules.state", async () => ({ "rules": await listed() ?? [] }));
 
 	// A preview's capability prompt (decide.ts): its Rule… makes the rule here — a new one, prefilled with the call —

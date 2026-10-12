@@ -1,5 +1,5 @@
 /**
- * A page newer than the debug-mcp it's linked to: list_tabs says so, instead of the debug-mcp silently ignoring what it
+ * A page newer than the debug-mcp it's linked to: tabs_list says so, instead of the debug-mcp silently ignoring what it
  * doesn't know. One stand-in tab over a real WebSocket. Runs under tsx.
  */
 import * as assert from "node:assert/strict";
@@ -40,12 +40,12 @@ after(async () => {
 	await debugMcp?.close();
 });
 
-test("list_tabs says when a page is newer than this debug-mcp, and what to do", async () => {
+test("tabs_list says when a page is newer than this debug-mcp, and what to do", async () => {
 	let tab: { "tab": string; "outdated"?: string } | undefined;
 
 	// (Discovery answers once the page's interest has reached debug-mcp.)
 	for (let attempt = 0; attempt < 30 && tab === undefined; attempt += 1) {
-		const result = await client.callTool({ "name": "list_tabs", "arguments": {} }) as { "content": { "text": string }[] };
+		const result = await client.callTool({ "name": "tabs_list", "arguments": {} }) as { "content": { "text": string }[] };
 
 		[tab] = JSON.parse(result.content[0]!.text) as { "tab": string; "outdated"?: string }[];
 	}

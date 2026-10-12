@@ -1,6 +1,6 @@
 /**
- * Payload capture from debug-mcp: off by default; `capture_payloads` turns it on in every connected tab (and in one that
- * links later), and get_architecture's channel detail then shows what each sampled message carried.
+ * Payload capture from debug-mcp: off by default; `payloads_capture` turns it on in every connected tab (and in one that
+ * links later), and architecture_state's channel detail then shows what each sampled message carried.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { TestClient } from "../src/testing.ts";
@@ -55,7 +55,7 @@ after(async () => {
 });
 
 async function recentPayloads(): Promise<unknown[]> {
-	const { value } = await mcp.call("get_architecture", { "channel": "root|worker" });
+	const { value } = await mcp.call("architecture_state", { "channel": "root|worker" });
 
 	return ((value as { "recent": { "label": string; "payload"?: string }[] }[])[0]?.recent ?? []).filter((sample) => sample.label === "game.move").map((sample) => sample.payload);
 }
@@ -65,7 +65,7 @@ test("capture is off until asked for, then a channel's recent traffic shows what
 	await until("the first move sampled", async () => (await recentPayloads()).length >= 1, { "timeoutMs": 5000 });
 	assert.deepEqual(await recentPayloads(), [undefined], "off by default");
 
-	assert.deepEqual((await mcp.call("capture_payloads", { "on": true })).value, { "capturing": true });
+	assert.deepEqual((await mcp.call("payloads_capture", { "on": true })).value, { "capturing": true });
 	await new Promise((resolve) => { setTimeout(resolve, 100); });
 	root.publish("game.move", { "x": 2 });
 
@@ -76,5 +76,5 @@ test("capture is off until asked for, then a channel's recent traffic shows what
 	}, { "timeoutMs": 5000 });
 
 	assert.deepEqual(payloads, [undefined, "{\"x\":2}"]);
-	assert.deepEqual((await mcp.call("capture_payloads", { "on": false })).value, { "capturing": false });
+	assert.deepEqual((await mcp.call("payloads_capture", { "on": false })).value, { "capturing": false });
 });

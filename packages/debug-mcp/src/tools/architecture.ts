@@ -5,14 +5,14 @@ import { z } from "zod";
 import { resolveTab } from "../forward.ts";
 
 export default ({ debugMcp }: ToolsContext) => [defineTool({
-	"name": "get_architecture",
+	"name": "architecture_state",
 	"config": {
-		"title": "Get architecture",
+		"title": "Architecture",
 		"description": "The live architecture of one tab: every context (hubs, workers, extension hosts, webviews, network endpoints) with its state, every channel between two of them (hub links and probed channels) with message counts, rates and top messages, and each hub's topology (links and the peer at the other end). Pass `channel` (a node id or 'a|b') for one channel's full message breakdown and recent traffic.",
 		"inputSchema": {
 			"channel": z.string().optional().describe("Node id (e.g. 'workbench') or 'a|b' pair to detail; omit for the overview."),
 			"limit": z.number().int().positive().optional().describe("Max channels in the overview (default 40)."),
-			"tab": z.string().optional().describe("The tab (from list_tabs). Omit when one tab is connected.")
+			"tab": z.string().optional().describe("The tab (from tabs_list). Omit for the editor tab.")
 		}
 	},
 	"handler": async ({ channel, limit = 40, tab }: { "channel"?: string; "limit"?: number; "tab"?: string }) => {

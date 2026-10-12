@@ -30,6 +30,7 @@ const FAMILIES = [debug, editor, files, git, margin, previews, rules, runs, term
 let debugMcp;
 let mcp;
 let socket;
+let windows = [{ "id": "preview:5173", "port": 5173, "window": 1 }];
 let sessions = [{ "session": "s1", "name": "debug index.ts", "program": "/workspace/src/index.ts", "state": "stopped" }];
 const stepped = [];
 
@@ -53,8 +54,9 @@ before(async () => {
 
 		return JSON.stringify(command.method === "Nope.nope"
 			? { "id": command.id, "error": { "code": -32601, "message": "unknown method" } }
-			: { "id": command.id, "result": { ...args.window === undefined ? { "port": args.port } : { "window": args.window }, "method": command.method } });
+			: { "id": command.id, "result": { "window": args.window, "method": command.method } });
 	});
+	serve(root, "preview.windows", () => windows);
 	const host = createToolHost(root);
 
 	servePageToolSet(root, "t1", toPageTools(FAMILIES.flatMap((family) => family(host))));
@@ -79,15 +81,19 @@ async function call(name, args = {}) {
 	return mcp.call(name, args);
 }
 
-test("the editor's tools are listed while its tab is connected", async () => {
+test("the editor's tools are listed while its tab is connected, each named <family>_<verb>", async () => {
 	const names = await until("the tab's tools", async () => {
 		const listed = (await mcp.client.listTools()).tools.map((tool) => tool.name);
 
 		return listed.includes("debug_start") ? listed : undefined;
 	});
 
-	for (const name of ["debug_start", "debug_sessions", "debug_step", "debug_state", "debug_breakpoints", "debug_stop", "margin", "editor", "problems", "files_read", "files_write", "files_edit", "files_glob", "files_grep", "shell", "git", "rules", "notifications", "terminal", "previews", "provoke_transform", "preview_cdp", "runs", "run_ledger", "preview_profile"]) {
+	for (const name of ["debug_start", "debug_list", "debug_step", "debug_state", "debug_breakpoints", "debug_stop", "margin_state", "editor_state", "editor_problems", "editor_notifications", "files_read", "files_write", "files_edit", "files_glob", "files_grep", "terminal_run", "terminal_output", "git_status", "git_diff", "git_commit", "rules_list", "previews_list", "previews_provoke", "previews_cdp", "previews_profile", "runs_list", "runs_stop", "runs_ledger"]) {
 		assert.ok(names.includes(name), name + " in " + names.join(", "));
+	}
+
+	for (const name of names) {
+		assert.match(name, /^[a-z]+_[a-z]+$/u, name);
 	}
 });
 
@@ -130,12 +136,22 @@ test("an unknown session fails fast instead of hanging", async () => {
 	assert.ok(Date.now() - started < 4500, "failed after " + (Date.now() - started) + "ms");
 });
 
-test("preview_cdp sends one CDP command to a preview's page and returns its result, or its error", async () => {
-	assert.deepEqual((await call("preview_cdp", { "method": "DOM.getDocument" })).value, { "port": 5173, "method": "DOM.getDocument" });
-	assert.deepEqual((await call("preview_cdp", { "method": "DOM.getDocument", "window": "5173~2" })).value, { "window": "5173~2", "method": "DOM.getDocument" });
+test("previews_cdp sends one CDP command to a preview's page and returns its result, or its error", async () => {
+	assert.deepEqual((await call("previews_cdp", { "method": "DOM.getDocument" })).value, { "window": "5173", "method": "DOM.getDocument" }, "the only window, without being told");
+	assert.deepEqual((await call("previews_cdp", { "method": "DOM.getDocument", "window": "preview:5173~2" })).value, { "window": "5173~2", "method": "DOM.getDocument" }, "a window by the id previews_list gives");
 
-	const failed = await call("preview_cdp", { "method": "Nope.nope" });
+	const failed = await call("previews_cdp", { "method": "Nope.nope" });
 
 	assert.equal(failed.isError, true);
 	assert.match(String(failed.value), /Nope\.nope: unknown method/u);
+});
+
+test("with several preview windows, a previews_* tool asks which one instead of guessing", async () => {
+	windows = [...windows, { "id": "preview:5173~2", "port": 5173, "window": 2, "page": "http://localhost:5173/about" }];
+
+	const answer = await call("previews_cdp", { "method": "DOM.getDocument" });
+
+	assert.equal(answer.isError, true);
+	assert.match(String(answer.value), /several preview windows are open — pass window: preview:5173; preview:5173~2 \(http:\/\/localhost:5173\/about\)/u);
+	windows = windows.slice(0, 1);
 });

@@ -55,10 +55,10 @@ function originAllowed(origin: string | undefined, extra: string[]): boolean {
 export interface DebugMcp {
 	"hub": Hub;
 	"store": RecordStore;
-	/** A tab's live architecture — its contexts' `$sys.arch` reports (see get_architecture). Per tab: each tab is its
+	/** A tab's live architecture — its contexts' `$sys.arch` reports (see architecture_state). Per tab: each tab is its
 	 *  own tree, and their hubs' ids collide (every editor tab has a `root`, every netsim tab a `referee`). */
 	"archOf": (tab: string) => ArchitectureStore | undefined;
-	/** A tab's metrics plane — the last five minutes of each context's `$sys.metrics` samples (see query_metrics). */
+	/** A tab's metrics plane — the last five minutes of each context's `$sys.metrics` samples (see metrics_query). */
 	"metricsOf": (tab: string) => MetricsHistory | undefined;
 	/** The link a tab's traffic arrives on (records carry it), and back — learned as tabs answer discovery. */
 	"linkOf": (tab: string) => string | undefined;
@@ -68,7 +68,7 @@ export interface DebugMcp {
 	/** Call tools SERVED BY A CONNECTED PAGE (the tab hosts them via `serve`); the MCP layer forwards here. */
 	"rpc": RpcClient;
 	/** Payload capture (opt-in — it records app data): on, every connected tab's sampled messages keep a preview of what
-	 *  they carried (get_architecture's channel detail shows it); a tab that links later is told too. */
+	 *  they carried (architecture_state's channel detail shows it); a tab that links later is told too. */
 	"capture": (on: boolean) => void;
 	"capturing": () => boolean;
 	/** How many pages are currently linked in (for tree-state health). */
@@ -258,7 +258,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		"capturing": () => capturing,
 		"linkCount": () => links.size,
 		// (A short grace after every link's editor tab has answered, for the apps in its previews.)
-		// A page newer than this debug-mcp says so (list_tabs shows `outdated`), once on stderr too.
+		// A page newer than this debug-mcp says so (tabs_list shows `outdated`), once on stderr too.
 		"tabs": async (timeoutMs) => (await discoverTabs(hub, links.size, timeoutMs, 150)).map((tab) => {
 			const marked = markOutdated(tab);
 

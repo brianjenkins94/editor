@@ -24,8 +24,11 @@ export const TAB_HERE = "tab.here";
  *   2 — a preview app's tab names its `scope` (its records are filed by window).
  *   3 — everything a tab exposes is a page tool (`page_eval`, `page_query` and the editor's debugger tools too): an
  *       older debug-mcp, with those as its own tools, can't reach them.
+ *   4 — every tool is named `<family>_<verb>` (debug-mcp's own: logs_query, tabs_list, …), `tab` always means the page
+ *       serving a tool (a query tool's filter is `from`), and page_eval / page_query take a frame by its name
+ *       (`window`), not a substring (`frame`): an older debug-mcp offers the old names beside the page's new ones.
  */
-export const OBSERVABILITY_PROTOCOL = 3;
+export const OBSERVABILITY_PROTOCOL = 4;
 
 export interface TabInfo {
 	"tab": string;

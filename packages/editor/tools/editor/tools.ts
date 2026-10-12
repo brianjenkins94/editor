@@ -6,7 +6,7 @@ import { z } from "zod";
 const editor: ToolFamily = ({ request }) => [{
 	"timeoutMs": 5000,
 	"tool": defineTool({
-		"name": "editor",
+		"name": "editor_state",
 		"config": {
 			"description": "What's in front of you in the editor, as data: the active file (its language, line count, whether it's unsaved), the cursor, any selections with their text, and the lines in view — all 1-based — and every editor tab open, by group.",
 			"inputSchema": {}
@@ -16,7 +16,7 @@ const editor: ToolFamily = ({ request }) => [{
 }, {
 	"timeoutMs": 5000,
 	"tool": defineTool({
-		"name": "problems",
+		"name": "editor_problems",
 		"config": {
 			"description": "The Problems view, as data: each diagnostic's file, 1-based range, severity, source (ts, eslint, notes, a capability tripwire) and message — errors first. `total` says how many there are in all.",
 			"inputSchema": {
@@ -29,7 +29,7 @@ const editor: ToolFamily = ({ request }) => [{
 }, {
 	"timeoutMs": 5000,
 	"tool": defineTool({
-		"name": "notifications",
+		"name": "editor_notifications",
 		"config": {
 			"description": "The notifications showing now — the toasts and the notification center's: each one's severity, message, source and buttons. (Errors like \"Couldn't run: …\" appear only there.)",
 			"inputSchema": {}

@@ -12,7 +12,7 @@ import { createToolHost, toPageTools } from "./page-tools";
 
 const families = import.meta.glob<ToolFamily>("./*/tools.ts", { "eager": true, "import": "default" });
 
-/** Every family's tools, as this tab's page tools. `commands`: the terminal's own, named in the shell tool. */
+/** Every family's tools, as this tab's page tools. `commands`: the terminal's own, named in terminal_run's description. */
 export function editorTools(hub: Hub, options: { "commands"?: string } = {}): PageTool[] {
 	const host = createToolHost(hub, options);
 

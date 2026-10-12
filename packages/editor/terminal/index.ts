@@ -512,7 +512,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	} };
 }
 
-/** The terminals, as data (debug-mcp's `terminal` tool): each one's number, whether it's open, the command it runs (a
+/** The terminals, as data (the `terminal_output` tool): each one's number, whether it's open, the command it runs (a
  *  task's), its latest output (`lines` of it, 50 by default) and what it's running (runs.ts, by its origin). */
 export function serveTerminalState(runner: NodeRunner, hub: Hub): void {
 	serve(hub, "terminal.state", (args) => {

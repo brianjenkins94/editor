@@ -332,7 +332,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		writing = writing.then(async () => record(run)).catch(() => { /* evidence never breaks a run */ });
 	});
 
-	// The run ledger asked (silo's RunQuery — debug-mcp's `run_ledger`): every user's runs, once the ones that just ended
+	// The run ledger asked (silo's RunQuery — the `runs_ledger` tool): every user's runs, once the ones that just ended
 	// are written.
 	serve(hub, "runs.ledger", async (query) => {
 		await writing;

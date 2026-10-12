@@ -8,13 +8,13 @@ each should be organized so that adding to it is one folder, and what people wil
 
 **If it's text in and text out, it's a terminal command. If it needs structure or the editor's state, it's a tool.**
 
-An agent already reaches every terminal command through the `shell` tool, so a terminal command is automatically
+An agent already reaches every terminal command through the `terminal_run` tool, so a terminal command is automatically
 an agent capability; a tool that wraps a command is a duplicate. Tools are for what a command line can't give:
 unsaved buffers, the debugger at a stop, the Problems view, a preview's DOM, JSON an agent will act on.
 
 **One folder per thing, named after it, holding everything about it**: its definition, its implementation, its test,
 and its help. A registry finds the folders (`import.meta.glob`), so adding one touches nothing else. Every list that
-enumerates commands or tools today (tab completion, the streaming regex, the `shell` tool's description, docs) is
+enumerates commands or tools today (tab completion, the streaming regex, the `terminal_run` tool's description, docs) is
 derived from the registry instead of kept by hand. `silo features` recognizes both definitions, so the inventory and
 the derived history (CHANGE-HISTORY.md) track them for free.
 
@@ -63,7 +63,7 @@ workspace API, the node runner, live output to this terminal, the terminal's num
 `npm run`). just-bash loads it the first time the command runs.
 
 Derived from the catalog: Tab completion (the shell's builtins, just-bash's own `getCommandNames()` as this build has
-them, and ours), which commands stream, and the `shell` tool's description. just-bash's `help` lists only builtins, so
+them, and ours), which commands stream, and the `terminal_run` tool's description. just-bash's `help` lists only builtins, so
 listing our commands with their summaries is still to do (step 2).
 
 ### Step 2 (built)
@@ -178,6 +178,29 @@ backends still live with their owning modules (moving them in is step 4's, with 
 Found on the way: util/mcp's tool module loaded its capability broker (an `AsyncLocalStorage`) as it loaded, so a page
 importing it for `defineTool` threw in the browser; the broker now loads only when a server brokers a handler.
 
+### Step 4 (built)
+
+Every tool is `<family>_<verb>`, behind `OBSERVABILITY_PROTOCOL` 4:
+
+| Was | Now |
+|---|---|
+| `query_logs`, `wait_for` | `logs_query`, `logs_wait` |
+| `query_spans`, `get_tree_state`, `get_architecture`, `query_metrics` | `spans_query`, `tree_state`, `architecture_state`, `metrics_query` |
+| `capture_payloads`, `list_tabs` | `payloads_capture`, `tabs_list` |
+| `debug_sessions` | `debug_list` (the other `debug_*` and `files_*` already fit) |
+| `editor`, `problems`, `notifications` | `editor_state`, `editor_problems`, `editor_notifications` |
+| `git` (action) | `git_status`, `git_diff`, `git_commit` |
+| `runs` (stop), `run_ledger` | `runs_list`, `runs_stop`, `runs_ledger` |
+| `shell`, `terminal` | `terminal_run`, `terminal_output` |
+| `previews`, `preview_cdp`, `preview_profile`, `provoke_transform` | `previews_list`, `previews_cdp`, `previews_profile`, `previews_provoke` |
+| `margin`, `rules` | `margin_state`, `rules_list` |
+
+Addressing: `tab` is always the page serving a tool (omitted, the editor tab); debug-mcp's query tools filter with
+`from`. `window` is a preview window by the id `previews_list` gives (`preview:5173~2`): the previews_* tools take it
+(omitted, the only one open; several, they ask) in place of `port`, and page_eval / page_query take a frame by its name
+in place of `frame`'s substring — a preview window's frame is named by its id. `page_eval` and `page_query` keep their
+names. The games repo's netsim test moved with debug-mcp.
+
 ### The naming rule
 
 `<family>_<verb>`, where the family is the folder: `files_read`, `git_status`, `runs_stop`, `editor_problems`,
@@ -217,8 +240,7 @@ costs less than living with three styles.
 
 ## Open questions
 
-- **Rename debug-mcp's own tools too?** They're the most used by agents (and in this project's notes), so renaming
-  them costs the most; leaving them makes the rule have exceptions.
+- ~~Rename debug-mcp's own tools too?~~ Yes, with the rest (step 4).
 - **Folder names when a command's name is a JS keyword or clashes** (a `test` command, `node`): the folder is the
   command's name; files inside avoid the clash.
 - **Desktop parity.** On desktop VS Code the terminal is real and has all of these. Our commands should behave like
