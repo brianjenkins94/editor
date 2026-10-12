@@ -263,6 +263,8 @@ class Frame implements monaco.editor.IOverlayWidget {
 			const element = document.createElement("div");
 
 			element.className = "notes-margin-cell";
+			// (its first line, 0-based: what a script driving the editor looks it up by)
+			element.dataset["line"] = String(cell.fromLine);
 
 			for (const entry of cell.entries) {
 				const item = document.createElement("div");

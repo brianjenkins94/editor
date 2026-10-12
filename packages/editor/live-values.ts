@@ -53,10 +53,11 @@ import type { LiveBatch, LiveCall, LiveValue } from "./extensions/worker-pod/liv
 import type { Range } from "./anchors";
 import type { ProfiledLine } from "./coverage";
 import { Anchors } from "./anchors";
+import { showMargin } from "./pane-views";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { parseInputs } from "./extensions/worker-pod/inputs";
-import { describeRule, ruleEditor, showPane, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
+import { describeRule, ruleEditor } from "@brianjenkins94/monaco-vscode-api/main";
 import css from "./live-values.css?raw";
 
 /** A prose note: Markdown on a line span (0-based, inclusive). */
@@ -1169,12 +1170,12 @@ async function place(uri: string): Promise<void> {
 
 	// Only a file that isn't code, with nothing in it, goes without.
 	if (entries.length === 0 && !open.has(uri) && marks.length === 0 && steps.length === 0) {
-		showPane(uri, undefined);
+		showMargin(uri, undefined);
 
 		return;
 	}
 
-	showPane(uri, entries, (entry, element) => {
+	showMargin(uri, { "entries": entries, "marks": marks, "groups": steps.map((step, index) => ({ "id": `step:${index}`, "fromLine": step.fromLine, "toLine": step.toLine })), "render": (entry, element) => {
 		if (entry.id === "runlog") {
 			renderRunLog(runLog!, end, element);
 
@@ -1221,7 +1222,7 @@ async function place(uri: string): Promise<void> {
 			gone = true;
 			dispose?.();
 		};
-	}, marks, steps.map((step, index) => ({ "id": `step:${index}`, "fromLine": step.fromLine, "toLine": step.toLine })));
+	} });
 }
 
 /** Where `uri`'s last run's work went (coverage.ts: tsval's profile, on the lines its statements are on now), for the
@@ -1256,14 +1257,6 @@ export function showNotes(uri: string, fileNotes: Note[] | undefined): void {
 /** Keep a margin beside every code file shown, and follow debug sessions' values and capability stops. */
 export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 	api = vscode;
-
-	// The pane's views, its tabs on its first line: the margin as it is (values, notes, cards, the run log), and the
-	// program's other projections as they come (PROJECTIONS.md) — shown, not yet chosen.
-	showPaneViews([
-		{ "id": "margin", "label": "Margin", "title": "Values, notes and cards beside the code" },
-		{ "id": "cards", "label": "Cards", "title": "Coming: the program as a column of cards, Automator's look (PROJECTIONS.md)", "disabled": true },
-		{ "id": "event-sheet", "label": "Event sheet", "title": "Coming: the program as an event sheet's conditions and actions", "disabled": true }
-	], "margin", () => undefined);
 
 	// At a stop, the values as VS Code's own inline values too (its InlineValuesProvider: the debugger's documented contract
 	// for values beside the code) — each row's latest at the end of its line, on the line its code is on now, as the margin

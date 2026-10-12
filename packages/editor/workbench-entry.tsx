@@ -61,6 +61,7 @@ import { installProfileFiles } from "./profile-files";
 import { installEvidence } from "./evidence";
 import { installEditorState } from "./editor-state";
 import { installLiveValues, showMarks, showNotes, showProfile } from "./live-values";
+import { installPaneViews } from "./pane-views";
 import { installRecordedStops } from "./recorded-stops";
 import { installCoverage } from "./coverage";
 import { registerRulesView } from "./rules-view";
@@ -596,6 +597,8 @@ function maybeBoot(): void {
 				// The notes margin beside every code file (live-values.ts): a debug session's values and capability stops, and
 				// coverage's strip (coverage.ts), read from the evidence through the insights extension's store, here with
 				// core's own API.
+				// The pane's views (pane-views.ts): its tabs, the Margin's and each extension's, and what an extension's draws.
+				installPaneViews(api as typeof import("vscode"));
 				installLiveValues(workbenchHub, api as typeof import("vscode"));
 				installEditorState(workbenchHub, api as typeof import("vscode"));
 				// A breakpoint in a page's code: a recorded stop, shown in the margin as live values are (recorded-stops.ts).

@@ -501,3 +501,17 @@
 .live-values-runlog-waited {
   color: var(--vscode-charts-blue, #3794ff);
 }
+
+/* A pane view's item (pane-views.ts), marked by its tone. */
+.pane-item.tone-question,
+.pane-item.tone-info,
+.pane-item.tone-warning,
+.pane-item.tone-error {
+	padding-left: 6px;
+	border-left: 2px solid var(--tone);
+}
+
+.pane-item.tone-question { --tone: var(--vscode-editorInfo-foreground); }
+.pane-item.tone-info { --tone: var(--vscode-editorHint-foreground, var(--vscode-editorInfo-foreground)); }
+.pane-item.tone-warning { --tone: var(--vscode-editorWarning-foreground); }
+.pane-item.tone-error { --tone: var(--vscode-editorError-foreground); }

@@ -11,6 +11,7 @@ import {
 	IStorageService,
 	LogLevel
 } from "@codingame/monaco-vscode-api";
+import { IExtensionService } from "@codingame/monaco-vscode-api/services";
 import { StorageScope, StorageTarget } from "@codingame/monaco-vscode-api/vscode/vs/platform/storage/common/storage";
 import { BrowserAuxiliaryWindowService } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/auxiliaryWindow/browser/auxiliaryWindowService";
 import getAuthenticationServiceOverride from "@codingame/monaco-vscode-authentication-service-override";
@@ -625,6 +626,26 @@ async function hideViewContainers(ids: string[]): Promise<void> {
 	}
 
 	storage.store(key, JSON.stringify(entries), StorageScope.PROFILE, StorageTarget.USER);
+}
+
+/** Every registered extension's contribution under `key` in its manifest (`contributes[key]`) — whichever extension host
+ *  it runs in, built in or loaded from outside — with the extension's id. A key VS Code doesn't know (the editor's own:
+ *  `paneViews`) is kept in the manifest all the same. */
+export async function extensionContributions(key: string): Promise<{ "extension": string; "value": unknown }[]> {
+	const extensions = await getService(IExtensionService);
+
+	await extensions.whenInstalledExtensionsRegistered();
+
+	return extensions.extensions.flatMap((extension) => {
+		const value = (extension.contributes as Record<string, unknown> | undefined)?.[key];
+
+		return value === undefined ? [] : [{ "extension": extension.identifier.value, "value": value }];
+	});
+}
+
+/** Call `listener` as extensions are registered and go (one loaded from outside, later than the built-in ones). */
+export async function onExtensionsChanged(listener: () => void): Promise<{ "dispose": () => void }> {
+	return (await getService(IExtensionService)).onDidChangeExtensions(listener);
 }
 
 // Re-exported so the consumer (games) can register its own extension(s) and set the default API:

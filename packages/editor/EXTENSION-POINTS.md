@@ -129,38 +129,121 @@ dismissed), how a lost reference is looked for before it's orphaned, and `undefi
 **Dogfooded:** notes, insights' evidence, tsval's placed rules, worker-pod's rule places and core's run anchors
 (anchors.ts) all call through it — no extension calls the commands by hand.
 
-## 4. Pane views (the Margin pane's tabs)
+## 4. Pane views (the Margin pane's tabs) — step 1 done (2026-10-12)
 
 The pane beside every editor (components/monaco-vscode-api/pane.ts) has a strip of tabs on its first line. VS Code has no
-API for anything like it, and today one consumer owns the strip: live-values.ts lists Margin and two disabled
-placeholders, Cards and Event sheet — though the event sheet is an extension of its own.
+API for anything like it. Today one consumer owns all of it: live-values.ts lists the tabs (Margin, and two disabled
+placeholders, Cards and Event sheet — though the event sheet is an extension of its own) and draws every entry in the
+Margin, whoever's it is:
 
-**The extension point:** a manifest key, `contributes.paneViews` (VS Code doesn't act on keys it doesn't know; core reads them
-from `vscode.extensions.all`):
+| In the Margin today | Whose | How it gets there |
+| --- | --- | --- |
+| A run's values (rows of cells, a column per turn), `process.argv`'s input row, values dropped | worker-pod's run contract → core | the hub (`values.session.*`), placed by live-values.ts |
+| A capability stop's question, its buttons, the rule and mock editors it opens | worker-pod → core | the hub (`capability.ask`) |
+| A run's end (crashed, stopped) | worker-pod → core | the hub (`values.ended`) — a gutter mark |
+| Coverage marks and how often each line ran; the run log | core (coverage.ts) | a function call (`showMarks`, `showProfile`) |
+| Placed rules | the capabilities extension's rules → core | `rules.placed` — a gutter mark |
+| The program's steps, a card around each | core (tsserver's `_statements`) | computed in live-values.ts |
+| Prose notes | nothing in production: the notes extension shows notes as comment threads; only a tour test feeds the Margin's (`__pane.show`) | |
+
+The pane's frame already takes data apart from DOM in one place — what goes where (entries on spans, groups, marks) is
+data; only an entry's *inside* is DOM, rendered by a function its one consumer hands it. The extension point makes the
+inside data too, and lets anyone hand it.
+
+### The extension point
+
+**A view** is declared in an extension's manifest — `contributes.paneViews` (VS Code ignores keys it doesn't know; core
+reads the manifests it registers, built-in and contributed alike):
 
 ```json
-"paneViews": [{ "id": "event-sheet", "label": "Event sheet", "title": "The program's conditions and actions" }]
+"paneViews": [{ "id": "eventSheet", "label": "Event sheet", "title": "The program's conditions and actions" }]
 ```
 
-and a provider, the command `<id>.paneView` (the view's id), asked for a file's view whenever its file or the view
-changes: entries on spans of lines (a span reference or line range), each rendered from data — markdown, or rows of
-cells — with actions that run commands; groups (cards drawn around lines); gutter marks. Core draws them as it draws the
-margin today. Data, not DOM: a pane view's rows sit level with the code's lines and move with it (view zones, wrapping),
-which a webview can't follow, and the pane stays one look.
+and provided by a command, `<id>.paneView` (`eventSheet.paneView`), which core runs for a file — when its view is shown,
+the file is, or the file changes — and which answers with what to draw:
 
-**Dogfood:** the Margin tab becomes the first provider — live values, notes, the crash and the capability question as
-its entries — and the event sheet extension contributes the tab its placeholder holds: the game's conditions and actions
-beside the code they're in (its map and builder stay the webview view they are). The cards projection (PROJECTIONS.md)
-is a third.
+```ts
+interface PaneContent {
+	entries: PaneItem[];      // beside the code, each level with its lines
+	groups?: PaneGroup[];     // cards drawn around spans of lines (the steps)
+	marks?: PaneMark[];       // the gutter column, left of the code (coverage, a run's end, placed rules)
+}
+```
 
-## 5. Margin entries
+A provider tells core its content changed with the command `editor.pane.refresh(view, uri?)` — commands cross extension
+hosts, so a provider can be in any of them, the web worker host's (editor-contrib's) included.
 
-Within the Margin tab, the same entry shape from several providers: live values, notes, coverage's marks, a run's end, a
-capability question — each owned by one extension today but drawn by live-values.ts. A provider contributing *into*
-`margin` (rather than a tab of its own) gives editor-contrib's interpreter a way to add its own cards.
+**Where an item is** — `at`, one of three, and core turns each into the lines it's on *now*:
 
-**Dogfood:** notes and insights move their margin entries onto it. Comes after 4, which fixes the entry shape. Entries
-as data are also what a native rendering draws (6).
+- `{ lines: [from, to] }` — 0-based, in the document as it is (the provider follows its code itself);
+- `{ ref: SpanRef }` — a span reference (`annotations.refer`'s): core resolves it, so it follows its code through edits,
+  reformats and moves as notes and evidence do — and a lost one isn't drawn;
+- `{ ran: { source, start, end } }` — an offset range in a text that ran (what a debugger reports): core refers it once,
+  against that text, and resolves it as the file changes (anchors.ts) — how values, the question and a run's end are
+  placed today.
+
+Providers never compute lines from a text that ran themselves; the one way to place things on code is core's
+(*tolerate cosmetic formatting*).
+
+**What an item is** — data, drawn by core in the pane's one look:
+
+```ts
+interface PaneItem {
+	id: string;
+	at: At;
+	content:
+		| { markdown: string }                                    // prose: a note, a hint (sanitized, VS Code's renderer)
+		| { label?: string; cells: PaneCell[] }                   // a row: a label, then cells (a run's values, a turn each)
+		| { label: string; input: { value: string; placeholder?: string; submit: Command } };  // one line typed in (process.argv's)
+	actions?: Command[];      // buttons under it (Allow, Skip, Deny…; Rule…, Mock…)
+	tone?: "info" | "question" | "warning" | "error";
+}
+interface PaneCell { text: string; kind?: "number" | "string" | "boolean" | "object" | "error" | "undefined"; title?: string; command?: Command; picked?: boolean }
+interface PaneGroup { id: string; at: At; label: string; state?: "ran" | "partial" | "missed" }   // a step's card, and how it ran
+interface PaneMark { at: At; kind: "ran" | "partial" | "missed" | "crashed" | "stopped" | "rule" | "rule-uncertain"; title?: string }
+// Command: VS Code's own shape — { title, command, arguments?, tooltip? }
+```
+
+Rows in a run of consecutive lines align their cells into columns (a turn of a loop each), as the Margin's do now;
+hovering a cell marks what it's about; a cell's `command` runs on click (picking a turn). Data, not DOM, because a
+pane view's rows sit level with the code and move with it (view zones, wrapping), which a webview can't follow; and the
+pane stays one look, whoever's view it is.
+
+**Into the Margin.** A provider can also contribute *into* an existing view rather than a tab of its own —
+`"paneViews": [{ "id": "notes", "into": "margin" }]` — its items drawn among the others, on their lines. That's how notes,
+coverage and editor-contrib's interpreter add to the Margin without owning it.
+
+**Natively** (6: a desktop build has no pane), the same content is drawn with VS Code's own contribution points: a row's
+latest cell as an inlay hint at the end of its line (and an inline value at a stop, as now); markdown as a hover on its
+span; actions and a group's label as CodeLens above their lines; marks as gutter and overview-ruler decorations. Data is
+what makes the second face possible.
+
+### Proposed, for deciding
+
+1. **The rich editors leave the Margin.** The rule and mock editors a question's Rule… and Mock… open, and a variable's
+   mock, open in the Rule view under the Rules tree (where a rule is already edited), not inline. A view's items stay
+   data (markdown, rows, one-line input, buttons), and the Margin's buttons become commands that open them there.
+2. **Notes keep their comment threads.** The notes extension's comment threads are how notes look in the editor (our
+   resolver placing each, VS Code drawing it); the Margin doesn't draw notes. The tour test's `__pane.show` and the
+   Margin's note rendering (pane.tsx) go.
+3. **Core places everything** (`at`'s three forms above): no provider computes lines from a text that ran.
+
+### Steps
+
+1. ~~**The content model and core's renderer**~~ — done (2026-10-12): run-contract's `./pane` (the types,
+   `refreshPane`); core's pane-views.ts — the strip (core's views, then every extension's `contributes.paneViews`, read
+   through VS Code's extension service, whichever host), a view's provider asked per shown file, each item's `at`
+   resolved, its content drawn in the Margin's look; the Margin still live-values.ts's drawing, handed to pane-views
+   (`showMargin`) with what's `into` it. Proved by an extension from outside the editor (test/pane-views.mjs and its
+   fixture): its tab, each item kind and placement, followed through an edit, its button and input.
+2. **The Margin becomes the first provider**: values, the input row, the question (its editors opening in the Rule view),
+   a run's end, the run log, the steps' cards — data through the contract; live-values.ts keeps the hub side (sessions,
+   anchors) and answers `margin.paneView`. Nothing changes on screen but where the editors open. The tour keeps passing.
+3. **Coverage contributes into the Margin** (its marks and counts), and placed rules (the capabilities extension's).
+4. **The event sheet takes its tab** — the game's conditions and actions beside the code they're in; its map and builder
+   stay the webview view they are. The Cards placeholder goes until the cards projection (PROJECTIONS.md) is built.
+5. **The native face** (6): the same content as inlay hints, hovers, CodeLens and decorations — on in a desktop build, and
+   wherever the pane is hidden.
 
 ## 6. VS Code's own contribution points
 
@@ -174,7 +257,7 @@ workbench, the chat service isn't.
 | Live values at a stop | `InlineValuesProvider`, the debugger's own contract for values beside the code | **Added** (2026-10-10, live-values.ts): at a stop, each line's latest value at its end, on the line its code is on now — the margin's values, for the session whose frame is in focus, whichever debugger's. Answered once the stop's values are in (they come by the hub; VS Code asks as it stops, and doesn't ask again when they change) |
 | Margin entries — the question, a run's end, coverage counts | CodeLens, inlay hints, decorations | **Later, with 4 and 5:** entries as data, drawn richly by the pane and natively by these — the margin's desktop face |
 | Agent tools (page-tools.ts, every tool in one place) | `contributes.languageModelTools`, `vscode.lm.registerTool` | **Not adopted:** those are tools for an agent inside VS Code — its chat — and VS Code isn't an MCP server that hands them to one outside. Our agent is outside: debug-mcp reaches the tab over the hub. A contributed tool would connect nothing we have |
-| Notes | The Comments API | **Not adopted.** A thread is a file and a range the controller owns; VS Code keeps nothing and follows nothing past typing — no reformat, branch or move to another file. Our span anchors would survive only as the truth behind it, our resolver setting each thread's range: two trackers moving one thread (VS Code's as you type, ours after), a thread rebuilt whenever its code moves files, and the display losing the span's precision. And the contract buys no interop — a controller's threads are its own, no extension can read another's. Revisit only as a second view on a desktop build |
+| Notes | The Comments API | **Adopted, as the display only.** The notes extension draws each note as a comment thread (`vscode.comments`), our resolver placing it on its span each time the file is shown or changes — VS Code keeps nothing and follows nothing past typing, so the span anchors stay the truth. A lost note waits in Problems. The Margin needn't draw notes too (4, proposed) |
 | Coverage marks | `TestController` with `FileCoverage` | **Not adopted:** the beaker and TestController were removed by choice, for ambient marks of our own |
 
 Already VS Code's: Source Control, tasks, diagnostics, configuration, debuggers; the terminal speaks shell integration.
@@ -210,7 +293,8 @@ breaks is what worker-pod reaches over the hub, because core isn't there:
 2. ~~The workspace runtime; tsval its own extension (2)~~ — done (2026-10-10).
 3. ~~The Rules view as a tree view; inline values (6)~~ — done (2026-10-10).
 4. ~~Workspace tools for an agent (below), so one develops in the workspace as on a local machine~~ — done (2026-10-10).
-5. Pane views, with Margin and the event sheet as its first two providers; margin entries and their native rendering.
+5. Pane views (4): the content model and core's renderer; the Margin as the first provider, coverage and placed rules
+   into it, the event sheet's tab; then the native face.
 6. The decider — when a second decider needs it.
 
 ## Workspace tools — done (2026-10-10)
