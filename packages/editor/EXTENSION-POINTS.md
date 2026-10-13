@@ -70,7 +70,7 @@ worker on it. What handing a port across hosts meets (measured 2026-10-10, Brave
 - **An extension can't open the way itself.** VS Code blocks `postMessage` for that host's extensions (the global is
   replaced by one that only logs, and the prototype's is gone), so an extension can't send a port out. Core has to be in
   the worker before that: as the architecture probe is (its bootstrap runs first and posts a port up through the iframe,
-  probes.ts), or in the worker bundle core already patches (patch-esm-ext-host.mjs). From there, a host's extensions
+  probes.ts). From there, a host's extensions
   share its global scope, and an extension posting to a worker of its own (tsval's way) isn't blocked.
 - **`BroadcastChannel` is no way round:** it delivers a `SharedArrayBuffer` as `null`, even within one realm, and carries
   no ports.
