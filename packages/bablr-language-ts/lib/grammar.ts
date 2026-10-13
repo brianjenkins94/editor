@@ -384,6 +384,50 @@ function *classHeritage() {
 	}
 }
 
+// ── JSX ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// A JSX name part: an identifier that may hold `-` (`aria-label`, `my-element`).
+const jsxIdentifierMatcher = mRaw(`/[a-zA-Z_$][a-zA-Z0-9_$]*(?:-[a-zA-Z0-9_$]*)*/`);
+// JSX text: anything but `{`, `}`, `<` and `>` — spelled as ranges around them, since a `<` in a DSL regex reads as a
+// tag delimiter.
+const jsxTextMatcher = mRaw(`/[\\t\\n\\r -;=?-z|~${ch(0x80)}-${ch(0xFFFF)}]+/`);
+
+// An element's children, up to its closing tag.
+function *jsxChildren() {
+	for (;;) {
+		if (yield match(m`'</'`)) {
+			return;
+		}
+
+		if (yield match(m`'{'`)) {
+			yield eat(m`children[]$: <JSXExpressionContainer />`);
+		} else if (yield match(m`'<'`)) {
+			yield eat(m`children[]$: <JSXElement />`);
+		} else {
+			yield eat(m`children[]$: <JSXText />`);
+		}
+	}
+}
+
+// ── modules ─────────────────────────────────────────────────────────────────────────────────────────────────
+// `import type A from` / `import type { … }` / `import type * as ns` — but not `import type from "x"` (a default import
+// named `type`) or `import type, { … }`.
+const typeOnlyImport = m`/type[ \t\r\n]+(?:[\{*]|[a-zA-Z_$][a-zA-Z0-9_$]*[ \t\r\n]*(?:,|from\b))/`;
+
+// A specifier's `type` modifier — `{ type A }` — but not `{ type }` or `{ type as b }` (a binding named `type`).
+function *typeModifier() {
+	if ((yield match(m`/type[ \t\r\n]+[a-zA-Z_$]/`)) && !(yield match(m`/type[ \t\r\n]+as[ \t\r\n]+[a-zA-Z_$'"]/`))) {
+		yield eat(m`typeToken*: <*Keyword 'type' />`);
+	}
+}
+
+// `with { type: "json" }` (or the older `assert { … }`) after a module specifier.
+function *importAttributes() {
+	if (yield match(m`/(?:with|assert)[ \t]*\{/`)) {
+		yield eat(m`attributesToken*: <*Keyword ${/with|assert/} />`);
+		yield eat(m`attributes$: <Object />`);
+	}
+}
+
 export class TypeScriptAtrivial extends ESNext.atrivial {
   // `[a, b] = x` / `({ a } = x)`: array and object literals are assignment targets too.
 	public static context = freezeRecord({
@@ -416,7 +460,8 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 			return;
 		}
 
-		if (yield match(m`/(?:import|export|class|var|const|let|async)[a-zA-Z0-9_$]/`)) {
+    // `import(…)` and `import.meta` are expressions, not import declarations.
+		if (yield match(m`/(?:import|export|class|var|const|let|async)[a-zA-Z0-9_$]|import[ \t\r\n]*[(.]/`)) {
 			yield eat(m`<ExpressionStatement />`);
 
 			return;
@@ -543,6 +588,149 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		}
 
 		yield eat(m`body$: <Block '{' />`);
+	}
+
+  // ── modules ──────────────────────────────────────────────────────────────────────────────────────────────
+  // es6's import/export, whole: the base's ImportDeclaration looks for the `,` after a default import only when there
+  // ISN'T one (`import a, { b }` can't parse) and has no `import "x"`; its ExportDeclaration takes only var/class/
+  // function declarations. Here: side-effect imports, default + named or namespace, TypeScript's `type` imports,
+  // exports and specifiers, `{ default as a }`, trailing commas, `export * as ns`, a nameless `export default`
+  // function or class, import attributes, and after `export` any declaration the extended Statement takes
+  // (`export interface`, `export type X =`, `export enum`, `export declare`, `export abstract class`, …).
+
+	public *ImportDeclaration() {
+		yield eat(m`sigilToken*: <*Keyword 'import' />`);
+
+		if (!(yield match(m`/['"]/`))) {
+			if (yield match(typeOnlyImport)) {
+				yield eat(m`typeToken*: <*Keyword 'type' />`);
+			}
+
+			const bare = !(yield match(m`/[\{*]/`));
+
+			if (bare) {
+				yield eat(m`specifiers[]$: <ImportDefaultSpecifier />`);
+			}
+
+			if (!bare || (yield eatMatch(m`separators[]*: <* ',' />`))) {
+				if (yield match(m`'*'`)) {
+					yield eat(m`specifiers[]$: <ImportNamespaceSpecifier />`);
+				} else {
+					yield eat(m`openSpecifiersToken*: <* '{' />`);
+
+					while (!(yield match(m`'}'`))) {
+						yield eat(m`specifiers[]$: <ImportSpecifier />`);
+
+						if (!(yield eatMatch(m`separators[]*: <* ',' />`))) {
+							break;
+						}
+					}
+
+					yield eat(m`closeSpecifiersToken*: <* '}' />`);
+				}
+			}
+
+			yield eat(m`fromToken*: <*Keyword 'from' />`);
+		}
+
+		yield eat(m`source$: <String />`);
+		yield* importAttributes();
+	}
+
+	public *ImportSpecifier() {
+		yield* typeModifier();
+
+		const named = yield eatMatch(m`imported$: <String /['"]/ />`);
+
+		if (!named) {
+			yield eat(m`imported$: <*Identifier />`, o({ "scoped": false }));
+		}
+
+		if (named || (yield match(m`/as\b/`))) {
+			yield eat(m`mapOperator*: <*Keyword 'as' />`);
+			yield eat(m`local$: <*Identifier />`);
+		} else {
+			yield eat(m`local$: null`);
+		}
+	}
+
+	public *ExportDeclaration() {
+		yield eat(m`sigilToken*: <*Keyword 'export' />`);
+
+		if (yield match(m`/default\b/`)) {
+			yield eat(m`defaultToken*: <*Keyword 'default' />`);
+
+			if (yield match(m`/(?:abstract[ \t\r\n]+)?class(?:[ \t\r\n]*[\{<]|[ \t\r\n]+(?:extends|implements)\b)/`)) {
+				yield eat(m`declaration$: <ClassExpression />`);
+			} else if (yield match(m`/(?:abstract[ \t\r\n]+)?class\b/`)) {
+				yield eat(m`declaration$: <ClassDeclaration />`);
+			} else if (yield match(m`/(?:async[ \t\r\n]+)?function[ \t\r\n]*\*?[ \t\r\n]*\(/`)) {
+				yield eat(m`declaration$: <FunctionExpression />`);
+			} else if (yield match(m`/(?:async[ \t\r\n]+)?function\b/`)) {
+				yield eat(m`declaration$: <FunctionDeclaration />`);
+			} else if (yield match(m`/interface\b/`)) {
+				yield eat(m`declaration$: <InterfaceDeclaration />`);
+			} else {
+				yield eat(m`declaration+$: <_Expression />`);
+			}
+
+			return;
+		}
+
+		if (yield match(m`/type[ \t\r\n]*[\{*]/`)) {
+			yield eat(m`typeToken*: <*Keyword 'type' />`);
+		}
+
+		if (yield match(m`'*'`)) {
+			yield eat(m`specifiers[]$: <ExportAllSpecifier />`);
+			yield eat(m`fromToken*: <*Keyword 'from' />`);
+			yield eat(m`source$: <String />`);
+			yield* importAttributes();
+		} else if (yield match(m`'{'`)) {
+			yield eat(m`openSpecifiersToken*: <* '{' />`);
+
+			while (!(yield match(m`'}'`))) {
+				yield eat(m`specifiers[]$: <ExportSpecifier />`);
+
+				if (!(yield eatMatch(m`#separatorTokens: <* ',' />`))) {
+					break;
+				}
+			}
+
+			yield eat(m`closeSpecifiersToken*: <* '}' />`);
+
+			if (yield match(m`/from\b/`)) {
+				yield eat(m`fromToken*: <*Keyword 'from' />`);
+				yield eat(m`source$: <String />`);
+				yield* importAttributes();
+			}
+		} else {
+			yield eat(m`declaration+$: <_Statement />`);
+		}
+	}
+
+	public *ExportAllSpecifier() {
+		yield eat(m`sigilToken*: <*Keyword '*' />`);
+
+		if (yield match(m`/as\b/`)) {
+			yield eat(m`mapOperator*: <*Keyword 'as' />`);
+			yield eat(m`exported$: <*Identifier />`, o({ "scoped": false }));
+		}
+	}
+
+	public *ExportSpecifier() {
+		yield* typeModifier();
+		yield eat(m`local$: <*Identifier />`, o({ "scoped": false }));
+
+		if (yield match(m`/as\b/`)) {
+			yield eat(m`mapOperator*: <*Keyword 'as' />`);
+
+			if (!(yield eatMatch(m`imported$: <String /['"]/ />`))) {
+				yield eat(m`imported$: <*Identifier />`, o({ "scoped": false }));
+			}
+		} else {
+			yield eat(m`imported$: null`);
+		}
 	}
 
   // ── classes ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -1196,10 +1384,16 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 				res = yield eat(m`<*PrivateIdentifier />`);
 			} else if (yield match(m`'/'`)) {
 				res = yield eat(m`<RegExpLiteral />`);
-			} else if (yield match(m`/new[ \t]*\.[ \t]*target\b/`)) {
+			} else if (yield match(m`/new[ \t]*\.[ \t]*target\b|import[ \t]*\.[ \t]*meta\b/`)) {
 				res = yield eat(m`<MetaProperty />`);
+			} else if (yield match(m`/import[ \t\r\n]*\(/`)) {
+				res = yield eat(m`<ImportExpression />`);
 			} else if (yield match(m`'<'`)) {
 				res = yield eatMatch(m`<ArrowFunctionExpression />`);
+
+				if (!res) {
+					res = yield eatMatch(m`<JSXElement />`);
+				}
 
 				if (!res) {
 					res = yield eat(m`<TypeAssertion />`);
@@ -1459,11 +1653,117 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		yield eat(m`expression+$: <_Expression />`, o({ "power": 4 }));
 	}
 
-  // `new.target`
+  // ── JSX ──────────────────────────────────────────────────────────────────────────────────────────────────
+  // `<a b="c" d={e} {...f}>text {g} <h /></a>`, `<>…</>`, `<x.y />`, `<svg:rect />`. Tried at a `<` after a generic
+  // arrow and before a type assertion (`<T>x`, which a .tsx file can't have). Text between tags is a token in a span
+  // of its own, as a string is: an enclosing span's guard would cut it at a `)` (UPSTREAM-WORKAROUND(W1)).
+
+	public *JSXElement() {
+		yield eat(m`openToken*: <* '<' />`);
+
+		if (!(yield match(m`'>'`))) {
+			yield eat(m`name$: <JSXName />`);
+
+			while (!(yield match(m`'>'`)) && !(yield match(m`'/>'`))) {
+				if (yield match(m`'{'`)) {
+					yield eat(m`attributes[]$: <JSXSpreadAttribute />`);
+				} else {
+					yield eat(m`attributes[]$: <JSXAttribute />`);
+				}
+			}
+
+			if (yield eatMatch(m`selfClosingToken*: <* '/>' />`)) {
+				return;
+			}
+		}
+
+		yield eat(m`closeToken*: <* '>' />`);
+		yield* jsxChildren();
+		yield eat(m`closingOpenToken*: <* '</' />`);
+
+		if (!(yield match(m`'>'`))) {
+			yield eat(m`closingName$: <JSXName />`);
+		}
+
+		yield eat(m`closingCloseToken*: <* '>' />`);
+	}
+
+	public *JSXName() {
+		yield eat(m`parts[]*: <*JSXIdentifier />`);
+
+		while (yield match(m`/[.:]/`)) {
+			if (yield match(m`'.'`)) {
+				yield eat(m`separators[]*: <* '.' />`);
+			} else {
+				yield eat(m`separators[]*: <* ':' />`);
+			}
+
+			yield eat(m`parts[]*: <*JSXIdentifier />`);
+		}
+	}
+
+	public *JSXIdentifier() {
+		yield eat(jsxIdentifierMatcher);
+	}
+
+	public *JSXAttribute() {
+		yield eat(m`name$: <JSXName />`);
+
+		if (yield eatMatch(m`mapToken*: <* '=' />`)) {
+			if (yield match(m`'{'`)) {
+				yield eat(m`value$: <JSXExpressionContainer />`);
+			} else if (yield match(m`'<'`)) {
+				yield eat(m`value$: <JSXElement />`);
+			} else {
+				yield eat(m`value$: <String />`);
+			}
+		} else {
+			yield eat(m`value$: null`);
+		}
+	}
+
+	public *JSXSpreadAttribute() {
+		yield eat(m`openToken*: <* '{' />`);
+		yield eat(m`spreadToken*: <* '...' />`);
+		yield eat(m`expression+$: <_Expression />`);
+		yield eat(m`closeToken*: <* '}' />`);
+	}
+
+  // `{expression}`, `{...children}`, or `{/* a comment alone */}`.
+	public *JSXExpressionContainer() {
+		yield eat(m`openToken*: <* '{' />`);
+		yield eatMatch(m`spreadToken*: <* '...' />`);
+
+		if (!(yield match(m`'}'`))) {
+			yield eat(m`expression+$: <_Expression />`);
+		}
+
+		yield eat(m`closeToken*: <* '}' />`);
+	}
+
+	public *JSXText() {
+		yield eat(m`value*: <*JSXCharacters />`);
+	}
+
+	public *JSXCharacters() {
+		yield startSpan("JSXText");
+		yield eat(jsxTextMatcher);
+		yield endSpan();
+	}
+
+  // `new.target`, `import.meta`
 	public *MetaProperty() {
-		yield eat(m`sigilToken*: <*Keyword 'new' />`);
+		yield eat(m`sigilToken*: <*Keyword ${/new|import/} />`);
 		yield eat(m`dotToken*: <* '.' />`);
 		yield eat(m`property$: <*Identifier />`, o({ "scoped": false }));
+	}
+
+  // `import("x")`, `import("x", { with: { type: "json" } })`
+	public *ImportExpression() {
+		yield eat(m`sigilToken*: <*Keyword 'import' />`);
+		yield eat(m`openArgumentsToken*: <* '(' />`);
+		yield* argumentList();
+		yield eat(m`closeArgumentsToken*: <* ')' />`);
 	}
 
   // es6's CallExpression plus `?.(`, `f<T>(` and spread arguments.

@@ -1,0 +1,16 @@
+# JSX, and what only looks like it: generic arrows, type assertions, comparisons
+const a = <div>hi</div>
+const a = <App />
+const a = <b onClick={() => f(1)}>n {x}</b>
+const a = <>x</>
+const a = <a.b c="d" {...e} f />
+const a = <svg:rect xlink:href="x" aria-label="y" />
+const a = <div>count is (x) and that's it</div>
+const a = <div>{/* nothing */}</div>
+const a = <div><span>a</span> <i>b</i></div>
+function A() { return (<div style={{ "a": 1 }}><button type="button" id="count" onClick={() => setCount(increment)}>count is {count}</button></div>); }
+const f = <T,>(x: T) => x
+const g = <T>(x: T) => x
+const c = <T>x
+const d = a < b
+const e = a < b && c > d

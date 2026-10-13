@@ -1,0 +1,41 @@
+# modules: import / export, TypeScript's type-only forms, import attributes
+import a from "x"
+import { a } from "x"
+import { a as b, c } from "x"
+import { a, } from "x"
+import * as ns from "x"
+import "x"
+import a, { b } from "x"
+import a, * as ns from "x"
+import type { A } from "x"
+import type A from "x"
+import { type A, b } from "x"
+import { default as a } from "x"
+import x from "./x.json" with { type: "json" }
+export { a } from "x"
+export * from "x"
+export * as ns from "x"
+export type { A } from "x"
+export { a as default }
+export default function () {}
+export default class {}
+export const a = 1
+export interface A { a: string }
+export type A = string
+export enum E { A }
+export const enum E { A }
+export declare const a: string
+export abstract class A {}
+export async function f() {}
+export function* g() {}
+export default async function f() {}
+export default a
+export default { a: 1 }
+export namespace N {}
+export let a = 1, b = 2
+export { a, b as c }
+export {}
+const m = await import("x")
+import("x").then(f)
+const u = import.meta.url
+new URL("./a", import.meta.url)
