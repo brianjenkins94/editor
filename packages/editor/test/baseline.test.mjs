@@ -9,7 +9,8 @@ import * as path from "node:path";
 import { Readable } from "node:stream";
 import { test } from "node:test";
 import { detect } from "@brianjenkins94/util/silo/detect";
-import { lockedPackages, tarballTexts } from "../workbench/baseline.ts";
+import { tarballTexts } from "../workbench/baseline.ts";
+import { choose, lockedVersions, resolveVersions } from "../workbench/versions.ts";
 
 test("a tarball's code files, long paths included — and what detect makes of them", async () => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "baseline-"));
@@ -30,15 +31,51 @@ test("a tarball's code files, long paths included — and what detect makes of t
 });
 
 test("a lockfile's packages: each name once, root before nested, links left out", () => {
-	assert.deepEqual(lockedPackages({ "packages": {
+	assert.deepEqual(lockedVersions({ "packages": {
 		"": { "version": "0.0.0" },
 		"node_modules/a/node_modules/b": { "version": "1.0.0" },
 		"node_modules/b": { "version": "2.0.0", "resolved": "https://registry.npmjs.org/b/-/b-2.0.0.tgz" },
 		"node_modules/@s/c": { "version": "3.0.0" },
 		"node_modules/local": { "version": "0.0.1", "link": true },
 		"packages/app": { "version": "1.0.0" }
-	} }), [
-		{ "name": "b", "version": "2.0.0", "tarball": "https://registry.npmjs.org/b/-/b-2.0.0.tgz" },
-		{ "name": "@s/c", "version": "3.0.0" }
-	]);
+	} }), {
+		"b": { "version": "2.0.0", "range": "2.0.0", "tarball": "https://registry.npmjs.org/b/-/b-2.0.0.tgz" },
+		"@s/c": { "version": "3.0.0", "range": "3.0.0" }
+	});
+});
+
+test("a range resolved with nothing younger than a week — `latest` the latest a week old", () => {
+	const now = Date.parse("2026-10-13T00:00:00Z");
+	const cutoff = now - 7 * 24 * 60 * 60 * 1000;
+	const versions = [
+		{ "version": "18.2.0", "at": "2026-01-01T00:00:00Z" },
+		{ "version": "18.3.1", "at": "2026-09-01T00:00:00Z" },
+		{ "version": "18.3.2", "at": "2026-10-12T00:00:00Z", "latest": true },
+		{ "version": "19.0.0-rc.1", "at": "2026-09-02T00:00:00Z" }
+	];
+
+	assert.deepEqual(choose(versions, "latest", cutoff), { "version": "18.3.1", "young": false }, "the newest stable one a week old, not yesterday's");
+	assert.deepEqual(choose(versions, "^18.2.0", cutoff), { "version": "18.3.1", "young": false });
+	assert.deepEqual(choose(versions, "18.2.0", cutoff), { "version": "18.2.0", "young": false });
+	assert.deepEqual(choose(versions, ">=18.3.2", cutoff), { "version": "18.3.2", "young": true }, "nothing old enough: the newest that satisfies, young");
+	assert.equal(choose(versions, "next", cutoff), undefined, "another dist-tag: not read here");
+});
+
+test("what's resolved already stays — a lockfile's way: nothing asked again", async () => {
+	const known = { "react": { "version": "18.2.0", "range": "^18.2.0" }, "loose-envify": { "version": "1.4.0", "range": "^1.1.0" } };
+	const asked = [];
+	const realFetch = globalThis.fetch;
+
+	globalThis.fetch = async (url) => {
+		asked.push(String(url));
+
+		throw new Error("offline");
+	};
+
+	try {
+		assert.deepEqual(await resolveVersions({ "react": "^18.2.0" }, { known }), known);
+		assert.deepEqual(asked, []);
+	} finally {
+		globalThis.fetch = realFetch;
+	}
 });

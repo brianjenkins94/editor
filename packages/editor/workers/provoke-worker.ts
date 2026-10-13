@@ -14,6 +14,9 @@ import { mountWorkspaceVfs } from "../shared/zenfs-vfs.js";
 
 import { createWorkerHub } from "./worker-hub";
 
+/** The exact version the preview loads of each package — the editor's shared resolver's (workbench/versions.ts). */
+const VERSIONS_FILE = "/workspace/.silo/versions.json"; // (util/silo/layout's versionsPath — not imported: util/env wants a `process` this worker has none of)
+
 interface ProvokeRequest { "buffer": SharedArrayBuffer; "root": string; "port": number; "modules": string[] }
 interface ProvokeReply { "failures": { "url": string; "status": number }[]; "transformErrors": { "url": string; "name": string; "message": string }[]; "error"?: string }
 
@@ -27,7 +30,7 @@ serve(hub, "provoke.round", async (args): Promise<ProvokeReply> => {
 		const vfs = await mountWorkspaceVfs(request.buffer);
 		// COLD import — this is the first time this realm pulls in almostnode + its typescript chunk.
 		const { ViteDevServer } = await import("@brianjenkins94/almostnode");
-		const server = new ViteDevServer(vfs, { "port": request.port, "root": request.root }) as unknown as {
+		const server = new ViteDevServer(vfs, { "port": request.port, "root": request.root, "versionsFile": VERSIONS_FILE }) as unknown as {
 			"start": () => void;
 			"setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string }) => void) => void;
 			"handleRequest": (method: string, url: string, headers: Record<string, string>) => Promise<{ "statusCode": number }>;

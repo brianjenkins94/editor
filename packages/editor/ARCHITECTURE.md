@@ -383,6 +383,7 @@ flowchart LR
   end
   subgraph c_network["Network (service worker)"]
     n_debug_mcp["debug-mcp"]
+    n_net_api_deps_dev["deps.dev"]
     n_net_esm_sh["esm.sh"]
     n_net_lighter_codehike_org["Code Hike"]
     n_net_open_vsx_org["Open VSX"]
@@ -439,12 +440,14 @@ flowchart LR
   n_exthost_iframe <-.->|"bootstrap handshake"| n_workbench
   n_idb <-.->|"IndexedDB"| n_workbench
   n_idb <-.->|"IndexedDB"| n_zenfs
+  n_net_api_deps_dev <-.->|"HTTP"| n_sw
   n_net_esm_sh <-.->|"HTTP"| n_sw
   n_net_lighter_codehike_org <-.->|"HTTP"| n_sw
   n_net_open_vsx_org <-.->|"HTTP"| n_sw
   n_net_origin <-.->|"HTTP"| n_sw
   n_net_registry_npmjs_org <-.->|"HTTP"| n_sw
   n_net_unpkg_com <-.->|"HTTP"| n_sw
+  n_node -->|"reads"| n_store__silo__file__json
   n_node <-.->|"in-realm calls"| n_vite__
   n_node <-.->|"zen-fs"| n_zenfs
   n_node <==> n_provoke
@@ -486,7 +489,7 @@ flowchart LR
 | `.git/refs/…/<file>` | Workbench | Workbench |
 | `.silo/.gitattributes` | Workbench | Workbench, notes |
 | `.silo/.gitignore` | Workbench | Workbench, bridge |
-| `.silo/<file>.json` | Workbench, bridge, capabilities | Workbench, bridge, capabilities |
+| `.silo/<file>.json` | Workbench, bridge, capabilities | Dev-server worker, Workbench, bridge, capabilities |
 | `.silo/capabilities/<file>.json` | Workbench, bridge | Workbench, bridge |
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |

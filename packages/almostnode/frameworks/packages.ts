@@ -139,6 +139,9 @@ export interface PackageResolverOptions {
 	"fetch"?: typeof fetch;
 	/** esm.sh URL for a registry dependency (default: `https://esm.sh/<name>@<version><subpath>`). */
 	"registryUrl"?: (name: string, version: string, subpath: string) => string;
+	/** The exact version to load of each package, by name — a host's resolution of the ranges (the editor's: nothing
+	 *  younger than a week), read fresh each time it's needed. A registry range it names is loaded at that version. */
+	"pinned"?: () => Record<string, string>;
 }
 
 export class PackageResolver {
@@ -152,11 +155,18 @@ export class PackageResolver {
 		this.options = options;
 	}
 
-	/** The app's declared dependencies (`dependencies` and `devDependencies`, as a bundler would resolve them). */
+	/** The app's declared dependencies (`dependencies` and `devDependencies`, as a bundler would resolve them) — each
+	 *  registry range at its pinned version, where the host pins one. */
 	public appDependencies(): Record<string, string> {
 		const manifest = this.options.manifest();
+		const pinned = this.options.pinned?.() ?? {};
 
-		return { ...manifest?.devDependencies, ...manifest?.dependencies };
+		return Object.fromEntries(Object.entries({ ...manifest?.devDependencies, ...manifest?.dependencies }).map(([name, spec]) => [name, this.pin(name, spec, pinned)]));
+	}
+
+	/** `spec` (how `name` is declared) at the version the host pins, when it's a registry range and one is pinned. */
+	private pin(name: string, spec: string, pinned: Record<string, string> = this.options.pinned?.() ?? {}): string {
+		return isRegistrySpec(spec) && pinned[name] !== undefined ? pinned[name] : spec;
 	}
 
 	/** Where a bare `specifier` imported by `importer` (a server path: an app module, or a `/@pkg/…` file) lives: an
@@ -247,11 +257,11 @@ export class PackageResolver {
 			const own = manifest?.dependencies?.[name] ?? manifest?.optionalDependencies?.[name];
 
 			if (own !== undefined && app[name] === undefined) {
-				return own;
+				return this.pin(name, own);
 			}
 
 			if (manifest?.peerDependencies?.[name] !== undefined || own !== undefined) {
-				return app[name] ?? own;
+				return app[name] ?? this.pin(name, own!);
 			}
 		}
 

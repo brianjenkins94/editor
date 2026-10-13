@@ -6,8 +6,8 @@
  * the call. Runs never change it — a compromised version would approve itself; what's decided at the call, beyond it, is
  * recorded in the runs instead (their effects' `decided`).
  *
- * The packages are the ones the project would install, by name@version: a package-lock.json's, where there is one; else
- * each package.json's dependency ranges resolved as the preview resolves them (esm.sh), and theirs in turn. What each can
+ * The packages are the ones the project loads, by name@version — the shared resolver's (versions.ts): a
+ * package-lock.json's, else each package.json's dependency ranges resolved with nothing younger than a week. What each can
  * do is lib's `detect` over the code files of its published tarball (npm's registry) — its own files, as
  * installedPackages reads them on desktop, never what it depends on (each dependency is its own entry). There's no
  * node_modules to walk here: the editor serves packages from a CDN.
@@ -18,7 +18,8 @@ import type { AcceptedPackages } from "@brianjenkins94/util/silo/evidence";
 import type * as vscodeApi from "vscode";
 import { detect } from "@brianjenkins94/util/silo/detect";
 import { syncPackages } from "@brianjenkins94/util/silo/evidence";
-import { baselinePath, SILO_DIR } from "@brianjenkins94/util/silo/layout";
+import { syncVersions } from "./versions";
+import { baselinePath } from "@brianjenkins94/util/silo/layout";
 
 /** A package as the baseline accepts it: its version, and what its own code can do. */
 interface Accepted { "version": string; "caps": string[] }
@@ -90,60 +91,6 @@ async function capsOf(name: string, version: string, tarball?: string): Promise<
 	return [...caps].toSorted();
 }
 
-/** A dependency range the registry can resolve (not a file:, link:, git or URL dependency, nor an npm: alias). */
-const resolvable = (range: string): boolean => !/^(?:file|link|workspace|git|git\+[a-z]+|https?|npm):|\//u.test(range);
-
-/** `name`@`range` as the preview resolves it (esm.sh redirects a range to the exact version): its version, and its own
- *  dependencies. */
-async function resolve(name: string, range: string): Promise<{ "version": string; "dependencies": Record<string, string> } | undefined> {
-	const response = await fetch(`https://esm.sh/${name}@${encodeURIComponent(range)}/package.json`);
-
-	if (!response.ok) {
-		return undefined;
-	}
-
-	const manifest = await response.json() as { "version"?: string; "dependencies"?: Record<string, string> };
-	const dependencies: Record<string, string> = manifest.dependencies ?? {};
-
-	return manifest.version === undefined ? undefined : { "version": manifest.version, "dependencies": dependencies };
-}
-
-/** The packages a lockfile installs (npm's v2/v3 `packages`), each name once — the first, root before nested. */
-export function lockedPackages(lock: { "packages"?: Record<string, { "version"?: string; "resolved"?: string; "link"?: boolean }> }): Wanted[] {
-	const wanted = new Map<string, Wanted>();
-
-	for (const [path, entry] of Object.entries(lock.packages ?? {}).toSorted(([one], [other]) => one.split("node_modules/").length - other.split("node_modules/").length)) {
-		const name = path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
-
-		if (path !== "" && path.includes("node_modules/") && entry.version !== undefined && entry.link !== true && !wanted.has(name)) {
-			wanted.set(name, { "name": name, "version": entry.version, ...entry.resolved?.startsWith("https://") === true ? { "tarball": entry.resolved } : {} });
-		}
-	}
-
-	return [...wanted.values()];
-}
-
-/** Every package the project's package.jsons depend on, and theirs, resolved — each name once, the first found. */
-async function resolvedPackages(manifests: { "dependencies"?: Record<string, string>; "devDependencies"?: Record<string, string> }[]): Promise<Wanted[]> {
-	const wanted = new Map<string, Wanted>();
-	const queue: [string, string][] = manifests.flatMap((manifest) => Object.entries({ ...manifest.devDependencies, ...manifest.dependencies }));
-
-	while (queue.length > 0) {
-		const batch = queue.splice(0, PARALLEL * 4).filter(([name, range], index, all) => !wanted.has(name) && resolvable(range) && all.findIndex(([other]) => other === name) === index);
-
-		for (const [index, found] of (await Promise.all(batch.map(async ([name, range]) => resolve(name, range).catch(() => undefined)))).entries()) {
-			const [name] = batch[index];
-
-			if (found !== undefined && !wanted.has(name)) {
-				wanted.set(name, { "name": name, "version": found.version });
-				queue.push(...Object.entries<string>(found.dependencies));
-			}
-		}
-	}
-
-	return [...wanted.values()];
-}
-
 /** One sync at a time; one asked for while one runs is run after it (what changed meanwhile is then seen). */
 let syncing: Promise<void> = Promise.resolve();
 let queued = false;
@@ -177,10 +124,14 @@ export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/wor
 		}
 
 		const accepted = existing?.packages ?? {};
-		const files = (await vscode.workspace.findFiles("**/package.json", `{**/node_modules/**,**/${SILO_DIR}/**}`)).toSorted((one, other) => one.path.length - other.path.length);
-		const manifests = (await Promise.all(files.map(async (file) => read(file).catch(() => undefined)))).filter((manifest) => manifest !== undefined) as { "dependencies"?: Record<string, string>; "devDependencies"?: Record<string, string> }[];
-		const lock = await read(vscode.Uri.file(`${root}/package-lock.json`)).catch(() => undefined) as Parameters<typeof lockedPackages>[0] | undefined;
-		const wanted = lock?.packages === undefined ? await resolvedPackages(manifests) : lockedPackages(lock);
+		// (the versions everything loads — the resolver's: versions.ts)
+		const versions = await syncVersions(vscode, root);
+
+		if (versions === undefined) {
+			return;
+		}
+
+		const wanted: Wanted[] = Object.entries(versions.packages).map(([name, each]) => ({ "name": name, "version": each.version, ...each.tarball === undefined ? {} : { "tarball": each.tarball } }));
 		const installed: Record<string, Accepted> = {};
 		const unread: string[] = [];
 
@@ -209,7 +160,7 @@ export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/wor
 		await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify({ "consumer": existing?.consumer ?? {}, "packages": sorted }, undefined, 2) + "\n"));
 
 		if (existing === undefined) {
-			console.info(`[baseline] made ${baselinePath()}: ${Object.keys(sorted).length} packages, from ${lock?.packages === undefined ? "package.json ranges (esm.sh)" : "package-lock.json"}`);
+			console.info(`[baseline] made ${baselinePath()}: ${Object.keys(sorted).length} packages, from ${versions.from}`);
 		} else {
 			console.info(`[baseline] synced ${baselinePath()} — added: ${changed.added.join(", ") || "none"}; updated: ${changed.updated.join(", ") || "none"}; pending acceptance: ${changed.pending.join(", ") || "none"}`);
 		}
@@ -224,15 +175,18 @@ export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/wor
 	return syncing;
 }
 
-/** Keep `.silo/baseline.json` up to the project's dependencies: synced as a package.json or package-lock.json changes
- *  (one that's there — the first run that keeps evidence makes it). */
+/** Keep the versions (versions.ts) and `.silo/baseline.json` up to the project's dependencies: both resolved again as a
+ *  package.json or package-lock.json changes — the baseline when there's one (the first run that keeps evidence makes
+ *  it) — and the versions now, so a preview started before any run pins them. */
 export function watchBaseline(vscode: typeof vscodeApi): vscodeApi.Disposable {
 	const watcher = vscode.workspace.createFileSystemWatcher("**/{package.json,package-lock.json}");
 	const changed = (uri: vscodeApi.Uri): void => {
 		if (!uri.path.includes("/node_modules/")) {
-			void syncBaseline(vscode, false);
+			void syncVersions(vscode).then(async () => syncBaseline(vscode, false));
 		}
 	};
+
+	void syncVersions(vscode);
 
 	const listeners = [watcher.onDidCreate(changed), watcher.onDidChange(changed), watcher.onDidDelete(changed)];
 

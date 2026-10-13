@@ -47,6 +47,10 @@ export interface ViteDevServerOptions extends DevServerOptions {
    */
 	"jsxFragment"?: string;
 
+	/** A JSON file in the VFS pinning each package's exact version (`{ "packages": { name: { "version" } } }`: the
+	 *  editor's resolution, nothing younger than a week), read fresh as its packages are resolved. */
+	"versionsFile"?: string;
+
   /**
    * Auto-inject React import for JSX files (default: true)
    */
@@ -325,7 +329,7 @@ export class ViteDevServer extends DevServer {
 
 	constructor(vfs: VirtualFS, options: ViteDevServerOptions) {
 		super(vfs, options);
-		this.packages = new PackageResolver({ "manifest": () => this.readManifest(), "registryUrl": registryUrl });
+		this.packages = new PackageResolver({ "manifest": () => this.readManifest(), "registryUrl": registryUrl, "pinned": () => this.readPins(options.versionsFile) });
 		this.options = {
 			"jsx": true,
 			"jsxFactory": "React.createElement",
@@ -492,6 +496,21 @@ export class ViteDevServer extends DevServer {
 		}
 
 		return this.serveFile(filePath);
+	}
+
+	/** Each package's pinned version, from the host's versions file (none without one). */
+	private readPins(file: string | undefined): Record<string, string> {
+		if (file === undefined) {
+			return {};
+		}
+
+		try {
+			const { packages } = JSON.parse(this.vfs.readFileSync(file, "utf8") as string) as { "packages"?: Record<string, { "version"?: string }> };
+
+			return Object.fromEntries(Object.entries(packages ?? {}).flatMap(([name, { version }]) => (typeof version === "string" ? [[name, version]] : [])));
+		} catch {
+			return {};
+		}
 	}
 
 	/** The app's package.json (at the server root), or undefined. */

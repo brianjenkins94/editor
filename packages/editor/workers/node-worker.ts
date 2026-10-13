@@ -22,6 +22,9 @@ import { WORKSPACE_CHANGED } from "../shared/workspace-changes";
 import { answerServer, workerTapResponse } from "../shared/workspace-runtime";
 import { attachSharedWorkspace, connectWorkspace, createZenfsVFS, getSharedWorkspaceBuffer } from "../shared/zenfs-vfs.js";
 
+/** The exact version the preview loads of each package — the editor's shared resolver's (workbench/versions.ts). */
+const VERSIONS_FILE = "/workspace/.silo/versions.json"; // (util/silo/layout's versionsPath — not imported: util/env wants a `process` this worker has none of)
+
 const hub = createHub({ "id": "node" });
 
 hub.link(portTransport(globalThis));
@@ -128,7 +131,7 @@ serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number
 	const { port, root } = raw as { "port": number; "root": string };
 	const { ViteDevServer } = await import("@brianjenkins94/almostnode");
 	const vfs = await getVfs();
-	const server = new ViteDevServer(vfs, { "port": port, "root": root }) as unknown as PreviewServer;
+	const server = new ViteDevServer(vfs, { "port": port, "root": root, "versionsFile": VERSIONS_FILE }) as unknown as PreviewServer;
 
 	server.start();
 	// HMR delivery (M2): the worker has no Window to post updates to, so give the server a stand-in whose
@@ -253,7 +256,7 @@ async function provokeColdRound(buffer: SharedArrayBuffer, root: string, port: n
 async function provokeWarmRound(ViteDevServer: typeof import("@brianjenkins94/almostnode")["ViteDevServer"], vfs: Awaited<ReturnType<typeof createZenfsVFS>>, port: number, root: string, urls: string[], round: number, collected: Pick<ProvokeResult, "failures" | "transformErrors">): Promise<void> {
 	previewServers.get(port)?.stop();
 
-	const server = new ViteDevServer(vfs, { "port": port, "root": root }) as unknown as PreviewServer;
+	const server = new ViteDevServer(vfs, { "port": port, "root": root, "versionsFile": VERSIONS_FILE }) as unknown as PreviewServer;
 
 	server.start();
 	server.setHMRTarget({
