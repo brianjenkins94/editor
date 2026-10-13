@@ -2,29 +2,29 @@
  * History — what your edits change, as you make them. Derived history (CHANGE-HISTORY.md, step 3) live: when you pause,
  * the program as it now stands is read — by this extension's TypeScript server plugin (ts-plugin.js), with the server's
  * own TypeScript, edits not yet saved included — and replayed against the last reading (util/silo's Replayer). What a
- * burst changed (a feature added, removed, changed — through anything it reaches) is a fact, a line appended to your
- * `.silo/history/<user>.jsonl`; `silo history` tells the facts with the commits (withFacts), so the work between commits
- * and the tries undone before any commit are in the history too.
+ * pause changed (a feature added, removed, changed — through anything it reaches) is told in the History output channel.
  *
  * And what runs say (step 4): after each reading, and whenever a run leaves evidence, each feature's own code is joined
  * with the evidence placed in the files as they are now (util/silo's exercise) — exercised, or dormant (its file ran, its
- * code didn't) — and a change in that is a fact too. Evidence is keyed on BABLR spans; the shared evidence store
+ * code didn't) — and a change in that is told too. Evidence is keyed on BABLR spans; the shared evidence store
  * (insights') places them through the editor's resolver, so the join with BABLR happens there, at the edge.
  *
- * Public API only: the plugin through `typescript.tsserverRequest`, the facts through `workspace.fs`, evidence through
- * worker-pod's `editor.annotations.resolve`. No hub, no core capture: the TypeScript server already sees every edit.
+ * Nothing it finds is kept: it's for the session. Once committed, the commit tells what changed (`silo history`), and what
+ * runs say is recomputed from the evidence, which is kept.
+ *
+ * Public API only: the plugin through `typescript.tsserverRequest`, evidence through worker-pod's
+ * `editor.annotations.resolve`. No hub, no core capture: the TypeScript server already sees every edit.
  */
 import type { Exercise, Ran } from "@brianjenkins94/util/silo/exercise";
 import type { WayIn } from "@brianjenkins94/util/silo/features";
 import type { Analysis, Analyzer } from "@brianjenkins94/util/silo/graph";
-import type { HistoryFact } from "@brianjenkins94/util/silo/history";
 import type { FileAnalysis } from "@brianjenkins94/util/silo/ts-analysis";
 import * as vscode from "vscode";
-import { parseRuns, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { parseRuns } from "@brianjenkins94/util/silo/evidence";
 import { exerciseOf } from "@brianjenkins94/util/silo/exercise";
 import { featuresOf, waysInManifest } from "@brianjenkins94/util/silo/features";
-import { exerciseEvents, factLine, includeByDefault, parseFacts, Replayer } from "@brianjenkins94/util/silo/history";
-import { historyPath, SILO_DIR } from "@brianjenkins94/util/silo/layout";
+import { exerciseEvents, includeByDefault, Replayer } from "@brianjenkins94/util/silo/history";
+import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { analysisOf } from "@brianjenkins94/util/silo/ts-analysis";
 import { evidenceStore } from "../insights/evidence";
 
@@ -64,7 +64,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 	const evidence = evidenceStore(vscode, context.subscriptions);
-	// What runs last said of each feature: from the facts kept, so a restart doesn't say it again.
+	// What runs last said of each feature, this session (undefined until the first join: that one is told as a summary).
 	let exercised: Map<string, Exercise> | undefined;
 	const replayer = new Replayer(async () => "", { "analyzer": analyzer, "include": includeByDefault });
 	const edited = new Set<string>();
@@ -72,16 +72,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	let steps = 0;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let queue = Promise.resolve();
-	let user: Promise<string> | undefined;
 
 	const relative = (uri: vscode.Uri): string | undefined => (uri.scheme === root.scheme && uri.path.startsWith(root.path + "/") ? uri.path.slice(root.path.length + 1) : undefined);
-
-	/** The person the facts are filed under: the git identity's slug (as runs are), else "local". */
-	const userOf = async (): Promise<string> => {
-		user ??= Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, ".git", "config"))).then((bytes) => userSlug(new TextDecoder().decode(bytes)) ?? "local", () => "local");
-
-		return user;
-	};
 
 	/** The ways in the program's manifests declare (VS Code extensions' `contributes`): JSON, read here. */
 	async function readManifests(): Promise<void> {
@@ -96,37 +88,6 @@ export function activate(context: vscode.ExtensionContext): void {
 				} catch { /* gone, or not JSON */ }
 			}
 		}
-	}
-
-	/** Append a fact to the person's history file. */
-	async function keep(fact: HistoryFact): Promise<void> {
-		const uri = vscode.Uri.joinPath(root, historyPath(await userOf()));
-		let existing = "";
-
-		try {
-			existing = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
-		} catch { /* the first */ }
-
-		await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, ".."));
-		await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(existing + (existing === "" || existing.endsWith("\n") ? "" : "\n") + factLine(fact)));
-	}
-
-	/** What runs last said of each feature, as this person's facts have it. */
-	async function lastExercise(): Promise<Map<string, Exercise>> {
-		const known = new Map<string, Exercise>();
-		const text = await Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, historyPath(await userOf())))).then((bytes) => new TextDecoder().decode(bytes), () => "");
-
-		for (const fact of parseFacts(text)) {
-			for (const event of fact.events) {
-				if (event.type === "exercised") {
-					known.set(event.key, { "status": "exercised", "runs": event.runs, "lastAt": event.lastAt });
-				} else if (event.type === "dormant") {
-					known.set(event.key, { "status": "dormant", "files": [event.file] });
-				}
-			}
-		}
-
-		return known;
 	}
 
 	/** The files some run ran: the run envelopes' (everyone's), and those with evidence kept. */
@@ -147,7 +108,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		return files;
 	}
 
-	/** Join each feature's code with what ran, and keep what changed in that as a fact. */
+	/** Join each feature's code with what ran, and tell what changed in that. */
 	async function exercise(): Promise<void> {
 		if (latest === undefined) {
 			return;
@@ -179,18 +140,21 @@ export function activate(context: vscode.ExtensionContext): void {
 
 		const now = new Map([...features].map(([key, feature]) => [key, exerciseOf(feature, analysis.graph, ran, observed)]));
 
-		exercised ??= await lastExercise();
+		if (exercised === undefined) {
+			const count = (status: Exercise["status"]): number => [...now.values()].filter((each) => each.status === status).length;
+
+			output.appendLine(`Runs say: ${String(count("exercised"))} features exercised, ${String(count("dormant"))} dormant, ${String(count("unobserved"))} not run yet.`);
+			exercised = now;
+
+			return;
+		}
 
 		const events = exerciseEvents(features, exercised, now);
 
 		exercised = now;
 
 		if (events.length > 0) {
-			const time = new Date().toISOString();
-			const fact: HistoryFact = { "time": time, "file": [...new Set(events.map((event) => ("file" in event ? event.file : "")))].join(", "), "features": features.size, "events": events };
-
-			await keep(fact);
-			output.appendLine(`${time} runs: ${events.map((event) => event.type + " " + event.facet + " " + event.id).join("; ")}`);
+			output.appendLine(`${new Date().toISOString()} runs: ${events.map((event) => event.type + " " + event.facet + " " + event.id).join("; ")}`);
 		}
 	}
 
@@ -242,10 +206,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 
 		if (result.events.length > 0) {
-			const fact: HistoryFact = { "time": result.date, "file": changed.join(", "), "features": result.features, "events": result.events };
-
-			await keep(fact);
-			output.appendLine(`${result.date} ${fact.file}: ${result.events.map((event) => event.type + " " + event.facet + " " + (event.id === "" ? "(unnamed)" : event.id)).join("; ")}`);
+			output.appendLine(`${result.date} ${changed.join(", ")}: ${result.events.map((event) => event.type + " " + event.facet + " " + (event.id === "" ? "(unnamed)" : event.id)).join("; ")}`);
 		}
 
 		await exercise();

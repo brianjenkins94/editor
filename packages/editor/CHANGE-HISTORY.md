@@ -129,32 +129,31 @@ implementations". The browser keeps oxc until TypeScript ships a browser build (
 ## Live from edits (built)
 
 History no longer waits for a commit. As you edit, the editor reads the program when you pause and replays it against
-the last reading, and what a burst changed is a **fact**: a line in your `.silo/history/<user>.jsonl` (shared, written
-only by you, merged by line). The bursts themselves aren't kept; the facts are what git can't give: the work between
-commits, and the tries undone before any commit.
+the last reading, and tells what each pause changed in its History output channel.
+
+**Nothing derived from edits is kept** (decided 2026-10-12): it's for the session. Once you commit, the commit tells what
+changed, and what runs say is recomputed from the runtime evidence, which is kept. What that gives up: tries undone
+before any commit leave no trace (tries that reach a commit still show as tried). A first version kept each pause's
+changes as facts in `.silo/history/<user>.jsonl` and told them with the commits; it was taken out.
 
 - **Read where TypeScript already is.** `extensions/history` contributes its own TypeScript server plugin, which reads the
   program the in-browser TypeScript server already holds, unsaved edits included, with the server's own TypeScript
   (lib `ts-analysis.ts`, through the in-process host). Its engine is built without TypeScript or oxc. The extension
   asks it `_history.read` through `typescript.tsserverRequest`, gets the readings that changed, replays (lib
-  `Replayer`), and appends facts through `workspace.fs`. Public API only: no hub, no capture of its own.
+  `Replayer`), and tells what changed. Public API only: no hub, no capture of its own, nothing written.
 - **One reading for both hosts.** Ways in and the declaration graph are read once over TypeScript's tree, behind a
   small host interface: TypeScript 7's API for the command line, the in-process API for the editor. Both find the
   same 289 features on this repo as oxc's recognizers. oxc is now one module (`oxc.ts`), loaded only where neither
   TypeScript is.
-- **Told with the commits.** `silo history` reads every `.silo/history/*.jsonl` and tells a commit's span by its facts
-  (lib `withFacts`); the commit adds only what no fact explains, such as an edit made outside the editor.
-  `--commits-only` tells the commits alone.
-
-Verified in the editor: adding a command registration and taking it out again, unsaved, left two facts (`added`, then
-`removed`), which `silo history` tells as a try; editing only a helper in another file left `changed … via reach`
-through it.
+Verified in the editor: adding a command registration and taking it out again, unsaved, was told as `added` then
+`removed`; editing only a helper in another file was told as `changed … via reach` through it.
 
 ## What runs say (built)
 
 A feature's lifeline now includes whether its code runs. **Exercised**: a statement of its own code ran (how many runs,
-when last). **Dormant**: its file ran, its code never did. **Unobserved**: no run ran its file yet. A change in that is a
-fact, told as "Ran command `x` (…)" and "Dormant: command `y`: its file ran, its code didn't".
+when last). **Dormant**: its file ran, its code never did. **Unobserved**: no run ran its file yet. The history extension
+tells a summary when it starts, then each change (lib's narration has the sentences for them too: "Ran command `x` (…)",
+"Dormant: command `y`: its file ran, its code didn't").
 
 - **Its own code, not what it reaches.** A feature's code is its registration (with its inline handler) and the
   declarations that registration names. What it reaches further doesn't count: a helper many features share would make
@@ -165,9 +164,8 @@ fact, told as "Ran command `x` (…)" and "Dormant: command `y`: its file ran, i
 - **The BABLR join is at the edge.** Runtime evidence is keyed on BABLR spans. The editor's resolver places them in the
   current text (the shared evidence store, insights'), and lib's `exercise.ts` compares ranges: those placed spans
   against the feature ranges the TypeScript reading reports. Analysis never touches BABLR.
-- **When.** The history extension joins after each reading, and whenever a run leaves evidence. It reads the previous
-  statuses from your facts, so a restart doesn't repeat them. "Its file ran" also counts the run ledger's envelopes
-  (`.silo/runs/`), which list every file a run ran.
+- **When.** The history extension joins after each reading, and whenever a run leaves evidence. "Its file ran" also
+  counts the run ledger's envelopes (`.silo/runs/`), which list every file a run ran.
 
 Verified in the editor: a program whose local `defineCommand` calls one of the two handlers it's given, run once under
 the debugger, left `exercised` for that one and `dormant` for the other.
@@ -181,7 +179,7 @@ In order, each useful on its own:
 2. **Analysis on TypeScript 7** (built, above). In place of "BABLR spans in place of tokens", which mixed up analysis
    with placement: the declaration fingerprints already ignore formatting, and BABLR's anchors are for keeping data on
    code (step 4's join), not for reading it.
-3. **Live, not only from commits** (built, above). Derive from edits as you work, keep the facts in `.silo/`.
+3. **Live, not only from commits** (built, above). Derive from edits as you work, for the session.
 4. **Runs** (built, above). Exercised and dormant from the run ledger and coverage, joined through BABLR's spans.
 5. **Status and drift.** The one-click status per feature, kept in `.silo/`, and the drift checks it enables.
 6. **In the editor.** A history view by feature in place of the commit list; the changes pane groups by feature.
@@ -190,14 +188,13 @@ In order, each useful on its own:
 ## Where it lives
 
 - **The logic** is in lib's `util/silo`: `features.ts` (the feature model), `graph.ts` (the declaration graph's seam and
-  reach), `history.ts` (the replay, live history, the facts, the sentences), `exercise.ts` (what runs say of a feature), `ts-analysis.ts` (the reading over
-  TypeScript's tree, for either host), `oxc.ts` (oxc's reading), and the Node ones: `typescript.ts` (TypeScript 7's
-  host) and `git-snapshots.ts` (a git history as snapshots).
+  reach), `history.ts` (the replay, the events, the sentences), `exercise.ts` (what runs say of a feature),
+  `ts-analysis.ts` (the reading over TypeScript's tree, for either host), `oxc.ts` (oxc's reading), and the Node ones:
+  `typescript.ts` (TypeScript 7's host) and `git-snapshots.ts` (a git history as snapshots).
 - **The command line** is `packages/silo` in this repo, published from here as `@brianjenkins94/silo` (bin `silo`):
   `silo features [repo]` and `silo history [repo] [--since …] [--until …] [--analyzer auto|oxc|typescript]`, each with
-  `--json`. It runs in any desktop
-  terminal, VS Code's included.
-- **The editor** uses the same internals: `extensions/history` and its TypeScript server plugin derive facts live, with
+  `--json`. It runs in any desktop terminal, VS Code's included.
+- **The editor** uses the same internals: `extensions/history` and its TypeScript server plugin derive history live, with
   the TypeScript server's own TypeScript.
 
 ## Open questions
