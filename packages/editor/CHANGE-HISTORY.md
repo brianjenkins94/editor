@@ -126,6 +126,30 @@ checker resolves such a call to the interface's member, not the object that impl
 implementations". The browser keeps oxc until TypeScript ships a browser build (the unreleased Playground v2 runs a
 `tsc.wasm` in a worker); BABLR isn't an analyzer: it joins history at the edge, in step 4, for data anchored by it.
 
+## Live from edits (built)
+
+History no longer waits for a commit. As you edit, the editor reads the program when you pause and replays it against
+the last reading, and what a burst changed is a **fact**: a line in your `.silo/history/<user>.jsonl` (shared, written
+only by you, merged by line). The bursts themselves aren't kept; the facts are what git can't give: the work between
+commits, and the tries undone before any commit.
+
+- **Read where TypeScript already is.** `extensions/history` contributes its own TypeScript server plugin, which reads the
+  program the in-browser TypeScript server already holds, unsaved edits included, with the server's own TypeScript
+  (lib `ts-analysis.ts`, through the in-process host). Its engine is built without TypeScript or oxc. The extension
+  asks it `_history.read` through `typescript.tsserverRequest`, gets the readings that changed, replays (lib
+  `Replayer`), and appends facts through `workspace.fs`. Public API only: no hub, no capture of its own.
+- **One reading for both hosts.** Ways in and the declaration graph are read once over TypeScript's tree, behind a
+  small host interface: TypeScript 7's API for the command line, the in-process API for the editor. Both find the
+  same 289 features on this repo as oxc's recognizers. oxc is now one module (`oxc.ts`), loaded only where neither
+  TypeScript is.
+- **Told with the commits.** `silo history` reads every `.silo/history/*.jsonl` and tells a commit's span by its facts
+  (lib `withFacts`); the commit adds only what no fact explains, such as an edit made outside the editor.
+  `--commits-only` tells the commits alone.
+
+Verified in the editor: adding a command registration and taking it out again, unsaved, left two facts (`added`, then
+`removed`), which `silo history` tells as a try; editing only a helper in another file left `changed … via reach`
+through it.
+
 ## Building it
 
 In order, each useful on its own:
@@ -135,8 +159,7 @@ In order, each useful on its own:
 2. **Analysis on TypeScript 7** (built, above). In place of "BABLR spans in place of tokens", which mixed up analysis
    with placement: the declaration fingerprints already ignore formatting, and BABLR's anchors are for keeping data on
    code (step 4's join), not for reading it.
-3. **Live, not only from commits.** Derive from edit bursts as you work. Keep the derived facts in `.silo/`, and the
-   bursts only as long as they're needed (today edit-history.ts drops them at each commit).
+3. **Live, not only from commits** (built, above). Derive from edits as you work, keep the facts in `.silo/`.
 4. **Runs.** Exercised and dormant from the run ledger and coverage (RUNTIME-EVIDENCE.md).
 5. **Status and drift.** The one-click status per feature, kept in `.silo/`, and the drift checks it enables.
 6. **In the editor.** A history view by feature in place of the commit list; the changes pane groups by feature.
@@ -144,16 +167,16 @@ In order, each useful on its own:
 
 ## Where it lives
 
-- **The logic** is in lib's `util/silo`, pure and browser-portable on oxc: `features.ts` (the ways in, the features they
-  make), `graph.ts` (the declaration graph: what a feature reaches, and the analyzer seam), `history.ts` (the replay, the
-  events, the sentences), and the Node ones: `git-snapshots.ts` (a git history as snapshots) and `typescript.ts`
-  (TypeScript 7's analyzer).
+- **The logic** is in lib's `util/silo`: `features.ts` (the feature model), `graph.ts` (the declaration graph's seam and
+  reach), `history.ts` (the replay, live history, the facts, the sentences), `ts-analysis.ts` (the reading over
+  TypeScript's tree, for either host), `oxc.ts` (oxc's reading), and the Node ones: `typescript.ts` (TypeScript 7's
+  host) and `git-snapshots.ts` (a git history as snapshots).
 - **The command line** is `packages/silo` in this repo, published from here as `@brianjenkins94/silo` (bin `silo`):
   `silo features [repo]` and `silo history [repo] [--since …] [--until …] [--analyzer auto|oxc|typescript]`, each with
   `--json`. It runs in any desktop
   terminal, VS Code's included.
-- **The editor** uses the same internals. In the browser, snapshots come from the editor's own git (isomorphic-git) and
-  edit bursts instead of `git cat-file`.
+- **The editor** uses the same internals: `extensions/history` and its TypeScript server plugin derive facts live, with
+  the TypeScript server's own TypeScript.
 
 ## Open questions
 

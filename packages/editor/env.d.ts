@@ -48,6 +48,14 @@ declare module "eslint:extension" {
 	export default path;
 }
 
+/** The history extension (what your edits change, read by its TypeScript server plugin), bundled like the others: its
+ *  path. */
+declare module "history:extension" {
+	const path: string;
+
+	export default path;
+}
+
 /** The insights extension (what runs say — hover, purple suggestions; the metrics monitor), bundled like the others: its
  *  path. */
 declare module "insights:extension" {

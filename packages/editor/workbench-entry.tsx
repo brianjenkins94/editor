@@ -22,6 +22,7 @@ import type { PodBridge } from "./extensions/worker-pod/extension";
 import type { SharedWorkspace } from "./playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
 import capabilitiesExtensionPath from "capabilities:extension";
+import historyExtensionPath from "history:extension";
 import eventSheetExtensionPath from "event-sheet:extension";
 import eventSheetViewPath from "event-sheet:view";
 import insightsExtensionPath from "insights:extension";
@@ -46,6 +47,7 @@ import * as gitEngine from "./git-engine";
 import { installEditHistory } from "./edit-history";
 import { installGitService } from "./git-service";
 import capabilitiesManifest from "./extensions/capabilities/package.json";
+import historyManifest from "./extensions/history/package.json";
 import eslintManifest from "./extensions/eslint/package.json";
 import eventSheetManifest from "./extensions/event-sheet/package.json";
 import insightsManifest from "./extensions/insights/package.json";
@@ -691,6 +693,18 @@ function maybeBoot(): void {
 			const capabilitiesPluginUrl = new URL("./lsp/capabilities-ts-plugin.js", location.href).href;
 
 			capabilitiesExt.registerFileUrl("./node_modules/capabilities-ts-plugin/index.js", capabilitiesPluginUrl);
+
+			// History: what your edits change, as you make them — a TS server plugin that reads the program tsserver holds with
+			// its own `ts` (served beside its engine, like eslint's and capabilities'), and an extension that replays each pause
+			// against the last and keeps what changed in `.silo/history/<user>.jsonl`. Public API only: no hub.
+			const historyExt = registerExtension(historyManifest, ExtensionHostKind.LocalWebWorker);
+
+			historyExt.registerFileUrl("./extension.js", new URL(historyExtensionPath, location.href).href);
+
+			const historyPluginPkg = JSON.stringify({ "name": "history-ts-plugin", "version": "0.0.1", "browser": "index.js" });
+
+			historyExt.registerFileUrl("./node_modules/history-ts-plugin/package.json", "data:application/json," + encodeURIComponent(historyPluginPkg));
+			historyExt.registerFileUrl("./node_modules/history-ts-plugin/index.js", new URL("./lsp/history-ts-plugin.js", location.href).href);
 
 			// Insights: every run's coverage marked in its file's gutter, and the metrics monitor, from whatever the debug
 			// sessions and the metrics plane report — public API only, so it runs in the web worker host.

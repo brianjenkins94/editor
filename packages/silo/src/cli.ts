@@ -4,22 +4,26 @@
  *   silo features [repo] [--json]                      every way into the program, found in its code
  *   silo history [repo] [--since …] [--until …] [--json] what changed, told from the code's snapshots — not from
  *                [--analyzer auto|oxc|typescript]        commit messages, which are never read; the code read by the
- *                                                        repository's TypeScript when it's ≥ 7.1, else by oxc
+ *                [--commits-only]                        repository's TypeScript when it's ≥ 7.1, else by oxc; with the
+ *                                                        facts editors kept (.silo/history/*.jsonl) — the work between
+ *                                                        commits, the tries undone before any — unless --commits-only
  *
  * The logic is @brianjenkins94/util/silo (features, history, git-snapshots): pure, so the editor runs the same code in
  * the browser over its own workspace. This file is only the desktop's way to ask: git, the disk, and stdout.
  */
 import type { Analyzer } from "@brianjenkins94/util/silo/graph";
-import type { Step } from "@brianjenkins94/util/silo/history";
+import type { HistoryFact, Step } from "@brianjenkins94/util/silo/history";
 import { execFileSync } from "node:child_process";
 import * as path from "node:path";
 import { isEntry } from "@brianjenkins94/util/env";
 import * as fs from "@brianjenkins94/util/fs";
 import { juvy } from "@brianjenkins94/util/juvy";
 import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
-import { featuresOf, waysIn } from "@brianjenkins94/util/silo/features";
+import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
-import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
+import { featuresMarkdown, historyMarkdown, includeByDefault, parseFacts, replay, withFacts } from "@brianjenkins94/util/silo/history";
+import { HISTORY_GLOB } from "@brianjenkins94/util/silo/layout";
+import { oxcAnalyzer, waysIn } from "@brianjenkins94/util/silo/oxc";
 import { typescriptAnalyzer } from "@brianjenkins94/util/silo/typescript";
 
 /** The repository a path is in. */
@@ -44,6 +48,20 @@ export function currentFeatures(repo: string): ReturnType<typeof featuresOf> {
  *  there is one, else oxc's. */
 export type AnalyzerChoice = "auto" | "oxc" | "typescript";
 
+/** Every fact the repository's editors kept, everyone's (`.silo/history/<user>.jsonl`, as the working tree has them). */
+export function factsOf(repo: string): HistoryFact[] {
+	const dir = path.join(repo, path.dirname(HISTORY_GLOB));
+	let names: string[];
+
+	try {
+		names = fs.readdirSync(dir).filter((name) => name.endsWith(".jsonl"));
+	} catch {
+		return []; // none kept
+	}
+
+	return names.flatMap((name) => parseFacts(fs.readFileSync(path.join(dir, name))));
+}
+
 /** The steps of a span of the history (its baseline, the commit before it, comes first and tells nothing). */
 export async function historyOf(repo: string, options: { "since"?: string; "until"?: string; "ref"?: string; "analyzer"?: AnalyzerChoice } = {}): Promise<Step[]> {
 	const choice = options.analyzer ?? "auto";
@@ -57,7 +75,7 @@ export async function historyOf(repo: string, options: { "since"?: string; "unti
 	const steps: Step[] = [];
 
 	try {
-		for await (const step of replay(gitSnapshots(repo, options), objects.read, analyzer === undefined ? {} : { "analyzer": analyzer })) {
+		for await (const step of replay(gitSnapshots(repo, options), objects.read, { "analyzer": analyzer ?? oxcAnalyzer() })) {
 			steps.push(step);
 		}
 	} finally {
@@ -94,6 +112,7 @@ export const app = subcommands({
 				"since": { "format": String, "default": "", "doc": "Start of the span: anything git's --since takes (\"7 days ago\", 2026-10-05). Default: the whole history." },
 				"until": { "format": String, "default": "", "doc": "End of the span, as git's --until takes it. Default: now." },
 				"ref": { "format": String, "default": "HEAD", "doc": "The branch or commit to walk back from." },
+				"commits-only": { "format": Boolean, "default": false, "doc": "The commits alone, without the facts editors kept (.silo/history/): the work between commits, and the tries undone before any." },
 				"analyzer": { "format": ["auto", "oxc", "typescript"], "default": "auto", "doc": "What reads the code: the repository's TypeScript (7.1 or later), oxc, or auto — TypeScript when there is one." },
 				"json": jsonFlag
 			}),
@@ -101,7 +120,8 @@ export const app = subcommands({
 				const repo = repoOf(config.get("repo"));
 				const since = config.get("since"), until = config.get("until");
 				const steps = await historyOf(repo, { "ref": config.get("ref"), "analyzer": config.get("analyzer") as AnalyzerChoice, ...since === "" ? {} : { "since": since }, ...until === "" ? {} : { "until": until } });
-				const span = since === "" ? steps : steps.slice(1); // the baseline only gives the first commit something to compare with
+				const told = config.get("commits-only") ? steps : withFacts(steps, factsOf(repo));
+				const span = since === "" ? told : told.slice(1); // the baseline only gives the first commit something to compare with
 
 				process.stdout.write(config.get("json") ? JSON.stringify(span, undefined, "\t") + "\n" : historyMarkdown(span, { "title": "History of " + path.basename(repo) }));
 			}

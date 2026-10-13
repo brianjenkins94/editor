@@ -1,0 +1,25 @@
+{
+  "name": "history",
+  "displayName": "History",
+  "description": "What your edits change, as you make them: each burst's added, removed and changed features, read by the TypeScript server's own TypeScript and kept in .silo/history/<user>.jsonl.",
+  "publisher": "silo",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact"
+  ],
+  "contributes": {
+    "typescriptServerPlugins": [
+      {
+        "name": "history-ts-plugin",
+        "enableForWorkspaceTypeScriptVersions": true
+      }
+    ]
+  }
+}

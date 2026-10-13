@@ -221,6 +221,16 @@ function capabilitiesTsPlugin(): Plugin {
 	};
 }
 
+/** Same, for the history tsserver plugin — emitted next to history-engine.js so its import.meta.url self-locates it. */
+function historyTsPlugin(): Plugin {
+	return {
+		"name": "history-ts-plugin-asset",
+		"generateBundle": function() {
+			this.emitFile({ "type": "asset", "fileName": "lsp/history-ts-plugin.js", "source": fs.readFileSync(resolvePath("./extensions/history/ts-plugin.js"), { "encoding": null }) });
+		}
+	};
+}
+
 // esquery's CJS build, resolved through eslint so it's found under npm's flat tree AND CI's pnpm workspace.
 const esqueryCjs = createRequire(createRequire(import.meta.url).resolve("eslint")).resolve("esquery");
 
@@ -299,7 +309,7 @@ export async function preBuild(): Promise<void> {
 		// just-bash chunk as /browser.js → index.html, "Failed to load module script") — the import itself, relative,
 		// still worked.
 		"base": "./",
-		"plugins": [bundledExtension("worker-pod"), bundledExtension("tsval"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledModule("event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin(), polyfillNode(["path", "url"])],
+		"plugins": [bundledExtension("worker-pod"), bundledExtension("tsval"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("history"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledModule("event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin(), polyfillNode(["path", "url"])],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
 		// `buffer` → the node-stdlib-browser polyfill: isomorphic-git (the git SCM engine) uses the `Buffer` global,
@@ -487,6 +497,30 @@ export async function preBuild(): Promise<void> {
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
 				"input": { "lsp/capabilities-canary": resolvePath("./extensions/capabilities/canary.ts") },
+				"output": { "banner": PROCESS_SHIM, "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
+			}
+		}
+	});
+
+	// 3d. history engine (dist/lsp/history-engine.js) — util/silo's reading over TypeScript's tree (ts-analysis), run
+	// INSIDE the history tsserver plugin with tsserver's own `ts`: `typescript` is EXTERNALIZED to the ts-external shim
+	// (the plugin sets globalThis.__historyTs first), and no oxc — ts-analysis loads only silo's pure model and graph.
+	await buildPackage(root, {
+		"base": "./",
+		"resolve": {
+			"alias": [{ "find": /^typescript(\/.*)?$/u, "replacement": resolvePath("./extensions/history/ts-external.js") }],
+			"conditions": ["browser", "import", "default"]
+		},
+		"plugins": [polyfillNode(), historyTsPlugin()],
+		"build": {
+			"outDir": "dist",
+			"emptyOutDir": false,
+			"minify": false,
+			"sourcemap": !isCI,
+			"assetsInlineLimit": 0,
+			"rollupOptions": {
+				"preserveEntrySignatures": "strict",
+				"input": { "lsp/history-engine": resolvePath("./extensions/history/engine.ts") },
 				"output": { "banner": PROCESS_SHIM, "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
 			}
 		}

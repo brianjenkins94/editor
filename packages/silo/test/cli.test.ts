@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import * as fs from "@brianjenkins94/util/fs";
 
-import { currentFeatures, historyOf } from "../src/cli.ts";
+import { currentFeatures, factsOf, historyOf } from "../src/cli.ts";
 
 const CLI = path.join(import.meta.dirname, "../src/cli.ts");
 
@@ -85,4 +85,20 @@ test("the command line: silo features --json", () => {
 	const output = execFileSync(process.execPath, ["--import", "tsx", CLI, "features", repo, "--json"], { "encoding": "utf8" });
 
 	assert.deepEqual(JSON.parse(output), [], "removed on Oct 5: nothing left");
+});
+
+test("silo history tells the facts editors kept with the commits: the work between them, the tries no commit saw", async () => {
+	const kept = await repository({ "2026-10-01": { "README.md": "hello" }, "2026-10-03": { "notes/package.json": manifest, "notes/extension.ts": extension("add();") } });
+	const fact = (time: string, type: string, id: string, label = ""): string => JSON.stringify({ "time": time, "file": "notes/extension.ts", "features": 1, "events": [{ "key": "command|" + id, "facet": "command", "id": id, "type": type, "label": label, "files": ["notes/extension.ts"] }] });
+
+	await fs.mkdir(path.join(kept, ".silo", "history"), { "recursive": true });
+	await fs.writeFile(path.join(kept, ".silo", "history", "silo.jsonl"), [fact("2026-10-02T09:00:00Z", "added", "notes.try"), fact("2026-10-02T10:00:00Z", "removed", "notes.try"), fact("2026-10-03T09:00:00Z", "added", "notes.add", "Add Note")].join("\n") + "\n");
+
+	assert.equal(factsOf(kept).length, 3);
+
+	const output = execFileSync(process.execPath, ["--import", "tsx", CLI, "history", kept], { "encoding": "utf8" });
+
+	assert.match(output, /Tried command `notes\.try`: added 2026-10-02, removed 2026-10-02\./u, "a try only the facts saw");
+	assert.match(output, /Added command `notes\.add`: Add Note \(2026-10-03\)\./u, "the commit's addition, told once");
+	assert.doesNotMatch(execFileSync(process.execPath, ["--import", "tsx", CLI, "history", kept, "--commits-only"], { "encoding": "utf8" }), /notes\.try/u, "--commits-only: the commits alone");
 });
