@@ -8,7 +8,7 @@ import type { ObserveSite } from "@brianjenkins94/tsval";
 import type ts from "typescript";
 import type { SiteObservation } from "./debug-protocol";
 // typeTag alone, not the interpreter: the page runtime bundles this into every preview page.
-import { typeTag } from "../../../tsval/src/values";
+import { typeTag } from "@brianjenkins94/tsval/values";
 
 /** At most this many type tags a site; the rest count as `other`. */
 const MAX_TAGS = 8;
