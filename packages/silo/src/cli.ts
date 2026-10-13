@@ -2,8 +2,8 @@
  * silo — the command line. What a program's code says about it, derived and never kept by hand:
  *
  *   silo init [repo]                                   start keeping .silo/: the baseline, synced with what's installed
- *   silo install [package…] [--min-age 7] [--repo …]   install — nothing newer than a week — and sync the baseline
- *   silo accept <package…> [--repo …]                  accept a version pending in the baseline
+ *   silo install [package…] [--min-age 7] [--project …] install — nothing newer than a week — and sync the baseline
+ *   silo accept <package…> [--project …]               accept a version pending in the baseline
  *   silo features [repo] [--json]                      every way into the program, found in its code
  *   silo history [repo] [--since …] [--until …] [--json] what changed, told from the code's snapshots — not from
  *                [--analyzer auto|oxc|typescript]        commit messages, which are never read; the code read by the
@@ -111,10 +111,32 @@ export async function coverageOf(repo: string, options: { "since"?: string; "unt
 }
 
 const repoArgument = { "format": String, "default": ".", "positional": true, "doc": "A directory in the repository (default: the current one)." } as const;
-const repoFlag = { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." } as const;
+const projectFlag = { "format": String, "default": ".", "doc": "The project — the folder of its package.json (default: the current one); in a monorepo, the package's own." } as const;
 
-/** How a project installs: by its lockfile — pnpm's, yarn's, else npm. */
+/** The project a directory is in: the nearest folder up from it with a package.json (its own install, and its .silo/). */
+function projectOf(directory: string): string {
+	let at = path.resolve(directory);
+
+	while (!fs.existsSync(path.join(at, "package.json"))) {
+		const up = path.dirname(at);
+
+		if (up === at) {
+			throw new Error(`no package.json at or above ${path.resolve(directory)}`);
+		}
+
+		at = up;
+	}
+
+	return at;
+}
+
+/** How a project installs: by its lockfile — npm's first (a project installed with npm here and pnpm in CI has both),
+ *  then pnpm's, then yarn's; npm with none. */
 function packageManagerOf(root: string): "npm" | "pnpm" | "yarn" {
+	if (fs.existsSync(path.join(root, "package-lock.json"))) {
+		return "npm";
+	}
+
 	if (fs.existsSync(path.join(root, "pnpm-lock.yaml"))) {
 		return "pnpm";
 	}
@@ -173,10 +195,11 @@ export const app = subcommands({
 			"config": juvy({
 				"packages": { "format": Array, "default": [], "positional": "rest", "doc": "What to add (none: the project's own dependencies), as the package manager takes them: name, name@range, name@tag." },
 				"min-age": { "format": Number, "default": 7, "doc": "The youngest a version may be, in days." },
-				"repo": repoFlag
+				"project": projectFlag
 			}),
 			"handler": async (config) => {
-				const repo = repoOf(config.get("repo"));
+				// (the project's own folder — in a monorepo, its package — never the repository's root)
+				const repo = projectOf(config.get("project"));
 				const manager = packageManagerOf(repo);
 
 				if (manager === "yarn") {
@@ -226,10 +249,10 @@ export const app = subcommands({
 			"description": "Accept a version pending in the baseline: what its code can do is what's accepted of it now — an approval, to commit.",
 			"config": juvy({
 				"packages": { "format": Array, "default": [], "positional": "rest", "doc": "The packages, by name." },
-				"repo": repoFlag
+				"project": projectFlag
 			}),
 			"handler": async (config) => {
-				const paths = siloPaths(repoOf(config.get("repo")));
+				const paths = siloPaths(projectOf(config.get("project")));
 				const baseline = loadBaseline(paths);
 				const names = config.get("packages") as string[];
 				const none = names.filter((name) => baseline.packages[name]?.pending === undefined);
