@@ -51,7 +51,7 @@ import type { CapabilityChoice } from "../extensions/worker-pod/capability-stops
 
 /** A capability stop's question, as the margin shows it on its line (the run contract's `ask`, its file and text apart). */
 type CapabilityAsk = Omit<AskEvent, "file" | "source">;
-import type { LiveBatch, LiveCall, LiveValue } from "../extensions/worker-pod/live-values";
+import type { LiveBatch, LiveCall, LiveValue } from "@brianjenkins94/run-contract";
 import type { Range } from "./anchors";
 import type { ProfiledLine } from "./coverage";
 import { Anchors } from "./anchors";

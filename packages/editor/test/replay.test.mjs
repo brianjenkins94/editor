@@ -1,11 +1,11 @@
-// Stepping a recorded handler (RUNNING.md): what a recorded call kept, revived (extensions/worker-pod/snapshot.ts), and
+// Stepping a recorded handler (RUNNING.md): what a recorded call kept, revived (run-contract's recorded.ts), and
 // the call run again by tsval (replay-run.ts) — its own code stepped, each call it couldn't make handed its result.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { createVM, runToEnd } from "@brianjenkins94/tsval";
 import { replayGuard, replayProgram } from "../extensions/tsval/replay-run.ts";
-import { encode, revive } from "../extensions/worker-pod/snapshot.ts";
+import { encode, revive } from "@brianjenkins94/run-contract/recorded";
 
 const named = (name) => Object.defineProperty(() => undefined, "name", { "value": name });
 

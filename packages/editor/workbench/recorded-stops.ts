@@ -9,7 +9,7 @@
  */
 import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
-import type { LiveValue } from "../extensions/worker-pod/live-values";
+import type { LiveValue } from "@brianjenkins94/run-contract";
 import type { RecordedStop } from "../previews/page-evidence";
 import { createRpcClient } from "@brianjenkins94/hub";
 

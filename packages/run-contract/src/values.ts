@@ -5,10 +5,10 @@
  *
  * Kept for the session only, in the worker's memory; nothing is written anywhere.
  */
-import type { LiveBatch, LiveCall, LiveValue } from "@brianjenkins94/run-contract";
+import type { LiveBatch, LiveCall, LiveValue } from "./index.ts";
 
 // A value, a call and a batch are the run contract's (@brianjenkins94/run-contract): what any debugger tells the margin.
-export type { LiveBatch, LiveCall, LiveValue } from "@brianjenkins94/run-contract";
+export type { LiveBatch, LiveCall, LiveValue } from "./index.ts";
 
 /** What one trace event says, with its line and its call's function already read off its nodes. */
 export interface Traced extends LiveValue {

@@ -17,9 +17,9 @@
 import type { ObserveSite } from "@brianjenkins94/tsval";
 import type { SiteObservation, StatementCoverage } from "@brianjenkins94/run-contract";
 import { typeTag } from "../../tsval/src/values";
-import { preview } from "../extensions/worker-pod/live-values";
-import type { Encoded } from "../extensions/worker-pod/snapshot";
-import { encode } from "../extensions/worker-pod/snapshot";
+import { preview } from "@brianjenkins94/run-contract/values";
+import type { Encoded } from "@brianjenkins94/run-contract/recorded";
+import { encode } from "@brianjenkins94/run-contract/recorded";
 
 /** What one version of a module observed in a page: its file and version, each statement with its count, each site
  *  that ran — positions in the module's original source. */

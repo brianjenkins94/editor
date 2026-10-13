@@ -4,9 +4,9 @@
  */
 import type ts from "typescript";
 import type { Replay } from "../../previews/page-evidence";
-import type { Encoded } from "../worker-pod/snapshot";
+import type { Encoded } from "@brianjenkins94/run-contract/recorded";
 import { isGuestFunction } from "@brianjenkins94/tsval";
-import { revive } from "../worker-pod/snapshot";
+import { revive } from "@brianjenkins94/run-contract/recorded";
 
 /** The program a replay runs (RUNNING.md: stepping a recorded handler): the recorded version's text with everything but
  *  the function blanked (newlines kept, so every line and column is the file's), the function made the callee of a call

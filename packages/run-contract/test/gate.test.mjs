@@ -1,10 +1,10 @@
 /**
- * The gate (extensions/worker-pod/gate.ts): how a program's call goes by the policy — the rule tsval's interpreter and
+ * The gate (src/gate.ts): how a program's call goes by the policy — the rule tsval's interpreter and
  * the runtime's files (any debugger's) both decide by.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { verdictOf } from "../extensions/worker-pod/gate.ts";
+import { verdictOf } from "../src/gate.ts";
 
 /** A policy of one rule: `action` for `capability` on `resource`. */
 function policyOf(capability, resource, action) {

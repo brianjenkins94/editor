@@ -1,8 +1,8 @@
-// A debug session's live values (extensions/worker-pod/live-values.ts): previews, calls, bounds, replays.
+// A debug session's live values (src/values.ts): previews, calls, bounds, replays.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { LiveRecord, preview } from "../extensions/worker-pod/live-values.ts";
+import { LiveRecord, preview } from "../src/values.ts";
 
 const value = (fields) => ({ "line": 0, "name": "x", "value": "", "kind": "bind", "call": 0, "turns": [], "step": 0, ...fields });
 

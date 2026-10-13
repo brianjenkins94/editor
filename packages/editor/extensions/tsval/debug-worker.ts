@@ -25,7 +25,7 @@ import type { Policy } from "@brianjenkins94/util/silo/policy";
 import { givenResult, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, ToWorker, Variable, WorkerEvent } from "./debug-protocol";
 import type { Effect } from "@brianjenkins94/run-contract";
-import type { Told, Traced } from "../worker-pod/live-values";
+import type { Told, Traced } from "@brianjenkins94/run-contract/values";
 import type { SiteSums } from "./site-sums";
 import type { VirtualRequest } from "../../workers/workspace-runtime";
 
@@ -34,13 +34,13 @@ import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@b
 
 import ts from "typescript";
 import { capabilityBreakLines, classifyCall, shouldBreak } from "../../shared/capabilities/capability-breakpoints";
-import { verdictOf } from "../worker-pod/gate";
+import { verdictOf } from "@brianjenkins94/run-contract/gate";
 import { capabilityStandins, givenAs, inert, standinCapability } from "../../shared/capabilities/canary";
 import { NETWORK_PROBES } from "../../shared/architecture";
-import { LiveRecord } from "../worker-pod/live-values";
+import { LiveRecord } from "@brianjenkins94/run-contract/values";
 import { addObservation, copySums, siteObservations } from "./site-sums";
 import { replayGuard, replayProgram } from "./replay-run";
-import { revive } from "../worker-pod/snapshot";
+import { revive } from "@brianjenkins94/run-contract/recorded";
 
 // This worker's link into the editor's runtime (run-contract's workspace runtime), the port the adapter hands over first
 // thing: a server the program starts answers the preview through it, and its log and spans — a step's, its uncaught

@@ -11,7 +11,7 @@
  */
 import type { CoverageEvent, Effect } from "@brianjenkins94/run-contract";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
-import type { LiveBatch } from "../worker-pod/live-values";
+import type { LiveBatch } from "@brianjenkins94/run-contract";
 import type { Replay } from "../../previews/page-evidence";
 
 // The run contract's own (what a debugger tells the editor), as tsval's worker and adapter speak it too.

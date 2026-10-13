@@ -18,7 +18,7 @@ import { answerMailbox, runtimeSession } from "@brianjenkins94/run-contract/runt
 import * as vscode from "vscode";
 import { recordEffect } from "./capabilities/run-effects";
 import { policyFor, takeOnce } from "./capability-stops";
-import { verdictOf } from "./gate";
+import { verdictOf } from "@brianjenkins94/run-contract/gate";
 
 const READS = new Set(["readFile", "stat", "readdir"]);
 const WRITES = new Set(["writeFile", "mkdir", "rm", "rename"]);
