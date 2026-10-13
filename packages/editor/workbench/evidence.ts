@@ -24,7 +24,7 @@ import type { Bablr } from "./bablr";
 import type { RunRegistry } from "./runs";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
-import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR } from "@brianjenkins94/util/silo/layout";
+import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, withLines } from "@brianjenkins94/util/silo/layout";
 import { blobOid, headCommit } from "./git-engine";
 
 const ROOT = "/workspace";
@@ -130,7 +130,7 @@ function mergeModules(first: ModuleEvidence, second: ModuleEvidence): ModuleEvid
 let siloFiles: Promise<void> | undefined;
 
 /**
- * `.silo/`'s own two files, before anything is written into it: `.gitignore` (silo's GITIGNORE — `local/` stays on this
+ * `.silo/`'s own two files, before anything is written into it: `.gitignore` (silo's GITIGNORE — `/local/` stays on this
  * machine) and `.gitattributes` (silo's GITATTRIBUTES — its JSONL merges by line). Lines already there are kept. Once a
  * session; profile-files.ts calls it too, since a profile can be the first thing saved there.
  */
@@ -139,10 +139,10 @@ export async function ensureSiloFiles(vscode: typeof vscodeApi): Promise<void> {
 		for (const [name, wanted] of [[".gitignore", GITIGNORE], [".gitattributes", GITATTRIBUTES]] as const) {
 			const uri = vscode.Uri.file(`${ROOT}/${SILO_DIR}/${name}`);
 			const existing = await vscode.workspace.fs.readFile(uri).then((bytes) => new TextDecoder().decode(bytes), () => "");
-			const missing = wanted.split("\n").filter((line) => line !== "" && !existing.split(/\r?\n/u).includes(line));
+			const updated = withLines(existing, wanted);
 
-			if (missing.length > 0) {
-				await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode((existing === "" || existing.endsWith("\n") ? existing : existing + "\n") + missing.join("\n") + "\n"));
+			if (updated !== undefined) {
+				await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(updated));
 			}
 		}
 	})().catch(() => { siloFiles = undefined; });
@@ -401,11 +401,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			envelope.effects = effects as Effect[];
 		}
 
-		const path = runsPath(envelope.user);
-		const before = await read(path) ?? new Uint8Array();
-
 		await ensureSiloFiles(vscode);
-		await vscode.workspace.fs.writeFile(uri(path), new Uint8Array([...before, ...new TextEncoder().encode(envelopeLine(envelope))]));
 
 		for (const each of covered ?? []) {
 			await recordFile(envelope, repoRelative(each.file), [each]);
@@ -414,6 +410,13 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		if (preview !== undefined) {
 			await recordPreview(envelope, preview);
 		}
+
+		// The envelope last: a run's line in runs/ means what it observed is written, so a commit that has the one has
+		// the other (coverage over time reads them commit by commit).
+		const path = runsPath(envelope.user);
+		const before = await read(path) ?? new Uint8Array();
+
+		await vscode.workspace.fs.writeFile(uri(path), new Uint8Array([...before, ...new TextEncoder().encode(envelopeLine(envelope))]));
 	};
 
 	runs.onEnd((run) => {
