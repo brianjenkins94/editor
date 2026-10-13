@@ -32,7 +32,8 @@ let session;
 // "not available" — CI's runners, reproduced in Playwright's Linux image): the full Chromium build does, so that's the
 // browser here. And eager: by default a reading resolves only at a garbage collection, and one taken early misses
 // workers started since (TypeScript's servers — 10 realms one time, 16 the next). Eager, it's immediate and has them all.
-before(async () => { session = await startSession({ "chromium": { "channel": "chromium", "args": ["--enable-blink-features=ForceEagerMeasureMemory"] } }); });
+// (`boot: false`: this suite times the boot and the first hover itself, so its session doesn't wait for every realm first.)
+before(async () => { session = await startSession({ "boot": false, "chromium": { "channel": "chromium", "args": ["--enable-blink-features=ForceEagerMeasureMemory"] } }); });
 
 after(async () => {
 	report();

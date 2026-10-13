@@ -18,6 +18,9 @@ import { until } from "@brianjenkins94/util/until";
 
 export const URL_UNDER_TEST = process.env.ARCH_URL ?? "http://localhost:5173/";
 export const TIMEOUT_MS = 120_000;
+/** The realms a booted editor has (the smoke test's `boot`), and how long a session waits for them before giving up. */
+const BOOT_REALMS = ["shell", "root", "sw", "workbench", "pod", "node"];
+const BOOT_TIMEOUT_MS = 90_000;
 /** Where the page's debug-mcp socket (:7378) is relayed to: this checkout's debug-mcp (`debugMcp: true` starts one; with
  *  `debugMcp: "external"` the test runs its own there — e.g. in-process, to read its store). */
 export const DEBUG_MCP_PORT = 7399;
@@ -123,15 +126,25 @@ export async function startSession(options = {}) {
 	await options.prepare?.(context);
 
 	const page = await context.newPage();
+	// What went wrong in the page, kept to say why when the editor doesn't boot (and printed as it happens in CI).
+	const pageErrors = [];
 
-	if (process.env.CI !== undefined) {
-		page.on("pageerror", (error) => { console.error("[page error]", error.message); });
-		page.on("console", (message) => {
-			if (message.type() === "error") {
+	page.on("pageerror", (error) => {
+		pageErrors.push(error.message);
+
+		if (process.env.CI !== undefined) {
+			console.error("[page error]", error.message);
+		}
+	});
+	page.on("console", (message) => {
+		if (message.type() === "error") {
+			pageErrors.push(message.text());
+
+			if (process.env.CI !== undefined) {
 				console.error("[page console]", message.text());
 			}
-		});
-	}
+		}
+	});
 
 	await page.goto(URL_UNDER_TEST);
 
@@ -201,6 +214,33 @@ export async function startSession(options = {}) {
 		await page.keyboard.press("Enter");
 	}
 
+	async function shutdown() {
+		await browser.close();
+
+		for (const child of processes) {
+			try {
+				process.kill(-child.pid);
+			} catch {
+				// already gone
+			}
+		}
+	}
+
+	// Fail fast: a session whose editor didn't boot can pass nothing. Say so once, here — the suite's `before` throws and
+	// its tests fail at once — not in every test's wait: a run whose extensions didn't load sat out each test's
+	// 30–120 s timeout, 23 minutes in all. (`boot: false`: the performance suite, which times the boot itself.)
+	if (options.boot !== false) {
+		try {
+			await observed("the editor's boot", (seen) => BOOT_REALMS.every((id) => alive(id)(seen)), BOOT_TIMEOUT_MS);
+		} catch {
+			const missing = BOOT_REALMS.filter((id) => snapshot === undefined || !alive(id)(snapshot));
+			const errors = [...new Set(pageErrors)].slice(-8);
+
+			await shutdown();
+			throw new Error(`The editor didn't boot in ${BOOT_TIMEOUT_MS / 1000} s: ${missing.join(", ")} never came up.` + (errors.length === 0 ? "" : "\nThe page's errors:\n  " + errors.join("\n  ")));
+		}
+	}
+
 	return {
 		"page": page,
 		"workbench": workbench,
@@ -259,15 +299,7 @@ export async function startSession(options = {}) {
 				fs.writeFileSync(path.join(fs.tmpdir(), name + ".json"), JSON.stringify(snapshot, null, "\t"));
 			}
 
-			await browser.close();
-
-			for (const child of processes) {
-				try {
-					process.kill(-child.pid);
-				} catch {
-					// already gone
-				}
-			}
+			await shutdown();
 		}
 	};
 }
