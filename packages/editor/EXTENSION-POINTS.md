@@ -90,6 +90,11 @@ It gets **synchronous files through core** instead, each call answered by the br
 - **The calls** (`runtime.fs`): `readFile`, `writeFile`, `stat`, `readdir`, `mkdir`, `rm`, `rename` — `/workspace` paths,
   failing as node's do (`ENOENT`, `EACCES`, …). A read is an open editor's text when it's open, else what's on disk; a
   write is the workspace's (so editors, Source Control and watchers see it).
+- **Beside them** (`decide`, `install`): a package's call beyond its baseline decided at the call; and a package the
+  debugger's `require` finds nothing of — the editor serves packages from a CDN, and type acquisition writes only their
+  types — installed into `/workspace/node_modules` at the version the editor pins (`.silo/versions.json`): the bridge
+  asks the workbench (`packages.install`, install.ts), which writes its tarball's files into zen-fs and notes it in
+  `node_modules/.package-lock.json`, as npm does. The run waits, then resolves it again (almostnode's `install` hook).
 - **The gate.** A call is the program's unless it says it's the debugger's own load (`{ load: true }`: the program and
   what it imports, read-only). The program's are decided by the session's policy as tsval decides its own
   (`policyFor(session)`, "this run" answers included): allowed, skipped, or failing with `EACCES`; a live run makes no

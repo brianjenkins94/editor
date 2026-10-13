@@ -601,6 +601,15 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 				throw Object.assign(new Error(`EACCES: ${packageOf(ran.dir)} may not run — the policy bans it`), { "code": "EACCES" });
 			}
 		},
+		// A package nothing in node_modules has (the editor serves packages from a CDN; type acquisition writes only their
+		// types): installed into the workspace by the editor, at the version it pins — the run waits for it.
+		"install": (name) => {
+			try {
+				return editorLink?.install(name) !== undefined;
+			} catch {
+				return false;
+			}
+		},
 		// The program's code gets its stand-ins (`fs`, `child_process`); a package, almostnode's own — its calls counted as its.
 		"builtinFor": (id, requester, from) => {
 			if (requester === "package") {

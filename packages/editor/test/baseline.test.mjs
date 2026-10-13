@@ -9,25 +9,29 @@ import * as path from "node:path";
 import { Readable } from "node:stream";
 import { test } from "node:test";
 import { detect } from "@brianjenkins94/util/silo/detect";
-import { tarballTexts } from "../workbench/baseline.ts";
+import { tarballFiles } from "../workbench/install.ts";
 import { choose, lockedVersions, resolveVersions } from "../workbench/versions.ts";
 
-test("a tarball's code files, long paths included — and what detect makes of them", async () => {
+test("a tarball's files, long paths included — bytes as they are, and what detect makes of its code", async () => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "baseline-"));
 	const deep = "lib/" + "very-long-folder-name-".repeat(5) + "/index.js";
+	const binary = Uint8Array.of(0, 97, 115, 109, 255, 1);
 
 	fs.mkdirSync(path.join(dir, "package", path.dirname(deep)), { "recursive": true });
 	fs.writeFileSync(path.join(dir, "package", "package.json"), "{\"name\":\"probe\",\"version\":\"1.0.0\"}");
 	fs.writeFileSync(path.join(dir, "package", "index.js"), "module.exports = () => require('child_process').execSync('ls');\n");
 	fs.writeFileSync(path.join(dir, "package", deep), "module.exports = () => fetch('https://example.com');\n");
 	fs.writeFileSync(path.join(dir, "package", "README.md"), "fetch('https://not.code');\n");
+	fs.writeFileSync(path.join(dir, "package", "probe.wasm"), binary);
 	// (COPYFILE_DISABLE: macOS's tar would add its ._ metadata files, which no published tarball has)
 	execFileSync("tar", ["czf", "probe.tgz", "package"], { "cwd": dir, "env": { ...process.env, "COPYFILE_DISABLE": "1" } });
 
-	const texts = await tarballTexts(Readable.toWeb(fs.createReadStream(path.join(dir, "probe.tgz"))));
+	const files = await tarballFiles(Readable.toWeb(fs.createReadStream(path.join(dir, "probe.tgz"))));
+	const code = [...files].filter(([file]) => file.endsWith(".js"));
 
-	assert.deepEqual([...texts.keys()].toSorted(), ["package/index.js", "package/" + deep], "the code files, by their whole path");
-	assert.deepEqual([...new Set([...texts.values()].flatMap((text) => detect(text)))].toSorted(), ["exec", "net"]);
+	assert.deepEqual([...files.keys()].toSorted(), ["README.md", "index.js", deep, "package.json", "probe.wasm"].toSorted(), "every file, by its path in the package");
+	assert.deepEqual(files.get("probe.wasm"), binary);
+	assert.deepEqual([...new Set(code.flatMap(([, bytes]) => detect(new TextDecoder().decode(bytes))))].toSorted(), ["exec", "net"]);
 });
 
 test("a lockfile's packages: each name once, root before nested, links left out", () => {

@@ -18,6 +18,7 @@ import type { AcceptedPackages } from "@brianjenkins94/util/silo/evidence";
 import type * as vscodeApi from "vscode";
 import { detect } from "@brianjenkins94/util/silo/detect";
 import { syncPackages } from "@brianjenkins94/util/silo/evidence";
+import { packageFiles, refreshInstalled } from "./install";
 import { syncVersions } from "./versions";
 import { baselinePath } from "@brianjenkins94/util/silo/layout";
 
@@ -30,60 +31,16 @@ interface Wanted { "name": string; "version": string; "tarball"?: string }
 /** How many packages are fetched and read at once. */
 const PARALLEL = 4;
 
-/** A tarball's code files, by path (under `package/`): what detect reads. */
+/** A tarball's code files: what detect reads. */
 const CODE = /\.[cm]?js$/u;
-
-/** The code files' texts in a .tgz: gunzipped, then its tar entries read (ustar, with pax and GNU long names). */
-export async function tarballTexts(gzipped: ReadableStream<Uint8Array>, wanted: (path: string) => boolean = (path) => CODE.test(path)): Promise<Map<string, string>> {
-	// (bytes in, bytes out — the DOM types' BufferSource writable side doesn't take a Uint8Array stream's chunks as one)
-	const bytes = new Uint8Array(await new Response(gzipped.pipeThrough(new DecompressionStream("gzip") as unknown as ReadableWritablePair<Uint8Array, Uint8Array>)).arrayBuffer());
-	const decoder = new TextDecoder();
-	const field = (at: number, length: number): string => decoder.decode(bytes.subarray(at, at + length)).replace(/\0[\s\S]*$/u, "");
-	const texts = new Map<string, string>();
-	let longName: string | undefined;
-
-	for (let at = 0; at + 512 <= bytes.length;) {
-		const name = field(at, 100);
-
-		if (name === "") {
-			break; // the two empty blocks that end it
-		}
-
-		const size = Number.parseInt(field(at + 124, 12).trim() || "0", 8);
-		const type = field(at + 156, 1);
-		const prefix = field(at + 345, 155);
-		const body = bytes.subarray(at + 512, at + 512 + size);
-		const path = longName ?? (prefix === "" ? name : `${prefix}/${name}`);
-
-		longName = undefined;
-
-		if (type === "x") {
-			longName = /(?:^|\n)\d+ path=([^\n]*)\n/u.exec(decoder.decode(body))?.[1];
-		} else if (type === "L") {
-			longName = decoder.decode(body).replace(/\0[\s\S]*$/u, "");
-		} else if ((type === "0" || type === "") && wanted(path)) {
-			texts.set(path, decoder.decode(body));
-		}
-
-		at += 512 + Math.ceil(size / 512) * 512;
-	}
-
-	return texts;
-}
 
 /** What `name`@`version`'s own code can do: detect over each of its tarball's code files. */
 async function capsOf(name: string, version: string, tarball?: string): Promise<string[]> {
-	const url = tarball ?? `https://registry.npmjs.org/${name}/-/${name.slice(name.lastIndexOf("/") + 1)}-${version}.tgz`;
-	const response = await fetch(url);
-
-	if (!response.ok || response.body === null) {
-		throw new Error(`${name}@${version}: ${response.status} from ${url}`);
-	}
-
 	const caps = new Set<string>();
+	const decoder = new TextDecoder();
 
-	for (const text of (await tarballTexts(response.body)).values()) {
-		for (const cap of detect(text)) {
+	for (const bytes of (await packageFiles(name, version, tarball, (path) => CODE.test(path))).values()) {
+		for (const cap of detect(decoder.decode(bytes))) {
 			caps.add(cap);
 		}
 	}
@@ -177,12 +134,16 @@ export function syncBaseline(vscode: typeof vscodeApi, make = true, root = "/wor
 
 /** Keep the versions (versions.ts) and `.silo/baseline.json` up to the project's dependencies: both resolved again as a
  *  package.json or package-lock.json changes — the baseline when there's one (the first run that keeps evidence makes
- *  it) — and the versions now, so a preview started before any run pins them. */
+ *  it), and what's installed (install.ts) at its new version — and the versions now, so a preview started before any run
+ *  pins them. */
 export function watchBaseline(vscode: typeof vscodeApi): vscodeApi.Disposable {
 	const watcher = vscode.workspace.createFileSystemWatcher("**/{package.json,package-lock.json}");
 	const changed = (uri: vscodeApi.Uri): void => {
 		if (!uri.path.includes("/node_modules/")) {
-			void syncVersions(vscode).then(async () => syncBaseline(vscode, false));
+			void syncVersions(vscode).then(async (versions) => {
+				await refreshInstalled(vscode, versions);
+				await syncBaseline(vscode, false);
+			});
 		}
 	};
 

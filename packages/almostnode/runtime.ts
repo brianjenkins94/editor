@@ -264,6 +264,9 @@ export interface RuntimeOptions {
   // Told once per package whose code runs, as its first module is evaluated: its name and version (its package.json's;
   // the folder's name when it has none) and its folder — for a host to record which versions a run ran.
 	"onPackage"?: (pkg: LoadedPackage) => void;
+  // A package nothing in node_modules resolves (a bare specifier's, scope included), for a host that can install it to,
+  // synchronously: true when it did — the specifier is then resolved again, once.
+	"install"?: (name: string, fromDir: string) => boolean;
 }
 
 /** A package whose code ran: what its package.json says it is, and where it's installed. */
@@ -532,7 +535,7 @@ function createRequire(
 		}
 	};
 
-	const resolveModule = (id: string, fromDir: string): string => {
+	const resolveModule = (id: string, fromDir: string, installed = false): string => {
     // Handle node: protocol prefix (Node.js 16+)
 		if (id.startsWith("node:")) {
 			id = id.slice(5);
@@ -788,6 +791,16 @@ function createRequire(
 			resolutionCache.set(cacheKey, rootResolved);
 
 			return rootResolved;
+		}
+
+		// Nothing installed it: the host's to install, then resolved again (its package.json read afresh).
+		const parts = id.split("/");
+		const name = parts[0].startsWith("@") && parts.length > 1 ? `${parts[0]}/${parts[1]}` : parts[0];
+
+		if (!installed && options.install?.(name, fromDir) === true) {
+			packageJsonCache.clear();
+
+			return resolveModule(id, fromDir, true);
 		}
 
 		resolutionCache.set(cacheKey, null);

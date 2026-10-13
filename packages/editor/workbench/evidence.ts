@@ -27,6 +27,7 @@ import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, fo
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, withLines } from "@brianjenkins94/util/silo/layout";
 import { Unparsable } from "./bablr";
 import { syncBaseline, watchBaseline } from "./baseline";
+import { installPackage } from "./install";
 import { blobOid, headCommit } from "./git-engine";
 
 const ROOT = "/workspace";
@@ -166,6 +167,12 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 
 	// The dependency baseline, kept up to the dependencies as they change (made by the first run that keeps evidence).
 	watchBaseline(vscode);
+	// A package a debug run's require found nothing of, installed at its pinned version (the bridge asks, for the run).
+	serve(hub, "packages.install", async (args) => {
+		const { name } = (args ?? {}) as { "name"?: unknown };
+
+		return { "version": typeof name === "string" ? await installPackage(vscode, name) : undefined };
+	});
 	// How much a preview's dev server instruments (`silo.evidence.previews`), asked as each preview starts.
 	serve(hub, "evidence.level", () => vscode.workspace.getConfiguration("silo.evidence").get<string>("previews") ?? "full");
 	// Each run's coverage, until the run ends (the session's coverage comes just before its end): its entry's, and each

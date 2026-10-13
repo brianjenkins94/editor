@@ -14,7 +14,7 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { Observed } from "@brianjenkins94/observability";
 import type { Effect } from "@brianjenkins94/run-contract";
 import type { RuntimeDecision } from "@brianjenkins94/run-contract/runtime";
-import { serve } from "@brianjenkins94/hub";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { verdictOf } from "@brianjenkins94/run-contract/gate";
 import { answerMailbox, runtimeSession } from "@brianjenkins94/run-contract/runtime";
 import * as vscode from "vscode";
@@ -110,6 +110,7 @@ function skipped(op: string): Answer {
 
 /** Answer each debugger worker's file calls, once it hands over its mailbox (`runtime.fs.attach`). */
 export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, log: Observed["log"]): void {
+	const rpc = createRpcClient(hub);
 	const sessions = new Map<string, vscode.DebugSession>();
 	/** Each session's mailboxes, stopped as it ends. */
 	const stops = new Map<string, (() => void)[]>();
@@ -148,6 +149,12 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 
 			return { "meta": await decideCapabilityAs({ "kind": call.kind, ...call.method === undefined ? {} : { "method": call.method }, ...call.op === undefined ? {} : { "op": call.op }, "args": call.args, "package": call.package, ...typeof runId === "string" ? { "runId": runId } : {} }) as unknown as Record<string, unknown> };
 		}
+
+		// A package the debugger's require found nothing of: installed by the workbench (install.ts) at its pinned version.
+		if (op === "install") {
+			return { "meta": await rpc.request("packages.install", { "name": meta["name"] }, { "timeoutMs": 300_000, "waitForResponderMs": 30_000 }) as Record<string, unknown> };
+		}
+
 		const path = workspacePath(meta["path"]);
 
 		if (!READS.has(op) && !WRITES.has(op)) {

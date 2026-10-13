@@ -549,6 +549,7 @@ flowchart LR
 | Workbench | margin | `margin.state()` |
 | Workbench | node | `node.exit.*`, `node.listening.*`, `node.out.*` |
 | Workbench | notifications | `notifications.list()` |
+| Workbench | packages | `packages.install()` |
 | Workbench | preview | `preview.close`, `preview.hmr.*`, `preview.profiled` |
 | Workbench | problems | `problems.list()` |
 | Workbench | production | `production.stop.*` |
