@@ -177,7 +177,7 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 	});
 
 	assert.doesNotMatch(exclude, /^\.silo\/$/mu, "the runs and their evidence go in git");
-	assert.match(ignore, /^local\/$/mu, "what stays on the machine");
+	assert.match(ignore, /^\/local\/$/mu, "what stays on the machine — anchored, so evidence/local/ (a user named local) is kept");
 
 	// BABLR's work, kept by content on this machine: f5.js's parse, in the BABLR worker's own IndexedDB (not the
 	// workspace), keyed by parse version and blob oid — and nothing left of the caches earlier builds kept in the workspace.
