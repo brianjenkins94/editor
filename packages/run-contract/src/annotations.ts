@@ -5,12 +5,19 @@
  * call:
  *
  * - `spans(source)`: the spans of a text an annotation can attach to — each one's id (a content-addressed hash, so it
- *   survives edits around it and moves with its code) and offsets; punctuation left out. `undefined` when BABLR's grammar
- *   doesn't take the text.
+ *   survives edits around it and moves with its code) and offsets; punctuation left out.
  * - `refer(source, file, ranges)`: a reference to the span standing for each `[start, end)` range of `source` — what an
  *   annotation keeps (silo's `SpanRef`: the span's id, its shape and neighbours, the commit it was made against).
- *   `undefined` where BABLR can't place a range, or can't parse the text.
+ *   `undefined` for a range no span stands for.
  * - `resolve(source, file, refs, options)`: where each reference's span is in `source` now, in the order given.
+ *
+ * Each answers an `Answer`, one of three — tell them apart, because they mean different things to an annotation:
+ *
+ * - `{ value }`: the answer;
+ * - `{ unparsable }`: BABLR's grammar doesn't take the text as it is (why) — often a file mid-edit. Nothing can be
+ *   placed or found in it, but nothing is lost either: keep what's placed where it last was, and look again when the
+ *   text changes. (The editor already says so, on the file, in the Problems view.)
+ * - `{ unavailable }`: there's no editor BABLR to ask (why): no bridge, as on a desktop build today, or it failed.
  *
  * Batch them: one call for every range or reference in a text, not one each — each call is a round trip to the worker.
  *
@@ -30,8 +37,6 @@
  * (an edit history), each followed the same way. `options.observed` is for references to what ran (runtime evidence):
  * found by their id alone — one that's lost fades rather than being looked for. `options.types` — by span id, its
  * TypeScript type and the types seen at run time — lets a match prefer spans of the same type.
- *
- * Without the editor (no the bridge, as on a desktop build today) each call answers `undefined`.
  */
 
 import type { Resolution, SpanRef } from "@brianjenkins94/util/silo/annotations";
@@ -47,16 +52,32 @@ export type Resolved = Resolution & { "ref"?: SpanRef };
 /** How `resolve` looks (see above). */
 export interface ResolveOptions { "observed"?: boolean; "types"?: Record<string, { "inferred"?: string; "observed"?: string[] }>; "texts"?: string[] }
 
+/** What a call answers (see above): the answer, or why there's none — the text can't be parsed, or there's no BABLR. */
+export type Answer<T> = { "value": T } | { "unparsable": string } | { "unavailable": string };
+
 /** What runs the commands: an extension's `vscode.commands`. */
 export interface Commands { "executeCommand": <T>(command: string, ...rest: unknown[]) => PromiseLike<T> }
 
-/** The editor's span annotations, through `commands` (an extension's `vscode.commands`). */
+/** The editor's span annotations, through `commands` (an extension's `vscode.commands`). The bridge's commands answer
+ *  `{ value }` or `{ unparsable }`; a command that's missing, fails or answers anything else is `{ unavailable }`. */
 export function annotations(commands: Commands) {
-	const run = async <T>(command: string, ...rest: unknown[]): Promise<T | undefined> => Promise.resolve(commands.executeCommand<T | undefined>(command, ...rest)).catch(() => undefined);
+	const run = async <T>(command: string, ...rest: unknown[]): Promise<Answer<T>> => {
+		try {
+			const answer = await commands.executeCommand<unknown>(command, ...rest);
+
+			if (answer !== null && typeof answer === "object" && ("value" in answer || (("unparsable" in answer) && typeof answer.unparsable === "string"))) {
+				return answer as Answer<T>;
+			}
+
+			return { "unavailable": `${command} answered nothing usable` };
+		} catch (error) {
+			return { "unavailable": error instanceof Error ? error.message : `${command} failed` };
+		}
+	};
 
 	return {
-		"spans": async (source: string): Promise<Span[] | undefined> => run<Span[]>("editor.annotations.spans", source),
-		"refer": async (source: string, file: string, ranges: { "start": number; "end": number }[]): Promise<(SpanRef | undefined)[] | undefined> => (ranges.length === 0 ? [] : run<(SpanRef | undefined)[]>("editor.annotations.refer", source, file, ranges)),
-		"resolve": async (source: string, file: string, refs: SpanRef[], options: ResolveOptions = {}): Promise<Resolved[] | undefined> => (refs.length === 0 ? [] : run<Resolved[]>("editor.annotations.resolve", source, file, refs, options))
+		"spans": async (source: string): Promise<Answer<Span[]>> => (source === "" ? { "value": [] } : run<Span[]>("editor.annotations.spans", source)),
+		"refer": async (source: string, file: string, ranges: { "start": number; "end": number }[]): Promise<Answer<(SpanRef | undefined)[]>> => (ranges.length === 0 ? { "value": [] } : run<(SpanRef | undefined)[]>("editor.annotations.refer", source, file, ranges)),
+		"resolve": async (source: string, file: string, refs: SpanRef[], options: ResolveOptions = {}): Promise<Answer<Resolved[]>> => (refs.length === 0 ? { "value": [] } : run<Resolved[]>("editor.annotations.resolve", source, file, refs, options))
 	};
 }

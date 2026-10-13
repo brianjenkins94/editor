@@ -112,40 +112,34 @@ export class Anchors {
 			const referred = annotations(this.vscode.commands).refer(this.source, this.file, unseen.map(([start, end]) => ({ "start": start, "end": end })));
 
 			for (const [index, [start, end]] of unseen.entries()) {
-				this.refs.set(`${start}:${end}`, referred.then((all) => all?.[index]));
+				this.refs.set(`${start}:${end}`, referred.then((answer) => ("value" in answer ? answer.value[index] : undefined)));
 			}
 		}
 
 		const refs = await Promise.all(ranges.map(([start, end]) => this.refs.get(`${start}:${end}`)));
 		// Only the ranges BABLR found a span for are looked for (one it couldn't — a file its grammar doesn't take — is gone).
 		const known = refs.flatMap((ref, index) => (ref === undefined ? [] : [index]));
-		const found = await annotations(this.vscode.commands).resolve(text, this.file, known.map((index) => refs[index]), { "observed": true });
+		const answer = await annotations(this.vscode.commands).resolve(text, this.file, known.map((index) => refs[index]), { "observed": true });
+
+		// The text as it is doesn't parse (typing paused mid-statement): follow the lines around the edit instead.
+		if ("unparsable" in answer) {
+			const map = lineMap(this.source, text);
+
+			return ranges.map(([start]) => map(lineOf(this.sourceStarts, start)));
+		}
+
+		const found = "value" in answer ? answer.value : [];
 		const starts = lineStarts(text);
 		const lines: (number | undefined)[] = ranges.map(() => undefined);
 
 		for (const [position, index] of known.entries()) {
-			const at = found?.[position]?.candidate;
+			const at = found[position]?.candidate;
 
 			if (at?.start !== undefined && (at.file === undefined || at.file === this.file)) {
 				lines[index] = lineOf(starts, at.start);
 			}
 		}
 
-		// Nothing found: its code gone — or the text doesn't parse yet (typing paused mid-statement), which BABLR says by
-		// referring to nothing in it (its parse cached, as resolve's). Then follow the lines around the edit instead.
-		if (known.length > 0 && lines.every((line) => line === undefined) && !await this.parses(text)) {
-			const map = lineMap(this.source, text);
-
-			return ranges.map(([start]) => map(lineOf(this.sourceStarts, start)));
-		}
-
 		return lines;
-	}
-
-	/** Whether BABLR reads `text` as code: only then does the whole of it refer to a span (its Program). */
-	private async parses(text: string): Promise<boolean> {
-		const [whole] = await annotations(this.vscode.commands).refer(text, this.file, [{ "start": 0, "end": text.length }]) ?? [];
-
-		return whole !== undefined && whole !== null;
 	}
 }

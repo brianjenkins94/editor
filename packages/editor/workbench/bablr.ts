@@ -56,12 +56,12 @@ export interface Bablr {
 	 *  replaced it — or undefined, gone. How a span annotation is re-placed from its baseline (SPAN-ANNOTATIONS.md). */
 	"follow": (baseline: string, current: string, span: string) => Promise<{ "id": string; "how": "kept" | "replaced" } | undefined>;
 	/** A reference to the span standing for each of `ranges` in `source`, the text of `file` — what an annotation keeps;
-	 *  undefined for one BABLR can't place, all of them when it can't parse the text. */
+	 *  undefined for one BABLR can't place. Throws Unparsable when it can't parse the text. */
 	"refer": (source: string, file: string, ranges: { "start": number; "end": number }[]) => Promise<(SpanRef | undefined)[]>;
 	/** Where each of `refs`' spans is in `source`, the text their file has now (SPAN-ANNOTATIONS.md) — and the reference
 	 *  as it would be made there now, for one found other than by its own id. An authored annotation whose id is gone
 	 *  is looked for in the other changed files (moved) and re-identified from its baseline, from git's objects; an
-	 *  `observed` one is looked for by its id, in its own file, alone. */
+	 *  `observed` one is looked for by its id, in its own file, alone. Throws Unparsable when BABLR can't parse `source`. */
 	"resolve": (source: string, file: string, refs: SpanRef[], options?: ResolveOptions) => Promise<Resolved[]>;
 	/** The span id standing for each of `ranges` in `source` (bablr-language-ts's pickAnchor), from its cached spans —
 	 *  or, `exact`, the span whose range is exactly the range (the node itself, when several are), and none when no
@@ -215,6 +215,10 @@ export function startBablr(hub: Hub): Bablr {
 			report(file, unparsable);
 		}
 
+		if (unparsable !== undefined) {
+			throw new Unparsable(unparsable);
+		}
+
 		return ranges.map((_, index) => refs?.[index] ?? undefined);
 	};
 
@@ -227,7 +231,7 @@ export function startBablr(hub: Hub): Bablr {
 		}
 
 		if (answer.unparsable !== undefined) {
-			return first;
+			throw new Unparsable(answer.unparsable);
 		}
 
 		// An authored one its own id didn't find is looked for further: in the other files that differ from HEAD (code
@@ -264,25 +268,51 @@ export function startBablr(hub: Hub): Bablr {
 		return first;
 	};
 
+	/** What the bridge's `editor.annotations.*` commands answer (run-contract's Answer): the value, or — the text can't
+	 *  be parsed — why. Anything else that goes wrong rejects (the command's caller hears `unavailable`). */
+	const answer = async <T>(ask: () => Promise<T>): Promise<{ "value": T } | { "unparsable": string }> => {
+		try {
+			return { "value": await ask() };
+		} catch (error) {
+			if (error instanceof Unparsable) {
+				return { "unparsable": error.message };
+			}
+
+			throw error;
+		}
+	};
+
 	// The pod's `editor.annotations.spans`, `editor.annotations.refer` and `editor.annotations.resolve` (for extensions)
 	// ask here, so they share the worker and its cache.
 	const offServe = [
 		serve(hub, "annotations.spans", async (args) => {
 			const { source } = (args ?? {}) as { "source"?: unknown };
 
-			return typeof source === "string" && source !== "" ? { "spans": await spans(source).catch(() => null) } : { "spans": null };
+			if (typeof source !== "string") {
+				throw new TypeError("annotations.spans: a source to parse");
+			}
+
+			return answer(async () => spans(source));
 		}),
 		serve(hub, "annotations.refer", async (args) => {
 			const { source, file, ranges } = (args ?? {}) as { "source"?: unknown; "file"?: unknown; "ranges"?: unknown };
 
-			return typeof source === "string" && typeof file === "string" && Array.isArray(ranges) ? { "refs": (await refer(source, file, ranges as { "start": number; "end": number }[])).map((ref) => ref ?? null) } : {};
+			if (typeof source !== "string" || typeof file !== "string" || !Array.isArray(ranges)) {
+				throw new TypeError("annotations.refer: a source, its file and ranges in it");
+			}
+
+			return answer(async () => (await refer(source, file, ranges as { "start": number; "end": number }[])).map((ref) => ref ?? null));
 		}),
 		serve(hub, "annotations.resolve", async (args) => {
 			const { source, file, refs, observed, types, texts } = (args ?? {}) as { "source"?: unknown; "file"?: unknown; "refs"?: unknown; "observed"?: unknown; "types"?: unknown; "texts"?: unknown };
 			const known = types !== null && typeof types === "object" ? types as ResolveOptions["types"] : undefined;
 			const before = Array.isArray(texts) ? texts.filter((text): text is string => typeof text === "string") : [];
 
-			return typeof source === "string" && typeof file === "string" && Array.isArray(refs) ? { "resolutions": await resolveRefs(source, file, refs as SpanRef[], { "observed": observed === true, "types": known, "texts": before }) } : {};
+			if (typeof source !== "string" || typeof file !== "string" || !Array.isArray(refs)) {
+				throw new TypeError("annotations.resolve: a source, its file and references");
+			}
+
+			return answer(async () => resolveRefs(source, file, refs as SpanRef[], { "observed": observed === true, "types": known, "texts": before }));
 		})
 	];
 

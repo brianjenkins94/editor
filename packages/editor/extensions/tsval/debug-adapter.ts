@@ -490,10 +490,12 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				return [];
 			}
 
-			const found = await annotations(vscode.commands).resolve(source, file, placed.map(({ place }) => place as SpanRef));
+			// (a file BABLR can't parse as it is: its rules' places can't be told, so none hooks — the bridge says why, on it)
+			const answer = await annotations(vscode.commands).resolve(source, file, placed.map(({ place }) => place as SpanRef));
+			const found = "value" in answer ? answer.value : [];
 
 			return placed.flatMap(({ rule, place }, index): SetHook[] => {
-				const resolution = found?.[index];
+				const resolution = found[index];
 				const start = resolution?.candidate?.start;
 
 				if (start === undefined || resolution?.status === "orphaned" || resolution?.status === "uncertain" || (resolution?.candidate?.file !== undefined && resolution.candidate.file !== file)) {

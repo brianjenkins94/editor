@@ -135,7 +135,12 @@ function recognizer(context: vscode.ExtensionContext): { "project": (root: strin
 
 			// Durable span references, from the editor's BABLR (one worker, one cache of parses): the bridge's command,
 			// each file named as the workspace does. Without it (VS Code without the editor), the nodes go unanchored.
-			return anchorGame(files, model, async (source, path, ranges) => annotations(vscode.commands).refer(source, vscode.workspace.asRelativePath(vscode.Uri.file(root + "/" + path), false), ranges));
+			// (a file BABLR can't parse as it is leaves its nodes unanchored — the bridge says why, on the file)
+			return anchorGame(files, model, async (source, path, ranges) => {
+				const answer = await annotations(vscode.commands).refer(source, vscode.workspace.asRelativePath(vscode.Uri.file(root + "/" + path), false), ranges);
+
+				return "value" in answer ? answer.value : undefined;
+			});
 		},
 		"dispose": () => { worker?.worker.terminate(); }
 	};

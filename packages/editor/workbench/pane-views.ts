@@ -74,7 +74,9 @@ async function placeAll(document: vscodeApi.TextDocument, ats: PaneAt[]): Promis
 	const refs = ats.flatMap((at, index) => ("ref" in at ? [{ "index": index, "ref": at.ref }] : []));
 
 	if (refs.length > 0) {
-		const found = await annotations(vscode.commands).resolve(text, file, refs.map(({ ref }) => ref)) ?? [];
+		// (none when the text can't be parsed as it is, or there's no BABLR: not drawn this time — the next draw looks again)
+		const answer = await annotations(vscode.commands).resolve(text, file, refs.map(({ ref }) => ref));
+		const found = "value" in answer ? answer.value : [];
 
 		refs.forEach(({ index }, at) => {
 			const candidate = found[at]?.status === "orphaned" ? undefined : found[at]?.candidate;

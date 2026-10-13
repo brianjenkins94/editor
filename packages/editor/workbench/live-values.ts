@@ -653,10 +653,20 @@ function placeVerdictText(covers: boolean, names: string[]): string {
 async function openVariableMock(uri: string, row: Row, name: string, session: Session, close: () => void): Promise<HTMLElement> {
 	const policy = await import("@brianjenkins94/util/silo/policy");
 	const program = api?.workspace.asRelativePath(api.Uri.parse(uri), false) ?? "";
-	const [place] = api === undefined ? [] : await annotations(api.commands).refer(session.anchors.text, program, [{ "start": row.at[0], "end": row.at[1] }]) ?? [];
+	const answer = api === undefined ? { "unavailable": "no editor here" } : await annotations(api.commands).refer(session.anchors.text, program, [{ "start": row.at[0], "end": row.at[1] }]);
+
+	if ("unparsable" in answer) {
+		throw new Error(`This line can't be placed: the code that ran can't be parsed (${answer.unparsable})`);
+	}
+
+	if ("unavailable" in answer) {
+		throw new Error(`This line can't be placed: the editor's BABLR isn't available (${answer.unavailable})`);
+	}
+
+	const [place] = answer.value;
 
 	if (place === undefined || place === null) {
-		throw new Error("This line can't be placed: BABLR doesn't read this file");
+		throw new Error("This line can't be placed: nothing on it a rule can stand at");
 	}
 
 	// The variables the run saw, each by its latest value: targets to test, and to set.

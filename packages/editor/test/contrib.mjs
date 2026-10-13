@@ -126,8 +126,14 @@ test("an agent's run of editor-contrib's interpreter answers with how it ended",
 });
 
 test("editor.annotations.spans gives an extension the editor's spans for a text", async () => {
-	const spans = await session.workbench().evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.annotations.spans", "const greeting = \"hello\";\n"));
+	const answer = await session.workbench().evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.annotations.spans", "const greeting = \"hello\";\n"));
+	const spans = answer?.value;
 
 	assert.ok(Array.isArray(spans) && spans.length > 0, "the text's spans");
 	assert.ok(spans.every((span) => typeof span.id === "string" && span.start <= span.end), "each one's id and offsets");
+
+	// A text the grammar doesn't take as it is: why — never a bare undefined.
+	const broken = await session.workbench().evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.annotations.spans", "do x++\n"));
+
+	assert.equal(typeof broken?.unparsable, "string", "why it can't be parsed");
 });

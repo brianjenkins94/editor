@@ -69,8 +69,11 @@ The editor parses code with BABLR (its TypeScript grammar), and keeps every text
 for a text's spans — the CST nodes an annotation can attach to:
 
 ```ts
-const spans = await vscode.commands.executeCommand("editor.annotations.spans", source);
-// [{ id, start, end }, …] — or undefined when the grammar doesn't take the text
+import { annotations } from "@brianjenkins94/run-contract/annotations";
+
+const answer = await annotations(vscode.commands).spans(source);
+// { value: [{ id, start, end }, …] } — or { unparsable: why } when the grammar doesn't take the text as it is (mid-edit,
+// often: nothing's lost), or { unavailable: why } when there's no editor BABLR to ask
 ```
 
 Each `id` is the node's Merkle hash (its type over its tokens' text and its children's hashes, whitespace and comments

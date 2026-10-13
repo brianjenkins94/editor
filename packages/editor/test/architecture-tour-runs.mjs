@@ -215,8 +215,8 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 	// its id alone (as the evidence marks are found).
 	const { ref, found } = await session.workbench().evaluate(async () => {
 		const { commands } = globalThis.__editor.api;
-		const [made] = await commands.executeCommand("editor.annotations.refer", "console.log('f5');\n", "f5.js", [{ "start": 0, "end": 18 }]);
-		const [where] = await commands.executeCommand("editor.annotations.resolve", "// above\nconsole.log('f5');\n", "f5.js", [made], { "observed": true });
+		const [made] = (await commands.executeCommand("editor.annotations.refer", "console.log('f5');\n", "f5.js", [{ "start": 0, "end": 18 }])).value;
+		const [where] = (await commands.executeCommand("editor.annotations.resolve", "// above\nconsole.log('f5');\n", "f5.js", [made], { "observed": true })).value;
 
 		return { "ref": made, "found": where };
 	});

@@ -209,6 +209,21 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	};
 
+	/** A reference to the code selected in `editor` (`file`'s) — or, when a note can't attach there, why: to tell. */
+	const referSelection = async (editor: vscode.TextEditor, file: string): Promise<SpanRef | string> => {
+		const answer = await annotations(vscode.commands).refer(editor.document.getText(), file, [{ "start": editor.document.offsetAt(editor.selection.start), "end": editor.document.offsetAt(editor.selection.end) }]);
+
+		if ("unparsable" in answer) {
+			return `A note can't attach here: this file can't be parsed as it is (${answer.unparsable}).`;
+		}
+
+		if ("unavailable" in answer) {
+			return `A note can't attach here: the editor's BABLR isn't available (${answer.unavailable}).`;
+		}
+
+		return answer.value[0] ?? "A note can't attach here: there's no code at the selection it can stand on — select a statement or expression.";
+	};
+
 	/** Resolve every note on `document` against its text now, and show each where it landed. */
 	const show = async (document: vscode.TextDocument): Promise<void> => {
 		if (document.uri.scheme !== "file" || !CODE_FILE.test(document.uri.path)) {
@@ -219,8 +234,21 @@ export function activate(context: vscode.ExtensionContext): void {
 		const { version } = document;
 		const source = document.getText();
 		const notes = (await notesOn(file)).filter(({ note }) => note.dismissed !== true);
-		const resolve = async (refs: SpanRef[], types?: Record<string, { "inferred"?: string; "observed"?: string[] }>): Promise<Resolved[] | undefined> => annotations(vscode.commands).resolve(source, file, refs, types === undefined ? {} : { "types": types });
-		const resolutions = await resolve(notes.map(({ note }) => note.ref)) ?? [];
+		const resolve = async (refs: SpanRef[], types?: Record<string, { "inferred"?: string; "observed"?: string[] }>): Promise<Resolved[] | undefined> => {
+			const answer = await annotations(vscode.commands).resolve(source, file, refs, types === undefined ? {} : { "types": types });
+
+			return "value" in answer ? answer.value : undefined;
+		};
+
+		const first = await resolve(notes.map(({ note }) => note.ref));
+
+		// Where the notes are can't be told now — the text can't be parsed as it is (mid-edit, often: the bridge says so,
+		// on the file), or there's no BABLR — which isn't their being lost: they stay where they're shown.
+		if (first === undefined) {
+			return;
+		}
+
+		const resolutions: (Resolved | undefined)[] = first;
 		// A note found only by its shape (asked about, or lost) that knows what its span was — its type, the kinds of value
 		// runs saw there — is looked for again with the same of the places it might be: the typed strategy lifts the one
 		// that matches, and lowers the ones that don't.
@@ -320,10 +348,10 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 
 			const file = relative(editor.document.uri);
-			const [ref] = await annotations(vscode.commands).refer(editor.document.getText(), file, [{ "start": editor.document.offsetAt(editor.selection.start), "end": editor.document.offsetAt(editor.selection.end) }]) ?? [];
+			const ref = await referSelection(editor, file);
 
-			if (ref === undefined) {
-				void vscode.window.showInformationMessage("A note needs BABLR to understand this file, and it can't parse it yet.");
+			if (typeof ref === "string") {
+				void vscode.window.showInformationMessage(ref);
 
 				return undefined;
 			}
@@ -374,9 +402,11 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 
 			const file = relative(editor.document.uri);
-			const [ref] = await annotations(vscode.commands).refer(editor.document.getText(), file, [{ "start": editor.document.offsetAt(editor.selection.start), "end": editor.document.offsetAt(editor.selection.end) }]) ?? [];
+			const ref = await referSelection(editor, file);
 
-			if (ref !== undefined) {
+			if (typeof ref === "string") {
+				void vscode.window.showInformationMessage(ref);
+			} else {
 				const { note } = pending;
 
 				// Placed in another file: it leaves the old file's notes (a tombstone there) and joins this one's.

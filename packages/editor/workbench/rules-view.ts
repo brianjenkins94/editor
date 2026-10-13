@@ -27,7 +27,7 @@ import { callRule, callVerdict, decisionOf, ensureStyled, rulePanel, variablesOf
 import css from "./rules-view.css?raw";
 
 /** Where a placed rule's place is now: its line, and how it was found — or lost. */
-interface Place { "status": string; "line"?: number }
+interface Place { "status": string; "line"?: number; "why"?: string }
 
 /** A policy file's rules, with its workspace-relative path, and where each placed rule's place is now (null: none). */
 interface PolicyFile { "file": string; "rules": EditedRule[]; "places"?: (Place | null)[] }
@@ -134,10 +134,20 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 		}
 
 		const { document, selection } = editor;
-		const [place] = await annotations(vscode.commands).refer(document.getText(), vscode.workspace.asRelativePath(document.uri, false), [{ "start": document.offsetAt(selection.start), "end": document.offsetAt(selection.end) }]) ?? [];
+		const answer = await annotations(vscode.commands).refer(document.getText(), vscode.workspace.asRelativePath(document.uri, false), [{ "start": document.offsetAt(selection.start), "end": document.offsetAt(selection.end) }]);
+
+		if ("unparsable" in answer) {
+			throw new Error(`That code can't be placed: its file can't be parsed as it is (${answer.unparsable})`);
+		}
+
+		if ("unavailable" in answer) {
+			throw new Error(`That code can't be placed: the editor's BABLR isn't available (${answer.unavailable})`);
+		}
+
+		const [place] = answer.value;
 
 		if (place === undefined || place === null) {
-			throw new Error("That code can't be placed: BABLR doesn't read this file");
+			throw new Error("That code can't be placed: nothing there a rule can stand at — select a statement");
 		}
 
 		return place;
@@ -197,8 +207,9 @@ export function registerRulesView(hub: Hub, vscode: typeof vscodeApi): void {
 
 		const each = (whose: "mine" | "shared", { file, rules, places }: PolicyFile): Listed[] => rules.map((rule, index) => {
 			const place = places?.[index] ?? null;
-			// A rule whose place in the code is lost can't apply: as broken as one that can't be matched.
-			const problem = policy.problemOf(rule) ?? (place?.status === "orphaned" ? "Its place in the code is lost — the statement it was at is gone or changed past recognizing" : undefined);
+			// A rule whose place in the code is lost can't apply: as broken as one that can't be matched. Nor can one whose
+			// file can't be parsed as it is — though its place isn't lost, and it applies again once the file parses.
+			const problem = policy.problemOf(rule) ?? (place?.status === "orphaned" ? "Its place in the code is lost — the statement it was at is gone or changed past recognizing" : undefined) ?? (place?.status === "unparsable" ? `Where it applies can't be told: its file can't be parsed as it is (${place.why ?? "BABLR can't parse it"})` : undefined);
 
 			return { "whose": whose, "file": file, "sentence": problem === undefined ? describeRule(rule, catalogFor(rule)) : `${problem} — it matches nothing`, ...problem === undefined ? {} : { "problem": problem }, ...place === null ? {} : { "place": place }, "rule": rule };
 		});

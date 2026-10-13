@@ -28,10 +28,11 @@ export interface SpanEvidence {
 export interface Placed { "start": number; "end": number; "type"?: string; "evidence": SpanEvidence }
 
 export interface EvidenceStore {
-	/** The evidence placed in `document` as it is now; undefined when it was edited while being placed (a newer look
-	 *  follows). Empty when there's none, or no editor BABLR to place it. */
+	/** The evidence placed in `document` as it is now; undefined when it was edited while being placed, or BABLR can't
+	 *  parse it as it is (mid-edit, often) — keep what's drawn: a newer look follows. Empty when there's none, or no
+	 *  editor BABLR to place it. */
 	"placed": (document: vscodeApi.TextDocument) => Promise<Placed[] | undefined>;
-	/** The evidence placed in `text`, a file's as it is on disk (one no editor has open). */
+	/** The evidence placed in `text`, a file's as it is on disk (one no editor has open): none when it can't be. */
 	"placedIn": (file: string, text: string) => Promise<Placed[]>;
 	/** Every file with evidence, workspace-relative. */
 	"files": () => Promise<string[]>;
@@ -130,8 +131,8 @@ export function evidenceStore(vscode: typeof vscodeApi, subscriptions: vscodeApi
 	};
 
 	/** `file`'s evidence placed in `text`: each span found there by its id (lost — or moved to another file — it fades:
-	 *  new runs make new evidence). */
-	const placeIn = async (file: string, text: string): Promise<Placed[]> => {
+	 *  new runs make new evidence). Undefined when `text` can't be parsed as it is: nothing's lost, it can't be told. */
+	const placeIn = async (file: string, text: string): Promise<Placed[] | undefined> => {
 		const known = await evidenceOf(file);
 
 		if (known.size === 0) {
@@ -139,10 +140,16 @@ export function evidenceStore(vscode: typeof vscodeApi, subscriptions: vscodeApi
 		}
 
 		const spans = [...known.keys()];
-		const found = await annotations(vscode.commands).resolve(text, file, spans.map((span) => observedRef(span, file)), { "observed": true });
+		const answer = await annotations(vscode.commands).resolve(text, file, spans.map((span) => observedRef(span, file)), { "observed": true });
+
+		if ("unparsable" in answer) {
+			return undefined;
+		}
+
+		const found = "value" in answer ? answer.value : [];
 
 		return spans.flatMap((span, index) => {
-			const at = found?.[index]?.candidate;
+			const at = found[index]?.candidate;
 
 			return at?.start === undefined || at.end === undefined || at.file !== file ? [] : [{ "start": at.start, "end": at.end, ...at.type === undefined ? {} : { "type": at.type }, "evidence": known.get(span) }];
 		});
@@ -194,7 +201,7 @@ export function evidenceStore(vscode: typeof vscodeApi, subscriptions: vscodeApi
 
 			return placing.placed;
 		},
-		"placedIn": placeIn,
+		"placedIn": async (file, text) => await placeIn(file, text) ?? [],
 		"files": async () => {
 			const evidence = vscode.Uri.joinPath(root, `${SILO_DIR}/evidence`);
 			const found = new Set<string>();

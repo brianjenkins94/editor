@@ -456,7 +456,9 @@ function setBreakpoints(program: string, lines: number[]): void {
 /** Where a placed rule's place is now: how it was found (or that it's lost), its 1-based lines, and — when that isn't its
  *  stored place (followed there through edits, moved, or re-placed by a match) — the reference as it would be made there
  *  now. */
-interface PlaceNow { "status": string; "line"?: number; "endLine"?: number; "ref"?: unknown }
+/** Where a rule's place is now: its status (a resolution's — or `unparsable`, its file can't be parsed as it is, `why`,
+ *  so where it is can't be told: not lost) and lines. */
+interface PlaceNow { "status": string; "line"?: number; "endLine"?: number; "ref"?: unknown; "why"?: string }
 
 /** How a place found surely enough to act on was found: on its own span, moved, or re-placed by a strong match. */
 const SURE = new Set(["attached", "moved", "re-placed"]);
@@ -469,15 +471,27 @@ async function textOf(uri: vscode.Uri): Promise<string> {
 }
 
 /** Where `place` is in `text` (of `file`), by the editor's BABLR — if in `file` at all. `before`: texts it may have been
- *  made against, for it to be followed from the one it was by the structural diff. */
-async function resolvePlace(text: string, file: string, place: unknown, before: string[] = []): Promise<Resolved | undefined> {
+ *  made against, for it to be followed from the one it was by the structural diff. `unparsable` (why) when BABLR can't
+ *  parse `text`: where it is can't be told, which isn't its being gone. */
+async function resolvePlace(text: string, file: string, place: unknown, before: string[] = []): Promise<Resolved | { "unparsable": string } | undefined> {
 	if (text === "") {
 		return undefined; // nothing to find it in (and BABLR reads no empty text)
 	}
 
-	const [found] = await annotations(vscode.commands).resolve(text, file, [place as SpanRef], { "texts": before }) ?? [];
+	const answer = await annotations(vscode.commands).resolve(text, file, [place as SpanRef], { "texts": before });
+
+	if ("unparsable" in answer) {
+		return answer;
+	}
+
+	const [found] = "value" in answer ? answer.value : [];
 
 	return found?.status === undefined || found.status === "orphaned" || found.candidate?.start === undefined || (found.candidate.file !== undefined && found.candidate.file !== file) ? undefined : found;
+}
+
+/** A place found, when it was — not one that couldn't be looked for. */
+function foundOf(found: Resolved | { "unparsable": string } | undefined): Resolved | undefined {
+	return found === undefined || "unparsable" in found ? undefined : found;
 }
 
 /** How many of a file's latest edit bursts a placed rule is followed through. */
@@ -490,7 +504,7 @@ const HISTORY_STEPS = 30;
 async function follow(place: unknown, texts: string[], file: string): Promise<{ "at": unknown; "found": Resolved } | undefined> {
 	let from = texts.length - 1;
 
-	while (from > 0 && (await resolvePlace(texts[from], file, place))?.status !== "attached") {
+	while (from > 0 && foundOf(await resolvePlace(texts[from], file, place))?.status !== "attached") {
 		from -= 1;
 	}
 
@@ -498,8 +512,9 @@ async function follow(place: unknown, texts: string[], file: string): Promise<{ 
 	let found: Resolved | undefined;
 
 	for (let index = from; index < texts.length; index += 1) {
-		// Each step from the texts before it — the reference was made against one of them — by the structural diff.
-		found = await resolvePlace(texts[index], file, at, texts.slice(from, index));
+		// Each step from the texts before it — the reference was made against one of them — by the structural diff. (A
+		// text BABLR can't parse — a burst mid-edit — tells nothing: the place goes on from where it was.)
+		found = foundOf(await resolvePlace(texts[index], file, at, texts.slice(from, index)));
 
 		if (found !== undefined && SURE.has(found.status) && found.ref !== undefined) {
 			at = found.ref;
@@ -545,7 +560,13 @@ async function placesNow(rpc: ReturnType<typeof createRpcClient>, rules: Rule[],
 			const chain = await texts(place.file);
 			const text = chain.at(-1);
 			const followed = await follow(place, chain, place.file);
-			const found = followed?.found ?? await resolvePlace(text, place.file, place);
+			const looked = followed?.found ?? await resolvePlace(text, place.file, place);
+
+			if (looked !== undefined && "unparsable" in looked) {
+				return { "status": "unparsable", "why": looked.unparsable };
+			}
+
+			const found = foundOf(looked);
 
 			if (found === undefined) {
 				return { "status": "orphaned" };

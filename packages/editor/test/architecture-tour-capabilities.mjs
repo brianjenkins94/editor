@@ -311,7 +311,7 @@ test("capability decisions and placed rules: in a file the program imports, as i
 		// A rule placed in tally.js — total starts at 100 — set when the program gets there.
 		const source = (await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file("/workspace/tally.js")).then((bytes) => new TextDecoder().decode(bytes))));
 		const statement = "let total = 0;";
-		const [place] = await workbench.evaluate(([text, start, end]) => globalThis.__editor.api.commands.executeCommand("editor.annotations.refer", text, "tally.js", [{ "start": start, "end": end }]), [source, source.indexOf(statement), source.indexOf(statement) + statement.length]);
+		const [place] = await workbench.evaluate(([text, start, end]) => globalThis.__editor.api.commands.executeCommand("editor.annotations.refer", text, "tally.js", [{ "start": start, "end": end }]).then((answer) => answer.value), [source, source.indexOf(statement), source.indexOf(statement) + statement.length]);
 
 		rule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": "tally.js" }, { "target_id": "at", "operator_id": "is", "argument": place }] }, "then": [{ "action_id": "set", "target_id": "variables.total", "argument": 100 }] };
 		await session.request("rules.set", { "rule": rule }, 10_000);
@@ -606,7 +606,7 @@ test("rules view: a rule whose place is lost, re-placed at a selection", async (
 	});
 
 	// A place in code that isn't there any more.
-	const [gone] = await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.annotations.refer", "let gone = 0;\n", "placed.js", [{ "start": 0, "end": 13 }]));
+	const [gone] = await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.annotations.refer", "let gone = 0;\n", "placed.js", [{ "start": 0, "end": 13 }]).then((answer) => answer.value));
 	const rule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": "placed.js" }, { "target_id": "at", "operator_id": "is", "argument": gone }] }, "then": [{ "action_id": "set", "target_id": "variables.x", "argument": 5 }] };
 	const listed = () => session.request("rules.list", undefined, 10_000);
 
@@ -675,7 +675,7 @@ test("placed rules: marked beside their code, followed through edits, and kept p
 		await api.window.showTextDocument(uri);
 	});
 
-	const [here] = await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.annotations.refer", "let price = 10;\nlet tax = 2;\nconsole.log(price + tax);\n", "marked.js", [{ "start": 16, "end": 28 }]));
+	const [here] = await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("editor.annotations.refer", "let price = 10;\nlet tax = 2;\nconsole.log(price + tax);\n", "marked.js", [{ "start": 16, "end": 28 }]).then((answer) => answer.value));
 	const rule = { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": "marked.js" }, { "target_id": "at", "operator_id": "is", "argument": here }] }, "then": [{ "action_id": "set", "target_id": "variables.tax", "argument": 5 }] };
 	// The shared contract's own rule, placed there too (written as a person would: silo reads the contract).
 	const shared = { ...rule, "then": [{ "action_id": "set", "target_id": "variables.tax", "argument": 7 }] };

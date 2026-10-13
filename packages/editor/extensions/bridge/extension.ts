@@ -145,20 +145,28 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	registerSourceControl(context);
 	// Durable annotations on code spans (SPAN-ANNOTATIONS.md), from core's BABLR (bablr.ts: one worker, its parses cached
 	// by content, so an unchanged file is never parsed twice) — for extensions, everything they attach to code: notes,
-	// the insights extension's evidence, the event sheet's anchors. Commands: what an extension can call.
+	// the insights extension's evidence, the event sheet's anchors. Commands: what an extension can call, through
+	// run-contract's annotations(). Each answers `{ value }`, or `{ unparsable }` — why BABLR's grammar doesn't take the
+	// text as it is (a file mid-edit, often), which loses nothing: what's placed stays where it was. A failure rejects.
+	const annotation = async (topic: string, args: Record<string, unknown>): Promise<{ "value": unknown } | { "unparsable": string }> => rpc.request(`annotations.${topic}`, args, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as Promise<{ "value": unknown } | { "unparsable": string }>;
+
 	context.subscriptions.push(
 		// The spans of a text an annotation can attach to — each one's id (its BABLR Merkle hash) and offsets, from the
-		// text's cached parse; punctuation left out — or undefined when BABLR's grammar doesn't take the text…
-		vscode.commands.registerCommand("editor.annotations.spans", async (source: unknown) => ((await rpc.request("annotations.spans", { "source": source }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "spans"?: unknown[] | null }).spans ?? undefined)),
-		// …a reference to the span standing for each range of a text — what an annotation keeps (undefined where BABLR
-		// can't place it, or can't parse the text)…
-		vscode.commands.registerCommand("editor.annotations.refer", async (source: unknown, file: unknown, ranges: unknown) => ((await rpc.request("annotations.refer", { "source": source, "file": file, "ranges": ranges }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "refs"?: unknown[] }).refs ?? []).map((ref) => ref ?? undefined)),
+		// text's cached parse; punctuation left out…
+		vscode.commands.registerCommand("editor.annotations.spans", async (source: unknown) => annotation("spans", { "source": source })),
+		// …a reference to the span standing for each range of a text — what an annotation keeps (undefined where no span
+		// stands for it)…
+		vscode.commands.registerCommand("editor.annotations.refer", async (source: unknown, file: unknown, ranges: unknown) => {
+			const answer = await annotation("refer", { "source": source, "file": file, "ranges": ranges });
+
+			return "value" in answer && Array.isArray(answer.value) ? { "value": answer.value.map((ref: unknown) => ref ?? undefined) } : answer;
+		}),
 		// …and where each reference's span is now: attached, moved, re-placed, uncertain or orphaned, with where it
 		// landed. `observed` (runtime evidence): by its id alone — one that's lost fades, it isn't looked for. `types`:
 		// what spans of the text are beyond their shape (by span id: TypeScript's type, observed tags), for the typed
 		// strategy. `texts`: texts the file went through that the caller knows (its edit history's), each a baseline a
 		// reference made against it is followed from by the structural diff, as one made against a commit is.
-		vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, refs: unknown, options?: { "observed"?: boolean; "types"?: unknown; "texts"?: string[] }) => (await rpc.request("annotations.resolve", { "source": source, "file": file, "refs": refs, "observed": options?.observed === true, "types": options?.types, "texts": options?.texts ?? [] }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "resolutions"?: unknown[] }).resolutions)
+		vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, refs: unknown, options?: { "observed"?: boolean; "types"?: unknown; "texts"?: string[] }) => annotation("resolve", { "source": source, "file": file, "refs": refs, "observed": options?.observed === true, "types": options?.types, "texts": options?.texts ?? [] }))
 	);
 
 	// Each extension host's command totals (extensions/command-tap.ts): the extensions, and the commands between them, on

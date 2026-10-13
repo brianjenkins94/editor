@@ -123,8 +123,10 @@ Placing something on code that survives edits and reformatting (SPAN-ANNOTATIONS
 **The extension point** (packages/run-contract's `./annotations`): `annotations(vscode.commands)` gives typed `spans`,
 `refer` and `resolve`, and the contract is documented there — batch them (one call per text), what each status means
 (`attached`, `moved`, `re-placed` — store its new `ref` —, `uncertain`, `orphaned`: lost, kept to be re-placed or
-dismissed), how a lost reference is looked for before it's orphaned, and `undefined` without the editor. `SpanRef` and
-`Resolution` are util/silo's, re-exported.
+dismissed), how a lost reference is looked for before it's orphaned, and that each call answers one of three: `{ value }`,
+`{ unparsable }` (the text can't be parsed as it is — mid-edit, often; nothing's lost, so keep what's placed where it
+was) or `{ unavailable }` (no editor BABLR, as without the editor). `SpanRef` and `Resolution` are util/silo's,
+re-exported.
 
 **Dogfooded:** notes, insights' evidence, tsval's placed rules, the bridge's rule places and core's run anchors
 (anchors.ts) all call through it — no extension calls the commands by hand.
