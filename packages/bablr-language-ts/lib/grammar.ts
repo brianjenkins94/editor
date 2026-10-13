@@ -954,6 +954,24 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		yield eat(m`sigilToken*: <* ';' />`);
 	}
 
+  // es3's DoWhile, with the `;` that ends a body that isn't a block (`do x++; while (x < 3)`): a statement's `;` is
+  // the statement list's, so the base found it where it wanted `while`. As If does for its consequent.
+	public *DoWhile() {
+		yield eat(m`sigilToken*: <*Keyword 'do' />`);
+		yield eat(m`body$: <_Statement />`);
+
+		if (yield match(m`/;[ \t\r\n]*while\b/`)) {
+			yield eat(m`bodyTerminatorToken*: <* ';' />`);
+		}
+
+		yield eat(m`footerSigilToken*: <*Keyword 'while' />`);
+		yield eat(m`openFooterToken*: <* '(' />`);
+		yield startSpan("Bare", ")");
+		yield eat(m`test+$: <_Expression />`);
+		yield endSpan();
+		yield eat(m`closeFooterToken*: <* ')' />`);
+	}
+
   // es3's If, plus `if (a) b; else c` — the `;` that terminates the consequent belongs to the If.
 	public *If() {
 		yield eat(m`sigilToken*: <*Keyword 'if' />`);

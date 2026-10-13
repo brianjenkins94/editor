@@ -104,3 +104,8 @@ L: const x = 0
 for (await x of y) {}
 for (await;;) {}
 x = await y
+# do-while with a statement body
+do x++; while (x < 3)
+do { x++ } while (x < 3)
+do ; while (x)
+do if (a) b(); while (x)
