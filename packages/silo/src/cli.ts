@@ -9,6 +9,7 @@
  * The logic is @brianjenkins94/util/silo (features, history, git-snapshots): pure, so the editor runs the same code in
  * the browser over its own workspace. This file is only the desktop's way to ask: git, the disk, and stdout.
  */
+import type { CoverageStep } from "@brianjenkins94/util/silo/coverage";
 import type { Analyzer } from "@brianjenkins94/util/silo/graph";
 import type { Step } from "@brianjenkins94/util/silo/history";
 import { execFileSync } from "node:child_process";
@@ -16,14 +17,15 @@ import * as path from "node:path";
 import { isEntry } from "@brianjenkins94/util/env";
 import * as fs from "@brianjenkins94/util/fs";
 import { juvy } from "@brianjenkins94/util/juvy";
-import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianjenkins94/util/silo/audit";
-import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
+import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianjenkins94/util/silo/audit";
+import { coverageMarkdown, coverageReplay } from "@brianjenkins94/util/silo/coverage";
+import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
-import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
 import { oxcAnalyzer, waysIn } from "@brianjenkins94/util/silo/oxc";
+import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer } from "@brianjenkins94/util/silo/typescript";
 
 /** The repository a path is in. */
@@ -62,6 +64,44 @@ export async function historyOf(repo: string, options: { "since"?: string; "unti
 
 	try {
 		for await (const step of replay(gitSnapshots(repo, options), objects.read, { "analyzer": analyzer ?? oxcAnalyzer() })) {
+			steps.push(step);
+		}
+	} finally {
+		objects.close();
+		analyzer?.close?.();
+	}
+
+	return steps;
+}
+
+/** Where each span of a text is, as BABLR names them — the ids runtime evidence is keyed by (the editor's BABLR worker
+ *  does the same). Undefined for a text BABLR's grammar doesn't take. */
+async function placeSpans(source: string): Promise<{ "id": string; "start": number; "end": number }[] | undefined> {
+	const bablr = await import("@brianjenkins94/bablr") as { "cstSpansAsync": (source: string, language: string) => Promise<unknown>; "spanAnchors": (source: string, language: string, cst: unknown) => { "id": string; "type": string | null; "start": number; "end": number }[] };
+
+	try {
+		const cst = await bablr.cstSpansAsync(source, "Program");
+
+		return cst === undefined ? undefined : bablr.spanAnchors(source, "Program", cst).filter((span) => span.type !== null).map(({ id, start, end }) => ({ "id": id, "start": start, "end": end }));
+	} catch {
+		return undefined;
+	}
+}
+
+/** What the runs committed in a span of the history did, commit by commit (its baseline, the commit before it, first). */
+export async function coverageOf(repo: string, options: { "since"?: string; "until"?: string; "ref"?: string; "analyzer"?: AnalyzerChoice } = {}): Promise<CoverageStep[]> {
+	const choice = options.analyzer ?? "auto";
+	const analyzer: Analyzer | undefined = choice === "oxc" ? undefined : await typescriptAnalyzer({ "root": repo });
+
+	if (choice === "typescript" && analyzer === undefined) {
+		throw new Error("--analyzer typescript needs TypeScript 7.1 or later installed in the repository");
+	}
+
+	const objects = gitObjects(repo);
+	const steps: CoverageStep[] = [];
+
+	try {
+		for await (const step of coverageReplay(gitSnapshots(repo, options), objects.read, { "analyzer": analyzer ?? oxcAnalyzer(), "place": placeSpans })) {
 			steps.push(step);
 		}
 	} finally {
@@ -130,6 +170,27 @@ export const app = subcommands({
 				if (found.length > 0) {
 					process.exitCode = 1;
 				}
+			}
+		}),
+		command({
+			"name": "coverage",
+			"description": "What the runs committed in .silo/ ran, commit by commit: what started running, what stopped, and what was reached and never ran — by feature, or by folder where no feature reaches it — and what changed alongside.",
+			"config": juvy({
+				"repo": repoArgument,
+				"since": { "format": String, "default": "", "doc": "Start of the span: anything git's --since takes. Default: the whole history." },
+				"until": { "format": String, "default": "", "doc": "End of the span, as git's --until takes it. Default: now." },
+				"ref": { "format": String, "default": "HEAD", "doc": "The branch or commit to walk back from." },
+				"analyzer": { "format": ["auto", "oxc", "typescript"], "default": "auto", "doc": "What reads the code: the repository's TypeScript (7.1 or later), oxc, or auto." },
+				"json": jsonFlag
+			}),
+			"handler": async (config) => {
+				const repo = repoOf(config.get("repo"));
+				const since = config.get("since");
+				const until = config.get("until");
+				const steps = await coverageOf(repo, { "ref": config.get("ref"), "analyzer": config.get("analyzer") as AnalyzerChoice, ...since === "" ? {} : { "since": since }, ...until === "" ? {} : { "until": until } });
+				const span = since === "" ? steps : steps.slice(1);
+
+				process.stdout.write(config.get("json") ? JSON.stringify(span.map((step) => ({ ...step, "features": Object.fromEntries(step.features) })), undefined, "\t") + "\n" : coverageMarkdown(span, { "title": "Coverage of " + path.basename(repo) }));
 			}
 		}),
 		command({

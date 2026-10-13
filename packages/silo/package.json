@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@brianjenkins94/bablr": "file:../bablr",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "cmd-ts": "^0.15.0",
     "oxc-parser": "0.151.0"
