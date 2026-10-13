@@ -24,11 +24,30 @@
   # Its own workflow, not a job in `ci`, so it doesn't gate the deploy until it has proven stable there. The last suite
   # (test/performance.mjs) holds boot, a typed hover, a 1000-file load and memory by realm to performance-budgets.json,
   # and warns on a rise since the last green run here — whose `performance` artifact is its baseline.
+  #
+  # Sharded: each suite file (or a few short ones together) on a runner of its own, so they run side by side without
+  # sharing a CPU — the tour is three files, each in a session of its own (test/architecture-tour-session.mjs). The tour's
+  # shards keep what they saw; `diagram` merges it and checks ARCHITECTURE.md's diagram against it.
   "jobs": {
-    "architecture": {
+    "suites": {
+      "name": "${{ matrix.shard }}",
       "runs-on": "ubuntu-latest",
       # actions: read, to download the last green run's performance results.
       "permissions": { "contents": "read", "actions": "read" },
+      "strategy": {
+        # Every shard runs to the end: a failure in one says nothing about the others.
+        "fail-fast": false,
+        "matrix": {
+          "include": [
+            { "shard": "smoke-app", "files": "test/architecture-smoke.mjs test/architecture-app.mjs test/contrib.mjs test/pane-views.mjs" },
+            { "shard": "tour-previews", "files": "test/architecture-tour-previews.mjs" },
+            { "shard": "tour-runs", "files": "test/architecture-tour-runs.mjs" },
+            { "shard": "tour-capabilities", "files": "test/architecture-tour-capabilities.mjs" },
+            # Alone, so nothing else shares the CPU while it measures.
+            { "shard": "performance", "files": "test/performance.mjs" }
+          ]
+        }
+      },
       "steps": [
         { "uses": "actions/checkout@v4" },
         { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
@@ -38,15 +57,20 @@
         { "run": "pnpm --filter ./packages/editor exec playwright install --with-deps chromium" },
         # The baseline the performance suite compares against: the last green run on main's results (none on a first run).
         {
+          "if": "${{ matrix.shard == 'performance' }}",
           "continue-on-error": true,
           "run": "id=$(gh run list --repo \"$GITHUB_REPOSITORY\" --workflow architecture --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')\nif [ -n \"$id\" ]; then gh run download \"$id\" --repo \"$GITHUB_REPOSITORY\" --name performance --dir /tmp/performance-baseline || echo \"run $id kept no performance results\"; fi",
           "env": { "GH_TOKEN": "${{ github.token }}" }
         },
-        # The fixture app installs hub and observability as tarballs: this commit's, not the published ones (a change to
-        # either publishes only after ci passes, so @latest would race it). util-publish with CI unset just packs them
-        # into docs/packages (no release); a static server hands them to the editor in the browser.
+        # The fixture app (architecture-app.mjs) installs hub and observability as tarballs: this commit's, not the
+        # published ones (a change to either publishes only after ci passes, so @latest would race it). util-publish with CI
+        # unset just packs them into docs/packages (no release); a static server hands them to the editor in the browser.
         {
-          "run": "CI= npx util-publish packages/hub packages/observability\n(npx -y http-server docs/packages -p 5198 --cors -c-1 --silent &)\nnpx -y wait-on -t 30000 http-get://localhost:5198/hub@0.0.0.tgz\npnpm --filter ./packages/editor run test:architecture",
+          "if": "${{ matrix.shard == 'smoke-app' }}",
+          "run": "CI= npx util-publish packages/hub packages/observability\n(npx -y http-server docs/packages -p 5198 --cors -c-1 --silent &)\nnpx -y wait-on -t 30000 http-get://localhost:5198/hub@0.0.0.tgz"
+        },
+        {
+          "run": "pnpm --filter ./packages/editor exec node --test --test-concurrency=1 --test-global-setup=test/architecture-harness.mjs ${{ matrix.files }}",
           "env": {
             "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}",
             "ARCH_HUB_TGZ": "http://localhost:5198/hub@0.0.0.tgz",
@@ -54,19 +78,40 @@
             "PERF_BASELINE": "/tmp/performance-baseline/performance.json"
           }
         },
+        # What a tour shard saw, for the diagram.
+        {
+          "if": "${{ startsWith(matrix.shard, 'tour-') }}",
+          "uses": "actions/upload-artifact@v4",
+          "with": { "name": "tour-seen-${{ matrix.shard }}", "path": "/tmp/architecture-tour-seen/*.json", "if-no-files-found": "error" }
+        },
         # This run's results — the next one's baseline — and something to look at when a budget fails.
         {
-          "if": "${{ always() }}",
+          "if": "${{ always() && matrix.shard == 'performance' }}",
           "uses": "actions/upload-artifact@v4",
           "with": { "name": "performance", "path": "/tmp/performance.json", "if-no-files-found": "ignore" }
         },
         {
           "if": "${{ failure() }}",
           "uses": "actions/upload-artifact@v4",
-          "with": { "name": "architecture-snapshots", "path": "/tmp/architecture-*.json", "if-no-files-found": "ignore" }
+          "with": { "name": "architecture-snapshots-${{ matrix.shard }}", "path": "/tmp/architecture-*.json", "if-no-files-found": "ignore" }
         }
       ],
       "timeout-minutes": 30
+    },
+    # ARCHITECTURE.md's diagram, against what the tour's shards saw together. No browser: a merge and a render.
+    "diagram": {
+      "needs": "suites",
+      "runs-on": "ubuntu-latest",
+      "steps": [
+        { "uses": "actions/checkout@v4" },
+        { "uses": "brianjenkins94/lib/.github/actions/setup@main", "with": { "workspace-packages": "packages/*,components/*,contrib" } },
+        {
+          "uses": "actions/download-artifact@v4",
+          "with": { "pattern": "tour-seen-*", "merge-multiple": true, "path": "/tmp/architecture-tour-seen" }
+        },
+        { "run": "pnpm --filter ./packages/editor run test:architecture:diagram" }
+      ],
+      "timeout-minutes": 15
     }
   }
 }
