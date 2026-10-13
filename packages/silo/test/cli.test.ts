@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import * as fs from "@brianjenkins94/util/fs";
 
-import { currentFeatures, historyOf } from "../src/cli.ts";
+import { currentFeatures, historyOf, installCommand } from "../src/cli.ts";
 
 const CLI = path.join(import.meta.dirname, "../src/cli.ts");
 
@@ -85,4 +85,13 @@ test("the command line: silo features --json", () => {
 	const output = execFileSync(process.execPath, ["--import", "tsx", CLI, "features", repo, "--json"], { "encoding": "utf8" });
 
 	assert.deepEqual(JSON.parse(output), [], "removed on Oct 5: nothing left");
+});
+
+test("silo install: nothing published in the last `days` days — `latest` is the latest a week old", () => {
+	const now = Date.parse("2026-10-13T12:00:00.000Z");
+
+	assert.deepEqual(installCommand("npm", [], 7, now), ["install", "--before=2026-10-06T12:00:00.000Z"]);
+	assert.deepEqual(installCommand("npm", ["react@latest"], 1, now), ["install", "react@latest", "--before=2026-10-12T12:00:00.000Z"]);
+	assert.deepEqual(installCommand("pnpm", [], 7, now), ["install", "--config.minimum-release-age=10080"]);
+	assert.deepEqual(installCommand("pnpm", ["react"], 7, now), ["add", "react", "--config.minimum-release-age=10080"]);
 });

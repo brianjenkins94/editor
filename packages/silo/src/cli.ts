@@ -1,6 +1,9 @@
 /**
  * silo — the command line. What a program's code says about it, derived and never kept by hand:
  *
+ *   silo init [repo]                                   start keeping .silo/: the baseline, synced with what's installed
+ *   silo install [package…] [--min-age 7] [--repo …]   install — nothing newer than a week — and sync the baseline
+ *   silo accept <package…> [--repo …]                  accept a version pending in the baseline
  *   silo features [repo] [--json]                      every way into the program, found in its code
  *   silo history [repo] [--since …] [--until …] [--json] what changed, told from the code's snapshots — not from
  *                [--analyzer auto|oxc|typescript]        commit messages, which are never read; the code read by the
@@ -12,15 +15,15 @@
 import type { CoverageStep } from "@brianjenkins94/util/silo/coverage";
 import type { Analyzer } from "@brianjenkins94/util/silo/graph";
 import type { Step } from "@brianjenkins94/util/silo/history";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import * as path from "node:path";
 import { isEntry } from "@brianjenkins94/util/env";
 import * as fs from "@brianjenkins94/util/fs";
 import { juvy } from "@brianjenkins94/util/juvy";
 import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
-import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianjenkins94/util/silo/audit";
+import { ensureBaseline, ensureSiloDir, loadBaseline, saveBaseline, siloPaths } from "@brianjenkins94/util/silo/audit";
 import { coverageMarkdown, coverageReplay } from "@brianjenkins94/util/silo/coverage";
-import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
+import { acceptPending, beyondBaseline, covers } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
@@ -108,6 +111,36 @@ export async function coverageOf(repo: string, options: { "since"?: string; "unt
 }
 
 const repoArgument = { "format": String, "default": ".", "positional": true, "doc": "A directory in the repository (default: the current one)." } as const;
+const repoFlag = { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." } as const;
+
+/** How a project installs: by its lockfile — pnpm's, yarn's, else npm. */
+function packageManagerOf(root: string): "npm" | "pnpm" | "yarn" {
+	if (fs.existsSync(path.join(root, "pnpm-lock.yaml"))) {
+		return "pnpm";
+	}
+
+	return fs.existsSync(path.join(root, "yarn.lock")) ? "yarn" : "npm";
+}
+
+/**
+ * `manager`'s install of `packages` (none: the project's own) that takes no version published in the last `days` days —
+ * so `latest` means the latest a week old, a range the newest in it that's that old, every dependency's too. npm's
+ * `--before` (a tag past the date falls back to the latest version at or before it); pnpm's `minimum-release-age`
+ * (minutes).
+ */
+export function installCommand(manager: "npm" | "pnpm", packages: string[], days: number, now = Date.now()): string[] {
+	if (manager === "pnpm") {
+		return [packages.length === 0 ? "install" : "add", ...packages, `--config.minimum-release-age=${Math.round(days * 24 * 60)}`];
+	}
+
+	return ["install", ...packages, `--before=${new Date(now - days * 24 * 60 * 60 * 1000).toISOString()}`];
+}
+
+/** What a pending version can do that the accepted one can't. */
+function newIn(entry: { "caps": string[]; "pending"?: { "caps": string[] } }): string[] {
+	return (entry.pending?.caps ?? []).filter((capability) => !covers(entry.caps, capability));
+}
+
 const jsonFlag = { "format": Boolean, "default": false, "doc": "Print the data as JSON instead of a document." } as const;
 
 export const app = subcommands({
@@ -116,14 +149,14 @@ export const app = subcommands({
 	"commands": [
 		command({
 			"name": "init",
-			"description": "Start keeping .silo/ in a repository: its .gitignore and .gitattributes, and the baseline — what the code imports and what each installed package can do — accepted as it is now.",
+			"description": "Start keeping .silo/ in a repository: its .gitignore and .gitattributes, and the baseline — what the code imports and what each installed package can do — accepted as it is now; once it's there, synced with what's installed (a library added is accepted; a new version that can do more is pending until `silo accept`).",
 			"config": juvy({ "repo": repoArgument }),
 			"handler": async (config) => {
 				const paths = siloPaths(repoOf(config.get("repo")));
 
 				await ensureSiloDir(paths);
 
-				const { created, baseline } = await ensureBaseline(paths);
+				const { created, baseline, changed } = await ensureBaseline(paths);
 				const packages = Object.keys(baseline.packages).length;
 				const imports = Object.values(baseline.consumer).reduce((count, workspace) => count + Object.keys(workspace).length, 0);
 				const relative = path.relative(process.cwd(), paths.baseline);
@@ -131,7 +164,91 @@ export const app = subcommands({
 
 				process.stdout.write(created
 					? `Made ${where}: ${imports} imports, ${packages} packages. Commit it: a change to what they can do is drift from here.\n`
-					: `${where} is already there (${imports} imports, ${packages} packages) — left as it is: changing it is approving.\n`);
+					: `${where} is there (${imports} imports, ${packages} packages) — synced with what's installed: ${changed.added.length} added, ${changed.updated.length} updated, ${changed.pending.length} pending acceptance.\n`);
+			}
+		}),
+		command({
+			"name": "install",
+			"description": "Install with the project's package manager, taking nothing published in the last week (--min-age days) — so `latest` means the latest a week old — then sync the baseline with what's installed: a library added is accepted; a new version that can do more is pending until accepted (`silo accept`). Exits 1 when the install fails or anything is pending.",
+			"config": juvy({
+				"packages": { "format": Array, "default": [], "positional": "rest", "doc": "What to add (none: the project's own dependencies), as the package manager takes them: name, name@range, name@tag." },
+				"min-age": { "format": Number, "default": 7, "doc": "The youngest a version may be, in days." },
+				"repo": repoFlag
+			}),
+			"handler": async (config) => {
+				const repo = repoOf(config.get("repo"));
+				const manager = packageManagerOf(repo);
+
+				if (manager === "yarn") {
+					process.stderr.write("silo install: yarn isn't supported yet — set its npmMinimalAgeGate and run it yourself, then `silo init` to sync the baseline.\n");
+					process.exitCode = 1;
+
+					return;
+				}
+
+				const args = installCommand(manager, config.get("packages") as string[], config.get("min-age"));
+
+				process.stdout.write(`${manager} ${args.join(" ")}\n`);
+
+				const installed = spawnSync(manager, args, { "cwd": repo, "stdio": "inherit", "shell": process.platform === "win32" });
+
+				if (installed.status !== 0) {
+					process.exitCode = installed.status ?? 1;
+
+					return;
+				}
+
+				// What was installed, against what was accepted.
+				const paths = siloPaths(repo);
+
+				await ensureSiloDir(paths);
+
+				const { created, baseline, changed } = await ensureBaseline(paths);
+				const relative = path.relative(process.cwd(), paths.baseline);
+				const where = relative.startsWith("..") ? paths.baseline : relative;
+
+				if (created) {
+					process.stdout.write(`Made ${where}: ${Object.keys(baseline.packages).length} packages accepted as they are. Commit it.\n`);
+
+					return;
+				}
+
+				process.stdout.write(`${where}: ${changed.added.length} added (${changed.added.join(", ") || "none"}), ${changed.updated.length} updated.\n`);
+
+				if (changed.pending.length > 0) {
+					process.stderr.write(`Pending acceptance — a new version can do more than what was accepted of it (until accepted, that asks at the call):\n${changed.pending.map((name) => `  ${name} ${baseline.packages[name]?.pending?.version ?? ""}: can also ${newIn(baseline.packages[name] ?? { "caps": [] }).join(", ")}`).join("\n")}\nAccept with: silo accept ${changed.pending.join(" ")}\n`);
+					process.exitCode = 1;
+				}
+			}
+		}),
+		command({
+			"name": "accept",
+			"description": "Accept a version pending in the baseline: what its code can do is what's accepted of it now — an approval, to commit.",
+			"config": juvy({
+				"packages": { "format": Array, "default": [], "positional": "rest", "doc": "The packages, by name." },
+				"repo": repoFlag
+			}),
+			"handler": async (config) => {
+				const paths = siloPaths(repoOf(config.get("repo")));
+				const baseline = loadBaseline(paths);
+				const names = config.get("packages") as string[];
+				const none = names.filter((name) => baseline.packages[name]?.pending === undefined);
+
+				for (const name of names) {
+					const entry = baseline.packages[name];
+
+					if (entry?.pending !== undefined) {
+						process.stdout.write(`${name}: ${entry.version ?? "?"} → ${entry.pending.version ?? "?"}, accepting ${newIn(entry).join(", ") || "nothing new"}\n`);
+						baseline.packages = acceptPending(baseline.packages, name);
+					}
+				}
+
+				await saveBaseline(paths, baseline);
+
+				if (none.length > 0) {
+					process.stderr.write(`Nothing pending for: ${none.join(", ")}\n`);
+					process.exitCode = 1;
+				}
 			}
 		}),
 		command({
