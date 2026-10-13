@@ -1,6 +1,6 @@
 /**
  * The debugger, driven the way VS Code's debug UI does: the worker-pod answers `debug.sessions` / `debug.start` /
- * `debug.breakpoints` (extensions/worker-pod/debug-control.ts), and each session its own `debug.session.<id>.step|state|
+ * `debug.breakpoints` / `debug.explore` (extensions/worker-pod/debug-control.ts), and each session its own `debug.session.<id>.step|state|
  * stop`. Every session answer is the same shape — state, and while stopped the line, its code, the locals — plus what
  * the program printed.
  */
@@ -9,6 +9,8 @@ import { defineTool, ok } from "@brianjenkins94/util/mcp/tool";
 import { z } from "zod";
 
 const SESSION = z.string().optional().describe("The session id (from debug_list or debug_start). Omit when exactly one session is running.");
+/** An ordering of the program's events to run again: debug_explore's `eventLoop`, with one outcome's `schedule`. */
+const EVENT_LOOP = z.object({ "now": z.number(), "seed": z.number(), "schedule": z.array(z.number()).optional() });
 const PROGRAM = z.string().optional().describe("The file, absolute or relative to the workspace (e.g. src/index.ts). Default: the file open in the editor.");
 
 /** The session to act on: `session` if given, else this tab's only live one. */
@@ -37,10 +39,24 @@ const debug: ToolFamily = (host) => [{
 			"inputSchema": {
 				"program": z.string().optional().describe("The file to run, absolute or relative to the workspace (e.g. src/index.ts). Default: the file open in the editor."),
 				"breakpoints": z.array(z.number()).optional().describe("1-based lines to break on in that file, replacing its existing breakpoints."),
+				"eventLoop": EVENT_LOOP.optional().describe("Run one ordering of the program's events again: debug_explore's eventLoop with an outcome's schedule (tsval only)."),
 				"timeoutMs": z.number().optional().describe("How long to wait for the first stop (default 30000).")
 			}
 		},
-		"handler": async ({ program, breakpoints }, { signal }) => ok(host.request("debug.start", { "program": program, "breakpoints": breakpoints }, signal))
+		"handler": async ({ program, breakpoints, eventLoop }, { signal }) => ok(host.request("debug.start", { "program": program, "breakpoints": breakpoints, ...eventLoop === undefined ? {} : { "eventLoop": eventLoop } }, signal))
+	})
+}, {
+	"timeoutMs": 120000,
+	"tool": defineTool({
+		"name": "debug_explore",
+		"config": {
+			"description": "Run a program once per ordering of its events (timers, promises, fetches settling) and return the distinct ways it can end: { runs, complete, outcomes: [{ output, crash, schedule, path, runs }], eventLoop }. To debug one outcome, pass debug_start eventLoop: { ...eventLoop, schedule: outcome.schedule }. tsval only; policy-gated calls must be allowed by a rule, since an explored run doesn't stop to ask.",
+			"inputSchema": {
+				"program": PROGRAM,
+				"maxRuns": z.number().optional().describe("Stop after this many runs (complete: false if orderings were left).")
+			}
+		},
+		"handler": async ({ program, maxRuns }, { signal }) => ok(host.request("debug.explore", { "program": program, ...maxRuns === undefined ? {} : { "maxRuns": maxRuns } }, signal, 120000))
 	})
 }, {
 	"timeoutMs": 5000,

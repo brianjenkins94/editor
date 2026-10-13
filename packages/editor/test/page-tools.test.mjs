@@ -88,7 +88,7 @@ test("the editor's tools are listed while its tab is connected, each named <fami
 		return listed.includes("debug_start") ? listed : undefined;
 	});
 
-	for (const name of ["debug_start", "debug_list", "debug_step", "debug_state", "debug_breakpoints", "debug_stop", "margin_state", "editor_state", "editor_problems", "editor_notifications", "files_read", "files_write", "files_edit", "files_glob", "files_grep", "terminal_run", "terminal_output", "git_status", "git_diff", "git_commit", "rules_list", "previews_list", "previews_provoke", "previews_cdp", "previews_profile", "runs_list", "runs_stop", "runs_ledger"]) {
+	for (const name of ["debug_start", "debug_list", "debug_step", "debug_state", "debug_breakpoints", "debug_stop", "debug_explore", "margin_state", "editor_state", "editor_problems", "editor_notifications", "files_read", "files_write", "files_edit", "files_glob", "files_grep", "terminal_run", "terminal_output", "git_status", "git_diff", "git_commit", "rules_list", "previews_list", "previews_provoke", "previews_cdp", "previews_profile", "runs_list", "runs_stop", "runs_ledger"]) {
 		assert.ok(names.includes(name), name + " in " + names.join(", "));
 	}
 
