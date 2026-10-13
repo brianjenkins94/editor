@@ -50,7 +50,10 @@ and what, and produces observations, each attached to a span.
 - **Packages**: each package whose code it ran, by `name@version`, with its install's integrity when the project's
   package-lock.json has it, so "did anyone run a version later found compromised?" is a question the committed runs
   answer (silo's `queryRuns({ package })`). Reported by almostnode as each package's first module runs (`onPackage`);
-  a preview's packages aren't recorded yet.
+  a preview's packages aren't recorded yet. And what each did: a package's own `fs` and `child_process` calls are among
+  the run's effects as that package's (`package`: its name@version) — its reads made, its writes refused, its commands
+  not possible here — recorded, not decided (the editor runs it sandboxed already). Its `fetch`, a global, isn't told
+  apart from the program's yet.
 - **Outcome**: target, entry, mode, started, ended, exit code.
 
 **An observation** is a kind, a span, and a summary that stays the same size however many runs feed it:

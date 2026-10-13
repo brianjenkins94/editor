@@ -27,6 +27,7 @@ import type { Policy } from "@brianjenkins94/util/silo/policy";
 import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, Snapshot, ToWorker, Variable, WorkerEvent } from "./debug-protocol";
 import type { SiteSums } from "./site-sums";
 
+import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { verdictOf } from "@brianjenkins94/run-contract/gate";
 import { revive } from "@brianjenkins94/run-contract/recorded";
 import { connectRuntime } from "@brianjenkins94/run-contract/runtime";
@@ -131,17 +132,17 @@ const packagesRan = new Map<string, LoadedPackage>();
 const effects = new Map<string, Effect>();
 let tallying = false;
 
-/** A gated call, counted among the run's effects. */
-function tally(capability: string, resource: string, how: Effect["how"]): void {
+/** A gated call, counted among the run's effects — a package's (`pkg`, its name@version) apart from the program's. */
+function tally(capability: string, resource: string, how: Effect["how"], pkg?: string): void {
 	if (!tallying) {
 		return;
 	}
 
-	const key = `${how}\0${capability}\0${resource}`;
+	const key = `${how}\0${capability}\0${resource}\0${pkg ?? ""}`;
 	const known = effects.get(key);
 
 	if (known === undefined) {
-		effects.set(key, { "capability": capability, "resource": resource, "how": how, "calls": 1 });
+		effects.set(key, { "capability": capability, "resource": resource, "how": how, "calls": 1, ...pkg === undefined ? {} : { "package": pkg } });
 	} else {
 		known.calls += 1;
 	}
@@ -343,6 +344,89 @@ let evaluating: Vm | undefined;
 
 type Runtime = InstanceType<typeof import("@brianjenkins94/almostnode").Runtime>;
 
+/** What a package's call through its `fs` or `child_process` is: each method by its capability. */
+const PACKAGE_CALLS: Record<string, Record<string, string>> = {
+	"fs": Object.fromEntries([...Object.entries(FS_SYNC), ...Object.entries(FS_ASYNC)].map(([method, op]) => [method, "fs:" + op])),
+	"fs/promises": Object.fromEntries(Object.entries(FS_ASYNC).map(([method, op]) => [method, "fs:" + op])),
+	"child_process": Object.fromEntries(["exec", "execSync", "execFile", "execFileSync", "spawn", "spawnSync", "fork"].map((method) => [method, "exec"]))
+};
+/** A call that didn't happen because it may not: refused (a write: beforeFs), or not possible here (a command). */
+const refused = (error: unknown): boolean => ["EACCES", "EPERM", "ENOSYS"].includes((error as { "code"?: unknown } | undefined)?.code as string);
+/** Each package's own `fs`, `fs/promises` and `child_process`, by module and package folder. */
+const packageBuiltins = new Map<string, unknown>();
+/** almostnode's `packageDirOf`, once the runtime's loaded. */
+let packageDirOf: ((filename: string) => string | undefined) | undefined;
+
+/**
+ * The package asking from folder `from` gets almostnode's own `id` — what it does is what it did — with each gated call
+ * counted among the run's effects as that package's, by name@version (packagesRan): a read made, a write refused
+ * (beforeFs), a command not possible here. Undefined for anything else (the program's code, a module with no gated calls).
+ */
+function packageBuiltin(id: string, from: string): unknown {
+	const calls = PACKAGE_CALLS[id];
+	const dir = calls === undefined ? undefined : packageDirOf?.(from);
+
+	if (calls === undefined || dir === undefined || runtime === undefined) {
+		return undefined;
+	}
+
+	const key = id + "\0" + dir;
+
+	if (!packageBuiltins.has(key)) {
+		const ran = packagesRan.get(dir) ?? { "name": dir.slice(dir.lastIndexOf("/node_modules/") + "/node_modules/".length) };
+		const pkg = ran.version === undefined ? ran.name : `${ran.name}@${ran.version}`;
+		const real = runtime.require(id, "/workspace", "package") as Record<string, unknown>;
+		const counted = (methods: Record<string, string>, target: Record<string, unknown>): Record<string, unknown> => new Proxy(target, {
+			"get": (object, property, receiver) => {
+				const value = Reflect.get(object, property, receiver) as unknown;
+
+				// fs.promises: the same, its methods the async ones
+				if (property === "promises" && id === "fs" && typeof value === "object" && value !== null) {
+					return counted(PACKAGE_CALLS["fs/promises"], value as Record<string, unknown>);
+				}
+
+				const capability = typeof property === "string" && typeof value === "function" ? methods[property] : undefined;
+
+				if (capability === undefined) {
+					return value;
+				}
+
+				return function(this: unknown, ...args: unknown[]): unknown {
+					const resource = reachedBy(args[0]);
+
+					try {
+						const result = (value as (...rest: unknown[]) => unknown).apply(this, args);
+
+						if (typeof (result as { "then"?: unknown } | null)?.then === "function") {
+							return (result as Promise<unknown>).then((settled) => {
+								tally(capability, resource, "made", pkg);
+
+								return settled;
+							}, (error: unknown) => {
+								tally(capability, resource, refused(error) ? "denied" : "made", pkg);
+
+								throw error;
+							});
+						}
+
+						tally(capability, resource, "made", pkg);
+
+						return result;
+					} catch (error) {
+						tally(capability, resource, refused(error) ? "denied" : "made", pkg);
+
+						throw error;
+					}
+				};
+			}
+		});
+
+		packageBuiltins.set(key, counted(calls, real));
+	}
+
+	return packageBuiltins.get(key);
+}
+
 /** The runtime, loaded once per worker: the shared workspace (the launch's — the pod holds it) attached, its servers
  *  answering the preview. */
 function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<Runtime> {
@@ -351,7 +435,7 @@ function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<Runtime
 
 /** Load the runtime (runtimeReady): the first time a run asks for it. */
 async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Runtime> {
-	const [{ createFsShim, getServerBridge }, { answerServer, programGlobals, serverOn, workerTapResponse, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../shared/workspace-runtime"), import("../../shared/zenfs-vfs.js"), import("./runtime-vfs")]);
+	const [{ createFsShim, getServerBridge, "packageDirOf": dirOf }, { answerServer, programGlobals, serverOn, workerTapResponse, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../shared/workspace-runtime"), import("../../shared/zenfs-vfs.js"), import("./runtime-vfs")]);
 
 	// (its files answered once the editor has the worker's mailbox — without it, the runtime's own)
 	if (editorLink !== undefined) {
@@ -366,6 +450,8 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 		zenfs.attachSharedWorkspace(workspace);
 	}
 
+	packageDirOf = dirOf;
+
 	const write = (method: string, path: string): never => {
 		throw Object.assign(new Error(`EACCES: a library can't write in a debug run (${method} ${path})`), { "code": "EACCES" });
 	};
@@ -378,8 +464,14 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 			}
 		},
 		"onPackage": (ran) => { packagesRan.set(ran.dir, ran); },
-		// The program's code gets its stand-ins (`fs`, `child_process`); a package, almostnode's own.
-		"builtinFor": (id, requester) => (requester === "program" && Object.hasOwn(programBuiltins, id) ? programBuiltins[id] : undefined),
+		// The program's code gets its stand-ins (`fs`, `child_process`); a package, almostnode's own — its calls counted as its.
+		"builtinFor": (id, requester, from) => {
+			if (requester === "package") {
+				return packageBuiltin(id, from);
+			}
+
+			return Object.hasOwn(programBuiltins, id) ? programBuiltins[id] : undefined;
+		},
 		// A program file a package requires: tsval's to evaluate, on the run's machine (a nested run).
 		"evaluateProgram": (module, _require, source) => {
 			if (evaluating === undefined) {

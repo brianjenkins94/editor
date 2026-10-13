@@ -101,6 +101,22 @@ test("onPackage: each package whose code runs is told once, with its version —
 	assert.deepEqual(told, [{ "name": "greet", "version": "1.2.3", "dir": "/workspace/node_modules/greet" }], "after clearCache, told again");
 });
 
+test("builtinFor: told which module's folder asks — a package's, under its node_modules", () => {
+	const asked: string[] = [];
+	const runtime = runtimeWith({ ...PACKAGE, "/workspace/main.js": "require('greet'); module.exports = require('fs');" }, {
+		"builtinFor": (id, requester, from) => {
+			if (id === "fs") {
+				asked.push(requester + " " + from);
+			}
+
+			return undefined;
+		}
+	});
+
+	runtime.require("./main.js");
+	assert.deepEqual(asked, ["package /workspace/node_modules/greet", "program /workspace"]);
+});
+
 test("register: a module the host evaluated is everyone's — a package requiring the program file gets the same one", () => {
 	const runtime = runtimeWith({
 		"/workspace/config.js": "module.exports = { 'evaluated': 'natively' };",

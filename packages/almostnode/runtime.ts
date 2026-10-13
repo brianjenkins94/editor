@@ -254,8 +254,9 @@ export interface RuntimeOptions {
   // resolves from, and its source as written (TypeScript included: no transform). Throw to fail the load.
 	"evaluateProgram"?: (module: Module, require: RequireFunction, source: string) => void;
   // A built-in by who asks: the program (a program file, or a host on its behalf) or a package — undefined for
-  // almostnode's own. A debugger gives the program's code capability stand-ins and packages the real shims.
-	"builtinFor"?: (id: string, requester: Requester) => unknown;
+  // almostnode's own. A debugger gives the program's code capability stand-ins and packages the real shims. `from`: the
+  // folder of the module asking (a package's is under its node_modules folder), so a host can tell which package it is.
+	"builtinFor"?: (id: string, requester: Requester, from: string) => unknown;
   // Told once per package whose code runs, as its first module is evaluated: its name and version (its package.json's;
   // the folder's name when it has none) and its folder — for a host to record which versions a run ran.
 	"onPackage"?: (pkg: LoadedPackage) => void;
@@ -266,7 +267,7 @@ export interface LoadedPackage { "name": string; "version"?: string; "dir": stri
 
 /** The folder of the package a file under node_modules belongs to (`…/node_modules/name`, `…/node_modules/@scope/name`):
  *  the innermost, so a nested install is its own. */
-function packageDirOf(filename: string): string | undefined {
+export function packageDirOf(filename: string): string | undefined {
 	const marker = "/node_modules/";
 	const at = filename.lastIndexOf(marker);
 
@@ -974,7 +975,7 @@ ${code}
 		}
 
     // The host's, for whoever asks (builtinFor): a debugger's stand-ins for the program's code
-		const override = options.builtinFor?.(id, requester);
+		const override = options.builtinFor?.(id, requester, currentDir);
 
 		if (override !== undefined) {
 			return override;

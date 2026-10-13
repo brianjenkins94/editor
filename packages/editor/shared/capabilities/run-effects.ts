@@ -9,7 +9,7 @@ import type { Effect } from "@brianjenkins94/util/silo/evidence";
 const runEffects = new Map<string, Map<string, Effect>>();
 const toldEffects = new Map<string, Map<string, Effect>>();
 
-function count(store: Map<string, Map<string, Effect>>, runId: string, capability: string, resource: string, how: Effect["how"], calls: number): void {
+function count(store: Map<string, Map<string, Effect>>, runId: string, capability: string, resource: string, how: Effect["how"], calls: number, pkg?: string): void {
 	let effects = store.get(runId);
 
 	if (effects === undefined) {
@@ -17,11 +17,12 @@ function count(store: Map<string, Map<string, Effect>>, runId: string, capabilit
 		store.set(runId, effects);
 	}
 
-	const key = `${how}\0${capability}\0${resource}`;
+	// (a package's call apart from the program's same call)
+	const key = `${how}\0${capability}\0${resource}\0${pkg ?? ""}`;
 	const known = effects.get(key);
 
 	if (known === undefined) {
-		effects.set(key, { "capability": capability, "resource": resource, "how": how, "calls": calls });
+		effects.set(key, { "capability": capability, "resource": resource, "how": how, "calls": calls, ...pkg === undefined ? {} : { "package": pkg } });
 	} else {
 		known.calls += calls;
 	}
@@ -39,7 +40,7 @@ export function setEffects(runId: string, effects: readonly Effect[]): void {
 	toldEffects.delete(runId);
 
 	for (const effect of effects) {
-		count(toldEffects, runId, effect.capability, effect.resource, effect.how, effect.calls);
+		count(toldEffects, runId, effect.capability, effect.resource, effect.how, effect.calls, effect.package);
 	}
 }
 
@@ -50,7 +51,7 @@ export function takeEffects(runId: string): Effect[] {
 
 	for (const store of [runEffects, toldEffects]) {
 		for (const effect of store.get(runId)?.values() ?? []) {
-			count(merged, runId, effect.capability, effect.resource, effect.how, effect.calls);
+			count(merged, runId, effect.capability, effect.resource, effect.how, effect.calls, effect.package);
 		}
 
 		store.delete(runId);
@@ -59,5 +60,5 @@ export function takeEffects(runId: string): Effect[] {
 	const effects = [...merged.get(runId)?.values() ?? []];
 	const order = ["made", "denied", "skipped", "given"];
 
-	return effects.toSorted((left, right) => order.indexOf(left.how) - order.indexOf(right.how) || left.capability.localeCompare(right.capability) || left.resource.localeCompare(right.resource));
+	return effects.toSorted((left, right) => order.indexOf(left.how) - order.indexOf(right.how) || left.capability.localeCompare(right.capability) || left.resource.localeCompare(right.resource) || (left.package ?? "").localeCompare(right.package ?? ""));
 }

@@ -110,7 +110,7 @@ export interface LoadedPackage { "name": string; "version"?: string; "dir": stri
  *  `skipped` (not made — the program went on as if it had done nothing); `given` (a rule's result in its place). A
  *  capability is `fs:read`, `fs:write`, `net`, `exec`, `eval`, `net.ws` or `net.webrtc`; its resource, the path, host or
  *  command it reached. */
-export interface Effect { "capability": string; "resource": string; "how": "made" | "denied" | "skipped" | "given"; "calls": number }
+export interface Effect { "capability": string; "resource": string; "how": "made" | "denied" | "skipped" | "given"; "calls": number; /** The package whose code made it, by `name@version`; absent for the program's own. */ "package"?: string }
 
 /** The `effects` event: the run's effects so far — all of them, each telling; its last is the run's. */
 export interface EffectsEvent { "effects": Effect[] }
