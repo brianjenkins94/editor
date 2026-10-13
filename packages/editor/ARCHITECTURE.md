@@ -53,7 +53,12 @@ CDN `node_modules` overlay. Not a place you put feature code. It sits at the pac
 `previews/` (what runs inside a preview's own pages: the page and worker taps, page evidence), and `extensions/<name>/`
 (that extension's host, and the workers it spawns). What more than one realm runs is in `shared/` (the architecture
 model and probes, `virtual-path`, `workspace-changes`, `cpuprofile`, `lifecycle`, `theme`, the capability canary and
-classifier, the `.silo/` stores that more than one extension reads: `evidence-store`, `capabilities/silo-store`); build-time Vite plugins are in `build/`. What a debugger's worker needs of a run — the values recorder,
+classifier, the `.silo/` stores that more than one extension reads: `evidence-store`, `capabilities/silo-store`; almostnode on
+the workspace, as every worker that runs a program has it: `zenfs-vfs`, `workspace-runtime`; `playground-link`), and the
+shapes one realm serves and another reads (`runs`, `git`, `preview-evidence`); build-time Vite plugins are in `build/`.
+Lint holds the line (`no-restricted-imports`, the root `eslint.config.js`): a relative import that climbs into another
+realm's folder — or, from an extension, another extension's — is an error. Only `workbench-entry` reaches into
+`extensions/`, to register them; `main.tsx`, `build.ts`, `dev.ts` and the tests may reach anywhere. What a debugger's worker needs of a run — the values recorder,
 recorded values, the gate's verdict — is run-contract's (EXTENSION-POINTS.md), so any debugger imports the same.
 
 ## Cross-realm communication
@@ -301,6 +306,7 @@ flowchart LR
         n_ext_capabilities["capabilities"]
         n_ext_eslint["eslint"]
         n_ext_event_sheet["event-sheet"]
+        n_ext_history["history"]
         n_ext_insights["insights"]
         n_ext_notes["notes"]
         n_ext_running["running"]
@@ -363,6 +369,8 @@ flowchart LR
   n_ext_eslint <-.->|"commands"| n_ext_vscode
   n_ext_event_sheet <-.->|"commands"| n_ext_vscode
   n_ext_event_sheet <-.->|"commands"| n_ext_worker_pod
+  n_ext_history -->|"reads"| n_store__silo_runs__file__jsonl
+  n_ext_history <-.->|"commands"| n_ext_vscode
   n_ext_insights -->|"reads"| n_store__silo_evidence____file__jsonl
   n_ext_insights -->|"reads"| n_store__silo_local____file__jsonl
   n_ext_insights <-.->|"commands"| n_ext_vscode
@@ -451,7 +459,7 @@ flowchart LR
 | `.silo/local/<file>.json` | Workbench, worker-pod | Workbench, worker-pod |
 | `.silo/notes/…/<file>.jsonl` | Workbench, notes | Workbench, notes |
 | `.silo/policy/<file>.json` | Workbench, worker-pod | Workbench, worker-pod |
-| `.silo/runs/<file>.jsonl` | Workbench | Workbench |
+| `.silo/runs/<file>.jsonl` | Workbench | Workbench, history |
 | `IndexedDB bablr` | BABLR worker | BABLR worker, Workbench |
 | `IndexedDB silo-local` | Workspace (zen-fs) | Workspace (zen-fs) |
 | `IndexedDB vscode-web-db` | Workbench | Workbench |
@@ -484,7 +492,7 @@ flowchart LR
 | Root | preview | `preview.close`, `preview.open` |
 | Root | project | `project.list()`, `project.open`, `project.openFiles` |
 | Root | tab | `tab.discover` |
-| Root | tool | `tool.debug_breakpoints.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_write.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.terminal_output.*()`, `tool.terminal_run.*()` |
+| Root | tool | `tool.debug_breakpoints.*()`, `tool.debug_explore.*()`, `tool.debug_list.*()`, `tool.debug_start.*()`, `tool.debug_state.*()`, `tool.debug_step.*()`, `tool.debug_stop.*()`, `tool.editor_notifications.*()`, `tool.editor_problems.*()`, `tool.editor_state.*()`, `tool.files_edit.*()`, `tool.files_glob.*()`, `tool.files_grep.*()`, `tool.files_read.*()`, `tool.files_write.*()`, `tool.git_commit.*()`, `tool.git_diff.*()`, `tool.git_status.*()`, `tool.margin_state.*()`, `tool.page_eval.*()`, `tool.page_query.*()`, `tool.previews_cdp.*()`, `tool.previews_list.*()`, `tool.previews_profile.*()`, `tool.previews_provoke.*()`, `tool.rules_list.*()`, `tool.runs_ledger.*()`, `tool.runs_list.*()`, `tool.runs_stop.*()`, `tool.terminal_output.*()`, `tool.terminal_run.*()` |
 | Root | virtual | `virtual.request.*()` |
 | Root | workbench | `workbench.init()`, `workbench.online`, `workbench.save` |
 | Root | workspace | `workspace.files()` |
