@@ -16,6 +16,7 @@ import * as path from "node:path";
 import { isEntry } from "@brianjenkins94/util/env";
 import * as fs from "@brianjenkins94/util/fs";
 import { juvy } from "@brianjenkins94/util/juvy";
+import { ensureBaseline, ensureSiloDir, siloPaths } from "@brianjenkins94/util/silo/audit";
 import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
@@ -76,6 +77,26 @@ export const app = subcommands({
 	"name": "silo",
 	"description": "What a program's code says about it — derived, never kept by hand.",
 	"commands": [
+		command({
+			"name": "init",
+			"description": "Start keeping .silo/ in a repository: its .gitignore and .gitattributes, and the baseline — what the code imports and what each installed package can do — accepted as it is now.",
+			"config": juvy({ "repo": repoArgument }),
+			"handler": async (config) => {
+				const paths = siloPaths(repoOf(config.get("repo")));
+
+				await ensureSiloDir(paths);
+
+				const { created, baseline } = await ensureBaseline(paths);
+				const packages = Object.keys(baseline.packages).length;
+				const imports = Object.values(baseline.consumer).reduce((count, workspace) => count + Object.keys(workspace).length, 0);
+				const relative = path.relative(process.cwd(), paths.baseline);
+				const where = relative.startsWith("..") ? paths.baseline : relative;
+
+				process.stdout.write(created
+					? `Made ${where}: ${imports} imports, ${packages} packages. Commit it: a change to what they can do is drift from here.\n`
+					: `${where} is already there (${imports} imports, ${packages} packages) — left as it is: changing it is approving.\n`);
+			}
+		}),
 		command({
 			"name": "features",
 			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code.",
