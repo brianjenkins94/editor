@@ -199,6 +199,22 @@ In order, each useful on its own:
 
 ## Open questions
 
+- **Ways in beyond this repo.** A feature is a way in matched against a hand-written list of shapes (`features.ts`),
+  and the list is this repo's: VS Code's APIs, the hub, MCP tools, buttons. That's fine here, but most repos would match
+  little of it, and a shape it doesn't know reads as a removal: the terminal commands that moved to `command.ts` files
+  (`export default { name, … }`) show as "tried and removed". Three layers would carry it further, in this order:
+  1. **What every package declares.** `package.json`'s `exports` (its public API), `bin` (its command lines) and
+     `scripts` are ways in on any JS/TS repo, with no list: each is a feature, and reach follows from it. For a library,
+     that's arguably what a feature is.
+  2. **Presets, switched on by dependencies.** `vscode` → today's VS Code shapes; `@modelcontextprotocol/sdk` → MCP
+     tools; `express`/`fastify`/`hono` → routes; `commander`/`yargs`/`cmd-ts` → CLI commands; `react-router` → routes.
+     Today's list becomes the VS Code, hub and MCP presets.
+  3. **A repo's own shapes, declared, not coded.** The call and which argument is the name, e.g.
+     `{ "facet": "hub request", "call": "serve", "name": 1 }`; most of today's list fits that form, and this repo's
+     `command.ts` gap is one more entry.
+
+  Until then, the feature layer is the weakest part: everything above it (reach, the story, what runs say) is per
+  feature, and inherits its gaps. Parked here (2026-10-12), not built.
 - **Names.** Code names a feature by its id (`installLiveValues`); people call it "live values". Labels from manifests
   help; docs and notes could supply the rest.
 - **What counts as one feature.** A command and the view it lives in; a hub request and the command that calls it.
