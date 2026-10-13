@@ -150,6 +150,28 @@ Verified in the editor: adding a command registration and taking it out again, u
 `removed`), which `silo history` tells as a try; editing only a helper in another file left `changed … via reach`
 through it.
 
+## What runs say (built)
+
+A feature's lifeline now includes whether its code runs. **Exercised**: a statement of its own code ran (how many runs,
+when last). **Dormant**: its file ran, its code never did. **Unobserved**: no run ran its file yet. A change in that is a
+fact, told as "Ran command `x` (…)" and "Dormant: command `y`: its file ran, its code didn't".
+
+- **Its own code, not what it reaches.** A feature's code is its registration (with its inline handler) and the
+  declarations that registration names. What it reaches further doesn't count: a helper many features share would make
+  them all look exercised. Nor does the statement that registers it, which runs whether or not the feature is used:
+  only code strictly inside counts. A registering call's own code is what follows its name (the handler, the provider),
+  never the API that registers it (`registerCommand`, `serve`, a local `defineCommand`), which runs for every
+  registration. That also keeps a change to `serve` from counting as a change to every hub request.
+- **The BABLR join is at the edge.** Runtime evidence is keyed on BABLR spans. The editor's resolver places them in the
+  current text (the shared evidence store, insights'), and lib's `exercise.ts` compares ranges: those placed spans
+  against the feature ranges the TypeScript reading reports. Analysis never touches BABLR.
+- **When.** The history extension joins after each reading, and whenever a run leaves evidence. It reads the previous
+  statuses from your facts, so a restart doesn't repeat them. "Its file ran" also counts the run ledger's envelopes
+  (`.silo/runs/`), which list every file a run ran.
+
+Verified in the editor: a program whose local `defineCommand` calls one of the two handlers it's given, run once under
+the debugger, left `exercised` for that one and `dormant` for the other.
+
 ## Building it
 
 In order, each useful on its own:
@@ -160,7 +182,7 @@ In order, each useful on its own:
    with placement: the declaration fingerprints already ignore formatting, and BABLR's anchors are for keeping data on
    code (step 4's join), not for reading it.
 3. **Live, not only from commits** (built, above). Derive from edits as you work, keep the facts in `.silo/`.
-4. **Runs.** Exercised and dormant from the run ledger and coverage (RUNTIME-EVIDENCE.md).
+4. **Runs** (built, above). Exercised and dormant from the run ledger and coverage, joined through BABLR's spans.
 5. **Status and drift.** The one-click status per feature, kept in `.silo/`, and the drift checks it enables.
 6. **In the editor.** A history view by feature in place of the commit list; the changes pane groups by feature.
 7. **Commits as transport.** Optionally, the derived sentences as the message of whatever commit the tooling needs.
@@ -168,7 +190,7 @@ In order, each useful on its own:
 ## Where it lives
 
 - **The logic** is in lib's `util/silo`: `features.ts` (the feature model), `graph.ts` (the declaration graph's seam and
-  reach), `history.ts` (the replay, live history, the facts, the sentences), `ts-analysis.ts` (the reading over
+  reach), `history.ts` (the replay, live history, the facts, the sentences), `exercise.ts` (what runs say of a feature), `ts-analysis.ts` (the reading over
   TypeScript's tree, for either host), `oxc.ts` (oxc's reading), and the Node ones: `typescript.ts` (TypeScript 7's
   host) and `git-snapshots.ts` (a git history as snapshots).
 - **The command line** is `packages/silo` in this repo, published from here as `@brianjenkins94/silo` (bin `silo`):
