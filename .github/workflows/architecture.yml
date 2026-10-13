@@ -96,7 +96,7 @@
           "with": { "name": "architecture-snapshots-${{ matrix.shard }}", "path": "/tmp/architecture-*.json", "if-no-files-found": "ignore" }
         }
       ],
-      "timeout-minutes": 30
+      "timeout-minutes": 15
     },
     # ARCHITECTURE.md's diagram, against what the tour's shards saw together. No browser: a merge and a render.
     "diagram": {
