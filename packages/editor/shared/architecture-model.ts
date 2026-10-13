@@ -918,12 +918,13 @@ export function tourDiagram(snapshot: TourSnapshot): string {
 	const names = (ids: string[]): string => [...new Set(ids.filter((id) => seen.has(id)).map((id) => label(id)))].sort().join(", ") || "—";
 	// A database named for its workspace (`vscode-web-state-db-<hash>`) is one of a kind too.
 	const stores = new Map(discoveredStores(snapshot).map((store) => [store.store.replace(/-[0-9a-f]{8}$/u, "-*"), store]));
-	// A hub's components, one of a kind (the previews' are alike), past the observability plane every hub has (`$sys`) —
-	// the hubs still running when the tour ends: one that came and went reports what it served, or not, as its
-	// environment does.
+	// A hub's components, past the observability plane every hub has (`$sys`) — the editor's standing hubs only: declared,
+	// unconditional, and still running when the tour ends. One that comes and goes (a preview, a debug run's worker) is
+	// running at the end, or not, as its environment's timing has it.
 	const components = new Map<string, string>();
+	const standing = (hub: string): boolean => seen.get(hub)?.state === "alive" && !DYNAMIC_PREFIXES.some((prefix) => hub.startsWith(prefix)) && nodeSpec(hub) !== undefined && nodeSpec(hub)?.condition === undefined;
 
-	for (const [hub, topology] of Object.entries(snapshot.topology).filter(([candidate]) => seen.get(candidate)?.state === "alive")) {
+	for (const [hub, topology] of Object.entries(snapshot.topology).filter(([candidate]) => standing(candidate))) {
 		for (const { component, subjects } of componentsOf({ "subscriptions": topology.subscriptions.filter((subject) => !subject.startsWith("$sys.")) })) {
 			components.set(`${label(hub)}\0${component}`, `| ${label(hub)} | ${component} | ${subjects.map((subject) => `\`${subject}\``).join(", ")} |`);
 		}

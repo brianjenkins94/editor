@@ -147,7 +147,7 @@ test("the tour's diagram: what was seen, one of a kind each, without counts", as
 	assert.match(diagram, /n_preview__ <==> n_shell/u);
 	assert.match(diagram, /n_ext_notes -->\|"reads, writes"\| n_store__silo_notes____file__jsonl/u);
 	assert.match(diagram, /\| `\.silo\/notes\/…\/<file>\.jsonl` \| notes \| notes \|/u);
-	assert.match(diagram, /\| Preview :\* \| evidence \| `evidence\.flush` \|\n\| Workbench \| annotations \| `annotations\.resolve\(\)` \|/u, "components by namespace, the previews' once, no $sys");
+	assert.match(diagram, /\| Hub \| Component \| Serves and hears \|\n\| --- \| --- \| --- \|\n\| Workbench \| annotations \| `annotations\.resolve\(\)` \|/u, "components by namespace, the standing hubs' only (no preview's: it comes and goes), no $sys");
 	assert.doesNotMatch(diagram, /esm\.sh/u, "only what was seen");
 	assert.doesNotMatch(diagram, /fontawesome/u, "not a first visit's requests, past the service worker");
 });

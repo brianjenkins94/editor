@@ -389,7 +389,6 @@ flowchart LR
     n_net_origin["Page origin"]
     n_net_unpkg_com["unpkg"]
     n_sw["Service worker"]
-    n_webview_sw["Webview service worker"]
   end
   n_bablr <-.->|"IndexedDB"| n_idb
   n_bablr <==> n_workbench
@@ -457,7 +456,6 @@ flowchart LR
   n_sw <-.->|"HTTP"| n_workbench
   n_sw <-.->|"HTTP"| n_worker_TextMateWorker
   n_webview_markdown_preview <-.->|"VS Code webview protocol"| n_workbench
-  n_webview_sw <-.->|"VS Code webview resources"| n_webview_markdown_preview
   n_workbench -->|"reads, writes"| n_store__git__file_
   n_workbench -->|"reads, writes"| n_store__git_objects____file_
   n_workbench -->|"reads, writes"| n_store__git_refs____file_
@@ -504,7 +502,6 @@ flowchart LR
 
 | Hub | Component | Serves and hears |
 | --- | --- | --- |
-| BABLR worker | bablr | `bablr.editGroups()`, `bablr.follow()`, `bablr.pick()`, `bablr.refer()`, `bablr.resolve()`, `bablr.spans()`, `bablr.verdict()` |
 | Bridge | bridge | `bridge.ready` |
 | Bridge | capability | `capability.decide()`, `capability.record()`, `capability.recorded()` |
 | Bridge | debug | `debug.breakpoints()`, `debug.command`, `debug.explore()`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.pace()`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.stdin()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
@@ -519,8 +516,6 @@ flowchart LR
 | Dev-server worker | preview | `preview.close`, `preview.provoke()`, `preview.start()`, `preview.stops()`, `preview.version()` |
 | Dev-server worker | virtual | `virtual.request()` |
 | Dev-server worker | workspace | `workspace.changed` |
-| Preview :* | evidence | `evidence.flush` |
-| Preview :* | tap | `tap.worker.decide()`, `tap.worker.log` |
 | Root | capability | `capability.decide.*()`, `capability.record.*()` |
 | Root | page_tools | `page_tools.*()` |
 | Root | preview | `preview.close`, `preview.open` |
