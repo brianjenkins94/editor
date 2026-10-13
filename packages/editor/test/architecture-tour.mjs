@@ -104,7 +104,13 @@ test("evidence: a preview run, across a hot update", async () => {
 		const find = async (folder, name) => {
 			for (const [entry, type] of await api.workspace.fs.readDirectory(folder).then((all) => all, () => [])) {
 				const child = api.Uri.joinPath(folder, entry);
-				const hit = type === api.FileType.Directory ? await find(child, name) : entry === name ? await text(child) : undefined;
+				let hit;
+
+				if (type === api.FileType.Directory) {
+					hit = await find(child, name);
+				} else if (entry === name) {
+					hit = await text(child);
+				}
 
 				if (hit !== undefined) {
 					return hit;
@@ -113,6 +119,7 @@ test("evidence: a preview run, across a hot update", async () => {
 
 			return undefined;
 		};
+
 		const evidence = await find(api.Uri.file("/workspace/.silo/evidence"), "main.tsx.jsonl");
 		const runsFolder = api.Uri.file("/workspace/.silo/runs");
 		let envelope;
@@ -172,7 +179,11 @@ test("recorded stops: a breakpoint in a page's handler records its scope each ti
 	// What the margin is given for the file (live-values.ts draws it).
 	await workbench.evaluate((path) => {
 		globalThis.__stopsSeen = [];
-		globalThis.__stopsOff = globalThis.__architecture.hub.subscribe("values.session.*", (data) => { if (data.file === path) { globalThis.__stopsSeen.push(data); } });
+		globalThis.__stopsOff = globalThis.__architecture.hub.subscribe("values.session.*", (data) => {
+			if (data.file === path) {
+				globalThis.__stopsSeen.push(data);
+			}
+		});
 	}, file);
 	await session.terminal("cd /workspace/stopsapp && npm run dev", { "fresh": true });
 
@@ -186,7 +197,10 @@ test("recorded stops: a breakpoint in a page's handler records its scope each ti
 		await session.request("debug.breakpoints", { "program": file, "lines": [7] }, 10_000);
 		await session.page.waitForTimeout(1500);
 		await eventually("the button again", async () => (await page()?.evaluate(() => document.getElementById("add") !== null).catch(() => false)) || undefined);
-		await page().evaluate(() => { document.getElementById("add").click(); document.getElementById("add").click(); });
+		await page().evaluate(() => {
+			document.getElementById("add").click();
+			document.getElementById("add").click();
+		});
 
 		const values = await eventually("its stops, in the margin", async () => {
 			const seen = await workbench.evaluate(() => globalThis.__stopsSeen.at(-1)?.values ?? []);
@@ -382,6 +396,7 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 
 			return undefined;
 		};
+
 		const found = await find(api.Uri.file("/workspace/.silo/evidence"));
 		const attributes = await api.workspace.fs.readFile(api.Uri.file("/workspace/.silo/.gitattributes")).then((bytes) => new TextDecoder().decode(bytes), () => "");
 
@@ -415,10 +430,18 @@ test("debug session: one VS Code starts is a run, known by the same id", async (
 			open.onsuccess = () => {
 				const request = open.result.transaction("cst").objectStore("cst").getAllKeys();
 
-				request.onsuccess = () => { resolve(request.result); };
-				request.onerror = () => { resolve([]); };
+				request.onsuccess = () => {
+					resolve(request.result);
+				};
+
+				request.onerror = () => {
+					resolve([]);
+				};
 			};
-			open.onerror = () => { resolve([]); };
+
+			open.onerror = () => {
+				resolve([]);
+			};
 		});
 
 		return { "keys": keys, "spans": await list("/workspace/.silo/local/bablr/spans"), "git": await list("/workspace/.git/bablr") };
@@ -496,7 +519,13 @@ test("evidence: a file the program imports gets its own", async () => {
 		const find = async (folder, name) => {
 			for (const [entry, type] of await api.workspace.fs.readDirectory(folder).then((all) => all, () => [])) {
 				const child = api.Uri.joinPath(folder, entry);
-				const hit = type === api.FileType.Directory ? await find(child, name) : entry === name ? new TextDecoder().decode(await api.workspace.fs.readFile(child)) : undefined;
+				let hit;
+
+				if (type === api.FileType.Directory) {
+					hit = await find(child, name);
+				} else if (entry === name) {
+					hit = new TextDecoder().decode(await api.workspace.fs.readFile(child));
+				}
 
 				if (hit !== undefined) {
 					return hit;
@@ -505,6 +534,7 @@ test("evidence: a file the program imports gets its own", async () => {
 
 			return undefined;
 		};
+
 		const lines = (await find(api.Uri.file("/workspace/.silo/evidence"), "scale.js.jsonl") ?? "").trim().split("\n").filter((line) => line !== "").map((line) => JSON.parse(line));
 
 		return lines.some((line) => line.kind === "value") ? lines : undefined;
@@ -537,7 +567,13 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 		const find = async (folder, name) => {
 			for (const [entry, type] of await api.workspace.fs.readDirectory(folder).then((all) => all, () => [])) {
 				const child = api.Uri.joinPath(folder, entry);
-				const hit = type === api.FileType.Directory ? await find(child, name) : entry === name ? new TextDecoder().decode(await api.workspace.fs.readFile(child)) : undefined;
+				let hit;
+
+				if (type === api.FileType.Directory) {
+					hit = await find(child, name);
+				} else if (entry === name) {
+					hit = new TextDecoder().decode(await api.workspace.fs.readFile(child));
+				}
 
 				if (hit !== undefined) {
 					return hit;
@@ -546,6 +582,7 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 
 			return undefined;
 		};
+
 		const evidence = await find(api.Uri.file("/workspace/.silo/evidence"), "values.js.jsonl");
 		const samples = await find(api.Uri.file("/workspace/.silo/local/samples"), "values.js.jsonl");
 		const lines = (text) => (text ?? "").trim().split("\n").filter((line) => line !== "").map((line) => JSON.parse(line));
@@ -575,6 +612,7 @@ test("evidence: a run's values and branches, beside its coverage", async () => {
 
 			return found.flatMap((each) => each.contents.map((content) => (typeof content === "string" ? content : content.value))).join("\n");
 		};
+
 		const optional = await hover("?.", -1);
 
 		return optional.includes("never nullish") ? { "optional": optional, "branch": await hover("if ("), "returned": await hover("return") } : undefined;
@@ -717,7 +755,9 @@ test("live values: a session's values beside the code, as the talk's binary sear
 		const text = editor.document.getText();
 		const reformatted = text.replaceAll("\t", "  ").replace("{\n", "{\n\n\n").replace("Math.floor((low + high) / 2);", "Math.floor(\n      (low + high) / 2\n    );").replaceAll(";\n", "\n");
 
-		await editor.edit((builder) => { builder.replace(new api.Range(editor.document.positionAt(0), editor.document.positionAt(text.length)), reformatted); });
+		await editor.edit((builder) => {
+			builder.replace(new api.Range(editor.document.positionAt(0), editor.document.positionAt(text.length)), reformatted);
+		});
 	});
 
 	const moved = await eventually("the rows moved with their code", async () => {
@@ -792,7 +832,9 @@ test("live runs: typing paused, the file runs again — writes skipped, half-typ
 		const text = editor.document.getText();
 		const at = text.indexOf(find);
 
-		await editor.edit((builder) => { builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + find.length)), replace); });
+		await editor.edit((builder) => {
+			builder.replace(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + find.length)), replace);
+		});
 	}, [from, to]);
 
 	await workbench.evaluate(async (path) => {
@@ -817,7 +859,9 @@ test("live runs: typing paused, the file runs again — writes skipped, half-typ
 
 	// Half-typed: the run that didn't parse tells nothing; the last one's values stay where they were.
 	await edit("total += p;", "total += p *");
-	await new Promise((resolve) => { setTimeout(resolve, 2000); });
+	await new Promise((resolve) => {
+		setTimeout(resolve, 2000);
+	});
 	assert.deepEqual((await rows())["3"], ["total =", "3", "7", "12", "18"], "kept");
 
 	await edit("total += p *", "total += p * 2;");
@@ -859,7 +903,9 @@ test("set a value: from the margin, at a stop or by a rule, and the run goes on 
 
 	// high's Mock…: the rule editor under its row, its value set to 3, then a button.
 	const mockHigh = async (button) => {
-		await workbench.evaluate(() => { [...document.querySelectorAll('.live-values-row[data-line="2"] button')].find((each) => each.textContent === "Mock…").click(); });
+		await workbench.evaluate(() => {
+			[...document.querySelectorAll(".live-values-row[data-line=\"2\"] button")].find((each) => each.textContent === "Mock…").click();
+		});
 		await eventually("high's rule editor", () => workbench.evaluate(() => document.querySelector(".live-values-rule .rule-editor-then input") !== null || undefined));
 		await workbench.evaluate((label) => {
 			const input = document.querySelector(".live-values-rule .rule-editor-then input");
@@ -872,7 +918,7 @@ test("set a value: from the margin, at a stop or by a rule, and the run goes on 
 
 	await eventually("high's row", async () => (await rows())["2"]?.[1] === "5" || undefined);
 	await mockHigh("Just this once");
-	await eventually("high, set by hand", () => workbench.evaluate(() => document.querySelector('.live-values-row[data-line="2"] .live-values-set')?.textContent).then((text) => (text === "3" ? text : undefined)));
+	await eventually("high, set by hand", () => workbench.evaluate(() => document.querySelector(".live-values-row[data-line=\"2\"] .live-values-set")?.textContent).then((text) => (text === "3" ? text : undefined)));
 
 	// On to the return: it went the way high = 3 sends it.
 	await session.request("debug.breakpoints", { "program": "/workspace/setvalue.js", "lines": [14] }, 30_000);
@@ -932,7 +978,7 @@ test("mock process.argv: a rule giving it, once or kept, several runs, and a pla
 	const runsOf = async () => (await session.request("runs.list", undefined, 5000)).filter((run) => run.title.includes("tax.js"));
 	const givenNow = () => session.request("rules.given", { "program": program, "target": "process.argv" }, 10_000);
 	const row = () => workbench.evaluate(() => {
-		const line = document.querySelector('.live-values-row[data-line="0"]');
+		const line = document.querySelector(".live-values-row[data-line=\"0\"]");
 
 		return line === null ? undefined : { "label": line.querySelector(".live-values-label")?.textContent.trim(), "given": line.querySelector(".live-values-given")?.textContent ?? null };
 	});
@@ -944,7 +990,7 @@ test("mock process.argv: a rule giving it, once or kept, several runs, and a pla
 
 		switch (what) {
 			case "open":
-				[...document.querySelectorAll('.live-values-row[data-line="0"] button')].find((button) => button.textContent === "Mock…").click();
+				[...document.querySelectorAll(".live-values-row[data-line=\"0\"] button")].find((button) => button.textContent === "Mock…").click();
 
 				return true;
 			case "status":
@@ -1057,7 +1103,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	}, what);
 	// The margin's question, as shown: the call, what it reaches, and which choices it offers.
 	const asked = () => workbench.evaluate(() => {
-		const box = document.querySelector('[data-item="ask"]');
+		const box = document.querySelector("[data-item=\"ask\"]");
 
 		return box === null ? undefined : { "what": box.querySelector(".pane-markdown").textContent.trim(), "choices": [...box.querySelectorAll(".live-values-choices > .live-values-split > .live-values-choice:not(.more), .live-values-choices > .live-values-choice")].map((button) => button.textContent), "lasting": [...box.querySelectorAll(".live-values-split:first-child .live-values-menu-item")].map((item) => (item.disabled ? `(${item.textContent})` : item.textContent)) };
 	});
@@ -1093,11 +1139,13 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	assert.equal(skipped.state, "terminated");
 	assert.deepEqual(skipped.output, ["wrote /workspace/out.txt"], "the run went on past it");
 	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.stat(globalThis.__editor.api.Uri.file("/workspace/out.txt")).then(() => true, () => false)), false, "nothing written");
-	assert.equal(await eventually("the skipped call on its line", () => workbench.evaluate(() => [...document.querySelector('.live-values-row[data-line="4"]')?.children ?? []].map((child) => child.textContent.trim()).filter(Boolean).join(" ") || undefined)), "skipped fs:write /workspace/out.txt");
+	assert.equal(await eventually("the skipped call on its line", () => workbench.evaluate(() => [...document.querySelector(".live-values-row[data-line=\"4\"]")?.children ?? []].map((child) => child.textContent.trim()).filter(Boolean).join(" ") || undefined)), "skipped fs:write /workspace/out.txt");
 
 	// Allow, from the margin's own button (this call): the call runs; nothing is written to the policy.
 	await start();
-	await workbench.evaluate(() => { [...document.querySelectorAll('[data-item="ask"] button')].find((button) => button.textContent === "Allow").click(); });
+	await workbench.evaluate(() => {
+		[...document.querySelectorAll("[data-item=\"ask\"] button")].find((button) => button.textContent === "Allow").click();
+	});
 	await eventually("the question answered", async () => (await asked()) === undefined || undefined);
 	assert.deepEqual(await silo("read"), [], "Allow once writes no rule");
 
@@ -1107,7 +1155,7 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	assert.equal(always.state, "terminated");
 	assert.deepEqual(always.output, ["wrote /workspace/out.txt"]);
 	assert.equal(await workbench.evaluate(() => globalThis.__editor.api.workspace.fs.readFile(globalThis.__editor.api.Uri.file("/workspace/out.txt")).then((bytes) => new TextDecoder().decode(bytes), () => undefined)), "hello", "written for real (RUNNING.md, step 2)");
-	assert.deepEqual((await silo("read")).flatMap((policy) => policy.rules.map(({ when, then }) => ({ when, then }))), [{ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "fs:write" }, { "target_id": "resource", "operator_id": "is", "argument": "/workspace/out.txt" }] }, "then": [{ "action_id": "allow" }] }]);
+	assert.deepEqual((await silo("read")).flatMap((policy) => policy.rules.map(({ when, then }) => ({ "when": when, "then": then }))), [{ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "fs:write" }, { "target_id": "resource", "operator_id": "is", "argument": "/workspace/out.txt" }] }, "then": [{ "action_id": "allow" }] }]);
 
 	const again = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, 60_000);
 
@@ -1132,7 +1180,9 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 		return run.reason === "capability" || undefined;
 	});
 	assert.deepEqual(await eventually("the question on its line", asked), { "what": "writeFileSync '/workspace/out.txt' fs:write", "choices": ["Allow", "Skip", "Deny", "Rule…"], "lasting": ["this call", "this run", "always"] });
-	await workbench.evaluate(() => { [...document.querySelectorAll('[data-item="ask"] button')].find((button) => button.textContent === "Rule…").click(); });
+	await workbench.evaluate(() => {
+		[...document.querySelectorAll("[data-item=\"ask\"] button")].find((button) => button.textContent === "Rule…").click();
+	});
 	assert.equal(await eventually("the rule editor, prefilled", status), "Covers this call: allows it");
 	await resourceRow([".rule-editor-operator select", "matches", "change"]);
 	await resourceRow([".rule-editor-argument", "/tmp/*", "input"]);
@@ -1141,9 +1191,11 @@ test("capability decisions: a gated call asks on its line, and the choice resume
 	await resourceRow([".rule-editor-argument", "/workspace/*.txt", "input"]);
 	assert.equal(await status(), "Covers this call: allows it");
 	assert.equal(await saveable(), true);
-	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-rule button")].find((button) => button.textContent === "Save as rule").click(); });
+	await workbench.evaluate(() => {
+		[...document.querySelectorAll(".live-values-rule button")].find((button) => button.textContent === "Save as rule").click();
+	});
 	await eventually("the question answered", async () => (await asked()) === undefined || undefined);
-	assert.deepEqual((await silo("read")).flatMap((policy) => policy.rules.map(({ when, then }) => ({ when, then }))), [{ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "fs:write" }, { "target_id": "resource", "operator_id": "matches", "argument": "/workspace/*.txt" }] }, "then": [{ "action_id": "allow" }] }]);
+	assert.deepEqual((await silo("read")).flatMap((policy) => policy.rules.map(({ when, then }) => ({ "when": when, "then": then }))), [{ "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": "fs:write" }, { "target_id": "resource", "operator_id": "matches", "argument": "/workspace/*.txt" }] }, "then": [{ "action_id": "allow" }] }]);
 
 	const ruled = await session.request("debug.start", { "program": "/workspace/gated.js", "breakpoints": [] }, 60_000);
 
@@ -1303,7 +1355,7 @@ test("capability decisions and placed rules: in a file the program imports, as i
 
 		// Its question, in that file's margin.
 		await workbench.evaluate(() => globalThis.__editor.api.window.showTextDocument(globalThis.__editor.api.Uri.file("/workspace/store.js")));
-		assert.equal(await eventually("the question in the imported file's margin", () => workbench.evaluate(() => document.querySelector('[data-item="ask"] .pane-markdown')?.textContent.trim())), "writeFileSync '/workspace/notes.txt' fs:write");
+		assert.equal(await eventually("the question in the imported file's margin", () => workbench.evaluate(() => document.querySelector("[data-item=\"ask\"] .pane-markdown")?.textContent.trim())), "writeFileSync '/workspace/notes.txt' fs:write");
 
 		const ended = await session.request(`debug.session.${stopped.session}.decide`, { "choice": "deny" }, 30_000);
 
@@ -1360,7 +1412,7 @@ test("capability decisions: Skip always and Deny always — every run goes past 
 			return [];
 		}
 
-		return (await Promise.all(names.map(async (name) => JSON.parse(new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.joinPath(folder, name))))))).flatMap((policy) => policy.rules.map(({ when, then }) => ({ when, then })));
+		return (await Promise.all(names.map(async (name) => JSON.parse(new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.joinPath(folder, name))))))).flatMap((policy) => policy.rules.map(({ when, then }) => ({ "when": when, "then": then })));
 	}, action);
 	const written = () => workbench.evaluate(() => globalThis.__editor.api.workspace.fs.stat(globalThis.__editor.api.Uri.file("/workspace/skipped.txt")).then(() => true, () => false));
 
@@ -1388,7 +1440,7 @@ test("capability decisions: Skip always and Deny always — every run goes past 
 		assert.equal(again.state, "terminated", "the next run doesn't stop there");
 		assert.deepEqual(again.output, ["done"]);
 		assert.equal(await written(), false, "never made");
-		assert.equal(await eventually("the skipped call on its line", () => workbench.evaluate(() => [...document.querySelector('.live-values-row[data-line="2"]')?.children ?? []].map((child) => child.textContent.trim()).filter(Boolean).join(" ") || undefined)), "skipped fs:write /workspace/skipped.txt");
+		assert.equal(await eventually("the skipped call on its line", () => workbench.evaluate(() => [...document.querySelector(".live-values-row[data-line=\"2\"]")?.children ?? []].map((child) => child.textContent.trim()).filter(Boolean).join(" ") || undefined)), "skipped fs:write /workspace/skipped.txt");
 
 		// Deny always, as the other lasting choice: the run asked fails there, and the next one fails there without asking.
 		await overrides("clear");
@@ -1447,10 +1499,12 @@ test("agent tools: the editor, its problems, notifications, rules, terminals and
 			return found.length > 0 ? found : undefined;
 		});
 
-		assert.deepEqual(typeErrors.map(({ line, column, severity, code }) => ({ line, column, severity, code })), [{ "line": 1, "column": 7, "severity": "error", "code": "2322" }]);
+		assert.deepEqual(typeErrors.map(({ line, column, severity, code }) => ({ "line": line, "column": column, "severity": severity, "code": code })), [{ "line": 1, "column": 7, "severity": "error", "code": "2322" }]);
 
 		// A run that can't start says why only in a toast.
-		await workbench.evaluate(() => { void globalThis.__editor.api.commands.executeCommand("editor.debugFile", globalThis.__editor.api.Uri.file("/workspace/package.json")); });
+		await workbench.evaluate(() => {
+			void globalThis.__editor.api.commands.executeCommand("editor.debugFile", globalThis.__editor.api.Uri.file("/workspace/package.json"));
+		});
 		assert.ok((await eventually("the toast", async () => {
 			const shownNow = await session.request("notifications.list", undefined, 5000);
 
@@ -1536,7 +1590,7 @@ test("capability decisions: Allow this run lets a loop's calls through, until th
 	// The resource is computed on the line (a template) — known all the same, from a fork run to the call — so Allow always
 	// is offered too.
 	const question = await eventually("its question", () => workbench.evaluate(() => {
-		const box = document.querySelector('[data-item="ask"]');
+		const box = document.querySelector("[data-item=\"ask\"]");
 
 		return box === null ? undefined : { "what": box.querySelector(".pane-markdown").textContent.trim(), "choices": [...box.querySelectorAll(".live-values-choices > .live-values-split > .live-values-choice:not(.more), .live-values-choices > .live-values-choice")].map((button) => button.textContent), "lasting": [...box.querySelectorAll(".live-values-split:first-child .live-values-menu-item")].map((item) => (item.disabled ? `(${item.textContent})` : item.textContent)) };
 	}));
@@ -1601,7 +1655,9 @@ test("rules view: every rule as a sentence, opened and removed there", async () 
 	// Opened: the rule editor (the Rule view), with Remove.
 	await openRule(workbench, "first");
 	await eventually("its editor", () => workbench.evaluate(() => [...document.querySelectorAll(".rules-view .live-values-rule button")].some((button) => button.textContent === "Remove") || undefined));
-	await workbench.evaluate(() => { [...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Remove").click(); });
+	await workbench.evaluate(() => {
+		[...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Remove").click();
+	});
 	assert.deepEqual(await eventually("no rules", async () => ((await lines())?.length === 0 ? lines() : undefined)), []);
 	assert.deepEqual((await session.request("rules.list", undefined, 10_000)).mine.rules, []);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
@@ -1639,7 +1695,9 @@ test("rules view: a rule whose place is lost, re-placed at a selection", async (
 	});
 	await openRule(workbench, "broken");
 	await eventually("Re-place at selection", () => workbench.evaluate(() => [...document.querySelectorAll(".rules-view .live-values-rule button")].some((button) => button.textContent === "Re-place at selection") || undefined));
-	await workbench.evaluate(() => { [...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Re-place at selection").click(); });
+	await workbench.evaluate(() => {
+		[...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Re-place at selection").click();
+	});
 
 	const placed = await eventually("the rule, re-placed", async () => {
 		const { mine } = await listed();
@@ -1676,7 +1734,9 @@ test("placed rules: marked beside their code, followed through edits, and kept p
 		const { api } = globalThis.__editor;
 		const editor = api.window.activeTextEditor;
 
-		await editor.edit((builder) => { builder.replace(new api.Range(from, 0, to, 0), contents); });
+		await editor.edit((builder) => {
+			builder.replace(new api.Range(from, 0, to, 0), contents);
+		});
 	}, [fromLine, toLine, text]);
 
 	await workbench.evaluate(async () => {
@@ -1730,7 +1790,7 @@ test("placed rules: marked beside their code, followed through edits, and kept p
 	await workbench.evaluate(() => globalThis.__editor.api.window.activeTextEditor.document.save());
 
 	const kept = await eventually("their places kept", async () => {
-		const { mine, shared: theirs } = await listed();
+		const { mine, "shared": theirs } = await listed();
 		const moved = (rules, from) => rules.find((each) => JSON.stringify(each.then) === JSON.stringify(from.then) && JSON.stringify(each.when) !== JSON.stringify(from.when));
 
 		return moved(mine.rules, rule) !== undefined && moved(theirs.rules, shared) !== undefined ? { "mine": mine, "shared": theirs } : undefined;
@@ -1778,17 +1838,21 @@ test("mock a call's result: given at its capability stop, from what it returned 
 
 	assert.equal(stopped.reason, "capability");
 	assert.equal(stopped.line, 2);
-	await eventually("the question", () => workbench.evaluate(() => document.querySelector('[data-item="ask"]') !== null || undefined));
-	await workbench.evaluate(() => { [...document.querySelectorAll('[data-item="ask"] button')].find((button) => button.textContent === "Rule…").click(); });
+	await eventually("the question", () => workbench.evaluate(() => document.querySelector("[data-item=\"ask\"]") !== null || undefined));
+	await workbench.evaluate(() => {
+		[...document.querySelectorAll("[data-item=\"ask\"] button")].find((button) => button.textContent === "Rule…").click();
+	});
 
 	const status = () => workbench.evaluate(() => document.querySelector(".live-values-rule-status")?.textContent);
 
 	assert.match(await eventually("the rule, given what it returned", status), /^Covers this call: gives it what it returned on /u);
 	assert.equal(await workbench.evaluate(() => document.querySelector(".live-values-rule .rule-editor-then .rule-editor-action-target select").value), "result");
-	await workbench.evaluate(() => { [...document.querySelectorAll(".live-values-rule button")].find((button) => button.textContent === "Save as rule").click(); });
+	await workbench.evaluate(() => {
+		[...document.querySelectorAll(".live-values-rule button")].find((button) => button.textContent === "Save as rule").click();
+	});
 
 	// Saved, the run goes on with it (and ends); the next run is given it with no stop, past both awaits.
-	await eventually("the question answered", () => workbench.evaluate(() => document.querySelector('[data-item="ask"]') === null || undefined));
+	await eventually("the question answered", () => workbench.evaluate(() => document.querySelector("[data-item=\"ask\"]") === null || undefined));
 
 	const again = await session.request("debug.start", { "program": program, "breakpoints": [] }, 60_000);
 
@@ -1822,13 +1886,15 @@ test("preview prompt: Rule… makes the rule in the Rules view, and the call wai
 	await rule.first().waitFor({ "timeout": 30_000 });
 	await rule.first().click();
 	await eventually("the rule, in the Rules view", () => workbench.evaluate(() => document.querySelector(".rules-view .live-values-rule-status")?.textContent).then((text) => (text === "Covers this call: allows it" ? text : undefined)));
-	await workbench.evaluate(() => { [...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Save as rule").click(); });
+	await workbench.evaluate(() => {
+		[...document.querySelectorAll(".rules-view .live-values-rule button")].find((button) => button.textContent === "Save as rule").click();
+	});
 	// Allowed: the fetch goes out (wherever it gets) instead of the gate's 403.
 	assert.notEqual(await decided, "Capability denied");
 
 	const { mine } = await session.request("rules.list", undefined, 10_000);
 
-	assert.deepEqual(mine.rules[0].when.predicates.map(({ target_id, argument }) => [target_id, argument]), [["capability", "net"], ["resource", "esm.sh"]]);
+	assert.deepEqual(mine.rules[0].when.predicates.map(({ "target_id": targetId, argument }) => [targetId, argument]), [["capability", "net"], ["resource", "esm.sh"]]);
 	await session.request("rules.set", { "previous": mine.rules[0] }, 10_000);
 	await workbench.evaluate(() => globalThis.__editor.api.commands.executeCommand("workbench.view.explorer"));
 });
@@ -1965,7 +2031,7 @@ test("debugger: a breakpoint in a file the program imports, its values, and step
 		// Its values in its own margin.
 		await workbench.evaluate((path) => globalThis.__editor.api.window.showTextDocument(globalThis.__editor.api.Uri.file(path)), imported);
 
-		const parameters = await eventually("the imported file's values in its margin", () => workbench.evaluate(() => document.querySelector('.live-values-row[data-line="0"]')?.textContent.trim()));
+		const parameters = await eventually("the imported file's values in its margin", () => workbench.evaluate(() => document.querySelector(".live-values-row[data-line=\"0\"]")?.textContent.trim()));
 
 		assert.equal(parameters, "width = 3, height = 4");
 
@@ -2143,13 +2209,17 @@ test("terminal: node runs in the debugger with its args, cwd and env — output 
 	// (A terminal's id as a task's is — one of a kind, so the diagram folds it: `terminal.in.*`.)
 	const id = crypto.randomUUID();
 	const screen = () => workbench.evaluate(() => (globalThis.__terminalSeen ?? []).join(""));
-	const type = (text) => workbench.evaluate(([terminal, keys]) => { globalThis.__architecture.hub.publish(`terminal.in.${terminal}`, keys); }, [id, text]);
+	const type = (text) => workbench.evaluate(([terminal, keys]) => {
+		globalThis.__architecture.hub.publish(`terminal.in.${terminal}`, keys);
+	}, [id, text]);
 
 	await workbench.evaluate(async (terminal) => {
 		const { api } = globalThis.__editor;
 
 		globalThis.__terminalSeen = [];
-		globalThis.__terminalOff = globalThis.__architecture.hub.subscribe(`terminal.out.${terminal}`, (data) => { globalThis.__terminalSeen.push(String(data)); });
+		globalThis.__terminalOff = globalThis.__architecture.hub.subscribe(`terminal.out.${terminal}`, (data) => {
+			globalThis.__terminalSeen.push(String(data));
+		});
 		await api.workspace.fs.createDirectory(api.Uri.file("/workspace/sub"));
 		await api.workspace.fs.writeFile(api.Uri.file("/workspace/argv.js"), new TextEncoder().encode([
 			"console.log(\"args\", process.argv.slice(2).join(\",\"), \"in\", process.cwd(), \"with\", process.env.GREETING ?? \"none\");",
@@ -2296,11 +2366,11 @@ test("projection: the run log — each step's share of the work, and its waits",
 
 	// The run log, as the Margin draws it: its head, then a row a step — its title, and what it waited.
 	const log = await eventually("the run log", () => workbench.evaluate(() => {
-		const head = document.querySelector('[data-item="runlog"] .pane-markdown');
+		const head = document.querySelector("[data-item=\"runlog\"] .pane-markdown");
 
 		return head === null ? undefined : {
 			"head": head.textContent.trim(),
-			"rows": [...document.querySelectorAll('[data-item^="runlog:"] .live-values-row')].map((row) => [row.querySelector(".live-values-label").textContent.trim(), [...row.querySelectorAll(".live-values-cell.turn")].map((cell) => cell.textContent).find((text) => text.startsWith("waited")) ?? null])
+			"rows": [...document.querySelectorAll("[data-item^=\"runlog:\"] .live-values-row")].map((row) => [row.querySelector(".live-values-label").textContent.trim(), [...row.querySelectorAll(".live-values-cell.turn")].map((cell) => cell.textContent).find((text) => text.startsWith("waited")) ?? null])
 		};
 	}));
 
@@ -2346,7 +2416,9 @@ test("run ends: a crash is marked on the line it threw on, and stays on it throu
 		const editor = api.window.activeTextEditor;
 		const text = editor.document.getText();
 
-		await editor.edit((builder) => { builder.replace(new api.Range(editor.document.positionAt(0), editor.document.positionAt(text.length)), "// parse\n\n" + text.replaceAll("\t", "    ").replaceAll(";\n", "\n")); });
+		await editor.edit((builder) => {
+			builder.replace(new api.Range(editor.document.positionAt(0), editor.document.positionAt(text.length)), "// parse\n\n" + text.replaceAll("\t", "    ").replaceAll(";\n", "\n"));
+		});
 	});
 	assert.equal((await eventually("the mark, moved with its code", async () => ((await crashed())?.line === 5 ? crashed() : undefined))).line, 5);
 
@@ -2448,14 +2520,18 @@ test("notes: a note follows its code, and waits in Problems when its code is gon
 
 				return api.commands.executeCommand("notes.add", value);
 			}
+
 			case "edit": {
 				const editor = await api.window.showTextDocument(uri);
 				const text = editor.document.getText();
 
-				await editor.edit((builder) => { builder.replace(new api.Range(editor.document.positionAt(text.indexOf(value[0])), editor.document.positionAt(text.indexOf(value[0]) + value[0].length)), value[1]); });
+				await editor.edit((builder) => {
+					builder.replace(new api.Range(editor.document.positionAt(text.indexOf(value[0])), editor.document.positionAt(text.indexOf(value[0]) + value[0].length)), value[1]);
+				});
 
 				return undefined;
 			}
+
 			case "notes":
 				return notes();
 			case "lost":
@@ -2468,7 +2544,7 @@ test("notes: a note follows its code, and waits in Problems when its code is gon
 	}, [step, arg]);
 
 	const id = await run("add", "check the bounds");
-	const [placed] = await eventually("the note, kept on its span", async () => (await run("notes")).filter((note) => note.id === id).length > 0 ? run("notes") : undefined);
+	const [placed] = await eventually("the note, kept on its span", async () => ((await run("notes")).some((note) => note.id === id) ? run("notes") : undefined));
 
 	assert.equal(placed.payload.text, "check the bounds");
 	assert.deepEqual(placed.ref.shape.atoms.slice(0, 3), ["fn", "(", "foo"]);
@@ -2545,6 +2621,7 @@ test("notes: a note goes with its code to another file", async () => {
 
 				return api.commands.executeCommand("notes.add", "mind the aspect ratio");
 			}
+
 			case "move": {
 				// Pasted into another file, saved; cut from this one.
 				await api.workspace.fs.writeFile(api.Uri.file("/workspace/moved-to.js"), new TextEncoder().encode("other();\nshift(width, height);\n"));
@@ -2553,10 +2630,13 @@ test("notes: a note goes with its code to another file", async () => {
 				const text = editor.document.getText();
 				const at = text.indexOf("shift(width, height);\n");
 
-				await editor.edit((builder) => { builder.delete(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + "shift(width, height);\n".length))); });
+				await editor.edit((builder) => {
+					builder.delete(new api.Range(editor.document.positionAt(at), editor.document.positionAt(at + "shift(width, height);\n".length)));
+				});
 
 				return undefined;
 			}
+
 			default:
 				return { "from": await notesOn("moved-from.js"), "to": await notesOn("moved-to.js") };
 		}
@@ -2656,7 +2736,7 @@ test("event sheet: its tab — a game's rule a card around its code, its conditi
 			const now = await cells();
 			const line = (text) => now.find((cell) => cell.text.includes(text))?.line;
 
-			return line("behavior Position") === 4 && line("when Position.x[eid] > 10") === 9 || undefined;
+			return (line("behavior Position") === 4 && line("when Position.x[eid] > 10") === 9) || undefined;
 		});
 	} finally {
 		await workbench.locator(".notes-margin-tab", { "hasText": "Margin" }).click();
@@ -2695,10 +2775,18 @@ test("git review: a diff in the shell", async () => {
 		open.onsuccess = () => {
 			const request = open.result.transaction("cst").objectStore("cst").count();
 
-			request.onsuccess = () => { resolve(request.result); };
-			request.onerror = () => { resolve(0); };
+			request.onsuccess = () => {
+				resolve(request.result);
+			};
+
+			request.onerror = () => {
+				resolve(0);
+			};
 		};
-		open.onerror = () => { resolve(0); };
+
+		open.onerror = () => {
+			resolve(0);
+		};
 	}));
 	const before = await parses();
 
@@ -2829,6 +2917,7 @@ test("the diagram: ARCHITECTURE.md's is this tour's", async () => {
 	const doc = await readFile(file, "utf8");
 	const [begin, end] = ["<!-- architecture-tour:begin -->\n", "\n<!-- architecture-tour:end -->"];
 	const committed = doc.slice(doc.indexOf(begin) + begin.length, doc.indexOf(end));
+
 	await session.until("a last look", () => true);
 
 	const fresh = tourDiagram(session.seen());

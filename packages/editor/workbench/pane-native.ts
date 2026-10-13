@@ -7,8 +7,8 @@
  * for it, a card's label as a CodeLens above its first line, and a gutter mark as an overview-ruler mark (its title on
  * hover). Public API only.
  */
-import type * as vscodeApi from "vscode";
 import type { PaneAction, PaneCommand, PaneGroup, PaneItem } from "@brianjenkins94/run-contract/pane";
+import type * as vscodeApi from "vscode";
 
 /** A file's content, placed: each item, card and mark on the lines it's on now (0-based). */
 export interface NativeDrawing {

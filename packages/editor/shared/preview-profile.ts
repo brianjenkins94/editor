@@ -30,7 +30,7 @@ type ProfilerConstructor = new (options: { "sampleInterval": number; "maxBufferS
 
 /** Profile `page` for `durationMs`: its `.cpuprofile` and where its time went. */
 async function capture(page: Window, durationMs: number, sampleIntervalMs: number, top: number): Promise<PreviewProfile> {
-	const Profiler = (page as Window & { "Profiler"?: ProfilerConstructor }).Profiler;
+	const { Profiler } = page as Window & Partial<Record<"Profiler", ProfilerConstructor>>;
 
 	if (Profiler === undefined) {
 		throw new Error("this browser has no JS Self-Profiling (Profiler): Chromium has it");
@@ -46,7 +46,9 @@ async function capture(page: Window, durationMs: number, sampleIntervalMs: numbe
 		throw new Error("the preview's page can't be profiled (" + String(error) + "): reload it, so it's served with the profiling policy", { "cause": error });
 	}
 
-	await new Promise((resolve) => { setTimeout(resolve, duration); });
+	await new Promise((resolve) => {
+		setTimeout(resolve, duration);
+	});
 
 	const profile = toCpuProfile(await profiler.stop());
 
@@ -56,9 +58,15 @@ async function capture(page: Window, durationMs: number, sampleIntervalMs: numbe
 /** Serve `preview.profile` for each preview window — `pageOf` finds its page, docked or popped out. */
 export function installPreviewProfiler(hub: Hub, pageOf: (key: string) => Window | undefined): void {
 	serve(hub, PREVIEW_PROFILE, async (args) => {
-		const { window: named, port, durationMs = 5000, sampleIntervalMs = 10, top = 25 } = (args ?? {}) as { "window"?: unknown; "port"?: unknown; "durationMs"?: number; "sampleIntervalMs"?: number; "top"?: number };
+		const { "window": named, port, durationMs = 5000, sampleIntervalMs = 10, top = 25 } = (args ?? {}) as { "window"?: unknown; "port"?: unknown; "durationMs"?: number; "sampleIntervalMs"?: number; "top"?: number };
 		// A window by its key (`5173`, `5173~2` — a port's second window), or a port (its first window).
-		const key = typeof named === "string" ? named : typeof port === "number" ? String(port) : undefined;
+		let key: string | undefined;
+
+		if (typeof named === "string") {
+			key = named;
+		} else if (typeof port === "number") {
+			key = String(port);
+		}
 
 		if (key === undefined) {
 			throw new Error("preview.profile takes { window or port }");
@@ -70,7 +78,7 @@ export function installPreviewProfiler(hub: Hub, pageOf: (key: string) => Window
 			throw new Error("no preview window " + key);
 		}
 
-		return await capture(page, durationMs, sampleIntervalMs, top);
+		return capture(page, durationMs, sampleIntervalMs, top);
 	});
 }
 
@@ -102,7 +110,7 @@ export function installAutoProfiler(hub: Hub, windows: () => { "key": string; "p
 	const lastProfiled = new Map<string, number>();
 	let capturing = false;
 
-	type ScriptTiming = { "duration": number; "window"?: Window | null };
+	interface ScriptTiming { "duration": number; "window"?: Window | null }
 	const observeTop = (top: Window): void => {
 		if (observed.has(top)) {
 			return;
@@ -143,11 +151,7 @@ export function installAutoProfiler(hub: Hub, windows: () => { "key": string; "p
 	setInterval(() => {
 		const now = Date.now();
 
-		for (const { key, port, page } of windows()) {
-			if (page === undefined) {
-				continue;
-			}
-
+		for (const { key, port, page } of windows().filter((open) => open.page !== undefined)) {
 			// A popped-out window is a top-level window of its own: its frames are reported there.
 			if (page.top === page) {
 				observeTop(page);

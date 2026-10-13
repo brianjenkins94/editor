@@ -55,9 +55,11 @@ function conditionHead(condition: Condition): string {
 		case "onKey": {
 			return "if (input.pressed(" + JSON.stringify(condition.arg ?? "") + ")) {";
 		}
+
 		case "onStart": {
 			return "if (world.frame === 0) {";
 		}
+
 		case "everyTick":
 		default: {
 			return "{";
@@ -71,9 +73,11 @@ function conditionLabel(condition: Condition): string {
 		case "onKey": {
 			return "when " + JSON.stringify(condition.arg ?? "") + " is pressed";
 		}
+
 		case "onStart": {
 			return "on start";
 		}
+
 		case "everyTick":
 		default: {
 			return "every tick";
@@ -87,12 +91,15 @@ function actionStatement(action: Action): string {
 		case "spawn": {
 			return "world.spawn(" + JSON.stringify(action.arg ?? "entity") + ");";
 		}
+
 		case "move": {
 			return "world.move(" + JSON.stringify(action.arg ?? "") + ", " + (action.value ?? "0") + ");";
 		}
+
 		case "setVar": {
 			return "world.vars[" + JSON.stringify(action.arg ?? "") + "] = " + (action.value ?? "0") + ";";
 		}
+
 		case "log":
 		default: {
 			return "world.log(" + JSON.stringify(action.arg ?? "") + ");";
@@ -142,7 +149,7 @@ function spansFromOwners(owners: (string | undefined)[]): RowSpan[] {
 
 		const last = spans.at(-1);
 
-		if (last !== undefined && last.rowId === rowId && last.endLine === line - 1) {
+		if (last?.rowId === rowId && last.endLine === line - 1) {
 			last.endLine = line;
 		} else {
 			spans.push({ "rowId": rowId, "startLine": line, "endLine": line });
@@ -201,12 +208,15 @@ function actionSummary(action: Action): string {
 		case "spawn": {
 			return "spawn " + (action.arg ?? "entity");
 		}
+
 		case "move": {
 			return "move " + (action.arg ?? "");
 		}
+
 		case "setVar": {
 			return "set " + (action.arg ?? "") + " = " + (action.value ?? "0");
 		}
+
 		case "log":
 		default: {
 			return "log " + (action.arg ?? "");

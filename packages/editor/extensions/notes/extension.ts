@@ -15,19 +15,32 @@
  * API only: everything it knows of the code comes from the editor's BABLR, through commands.
  */
 import type { Resolved } from "@brianjenkins94/run-contract/annotations";
+import type { Annotation, Candidate, SpanRef } from "@brianjenkins94/util/silo/annotations";
 import { annotations } from "@brianjenkins94/run-contract/annotations";
-import type { Annotation, SpanRef } from "@brianjenkins94/util/silo/annotations";
 import { annotationsText, parseAnnotations } from "@brianjenkins94/util/silo/annotations";
 import { parseEvidence, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { annotationsPath, GITATTRIBUTES, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
 
 type Note = Annotation<{ "text": string }>;
+/** A note, who wrote it, and where it was found now. */
+interface Landing { "note": Note; "owner": string; "resolved": Resolved }
+/** Where a look at `document` shows its notes: its threads (`fresh`) and its lost notes' diagnostics (`orphans`). */
+interface Placing { "document": vscode.TextDocument; "file": string; "source": string; "you": string; "fresh": vscode.CommentThread[]; "orphans": vscode.Diagnostic[] }
 
 const COLLECTION = "notes";
 const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 /** How long to wait after typing stops before resolving a file's notes again (BABLR re-reads the whole file). */
 const SETTLE_MS = 600;
+
+/** A shown note's thread label: how it was found, when not by its own id. */
+function threadLabel(status: Resolved["status"], at: Candidate): string | undefined {
+	if (status === "uncertain") {
+		return `Moved here? (${at.strategy}, ${at.score.toFixed(2)})`;
+	}
+
+	return status === "re-placed" ? "Followed its code here" : undefined;
+}
 
 export function activate(context: vscode.ExtensionContext): void {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("/workspace");
@@ -132,6 +145,70 @@ export function activate(context: vscode.ExtensionContext): void {
 		return { ...bare, ...inferred === null || inferred === "any" || inferred === "unknown" ? {} : { "inferred": inferred }, ...observed === undefined ? {} : { "observed": observed } };
 	};
 
+	/** A note that isn't shown on its code: a diagnostic at its last place in `document`, saying `message` (and pointing
+	 *  at its code elsewhere, `related`, when it moved there). */
+	const lose = ({ document, source, orphans }: Placing, note: Note, owner: string, message: string, related?: vscode.DiagnosticRelatedInformation[]): void => {
+		const near = document.positionAt(Math.min(note.ref.baseline?.start ?? 0, source.length));
+		const diagnostic = new vscode.Diagnostic(document.lineAt(near.line).range, message, vscode.DiagnosticSeverity.Information);
+
+		diagnostic.source = "notes";
+		diagnostic.code = note.id;
+
+		if (related !== undefined) {
+			diagnostic.relatedInformation = related;
+		}
+
+		orphans.push(diagnostic);
+		lost.set(note.id, { "note": note, "owner": owner });
+	};
+
+	/** Show a note where it landed in `document`: as a thread on its span (`fresh`), or — moved away, or lost — as a
+	 *  diagnostic (`orphans`). */
+	const land = async (placing: Placing, { note, owner, resolved }: Landing): Promise<void> => {
+		const { document, file, you, fresh } = placing;
+		const at = resolved.candidate;
+		const noteText = note.payload?.text ?? "";
+
+		// Its code moved to another file: a note of yours goes with it (a tombstone here, the note in that file's
+		// notes); anyone else's waits here, pointing there, until its author next looks.
+		if (resolved.status === "moved" && at?.start !== undefined && at.end !== undefined && at.file !== file) {
+			if (owner === you && resolved.ref !== undefined) {
+				await save(file, { ...note, "dismissed": true, "updatedAt": new Date().toISOString() });
+				await save(at.file, { ...note, "ref": resolved.ref, "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": new Date().toISOString() });
+
+				return;
+			}
+
+			const there = vscode.Uri.joinPath(root, at.file);
+			const target = await vscode.workspace.openTextDocument(there).then((opened) => new vscode.Range(opened.positionAt(at.start), opened.positionAt(at.end)), () => new vscode.Range(0, 0, 0, 0));
+
+			lose(placing, note, owner, `A note's code moved to ${at.file}: "${noteText}" — it moves there when ${owner} next opens this file.`, [new vscode.DiagnosticRelatedInformation(new vscode.Location(there, target), "Its code, now")]);
+
+			return;
+		}
+
+		if (resolved.status === "orphaned" || at?.start === undefined || at.end === undefined || at.file !== file) {
+			lose(placing, note, owner, `A note lost its place: "${noteText}" — re-place it on the code it's about, or dismiss it.`);
+
+			return;
+		}
+
+		const thread = controller.createCommentThread(document.uri, new vscode.Range(document.positionAt(at.start), document.positionAt(at.end)), [comment(note, owner)]);
+
+		thread.canReply = false;
+		thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
+		thread.contextValue = resolved.status === "uncertain" ? "note-uncertain" : "note";
+		thread.label = threadLabel(resolved.status, at);
+		shown.set(thread, { "note": note, "owner": owner, "resolved": resolved });
+		fresh.push(thread);
+
+		// Found by anything but its own id: a note of yours is rewritten where it landed (healed), so the next look
+		// finds it by id. An uncertain one waits for you to keep it there.
+		if (owner === you && resolved.status === "re-placed" && resolved.ref !== undefined) {
+			await save(file, { ...note, "ref": await withType(resolved.ref, document), "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": new Date().toISOString() });
+		}
+	};
+
 	/** Resolve every note on `document` against its text now, and show each where it landed. */
 	const show = async (document: vscode.TextDocument): Promise<void> => {
 		if (document.uri.scheme !== "file" || !CODE_FILE.test(document.uri.path)) {
@@ -139,7 +216,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 
 		const file = relative(document.uri);
-		const version = document.version;
+		const { version } = document;
 		const source = document.getText();
 		const notes = (await notesOn(file)).filter(({ note }) => note.dismissed !== true);
 		const resolve = async (refs: SpanRef[], types?: Record<string, { "inferred"?: string; "observed"?: string[] }>): Promise<Resolved[] | undefined> => annotations(vscode.commands).resolve(source, file, refs, types === undefined ? {} : { "types": types });
@@ -153,10 +230,12 @@ export function activate(context: vscode.ExtensionContext): void {
 		if (places.length > 0) {
 			const inferred = await typesAt(document, places.map(([, range]) => range));
 			const observed = await observedOf(file);
-			const types = Object.fromEntries(places.map(([span], index) => [span, { ...inferred[index] === null ? {} : { "inferred": inferred[index]! }, ...observed.has(span) ? { "observed": observed.get(span) } : {} }]));
+			const types = Object.fromEntries(places.map(([span], index) => [span, { ...inferred[index] === null ? {} : { "inferred": inferred[index] }, ...observed.has(span) ? { "observed": observed.get(span) } : {} }]));
 			const again = await resolve(unsure.map((index) => notes[index].note.ref), types);
 
-			unsure.forEach((index, at) => { resolutions[index] = again?.[at] ?? resolutions[index]; });
+			unsure.forEach((index, at) => {
+				resolutions[index] = again?.[at] ?? resolutions[index];
+			});
 		}
 
 		const landed = notes.map(({ note, owner }, index) => ({ "note": note, "owner": owner, "resolved": resolutions[index] ?? { "status": "orphaned" as const, "alternatives": [] } }));
@@ -173,59 +252,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		const orphans: vscode.Diagnostic[] = [];
 		const you = await me();
 
-		for (const { note, owner, resolved } of landed) {
-			const at = resolved.candidate;
-
-			// Its code moved to another file: a note of yours goes with it (a tombstone here, the note in that file's
-			// notes); anyone else's waits here, pointing there, until its author next looks.
-			if (resolved.status === "moved" && at?.start !== undefined && at.end !== undefined && at.file !== file) {
-				if (owner === you && resolved.ref !== undefined) {
-					await save(file, { ...note, "dismissed": true, "updatedAt": new Date().toISOString() });
-					await save(at.file, { ...note, "ref": resolved.ref, "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": new Date().toISOString() });
-
-					continue;
-				}
-
-				const there = vscode.Uri.joinPath(root, at.file);
-				const target = await vscode.workspace.openTextDocument(there).then((opened) => new vscode.Range(opened.positionAt(at.start!), opened.positionAt(at.end!)), () => new vscode.Range(0, 0, 0, 0));
-				const near = document.positionAt(Math.min(note.ref.baseline?.start ?? 0, source.length));
-				const diagnostic = new vscode.Diagnostic(document.lineAt(near.line).range, `A note's code moved to ${at.file}: "${note.payload?.text ?? ""}" — it moves there when ${owner} next opens this file.`, vscode.DiagnosticSeverity.Information);
-
-				diagnostic.source = "notes";
-				diagnostic.code = note.id;
-				diagnostic.relatedInformation = [new vscode.DiagnosticRelatedInformation(new vscode.Location(there, target), "Its code, now")];
-				orphans.push(diagnostic);
-				lost.set(note.id, { "note": note, "owner": owner });
-
-				continue;
-			}
-
-			if (resolved.status === "orphaned" || at?.start === undefined || at.end === undefined || at.file !== file) {
-				const near = document.positionAt(Math.min(note.ref.baseline?.start ?? 0, source.length));
-				const diagnostic = new vscode.Diagnostic(document.lineAt(near.line).range, `A note lost its place: "${note.payload?.text ?? ""}" — re-place it on the code it's about, or dismiss it.`, vscode.DiagnosticSeverity.Information);
-
-				diagnostic.source = "notes";
-				diagnostic.code = note.id;
-				orphans.push(diagnostic);
-				lost.set(note.id, { "note": note, "owner": owner });
-
-				continue;
-			}
-
-			const thread = controller.createCommentThread(document.uri, new vscode.Range(document.positionAt(at.start), document.positionAt(at.end)), [comment(note, owner)]);
-
-			thread.canReply = false;
-			thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
-			thread.contextValue = resolved.status === "uncertain" ? "note-uncertain" : "note";
-			thread.label = resolved.status === "uncertain" ? `Moved here? (${at.strategy}, ${at.score.toFixed(2)})` : resolved.status === "re-placed" ? "Followed its code here" : undefined;
-			shown.set(thread, { "note": note, "owner": owner, "resolved": resolved });
-			fresh.push(thread);
-
-			// Found by anything but its own id: a note of yours is rewritten where it landed (healed), so the next look
-			// finds it by id. An uncertain one waits for you to keep it there.
-			if (owner === you && resolved.status === "re-placed" && resolved.ref !== undefined) {
-				await save(file, { ...note, "ref": await withType(resolved.ref, document), "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": new Date().toISOString() });
-			}
+		for (const landing of landed) {
+			await land({ "document": document, "file": file, "source": source, "you": you, "fresh": fresh, "orphans": orphans }, landing);
 		}
 
 		threads.set(document.uri.toString(), fresh);
@@ -262,10 +290,20 @@ export function activate(context: vscode.ExtensionContext): void {
 		return found.note;
 	};
 
+	/** The note waiting to be placed by hand is placed. */
+	const donePlacing = (): void => {
+		pending = undefined;
+		status.hide();
+	};
+
 	let typing: ReturnType<typeof setTimeout> | undefined;
 	const watcher = vscode.workspace.createFileSystemWatcher(`**/${SILO_DIR}/${COLLECTION}/**/*.jsonl`);
 
-	context.subscriptions.push(controller, diagnostics, status, watcher,
+	context.subscriptions.push(
+		controller,
+		diagnostics,
+		status,
+		watcher,
 		vscode.commands.registerCommand("notes.add", async (textArg?: unknown) => {
 			const editor = vscode.window.activeTextEditor;
 
@@ -313,7 +351,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			const at = found?.resolved?.candidate;
 
 			if (note !== undefined && found?.resolved?.ref !== undefined && at !== undefined) {
-				const document = vscode.workspace.textDocuments.find((open) => relative(open.uri) === found.resolved!.ref!.file);
+				const document = vscode.workspace.textDocuments.find((open) => relative(open.uri) === found.resolved.ref.file);
 
 				await save(note.ref.file, { ...note, "ref": document === undefined ? found.resolved.ref : await withType(found.resolved.ref, document), "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": new Date().toISOString() });
 				showAll();
@@ -348,8 +386,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 				await save(file, { ...note, "ref": await withType(ref, editor.document), "placed": { "strategy": "by hand", "score": 1 }, "updatedAt": new Date().toISOString() });
 				lost.delete(note.id);
-				pending = undefined;
-				status.hide();
+				donePlacing();
 				showAll();
 			}
 		}),
@@ -374,11 +411,15 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.workspace.onDidChangeTextDocument((event) => {
 			if (event.contentChanges.length > 0) {
 				clearTimeout(typing);
-				typing = setTimeout(() => { void show(event.document); }, SETTLE_MS);
+				typing = setTimeout(() => {
+					void show(event.document);
+				}, SETTLE_MS);
 			}
 		}),
 		// Notes changed underneath (a pull, a teammate's merge, another window).
-		watcher.onDidChange(showAll), watcher.onDidCreate(showAll), watcher.onDidDelete(showAll)
+		watcher.onDidChange(showAll),
+		watcher.onDidCreate(showAll),
+		watcher.onDidDelete(showAll)
 	);
 
 	showAll();

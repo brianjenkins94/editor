@@ -42,6 +42,7 @@ export interface EditorTap {
 	"onFlush": (flush: () => void) => void;
 }
 
+// eslint-disable-next-line ts/naming-convention -- the page globals the editor and the observability tap look for
 type TapWindow = Window & { "__editorTap"?: EditorTap; "__obsTap"?: true };
 
 /** The editor window hosting this preview: above every frame the app nests in it, each a preview page too — the window
@@ -58,7 +59,7 @@ function findHost(): { "host": Window; "top": TapWindow } {
 	} catch { /* a parent we can't read: the top we have */ }
 
 	if (current.parent === current) {
-		return { "host": (current.opener as Window | null) ?? current, "top": current as TapWindow };
+		return { "host": (current.opener as Window | null) ?? current, "top": current };
 	}
 
 	let host: Window = current.parent;
@@ -69,7 +70,7 @@ function findHost(): { "host": Window; "top": TapWindow } {
 		}
 	} catch { /* an ancestor we can't read */ }
 
-	return { "host": (host as unknown as Record<string, unknown>)[PREVIEW_HOST_MARK] === true ? host : current.parent, "top": current as TapWindow };
+	return { "host": (host as unknown as Record<string, unknown>)[PREVIEW_HOST_MARK] === true ? host : current.parent, "top": current };
 }
 
 /** The top frame's tap: the window's hub, and what it offers. */
@@ -85,6 +86,7 @@ function windowTap(host: Window, windowId: string): EditorTap {
 	const log = (record: TapRecord): void => {
 		hub.publish("$sys.log.tap", { "kind": "log", "level": record.level, "message": record.message, "attrs": record.attrs, "context": { "source": "tap" }, "time": Date.now(), "depth": 0 });
 	};
+
 	// Unanswered (no shell, no decider) ⇒ deny.
 	const decide = async (kind: string, resource: string): Promise<boolean> => rpc.request("preview.decide", { "kind": kind, "resource": resource }, { "timeoutMs": 300_000, "waitForResponderMs": 10_000 }).then((allow) => allow === true, () => false);
 
@@ -157,14 +159,20 @@ function install(): void {
 	}
 
 	// A nested frame's records name it (by its path on the server), on its window's hub.
-	const frame = top === self ? undefined : "/" + location.pathname.split(VIRTUAL_MARKER)[1]!.split("/").slice(2).join("/");
-	const send = (record: TapRecord): void => { tap.log(frame === undefined ? record : { ...record, "attrs": { "frame": frame, ...record.attrs } }); };
+	const frame = top === self ? undefined : "/" + location.pathname.split(VIRTUAL_MARKER)[1].split("/").slice(2).join("/");
+	const send = (record: TapRecord): void => {
+		tap.log(frame === undefined ? record : { ...record, "attrs": { "frame": frame, ...record.attrs } });
+	};
 
 	installConsoleTap(send);
 	// This page's runtime evidence, named by its frame and this load (a reload is a page of its own).
 	const page = `${windowId}${frame ?? ""}#${crypto.randomUUID()}`;
 
-	tap.onFlush(installPageEvidence((modules) => { tap.evidence(page, modules); }, (stops) => { tap.stops(page, stops); }).flush);
+	tap.onFlush(installPageEvidence((modules) => {
+		tap.evidence(page, modules);
+	}, (stops) => {
+		tap.stops(page, stops);
+	}).flush);
 	installSocketGate(tap.decide);
 	gateWebRtc(tap.decide);
 	keepNewWindows(tap.open);
@@ -176,15 +184,16 @@ function install(): void {
  *  the editor. Anything else (another site, a named target) is the browser's, as always. There's no window to hand
  *  back, so such a `window.open` returns null (as a blocked popup does). */
 function keepNewWindows(open: (href: string) => void): void {
-	const pageOf = (url: unknown): string | undefined => {
+	const pageOf = (url: string | URL): string | undefined => {
 		try {
-			const parsed = new URL(String(url), location.href);
+			const parsed = new URL(url, location.href);
 
 			return parsed.origin === location.origin && VIRTUAL_RE.test(parsed.pathname) ? parsed.href : undefined;
 		} catch {
 			return undefined;
 		}
 	};
+
 	const original = window.open.bind(window);
 
 	window.open = (url?: string | URL, target?: string, features?: string): WindowProxy | null => {
@@ -198,12 +207,13 @@ function keepNewWindows(open: (href: string) => void): void {
 
 		return original(url, target, features);
 	};
+
 	addEventListener("click", (event) => {
 		if (event.defaultPrevented || event.button !== 0) {
 			return;
 		}
 
-		const anchor = (event.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+		const anchor = (event.target as Element | null)?.closest?.<HTMLAnchorElement>("a[href]");
 
 		if (anchor === null || anchor.hasAttribute("download") || !(anchor.target === "_blank" || event.metaKey || event.ctrlKey || event.shiftKey)) {
 			return;
@@ -221,7 +231,7 @@ function keepNewWindows(open: (href: string) => void): void {
 /** WebRTC (peer-to-peer, past the service worker): a real peer connection, but with its ICE servers stripped until
  *  the decision allows them (closed if it denies). */
 function gateWebRtc(decide: EditorTap["decide"]): void {
-	const Original = window.RTCPeerConnection as typeof RTCPeerConnection | undefined;
+	const Original = window.RTCPeerConnection;
 
 	if (Original === undefined) {
 		return;
@@ -249,6 +259,7 @@ function gateWebRtc(decide: EditorTap["decide"]): void {
 	} as unknown as typeof RTCPeerConnection;
 
 	Gated.prototype = Original.prototype;
+	// eslint-disable-next-line ts/naming-convention -- the DOM's RTCPeerConnection global, named by spec
 	(window as { "RTCPeerConnection": unknown }).RTCPeerConnection = Gated;
 }
 
@@ -278,6 +289,7 @@ function adoptWorkers(windowId: string, tap: EditorTap): void {
 			return url;
 		}
 	};
+
 	const offer = (post: (message: unknown, transfer: Transferable[]) => void): void => {
 		const { port1, port2 } = new MessageChannel();
 
@@ -286,24 +298,31 @@ function adoptWorkers(windowId: string, tap: EditorTap): void {
 			tap.adopt(port1);
 		} catch { /* a tap never breaks the app */ }
 	};
-	const OriginalWorker = window.Worker as typeof Worker | undefined;
-	const OriginalShared = window.SharedWorker as typeof SharedWorker | undefined;
+
+	const OriginalWorker = window.Worker;
+	const OriginalShared = window.SharedWorker;
 
 	if (OriginalWorker !== undefined) {
+		// eslint-disable-next-line ts/naming-convention -- the DOM's Worker global, named by spec
 		(window as { "Worker": unknown }).Worker = class extends OriginalWorker {
 			public constructor(url: string | URL, options?: WorkerOptions) {
 				super(tagged(url), options);
-				offer((message, transfer) => { super.postMessage(message, transfer); });
+				offer((message, transfer) => {
+					super.postMessage(message, transfer);
+				});
 			}
 		};
 	}
 
 	if (OriginalShared !== undefined) {
 		// (Its URL stays as it is: a shared worker is found by its URL, and a window's tag would make one per window.)
+		// eslint-disable-next-line ts/naming-convention -- the DOM's SharedWorker global, named by spec
 		(window as { "SharedWorker": unknown }).SharedWorker = class extends OriginalShared {
 			public constructor(url: string | URL, options?: string | WorkerOptions) {
 				super(url, options);
-				offer((message, transfer) => { this.port.postMessage(message, transfer); });
+				offer((message, transfer) => {
+					this.port.postMessage(message, transfer);
+				});
 			}
 		};
 	}

@@ -19,6 +19,7 @@ const KEEP_UNTIL_JOINED = 200;
 const JOIN_WAIT_MS = 10_000;
 
 function install(): void {
+	// eslint-disable-next-line ts/naming-convention -- the global the observability tap marks itself installed with
 	const self = globalThis as typeof globalThis & { "__obsTap"?: true };
 
 	if (self.__obsTap === true) {
@@ -38,9 +39,14 @@ function install(): void {
 	// publish before that goes nowhere).
 	let flowing = false;
 	let resolveJoined: () => void = () => undefined;
-	const whenJoined = new Promise<void>((resolve) => { resolveJoined = resolve; });
+	const whenJoined = new Promise<void>((resolve) => {
+		resolveJoined = resolve;
+	});
 
-	const publish = (record: TapRecord): void => { hub.publish("tap.worker.log", { "record": { ...record, "attrs": { "worker": worker, ...record.attrs } } }); };
+	const publish = (record: TapRecord): void => {
+		hub.publish("tap.worker.log", { "record": { ...record, "attrs": { "worker": worker, ...record.attrs } } });
+	};
+
 	const join = (port: MessagePort): void => {
 		if (joined) {
 			return;
@@ -57,10 +63,11 @@ function install(): void {
 			}
 		});
 	};
+
 	// The offer, taken before the app's handlers (registered after this one) see it.
 	const takeOffer = (event: MessageEvent): void => {
 		const data = event.data as Record<string, unknown> | null;
-		const port = event.ports[0];
+		const [port] = event.ports;
 
 		if (data !== null && typeof data === "object" && data[WORKER_OFFER] === true && port !== undefined) {
 			event.stopImmediatePropagation();
@@ -84,9 +91,17 @@ function install(): void {
 			}
 		} catch { /* a tap never breaks the app */ }
 	};
+
 	// Unanswered, or no page to ask ⇒ deny.
 	const decide: Decide = async (kind, resource) => {
-		const ready = await Promise.race([whenJoined.then(() => true), new Promise<boolean>((resolve) => { setTimeout(() => { resolve(false); }, JOIN_WAIT_MS); })]);
+		const ready = await Promise.race([
+			whenJoined.then(() => true),
+			new Promise<boolean>((resolve) => {
+				setTimeout(() => {
+					resolve(false);
+				}, JOIN_WAIT_MS);
+			})
+		]);
 
 		return ready && await rpc.request("tap.worker.decide", { "kind": kind, "resource": resource }, { "timeoutMs": 300_000, "waitForResponderMs": JOIN_WAIT_MS }).then((allow) => allow === true, () => false);
 	};
@@ -98,12 +113,14 @@ function install(): void {
 
 /** A worker this worker starts joins this worker's hub, as this one joined its page's. */
 function adoptWorkers(hub: Hub): void {
+	// eslint-disable-next-line ts/naming-convention -- the DOM's Worker global, named by spec
 	const Original = (globalThis as { "Worker"?: typeof Worker }).Worker;
 
 	if (Original === undefined) {
 		return;
 	}
 
+	// eslint-disable-next-line ts/naming-convention -- the DOM's Worker global, named by spec
 	(globalThis as { "Worker": unknown }).Worker = class extends Original {
 		public constructor(url: string | URL, options?: WorkerOptions) {
 			super(url, options);

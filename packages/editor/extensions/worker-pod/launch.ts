@@ -3,23 +3,10 @@
  * extension's package.json scripts, and any task the workspace defines) and runs one (`tasks.run`). The bridge's part is
  * only the crossing: tasks are VS Code's, and this asks VS Code for them.
  */
-import * as vscode from "vscode";
+import type { LaunchTarget } from "../../shared/runs";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
+import * as vscode from "vscode";
 import { podHub } from "./pod";
-
-/** One thing there is to run, as the shell's picker shows it. */
-export interface LaunchTarget {
-	/** Picks it back out (`tasks.run`): its source and name. */
-	"id": string;
-	"name": string;
-	/** Its package's folder relative to the workspace ("." for the root), when it's a package's script. */
-	"package"?: string;
-	/** The command it runs (`npm run dev`), and where. */
-	"command": string;
-	"cwd": string;
-	/** Keeps running until stopped (a background task: a dev server, a watcher), or runs to completion. */
-	"lifecycle": "service" | "task";
-}
 
 const idOf = (task: vscode.Task): string => `${task.source}:${task.name}`;
 
@@ -60,14 +47,12 @@ export async function appRootOf(path: string): Promise<string | undefined> {
 			if (await read(`${dir}/package.json`) !== undefined) {
 				return undefined;
 			}
+		} else {
+			const loaded = [...html.matchAll(/<script\s(?:[^>]*\s)?src\s*=\s*["']([^"']+)["']/giu)].map(([, src]) => `${dir}/${src.replace(/^\.\//u, "")}`);
+			const source = await read(path) ?? "";
 
-			continue;
+			return loaded.includes(path) || /\.[jt]sx$/u.test(path) || /\breact-dom\b|\bdocument\./u.test(source) ? dir : undefined;
 		}
-
-		const loaded = [...html.matchAll(/<script\s(?:[^>]*\s)?src\s*=\s*["']([^"']+)["']/giu)].map(([, src]) => `${dir}/${src!.replace(/^\.\//u, "")}`);
-		const source = await read(path) ?? "";
-
-		return loaded.includes(path) || /\.[jt]sx$/u.test(path) || /\breact-dom\b|\bdocument\./u.test(source) ? dir : undefined;
 	}
 
 	return undefined;
@@ -126,5 +111,11 @@ export function registerLaunch(context: vscode.ExtensionContext): void {
 			throw error;
 		}
 	});
-	context.subscriptions.push({ "dispose": () => { offList(); offRun(); } });
+
+	context.subscriptions.push({
+		"dispose": () => {
+			offList();
+			offRun();
+		}
+	});
 }

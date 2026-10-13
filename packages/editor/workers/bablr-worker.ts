@@ -17,11 +17,11 @@
  * mid-parse and the run bails cooperatively, no worker termination. bablr.ts drives one call at a time.
  */
 import "./bablr-fast-freeze"; // MUST be first: neutralizes record freezing before the BABLR bundle captures Object.freeze
+// (A comment, so sorting leaves the freeze first.)
+import type { SpanRef, SpanShape } from "@brianjenkins94/util/silo/annotations";
 import { atomsOf, cstSpansAsync, deriveIdentityAsync, editGroups, follow, PARSE_VERSION, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import { serve } from "@brianjenkins94/hub";
-import type { SpanRef, SpanShape } from "@brianjenkins94/util/silo/annotations";
 import { OBSERVED, PIPELINE, referTo, resolve } from "@brianjenkins94/util/silo/annotations";
-
 import { createWorkerHub } from "./worker-hub";
 
 const hub = createWorkerHub("bablr");
@@ -62,6 +62,7 @@ function keep(cst: Cst): Kept {
 
 		return at;
 	};
+
 	const data = new Int32Array(cst.spans.length * 8);
 
 	cst.spans.forEach((span, at) => {
@@ -100,10 +101,16 @@ async function blobOid(text: string): Promise<string> {
 	return [...new Uint8Array(await crypto.subtle.digest("SHA-1", bytes))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-const done = <T>(request: IDBRequest<T>): Promise<T> => new Promise((resolve, reject) => {
-	request.addEventListener("success", () => { resolve(request.result); });
-	request.addEventListener("error", () => { reject(request.error); });
-});
+function done<T>(request: IDBRequest<T>): Promise<T> {
+	return new Promise((resolve, reject) => {
+		request.addEventListener("success", () => {
+			resolve(request.result);
+		});
+		request.addEventListener("error", () => {
+			reject(request.error);
+		});
+	});
+}
 
 // Two stores: the parses, and what each weighs and when it was last used (pruning reads only the second).
 const database = new Promise<IDBDatabase | undefined>((resolve) => {
@@ -114,8 +121,12 @@ const database = new Promise<IDBDatabase | undefined>((resolve) => {
 			open.result.createObjectStore("cst");
 			open.result.createObjectStore("meta").createIndex("used", "used");
 		});
-		open.addEventListener("success", () => { resolve(open.result); });
-		open.addEventListener("error", () => { resolve(undefined); });
+		open.addEventListener("success", () => {
+			resolve(open.result);
+		});
+		open.addEventListener("error", () => {
+			resolve(undefined);
+		});
 	} catch {
 		resolve(undefined); // no IndexedDB here: parse every time
 	}
@@ -149,7 +160,7 @@ async function prune(db: IDBDatabase): Promise<void> {
 
 	const stores = db.transaction(["cst", "meta"], "readwrite");
 
-	for (const entry of entries.sort((a, b) => a.used - b.used)) {
+	for (const entry of entries.sort((left, right) => left.used - right.used)) {
 		if (total <= CACHE_BYTES * 0.75) {
 			break;
 		}
@@ -206,15 +217,17 @@ async function parse(source: string, signal?: AbortSignal): Promise<Cst | undefi
 }
 
 /** How a derivation gets a text's parse: from the cache — and, for a text BABLR can't parse, the failure a parse is. */
-const cachedParse = (signal: AbortSignal) => async (source: string): Promise<Cst> => {
-	const cst = await parse(source, signal);
+function cachedParse(signal: AbortSignal) {
+	return async (source: string): Promise<Cst> => {
+		const cst = await parse(source, signal);
 
-	if (cst === undefined) {
-		throw new Error("BABLR can't parse this text");
-	}
+		if (cst === undefined) {
+			throw new Error("BABLR can't parse this text");
+		}
 
-	return cst;
-};
+		return cst;
+	};
+}
 
 // A content chain (in practice [HEAD, working]) ⇒ verdict + changed nodes + their working lines. From cached parses:
 // each version of a file is parsed once, however many working versions it's compared against.
@@ -289,7 +302,7 @@ serve(hub, "bablr.follow", async (args, { signal }) => {
 
 /** Every span of a parsed text as silo's annotation strategies see it: id, node type, offsets, tokens. */
 function shapesOf(source: string, cst: Cst): SpanShape[] {
-	const tokens = cst.spans.filter((span) => span.token && !span.trivia).sort((a, b) => a.start - b.start);
+	const tokens = cst.spans.filter((span) => span.token && !span.trivia).sort((left, right) => left.start - right.start);
 	const firstAt = (offset: number): number => {
 		let low = 0;
 		let high = tokens.length;
@@ -311,10 +324,10 @@ function shapesOf(source: string, cst: Cst): SpanShape[] {
 		const atoms: string[] = [];
 
 		for (let at = firstAt(span.start); at < tokens.length && tokens[at].end <= span.end; at += 1) {
-			atoms.push(tokens[at].text!);
+			atoms.push(tokens[at].text);
 		}
 
-		return { "id": span.id, "type": span.type!, "start": span.start, "end": span.end, "atoms": atoms };
+		return { "id": span.id, "type": span.type, "start": span.start, "end": span.end, "atoms": atoms };
 	});
 }
 
@@ -338,6 +351,15 @@ serve(hub, "bablr.refer", async (args, { signal }) => {
 	}) };
 });
 
+/** Where `span`, a span of `baseline` (`was`: its parse, undefined when there's none), is in the text now (`now`, and
+ *  its `anchors`), by the structural diff; undefined when it went. */
+function reidentify(baseline: string, was: Cst | undefined, span: string, now: Cst, anchors: ReturnType<typeof spanAnchors>): { "id": string; "how": "kept" | "replaced" } | undefined {
+	const index = was === undefined ? -1 : spanAnchors(baseline, "Program", was).findIndex((anchor) => anchor.id === span);
+	const found = was === undefined || index === -1 ? undefined : follow(atomsOf(was), atomsOf(now), index);
+
+	return found === undefined ? undefined : { "id": anchors[found.to].id, "how": found.how };
+}
+
 // References, the text their file has now (and their baselines' texts, by blob oid — git's, and the texts the caller knows
 // the file went through, `texts`, keyed here — other files' texts, by path, and
 // what spans of this text are beyond their shape — TypeScript's type, observed tags — when the caller could get them) ⇒ where each one's span is: silo's resolver — the authored pipeline, with the other
@@ -345,7 +367,7 @@ serve(hub, "bablr.refer", async (args, { signal }) => {
 // observed one (the id alone) — and, for one found anywhere but by its own id, the reference as it would be made where
 // it was found now (for an annotation to be rewritten with).
 serve(hub, "bablr.resolve", async (args, { signal }) => {
-	const { source, file, refs, baselines: fromGit = {}, texts = [], others = {}, observed = false, types = {} } = args as { "source": string; "file": string; "refs": SpanRef[]; "baselines"?: Record<string, string>; "texts"?: string[]; "others"?: Record<string, string>; "observed"?: boolean; "types"?: Record<string, { "inferred"?: string; "observed"?: string[] }> };
+	const { source, file, refs, "baselines": fromGit = {}, texts = [], others = {}, observed = false, types = {} } = args as { "source": string; "file": string; "refs": SpanRef[]; "baselines"?: Record<string, string>; "texts"?: string[]; "others"?: Record<string, string>; "observed"?: boolean; "types"?: Record<string, { "inferred"?: string; "observed"?: string[] }> };
 	const cst = source === "" ? undefined : await parse(source, signal);
 	const baselines: Record<string, string> = { ...fromGit };
 
@@ -363,7 +385,7 @@ serve(hub, "bablr.resolve", async (args, { signal }) => {
 	const blob = await blobOid(source);
 	// The other files' spans, by id — parsed (or taken from the cache) only once a reference needs them.
 	let elsewhere: Map<string, { "file": string; "shape": SpanShape; "shapes": SpanShape[]; "blob": string }> | undefined;
-	const indexOthers = async (): Promise<NonNullable<typeof elsewhere>> => {
+	const indexOthers = async (): Promise<void> => {
 		const index = new Map<string, { "file": string; "shape": SpanShape; "shapes": SpanShape[]; "blob": string }>();
 
 		for (const [path, text] of Object.entries(others)) {
@@ -381,8 +403,19 @@ serve(hub, "bablr.resolve", async (args, { signal }) => {
 			}
 		}
 
-		return index;
+		elsewhere = index;
 	};
+
+	// One reference's resolution, with the reference as it would be made where it was found (when that wasn't by its id).
+	const resolveRef = (ref: SpanRef, reidentified: { "id": string; "how": "kept" | "replaced" } | undefined) => {
+		const index = elsewhere;
+		const resolution = resolve(ref, { "file": file, "shapes": shapes, "types": (id: string) => types[id], ...index === undefined ? {} : { "elsewhere": (id: string) => index.get(id) }, ...reidentified === undefined ? {} : { "reidentified": reidentified } }, observed ? OBSERVED : PIPELINE);
+		const at = resolution.status === "attached" ? undefined : resolution.candidate;
+		const there = at === undefined || at.file === file ? { "shapes": shapes, "blob": blob } : index?.get(at.span);
+
+		return { ...resolution, ...at === undefined || there === undefined ? {} : { "ref": referTo(there.shapes, at.span, at.file, there.blob) } };
+	};
+
 	const resolutions = [];
 
 	for (const ref of refs) {
@@ -390,23 +423,14 @@ serve(hub, "bablr.resolve", async (args, { signal }) => {
 		const baseline = ref.baseline === undefined ? undefined : baselines[ref.baseline.blob];
 
 		if (!observed && baseline !== undefined && !ids.has(ref.span)) {
-			const was = await parse(baseline, signal);
-			const index = was === undefined ? -1 : spanAnchors(baseline, "Program", was).findIndex((anchor) => anchor.id === ref.span);
-			const found = was === undefined || index === -1 ? undefined : follow(atomsOf(was), atomsOf(cst), index);
-
-			reidentified = found === undefined ? undefined : { "id": anchors[found.to].id, "how": found.how };
+			reidentified = reidentify(baseline, await parse(baseline, signal), ref.span, cst, anchors);
 		}
 
-		if (!observed && !ids.has(ref.span) && Object.keys(others).length > 0) {
-			elsewhere ??= await indexOthers();
+		if (!observed && !ids.has(ref.span) && Object.keys(others).length > 0 && elsewhere === undefined) {
+			await indexOthers();
 		}
 
-		const index = elsewhere;
-		const resolution = resolve(ref, { "file": file, "shapes": shapes, "types": (id: string) => types[id], ...index === undefined ? {} : { "elsewhere": (id: string) => index.get(id) }, ...reidentified === undefined ? {} : { "reidentified": reidentified } }, observed ? OBSERVED : PIPELINE);
-		const at = resolution.status === "attached" ? undefined : resolution.candidate;
-		const there = at === undefined || at.file === file ? { "shapes": shapes, "blob": blob } : index?.get(at.span);
-
-		resolutions.push({ ...resolution, ...at === undefined || there === undefined ? {} : { "ref": referTo(there.shapes, at.span, at.file, there.blob) } });
+		resolutions.push(resolveRef(ref, reidentified));
 	}
 
 	return { "resolutions": resolutions };

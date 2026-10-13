@@ -72,10 +72,9 @@ export function spriteDataUrls(): Record<string, string> {
 
 		const source = libraryFiles()["levels/level1.ts"] ?? "";
 		const pattern = /addTileset\("([^"]+)",\s*"(data:[^"]+)"\)/gu;
-		let match: RegExpExecArray | null;
 
-		while ((match = pattern.exec(source)) !== null) {
-			assetCache[match[1]] = match[2];
+		for (const [, name, dataUrl] of source.matchAll(pattern)) {
+			assetCache[name] = dataUrl;
 		}
 	}
 
@@ -138,7 +137,7 @@ export interface AuthoredGame {
 
 /** A blank but runnable game: infra + an empty level, no entities, no systems. The from-scratch starting point. */
 export function blankGame(width = 20, height = 12, tile = 32): AuthoredGame {
-	return { "level": "level1", "entities": [], "systems": [], "map": { width, height, tile, "floor": [], "objects": [] } };
+	return { "level": "level1", "entities": [], "systems": [], "map": { "width": width, "height": height, "tile": tile, "floor": [], "objects": [] } };
 }
 
 /** The maker's built-in example, as a block model — the starter template. Assembling THIS and generating reproduces the example game. */
@@ -340,7 +339,7 @@ export function update(scene, time, delta) {
  *  background backdrop, the walkable floor layer, and the placed objects. Readable, house-style code (a coordinate list
  *  + a tiny paint loop), not an opaque blob — the visible code is a core value. */
 function generateLevelFile(game: AuthoredGame): string {
-	const map = game.map;
+	const { map } = game;
 
 	if (map === undefined) {
 		throw new Error("generateLevelFile requires an authored map");
@@ -357,7 +356,9 @@ function generateLevelFile(game: AuthoredGame): string {
 
 	const gid: Record<string, number> = {};
 
-	tilesetOrder.forEach((name, index) => { gid[name] = index + 1; });
+	tilesetOrder.forEach((name, index) => {
+		gid[name] = index + 1;
+	});
 
 	const tilesetLines = tilesetOrder.map((name) => `${game.level}.addTileset("${name}", "${assets[name]}");`).join("\n");
 	const gidEntries = tilesetOrder.map((name) => `"${name}": ${gid[name]}`).join(", ");
@@ -398,6 +399,53 @@ ${objectLines}
 }
 
 /**
+ * The composed path of {@link generateGame}: emit the components the entities attach, the compiled behaviors/ + systems/,
+ * the render engine system, the level, and a scene that wires the compiled systems.
+ */
+function emitComposedGame(game: AuthoredGame, files: Record<string, string>, vendored: Record<string, string>): void {
+	const composedComponents = new Set<string>(["Position"]);
+
+	for (const entity of game.entities) {
+		for (const component of entity.components) {
+			composedComponents.add(component);
+		}
+	}
+
+	for (const name of composedComponents) {
+		const meta = COMPONENT_META[name];
+
+		if (meta !== undefined && vendored[meta.path] !== undefined) {
+			files[meta.path] = vendored[meta.path];
+		}
+	}
+
+	// Behaviors to compile: those the game carries, plus the built-in library behaviors the rules compose (so a rule
+	// that composes `gridPush` gets it emitted even when the model didn't list it explicitly).
+	const behaviorsByName = new Map((game.behaviors ?? []).map((behavior) => [behavior.name, behavior]));
+	const library = new Map(builtinBehaviors().map((behavior) => [behavior.name, behavior]));
+
+	for (const name of behaviorsUsedBy(game.rules)) {
+		const fromLibrary = library.get(name);
+
+		if (!behaviorsByName.has(name) && fromLibrary !== undefined) {
+			behaviorsByName.set(name, fromLibrary);
+		}
+	}
+
+	Object.assign(files, compileGame(game.rules, [...behaviorsByName.values()]));
+
+	if (vendored["systems/render.ts"] !== undefined) {
+		files["systems/render.ts"] = vendored["systems/render.ts"]; // the render engine system — glue, not authored
+	}
+
+	if (game.map !== undefined) {
+		files["levels/" + game.level + ".ts"] = generateLevelFile(game);
+	}
+
+	files["game.ts"] = generateComposedScene(game);
+}
+
+/**
  * Generate all of a game's code files from its block model: the constant infra, the library component + system files the
  * used behaviors require, the generated level (when a map is authored), and the generated `game.ts` assembly. Returns
  * `{ path → content }` — a complete, self-contained, runnable game.
@@ -413,50 +461,9 @@ export function generateGame(game: AuthoredGame): Record<string, string> {
 		}
 	}
 
-	// Composed path: the gameplay systems are COMPILED from ECA rules (+ their behaviors), not vendored by name. Emit the
-	// components the entities attach, the compiled behaviors/ + systems/, the render engine system, the level, and a scene
-	// that wires the compiled systems.
+	// Composed path: the gameplay systems are COMPILED from ECA rules (+ their behaviors), not vendored by name.
 	if (game.rules !== undefined) {
-		const composedComponents = new Set<string>(["Position"]);
-
-		for (const entity of game.entities) {
-			for (const component of entity.components) {
-				composedComponents.add(component);
-			}
-		}
-
-		for (const name of composedComponents) {
-			const meta = COMPONENT_META[name];
-
-			if (meta !== undefined && vendored[meta.path] !== undefined) {
-				files[meta.path] = vendored[meta.path];
-			}
-		}
-
-		// Behaviors to compile: those the game carries, plus the built-in library behaviors the rules compose (so a rule
-		// that composes `gridPush` gets it emitted even when the model didn't list it explicitly).
-		const behaviorsByName = new Map((game.behaviors ?? []).map((behavior) => [behavior.name, behavior]));
-		const library = new Map(builtinBehaviors().map((behavior) => [behavior.name, behavior]));
-
-		for (const name of behaviorsUsedBy(game.rules)) {
-			const fromLibrary = library.get(name);
-
-			if (!behaviorsByName.has(name) && fromLibrary !== undefined) {
-				behaviorsByName.set(name, fromLibrary);
-			}
-		}
-
-		Object.assign(files, compileGame(game.rules, [...behaviorsByName.values()]));
-
-		if (vendored["systems/render.ts"] !== undefined) {
-			files["systems/render.ts"] = vendored["systems/render.ts"]; // the render engine system — glue, not authored
-		}
-
-		if (game.map !== undefined) {
-			files["levels/" + game.level + ".ts"] = generateLevelFile(game);
-		}
-
-		files["game.ts"] = generateComposedScene(game);
+		emitComposedGame(game, files, vendored);
 
 		return files;
 	}

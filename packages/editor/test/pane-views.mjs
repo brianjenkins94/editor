@@ -35,7 +35,9 @@ before(async () => {
 			response.end();
 		});
 	});
-	await new Promise((resolve) => { server.listen(PORT, resolve); });
+	await new Promise((resolve) => {
+		server.listen(PORT, resolve);
+	});
 	session = await startSession({ "prepare": (context) => context.route("**/extensions.json", (route) => route.fulfill({ "json": [EXTENSION] })) });
 });
 

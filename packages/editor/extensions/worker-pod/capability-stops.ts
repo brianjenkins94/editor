@@ -9,18 +9,16 @@
  * result given in the call's place. The debugger is told the verdict, and — when the answer changed it — the policy in
  * effect from now on. Every debugger is given the policy as it launches (`__policy`, debug-events.ts).
  */
-import type { AskEvent, DecideRequest } from "@brianjenkins94/run-contract";
 import type { Hub } from "@brianjenkins94/hub";
+import type { AskEvent, DecideRequest } from "@brianjenkins94/run-contract";
+import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
+import type { CapabilityChoice } from "../../shared/capabilities/capability-breakpoints";
+import type { DebugOutcome } from "./debug-control";
 import { serve } from "@brianjenkins94/hub";
-import { EMPTY_POLICY, problemOf, ruleMatches, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
+import { EMPTY_POLICY, problemOf, ruleMatches } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { loadEffectivePolicy, persistOverride, replaceRule } from "../../shared/capabilities/silo-store";
-import { controllable, type DebugOutcome } from "./debug-control";
-
-/** The choices at a capability stop, as the preview's prompt words them — and `rule`, a rule made there (the margin's
- *  rule editor) saved in my policy, deciding the call as it does (or giving its result); `give-once`, a result given the
- *  call instead of it, just this once; `allow-run`, calls like it allowed until the run ends (kept nowhere). */
-export type CapabilityChoice = "allow-once" | "allow-run" | "allow-always" | "skip" | "skip-run" | "skip-always" | "deny" | "deny-run" | "deny-always" | "rule" | "give-once";
+import { controllable } from "./debug-control";
 
 const CHOICES = new Set<string>(["allow-once", "allow-run", "allow-always", "skip", "skip-run", "skip-always", "deny", "deny-run", "deny-always", "rule", "give-once"] satisfies CapabilityChoice[]);
 
@@ -36,7 +34,7 @@ const onceFor = new Map<string, { "capability": string; "resource": string; "ver
 export function takeOnce(session: string, capability: string, resource: string): "allow" | "skip" | "deny" | undefined {
 	const once = onceFor.get(session);
 
-	if (once === undefined || once.capability !== capability || once.resource !== resource) {
+	if (once?.capability !== capability || once.resource !== resource) {
 		return undefined;
 	}
 
@@ -79,6 +77,28 @@ function answered(hub: Hub, session: string): void {
 	}
 }
 
+/** The call `session` is stopped at (`ask`), decided by `rule`: the rule kept, and what it decides for the debugger. */
+async function ruleRequest(session: vscode.DebugSession, ask: AskEvent, rule?: Rule): Promise<DecideRequest> {
+	// The call as a rule sees it: an unknown resource is "".
+	const subject = { "capability": ask.capability, "resource": ask.resolved ? ask.resource : "" };
+	const decision = rule?.then?.find(({ "action_id": actionId }) => ["allow", "deny", "skip", "ask"].includes(actionId))?.action_id;
+
+	if (rule === undefined || problemOf(rule) !== undefined || !ruleMatches(rule, subject)) {
+		throw new Error(rule === undefined ? "no rule" : problemOf(rule) ?? "the rule doesn't cover this call");
+	}
+
+	// A rule giving the call's result decides it too: the call isn't made, the debugger returns what it gives.
+	const gives = rule.then.some((action) => action.action_id === "give" && action.target_id === "result");
+
+	if (decision !== "allow" && decision !== "deny" && decision !== "skip" && !gives) {
+		throw new Error("the rule doesn't allow, deny, skip or give this call");
+	}
+
+	await replaceRule(undefined, rule);
+
+	return { "verdict": !gives && (decision === "deny" || decision === "skip") ? decision : "allow", "policy": await policyFor(session.id) };
+}
+
 /** What `choice` means for the call `session` is stopped at, told the debugger (`decide`), which continues. */
 async function decide(hub: Hub, session: vscode.DebugSession, choice: CapabilityChoice, rule?: Rule, give?: unknown): Promise<void> {
 	const ask = asks.get(session.id);
@@ -89,33 +109,18 @@ async function decide(hub: Hub, session: vscode.DebugSession, choice: Capability
 
 	const always = async (disposition: "allow" | "deny" | "skip"): Promise<Policy> => {
 		if (!ask.resolved) {
-			throw new Error(`"${disposition[0]!.toUpperCase()}${disposition.slice(1)} always" needs the resource the call reaches, and ${ask.resource} isn't known before it runs`);
+			throw new Error(`"${disposition[0].toUpperCase()}${disposition.slice(1)} always" needs the resource the call reaches, and ${ask.resource} isn't known before it runs`);
 		}
 
 		await persistOverride(ask.capability, ask.resource, disposition);
 
 		return policyFor(session.id);
 	};
+
 	let request: DecideRequest;
 
 	if (choice === "rule") {
-		// The call as a rule sees it: an unknown resource is "".
-		const subject = { "capability": ask.capability, "resource": ask.resolved ? ask.resource : "" };
-		const decision = rule?.then?.find(({ action_id }) => ["allow", "deny", "skip", "ask"].includes(action_id))?.action_id;
-
-		if (rule === undefined || problemOf(rule) !== undefined || !ruleMatches(rule, subject)) {
-			throw new Error(rule === undefined ? "no rule" : problemOf(rule) ?? "the rule doesn't cover this call");
-		}
-
-		// A rule giving the call's result decides it too: the call isn't made, the debugger returns what it gives.
-		const gives = rule.then.some((action) => action.action_id === "give" && action.target_id === "result");
-
-		if (decision !== "allow" && decision !== "deny" && decision !== "skip" && !gives) {
-			throw new Error("the rule doesn't allow, deny, skip or give this call");
-		}
-
-		await replaceRule(undefined, rule);
-		request = { "verdict": !gives && (decision === "deny" || decision === "skip") ? decision : "allow", "policy": await policyFor(session.id) };
+		request = await ruleRequest(session, ask, rule);
 	} else if (choice === "give-once") {
 		request = { "verdict": "give", "value": give ?? null };
 	} else if (choice === "allow-run" || choice === "skip-run" || choice === "deny-run") {
@@ -123,7 +128,7 @@ async function decide(hub: Hub, session: vscode.DebugSession, choice: Capability
 		// each time round) — allowed, skipped or denied, this one with them.
 		const action = choice.slice(0, choice.indexOf("-")) as "allow" | "skip" | "deny";
 
-		runRules.set(session.id, [...runRules.get(session.id) ?? [], { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": ask.capability }] }, "then": [{ "action_id": action }] } as Rule]);
+		runRules.set(session.id, [...runRules.get(session.id) ?? [], { "when": { "logicalType_id": "all", "predicates": [{ "target_id": "capability", "operator_id": "is", "argument": ask.capability }] }, "then": [{ "action_id": action }] }]);
 		request = { "verdict": action, "policy": await policyFor(session.id) };
 	} else if (choice === "allow-always" || choice === "skip-always" || choice === "deny-always") {
 		const disposition = choice.slice(0, choice.indexOf("-")) as "allow" | "skip" | "deny";
@@ -131,7 +136,7 @@ async function decide(hub: Hub, session: vscode.DebugSession, choice: Capability
 		request = { "verdict": disposition, "policy": await always(disposition) };
 	} else {
 		// This call only: allowed, skipped (the run goes on as if it did nothing), or denied (it fails, as refused).
-		const verdict = choice === "allow-once" ? "allow" : choice as "skip" | "deny";
+		const verdict = choice === "allow-once" ? "allow" : choice;
 
 		onceFor.set(session.id, { "capability": ask.capability, "resource": ask.resource, "verdict": verdict });
 		request = { "verdict": verdict };

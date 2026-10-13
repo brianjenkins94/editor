@@ -11,32 +11,33 @@
  * it spawns them by URL relative to the workbench origin (`location.href`). (eslint moved OUT of this pod to a
  * tsserver plugin — extensions/eslint — that reuses tsserver's typescript; only cspell remains here.)
  */
-import { provideWorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
+import type { CommandTotals } from "../command-tap";
+import type { CapabilityCall } from "./capabilities/decide";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
+import { observe } from "@brianjenkins94/observability";
+
+import { provideWorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
 import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
-
-import { type CapabilityCall, decideCapability } from "./capabilities/decide";
-import { takeEffects } from "../../shared/capabilities/run-effects";
-import { recordedResult, recordResult } from "../../shared/capabilities/silo-store";
-import { observe } from "@brianjenkins94/observability";
 import { identifyWorker } from "../../shared/architecture-ids";
 import { storeNode, ZENFS_NODE } from "../../shared/architecture-zenfs";
-import type { CommandTotals } from "../command-tap";
+import { takeEffects } from "../../shared/capabilities/run-effects";
+import { recordedResult, recordResult } from "../../shared/capabilities/silo-store";
 import { ARCH_COMMANDS } from "../command-tap";
+import { decideCapability } from "./capabilities/decide";
 import { registerCapabilityStops } from "./capability-stops";
-import { serveRuntimeFiles } from "./runtime-fs";
-import { registerDebugEvents } from "./debug-events";
 import { runProgram, serveDebugControl } from "./debug-control";
+import { registerDebugEvents } from "./debug-events";
+import { registerDebugToolbar } from "./debug-toolbar";
 import { registerLaunch } from "./launch";
 import { registerLiveRuns } from "./live-run";
-import { registerReplay } from "./replay";
-import { registerSourceControl } from "./source-control";
-import { registerTasks } from "./tasks";
-import { registerDebugToolbar } from "./debug-toolbar";
 import { registerMetricsBridge } from "./metrics-bridge";
 import { podHub, workspace, workspaceRuntime } from "./pod";
 import { registerProductionDebug } from "./production-adapter";
+import { registerReplay } from "./replay";
+import { serveRuntimeFiles } from "./runtime-fs";
+import { registerSourceControl } from "./source-control";
+import { registerTasks } from "./tasks";
 
 /** This extension's exports — the pod->workbench half of the hub uplink (ext host is an isolated realm, so it
  *  rides the exported API rather than a window transport). See activate + workbench-entry's bridge. */
@@ -77,7 +78,7 @@ const clients: LanguageClient[] = [];
 // One control port per spawned LSP worker (the workbench end of a MessageChannel), used only to hand the worker
 // the shared workspace SharedArrayBuffer (M3b) — separate from the LSP JSON-RPC channel. `workspace.buffer` (pod.ts) is
 // the SAB once the workbench provides it; a worker that spawns after gets it immediately.
-const controlPorts: Array<{ "port": MessagePort; "worker": string }> = [];
+const controlPorts: { "port": MessagePort; "worker": string }[] = [];
 // The pod's logger (its spans/records ride podHub), its uncaught errors, and its hub's topology/traffic — not its
 // network: this extension host shares the workbench realm, whose network is probed there.
 const { "log": podLog, architecture } = observe(podHub);
@@ -146,7 +147,11 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 	// Workers link UP to podHub and announce themselves on `pod.ready`; log each join so pod membership shows
 	// up in the collector (as a `[pod]` record).
-	context.subscriptions.push({ "dispose": podHub.subscribe("pod.ready", (data) => { podLog.info("worker joined", data as Record<string, unknown>); }) });
+	context.subscriptions.push({
+		"dispose": podHub.subscribe("pod.ready", (data) => {
+			podLog.info("worker joined", data as Record<string, unknown>);
+		})
+	});
 	// The metrics plane's samples, for VS Code's side (the insights monitor reads them by command).
 	registerMetricsBridge(context);
 
@@ -215,21 +220,20 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// Durable annotations on code spans (SPAN-ANNOTATIONS.md), from core's BABLR (bablr.ts: one worker, its parses cached
 	// by content, so an unchanged file is never parsed twice) — for extensions, everything they attach to code: notes,
 	// the insights extension's evidence, the event sheet's anchors. Commands: what an extension can call.
-	context.subscriptions.push(vscode.commands.registerCommand("editor.annotations.spans", async (source: unknown) =>
+	context.subscriptions.push(
 		// The spans of a text an annotation can attach to — each one's id (its BABLR Merkle hash) and offsets, from the
 		// text's cached parse; punctuation left out — or undefined when BABLR's grammar doesn't take the text…
-		((await rpc.request("annotations.spans", { "source": source }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "spans"?: unknown[] | null }).spans ?? undefined)
-	), vscode.commands.registerCommand("editor.annotations.refer", async (source: unknown, file: unknown, ranges: unknown) =>
+		vscode.commands.registerCommand("editor.annotations.spans", async (source: unknown) => ((await rpc.request("annotations.spans", { "source": source }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "spans"?: unknown[] | null }).spans ?? undefined)),
 		// …a reference to the span standing for each range of a text — what an annotation keeps (undefined where BABLR
 		// can't place it, or can't parse the text)…
-		((await rpc.request("annotations.refer", { "source": source, "file": file, "ranges": ranges }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "refs"?: unknown[] }).refs ?? []).map((ref) => ref ?? undefined)
-	), vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, refs: unknown, options?: { "observed"?: boolean; "types"?: unknown; "texts"?: string[] }) =>
+		vscode.commands.registerCommand("editor.annotations.refer", async (source: unknown, file: unknown, ranges: unknown) => ((await rpc.request("annotations.refer", { "source": source, "file": file, "ranges": ranges }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "refs"?: unknown[] }).refs ?? []).map((ref) => ref ?? undefined)),
 		// …and where each reference's span is now: attached, moved, re-placed, uncertain or orphaned, with where it
 		// landed. `observed` (runtime evidence): by its id alone — one that's lost fades, it isn't looked for. `types`:
 		// what spans of the text are beyond their shape (by span id: TypeScript's type, observed tags), for the typed
 		// strategy. `texts`: texts the file went through that the caller knows (its edit history's), each a baseline a
 		// reference made against it is followed from by the structural diff, as one made against a commit is.
-		(await rpc.request("annotations.resolve", { "source": source, "file": file, "refs": refs, "observed": options?.observed === true, "types": options?.types, "texts": options?.texts ?? [] }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "resolutions"?: unknown[] }).resolutions));
+		vscode.commands.registerCommand("editor.annotations.resolve", async (source: unknown, file: unknown, refs: unknown, options?: { "observed"?: boolean; "types"?: unknown; "texts"?: string[] }) => (await rpc.request("annotations.resolve", { "source": source, "file": file, "refs": refs, "observed": options?.observed === true, "types": options?.types, "texts": options?.texts ?? [] }, { "timeoutMs": 120_000, "waitForResponderMs": 30_000 }) as { "resolutions"?: unknown[] }).resolutions)
+	);
 
 	// Each extension host's command totals (extensions/command-tap.ts): the extensions, and the commands between them, on
 	// the architecture view — discovered, not declared (DISCOVERED-ARCHITECTURE.md). A host sends its totals; what's new
@@ -264,9 +268,9 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 		for (const [caller, command, count] of calls) {
 			const key = `${caller}\0${command}`;
-			const owner = owners.get(command.split(" ")[0]!)?.split("\0") ?? ["vscode", "LocalProcess"];
+			const owner = owners.get(command.split(" ")[0])?.split("\0") ?? ["vscode", "LocalProcess"];
 			const from = extensionNode(caller, host);
-			const to = extensionNode(owner[0]!, owner[1]!);
+			const to = extensionNode(owner[0], owner[1]);
 
 			for (let call = before.get(key) ?? 0; call < count; call += 1) {
 				architecture.record(from, to, "request", "cmd " + command);
@@ -306,7 +310,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 			return;
 		}
 
-		const id = info.id;
+		const { id } = info;
 		const name = info.name ?? "Production run";
 
 		// Stamp the preview port into the session config so the debug-toolbar mirror can tell the shell WHICH preview
@@ -320,7 +324,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 			return;
 		}
 
-		const port = info.port;
+		const { port } = info;
 
 		previewRunByPort.set(port, id);
 
@@ -434,7 +438,13 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		podLog.info("workspace buffer shared with LSP workers", { "workers": controlPorts.length, "mb": Math.round(buffer.byteLength / 1048576) });
 	};
 
-	return { "toWorkbench": outgoing.event, "fromWorkbench": (message: unknown) => { incoming.fire(message); }, "attachWorkspaceBuffer": attachWorkspaceBuffer };
+	return {
+		"toWorkbench": outgoing.event,
+		"fromWorkbench": (message: unknown) => {
+			incoming.fire(message);
+		},
+		"attachWorkspaceBuffer": attachWorkspaceBuffer
+	};
 }
 
 export function deactivate(): Promise<void> {

@@ -15,12 +15,13 @@
  * changes and edit history read a real repo, its HEAD the commit cloned.
  */
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
-import { Buffer } from "buffer";
+import { Buffer } from "node:buffer";
 import { fs, InMemory } from "@zenfs/core";
 import { clone, currentBranch } from "isomorphic-git";
 import http from "isomorphic-git/http/web";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism); see git-engine.ts.
+// eslint-disable-next-line ts/naming-convention -- the `Buffer` global isomorphic-git reads
 (globalThis as unknown as { "Buffer"?: unknown }).Buffer ??= Buffer;
 
 /** isomorphic-git's public CORS proxy for github.com. */

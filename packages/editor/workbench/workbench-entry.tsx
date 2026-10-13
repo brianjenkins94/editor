@@ -13,67 +13,68 @@
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
 import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
-import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
-import { linkRuntime } from "@brianjenkins94/run-contract/runtime";
-import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, openHostedEditor, registerExtension, OPEN_ARCHITECTURE_COMMAND, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
-import { render } from "preact";
-import type { ShellDockHost } from "../shared/dock-host";
 import type { PodBridge } from "../extensions/worker-pod/extension";
-import type { SharedWorkspace } from "../shell/playground-link";
+import type { ShellDockHost } from "../shared/dock-host";
+import type { SharedWorkspace } from "../shared/playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
+import { createHub, createRpcClient, serve } from "@brianjenkins94/hub";
+import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, OPEN_ARCHITECTURE_COMMAND, openHostedEditor, registerExtension, registerFileSystemOverlay, registerHostedEditors, registerLiveArchitecture, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
+import { isCancellation, observe } from "@brianjenkins94/observability";
+import { linkRuntime } from "@brianjenkins94/run-contract/runtime";
 import capabilitiesExtensionPath from "capabilities:extension";
-import historyExtensionPath from "history:extension";
-import eventSheetExtensionPath from "event-sheet:extension";
-import eventSheetViewPath from "event-sheet:view";
-import insightsExtensionPath from "insights:extension";
-import runningExtensionPath from "running:extension";
-import typeQueriesExtensionPath from "type-queries:extension";
-import notesExtensionPath from "notes:extension";
 import settingsDefaults from "editor:settings-defaults";
 import eslintExtensionPath from "eslint:extension";
-import workerPodExtensionPath from "worker-pod:extension";
+import eventSheetExtensionPath from "event-sheet:extension";
+import eventSheetViewPath from "event-sheet:view";
+import historyExtensionPath from "history:extension";
+import insightsExtensionPath from "insights:extension";
+import notesExtensionPath from "notes:extension";
+import { render } from "preact";
+import runningExtensionPath from "running:extension";
 import tsvalExtensionPath from "tsval:extension";
+import typeQueriesExtensionPath from "type-queries:extension";
+import workerPodExtensionPath from "worker-pod:extension";
+import capabilitiesManifest from "../extensions/capabilities/package.json";
+import eslintManifest from "../extensions/eslint/package.json";
+import eventSheetManifest from "../extensions/event-sheet/package.json";
+import historyManifest from "../extensions/history/package.json";
+import insightsManifest from "../extensions/insights/package.json";
+import notesManifest from "../extensions/notes/package.json";
+import runningManifest from "../extensions/running/package.json";
+import tsvalManifest from "../extensions/tsval/package.json";
+import typeQueriesManifest from "../extensions/type-queries/package.json";
+import workerPodManifest from "../extensions/worker-pod/package.json";
 import { NETWORK_PROBES } from "../shared/architecture";
-import { SHELL_DOCK_HOST } from "../shared/dock-host";
 import { classifyUrl, identifyWorker } from "../shared/architecture-ids";
+import { SHELL_DOCK_HOST } from "../shared/dock-host";
+import { reportWorkbenchMetrics } from "../shared/editor-metrics";
+import { evidenceStore } from "../shared/evidence-store";
+import { windowClientTransport } from "../shared/pane-link";
 import { architectureStore, renderArchitectureView } from "./architecture-view";
 import { installTypeAcquisition } from "./ata";
-import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
-import { reportWorkbenchMetrics } from "../shared/editor-metrics";
 import { startBablr } from "./bablr";
 import { loadContributedExtensions } from "./contributed-extensions";
 import { createCosmeticClassifier } from "./cosmetic-classifier";
-import * as gitEngine from "./git-engine";
+import { installCoverage } from "./coverage";
+import { installDebugBridge, markBridgeReady, markContributedLoaded } from "./debug-bridge";
 import { installEditHistory } from "./edit-history";
+import { installEditorState } from "./editor-state";
+import { installEvidence } from "./evidence";
+import * as gitEngine from "./git-engine";
 import { installGitService } from "./git-service";
-import capabilitiesManifest from "../extensions/capabilities/package.json";
-import historyManifest from "../extensions/history/package.json";
-import eslintManifest from "../extensions/eslint/package.json";
-import eventSheetManifest from "../extensions/event-sheet/package.json";
-import insightsManifest from "../extensions/insights/package.json";
-import runningManifest from "../extensions/running/package.json";
-import typeQueriesManifest from "../extensions/type-queries/package.json";
-import notesManifest from "../extensions/notes/package.json";
-import workerPodManifest from "../extensions/worker-pod/package.json";
-import tsvalManifest from "../extensions/tsval/package.json";
+import { installLiveValues, showMarks, showProfile } from "./live-values";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
-import { installProfileFiles } from "./profile-files";
-import { installEvidence } from "./evidence";
-import { installEditorState } from "./editor-state";
-import { installLiveValues, showMarks, showProfile } from "./live-values";
 import { installPaneViews } from "./pane-views";
+import { installProfileFiles } from "./profile-files";
 import { installRecordedStops } from "./recorded-stops";
-import { installCoverage } from "./coverage";
 import { registerRulesView } from "./rules-view";
-import { evidenceStore } from "../shared/evidence-store";
-import { windowClientTransport } from "../shared/pane-link";
-import { isCancellation, observe } from "@brianjenkins94/observability";
 import { createBashProcess, serveTaskTerminals, serveTerminalState } from "./terminal";
-import { installWorkspaceTools } from "./workspace-tools";
 import { Workbench } from "./Workbench";
 import { configuration, keybindings } from "./workspace";
 import { installWorkspaceFs } from "./workspace-fs";
+import { installWorkspaceTools } from "./workspace-tools";
+
 // Boot milestones on the performance timeline (beside VS Code's own code/* marks), for load investigations.
 performance.mark("editor/entry");
 
@@ -132,13 +133,13 @@ registerLiveArchitecture({ "render": (container) => renderArchitectureView(conta
 
 // A dock panel of the shell dropped into the editor area (shell-dock.ts): an editor per panel, whose content the shell
 // moves in — through its host on the top window, as element references can't cross the hub.
-const shellDock = (): ShellDockHost | undefined => {
+function shellDock(): ShellDockHost | undefined {
 	try {
 		return (window.top as unknown as Record<string, ShellDockHost | undefined> | null)?.[SHELL_DOCK_HOST];
 	} catch {
 		return undefined; // a top window that isn't ours
 	}
-};
+}
 
 registerHostedEditors({
 	"render": (slot, element) => { shellDock()?.attach(slot, element); },
@@ -209,7 +210,9 @@ let vscodeApi: any = null;
 // Resolves once `vscodeApi` is captured — an `openProject` message (from the shell's picker, over the pane bus)
 // may arrive right after "online" but before getApi()'s promise settles, so its handler awaits this.
 let markApiReady: () => void;
-const apiReady = new Promise<void>((resolve) => { markApiReady = resolve; });
+const apiReady = new Promise<void>((resolve) => {
+	markApiReady = resolve;
+});
 
 function runCommand(command: string): void {
 	const pending = vscodeApi?.commands?.executeCommand(command) as Promise<unknown> | undefined;
@@ -268,11 +271,9 @@ async function clearWorkspace(root: string): Promise<void> {
 	for (const [name] of entries) {
 		// Keep scaffolding always; keep overridable-default configs so a repo that ships its own can OVERWRITE them
 		// in place (openProject prunes the ones the repo omits afterwards, so those fall through to the base).
-		if (kept(name)) {
-			continue;
+		if (!kept(name)) {
+			await vscode.workspace.fs.delete(vscode.Uri.file(root + "/" + name), { "recursive": true, "useTrash": false }).then(undefined, () => { /* already gone */ });
 		}
-
-		await vscode.workspace.fs.delete(vscode.Uri.file(root + "/" + name), { "recursive": true, "useTrash": false }).then(undefined, () => { /* already gone */ });
 	}
 }
 
@@ -294,16 +295,14 @@ async function collectFiles(root: string): Promise<{ "path": string; "bytes": Ui
 
 	const walk = async (dir: string): Promise<void> => {
 		for (const [name, type] of await vscode.workspace.fs.readDirectory(vscode.Uri.file(dir))) {
-			if (dir === root && SCAFFOLDING.has(name)) {
-				continue;
-			}
+			if (dir !== root || !SCAFFOLDING.has(name)) {
+				const full = dir + "/" + name;
 
-			const full = dir + "/" + name;
-
-			if (type === vscode.FileType.Directory) {
-				await walk(full);
-			} else if (type === vscode.FileType.File) {
-				out.push({ "path": full, "bytes": await vscode.workspace.fs.readFile(vscode.Uri.file(full)) });
+				if (type === vscode.FileType.Directory) {
+					await walk(full);
+				} else if (type === vscode.FileType.File) {
+					out.push({ "path": full, "bytes": await vscode.workspace.fs.readFile(vscode.Uri.file(full)) });
+				}
 			}
 		}
 	};
@@ -424,7 +423,9 @@ function wireWorkbenchHub(workspaceBuffer?: SharedArrayBuffer): void {
 			"listen": (onMessage) => {
 				const subscription = bridge.toWorkbench(onMessage);
 
-				return () => { subscription.dispose(); };
+				return () => {
+					subscription.dispose();
+				};
 			}
 		});
 	}).catch((error: unknown) => { paneLog.error("workbench hub uplink failed", { "error": errText(error) }); });
@@ -626,28 +627,33 @@ function maybeBoot(): void {
 					// git-service.ts / git-engine.ts.
 					// One classifier, shared by both panes: its verdicts come from the BABLR worker's cached parses
 					// (bablr.ts), so each version of a file is parsed once, across refreshes and reloads.
-					const cosmeticClassifier = createCosmeticClassifier(bablr);
+				const cosmeticClassifier = createCosmeticClassifier(bablr);
 
-					installGitService(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
+				installGitService(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
 					// Fine-grained edit history: records edit-bursts per file into a lazily-loaded Automerge doc, so the
 					// changes pane can show your uncommitted work as small chunks (the local tier over git). See
 					// edit-history.ts.
-					installEditHistory(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
+				installEditHistory(api as typeof import("vscode"), workbenchHub, cosmeticClassifier, paneLog);
 
 					// Editor theme follows the OS, like the shell chrome. `window.autoDetectColorScheme` isn't wired to
 					// `prefers-color-scheme` in this monaco-vscode-api build, so drive `workbench.colorTheme` ourselves.
 					// The SHELL is the source of truth (it reliably gets prefers-color-scheme changes; an iframe may not),
 					// so apply what it publishes on `theme.colorScheme`; also react to this frame's own matchMedia as a
 					// real-browser fallback.
-					const themeApi = api as typeof import("vscode");
-					const applyEditorTheme = (dark: boolean): void => {
-						void themeApi.workspace.getConfiguration().update("workbench.colorTheme", dark ? "Default Dark+" : "Default Light+", themeApi.ConfigurationTarget.Global);
-					};
-					const themeMq = window.matchMedia("(prefers-color-scheme: dark)");
+				const themeApi = api as typeof import("vscode");
+				const applyEditorTheme = (dark: boolean): void => {
+					void themeApi.workspace.getConfiguration().update("workbench.colorTheme", dark ? "Default Dark+" : "Default Light+", themeApi.ConfigurationTarget.Global);
+				};
 
-					workbenchHub.subscribe("theme.colorScheme", (data) => { applyEditorTheme((data as { "dark"?: boolean } | null)?.dark ?? themeMq.matches); });
-					themeMq.addEventListener("change", () => { applyEditorTheme(themeMq.matches); });
-					bootSpan.info("the bridge's vscode api, for core");
+				const themeMq = window.matchMedia("(prefers-color-scheme: dark)");
+
+				workbenchHub.subscribe("theme.colorScheme", (data) => {
+					applyEditorTheme((data as { "dark"?: boolean } | null)?.dark ?? themeMq.matches);
+				});
+				themeMq.addEventListener("change", () => {
+					applyEditorTheme(themeMq.matches);
+				});
+				bootSpan.info("the bridge's vscode api, for core");
 			}).catch((error: unknown) => { bootSpan.error("the bridge's setup failed", { "error": errText(error) }); });
 
 			// tsval, the stepping debugger — an extension of its own, in the bridge's host (LocalProcess: it spawns its debug
@@ -774,7 +780,9 @@ async function openDockedWindow(request: AuxiliaryWindowRequest): Promise<Window
 		const docked = frame?.contentWindow ?? undefined;
 
 		if (docked !== undefined) {
-			docked.close = () => { workbenchHub.publish("dock.closeWindow", { "name": name }); };
+			docked.close = () => {
+				workbenchHub.publish("dock.closeWindow", { "name": name });
+			};
 		}
 
 		return docked;
@@ -790,6 +798,7 @@ void (async () => {
 		try {
 			performance.mark("editor/init-request");
 			const data = await paneRpc.request("workbench.init", undefined, { "timeoutMs": 1500, "waitForResponderMs": 10_000 }) as Init;
+
 			performance.mark("editor/init-received");
 
 			init = { "files": data.files ?? [], "openEditors": data.openEditors ?? [], "workspaceFolder": data.workspaceFolder, "moduleVersions": data.moduleVersions, "tab": data.tab };
@@ -798,7 +807,9 @@ void (async () => {
 			return;
 		} catch (error) {
 			performance.mark("editor/init-retry", { "detail": String(error) });
-			await new Promise((resolve) => { setTimeout(resolve, 250); });
+			await new Promise((resolve) => {
+				setTimeout(resolve, 250);
+			});
 		}
 	}
 })();
@@ -813,7 +824,7 @@ let pendingProject: { "files"?: { "path": string; "contents"?: string; "bytes"?:
 let projectTimer: ReturnType<typeof setTimeout> | undefined;
 
 workbenchHub.subscribe("workbench.openProject", (data) => {
-	pendingProject = data as typeof pendingProject;
+	pendingProject = data;
 
 	clearTimeout(projectTimer);
 	projectTimer = setTimeout(() => {
@@ -822,7 +833,9 @@ workbenchHub.subscribe("workbench.openProject", (data) => {
 		pendingProject = undefined;
 
 		if (project !== undefined) {
-			void openProject(project.files ?? [], project.openEditors ?? [], project.replace ?? false).catch((error: unknown) => { paneLog.error("openProject failed", { "error": errText(error) }); });
+			void openProject(project.files ?? [], project.openEditors ?? [], project.replace ?? false).catch((error: unknown) => {
+				paneLog.error("openProject failed", { "error": errText(error) });
+			});
 		}
 	}, 150);
 });

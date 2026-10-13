@@ -23,7 +23,7 @@ import type { ArchitectureStore, Gauge } from "@brianjenkins94/observability";
 import { longFrameGauge, memoryGauge, reportMetrics, spanMetrics } from "@brianjenkins94/observability";
 
 /** zen-fs SingleBuffer's superblock: magic (u32 at 4), used_bytes and total_bytes (u64 at 16 and 24), little-endian. */
-const SUPERBLOCK_MAGIC = 0x62732e7a;
+const SUPERBLOCK_MAGIC = 0x62732E7A;
 
 /** A URL without its fragment: a worker loaded through core's bootstrap (workerBootstrap.worker.ts) carries its target there, and a memory
  *  attribution may not. */
@@ -117,7 +117,11 @@ export function workspaceFill(buffer: ArrayBufferLike): Record<string, number> |
 function refreshed(read: () => Promise<number | undefined>, everyMs: number): Gauge {
 	let latest: number | undefined;
 	const refresh = (): void => {
-		read().then((value) => { latest = value; }, () => undefined).finally(() => { setTimeout(refresh, everyMs); });
+		read().then((value) => {
+			latest = value;
+		}, () => undefined).finally(() => {
+			setTimeout(refresh, everyMs);
+		});
 	};
 
 	refresh();
@@ -170,7 +174,12 @@ export function reportSpanMetrics(hub: Hub): { "record": (record: unknown) => vo
 
 	metrics.gauge("spans", spans.gauge);
 
-	return { "record": spans.record, "dispose": () => { metrics.dispose(); } };
+	return {
+		"record": spans.record,
+		"dispose": () => {
+			metrics.dispose();
+		}
+	};
 }
 
 /** The shell's own gauge: the share of time it spent in long animation frames (it hosts the preview windows). */
@@ -179,5 +188,7 @@ export function reportShellMetrics(hub: Hub): () => void {
 
 	metrics.gauge("longFrames", longFrameGauge(window));
 
-	return () => { metrics.dispose(); };
+	return () => {
+		metrics.dispose();
+	};
 }

@@ -18,11 +18,11 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { AnchoredBox, DockviewApi, DockviewGroupPanel, IContentRenderer, IHeaderActionsRenderer } from "dockview-core";
+import type { ShellDockHost } from "../shared/dock-host";
+import type { PaneWindowFactory } from "./window";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { DockviewComponent, getPanelData, themeDark, themeLight } from "dockview-core";
 import dockviewCss from "dockview:css";
-import type { ShellDockHost } from "../shared/dock-host";
-import type { PaneWindowFactory } from "./window";
 import { SHELL_DOCK_HOST } from "../shared/dock-host";
 import { css, globalCss } from "../shared/theme";
 
@@ -47,8 +47,11 @@ const paneBodyCss = css({ "position": "relative", "width": "100%", "height": "10
 // The editor's box, and what it shows while a window panel dragged over it would go into a VS Code editor.
 const editorBoxCss = css({ "position": "relative" });
 const dropHintCss = css({
-	"position": "absolute", "inset": "var(--wa-space-s)", "pointerEvents": "none",
-	"border": "2px dashed var(--wa-color-brand-fill-loud)", "borderRadius": "var(--wa-border-radius-m)",
+	"position": "absolute",
+	"inset": "var(--wa-space-s)",
+	"pointerEvents": "none",
+	"border": "2px dashed var(--wa-color-brand-fill-loud)",
+	"borderRadius": "var(--wa-border-radius-m)",
 	"backgroundColor": "color-mix(in srgb, var(--wa-color-brand-fill-loud) 12%, transparent)",
 	"&[hidden]": { "display": "none" }
 });
@@ -59,10 +62,22 @@ const paneActionsCss = css({ "display": "flex", "alignItems": "center", "height"
 // they do nothing, and in a group that isn't the active one until hovered; their glyphs show on hover. In a title bar
 // they're a utility panel's (an inspector's): smaller, to match the bar.
 const trafficLightsCss = css({
-	"display": "flex", "alignItems": "center", "gap": "8px", "height": "100%", "paddingInline": "12px 8px",
+	"display": "flex",
+	"alignItems": "center",
+	"gap": "8px",
+	"height": "100%",
+	"paddingInline": "12px 8px",
 	"& > button": {
-		"display": "grid", "placeItems": "center", "width": "12px", "height": "12px", "padding": 0, "border": 0, "borderRadius": "50%",
-		"boxShadow": "inset 0 0 0 0.5px rgb(0 0 0 / 0.2)", "color": "rgb(0 0 0 / 0.55)", "cursor": "default"
+		"display": "grid",
+		"placeItems": "center",
+		"width": "12px",
+		"height": "12px",
+		"padding": 0,
+		"border": 0,
+		"borderRadius": "50%",
+		"boxShadow": "inset 0 0 0 0.5px rgb(0 0 0 / 0.2)",
+		"color": "rgb(0 0 0 / 0.55)",
+		"cursor": "default"
 	},
 	"& > button > svg": { "width": "100%", "height": "100%", "opacity": 0 },
 	"&:hover > button:enabled > svg": { "opacity": 1 },
@@ -104,7 +119,6 @@ interface Pane {
 	"frame"?: HTMLIFrameElement;
 }
 
-
 function frameElement(name?: string): HTMLIFrameElement {
 	const frame = document.createElement("iframe");
 
@@ -125,7 +139,13 @@ function frameContent(frame: HTMLIFrameElement, onDispose?: () => void): IConten
 	element.className = fillCss();
 	element.append(frame);
 
-	return { "element": element, "init": () => undefined, "dispose": () => { onDispose?.(); } };
+	return {
+		"element": element,
+		"init": () => undefined,
+		"dispose": () => {
+			onDispose?.();
+		}
+	};
 }
 
 export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
@@ -149,6 +169,9 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 	const panes = new Map<string, Pane>();
 	let paneCount = 0;
 
+	// Assigned once, below: the traffic lights are handed to its constructor, and read it only after.
+	let component: DockviewComponent;
+
 	/**
 	 * A group's traffic lights. Close closes the group, every panel in it. Minimize folds a floating window to its tab
 	 * bar, and back. Zoom maximizes a docked group, and fills the dock with a floating window; again, restores either.
@@ -168,7 +191,9 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 			button.dataset["control"] = control;
 			button.innerHTML = "<svg width=\"12\" height=\"12\" viewBox=\"0 0 12 12\">" + GLYPHS[control] + "</svg>";
 			// Not the tab bar's: a press here mustn't start dragging the group.
-			button.addEventListener("pointerdown", (event) => { event.stopPropagation(); });
+			button.addEventListener("pointerdown", (event) => {
+				event.stopPropagation();
+			});
 			button.addEventListener("click", (event) => {
 				event.stopPropagation();
 				onClick();
@@ -176,6 +201,7 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 
 			return button;
 		};
+
 		/** Change a floating window's box, or put back the one it had. Sizes are the ones `position` takes, its border
 		 *  not counted — `toJSON`'s count it, so restoring from those would grow the window each time. */
 		const toggle = (box: (current: AnchoredBox, border: number) => Partial<AnchoredBox>): void => {
@@ -197,9 +223,14 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 				restore = undefined;
 			}
 		};
-		const close = light("close", () => { group.api.close(); });
+
+		const close = light("close", () => {
+			group.api.close();
+		});
 		// Down to its title and tab bars: the window's height less its group's content.
-		const minimize = light("minimize", () => { toggle(({ height }) => ({ "height": height - group.element.querySelector(".dv-content-container")!.getBoundingClientRect().height })); });
+		const minimize = light("minimize", () => {
+			toggle(({ height }) => ({ "height": height - group.element.querySelector(".dv-content-container").getBoundingClientRect().height }));
+		});
 		const zoom = light("zoom", () => {
 			if (group.api.location.type === "grid") {
 				if (group.api.isMaximized()) {
@@ -224,6 +255,7 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 			zoom.disabled = type === "popout";
 			zoom.title = type === "grid" ? "Maximize" : "Fill the dock";
 		};
+
 		let listener: { "dispose": () => void } | undefined;
 
 		close.title = "Close";
@@ -245,7 +277,8 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 	};
 
 	const scheme = window.matchMedia("(prefers-color-scheme: dark)");
-	const component = new DockviewComponent(host, {
+
+	component = new DockviewComponent(host, {
 		"theme": scheme.matches ? themeDark : themeLight,
 		"floatingGroupBounds": "boundedWithinViewport",
 		"createPrefixHeaderActionComponent": trafficLights,
@@ -256,7 +289,7 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 
 			return {
 				"element": element,
-				"init": ({ api: groupApi, group }) => {
+				"init": ({ "api": groupApi, group }) => {
 					const render = (): void => {
 						const pane = group.activePanel === undefined ? undefined : panes.get(group.activePanel.id);
 
@@ -275,7 +308,7 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 			}
 
 			if (name === "pane") {
-				const pane = panes.get(id)!;
+				const pane = panes.get(id);
 
 				return {
 					"element": pane.body,
@@ -307,9 +340,11 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 		}
 	});
 
-	const { "api": api } = component;
+	const { api } = component;
 
-	scheme.addEventListener("change", () => { api.updateOptions({ "theme": scheme.matches ? themeDark : themeLight }); });
+	scheme.addEventListener("change", () => {
+		api.updateOptions({ "theme": scheme.matches ? themeDark : themeLight });
+	});
 
 	const editorPanel = api.addPanel({ "id": EDITOR_PANEL, "component": "editor", "title": "Editor", "renderer": "always" });
 
@@ -332,32 +367,6 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 
 		return hostable(getPanelData()?.panelId) && event.clientX > box.left + marginX && event.clientX < box.right - marginX && event.clientY > box.top + marginY && event.clientY < box.bottom - marginY;
 	};
-
-	dropHint.className = dropHintCss();
-	dropHint.hidden = true;
-	editorContent.element.append(dropHint);
-	editorContent.element.addEventListener("dragover", (event) => {
-		dropHint.hidden = !intoEditor(event);
-
-		if (!dropHint.hidden) {
-			event.preventDefault();
-		}
-	});
-	editorContent.element.addEventListener("dragleave", (event) => {
-		if (!editorContent.element.contains(event.relatedTarget as Node | null)) {
-			dropHint.hidden = true;
-		}
-	});
-	editorContent.element.addEventListener("drop", (event) => {
-		dropHint.hidden = true;
-
-		if (intoEditor(event)) {
-			event.preventDefault();
-			event.stopPropagation(); // not dockview's too
-			void hostInEditor(getPanelData()!.panelId!);
-		}
-	});
-	document.addEventListener("dragend", () => { dropHint.hidden = true; }, true);
 
 	/** The workbench's call for a slot (see ShellDockHost) — its reply, or undefined with no workbench to answer. */
 	const askWorkbench = async (name: string, args: { "slot": string; "title"?: string }): Promise<boolean> => rpc.request(name, args, { "timeoutMs": 10_000, "waitForResponderMs": 2000 }).then(() => true, () => false);
@@ -389,6 +398,34 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 
 		api.getPanel(id)?.api.close(); // its dispose keeps the hosted pane
 	};
+
+	dropHint.className = dropHintCss();
+	dropHint.hidden = true;
+	editorContent.element.append(dropHint);
+	editorContent.element.addEventListener("dragover", (event) => {
+		dropHint.hidden = !intoEditor(event);
+
+		if (!dropHint.hidden) {
+			event.preventDefault();
+		}
+	});
+	editorContent.element.addEventListener("dragleave", (event) => {
+		if (!editorContent.element.contains(event.relatedTarget as Node | null)) {
+			dropHint.hidden = true;
+		}
+	});
+	editorContent.element.addEventListener("drop", (event) => {
+		dropHint.hidden = true;
+
+		if (intoEditor(event)) {
+			event.preventDefault();
+			event.stopPropagation(); // not dockview's too
+			void hostInEditor(getPanelData().panelId);
+		}
+	});
+	document.addEventListener("dragend", () => {
+		dropHint.hidden = true;
+	}, true);
 
 	/** Bring a window panel back from its VS Code editor into the dock, beside the editor. */
 	const dockPane = async (id: string): Promise<void> => {
@@ -427,7 +464,9 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 			/* eslint-enable webawesome/no-inline-styles */
 			back.textContent = "Move to dock";
 			back.title = "Move " + pane.title + " back into the dock";
-			back.addEventListener("click", () => { void dockPane(slot); });
+			back.addEventListener("click", () => {
+				void dockPane(slot);
+			});
 			bar.append(back);
 			element.replaceChildren(bar, pane.frame);
 		},
@@ -511,6 +550,7 @@ export function createShellDock(host: HTMLElement, hub: Hub): ShellDock {
 		const width = Math.min(options.width ?? 640, origin.width * 0.9);
 		const height = Math.min((options.height ?? 480) + TAB_BAR_HEIGHT, origin.height * 0.9);
 		const clamp = (value: number, max: number): number => Math.max(0, Math.min(value, max));
+
 		api.addPanel({
 			"id": id,
 			"component": "pane",

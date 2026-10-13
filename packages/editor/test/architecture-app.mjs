@@ -263,7 +263,9 @@ test("a worker's capability request is decided the same way — asked through it
 
 	assert.ok(worker !== undefined, "the app's worker: " + session.page.workers().map((candidate) => candidate.url()).join(", "));
 	// The worker's tap gates its WebSocket like the page's: it asks its page (tap.worker.decide), which asks the shell.
-	await worker.evaluate(() => { globalThis.__decideTest = new WebSocket("ws://localhost:1/worker-decide-test"); });
+	await worker.evaluate(() => {
+		globalThis.__decideTest = new WebSocket("ws://localhost:1/worker-decide-test");
+	});
 
 	const deny = session.page.locator("wa-button", { "hasText": "Deny" }).first();
 
@@ -356,7 +358,9 @@ test("the app's metrics reach the editor's metrics plane, named by the edge: its
 test("the app's link is confined: an editor subject it publishes doesn't cross into the editor", async () => {
 	const port = previewPort();
 
-	await previewPage().evaluate((closing) => { globalThis.__wiredHub.publish("preview.close", { "port": closing }); }, port);
+	await previewPage().evaluate((closing) => {
+		globalThis.__wiredHub.publish("preview.close", { "port": closing });
+	}, port);
 	await session.page.waitForTimeout(1500);
 	assert.ok(previewPage() !== undefined, "the preview is still open");
 });

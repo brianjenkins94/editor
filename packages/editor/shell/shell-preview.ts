@@ -17,18 +17,18 @@
  *   • `preview.hmr.<port>` → post the HMR update into every window of the port (its injected client applies it).
  * Each iframe's injected console tap posts `{channel:"obs-log"}` up here; we reshape onto `$sys.log.<window>`.
  */
-import type { Hub } from "@brianjenkins94/hub";
+import type { Hub, LinkPermissions } from "@brianjenkins94/hub";
 import type { ArchSink } from "@brianjenkins94/observability";
-import type { LinkPermissions, Transport } from "@brianjenkins94/hub";
+import type { DevtoolsPanel } from "./preview-devtools";
+import type { PaneWindow, PaneWindowFactory } from "./window";
 import { createRpcClient, rpcCallSubject, rpcReplySubject, serve, windowTransport } from "@brianjenkins94/hub";
 import { installWindowMessageProbe, scopedTransport } from "@brianjenkins94/observability";
 import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Pause, Play, Redo2, RotateCcw, SquareArrowDownLeft, SquareArrowOutUpRight } from "lucide";
-import type { DevtoolsPanel } from "./preview-devtools";
-import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import { installAutoProfiler, installPreviewProfiler } from "../shared/preview-profile";
 import { css, iconSvg } from "../shared/theme";
 import { PREVIEW_HOST_MARK, PREVIEW_WINDOW_PREFIX, previewPageOf, windowId, windowTitle } from "../shared/virtual-path";
-import { createPaneWindow, type PaneWindow, type PaneWindowFactory } from "./window";
+import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
+import { createPaneWindow } from "./window";
 
 /** The default preview port, used when an event omits one (single-preview back-compat). */
 const DEFAULT_PORT = 5173;
@@ -44,8 +44,13 @@ const DEVTOOLS_HEIGHT = 340;
 /** How far each further window of a server opens from the one before it, so none opens exactly over another. */
 const CASCADE = 32;
 const promptLayer = css({
-	"position": "absolute", "inset": 0, "zIndex": 5,
-	"display": "none", "alignItems": "center", "justifyContent": "center", "padding": "var(--wa-space-l)",
+	"position": "absolute",
+	"inset": 0,
+	"zIndex": 5,
+	"display": "none",
+	"alignItems": "center",
+	"justifyContent": "center",
+	"padding": "var(--wa-space-l)",
 	"background": "color-mix(in srgb, var(--wa-color-surface-default) 74%, transparent)",
 	"backdropFilter": "blur(2px)",
 	"&.open": { "display": "flex" }
@@ -53,9 +58,16 @@ const promptLayer = css({
 const promptCard = css({ "width": "min(420px, 100%)", "boxShadow": "var(--wa-shadow-l)" });
 // What a preview window shows while its page is popped out into a browser window of its own.
 const poppedLayer = css({
-	"position": "absolute", "inset": 0, "zIndex": 4,
-	"display": "flex", "flexDirection": "column", "alignItems": "center", "justifyContent": "center", "gap": "var(--wa-space-s)",
-	"backgroundColor": "var(--wa-color-surface-default)", "color": "var(--wa-color-text-quiet)",
+	"position": "absolute",
+	"inset": 0,
+	"zIndex": 4,
+	"display": "flex",
+	"flexDirection": "column",
+	"alignItems": "center",
+	"justifyContent": "center",
+	"gap": "var(--wa-space-s)",
+	"backgroundColor": "var(--wa-color-surface-default)",
+	"color": "var(--wa-color-text-quiet)",
 	"&[hidden]": { "display": "none" }
 });
 const promptTitle = css({ "display": "block", "fontWeight": "var(--wa-font-weight-semibold)", "marginBlockEnd": "var(--wa-space-2xs)" });
@@ -134,13 +146,15 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	// For the preview shim's WS/WebRTC capability decisions — round-trips to the ext-host decider over the hub.
 	const capRpc = createRpcClient(hub);
 
-	const windowsOf = (port: number): PreviewSurface[] => [...surfaces.values()].filter((surface) => surface.port === port).sort((a, b) => a.index - b.index);
-	const lastUsed = (list: PreviewSurface[]): PreviewSurface | undefined => list.toSorted((a, b) => b.usedAt - a.usedAt)[0];
+	const windowsOf = (port: number): PreviewSurface[] => [...surfaces.values()].filter((surface) => surface.port === port).sort((left, right) => left.index - right.index);
+	const lastUsed = (list: PreviewSurface[]): PreviewSurface | undefined => list.toSorted((left, right) => right.usedAt - left.usedAt)[0];
 	/** The port's window a prompt or the toolbar goes to: the one last used; with no port, the last used of all. */
 	const windowFor = (port: number | undefined): PreviewSurface | undefined => lastUsed(port === undefined ? [...surfaces.values()] : windowsOf(port));
 	/** Where a window's page is: its frame's, or the browser window it's popped out into. */
 	const pageOf = (surface: PreviewSurface): Window | null => surface.popup?.window ?? surface.frame.contentWindow;
-	const record = (to: string, label: string, bytes?: number): void => { sink?.record(sink.self, to, "message", label, bytes); };
+	const record = (to: string, label: string, bytes?: number): void => {
+		sink?.record(sink.self, to, "message", label, bytes);
+	};
 
 	const headerButton = (icon: Parameters<typeof iconSvg>[0], title: string, onClick: () => void, pressed?: boolean): HTMLElement => {
 		const element = document.createElement("wa-button");
@@ -169,18 +183,26 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	const renderDebugToolbar = (): void => {
 		for (const surface of surfaces.values()) {
 			// Every app window has "new window", DevTools (docked under the frame, so not while popped out) and pop out.
-			const devtools = headerButton(Bug, surface.devtools === undefined ? "DevTools" : "Close DevTools", () => { toggleDevtools(surface); }, surface.devtools !== undefined);
+			const devtools = headerButton(Bug, surface.devtools === undefined ? "DevTools" : "Close DevTools", () => {
+				toggleDevtools(surface);
+			}, surface.devtools !== undefined);
 
 			if (surface.popup !== undefined) {
 				devtools.setAttribute("disabled", "");
 			}
 
 			surface.paneWindow.headerActions.replaceChildren(
-				headerButton(AppWindow, "New window", () => { openWindow(surface.port, { "from": surface }); }),
+				headerButton(AppWindow, "New window", () => {
+					openWindow(surface.port, { "from": surface });
+				}),
 				devtools,
 				surface.popup === undefined
-					? headerButton(SquareArrowOutUpRight, "Pop out into its own window", () => { popOut(surface); })
-					: headerButton(SquareArrowDownLeft, "Bring back", () => { bringBack(surface); })
+					? headerButton(SquareArrowOutUpRight, "Pop out into its own window", () => {
+							popOut(surface);
+						})
+					: headerButton(SquareArrowDownLeft, "Bring back", () => {
+							bringBack(surface);
+						})
 			);
 		}
 
@@ -192,7 +214,14 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		// on the window showing its server, if it has one (else only VS Code's toolbar); a production run's on its port's
 		// window, else the last used. So they're never on a window it doesn't drive.
 		const stepping = debugState.type !== "production";
-		const target = stepping ? (debugState.port === undefined ? undefined : windowFor(debugState.port)) : windowFor(debugState.port) ?? windowFor(undefined);
+		let target: PreviewSurface | undefined;
+
+		if (stepping) {
+			target = debugState.port === undefined ? undefined : windowFor(debugState.port);
+		} else {
+			target = windowFor(debugState.port) ?? windowFor(undefined);
+		}
+
 		const host = target?.paneWindow.headerActions;
 
 		if (host === undefined) {
@@ -200,7 +229,9 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		}
 
 		const button = (icon: Parameters<typeof iconSvg>[0], command: string, title: string, enabled = true): HTMLElement => {
-			const element = headerButton(icon, title, () => { hub.publish("debug.command", { "command": command }); });
+			const element = headerButton(icon, title, () => {
+				hub.publish("debug.command", { "command": command });
+			});
 
 			if (!enabled) {
 				element.setAttribute("disabled", "");
@@ -224,7 +255,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	};
 
 	/** Dock DevTools under the app in `surface`'s window, or undock it. */
-	const toggleDevtools = (surface: PreviewSurface): void => {
+	function toggleDevtools(surface: PreviewSurface): void {
 		if (surface.devtools === undefined) {
 			surface.devtools = openDevtoolsPanel(hub, surface.key, surface.frame);
 			surface.paneWindow.body.append(surface.devtools.element);
@@ -243,7 +274,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		}
 
 		renderDebugToolbar();
-	};
+	}
 
 	/**
 	 * Pop a window's page out into a browser window of its own. Its page reloads there — a page can't move between
@@ -251,7 +282,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	 * from the popup (the window's link reads its page through `pageOf`). It's still served from this tab, so it lives
 	 * as long as the editor does. Closing the popup brings the page back; so does "Bring back".
 	 */
-	const popOut = (surface: PreviewSurface): void => {
+	function popOut(surface: PreviewSurface): void {
 		let url = surface.frame.src;
 
 		try {
@@ -277,22 +308,30 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			toggleDevtools(surface);
 		}
 
-		surface.popup = { "window": popup, "url": url, "watch": setInterval(() => { if (popup.closed) { bringBack(surface); } }, 500) };
+		surface.popup = {
+			"window": popup,
+			"url": url,
+			"watch": setInterval(() => {
+				if (popup.closed) {
+					bringBack(surface);
+				}
+			}, 500)
+		};
 		surface.frame.src = "about:blank";
 		surface.poppedEl.hidden = false;
 		record(surface.id, "pop out");
 		renderDebugToolbar();
-	};
+	}
 
 	/** Bring a popped-out page back into its window, at the page it's on (or popped out at, if its window's gone). */
-	const bringBack = (surface: PreviewSurface): void => {
-		const popup = surface.popup;
+	function bringBack(surface: PreviewSurface): void {
+		const { popup } = surface;
 
 		if (popup === undefined) {
 			return;
 		}
 
-		let url = popup.url;
+		let { url } = popup;
 
 		try {
 			// Where it's got to — if it's still on one of the server's pages (not a blank, or a page it navigated away to).
@@ -309,7 +348,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		surface.frame.src = url;
 		record(surface.id, "bring back");
 		renderDebugToolbar();
-	};
+	}
 
 	/** A running server's bookkeeping: its HMR goes into every window of the port — and every frame the app nests in
 	 *  each (a game's instance iframes), each with its own HMR client, which acts only on modules it loaded (React Fast
@@ -375,7 +414,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 
 	/** Open another window onto the server on `port` — at `url` (one of its pages) if given, else where the server
 	 *  serves (once it's up). `from`: the window it was opened from, which it cascades from. */
-	const openWindow = (port: number, { url, from }: { "url"?: string; "from"?: PreviewSurface } = {}): PreviewSurface => {
+	function openWindow(port: number, { url, from }: { "url"?: string; "from"?: PreviewSurface } = {}): PreviewSurface {
 		const server = ensureServer(port);
 		// Never reused: a window that closed keeps its id to itself, so its records never merge with a later window's.
 		const index = nextIndex.get(port) ?? 1;
@@ -445,6 +484,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 
 			return surface === undefined ? frame.contentWindow : pageOf(surface);
 		};
+
 		const unlinkApp = hub.link(scopedTransport(windowTransport(page, location.origin), id, {
 			// The edge names the app's contexts: its page IS this window, the rest under it; the shell keeps its name.
 			"keep": (other) => other === hub.id,
@@ -458,12 +498,16 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			}
 		}), { "transit": false, "peer": id, "permissions": previewAppPermissions(id) });
 
-		frame.addEventListener("load", () => { hub.publish("page_tools.changed", { "preview": port, "window": id }); });
+		frame.addEventListener("load", () => {
+			hub.publish("page_tools.changed", { "preview": port, "window": id });
+		});
 
 		const surface: PreviewSurface = { "id": id, "key": id.slice(PREVIEW_WINDOW_PREFIX.length), "port": port, "index": index, "usedAt": Date.now(), "paneWindow": paneWindow, "frame": frame, "promptEl": promptEl, "unlinkApp": unlinkApp, "reporters": reporters, "height": height, "promptChain": Promise.resolve(), "poppedEl": poppedEl };
 
 		// The window last touched is the port's for prompts and the debug toolbar.
-		paneWindow.element.addEventListener("pointerdown", () => { surface.usedAt = Date.now(); }, { "capture": true });
+		paneWindow.element.addEventListener("pointerdown", () => {
+			surface.usedAt = Date.now();
+		}, { "capture": true });
 		surfaces.set(id, surface);
 		sink?.spawn({ "id": id, "label": windowTitle(id), "container": "previews", "detail": server.url, "dynamic": true });
 
@@ -477,7 +521,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		renderDebugToolbar(); // its header buttons (and the toolbar, if a session is already active)
 
 		return surface;
-	};
+	}
 
 	hub.subscribe("preview.open", (data) => {
 		const info = data as { "port"?: number } | null;
@@ -508,14 +552,13 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		const base = new URL(info.url, location.href);
 
 		for (const surface of windowsOf(port)) {
-			if (surface.popup !== undefined) {
-				continue; // its page is in its own window, which keeps it
-			}
+			// (A popped-out one is skipped: its page is in its own window, which keeps it.)
+			if (surface.popup === undefined) {
+				const showing = surface.frame.src === "" ? undefined : new URL(surface.frame.src, location.href);
 
-			const showing = surface.frame.src === "" ? undefined : new URL(surface.frame.src, location.href);
-
-			if (showing === undefined || showing.origin !== base.origin || !showing.pathname.startsWith(base.pathname)) {
-				surface.frame.src = info.url;
+				if (showing?.origin !== base.origin || !showing.pathname.startsWith(base.pathname)) {
+					surface.frame.src = info.url;
+				}
 			}
 		}
 	});
@@ -569,7 +612,9 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 				resolve(choice);
 			};
 
-			timer = setTimeout(() => { finish("deny"); }, 300000);
+			timer = setTimeout(() => {
+				finish("deny");
+			}, 300000);
 
 			const card = document.createElement("wa-card");
 
@@ -578,9 +623,13 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 			const title = document.createElement("span");
 
 			title.className = promptTitle();
-			title.textContent = request.redline === true
-				? "⛔ Redline capability"
-				: request.dangerous === true ? "Review capability" : "Allow capability?";
+			if (request.redline === true) {
+				title.textContent = "⛔ Redline capability";
+			} else if (request.dangerous === true) {
+				title.textContent = "Review capability";
+			} else {
+				title.textContent = "Allow capability?";
+			}
 
 			const scope = document.createElement("span");
 
@@ -597,7 +646,9 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 				element.setAttribute("size", "small");
 				element.setAttribute("variant", variant);
 				element.textContent = label;
-				element.addEventListener("click", () => { finish(choice); });
+				element.addEventListener("click", () => {
+					finish(choice);
+				});
 
 				return element;
 			};
@@ -627,7 +678,15 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	let promptOnly: { "paneWindow": PaneWindow; "promptEl": HTMLDivElement; "promptChain": Promise<unknown> } | undefined;
 	const promptWindow = (): NonNullable<typeof promptOnly> => {
 		if (promptOnly === undefined) {
-			const paneWindow = createPaneWindow({ "title": "Capability request", "storageKey": "capability-prompt", "width": Math.min(460, window.innerWidth - 80), "height": 220, "onClose": () => { paneWindow.close(); } });
+			const paneWindow = createPaneWindow({
+				"title": "Capability request",
+				"storageKey": "capability-prompt",
+				"width": Math.min(460, window.innerWidth - 80),
+				"height": 220,
+				"onClose": () => {
+					paneWindow.close();
+				}
+			});
 			const promptEl = document.createElement("div");
 
 			promptEl.className = promptLayer();
@@ -640,7 +699,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	};
 
 	serve(hub, "capability.prompt", (request) => {
-		const { port, window: named } = request as { "port"?: number; "window"?: string };
+		const { port, "window": named } = request as { "port"?: number; "window"?: string };
 		const surface = (typeof named === "string" ? surfaces.get(named) : undefined) ?? windowFor(typeof port === "number" ? port : undefined) ?? windowFor(undefined) ?? promptWindow();
 		const result = surface.promptChain.then(() => runOnePrompt(surface, request as PromptRequest));
 
@@ -661,7 +720,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		// else by its path, so a new channel shows up on the diagram (and in conformance) without being declared here.
 		installWindowMessageProbe(sink, (source) => {
 			for (const surface of surfaces.values()) {
-				if (surface.devtools !== undefined && surface.devtools.frame.contentWindow === source) {
+				if (surface.devtools?.frame.contentWindow === source) {
 					return "devtools:" + surface.key;
 				}
 			}
@@ -696,7 +755,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 
 	// The preview windows, as data (the `previews_list` tool): each one's id, its server's port and address, the page
 	// it's on, whether its page is popped out into a browser window of its own or has DevTools open, and when it was used.
-	serve(hub, "preview.windows", () => [...surfaces.values()].toSorted((a, b) => a.port - b.port || a.index - b.index).map((surface) => {
+	serve(hub, "preview.windows", () => [...surfaces.values()].toSorted((left, right) => left.port - right.port || left.index - right.index).map((surface) => {
 		let page: string | undefined;
 
 		try {
@@ -705,7 +764,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 
 		page ??= surface.popup?.url ?? surface.frame.src;
 
-		return { "id": surface.id, "port": surface.port, "window": surface.index, ...servers.get(surface.port)?.url === undefined ? {} : { "server": servers.get(surface.port)!.url }, ...page === "" ? {} : { "page": previewPageOf(page)?.url ?? page }, "poppedOut": surface.popup !== undefined, "devtools": surface.devtools !== undefined, "usedAt": new Date(surface.usedAt).toISOString() };
+		return { "id": surface.id, "port": surface.port, "window": surface.index, ...servers.get(surface.port)?.url === undefined ? {} : { "server": servers.get(surface.port).url }, ...page === "" ? {} : { "page": previewPageOf(page)?.url ?? page }, "poppedOut": surface.popup !== undefined, "devtools": surface.devtools !== undefined, "usedAt": new Date(surface.usedAt).toISOString() };
 	}));
 
 	// The app opened a page of a server as a new window (`window.open`, a `target="_blank"` link — the tap hands it up
@@ -713,7 +772,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 	// here (this origin's `/__virtual__/<tab>/<port>/…`); anything else was left to the browser.
 	serve(hub, "preview.open", (args, { from }) => {
 		const surface = windowOfCall(from);
-		const target = previewPageOf(String((args as { "url"?: unknown } | undefined)?.url));
+		const target = previewPageOf((args as { "url"?: string } | undefined)?.url);
 
 		if (surface !== undefined && target !== undefined && servers.has(target.port)) {
 			openWindow(target.port, { "url": target.url, "from": surface });
@@ -760,7 +819,7 @@ function isWithin(source: MessageEventSource | null, root: Window | null): boole
 		let parent: Window;
 
 		try {
-			parent = current.parent;
+			({ parent } = current);
 		} catch {
 			return false;
 		}
@@ -774,5 +833,3 @@ function isWithin(source: MessageEventSource | null, root: Window | null): boole
 
 	return false;
 }
-
-

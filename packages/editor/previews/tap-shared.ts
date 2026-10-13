@@ -25,6 +25,7 @@ function format(value: unknown): string {
 	try {
 		return JSON.stringify(value);
 	} catch {
+		// eslint-disable-next-line ts/no-base-to-string -- a value JSON can't take (a cycle, a BigInt): String's own rendering, "[object Object]" included, is the intended fallback
 		return String(value);
 	}
 }
@@ -53,14 +54,14 @@ export function installConsoleTap(send: Send): void {
 	}
 
 	addEventListener("error", (event) => {
-		const error = event as ErrorEvent;
+		const error = event;
 
 		send({ "level": "error", "message": error.message || "uncaught error", "attrs": { "src": error.filename, "line": error.lineno, "col": error.colno, "stack": (error.error as Error | undefined)?.stack } });
 	});
 	addEventListener("unhandledrejection", (event) => {
-		const reason = (event as PromiseRejectionEvent).reason as { "message"?: string; "stack"?: string } | undefined;
+		const reason = (event).reason as { "message"?: string; "stack"?: string } | undefined;
 
-		send({ "level": "error", "message": "unhandledrejection: " + (reason?.message ?? String(reason)), "attrs": { "stack": reason?.stack } });
+		send({ "level": "error", "message": "unhandledrejection: " + (reason?.message ?? String(event.reason)), "attrs": { "stack": reason?.stack } });
 	});
 }
 
@@ -70,7 +71,7 @@ export function installConsoleTap(send: Send): void {
  * constructor can't await a decision, hence the proxy.
  */
 export function installSocketGate(decide: Decide): void {
-	const Original = globalThis.WebSocket as typeof WebSocket | undefined;
+	const Original = globalThis.WebSocket;
 
 	if (Original === undefined) {
 		return;
@@ -94,22 +95,22 @@ export function installSocketGate(decide: Decide): void {
 	};
 
 	class GatedWebSocket extends EventTarget {
-		public static readonly CONNECTING = Original!.CONNECTING;
-		public static readonly OPEN = Original!.OPEN;
-		public static readonly CLOSING = Original!.CLOSING;
-		public static readonly CLOSED = Original!.CLOSED;
+		public static readonly CONNECTING = Original.CONNECTING;
+		public static readonly OPEN = Original.OPEN;
+		public static readonly CLOSING = Original.CLOSING;
+		public static readonly CLOSED = Original.CLOSED;
 		public readonly url: string;
 		public protocol = "";
 		public extensions = "";
 		public binaryType: BinaryType = "blob";
-		public readyState: number = Original!.CONNECTING;
+		public readyState: number = Original.CONNECTING;
 		public bufferedAmount = 0;
-		private real: WebSocket | undefined;
-		private queue: unknown[] = [];
-		private closed = false;
-		private closeArgs: [number?, string?] | undefined;
 		/** The on* handlers (the accessors below). */
 		public readonly handlers: Record<string, EventListener | null> = {};
+		private real: WebSocket | undefined;
+		private readonly queue: unknown[] = [];
+		private closed = false;
+		private closeArgs: [number?, string?] | undefined;
 
 		public constructor(url: string | URL, protocols?: string | string[]) {
 			super();
@@ -128,7 +129,7 @@ export function installSocketGate(decide: Decide): void {
 				return;
 			}
 
-			if (this.real !== undefined && this.readyState === Original!.OPEN) {
+			if (this.real !== undefined && this.readyState === Original.OPEN) {
 				this.real.send(data as string);
 			} else {
 				this.queue.push(data);
@@ -140,7 +141,7 @@ export function installSocketGate(decide: Decide): void {
 			this.closeArgs = [code, reason];
 
 			if (this.real === undefined) {
-				this.readyState = Original!.CLOSING;
+				this.readyState = Original.CLOSING;
 			} else {
 				try {
 					this.real.close(code, reason);
@@ -149,7 +150,7 @@ export function installSocketGate(decide: Decide): void {
 		}
 
 		private open(url: string | URL, protocols?: string | string[]): void {
-			const real = protocols === undefined ? new Original!(url) : new Original!(url, protocols);
+			const real = protocols === undefined ? new Original(url) : new Original(url, protocols);
 
 			this.real = real;
 
@@ -160,12 +161,12 @@ export function installSocketGate(decide: Decide): void {
 			for (const type of ["open", "message", "error", "close"]) {
 				real.addEventListener(type, (event) => {
 					if (type === "open") {
-						this.readyState = Original!.OPEN;
+						this.readyState = Original.OPEN;
 						this.protocol = real.protocol;
 						this.extensions = real.extensions;
 						this.flush();
 					} else if (type === "close") {
-						this.readyState = Original!.CLOSED;
+						this.readyState = Original.CLOSED;
 					}
 
 					this.dispatchEvent(relay(event));
@@ -188,7 +189,7 @@ export function installSocketGate(decide: Decide): void {
 		}
 
 		private deny(): void {
-			this.readyState = Original!.CLOSED;
+			this.readyState = Original.CLOSED;
 			this.dispatchEvent(new Event("error"));
 			this.dispatchEvent(new CloseEvent("close", { "code": 4403, "reason": "Blocked by capability policy", "wasClean": false }));
 		}
@@ -211,11 +212,11 @@ export function installSocketGate(decide: Decide): void {
 				this.handlers[name] = typeof handler === "function" ? handler as EventListener : null;
 
 				if (this.handlers[name]) {
-					this.addEventListener(type, this.handlers[name]!);
+					this.addEventListener(type, this.handlers[name]);
 				}
 			}
 		});
 	}
 
-	(globalThis as { "WebSocket": unknown }).WebSocket = GatedWebSocket;
+	globalThis.WebSocket = GatedWebSocket as unknown as typeof WebSocket;
 }

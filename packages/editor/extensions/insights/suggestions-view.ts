@@ -24,9 +24,17 @@ export function registerSuggestionsView(context: vscode.ExtensionContext, source
 	const purple = new vscode.ThemeColor("charts.purple");
 	const provider: vscode.TreeDataProvider<Item> = {
 		"onDidChangeTreeData": changed.event,
-		"getChildren": (item) => (item === undefined
-			? [...source.all()].sort(([a], [b]) => a.localeCompare(b)).map(([file, found]): Item => ({ "kind": "file", "file": file, "found": found }))
-			: item.kind === "file" ? item.found.suggestions.toSorted((a, b) => a.start - b.start).map((suggestion): Item => ({ "kind": "suggestion", "found": item.found, "suggestion": suggestion })) : []),
+		"getChildren": (item) => {
+			if (item === undefined) {
+				return [...source.all()].sort(([left], [right]) => left.localeCompare(right)).map(([file, found]): Item => ({ "kind": "file", "file": file, "found": found }));
+			}
+
+			if (item.kind === "file") {
+				return item.found.suggestions.toSorted((left, right) => left.start - right.start).map((suggestion): Item => ({ "kind": "suggestion", "found": item.found, "suggestion": suggestion }));
+			}
+
+			return [];
+		},
 		"getTreeItem": (item) => {
 			if (item.kind === "file") {
 				const tree = new vscode.TreeItem(item.found.uri, vscode.TreeItemCollapsibleState.Expanded);
@@ -59,19 +67,17 @@ export function registerSuggestionsView(context: vscode.ExtensionContext, source
 		changed.fire(undefined);
 	};
 
-	context.subscriptions.push(changed, view, source.onDidChange(refresh),
-		vscode.commands.registerCommand("insights.applySuggestion", async (item?: Item) => {
-			const fix = item?.kind === "suggestion" ? item.suggestion.fix : undefined;
+	context.subscriptions.push(changed, view, source.onDidChange(refresh), vscode.commands.registerCommand("insights.applySuggestion", async (item?: Item) => {
+		const fix = item?.kind === "suggestion" ? item.suggestion.fix : undefined;
 
-			if (item === undefined || fix === undefined) {
-				return;
-			}
+		if (item === undefined || fix === undefined) {
+			return;
+		}
 
-			const edit = new vscode.WorkspaceEdit();
+		const edit = new vscode.WorkspaceEdit();
 
-			edit.replace(item.found.uri, rangeOf(item.found.text, fix.start, fix.end), fix.text);
-			await vscode.workspace.applyEdit(edit);
-		})
-	);
+		edit.replace(item.found.uri, rangeOf(item.found.text, fix.start, fix.end), fix.text);
+		await vscode.workspace.applyEdit(edit);
+	}));
 	refresh();
 }

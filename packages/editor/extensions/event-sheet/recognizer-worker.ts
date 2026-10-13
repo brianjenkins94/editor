@@ -14,15 +14,24 @@ import { recognizeGame } from "./recognizer";
 
 let tsApi: TsApi | undefined;
 
+async function loadTsApi(): Promise<TsApi> {
+	const loaded = ((await import("typescript")) as unknown as { "default": TsApi }).default;
+
+	tsApi = loaded;
+
+	return loaded;
+}
+
 globalThis.addEventListener("message", (event: MessageEvent) => {
 	const { id, files } = event.data as { "id": number; "files": Record<string, string> };
 
 	void (async () => {
 		try {
 			// The shared ts chunk — loaded once, on first use.
-			tsApi ??= ((await import("typescript")) as unknown as { "default": TsApi }).default;
+			const api = tsApi ?? await loadTsApi();
+
 			// Recognize with the TS AST; the extension attaches the durable BABLR anchors (anchors.ts), from the editor's BABLR.
-			globalThis.postMessage({ "id": id, "model": recognizeGame(files, tsApi) });
+			globalThis.postMessage({ "id": id, "model": recognizeGame(files, api) });
 		} catch (error) {
 			globalThis.postMessage({ "id": id, "error": error instanceof Error ? error.message : String(error) });
 		}

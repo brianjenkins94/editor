@@ -15,7 +15,9 @@ export function coalesce<T, R>(keyOf: (request: T) => string, decide: (request: 
 			return pending;
 		}
 
-		const decision = decide(request).finally(() => { waiting.delete(key); });
+		const decision = decide(request).finally(() => {
+			waiting.delete(key);
+		});
 
 		waiting.set(key, decision);
 

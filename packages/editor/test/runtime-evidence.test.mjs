@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { evidenceText, foldBranches, foldReached, foldSamples, foldValues, HALF_LIFE_RUNS, MAX_SAMPLES, MAX_TAGS, parseEvidence, parseSamples, samplesText } from "@brianjenkins94/util/silo/evidence";
 import { samplesPath } from "@brianjenkins94/util/silo/layout";
 
-const run = (n) => ({ "id": `run-${n}`, "at": `2026-10-04T00:00:0${n}Z` });
+const run = (index) => ({ "id": `run-${index}`, "at": `2026-10-04T00:00:0${index}Z` });
 const fade = 2 ** (-1 / HALF_LIFE_RUNS);
 
 test("a value site: strict counts add up run by run, the weight fades", () => {
@@ -35,7 +35,7 @@ test("a site a run didn't report only fades; one faded away is dropped", () => {
 	assert.equal(known[0].seen, 1, "strict counts stay");
 	assert.ok(known[0].runs < 1);
 
-	for (let n = 0; n < 200; n += 1) {
+	for (let index = 0; index < 200; index += 1) {
 		known = foldValues(known, [], run(3));
 	}
 

@@ -58,7 +58,7 @@ test("never isn't proof: how rare it could still be, and how strongly to say so"
 
 test("a branch's arms, in its text", () => {
 	const ternary = "a?.b ? x ?? y : (c ? 1 : 2)";
-	const { arms, test: condition } = armsOf(ternary, "TernaryExpression");
+	const { arms, "test": condition } = armsOf(ternary, "TernaryExpression");
 
 	assert.deepEqual(arms.map((arm) => ternary.slice(...arm)), ["x ?? y", "(c ? 1 : 2)"]);
 	assert.equal(ternary.slice(...condition), "a?.b");

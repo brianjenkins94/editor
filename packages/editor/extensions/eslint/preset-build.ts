@@ -68,6 +68,78 @@ function pluginOf(id: string): string | undefined {
 	return id.startsWith("@") ? id.slice(0, id.indexOf("/", id.indexOf("/") + 1)) : id.slice(0, id.indexOf("/"));
 }
 
+/** A dependency's entry and its module — undefined when it's not a runtime package (types, a CLI) or not importable here. */
+async function importPackage(antfuRequire: ReturnType<typeof createRequire>, name: string): Promise<[string, Record<string, unknown>] | undefined> {
+	try {
+		const resolved = antfuRequire.resolve(name);
+
+		return [resolved, await import(resolved) as Record<string, unknown>];
+	} catch {
+		return undefined;
+	}
+}
+
+/** Record a package's rules: each rule object's [package entry, rule key] in `owners` (the first package to export it wins). */
+function recordPackage(resolved: string, module: Record<string, unknown>, owners: Map<unknown, [string, string]>, packageRules: Map<string, Record<string, unknown>>): void {
+	for (const candidate of [module["default"], module, (module["default"] as Record<string, unknown> | undefined)?.["default"]]) {
+		const rules = (candidate as { "rules"?: Record<string, unknown> } | undefined)?.rules;
+
+		if (rules !== undefined && typeof rules === "object") {
+			packageRules.set(resolved, rules);
+
+			for (const [key, rule] of Object.entries(rules)) {
+				if (!owners.has(rule)) {
+					owners.set(rule, [resolved, key]);
+				}
+			}
+		}
+	}
+}
+
+/** A block's `languageOptions` as data: the parser as a marker, filesystem-bound and non-JSON options dropped. */
+function languageOptionsOf(languageOptions: Record<string, unknown>): Record<string, unknown> {
+	const options: Record<string, unknown> = {};
+
+	for (const [key, value] of Object.entries(languageOptions)) {
+		if (key === "parser") {
+			options["parser"] = "typescript"; // marker: the engine supplies its bundled @typescript-eslint/parser
+		} else if (key === "parserOptions" && value !== null && typeof value === "object") {
+			options["parserOptions"] = Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([name, option]) => !FS_PARSER_OPTIONS.has(name) && isJsonSafe(option)));
+		} else if (isJsonSafe(value)) {
+			options[key] = value;
+		}
+	}
+
+	return options;
+}
+
+/** A block's rule settings that can be carried to the browser — each plugin rule's source recorded in `sources`, the
+ *  ids of what can't be carried in `dropped`. */
+function carriedRules(blockRules: Record<string, unknown>, locate: (plugin: string, rule: string) => [string, string] | undefined, sources: Map<string, Map<string, [string, string]>>, dropped: string[]): Record<string, unknown> {
+	const rules: Record<string, unknown> = {};
+
+	for (const [id, setting] of Object.entries(blockRules)) {
+		const plugin = pluginOf(id);
+		const source = plugin === undefined ? undefined : locate(plugin, id.slice(plugin.length + 1));
+
+		if (!isJsonSafe(setting) || (plugin !== undefined && source === undefined)) {
+			dropped.push(id);
+		} else {
+			rules[id] = setting;
+
+			if (plugin !== undefined && source !== undefined) {
+				if (!sources.has(plugin)) {
+					sources.set(plugin, new Map());
+				}
+
+				sources.get(plugin)?.set(id.slice(plugin.length + 1), source);
+			}
+		}
+	}
+
+	return rules;
+}
+
 async function extract(): Promise<Extracted> {
 	const localRequire = createRequire(import.meta.url);
 	const presetEntry = localRequire.resolve(PRESET);
@@ -90,28 +162,10 @@ async function extract(): Promise<Extracted> {
 	const packageRules = new Map<string, Record<string, unknown>>();
 
 	for (const name of Object.keys(antfuManifest.dependencies ?? {})) {
-		let resolved: string;
-		let module: Record<string, unknown>;
+		const imported = await importPackage(antfuRequire, name);
 
-		try {
-			resolved = antfuRequire.resolve(name);
-			module = await import(resolved) as Record<string, unknown>;
-		} catch {
-			continue; // not a runtime package (types, a CLI) or not importable here
-		}
-
-		for (const candidate of [module["default"], module, (module["default"] as Record<string, unknown> | undefined)?.["default"]]) {
-			const rules = (candidate as { "rules"?: Record<string, unknown> } | undefined)?.rules;
-
-			if (rules !== undefined && typeof rules === "object") {
-				packageRules.set(resolved, rules);
-
-				for (const [key, rule] of Object.entries(rules)) {
-					if (!owners.has(rule)) {
-						owners.set(rule, [resolved, key]);
-					}
-				}
-			}
+		if (imported !== undefined) {
+			recordPackage(imported[0], imported[1], owners, packageRules);
 		}
 	}
 
@@ -134,7 +188,7 @@ async function extract(): Promise<Extracted> {
 
 		// Same package, separate module instance: prefer a package that already provides this plugin's rules.
 		const known = new Set([...(sources.get(plugin)?.values() ?? [])].map(([pkg]) => pkg));
-		const candidates = [...packageRules].filter(([, rules]) => rule in rules).sort(([a], [b]) => Number(known.has(b)) - Number(known.has(a)));
+		const candidates = [...packageRules].filter(([, rules]) => rule in rules).sort(([left], [right]) => Number(known.has(right)) - Number(known.has(left)));
 
 		return candidates.length > 0 ? [candidates[0][0], rule] : undefined;
 	};
@@ -142,11 +196,8 @@ async function extract(): Promise<Extracted> {
 	const blocks: Record<string, unknown>[] = [];
 	const dropped: string[] = [];
 
-	for (const block of configs) {
-		if (block["name"] === "antfu/gitignore" || !applies(block)) {
-			continue; // the gitignore block carries THIS repo's .gitignore; non-JS/TS blocks can't apply in-browser
-		}
-
+	// (the gitignore block carries THIS repo's .gitignore; non-JS/TS blocks can't apply in-browser)
+	for (const block of configs.filter((each) => each["name"] !== "antfu/gitignore" && applies(each))) {
 		const out: Record<string, unknown> = {};
 
 		for (const key of ["name", "files", "ignores", "settings", "linterOptions"]) {
@@ -158,44 +209,11 @@ async function extract(): Promise<Extracted> {
 		const languageOptions = block["languageOptions"] as Record<string, unknown> | undefined;
 
 		if (languageOptions !== undefined) {
-			const options: Record<string, unknown> = {};
-
-			for (const [key, value] of Object.entries(languageOptions)) {
-				if (key === "parser") {
-					options["parser"] = "typescript"; // marker: the engine supplies its bundled @typescript-eslint/parser
-				} else if (key === "parserOptions" && value !== null && typeof value === "object") {
-					options["parserOptions"] = Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([name, option]) => !FS_PARSER_OPTIONS.has(name) && isJsonSafe(option)));
-				} else if (isJsonSafe(value)) {
-					options[key] = value;
-				}
-			}
-
-			out["languageOptions"] = options;
+			out["languageOptions"] = languageOptionsOf(languageOptions);
 		}
 
 		if (block.rules !== undefined) {
-			const rules: Record<string, unknown> = {};
-
-			for (const [id, setting] of Object.entries(block.rules)) {
-				const plugin = pluginOf(id);
-				const source = plugin === undefined ? undefined : locate(plugin, id.slice(plugin.length + 1));
-
-				if (!isJsonSafe(setting) || (plugin !== undefined && source === undefined)) {
-					dropped.push(id);
-				} else {
-					rules[id] = setting;
-
-					if (plugin !== undefined && source !== undefined) {
-						if (!sources.has(plugin)) {
-							sources.set(plugin, new Map());
-						}
-
-						sources.get(plugin)?.set(id.slice(plugin.length + 1), source);
-					}
-				}
-			}
-
-			out["rules"] = rules;
+			out["rules"] = carriedRules(block.rules, locate, sources, dropped);
 		}
 
 		if (Object.keys(out).some((key) => key !== "name")) {
@@ -222,7 +240,13 @@ export function eslintPresetPlugin(): Plugin {
 
 	return {
 		"name": "eslint-preset",
-		"resolveId": (id) => (id === DATA_VIRTUAL ? data : id === PLUGINS_VIRTUAL ? plugins : undefined),
+		"resolveId": (id) => {
+			if (id === DATA_VIRTUAL) {
+				return data;
+			}
+
+			return id === PLUGINS_VIRTUAL ? plugins : undefined;
+		},
 		"load": async (id) => {
 			if (id !== data && id !== plugins) {
 				return undefined;

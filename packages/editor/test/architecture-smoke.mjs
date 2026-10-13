@@ -57,8 +57,12 @@ const MUST_SEE_LABELS = [
 
 let session;
 
-before(async () => { session = await startSession(); });
-after(async () => { await session?.close("architecture-smoke"); });
+before(async () => {
+	session = await startSession();
+});
+after(async () => {
+	await session?.close("architecture-smoke");
+});
 
 test("boot: every realm reports", async () => {
 	for (const id of ["shell", "root", "sw", "workbench", "pod", "node"]) {
@@ -85,19 +89,19 @@ test("coverage: every must-see hub link, channel and message was observed", asyn
 	const seen = seenChannels(current.channels.map((channel) => ({ ...channel, "labels": new Map(Object.entries(channel.labels)) })));
 	const missing = [];
 
-	for (const [a, b] of hubLinks) {
+	for (const [one, other] of hubLinks) {
 		// Links to contexts that exist only under a condition (debug-mcp running, a debug session) aren't required — nor
 		// to dynamic ones (`preview:*`: the shell links an app's hubs only when a previewed app links up).
-		const conditional = [a, b].some((id) => id.endsWith("*") || nodes.find((node) => node.id === id)?.condition !== undefined);
+		const conditional = [one, other].some((id) => id.endsWith("*") || nodes.find((node) => node.id === id)?.condition !== undefined);
 
-		if (!conditional && between(current, a, b).length === 0) {
-			missing.push(`hub link ${a} ⇄ ${b}`);
+		if (!conditional && between(current, one, other).length === 0) {
+			missing.push(`hub link ${one} ⇄ ${other}`);
 		}
 	}
 
 	for (const pair of MUST_SEE_CHANNELS) {
-		const [a, b] = pair.split(" ⇄ ");
-		const spec = channels.find((channel) => channel.a === a && channel.b === b);
+		const [one, other] = pair.split(" ⇄ ");
+		const spec = channels.find((channel) => channel.a === one && channel.b === other);
 
 		assert.ok(spec !== undefined, "not a declared channel: " + pair);
 
@@ -106,9 +110,9 @@ test("coverage: every must-see hub link, channel and message was observed", asyn
 		}
 	}
 
-	for (const [a, b, label] of MUST_SEE_LABELS) {
-		if (!hasLabel(a, b, label)(current)) {
-			missing.push(`message ${String(label)} between ${String(a)} and ${String(b)}`);
+	for (const [one, other, label] of MUST_SEE_LABELS) {
+		if (!hasLabel(one, other, label)(current)) {
+			missing.push(`message ${String(label)} between ${String(one)} and ${String(other)}`);
 		}
 	}
 

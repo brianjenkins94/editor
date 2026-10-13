@@ -15,13 +15,13 @@
 import type { Hub } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 
-interface Dap { [key: string]: unknown }
+type Dap = Record<string, unknown>;
 interface DapRequest { "type": "request"; "seq": number; "command": string; "arguments"?: Dap }
 
 class ProductionDebugSession implements vscode.DebugAdapter {
-	private readonly sendEmitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
-	public readonly onDidSendMessage = this.sendEmitter.event;
+	public readonly onDidSendMessage: vscode.Event<vscode.DebugProtocolMessage>;
 
+	private readonly sendEmitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
 	private seq = 1;
 	private id = "";
 	private readonly offs: (() => void)[] = [];
@@ -29,19 +29,7 @@ class ProductionDebugSession implements vscode.DebugAdapter {
 
 	public constructor(hub: Hub) {
 		this.hub = hub;
-	}
-
-	private send(message: Dap): void {
-		this.sendEmitter.fire({ ...message, "seq": this.seq });
-		this.seq += 1;
-	}
-
-	private respond(request: DapRequest, body?: Dap): void {
-		this.send({ "type": "response", "request_seq": request.seq, "success": true, "command": request.command, "body": body ?? {} });
-	}
-
-	private event(event: string, body?: Dap): void {
-		this.send({ "type": "event", "event": event, "body": body ?? {} });
+		this.onDidSendMessage = this.sendEmitter.event;
 	}
 
 	public handleMessage(message: vscode.DebugProtocolMessage): void {
@@ -61,7 +49,7 @@ class ProductionDebugSession implements vscode.DebugAdapter {
 				break;
 
 			case "launch":
-				this.id = String(args["__prodId"] ?? "");
+				this.id = (args["__prodId"] as string | undefined) ?? "";
 				// The run's driver streams its output here; relay it to the Debug Console.
 				this.offs.push(this.hub.subscribe(`production.out.${this.id}`, (data) => {
 					const chunk = data as { "stream"?: "out" | "err"; "data"?: string };
@@ -69,7 +57,9 @@ class ProductionDebugSession implements vscode.DebugAdapter {
 					this.event("output", { "category": chunk.stream === "err" ? "stderr" : "stdout", "output": chunk.data ?? "" });
 				}));
 				// The run ended (or was stopped) → end the debug session.
-				this.offs.push(this.hub.subscribe(`production.exit.${this.id}`, () => { this.event("terminated"); }));
+				this.offs.push(this.hub.subscribe(`production.exit.${this.id}`, () => {
+					this.event("terminated");
+				}));
 				this.respond(request);
 				break;
 
@@ -109,6 +99,19 @@ class ProductionDebugSession implements vscode.DebugAdapter {
 
 		this.offs.length = 0;
 		this.sendEmitter.dispose();
+	}
+
+	private send(message: Dap): void {
+		this.sendEmitter.fire({ ...message, "seq": this.seq });
+		this.seq += 1;
+	}
+
+	private respond(request: DapRequest, body?: Dap): void {
+		this.send({ "type": "response", "request_seq": request.seq, "success": true, "command": request.command, "body": body ?? {} });
+	}
+
+	private event(event: string, body?: Dap): void {
+		this.send({ "type": "event", "event": event, "body": body ?? {} });
 	}
 }
 

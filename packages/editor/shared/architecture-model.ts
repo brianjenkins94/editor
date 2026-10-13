@@ -359,34 +359,35 @@ export function subjectMatches(pattern: string, subject: string): boolean {
 	return patternTokens.length === subjectTokens.length;
 }
 
-/** A hub link joins a and b — themselves, or the dynamic ids they're one of (`shell` ⇄ `preview:5173` is `preview:*`'s). */
-function isHubLink(a: string, b: string): boolean {
-	const [x, y] = [hubOf(a) ?? a, hubOf(b) ?? b];
+/** A hub link joins `first` and `second` — themselves, or the dynamic ids they're one of (`shell` ⇄ `preview:5173` is
+ *  `preview:*`'s). */
+function isHubLink(first: string, second: string): boolean {
+	const [x, y] = [hubOf(first) ?? first, hubOf(second) ?? second];
 
 	return hubLinks.some(([one, other]) => (one === x && other === y) || (one === y && other === x));
 }
 
-export function findChannel(a: string, b: string): ChannelSpec | undefined {
-	return channels.find((channel) => (globMatches(channel.a, a) && globMatches(channel.b, b)) || (globMatches(channel.a, b) && globMatches(channel.b, a)));
+export function findChannel(first: string, second: string): ChannelSpec | undefined {
+	return channels.find((channel) => (globMatches(channel.a, first) && globMatches(channel.b, second)) || (globMatches(channel.a, second) && globMatches(channel.b, first)));
 }
 
 /** The declared kind of a pair: a hub link, a declared channel, or nothing. */
-export function declaredBetween(a: string, b: string): { "type": "hub" } | { "type": "channel"; "spec": ChannelSpec } | { "type": "discovered"; "kind": "commands" | "store" } | undefined {
-	if (isHubLink(a, b)) {
+export function declaredBetween(first: string, second: string): { "type": "hub" } | { "type": "channel"; "spec": ChannelSpec } | { "type": "discovered"; "kind": "commands" | "store" } | undefined {
+	if (isHubLink(first, second)) {
 		return { "type": "hub" };
 	}
 
 	// Discovered rather than declared (DISCOVERED-ARCHITECTURE.md): between extensions is VS Code's command surface, and a
 	// store is what's written to it and read from it.
-	if (isExtensionNode(a) && isExtensionNode(b)) {
+	if (isExtensionNode(first) && isExtensionNode(second)) {
 		return { "type": "discovered", "kind": "commands" };
 	}
 
-	if (isStoreNode(a) || isStoreNode(b)) {
+	if (isStoreNode(first) || isStoreNode(second)) {
 		return { "type": "discovered", "kind": "store" };
 	}
 
-	const spec = findChannel(a, b);
+	const spec = findChannel(first, second);
 
 	return spec === undefined ? undefined : { "type": "channel", "spec": spec };
 }
@@ -412,7 +413,13 @@ function treePath(from: string, to: string): string[] | undefined {
 		}
 
 		for (const [x, y] of hubLinks) {
-			const next = x === current ? y : y === current ? x : undefined;
+			let next: string | undefined;
+
+			if (x === current) {
+				next = y;
+			} else if (y === current) {
+				next = x;
+			}
 
 			if (next !== undefined && !previous.has(next)) {
 				previous.set(next, current);
@@ -435,17 +442,22 @@ function hubOf(id: string): string | undefined {
 export type MessageKind = "call" | "reply" | "event";
 
 export function kindOfLabel(label: string): MessageKind {
-	return label.startsWith("↩ ") ? "reply" : label.endsWith("()") ? "call" : "event";
+	if (label.startsWith("↩ ")) {
+		return "reply";
+	}
+
+	return label.endsWith("()") ? "call" : "event";
 }
 
 const expand = (ids: string[]): string[] => (ids.includes("*") ? hubIds : ids);
 
 /**
- * Whether `family` lets a message of `kind` cross the hub link from `a` to `b`: it lies on the tree path from one of the
- * family's senders to one of its receivers, in that direction. An event or a call goes `from` → `to`; a reply, back.
+ * Whether `family` lets a message of `kind` cross the hub link from `first` to `second`: it lies on the tree path from
+ * one of the family's senders to one of its receivers, in that direction. An event or a call goes `from` → `to`; a
+ * reply, back.
  */
-export function familyAllowsHop(family: SubjectFamily, kind: MessageKind, a: string, b: string): boolean {
-	const [x, y] = [hubOf(a), hubOf(b)];
+export function familyAllowsHop(family: SubjectFamily, kind: MessageKind, first: string, second: string): boolean {
+	const [x, y] = [hubOf(first), hubOf(second)];
 
 	if (x === undefined || y === undefined) {
 		return false;
@@ -467,24 +479,32 @@ export function familyAllowsHop(family: SubjectFamily, kind: MessageKind, a: str
 	return false;
 }
 
-/** The subject families that cross the hub link a–b at all, either way: the families the link carries. */
-export function familiesOnLink(a: string, b: string): SubjectFamily[] {
-	return subjects.filter((family) => (["event", "call"] as const).some((kind) => familyAllowsHop(family, kind, a, b) || familyAllowsHop(family, kind, b, a)));
+/** The subject families that cross the hub link `first`–`second` at all, either way: the families the link carries. */
+export function familiesOnLink(first: string, second: string): SubjectFamily[] {
+	return subjects.filter((family) => (["event", "call"] as const).some((kind) => familyAllowsHop(family, kind, first, second) || familyAllowsHop(family, kind, second, first)));
 }
 
-/** Which way a family's events and calls cross the link a–b: `→` (a to b), `←`, or `⇄`. */
-export function directionOnLink(family: SubjectFamily, a: string, b: string): "→" | "←" | "⇄" | undefined {
-	const forward = familyAllowsHop(family, "event", a, b);
-	const backward = familyAllowsHop(family, "event", b, a);
+/** Which way a family's events and calls cross the link `first`–`second`: `→` (first to second), `←`, or `⇄`. */
+export function directionOnLink(family: SubjectFamily, first: string, second: string): "→" | "←" | "⇄" | undefined {
+	const forward = familyAllowsHop(family, "event", first, second);
+	const backward = familyAllowsHop(family, "event", second, first);
 
-	return forward && backward ? "⇄" : forward ? "→" : backward ? "←" : undefined;
+	if (forward && backward) {
+		return "⇄";
+	}
+
+	if (forward) {
+		return "→";
+	}
+
+	return backward ? "←" : undefined;
 }
 
-/** Whether the model lets `label` (a hub message) cross from `a` to `b`. */
-export function allowedOnLink(label: string, a: string, b: string): boolean {
+/** Whether the model lets `label` (a hub message) cross from `first` to `second`. */
+export function allowedOnLink(label: string, first: string, second: string): boolean {
 	const subject = subjectOfLabel(label);
 
-	return subject === undefined || subjects.some((family) => subjectMatches(family.pattern, subject) && familyAllowsHop(family, kindOfLabel(label), a, b));
+	return subject === undefined || subjects.some((family) => subjectMatches(family.pattern, subject) && familyAllowsHop(family, kindOfLabel(label), first, second));
 }
 
 /** The subject a hub traffic label stands for (`↩ git.status()` → `git.status`), or undefined for control frames. */
@@ -515,6 +535,7 @@ export interface ObservedChannel { "a": string; "b": string; "labels": Map<strin
 export function declaredOn(channel: { "a": string; "b": string; "medium"?: string }): ReturnType<typeof declaredBetween> {
 	return channel.medium === undefined ? declaredBetween(channel.a, channel.b) : declaredBetween(channel.a, channel.medium) ?? declaredBetween(channel.b, channel.medium);
 }
+
 export interface ObservedTopology { "links": { "peerId"?: string }[] }
 
 /** How many observed pairs each declared channel covers. A channel declared on a hub-linked pair (raw messages beside
@@ -534,6 +555,29 @@ export function seenChannels(observed: ObservedChannel[]): Map<ChannelSpec, numb
 	return seen;
 }
 
+/** Contexts created at runtime, by id prefix, and where they live. */
+export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:", "channel:", "lock:", "rtc:", "webview:", "ext:", "store:"];
+
+/** The hub messages on `channel`, a hub link, that no family sends the way they went: into `violations`. */
+function checkSubjects(channel: ObservedChannel, violations: Violation[]): void {
+	for (const [label, stats] of channel.labels) {
+		const subject = (stats.hub ?? 0) > 0 ? subjectOfLabel(label) : undefined;
+		const directed = stats.forward !== undefined || stats.backward !== undefined;
+
+		if (subject !== undefined && !directed) {
+			if (!allowedOnLink(label, channel.a, channel.b) && !allowedOnLink(label, channel.b, channel.a)) {
+				violations.push({ "type": "unexpected-subject", "a": channel.a, "b": channel.b, "subject": subject, "count": stats.count });
+			}
+		} else if (subject !== undefined) {
+			for (const [from, to, count] of [[channel.a, channel.b, stats.forward ?? 0], [channel.b, channel.a, stats.backward ?? 0]] as const) {
+				if (count > 0 && !allowedOnLink(label, from, to)) {
+					violations.push({ "type": "unexpected-subject", "a": from, "b": to, "subject": subject, "count": count });
+				}
+			}
+		}
+	}
+}
+
 /** Compare what's observed with the model. */
 export function checkConformance(observed: { "nodes": string[]; "channels": ObservedChannel[]; "topology": Map<string, ObservedTopology> }): Violation[] {
 	const violations: Violation[] = [];
@@ -545,32 +589,8 @@ export function checkConformance(observed: { "nodes": string[]; "channels": Obse
 
 		if (declared === undefined) {
 			violations.push({ "type": "undeclared-channel", "a": channel.a, "b": channel.b });
-			continue;
-		}
-
-		if (declared.type === "hub") {
-			for (const [label, stats] of channel.labels) {
-				const subject = (stats.hub ?? 0) > 0 ? subjectOfLabel(label) : undefined;
-				const directed = stats.forward !== undefined || stats.backward !== undefined;
-
-				if (subject === undefined) {
-					continue;
-				}
-
-				if (!directed) {
-					if (!allowedOnLink(label, channel.a, channel.b) && !allowedOnLink(label, channel.b, channel.a)) {
-						violations.push({ "type": "unexpected-subject", "a": channel.a, "b": channel.b, "subject": subject, "count": stats.count });
-					}
-
-					continue;
-				}
-
-				for (const [from, to, count] of [[channel.a, channel.b, stats.forward ?? 0], [channel.b, channel.a, stats.backward ?? 0]] as const) {
-					if (count > 0 && !allowedOnLink(label, from, to)) {
-						violations.push({ "type": "unexpected-subject", "a": from, "b": to, "subject": subject, "count": count });
-					}
-				}
-			}
+		} else if (declared.type === "hub") {
+			checkSubjects(channel, violations);
 		}
 	}
 
@@ -646,12 +666,12 @@ function isWindowNode(id: string): boolean {
 export function appLayout(observed: { "channels": { "a": string; "b": string }[]; "topology": Map<string, ObservedTopology>; "realms": Map<string, ObservedRealm> }): AppLayout {
 	const nodes = appNodes(observed);
 	const parent = new Map<string, string>();
-	const windowOf = (id: string): string => (isWindowNode(id) ? id : appWindowOf(id)!);
+	const windowOf = (id: string): string => (isWindowNode(id) ? id : appWindowOf(id));
 	// Each window realm by its address, per preview window — the window itself first, where a realm holds several hubs.
 	const byUrl = new Map<string, string>();
 	const holders = [...observed.realms].filter(([id, realm]) => realm.kind === "window" && (nodes.has(id) || isWindowNode(id)));
 
-	for (const [id, realm] of holders.toSorted(([a], [b]) => Number(isWindowNode(b)) - Number(isWindowNode(a)))) {
+	for (const [id, realm] of holders.toSorted(([left], [right]) => Number(isWindowNode(right)) - Number(isWindowNode(left)))) {
 		const key = windowOf(id) + "\0" + realm.url;
 
 		if (!byUrl.has(key)) {
@@ -672,9 +692,6 @@ export function appLayout(observed: { "channels": { "a": string; "b": string }[]
 }
 
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────
-
-/** Contexts created at runtime, by id prefix, and where they live. */
-export const DYNAMIC_PREFIXES = ["nested:", "worker:", "preview:", "devtools:", "vite:", "server:", "channel:", "lock:", "rtc:", "webview:", "ext:", "store:"];
 
 /** An extension, discovered by its commands (extensions/command-tap.ts): `ext:<name>`, or `ext:vscode` for VS Code's own
  *  commands and its built-in extensions'. */
@@ -701,7 +718,7 @@ export function componentsOf(hub: { "subscriptions": string[]; "sites"?: Record<
 		}
 	}
 
-	return [...components].map(([component, subjects]) => ({ "component": component, "subjects": [...subjects].sort() })).sort((a, b) => a.component.localeCompare(b.component));
+	return [...components].map(([component, subjects]) => ({ "component": component, "subjects": [...subjects].sort() })).sort((left, right) => left.component.localeCompare(right.component));
 }
 
 /** One subscription as a component's: the subject it reads as (a call as `name()`, a session's or port's own token as
@@ -716,7 +733,7 @@ function subscriptionOf(hub: { "sites"?: Record<string, string[]> }, pattern: st
 	const general = pattern.split(".").map((token) => (/^(?:\d+|(?:[a-z]+-)?[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8})$/u.test(token) ? "*" : token)).join(".");
 	const subject = general.startsWith("$rpc.call.") ? general.slice("$rpc.call.".length) + "()" : general;
 
-	return { "subject": subject, "component": hub.sites?.[pattern]?.[0] ?? subject.split(".")[0]! };
+	return { "subject": subject, "component": hub.sites?.[pattern]?.[0] ?? subject.split(".")[0] };
 }
 
 /** The component of `hub` that handles `subject` (a label's: `annotations.resolve` for a call or its reply) — the one
@@ -772,7 +789,7 @@ export function discoveredStores(observed: { "channels": { "a": string; "b": str
 		}
 	}
 
-	return [...stores].map(([store, { writers, readers }]) => ({ "store": store, "writers": [...writers].sort(), "readers": [...readers].sort() })).sort((a, b) => a.store.localeCompare(b.store));
+	return [...stores].map(([store, { writers, readers }]) => ({ "store": store, "writers": [...writers].sort(), "readers": [...readers].sort() })).sort((left, right) => left.store.localeCompare(right.store));
 }
 
 export function dynamicContainer(id: string): string | undefined {
@@ -866,6 +883,7 @@ export function tourDiagram(snapshot: TourSnapshot): string {
 
 		return inside.length === 0 ? [] : [`${indent}subgraph c_${container.id}["${container.label}"]`, ...inside, `${indent}end`];
 	};
+
 	const lines = ["flowchart LR", ...containers.filter((container) => container.parent === undefined).flatMap((container) => box(container, "  ")), ...partsIn(undefined, "  ")];
 
 	// What joined them: a hub link, a declared channel's protocol, an extension's commands, a store's reads and writes.
@@ -875,19 +893,25 @@ export function tourDiagram(snapshot: TourSnapshot): string {
 		const declared = declaredOn(channel);
 		const operations = Object.keys(channel.labels);
 		// Either way round, the same edge (but a store's, from who touched it).
-		const [a, b] = [general(channel.a), general(channel.b)].sort();
+		const [one, other] = [general(channel.a), general(channel.b)].sort();
 
 		if (declared?.type === "hub") {
-			edges.add(`  ${mermaidId(a)} <==> ${mermaidId(b)}`);
+			edges.add(`  ${mermaidId(one)} <==> ${mermaidId(other)}`);
 		} else if (declared?.type === "discovered" && declared.kind === "store") {
-			const [store, by] = isStoreNode(a) ? [a, b] : [b, a];
+			const [store, by] = isStoreNode(one) ? [one, other] : [other, one];
 			const how = [operations.some((operation) => !writesStore(operation)) && "reads", operations.some(writesStore) && "writes"].filter(Boolean).join(", ");
 
 			edges.add(`  ${mermaidId(by)} -->|"${how}"| ${mermaidId(store)}`);
 		} else {
-			const how = declared === undefined ? "undeclared" : declared.type === "discovered" ? "commands" : declared.spec.protocol;
+			let how = "undeclared";
 
-			edges.add(`  ${mermaidId(a)} <-.->|"${text(how + (channel.medium === undefined ? "" : " via " + channel.medium))}"| ${mermaidId(b)}`);
+			if (declared?.type === "discovered") {
+				how = "commands";
+			} else if (declared !== undefined) {
+				how = declared.spec.protocol;
+			}
+
+			edges.add(`  ${mermaidId(one)} <-.->|"${text(how + (channel.medium === undefined ? "" : " via " + channel.medium))}"| ${mermaidId(other)}`);
 		}
 	}
 
@@ -914,10 +938,10 @@ export function tourDiagram(snapshot: TourSnapshot): string {
 		"",
 		"| Store | Written by | Read by |",
 		"| --- | --- | --- |",
-		...[...stores].sort(([a], [b]) => a.localeCompare(b)).map(([name, store]) => `| \`${name}\` | ${names(store.writers)} | ${names(store.readers)} |`),
+		...[...stores].sort(([left], [right]) => left.localeCompare(right)).map(([name, store]) => `| \`${name}\` | ${names(store.writers)} | ${names(store.readers)} |`),
 		"",
 		"| Hub | Component | Serves and hears |",
 		"| --- | --- | --- |",
-		...[...components].sort(([a], [b]) => a.localeCompare(b)).map(([, row]) => row)
+		...[...components].sort(([left], [right]) => left.localeCompare(right)).map(([, row]) => row)
 	].join("\n");
 }

@@ -7,8 +7,8 @@
  * its hub is federated into the workbench hub (its spans reach the page collector).
  */
 import type { Hub } from "@brianjenkins94/hub";
-import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import type { RunRegistry } from "./runs";
+import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { createRunRegistry } from "./runs";
 
 /** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
@@ -74,10 +74,12 @@ export interface NodeRunner {
 /** Start the dev-server worker, wire it into `hub`, and return the runner the terminal and the buttons drive. */
 export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer): NodeRunner {
 	let currentRunId: string | undefined;
+
 	// The worker asks for the shared workspace SAB over the hub (a respawned worker asks again) and mounts the SAME
 	// zen-fs at /workspace. Null without cross-origin isolation — it then runs on its own root.
 	serve(hub, "workspace.buffer", () => workspaceBuffer ?? null);
 	const rpc = createRpcClient(hub); // for request/reply calls into the worker (e.g. the preview bridge relay)
+
 	// The dev-server worker: the preview dev servers, answering their requests — started once, never terminated.
 	hub.link(portTransport(new Worker(new URL("./lsp/node-worker.js", location.href), { "type": "module" })));
 
@@ -99,7 +101,20 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 			hooks.onListening?.((data as { "port": number }).port);
 		});
 
-		const finish = (attached: boolean, exitCode: number): void => {
+		const offExit = hub.subscribe(`node.exit.${runId}`, (data) => {
+			finish(true, (data as { "exitCode"?: number }).exitCode ?? 0);
+		});
+		// The ext host couldn't attach a debug session (debugger API unavailable / start failed) → the caller says so.
+		const offDeclined = hub.subscribe(`debug.declined.${runId}`, () => {
+			finish(false, 0);
+		});
+
+		const onAbort = (): void => {
+			hub.publish("debug.stop", { "runId": runId }); // ask the ext host to stop the debug session
+			finish(true, 130);
+		};
+
+		function finish(attached: boolean, exitCode: number): void {
 			if (settled) {
 				return;
 			}
@@ -115,20 +130,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 
 			hooks.signal?.removeEventListener("abort", onAbort);
 			resolve({ "attached": attached, "exitCode": exitCode });
-		};
-
-		const offExit = hub.subscribe(`node.exit.${runId}`, (data) => {
-			finish(true, (data as { "exitCode"?: number }).exitCode ?? 0);
-		});
-		// The ext host couldn't attach a debug session (debugger API unavailable / start failed) → the caller says so.
-		const offDeclined = hub.subscribe(`debug.declined.${runId}`, () => {
-			finish(false, 0);
-		});
-
-		const onAbort = (): void => {
-			hub.publish("debug.stop", { "runId": runId }); // ask the ext host to stop the debug session
-			finish(true, 130);
-		};
+		}
 
 		if (hooks.signal !== undefined) {
 			if (hooks.signal.aborted) {
@@ -219,7 +221,9 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		"closePreview": (port) => { hub.publish("preview.close", { "port": port }); },
 		"flushPreviewEvidence": async () => {
 			hub.publish("evidence.flush", {});
-			await new Promise((resolve) => { setTimeout(resolve, 500); });
+			await new Promise((resolve) => {
+				setTimeout(resolve, 500);
+			});
 		},
 		"onPreviewClose": (port, handler) => hub.subscribe("preview.close", (data) => {
 			if ((data as { "port"?: number } | null)?.port === port) {

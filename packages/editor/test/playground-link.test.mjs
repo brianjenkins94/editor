@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 import LZString from "lz-string";
 
-import { parsePlaygroundLink, playgroundLink } from "../shell/playground-link.ts";
+import { parsePlaygroundLink, playgroundLink } from "../shared/playground-link.ts";
 
 // A Playground v2 link (its default project): three files under /workspace, greet.ts active.
 const V2 = "#code/v2/N4IghgxgLglgbgUwGIwDYJALhAegO4D2ATgNYDOADpAjmURDgOZEIJQB0UZIANCAGZoE3TKHzFyVCDS4QCAO0GN2AKzIKsIYAB15AAj3aQcgLYUhRAPIVYCskcx6d+g4ZBQwRRmwduAogDKAEwADEFBRjy6rm4mBAAmAK7ovkYAcgkIaQgAHlCR0a5GZFBEMNC+pYkIUS4GRvEIEKieYLbylUTVtTFGwgCyCckIAJLyUAhEBBSd3YX1IGQkMBQAMjAARgDCABZNJLMIhQC+PW4w8s2Jjb4A2vNu7LT0OABUr29GhQC6use6vFwhFIlGozwYF0aOU4IhAMDMxCgTj0zFYSOOen4UxMjyYLB8IF0ujk8hKehMwjIYG8egAvCj8VAABRGAAqAE8KAgAhAyjY9AAFFrs5gERLyeJ6OAREAASl0OBwMQAegB+ImXOwEdDsVAERhMilkKneeXyQHiEFSGh0BiotgwzS5CiIzHi6AwBQMtFM+RgCmOEpleSMWVOQosKCJIj6AAGAAkEKg9Tw9AASYB+inHACEsb+ANOiyTTXaWFALrIMHaW21iRM5swQQA7HxK9XPfJ1vIsvWNpMsEE+GQSx6FAEPEQoLXUPXGy3h6P2hPPFBu72TP2iIOi4giFWNE3jkA";

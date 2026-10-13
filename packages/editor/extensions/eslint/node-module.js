@@ -19,10 +19,50 @@ const REGISTRY = {
 	// registry: the rest of `use-at-your-own-risk` is ESLint's Node API.
 	"eslint/use-at-your-own-risk": () => ({ "builtinRules": builtinRules })
 };
+
 export const builtinModules = [
-	"assert", "async_hooks", "buffer", "child_process", "cluster", "console", "constants", "crypto", "dgram", "diagnostics_channel", "dns", "domain",
-	"events", "fs", "http", "http2", "https", "inspector", "module", "net", "os", "path", "perf_hooks", "process", "punycode", "querystring",
-	"readline", "repl", "stream", "string_decoder", "sys", "timers", "tls", "trace_events", "tty", "url", "util", "v8", "vm", "wasi", "worker_threads", "zlib"
+	"assert",
+	"async_hooks",
+	"buffer",
+	"child_process",
+	"cluster",
+	"console",
+	"constants",
+	"crypto",
+	"dgram",
+	"diagnostics_channel",
+	"dns",
+	"domain",
+	"events",
+	"fs",
+	"http",
+	"http2",
+	"https",
+	"inspector",
+	"module",
+	"net",
+	"os",
+	"path",
+	"perf_hooks",
+	"process",
+	"punycode",
+	"querystring",
+	"readline",
+	"repl",
+	"stream",
+	"string_decoder",
+	"sys",
+	"timers",
+	"tls",
+	"trace_events",
+	"tty",
+	"url",
+	"util",
+	"v8",
+	"vm",
+	"wasi",
+	"worker_threads",
+	"zlib"
 ];
 
 export function isBuiltin(name) {
@@ -33,7 +73,7 @@ export function isBuiltin(name) {
 
 export function createRequire() {
 	function require(id) {
-		const provided = Object.prototype.hasOwnProperty.call(REGISTRY, id) ? REGISTRY[id]() : undefined;
+		const provided = Object.hasOwn(REGISTRY, id) ? REGISTRY[id]() : undefined;
 
 		if (provided !== undefined) {
 			return provided;
@@ -51,4 +91,4 @@ export function createRequire() {
 	return require;
 }
 
-export default { builtinModules, isBuiltin, createRequire };
+export default { "builtinModules": builtinModules, "isBuiltin": isBuiltin, "createRequire": createRequire };

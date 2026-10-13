@@ -36,14 +36,14 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 	};
 
 	const start = async (document: vscode.TextDocument): Promise<void> => {
-		const path = document.uri.path;
+		const { path } = document.uri;
 
 		// (an app's file runs in its page, not here — RUNNING.md, step 4)
 		if (!enabled() || yours(path) || running.has(path) || await appRootOf(path) !== undefined) {
 			return;
 		}
 
-		await vscode.debug.startDebugging(undefined, { "type": runDebugger(), "request": "launch", "name": `${path.split("/").pop()!} (live)`, "program": path, "internalConsoleOptions": "neverOpen", "__live": true }, { "suppressDebugToolbar": true, "suppressDebugStatusbar": true, "suppressDebugView": true, "suppressSaveBeforeStart": true });
+		await vscode.debug.startDebugging(undefined, { "type": runDebugger(), "request": "launch", "name": `${path.split("/").pop()} (live)`, "program": path, "internalConsoleOptions": "neverOpen", "__live": true }, { "suppressDebugToolbar": true, "suppressDebugStatusbar": true, "suppressDebugView": true, "suppressSaveBeforeStart": true });
 	};
 
 	context.subscriptions.push(
@@ -73,7 +73,9 @@ export function registerLiveRuns(context: vscode.ExtensionContext): void {
 			// The edit makes the run going stale: stop it, and run again once typing pauses.
 			stop(document.uri.path);
 			clearTimeout(timer);
-			timer = setTimeout(() => { void start(document); }, PAUSE_MS);
+			timer = setTimeout(() => {
+				void start(document);
+			}, PAUSE_MS);
 		}),
 		{ "dispose": () => { clearTimeout(timer); } }
 	);

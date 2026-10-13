@@ -35,7 +35,9 @@ async function session() {
 async function interrupted(bash, state, line, ms = 50) {
 	const controller = new AbortController();
 
-	setTimeout(() => { controller.abort(); }, ms);
+	setTimeout(() => {
+		controller.abort();
+	}, ms);
 
 	return execInSession(bash, state, line, controller.signal);
 }

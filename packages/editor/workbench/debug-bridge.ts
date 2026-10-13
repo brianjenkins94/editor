@@ -19,9 +19,13 @@
 type Api = any;
 
 let resolveReady: () => void;
-const readyPromise = new Promise<void>((resolve) => { resolveReady = resolve; });
+const readyPromise = new Promise<void>((resolve) => {
+	resolveReady = resolve;
+});
 let resolveContributed: () => void;
-const contributedPromise = new Promise<void>((resolve) => { resolveContributed = resolve; });
+const contributedPromise = new Promise<void>((resolve) => {
+	resolveContributed = resolve;
+});
 
 /** Install `window.__editor`. `getApi` is read lazily so the bridge exists before the API is captured;
  *  `ready` resolves once it is (call `markBridgeReady`). No-op off localhost. */
@@ -61,19 +65,21 @@ export function installDebugBridge(getApi: () => Api): void {
 		"getActiveText": (): string | undefined => requireApi().window.activeTextEditor?.document.getText(),
 
 		/** Replace the whole active document (reliable, unlike simulated typing). */
-		"setActiveText": async (text: string): Promise<boolean> => {
+		"setActiveText": (text: string): Promise<boolean> => new Promise((resolve) => {
 			const api = requireApi();
 			const editor = api.window.activeTextEditor;
 
 			if (editor === undefined) {
-				return false;
+				resolve(false);
+
+				return;
 			}
 
 			const { document } = editor;
 			const range = new api.Range(document.positionAt(0), document.positionAt(document.getText().length));
 
-			return editor.edit((builder: any) => builder.replace(range, text));
-		},
+			resolve(editor.edit((builder: any) => builder.replace(range, text)));
+		}),
 
 		"openFile": async (path: string): Promise<void> => {
 			const api = requireApi();
@@ -105,16 +111,18 @@ export function installDebugBridge(getApi: () => Api): void {
 		"listExtensions": (): { "id": string; "isActive": boolean }[] => requireApi().extensions.all.map((ext: any) => ({ "id": ext.id, "isActive": ext.isActive })),
 
 		/** Run the TS language service's hover at a position of the active doc (types WITHOUT a bundled ts). */
-		"hoverAt": async (line: number, character: number): Promise<any> => {
+		"hoverAt": (line: number, character: number): Promise<any> => new Promise((resolve) => {
 			const api = requireApi();
 			const uri = api.window.activeTextEditor?.document.uri;
 
 			if (uri === undefined) {
-				return undefined;
+				resolve(undefined);
+
+				return;
 			}
 
-			return api.commands.executeCommand("vscode.executeHoverProvider", uri, new api.Position(line, character));
-		}
+			resolve(api.commands.executeCommand("vscode.executeHoverProvider", uri, new api.Position(line, character)));
+		})
 	};
 
 	(window as any).__editor = bridge;

@@ -38,7 +38,7 @@ interface VsCodeWebviewApi { "postMessage": (message: unknown) => void }
 
 /** A call to the extension (`{ call, id, method, args }`), its answer (`{ answer, id, result | error }`), and the
  *  extension's word to refresh (`{ refresh: "editor" | "save" }`). */
-export type ViewMessage = { "call": true; "id": number; "method": keyof EventSheetHost; "args": unknown[] };
+export interface ViewMessage { "call": true; "id": number; "method": keyof EventSheetHost; "args": unknown[] }
 export type HostMessage = { "answer": true; "id": number; "result"?: unknown; "error"?: string } | { "refresh": "editor" | "save" };
 
 const BORDER = "1px solid var(--vscode-panel-border,#2a2a2a)";
@@ -64,8 +64,12 @@ function clickableRow(onClick: () => void, build: (row: HTMLElement) => void): H
 	const row = document.createElement("div");
 
 	row.style.cssText = "padding:5px 10px;cursor:pointer;border-bottom:" + BORDER;
-	row.addEventListener("mouseenter", () => { row.style.background = "var(--vscode-list-hoverBackground,#2a2d2e)"; });
-	row.addEventListener("mouseleave", () => { row.style.background = "transparent"; });
+	row.addEventListener("mouseenter", () => {
+		row.style.background = "var(--vscode-list-hoverBackground,#2a2d2e)";
+	});
+	row.addEventListener("mouseleave", () => {
+		row.style.background = "transparent";
+	});
 	row.addEventListener("click", onClick);
 	build(row);
 
@@ -86,7 +90,9 @@ function renderObjects(container: HTMLElement, host: EventSheetHost, root: strin
 	container.append(heading("Objects · " + objects.length));
 
 	for (const object of objects) {
-		container.append(clickableRow(() => { host.open(root + "/" + object.defPath, object.defLine); }, (row) => {
+		container.append(clickableRow(() => {
+			host.open(root + "/" + object.defPath, object.defLine);
+		}, (row) => {
 			const name = document.createElement("span");
 
 			name.textContent = object.name;
@@ -119,7 +125,9 @@ function renderRules(container: HTMLElement, host: EventSheetHost, root: string,
 
 	for (const rule of rules) {
 		// The rule header — jumps to the system's definition; shows its subject(s) ("for each ...") and the behaviors it composes.
-		container.append(clickableRow(() => { host.open(root + "/" + rule.defPath, rule.defLine); }, (row) => {
+		container.append(clickableRow(() => {
+			host.open(root + "/" + rule.defPath, rule.defLine);
+		}, (row) => {
 			const name = document.createElement("span");
 
 			name.textContent = rule.name;
@@ -144,7 +152,10 @@ function renderRules(container: HTMLElement, host: EventSheetHost, root: string,
 
 					if (composite !== undefined) {
 						element.style.cursor = "pointer";
-						element.addEventListener("click", (event) => { event.stopPropagation(); host.open(root + "/" + composite.defPath, composite.defLine); });
+						element.addEventListener("click", (event) => {
+							event.stopPropagation();
+							host.open(root + "/" + composite.defPath, composite.defLine);
+						});
 					}
 
 					uses.append(element);
@@ -156,7 +167,9 @@ function renderRules(container: HTMLElement, host: EventSheetHost, root: string,
 
 		// Its event→action rows (indented) — each jumps to its own line.
 		for (const eventRow of rule.rows) {
-			container.append(clickableRow(() => { host.open(root + "/" + rule.defPath, eventRow.line); }, (element) => {
+			container.append(clickableRow(() => {
+				host.open(root + "/" + rule.defPath, eventRow.line);
+			}, (element) => {
 				element.style.paddingLeft = "22px";
 
 				const when = document.createElement("span");
@@ -197,7 +210,9 @@ function renderComposites(container: HTMLElement, host: EventSheetHost, root: st
 	container.append(heading("Behaviors · " + composites.length));
 
 	for (const composite of composites) {
-		container.append(clickableRow(() => { host.open(root + "/" + composite.defPath, composite.defLine); }, (row) => {
+		container.append(clickableRow(() => {
+			host.open(root + "/" + composite.defPath, composite.defLine);
+		}, (row) => {
 			const name = document.createElement("span");
 
 			name.textContent = composite.name;
@@ -226,7 +241,9 @@ function renderComponents(container: HTMLElement, host: EventSheetHost, root: st
 	container.append(heading("Components · " + behaviors.length));
 
 	for (const behavior of behaviors) {
-		container.append(clickableRow(() => { host.open(root + "/" + behavior.defPath, behavior.defLine); }, (row) => {
+		container.append(clickableRow(() => {
+			host.open(root + "/" + behavior.defPath, behavior.defLine);
+		}, (row) => {
 			const name = document.createElement("span");
 
 			name.textContent = behavior.name;
@@ -332,7 +349,9 @@ function start(): void {
 		}
 
 		clearTimeout(timer);
-		timer = setTimeout(() => { void rebuild(); }, why === "save" ? 300 : 0);
+		timer = setTimeout(() => {
+			void rebuild();
+		}, why === "save" ? 300 : 0);
 	});
 
 	// Scaffold a blank, runnable game the user owns, then open it (the view follows the editor there, in Build, with a
@@ -348,7 +367,10 @@ function start(): void {
 	};
 
 	const renderToggle = (): void => {
-		bar.replaceChildren(...(["build", "map"] as const).map((mode) => button(mode === "build" ? "Build" : "Map", () => { viewMode = mode; void rebuild(); }, viewMode === mode)));
+		bar.replaceChildren(...(["build", "map"] as const).map((mode) => button(mode === "build" ? "Build" : "Map", () => {
+			viewMode = mode;
+			void rebuild();
+		}, viewMode === mode)));
 	};
 
 	async function rebuild(): Promise<void> {
@@ -391,7 +413,12 @@ function start(): void {
 				authoredByRoot.set(game.root, authored);
 			}
 
-			renderAuthoring(body, host, game.root, authored, { "rerender": () => { void rebuild(); }, "createGame": createGame });
+			renderAuthoring(body, host, game.root, authored, {
+				"rerender": () => {
+					void rebuild();
+				},
+				"createGame": createGame
+			});
 
 			return;
 		}

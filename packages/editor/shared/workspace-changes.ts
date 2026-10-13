@@ -25,7 +25,7 @@ export interface WorkspaceChange {
 
 /** StoreFS methods that change the tree, and what each means for the path(s) it's given. */
 const MUTATIONS: Record<string, (args: unknown[]) => WorkspaceChange[]> = {};
-const one = (type: WorkspaceChangeType) => (args: unknown[]): WorkspaceChange[] => [{ "path": String(args[0]), "type": type }];
+const one = (type: WorkspaceChangeType) => (args: unknown[]): WorkspaceChange[] => [{ "path": args[0] as string, "type": type }];
 
 for (const [method, describe] of Object.entries({
 	"createFile": one("added"),
@@ -33,8 +33,8 @@ for (const [method, describe] of Object.entries({
 	"write": one("changed"),
 	"unlink": one("deleted"),
 	"rmdir": one("deleted"),
-	"rename": (args: unknown[]): WorkspaceChange[] => [{ "path": String(args[0]), "type": "deleted" }, { "path": String(args[1]), "type": "added" }],
-	"link": (args: unknown[]): WorkspaceChange[] => [{ "path": String(args[1]), "type": "added" }]
+	"rename": (args: unknown[]): WorkspaceChange[] => [{ "path": args[0] as string, "type": "deleted" }, { "path": args[1] as string, "type": "added" }],
+	"link": (args: unknown[]): WorkspaceChange[] => [{ "path": args[1] as string, "type": "added" }]
 })) {
 	MUTATIONS[method] = describe;
 	MUTATIONS[method + "Sync"] = describe;
@@ -93,6 +93,7 @@ export function watchWorkspaceStore(store: object, mountPoint: string, onChanges
 			onChanges(flushed);
 		}, delayMs);
 	};
+
 	const wrap = (original: (...parameters: unknown[]) => unknown, describe: (args: unknown[]) => WorkspaceChange[]) => function watched(this: unknown, ...args: unknown[]): unknown {
 		const result = original.apply(this, args);
 
@@ -121,7 +122,7 @@ export function watchWorkspaceStore(store: object, mountPoint: string, onChanges
 	const statSync = ((Object.getPrototypeOf(store) as Record<string, unknown>)["statSync"] ?? target["statSync"]) as ((path: string) => Inode) | undefined;
 	const statBefore = (path: unknown): Inode | undefined => {
 		try {
-			return statSync?.call(store, String(path));
+			return statSync?.call(store, path as string);
 		} catch {
 			return undefined;
 		}

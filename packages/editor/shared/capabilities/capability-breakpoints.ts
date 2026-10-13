@@ -14,9 +14,9 @@
  * mocks, so there are no tags to read — the call node is what we have. (Aliasing like `const f = fetch` isn't
  * caught here, unlike the canary; a later refinement can resolve it.)
  */
+import type { Policy } from "@brianjenkins94/util/silo/policy";
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
-import { isDangerous } from "@brianjenkins94/util/silo/policy";
-import { effectiveDisposition, givenResult, type Policy } from "@brianjenkins94/util/silo/policy";
+import { effectiveDisposition, givenResult, isDangerous } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
 
 /** A capability call the debugger (or the canary) reached: what it is, and the resource it targets (when a
@@ -138,3 +138,8 @@ export function capabilityBreakLines(sourceFile: ts.SourceFile, policy: Policy):
 
 	return [...lines];
 }
+
+/** The choices at a capability stop, as the preview's prompt words them — and `rule`, a rule made there (the margin's
+ *  rule editor) saved in my policy, deciding the call as it does (or giving its result); `give-once`, a result given the
+ *  call instead of it, just this once; `allow-run`, calls like it allowed until the run ends (kept nowhere). */
+export type CapabilityChoice = "allow-once" | "allow-run" | "allow-always" | "skip" | "skip-run" | "skip-always" | "deny" | "deny-run" | "deny-always" | "rule" | "give-once";

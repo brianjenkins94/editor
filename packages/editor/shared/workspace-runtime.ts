@@ -16,7 +16,7 @@ export interface VirtualRequest { "port": number; "method": string; "url": strin
 export interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 /** What answers a port: a dev server, or a program's own http server (almostnode's). */
-export type RequestHandler = { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> };
+export interface RequestHandler { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> }
 
 /** The deploy base (this worker's served URL minus the "/__vscode__/…" tail), so a program's `file://` dynamic import
  *  resolves under the base-scoped service worker. Same computation as server-host. */
@@ -41,6 +41,7 @@ export function programGlobals(runtime: Runtime): Record<string, unknown> {
 	const host = globalThis as unknown as Record<string, unknown>;
 	const web = Object.fromEntries(NODE_WEB_GLOBALS.filter((name) => name in host).map((name) => [name, host[name]]));
 
+	// eslint-disable-next-line ts/naming-convention -- node's buffer module exports Buffer
 	return { ...web, "Buffer": (runtime.require("buffer", "/workspace", "package") as { "Buffer": unknown }).Buffer };
 }
 
@@ -64,7 +65,7 @@ const PAGE_TAP_SCRIPT = "<script>" + pageTap.replaceAll("</script", "<\\/script"
  *  "use strict" directive, which must stay the script's first statement. */
 function injectWorkerTap(body: string, url: string): string {
 	const isModule = /^\s*(?:import\b|export\b)/mu.test(body);
-	const depth = url.split(/[?#]/u)[0]!.split("/").length - 2;
+	const depth = url.split(/[?#]/u)[0].split("/").length - 2;
 	const tap = isModule ? `import "./${"../".repeat(Math.max(0, depth))}${WORKER_TAP_PATH.slice(1)}";` : `(0, eval)(${JSON.stringify(workerTap)});`;
 	const directive = /^\s*(["'])use strict\1;?/u.exec(body)?.[0] ?? "";
 
@@ -102,7 +103,7 @@ export function workerTapResponse(url: string): VirtualResponse | undefined {
  *  architecture's record of the server's traffic). */
 export async function answerServer(server: RequestHandler, request: VirtualRequest, observed?: (direction: "request" | "reply" | "error", label: string, bytes: number) => void): Promise<VirtualResponse> {
 	const { method, url, headers, body, entry } = request;
-	const path = url.split("?")[0]!;
+	const [path] = url.split("?");
 
 	observed?.("request", method + " " + path, body?.byteLength ?? 0);
 

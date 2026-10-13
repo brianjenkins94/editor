@@ -9,7 +9,7 @@ export function parseInputs(text: string): string[][] {
 	let [word, quote, inWord] = ["", "", false];
 	const end = (): void => {
 		if (inWord) {
-			runs.at(-1)!.push(word);
+			runs.at(-1).push(word);
 		}
 
 		[word, inWord] = ["", false];

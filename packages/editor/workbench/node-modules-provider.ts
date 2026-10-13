@@ -209,19 +209,19 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		// All three reads are SYNCHRONOUS-SAFE: they answer from the resolved cache or fail fast (never awaiting a
 		// fetch), so the sync-api checker can't deadlock on them. A miss kicks off the background fetch, which
 		// caches + announces; the checker re-reads on that change and resolves.
-		"stat": async function(resource): Promise<IStat> {
+		"stat": function(resource): Promise<IStat> {
 			const rel = toRel(resource.path);
 
 			if (rel === undefined) {
-				throw notFound();
+				return Promise.reject(notFound());
 			}
 
 			if (rel === "") {
-				return { "type": FileType.Directory, "ctime": 0, "mtime": 0, "size": 0 };
+				return Promise.resolve({ "type": FileType.Directory, "ctime": 0, "mtime": 0, "size": 0 });
 			}
 
 			if (isTsSourceProbe(rel)) {
-				throw notFound();
+				return Promise.reject(notFound());
 			}
 
 			// Existence via the ACTUAL FILE (404-aware), NOT `?meta`. unpkg's `?meta` lies: it returns
@@ -231,59 +231,59 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			if (!fileResults.has(rel)) {
 				ensureFile(rel, resource);
 
-				throw notFound(); // not fetched yet — fail fast; the background fetch caches + announces, then we re-stat
+				return Promise.reject(notFound()); // not fetched yet — fail fast; the background fetch caches + announces, then we re-stat
 			}
 
 			const statData = fileResults.get(rel);
 
 			if (statData === undefined) {
-				throw notFound(); // 404 at the CDN — the file genuinely doesn't exist
+				return Promise.reject(notFound()); // 404 at the CDN — the file genuinely doesn't exist
 			}
 
-			return { "type": FileType.File, "ctime": 0, "mtime": 0, "size": statData.length };
+			return Promise.resolve({ "type": FileType.File, "ctime": 0, "mtime": 0, "size": statData.length });
 		},
 
-		"readFile": async function(resource): Promise<Uint8Array> {
+		"readFile": function(resource): Promise<Uint8Array> {
 			const rel = toRel(resource.path);
 
 			if (rel === undefined || rel === "") {
-				throw notFound();
+				return Promise.reject(notFound());
 			}
 
 			if (isTsSourceProbe(rel)) {
-				throw notFound();
+				return Promise.reject(notFound());
 			}
 
 			if (!fileResults.has(rel)) {
 				ensureFile(rel, resource);
 
-				throw notFound(); // not fetched yet — fail fast; the background fetch will announce and we re-read
+				return Promise.reject(notFound()); // not fetched yet — fail fast; the background fetch will announce and we re-read
 			}
 
 			const data = fileResults.get(rel);
 
 			if (data === undefined) {
-				throw notFound();
+				return Promise.reject(notFound());
 			}
 
-			return data;
+			return Promise.resolve(data);
 		},
 
-		"readdir": async function(resource): Promise<[string, FileType][]> {
+		"readdir": function(resource): Promise<[string, FileType][]> {
 			const rel = toRel(resource.path);
 
 			if (rel === undefined) {
-				throw notFound();
+				return Promise.reject(notFound());
 			}
 
 			if (rel === "") {
-				return [];
+				return Promise.resolve([]);
 			}
 
 			if (!metaResults.has(rel)) {
 				ensureMeta(rel, resource);
 
-				throw notFound();
+				return Promise.reject(notFound());
 			}
 
 			const meta = metaResults.get(rel);
@@ -291,10 +291,10 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 
 			// unpkg answers `?meta` for ANY path (see stat), so an empty listing is a file or nothing — not a directory.
 			if (children.length === 0) {
-				throw notFound();
+				return Promise.reject(notFound());
 			}
 
-			return children;
+			return Promise.resolve(children);
 		},
 
 		"writeFile": () => Promise.reject(readOnly()),

@@ -5,7 +5,7 @@
  * how often each arm ran. For a value site, the type TypeScript gives it beside the kinds runs saw (the capabilities
  * tsserver plugin's `_types.at`), so whether the types held is there to read.
  */
-import type { EvidenceStore, Placed, SpanEvidence } from "../../shared/evidence-store";
+import type { EvidenceStore, SpanEvidence } from "../../shared/evidence-store";
 import * as vscode from "vscode";
 
 const CODE = [{ "scheme": "file", "language": "typescript" }, { "scheme": "file", "language": "typescriptreact" }, { "scheme": "file", "language": "javascript" }, { "scheme": "file", "language": "javascriptreact" }];
@@ -40,9 +40,9 @@ function branchSite(type: string | undefined): { "name": string; "arms": string[
 	return type === "BinaryExpression" ? { "name": "`&&` / `||`", "arms": ["right side ran", "short-circuited"] } : { "name": "Branch", "arms": ["first", "second"] };
 }
 
-const count = (n: number): string => n.toLocaleString("en-US");
-const times = (n: number): string => `${count(n)}×`;
-const runs = (n: number): string => `${count(n)} run${n === 1 ? "" : "s"}`;
+const count = (amount: number): string => amount.toLocaleString("en-US");
+const times = (amount: number): string => `${count(amount)}×`;
+const runs = (amount: number): string => `${count(amount)} run${amount === 1 ? "" : "s"}`;
 const share = (part: number, whole: number): string => `${whole === 0 ? 0 : Math.round(part / whole * 100)}%`;
 const bar = (part: number, whole: number): string => "█".repeat(Math.max(1, Math.round(part / Math.max(whole, 1) * 10))).padEnd(10, "░");
 
@@ -51,8 +51,8 @@ export function describe(evidence: SpanEvidence, type: string | undefined, decla
 	const { value, branch } = evidence;
 
 	if (value !== undefined) {
-		const kinds = Object.entries(value.tags).sort(([, a], [, b]) => b - a).map(([tag, n]) => `\`${tag}\` ${bar(n, value.seen)} ${share(n, value.seen)}`);
-		const samples = evidence.samples === undefined ? [] : [`Seen here: ${evidence.samples.map((sample) => typeof sample === "string" ? JSON.stringify(sample) : String(sample)).join(", ")}`];
+		const kinds = Object.entries(value.tags).sort(([, left], [, right]) => right - left).map(([tag, seen]) => `\`${tag}\` ${bar(seen, value.seen)} ${share(seen, value.seen)}`);
+		const samples = evidence.samples === undefined ? [] : [`Seen here: ${evidence.samples.map((sample) => (typeof sample === "string" ? JSON.stringify(sample) : String(sample))).join(", ")}`];
 
 		const types = declared === undefined ? [] : [`Declared \`${declared}\` · observed ${Object.keys(value.tags).map((tag) => `\`${tag}\``).join(", ")}`];
 
@@ -61,9 +61,9 @@ export function describe(evidence: SpanEvidence, type: string | undefined, decla
 
 	if (branch !== undefined) {
 		const { name, arms } = branchSite(type);
-		const total = branch.arms.reduce((sum, n) => sum + n, 0);
+		const total = branch.arms.reduce((sum, ran) => sum + ran, 0);
 
-		return `**${name}** — ${branch.arms.map((n, arm) => (n === 0 ? `${arms[arm] ?? `arm ${arm + 1}`} never ran` : `${arms[arm] ?? `arm ${arm + 1}`} ${times(n)} (${share(n, total)})`)).join(" · ")}, in ${runs(branch.ever)}`;
+		return `**${name}** — ${branch.arms.map((ran, arm) => (ran === 0 ? `${arms[arm] ?? `arm ${arm + 1}`} never ran` : `${arms[arm] ?? `arm ${arm + 1}`} ${times(ran)} (${share(ran, total)})`)).join(" · ")}, in ${runs(branch.ever)}`;
 	}
 
 	return undefined;
@@ -75,11 +75,11 @@ export function registerHover(context: vscode.ExtensionContext, store: EvidenceS
 			const offset = document.offsetAt(position);
 			const placed = await store.placed(document);
 			// The innermost span under the cursor with values or a branch: the code the cursor is on.
-			const here = (placed ?? []).filter(({ start, end, evidence }) => start <= offset && offset < end && (evidence.value !== undefined || evidence.branch !== undefined)).sort((a, b) => (a.end - a.start) - (b.end - b.start))[0] as Placed | undefined;
+			const [here] = (placed ?? []).filter(({ start, end, evidence }) => start <= offset && offset < end && (evidence.value !== undefined || evidence.branch !== undefined)).sort((left, right) => (left.end - left.start) - (right.end - right.start));
 			const declared = here?.evidence.value === undefined ? undefined : await Promise.resolve(vscode.commands.executeCommand<{ "body"?: { "types"?: (string | null)[] } } | undefined>("typescript.tsserverRequest", "_types.at", { "file": document.uri, "ranges": [{ "start": here.start, "end": here.end }] })).then((response) => response?.body?.types?.[0] ?? undefined, () => undefined);
 			const text = here === undefined ? undefined : describe(here.evidence, here.type, declared);
 
-			return text === undefined ? undefined : new vscode.Hover(new vscode.MarkdownString(text), new vscode.Range(document.positionAt(here!.start), document.positionAt(here!.end)));
+			return text === undefined ? undefined : new vscode.Hover(new vscode.MarkdownString(text), new vscode.Range(document.positionAt(here.start), document.positionAt(here.end)));
 		}
 	}));
 }

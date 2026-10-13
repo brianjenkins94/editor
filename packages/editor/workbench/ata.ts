@@ -144,7 +144,7 @@ function pickTypes(node: unknown): string | undefined {
 	}
 
 	const record = node as Record<string, unknown>;
-	const types = record["types"];
+	const { types } = record;
 
 	if (typeof types === "string") {
 		return types;
@@ -199,23 +199,21 @@ function references(dts: string): { "relative": string[]; "packages": string[]; 
 
 	for (const match of code.matchAll(/(?:from|import|require)\s*(?:\(\s*)?["']([^"']+)["']|\/\/\/\s*<reference\s+(path|types)\s*=\s*["']([^"']+)["']/gu)) {
 		const spec = match[1] ?? match[3];
-		const kind = match[2]; // "path" | "types" | undefined (a module specifier)
+		const [, , kind] = match; // "path" | "types" | undefined (a module specifier)
 
-		if (spec === undefined) {
-			continue;
-		}
+		if (spec !== undefined) {
+			if (kind === "types") {
+				packages.add(spec); // /// <reference types="node"> → a package
+			} else if (spec.startsWith(".") || kind === "path") {
+				relative.add(spec);
+			} else if (spec.startsWith("#")) {
+				imports.add(spec);
+			} else {
+				const pkg = packageRootOf(spec);
 
-		if (kind === "types") {
-			packages.add(spec); // /// <reference types="node"> → a package
-		} else if (spec.startsWith(".") || kind === "path") {
-			relative.add(spec);
-		} else if (spec.startsWith("#")) {
-			imports.add(spec);
-		} else {
-			const pkg = packageRootOf(spec);
-
-			if (pkg !== undefined) {
-				packages.add(pkg);
+				if (pkg !== undefined) {
+					packages.add(pkg);
+				}
 			}
 		}
 	}
@@ -312,7 +310,13 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		budget.n -= 1;
 
 		const version = versions[packageRootOf(rel) ?? rel];
-		const search = meta ? "?meta" + (version === undefined ? "" : "&v=" + version) : (version === undefined ? "" : "?v=" + version);
+		let search: string;
+
+		if (meta) {
+			search = "?meta" + (version === undefined ? "" : "&v=" + version);
+		} else {
+			search = version === undefined ? "" : "?v=" + version;
+		}
 
 		try {
 			const response = await fetch(new URL(`${deployBase}${nodeModules.replace(/^\//u, "")}/${rel}${search}`, location.href).href);
@@ -507,11 +511,15 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 				span.end({ "files": fetchedPath.size, "network": MAX_NETWORK - budget.n, "added": added });
 			})
-			.catch((error: unknown) => { span.error("ata failed", { "error": error instanceof Error ? error.message : String(error) }); span.end(); });
+			.catch((error: unknown) => {
+				// eslint-disable-next-line ts/no-base-to-string -- a rejection's value is unknown: a non-Error one is logged as String() makes it
+				span.error("ata failed", { "error": error instanceof Error ? error.message : String(error) });
+				span.end();
+			});
 	};
 
 	const run = (document: vscode.TextDocument | undefined): void => {
-		if (document === undefined || document.uri.scheme !== "file" || !RELEVANT.test(document.uri.path) || document.uri.path.includes("/node_modules/")) {
+		if (document?.uri.scheme !== "file" || !RELEVANT.test(document.uri.path) || document.uri.path.includes("/node_modules/")) {
 			return;
 		}
 
@@ -574,7 +582,11 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		timer = setTimeout(run, DEBOUNCE_MS, document);
 	};
 
-	api.window.onDidChangeActiveTextEditor((editor) => { schedule(editor?.document); });
-	api.workspace.onDidChangeTextDocument((event) => { schedule(event.document); });
+	api.window.onDidChangeActiveTextEditor((editor) => {
+		schedule(editor?.document);
+	});
+	api.workspace.onDidChangeTextDocument((event) => {
+		schedule(event.document);
+	});
 	run(api.window.activeTextEditor?.document); // acquire for whatever's already open
 }

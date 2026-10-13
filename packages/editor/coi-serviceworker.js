@@ -299,7 +299,9 @@ globalThis.addEventListener("message", (event) => {
 	// Dedicated observability link: the page hands us a hub port (observability's linkServiceWorkerHub). Link our
 	// hub over it so `$sys.log.sw` records federate to the page's collector.
 	if (data && data.type === "hub" && event.ports && event.ports[0]) {
-		void linkTab(event.source && event.source.id, event.ports[0]).then(() => { swLog.info("hub linked", { "tabs": tabLinks.size }); });
+		void linkTab(event.source && event.source.id, event.ports[0]).then(() => {
+			swLog.info("hub linked", { "tabs": tabLinks.size });
+		});
 	}
 });
 

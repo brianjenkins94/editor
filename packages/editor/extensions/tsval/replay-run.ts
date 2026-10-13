@@ -2,11 +2,11 @@
  * A recorded call, run again (RUNNING.md: stepping a recorded handler): the program a replay runs, and what stands in for
  * the calls it can't make. Pure — the debug worker runs it (debug-worker.ts `launchReplay`), node tests it.
  */
-import type ts from "typescript";
-import type { Replay } from "../../previews/page-evidence";
 import type { Encoded } from "@brianjenkins94/run-contract/recorded";
-import { isGuestFunction } from "@brianjenkins94/tsval";
+import type ts from "typescript";
+import type { Replay } from "../../shared/preview-evidence";
 import { revive } from "@brianjenkins94/run-contract/recorded";
+import { isGuestFunction } from "@brianjenkins94/tsval";
 
 /** The program a replay runs (RUNNING.md: stepping a recorded handler): the recorded version's text with everything but
  *  the function blanked (newlines kept, so every line and column is the file's), the function made the callee of a call
@@ -23,6 +23,7 @@ export function replayProgram(source: string, [l1, c1, l2, c2]: [number, number,
 
 		return at + character;
 	};
+
 	const [start, end] = [offset(l1, c1), offset(l2, c2)];
 	const blank = (text: string): string => text.replace(/[^\n]/gu, " ");
 	const prefix = "(__self.__replay = ";
@@ -33,8 +34,13 @@ export function replayProgram(source: string, [l1, c1, l2, c2]: [number, number,
 		const runs = [...text.matchAll(new RegExp(` {${length},}`, "gu"))];
 		const run = last ? runs.at(-1) : runs[0];
 
-		return run === undefined ? -1 : last ? run.index + run[0].length - length : run.index;
+		if (run === undefined) {
+			return -1;
+		}
+
+		return last ? run.index + run[0].length - length : run.index;
 	};
+
 	const front = room(before, prefix.length, true);
 	const back = room(after, suffix.length, false);
 
@@ -49,7 +55,9 @@ export function replayProgram(source: string, [l1, c1, l2, c2]: [number, number,
  *  the result it had, by where it was made and how many times there; a call with a function of the program's among its
  *  arguments (`items.map(fn)`) is made for real, so the debugger steps into it. */
 export function replayGuard(replay: Replay): { "standIn": (name: string) => (...args: unknown[]) => unknown; "hostGuard": { "beforeCall": (callee: (...args: unknown[]) => unknown, self: unknown, construct: boolean, site: { "node": ts.Node; "args": readonly unknown[] }) => (...args: unknown[]) => unknown } } {
-	const standIn = (name: string): ((...args: unknown[]) => unknown) => Object.defineProperty(function standIn(): unknown { return undefined; }, "name", { "value": name });
+	const standIn = (name: string): ((...args: unknown[]) => unknown) => Object.defineProperty(function standIn(): unknown {
+		return undefined;
+	}, "name", { "value": name });
 	const recorded = new Map<string, Encoded[]>();
 	const made = new Map<string, number>();
 
@@ -74,7 +82,7 @@ export function replayGuard(replay: Replay): { "standIn": (name: string) => (...
 
 				made.set(key, time + 1);
 
-				const value = time < results.length ? revive(results[time]!, standIn) : undefined;
+				const value = time < results.length ? revive(results[time], standIn) : undefined;
 
 				return () => value;
 			}

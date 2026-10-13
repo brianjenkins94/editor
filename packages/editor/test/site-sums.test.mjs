@@ -9,11 +9,15 @@ import { addObservation, copySums, siteObservations } from "../extensions/tsval/
 /** Run `code` under tsval, summing its observed sites, and return the sums and the source file. */
 function run(code) {
 	const sums = new Map();
-	const { vm, sourceFile } = createVM(code, { "observe": (node, site, value) => { addObservation(sums, node, site, value); } });
+	const { vm, sourceFile } = createVM(code, {
+		"observe": (node, site, value) => {
+			addObservation(sums, node, site, value);
+		}
+	});
 
 	vm.run();
 
-	return { sums, sourceFile };
+	return { "sums": sums, "sourceFile": sourceFile };
 }
 
 test("a value site: how often seen, how often nullish, each type tag, a few distinct primitives", () => {

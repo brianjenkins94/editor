@@ -10,9 +10,9 @@
  * Only `command.ts` is read here, eagerly — it's a few lines and imports nothing — so anything can ask what the
  * commands are without loading a command (index.ts loads the implementations, lazily).
  */
+import type { Hub } from "@brianjenkins94/hub";
 import type { Juvy, Schema } from "@brianjenkins94/util/juvy";
 import type { ResolvedCommandContext } from "just-bash/browser";
-import type { Hub } from "@brianjenkins94/hub";
 import type { NodeOutput, NodeRunner } from "../node-runner";
 import type { BashSession } from "./session";
 
@@ -103,5 +103,3 @@ export function describeCommands(): string {
 
 	return PRESENT.map((command) => `\`${command.name}\` (${command.summary.replace(/\.$/u, "")})`).join(", ") + (missing.length === 0 ? "" : `. Not here: ${missing.join(", ")}`);
 }
-
-

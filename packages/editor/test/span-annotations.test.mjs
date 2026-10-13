@@ -8,8 +8,8 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { evaluate, referTo, resolve } from "@brianjenkins94/util/silo/annotations";
 import { atomsOf, cstSpans, follow, spanAnchors } from "@brianjenkins94/bablr";
+import { evaluate, referTo, resolve } from "@brianjenkins94/util/silo/annotations";
 
 /** Every span of `source` as silo's strategies see it: id, node type, offsets, and its tokens. */
 function shapesOf(source) {
@@ -23,7 +23,7 @@ function shapesOf(source) {
 function spanOf(shapes, source, text) {
 	const at = source.indexOf(text);
 
-	return shapes.filter((shape) => shape.start === at && shape.end === at + text.length).sort((a, b) => (b.end - b.start) - (a.end - a.start))[0];
+	return shapes.filter((shape) => shape.start === at && shape.end === at + text.length).sort((left, right) => (right.end - right.start) - (left.end - left.start))[0];
 }
 
 /** Where span `id` of `before` went in `after`, by BABLR's structural diff (what core works out from the baseline). */

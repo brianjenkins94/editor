@@ -8,8 +8,8 @@
  * workspace runtime (`workspaceRuntime()`, which worker-pod provides in this extension host — the one tsval depends on)
  * — its worker reads the workspace through it, and a server its program starts answers the preview through it.
  */
-import { workspaceRuntime } from "@brianjenkins94/run-contract/runtime";
 import type * as vscode from "vscode";
+import { workspaceRuntime } from "@brianjenkins94/run-contract/runtime";
 import { registerTsvalDebug } from "./debug-adapter";
 
 export function activate(context: vscode.ExtensionContext): void {

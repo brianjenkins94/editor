@@ -8,8 +8,8 @@
  * so a row re-finds its code by anchor (not line number) after a regen that reorders/adds rows or an edit to an
  * unrelated row, and a row whose own code changed no longer matches any anchor (it orphans → "diverged from generated").
  */
-import { spanAnchors } from "@brianjenkins94/bablr";
 import type { GeneratedProgram } from "./sheet";
+import { spanAnchors } from "@brianjenkins94/bablr";
 
 /**
  * Map each row to the content-addressed anchor of its most distinctive owned span. Returns rowId → anchorId; a row with
@@ -55,23 +55,21 @@ export function rowAnchors(program: GeneratedProgram): Map<string, string> {
 		let best: { "id": string; "bare": boolean; "size": number } | undefined;
 
 		for (const anchor of anchors) {
-			if (anchor.type === null) {
-				continue; // punctuation — always duplicated, never a stable handle
-			}
+			// (Punctuation, `type: null`, is skipped — always duplicated, never a stable handle.)
+			if (anchor.type !== null) {
+				const startLine = lineAt(anchor.start);
+				const endLine = lineAt(Math.max(anchor.start, anchor.end - 1));
 
-			const startLine = lineAt(anchor.start);
-			const endLine = lineAt(Math.max(anchor.start, anchor.end - 1));
+				// (Skipped too: a span not fully inside this row.)
+				if (!(startLine < span.startLine || endLine > span.endLine)) {
+					const bare = !anchor.id.includes("#");
+					const size = anchor.end - anchor.start;
 
-			if (startLine < span.startLine || endLine > span.endLine) {
-				continue; // not fully inside this row
-			}
-
-			const bare = !anchor.id.includes("#");
-			const size = anchor.end - anchor.start;
-
-			// Bare beats ordinal'd; then larger beats smaller.
-			if (best === undefined || (bare && !best.bare) || (bare === best.bare && size > best.size)) {
-				best = { "id": anchor.id, "bare": bare, "size": size };
+					// Bare beats ordinal'd; then larger beats smaller.
+					if (best === undefined || (bare && !best.bare) || (bare === best.bare && size > best.size)) {
+						best = { "id": anchor.id, "bare": bare, "size": size };
+					}
+				}
 			}
 		}
 

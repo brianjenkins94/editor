@@ -15,10 +15,8 @@
  * calls are visible on the architecture view). bablr.ts queues them, one at a time, behind its other callers' — and
  * passes on cancellation: aborting a call stops it mid-parse, or drops it unsent while it's still queued.
  */
+import type { ChangeKind } from "../shared/git";
 import type { Bablr } from "./bablr";
-
-/** BABLR's verdict for a change (mirrors `@brianjenkins94/bablr`). */
-export type ChangeKind = "cosmetic" | "semantic" | "unparsable";
 
 /** A change's verdict + the changed node ids and the working lines they land on — the badge AND the diff-focus data. */
 export interface VerdictEntry { "verdict": ChangeKind | "none"; "changedNodeIds": string[]; "changedLines": number[] }
@@ -36,14 +34,14 @@ export interface EditGroup { "label": string; "kind": string; "startLine": numbe
 
 /** FNV-1a 32-bit — a cheap key for the in-memory cache. */
 function fnv32(text: string): number {
-	let h = 0x811c9dc5;
+	let hash = 0x811C9DC5;
 
 	for (let index = 0; index < text.length; index += 1) {
-		h ^= text.charCodeAt(index);
-		h = Math.imul(h, 0x01000193);
+		hash ^= text.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193);
 	}
 
-	return h >>> 0;
+	return hash >>> 0;
 }
 
 /** Create a classifier over the editor's BABLR worker (bablr.ts). */

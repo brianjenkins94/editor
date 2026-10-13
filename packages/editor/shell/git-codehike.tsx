@@ -24,10 +24,12 @@
  * sets none today).
  */
 import type { AnnotationHandler, HighlightedCode, Tokens } from "codehike/code";
-import type { ChangeKind } from "../workbench/cosmetic-classifier";
+import type { ReactNode } from "react";
+import type { Root } from "react-dom/client";
+import type { ChangeKind } from "../shared/git";
 import { highlight, InnerLine, Pre } from "codehike/code";
-import { createElement, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createElement, useEffect, useMemo, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
 
 /** One React root per host element, reused across diff switches (root.render updates in place). */
 const roots = new WeakMap<HTMLElement, Root>();
@@ -92,7 +94,11 @@ interface FoldHeader { "id": string; "folded": boolean; "count": number }
 function tint(type: DiffRowInfo["type"], side: "left" | "right"): string | undefined {
 	const changed = side === "left" ? type === "del" || type === "mod" : type === "add" || type === "mod";
 
-	return changed ? (side === "left" ? DEL_BG : ADD_BG) : undefined;
+	if (!changed) {
+		return undefined;
+	}
+
+	return side === "left" ? DEL_BG : ADD_BG;
 }
 
 /**
@@ -165,6 +171,30 @@ interface DiffPlan {
 	"indexToGrid": Map<number, number>;
 }
 
+/** The fold chevrons, by line on each side: on the visible header rows only — on BOTH gutters (either toggles the same
+ *  region), wherever that header row has a line on that side. */
+function foldHeadersOf(rows: DiffRowInfo[], folds: FoldRegion[], folded: ReadonlySet<string>, hidden: (row: number) => boolean): [Map<number, FoldHeader>, Map<number, FoldHeader>] {
+	const leftFoldHeaders = new Map<number, FoldHeader>();
+	const rightFoldHeaders = new Map<number, FoldHeader>();
+
+	for (const fold of folds) {
+		if (!hidden(fold.startRow)) {
+			const header: FoldHeader = { "id": fold.id, "folded": folded.has(fold.id), "count": fold.count };
+			const row = rows[fold.startRow];
+
+			if (row.leftNo !== undefined) {
+				leftFoldHeaders.set(row.leftNo, header);
+			}
+
+			if (row.rightNo !== undefined) {
+				rightFoldHeaders.set(row.rightNo, header);
+			}
+		}
+	}
+
+	return [leftFoldHeaders, rightFoldHeaders];
+}
+
 /**
  * Resolve rows + fold regions + user toggles into a render plan: which grid track each visible line lands on, where
  * the gap and empty-side filler go, and which right-hand lines carry a fold chevron. Block folds are applied first,
@@ -180,8 +210,8 @@ function buildPlan(
 
 	for (const fold of folds) {
 		if (folded.has(fold.id)) {
-			for (let r = fold.startRow + 1; r <= fold.endRow; r += 1) {
-				hiddenFold.add(r);
+			for (let index = fold.startRow + 1; index <= fold.endRow; index += 1) {
+				hiddenFold.add(index);
 			}
 		}
 	}
@@ -197,8 +227,8 @@ function buildPlan(
 			const firstHidden = runStart + CTX_KEEP;
 			const lastHidden = endExclusive - 1 - CTX_KEEP;
 
-			for (let r = firstHidden; r <= lastHidden; r += 1) {
-				hiddenCollapse.add(r);
+			for (let index = firstHidden; index <= lastHidden; index += 1) {
+				hiddenCollapse.add(index);
 			}
 
 			gapAtFirstRow.set(firstHidden, { "count": lastHidden - firstHidden + 1, "id": "gap-" + runStart });
@@ -208,15 +238,15 @@ function buildPlan(
 		runLength = 0;
 	};
 
-	for (let r = 0; r < rows.length; r += 1) {
-		if (rows[r].type === "ctx" && !hiddenFold.has(r)) {
+	for (let index = 0; index < rows.length; index += 1) {
+		if (rows[index].type === "ctx" && !hiddenFold.has(index)) {
 			if (runStart < 0) {
-				runStart = r;
+				runStart = index;
 			}
 
 			runLength += 1;
 		} else {
-			flushRun(r);
+			flushRun(index);
 		}
 	}
 
@@ -230,80 +260,102 @@ function buildPlan(
 	const indexToGrid = new Map<number, number>();
 	let gridRow = 0;
 
-	for (let r = 0; r < rows.length; r += 1) {
-		if (hiddenFold.has(r)) {
-			continue;
-		}
+	for (let index = 0; index < rows.length; index += 1) {
+		// (a row inside a folded block gets no track)
+		if (!hiddenFold.has(index)) {
+			if (hiddenCollapse.has(index)) {
+				const gap = gapAtFirstRow.get(index);
 
-		if (hiddenCollapse.has(r)) {
-			const gap = gapAtFirstRow.get(r);
-
-			if (gap !== undefined) {
+				if (gap !== undefined) {
+					gridRow += 1;
+					gaps.push({ "row": gridRow, "count": gap.count, "id": gap.id });
+				}
+			} else {
 				gridRow += 1;
-				gaps.push({ "row": gridRow, "count": gap.count, "id": gap.id });
+				indexToGrid.set(index, gridRow);
+
+				const row = rows[index];
+
+				if (row.leftNo !== undefined) {
+					leftLineToRow.set(row.leftNo, { "row": gridRow, "type": row.type, "index": index });
+				}
+
+				if (row.rightNo !== undefined) {
+					rightLineToRow.set(row.rightNo, { "row": gridRow, "type": row.type, "index": index });
+				}
+
+				if (row.leftNo === undefined) {
+					spacers.push({ "row": gridRow, "side": "left" });
+				} else if (row.rightNo === undefined) {
+					spacers.push({ "row": gridRow, "side": "right" });
+				}
 			}
-
-			continue;
-		}
-
-		gridRow += 1;
-		indexToGrid.set(r, gridRow);
-
-		const row = rows[r];
-
-		if (row.leftNo !== undefined) {
-			leftLineToRow.set(row.leftNo, { "row": gridRow, "type": row.type, "index": r });
-		}
-
-		if (row.rightNo !== undefined) {
-			rightLineToRow.set(row.rightNo, { "row": gridRow, "type": row.type, "index": r });
-		}
-
-		if (row.leftNo === undefined) {
-			spacers.push({ "row": gridRow, "side": "left" });
-		} else if (row.rightNo === undefined) {
-			spacers.push({ "row": gridRow, "side": "right" });
 		}
 	}
 
-	// Chevrons on the visible header rows only — on BOTH gutters (either toggles the same region), wherever that
-	// header row has a line on that side.
-	const leftFoldHeaders = new Map<number, FoldHeader>();
-	const rightFoldHeaders = new Map<number, FoldHeader>();
-
-	for (const fold of folds) {
-		if (hiddenFold.has(fold.startRow) || hiddenCollapse.has(fold.startRow)) {
-			continue;
-		}
-
-		const header: FoldHeader = { "id": fold.id, "folded": folded.has(fold.id), "count": fold.count };
-		const row = rows[fold.startRow];
-
-		if (row.leftNo !== undefined) {
-			leftFoldHeaders.set(row.leftNo, header);
-		}
-
-		if (row.rightNo !== undefined) {
-			rightFoldHeaders.set(row.rightNo, header);
-		}
-	}
+	const [leftFoldHeaders, rightFoldHeaders] = foldHeadersOf(rows, folds, folded, (row) => hiddenFold.has(row) || hiddenCollapse.has(row));
 
 	return { "leftLineToRow": leftLineToRow, "rightLineToRow": rightLineToRow, "spacers": spacers, "gaps": gaps, "leftFoldHeaders": leftFoldHeaders, "rightFoldHeaders": rightFoldHeaders, "indexToGrid": indexToGrid };
 }
 
+/** How the verdict banner reads, per verdict. */
+const VERDICT_LABELS: Record<ChangeKind, string> = {
+	"cosmetic": "Cosmetic change — whitespace & comments only",
+	"semantic": "Semantic change",
+	"unparsable": "Couldn’t parse — showing the raw text diff"
+};
+
 /** The BABLR verdict banner above the diff (nothing for a non-classified change). */
 function banner(verdict: ChangeKind | "none"): ReactNode {
-	const label = verdict === "cosmetic" ? "Cosmetic change — whitespace & comments only"
-		: verdict === "semantic" ? "Semantic change"
-			: verdict === "unparsable" ? "Couldn’t parse — showing the raw text diff"
-				: undefined;
+	const label = verdict === "none" ? undefined : VERDICT_LABELS[verdict];
 
 	if (label === undefined) {
 		return null;
 	}
 
-	return createElement("div", { "className": "sxs-verdict " + verdict },
-		createElement("span", { "className": "sxs-dot" }), label);
+	return createElement("div", { "className": "sxs-verdict " + verdict }, createElement("span", { "className": "sxs-dot" }), label);
+}
+
+/** A line's fold slot: its chevron when it heads a block, else empty. */
+function foldSlotOf(header: FoldHeader | undefined, onToggleFold: (id: string) => void): ReactNode {
+	return createElement("span", { "className": "sxs-fold-slot", "key": "b" }, header !== undefined
+		? createElement("button", {
+				"className": "sxs-fold",
+				"title": header.folded ? "Unfold " + header.count + " lines" : "Fold block",
+				"onClick": (event: { "stopPropagation": () => void }) => {
+					event.stopPropagation();
+					onToggleFold(header.id);
+				}
+			}, header.folded ? "▸" : "▾")
+		: null);
+}
+
+/** A line's pick slot: a changed row's checkmark, else — when the file has folds — an empty slot to match. */
+function pickSlotOf(at: Rendered, hasFolds: boolean, deselectedRows: ReadonlySet<number>, onToggleRow: (index: number) => void): ReactNode {
+	if (at.type !== "ctx") {
+		return createElement("button", {
+			"className": "sxs-pick" + (deselectedRows.has(at.index) ? "" : " on"),
+			"key": "p",
+			"title": deselectedRows.has(at.index) ? "Include this line in the commit" : "Exclude this line from the commit",
+			"onClick": (event: { "stopPropagation": () => void }) => {
+				event.stopPropagation();
+				onToggleRow(at.index);
+			}
+		}, deselectedRows.has(at.index) ? "" : "✓");
+	}
+
+	return hasFolds ? createElement("span", { "className": "sxs-pick sxs-pick-empty", "key": "p" }) : null;
+}
+
+/** A code cell's hanging indent: shifted right by the line's indentation, the first row pulled back (not when folded). */
+function indentStyleOf(indent: number, foldedHeader: FoldHeader | undefined): { "marginLeft": string; "textIndent"?: string } | undefined {
+	if (indent > 0) {
+		return foldedHeader === undefined
+			? { "marginLeft": indent + "ch", "textIndent": "-" + indent + "ch" }
+			: { "marginLeft": indent + "ch" };
+	}
+
+	return undefined;
 }
 
 /** Build the codehike handlers for one side: a display:contents Pre wrapper + a subgrid Line placer. */
@@ -322,12 +374,13 @@ function sideHandlers(
 
 	const contents: AnnotationHandler = {
 		"name": "sxs-contents",
-		"Pre": (props: { "children"?: ReactNode }) =>
-			createElement("div", { "style": { "display": "contents" } }, props.children)
+		// eslint-disable-next-line ts/naming-convention -- codehike's AnnotationHandler slot name
+		"Pre": (props: { "children"?: ReactNode }) => createElement("div", { "style": { "display": "contents" } }, props.children)
 	};
 
 	const line: AnnotationHandler = {
 		"name": "sxs-line",
+		// eslint-disable-next-line ts/naming-convention -- codehike's AnnotationHandler slot name
 		"Line": (props: { "lineNumber": number; "indentation"?: number }) => {
 			const at = lineToRow.get(props.lineNumber);
 
@@ -342,28 +395,9 @@ function sideHandlers(
 			const header = foldHeaders?.get(props.lineNumber);
 
 			const rowSelected = at.type !== "ctx" && !deselectedRows.has(at.index);
-			const numCell = createElement("span", { "className": "sxs-num" + (rowSelected ? " sel" : ""), "key": "n" },
-				// Pick checkmark shows LEFT of the fold chevron (via CSS `order`). The fold slot is present on every row when the
-				// file has folds so chevrons share one column; a context row (no pick) renders an empty pick slot to match.
-				hasFolds
-					? createElement("span", { "className": "sxs-fold-slot", "key": "b" },
-						header !== undefined
-							? createElement("button", {
-								"className": "sxs-fold",
-								"title": header.folded ? "Unfold " + header.count + " lines" : "Fold block",
-								"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleFold(header.id); }
-							}, header.folded ? "▸" : "▾")
-							: null)
-					: null,
-				at.type !== "ctx"
-					? createElement("button", {
-						"className": "sxs-pick" + (deselectedRows.has(at.index) ? "" : " on"),
-						"key": "p",
-						"title": deselectedRows.has(at.index) ? "Include this line in the commit" : "Exclude this line from the commit",
-						"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleRow(at.index); }
-					}, deselectedRows.has(at.index) ? "" : "✓")
-					: (hasFolds ? createElement("span", { "className": "sxs-pick sxs-pick-empty", "key": "p" }) : null),
-				createElement("span", { "className": "sxs-lineno", "key": "l" }, props.lineNumber));
+			// Pick checkmark shows LEFT of the fold chevron (via CSS `order`). The fold slot is present on every row when the
+			// file has folds so chevrons share one column; a context row (no pick) renders an empty pick slot to match.
+			const numCell = createElement("span", { "className": "sxs-num" + (rowSelected ? " sel" : ""), "key": "n" }, hasFolds ? foldSlotOf(header, onToggleFold) : null, pickSlotOf(at, hasFolds, deselectedRows, onToggleRow), createElement("span", { "className": "sxs-lineno", "key": "l" }, props.lineNumber));
 
 			// A folded block collapses to `{ ⋯ }` on the opening line: the code already ends with `{`, so we append the
 			// ellipsis and a synthetic closing brace (the real `}` row is hidden), and clicking it unfolds the block.
@@ -375,20 +409,17 @@ function sideHandlers(
 			const codeCell = createElement("div", {
 				"className": "sxs-code" + (foldedHeader !== undefined ? " folded" : ""),
 				"key": "c",
-				"style": indent > 0
-					? (foldedHeader === undefined
-						? { "marginLeft": indent + "ch", "textIndent": "-" + indent + "ch" }
-						: { "marginLeft": indent + "ch" })
-					: undefined
-			},
-			createElement(InnerLine, { "merge": props }),
-			foldedHeader !== undefined
+				"style": indentStyleOf(indent, foldedHeader)
+			}, createElement(InnerLine, { "merge": props }), foldedHeader !== undefined
 				? createElement("span", {
-					"className": "sxs-folded-mark",
-					"key": "f",
-					"title": "Unfold " + foldedHeader.count + " lines",
-					"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); onToggleFold(foldedHeader.id); }
-				}, " ⋯ }")
+						"className": "sxs-folded-mark",
+						"key": "f",
+						"title": "Unfold " + foldedHeader.count + " lines",
+						"onClick": (event: { "stopPropagation": () => void }) => {
+							event.stopPropagation();
+							onToggleFold(foldedHeader.id);
+						}
+					}, " ⋯ }")
 				: null);
 
 			// The left pane is mirrored — code on the outer edge, gutter hugging the centre — so both number columns
@@ -435,8 +466,22 @@ export function setDiffHighlight(range: HighlightRange): void {
 function subscribeHighlight(listener: (range: HighlightRange) => void): () => void {
 	highlightListeners.add(listener);
 
-	return () => { highlightListeners.delete(listener); };
+	return () => {
+		highlightListeners.delete(listener);
+	};
 }
+
+/** How much of a hunk is picked: all of it, none, or part. */
+function hunkState(chosen: number, total: number): "all" | "none" | "partial" {
+	if (chosen === total) {
+		return "all";
+	}
+
+	return chosen === 0 ? "none" : "partial";
+}
+
+/** A hunk's center-bar mark, by how much of it is picked. */
+const HUNK_MARKS = { "all": "✓", "partial": "–", "none": "" } as const;
 
 /** The interactive diff: highlighted code in, fold/expand state held here, one shared grid out. */
 function Diff(props: {
@@ -476,7 +521,7 @@ function Diff(props: {
 	}
 
 	// Kick off classification after paint; drop the result if the content changed underneath (a stale verdict).
-	const classify = props.classify;
+	const { classify } = props;
 
 	useEffect(() => {
 		if (classify === undefined) {
@@ -492,7 +537,9 @@ function Diff(props: {
 			}
 		});
 
-		return () => { live = false; };
+		return () => {
+			live = false;
+		};
 	}, [classify, props.contentKey]);
 
 	const toggleRow = (index: number): void => {
@@ -506,8 +553,7 @@ function Diff(props: {
 		props.onRowSelection?.([...next]);
 	};
 
-	const plan = useMemo(() => buildPlan(props.rows, props.foldRegions, expanded, folded),
-		[props.rows, props.foldRegions, expanded, folded]);
+	const plan = useMemo(() => buildPlan(props.rows, props.foldRegions, expanded, folded), [props.rows, props.foldRegions, expanded, folded]);
 
 	const toggleFold = (id: string): void => {
 		setFolded((prev) => {
@@ -531,7 +577,7 @@ function Diff(props: {
 
 	const flushHunk = (): void => {
 		if (run.length > 0) {
-			const grids = run.map((index) => plan.indexToGrid.get(index)!);
+			const grids = run.map((index) => plan.indexToGrid.get(index));
 
 			hunks.push({ "rows": run, "gridStart": Math.min(...grids), "gridEnd": Math.max(...grids) });
 		}
@@ -596,49 +642,50 @@ function Diff(props: {
 		}
 	}
 
-	const grid = createElement("div", { "className": "sxs" },
-		...hunks.map((hunk) => {
-			const chosen = hunk.rows.filter((index) => !deselectedRows.has(index)).length;
-			const state = chosen === hunk.rows.length ? "all" : chosen === 0 ? "none" : "partial";
+	const grid = createElement("div", { "className": "sxs" }, ...hunks.map((hunk) => {
+		const chosen = hunk.rows.filter((index) => !deselectedRows.has(index)).length;
+		const state = hunkState(chosen, hunk.rows.length);
 
-			return createElement("button", {
-				"key": "h" + hunk.gridStart,
-				"className": "sxs-hunk " + state,
-				"title": (state === "all" ? "Exclude this whole change" : "Include this whole change") + " · right-click to discard",
-				"style": { "gridRow": hunk.gridStart + " / " + (hunk.gridEnd + 1) },
-				"onClick": () => { toggleHunk(hunk.rows); },
-				"onContextMenu": (event: { "preventDefault": () => void; "clientX": number; "clientY": number }) => {
-					event.preventDefault();
-					setMenu({ "x": event.clientX, "y": event.clientY, "rows": hunk.rows });
-				}
-			}, state === "all" ? "✓" : state === "partial" ? "–" : "");
-		}),
-		...plan.spacers.map((spacer) => createElement("div", {
-			"key": "s" + spacer.side + spacer.row,
-			"className": "sxs-empty " + spacer.side,
-			"style": { "gridColumn": spacer.side === "left" ? "1 / span 2" : "4 / span 2", "gridRow": spacer.row }
-		})),
-		...plan.gaps.map((gap) => createElement("button", {
-			"key": gap.id,
-			"className": "sxs-gap",
-			"style": { "gridRow": gap.row },
-			"onClick": () => { expand(gap.id); }
-		}, "⋯ " + gap.count + " unchanged lines")),
-		createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, fadedRows, plan.leftFoldHeaders, toggleFold, deselectedRows, toggleRow, highlightedLines) }),
-		createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, fadedRows, plan.rightFoldHeaders, toggleFold, deselectedRows, toggleRow, highlightedLines) }));
+		return createElement("button", {
+			"key": "h" + hunk.gridStart,
+			"className": "sxs-hunk " + state,
+			"title": (state === "all" ? "Exclude this whole change" : "Include this whole change") + " · right-click to discard",
+			"style": { "gridRow": hunk.gridStart + " / " + (hunk.gridEnd + 1) },
+			"onClick": () => { toggleHunk(hunk.rows); },
+			"onContextMenu": (event: { "preventDefault": () => void; "clientX": number; "clientY": number }) => {
+				event.preventDefault();
+				setMenu({ "x": event.clientX, "y": event.clientY, "rows": hunk.rows });
+			}
+		}, HUNK_MARKS[state]);
+	}), ...plan.spacers.map((spacer) => createElement("div", {
+		"key": "s" + spacer.side + spacer.row,
+		"className": "sxs-empty " + spacer.side,
+		"style": { "gridColumn": spacer.side === "left" ? "1 / span 2" : "4 / span 2", "gridRow": spacer.row }
+	})), ...plan.gaps.map((gap) => createElement("button", {
+		"key": gap.id,
+		"className": "sxs-gap",
+		"style": { "gridRow": gap.row },
+		"onClick": () => { expand(gap.id); }
+	}, "⋯ " + gap.count + " unchanged lines")), createElement(Pre, { "code": props.leftCode, "handlers": sideHandlers("left", plan.leftLineToRow, fadedRows, plan.leftFoldHeaders, toggleFold, deselectedRows, toggleRow, highlightedLines) }), createElement(Pre, { "code": props.rightCode, "handlers": sideHandlers("right", plan.rightLineToRow, fadedRows, plan.rightFoldHeaders, toggleFold, deselectedRows, toggleRow, highlightedLines) }));
 
 	// Right-click discard menu (a hunk at a time).
 	const menuEl = menu === null ? null : createElement("div", {
 		"className": "sxs-menu-backdrop",
 		"onClick": () => { setMenu(null); },
-		"onContextMenu": (event: { "preventDefault": () => void }) => { event.preventDefault(); setMenu(null); }
+		"onContextMenu": (event: { "preventDefault": () => void }) => {
+			event.preventDefault();
+			setMenu(null);
+		}
 	}, createElement("div", {
 		"className": "sxs-menu",
 		"style": { "left": menu.x, "top": menu.y },
 		"onClick": (event: { "stopPropagation": () => void }) => { event.stopPropagation(); }
 	}, createElement("button", {
 		"className": "sxs-menu-item",
-		"onClick": () => { props.onDiscardRows?.(menu.rows); setMenu(null); }
+		"onClick": () => {
+			props.onDiscardRows?.(menu.rows);
+			setMenu(null);
+		}
 	}, "Discard this change (" + menu.rows.length + " line" + (menu.rows.length === 1 ? "" : "s") + ")")));
 
 	return createElement("div", { "className": "sxs-wrap" }, banner(verdict), grid, menuEl);

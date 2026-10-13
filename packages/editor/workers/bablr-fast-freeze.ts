@@ -25,5 +25,5 @@
 //     throws — it is why the historical measurement shim (bablr-language-ts/test/nofreeze.mjs) also faked it.
 //   - `setPrototypeOf` is left ALONE: @bablr/btree asserts null-prototype records, and freezeRecord still calls
 //     `setPrototypeOf(obj, null)`. Only the freeze half is removed.
-Object.freeze = ((value: unknown) => value) as typeof Object.freeze;
+Object.freeze = (value: unknown) => value;
 Object.isFrozen = (() => true) as typeof Object.isFrozen;

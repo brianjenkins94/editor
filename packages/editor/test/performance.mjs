@@ -17,8 +17,8 @@
  */
 import assert from "node:assert/strict";
 import { appendFileSync } from "node:fs";
-import { after, before, test } from "node:test";
 import * as path from "node:path";
+import { after, before, test } from "node:test";
 import * as fs from "@brianjenkins94/util/fs";
 import { until } from "@brianjenkins94/util/until";
 
@@ -33,7 +33,9 @@ let session;
 // browser here. And eager: by default a reading resolves only at a garbage collection, and one taken early misses
 // workers started since (TypeScript's servers — 10 realms one time, 16 the next). Eager, it's immediate and has them all.
 // (`boot: false`: this suite times the boot and the first hover itself, so its session doesn't wait for every realm first.)
-before(async () => { session = await startSession({ "boot": false, "chromium": { "channel": "chromium", "args": ["--enable-blink-features=ForceEagerMeasureMemory"] } }); });
+before(async () => {
+	session = await startSession({ "boot": false, "chromium": { "channel": "chromium", "args": ["--enable-blink-features=ForceEagerMeasureMemory"] } });
+});
 
 after(async () => {
 	report();
@@ -94,7 +96,9 @@ test("the demo's first typed hover", async () => {
 				return performance.now() - start;
 			}
 
-			await new Promise((resolve) => { setTimeout(resolve, 100); });
+			await new Promise((resolve) => {
+				setTimeout(resolve, 100);
+			});
 		}
 
 		return Infinity;
@@ -116,7 +120,14 @@ test("memory by realm, at idle", async () => {
 
 		if (typeof measure === "function") {
 			try {
-				const result = await Promise.race([measure.call(performance), new Promise((_, reject) => { setTimeout(() => { reject(new Error("no answer in 10 s")); }, 10_000); })]);
+				const result = await Promise.race([
+					measure.call(performance),
+					new Promise((_, reject) => {
+						setTimeout(() => {
+							reject(new Error("no answer in 10 s"));
+						}, 10_000);
+					})
+				]);
 
 				found.measured = Math.round(result.bytes / 1048576) + " MB in " + result.breakdown.length + " realms";
 			} catch (error) {
@@ -170,7 +181,9 @@ test("loading a 1000-file project", async () => {
 
 				return performance.now() - start;
 			} catch {
-				await new Promise((resolve) => { setTimeout(resolve, 50); });
+				await new Promise((resolve) => {
+					setTimeout(resolve, 50);
+				});
 			}
 		}
 

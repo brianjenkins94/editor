@@ -45,7 +45,8 @@ function patchSucceeds(dir, patchFile, reverse) {
 	}
 }
 
-for (const file of readdirSync(here).filter((entry) => entry.endsWith(".patch"))) {
+/** Apply `file`, one of this folder's patches — or skip it, when its package isn't installed or it's already applied. */
+function applyPatch(file) {
 	const [, name, version] = /^(.+)@([^@]+)\.patch$/u.exec(file) ?? [];
 	const packageName = name.replace("__", "/");
 	const patchFile = path.join(here, file);
@@ -53,7 +54,8 @@ for (const file of readdirSync(here).filter((entry) => entry.endsWith(".patch"))
 
 	if (dir === undefined) {
 		console.warn("[patches] " + packageName + " is not installed; skipping " + file);
-		continue;
+
+		return;
 	}
 
 	const installed = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8")).version;
@@ -63,7 +65,7 @@ for (const file of readdirSync(here).filter((entry) => entry.endsWith(".patch"))
 	}
 
 	if (patchSucceeds(dir, patchFile, true)) {
-		continue; // already applied
+		return; // already applied
 	}
 
 	if (!patchSucceeds(dir, patchFile, false)) {
@@ -80,4 +82,8 @@ for (const file of readdirSync(here).filter((entry) => entry.endsWith(".patch"))
 
 	execFileSync("patch", ["-p1", "-f", "-s", "-N", "-i", patchFile], { "cwd": dir, "stdio": "inherit" });
 	console.log("[patches] applied " + file);
+}
+
+for (const file of readdirSync(here).filter((entry) => entry.endsWith(".patch"))) {
+	applyPatch(file);
 }

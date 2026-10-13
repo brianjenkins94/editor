@@ -55,7 +55,9 @@ test("identical decisions asked at once share one answer — one prompt, not one
 	const decide = coalesce((request) => request.scope, (request) => {
 		asked += 1;
 
-		return new Promise((resolve) => { answers.set(request.scope, resolve); });
+		return new Promise((resolve) => {
+			answers.set(request.scope, resolve);
+		});
 	});
 	// Six peer connections asking for net.webrtc:peer before the first answer, and one asking something else.
 	const same = Array.from({ "length": 6 }, () => decide({ "scope": "net.webrtc:peer" }));
@@ -64,7 +66,7 @@ test("identical decisions asked at once share one answer — one prompt, not one
 	assert.equal(asked, 2, "one decision per distinct question");
 	answers.get("net.webrtc:peer")("allow");
 	answers.get("net.ws:example.com")("deny");
-	assert.deepEqual(await Promise.all(same), Array(6).fill("allow"));
+	assert.deepEqual(await Promise.all(same), Array.from({ "length": 6 }).fill("allow"));
 	assert.equal(await other, "deny");
 
 	// Answered, it's asked afresh next time (an "Allow once" is the broker's to remember, not this).

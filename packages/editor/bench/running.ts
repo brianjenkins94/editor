@@ -9,6 +9,7 @@
  */
 import { register } from "node:module";
 
+// eslint-disable-next-line ts/no-deprecated -- module.registerHooks() takes synchronous in-thread hooks, not extensionless.mjs's async loader module: not a drop-in
 register("../../almostnode/test/extensionless.mjs", import.meta.url);
 
 const { Runtime } = await import("../../almostnode/runtime.ts");
@@ -43,7 +44,9 @@ const cheap = rows.filter((row) => row.price < 50).map((row) => ({ ...row, label
 cheap.sort((a, b) => a.price - b.price || a.id - b.id);
 module.exports = JSON.parse(JSON.stringify(cheap)).length;
 ` } },
-	"server (500 requests, a small JSON handler)": { "requests": 500, "files": { "/workspace/main.js": `const http = require("http");
+	"server (500 requests, a small JSON handler)": {
+		"requests": 500,
+		"files": { "/workspace/main.js": `const http = require("http");
 const items = Array.from({ length: 50 }, (_, i) => ({ id: i, total: i * 3 }));
 http.createServer((request, response) => {
 	const id = Number(new URL(request.url, "http://x").searchParams.get("id"));
@@ -51,7 +54,8 @@ http.createServer((request, response) => {
 	response.writeHead(200, { "content-type": "application/json" });
 	response.end(JSON.stringify({ id, found }));
 }).listen(4100);
-` } },
+` }
+	},
 	"build-like (the work in a package: primes < 20k, natively)": { "files": {
 		"/workspace/node_modules/heavy/package.json": JSON.stringify({ "name": "heavy", "main": "index.js" }),
 		"/workspace/node_modules/heavy/index.js": `module.exports = (LIMIT) => { ${PRIMES.replace("module.exports = count;", "return count;")} };`,
@@ -81,12 +85,14 @@ async function runOnce(files: Files, mode: Mode, requests = 0): Promise<{ "run":
 	} else {
 		let vm: ReturnType<typeof createVM>["vm"] | undefined;
 
-		runtime = runtimeWith(files, { "evaluateProgram": (module) => { vm!.evaluateModule(module); } });
+		runtime = runtimeWith(files, { "evaluateProgram": (module) => {
+			vm.evaluateModule(module);
+		} });
 
 		const loader = {
 			"resolve": (specifier: string, fromDir: string) => runtime.resolve(specifier, fromDir),
 			"require": (specifier: string, fromDir: string) => runtime.require(specifier, fromDir, "program"),
-			"source": (filename: string) => runtime.getVFS().readFileSync(filename, "utf8") as string,
+			"source": (filename: string) => runtime.getVFS().readFileSync(filename, "utf8"),
 			"cached": (filename: string) => runtime.cached(filename),
 			"register": (filename: string, module: unknown) => { runtime.register(filename, module as Parameters<typeof runtime.register>[1]); },
 			"forget": (filename: string) => { runtime.forget(filename); }
@@ -94,7 +100,7 @@ async function runOnce(files: Files, mode: Mode, requests = 0): Promise<{ "run":
 		const debugging = mode === "debugger" ? { "coverage": true, "profile": true, "observe": () => undefined, "trace": () => undefined } : {};
 
 		// (URL isn't one of tsval's standard globals: the host's, as native has it.)
-		vm = createVM(files["/workspace/main.js"]!, { "fileName": "/workspace/main.js", "modules": loader, "globals": { "URL": URL }, "eventLoop": { "pace": "fast" }, ...debugging }).vm;
+		({ vm } = createVM(files["/workspace/main.js"], { "fileName": "/workspace/main.js", "modules": loader, "globals": { "URL": URL }, "eventLoop": { "pace": "fast" }, ...debugging }));
 		await runToEnd(vm);
 	}
 
@@ -103,7 +109,9 @@ async function runOnce(files: Files, mode: Mode, requests = 0): Promise<{ "run":
 	// (A server's listen registers a tick later.)
 	if (requests > 0) {
 		for (let waited = 0; getServer(4100) === undefined && waited < 100; waited += 1) {
-			await new Promise((resolve) => { setTimeout(resolve, 1); });
+			await new Promise((resolve) => {
+				setTimeout(resolve, 1);
+			});
 		}
 	}
 
@@ -125,7 +133,7 @@ async function runOnce(files: Files, mode: Mode, requests = 0): Promise<{ "run":
 	return { "run": ran, "requests": performance.now() - served };
 }
 
-const median = (values: number[]): number => values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)]!;
+const median = (values: number[]): number => values.toSorted((left, right) => left - right)[Math.floor(values.length / 2)];
 const rounds = Number(process.argv[2] ?? 5);
 
 console.log(`rounds: ${rounds} (median shown; the first, a warm-up, is dropped)\n`);

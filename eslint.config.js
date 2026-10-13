@@ -1,5 +1,35 @@
+import { readdirSync } from "node:fs";
 import config from "@brianjenkins94/util/eslint";
 import webawesome from "./packages/eslint-plugin-webawesome/src/index.js";
+
+// The editor's folders are its realms (packages/editor/ARCHITECTURE.md): a realm imports another realm's code only
+// through shared/. A relative import that climbs out of its folder and into another realm's is an error. The
+// composition roots (main.tsx, build.ts, dev.ts), the tests and the benches may reach anywhere.
+const EDITOR = "packages/editor";
+const REALMS = ["app", "shell", "workbench", "workers", "previews", "extensions"];
+const EXTENSIONS = readdirSync(new URL(EDITOR + "/extensions", import.meta.url), { "withFileTypes": true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+const SOURCES = "*.{ts,tsx,mts,js,mjs}";
+
+/** `files` may not climb into any of the `banned` folders. */
+function realmImports(files, banned, ignores = []) {
+	const pattern = {
+		"regex": "^(?:\\.\\./)+(?:" + banned.join("|") + ")(?:/|$)",
+		"message": "Realms import each other only through shared/ (packages/editor/ARCHITECTURE.md, \"The realms\")."
+	};
+
+	return { "files": files, "ignores": ignores, "rules": { "no-restricted-imports": ["error", { "patterns": [pattern] }] } };
+}
+
+const otherRealms = (...own) => REALMS.filter((realm) => !own.includes(realm));
+const realmBoundaries = [
+	...["app", "shell", "workers", "previews", "shared", "build"].map((realm) => realmImports([`${EDITOR}/${realm}/**/${SOURCES}`], otherRealms(realm))),
+	realmImports([`${EDITOR}/workbench/**/${SOURCES}`], otherRealms("workbench"), [`${EDITOR}/workbench/workbench-entry.tsx`]),
+	// workbench-entry registers the extensions (their package.json, worker-pod's bridge): its one reach into them.
+	realmImports([`${EDITOR}/workbench/workbench-entry.tsx`], otherRealms("workbench", "extensions")),
+	// What sits directly in extensions/ is every extension's; an extension reaches no other extension's folder.
+	realmImports([`${EDITOR}/extensions/${SOURCES}`], otherRealms("extensions")),
+	...EXTENSIONS.map((name) => realmImports([`${EDITOR}/extensions/${name}/**/${SOURCES}`], [...otherRealms("extensions"), ...EXTENSIONS.filter((other) => other !== name)]))
+];
 
 export default [
 	...config,
@@ -17,6 +47,11 @@ export default [
 			"webawesome/no-css-in-strings": "error",
 			"webawesome/no-inline-styles": "error"
 		}
+	},
+	...realmBoundaries,
+	{
+		// `void promise;` is how this repo says "fired on purpose, not awaited" — what no-floating-promises asks for.
+		"rules": { "no-void": ["warn", { "allowAsStatement": true }] }
 	},
 	{
 		// CI fails only on ERRORS (util-lint counts errorCount); warnings never fail it. Almost everything is

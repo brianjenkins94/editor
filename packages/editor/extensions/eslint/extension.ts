@@ -54,7 +54,9 @@ async function configurePluginWhenReady(attempts = 20): Promise<void> {
 
 			return;
 		} catch {
-			await new Promise((resolve) => { setTimeout(resolve, 500); });
+			await new Promise((resolve) => {
+				setTimeout(resolve, 500);
+			});
 		}
 	}
 }
@@ -62,7 +64,9 @@ async function configurePluginWhenReady(attempts = 20): Promise<void> {
 /** Every autofix for the document, via the plugin — the fixed text, or undefined when there's nothing to fix. */
 async function fixAll(document: vscode.TextDocument): Promise<string | undefined> {
 	const response = await vscode.commands.executeCommand<{ "body"?: { "output"?: unknown; "fixed"?: unknown } } | undefined>(
-		"typescript.tsserverRequest", "_eslint.fixAll", { "file": document.uri, "text": document.getText() }
+		"typescript.tsserverRequest",
+		"_eslint.fixAll",
+		{ "file": document.uri, "text": document.getText() }
 	);
 	const body = response?.body;
 

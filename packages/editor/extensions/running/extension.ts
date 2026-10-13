@@ -56,6 +56,28 @@ function since(ms: number): string {
 	return seconds < 3600 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
 
+/** How a run ended: stopped (we asked, or 130: interrupted), with no exit code known, or by its exit code. */
+function endedState(stopping: boolean, exitCode: number | undefined): RunState {
+	if (stopping || exitCode === 130) {
+		return "stopped";
+	}
+
+	if (exitCode === undefined) {
+		return "ended";
+	}
+
+	return exitCode === 0 ? "exited" : "failed";
+}
+
+/** An ended run's icon in the list. */
+function endedIcon(state: RunState): string {
+	if (state === "failed") {
+		return "error";
+	}
+
+	return state === "stopped" ? "debug-stop" : "check";
+}
+
 async function readText(uri: vscode.Uri): Promise<string | undefined> {
 	try {
 		return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
@@ -88,7 +110,11 @@ async function scriptsNear(cwd: vscode.Uri): Promise<Record<string, string>> {
 async function classify(commandLine: string, cwd: vscode.Uri | undefined, depth = 0): Promise<LifecycleGuess> {
 	const words = commandLine.trim().split(/\s+/u);
 	const runner = /^(?:npm|pnpm|yarn|bun)$/u.test(words[0] ?? "");
-	const script = runner ? (words[1] === "run" || words[1] === "run-script" ? words[2] : words[1]) : undefined;
+	let script: string | undefined;
+
+	if (runner) {
+		script = words[1] === "run" || words[1] === "run-script" ? words[2] : words[1];
+	}
 
 	if (script !== undefined && cwd !== undefined && depth < 4) {
 		const command = (await scriptsNear(cwd))[script];
@@ -155,14 +181,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	/** It ended: with an exit code (130 is interrupted, as a shell reports Ctrl-C), or none known. */
 	const end = (run: Run | undefined, exitCode: number | undefined): void => {
-		if (run === undefined || run.state !== "running") {
+		if (run?.state !== "running") {
 			return;
 		}
 
 		live.delete(run);
 		run.endedAt = Date.now();
 		run.exitCode = exitCode;
-		run.state = run.stopping || exitCode === 130 ? "stopped" : exitCode === undefined ? "ended" : exitCode === 0 ? "exited" : "failed";
+		run.state = endedState(run.stopping, exitCode);
 		refresh();
 
 		// (127 is a shell's "not found": nothing ran, so nothing failed — the terminal already says what to do instead.)
@@ -196,7 +222,7 @@ export function activate(context: vscode.ExtensionContext): void {
 				return;
 			}
 
-			const terminal = event.terminal;
+			const { terminal } = event;
 			const run = start({
 				"title": title,
 				"kind": "task",
@@ -240,7 +266,11 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 
 			const program = typeof session.configuration["program"] === "string" ? vscode.workspace.asRelativePath(session.configuration["program"]) : undefined;
-			const run = start({ "title": program === undefined ? session.name : `${session.name} — ${program}`, "kind": "task", "where": "Run and Debug", "counted": true, "stop": () => { void vscode.debug.stopDebugging(session); } });
+			const stop = (): void => {
+				void vscode.debug.stopDebugging(session);
+			};
+
+			const run = start({ "title": program === undefined ? session.name : `${session.name} — ${program}`, "kind": "task", "where": "Run and Debug", "counted": true, "stop": stop });
 
 			sessions.set(session.id, run);
 		}),
@@ -256,8 +286,11 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
 		vscode.tasks.onDidStartTaskProcess((event) => {
 			const { execution } = event;
+			const stop = (): void => {
+				execution.terminate();
+			};
 
-			tasks.set(execution, start({ "title": execution.task.name, "kind": execution.task.isBackground ? "service" : "task", "where": "task", "counted": true, "stop": () => { execution.terminate(); } }));
+			tasks.set(execution, start({ "title": execution.task.name, "kind": execution.task.isBackground ? "service" : "task", "where": "task", "counted": true, "stop": stop }));
 		}),
 		vscode.tasks.onDidEndTaskProcess((event) => {
 			end(tasks.get(event.execution), event.exitCode);
@@ -268,13 +301,13 @@ export function activate(context: vscode.ExtensionContext): void {
 	// ── The list ──────────────────────────────────────────────────────────────────────────────────────────────────
 	context.subscriptions.push(item, vscode.commands.registerCommand("running.show", async () => {
 		type Pick = vscode.QuickPickItem & { "run"?: Run };
-		const running = [...live].filter((run) => run.counted).sort((a, b) => b.startedAt - a.startedAt);
+		const running = [...live].filter((run) => run.counted).sort((left, right) => right.startedAt - left.startedAt);
 		const picks: Pick[] = [
 			...running.length === 0 ? [] : [{ "label": "Running", "kind": vscode.QuickPickItemKind.Separator }],
 			...running.map((run) => ({ "label": `$(${run.kind === "service" ? "server-process" : "play"}) ${run.title}`, "description": since(Date.now() - run.startedAt), "detail": `${run.kind} · ${run.where}`, "run": run })),
 			...ended.length === 0 ? [] : [{ "label": "Ended", "kind": vscode.QuickPickItemKind.Separator }],
 			...ended.map((run) => ({
-				"label": `$(${run.state === "failed" ? "error" : run.state === "stopped" ? "debug-stop" : "check"}) ${run.title}`,
+				"label": `$(${endedIcon(run.state)}) ${run.title}`,
 				"description": `${run.state === "exited" || run.state === "failed" ? "exit " + run.exitCode : run.state} · after ${since((run.endedAt ?? run.startedAt) - run.startedAt)} · ${since(Date.now() - (run.endedAt ?? run.startedAt))} ago`,
 				"detail": `${run.kind} · ${run.where}`,
 				"run": run

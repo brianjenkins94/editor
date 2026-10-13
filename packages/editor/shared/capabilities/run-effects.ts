@@ -59,5 +59,5 @@ export function takeEffects(runId: string): Effect[] {
 	const effects = [...merged.get(runId)?.values() ?? []];
 	const order = ["made", "denied", "skipped", "given"];
 
-	return effects.toSorted((a, b) => order.indexOf(a.how) - order.indexOf(b.how) || a.capability.localeCompare(b.capability) || a.resource.localeCompare(b.resource));
+	return effects.toSorted((left, right) => order.indexOf(left.how) - order.indexOf(right.how) || left.capability.localeCompare(right.capability) || left.resource.localeCompare(right.resource));
 }

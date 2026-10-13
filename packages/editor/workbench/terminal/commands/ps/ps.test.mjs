@@ -17,12 +17,22 @@ function registry() {
 	];
 	const stopped = [];
 
-	return { stopped, "runs": { "list": () => runs, "stop": (id) => { stopped.push(id); return true; } } };
+	return {
+		"stopped": stopped,
+		"runs": {
+			"list": () => runs,
+			"stop": (id) => {
+				stopped.push(id);
+
+				return true;
+			}
+		}
+	};
 }
 
 test("ps: what's running, a short id each; -a adds what ended", async () => {
 	const { runs } = registry();
-	const bash = new Bash({ "customCommands": [toCommand(definition, ps({ "runner": { runs } }))] });
+	const bash = new Bash({ "customCommands": [toCommand(definition, ps({ "runner": { "runs": runs } }))] });
 	const running = (await bash.exec("ps")).stdout.split("\n");
 
 	assert.match(running[0], /^ID\s+STATE\s+KIND\s+PORT\s+FROM\s+COMMAND$/u);
@@ -33,7 +43,7 @@ test("ps: what's running, a short id each; -a adds what ended", async () => {
 
 test("kill: by any unique beginning of the id; an ambiguous or unknown one says so", async () => {
 	const { runs, stopped } = registry();
-	const bash = new Bash({ "customCommands": [toCommand(killDefinition, kill({ "runner": { runs } }))] });
+	const bash = new Bash({ "customCommands": [toCommand(killDefinition, kill({ "runner": { "runs": runs } }))] });
 
 	assert.equal((await bash.exec("kill -9 aaaa2")).exitCode, 0);
 	assert.deepEqual(stopped, ["aaaa2222-0000"]);

@@ -16,8 +16,8 @@
  * edit history records it, and saving runs what saving runs (format on save). Paths are the workspace's: relative to it,
  * or absolute under it. Runs in the workbench realm (core), with its own extension API.
  */
-import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
+import type * as vscodeApi from "vscode";
 import type { NodeRunner } from "./node-runner";
 import { serve } from "@brianjenkins94/hub";
 import { createBashProcess, ESCAPES } from "./terminal";
@@ -59,6 +59,7 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub, runner
 
 		return vscode.Uri.file(absolute);
 	};
+
 	const relative = (uri: vscodeApi.Uri): string => vscode.workspace.asRelativePath(uri, false);
 	/** A file's text as the editor has it: an open document's (unsaved edits included), else what's on disk. */
 	const textOf = async (uri: vscodeApi.Uri): Promise<{ "text": string; "dirty": boolean }> => {
@@ -74,6 +75,7 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub, runner
 			throw new Error(`${relative(uri)} doesn't exist`);
 		}
 	};
+
 	/** Edits to `uri`'s text, as typing makes them (an open editor, undo, the edit history), then saved. */
 	const applyAndSave = async (uri: vscodeApi.Uri, edits: (document: vscodeApi.TextDocument) => { "range": vscodeApi.Range; "text": string }[]): Promise<void> => {
 		const document = await vscode.workspace.openTextDocument(uri);
@@ -171,6 +173,21 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub, runner
 		return { "files": files.slice(0, most), "truncated": files.length > most };
 	});
 
+	/** What grep searches in `uri`: the open document's text, else the file's — undefined for data, binary or unreadable. */
+	const searchableText = async (uri: vscodeApi.Uri): Promise<string | undefined> => {
+		try {
+			const bytes = await vscode.workspace.fs.readFile(uri);
+
+			if (bytes.byteLength > GREP_BYTES || bytes.includes(0)) {
+				return undefined; // data, or binary
+			}
+
+			return vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString())?.getText() ?? decoder.decode(bytes);
+		} catch {
+			return undefined;
+		}
+	};
+
 	serve(hub, "files.grep", async (args) => {
 		const { pattern, glob, ignoreCase, limit } = (args ?? {}) as { "pattern"?: unknown; "glob"?: unknown; "ignoreCase"?: unknown; "limit"?: unknown };
 
@@ -184,31 +201,21 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub, runner
 		const matches: { "file": string; "line": number; "text": string }[] = [];
 		let total = 0;
 
-		for (const uri of (await vscode.workspace.findFiles(include, /node_modules|\.git\//u.test(include) ? undefined : EXCLUDE)).sort((a, b) => a.path.localeCompare(b.path))) {
-			let text: string;
+		for (const uri of (await vscode.workspace.findFiles(include, /node_modules|\.git\//u.test(include) ? undefined : EXCLUDE)).sort((left, right) => left.path.localeCompare(right.path))) {
+			const text = await searchableText(uri);
 
-			try {
-				const bytes = await vscode.workspace.fs.readFile(uri);
+			if (text !== undefined) {
+				const lines = text.split("\n");
 
-				if (bytes.byteLength > GREP_BYTES || bytes.includes(0)) {
-					continue; // data, or binary
-				}
+				for (let index = 0; index < lines.length; index += 1) {
+					const line = lines[index];
 
-				text = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString())?.getText() ?? decoder.decode(bytes);
-			} catch {
-				continue;
-			}
+					if (expression.test(line)) {
+						total += 1;
 
-			const lines = text.split("\n");
-
-			for (let index = 0; index < lines.length; index += 1) {
-				const line = lines[index]!;
-
-				if (expression.test(line)) {
-					total += 1;
-
-					if (matches.length < most) {
-						matches.push({ "file": relative(uri), "line": index + 1, "text": line.length > LINE_CHARACTERS ? line.slice(0, LINE_CHARACTERS) + "…" : line });
+						if (matches.length < most) {
+							matches.push({ "file": relative(uri), "line": index + 1, "text": line.length > LINE_CHARACTERS ? line.slice(0, LINE_CHARACTERS) + "…" : line });
+						}
 					}
 				}
 			}
@@ -229,6 +236,7 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub, runner
 
 		return new Promise<{ "exitCode": number | null; "output": string; "timedOut": boolean }>((resolve) => {
 			let settled = false;
+			let timer: ReturnType<typeof setTimeout> | undefined;
 			const finish = (exitCode: number | null, timedOut: boolean): void => {
 				if (settled) {
 					return;
@@ -243,12 +251,21 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub, runner
 
 				resolve({ "exitCode": exitCode, "output": printed.length > SHELL_OUTPUT ? "…" + printed.slice(-SHELL_OUTPUT) : printed, "timedOut": timedOut });
 			};
-			const process = createBashProcess(vscode, runner, hub, (data) => { output += data; }, directory, { "command": command, "exit": (code) => { finish(code, false); } });
+
+			const process = createBashProcess(vscode, runner, hub, (data) => {
+				output += data;
+			}, directory, {
+				"command": command,
+				"exit": (code) => {
+					finish(code, false);
+				}
+			});
 			const stop = (): void => {
 				process.shutdown?.();
 				finish(null, true);
 			};
-			const timer = setTimeout(stop, typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : SHELL_TIMEOUT);
+
+			timer = setTimeout(stop, typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : SHELL_TIMEOUT);
 
 			signal.addEventListener("abort", stop, { "once": true });
 			process.start();

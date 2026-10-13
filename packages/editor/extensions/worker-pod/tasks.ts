@@ -42,8 +42,17 @@ function taskTerminal(command: string, cwd: string): vscode.Pseudoterminal {
 		"onDidWrite": write.event,
 		"onDidClose": close.event,
 		"open": () => {
-			offs.push(podHub.subscribe(`terminal.out.${id}`, (data) => { write.fire(String(data)); }), podHub.subscribe(`terminal.exit.${id}`, (data) => { done((data as { "code"?: number } | null)?.code ?? 0); }));
+			offs.push(
+				// The terminal's output comes as text (workbench/terminal: createBashProcess's).
+				podHub.subscribe(`terminal.out.${id}`, (data) => {
+					write.fire(data as string);
+				}),
+				podHub.subscribe(`terminal.exit.${id}`, (data) => {
+					done((data as { "code"?: number } | null)?.code ?? 0);
+				})
+			);
 			void rpc.request("terminal.run", { "id": id, "command": command, "cwd": cwd }, { "timeoutMs": 10_000, "waitForResponderMs": 10_000 }).catch((error: unknown) => {
+				// eslint-disable-next-line ts/no-base-to-string -- a rejection can be any value: it's said as String() says it
 				write.fire(`couldn't start ${command}: ${String(error)}\r\n`);
 				done(1);
 			});
@@ -56,11 +65,20 @@ function taskTerminal(command: string, cwd: string): vscode.Pseudoterminal {
 /** A `run` task named `name`: `command` in `cwd`, from `source` ("npm" for a package's script). */
 export function runTask(name: string, command: string, cwd: string, source: string, background: boolean): vscode.Task {
 	const definition: RunTaskDefinition = { "type": "run", "command": command, "cwd": cwd };
-	const task = new vscode.Task(definition, vscode.TaskScope.Workspace, name, source, new vscode.CustomExecution(async () => taskTerminal(command, cwd)));
+	const task = new vscode.Task(definition, vscode.TaskScope.Workspace, name, source, new vscode.CustomExecution(() => Promise.resolve(taskTerminal(command, cwd))));
 
 	task.isBackground = background;
 
 	return task;
+}
+
+/** The task group a package.json script is in, by its name: `build` and `test` are theirs, the others none. */
+function scriptGroup(script: string): vscode.TaskGroup | undefined {
+	if (script === "build") {
+		return vscode.TaskGroup.Build;
+	}
+
+	return script === "test" ? vscode.TaskGroup.Test : undefined;
 }
 
 /** Every package.json script under the workspace (not a dependency's), as a task. */
@@ -75,15 +93,15 @@ async function scriptTasks(): Promise<vscode.Task[]> {
 			const path = dir.replace(/^\/workspace\/?/u, "");
 
 			for (const [script, body] of Object.entries(scripts)) {
-				const task = runTask(path === "" ? script : `${script} · ${path}`, `npm run ${script}`, dir, "npm", lifecycleOfScript(script, String(body)).lifecycle === "service");
+				const task = runTask(path === "" ? script : `${script} · ${path}`, `npm run ${script}`, dir, "npm", lifecycleOfScript(script, body).lifecycle === "service");
 
-				task.group = script === "build" ? vscode.TaskGroup.Build : script === "test" ? vscode.TaskGroup.Test : undefined;
+				task.group = scriptGroup(script);
 				tasks.push(task);
 			}
 		} catch { /* absent, or not JSON */ }
 	}
 
-	return tasks.sort((a, b) => a.name.localeCompare(b.name));
+	return tasks.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export function registerTasks(context: vscode.ExtensionContext): void {

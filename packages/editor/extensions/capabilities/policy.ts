@@ -12,11 +12,12 @@
  * Policy-as-code on purpose: the file is under `.silo/`, human-readable, shows up in the explorer, and is
  * reviewable in git — the disposition of every capability the code reaches, tracked alongside it.
  */
+import type { Policy } from "@brianjenkins94/util/silo/policy";
+import { EMPTY_POLICY, parsePolicy } from "@brianjenkins94/util/silo/policy";
+
 import * as vscode from "vscode";
 
-import { EMPTY_POLICY, parsePolicy, type Policy } from "@brianjenkins94/util/silo/policy";
-
-export { effectiveDisposition, withRule, withoutRule } from "@brianjenkins94/util/silo/policy";
+export { effectiveDisposition, withoutRule, withRule } from "@brianjenkins94/util/silo/policy";
 export type { Disposition, Effective, Policy, Rule } from "@brianjenkins94/util/silo/policy";
 
 /** The base `.silo/policy.json` at the (first) workspace root, or undefined with no workspace open. */

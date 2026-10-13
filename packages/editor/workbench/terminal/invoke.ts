@@ -7,8 +7,8 @@
  *
  * Kept out of catalog.ts (which only Vite can read, for its glob), so a command's test can make its command here.
  */
-import type { Command } from "just-bash/browser";
 import type { JuvyCommand, RunProcess } from "@brianjenkins94/util/juvy/cli";
+import type { Command } from "just-bash/browser";
 import type { CommandDefinition, CommandResult, Handler, Implementation } from "./catalog";
 import { juvy } from "@brianjenkins94/util/juvy";
 import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
@@ -24,7 +24,19 @@ export function toCommand(definition: CommandDefinition, implementation: Impleme
 
 		let [stdout, stderr] = ["", ""];
 		// The process juvy runs it on: one that collects what it writes, and doesn't exit.
-		const proc: RunProcess = { "stdout": { "write": (text: string) => { stdout += text; } }, "stderr": { "write": (text: string) => { stderr += text; } }, "exit": () => undefined };
+		const proc: RunProcess = {
+			"stdout": {
+				"write": (text: string) => {
+					stdout += text;
+				}
+			},
+			"stderr": {
+				"write": (text: string) => {
+					stderr += text;
+				}
+			},
+			"exit": () => undefined
+		};
 		// What the handler returned, if juvy got as far as calling it.
 		let result: CommandResult | undefined;
 		// A fresh config for each run: a juvy config keeps what it parsed.
@@ -38,12 +50,13 @@ export function toCommand(definition: CommandDefinition, implementation: Impleme
 		const app = definition.subcommands === undefined
 			? leaf(definition.name, definition.summary, definition.options, definition.stopEarly, implementation as Handler)
 			: subcommands({
-				"name": definition.name,
-				"description": definition.summary,
-				"commands": Object.entries(definition.subcommands).map(([name, subcommand]) => leaf(name, subcommand.summary, subcommand.options, subcommand.stopEarly, subcommand.missing === undefined
-					? (implementation as Record<string, Handler>)[name]!
-					: async () => ({ "stdout": "", "stderr": `${definition.name} ${name}: ${subcommand.missing}\n`, "exitCode": 1 }), subcommand.aliases))
-			});
+					"name": definition.name,
+					"description": definition.summary,
+					"commands": Object.entries(definition.subcommands).map(([name, subcommand]) => leaf(name, subcommand.summary, subcommand.options, subcommand.stopEarly, subcommand.missing === undefined
+						? (implementation as Record<string, Handler>)[name]
+						: () => Promise.resolve({ "stdout": "", "stderr": `${definition.name} ${name}: ${subcommand.missing}\n`, "exitCode": 1 }), subcommand.aliases))
+				});
+
 		await run(app, { "argv": args, "exit": false, "process": proc });
 
 		const exitCode = Number(proc.exitCode ?? 0);

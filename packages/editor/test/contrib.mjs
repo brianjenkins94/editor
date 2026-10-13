@@ -38,7 +38,9 @@ before(async () => {
 			response.end();
 		});
 	});
-	await new Promise((resolve) => { server.listen(PORT, resolve); });
+	await new Promise((resolve) => {
+		server.listen(PORT, resolve);
+	});
 	session = await startSession({
 		// The site's own extensions, as editor-contrib's site lists its one.
 		"prepare": (context) => context.route("**/extensions.json", (route) => route.fulfill({ "json": [EXTENSION] }))
@@ -75,10 +77,16 @@ test("Run starts editor-contrib's interpreter: a run in its worker, the program 
 		const seen = { "sessions": [], "events": [], "records": [] };
 
 		globalThis.__contrib = seen;
-		api.debug.onDidStartDebugSession((started) => { seen.sessions.push({ "type": started.type, "runId": started.configuration.__runId }); });
-		api.debug.onDidReceiveDebugSessionCustomEvent((event) => { seen.events.push({ "type": event.session.type, "event": event.event, "source": event.body?.source }); });
+		api.debug.onDidStartDebugSession((started) => {
+			seen.sessions.push({ "type": started.type, "runId": started.configuration.__runId });
+		});
+		api.debug.onDidReceiveDebugSessionCustomEvent((event) => {
+			seen.events.push({ "type": event.session.type, "event": event.event, "source": event.body?.source });
+		});
 		// The editor's log plane: the worker's log, and the runtime's answers to its file calls.
-		globalThis.__architecture.hub.subscribe("$sys.log.>", (record) => { seen.records.push(JSON.stringify(record)); });
+		globalThis.__architecture.hub.subscribe("$sys.log.>", (record) => {
+			seen.records.push(JSON.stringify(record));
+		});
 		await api.workspace.fs.writeFile(uri, new TextEncoder().encode("const greeting = \"hello\";\nconsole.log(greeting);\n"));
 		await api.commands.executeCommand("editor.debugFile", uri);
 	});

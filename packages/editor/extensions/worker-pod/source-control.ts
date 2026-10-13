@@ -7,7 +7,7 @@
  * (git-service.ts) on the hub, which the shell's review panel reads too. This is that service's VS Code face — the
  * bridge's part is the crossing: `git.status`, `git.file`, `git.commit` over the hub, and `git.changed` to refresh.
  */
-import type { GitFileChange } from "../../workbench/git-service";
+import type { GitFileChange } from "../../shared/git";
 import { createRpcClient } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { podHub } from "./pod";
@@ -62,8 +62,9 @@ export function registerSourceControl(context: vscode.ExtensionContext): void {
 			"provideTextDocumentContent": async (uri) => ((await rpc.request("git.file", { "path": uri.path.replace(DIR + "/", "") }, { "timeoutMs": 30_000, "waitForResponderMs": 30_000 })) as { "head": string }).head
 		}),
 		vscode.commands.registerCommand("editor.git.commit", async (messageArg?: unknown) => {
+			const { inputBox } = scm;
 			// The message from the arg (a programmatic caller) or the input box (the accept button, Ctrl+Enter).
-			const message = (typeof messageArg === "string" ? messageArg : scm.inputBox.value).trim();
+			const message = (typeof messageArg === "string" ? messageArg : inputBox.value).trim();
 
 			if (message === "") {
 				void vscode.window.showWarningMessage("Enter a commit message first.");
@@ -73,7 +74,7 @@ export function registerSourceControl(context: vscode.ExtensionContext): void {
 
 			try {
 				await rpc.request("git.commit", { "message": message }, { "timeoutMs": 60_000 });
-				scm.inputBox.value = "";
+				inputBox.value = "";
 			} catch (error) {
 				void vscode.window.showErrorMessage("Commit failed: " + (error instanceof Error ? error.message : String(error)));
 			}

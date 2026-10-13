@@ -28,8 +28,8 @@ import type { BashSession, SessionState } from "./session";
 import { serve } from "@brianjenkins94/hub";
 import { COMMANDS, PRESENT, STREAMING } from "./catalog";
 import { createWorkspaceTerminalFs } from "./fs";
-import { toCommand } from "./invoke";
 import { commandExecuted, commandFinished, commandLine, commandStart, promptStart, workingDirectory } from "./integration";
+import { toCommand } from "./invoke";
 import { execInSession, statementsOf } from "./session";
 
 type VscodeApi = typeof import("vscode");
@@ -50,7 +50,7 @@ function longestCommonPrefix(items: string[]): string {
 		return "";
 	}
 
-	let prefix = items[0];
+	let [prefix] = items;
 
 	for (const item of items) {
 		while (!item.startsWith(prefix)) {
@@ -73,7 +73,7 @@ const TAIL = 8000;
 const tails = new Map<number, { "terminal": number; "command"?: string; "open": boolean; "text": string }>();
 
 /** The escapes a terminal's output carries (colors, cursor moves, shell integration), for reading it as text. */
-// eslint-disable-next-line no-control-regex -- escapes are what's being stripped
+
 export const ESCAPES = /\u001B(?:\[[^A-Za-z@~]*[A-Za-z@~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)|[A-Z=>\\^_])/gu;
 
 /** A terminal opened to run one command (a task's, serveTaskTerminals), and how it exits when that's done. */
@@ -91,25 +91,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	};
 
 	tails.set(terminal, tail);
-	let sessionPromise: Promise<BashSession> | undefined;
-	const getSession = (): Promise<BashSession> => {
-		// just-bash, and the custom commands (which build on its defineCommand), load with the first command run.
-		sessionPromise ??= import("just-bash/browser").then((module) => {
-			const host: CommandHost = { "api": api, "runner": runner, "hub": hub, "writeLive": writeLive, "terminal": terminal, "session": getSession, "history": () => history };
-			const theirs = new Set(module.getCommandNames());
-			// Ours, each loaded the first time it runs (just-bash's lazy command), through juvy (invoke.ts): its options parsed
-			// and `--help` made from its definition, and a missing one's message said. (One that isn't here stays out of the way of
-			// one just-bash comes to have: its `python`, say.)
-			const commands = COMMANDS.filter((command) => command.missing === undefined || !theirs.has(command.name)).map((command) => ({ "name": command.name, "load": async () => toCommand(command, command.missing === undefined ? (await implementations[`./commands/${command.name}/${command.name}.ts`]!())(host) : undefined) }));
-
-			completions = [...new Set([...BUILTINS, ...theirs, ...PRESENT.map((command) => command.name)])];
-
-			return new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": commands }) as unknown as BashSession;
-		});
-
-		return sessionPromise;
-	};
-
 	// The session: cwd + env, carried from command to command (session.ts).
 	const state: SessionState = { "cwd": cwd0, "env": {} };
 	let line = "";
@@ -124,7 +105,10 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	let stdinBuffer = ""; // the line being typed into a running process's stdin (flushed on Enter)
 
 	// terminals want CRLF; the shell emits LF.
-	const write = (text: string): void => { fire(text.replace(/\r?\n/gu, "\r\n")); };
+	const write = (text: string): void => {
+		fire(text.replace(/\r?\n/gu, "\r\n"));
+	};
+
 	// Live output from a streaming process (node): written to the terminal as it arrives, stderr in red.
 	const writeLive: NodeOutput = (stream, data) => {
 		const text = data.replace(/\r?\n/gu, "\r\n");
@@ -132,14 +116,37 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		fire(stream === "err" ? `[31m${text}[0m` : text);
 	};
 
+	let sessionPromise: Promise<BashSession> | undefined;
+	const getSession = (): Promise<BashSession> => {
+		// just-bash, and the custom commands (which build on its defineCommand), load with the first command run.
+		sessionPromise ??= import("just-bash/browser").then((module) => {
+			const host: CommandHost = { "api": api, "runner": runner, "hub": hub, "writeLive": writeLive, "terminal": terminal, "session": getSession, "history": () => history };
+			const theirs = new Set(module.getCommandNames());
+			// Ours, each loaded the first time it runs (just-bash's lazy command), through juvy (invoke.ts): its options parsed
+			// and `--help` made from its definition, and a missing one's message said. (One that isn't here stays out of the way of
+			// one just-bash comes to have: its `python`, say.)
+			const commands = COMMANDS.filter((command) => command.missing === undefined || !theirs.has(command.name)).map((command) => ({ "name": command.name, "load": async () => toCommand(command, command.missing === undefined ? (await implementations[`./commands/${command.name}/${command.name}.ts`]())(host) : undefined) }));
+
+			completions = [...new Set([...BUILTINS, ...theirs, ...PRESENT.map((command) => command.name)])];
+
+			return new module.Bash({ "fs": createWorkspaceTerminalFs(api), "customCommands": commands });
+		});
+
+		return sessionPromise;
+	};
+
 	// Marked for VS Code's shell integration (integration.ts), as a desktop shell's prompt is: where it is, where
 	// the prompt starts, where the command line starts. (A redrawn prompt is marked again, as a shell's PS1 would be.)
-	const prompt = (): void => { fire(`\r\n${workingDirectory(state.cwd)}${promptStart()}[1;36m${state.cwd}[0m $ ${commandStart()}`); };
+	const prompt = (): void => {
+		fire(`\r\n${workingDirectory(state.cwd)}${promptStart()}[1;36m${state.cwd}[0m $ ${commandStart()}`);
+	};
 
 	const runLine = async (input: string): Promise<void> => {
+		const abort = new AbortController();
+		const { signal } = abort;
+
 		running = true;
-		controller = new AbortController();
-		const { signal } = controller;
+		controller = abort;
 		// Shell integration: what runs and that it's running, then how it ended. A blank line runs nothing.
 		const runs = input.trim() !== "";
 		let exitCode = 0;
@@ -171,6 +178,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 					fresh = false;
 				}
 			};
+
 			// A line with a streaming command (`node`) runs a statement at a time (session.ts statementsOf): just-bash
 			// hands back a line's output only when the whole line's done, so what came before the command would otherwise
 			// show after it. `;`, `&&` and `||` keep their meaning: a statement after `&&` runs if the last one ran succeeded,
@@ -179,23 +187,22 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 
 			for (let index = 0; index < statements.length && !signal.aborted; index += 1) {
 				const joined = statements[index - 1]?.then;
+				const skipped = (joined === "&&" && exitCode !== 0) || (joined === "||" && exitCode === 0);
 
-				if ((joined === "&&" && exitCode !== 0) || (joined === "||" && exitCode === 0)) {
-					continue;
+				if (!skipped) {
+					// (a streaming command's output, written as it runs, starts on a line of its own)
+					if (!fresh) {
+						write("\n");
+						fresh = true;
+					}
+
+					// `signal` is the shell's Ctrl-C: just-bash stops at the next statement boundary and forwards it to a custom
+					// command's `ctx.signal` (so `node` kills its worker). An interrupted run may not reach the PROBE.
+					const result = await execInSession(session, state, statements[index].text, signal);
+
+					({ exitCode } = result);
+					show(result);
 				}
-
-				// (a streaming command's output, written as it runs, starts on a line of its own)
-				if (!fresh) {
-					write("\n");
-					fresh = true;
-				}
-
-				// `signal` is the shell's Ctrl-C: just-bash stops at the next statement boundary and forwards it to a custom
-				// command's `ctx.signal` (so `node` kills its worker). An interrupted run may not reach the PROBE.
-				const result = await execInSession(session, state, statements[index]!.text, signal);
-
-				exitCode = result.exitCode;
-				show(result);
 			}
 		} catch (error) {
 			exitCode = 1;
@@ -237,29 +244,28 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 				return;
 			}
 
-			if (!runner.isRunning()) {
-				continue; // a non-node command is running; only Ctrl-C reaches it
-			}
-
-			if (code === 0x0D || code === 0x0A) { // Enter → flush the buffered line into stdin
-				fire("\r\n");
-				runner.sendStdin(`${stdinBuffer}\n`);
-				stdinBuffer = "";
-			} else if (code === 0x7F || code === 0x08) { // Backspace — edit the buffer
-				if (stdinBuffer !== "") {
-					stdinBuffer = stdinBuffer.slice(0, -1);
-					fire("\b \b");
-				}
-			} else if (code === 0x04) { // Ctrl-D: submit a partial line if any, else signal end-of-input (like a tty)
-				if (stdinBuffer === "") {
-					runner.endStdin();
-				} else {
-					runner.sendStdin(stdinBuffer);
+			// (a non-node command is running: only Ctrl-C reaches it)
+			if (runner.isRunning()) {
+				if (code === 0x0D || code === 0x0A) { // Enter → flush the buffered line into stdin
+					fire("\r\n");
+					runner.sendStdin(`${stdinBuffer}\n`);
 					stdinBuffer = "";
+				} else if (code === 0x7F || code === 0x08) { // Backspace — edit the buffer
+					if (stdinBuffer !== "") {
+						stdinBuffer = stdinBuffer.slice(0, -1);
+						fire("\b \b");
+					}
+				} else if (code === 0x04) { // Ctrl-D: submit a partial line if any, else signal end-of-input (like a tty)
+					if (stdinBuffer === "") {
+						runner.endStdin();
+					} else {
+						runner.sendStdin(stdinBuffer);
+						stdinBuffer = "";
+					}
+				} else if (code >= 0x20 || code === 0x09) { // printable / tab — echo and buffer
+					fire(character);
+					stdinBuffer += character;
 				}
-			} else if (code >= 0x20 || code === 0x09) { // printable / tab — echo and buffer
-				fire(character);
-				stdinBuffer += character;
 			}
 		}
 	};
@@ -268,10 +274,11 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	// ↑/↓ command history. Redraws are done with bare escapes: `\b` (cursor left), `\x1b[C` (cursor right),
 	// `\x1b[0K` (erase to end of line). After an in-place edit we reprint the tail and step the cursor back onto it.
 	const setLine = (next: string): void => {
-		fire("\b".repeat(pos) + "\x1b[0K" + next); // cursor to start, erase to EOL, print the replacement
+		fire("\b".repeat(pos) + "\x1B[0K" + next); // cursor to start, erase to EOL, print the replacement
 		line = next;
 		pos = next.length;
 	};
+
 	const insert = (chars: string): void => {
 		const tail = line.slice(pos);
 
@@ -279,6 +286,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		fire(chars + tail + "\b".repeat(tail.length)); // print inserted text + tail, then back onto the insertion point
 		pos += chars.length;
 	};
+
 	const backspace = (): void => {
 		if (pos === 0) {
 			return;
@@ -290,6 +298,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		pos -= 1;
 		fire("\b" + tail + " " + "\b".repeat(tail.length + 1)); // move left, reprint tail over the gap, erase last cell, restore cursor
 	};
+
 	const deleteAt = (): void => {
 		if (pos >= line.length) {
 			return;
@@ -300,10 +309,35 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		line = line.slice(0, pos) + tail;
 		fire(tail + " " + "\b".repeat(tail.length + 1));
 	};
-	const moveLeft = (): void => { if (pos > 0) { pos -= 1; fire("\b"); } };
-	const moveRight = (): void => { if (pos < line.length) { fire("\x1b[C"); pos += 1; } };
-	const moveHome = (): void => { if (pos > 0) { fire("\b".repeat(pos)); pos = 0; } };
-	const moveEnd = (): void => { if (pos < line.length) { fire("\x1b[C".repeat(line.length - pos)); pos = line.length; } };
+
+	const moveLeft = (): void => {
+		if (pos > 0) {
+			pos -= 1;
+			fire("\b");
+		}
+	};
+
+	const moveRight = (): void => {
+		if (pos < line.length) {
+			fire("\x1B[C");
+			pos += 1;
+		}
+	};
+
+	const moveHome = (): void => {
+		if (pos > 0) {
+			fire("\b".repeat(pos));
+			pos = 0;
+		}
+	};
+
+	const moveEnd = (): void => {
+		if (pos < line.length) {
+			fire("\x1B[C".repeat(line.length - pos));
+			pos = line.length;
+		}
+	};
+
 	const historyPrev = (): void => {
 		if (histIndex === 0) {
 			return;
@@ -316,6 +350,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		histIndex -= 1;
 		setLine(history[histIndex]);
 	};
+
 	const historyNext = (): void => {
 		if (histIndex >= history.length) {
 			return;
@@ -331,13 +366,9 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		const segments: string[] = [];
 
 		for (const segment of raw.split("/")) {
-			if (segment === "" || segment === ".") {
-				continue;
-			}
-
 			if (segment === "..") {
 				segments.pop();
-			} else {
+			} else if (segment !== "" && segment !== ".") {
 				segments.push(segment);
 			}
 		}
@@ -380,7 +411,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 			}
 		}
 
-		matches.sort((a, b) => a.localeCompare(b));
+		matches.sort((left, right) => left.localeCompare(right));
 
 		if (matches.length === 0) {
 			fire("\x07"); // bell
@@ -389,8 +420,8 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		}
 
 		if (matches.length === 1) {
-			const only = matches[0];
-			const suffix = isCommand ? " " : isDir.get(only) === true ? "/" : " ";
+			const [only] = matches;
+			const suffix = !isCommand && isDir.get(only) === true ? "/" : " ";
 
 			setLine(before + dirPrefix + only + suffix);
 
@@ -415,14 +446,68 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	// application-cursor mode). Anything unmapped (modified arrows like "[1;5C") is ignored rather than echoed.
 	const handleEscape = (seq: string): void => {
 		switch (seq) {
-			case "[A": case "OA": { historyPrev(); break; }
-			case "[B": case "OB": { historyNext(); break; }
-			case "[C": case "OC": { moveRight(); break; }
-			case "[D": case "OD": { moveLeft(); break; }
-			case "[H": case "OH": case "[1~": case "[7~": { moveHome(); break; }
-			case "[F": case "OF": case "[4~": case "[8~": { moveEnd(); break; }
-			case "[3~": { deleteAt(); break; }
+			case "[A":
+			case "OA": {
+				historyPrev();
+				break;
+			}
+
+			case "[B":
+			case "OB": {
+				historyNext();
+				break;
+			}
+
+			case "[C":
+			case "OC": {
+				moveRight();
+				break;
+			}
+
+			case "[D":
+			case "OD": {
+				moveLeft();
+				break;
+			}
+
+			case "[H":
+			case "OH":
+			case "[1~":
+			case "[7~": {
+				moveHome();
+				break;
+			}
+
+			case "[F":
+			case "OF":
+			case "[4~":
+			case "[8~": {
+				moveEnd();
+				break;
+			}
+
+			case "[3~": {
+				deleteAt();
+				break;
+			}
+
 			default: break;
+		}
+	};
+
+	// One character of an escape sequence in progress.
+	const feedEscape = (character: string, code: number): void => {
+		esc += character;
+
+		// The final byte of a CSI/SS3 sequence is a letter or `~` (0x40–0x7E); digits and `;` are parameters.
+		// The introducer (`[` or `O`) is the first char and never terminates on its own.
+		if (esc.length >= 2 && code >= 0x40 && code <= 0x7E) {
+			inEscape = false;
+			handleEscape(esc);
+			esc = "";
+		} else if (esc.length === 1 && esc !== "[" && esc !== "O") {
+			inEscape = false; // not a sequence we track (bare ESC, etc.) — drop it
+			esc = "";
 		}
 	};
 
@@ -437,23 +522,8 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 			const code = character.charCodeAt(0);
 
 			if (inEscape) {
-				esc += character;
-
-				// The final byte of a CSI/SS3 sequence is a letter or `~` (0x40–0x7E); digits and `;` are parameters.
-				// The introducer (`[` or `O`) is the first char and never terminates on its own.
-				if (esc.length >= 2 && code >= 0x40 && code <= 0x7E) {
-					inEscape = false;
-					handleEscape(esc);
-					esc = "";
-				} else if (esc.length === 1 && esc !== "[" && esc !== "O") {
-					inEscape = false; // not a sequence we track (bare ESC, etc.) — drop it
-					esc = "";
-				}
-
-				continue;
-			}
-
-			if (code === 0x1B) { // ESC — begin an escape sequence
+				feedEscape(character, code);
+			} else if (code === 0x1B) { // ESC — begin an escape sequence
 				inEscape = true;
 				esc = "";
 			} else if (code === 0x0D || code === 0x0A) { // Enter (CR from a terminal; LF from paste/automation)
@@ -495,7 +565,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 
 		// A task's terminal: run its command, shown as typed.
 		if (run !== undefined) {
-			fire(`\x1b[1;36m${state.cwd}\x1b[0m $ ${run.command}\r\n`);
+			fire(`\x1B[1;36m${state.cwd}\x1B[0m $ ${run.command}\r\n`);
 			void runLine(run.command);
 
 			return;
@@ -506,10 +576,14 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	};
 
 	// The terminal closing stops what it's running — a dev server, a script — rather than leaving it running unseen.
-	return { "start": start, "input": input, "shutdown": () => {
-		tail.open = false;
-		controller?.abort();
-	} };
+	return {
+		"start": start,
+		"input": input,
+		"shutdown": () => {
+			tail.open = false;
+			controller?.abort();
+		}
+	};
 }
 
 /** The terminals, as data (the `terminal_output` tool): each one's number, whether it's open, the command it runs (a
@@ -544,7 +618,9 @@ export function serveTaskTerminals(api: VscodeApi, runner: NodeRunner, hub: Hub)
 		}
 
 		const offs: (() => void)[] = [];
-		const process = createBashProcess(api, runner, hub, (data) => { hub.publish(`terminal.out.${id}`, data); }, typeof cwd === "string" ? cwd : "/workspace", {
+		const process = createBashProcess(api, runner, hub, (data) => {
+			hub.publish(`terminal.out.${id}`, data);
+		}, typeof cwd === "string" ? cwd : "/workspace", {
 			"command": command,
 			"exit": (code) => {
 				hub.publish(`terminal.exit.${id}`, { "code": code });
@@ -555,7 +631,11 @@ export function serveTaskTerminals(api: VscodeApi, runner: NodeRunner, hub: Hub)
 			}
 		});
 
-		offs.push(hub.subscribe(`terminal.in.${id}`, (data) => { process.input(String(data)); }), hub.subscribe(`terminal.stop.${id}`, () => { process.shutdown?.(); }));
+		offs.push(hub.subscribe(`terminal.in.${id}`, (data) => {
+			process.input(data as string);
+		}), hub.subscribe(`terminal.stop.${id}`, () => {
+			process.shutdown?.();
+		}));
 		process.start();
 
 		return true;

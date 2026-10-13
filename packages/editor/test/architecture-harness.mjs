@@ -21,6 +21,7 @@ export const TIMEOUT_MS = 120_000;
 /** The realms a booted editor has (the smoke test's `boot`), and how long a session waits for them before giving up. */
 const BOOT_REALMS = ["shell", "root", "sw", "workbench", "pod", "node"];
 const BOOT_TIMEOUT_MS = 90_000;
+
 /** Where the page's debug-mcp socket (:7378) is relayed to: this checkout's debug-mcp (`debugMcp: true` starts one; with
  *  `debugMcp: "external"` the test runs its own there — e.g. in-process, to read its store). */
 export const DEBUG_MCP_PORT = 7399;
@@ -46,7 +47,9 @@ async function startProcess(command, args, cwd, ready) {
 	}
 
 	await new Promise((resolve, reject) => {
-		const timer = setTimeout(() => { reject(new Error(command + " didn't start")); }, TIMEOUT_MS);
+		const timer = setTimeout(() => {
+			reject(new Error(command + " didn't start"));
+		}, TIMEOUT_MS);
 		const onData = (chunk) => {
 			// Without colors stripped, Vite's "Local:" never matches where CI turns them on ("\e[1mLocal\e[22m:").
 			if (stripVTControlCharacters(String(chunk)).includes(ready)) {
@@ -57,7 +60,9 @@ async function startProcess(command, args, cwd, ready) {
 
 		child.stdout.on("data", onData);
 		child.stderr.on("data", onData);
-		child.on("exit", (code) => { reject(new Error(command + " exited: " + code)); });
+		child.on("exit", (code) => {
+			reject(new Error(command + " exited: " + code));
+		});
 	});
 
 	return child;
@@ -67,13 +72,13 @@ async function startProcess(command, args, cwd, ready) {
 
 const matches = (pattern, value) => (pattern instanceof RegExp ? pattern.test(value) : pattern === value);
 
-/** Every observed channel between `a` and `b` (either direction; ids or patterns). */
-export function between(snapshot, a, b) {
-	return snapshot.channels.filter((channel) => (matches(a, channel.a) && matches(b, channel.b)) || (matches(a, channel.b) && matches(b, channel.a)));
+/** Every observed channel between `one` and `other` (either direction; ids or patterns). */
+export function between(snapshot, one, other) {
+	return snapshot.channels.filter((channel) => (matches(one, channel.a) && matches(other, channel.b)) || (matches(one, channel.b) && matches(other, channel.a)));
 }
 
 export const alive = (id) => (snapshot) => snapshot.nodes.some((node) => matches(id, node.id) && node.state === "alive");
-export const hasLabel = (a, b, label) => (snapshot) => between(snapshot, a, b).some((channel) => Object.keys(channel.labels).some((name) => label.test(name)));
+export const hasLabel = (one, other, label) => (snapshot) => between(snapshot, one, other).some((channel) => Object.keys(channel.labels).some((name) => label.test(name)));
 
 // ── one dev server for a whole run ────────────────────────────────────────────────────────────────────────────
 
@@ -119,7 +124,9 @@ export async function startSession(options = {}) {
 		// The page's debug-mcp socket (:7378), relayed to this checkout's debug-mcp.
 		await relayWebSocket(context, /:7378/u, `ws://localhost:${DEBUG_MCP_PORT}`);
 	} else {
-		await context.routeWebSocket(/:7378/u, (route) => { route.close(); });
+		await context.routeWebSocket(/:7378/u, (route) => {
+			route.close();
+		});
 	}
 
 	// (`prepare`: what a test sets up on the browser context before the page loads — a route answering for the site, say.)
@@ -187,10 +194,14 @@ export async function startSession(options = {}) {
 
 	// A look every second all session long, so a context that comes and goes between a test's own looks (a debug run's
 	// server) is seen all the same.
-	const looking = setInterval(() => { void look().catch(() => undefined); }, 1000);
+	const looking = setInterval(() => {
+		void look().catch(() => undefined);
+	}, 1000);
 
 	looking.unref();
-	page.on("close", () => { clearInterval(looking); });
+	page.on("close", () => {
+		clearInterval(looking);
+	});
 
 	/** Poll what the view observed until `ready(snapshot)` holds. */
 	async function observed(what, ready, timeoutMs = TIMEOUT_MS) {
@@ -251,7 +262,7 @@ export async function startSession(options = {}) {
 		"seen": () => ({ ...snapshot, "nodes": [...nodesSeen.values()], "channels": [...channelsSeen.values()], "topology": topologySeen }),
 		"conformance": async () => workbench().evaluate(() => globalThis.__architecture.conformance()),
 		/** An RPC into the hub tree, from the workbench realm. */
-		"request": async (subject, data, timeoutMs) => workbench().evaluate(([s, d, t]) => globalThis.__architecture.request(s, d, t), [subject, data, timeoutMs]),
+		"request": async (subject, data, timeoutMs) => workbench().evaluate(([sentSubject, sentData, sentTimeoutMs]) => globalThis.__architecture.request(sentSubject, sentData, sentTimeoutMs), [subject, data, timeoutMs]),
 		/** Type a command into a terminal: the current one, or a new one (the current may be busy with a server). */
 		"terminal": async (command, { fresh = false } = {}) => {
 			// The terminal is created on demand (it's off the boot path), so a session starts without one.

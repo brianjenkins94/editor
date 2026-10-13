@@ -6,8 +6,8 @@
  */
 import type { EvidenceStore } from "../../shared/evidence-store";
 import type { Suggestion } from "./suggestions";
-import { suggestions } from "./suggestions";
 import * as vscode from "vscode";
+import { suggestions } from "./suggestions";
 
 const CODE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 
@@ -50,6 +50,7 @@ export function registerFixes(context: vscode.ExtensionContext, store: EvidenceS
 
 		return [settings.get<number>("minRuns") ?? 3, settings.get<number>("minSeen") ?? 10];
 	};
+
 	const update = (file: string, found: FileSuggestions | undefined): void => {
 		if (found === undefined || found.suggestions.length === 0) {
 			byFile.delete(file);
@@ -132,11 +133,15 @@ export function registerFixes(context: vscode.ExtensionContext, store: EvidenceS
 			await checkFile(file);
 		}
 	};
+
 	let typing: ReturnType<typeof setTimeout> | undefined;
 
-	context.subscriptions.push(diagnostics, changed, ...Object.values(styles).flat(),
+	context.subscriptions.push(
+		diagnostics,
+		changed,
+		...Object.values(styles).flat(),
 		vscode.languages.registerCodeActionsProvider({ "scheme": "file" }, {
-			"provideCodeActions": (document, _range, { diagnostics: here }) => here.flatMap((diagnostic) => {
+			"provideCodeActions": (document, _range, { "diagnostics": here }) => here.flatMap((diagnostic) => {
 				const fix = fixes.get(diagnostic);
 
 				if (fix === undefined) {
@@ -152,7 +157,9 @@ export function registerFixes(context: vscode.ExtensionContext, store: EvidenceS
 				return [action];
 			})
 		}, { "providedCodeActionKinds": [vscode.CodeActionKind.QuickFix] }),
-		store.onDidChange((file) => { void checkFile(file); }),
+		store.onDidChange((file) => {
+			void checkFile(file);
+		}),
 		// Shown: drawn from what's known, then looked at as the document it is (its diagnostics, for the lightbulb).
 		vscode.window.onDidChangeVisibleTextEditors((editors) => {
 			for (const editor of editors) {
@@ -174,7 +181,9 @@ export function registerFixes(context: vscode.ExtensionContext, store: EvidenceS
 				}
 
 				clearTimeout(typing);
-				typing = setTimeout(() => { void check(event.document); }, 400);
+				typing = setTimeout(() => {
+					void check(event.document);
+				}, 400);
 			}
 		}),
 		// Closed: back to its text on disk (its diagnostics go with the editor).

@@ -103,10 +103,14 @@ export function startBablr(hub: Hub): Bablr {
 
 		// Reject a queued call as soon as it's aborted, not when its turn comes.
 		return new Promise<T>((resolve, reject) => {
-			const onAbort = (): void => { reject(combined.reason); };
+			const onAbort = (): void => {
+				reject(combined.reason as Error);
+			};
 
 			combined.addEventListener("abort", onAbort, { "once": true });
-			run.then(resolve, reject).finally(() => { combined.removeEventListener("abort", onAbort); });
+			run.then(resolve, reject).finally(() => {
+				combined.removeEventListener("abort", onAbort);
+			});
 		});
 	};
 
@@ -128,7 +132,11 @@ export function startBablr(hub: Hub): Bablr {
 			const asked = request<{ "spans"?: Span[]; "unparsable"?: true }>("spans", { "source": source }, signal).then((answer) => answer.spans);
 
 			last = { "source": source, "spans": asked };
-			asked.catch(() => { if (last?.spans === asked) { last = undefined; } });
+			asked.catch(() => {
+				if (last?.spans === asked) {
+					last = undefined;
+				}
+			});
 		}
 
 		return last.spans;
@@ -168,6 +176,7 @@ export function startBablr(hub: Hub): Bablr {
 
 		return ranges.map((_, index) => refs?.[index] ?? undefined);
 	};
+
 	const resolveRefs = async (source: string, file: string, refs: SpanRef[], { observed = false, types, texts = [] }: ResolveOptions = {}): Promise<Resolved[]> => {
 		const first = (await request<{ "resolutions": Resolved[] }>("resolve", { "source": source, "file": file, "refs": refs, "observed": observed, "types": types })).resolutions;
 		// An authored one its own id didn't find is looked for further: in the other files that differ from HEAD (code
@@ -181,7 +190,7 @@ export function startBablr(hub: Hub): Bablr {
 
 		const baselines: Record<string, string> = {};
 
-		for (const blob of new Set(lost.flatMap(({ ref }) => ref.baseline === undefined ? [] : [ref.baseline.blob]))) {
+		for (const blob of new Set(lost.flatMap(({ ref }) => (ref.baseline === undefined ? [] : [ref.baseline.blob])))) {
 			const text = await blobText(blob);
 
 			if (text !== undefined) {
@@ -197,10 +206,13 @@ export function startBablr(hub: Hub): Bablr {
 
 		const again = (await request<{ "resolutions": Resolved[] }>("resolve", { "source": source, "file": file, "refs": lost.map(({ ref }) => ref), "baselines": baselines, "texts": texts, "others": others, "types": types })).resolutions;
 
-		lost.forEach(({ index }, at) => { first[index] = again[at]; });
+		lost.forEach(({ index }, at) => {
+			first[index] = again[at];
+		});
 
 		return first;
 	};
+
 	// The pod's `editor.annotations.spans`, `editor.annotations.refer` and `editor.annotations.resolve` (for extensions)
 	// ask here, so they share the worker and its cache.
 	const offServe = [

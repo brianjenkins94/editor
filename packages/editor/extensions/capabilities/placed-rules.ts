@@ -7,9 +7,9 @@
  */
 import type { PaneContent, PaneMark } from "@brianjenkins94/run-contract/pane";
 import { refreshPane } from "@brianjenkins94/run-contract/pane";
+import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
 import { placesOf } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
 
 /** The view's id: its provider is `placedRules.paneView`. */
 const VIEW = "placedRules";
@@ -25,16 +25,14 @@ async function placedIn(uri: string): Promise<PaneContent | undefined> {
 
 	for (const { whose, sentence, problem, place, rule } of listed) {
 		// (one that can't apply — broken, or its place lost — is the Rules view's to say, not a mark's)
-		if (problem !== undefined || place?.line === undefined || place.status === "orphaned" || !(placesOf(rule) as ({ "file"?: string } | undefined)[]).some((each) => each?.file === file)) {
-			continue;
+		if (problem === undefined && place?.line !== undefined && place.status !== "orphaned" && (placesOf(rule) as ({ "file"?: string } | undefined)[]).some((each) => each?.file === file)) {
+			const end = place.endLine ?? place.line;
+			const at = byLine.get(place.line - 1) ?? { "sentences": [], "uncertain": false };
+
+			at.sentences.push(`${whose === "mine" ? "My rule" : "A shared rule"}${end > place.line ? ` (lines ${place.line}–${end})` : ""}: ${sentence}${place.status === "uncertain" ? " — found here by a weak match: open it in the Rules view to confirm or re-place it" : ""}`);
+			at.uncertain ||= place.status === "uncertain";
+			byLine.set(place.line - 1, at);
 		}
-
-		const end = place.endLine ?? place.line;
-		const at = byLine.get(place.line - 1) ?? { "sentences": [], "uncertain": false };
-
-		at.sentences.push(`${whose === "mine" ? "My rule" : "A shared rule"}${end > place.line ? ` (lines ${place.line}–${end})` : ""}: ${sentence}${place.status === "uncertain" ? " — found here by a weak match: open it in the Rules view to confirm or re-place it" : ""}`);
-		at.uncertain ||= place.status === "uncertain";
-		byLine.set(place.line - 1, at);
 	}
 
 	if (byLine.size === 0) {
@@ -46,7 +44,9 @@ async function placedIn(uri: string): Promise<PaneContent | undefined> {
 
 export function registerPlacedRules(context: vscode.ExtensionContext): void {
 	const watcher = vscode.workspace.createFileSystemWatcher(POLICY_GLOB);
-	const changed = (): void => { void refreshPane(vscode.commands, VIEW); };
+	const changed = (): void => {
+		void refreshPane(vscode.commands, VIEW);
+	};
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand(`${VIEW}.paneView`, async (uri: unknown) => (typeof uri === "string" ? placedIn(uri) : undefined)),

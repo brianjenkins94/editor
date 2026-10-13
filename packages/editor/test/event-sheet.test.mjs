@@ -9,8 +9,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // Node 24 strips the types; rowAnchors' only runtime import is bablr/dist (gitignored, local/CI-built).
-import { generate, sampleSheet } from "../extensions/event-sheet/sheet.ts";
 import { rowAnchors } from "../extensions/event-sheet/sheet-anchors.ts";
+import { generate, sampleSheet } from "../extensions/event-sheet/sheet.ts";
 
 test("every generated line is chrome or maps to exactly one row", () => {
 	const program = generate(sampleSheet);
@@ -52,7 +52,7 @@ test("each row owns a single contiguous line range, and rowAt/spanOf are inverse
 	// Rows appear in the generated file in sheet order, not overlapping.
 	const starts = sampleSheet.rows.map((row) => program.spanOf(row.id).startLine);
 
-	assert.deepEqual([...starts].sort((a, b) => a - b), starts, "row spans are in sheet order");
+	assert.deepEqual([...starts].sort((left, right) => left - right), starts, "row spans are in sheet order");
 });
 
 test("click-to-jump: an unknown row has no span, a real row lands on its condition comment", () => {

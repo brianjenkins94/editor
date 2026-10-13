@@ -9,10 +9,9 @@
  * The worker is blocked in Atomics.wait there, so the adapter resumes it through the shared control word it sent at
  * launch.
  */
-import type { CoverageEvent, Effect } from "@brianjenkins94/run-contract";
+import type { CoverageEvent, Effect, LiveBatch } from "@brianjenkins94/run-contract";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
-import type { LiveBatch } from "@brianjenkins94/run-contract";
-import type { Replay } from "../../previews/page-evidence";
+import type { Replay } from "../../shared/preview-evidence";
 
 // The run contract's own (what a debugger tells the editor), as tsval's worker and adapter speak it too.
 export type { RunEnd, SiteObservation, StatementCoverage, StatementProfile } from "@brianjenkins94/run-contract";
@@ -116,4 +115,3 @@ export type WorkerEvent =
 /** Coverage, and the observed sites, as the run contract has them (@brianjenkins94/run-contract): the body of the
  *  adapter's `getCoverage` reply and of its `coverage` event. */
 export type CoverageReport = CoverageEvent;
-

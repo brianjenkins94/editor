@@ -7,9 +7,9 @@
  * The pod hears what the preview pages report (`stops.preview`, as the margin does: recorded-stops.ts) and keeps each
  * file's latest; the text of the version that ran comes from the dev server that served it (`preview.version`).
  */
-import * as vscode from "vscode";
+import type { RecordedStop, Replay, StopHit } from "../../shared/preview-evidence";
 import { createRpcClient } from "@brianjenkins94/hub";
-import type { RecordedStop, Replay, StopHit } from "../../previews/page-evidence";
+import * as vscode from "vscode";
 import { podHub } from "./pod";
 
 /** A hit that can be stepped: its stop, the hit, and the preview port it came from. */

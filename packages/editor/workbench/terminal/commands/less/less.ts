@@ -4,8 +4,8 @@
  */
 import type { Handler } from "../../catalog";
 
-/** stdin's bytes (just-bash hands them over as latin1 characters) as UTF-8 text. */
-const text = (stdin: unknown): string => new TextDecoder().decode(Uint8Array.from(String(stdin ?? ""), (character) => character.charCodeAt(0)));
+/** stdin's bytes (just-bash hands them over as latin1 characters, in a string) as UTF-8 text. */
+const text = (stdin: unknown): string => new TextDecoder().decode(Uint8Array.from(typeof stdin === "string" ? stdin : "", (character) => character.charCodeAt(0)));
 
 export function pager(name: string): Handler {
 	return async (config, ctx) => {

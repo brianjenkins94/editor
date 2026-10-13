@@ -9,18 +9,18 @@
  * filesystem — and every change it makes is reported back as `workspace.changed` (persisted + announced by the
  * workbench; see workspace-changes.ts).
  */
+import type { WorkspaceChange } from "../shared/workspace-changes";
+import type { RequestHandler, VirtualRequest, VirtualResponse } from "../shared/workspace-runtime";
+
 import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { installWorkerProbe, observe } from "@brianjenkins94/observability";
-
 import { NETWORK_PROBES } from "../shared/architecture";
 import { identifyWorker } from "../shared/architecture-ids";
 import { ZENFS_NODE } from "../shared/architecture-zenfs";
-import type { WorkspaceChange } from "../shared/workspace-changes";
-import { WORKSPACE_CHANGED } from "../shared/workspace-changes";
 
-import type { RequestHandler, VirtualRequest, VirtualResponse } from "./workspace-runtime";
-import { answerServer, workerTapResponse } from "./workspace-runtime";
-import { attachSharedWorkspace, connectWorkspace, createZenfsVFS, getSharedWorkspaceBuffer } from "./zenfs-vfs.js";
+import { WORKSPACE_CHANGED } from "../shared/workspace-changes";
+import { answerServer, workerTapResponse } from "../shared/workspace-runtime";
+import { attachSharedWorkspace, connectWorkspace, createZenfsVFS, getSharedWorkspaceBuffer } from "../shared/zenfs-vfs.js";
 
 const hub = createHub({ "id": "node" });
 
@@ -33,20 +33,27 @@ installWorkerProbe(architecture, identifyWorker);
 
 // The workspace: the shared buffer comes from the workbench over the hub, and every change this worker makes to it
 // (a dev server's writes, an install) goes back as `workspace.changed` — the workbench persists and announces it.
-connectWorkspace({ "architecture": architecture, "onChanges": (changes) => { hub.publish(WORKSPACE_CHANGED, changes); } });
+connectWorkspace({
+	"architecture": architecture,
+	"onChanges": (changes) => {
+		hub.publish(WORKSPACE_CHANGED, changes);
+	}
+});
 const rpc = createRpcClient(hub);
 const workspaceReady = rpc.request("workspace.buffer", undefined, { "timeoutMs": 10000, "waitForResponderMs": 10000 })
-	.then(attachSharedWorkspace, (error: unknown) => { log.warn("no shared workspace — running on this worker's own filesystem", { "error": String(error) }); });
+	.then(attachSharedWorkspace, (error: unknown) => {
+		const failure = error as Error | string;
+
+		log.warn("no shared workspace — running on this worker's own filesystem", { "error": String(failure) });
+	});
 
 let vfsPromise: ReturnType<typeof createZenfsVFS> | undefined;
 const getVfs = (): ReturnType<typeof createZenfsVFS> => (vfsPromise ??= workspaceReady.then(createZenfsVFS));
-
 
 // Preview bridge relay (M0): the service worker's `/__virtual__/<tab>/<port>/…` request arrives here (relayed by
 // the tab's root); we drive the dev server on that port (M1, below) and return its response — or relay it to a debug run
 // serving the port. Body crosses as a Uint8Array (structured-clone over the worker port).
 type PreviewServer = RequestHandler & { "start": () => void; "setInstrumentation": (level: "full" | "coverage" | "off") => void; "versionSource": (oid: string) => { "file": string; "source": string } | undefined; "setHMRTarget": (target: { "postMessage": (message: unknown, origin?: string) => void }) => void; "setTransformErrorReporter": (reporter: (info: { "url": string; "name": string; "message": string; "stack"?: string }) => void) => void; "notifyChange": (path: string) => void; "setStops": (stops: Record<string, number[]>) => string[]; "stop": () => void };
-
 
 // Dev servers started in this worker (M1), keyed by their virtual port — checked before the raw http registry —
 // and the workspace root each serves.
@@ -135,7 +142,9 @@ serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number
 	// Surface a cold-start transform failure on the observability plane so it's queryable via debug-mcp — not just a
 	// worker console.warn we can't read. The server now returns a 500 (self-healing) instead of retrying, so if this
 	// fires the preview may show a one-load error that recovers on reload; a recurrence means the race is still live.
-	server.setTransformErrorReporter((info) => { log.warn("preview transform failed (served 500, recovers on reload)", info); });
+	server.setTransformErrorReporter((info) => {
+		log.warn("preview transform failed (served 500, recovers on reload)", info);
+	});
 	// The workspace's modules, instrumented for runtime evidence (RUNTIME-EVIDENCE.md, the third slice) as far as the
 	// `silo.evidence.previews` setting says (core answers; `full` when it can't): the page runtime the tap carries
 	// counts what they report.
@@ -155,12 +164,14 @@ serve(hub, "preview.start", async (raw): Promise<{ "ok": boolean; "port": number
 // almostnode + typescript are imported for the first time, so the FIRST transform reproduces the true cold-start
 // window that a warm in-process restart can't. Its hub links into ours; we hand it the workspace SAB in one
 // `provoke.round` call, await the reply, then terminate it.
-async function provokeColdChild(buffer: SharedArrayBuffer, root: string, port: number, urls: string[], timeoutMs: number): Promise<{ "failures": Array<{ "url": string; "status": number }>; "transformErrors": Array<{ "url": string; "name": string; "message": string }>; "error"?: string }> {
+async function provokeColdChild(buffer: SharedArrayBuffer, root: string, port: number, urls: string[], timeoutMs: number): Promise<{ "failures": { "url": string; "status": number }[]; "transformErrors": { "url": string; "name": string; "message": string }[]; "error"?: string }> {
 	const worker = new Worker(new URL("./provoke-worker.js", location.href), { "type": "module" });
 	const unlink = hub.link(portTransport(worker));
 	// One deadline for the whole round (the child's boot + its cold transforms), and a worker that fails ends it now.
 	const round = new AbortController();
-	const timer = setTimeout(() => { round.abort(new Error("provoke child timed out after " + timeoutMs + "ms")); }, timeoutMs);
+	const timer = setTimeout(() => {
+		round.abort(new Error("provoke child timed out after " + timeoutMs + "ms"));
+	}, timeoutMs);
 
 	worker.addEventListener("error", (event) => {
 		event.preventDefault();
@@ -170,7 +181,7 @@ async function provokeColdChild(buffer: SharedArrayBuffer, root: string, port: n
 	try {
 		architecture.record("provoke", ZENFS_NODE, "lifecycle", "mount /workspace (shared " + Math.round(buffer.byteLength / 1048576) + " MB)");
 
-		return await rpc.request("provoke.round", { "buffer": buffer, "root": root, "port": port, "modules": urls }, { "timeoutMs": Infinity, "waitForResponderMs": timeoutMs, "signal": round.signal }) as { "failures": Array<{ "url": string; "status": number }>; "transformErrors": Array<{ "url": string; "name": string; "message": string }>; "error"?: string };
+		return await rpc.request("provoke.round", { "buffer": buffer, "root": root, "port": port, "modules": urls }, { "timeoutMs": Infinity, "waitForResponderMs": timeoutMs, "signal": round.signal }) as { "failures": { "url": string; "status": number }[]; "transformErrors": { "url": string; "name": string; "message": string }[]; "error"?: string };
 	} finally {
 		clearTimeout(timer);
 		unlink();
@@ -187,7 +198,7 @@ async function provokeColdChild(buffer: SharedArrayBuffer, root: string, port: n
 //     (cross-origin isolation); without it there's nothing to hand the child, so it errors.
 // A transform that loses the race returns 500 (we removed the masking retry), so we count 500s and surface the
 // reporter's error shape.
-interface ProvokeResult { "rounds": number; "modules": string[]; "hardReset": boolean; "provoked": boolean; "failures": Array<{ "round": number; "url": string; "status": number }>; "transformErrors": Array<{ "round": number; "url": string; "name": string; "message": string }> }
+interface ProvokeResult { "rounds": number; "modules": string[]; "hardReset": boolean; "provoked": boolean; "failures": { "round": number; "url": string; "status": number }[]; "transformErrors": { "round": number; "url": string; "name": string; "message": string }[] }
 // A version of a module a dev server instrumented, by its source's blob oid: runtime evidence reads a version's counts
 // against its own text (evidence.ts asks as soon as a page reports a version — a hot update may have replaced it).
 serve(hub, "preview.version", (raw) => {
@@ -209,8 +220,70 @@ serve(hub, "preview.stops", (raw) => {
 	return true;
 });
 
+/** The whole src/ graph under `root` (what a cold boot fetches at once) — or, when it can't be read, the usual entries. */
+function srcModules(vfs: Awaited<ReturnType<typeof createZenfsVFS>>, root: string): string[] {
+	try {
+		const srcDir = root.replace(/\/$/u, "") + "/src";
+
+		return (vfs.readdirSync(srcDir)).filter((name) => /\.[jt]sx?$/u.test(name)).map((name) => "/src/" + name);
+	} catch {
+		return ["/src/main.tsx", "/src/App.tsx"];
+	}
+}
+
+/** One hardReset round of `preview.provoke`: a cold child's transforms, its failures into `collected`. */
+async function provokeColdRound(buffer: SharedArrayBuffer, root: string, port: number, urls: string[], round: number, collected: Pick<ProvokeResult, "failures" | "transformErrors">): Promise<void> {
+	const outcome = await provokeColdChild(buffer, root, port, urls, 30000);
+
+	for (const failure of outcome.failures) {
+		collected.failures.push({ "round": round, "url": failure.url, "status": failure.status });
+	}
+
+	for (const info of outcome.transformErrors) {
+		collected.transformErrors.push({ "round": round, "url": info.url, "name": info.name, "message": info.message });
+	}
+
+	if (outcome.error !== undefined) {
+		log.warn("preview.provoke child error (round " + round + ")", { "error": outcome.error });
+	}
+}
+
+/** One warm round of `preview.provoke`: the preview's dev server restarted in this worker, and the whole graph fired at
+ *  it — its failures into `collected`. */
+async function provokeWarmRound(ViteDevServer: typeof import("@brianjenkins94/almostnode")["ViteDevServer"], vfs: Awaited<ReturnType<typeof createZenfsVFS>>, port: number, root: string, urls: string[], round: number, collected: Pick<ProvokeResult, "failures" | "transformErrors">): Promise<void> {
+	previewServers.get(port)?.stop();
+
+	const server = new ViteDevServer(vfs, { "port": port, "root": root }) as unknown as PreviewServer;
+
+	server.start();
+	server.setHMRTarget({
+		"postMessage": (message) => {
+			hub.publish(`preview.hmr.${port}`, message);
+		}
+	});
+	server.setTransformErrorReporter((info) => {
+		log.warn("preview transform failed (provoke round " + round + ")", info);
+		collected.transformErrors.push({ "round": round, "url": info.url, "name": info.name, "message": info.message });
+	});
+	previewServers.set(port, server);
+	lastPreviewConfig = { "port": port, "root": root };
+
+	// Fire the whole graph at once — losing the cold-start race is the thing we're trying to catch.
+	const results = await Promise.all(urls.map(async (url) => {
+		const response = await server.handleRequest("GET", url, {});
+
+		return { "url": url, "status": response.statusCode };
+	}));
+
+	for (const result of results) {
+		if (result.status >= 500) {
+			collected.failures.push({ "round": round, "url": result.url, "status": result.status });
+		}
+	}
+}
+
 serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
-	const { rounds = 10, modules, hardReset = false, port: portArg, root: rootArg } = (raw ?? {}) as { "rounds"?: number; "modules"?: string[]; "hardReset"?: boolean; "port"?: number; "root"?: string };
+	const { rounds = 10, modules, hardReset = false, "port": portArg, "root": rootArg } = (raw ?? {}) as { "rounds"?: number; "modules"?: string[]; "hardReset"?: boolean; "port"?: number; "root"?: string };
 	const port = portArg ?? lastPreviewConfig?.port;
 	const root = rootArg ?? lastPreviewConfig?.root;
 
@@ -222,20 +295,10 @@ serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
 	const vfs = await getVfs();
 
 	// The module set to hammer: caller-supplied, else the whole src/ graph (what a cold boot fetches at once).
-	let urls = modules;
-
-	if (urls === undefined) {
-		try {
-			const srcDir = root.replace(/\/$/, "") + "/src";
-
-			urls = (vfs.readdirSync(srcDir) as string[]).filter((name) => /\.[jt]sx?$/.test(name)).map((name) => "/src/" + name);
-		} catch {
-			urls = ["/src/main.tsx", "/src/App.tsx"];
-		}
-	}
-
+	const urls = modules ?? srcModules(vfs, root);
 	const failures: ProvokeResult["failures"] = [];
 	const transformErrors: ProvokeResult["transformErrors"] = [];
+	const collected = { "failures": failures, "transformErrors": transformErrors };
 	const span = log.span("preview.provoke", { "rounds": rounds, "modules": urls.length, "hardReset": hardReset });
 
 	if (hardReset) {
@@ -248,44 +311,11 @@ serve(hub, "preview.provoke", async (raw): Promise<ProvokeResult> => {
 		}
 
 		for (let round = 0; round < rounds; round += 1) {
-			const outcome = await provokeColdChild(buffer, root, port, urls, 30000);
-
-			for (const failure of outcome.failures) {
-				failures.push({ "round": round, "url": failure.url, "status": failure.status });
-			}
-
-			for (const info of outcome.transformErrors) {
-				transformErrors.push({ "round": round, "url": info.url, "name": info.name, "message": info.message });
-			}
-
-			if (outcome.error !== undefined) {
-				log.warn("preview.provoke child error (round " + round + ")", { "error": outcome.error });
-			}
+			await provokeColdRound(buffer, root, port, urls, round, collected);
 		}
 	} else {
 		for (let round = 0; round < rounds; round += 1) {
-			previewServers.get(port)?.stop();
-
-			const server = new ViteDevServer(vfs, { "port": port, "root": root }) as unknown as PreviewServer;
-
-			server.start();
-			server.setHMRTarget({ "postMessage": (message) => { hub.publish(`preview.hmr.${port}`, message); } });
-			server.setTransformErrorReporter((info) => { log.warn("preview transform failed (provoke round " + round + ")", info); transformErrors.push({ "round": round, "url": info.url, "name": info.name, "message": info.message }); });
-			previewServers.set(port, server);
-			lastPreviewConfig = { "port": port, "root": root };
-
-			// Fire the whole graph at once — losing the cold-start race is the thing we're trying to catch.
-			const results = await Promise.all(urls.map(async (url) => {
-				const response = await server.handleRequest("GET", url, {});
-
-				return { "url": url, "status": response.statusCode };
-			}));
-
-			for (const result of results) {
-				if (result.status >= 500) {
-					failures.push({ "round": round, "url": result.url, "status": result.status });
-				}
-			}
+			await provokeWarmRound(ViteDevServer, vfs, port, root, urls, round, collected);
 		}
 	}
 

@@ -73,7 +73,10 @@ export function registerDebugToolbar(context: vscode.ExtensionContext, hub: Hub)
 			}));
 		}
 
-		const onSessionChange = (): void => { paused = false; publish(); };
+		const onSessionChange = (): void => {
+			paused = false;
+			publish();
+		};
 
 		for (const event of [debugApi.onDidChangeActiveDebugSession, debugApi.onDidStartDebugSession, debugApi.onDidTerminateDebugSession]) {
 			if (typeof event === "function") {

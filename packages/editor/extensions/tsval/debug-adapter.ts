@@ -9,17 +9,18 @@
  * session over hub RPC (debug-control.ts), so debug-mcp can drive it too. Inline is the only viable shape in-browser
  * (a DebugAdapterServer needs a socket).
  */
-import type { Span } from "@brianjenkins94/util/logger";
 import type { DecideRequest, Events, StdinRequest } from "@brianjenkins94/run-contract";
-import { logger } from "@brianjenkins94/util/logger";
-import * as vscode from "vscode";
-
-import { EMPTY_POLICY, given as givenBy, placesOf, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
-import type { WorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
 import type { SpanRef } from "@brianjenkins94/run-contract/annotations";
-import { annotations } from "@brianjenkins94/run-contract/annotations";
-import type { Replay } from "../../previews/page-evidence";
+import type { WorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
+import type { Span } from "@brianjenkins94/util/logger";
+
+import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
+import type { Replay } from "../../shared/preview-evidence";
 import type { CapabilityAsk, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
+import { annotations } from "@brianjenkins94/run-contract/annotations";
+import { logger } from "@brianjenkins94/util/logger";
+import { EMPTY_POLICY, given as givenBy, placesOf } from "@brianjenkins94/util/silo/policy";
+import * as vscode from "vscode";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }
 type Dap = Record<string, unknown>;
@@ -29,10 +30,10 @@ type DebugState = "starting" | "running" | "stopped" | "idle" | "terminated";
 type DebugAction = StepAction;
 
 class TsvalDebugSession implements vscode.DebugAdapter {
-	private readonly sendEmitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
-	public readonly onDidSendMessage = this.sendEmitter.event;
+	public readonly onDidSendMessage: vscode.Event<vscode.DebugProtocolMessage>;
 
 	public readonly id: string;
+	private readonly sendEmitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
 	// Where the session is (an agent follows it by its DAP messages: debug-control.ts).
 	private state: DebugState = "starting";
 	/** Whether the end was told (`values.ended`): a stop after the program's own end doesn't tell it again. */
@@ -105,8 +106,260 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private readonly runtime: WorkspaceRuntime;
 
 	public constructor(session: vscode.DebugSession, runtime: WorkspaceRuntime) {
+		this.onDidSendMessage = this.sendEmitter.event;
 		this.id = session.id;
 		this.runtime = runtime;
+	}
+
+	public handleMessage(message: vscode.DebugProtocolMessage): void {
+		const request = message as DapRequest;
+
+		if (request.type !== "request") {
+			return;
+		}
+
+		const args = request.arguments ?? {};
+
+		switch (request.command) {
+			case "initialize":
+				// supportsStepBack lights up VS Code's reverse toolbar (Step Back + Reverse) — tsval time travel.
+				// supportsSetVariable: the Variables view's Set Value, as the notes margin's (setValue).
+				this.respond(request, { "supportsConfigurationDoneRequest": true, "supportsTerminateRequest": true, "supportsStepBack": true, "supportsSetVariable": true });
+				this.event("initialized");
+				break;
+
+			case "setBreakpoints":
+				this.setBreakpointsRequest(request, args);
+				break;
+
+			case "setExceptionBreakpoints":
+				this.respond(request, { "breakpoints": [] });
+				break;
+
+			case "configurationDone":
+				this.respond(request);
+				this.configDone = true;
+				this.maybeStart();
+				break;
+
+			// The program's statement coverage so far (a CoverageReport); once it has ended, its final coverage.
+			// Input for the program's process.stdin — a terminal's run's typing (the run contract's `stdin`, debug-events.ts).
+			case "stdin": {
+				const { data, end } = args as unknown as StdinRequest;
+
+				this.control({ "type": "stdin", "data": data ?? "", ...end === true ? { "end": true } : {} });
+				this.respond(request);
+				break;
+			}
+
+			case "getCoverage":
+				// With the text that ran, so the margin can place it on the code as it is now (coverage.ts).
+				void this.currentCoverage(5000).then((report) => {
+					this.respond(request, { ...report, "source": this.source });
+				});
+				break;
+
+			case "launch":
+				this.launchRequest(request, args);
+				break;
+
+			// At a capability stop, the editor's answer (the run contract's `decide`, capability-stops.ts): how the call goes,
+			// and the policy from now on when the answer changed it. Then the run goes on.
+			case "decide":
+				this.decideRequest(request, args);
+				break;
+
+			default:
+				this.inspectionRequest(request, args);
+				break;
+		}
+	}
+
+	public dispose(): void {
+		this.closeWorker();
+		this.sendEmitter.dispose();
+	}
+
+	private setBreakpointsRequest(request: DapRequest, args: Record<string, unknown>): void {
+		// Per file: the program's entry's, or another file's — one of the program's own when it loads it (MODULES.md).
+		const points = (args["breakpoints"] as { "line": number }[] | undefined) ?? [];
+		const path = (args["source"] as { "path"?: string } | undefined)?.path ?? "";
+
+		this.breakpointLines.set(path, points.map((point) => point.line));
+		this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
+
+		if (path === this.program) {
+			this.control({ "type": "setBreakpoints", "lines": this.lines });
+		} else if (!this.noDebug) {
+			this.control({ "type": "setBreakpoints", "lines": this.breakpointLines.get(path) ?? [], "file": path });
+		}
+
+		this.respond(request, { "breakpoints": points.map((point) => ({ "verified": true, "line": point.line })) });
+	}
+
+	private launchRequest(request: DapRequest, args: Record<string, unknown>): void {
+		this.program = (args["program"] as string | undefined) ?? "";
+		this.args = Array.isArray(args["args"]) ? (args["args"] as unknown[]).map(String) : [];
+		this.replay = typeof args["replay"] === "object" && args["replay"] !== null ? args["replay"] as Replay & { "source": string } : undefined;
+		this.where = { ...typeof args["cwd"] === "string" ? { "cwd": args["cwd"] } : {}, ...typeof args["env"] === "object" && args["env"] !== null ? { "env": args["env"] as Record<string, string> } : {} };
+		this.eventLoop = loopStartOf(args["eventLoop"]);
+		this.noDebug = args["noDebug"] === true;
+		this.policy = typeof args["__policy"] === "object" && args["__policy"] !== null ? args["__policy"] as Policy : EMPTY_POLICY;
+		// A live run (LIVE-VALUES.md): the file run again as typing pauses — it stops at nothing.
+		this.live = args["__live"] === true;
+		this.lines = this.noDebug || this.live ? [] : this.breakpointLines.get(this.program) ?? [];
+		this.respond(request);
+		void this.loadSource();
+	}
+
+	private decideRequest(request: DapRequest, args: Record<string, unknown>): void {
+		if (this.state !== "stopped" || this.ask === undefined) {
+			this.fail(request, "not stopped at a capability call");
+
+			return;
+		}
+
+		const { verdict, value, policy } = args as unknown as DecideRequest;
+
+		if (policy !== undefined) {
+			this.policy = policy;
+		}
+
+		this.control({ "type": "decide", ...policy === undefined ? {} : { "policy": policy }, "deny": verdict === "deny", "skip": verdict === "skip", ...verdict === "give" ? { "give": value ?? null } : {} });
+		this.respond(request);
+		this.goOn("continue");
+	}
+
+	/** What the snapshot answers (threads, frames, scopes, variables), the Debug Console, and the session's settings. */
+	private inspectionRequest(request: DapRequest, args: Record<string, unknown>): void {
+		switch (request.command) {
+			case "threads":
+				this.respond(request, { "threads": [{ "id": 1, "name": "tsval" }] });
+				break;
+
+			case "stackTrace":
+				this.respond(request, {
+					"stackFrames": (this.snapshot?.frames ?? []).map(({ file, ...frame }) => ({ ...frame, "source": { "path": file ?? this.program } })),
+					"totalFrames": this.snapshot?.frames.length ?? 0
+				});
+				break;
+
+			case "scopes":
+				this.respond(request, { "scopes": this.snapshot?.scopes[args["frameId"] as number] ?? [] });
+				break;
+
+			// The Debug Console is the program's stdin: what's typed there is a line of its input.
+			case "evaluate":
+				this.evaluateRequest(request, args);
+				break;
+
+			// Skip Waits / Wait in Real Time (tsval.skipWaits): what a timer's wait costs from here on.
+			case "pace":
+				this.pace(args["pace"] === "fast" ? "fast" : "real");
+				this.respond(request);
+				break;
+
+			case "setVariable":
+				void this.setValue((args["name"] as string | undefined) ?? "", (args["value"] as string | undefined) ?? "").then((value) => {
+					this.respond(request, { "value": value });
+				}, (error: unknown) => {
+					this.fail(request, messageOf(error));
+				});
+				break;
+
+			case "variables":
+				this.respond(request, { "variables": this.snapshot?.variables[args["variablesReference"] as number] ?? [] });
+				break;
+
+			default:
+				this.executionRequest(request);
+				break;
+		}
+	}
+
+	private evaluateRequest(request: DapRequest, args: Record<string, unknown>): void {
+		if (args["context"] === "repl") {
+			this.stdin(((args["expression"] as string | undefined) ?? "") + "\n");
+			this.respond(request, { "result": "", "variablesReference": 0 });
+		} else {
+			this.fail(request, "tsval evaluates nothing here: the Debug Console is the program's stdin");
+		}
+	}
+
+	/** Running it: continuing, stepping (forward and back), and ending it. */
+	private executionRequest(request: DapRequest): void {
+		switch (request.command) {
+			case "continue":
+				this.resume("continue");
+				this.respond(request, { "allThreadsContinued": true });
+				break;
+
+			case "next":
+				this.resume("next");
+				this.respond(request);
+				break;
+
+			case "stepIn":
+				this.resume("stepIn");
+				this.respond(request);
+				break;
+
+			case "stepOut":
+				this.resume("stepOut");
+				this.respond(request);
+				break;
+
+			case "stepBack":
+				this.resume("stepBack");
+				this.respond(request);
+				break;
+
+			case "reverseContinue":
+				this.resume("reverseContinue");
+				this.respond(request, { "allThreadsContinued": true });
+				break;
+
+			case "disconnect":
+			case "terminate":
+				this.terminateRequest(request);
+				break;
+
+			default:
+				this.respond(request);
+				break;
+		}
+	}
+
+	private terminateRequest(request: DapRequest): void {
+		// A live run stopped by the next edit, or one that ran nothing: it tells nothing — no coverage, no end — and the
+		// margin keeps the last run's until the next one finishes.
+		if (this.live && (!this.ended || !this.coverageSent)) {
+			this.ended = true;
+			this.coverageSent = true;
+			this.endAction();
+			this.closeWorker();
+			this.respond(request);
+			this.event("terminated");
+			this.settle("terminated");
+
+			return;
+		}
+
+		// Stopped early: ask for the coverage so far first, briefly — a worker blocked in Atomics.wait (an
+		// in-handler pause) can't answer, and then the last report stands. Then hard-stop: terminate() kills
+		// the worker even while it's blocked, which a postMessage could not reach.
+		void this.currentCoverage(500).then((report) => {
+			this.sendFinalCoverage(report);
+			this.endAction();
+			this.closeWorker();
+			// The session's live values go with it, as when it runs to its end — and, stopped while paused, where it was.
+			const frame = this.state === "stopped" ? this.snapshot?.frames[0] : undefined;
+
+			this.tellEnded(frame === undefined ? undefined : { "kind": "stopped", "line": frame.line - 1, ...frame.at === undefined ? {} : { "at": frame.at } }, frame?.file);
+			this.respond(request);
+			this.event("terminated");
+			this.settle("terminated");
+		});
 	}
 
 	/** Resume with `action`, from somewhere other than VS Code's UI (an agent, an answer at a capability stop). */
@@ -196,209 +449,6 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.actionSpan = undefined;
 	}
 
-	public handleMessage(message: vscode.DebugProtocolMessage): void {
-		const request = message as DapRequest;
-
-		if (request.type !== "request") {
-			return;
-		}
-
-		const args = request.arguments ?? {};
-
-		switch (request.command) {
-			case "initialize":
-				// supportsStepBack lights up VS Code's reverse toolbar (Step Back + Reverse) — tsval time travel.
-				// supportsSetVariable: the Variables view's Set Value, as the notes margin's (setValue).
-				this.respond(request, { "supportsConfigurationDoneRequest": true, "supportsTerminateRequest": true, "supportsStepBack": true, "supportsSetVariable": true });
-				this.event("initialized");
-				break;
-
-			case "setBreakpoints": {
-				// Per file: the program's entry's, or another file's — one of the program's own when it loads it (MODULES.md).
-				const points = (args["breakpoints"] as { "line": number }[] | undefined) ?? [];
-				const path = String((args["source"] as { "path"?: string } | undefined)?.path ?? "");
-
-				this.breakpointLines.set(path, points.map((point) => point.line));
-				this.lines = this.noDebug ? [] : this.breakpointLines.get(this.program) ?? [];
-
-				if (path === this.program) {
-					this.control({ "type": "setBreakpoints", "lines": this.lines });
-				} else if (!this.noDebug) {
-					this.control({ "type": "setBreakpoints", "lines": this.breakpointLines.get(path) ?? [], "file": path });
-				}
-
-				this.respond(request, { "breakpoints": points.map((point) => ({ "verified": true, "line": point.line })) });
-				break;
-			}
-
-			case "setExceptionBreakpoints":
-				this.respond(request, { "breakpoints": [] });
-				break;
-
-			case "configurationDone":
-				this.respond(request);
-				this.configDone = true;
-				this.maybeStart();
-				break;
-
-			// The program's statement coverage so far (a CoverageReport); once it has ended, its final coverage.
-			// Input for the program's process.stdin — a terminal's run's typing (the run contract's `stdin`, debug-events.ts).
-			case "stdin": {
-				const { data, end } = args as unknown as StdinRequest;
-
-				this.control({ "type": "stdin", "data": data ?? "", ...end === true ? { "end": true } : {} });
-				this.respond(request);
-				break;
-			}
-
-			case "getCoverage":
-				// With the text that ran, so the margin can place it on the code as it is now (coverage.ts).
-				void this.currentCoverage(5000).then((report) => { this.respond(request, { ...report, "source": this.source } as unknown as Dap); });
-				break;
-
-			case "launch":
-				this.program = String(args["program"] ?? "");
-				this.args = Array.isArray(args["args"]) ? (args["args"] as unknown[]).map(String) : [];
-				this.replay = typeof args["replay"] === "object" && args["replay"] !== null ? args["replay"] as Replay & { "source": string } : undefined;
-				this.where = { ...typeof args["cwd"] === "string" ? { "cwd": args["cwd"] } : {}, ...typeof args["env"] === "object" && args["env"] !== null ? { "env": args["env"] as Record<string, string> } : {} };
-				this.eventLoop = loopStartOf(args["eventLoop"]);
-				this.noDebug = args["noDebug"] === true;
-				this.policy = typeof args["__policy"] === "object" && args["__policy"] !== null ? args["__policy"] as Policy : EMPTY_POLICY;
-				// A live run (LIVE-VALUES.md): the file run again as typing pauses — it stops at nothing.
-				this.live = args["__live"] === true;
-				this.lines = this.noDebug || this.live ? [] : this.breakpointLines.get(this.program) ?? [];
-				this.respond(request);
-				void this.loadSource();
-				break;
-
-			// At a capability stop, the editor's answer (the run contract's `decide`, capability-stops.ts): how the call goes,
-			// and the policy from now on when the answer changed it. Then the run goes on.
-			case "decide": {
-				if (this.state !== "stopped" || this.ask === undefined) {
-					this.fail(request, "not stopped at a capability call");
-					break;
-				}
-
-				const { verdict, value, policy } = args as unknown as DecideRequest;
-
-				if (policy !== undefined) {
-					this.policy = policy;
-				}
-
-				this.control({ "type": "decide", ...policy === undefined ? {} : { "policy": policy }, "deny": verdict === "deny", "skip": verdict === "skip", ...verdict === "give" ? { "give": value ?? null } : {} });
-				this.respond(request);
-				this.goOn("continue");
-				break;
-			}
-
-			case "threads":
-				this.respond(request, { "threads": [{ "id": 1, "name": "tsval" }] });
-				break;
-
-			case "stackTrace":
-				this.respond(request, {
-					"stackFrames": (this.snapshot?.frames ?? []).map(({ file, ...frame }) => ({ ...frame, "source": { "path": file ?? this.program } })),
-					"totalFrames": this.snapshot?.frames.length ?? 0
-				});
-				break;
-
-			case "scopes":
-				this.respond(request, { "scopes": this.snapshot?.scopes[args["frameId"] as number] ?? [] });
-				break;
-
-			// The Debug Console is the program's stdin: what's typed there is a line of its input.
-			case "evaluate":
-				if (args["context"] === "repl") {
-					this.stdin(String(args["expression"] ?? "") + "\n");
-					this.respond(request, { "result": "", "variablesReference": 0 });
-				} else {
-					this.fail(request, "tsval evaluates nothing here: the Debug Console is the program's stdin");
-				}
-
-				break;
-
-			// Skip Waits / Wait in Real Time (tsval.skipWaits): what a timer's wait costs from here on.
-			case "pace":
-				this.pace(args["pace"] === "fast" ? "fast" : "real");
-				this.respond(request);
-				break;
-
-			case "setVariable":
-				void this.setValue(String(args["name"] ?? ""), String(args["value"] ?? "")).then((value) => { this.respond(request, { "value": value }); }, (error: unknown) => { this.fail(request, error instanceof Error ? error.message : String(error)); });
-				break;
-
-			case "variables":
-				this.respond(request, { "variables": this.snapshot?.variables[args["variablesReference"] as number] ?? [] });
-				break;
-
-			case "continue":
-				this.resume("continue");
-				this.respond(request, { "allThreadsContinued": true });
-				break;
-
-			case "next":
-				this.resume("next");
-				this.respond(request);
-				break;
-
-			case "stepIn":
-				this.resume("stepIn");
-				this.respond(request);
-				break;
-
-			case "stepOut":
-				this.resume("stepOut");
-				this.respond(request);
-				break;
-
-			case "stepBack":
-				this.resume("stepBack");
-				this.respond(request);
-				break;
-
-			case "reverseContinue":
-				this.resume("reverseContinue");
-				this.respond(request, { "allThreadsContinued": true });
-				break;
-
-			case "disconnect":
-			case "terminate":
-				// A live run stopped by the next edit, or one that ran nothing: it tells nothing — no coverage, no end — and the
-				// margin keeps the last run's until the next one finishes.
-				if (this.live && (!this.ended || !this.coverageSent)) {
-					this.ended = true;
-					this.coverageSent = true;
-					this.endAction();
-					this.closeWorker();
-					this.respond(request);
-					this.event("terminated");
-					this.settle("terminated");
-					break;
-				}
-
-				// Stopped early: ask for the coverage so far first, briefly — a worker blocked in Atomics.wait (an
-				// in-handler pause) can't answer, and then the last report stands. Then hard-stop: terminate() kills
-				// the worker even while it's blocked, which a postMessage could not reach.
-				void this.currentCoverage(500).then((report) => {
-					this.sendFinalCoverage(report);
-					this.endAction();
-					this.closeWorker();
-					// The session's live values go with it, as when it runs to its end — and, stopped while paused, where it was.
-					const frame = this.state === "stopped" ? this.snapshot?.frames[0] : undefined;
-
-					this.tellEnded(frame === undefined ? undefined : { "kind": "stopped", "line": frame.line - 1, ...frame.at === undefined ? {} : { "at": frame.at } }, frame?.file);
-					this.respond(request);
-					this.event("terminated");
-					this.settle("terminated");
-				});
-				break;
-
-			default:
-				this.respond(request);
-				break;
-		}
-	}
-
 	private async loadSource(): Promise<void> {
 		try {
 			// A replay runs the text that ran in the page (its recorded version), whatever the file holds now.
@@ -433,7 +483,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		}
 
 		const hooks = await Promise.all([...byFile].map(async ([file, placed]) => {
-			const absolute = file === entry ? this.program : vscode.Uri.joinPath(root!, file).path;
+			const absolute = file === entry ? this.program : vscode.Uri.joinPath(root, file).path;
 			const source = file === entry ? this.source : await Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(absolute))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
 
 			if (source === undefined) {
@@ -465,7 +515,11 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		this.started = true;
 		// Cache-bust so a rebuilt worker is picked up (the Worker constructor may reuse the browser's module
 		// cache for an unchanged URL even after a rebuild); harmless in production.
-		this.worker = startWorker(this.runtime, this.id, (event) => { this.onWorker(event); }, (message) => { this.event("output", { "category": "stderr", "output": `[debug-worker] ${message}\n` }); });
+		this.worker = startWorker(this.runtime, this.id, (event) => {
+			this.onWorker(event);
+		}, (message) => {
+			this.event("output", { "category": "stderr", "output": `[debug-worker] ${message}\n` });
+		});
 
 		const trace = this.startAction("launch");
 
@@ -491,15 +545,16 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		}
 
 		return new Promise((resolve) => {
-			const timer = setTimeout(() => {
-				this.coverageWaiters.delete(answer);
-				resolve(fallback());
-			}, timeoutMs);
+			let timer: ReturnType<typeof setTimeout> | undefined;
 			const answer = (report: CoverageReport): void => {
 				clearTimeout(timer);
 				resolve(report);
 			};
 
+			timer = setTimeout(() => {
+				this.coverageWaiters.delete(answer);
+				resolve(fallback());
+			}, timeoutMs);
 			this.coverageWaiters.add(answer);
 			this.control({ "type": "coverage" });
 		});
@@ -570,22 +625,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private onWorker(message: WorkerEvent): void {
 		switch (message.type) {
 			case "stopped":
-				this.snapshot = message.snapshot;
-				this.lastStopAtomic = message.atomic === true;
-				this.endAction(); // the action reached a stop — close its round-trip span
-				this.ask = message.ask;
-
-				// A capability stop asks on its line (the run contract's `ask`: the margin shows it — capability-stops.ts) — in
-				// the file it's in.
-				if (message.ask !== undefined) {
-					const { file, source, ...ask } = message.ask;
-					const text = file === undefined ? this.source : source;
-
-					this.tell("ask", { ...ask, "file": file ?? this.program, ...text === undefined ? {} : { "source": text } });
-				}
-
-				this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
-				this.settle("stopped");
+				this.onStopped(message);
 				break;
 
 			// What the run did to the world so far (each telling has it all), for its envelope in the run ledger.
@@ -594,36 +634,11 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				break;
 
 			case "coverage":
-				this.coverage = message.report;
-
-				for (const waiter of [...this.coverageWaiters]) {
-					waiter(message.report);
-				}
-
-				this.coverageWaiters.clear();
-
-				if (message.final === true) {
-					this.sendFinalCoverage(message.report);
-				}
-
+				this.onCoverage(message);
 				break;
 
 			case "terminated":
-				this.endAction();
-
-				// A live run that ran nothing (its text doesn't parse yet): no values, no coverage, no end — the margin keeps
-				// the last run's.
-				if (message.quiet === true) {
-					this.ended = true;
-				}
-
-				// (a live run that ran out of budget ends stopped where it got to, not crashed)
-				this.tellEnded(message.crash === undefined ? undefined : { "kind": message.crash.stopped === true ? "stopped" : "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message }, message.crash?.file);
-				// (DAP's own: the run's end, with its exit code — the editor's run ends with it)
-				this.event("exited", { "exitCode": message.exitCode ?? 0 });
-				this.event("terminated");
-				this.closeWorker();
-				this.settle("terminated");
+				this.onTerminated(message);
 				break;
 
 			// What a run's allowed call returned, recorded (RULES.md, slice 2): a rule can give it back.
@@ -632,15 +647,9 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				break;
 
 			// The session's live values (LIVE-VALUES.md), on to core (through debug-events.ts): the file they're of, what's new.
-			case "values": {
-				// The text that ran, once a file: what core anchors the values' ranges in.
-				const file = message.file ?? this.program;
-				const source = message.file === undefined ? this.source : message.source ?? this.told.get(file) ?? "";
-
-				this.tell("values", { "file": file, ...this.told.has(file) ? {} : { "source": source }, ...message.batch });
-				this.told.set(file, source);
+			case "values":
+				this.onValues(message);
 				break;
-			}
 
 			// (started in a terminal, its stdout and stderr are printed there too: debug-events.ts)
 			case "output":
@@ -668,15 +677,83 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				this.tell("idle", {});
 				break;
 
+			// (an explore's answer: exploreProgram's worker sends it, a session's doesn't)
+			case "explored":
 			default:
 				break;
 		}
 	}
 
-	public dispose(): void {
-		this.closeWorker();
-		this.sendEmitter.dispose();
+	private onStopped(message: Extract<WorkerEvent, { "type": "stopped" }>): void {
+		this.snapshot = message.snapshot;
+		this.lastStopAtomic = message.atomic === true;
+		this.endAction(); // the action reached a stop — close its round-trip span
+		this.ask = message.ask;
+
+		// A capability stop asks on its line (the run contract's `ask`: the margin shows it — capability-stops.ts) — in
+		// the file it's in.
+		if (message.ask !== undefined) {
+			const { file, source, ...ask } = message.ask;
+			const text = file === undefined ? this.source : source;
+
+			this.tell("ask", { ...ask, "file": file ?? this.program, ...text === undefined ? {} : { "source": text } });
+		}
+
+		this.event("stopped", { "reason": message.reason, "threadId": 1, "allThreadsStopped": true });
+		this.settle("stopped");
 	}
+
+	private onCoverage(message: Extract<WorkerEvent, { "type": "coverage" }>): void {
+		this.coverage = message.report;
+
+		for (const waiter of [...this.coverageWaiters]) {
+			waiter(message.report);
+		}
+
+		this.coverageWaiters.clear();
+
+		if (message.final === true) {
+			this.sendFinalCoverage(message.report);
+		}
+	}
+
+	private onTerminated(message: Extract<WorkerEvent, { "type": "terminated" }>): void {
+		this.endAction();
+
+		// A live run that ran nothing (its text doesn't parse yet): no values, no coverage, no end — the margin keeps
+		// the last run's.
+		if (message.quiet === true) {
+			this.ended = true;
+		}
+
+		// (a live run that ran out of budget ends stopped where it got to, not crashed)
+		this.tellEnded(message.crash === undefined ? undefined : { "kind": message.crash.stopped === true ? "stopped" : "crashed", "line": message.crash.line, "at": message.crash.at, "message": message.crash.message }, message.crash?.file);
+		// (DAP's own: the run's end, with its exit code — the editor's run ends with it)
+		this.event("exited", { "exitCode": message.exitCode ?? 0 });
+		this.event("terminated");
+		this.closeWorker();
+		this.settle("terminated");
+	}
+
+	private onValues(message: Extract<WorkerEvent, { "type": "values" }>): void {
+		// The text that ran, once a file: what core anchors the values' ranges in.
+		const file = message.file ?? this.program;
+		const source = message.file === undefined ? this.source : message.source ?? this.told.get(file) ?? "";
+
+		this.tell("values", { "file": file, ...this.told.has(file) ? {} : { "source": source }, ...message.batch });
+		this.told.set(file, source);
+	}
+}
+
+/** What a rejection says: an Error's message, anything else stringified as it is. */
+function messageOf(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+
+	const thrown = error as string | number | boolean | null | undefined;
+
+	return String(thrown);
 }
 
 /** How each session's program ended (by session id), for whoever reports its end — a terminal's run waits on it. */
@@ -704,16 +781,26 @@ function startWorker(runtime: WorkspaceRuntime, session: string | undefined, onE
 
 	const link = runtime.connect("debug-worker", session);
 	const worker = new Worker(url, { "type": "module" });
-	const post = (message: ToWorker, transfer: Transferable[] = []): void => { worker.postMessage(message, transfer); };
+	const post = (message: ToWorker, transfer: Transferable[] = []): void => {
+		worker.postMessage(message, transfer);
+	};
 
-	worker.onmessage = (event: MessageEvent<WorkerEvent>) => { onEvent(event.data); };
-	worker.onerror = (event) => { onError(event.message); };
+	worker.onmessage = (event: MessageEvent<WorkerEvent>) => {
+		onEvent(event.data);
+	};
+
+	worker.onerror = (event) => {
+		onError(event.message);
+	};
+
 	// (posted before it loads: queued, and delivered once its module is evaluated — the runtime link first)
 	post({ "kind": "runtime", "port": link.port }, [link.port]);
 
 	return {
 		"buffer": runtime.buffer,
-		"send": (control, trace) => { post({ "kind": "control", "control": control, ...trace === undefined ? {} : { "trace": trace } }); },
+		"send": (control, trace) => {
+			post({ "kind": "control", "control": control, ...trace === undefined ? {} : { "trace": trace } });
+		},
 		"close": () => {
 			worker.terminate();
 			link.dispose();
@@ -737,12 +824,21 @@ export async function exploreProgram(runtime: WorkspaceRuntime, program: string,
 		if (event.type === "explored") {
 			resolveExplored?.(event.explored);
 		}
-	}, (message) => { failed?.(new Error(`the debug worker failed: ${message}`)); });
+	}, (message) => {
+		failed?.(new Error(`the debug worker failed: ${message}`));
+	});
 
 	try {
 		worker.send({ "type": "explore", "source": source, "fileName": program, "policy": policy, "args": mocked ?? [], "eventLoop": { "now": Date.now(), "seed": Math.floor(Math.random() * 2 ** 32) }, "maxRuns": maxRuns, ...worker.buffer === undefined ? {} : { "workspace": worker.buffer } });
 
-		return await Promise.race([explored, new Promise<never>((_, reject) => { setTimeout(() => { reject(new Error("exploring took over 2 minutes")); }, 120_000); })]);
+		return await Promise.race([
+			explored,
+			new Promise<never>((_, reject) => {
+				setTimeout(() => {
+					reject(new Error("exploring took over 2 minutes"));
+				}, 120_000);
+			})
+		]);
 	} finally {
 		worker.close();
 	}
@@ -771,7 +867,7 @@ export function registerTsvalDebug(context: vscode.ExtensionContext, runtime: Wo
 				return;
 			}
 
-			const name = uri.path.split("/").pop()!;
+			const name = uri.path.split("/").pop();
 			const explored = await vscode.window.withProgress({ "location": vscode.ProgressLocation.Notification, "title": `Exploring the orderings of ${name}…` }, () => exploreProgram(runtime, uri.path));
 			const runs = `${explored.runs} run${explored.runs === 1 ? "" : "s"}${explored.complete ? "" : ", cut short"}`;
 
@@ -784,7 +880,7 @@ export function registerTsvalDebug(context: vscode.ExtensionContext, runtime: Wo
 			const picked = await vscode.window.showQuickPick(explored.outcomes.map(orderingItem), { "title": `${name}: ${explored.outcomes.length} ways it can end (${runs}) — pick one to debug it`, "matchOnDetail": true });
 
 			if (picked !== undefined) {
-				await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `debug ${name} (ordering ${picked.index + 1} of ${explored.outcomes.length})`, "program": uri.path, "eventLoop": { ...explored.eventLoop, "schedule": explored.outcomes[picked.index]!.schedule } });
+				await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `debug ${name} (ordering ${picked.index + 1} of ${explored.outcomes.length})`, "program": uri.path, "eventLoop": { ...explored.eventLoop, "schedule": explored.outcomes[picked.index].schedule } });
 			}
 		}),
 		// The same, as data (worker-pod's `debug.explore`, for an agent): the distinct outcomes, each with its schedule.

@@ -17,9 +17,9 @@
  * And a file whose saved history ends at HEAD — nothing since the last commit — starts afresh: what came before it is
  * never shown, and silo's local/ is kept in memory, so it isn't kept.
  */
-import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
+import type * as vscodeApi from "vscode";
 import type { CosmeticClassifier } from "./cosmetic-classifier";
 import { serve } from "@brianjenkins94/hub";
 import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
@@ -41,13 +41,15 @@ interface AutomergeApi {
 	"getHistory": (doc: AutomergeDoc) => { "change": { "message"?: string; "time": number; "actor": string }; "snapshot": AutomergeDoc }[];
 }
 
+// eslint-disable-next-line ts/no-base-to-string -- a rejection can be any value: one that isn't an Error is said as String() says it
 const errText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 let amPromise: Promise<AutomergeApi> | undefined;
-const automerge = async (): Promise<AutomergeApi> => {
+
+async function automerge(): Promise<AutomergeApi> {
 	amPromise ??= import("@automerge/automerge") as unknown as Promise<AutomergeApi>;
 
 	return amPromise;
-};
+}
 
 /** Where each file's history is kept, and where older builds kept it (read once, then moved). */
 const HISTORY = `${DIR}/${LOCAL_DIR}/edit-history`;
@@ -110,7 +112,9 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifie
 
 		// Nothing since the last commit: what came before it is never shown, so the history starts afresh at HEAD.
 		if (doc === undefined || doc.text === head) {
-			doc = AM.change(AM.init(), "seed", (draft) => { draft.text = head; });
+			doc = AM.change(AM.init(), "seed", (draft) => {
+				draft.text = head;
+			});
 		}
 
 		docs.set(path, doc);
@@ -127,7 +131,9 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifie
 			return;
 		}
 
-		const next = AM.change(doc, "burst", (draft) => { AM.updateText(draft, ["text"], text); });
+		const next = AM.change(doc, "burst", (draft) => {
+			AM.updateText(draft, ["text"], text);
+		});
 
 		docs.set(path, next);
 
@@ -147,7 +153,9 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifie
 
 		timers.set(path, setTimeout(() => {
 			timers.delete(path);
-			void flush(path, text).catch((error: unknown) => { log.error("edit-history flush failed", { "path": path, "error": errText(error) }); });
+			void flush(path, text).catch((error: unknown) => {
+				log.error("edit-history flush failed", { "path": path, "error": errText(error) });
+			});
 		}, BURST_IDLE_MS));
 	};
 
@@ -168,7 +176,9 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifie
 		if (path !== undefined && pending !== undefined) {
 			clearTimeout(pending);
 			timers.delete(path);
-			void flush(path, event.document.getText()).catch((error: unknown) => { log.error("edit-history will-save flush failed", { "path": path, "error": errText(error) }); });
+			void flush(path, event.document.getText()).catch((error: unknown) => {
+				log.error("edit-history will-save flush failed", { "path": path, "error": errText(error) });
+			});
 		}
 	});
 
@@ -184,7 +194,9 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, classifie
 				timers.delete(path);
 			}
 
-			void flush(path, document.getText()).catch((error: unknown) => { log.error("edit-history save-flush failed", { "path": path, "error": errText(error) }); });
+			void flush(path, document.getText()).catch((error: unknown) => {
+				log.error("edit-history save-flush failed", { "path": path, "error": errText(error) });
+			});
 		}
 	});
 

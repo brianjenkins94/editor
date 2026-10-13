@@ -4,10 +4,10 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import test from "node:test";
-import { allowedOnLink, appLayout, appNodes, channels, checkConformance, declaredBetween, declaredOn, familiesOnLink, nodes, subjectMatches, subjectOfLabel, subjects } from "../shared/architecture-model.ts";
 import { classifyUrl, identifyWorker } from "../shared/architecture-ids.ts";
+import { allowedOnLink, appLayout, appNodes, channels, checkConformance, declaredBetween, declaredOn, familiesOnLink, nodes, subjectMatches, subjectOfLabel, subjects } from "../shared/architecture-model.ts";
 
-const patterns = (a, b) => familiesOnLink(a, b).map((family) => family.pattern);
+const patterns = (from, to) => familiesOnLink(from, to).map((family) => family.pattern);
 
 test("a subject family may only cross the tree links between its senders and receivers", () => {
 	// git.discard runs shell → workbench, through root — and only there (the Source Control view, the pod's, doesn't)
@@ -16,8 +16,8 @@ test("a subject family may only cross the tree links between its senders and rec
 	assert.ok(!patterns("workbench", "pod").includes("git.discard"));
 	// capability.decide: pod serves, root (for the sw) and shell call — so it crosses root⇄workbench, workbench⇄pod,
 	// shell⇄root; the sw only ever asks its tab's root (capability.decide.<tab>), never the pod directly
-	for (const [a, b] of [["root", "workbench"], ["workbench", "pod"], ["shell", "root"]]) {
-		assert.ok(patterns(a, b).includes("capability.decide"), `${a}⇄${b}`);
+	for (const [from, to] of [["root", "workbench"], ["workbench", "pod"], ["shell", "root"]]) {
+		assert.ok(patterns(from, to).includes("capability.decide"), `${from}⇄${to}`);
 	}
 
 	assert.ok(!patterns("sw", "root").includes("capability.decide"));
@@ -202,7 +202,7 @@ test("a previewed app's contexts are its own: scoped under their preview window,
 
 	const violations = checkConformance({ "nodes": ["shell", "root", "preview:5173", ...app.topology.map(([id]) => id), "mystery"], "channels": channels, "topology": topology });
 
-	assert.deepEqual(violations.map((violation) => violation.type === "unknown-node" ? "unknown " + violation.id : violation.type + " " + violation.a + "⇄" + violation.b).sort(), ["undeclared-channel root⇄mystery", "unknown mystery"], "the editor's own unknowns are still flagged");
+	assert.deepEqual(violations.map((violation) => (violation.type === "unknown-node" ? "unknown " + violation.id : violation.type + " " + violation.a + "⇄" + violation.b)).sort(), ["undeclared-channel root⇄mystery", "unknown mystery"], "the editor's own unknowns are still flagged");
 	// An unscoped undeclared hub linked to the shell is a finding, not an app.
 	assert.ok(checkConformance({ "nodes": ["page"], "channels": [{ "a": "shell", "b": "page", "labels": new Map() }], "topology": new Map([["page", { "links": [{ "peerId": "shell" }] }]]) }).some((violation) => violation.type === "unknown-node" && violation.id === "page"));
 });
@@ -270,14 +270,12 @@ test("every subject the source names is declared", () => {
 		for (const name of readdirSync(dir)) {
 			const path = join(dir, name);
 
-			if (name.startsWith(".") || ["node_modules", "dist", "test", "demo", "vendor"].includes(name)) {
-				continue;
-			}
-
-			if (statSync(path).isDirectory()) {
-				walk(path);
-			} else if (/\.(?:ts|tsx|js|mjs)$/u.test(name) && !/\.(?:test|d)\.[^.]+$/u.test(name)) {
-				files.push(path);
+			if (!name.startsWith(".") && !["node_modules", "dist", "test", "demo", "vendor"].includes(name)) {
+				if (statSync(path).isDirectory()) {
+					walk(path);
+				} else if (/\.(?:ts|tsx|js|mjs)$/u.test(name) && !/\.(?:test|d)\.[^.]+$/u.test(name)) {
+					files.push(path);
+				}
 			}
 		}
 	};
@@ -311,12 +309,10 @@ test("every subject the source names is declared", () => {
 			const line = text.slice(text.lastIndexOf("\n", match.index) + 1, match.index).trim();
 			const subject = valueOf(match[1]);
 
-			// Prose (a doc comment's example), and subjects that are all variable (a helper passing its caller's on).
-			if (line.startsWith("*") || line.startsWith("//") || subject.split(".").every((token) => token === "*")) {
-				continue;
+			// Not prose (a doc comment's example), nor a subject that is all variable (a helper passing its caller's on).
+			if (!line.startsWith("*") && !line.startsWith("//") && !subject.split(".").every((token) => token === "*")) {
+				named.push({ "subject": subject, "at": `${relative(here, file)}:${text.slice(0, match.index).split("\n").length}` });
 			}
-
-			named.push({ "subject": subject, "at": `${relative(here, file)}:${text.slice(0, match.index).split("\n").length}` });
 		}
 	}
 

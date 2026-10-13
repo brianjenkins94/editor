@@ -33,35 +33,34 @@ export function opener(name: string, { api }: CommandHost, { urls = false }: { "
 		for (const target of targets) {
 			if (urls && /^https?:\/\//u.test(target)) {
 				await api.env.openExternal(api.Uri.parse(target));
-				continue;
-			}
+			} else {
+				// `file:line[:column]`, unless the whole thing is a file's name.
+				let path = resolve(ctx.cwd, target);
+				let at: { "line": number; "column": number } | undefined;
+				let stat = await ctx.fs.stat(path).catch(() => undefined);
+				const position = /^(.*?):(\d+)(?::(\d+))?$/u.exec(target);
 
-			// `file:line[:column]`, unless the whole thing is a file's name.
-			let path = resolve(ctx.cwd, target);
-			let at: { "line": number; "column": number } | undefined;
-			let stat = await ctx.fs.stat(path).catch(() => undefined);
-			const position = /^(.*?):(\d+)(?::(\d+))?$/u.exec(target);
-
-			if (stat === undefined && position !== null) {
-				path = resolve(ctx.cwd, position[1]!);
-				at = { "line": Number(position[2]), "column": Number(position[3] ?? 1) };
-				stat = await ctx.fs.stat(path).catch(() => undefined);
-			}
-
-			const uri = api.Uri.file(path);
-
-			try {
-				if (stat?.isDirectory === true) {
-					await api.commands.executeCommand("revealInExplorer", uri);
-				} else {
-					// A file that isn't there yet opens as a new one, saved to that path when it's saved.
-					const document = await api.workspace.openTextDocument(stat === undefined ? uri.with({ "scheme": "untitled" }) : uri);
-					const selection = at === undefined ? undefined : new api.Range(at.line - 1, at.column - 1, at.line - 1, at.column - 1);
-
-					await api.window.showTextDocument(document, { "preview": false, ...selection === undefined ? {} : { "selection": selection } });
+				if (stat === undefined && position !== null) {
+					path = resolve(ctx.cwd, position[1]);
+					at = { "line": Number(position[2]), "column": Number(position[3] ?? 1) };
+					stat = await ctx.fs.stat(path).catch(() => undefined);
 				}
-			} catch (error) {
-				errors.push(`${name}: ${target}: ${error instanceof Error ? error.message : String(error)}`);
+
+				const uri = api.Uri.file(path);
+
+				try {
+					if (stat?.isDirectory === true) {
+						await api.commands.executeCommand("revealInExplorer", uri);
+					} else {
+						// A file that isn't there yet opens as a new one, saved to that path when it's saved.
+						const document = await api.workspace.openTextDocument(stat === undefined ? uri.with({ "scheme": "untitled" }) : uri);
+						const selection = at === undefined ? undefined : new api.Range(at.line - 1, at.column - 1, at.line - 1, at.column - 1);
+
+						await api.window.showTextDocument(document, { "preview": false, ...selection === undefined ? {} : { "selection": selection } });
+					}
+				} catch (error) {
+					errors.push(`${name}: ${target}: ${error instanceof Error ? error.message : String(error)}`);
+				}
 			}
 		}
 

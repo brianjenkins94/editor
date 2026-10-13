@@ -43,7 +43,12 @@ function compile(level) {
 function time(level) {
 	const code = compile(level);
 	let result;
-	const context = { "FRAMES": FRAMES, "done": (value) => { result = value; } };
+	const context = {
+		"FRAMES": FRAMES,
+		"done": (value) => {
+			result = value;
+		}
+	};
 	const start = performance.now();
 
 	runInNewContext(code, level === "off" ? context : { ...context, "__evidence": installRuntime() });
@@ -53,7 +58,7 @@ function time(level) {
 
 /** The page runtime, as a preview page has it (its listeners and timer stubbed: there's no page here). */
 function installRuntime() {
-	const { setInterval: realSetInterval } = globalThis;
+	const { "setInterval": realSetInterval } = globalThis;
 
 	globalThis.addEventListener = () => undefined;
 	globalThis.setInterval = () => 0;

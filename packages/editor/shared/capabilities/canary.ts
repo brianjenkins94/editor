@@ -20,11 +20,12 @@
  * one); `env` is a member read the static half already resolves, so the canary skips it.
  */
 import type { HostCallSite } from "@brianjenkins94/tsval";
-import { createVM } from "@brianjenkins94/tsval";
+import type { CapabilityHit } from "./capability-breakpoints";
 import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
+import { createVM } from "@brianjenkins94/tsval";
 import { isDangerous } from "@brianjenkins94/util/silo/policy";
-import { type CapabilityHit, classifyCall, renderCallee } from "./capability-breakpoints";
 import ts from "typescript";
+import { classifyCall, renderCallee } from "./capability-breakpoints";
 
 export interface CanaryObservation {
 	/** Capability class (silo vocabulary): net / fs:read / fs:write / exec. */
@@ -75,7 +76,11 @@ export function givenAs(capability: string, real: unknown, value: unknown): unkn
 	const settle = (shaped: unknown): unknown => (real instanceof Promise ? Promise.resolve(shaped) : shaped);
 
 	if (capability === "net") {
-		return settle({ "ok": true, "status": 200, "statusText": "OK", "json": async () => (typeof value === "string" ? JSON.parse(value) as unknown : value), "text": async () => text, "arrayBuffer": async () => new TextEncoder().encode(text).buffer });
+		const json = (): Promise<unknown> => new Promise((resolve) => {
+			resolve(typeof value === "string" ? JSON.parse(value) as unknown : value);
+		});
+
+		return settle({ "ok": true, "status": 200, "statusText": "OK", "json": json, "text": () => Promise.resolve(text), "arrayBuffer": () => Promise.resolve(new TextEncoder().encode(text).buffer) });
 	}
 
 	if (capability === "fs:read") {
@@ -106,7 +111,7 @@ function tagHit(callee: Tagged, site: HostCallSite): CapabilityHit | undefined {
 
 /** An inert Response stand-in so a run performs no real network but keeps executing. */
 function inertResponse(): unknown {
-	return { "ok": true, "status": 200, "json": async () => ({}), "text": async () => "", "arrayBuffer": async () => new ArrayBuffer(0) };
+	return { "ok": true, "status": 200, "json": () => Promise.resolve({}), "text": () => Promise.resolve(""), "arrayBuffer": () => Promise.resolve(new ArrayBuffer(0)) };
 }
 
 /**
@@ -150,7 +155,14 @@ export function capabilityStandins(): { "globals": Record<string, unknown>; "mod
 	const fsResults: Record<string, () => unknown> = { "readdir": () => [], "readdirSync": () => [], "existsSync": () => false, "createReadStream": inert, "createWriteStream": inert };
 	const fsMock = Object.fromEntries([
 		...Object.entries(FS_SYNC).map(([method, op]) => [method, tag("fs:" + op, fsResults[method] ?? (op === "read" ? () => "" : noop))]),
-		...Object.entries(FS_ASYNC).map(([method, op]) => [method, tag("fs:" + op, async () => (fsResults[method] ?? (op === "read" ? () => "" : noop))())])
+		...Object.entries(FS_ASYNC).map(([method, op]) => [
+			method,
+			tag("fs:" + op, () => {
+				(fsResults[method] ?? (op === "read" ? () => "" : noop))();
+
+				return Promise.resolve();
+			})
+		])
 	]);
 	const childProcessMock = {
 		"spawn": tag("exec", () => ({ "on": noop, "stdout": { "on": noop }, "stderr": { "on": noop }, "kill": noop })),
@@ -169,7 +181,7 @@ export function capabilityStandins(): { "globals": Record<string, unknown>; "mod
 	};
 
 	return {
-		"globals": { "fetch": tag("net", async () => inertResponse()) },
+		"globals": { "fetch": tag("net", () => Promise.resolve(inertResponse())) },
 		"modules": {
 			"node:fs": fsMock,
 			"fs": fsMock,
@@ -239,7 +251,7 @@ export async function runCanary(src: string, fileName: string): Promise<CanaryOb
 		}
 	});
 
-	sourceFile = loaded.sourceFile;
+	({ sourceFile } = loaded);
 
 	try {
 		await loaded.vm.runAsync();

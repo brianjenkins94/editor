@@ -45,7 +45,11 @@ export default function init(modules) {
 	 */
 	function relativeTo(root, fileName) {
 		const uri = /^\/([a-z][a-z0-9+.-]*)\/([^/]+)(\/.*)$/u.exec(fileName);
-		const path = uri === null ? fileName : uri[1] === "file" ? uri[3] : undefined;
+		let path = fileName;
+
+		if (uri !== null) {
+			path = uri[1] === "file" ? uri[3] : undefined;
+		}
 
 		return path !== undefined && path.startsWith(root + "/") && !path.includes("/node_modules/") ? path.slice(root.length + 1) : undefined;
 	}
@@ -63,15 +67,13 @@ export default function init(modules) {
 		for (const project of projects) {
 			const program = project.getLanguageService().getProgram();
 
-			if (program === undefined) {
-				continue;
-			}
+			if (program !== undefined) {
+				for (const source of program.getSourceFiles()) {
+					const path = relativeTo(root, source.fileName);
 
-			for (const source of program.getSourceFiles()) {
-				const path = relativeTo(root, source.fileName);
-
-				if (path !== undefined && !source.isDeclarationFile && !files.has(path)) {
-					files.set(path, { "program": program, "source": source, "version": String(source.version ?? project.getScriptVersion(source.fileName) ?? "") });
+					if (path !== undefined && !source.isDeclarationFile && !files.has(path)) {
+						files.set(path, { "program": program, "source": source, "version": String(source.version ?? project.getScriptVersion(source.fileName) ?? "") });
+					}
 				}
 			}
 		}
@@ -106,6 +108,7 @@ export default function init(modules) {
 
 		// One host per program: names resolve in the program that has the file.
 		const hosts = new Map();
+
 		function hostFor(program) {
 			let host = hosts.get(program);
 

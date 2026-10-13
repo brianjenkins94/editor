@@ -29,11 +29,11 @@ declare module "@brianjenkins94/util/silo/enforce/broker" {
 	/** A capability request at a boundary. `scope` is the canonical silo scope string
 	 *  (`net:<host>`, `fs:read:<path>`, `fs:write:<path>`, `exec:<bin>`, `eval:<kind>`). */
 	export interface CapabilityRequest {
+		[key: string]: unknown;
 		"kind": "net" | "fs" | "exec" | "eval";
 		"scope": string;
 		"op"?: "read" | "write";
 		"resource"?: string;
-		[key: string]: unknown;
 	}
 
 	/** The pluggable decision source — a VS Code allow/deny popup today; an external program or AI later.
@@ -57,7 +57,7 @@ declare module "@brianjenkins94/util/silo/enforce/broker" {
 
 	export class CapabilityDenied extends Error {
 		public readonly scope: string;
-		constructor(scope: string, reason: string);
+		public constructor(scope: string, reason: string);
 	}
 
 	/** Decide one request (BERNARD → grant store → decider → deny). Resolves on allow; throws on deny. */

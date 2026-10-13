@@ -18,11 +18,11 @@
  *
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
-import type * as vscodeApi from "vscode";
 import type { PaneMark } from "@brianjenkins94/monaco-vscode-api/main";
-import type { EvidenceStore } from "../shared/evidence-store";
 import type { CoverageEvent as CoverageReport } from "@brianjenkins94/run-contract";
 import type { PaneMark as ContentMark } from "@brianjenkins94/run-contract/pane";
+import type * as vscodeApi from "vscode";
+import type { EvidenceStore } from "../shared/evidence-store";
 import { Anchors, offsetOf } from "./anchors";
 import { refreshView } from "./pane-views";
 
@@ -35,7 +35,31 @@ interface LineEvidence { "ever": number; "runs": number; "lastAt": string; "ran"
 /** A line's coverage: every statement starting on it ran, some did, or none. */
 type Covered = "ran" | "partial" | "missed";
 
-const coveredOf = (all: boolean, some: boolean): Covered => (all ? "ran" : some ? "partial" : "missed");
+function coveredOf(all: boolean, some: boolean): Covered {
+	if (all) {
+		return "ran";
+	}
+
+	return some ? "partial" : "missed";
+}
+
+/** A line's hover, from the session's own run. */
+function ranHover(ran: boolean, some: boolean, count: number): string {
+	if (ran) {
+		return `Ran ${count}×`;
+	}
+
+	return some ? "Partly ran: some of it didn't" : "Didn't run";
+}
+
+/** A line's hover, from the evidence of recent runs. */
+function evidenceHover(each: LineEvidence): string {
+	if (each.ran) {
+		return `Ran in ${each.ever} run${each.ever === 1 ? "" : "s"} since it last changed · last ${new Date(each.lastAt).toLocaleString()}`;
+	}
+
+	return each.some ? "Partly ran: some of it didn't, in recent runs" : `Didn't run in ${Math.max(1, Math.round(each.runs))} recent run${Math.round(each.runs) > 1 ? "s" : ""}`;
+}
 
 /** Each line's coverage: whether every statement that starts on it ran, or some did, and how often its first one did —
  *  each statement on the line `lineOf` says it's on now (undefined: its code is gone). */
@@ -109,7 +133,7 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 			const span = evidence.reached;
 
 			if (span !== undefined) {
-				const line = document.positionAt(start).line;
+				const { line } = document.positionAt(start);
 				const before = byLine.get(line);
 
 				byLine.set(line, before === undefined ? { ...span, "ran": span.ever > 0, "some": span.ever > 0 } : { ...before, "ran": before.ran && span.ever > 0, "some": before.some || span.ever > 0 });
@@ -124,14 +148,14 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 
 		if (known !== undefined) {
 			const { report, anchors } = known;
-			const version = editor.document.version;
+			const { version } = editor.document;
 			// Each statement by its anchor (its head, for one with a body), else its own range.
 			const ranges = anchors === undefined ? [] : report.statements.map(({ start, end, anchor }): [number, number] => anchor ?? [offsetOf(anchors.text, start), offsetOf(anchors.text, end)]);
 
 			// Where each statement is now (as it ran, with no text to anchor in).
 			void (anchors === undefined ? Promise.resolve(report.statements.map(({ start }) => start[0])) : anchors.lines(editor.document.getText(), ranges)).then((now) => {
 				if (editor.document.version === version && reports.get(editor.document.uri.path) === known) {
-					paint(editor, [...lines(report, (index) => now[index])].map(([line, { ran, some, count }]) => [line, { "covered": coveredOf(ran, some), "hover": ran ? `Ran ${count}×` : some ? "Partly ran: some of it didn't" : "Didn't run" }]));
+					paint(editor, [...lines(report, (index) => now[index])].map(([line, { ran, some, count }]) => [line, { "covered": coveredOf(ran, some), "hover": ranHover(ran, some, count) }]));
 				}
 			});
 			// The run's work, by the statements it went to, where they are now (those whose code is gone left out).
@@ -139,7 +163,7 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 
 			void (anchors === undefined ? Promise.resolve(profile.map(({ start }) => start[0])) : anchors.lines(editor.document.getText(), profile.map(({ anchor }) => anchor))).then((now) => {
 				if (editor.document.version === version && reports.get(editor.document.uri.path) === known) {
-					profiled(editor.document.uri.toString(), profile.flatMap(({ statements, waited, first }, index) => (now[index] === undefined ? [] : [{ "line": now[index]!, "statements": statements, "waited": waited, "first": first }])));
+					profiled(editor.document.uri.toString(), profile.flatMap(({ statements, waited, first }, index) => (now[index] === undefined ? [] : [{ "line": now[index], "statements": statements, "waited": waited, "first": first }])));
 				}
 			});
 
@@ -148,7 +172,7 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 
 		void evidenceMarks(editor.document).then((marks) => {
 			if (marks !== undefined && !reports.has(editor.document.uri.path)) {
-				paint(editor, [...marks].map(([line, each]) => [line, { "covered": coveredOf(each.ran, each.some), "hover": each.ran ? `Ran in ${each.ever} run${each.ever === 1 ? "" : "s"} since it last changed · last ${new Date(each.lastAt).toLocaleString()}` : each.some ? "Partly ran: some of it didn't, in recent runs" : `Didn't run in ${Math.max(1, Math.round(each.runs))} recent run${Math.round(each.runs) > 1 ? "s" : ""}` }]));
+				paint(editor, [...marks].map(([line, each]) => [line, { "covered": coveredOf(each.ran, each.some), "hover": evidenceHover(each) }]));
 			}
 		});
 	};
@@ -160,6 +184,7 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 			}
 		}
 	};
+
 	// Typing: draw once it pauses (BABLR re-reads the whole file).
 	let typing: ReturnType<typeof setTimeout> | undefined;
 
@@ -182,7 +207,9 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 		}
 	};
 
-	store.onDidChange(() => { redraw(); });
+	store.onDidChange(() => {
+		redraw();
+	});
 	// A session's final coverage, as it ends.
 	vscode.debug.onDidReceiveDebugSessionCustomEvent((event) => {
 		if (event.event === "coverage") {
@@ -211,7 +238,9 @@ export function installCoverage(vscode: typeof vscodeApi, store: EvidenceStore, 
 		}
 
 		clearTimeout(typing);
-		typing = setTimeout(() => { redraw(event.document); }, 400);
+		typing = setTimeout(() => {
+			redraw(event.document);
+		}, 400);
 	});
 	redraw();
 }

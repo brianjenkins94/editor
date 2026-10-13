@@ -6,11 +6,12 @@ import { commandFinished, commandLine, workingDirectory } from "../workbench/ter
 
 // VS Code's own reading of a sequence's value (shellIntegrationAddon.ts, deserializeVSCodeOscMessage).
 const deserialize = (message) => message.replaceAll(/\\(\\|x([0-9a-f]{2}))/giu, (_match, op, hex) => (hex ? String.fromCharCode(Number.parseInt(hex, 16)) : op));
-const value = (sequence, prefix) => {
-	assert.ok(sequence.startsWith("\x1b]633;" + prefix) && sequence.endsWith("\x07"), JSON.stringify(sequence));
 
-	return sequence.slice(("\x1b]633;" + prefix).length, -1);
-};
+function value(sequence, prefix) {
+	assert.ok(sequence.startsWith("\x1B]633;" + prefix) && sequence.endsWith("\x07"), JSON.stringify(sequence));
+
+	return sequence.slice(("\x1B]633;" + prefix).length, -1);
+}
 
 test("a command line comes through VS Code's reading as it was typed — separators, backslashes, spaces and all", () => {
 	const typed = "echo \"a;b\" | sed 's/\\\\/x/' && cd 'my dir'\t# done";
@@ -22,6 +23,6 @@ test("a command line comes through VS Code's reading as it was typed — separat
 
 test("the working directory too, and a finish with or without its exit code", () => {
 	assert.equal(deserialize(value(workingDirectory("/workspace/my app"), "P;Cwd=")), "/workspace/my app");
-	assert.equal(commandFinished(130), "\x1b]633;D;130\x07");
-	assert.equal(commandFinished(), "\x1b]633;D\x07");
+	assert.equal(commandFinished(130), "\x1B]633;D;130\x07");
+	assert.equal(commandFinished(), "\x1B]633;D\x07");
 });

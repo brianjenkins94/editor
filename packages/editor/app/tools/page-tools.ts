@@ -5,8 +5,8 @@
  *
  * Kept apart from index.ts (whose glob only Vite can read), so a test can serve a family's tools.
  */
-import type { PageTool } from "@brianjenkins94/observability";
 import type { Hub } from "@brianjenkins94/hub";
+import type { PageTool } from "@brianjenkins94/observability";
 import type { ToolContext } from "@brianjenkins94/util/mcp/tool";
 import type { EditorTool, ToolHost } from "./host";
 import { createRpcClient } from "@brianjenkins94/hub";
@@ -16,7 +16,7 @@ import { z } from "zod";
 const RESPONDER_MS = 3000;
 
 /** What a page tool can't do: it runs in the tab, not in debug-mcp's server. */
-const unavailable = (what: string) => async (): Promise<never> => { throw new Error(`a page tool can't ${what}`); };
+const unavailable = (what: string) => (): Promise<never> => Promise.reject(new Error(`a page tool can't ${what}`));
 
 /** The host this tab's tools get: requests into its root hub's tree. */
 export function createToolHost(hub: Hub, { commands = "" }: { "commands"?: string } = {}): ToolHost {
@@ -43,7 +43,7 @@ export function toPageTools(tools: EditorTool[]): PageTool[] {
 	return tools.map(({ tool, timeoutMs }) => ({
 		"name": tool.name,
 		"description": tool.config.description,
-		"inputSchema": z.toJSONSchema(z.object(tool.config.inputSchema as z.ZodRawShape)) as Record<string, unknown>,
+		"inputSchema": z.toJSONSchema(z.object(tool.config.inputSchema as z.ZodRawShape)),
 		...timeoutMs === undefined ? {} : { "timeoutMs": timeoutMs },
 		"handler": async (args, { signal }) => {
 			const context: ToolContext = {

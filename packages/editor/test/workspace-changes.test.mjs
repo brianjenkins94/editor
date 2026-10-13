@@ -10,35 +10,51 @@ await configure({ "mounts": { "/workspace": { "backend": SingleBuffer, "buffer":
 
 const batches = [];
 
-watchWorkspaceStore(mounts.get("/workspace"), "/workspace", (changes) => { batches.push(changes); }, 1);
+watchWorkspaceStore(mounts.get("/workspace"), "/workspace", (changes) => {
+	batches.push(changes);
+}, 1);
 
 /** Run `act`, let the batch flush, and return the changes it reported (sorted by path). */
 async function changesOf(act) {
 	batches.length = 0;
 	act();
-	await new Promise((resolve) => { setTimeout(resolve, 20); });
+	await new Promise((resolve) => {
+		setTimeout(resolve, 20);
+	});
 
-	return batches.flat().sort((a, b) => a.path.localeCompare(b.path));
+	return batches.flat().sort((left, right) => left.path.localeCompare(right.path));
 }
 
 test("creating a file is one add (its writes fold into it), with an absolute path", async () => {
-	assert.deepEqual(await changesOf(() => { fs.writeFileSync("/workspace/a.txt", "hello"); }), [{ "path": "/workspace/a.txt", "type": "added" }]);
+	assert.deepEqual(await changesOf(() => {
+		fs.writeFileSync("/workspace/a.txt", "hello");
+	}), [{ "path": "/workspace/a.txt", "type": "added" }]);
 });
 
 test("rewriting a file is a change", async () => {
-	assert.deepEqual(await changesOf(() => { fs.writeFileSync("/workspace/a.txt", "hello again"); }), [{ "path": "/workspace/a.txt", "type": "changed" }]);
+	assert.deepEqual(await changesOf(() => {
+		fs.writeFileSync("/workspace/a.txt", "hello again");
+	}), [{ "path": "/workspace/a.txt", "type": "changed" }]);
 });
 
 test("emptying a file (only a touch in zen-fs) is a change", async () => {
-	assert.deepEqual(await changesOf(() => { fs.writeFileSync("/workspace/a.txt", ""); }), [{ "path": "/workspace/a.txt", "type": "changed" }]);
+	assert.deepEqual(await changesOf(() => {
+		fs.writeFileSync("/workspace/a.txt", "");
+	}), [{ "path": "/workspace/a.txt", "type": "changed" }]);
 	fs.writeFileSync("/workspace/a.txt", "back");
-	assert.deepEqual(await changesOf(() => { fs.truncateSync("/workspace/a.txt", 0); }), [{ "path": "/workspace/a.txt", "type": "changed" }]);
+	assert.deepEqual(await changesOf(() => {
+		fs.truncateSync("/workspace/a.txt", 0);
+	}), [{ "path": "/workspace/a.txt", "type": "changed" }]);
 });
 
 test("reading is not a change", async () => {
 	fs.writeFileSync("/workspace/a.txt", "read me");
 	await changesOf(() => undefined);
-	assert.deepEqual(await changesOf(() => { fs.readFileSync("/workspace/a.txt", "utf8"); fs.statSync("/workspace/a.txt"); fs.readdirSync("/workspace"); }), []);
+	assert.deepEqual(await changesOf(() => {
+		fs.readFileSync("/workspace/a.txt", "utf8");
+		fs.statSync("/workspace/a.txt");
+		fs.readdirSync("/workspace");
+	}), []);
 	assert.equal(batches.length, 0, "a read publishes nothing, not even an empty batch");
 });
 
@@ -48,7 +64,9 @@ test("a recursive delete reports every file and directory under it", async () =>
 	fs.writeFileSync("/workspace/dir/sub/two.txt", "2");
 	await changesOf(() => undefined);
 
-	const changes = await changesOf(() => { fs.rmSync("/workspace/dir", { "recursive": true }); });
+	const changes = await changesOf(() => {
+		fs.rmSync("/workspace/dir", { "recursive": true });
+	});
 
 	assert.ok(changes.every((change) => change.type === "deleted"), JSON.stringify(changes));
 	assert.deepEqual(changes.map((change) => change.path), ["/workspace/dir", "/workspace/dir/one.txt", "/workspace/dir/sub", "/workspace/dir/sub/two.txt"]);
@@ -58,7 +76,9 @@ test("renaming a directory deletes the old path and adds the new one", async () 
 	fs.mkdirSync("/workspace/old");
 	fs.writeFileSync("/workspace/old/file.txt", "x");
 	await changesOf(() => undefined);
-	assert.deepEqual(await changesOf(() => { fs.renameSync("/workspace/old", "/workspace/new"); }), [
+	assert.deepEqual(await changesOf(() => {
+		fs.renameSync("/workspace/old", "/workspace/new");
+	}), [
 		{ "path": "/workspace/new", "type": "added" },
 		{ "path": "/workspace/old", "type": "deleted" }
 	]);

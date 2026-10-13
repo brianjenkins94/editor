@@ -16,11 +16,13 @@
  * 3. The TRIPWIRE (M0 = surface): a `deny`d call the code reaches gets its own ERROR squiggle (a separate
  *    `capabilities-policy` diagnostic collection). Runtime blocking/substituting is the next layer, at real-run.
  */
-import * as vscode from "vscode";
+import type { StaticEntry, StaticSurface } from "../../shared/capabilities/silo-store";
 
-import { type Disposition, type Effective, type Policy, effectiveDisposition, policyUri, readPolicy, withRule, withoutRule, writePolicy } from "./policy";
-import { type StaticEntry, type StaticSurface, loadStaticSurface, writeStaticSurface } from "../../shared/capabilities/silo-store";
+import type { Disposition, Effective, Policy } from "./policy";
+import * as vscode from "vscode";
+import { loadStaticSurface, writeStaticSurface } from "../../shared/capabilities/silo-store";
 import { registerPlacedRules } from "./placed-rules";
+import { effectiveDisposition, policyUri, readPolicy, withoutRule, withRule, writePolicy } from "./policy";
 import { registerRulesTree } from "./rules-tree";
 
 interface Row {
@@ -107,8 +109,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		// fills in as you browse (a whole-project sweep is a later engine change); the ACTIVE file is updated
 		// authoritatively (including removals) since we know it was just analyzed. Digest-guarded so the committed
 		// file is written only on real DRIFT (a file gaining/losing a capability), not on every diagnostics refresh.
-		let staticSurface: StaticSurface | undefined;
-		let lastStaticKey = "";
+	let staticSurface: StaticSurface | undefined;
+	let lastStaticKey = "";
 
 	context.subscriptions.push(view, violations);
 
@@ -122,18 +124,16 @@ export function activate(context: vscode.ExtensionContext): void {
 			const denied: vscode.Diagnostic[] = [];
 
 			for (const diagnostic of diagnostics) {
-				if (diagnostic.source !== "capabilities") {
-					continue;
-				}
+				if (diagnostic.source === "capabilities") {
+					const parsed = parseMessage(diagnostic.message);
+					const dangerous = diagnostic.severity === vscode.DiagnosticSeverity.Warning;
 
-				const parsed = parseMessage(diagnostic.message);
-				const dangerous = diagnostic.severity === vscode.DiagnosticSeverity.Warning;
+					if (parsed.resolved && effectiveDisposition(policy, parsed.capability, parsed.resource, dangerous) === "deny") {
+						const violation = new vscode.Diagnostic(diagnostic.range, `${parsed.capability} call to "${parsed.resource}" is denied by capability policy`, vscode.DiagnosticSeverity.Error);
 
-				if (parsed.resolved && effectiveDisposition(policy, parsed.capability, parsed.resource, dangerous) === "deny") {
-					const violation = new vscode.Diagnostic(diagnostic.range, `${parsed.capability} call to "${parsed.resource}" is denied by capability policy`, vscode.DiagnosticSeverity.Error);
-
-					violation.source = "capabilities-policy";
-					denied.push(violation);
+						violation.source = "capabilities-policy";
+						denied.push(violation);
+					}
 				}
 			}
 
@@ -142,7 +142,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			}
 		}
 
-		const key = [...next.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([uri, list]) => uri + "#" + list.map((diagnostic) => `${diagnostic.range.start.line}:${diagnostic.range.start.character}`).join(",")).join("|");
+		const key = [...next.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([uri, list]) => uri + "#" + list.map((diagnostic) => `${diagnostic.range.start.line}:${diagnostic.range.start.character}`).join(",")).join("|");
 
 		if (key === lastViolationsKey) {
 			return; // nothing changed — don't re-publish (avoids the onDidChangeDiagnostics feedback loop)
@@ -157,8 +157,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	/** Rebuild the STATIC surface from the current "capabilities" diagnostics and persist it (digest-guarded). */
 	const updateStaticSurface = async (): Promise<void> => {
-		if (staticSurface === undefined) {
-			staticSurface = await loadStaticSurface();
+		const surface = staticSurface ?? await loadStaticSurface();
+
+		if (staticSurface !== surface) {
+			staticSurface = surface;
 		}
 
 		const byFile = new Map<string, StaticEntry[]>();
@@ -168,21 +170,17 @@ export function activate(context: vscode.ExtensionContext): void {
 			const entries: StaticEntry[] = [];
 
 			for (const diagnostic of diagnostics) {
-				if (diagnostic.source !== "capabilities") {
-					continue;
-				}
+				if (diagnostic.source === "capabilities") {
+					const parsed = parseMessage(diagnostic.message);
 
-				const parsed = parseMessage(diagnostic.message);
+					if (parsed.capability !== "") {
+						const dedupe = `${parsed.capability} ${parsed.callee} ${parsed.resource}`;
 
-				if (parsed.capability === "") {
-					continue;
-				}
-
-				const dedupe = `${parsed.capability} ${parsed.callee} ${parsed.resource}`;
-
-				if (!seen.has(dedupe)) {
-					seen.add(dedupe);
-					entries.push({ "capability": parsed.capability, "callee": parsed.callee, "resource": parsed.resource });
+						if (!seen.has(dedupe)) {
+							seen.add(dedupe);
+							entries.push({ "capability": parsed.capability, "callee": parsed.callee, "resource": parsed.resource });
+						}
+					}
 				}
 			}
 
@@ -194,7 +192,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		// Set every file we saw caps for. The ACTIVE file additionally gets authoritative removal — it was just
 		// analyzed, so zero caps means its calls are genuinely gone (other closed files are left as-is: merge).
 		for (const [path, entries] of byFile) {
-			staticSurface.capabilities[path] = entries;
+			surface.capabilities[path] = entries;
 		}
 
 		const activeUri = vscode.window.activeTextEditor?.document.uri;
@@ -203,18 +201,18 @@ export function activate(context: vscode.ExtensionContext): void {
 			const activePath = vscode.workspace.asRelativePath(activeUri, false);
 
 			if (!byFile.has(activePath)) {
-				delete staticSurface.capabilities[activePath];
+				delete surface.capabilities[activePath];
 			}
 		}
 
-		const key = JSON.stringify(Object.entries(staticSurface.capabilities).sort(([a], [b]) => a.localeCompare(b)));
+		const key = JSON.stringify(Object.entries(surface.capabilities).sort(([left], [right]) => left.localeCompare(right)));
 
 		if (key === lastStaticKey) {
 			return; // no drift → don't rewrite (also breaks the onDidChangeDiagnostics feedback loop)
 		}
 
 		lastStaticKey = key;
-		await writeStaticSurface(staticSurface);
+		await writeStaticSurface(surface);
 	};
 
 	const refresh = async (): Promise<void> => {
@@ -251,7 +249,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	const setDisposition = async (row: Row | undefined, disposition: Disposition | "clear"): Promise<void> => {
 		const uri = policyUri();
 
-		if (uri === undefined || row === undefined || !row.resolved) {
+		if (uri === undefined || !row?.resolved) {
 			return;
 		}
 

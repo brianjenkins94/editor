@@ -14,11 +14,11 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { Observed } from "@brianjenkins94/observability";
 import type { Effect } from "@brianjenkins94/run-contract";
 import { serve } from "@brianjenkins94/hub";
+import { verdictOf } from "@brianjenkins94/run-contract/gate";
 import { answerMailbox, runtimeSession } from "@brianjenkins94/run-contract/runtime";
 import * as vscode from "vscode";
 import { recordEffect } from "../../shared/capabilities/run-effects";
 import { policyFor, takeOnce } from "./capability-stops";
-import { verdictOf } from "@brianjenkins94/run-contract/gate";
 
 const READS = new Set(["readFile", "stat", "readdir"]);
 const WRITES = new Set(["writeFile", "mkdir", "rm", "rename"]);
@@ -26,7 +26,7 @@ const WRITES = new Set(["writeFile", "mkdir", "rm", "rename"]);
 /** VS Code's file errors, as node names them. */
 const CODES: Record<string, string> = { "FileNotFound": "ENOENT", "FileExists": "EEXIST", "FileIsADirectory": "EISDIR", "FileNotADirectory": "ENOTDIR", "NoPermissions": "EACCES", "Unavailable": "EAGAIN" };
 
-type Answer = { "meta": Record<string, unknown>; "payload"?: Uint8Array };
+interface Answer { "meta": Record<string, unknown>; "payload"?: Uint8Array }
 
 function failure(message: string, code: string): Error {
 	return Object.assign(new Error(message), { "code": code });
@@ -64,11 +64,13 @@ async function perform(op: string, path: string, payload: Uint8Array, to?: strin
 
 				return { "meta": {}, "payload": open === undefined ? await vscode.workspace.fs.readFile(uri) : new TextEncoder().encode(open.getText()) };
 			}
+
 			case "stat": {
 				const stat = await vscode.workspace.fs.stat(uri).then((found) => found, () => undefined);
 
 				return { "meta": stat === undefined ? {} : { "stat": { "type": (stat.type & vscode.FileType.Directory) === 0 ? "file" : "directory", "size": stat.size, "mtime": stat.mtime } } };
 			}
+
 			case "readdir":
 				return { "meta": { "entries": (await vscode.workspace.fs.readDirectory(uri)).map(([name]) => name) } };
 			case "writeFile":
@@ -84,7 +86,7 @@ async function perform(op: string, path: string, payload: Uint8Array, to?: strin
 
 				return { "meta": {} };
 			case "rename":
-				await vscode.workspace.fs.rename(uri, vscode.Uri.file(to!), { "overwrite": true });
+				await vscode.workspace.fs.rename(uri, vscode.Uri.file(to), { "overwrite": true });
 
 				return { "meta": {} };
 			default:
@@ -133,7 +135,7 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 	};
 
 	const answer = async (session: string | undefined, meta: Record<string, unknown>, payload: Uint8Array): Promise<Answer & { "how"?: Effect["how"] }> => {
-		const op = String(meta["op"]);
+		const op = meta["op"] as string;
 		const path = workspacePath(meta["path"]);
 
 		if (!READS.has(op) && !WRITES.has(op)) {
@@ -144,7 +146,7 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 		const to = op === "rename" ? workspacePath(meta["to"]) : undefined;
 
 		if (path === undefined || (op === "rename" && to === undefined)) {
-			throw failure(`EACCES: ${String(path === undefined ? meta["path"] : meta["to"])} isn't in the workspace`, "EACCES");
+			throw failure(`EACCES: ${(path === undefined ? meta["path"] : meta["to"]) as string} isn't in the workspace`, "EACCES");
 		}
 
 		// The debugger's own: the program and what it imports, read.
@@ -156,8 +158,15 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 		// Each path it reaches decided (a rename: both, refused if either is) — and counted.
 		const paths = to === undefined ? [path] : [path, to];
 		const verdicts = await Promise.all(paths.map(async (each) => decide(session, capability, each)));
-		const verdict = verdicts.includes("deny") ? "deny" : verdicts.includes("skip") ? "skip" : "allow";
-		const count = (how: Effect["how"]): Effect["how"] => paths.map((each) => counted(session, capability, each, how))[0]!;
+		let verdict: "deny" | "skip" | "allow" = "allow";
+
+		if (verdicts.includes("deny")) {
+			verdict = "deny";
+		} else if (verdicts.includes("skip")) {
+			verdict = "skip";
+		}
+
+		const count = (how: Effect["how"]): Effect["how"] => paths.map((each) => counted(session, capability, each, how))[0];
 
 		if (verdict === "skip") {
 			return { ...skipped(op), "how": count("skipped") };
@@ -196,6 +205,7 @@ export function serveRuntimeFiles(context: vscode.ExtensionContext, hub: Hub, lo
 			// The session its link was made for: the extension named it to `connect` — never the worker's word.
 			const bound = from === undefined ? undefined : runtimeSession(from);
 			const stop = answerMailbox(mailbox, async (meta, payload) => {
+				// eslint-disable-next-line ts/no-base-to-string -- a call's fields come off the mailbox unknown: logged as String() makes them
 				const span = log.span("runtime.fs", { "op": String(meta["op"]), "path": String(meta["path"]), ...bound === undefined ? {} : { "session": bound } });
 
 				try {

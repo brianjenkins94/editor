@@ -15,11 +15,11 @@
  */
 import type { VirtualFS } from "@brianjenkins94/almostnode";
 import type { ArchSink } from "@brianjenkins94/observability";
-import { configure, fs, InMemory, mounts, resolveMountConfig, SingleBuffer } from "@zenfs/core";
+import type { WorkspaceChange } from "./workspace-changes";
 
-import type { WorkspaceChange } from "../shared/workspace-changes";
-import { observeZenfs, ZENFS_NODE } from "../shared/architecture-zenfs";
-import { watchWorkspaceStore } from "../shared/workspace-changes";
+import { configure, defaultContext, fs, InMemory, resolveMountConfig, SingleBuffer } from "@zenfs/core";
+import { observeZenfs, ZENFS_NODE } from "./architecture-zenfs";
+import { watchWorkspaceStore } from "./workspace-changes";
 
 const noopWatcher = { "close": () => undefined };
 
@@ -75,7 +75,7 @@ export interface WorkspaceConnection {
 /** Wire this realm's workspace mount into the editor (now, or when the buffer arrives). */
 export function connectWorkspace(options: WorkspaceConnection): void {
 	connection = options;
-	const store = mounted ? mounts.get(WORKSPACE_MOUNT) : undefined;
+	const store = mounted ? defaultContext.mounts.get(WORKSPACE_MOUNT) : undefined;
 
 	if (store !== undefined) {
 		connectStore(store);
@@ -149,9 +149,12 @@ export async function createZenfsVFS(): Promise<VirtualFS> {
 	await configure({ "mounts": { "/": InMemory } });
 	configured = true;
 
-	if (pendingBuffer !== undefined) {
-		await mountSharedWorkspace(pendingBuffer);
+	const buffer = pendingBuffer;
+
+	if (buffer !== undefined) {
+		// Taken before the mount: once configured, attachSharedWorkspace mounts a buffer itself and never sets it again.
 		pendingBuffer = undefined;
+		await mountSharedWorkspace(buffer);
 	}
 
 	// Duck-typed: almostnode only calls the public VirtualFS methods, which this delegates to zen-fs.
@@ -170,7 +173,7 @@ export function receiveSharedWorkspace(): void {
 		}
 
 		globalThis.removeEventListener("message", onControl);
-		const port = event.ports[0];
+		const [port] = event.ports;
 
 		port.addEventListener("message", (message: MessageEvent) => {
 			attachSharedWorkspace((message.data as { "buffer"?: unknown } | undefined)?.buffer);

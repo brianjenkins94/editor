@@ -102,10 +102,15 @@ export default function init(modules) {
 	// eslint severity (1 warn / 2 error) + an override → a ts.DiagnosticCategory, or undefined for "off".
 	function categoryOf(eslintSeverity, override) {
 		const base = eslintSeverity === 2 ? "error" : "warn";
-		const resolved = override === "downgrade" ? (base === "error" ? "warn" : "info")
-			: override === "upgrade" ? "error"
-				: override === "off" || override === "info" || override === "warn" || override === "error" ? override
-					: base;
+		let resolved = base;
+
+		if (override === "downgrade") {
+			resolved = base === "error" ? "warn" : "info";
+		} else if (override === "upgrade") {
+			resolved = "error";
+		} else if (override === "off" || override === "info" || override === "warn" || override === "error") {
+			resolved = override;
+		}
 
 		if (resolved === "off") {
 			return undefined;
@@ -184,7 +189,7 @@ export default function init(modules) {
 			function readWorkspaceConfig() {
 				try {
 					const dir = (project && project.getCurrentDirectory && project.getCurrentDirectory()) || "/workspace";
-					const base = dir.replace(/\/+$/, "");
+					const base = dir.replace(/\/+$/u, "");
 
 					for (const name of configNames) {
 						const path = base + "/" + name;
@@ -237,25 +242,24 @@ export default function init(modules) {
 					for (const message of messages) {
 						const category = categoryOf(message.severity, message.ruleId === null ? undefined : overrideFor(message.ruleId, message.fixable === true));
 
-						if (category === undefined) {
-							continue; // customized "off": hidden, but still fixed by fix-all
+						// customized "off" (undefined): hidden, but still fixed by fix-all
+						if (category !== undefined) {
+							const start = offsetOf(sourceFile, message.line, message.column);
+							const end = message.endLine !== undefined && message.endColumn !== undefined
+								? offsetOf(sourceFile, message.endLine, message.endColumn)
+								: start + 1;
+
+							prior.push({
+								"file": sourceFile,
+								"start": start,
+								"length": Math.max(0, end - start),
+								"code": 0,
+								"category": category,
+								"source": "eslint",
+								"reportsUnnecessary": isUnnecessary(message) ? true : undefined,
+								"messageText": message.ruleId === null ? message.message : message.message + " (" + message.ruleId + ")"
+							});
 						}
-
-						const start = offsetOf(sourceFile, message.line, message.column);
-						const end = message.endLine !== undefined && message.endColumn !== undefined
-							? offsetOf(sourceFile, message.endLine, message.endColumn)
-							: start + 1;
-
-						prior.push({
-							"file": sourceFile,
-							"start": start,
-							"length": Math.max(0, end - start),
-							"code": 0,
-							"category": category,
-							"source": "eslint",
-							"reportsUnnecessary": isUnnecessary(message) ? true : undefined,
-							"messageText": message.ruleId === null ? message.message : message.message + " (" + message.ruleId + ")"
-						});
 					}
 				} catch (error) { /* a lint failure never takes tsserver's own diagnostics down */ }
 

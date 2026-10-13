@@ -48,11 +48,20 @@ export function addObservation<Key>(sums: SiteSums<Key>, node: Key, site: Observ
 
 	known.tags[counted] = (known.tags[counted] ?? 0) + 1;
 
-	const sample = typeof value === "string" ? value.slice(0, SAMPLE_CHARS) : typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)) ? value : undefined;
+	const sample = sampleOf(value);
 
 	if (sample !== undefined && known.samples.length < MAX_SAMPLES && !known.samples.includes(sample)) {
 		known.samples.push(sample);
 	}
+}
+
+/** A value as a sample keeps it: a string cut short, a boolean or finite number as it is; nothing else is sampled. */
+function sampleOf(value: unknown): string | number | boolean | undefined {
+	if (typeof value === "string") {
+		return value.slice(0, SAMPLE_CHARS);
+	}
+
+	return typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)) ? value : undefined;
 }
 
 /** A copy of `sums` a fork goes on adding to, leaving the original as it was. */
@@ -68,7 +77,7 @@ export function siteObservations(sums: SiteSums | undefined, file: ts.SourceFile
 		return [line, character];
 	};
 
-	return [...sums ?? []].filter(([node]) => node.getSourceFile() === file).sort(([a], [b]) => a.getStart(file) - b.getStart(file)).map(([node, known]) => ({ "start": position(node.getStart(file)), "end": position(node.getEnd()), ...summary(known) }));
+	return [...sums ?? []].filter(([node]) => node.getSourceFile() === file).sort(([left], [right]) => left.getStart(file) - right.getStart(file)).map(([node, known]) => ({ "start": position(node.getStart(file)), "end": position(node.getEnd()), ...summary(known) }));
 }
 
 /** What a site's sums say, as a report gives it: for a branch its arms, for a value its counts, tags and samples. */

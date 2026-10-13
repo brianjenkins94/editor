@@ -14,29 +14,13 @@
  * and the functions it was in; the latest of each stop's hits kept, and reported soon after (not every 10 seconds: a
  * stop is looked at as it happens).
  */
-import type { ObserveSite } from "@brianjenkins94/tsval";
-import type { SiteObservation, StatementCoverage } from "@brianjenkins94/run-contract";
-import { typeTag } from "../../tsval/src/values";
-import { preview } from "@brianjenkins94/run-contract/values";
+import type { SiteObservation } from "@brianjenkins94/run-contract";
 import type { Encoded } from "@brianjenkins94/run-contract/recorded";
+import type { ObserveSite } from "@brianjenkins94/tsval";
+import type { ModuleEvidence, RecordedStop, Replay, StopHit } from "../shared/preview-evidence";
 import { encode } from "@brianjenkins94/run-contract/recorded";
-
-/** What one version of a module observed in a page: its file and version, each statement with its count, each site
- *  that ran — positions in the module's original source. */
-export interface ModuleEvidence { "file": string; "version": string; "statements": StatementCoverage[]; "sites": SiteObservation[] }
-
-/** One time a recorded stop's line ran: which time, the event the page was handling, and each name in scope with its
- *  value previewed then (`this` among them, when it's something). */
-export interface StopHit { "n": number; "event"?: string; "values": [string, string][]; "replay"?: Replay }
-
-/** A recorded call of the function a stop is in, to step afterwards (RUNNING.md: stepping a recorded handler): its range,
- *  what it read from outside itself (`free`), `this` and its arguments on entry, and each call's result where it was made
- *  (0-based line and character, the nth time there) — encoded (snapshot.ts). */
-export interface Replay { "fn": [number, number, number, number]; "free": Record<string, Encoded>; "self": Encoded; "args": Encoded[]; "calls": [number, number, Encoded][] }
-
-/** A recorded stop of a module version: its statement's range (0-based line and character), the functions it's in,
- *  and its latest hits. */
-export interface RecordedStop { "file": string; "version": string; "at": [number, number, number, number]; "where": string; "hits": StopHit[] }
+import { preview } from "@brianjenkins94/run-contract/values";
+import { typeTag } from "../../tsval/src/values";
 
 /** What a site of a module records: a statement (coverage), or one of tsval's observe sites (instrument.ts). */
 type SiteKind = "statement" | ObserveSite;
@@ -100,7 +84,7 @@ interface Kinds { "first": string; "firstCount": number; "others": Record<string
 
 /** `tags`, at most MAX_TAGS of them: the most counted MAX_TAGS − 1, and the rest as `other`. */
 function capped(tags: Record<string, number>): Record<string, number> {
-	const ranked = Object.entries(tags).sort(([, a], [, b]) => b - a);
+	const ranked = Object.entries(tags).sort(([, left], [, right]) => right - left);
 
 	return ranked.length <= MAX_TAGS ? tags : { ...Object.fromEntries(ranked.slice(0, MAX_TAGS - 1)), "other": ranked.slice(MAX_TAGS - 1).reduce((sum, [, count]) => sum + count, 0) };
 }
@@ -114,8 +98,9 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 	let stopTimer: ReturnType<typeof setTimeout> | undefined;
 	const stopsNow = (): void => {
 		stopTimer = undefined;
-		reportStops([...stops.values()].map(({ count: _count, ...stop }) => stop));
+		reportStops([...stops.values()].map(({ "count": _count, ...stop }) => stop));
 	};
+
 	/** The replayable calls being made, innermost last. */
 	const calls: Recording[] = [];
 	/** A stop of `file`'s `version` hit: what's in scope, previewed now (a value read later would be what it became). */
@@ -145,7 +130,9 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 		stop.count += 1;
 		stop.hits = [...stop.hits, hit].slice(-MAX_HITS);
 		// The recorded call it's in, if its function is replayable: given the hit as it leaves. Only the latest few keep one.
-		stop.hits.slice(0, -MAX_REPLAYS).forEach((older) => { delete older.replay; });
+		stop.hits.slice(0, -MAX_REPLAYS).forEach((older) => {
+			delete older.replay;
+		});
 
 		const recording = calls.at(-1);
 
@@ -156,6 +143,7 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 		stops.set(key, stop);
 		stopTimer ??= setTimeout(stopsNow, STOP_REPORT_MS);
 	};
+
 	const safely = <T>(read: () => T, otherwise: T): T => {
 		try {
 			return read();
@@ -163,6 +151,7 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 			return otherwise;
 		}
 	};
+
 	const enter = (fn: [number, number, number, number], free: () => Record<string, unknown>, self: () => unknown, args: ArrayLike<unknown>): Recording => {
 		const recording: Recording = { "replay": { "fn": fn, "free": Object.fromEntries(Object.entries(safely(free, {})).map(([name, value]) => [name, encode(value)])), "self": encode(safely(self, undefined)), "args": Array.from(args, (arg) => encode(arg)), "calls": [] } };
 
@@ -170,6 +159,7 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 
 		return recording;
 	};
+
 	const made = (at: [number, number], value: unknown): unknown => {
 		const recording = calls.at(-1);
 
@@ -180,12 +170,17 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 
 			// A promise: what it settles to, when it does (a replay's await gets that).
 			if (value !== null && typeof value === "object" && typeof (value as { "then"?: unknown }).then === "function") {
-				void (value as Promise<unknown>).then((settled) => { slot[2] = { "$": "p", "v": encode(settled) }; }, (reason: unknown) => { slot[2] = { "$": "pr", "v": encode(reason) }; });
+				void (value as Promise<unknown>).then((settled) => {
+					slot[2] = { "$": "p", "v": encode(settled) };
+				}, (reason: unknown) => {
+					slot[2] = { "$": "pr", "v": encode(reason) };
+				});
 			}
 		}
 
 		return value;
 	};
+
 	const leave = (recording: Recording): void => {
 		const at = calls.lastIndexOf(recording);
 
@@ -199,6 +194,7 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 			stopTimer ??= setTimeout(stopsNow, STOP_REPORT_MS);
 		}
 	};
+
 	const versions = new Map<string, { "file": string; "version": string; "table": Entry[]; "counts": Uint32Array; "seen": Uint32Array; "nullish": Uint32Array; "arms": Uint32Array; "kinds": (Kinds | undefined)[]; "ops": Ops }>();
 	let changed = false;
 
@@ -246,7 +242,13 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 			}
 
 			if (mine.samples.length < MAX_SAMPLES) {
-				const sample = typeof observed === "string" ? observed.slice(0, SAMPLE_CHARS) : typeof observed === "boolean" || (typeof observed === "number" && Number.isFinite(observed)) ? observed : undefined;
+				let sample: string | number | boolean | undefined;
+
+				if (typeof observed === "string") {
+					sample = observed.slice(0, SAMPLE_CHARS);
+				} else if (typeof observed === "boolean" || (typeof observed === "number" && Number.isFinite(observed))) {
+					sample = observed;
+				}
 
 				if (sample !== undefined && !mine.samples.includes(sample)) {
 					mine.samples.push(sample);
@@ -255,8 +257,12 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 
 			return observed;
 		};
+
 		const ops: Ops = {
-			"s": (site) => { counts[site] += 1; changed = true; },
+			"s": (site) => {
+				counts[site] += 1;
+				changed = true;
+			},
 			"v": value,
 			"c": (site, before, observed) => {
 				if (stopped[before] === 1) {
@@ -267,9 +273,24 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 
 				return value(site, observed);
 			},
-			"b": (site, observed) => { arms[site * 2 + (observed ? 0 : 1)] += 1; changed = true; return observed; },
-			"a": (site, observed) => { arms[site * 2 + (observed ? 0 : 1)] += 1; changed = true; return observed; },
-			"o": (site, observed) => { arms[site * 2 + (observed ? 1 : 0)] += 1; changed = true; return observed; },
+			"b": (site, observed) => {
+				arms[site * 2 + (observed ? 0 : 1)] += 1;
+				changed = true;
+
+				return observed;
+			},
+			"a": (site, observed) => {
+				arms[site * 2 + (observed ? 0 : 1)] += 1;
+				changed = true;
+
+				return observed;
+			},
+			"o": (site, observed) => {
+				arms[site * 2 + (observed ? 1 : 0)] += 1;
+				changed = true;
+
+				return observed;
+			},
 			"p": (at, scope, self, where) => { stopHit(file, version, at, scope, self, where); },
 			"e": enter,
 			"k": made,
@@ -284,9 +305,9 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 	const evidence = (): ModuleEvidence[] => [...versions.values()].map(({ file, version, table, counts, seen, nullish, arms, kinds }) => ({
 		"file": file,
 		"version": version,
-		"statements": table.flatMap(([kind, ...range], site) => (kind === "statement" ? [{ "start": [range[0]!, range[1]!] as [number, number], "end": [range[2]!, range[3]!] as [number, number], "count": counts[site]! }] : [])),
+		"statements": table.flatMap(([kind, ...range], site) => (kind === "statement" ? [{ "start": [range[0], range[1]] as [number, number], "end": [range[2], range[3]] as [number, number], "count": counts[site] }] : [])),
 		"sites": table.flatMap(([kind, ...range], site): SiteObservation[] => {
-			const at = { "site": kind as ObserveSite, "start": [range[0]!, range[1]!] as [number, number], "end": [range[2]!, range[3]!] as [number, number] };
+			const at = { "site": kind as ObserveSite, "start": [range[0], range[1]] as [number, number], "end": [range[2], range[3]] as [number, number] };
 
 			if (kind === "branch") {
 				const [taken, other] = [arms[site * 2] ?? 0, arms[site * 2 + 1] ?? 0];
@@ -296,7 +317,7 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 
 			const mine = kinds[site];
 
-			return kind === "statement" || mine === undefined ? [] : [{ ...at, "seen": seen[site]!, "nullish": nullish[site]!, "tags": capped({ [mine.first]: mine.firstCount, ...mine.others }), ...mine.samples.length > 0 ? { "samples": mine.samples } : {} }];
+			return kind === "statement" || mine === undefined ? [] : [{ ...at, "seen": seen[site], "nullish": nullish[site], "tags": capped({ [mine.first]: mine.firstCount, ...mine.others }), ...mine.samples.length > 0 ? { "samples": mine.samples } : {} }];
 		})
 	}));
 
@@ -308,7 +329,7 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 	};
 
 	// `module` is what instrumented modules call; `evidence` reads what the page has counted (for a debugger, a test).
-	(globalThis as { "__evidence"?: { "module": typeof module; "evidence": typeof evidence } }).__evidence = { "module": module, "evidence": evidence };
+	Object.assign(globalThis, { "__evidence": { "module": module, "evidence": evidence } });
 	setInterval(() => {
 		if (changed) {
 			flush();

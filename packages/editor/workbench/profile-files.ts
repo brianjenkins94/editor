@@ -15,16 +15,16 @@
  *
  * Runs in the workbench realm: the workspace filesystem, and the run registry that knows where each dev server serves.
  */
-import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
+import type * as vscodeApi from "vscode";
 import type { CpuProfile } from "../shared/cpuprofile";
 import type { PreviewProfile } from "../shared/preview-profile";
 import type { RunRegistry } from "./runs";
 import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
-import { ensureSiloFiles } from "./evidence";
 import { PREVIEW_PROFILED } from "../shared/preview-profile";
-import { inlineSourceMap, originalPosition } from "./sourcemap";
 import { VIRTUAL_RE } from "../shared/virtual-path";
+import { ensureSiloFiles } from "./evidence";
+import { inlineSourceMap, originalPosition } from "./sourcemap";
 
 /** Where profiles are saved, and how many of the newest stay. */
 export const PROFILES = `/workspace/${LOCAL_DIR}/profiles`;
@@ -48,6 +48,7 @@ async function sourceMapped(profile: CpuProfile, port: number, root: string): Pr
 
 		return map;
 	};
+
 	const base = root.replace(/\/$/u, "");
 	const nodes = await Promise.all(profile.nodes.map(async (node) => {
 		const match = VIRTUAL_RE.exec(node.callFrame.url);
@@ -70,7 +71,7 @@ async function sourceMapped(profile: CpuProfile, port: number, root: string): Pr
 
 export function installProfileFiles(vscode: typeof vscodeApi, hub: Hub, runs: RunRegistry): void {
 	hub.subscribe(PREVIEW_PROFILED, (data) => {
-		const { port, window: key, profile } = (data ?? {}) as Partial<PreviewProfile> & { "port"?: number; "window"?: string };
+		const { port, "window": key, profile } = (data ?? {}) as Partial<PreviewProfile> & { "port"?: number; "window"?: string };
 		const run = typeof port === "number" ? runs.runningService((candidate) => candidate.port === port) : undefined;
 
 		if (run === undefined || port === undefined || profile === undefined) {
@@ -86,7 +87,7 @@ export function installProfileFiles(vscode: typeof vscodeApi, hub: Hub, runs: Ru
 
 				// The newest stay (names end in their time, so they sort by it within a window); the rest go.
 				const saved = (await vscode.workspace.fs.readDirectory(vscode.Uri.file(PROFILES))).map(([file]) => file).filter((file) => file.endsWith(".cpuprofile"));
-				const byTime = saved.sort((a, b) => (/\d{4}-\d\d-\d\dT[\d-]+Z/u.exec(b)?.[0] ?? "").localeCompare(/\d{4}-\d\d-\d\dT[\d-]+Z/u.exec(a)?.[0] ?? ""));
+				const byTime = saved.sort((left, right) => (/\d{4}-\d\d-\d\dT[\d-]+Z/u.exec(right)?.[0] ?? "").localeCompare(/\d{4}-\d\d-\d\dT[\d-]+Z/u.exec(left)?.[0] ?? ""));
 
 				for (const old of byTime.slice(KEEP_PROFILES)) {
 					await vscode.workspace.fs.delete(vscode.Uri.file(`${PROFILES}/${old}`));

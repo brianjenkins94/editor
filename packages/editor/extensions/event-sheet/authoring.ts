@@ -7,9 +7,9 @@
  */
 /* eslint-disable webawesome/no-inline-styles, webawesome/no-css-in-strings, webawesome/prefer-components -- a prototype authoring surface in a webview; intrinsic layout + custom sprite/label paint-tool tiles, not themeable chrome */
 import type { AuthoredGame } from "./generator";
+import type { Rule } from "./rules";
 import type { EventSheetHost } from "./view";
 import { generateGame, libraryComponents, objectPresets, spriteDataUrls } from "./generator";
-import type { Rule } from "./rules";
 import { builtinBehaviors } from "./rules";
 
 /** Capitalize the first letter (for auto-naming generated rules). */
@@ -74,7 +74,10 @@ function chip(text: string, onRemove: () => void): HTMLElement {
 
 	close.textContent = "×";
 	close.style.cssText = "cursor:pointer;opacity:0.7;font-weight:600";
-	close.addEventListener("click", (event) => { event.stopPropagation(); onRemove(); });
+	close.addEventListener("click", (event) => {
+		event.stopPropagation();
+		onRemove();
+	});
 
 	element.append(label, close);
 
@@ -97,7 +100,7 @@ function heading(text: string): HTMLElement {
  * ensures its entity (with the preset's behaviors) exists so the generated game.ts wires it.
  */
 function renderGrid(container: HTMLElement, model: AuthoredGame, rerender: () => void): void {
-	const map = model.map;
+	const { map } = model;
 
 	if (map === undefined) {
 		return;
@@ -151,11 +154,14 @@ function renderGrid(container: HTMLElement, model: AuthoredGame, rerender: () =>
 
 	const tools: { "tool": Tool; "label": string; "sprite"?: string }[] = [
 		{ "tool": "floor", "label": "Floor", "sprite": "gray_square" },
-		...objectPresets().map((preset) => ({ "tool": preset.type as Tool, "label": preset.type, "sprite": preset.sprite })),
+		...objectPresets().map((preset) => ({ "tool": preset.type, "label": preset.type, "sprite": preset.sprite })),
 		{ "tool": "erase", "label": "Erase" }
 	];
 
-	const selectTool = (tool: Tool): void => { activeTool = tool; rerender(); };
+	const selectTool = (tool: Tool): void => {
+		activeTool = tool;
+		rerender();
+	};
 
 	for (const entry of tools) {
 		const item = document.createElement("button");
@@ -176,7 +182,9 @@ function renderGrid(container: HTMLElement, model: AuthoredGame, rerender: () =>
 
 		text.textContent = entry.label;
 		item.append(text);
-		item.addEventListener("click", () => { selectTool(entry.tool); });
+		item.addEventListener("click", () => {
+			selectTool(entry.tool);
+		});
 		palette.append(item);
 	}
 
@@ -219,7 +227,7 @@ function renderGrid(container: HTMLElement, model: AuthoredGame, rerender: () =>
 	let painting = false;
 
 	const cellAt = (target: EventTarget | null): [number, number] | undefined => {
-		const element = (target as HTMLElement | null)?.closest?.("[data-x]") as HTMLElement | null;
+		const element = (target as HTMLElement | null)?.closest?.<HTMLElement>("[data-x]");
 
 		if (element?.dataset.x === undefined || element.dataset.y === undefined) {
 			return undefined;
@@ -254,7 +262,9 @@ function renderGrid(container: HTMLElement, model: AuthoredGame, rerender: () =>
 	});
 
 	// Stop painting anywhere the mouse comes up (window, so a release outside the grid still ends the stroke).
-	const stop = (): void => { painting = false; };
+	const stop = (): void => {
+		painting = false;
+	};
 
 	window.addEventListener("mouseup", stop, { "once": true });
 
@@ -264,7 +274,7 @@ function renderGrid(container: HTMLElement, model: AuthoredGame, rerender: () =>
 
 /** Render the authoring editor for `model` into `container`; edits mutate the model and call `host.rerender`. */
 export function renderAuthoring(container: HTMLElement, host: EventSheetHost, root: string, model: AuthoredGame, hooks: AuthoringHooks): void {
-	const rerender = hooks.rerender;
+	const { rerender } = hooks;
 
 	container.replaceChildren();
 	container.style.cssText = "height:100%;overflow:auto;padding-bottom:12px";
@@ -384,7 +394,11 @@ export function renderAuthoring(container: HTMLElement, host: EventSheetHost, ro
 	// Adding a rule puts the game on the COMPOSED path (Generate compiles these to systems; see game-generator). We only
 	// define model.rules once the user actually adds one, so Generate over an as-yet-unauthored game keeps its old path.
 	const rules = model.rules ?? [];
-	const addRuleTo = (rule: Rule): void => { model.rules = [...rules, rule]; rerender(); };
+	const addRuleTo = (rule: Rule): void => {
+		model.rules = [...rules, rule];
+		rerender();
+	};
+
 	const entityNames = model.entities.map((entity) => entity.name);
 	const subjectOf = (name: string): string | undefined => model.entities.find((entity) => entity.name === name)?.components[0];
 

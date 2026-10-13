@@ -34,6 +34,7 @@ export function toCpuProfile(trace: ProfilerTrace): CpuProfile {
 
 		return nodes.length;
 	};
+
 	const root = node("(root)");
 	const idle = node("(idle)");
 	/** A frame under a node, once: `parent:frame` → its node. */
@@ -101,17 +102,18 @@ export function summarize(profile: CpuProfile, top = 20): { "durationMs": number
 	}
 
 	const keyOf = (id: number): string => {
-		const frame = byId.get(id)!.callFrame;
+		const frame = byId.get(id).callFrame;
 
 		return frame.functionName + "\0" + frame.url + "\0" + frame.lineNumber + "\0" + frame.columnNumber;
 	};
+
 	const self = new Map<string, number>();
 	const total = new Map<string, number>();
 	let idleMs = 0;
 
 	profile.samples.forEach((id, index) => {
 		const ms = (profile.timeDeltas[index + 1] ?? profile.timeDeltas[index] ?? 0) / 1000;
-		const frame = byId.get(id)!.callFrame;
+		const frame = byId.get(id).callFrame;
 
 		if (frame.functionName === "(idle)" || frame.functionName === "(root)") {
 			idleMs += ms;
@@ -124,7 +126,7 @@ export function summarize(profile: CpuProfile, top = 20): { "durationMs": number
 		// Each function on the stack once (a recursive one would otherwise count itself again).
 		const seen = new Set<string>();
 
-		for (let at: number | undefined = id; at !== undefined && byId.get(at)!.callFrame.functionName !== "(root)"; at = parentOf.get(at)) {
+		for (let at: number | undefined = id; at !== undefined && byId.get(at).callFrame.functionName !== "(root)"; at = parentOf.get(at)) {
 			const key = keyOf(at);
 
 			if (!seen.has(key)) {
@@ -135,7 +137,7 @@ export function summarize(profile: CpuProfile, top = 20): { "durationMs": number
 	});
 
 	const round = (ms: number): number => Math.round(ms * 10) / 10;
-	const functions = [...self].sort((a, b) => b[1] - a[1]).slice(0, top).map(([key, ms]) => {
+	const functions = [...self].sort((left, right) => right[1] - left[1]).slice(0, top).map(([key, ms]) => {
 		const [name, url, line, column] = key.split("\0");
 
 		return { "function": name, "url": url, "line": Number(line) + 1, "column": Number(column) + 1, "selfMs": round(ms), "totalMs": round(total.get(key) ?? ms) };

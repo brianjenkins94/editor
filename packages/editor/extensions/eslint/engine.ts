@@ -11,11 +11,11 @@
  * eslint.engine.config.ts to a served URL (/__vscode__/lsp/eslint-engine.js), loaded by the plugin via a
  * native dynamic import.
  */
+import { createRequire } from "node:module";
 import * as tsParserModule from "@typescript-eslint/parser";
 import { Linter } from "eslint/universal";
 import presetData from "eslint:preset";
 import presetPlugins from "eslint:preset-plugins";
-import { createRequire } from "node:module";
 import { gatedEvalRealm } from "../../shared/gated-eval";
 
 const linter = new Linter();
@@ -82,7 +82,10 @@ const brokenRuleErrors = new Map<string, string>();
 
 function noteBroken(id: string, error: unknown): void {
 	if (!brokenRuleErrors.has(id)) {
-		brokenRuleErrors.set(id, error instanceof Error ? error.message : String(error));
+		// What isn't an Error is stringified as it is (a rule throws a string, if anything else).
+		const thrown = error as string | number | boolean | null | undefined;
+
+		brokenRuleErrors.set(id, error instanceof Error ? error.message : String(thrown));
 	}
 }
 
@@ -128,7 +131,7 @@ const pluginLoadMs: Record<string, number> = {};
 // Plugins that pass `require` around as a VALUE (e.g. es-x's `optionalRequire(require, "typescript")`) are rewritten at
 // build time to use this instead of the bundler's runtime `require`, which throws in a worker. It serves the few
 // modules the engine can hand out — `typescript` is tsserver's own instance — and MODULE_NOT_FOUND otherwise.
-(globalThis as { "__eslintRequire"?: unknown }).__eslintRequire = createRequire("/lsp/eslint-engine.js");
+(globalThis as Record<string, unknown>)["__eslintRequire"] = createRequire("/lsp/eslint-engine.js");
 
 // Load every plugin concurrently; keep the survivors. Top-level await: the plugin imports this engine as native ESM,
 // so its import resolves once the preset is ready.
@@ -218,11 +221,7 @@ function normalizeConfig(raw: unknown): Linter.Config[] {
 	const blocks = Array.isArray(raw) ? raw : [raw];
 	const out: Linter.Config[] = [];
 
-	for (const block of blocks as Record<string, unknown>[]) {
-		if (block === null || typeof block !== "object") {
-			continue;
-		}
-
+	for (const block of (blocks as Record<string, unknown>[]).filter((candidate) => candidate !== null && typeof candidate === "object")) {
 		const config: Record<string, unknown> = {};
 
 		for (const key of ["name", "files", "ignores", "settings", "linterOptions"]) {
@@ -231,7 +230,7 @@ function normalizeConfig(raw: unknown): Linter.Config[] {
 			}
 		}
 
-		const source = block["languageOptions"] as Record<string, unknown> | undefined;
+		const { "languageOptions": source } = block as { "languageOptions"?: Record<string, unknown> };
 
 		if (source !== undefined && source !== null && typeof source === "object") {
 			const languageOptions: Record<string, unknown> = {};
@@ -246,7 +245,7 @@ function normalizeConfig(raw: unknown): Linter.Config[] {
 				}
 			}
 
-			const parserOptions = source["parserOptions"];
+			const { parserOptions } = source;
 
 			if (parserOptions !== null && typeof parserOptions === "object") {
 				languageOptions["parserOptions"] = Object.fromEntries(Object.entries(parserOptions as Record<string, unknown>).filter(([name]) => !FS_PARSER_OPTIONS.has(name)));
@@ -260,7 +259,7 @@ function normalizeConfig(raw: unknown): Linter.Config[] {
 		}
 
 		if (Object.keys(config).some((key) => key !== "name")) {
-			out.push(config as Linter.Config);
+			out.push(config);
 		}
 	}
 
@@ -293,7 +292,7 @@ export async function applyWorkspaceConfig(text: string | undefined): Promise<vo
 		return;
 	}
 
-	const ts = (globalThis as { "__eslintTs"?: typeof import("typescript") }).__eslintTs;
+	const ts = (globalThis as Record<string, unknown>)["__eslintTs"] as typeof import("typescript") | undefined;
 	const code = ts === undefined
 		? text
 		: ts.transpileModule(text, { "compilerOptions": { "module": ts.ModuleKind.CommonJS, "target": ts.ScriptTarget.ES2020 } }).outputText;
@@ -327,7 +326,7 @@ export function lintText(text: string, filename: string): LintMessage[] {
 	try {
 		const messages = linter.verify(text, activeConfig, { "filename": filename }).map((message) => ({ ...message, "fixable": message.fix !== undefined }));
 
-		return messages.sort((a, b) => b.severity - a.severity);
+		return messages.sort((left, right) => right.severity - left.severity);
 	} catch (error) {
 		// A config/rule error aborts the whole run — say so on the file instead of silently reporting nothing.
 		return [{ "line": 1, "column": 1, "message": "ESLint couldn't lint this file: " + (error instanceof Error ? error.message : String(error)), "severity": 1, "ruleId": null, "fixable": false }];

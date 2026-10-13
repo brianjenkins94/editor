@@ -27,7 +27,13 @@ export function workspaceRuntime(): WorkspaceRuntime {
 			const channel = new MessageChannel();
 			const unlink = linkRuntime(podHub, channel.port1, name, session);
 
-			return { "port": channel.port2, "dispose": () => { unlink(); channel.port1.close(); } };
+			return {
+				"port": channel.port2,
+				"dispose": () => {
+					unlink();
+					channel.port1.close();
+				}
+			};
 		}
 	};
 }

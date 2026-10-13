@@ -3,9 +3,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { encode, revive } from "@brianjenkins94/run-contract/recorded";
 import { createVM, runToEnd } from "@brianjenkins94/tsval";
 import { replayGuard, replayProgram } from "../extensions/tsval/replay-run.ts";
-import { encode, revive } from "@brianjenkins94/run-contract/recorded";
 
 const named = (name) => Object.defineProperty(() => undefined, "name", { "value": name });
 

@@ -29,16 +29,14 @@ function componentStaticChunks(componentDist: string): string[] {
 	const pending = ["main.js"];
 
 	while (pending.length > 0) {
-		const file = pending.pop()!;
+		const file = pending.pop();
 
-		if (seen.has(file) || !fs.existsSync(path.join(componentDist, file))) {
-			continue;
-		}
+		if (!seen.has(file) && fs.existsSync(path.join(componentDist, file))) {
+			seen.add(file);
 
-		seen.add(file);
-
-		for (const match of fs.readFileSync(path.join(componentDist, file)).matchAll(/(?:^|[;}\s])(?:import|export)\s*(?:[\w${}*,\s]+from\s*)?["'](\.\/[^"']+\.js)["']/gu)) {
-			pending.push(path.posix.normalize(match[1]));
+			for (const match of fs.readFileSync(path.join(componentDist, file)).matchAll(/(?:^|[;}\s])(?:import|export)(?:[\w${}*,\s]+from\s*|\s*)["'](\.\/[^"']+\.js)["']/gu)) {
+				pending.push(path.posix.normalize(match[1]));
+			}
 		}
 	}
 

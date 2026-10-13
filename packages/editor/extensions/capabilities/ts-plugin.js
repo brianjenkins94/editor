@@ -272,13 +272,19 @@ export default function init(modules) {
 				}
 			}
 
-			return { "response": { "statements": sourceFile.statements.map(function(statement) {
+			const statements = sourceFile.statements.map(function(statement) {
 				// The `//` comment right above it, if any — a step's own title.
 				const comments = ts.getLeadingCommentRanges(sourceFile.text, statement.getFullStart()) || [];
-				const comment = comments.filter(function(range) { return range.kind === ts.SyntaxKind.SingleLineCommentTrivia; }).map(function(range) { return sourceFile.text.slice(range.pos + 2, range.end).trim(); }).join(" ");
+				const comment = comments.filter(function(range) {
+					return range.kind === ts.SyntaxKind.SingleLineCommentTrivia;
+				}).map(function(range) {
+					return sourceFile.text.slice(range.pos + 2, range.end).trim();
+				}).join(" ");
 
 				return { "start": statement.getStart(sourceFile), "end": statement.getEnd(), "kind": ts.SyntaxKind[statement.kind], ...comment === "" ? {} : { "comment": comment }, ...describeStatement(statement, sourceFile, typeOf) };
-			}) }, "responseRequired": true };
+			});
+
+			return { "response": { "statements": statements }, "responseRequired": true };
 		});
 	}
 
@@ -302,16 +308,20 @@ export default function init(modules) {
 
 		// The names a binding declares — `[, , country = "CA", coupon]` is country and coupon.
 		function namesOf(name) {
-			return ts.isIdentifier(name) ? [name] : name.elements.flatMap(function(element) { return ts.isOmittedExpression(element) ? [] : namesOf(element.name); });
+			return ts.isIdentifier(name) ? [name] : name.elements.flatMap(function(element) {
+				return ts.isOmittedExpression(element) ? [] : namesOf(element.name);
+			});
 		}
 
 		if (ts.isVariableStatement(statement)) {
 			const declarations = statement.declarationList.declarations;
 			const flags = statement.declarationList.flags;
-			const keyword = (flags & ts.NodeFlags.Const) !== 0 ? "const" : (flags & ts.NodeFlags.Let) !== 0 ? "let" : "var";
+			const keyword = declarationKeyword(flags);
 			const callee = declarations.length === 1 && declarations[0].initializer !== undefined ? calleeOf(declarations[0].initializer) : undefined;
 
-			const names = declarations.flatMap(function(declaration) { return namesOf(declaration.name); });
+			const names = declarations.flatMap(function(declaration) {
+				return namesOf(declaration.name);
+			});
 
 			return {
 				"title": names.map(function(name) { return name.text; }).join(", "),
@@ -321,10 +331,7 @@ export default function init(modules) {
 		}
 
 		if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) {
-			const name = statement.name === undefined ? "(anonymous)" : statement.name.text;
-			const isAsync = ts.isFunctionDeclaration(statement) && statement.modifiers !== undefined && statement.modifiers.some(function(modifier) { return modifier.kind === ts.SyntaxKind.AsyncKeyword; });
-
-			return { "title": name, "detail": ts.isClassDeclaration(statement) ? "class" : isAsync ? "async function" : "function", "declares": statement.name === undefined ? [] : [{ "name": name, "type": typeOf(statement.name) }] };
+			return describeDeclaration(statement, typeOf);
 		}
 
 		if (ts.isImportDeclaration(statement)) {
@@ -356,6 +363,45 @@ export default function init(modules) {
 		return { "title": ts.SyntaxKind[statement.kind].replace(/Statement$|Declaration$/u, "").toLowerCase(), "detail": "" };
 	}
 
+	/** A variable statement's keyword, from its declaration list's `flags`. */
+	function declarationKeyword(flags) {
+		if ((flags & ts.NodeFlags.Const) !== 0) {
+			return "const";
+		}
+
+		return (flags & ts.NodeFlags.Let) !== 0 ? "let" : "var";
+	}
+
+	/** A function or class declaration as a card says it (describeStatement). */
+	function describeDeclaration(statement, typeOf) {
+		const name = statement.name === undefined ? "(anonymous)" : statement.name.text;
+		const isAsync = ts.isFunctionDeclaration(statement) && statement.modifiers !== undefined && statement.modifiers.some(function(modifier) {
+			return modifier.kind === ts.SyntaxKind.AsyncKeyword;
+		});
+		let detail = "function";
+
+		if (ts.isClassDeclaration(statement)) {
+			detail = "class";
+		} else if (isAsync) {
+			detail = "async function";
+		}
+
+		return { "title": name, "detail": detail, "declares": statement.name === undefined ? [] : [{ "name": name, "type": typeOf(statement.name) }] };
+	}
+
+	/** Each of `rows` with its TypeScript type, where the checker can say. */
+	function typeRows(rows, sourceFile, checker) {
+		for (const row of rows) {
+			try {
+				const node = typedNodeAt(sourceFile, row.start);
+
+				if (node !== undefined) {
+					row.type = checker.typeToString(checker.getTypeAtLocation(node), node, ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.WriteArrayAsGenericType);
+				}
+			} catch (error) { /* leave row.type unset */ }
+		}
+	}
+
 	return {
 		"create": function(info) {
 			applyConfig(info.config);
@@ -366,7 +412,7 @@ export default function init(modules) {
 
 			for (const key of Object.keys(ls)) {
 				proxy[key] = function(...args) {
-					return ls[key].apply(ls, args);
+					return ls[key](...args);
 				};
 			}
 
@@ -399,16 +445,7 @@ export default function init(modules) {
 							const rows = engine.analyze(sourceFile.text, fileName);
 							const checker = program.getTypeChecker();
 
-							for (const row of rows) {
-								try {
-									const node = typedNodeAt(sourceFile, row.start);
-
-									if (node !== undefined) {
-										row.type = checker.typeToString(checker.getTypeAtLocation(node), node, ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.WriteArrayAsGenericType);
-									}
-								} catch (error) { /* leave row.type unset */ }
-							}
-
+							typeRows(rows, sourceFile, checker);
 							cacheRows = rows;
 							cacheText = sourceFile.text;
 						}

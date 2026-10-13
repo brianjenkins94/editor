@@ -18,7 +18,11 @@ function tsvalEvents(source) {
 		"coverage": true,
 		"globals": { "out": () => undefined },
 		"observe": (node, site, value) => {
-			const position = (offset) => { const { line, character } = sourceFile.getLineAndCharacterOfPosition(offset); return [line, character]; };
+			const position = (offset) => {
+				const { line, character } = sourceFile.getLineAndCharacterOfPosition(offset);
+
+				return [line, character];
+			};
 
 			events.push(`${site} ${at(position(node.getStart(sourceFile)))}-${at(position(node.getEnd()))} ${site === "branch" ? value : typeTag(value)}`);
 		}
@@ -31,7 +35,7 @@ function tsvalEvents(source) {
 	for (const [index, node] of statements.entries()) {
 		const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
 
-		for (let n = 0; n < counts[index]; n += 1) {
+		for (let count = 0; count < counts[index]; count += 1) {
 			events.push(`statement ${line}:${character}`);
 		}
 	}
@@ -50,7 +54,12 @@ function previewEvents(source) {
 	const runtime = {
 		"module": () => ({
 			"s": (index) => { events.push(`statement ${at(sites[index].start)}`); },
-			"v": (index, value) => { stopped.set(index, value === null || value === undefined); events.push(`${sites[index].kind} ${range(index)} ${typeTag(value)}`); return value; },
+			"v": (index, value) => {
+				stopped.set(index, value === null || value === undefined);
+				events.push(`${sites[index].kind} ${range(index)} ${typeTag(value)}`);
+
+				return value;
+			},
 			"c": (index, before, value) => {
 				if (stopped.get(before) === true) {
 					stopped.set(index, true);
@@ -61,9 +70,21 @@ function previewEvents(source) {
 
 				return value;
 			},
-			"b": (index, value) => { events.push(`branch ${range(index)} ${value ? 0 : 1}`); return value; },
-			"a": (index, value) => { events.push(`branch ${range(index)} ${value ? 0 : 1}`); return value; },
-			"o": (index, value) => { events.push(`branch ${range(index)} ${value ? 1 : 0}`); return value; }
+			"b": (index, value) => {
+				events.push(`branch ${range(index)} ${value ? 0 : 1}`);
+
+				return value;
+			},
+			"a": (index, value) => {
+				events.push(`branch ${range(index)} ${value ? 0 : 1}`);
+
+				return value;
+			},
+			"o": (index, value) => {
+				events.push(`branch ${range(index)} ${value ? 1 : 0}`);
+
+				return value;
+			}
 		})
 	};
 

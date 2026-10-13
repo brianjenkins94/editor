@@ -58,8 +58,12 @@ async function chobitsuIn(page: Window): Promise<Chobitsu> {
 		const script = page.document.createElement("script");
 
 		script.src = CHOBITSU_URL;
-		script.addEventListener("load", () => { resolve(); });
-		script.addEventListener("error", () => { reject(new Error("couldn't load chobitsu into the preview")); });
+		script.addEventListener("load", () => {
+			resolve();
+		});
+		script.addEventListener("error", () => {
+			reject(new Error("couldn't load chobitsu into the preview"));
+		});
 		page.document.head.append(script);
 	});
 
@@ -102,16 +106,24 @@ export function installPreviewCdp(hub: Hub, frameOf: (key: string) => HTMLIFrame
 			return { "chobitsu": chobitsu, "pending": pending };
 		});
 
-		session.catch(() => { sessions.delete(page); }); // didn't load: the next command tries again
+		session.catch(() => {
+			sessions.delete(page);
+		}); // didn't load: the next command tries again
 		sessions.set(page, session);
 
 		return session;
 	};
 
 	serve(hub, PREVIEW_CDP, async (args) => {
-		const { window: named, port, message } = (args ?? {}) as { "window"?: unknown; "port"?: unknown; "message"?: unknown };
+		const { "window": named, port, message } = (args ?? {}) as { "window"?: unknown; "port"?: unknown; "message"?: unknown };
 		// A window by its key (`5173`, `5173~2` — a port's second window), or a port (its first window).
-		const key = typeof named === "string" ? named : typeof port === "number" ? String(port) : undefined;
+		let key: string | undefined;
+
+		if (typeof named === "string") {
+			key = named;
+		} else if (typeof port === "number") {
+			key = String(port);
+		}
 
 		if (key === undefined || typeof message !== "string") {
 			throw new Error("preview.cdp takes { window or port, message }");
@@ -128,7 +140,9 @@ export function installPreviewCdp(hub: Hub, frameOf: (key: string) => HTMLIFrame
 		const own = "hub:" + String(nextId += 1);
 
 		return new Promise<string>((resolve) => {
-			pending.set(own, (reply) => { resolve(JSON.stringify({ ...JSON.parse(reply) as Record<string, unknown>, "id": command.id })); });
+			pending.set(own, (reply) => {
+				resolve(JSON.stringify({ ...JSON.parse(reply) as Record<string, unknown>, "id": command.id }));
+			});
 			chobitsu.sendRawMessage(JSON.stringify({ ...command, "id": own }));
 		});
 	});
@@ -189,7 +203,9 @@ export function openDevtoolsPanel(hub: Hub, key: string, preview: HTMLIFrameElem
 	frame.setAttribute("sandbox", "allow-scripts");
 	element.append(frame);
 
-	const toFrontend = (message: string): void => { frame.contentWindow?.postMessage(message, "*"); }; // an opaque origin has no name to target
+	const toFrontend = (message: string): void => {
+		frame.contentWindow?.postMessage(message, "*");
+	}; // an opaque origin has no name to target
 
 	const start = (): void => {
 		generation += 1;

@@ -14,31 +14,8 @@
  * Code's own API (terminal shell integration, debug sessions, tasks), as it would be on the desktop.
  */
 import type { Hub } from "@brianjenkins94/hub";
+import type { RunInfo } from "../shared/runs";
 import { serve } from "@brianjenkins94/hub";
-
-export type RunKind = "service" | "task";
-export type RunState = "running" | "exited" | "failed" | "stopped";
-
-/** A run, as everyone sees it. */
-export interface RunInfo {
-	"id": string;
-	/** What was run, as typed: `node app.ts`, `npm run dev`. */
-	"title": string;
-	"kind": RunKind;
-	"cwd": string;
-	/** Where it came from: a terminal's (its number, from 1), or elsewhere. */
-	"origin": { "terminal": number } | { "other": string };
-	"state": RunState;
-	"startedAt": number;
-	"endedAt"?: number;
-	"exitCode"?: number;
-	/** A service's port (a dev server's preview). */
-	"port"?: number;
-	/** The file it runs (a dev server: its folder), and what runs it — tsval's interpreter, almostnode, the browser, or
-	 *  another extension's debugger (its debug type: `run.debugger`). */
-	"entry"?: string;
-	"runtime"?: "tsval" | "almostnode" | "preview" | (string & {});
-}
 
 /** What starts a run hands back: change it as it goes, end it once. */
 export interface RunHandle {
@@ -65,20 +42,22 @@ export interface RunRegistry {
 /** How many ended runs are kept, for the list's history. */
 const KEEP_ENDED = 10;
 
+/** How a run ended: stopped, or by itself — `exited`, or `failed` with a nonzero code. */
+function endedState(exitCode: number, stopped: boolean): RunInfo["state"] {
+	if (stopped) {
+		return "stopped";
+	}
+
+	return exitCode === 0 ? "exited" : "failed";
+}
+
 export function createRunRegistry(hub: Hub): RunRegistry {
 	const running = new Map<string, { "info": RunInfo; "stop": () => void }>();
 	const ended: RunInfo[] = [];
 	const endListeners = new Set<(run: RunInfo) => void>();
 
 	// Copies: a caller in this realm gets the list itself, not a clone, and must not see a run change under it.
-	const list = (): RunInfo[] => [...[...running.values()].map((run) => run.info).sort((a, b) => b.startedAt - a.startedAt), ...ended].map((info) => ({ ...info }));
-
-	serve(hub, "runs.list", () => list());
-	serve(hub, "runs.stop", (args) => {
-		const { id } = (args ?? {}) as { "id"?: unknown };
-
-		return typeof id === "string" && registry.stop(id);
-	});
+	const list = (): RunInfo[] => [...[...running.values()].map((run) => run.info).sort((left, right) => right.startedAt - left.startedAt), ...ended].map((info) => ({ ...info }));
 
 	const registry: RunRegistry = {
 		"start": (run, stop) => {
@@ -99,7 +78,7 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 						return;
 					}
 
-					Object.assign(info, { "state": stopped ? "stopped" : exitCode === 0 ? "exited" : "failed", "endedAt": Date.now(), "exitCode": exitCode });
+					Object.assign(info, { "state": endedState(exitCode, stopped), "endedAt": Date.now(), "exitCode": exitCode });
 					ended.unshift(info);
 					ended.length = Math.min(ended.length, KEEP_ENDED);
 
@@ -127,9 +106,18 @@ export function createRunRegistry(hub: Hub): RunRegistry {
 		"onEnd": (listener) => {
 			endListeners.add(listener);
 
-			return () => { endListeners.delete(listener); };
+			return () => {
+				endListeners.delete(listener);
+			};
 		}
 	};
+
+	serve(hub, "runs.list", () => list());
+	serve(hub, "runs.stop", (args) => {
+		const { id } = (args ?? {}) as { "id"?: unknown };
+
+		return typeof id === "string" && registry.stop(id);
+	});
 
 	return registry;
 }

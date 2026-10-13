@@ -12,10 +12,10 @@
  * follow their code; projected again as the game's files are saved.
  */
 import type { PaneContent, PaneItem } from "@brianjenkins94/run-contract/pane";
+import type { GameModel, NodeLoc } from "./recognizer";
+import type { EventSheetHost, HostMessage, ViewMessage } from "./view";
 import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { refreshPane } from "@brianjenkins94/run-contract/pane";
-import type { EventSheetHost, HostMessage, ViewMessage } from "./view";
-import type { GameModel, NodeLoc } from "./recognizer";
 import * as vscode from "vscode";
 import { anchorGame } from "./anchors";
 
@@ -45,14 +45,14 @@ async function gameFiles(root: string): Promise<Record<string, string>> {
 		for (const [name, type] of entries) {
 			const full = dir + "/" + name;
 
-			if (IGNORE.test(full)) {
-				continue;
-			}
-
-			if (type === vscode.FileType.Directory) {
-				await walk(full);
-			} else if (CODE_FILE.test(name) && !name.endsWith(".d.ts")) {
-				await vscode.workspace.fs.readFile(vscode.Uri.file(full)).then((bytes) => { files[full.slice(root.length + 1)] = decoder.decode(bytes); }, () => undefined);
+			if (!IGNORE.test(full)) {
+				if (type === vscode.FileType.Directory) {
+					await walk(full);
+				} else if (CODE_FILE.test(name) && !name.endsWith(".d.ts")) {
+					await vscode.workspace.fs.readFile(vscode.Uri.file(full)).then((bytes) => {
+						files[full.slice(root.length + 1)] = decoder.decode(bytes);
+					}, () => undefined);
+				}
 			}
 		}
 	};
@@ -72,7 +72,10 @@ function recognizer(context: vscode.ExtensionContext): { "project": (root: strin
 		const started = new Worker(vscode.Uri.joinPath(context.extensionUri, "recognizer.js").toString(true));
 		let markReady: () => void = () => undefined;
 		let markFailed: (error: Error) => void = () => undefined;
-		const ready = new Promise<void>((resolve, reject) => { markReady = resolve; markFailed = reject; });
+		const ready = new Promise<void>((resolve, reject) => {
+			markReady = resolve;
+			markFailed = reject;
+		});
 
 		started.addEventListener("message", (event: MessageEvent) => {
 			const { id, model, error, "ready": isReady, failed } = event.data as { "id": number; "model"?: GameModel; "error"?: string; "ready"?: true; "failed"?: string };
@@ -165,7 +168,7 @@ function hostFor(projection: ReturnType<typeof recognizer>): EventSheetHost {
 			const encoder = new TextEncoder();
 
 			// Directories first (the workspace's file system won't make parents), shallowest first.
-			const dirs = [...new Set(Object.keys(files).flatMap((relative) => relative.split("/").slice(0, -1).map((_, index, parts) => root + "/" + parts.slice(0, index + 1).join("/"))))].sort((a, b) => a.length - b.length);
+			const dirs = [...new Set(Object.keys(files).flatMap((relative) => relative.split("/").slice(0, -1).map((_, index, parts) => root + "/" + parts.slice(0, index + 1).join("/"))))].sort((left, right) => left.length - right.length);
 
 			for (const dir of dirs) {
 				await vscode.workspace.fs.createDirectory(vscode.Uri.file(dir));
@@ -184,7 +187,7 @@ function hostFor(projection: ReturnType<typeof recognizer>): EventSheetHost {
 /** The pane view (`eventSheet.paneView`): `uri`'s part of its game, beside the code it's in. `modelOf` projects a
  *  game (cached until its files are saved). */
 async function sheetBeside(uri: string, modelOf: (root: string) => Promise<GameModel>): Promise<PaneContent | undefined> {
-	const path = vscode.Uri.parse(uri).path;
+	const { path } = vscode.Uri.parse(uri);
 
 	if (!CODE_FILE.test(path)) {
 		return undefined;
@@ -245,7 +248,9 @@ export function activate(context: vscode.ExtensionContext): void {
 		const model = gameFiles(root).then(async (files) => projection.project(root, files));
 
 		models.set(root, model);
-		model.catch(() => { models.delete(root); });
+		model.catch(() => {
+			models.delete(root);
+		});
 
 		return model;
 	};
@@ -262,7 +267,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push({ "dispose": projection.dispose }, vscode.window.registerWebviewViewProvider("eventSheet.view", {
 		"resolveWebviewView": async (view) => {
-			const post = (message: HostMessage): void => { void view.webview.postMessage(message); };
+			const post = (message: HostMessage): void => {
+				void view.webview.postMessage(message);
+			};
 
 			view.webview.options = { "enableScripts": true };
 			view.webview.onDidReceiveMessage(async (message: ViewMessage) => {
@@ -282,7 +289,9 @@ export function activate(context: vscode.ExtensionContext): void {
 				vscode.window.onDidChangeActiveTextEditor(() => { post({ "refresh": "editor" }); }),
 				vscode.workspace.onDidSaveTextDocument(() => { post({ "refresh": "save" }); })
 			);
-			view.webview.html = await page(context, view.webview);
+			const { webview } = view;
+
+			webview.html = await page(context, webview);
 		}
 	}));
 }

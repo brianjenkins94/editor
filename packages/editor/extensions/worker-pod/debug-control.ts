@@ -25,11 +25,13 @@
  * owns the session, even with several editor tabs linked to debug-mcp.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import { createRpcClient, serve } from "@brianjenkins94/hub";
+import type { Resolved, SpanRef } from "@brianjenkins94/run-contract/annotations";
 
-import { given, placesOf, type Rule } from "@brianjenkins94/util/silo/policy";
+import type { Rule } from "@brianjenkins94/util/silo/policy";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
+import { annotations } from "@brianjenkins94/run-contract/annotations";
+import { given, placesOf } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { annotations, type Resolved, type SpanRef } from "@brianjenkins94/run-contract/annotations";
 
 import { loadEffectivePolicy, loadPolicyFiles, movePlace, replaceRule } from "../../shared/capabilities/silo-store";
 import { appRootOf, runApp, runDebugger } from "./launch";
@@ -84,20 +86,20 @@ class Session {
 	public state: DebugState = "starting";
 	/** Followed by a tracker on its DAP messages (a debugger in this extension host), else by what every host is told. */
 	public tracked = false;
+	public readonly session: vscode.DebugSession;
 	private reason: string | undefined;
 	/** A capability stop asked (the run contract's `ask`, just before it stops): the reason the next stop is. */
 	private asking = false;
 	private thread = 1;
 	private output: string[] = [];
 	private readonly waiters = new Set<() => void>();
-	public readonly session: vscode.DebugSession;
 
 	public constructor(session: vscode.DebugSession) {
 		this.session = session;
 	}
 
 	private get program(): string {
-		const program = this.session.configuration["program"];
+		const { program } = this.session.configuration;
 
 		return typeof program === "string" ? program : "";
 	}
@@ -187,7 +189,7 @@ class Session {
 
 		try {
 			const { stackFrames } = await this.session.customRequest("stackTrace", { "threadId": this.thread, "startFrame": 0, "levels": 1 }) as { "stackFrames": Frame[] };
-			const frame = stackFrames[0];
+			const [frame] = stackFrames;
 
 			if (frame === undefined) {
 				return { ...base, ...this.reason === undefined ? {} : { "reason": this.reason } };
@@ -218,14 +220,16 @@ class Session {
 	/** The outcome once it next stops, goes idle or ends — or `signal.reason` if the caller gives up first. */
 	public next(signal: AbortSignal): Promise<DebugOutcome> {
 		return new Promise((resolve, reject) => {
+			const { waiters } = this;
 			const waiter = (): void => {
 				signal.removeEventListener("abort", onAbort);
 				resolve(this.outcome());
 			};
-			const onAbort = (): void => {
-				this.waiters.delete(waiter);
-				reject(signal.reason);
-			};
+
+			function onAbort(): void {
+				waiters.delete(waiter);
+				reject(signal.reason as Error);
+			}
 
 			this.waiters.add(waiter);
 			signal.addEventListener("abort", onAbort, { "once": true });
@@ -351,7 +355,11 @@ function trackSessions(context: vscode.ExtensionContext, hub: Hub): void {
 		const launchId = debugSession.configuration["__launchId"];
 
 		sessions.set(debugSession.id, session);
-		served.set(debugSession.id, () => { unserve.forEach((dispose) => { dispose(); }); });
+		served.set(debugSession.id, () => {
+			unserve.forEach((dispose) => {
+				dispose();
+			});
+		});
 
 		if (typeof launchId === "string") {
 			pendingLaunches.get(launchId)?.(session);
@@ -482,7 +490,7 @@ const HISTORY_STEPS = 30;
 async function follow(place: unknown, texts: string[], file: string): Promise<{ "at": unknown; "found": Resolved } | undefined> {
 	let from = texts.length - 1;
 
-	while (from > 0 && (await resolvePlace(texts[from]!, file, place))?.status !== "attached") {
+	while (from > 0 && (await resolvePlace(texts[from], file, place))?.status !== "attached") {
 		from -= 1;
 	}
 
@@ -491,14 +499,14 @@ async function follow(place: unknown, texts: string[], file: string): Promise<{ 
 
 	for (let index = from; index < texts.length; index += 1) {
 		// Each step from the texts before it — the reference was made against one of them — by the structural diff.
-		found = await resolvePlace(texts[index]!, file, at, texts.slice(from, index));
+		found = await resolvePlace(texts[index], file, at, texts.slice(from, index));
 
-		if (found !== undefined && SURE.has(found.status!) && found.ref !== undefined) {
+		if (found !== undefined && SURE.has(found.status) && found.ref !== undefined) {
 			at = found.ref;
 		}
 	}
 
-	return found !== undefined && SURE.has(found.status!) ? { "at": at, "found": found } : undefined;
+	return found !== undefined && SURE.has(found.status) ? { "at": at, "found": found } : undefined;
 }
 
 /** Where each rule's place is now (RULES.md: *at*, a span reference) — followed through the edits made to its file since
@@ -512,7 +520,7 @@ async function placesNow(rpc: ReturnType<typeof createRpcClient>, rules: Rule[],
 	const textsOf = new Map<string, Promise<string[]>>();
 	const texts = (file: string): Promise<string[]> => {
 		const known = textsOf.get(file) ?? (async (): Promise<string[]> => {
-			const uri = vscode.Uri.joinPath(root!, file);
+			const uri = vscode.Uri.joinPath(root, file);
 			const now = saved ? new TextDecoder().decode(await vscode.workspace.fs.readFile(uri)) : await textOf(uri);
 			const history = await rpc.request("history.texts", { "path": file }, { "timeoutMs": 10_000 }).catch(() => []) as string[];
 
@@ -535,7 +543,7 @@ async function placesNow(rpc: ReturnType<typeof createRpcClient>, rules: Rule[],
 
 		try {
 			const chain = await texts(place.file);
-			const text = chain.at(-1)!;
+			const text = chain.at(-1);
 			const followed = await follow(place, chain, place.file);
 			const found = followed?.found ?? await resolvePlace(text, place.file, place);
 
@@ -544,11 +552,15 @@ async function placesNow(rpc: ReturnType<typeof createRpcClient>, rules: Rule[],
 			}
 
 			const lineAt = (offset: number): number => text.slice(0, offset).split("\n").length;
-			const { start, end } = found.candidate!;
+			const { start, end } = found.candidate;
 			// The place it's at now, when that isn't the one stored: followed there, or found there by a match.
-			const at = followed === undefined ? found.ref : followed.at === place ? undefined : followed.at;
+			let at: unknown = found.ref;
 
-			return { "status": found.status!, "line": lineAt(start!), "endLine": lineAt(end ?? start!), ...at === undefined ? {} : { "ref": at } };
+			if (followed !== undefined) {
+				at = followed.at === place ? undefined : followed.at;
+			}
+
+			return { "status": found.status, "line": lineAt(start), "endLine": lineAt(end ?? start), ...at === undefined ? {} : { "ref": at } };
 		} catch {
 			return { "status": "orphaned" };
 		}
@@ -557,7 +569,13 @@ async function placesNow(rpc: ReturnType<typeof createRpcClient>, rules: Rule[],
 
 /** `rule` with its place (`at`'s argument) made `place`. */
 function withPlace(rule: Rule, place: unknown): Rule {
-	const walk = (predicate: Rule["when"]): Rule["when"] => ("predicates" in predicate ? { ...predicate, "predicates": predicate.predicates.map(walk) } : predicate.target_id === "at" && predicate.operator_id === "is" ? { ...predicate, "argument": place } : predicate) as Rule["when"];
+	const walk = (predicate: Rule["when"]): Rule["when"] => {
+		if ("predicates" in predicate) {
+			return { ...predicate, "predicates": predicate.predicates.map(walk) };
+		}
+
+		return (predicate.target_id === "at" && predicate.operator_id === "is" ? { ...predicate, "argument": place } : predicate) as Rule["when"];
+	};
 
 	return { ...rule, "when": walk(rule.when) };
 }
@@ -599,7 +617,7 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub): v
 			}
 		}),
 		{ "dispose": serve(hub, "debug.sessions", async () => Promise.all([...sessions.values()].map(async (session) => {
-			const { output: _output, locals: _locals, ...summary } = await session.outcome();
+			const { "output": _output, "locals": _locals, ...summary } = await session.outcome();
 
 			return summary;
 		}))) },
@@ -678,7 +696,7 @@ async function startRun(args: unknown, signal: AbortSignal): Promise<DebugOutcom
 	if (app !== undefined) {
 		await runApp(app);
 
-		return { "session": "", "name": path.split("/").pop()!, "program": path, "state": "idle", "reason": "app", "output": [] };
+		return { "session": "", "name": path.split("/").pop(), "program": path, "state": "idle", "reason": "app", "output": [] };
 	}
 
 	const launchId = crypto.randomUUID();
@@ -694,13 +712,20 @@ async function startRun(args: unknown, signal: AbortSignal): Promise<DebugOutcom
 		pendingLaunches.set(launchId, resolve);
 		signal.addEventListener("abort", () => {
 			pendingLaunches.delete(launchId);
-			reject(signal.reason);
+			reject(signal.reason as Error);
 		}, { "once": true });
 	});
 	// `cases`: several runs, one after another (process.argv mocked with Multiple); answered with the first's first stop.
-	const given = cases !== undefined && cases.length > 0 ? { "args": cases[0], "__cases": cases, "__case": 0 } : inputs === undefined ? {} : { "args": inputs };
+	let given: Record<string, unknown> = {};
+
+	if (cases !== undefined && cases.length > 0) {
+		given = { "args": cases[0], "__cases": cases, "__case": 0 };
+	} else if (inputs !== undefined) {
+		given = { "args": inputs };
+	}
+
 	// `eventLoop`: an ordering to run again (debug.explore's: its clock, seed and schedule).
-	const started = await vscode.debug.startDebugging(undefined, { "type": type, "request": "launch", "name": path.split("/").pop()!, "program": path, ...given, ...eventLoop === undefined ? {} : { "eventLoop": eventLoop }, "__launchId": launchId });
+	const started = await vscode.debug.startDebugging(undefined, { "type": type, "request": "launch", "name": path.split("/").pop(), "program": path, ...given, ...eventLoop === undefined ? {} : { "eventLoop": eventLoop }, "__launchId": launchId });
 
 	if (!started) {
 		pendingLaunches.delete(launchId);

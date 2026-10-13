@@ -34,7 +34,11 @@ function inRepo(cwd: string, path: string): string | undefined {
 
 	const absolute = "/" + parts.join("/");
 
-	return absolute === ROOT ? "" : absolute.startsWith(ROOT + "/") ? absolute.slice(ROOT.length + 1) : undefined;
+	if (absolute === ROOT) {
+		return "";
+	}
+
+	return absolute.startsWith(ROOT + "/") ? absolute.slice(ROOT.length + 1) : undefined;
 }
 
 /** Whether `file` is `path` or under it ("" is everything). */
@@ -135,7 +139,10 @@ async function changedUnder(paths: string[], cwd: string): Promise<string[] | Re
 }
 
 export function create({ hub }: CommandHost): Record<string, Handler> {
-	const changed = (): void => { hub.publish("git.changed"); };
+	const changed = (): void => {
+		hub.publish("git.changed");
+	};
+
 	// Each handler's failure is git's: `fatal: …`, 128.
 	const guarded = (handler: Handler): Handler => async (config, ctx) => {
 		try {
@@ -146,7 +153,7 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 	};
 
 	return Object.fromEntries(Object.entries({
-		"version": async () => ok(`git version isomorphic-git ${version()}\n`),
+		"version": () => Promise.resolve(ok(`git version isomorphic-git ${version()}\n`)),
 		"status": async (config) => status(config),
 		"diff": async (config, ctx) => diff(config, ctx.cwd),
 		"log": async (config) => log(config),

@@ -9,9 +9,9 @@ import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import stdlib from "node-stdlib-browser";
 import { build } from "vite";
-import { eslintPresetPlugin } from "./extensions/eslint/preset-build";
 import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./build/snapshot";
 import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./build/vite";
+import { eslintPresetPlugin } from "./extensions/eslint/preset-build";
 
 /**
  * The whole packages/editor build, in ONE file — the five vite passes that used to be separate `-c` configs
@@ -45,7 +45,7 @@ const MODULE_PROCESS_SHIM = "var process=globalThis.process||{\"env\":{},\"argv\
  *  module `<name>:<id>`, named for the folder's last segment, exposing the built code as a default-export string.
  *  `externals` stay unbundled. `configFile:false` isolates the nested build. */
 function bundledModule(folder: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[] | ((source: string, importer: string | undefined) => boolean), served = false, plugins: Plugin[] = [], banner?: string): Plugin {
-	const name = folder.split("/").at(-1)!;
+	const name = folder.split("/").at(-1);
 	const virtual = `${name}:${id}`;
 	const resolved = "\0" + virtual;
 	const dir = url.fileURLToPath(new URL(`./${folder}/`, import.meta.url));
@@ -93,6 +93,9 @@ function bundledModule(folder: string, file: string, id: string, format: "cjs" |
 	};
 }
 
+/** The module an extension's `vscode` imports resolve to (commandTap). */
+const TAPPED_VSCODE = "\0vscode-tapped";
+
 /** An extension's `extension.ts` → a served browser CJS file (`<name>:extension` is its path), `vscode` external. The
  *  extension host fetches it on activation, so none of it is on the workbench's boot path. Its `vscode` is tapped
  *  (commandTap): the architecture view discovers its commands. */
@@ -101,9 +104,6 @@ function bundledExtension(name: string): Plugin {
 	// The extension host has no `process`; util reads it as it loads.
 	return bundledModule("extensions/" + name, "extension.ts", "extension", "cjs", (source, importer) => source === "vscode" && importer === TAPPED_VSCODE, true, [commandTap(name)], MODULE_PROCESS_SHIM);
 }
-
-/** The module an extension's `vscode` imports resolve to (commandTap). */
-const TAPPED_VSCODE = "\0vscode-tapped";
 
 /** Hand extension `name` a `vscode` whose commands and file operations are counted (extensions/command-tap.ts;
  *  DISCOVERED-ARCHITECTURE.md): every `import … from "vscode"` in it resolves to a module that is the real `vscode` but
@@ -165,7 +165,7 @@ function eslintNodeModule(): Plugin {
  *  direct dependency). As the workbench pass's alias does for git-engine.ts; in dev, Vite pre-bundles it (it resolves
  *  into node_modules) into ESM. */
 function shellBuffer(): Plugin {
-	return { "name": "shell-buffer", "config": () => ({ "resolve": { "alias": { "buffer": stdlib["buffer"] as string } } }) };
+	return { "name": "shell-buffer", "config": () => ({ "resolve": { "alias": { "buffer": stdlib["buffer"] } } }) };
 }
 
 /** oxc-parser's WASI binding, its browser build: whichever of its two names is installed (`binding-wasm32-wasip1` from
@@ -323,7 +323,7 @@ export async function preBuild(): Promise<void> {
 		// The terminal's commands run on juvy, which parses with node:util's parseArgs: @pkgjs/parseargs (Node's own, as a
 		// package). polyfillNode(["path", "url"]) is for util/env, which juvy imports (it reads node:path/url at load), and
 		// gives the bundle `global`/`process` where they're read.
-		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "buffer": stdlib["buffer"] as string, "node:util": "@pkgjs/parseargs", "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
+		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "buffer": stdlib["buffer"], "node:util": "@pkgjs/parseargs", "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
 		"build": {
 			"outDir": "dist",
 			"minify": isCI,

@@ -26,6 +26,7 @@ exports.activate = (context) => {
 			if (ref === undefined) {
 				const zAt = text.indexOf("const z");
 
+				// eslint-disable-next-line require-atomic-updates -- a cache: a call that overlaps refers the same span again, either answer will do
 				[ref] = await vscode.commands.executeCommand("editor.annotations.refer", text, vscode.workspace.asRelativePath(document.uri, false), [{ "start": zAt, "end": text.indexOf(";", zAt) + 1 }]) ?? [];
 			}
 

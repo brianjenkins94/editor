@@ -14,23 +14,23 @@
  * mounted into the `aside` region as-is; its WA rebuild is a follow-on.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import type { RunInfo } from "../workbench/runs";
-import type { LaunchTarget } from "../extensions/worker-pod/launch";
+import type { ComponentChildren } from "preact";
+import type { SharedWorkspace } from "../shared/playground-link";
+import type { LaunchTarget, RunInfo } from "../shared/runs";
+import type { RepoBinding } from "./github-auth";
 import { createHub, createRpcClient, windowTransport } from "@brianjenkins94/hub";
-import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play, Share2 } from "lucide";
 import { logger } from "@brianjenkins94/util/logger";
+import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play, Share2 } from "lucide";
 import { render } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { renderGitPanel } from "./git-panel";
 import { reportArchitecture } from "../shared/architecture";
-import { getPat, getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
-import type { RepoBinding } from "./github-auth";
-import { parsePlaygroundLink, playgroundLink } from "./playground-link";
-import type { SharedWorkspace } from "./playground-link";
 import { reportShellMetrics } from "../shared/editor-metrics";
+import { parsePlaygroundLink, playgroundLink } from "../shared/playground-link";
+import { css, globalCss, iconSvg } from "../shared/theme";
+import { renderGitPanel } from "./git-panel";
+import { getPat, getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
 import { createShellDock } from "./shell-dock";
 import { installShellPreview } from "./shell-preview";
-import { css, globalCss, iconSvg } from "../shared/theme";
 import "@awesome.me/webawesome/dist/components/page/page.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
 import "@awesome.me/webawesome/dist/components/card/card.js";
@@ -43,7 +43,17 @@ import "theme"; // our brand tokens, layered on Web Awesome's default theme (mus
 // The shell owns the token and the network calls, so this is where load/commit/connect are traced.
 const githubLog = logger({ "source": "github" });
 
-const errText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+function errText(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+
+	// What isn't an Error is stringified as it is (a thrown string, if anything else).
+	const thrown = error as string | number | boolean | null | undefined;
+
+	return String(thrown);
+}
+
 const statusOf = (error: unknown): number | undefined => (typeof (error as { "status"?: unknown }).status === "number" ? (error as { "status": number }).status : undefined);
 
 interface SampleInfo { "id": string; "name": string; "description": string }
@@ -310,6 +320,15 @@ function RailContent({ items }: { "items": RailItem[] }) {
 	);
 }
 
+/** What a run target is, as its row says: a task, the workspace's own script, or the package whose script it is. */
+function targetKind(target: LaunchTarget): string {
+	if (target.package === undefined) {
+		return "task";
+	}
+
+	return target.package === "." ? "script" : target.package;
+}
+
 /** The shell chrome. Owns the shell hub and, once mounted, links it to the app iframe, mounts the review panel into
  *  the aside, and installs the (top-frame) preview window. */
 function Shell() {
@@ -383,6 +402,7 @@ function Shell() {
 		appFrame.src = location.href;
 
 		const architecture = reportArchitecture(shellHub); // this realm's hub + network (GitHub, Code Hike) on $sys.arch
+
 		hubRef.current = shellHub;
 		shellHub.link(windowTransport(appFrame.contentWindow));
 
@@ -395,7 +415,9 @@ function Shell() {
 		// preference — it reliably gets prefers-color-scheme changes, whereas the iframe may not — so publish the
 		// scheme (initially + on change) and let workbench-entry.tsx set the editor theme from it.
 		const scheme = window.matchMedia("(prefers-color-scheme: dark)");
-		const publishScheme = (): void => { shellHub.publish("theme.colorScheme", { "dark": scheme.matches }); };
+		const publishScheme = (): void => {
+			shellHub.publish("theme.colorScheme", { "dark": scheme.matches });
+		};
 
 		publishScheme();
 		scheme.addEventListener("change", publishScheme);
@@ -406,9 +428,7 @@ function Shell() {
 			"title": overlayTitleRef.current,
 			"body": overlayBodyRef.current,
 			"close": overlayCloseRef.current
-		}, shellHub, (
-			<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse changes panel" onClick={() => { setRhsCollapsed(true); }}><Icon node={ChevronRight} /></wa-button>
-		));
+		}, shellHub, (<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse changes panel" onClick={() => { setRhsCollapsed(true); }}><Icon node={ChevronRight} /></wa-button>));
 
 		const rpc = createRpcClient(shellHub);
 
@@ -436,7 +456,9 @@ function Shell() {
 					}
 				} catch { /* app not linked yet — retry */ }
 
-				await new Promise((resolve) => { setTimeout(resolve, 500); });
+				await new Promise((resolve) => {
+					setTimeout(resolve, 500);
+				});
 			}
 		})();
 	}, []);
@@ -533,8 +555,13 @@ function Shell() {
 					setTargets([]);
 				}
 			})();
+
 			// What's already running, so a running service is offered as itself rather than as a second copy.
-			void rpcRef.current?.request("runs.list", undefined, { "timeoutMs": 4000 }).then((list) => { setRuns(Array.isArray(list) ? list as RunInfo[] : []); }, () => { setRuns([]); });
+			void rpcRef.current?.request("runs.list", undefined, { "timeoutMs": 4000 }).then((list) => {
+				setRuns(Array.isArray(list) ? list as RunInfo[] : []);
+			}, () => {
+				setRuns([]);
+			});
 		}
 	};
 
@@ -585,7 +612,9 @@ function Shell() {
 			}
 		})();
 
-		return () => { cancelled = true; };
+		return () => {
+			cancelled = true;
+		};
 	}, []);
 
 	// Connect: store the pasted PAT, then verify it by fetching the viewer (the cheapest authed call). On failure the
@@ -647,7 +676,7 @@ function Shell() {
 		const span = githubLog.span("github.loadRepo", { "repo": repoInput.trim() });
 
 		try {
-			const [owner, repo] = [match[1], match[2]];
+			const [, owner, repo] = match;
 			const { createGitHub } = await import("./github");
 			const gh = createGitHub();
 			const meta = await gh.getRepo(owner, repo);
@@ -666,7 +695,7 @@ function Shell() {
 			try {
 				const { cloneRepo } = await import("./git-clone");
 
-				files = (await cloneRepo(owner, repo, getPat())).files;
+				({ files } = await cloneRepo(owner, repo, getPat()));
 				span.info("cloned", { "files": files.length });
 			} catch (error) {
 				span.warn("clone failed — reading through the API", { "error": errText(error) });
@@ -778,6 +807,210 @@ function Shell() {
 		hubRef.current?.publish("project.open", { "id": id });
 	};
 
+	// The Commit popover's body: what it needs first, until it has it — then the repo it pushes to, and the message.
+	const commitBody = (): ComponentChildren => {
+		if (githubUser === undefined) {
+			return <span class={ghHint()}>Connect GitHub first.</span>;
+		}
+
+		if (boundRepo === undefined) {
+			return <span class={ghHint()}>Load a repo first — commits push back to the repo the workspace came from.</span>;
+		}
+
+		return (
+			<>
+				<span class={ghHint()}>
+					To
+					{" "}
+
+					<strong>
+						{boundRepo.owner}
+						/
+
+						{boundRepo.repo}
+					</strong>
+
+					{" "}
+					on
+
+					{" "}
+
+					<strong>{boundRepo.branch}</strong>
+				</span>
+
+				<wa-input
+					class={ghInput()}
+					size="small"
+					placeholder="Commit message"
+					value={commitMessage}
+					aria-label="Commit message"
+					onInput={(event: Event) => { setCommitMessage((event.currentTarget as HTMLInputElement).value); }}
+					onKeyDown={(event: KeyboardEvent) => {
+						if (event.key === "Enter") {
+							event.preventDefault();
+							void commit();
+						}
+					}}
+				/>
+
+				{commitError !== undefined && <span class={ghError()}>{commitError}</span>}
+
+				{commitResult !== undefined && (
+					<span class={ghOk()}>
+						{`Committed ${commitResult}`}
+					</span>
+				)}
+
+				<div class={ghActions()}>
+					<wa-button variant="brand" size="small" disabled={committing || commitMessage.trim() === ""} onClick={() => { void commit(); }}>{committing ? "Committing…" : "Commit"}</wa-button>
+				</div>
+			</>
+		);
+	};
+
+	// The Share popover's body: the link being made, why it couldn't be — or the link, its size, and what it left out.
+	const shareBody = (): ComponentChildren => {
+		if (share === undefined) {
+			return <span class={ghHint()}>Making a link…</span>;
+		}
+
+		if (share.error !== undefined) {
+			return <span class={ghError()}>{share.error}</span>;
+		}
+
+		return (
+			<>
+				<span class={share.copied === true ? ghOk() : ghHint()}>
+					{share.copied === true ? "Link copied." : "Copy this link."}
+
+					{" "}
+					It opens this project here, or in the TypeScript Playground.
+				</span>
+
+				<wa-input class={ghInput()} size="small" readonly value={share.url} aria-label="Share link" />
+
+				<span class={ghHint()}>
+					{(share.url.length / 1024).toFixed(1)}
+
+					{" "}
+					KB
+
+					{share.url.length > 8192 && " — some apps cut links this long"}
+
+					{share.skipped.length > 0 && ` · ${share.skipped.length} binary ${share.skipped.length === 1 ? "file" : "files"} left out`}
+				</span>
+
+				<div class={ghActions()}>
+					<wa-button
+						size="small"
+						appearance="outlined"
+						onClick={() => {
+							void copyShare(share.url).then((copied) => {
+								setShare({ ...share, "copied": copied });
+							});
+						}}
+					>
+						Copy
+					</wa-button>
+				</div>
+			</>
+		);
+	};
+
+	// The GitHub popover's body: who it's connected as, and a repo to load — or, not connected, how to connect.
+	const githubBody = (): ComponentChildren => {
+		if (githubUser !== undefined) {
+			return (
+				<>
+					<span class={ghTitle()}>GitHub</span>
+
+					<span class={ghConnected()}>
+						Connected as
+						{" "}
+
+						<strong>{githubUser}</strong>
+					</span>
+
+					<div class={ghActions()}>
+						<wa-button appearance="outlined" size="small" onClick={disconnectGithub}>
+							<Icon node={LogOut} />
+
+							{" "}
+							Disconnect
+						</wa-button>
+					</div>
+
+					<wa-divider />
+
+					<span class={ghTitle()}>Load a repo</span>
+
+					<span class={ghHint()}>Its files open in the workspace.</span>
+
+					<wa-input
+						class={ghInput()}
+						size="small"
+						placeholder="owner/repo"
+						value={repoInput}
+						autocapitalize="off"
+						autocorrect="off"
+						spellcheck={false}
+						aria-label="Repository to load"
+						onInput={(event: Event) => { setRepoInput((event.currentTarget as HTMLInputElement).value); }}
+						onKeyDown={(event: KeyboardEvent) => {
+							if (event.key === "Enter") {
+								event.preventDefault();
+								void loadRepo();
+							}
+						}}
+					/>
+
+					{loadError !== undefined && <span class={ghError()}>{loadError}</span>}
+
+					<div class={ghActions()}>
+						<wa-button variant="brand" size="small" disabled={loadingRepo || repoInput.trim() === ""} onClick={() => { void loadRepo(); }}>{loadingRepo ? "Loading…" : "Load"}</wa-button>
+					</div>
+				</>
+			);
+		}
+
+		return (
+			<>
+				<span class={ghTitle()}>Connect GitHub</span>
+
+				<span class={ghHint()}>
+					Paste a fine-grained token with Contents read/write on your games repo. It stays in this browser and is sent only to GitHub.
+					{" "}
+
+					<a class={ghLink()} href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer noopener">Create one →</a>
+				</span>
+
+				<wa-input
+					class={ghInput()}
+					size="small"
+					type="password"
+					placeholder="github_pat_…"
+					value={patInput}
+					autocomplete="off"
+					spellcheck={false}
+					aria-label="GitHub personal access token"
+					onInput={(event: Event) => { setPatInput((event.currentTarget as HTMLInputElement).value); }}
+					onKeyDown={(event: KeyboardEvent) => {
+						if (event.key === "Enter") {
+							event.preventDefault();
+							void connectGithub();
+						}
+					}}
+				/>
+
+				{githubError !== undefined && <span class={ghError()}>{githubError}</span>}
+
+				<div class={ghActions()}>
+					<wa-button variant="brand" size="small" disabled={githubBusy || patInput.trim() === ""} onClick={() => { void connectGithub(); }}>{githubBusy ? "Connecting…" : "Connect"}</wa-button>
+				</div>
+			</>
+		);
+	};
+
 	const shellClass = ["wa-shell", lhsCollapsed ? "lhs-collapsed" : "", rhsCollapsed ? "rhs-collapsed" : ""].filter(Boolean).join(" ");
 
 	return (
@@ -803,7 +1036,12 @@ function Shell() {
 									tabIndex={0}
 									title="Run the file in the editor"
 									onClick={runThisFile}
-									onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); runThisFile(); } }}
+									onKeyDown={(event: KeyboardEvent) => {
+										if (event.key === "Enter" || event.key === " ") {
+											event.preventDefault();
+											runThisFile();
+										}
+									}}
 								>
 									<span class={runItemName()}>The file in the editor</span>
 								</div>
@@ -828,13 +1066,18 @@ function Shell() {
 														tabIndex={0}
 														title={`${target.command} — in ${target.cwd}`}
 														onClick={() => { runTarget(target); }}
-														onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); runTarget(target); } }}
+														onKeyDown={(event: KeyboardEvent) => {
+															if (event.key === "Enter" || event.key === " ") {
+																event.preventDefault();
+																runTarget(target);
+															}
+														}}
 													>
 														<span class={runItemName()}>{target.name}</span>
 
 														{running !== undefined && <span class={runItemLive()}>{running.port === undefined ? "running" : `running · :${running.port}`}</span>}
 
-														<span class={runItemMeta()}>{target.package === undefined ? "task" : target.package === "." ? "script" : target.package}</span>
+														<span class={runItemMeta()}>{targetKind(target)}</span>
 													</div>
 												);
 											})}
@@ -847,54 +1090,51 @@ function Shell() {
 				</span>
 
 				<span class={runWrap()}>
-					<wa-button appearance="plain" size="small" title={boundRepo !== undefined ? "Commit to " + boundRepo.owner + "/" + boundRepo.repo : "Commit"} aria-label="Commit" aria-expanded={commitOpen} onClick={() => { setCommitError(undefined); setCommitResult(undefined); setCommitOpen((value) => !value); }}><Icon node={GitCommit} /></wa-button>
+					<wa-button
+						appearance="plain"
+						size="small"
+						title={boundRepo !== undefined ? "Commit to " + boundRepo.owner + "/" + boundRepo.repo : "Commit"}
+						aria-label="Commit"
+						aria-expanded={commitOpen}
+						onClick={() => {
+							setCommitError(undefined);
+							setCommitResult(undefined);
+							setCommitOpen((value) => !value);
+						}}
+					>
+						<Icon node={GitCommit} />
+					</wa-button>
+
 					{commitOpen && (
 						<>
 							<div class={runBackdrop()} onClick={() => { setCommitOpen(false); }} />
+
 							<div class={githubMenu()} role="dialog" aria-label="Commit to GitHub">
 								<span class={ghTitle()}>Commit</span>
 
-								{githubUser === undefined ? (
-									<span class={ghHint()}>Connect GitHub first.</span>
-								) : boundRepo === undefined ? (
-									<span class={ghHint()}>Load a repo first — commits push back to the repo the workspace came from.</span>
-								) : (
-									<>
-										<span class={ghHint()}>To
-											{" "}
-											<strong>{boundRepo.owner}/{boundRepo.repo}</strong>
-											{" "}
-											on
-											{" "}
-											<strong>{boundRepo.branch}</strong>
-										</span>
-
-										<wa-input
-											class={ghInput()}
-											size="small"
-											placeholder="Commit message"
-											value={commitMessage}
-											aria-label="Commit message"
-											onInput={(event: Event) => { setCommitMessage((event.currentTarget as HTMLInputElement).value); }}
-											onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter") { event.preventDefault(); void commit(); } }}
-										></wa-input>
-
-										{commitError !== undefined && <span class={ghError()}>{commitError}</span>}
-
-										{commitResult !== undefined && <span class={ghOk()}>Committed {commitResult}</span>}
-
-										<div class={ghActions()}>
-											<wa-button variant="brand" size="small" disabled={committing || commitMessage.trim() === ""} onClick={() => { void commit(); }}>{committing ? "Committing…" : "Commit"}</wa-button>
-										</div>
-									</>
-								)}
+								{commitBody()}
 							</div>
 						</>
 					)}
 				</span>
 
 				<span class={runWrap()}>
-					<wa-button appearance="plain" size="small" title="Share as a link" aria-label="Share" aria-expanded={shareOpen} onClick={() => { if (shareOpen) { setShareOpen(false); } else { void openShare(); } }}><Icon node={Share2} /></wa-button>
+					<wa-button
+						appearance="plain"
+						size="small"
+						title="Share as a link"
+						aria-label="Share"
+						aria-expanded={shareOpen}
+						onClick={() => {
+							if (shareOpen) {
+								setShareOpen(false);
+							} else {
+								void openShare();
+							}
+						}}
+					>
+						<Icon node={Share2} />
+					</wa-button>
 
 					{shareOpen && (
 						<>
@@ -903,27 +1143,7 @@ function Shell() {
 							<div class={githubMenu()} role="dialog" aria-label="Share">
 								<span class={ghTitle()}>Share</span>
 
-								{share === undefined ? (
-									<span class={ghHint()}>Making a link…</span>
-								) : share.error !== undefined ? (
-									<span class={ghError()}>{share.error}</span>
-								) : (
-									<>
-										<span class={share.copied === true ? ghOk() : ghHint()}>{share.copied === true ? "Link copied." : "Copy this link."} It opens this project here, or in the TypeScript Playground.</span>
-
-										<wa-input class={ghInput()} size="small" readonly value={share.url} aria-label="Share link"></wa-input>
-
-										<span class={ghHint()}>
-											{(share.url.length / 1024).toFixed(1)} KB
-											{share.url.length > 8192 && " — some apps cut links this long"}
-											{share.skipped.length > 0 && ` · ${share.skipped.length} binary ${share.skipped.length === 1 ? "file" : "files"} left out`}
-										</span>
-
-										<div class={ghActions()}>
-											<wa-button size="small" appearance="outlined" onClick={() => { void copyShare(share.url).then((copied) => { setShare({ ...share, "copied": copied }); }); }}>Copy</wa-button>
-										</div>
-									</>
-								)}
+								{shareBody()}
 							</div>
 						</>
 					)}
@@ -939,80 +1159,7 @@ function Shell() {
 							<div class={runBackdrop()} onClick={() => { setGithubOpen(false); }} />
 
 							<div class={githubMenu()} role="dialog" aria-label="GitHub connection">
-								{githubUser !== undefined ? (
-									<>
-										<span class={ghTitle()}>GitHub</span>
-
-										<span class={ghConnected()}>
-											Connected as
-											{" "}
-											<strong>{githubUser}</strong>
-										</span>
-
-										<div class={ghActions()}>
-											<wa-button appearance="outlined" size="small" onClick={disconnectGithub}>
-												<Icon node={LogOut} />
-
-												{" "}
-												Disconnect
-											</wa-button>
-										</div>
-
-										<wa-divider></wa-divider>
-
-										<span class={ghTitle()}>Load a repo</span>
-
-										<span class={ghHint()}>Its files open in the workspace.</span>
-
-										<wa-input
-											class={ghInput()}
-											size="small"
-											placeholder="owner/repo"
-											value={repoInput}
-											autocapitalize="off"
-											autocorrect="off"
-											spellcheck={false}
-											aria-label="Repository to load"
-											onInput={(event: Event) => { setRepoInput((event.currentTarget as HTMLInputElement).value); }}
-											onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter") { event.preventDefault(); void loadRepo(); } }}
-										></wa-input>
-
-										{loadError !== undefined && <span class={ghError()}>{loadError}</span>}
-
-										<div class={ghActions()}>
-											<wa-button variant="brand" size="small" disabled={loadingRepo || repoInput.trim() === ""} onClick={() => { void loadRepo(); }}>{loadingRepo ? "Loading…" : "Load"}</wa-button>
-										</div>
-									</>
-								) : (
-									<>
-										<span class={ghTitle()}>Connect GitHub</span>
-
-										<span class={ghHint()}>
-											Paste a fine-grained token with Contents read/write on your games repo. It stays in this browser and is sent only to GitHub.
-											{" "}
-											<a class={ghLink()} href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer noopener">Create one →</a>
-										</span>
-
-										<wa-input
-											class={ghInput()}
-											size="small"
-											type="password"
-											placeholder="github_pat_…"
-											value={patInput}
-											autocomplete="off"
-											spellcheck={false}
-											aria-label="GitHub personal access token"
-											onInput={(event: Event) => { setPatInput((event.currentTarget as HTMLInputElement).value); }}
-											onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter") { event.preventDefault(); void connectGithub(); } }}
-										/>
-
-										{githubError !== undefined && <span class={ghError()}>{githubError}</span>}
-
-										<div class={ghActions()}>
-											<wa-button variant="brand" size="small" disabled={githubBusy || patInput.trim() === ""} onClick={() => { void connectGithub(); }}>{githubBusy ? "Connecting…" : "Connect"}</wa-button>
-										</div>
-									</>
-								)}
+								{githubBody()}
 							</div>
 						</>
 					)}
@@ -1081,12 +1228,14 @@ function Shell() {
 			    class and children onto it — the panel then renders inside it. */}
 			<div slot="aside" class={rhsCollapsed ? railRegion() : sideCol() + " " + asidePane()}>
 				{rhsCollapsed && (
-					<RailContent key="rail" items={[
-						{ "node": PanelRight, "label": "Changes", "title": "Expand changes panel", "onClick": () => { setRhsCollapsed(false); } },
+					<RailContent
+						key="rail"
+						items={[
+							{ "node": PanelRight, "label": "Changes", "title": "Expand changes panel", "onClick": () => { setRhsCollapsed(false); } },
 						// placeholders to preview the stacked look — settle final contents next
-						{ "node": GitCommit, "label": "Commit", "title": "Commit", "onClick": () => undefined },
-						{ "node": History, "label": "History", "title": "History", "onClick": () => undefined }
-					]}
+							{ "node": GitCommit, "label": "Commit", "title": "Commit", "onClick": () => undefined },
+							{ "node": History, "label": "History", "title": "History", "onClick": () => undefined }
+						]}
 					/>
 				)}
 

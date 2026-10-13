@@ -86,6 +86,7 @@ function ensureWorker(): Worker {
 	worker.onmessage = (event: MessageEvent) => {
 		const data = event.data as { "id": number; "value"?: unknown; "error"?: string; "attempts"?: string[] };
 		const entry = pending.get(data.id);
+
 		if (entry === undefined) {
 			return;
 		}
@@ -117,6 +118,7 @@ function killWorker(): void {
  */
 export function gatedEvalRealm(code: string, imports: Record<string, unknown> = {}, timeoutMs = 2000): Promise<GatedEvalResult> {
 	const active = ensureWorker();
+
 	sequence += 1;
 	const id = sequence;
 

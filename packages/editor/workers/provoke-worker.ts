@@ -10,12 +10,12 @@
  */
 import { serve } from "@brianjenkins94/hub";
 
+import { mountWorkspaceVfs } from "../shared/zenfs-vfs.js";
+
 import { createWorkerHub } from "./worker-hub";
 
-import { mountWorkspaceVfs } from "./zenfs-vfs.js";
-
 interface ProvokeRequest { "buffer": SharedArrayBuffer; "root": string; "port": number; "modules": string[] }
-interface ProvokeReply { "failures": Array<{ "url": string; "status": number }>; "transformErrors": Array<{ "url": string; "name": string; "message": string }>; "error"?: string }
+interface ProvokeReply { "failures": { "url": string; "status": number }[]; "transformErrors": { "url": string; "name": string; "message": string }[]; "error"?: string }
 
 const hub = createWorkerHub("provoke");
 
@@ -34,7 +34,9 @@ serve(hub, "provoke.round", async (args): Promise<ProvokeReply> => {
 		};
 
 		server.start();
-		server.setTransformErrorReporter((info) => { reply.transformErrors.push({ "url": info.url, "name": info.name, "message": info.message }); });
+		server.setTransformErrorReporter((info) => {
+			reply.transformErrors.push({ "url": info.url, "name": info.name, "message": info.message });
+		});
 
 		// Fire the whole set at once against the cold server — losing this race is what we're hunting.
 		const results = await Promise.all(request.modules.map(async (url) => {

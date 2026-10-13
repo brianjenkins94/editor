@@ -10,13 +10,14 @@
  * (public repos) and push / commit-back (auth, Cloudflare) are later phases; they add functions here, not a rewrite.
  */
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
-import { Buffer } from "buffer";
+import { Buffer } from "node:buffer";
 import { fs } from "@zenfs/core";
 import { add, branch, commit, currentBranch, hashBlob, init, listBranches, log, readBlob, remove, resetIndex, resolveRef, statusMatrix, updateIndex, writeBlob } from "isomorphic-git";
 
 // isomorphic-git reads the `Buffer` global (a Node-ism); the browser has none and the workbench bundle doesn't
 // polyfill node globals, so provide it. The `buffer` import resolves to the node-stdlib-browser polyfill via the
 // build's resolve.alias (see build.ts pass 1). Set before any git op runs (module load precedes the git service's first op).
+// eslint-disable-next-line ts/naming-convention -- the Buffer global isomorphic-git expects, node's name
 (globalThis as unknown as { "Buffer"?: unknown }).Buffer ??= Buffer;
 
 /** The workspace is the repo root (zen-fs mounts the SingleBuffer here; see workspace-fs.ts). */
@@ -73,6 +74,15 @@ function letterFor(head: number, workdir: number): "A" | "M" | "D" {
 	return workdir === 0 ? "D" : "M";
 }
 
+/** D→deleted, A→added, M→modified, from a statusMatrix row's head+stage columns (what's staged). */
+function stagedLetterFor(head: number, stage: number): "A" | "M" | "D" {
+	if (stage === 0) {
+		return "D";
+	}
+
+	return head === 0 ? "A" : "M";
+}
+
 /**
  * Working-tree status split into staged (index differs from HEAD) and unstaged (working tree differs from index).
  * A file can be in BOTH (staged, then edited again). statusMatrix rows are [path, head, workdir, stage] with 0/1/2/3
@@ -84,16 +94,15 @@ export async function status(): Promise<GitStatus> {
 	const unstaged: GitChange[] = [];
 
 	for (const [path, head, workdir, stage] of matrix) {
-		if (head === 1 && workdir === 1 && stage === 1) {
-			continue; // unmodified
-		}
+		// [1,1,1] is unmodified
+		if (head !== 1 || workdir !== 1 || stage !== 1) {
+			if (workdir !== stage) {
+				unstaged.push({ "path": path, "status": letterFor(head, workdir) });
+			}
 
-		if (workdir !== stage) {
-			unstaged.push({ "path": path, "status": letterFor(head, workdir) });
-		}
-
-		if (stage !== head) {
-			staged.push({ "path": path, "status": stage === 0 ? "D" : (head === 0 ? "A" : "M") });
+			if (stage !== head) {
+				staged.push({ "path": path, "status": stagedLetterFor(head, stage) });
+			}
 		}
 	}
 
@@ -140,7 +149,7 @@ export interface LogEntry { "oid": string; "message": string; "author": { "name"
 /** The commits from HEAD back, newest first; at most `depth`. None before the first commit. */
 export async function history(depth?: number): Promise<LogEntry[]> {
 	try {
-		return (await log({ "fs": fs, "dir": DIR, ...depth === undefined ? {} : { "depth": depth } })).map(({ oid, commit: entry }) => ({ "oid": oid, "message": entry.message, "author": entry.author }));
+		return (await log({ "fs": fs, "dir": DIR, ...depth === undefined ? {} : { "depth": depth } })).map(({ oid, "commit": entry }) => ({ "oid": oid, "message": entry.message, "author": entry.author }));
 	} catch {
 		return [];
 	}
@@ -249,7 +258,6 @@ export async function setWorking(path: string, content: string): Promise<void> {
 export async function blobOid(content: string): Promise<string> {
 	return (await hashBlob({ "object": new TextEncoder().encode(content) })).oid;
 }
-
 
 /** A file's text in the working tree; "" when it's gone. */
 export async function workingContent(path: string): Promise<string> {

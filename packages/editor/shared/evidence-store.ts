@@ -8,12 +8,12 @@
  * editor's BABLR, by its id alone (worker-pod's `editor.annotations.resolve`), and one that isn't there fades rather
  * than being looked for. A file BABLR's grammar doesn't take yet has none.
  */
-import { annotations } from "@brianjenkins94/run-contract/annotations";
 import type { Observation } from "@brianjenkins94/util/silo/evidence";
+import type * as vscodeApi from "vscode";
+import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { observedRef } from "@brianjenkins94/util/silo/annotations";
 import { parseEvidence, parseSamples } from "@brianjenkins94/util/silo/evidence";
 import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
-import type * as vscodeApi from "vscode";
 
 /** What every run observed at one span, folded: strict counts summed, faded runs summed, the latest report's time. */
 export interface SpanEvidence {
@@ -39,34 +39,46 @@ export interface EvidenceStore {
 	"onDidChange": vscodeApi.Event<string>;
 }
 
+/** The later of a known report time (if any) and a new one. */
+function latest(known: string | undefined, reported: string): string {
+	return known !== undefined && known > reported ? known : reported;
+}
+
+function foldReached(known: SpanEvidence, observation: Extract<Observation, { "kind": "reached" }>): SpanEvidence {
+	const before = known.reached;
+
+	return { ...known, "reached": { "ever": (before?.ever ?? 0) + observation.ever, "runs": (before?.runs ?? 0) + observation.runs, "lastAt": latest(before?.lastAt, observation.lastAt) } };
+}
+
+function foldValue(known: SpanEvidence, observation: Extract<Observation, { "kind": "value" }>): SpanEvidence {
+	const before = known.value;
+	const tags = { ...before?.tags };
+
+	for (const [tag, count] of Object.entries(observation.tags)) {
+		tags[tag] = (tags[tag] ?? 0) + count;
+	}
+
+	return { ...known, "value": { "seen": (before?.seen ?? 0) + observation.seen, "nullish": (before?.nullish ?? 0) + observation.nullish, "tags": tags, "ever": (before?.ever ?? 0) + observation.ever, "runs": (before?.runs ?? 0) + observation.runs, "lastAt": latest(before?.lastAt, observation.lastAt) } };
+}
+
+function foldBranch(known: SpanEvidence, observation: Extract<Observation, { "kind": "branch" }>): SpanEvidence {
+	const before = known.branch;
+	const arms = Array.from({ "length": Math.max(before?.arms.length ?? 0, observation.arms.length) }, (_, arm) => (before?.arms[arm] ?? 0) + (observation.arms[arm] ?? 0));
+
+	return { ...known, "branch": { "arms": arms, "ever": (before?.ever ?? 0) + observation.ever, "runs": (before?.runs ?? 0) + observation.runs, "lastAt": latest(before?.lastAt, observation.lastAt) } };
+}
+
 /** `observation` added to what's known of its span. */
 function fold(known: SpanEvidence, observation: Observation): SpanEvidence {
-	const latest = (a: string | undefined, b: string): string => (a !== undefined && a > b ? a : b);
-
 	switch (observation.kind) {
-		case "reached": {
-			const before = known.reached;
+		case "reached":
+			return foldReached(known, observation);
 
-			return { ...known, "reached": { "ever": (before?.ever ?? 0) + observation.ever, "runs": (before?.runs ?? 0) + observation.runs, "lastAt": latest(before?.lastAt, observation.lastAt) } };
-		}
+		case "value":
+			return foldValue(known, observation);
 
-		case "value": {
-			const before = known.value;
-			const tags = { ...before?.tags };
-
-			for (const [tag, count] of Object.entries(observation.tags)) {
-				tags[tag] = (tags[tag] ?? 0) + count;
-			}
-
-			return { ...known, "value": { "seen": (before?.seen ?? 0) + observation.seen, "nullish": (before?.nullish ?? 0) + observation.nullish, "tags": tags, "ever": (before?.ever ?? 0) + observation.ever, "runs": (before?.runs ?? 0) + observation.runs, "lastAt": latest(before?.lastAt, observation.lastAt) } };
-		}
-
-		case "branch": {
-			const before = known.branch;
-			const arms = Array.from({ "length": Math.max(before?.arms.length ?? 0, observation.arms.length) }, (_, arm) => (before?.arms[arm] ?? 0) + (observation.arms[arm] ?? 0));
-
-			return { ...known, "branch": { "arms": arms, "ever": (before?.ever ?? 0) + observation.ever, "runs": (before?.runs ?? 0) + observation.runs, "lastAt": latest(before?.lastAt, observation.lastAt) } };
-		}
+		case "branch":
+			return foldBranch(known, observation);
 
 		default:
 			return known;
@@ -132,12 +144,12 @@ export function evidenceStore(vscode: typeof vscodeApi, subscriptions: vscodeApi
 		return spans.flatMap((span, index) => {
 			const at = found?.[index]?.candidate;
 
-			return at?.start === undefined || at.end === undefined || at.file !== file ? [] : [{ "start": at.start, "end": at.end, ...at.type === undefined ? {} : { "type": at.type }, "evidence": known.get(span)! }];
+			return at?.start === undefined || at.end === undefined || at.file !== file ? [] : [{ "start": at.start, "end": at.end, ...at.type === undefined ? {} : { "type": at.type }, "evidence": known.get(span) }];
 		});
 	};
 
 	const place = async (document: vscodeApi.TextDocument): Promise<Placed[] | undefined> => {
-		const version = document.version;
+		const { version } = document;
 		const placed = await placeIn(vscode.workspace.asRelativePath(document.uri, false), document.getText());
 
 		return document.version === version ? placed : undefined;
@@ -147,7 +159,13 @@ export function evidenceStore(vscode: typeof vscodeApi, subscriptions: vscodeApi
 	const evidenceFiles = async (folder: vscodeApi.Uri, prefix = ""): Promise<string[]> => {
 		const entries = await Promise.resolve(vscode.workspace.fs.readDirectory(folder)).catch(() => [] as [string, vscodeApi.FileType][]);
 
-		return (await Promise.all(entries.map(async ([name, type]) => (type === vscode.FileType.Directory ? evidenceFiles(vscode.Uri.joinPath(folder, name), `${prefix}${name}/`) : name.endsWith(".jsonl") ? [prefix + name.slice(0, -".jsonl".length)] : [])))).flat();
+		return (await Promise.all(entries.map(async ([name, type]) => {
+			if (type === vscode.FileType.Directory) {
+				return evidenceFiles(vscode.Uri.joinPath(folder, name), `${prefix}${name}/`);
+			}
+
+			return name.endsWith(".jsonl") ? [prefix + name.slice(0, -".jsonl".length)] : [];
+		}))).flat();
 	};
 
 	const watchers = [`**/${SILO_DIR}/evidence/**/*.jsonl`, `**/${LOCAL_DIR}/samples/**/*.jsonl`].map((glob) => vscode.workspace.createFileSystemWatcher(glob));

@@ -8,8 +8,9 @@
  *
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
+import type { SpanRef } from "@brianjenkins94/run-contract/annotations";
 import type * as vscodeApi from "vscode";
-import { annotations, type SpanRef } from "@brianjenkins94/run-contract/annotations";
+import { annotations } from "@brianjenkins94/run-contract/annotations";
 
 /** A range of offsets, `[start, end)`. */
 export type Range = [number, number];
@@ -33,7 +34,7 @@ function lineOf(starts: number[], at: number): number {
 	while (low < high) {
 		const mid = Math.ceil((low + high) / 2);
 
-		if (starts[mid]! <= at) {
+		if (starts[mid] <= at) {
 			low = mid;
 		} else {
 			high = mid - 1;
@@ -60,7 +61,17 @@ function lineMap(before: string, after: string): (line: number) => number | unde
 		tail += 1;
 	}
 
-	return (line) => (line < head ? line : line >= was.length - tail ? line - was.length + now.length : line - head < now.length - head - tail ? line : undefined);
+	return (line) => {
+		if (line < head) {
+			return line;
+		}
+
+		if (line >= was.length - tail) {
+			return line - was.length + now.length;
+		}
+
+		return line - head < now.length - head - tail ? line : undefined;
+	};
 }
 
 /** Offset of `[line, character]` (0-based) in `text`. */
@@ -89,13 +100,6 @@ export class Anchors {
 		return this.source;
 	}
 
-	/** Whether BABLR reads `text` as code: only then does the whole of it refer to a span (its Program). */
-	private async parses(text: string): Promise<boolean> {
-		const [whole] = await annotations(this.vscode.commands).refer(text, this.file, [{ "start": 0, "end": text.length }]) ?? [];
-
-		return whole !== undefined && whole !== null;
-	}
-
 	/** The line (0-based) each range starts on in `text`, the file as it is now: undefined for one whose code is gone. */
 	public async lines(text: string, ranges: Range[]): Promise<(number | undefined)[]> {
 		if (text === this.source) {
@@ -115,7 +119,7 @@ export class Anchors {
 		const refs = await Promise.all(ranges.map(([start, end]) => this.refs.get(`${start}:${end}`)));
 		// Only the ranges BABLR found a span for are looked for (one it couldn't — a file its grammar doesn't take — is gone).
 		const known = refs.flatMap((ref, index) => (ref === undefined ? [] : [index]));
-		const found = await annotations(this.vscode.commands).resolve(text, this.file, known.map((index) => refs[index]!), { "observed": true });
+		const found = await annotations(this.vscode.commands).resolve(text, this.file, known.map((index) => refs[index]), { "observed": true });
 		const starts = lineStarts(text);
 		const lines: (number | undefined)[] = ranges.map(() => undefined);
 
@@ -136,5 +140,12 @@ export class Anchors {
 		}
 
 		return lines;
+	}
+
+	/** Whether BABLR reads `text` as code: only then does the whole of it refer to a span (its Program). */
+	private async parses(text: string): Promise<boolean> {
+		const [whole] = await annotations(this.vscode.commands).refer(text, this.file, [{ "start": 0, "end": text.length }]) ?? [];
+
+		return whole !== undefined && whole !== null;
 	}
 }

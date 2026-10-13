@@ -176,7 +176,7 @@ export function handlers(name: string, getSession: CommandHost["session"]): Reco
 				return pkg;
 			}
 
-			const removed = names.filter((dependency) => (["dependencies", "devDependencies"] as const).some((field) => pkg[field]?.[dependency] !== undefined && delete pkg[field]![dependency]));
+			const removed = names.filter((dependency) => (["dependencies", "devDependencies"] as const).some((field) => pkg[field]?.[dependency] !== undefined && delete pkg[field][dependency]));
 
 			await ctx.fs.writeFile(manifest.path, `${JSON.stringify(pkg, null, "\t")}\n`);
 
@@ -206,7 +206,7 @@ export function handlers(name: string, getSession: CommandHost["session"]): Reco
 		"test": lifecycle("test"),
 		"restart": lifecycle("restart"),
 		"exec": async (config, ctx) => exec(name, getSession, config.get("command") as string[], ctx),
-		"version": async () => ({ "stdout": VERSION + "\n", "stderr": "", "exitCode": 0 })
+		"version": () => Promise.resolve({ "stdout": VERSION + "\n", "stderr": "", "exitCode": 0 })
 	};
 }
 

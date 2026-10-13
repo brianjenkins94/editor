@@ -10,7 +10,16 @@ import definition from "./command.ts";
 import { create } from "./git.ts";
 
 const announced = [];
-const bash = new Bash({ "cwd": "/workspace", "customCommands": [toCommand(definition, create({ "hub": { "publish": (subject) => { announced.push(subject); } } }))] });
+const bash = new Bash({
+	"cwd": "/workspace",
+	"customCommands": [toCommand(definition, create({
+		"hub": {
+			"publish": (subject) => {
+				announced.push(subject);
+			}
+		}
+	}))]
+});
 const git = async (line) => bash.exec("git " + line, { "cwd": "/workspace" });
 
 fs.mkdirSync("/workspace", { "recursive": true });

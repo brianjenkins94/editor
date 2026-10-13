@@ -50,6 +50,7 @@ test("patProvider attaches the bearer per request, and leaves an explicit Author
 
 		assert.deepEqual(seen, ["Bearer abc123", "Bearer explicit"]);
 	} finally {
+		// eslint-disable-next-line require-atomic-updates -- restoring the fetch this test saved; nothing else swaps globalThis.fetch meanwhile
 		globalThis.fetch = realFetch;
 	}
 });
@@ -71,6 +72,7 @@ test("the token is resolved fresh per request (changing it needs no new client)"
 
 		assert.deepEqual(calls.map((call) => call.auth), ["Bearer first", "Bearer second"]);
 	} finally {
+		// eslint-disable-next-line require-atomic-updates -- restoring the fetch this test saved; nothing else swaps globalThis.fetch meanwhile
 		globalThis.fetch = realFetch;
 	}
 });
@@ -156,11 +158,20 @@ test("readRepo returns every blob as decoded bytes (text + binary), skipping tre
 	const pngBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]); // PNG magic — arbitrary binary
 	const pngB64 = Buffer.from(pngBytes).toString("base64");
 	const { provider } = fakeProvider([
-		[{ "method": "GET", "path": "/git/trees/HEAD" }, () => ({ "json": { "sha": "T", "truncated": false, "tree": [
-			{ "path": "dir", "type": "tree", "sha": "d", "mode": "040000" },
-			{ "path": "a.ts", "type": "blob", "sha": "s1", "mode": "100644" },
-			{ "path": "assets/img.png", "type": "blob", "sha": "s2", "mode": "100644" }
-		] } })],
+		[
+			{ "method": "GET", "path": "/git/trees/HEAD" },
+			() => ({
+				"json": {
+					"sha": "T",
+					"truncated": false,
+					"tree": [
+						{ "path": "dir", "type": "tree", "sha": "d", "mode": "040000" },
+						{ "path": "a.ts", "type": "blob", "sha": "s1", "mode": "100644" },
+						{ "path": "assets/img.png", "type": "blob", "sha": "s2", "mode": "100644" }
+					]
+				}
+			})
+		],
 		[{ "method": "GET", "path": "/git/blobs/s1" }, () => ({ "json": { "content": textB64, "encoding": "base64" } })],
 		[{ "method": "GET", "path": "/git/blobs/s2" }, () => ({ "json": { "content": pngB64, "encoding": "base64" } })]
 	]);

@@ -49,12 +49,19 @@ const CONTENT = new Set(["read", "write", "create", "unlink", "rename"]);
 export function storeShape(path: string): string | undefined {
 	const segments = path.split("/").filter((segment) => segment !== "");
 
-	if (segments.length < 2 || !segments[0]!.startsWith(".")) {
+	if (segments.length < 2 || !segments[0].startsWith(".")) {
 		return undefined;
 	}
 
-	const name = segments.at(-1)!;
-	const kind = name.startsWith(".") ? name : name.includes(".") ? `<file>${name.slice(name.lastIndexOf("."))}` : "<file>";
+	const name = segments.at(-1);
+	let kind = "<file>";
+
+	if (name.startsWith(".")) {
+		kind = name;
+	} else if (name.includes(".")) {
+		kind = `<file>${name.slice(name.lastIndexOf("."))}`;
+	}
+
 	const directories = segments.slice(0, -1);
 
 	return [...directories.slice(0, 2), ...directories.length > 2 ? ["…"] : [], kind].join("/");
@@ -150,5 +157,7 @@ export function reportZenfsUsage(sink: ArchSink, store: { "usage": () => { "tota
 	update();
 	const timer = setInterval(update, intervalMs);
 
-	return () => { clearInterval(timer); };
+	return () => {
+		clearInterval(timer);
+	};
 }

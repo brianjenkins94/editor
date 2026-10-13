@@ -28,8 +28,10 @@ interface Tally { "id": string; "registered": Map<string, string>; "calls": Map<
 
 /** This extension host's tally, shared by every extension in it (they share the realm). */
 function tally(): Tally {
+	// eslint-disable-next-line ts/naming-convention -- the global every extension in this host shares the tally through
 	const self = globalThis as { "__commandTap"?: Tally };
 
+	// eslint-disable-next-line ts/naming-convention -- WorkerGlobalScope is the DOM's global, named by spec
 	self.__commandTap ??= { "id": `${typeof (globalThis as { "WorkerGlobalScope"?: unknown }).WorkerGlobalScope === "undefined" ? "LocalProcess" : "LocalWebWorker"}#${crypto.randomUUID()}`, "registered": new Map(), "calls": new Map(), "files": new Map(), "timer": undefined };
 
 	return self.__commandTap;
@@ -60,8 +62,16 @@ export function tappedCommands(vscode: typeof vscodeApi, extension: string): typ
 
 	return {
 		...real,
-		"registerCommand": (id, callback, thisArg) => { registered(id); return real.registerCommand(id, callback, thisArg); },
-		"registerTextEditorCommand": (id, callback, thisArg) => { registered(id); return real.registerTextEditorCommand(id, callback, thisArg); },
+		"registerCommand": (id, callback, thisArg) => {
+			registered(id);
+
+			return real.registerCommand(id, callback, thisArg);
+		},
+		"registerTextEditorCommand": (id, callback, thisArg) => {
+			registered(id);
+
+			return real.registerTextEditorCommand(id, callback, thisArg);
+		},
 		"executeCommand": async <T>(id: string, ...rest: unknown[]): Promise<T> => {
 			if (id !== ARCH_COMMANDS) {
 				const key = `${extension}\0${id === "typescript.tsserverRequest" && typeof rest[0] === "string" ? `${id} ${rest[0]}` : id}`;

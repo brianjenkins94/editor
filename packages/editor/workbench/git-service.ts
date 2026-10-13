@@ -4,26 +4,17 @@
  * engine is vscode-free, so each face reads it over the hub without knowing about the other. Runs in the workbench
  * realm (where zen-fs lives); the shell reaches it shell → app → workbench, the Source Control view pod → workbench.
  */
-import type * as vscodeApi from "vscode";
-import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
+import type * as vscodeApi from "vscode";
+import type { GitFileChange } from "../shared/git";
 import type { CosmeticClassifier } from "./cosmetic-classifier";
 import { serve } from "@brianjenkins94/hub";
+import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
 import * as engine from "./git-engine";
 
 const DIR = "/workspace";
 const CLASSIFIABLE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
-
-/** One changed file as the review panel sees it. */
-export interface GitFileChange {
-	"path": string;
-	"status": "A" | "M" | "D";
-	"staged": boolean;
-	"unstaged": boolean;
-	/** True when a MODIFIED file's change is whitespace/comments only (BABLR verdict); false/undefined otherwise. */
-	"cosmetic": boolean;
-}
 
 /** Past this many changed lines a diff says so rather than listing them (a rewrite, a generated file). */
 const MOST_EDITS = 5000;
@@ -42,8 +33,7 @@ export function unifiedDiff(path: string, before: string, after: string): string
 
 /** Serve `git.status` / `git.file` / `git.diff` / `git.commit` and publish `git.changed` on the given hub. */
 export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier: CosmeticClassifier, log: Logger): void {
-	const readWorking = async (path: string): Promise<string> =>
-		new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
+	const readWorking = async (path: string): Promise<string> => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
 
 	serve(hub, "git.status", async () => {
 		const status = await engine.status();
@@ -72,15 +62,22 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		// Cosmetic verdict for modified, classifiable files — read-through cached in the classifier (in-memory + the
 		// durable cache in `.silo/local/bablr/`), so a refresh re-derives nothing: an unchanged file's verdict is a cache hit and
 		// BABLR (slow) is never re-run for it. Shares the cache with git.classify below and the SCM viewlet.
-		await Promise.all([...byPath.values()].map(async (entry) => {
+		const entries = [...byPath.values()];
+		const cosmetic = await Promise.all(entries.map(async (entry) => {
 			if (entry.status === "M" && CLASSIFIABLE.test(entry.path)) {
 				try {
-					entry.cosmetic = (await classifier.verdict(await engine.headContent(entry.path), await readWorking(entry.path))).verdict === "cosmetic";
+					return (await classifier.verdict(await engine.headContent(entry.path), await readWorking(entry.path))).verdict === "cosmetic";
 				} catch { /* unreadable / unparsable → no badge */ }
 			}
+
+			return false;
 		}));
 
-		return { "files": [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path)) };
+		entries.forEach((entry, index) => {
+			entry.cosmetic = cosmetic[index];
+		});
+
+		return { "files": [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path)) };
 	});
 
 	// What changed, as `git diff HEAD` says it: one file's (`path`), or every changed file's — a unified diff of the
@@ -88,7 +85,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 	serve(hub, "git.diff", async (args) => {
 		const path = (args as { "path"?: string } | null)?.path;
 		const status = typeof path === "string" && path !== "" ? undefined : await engine.status();
-		const paths = status === undefined ? [path!] : [...status.unstaged, ...status.staged].map((change) => change.path);
+		const paths = status === undefined ? [path] : [...status.unstaged, ...status.staged].map((change) => change.path);
 		const diffs = await Promise.all([...new Set(paths)].sort().map(async (each) => unifiedDiff(each, await engine.headContent(each).catch(() => ""), await readWorking(each).catch(() => ""))));
 
 		return { "diff": diffs.join("") };
@@ -177,7 +174,7 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 		const request = args as { "path"?: string; "content"?: string } | null;
 
 		if (typeof request?.path !== "string") {
-			throw new Error("git.discard needs a path.");
+			throw new TypeError("git.discard needs a path.");
 		}
 
 		if (typeof request.content === "string") {
@@ -198,7 +195,9 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 			clearTimeout(timer);
 		}
 
-		timer = setTimeout(() => { hub.publish("git.changed"); }, 300);
+		timer = setTimeout(() => {
+			hub.publish("git.changed");
+		}, 300);
 	};
 
 	vscode.workspace.onDidSaveTextDocument(schedule);
@@ -213,7 +212,12 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, classifier
 
 	// Announce readiness once there's a repository (made here if the workspace has none): both faces subscribe
 	// `git.changed`, so this prompts their first load the moment the serves are live.
-	void engine.ensureRepo().then(() => { hub.publish("git.changed"); }, (error: unknown) => {
-		log.error("git repository unavailable", { "error": error instanceof Error ? error.message : String(error) });
+	void engine.ensureRepo().then(() => {
+		hub.publish("git.changed");
+	}, (error: unknown) => {
+		// (an Error, else whatever was thrown — a primitive)
+		const thrown = error as Error | string | number | boolean | null | undefined;
+
+		log.error("git repository unavailable", { "error": thrown instanceof Error ? thrown.message : String(thrown) });
 	});
 }

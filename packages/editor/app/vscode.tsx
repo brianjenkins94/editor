@@ -21,10 +21,10 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
-import type { SharedWorkspace } from "../shell/playground-link";
+import type { SharedWorkspace } from "../shared/playground-link";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { hostLog } from "./logging";
 import { windowServerTransport } from "../shared/pane-link";
+import { hostLog } from "./logging";
 
 /** The workbench pane's stable id — travels in the iframe URL (`?pane=`) so it survives a popout reload. */
 const PANE_ID = "editor";

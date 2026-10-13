@@ -41,12 +41,26 @@ const PRODUCTION = "production";
  *  code (`exited`), and whether it was stopped by hand (disconnected before it said it was done). */
 const ends = new Map<string, { "exitCode": number; "stoppedByHand": boolean; "done": boolean }>();
 
-
 /** The terminal run `session` was started as, if a terminal started it. */
 function terminalRun(session: vscode.DebugSession): string | undefined {
 	const runId = session.configuration["__runId"];
 
 	return session.configuration["__startedBy"] === "terminal" && typeof runId === "string" ? runId : undefined;
+}
+
+/** Whether F5 on `program` runs its app: a launch nothing else decided (not Run's own, a terminal's `node`, a live run,
+ *  or an ordering's replay). */
+function launchesApp(given: vscode.DebugConfiguration, program: string): boolean {
+	return given["__launchId"] === undefined && given["__startedBy"] !== "terminal" && given["__live"] !== true && given["eventLoop"] === undefined && given["replay"] === undefined && program !== "";
+}
+
+/** The `args` a rule's cases give a launch: the first case — and, unless it's a live run, the rest to run after it. */
+function caseArgs(given: vscode.DebugConfiguration, cases: string[][] | undefined): Record<string, unknown> {
+	if (cases === undefined || cases.length === 0) {
+		return {};
+	}
+
+	return given["__live"] === true ? { "args": cases[0] } : { "args": cases[0], "__cases": cases, "__case": 0 };
 }
 
 export function registerDebugEvents(context: vscode.ExtensionContext): void {
@@ -68,11 +82,13 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 
 				// F5 on an app's file: the app runs. (Run's own launches decided that already; a terminal's `node` and an
 				// ordering's replay are what they say.)
-				if (given["__launchId"] === undefined && given["__startedBy"] !== "terminal" && given["__live"] !== true && given["eventLoop"] === undefined && given["replay"] === undefined && program !== "") {
+				if (launchesApp(given, program)) {
 					const app = await appRootOf(program);
 
 					if (app !== undefined) {
-						await runApp(app).catch((error: unknown) => { void vscode.window.showErrorMessage(`Couldn't run: ${error instanceof Error ? error.message : String(error)}`); });
+						await runApp(app).catch((error: unknown) => {
+							void vscode.window.showErrorMessage(`Couldn't run: ${error instanceof Error ? error.message : String(error as string | number | boolean | null | undefined)}`);
+						});
 
 						return undefined;
 					}
@@ -83,7 +99,7 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 				// No `args`: what a rule gives the file's process.argv, if one does. (A live run takes the first alone.)
 				const mocked = Array.isArray(given["args"]) || Array.isArray(given["__cases"]) || given["replay"] !== undefined || program === "" ? undefined : givenBy(policy, { "program": vscode.workspace.asRelativePath(vscode.Uri.file(program), false) }, "process.argv");
 				const cases = mocked?.values.filter((each): each is string[] => Array.isArray(each));
-				const config = { ...given, "__policy": policy, ...cases === undefined || cases.length === 0 ? {} : given["__live"] === true ? { "args": cases[0] } : { "args": cases[0], "__cases": cases, "__case": 0 } };
+				const config = { ...given, "__policy": policy, ...caseArgs(given, cases) };
 
 				if (typeof config["__runId"] === "string" || config["__live"] === true) {
 					return config;
@@ -225,7 +241,7 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 			if (Array.isArray(cases) && next < cases.length && end?.stoppedByHand !== true) {
 				const { "__runId": _run, "__launchId": _launch, "__policy": _policy, ...rest } = config;
 
-				void vscode.debug.startDebugging(undefined, { ...rest, "name": `${String(rest.name).replace(/ \(case \d+ of \d+\)$/u, "")} (case ${next + 1} of ${cases.length})`, "args": cases[next], "__case": next } as vscode.DebugConfiguration);
+				void vscode.debug.startDebugging(undefined, { ...rest, "name": `${rest.name.replace(/ \(case \d+ of \d+\)$/u, "")} (case ${next + 1} of ${cases.length})`, "args": cases[next], "__case": next });
 			}
 		})
 	);

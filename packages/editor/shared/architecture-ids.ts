@@ -37,6 +37,7 @@ export function identifyWorker(url: string): { "id": string; "label"?: string; "
  * service worker's own requests go straight out, and so does anything outside a browser (tests).
  */
 function viaServiceWorker(): boolean {
+	// eslint-disable-next-line ts/naming-convention -- the browser's own global names (ServiceWorkerGlobalScope, WorkerGlobalScope)
 	const scope = globalThis as unknown as { "ServiceWorkerGlobalScope"?: new () => unknown; "WorkerGlobalScope"?: unknown; "navigator"?: { "serviceWorker"?: { "controller": unknown } } };
 
 	if (scope.ServiceWorkerGlobalScope !== undefined && globalThis instanceof scope.ServiceWorkerGlobalScope) {

@@ -103,23 +103,28 @@ function classifyInitializer(ts: TsApi, init: TS.Expression | undefined): { "kin
 	return undefined;
 }
 
+/** A file's syntax tree, or undefined when it can't be parsed. */
+function parseOrSkip(ts: TsApi, path: string, src: string): TS.SourceFile | undefined {
+	try {
+		return ts.createSourceFile(path, src, ts.ScriptTarget.Latest, true, scriptKind(ts, path));
+	} catch {
+		return undefined;
+	}
+}
+
 /** Parse each file and visit every node with its source + path. Unparsable files are skipped (don't fail the whole run). */
 function eachNode(files: Record<string, string>, ts: TsApi, visit: (node: TS.Node, source: TS.SourceFile, path: string) => void): void {
 	for (const [path, src] of Object.entries(files)) {
-		let source: TS.SourceFile;
+		const source = parseOrSkip(ts, path, src);
 
-		try {
-			source = ts.createSourceFile(path, src, ts.ScriptTarget.Latest, true, scriptKind(ts, path));
-		} catch {
-			continue;
+		if (source !== undefined) {
+			const walk = (node: TS.Node): void => {
+				visit(node, source, path);
+				ts.forEachChild(node, walk);
+			};
+
+			walk(source);
 		}
-
-		const walk = (node: TS.Node): void => {
-			visit(node, source, path);
-			ts.forEachChild(node, walk);
-		};
-
-		walk(source);
 	}
 }
 
@@ -185,7 +190,7 @@ export function recognizeBehaviors(files: Record<string, string>, ts: TsApi): Be
 		}
 	}
 
-	return behaviors.sort((a, b) => a.name.localeCompare(b.name));
+	return behaviors.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 /** An object = an entity type: a named thing with a list of attached behaviors, plus a few scalar attributes. */
@@ -213,45 +218,38 @@ export function recognizeObjects(files: Record<string, string>, ts: TsApi): Game
 
 		// This object is an ENTITY MAP if any of its entries is itself a spec (an object with a `components:` array).
 		for (const entry of node.properties) {
-			if (!ts.isPropertyAssignment(entry) || !ts.isObjectLiteralExpression(entry.initializer)) {
-				continue;
-			}
+			if (ts.isPropertyAssignment(entry) && ts.isObjectLiteralExpression(entry.initializer)) {
+				const name = propName(ts, entry.name);
+				let behaviors: string[] | undefined;
+				let depth: number | undefined;
 
-			const name = propName(ts, entry.name);
-			let behaviors: string[] | undefined;
-			let depth: number | undefined;
+				for (const field of entry.initializer.properties) {
+					if (ts.isPropertyAssignment(field)) {
+						const key = propName(ts, field.name);
 
-			for (const field of entry.initializer.properties) {
-				if (!ts.isPropertyAssignment(field)) {
-					continue;
+						if (key === "components" && ts.isArrayLiteralExpression(field.initializer)) {
+							behaviors = field.initializer.elements.filter((element) => ts.isIdentifier(element)).map((element) => element.text);
+						} else if (key === "depth" && ts.isNumericLiteral(field.initializer)) {
+							depth = Number(field.initializer.text);
+						}
+					}
 				}
 
-				const key = propName(ts, field.name);
+				// (no name or no `components` array: not an entity spec)
+				if (name !== undefined && behaviors !== undefined) {
+					const loc = nodeLoc(ts, source, path, entry);
+					const dedupe = path + ":" + loc.defLine + ":" + name;
 
-				if (key === "components" && ts.isArrayLiteralExpression(field.initializer)) {
-					behaviors = field.initializer.elements.filter((element) => ts.isIdentifier(element)).map((element) => element.text);
-				} else if (key === "depth" && ts.isNumericLiteral(field.initializer)) {
-					depth = Number(field.initializer.text);
+					if (!seen.has(dedupe)) {
+						seen.add(dedupe);
+						objects.push({ "name": name, "behaviors": behaviors, ...(depth === undefined ? {} : { "depth": depth }), ...loc });
+					}
 				}
 			}
-
-			if (name === undefined || behaviors === undefined) {
-				continue; // not an entity spec — no `components` array
-			}
-
-			const loc = nodeLoc(ts, source, path, entry);
-			const dedupe = path + ":" + loc.defLine + ":" + name;
-
-			if (seen.has(dedupe)) {
-				continue;
-			}
-
-			seen.add(dedupe);
-			objects.push({ "name": name, "behaviors": behaviors, ...(depth === undefined ? {} : { "depth": depth }), ...loc });
 		}
 	});
 
-	return objects.sort((a, b) => a.defPath.localeCompare(b.defPath) || a.defLine - b.defLine);
+	return objects.sort((left, right) => left.defPath.localeCompare(right.defPath) || left.defLine - right.defLine);
 }
 
 /** One recognized event→action row: a condition (the "when") guarding one or more effects (the "do"). */
@@ -302,7 +300,7 @@ function actionTexts(ts: TsApi, source: TS.SourceFile, thenStatement: TS.Stateme
  * (branches whose body is only control flow — the guards in movement/win — yield no row, so those systems read as
  * not-yet-decomposed rather than as noise). Everything is deep-linked (the rule, and each row).
  */
-export function recognizeRules(files: Record<string, string>, ts: TsApi, composites: Set<string> = new Set()): Rule[] {
+export function recognizeRules(files: Record<string, string>, ts: TsApi, composites = new Set<string>()): Rule[] {
 	const rules: Rule[] = [];
 
 	eachNode(files, ts, (node, source, path) => {
@@ -360,7 +358,7 @@ export function recognizeRules(files: Record<string, string>, ts: TsApi, composi
 		rules.push({ "name": node.name.text, "queries": queries, "rows": rows, "composes": composes, ...nodeLoc(ts, source, path, node) });
 	});
 
-	return rules.sort((a, b) => a.defPath.localeCompare(b.defPath) || a.defLine - b.defLine);
+	return rules.sort((left, right) => left.defPath.localeCompare(right.defPath) || left.defLine - right.defLine);
 }
 
 /** A composite = a reusable BEHAVIOR: a function composed of the primitive vocabulary (the built-in library's unit; the
@@ -436,7 +434,7 @@ export function recognizeComposites(files: Record<string, string>, ts: TsApi, co
 
 	return candidates
 		.map((candidate) => ({ "name": candidate.name, "uses": candidate.uses, "composes": [...candidate.calls].filter((name) => names.has(name) && name !== candidate.name).sort(), ...candidate.loc }))
-		.sort((a, b) => a.defPath.localeCompare(b.defPath) || a.defLine - b.defLine);
+		.sort((left, right) => left.defPath.localeCompare(right.defPath) || left.defLine - right.defLine);
 }
 
 /** The whole reverse-projection of a game: the nouns (objects + their behaviors) and the verbs (rules). Plain JSON, so

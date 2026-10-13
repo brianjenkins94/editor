@@ -76,17 +76,16 @@ export function originalPosition(map: SourceMap, line: number, column: number): 
 			const values = decodeSegment(segment);
 
 			if (values.length < 4) {
-				generatedColumn += values[0] ?? 0;
-				continue; // no source: a generated-only segment
-			}
+				generatedColumn += values[0] ?? 0; // no source: a generated-only segment
+			} else {
+				generatedColumn += values[0];
+				source += values[1];
+				sourceLine += values[2];
+				sourceColumn += values[3];
 
-			generatedColumn += values[0];
-			source += values[1];
-			sourceLine += values[2];
-			sourceColumn += values[3];
-
-			if (at === line && (best === undefined || generatedColumn <= column)) {
-				best = { "source": (map.sourceRoot ?? "") + (map.sources[source] ?? ""), "line": sourceLine, "column": sourceColumn };
+				if (at === line && (best === undefined || generatedColumn <= column)) {
+					best = { "source": (map.sourceRoot ?? "") + (map.sources[source] ?? ""), "line": sourceLine, "column": sourceColumn };
+				}
 			}
 		}
 

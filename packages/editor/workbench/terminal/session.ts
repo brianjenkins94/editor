@@ -14,7 +14,7 @@ export interface SessionState {
 	"env": Record<string, string>;
 }
 
-const RS = "\u001e"; // record separator (ASCII RS) — frames the cwd/exit-code probe; ~never appears in real shell output
+const RS = "\u001E"; // record separator (ASCII RS) — frames the cwd/exit-code probe; ~never appears in real shell output
 // Appended to every command: capture the user command's exit code, then emit `<RS>cwd<RS>rc<RS>` so we can read
 // the working directory back (a `cd` has no other way to reach us) and the real exit code (printf would clobber $?).
 const PROBE = `\n__jbrc=$?\nprintf '${RS}%s${RS}%s${RS}' "$PWD" "$__jbrc"`;
@@ -31,6 +31,13 @@ const PROBE_RE = new RegExp(`${RS}([^${RS}]*)${RS}([^${RS}]*)${RS}$`, "u");
  */
 export async function execInSession(session: BashSession, state: SessionState, input: string, signal?: AbortSignal): Promise<{ "stdout": string; "stderr": string; "exitCode": number }> {
 	const result = await session.exec(input + PROBE, { "cwd": state.cwd, "env": { ...state.env, "PWD": state.cwd }, ...signal === undefined ? {} : { "signal": signal } });
+
+	return adoptResult(state, result);
+}
+
+/** `execInSession`'s reading of a run's `result`: the cwd from its probe and its env into `state`; its own output and
+ *  exit code out. */
+function adoptResult(state: SessionState, result: Awaited<ReturnType<BashSession["exec"]>>): { "stdout": string; "stderr": string; "exitCode": number } {
 	let { stdout } = result;
 	const match = PROBE_RE.exec(stdout);
 
@@ -59,6 +66,31 @@ const WHOLE = new Set(["if", "then", "elif", "else", "fi", "for", "while", "unti
 /** How a statement is joined to the next: `;` (or a newline), `&&`, `||` — none after the last. */
 export type Then = ";" | "&&" | "||" | "";
 
+/** Whether what's at `index` would mean something else run statement by statement: a subshell, a group, a command
+ *  substitution, a here-document, a background job. */
+function runsWhole(input: string, index: number): boolean {
+	const character = input[index];
+	const next = input[index + 1];
+
+	return "(){}`".includes(character) || (character === "<" && next === "<") || (character === "&" && next !== "&" && input[index - 1] !== "&" && input[index - 1] !== ">" && next !== ">");
+}
+
+/** What joins the statement ending at `index` to the next, if a statement ends there: `;` (or a newline), `&&`, `||`. */
+function joinerAt(input: string, index: number): Then | undefined {
+	const character = input[index];
+	const next = input[index + 1];
+
+	if (character === ";" || character === "\n") {
+		return ";";
+	}
+
+	if (character === "&" && next === "&") {
+		return "&&";
+	}
+
+	return character === "|" && next === "|" ? "||" : undefined;
+}
+
 /**
  * `input` as its top-level statements, each with what joins it to the next — so a line with a `streaming` command
  * (`node`) can be run a statement at a time, each one's output shown before the next runs. Undefined — run it whole —
@@ -75,8 +107,8 @@ export function statementsOf(input: string, streaming: ReadonlySet<string>): { "
 	let quote: "'" | "\"" | undefined;
 
 	for (let index = 0; index < input.length; index += 1) {
-		const character = input[index]!;
-		const next = input[index + 1];
+		const character = input[index];
+		const then = joinerAt(input, index);
 
 		if (quote !== undefined) {
 			if (character === "\\" && quote === "\"") {
@@ -84,19 +116,13 @@ export function statementsOf(input: string, streaming: ReadonlySet<string>): { "
 			} else if (character === quote) {
 				quote = undefined;
 			}
-
-			continue;
-		}
-
-		if (character === "\\") {
+		} else if (character === "\\") {
 			index += 1;
 		} else if (character === "'" || character === "\"") {
 			quote = character;
-		} else if ("(){}`".includes(character) || (character === "<" && next === "<") || (character === "&" && next !== "&" && input[index - 1] !== "&" && input[index - 1] !== ">" && next !== ">")) {
+		} else if (runsWhole(input, index)) {
 			return undefined; // a subshell, a group, a command substitution, a here-document, a background job
-		} else if (character === ";" || character === "\n" || (character === "&" && next === "&") || (character === "|" && next === "|")) {
-			const then: Then = character === "&" ? "&&" : character === "|" ? "||" : ";";
-
+		} else if (then !== undefined) {
 			statements.push({ "text": input.slice(start, index), "then": then });
 			index += then.length - 1;
 			start = index + 1;
@@ -111,11 +137,11 @@ export function statementsOf(input: string, streaming: ReadonlySet<string>): { "
 
 	const kept = statements.filter((statement) => statement.text.trim() !== "");
 
-	if (kept.length < 2 || kept.some((statement) => WHOLE.has(statement.text.trim().split(/\s+/u)[0]!))) {
+	if (kept.length < 2 || kept.some((statement) => WHOLE.has(statement.text.trim().split(/\s+/u)[0]))) {
 		return undefined;
 	}
 
-	kept[kept.length - 1]!.then = "";
+	kept[kept.length - 1].then = "";
 
 	return kept;
 }

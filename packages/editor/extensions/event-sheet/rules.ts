@@ -79,11 +79,16 @@ export const gridPush: Behavior = {
 	"body": [
 		{ "let": "target", "cellAheadOf": "me" },
 		{ "ifWall": "target" },
-		{ "ifHas": "target", "a": "Pushable", "bind": "rock", "then": [
-			{ "let": "past", "cellAheadOf": "rock" },
-			{ "ifBlocked": "past", "by": "Pushable", "ignoring": "rock" },
-			{ "move": "rock", "to": "past" }
-		] },
+		{
+			"ifHas": "target",
+			"a": "Pushable",
+			"bind": "rock",
+			"then": [
+				{ "let": "past", "cellAheadOf": "rock" },
+				{ "ifBlocked": "past", "by": "Pushable", "ignoring": "rock" },
+				{ "move": "rock", "to": "past" }
+			]
+		},
 		{ "move": "me", "to": "target" }
 	]
 };

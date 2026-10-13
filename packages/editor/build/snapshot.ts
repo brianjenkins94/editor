@@ -302,24 +302,22 @@ function typeSurface(): SnapshotFile[] {
 	for (const pkg of packages) {
 		if (ALWAYS_SHIM.has(pkg)) {
 			shims.push(pkg);
+		} else {
+			// A package's own types, plus its DefinitelyTyped counterpart (react → @types/react): react/react-dom ship
+			// no types, so the @types package is what provides the module types AND the global JSX namespace.
+			const ownTypes = seedPackage(pkg);
+			const typesPkg = pkg.startsWith("@types/") ? undefined : typesCounterpart(pkg);
+			const viaTypes = typesPkg !== undefined && seedPackage(typesPkg);
 
-			continue;
-		}
+			// Covered by @types but ships no own types → bake its manifest so resolution follows it to @types rather
+			// than probing the physical (async-served) tree and stalling on an empty `<pkg>/index.ts`.
+			if (viaTypes && !ownTypes) {
+				seedManifest(pkg);
+			}
 
-		// A package's own types, plus its DefinitelyTyped counterpart (react → @types/react): react/react-dom ship
-		// no types, so the @types package is what provides the module types AND the global JSX namespace.
-		const ownTypes = seedPackage(pkg);
-		const typesPkg = pkg.startsWith("@types/") ? undefined : typesCounterpart(pkg);
-		const viaTypes = typesPkg !== undefined && seedPackage(typesPkg);
-
-		// Covered by @types but ships no own types → bake its manifest so resolution follows it to @types rather
-		// than probing the physical (async-served) tree and stalling on an empty `<pkg>/index.ts`.
-		if (viaTypes && !ownTypes) {
-			seedManifest(pkg);
-		}
-
-		if (!ownTypes && !viaTypes) {
-			shims.push(pkg);   // ships no types and has no installed @types counterpart → ambient any
+			if (!ownTypes && !viaTypes) {
+				shims.push(pkg);   // ships no types and has no installed @types counterpart → ambient any
+			}
 		}
 	}
 

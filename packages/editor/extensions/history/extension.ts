@@ -19,13 +19,13 @@ import type { Exercise, Ran } from "@brianjenkins94/util/silo/exercise";
 import type { WayIn } from "@brianjenkins94/util/silo/features";
 import type { Analysis, Analyzer } from "@brianjenkins94/util/silo/graph";
 import type { FileAnalysis } from "@brianjenkins94/util/silo/ts-analysis";
-import * as vscode from "vscode";
 import { parseRuns } from "@brianjenkins94/util/silo/evidence";
 import { exerciseOf } from "@brianjenkins94/util/silo/exercise";
 import { featuresOf, waysInManifest } from "@brianjenkins94/util/silo/features";
 import { exerciseEvents, includeByDefault, Replayer } from "@brianjenkins94/util/silo/history";
 import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { analysisOf } from "@brianjenkins94/util/silo/ts-analysis";
+import * as vscode from "vscode";
 import { evidenceStore } from "../../shared/evidence-store";
 
 /** How long after the last keystroke a burst ends. */
@@ -57,16 +57,16 @@ export function activate(context: vscode.ExtensionContext): void {
 	// The program as the plugin last read it: no snapshot is read here, so `read` is never asked.
 	let latest: Analysis | undefined;
 	const analyzer: Analyzer = {
-		"analyze": async () => {
+		"analyze": () => {
 			latest = analysisOf(new Map([...readings].map(([path, reading]) => [path, reading.analysis])), manifests);
 
-			return latest;
+			return Promise.resolve(latest);
 		}
 	};
 	const evidence = evidenceStore(vscode, context.subscriptions);
 	// What runs last said of each feature, this session (undefined until the first join: that one is told as a summary).
 	let exercised: Map<string, Exercise> | undefined;
-	const replayer = new Replayer(async () => "", { "analyzer": analyzer, "include": includeByDefault });
+	const replayer = new Replayer(() => Promise.resolve(""), { "analyzer": analyzer, "include": includeByDefault });
 	const edited = new Set<string>();
 	let baseline = false;
 	let steps = 0;
@@ -127,15 +127,13 @@ export function activate(context: vscode.ExtensionContext): void {
 		const ran = new Map<string, Ran[]>();
 
 		for (const file of withEvidence) {
-			if (![...features.values()].some((feature) => feature.files.includes(file) || feature.roots.some((rootId) => rootId.startsWith(file + "#")))) {
-				continue;
+			if ([...features.values()].some((feature) => feature.files.includes(file) || feature.roots.some((rootId) => rootId.startsWith(file + "#")))) {
+				const open = vscode.workspace.textDocuments.find((document) => relative(document.uri) === file);
+				const text = open?.getText() ?? await Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, file))).then((bytes) => new TextDecoder().decode(bytes), () => "");
+				const placed = await evidence.placedIn(file, text);
+
+				ran.set(file, placed.flatMap((span) => (span.evidence.reached === undefined ? [] : [{ "file": file, "start": span.start, "end": span.end, ...span.evidence.reached }])));
 			}
-
-			const open = vscode.workspace.textDocuments.find((document) => relative(document.uri) === file);
-			const text = open?.getText() ?? await Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, file))).then((bytes) => new TextDecoder().decode(bytes), () => "");
-			const placed = await evidence.placedIn(file, text);
-
-			ran.set(file, placed.flatMap((span) => (span.evidence.reached === undefined ? [] : [{ "file": file, "start": span.start, "end": span.end, ...span.evidence.reached }])));
 		}
 
 		const now = new Map([...features].map(([key, feature]) => [key, exerciseOf(feature, analysis.graph, ran, observed)]));
@@ -220,6 +218,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		timer = setTimeout(() => {
 			timer = undefined;
 			queue = queue.then(async () => step()).catch((error: unknown) => {
+				// eslint-disable-next-line ts/no-base-to-string -- a rejection can be any value: one that isn't an Error is said as String() says it
 				output.appendLine("History failed to read the program: " + (error instanceof Error ? error.message : String(error)));
 			});
 		}, delay);
@@ -245,6 +244,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	// A run left evidence (or a person's evidence changed): what runs say may have changed.
 	context.subscriptions.push(evidence.onDidChange(() => {
 		queue = queue.then(exercise).catch((error: unknown) => {
+			// eslint-disable-next-line ts/no-base-to-string -- a rejection can be any value: one that isn't an Error is said as String() says it
 			output.appendLine("History failed to join what ran: " + (error instanceof Error ? error.message : String(error)));
 		});
 	}));

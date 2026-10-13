@@ -9,18 +9,17 @@
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { ComponentChildren } from "preact";
+import type { ChangeKind, GitFileChange } from "../shared/git";
+import type { DiffRowInfo } from "./git-codehike";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { Fragment, render } from "preact";
 import { useEffect, useReducer, useRef, useState } from "preact/hooks";
-import type { ChangeKind } from "../workbench/cosmetic-classifier";
-import type { DiffRowInfo } from "./git-codehike";
 import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
 import "@awesome.me/webawesome/dist/components/textarea/textarea.js";
 import "@awesome.me/webawesome/dist/components/button/button.js";
 import "@awesome.me/webawesome/dist/components/badge/badge.js";
 import "./git-panel.css";
 
-interface GitFileChange { "path": string; "status": "A" | "M" | "D"; "staged": boolean; "unstaged": boolean; "cosmetic": boolean }
 interface DiffRow { "t": "ctx" | "add" | "del"; "text": string }
 
 /**
@@ -34,38 +33,45 @@ interface EditGroup { "label": string; "kind": string; "startLine": number; "end
 
 /** Unified line diff via LCS (fine for the file sizes a review touches). */
 function lineDiff(before: string, after: string): DiffRow[] {
-	const a = before === "" ? [] : before.split("\n");
-	const b = after === "" ? [] : after.split("\n");
-	const m = a.length;
-	const n = b.length;
-	const dp: number[][] = Array.from({ "length": m + 1 }, () => new Array<number>(n + 1).fill(0));
+	const left = before === "" ? [] : before.split("\n");
+	const right = after === "" ? [] : after.split("\n");
+	const leftCount = left.length;
+	const rightCount = right.length;
+	const dp: number[][] = Array.from({ "length": leftCount + 1 }, () => Array.from({ "length": rightCount + 1 }, () => 0));
 
-	for (let i = m - 1; i >= 0; i -= 1) {
-		for (let j = n - 1; j >= 0; j -= 1) {
-			dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+	for (let leftIndex = leftCount - 1; leftIndex >= 0; leftIndex -= 1) {
+		for (let rightIndex = rightCount - 1; rightIndex >= 0; rightIndex -= 1) {
+			dp[leftIndex][rightIndex] = left[leftIndex] === right[rightIndex] ? dp[leftIndex + 1][rightIndex + 1] + 1 : Math.max(dp[leftIndex + 1][rightIndex], dp[leftIndex][rightIndex + 1]);
 		}
 	}
 
 	const rows: DiffRow[] = [];
-	let i = 0;
-	let j = 0;
+	let leftIndex = 0;
+	let rightIndex = 0;
 
-	while (i < m && j < n) {
-		if (a[i] === b[j]) {
-			rows.push({ "t": "ctx", "text": a[i] });
-			i += 1;
-			j += 1;
-		} else if (dp[i + 1][j] >= dp[i][j + 1]) {
-			rows.push({ "t": "del", "text": a[i] });
-			i += 1;
+	while (leftIndex < leftCount && rightIndex < rightCount) {
+		if (left[leftIndex] === right[rightIndex]) {
+			rows.push({ "t": "ctx", "text": left[leftIndex] });
+			leftIndex += 1;
+			rightIndex += 1;
+		} else if (dp[leftIndex + 1][rightIndex] >= dp[leftIndex][rightIndex + 1]) {
+			rows.push({ "t": "del", "text": left[leftIndex] });
+			leftIndex += 1;
 		} else {
-			rows.push({ "t": "add", "text": b[j] });
-			j += 1;
+			rows.push({ "t": "add", "text": right[rightIndex] });
+			rightIndex += 1;
 		}
 	}
 
-	while (i < m) { rows.push({ "t": "del", "text": a[i] }); i += 1; }
-	while (j < n) { rows.push({ "t": "add", "text": b[j] }); j += 1; }
+	while (leftIndex < leftCount) {
+		rows.push({ "t": "del", "text": left[leftIndex] });
+		leftIndex += 1;
+	}
+
+	while (rightIndex < rightCount) {
+		rows.push({ "t": "add", "text": right[rightIndex] });
+		rightIndex += 1;
+	}
 
 	return rows;
 }
@@ -110,34 +116,41 @@ function buildRows(before: string, after: string): DiffRowInfo[] {
 	const rows: DiffRowInfo[] = [];
 	let leftNo = 0;
 	let rightNo = 0;
-	let k = 0;
+	let cursor = 0;
 
-	while (k < diff.length) {
-		if (diff[k].t === "ctx") {
+	while (cursor < diff.length) {
+		if (diff[cursor].t === "ctx") {
 			leftNo += 1;
 			rightNo += 1;
 			rows.push({ "type": "ctx", "leftNo": leftNo, "rightNo": rightNo });
-			k += 1;
+			cursor += 1;
+		} else {
+			const dels: number[] = [];
+			const adds: number[] = [];
 
-			continue;
-		}
+			while (cursor < diff.length && diff[cursor].t === "del") {
+				leftNo += 1;
+				dels.push(leftNo);
+				cursor += 1;
+			}
 
-		const dels: number[] = [];
-		const adds: number[] = [];
+			while (cursor < diff.length && diff[cursor].t === "add") {
+				rightNo += 1;
+				adds.push(rightNo);
+				cursor += 1;
+			}
 
-		while (k < diff.length && diff[k].t === "del") { leftNo += 1; dels.push(leftNo); k += 1; }
-		while (k < diff.length && diff[k].t === "add") { rightNo += 1; adds.push(rightNo); k += 1; }
+			for (let pair = 0; pair < Math.max(dels.length, adds.length); pair += 1) {
+				const deleted = dels[pair];
+				const added = adds[pair];
 
-		for (let p = 0; p < Math.max(dels.length, adds.length); p += 1) {
-			const l = dels[p];
-			const r = adds[p];
-
-			if (l !== undefined && r !== undefined) {
-				rows.push({ "type": "mod", "leftNo": l, "rightNo": r });
-			} else if (l !== undefined) {
-				rows.push({ "type": "del", "leftNo": l });
-			} else {
-				rows.push({ "type": "add", "rightNo": r });
+				if (deleted !== undefined && added !== undefined) {
+					rows.push({ "type": "mod", "leftNo": deleted, "rightNo": added });
+				} else if (deleted !== undefined) {
+					rows.push({ "type": "del", "leftNo": deleted });
+				} else {
+					rows.push({ "type": "add", "rightNo": added });
+				}
 			}
 		}
 	}
@@ -159,28 +172,50 @@ function committedContent(head: string, working: string, rows: DiffRowInfo[], de
 		const selected = !deselected.has(index);
 
 		if (row.type === "ctx") {
-			out.push(workingLines[row.rightNo! - 1]);
+			out.push(workingLines[row.rightNo - 1]);
 		} else if (row.type === "add") {
 			if (selected) {
-				out.push(workingLines[row.rightNo! - 1]);
+				out.push(workingLines[row.rightNo - 1]);
 			}
 		} else if (row.type === "del") {
 			if (!selected) {
-				out.push(headLines[row.leftNo! - 1]);
+				out.push(headLines[row.leftNo - 1]);
 			}
 		} else {
-			out.push(selected ? workingLines[row.rightNo! - 1] : headLines[row.leftNo! - 1]);
+			out.push(selected ? workingLines[row.rightNo - 1] : headLines[row.leftNo - 1]);
 		}
 	});
 
 	return out.join("\n");
 }
 
-const langFor = (path: string): string =>
-	/\.(?:tsx|jsx)$/u.test(path) ? "tsx"
-		: /\.(?:ts|mts|cts)$/u.test(path) ? "typescript"
-			: /\.(?:js|mjs|cjs)$/u.test(path) ? "javascript"
-				: /\.json$/u.test(path) ? "json" : "tsx";
+function langFor(path: string): string {
+	if (/\.(?:tsx|jsx)$/u.test(path)) {
+		return "tsx";
+	}
+
+	if (/\.(?:ts|mts|cts)$/u.test(path)) {
+		return "typescript";
+	}
+
+	if (/\.(?:js|mjs|cjs)$/u.test(path)) {
+		return "javascript";
+	}
+
+	return path.endsWith(".json") ? "json" : "tsx";
+}
+
+/** How a row of the plain diff is marked, by its kind. */
+const ROW_MARKS: Record<DiffRow["t"] | "gap", string> = { "add": "+", "del": "-", "gap": "", "ctx": " " };
+
+/** The commit button's label: a failure, everything, or how much of it. */
+function commitLabelOf(commitError: boolean, allChecked: boolean, chosen: number, total: number): string {
+	if (commitError) {
+		return "Commit failed";
+	}
+
+	return allChecked ? "Commit all changes" : "Commit " + chosen + " of " + total;
+}
 
 const isCodeFile = (file: GitFileChange): boolean => /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u.test(file.path) && file.status !== "D";
 
@@ -195,7 +230,9 @@ function Chunks({ path, rpc, onOpen }: { "path": string; "rpc": ReturnType<typeo
 	useEffect(() => {
 		let live = true;
 
-		void import("./git-codehike").then(({ setDiffHighlight }) => { highlightRef.current = setDiffHighlight; }).catch(() => { /* island unavailable — hover is a no-op */ });
+		void import("./git-codehike").then(({ setDiffHighlight }) => {
+			highlightRef.current = setDiffHighlight;
+		}).catch(() => { /* island unavailable — hover is a no-op */ });
 
 		void (async () => {
 			try {
@@ -213,7 +250,9 @@ function Chunks({ path, rpc, onOpen }: { "path": string; "rpc": ReturnType<typeo
 			}
 		})();
 
-		return () => { live = false; };
+		return () => {
+			live = false;
+		};
 	}, [path, rpc]);
 
 	if (state.status === "loading") {
@@ -233,6 +272,7 @@ function Chunks({ path, rpc, onOpen }: { "path": string; "rpc": ReturnType<typeo
 	return (
 		<div class="chunks">
 			<div class="chunk info">{groups.length + " change" + (groups.length === 1 ? "" : "s") + " · " + (state.bursts ?? 0) + " edit" + (state.bursts === 1 ? "" : "s")}</div>
+
 			{groups.map((group, index) => {
 				const range = group.endLine > group.startLine ? "L" + group.startLine + "–" + group.endLine : "L" + group.startLine;
 
@@ -245,8 +285,18 @@ function Chunks({ path, rpc, onOpen }: { "path": string; "rpc": ReturnType<typeo
 						onClick={() => { onOpen(path); }}
 					>
 						<span class="ck">{group.kind}</span>
+
 						<span class="cl">{group.label}</span>
-						{group.edits > 1 ? <span class="ce" title={group.edits + " edit-bursts touched this"}>{group.edits} edits</span> : <span class="ce" />}
+
+						{group.edits > 1 ? (
+							<span class="ce" title={group.edits + " edit-bursts touched this"}>
+								{group.edits}
+
+								{" "}
+								edits
+							</span>
+						) : <span class="ce" />}
+
 						<span class="cr">{range}</span>
 					</div>
 				);
@@ -276,7 +326,9 @@ function FileRow({ file, state, current, expanded, onPick, onOpen, onToggleExpan
 
 		if (!armed) {
 			setArmed(true);
-			disarmRef.current = setTimeout(() => { setArmed(false); }, 3000);
+			disarmRef.current = setTimeout(() => {
+				setArmed(false);
+			}, 3000);
 
 			return;
 		}
@@ -286,14 +338,30 @@ function FileRow({ file, state, current, expanded, onPick, onOpen, onToggleExpan
 		onDiscard();
 	};
 
+	const clickRow = (event: MouseEvent): void => {
+		if ((event.target as HTMLElement).closest("wa-checkbox, .discard, .exp") === null) {
+			onOpen();
+		}
+	};
+
+	const clickExpand = (event: MouseEvent): void => {
+		event.stopPropagation();
+		onToggleExpand();
+	};
+
 	return (
-		<div class={"file" + (file.cosmetic ? " cosmetic" : "")} aria-current={current} onClick={(event) => { if ((event.target as HTMLElement).closest("wa-checkbox, .discard, .exp") === null) { onOpen(); } }}>
+		<div class={"file" + (file.cosmetic ? " cosmetic" : "")} aria-current={current} onClick={clickRow}>
 			<wa-checkbox class="pick" checked={state !== "off"} indeterminate={state === "partial"} onChange={(event: Event) => { onPick((event.target as HTMLInputElement).checked); }} />
+
 			<span class={"st " + file.status}>{file.status}</span>
+
 			<span class="nm"><bdi dir="ltr">{file.path}</bdi></span>
+
 			<span class="tail">
-				{isCodeFile(file) && <wa-button class="exp" appearance="plain" size="small" title="Your edits" aria-label="Your edits" onClick={(event: MouseEvent) => { event.stopPropagation(); onToggleExpand(); }}>{expanded ? "▾" : "▸"}</wa-button>}
+				{isCodeFile(file) && <wa-button class="exp" appearance="plain" size="small" title="Your edits" aria-label="Your edits" onClick={clickExpand}>{expanded ? "▾" : "▸"}</wa-button>}
+
 				{file.cosmetic && <wa-badge class="cos" variant="neutral">cosmetic</wa-badge>}
+
 				<wa-button class={"discard" + (armed ? " armed" : "")} appearance="plain" size="small" variant="danger" title="Discard changes" aria-label="Discard changes" onClick={clickDiscard}>{armed ? "Discard?" : "⨯"}</wa-button>
 			</span>
 		</div>
@@ -356,7 +424,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 			const line = document.createElement("div");
 
 			line.className = "row " + row.t;
-			line.textContent = (row.t === "add" ? "+" : row.t === "del" ? "-" : row.t === "gap" ? "" : " ") + row.text;
+			line.textContent = ROW_MARKS[row.t] + row.text;
 			diff.appendChild(line);
 		}
 
@@ -416,6 +484,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 			codehikeActive.current = true;
 		} catch {
 			if (codehikeActive.current) {
+				// eslint-disable-next-line require-atomic-updates -- overlay is the shell's fixed set of elements: nothing swaps it across the await
 				overlay.title.textContent = path + " — diff unavailable";
 			} else {
 				renderPlain(head, working);
@@ -424,7 +493,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	};
 
 	const refresh = async (options?: { "timeoutMs": number }): Promise<void> => {
-		const { files: next } = await rpc.request("git.status", undefined, options) as { "files": GitFileChange[] };
+		const { "files": next } = await rpc.request("git.status", undefined, options) as { "files": GitFileChange[] };
 		const stillChanged = (path: string): boolean => next.some((file) => file.path === path);
 
 		for (const path of [...deselected]) {
@@ -460,7 +529,9 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	useEffect(() => {
 		overlay.close.addEventListener("click", hideOverlay);
 
-		const off = hub.subscribe("git.changed", () => { void refresh(); });
+		const off = hub.subscribe("git.changed", () => {
+			void refresh();
+		});
 
 		// The workbench git service registers late in its boot (and the shell→app→workbench link takes a moment to
 		// form), so the initial load POLLS with a short timeout until the responder answers — instead of one
@@ -472,7 +543,9 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 
 					return;
 				} catch {
-					await new Promise((resolve) => { setTimeout(resolve, 500); });
+					await new Promise((resolve) => {
+						setTimeout(resolve, 500);
+					});
 				}
 			}
 		})();
@@ -494,11 +567,17 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	// docKey (path) is unchanged, so the diff's fold/selection state survives the re-mount.
 	useEffect(() => {
 		const mq = window.matchMedia("(prefers-color-scheme: dark)");
-		const onChange = (): void => { if (selected !== undefined) { void showDiff(selected); } };
+		const onChange = (): void => {
+			if (selected !== undefined) {
+				void showDiff(selected);
+			}
+		};
 
 		mq.addEventListener("change", onChange);
 
-		return () => { mq.removeEventListener("change", onChange); };
+		return () => {
+			mq.removeEventListener("change", onChange);
+		};
 	}, [selected]);
 
 	const total = files.length;
@@ -589,22 +668,28 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 			changedCount.clear();
 		} catch {
 			setCommitError(true);
-			setTimeout(() => { setCommitError(false); }, 1800);
+			setTimeout(() => {
+				setCommitError(false);
+			}, 1800);
 		} finally {
 			setCommitting(false);
 			void refresh();
 		}
 	};
 
-	const commitLabel = commitError ? "Commit failed" : allChecked ? "Commit all changes" : "Commit " + chosen + " of " + total;
+	const commitLabel = commitLabelOf(commitError, allChecked, chosen, total);
 
 	return (
 		<div class="gp">
 			<div class="head">
 				<wa-checkbox checked={allChecked} indeterminate={someChecked} title="Select all changes" aria-label="Select all changes" onChange={(event: Event) => { toggleAll((event.target as HTMLInputElement).checked); }} />
+
 				<span>Changes</span>
+
 				<span class="count">{total}</span>
+
 				<span class="spacer" />
+
 				{headerEnd}
 			</div>
 
@@ -612,24 +697,26 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 				{total === 0
 					? <div class="empty">No changes</div>
 					: files.map((file) => (
-						<Fragment key={file.path}>
-							<FileRow
-								file={file}
-								state={fileState(file.path)}
-								current={file.path === selected}
-								expanded={expanded.has(file.path)}
-								onPick={(checked) => { pickFile(file.path, checked); }}
-								onOpen={() => { void showDiff(file.path); }}
-								onToggleExpand={() => { toggleExpand(file.path); }}
-								onDiscard={() => { void rpc.request("git.discard", { "path": file.path }); }}
-							/>
-							{expanded.has(file.path) && <Chunks path={file.path} rpc={rpc} onOpen={(path) => { void showDiff(path); }} />}
-						</Fragment>
-					))}
+							<Fragment key={file.path}>
+								<FileRow
+									file={file}
+									state={fileState(file.path)}
+									current={file.path === selected}
+									expanded={expanded.has(file.path)}
+									onPick={(checked) => { pickFile(file.path, checked); }}
+									onOpen={() => { void showDiff(file.path); }}
+									onToggleExpand={() => { toggleExpand(file.path); }}
+									onDiscard={() => { void rpc.request("git.discard", { "path": file.path }); }}
+								/>
+
+								{expanded.has(file.path) && <Chunks path={file.path} rpc={rpc} onOpen={(path) => { void showDiff(path); }} />}
+							</Fragment>
+						))}
 			</div>
 
 			<div class="commit">
 				<wa-textarea ref={msgRef} rows={2} resize="vertical" placeholder="Summary — describe your changes" />
+
 				<wa-button variant="brand" disabled={chosen === 0 || committing} onClick={() => { void commit(); }}>{commitLabel}</wa-button>
 			</div>
 		</div>

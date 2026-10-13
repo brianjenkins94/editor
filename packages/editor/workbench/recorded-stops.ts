@@ -7,10 +7,10 @@
  *
  * Runs in the workbench realm, beside runtime evidence (evidence.ts), which reads the same pages' counts.
  */
-import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
 import type { LiveValue } from "@brianjenkins94/run-contract";
-import type { RecordedStop } from "../previews/page-evidence";
+import type * as vscodeApi from "vscode";
+import type { RecordedStop } from "../shared/preview-evidence";
 import { createRpcClient } from "@brianjenkins94/hub";
 
 /** Each workspace file's breakpoints, enabled, as 1-based lines. */
@@ -59,7 +59,9 @@ export function stopValues(stop: RecordedStop, source: string): LiveValue[] {
 export function installRecordedStops(hub: Hub, vscode: typeof vscodeApi): void {
 	const rpc = createRpcClient(hub);
 	// The dev servers answer from the node worker, which may still be starting: asked again as the breakpoints change.
-	const push = (): void => { void rpc.request("preview.stops", { "stops": breakpointsOf(vscode) }, { "timeoutMs": 10_000, "waitForResponderMs": 10_000 }).catch(() => undefined); };
+	const push = (): void => {
+		void rpc.request("preview.stops", { "stops": breakpointsOf(vscode) }, { "timeoutMs": 10_000, "waitForResponderMs": 10_000 }).catch(() => undefined);
+	};
 
 	push();
 	vscode.debug.onDidChangeBreakpoints(push);
@@ -76,6 +78,7 @@ export function installRecordedStops(hub: Hub, vscode: typeof vscodeApi): void {
 
 		return source;
 	};
+
 	let reported = 0;
 
 	hub.subscribe("stops.preview", (data) => {
@@ -101,7 +104,7 @@ export function installRecordedStops(hub: Hub, vscode: typeof vscodeApi): void {
 			void (async () => {
 				// The text of the version that ran last: its stops' (an earlier version's, from before a hot update, are
 				// another text's).
-				const { version } = fileStops.at(-1)!;
+				const { version } = fileStops.at(-1);
 				const source = await sourceOf(port, version);
 
 				if (source !== undefined) {

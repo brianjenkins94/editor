@@ -11,8 +11,8 @@
  *
  * Lines and columns are 1-based, as an agent reads code. Runs in the workbench realm (core), with its own extension API.
  */
-import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
+import type * as vscodeApi from "vscode";
 import { serve } from "@brianjenkins94/hub";
 import { shownNotifications } from "@brianjenkins94/monaco-vscode-api/main";
 
@@ -70,7 +70,7 @@ export function installEditorState(hub: Hub, vscode: typeof vscodeApi): void {
 			"message": diagnostic.message
 		}))));
 		// Errors first, then by file and line.
-		const sorted = all.toSorted((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || a.file.localeCompare(b.file) || a.line - b.line);
+		const sorted = all.toSorted((left, right) => SEVERITIES.indexOf(left.severity) - SEVERITIES.indexOf(right.severity) || left.file.localeCompare(right.file) || left.line - right.line);
 		const most = typeof limit === "number" && limit > 0 ? limit : PROBLEMS;
 
 		return { "total": sorted.length, "problems": sorted.slice(0, most) };

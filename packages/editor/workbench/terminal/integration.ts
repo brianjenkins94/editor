@@ -10,7 +10,7 @@
  * untrusted (`commandLine.isTrusted` false), still at high confidence.
  */
 
-const OSC = "\x1b]633;";
+const OSC = "\x1B]633;";
 const BEL = "\x07";
 
 /** A value as VS Code reads it in a sequence: backslash, `;` and control characters (and space) escaped as `\xNN`. */

@@ -32,11 +32,11 @@
  */
 import type { CapabilityRequest } from "@brianjenkins94/util/silo/enforce/broker";
 import type { Disposition, Policy, Rule } from "@brianjenkins94/util/silo/policy";
-import * as vscode from "vscode";
 import { userSlug } from "@brianjenkins94/util/silo/evidence";
 import { capabilitiesPath, GITIGNORE, observedCapabilitiesPath, POLICY_GLOB, policyPath, SILO_DIR, userPolicyPath, withLines } from "@brianjenkins94/util/silo/layout";
-import { recordEffect } from "./run-effects";
 import { EMPTY_POLICY, parsePolicy, withRule } from "@brianjenkins94/util/silo/policy";
+import * as vscode from "vscode";
+import { recordEffect } from "./run-effects";
 
 // ── paths ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -83,15 +83,20 @@ export async function currentUser(): Promise<string> {
 	const folder = vscode.workspace.workspaceFolders?.[0];
 
 	if (folder !== undefined) {
-		const config = await readText(vscode.Uri.joinPath(folder.uri, ".git", "config"));
-		const slug = config === undefined ? undefined : userSlug(config);
-
-		if (slug !== undefined) {
-			userCache = slug;
-		}
+		await readUser(folder);
 	}
 
 	return userCache;
+}
+
+/** `currentUser`'s read of `folder`'s `.git/config`: its user, when it names one. */
+async function readUser(folder: vscode.WorkspaceFolder): Promise<void> {
+	const config = await readText(vscode.Uri.joinPath(folder.uri, ".git", "config"));
+	const slug = config === undefined ? undefined : userSlug(config);
+
+	if (slug !== undefined) {
+		userCache = slug;
+	}
 }
 
 // ── policy: base contract + my overrides ─────────────────────────────────────────────────────────────────────
@@ -110,7 +115,10 @@ function ensurePolicyWatcher(): void {
 
 	try {
 		const watcher = vscode.workspace.createFileSystemWatcher(POLICY_GLOB);
-		const invalidate = (): void => { baseCache = undefined; overrideCache = undefined; };
+		const invalidate = (): void => {
+			baseCache = undefined;
+			overrideCache = undefined;
+		};
 
 		watcher.onDidChange(invalidate);
 		watcher.onDidCreate(invalidate);
@@ -122,21 +130,27 @@ function ensurePolicyWatcher(): void {
 }
 
 async function loadBase(root: vscode.Uri): Promise<Policy> {
-	if (baseCache === undefined) {
-		const text = await readText(fileIn(root, policyPath()));
+	return baseCache ?? await readBase(root);
+}
 
-		baseCache = text === undefined ? { ...EMPTY_POLICY } : parsePolicy(text);
-	}
+/** `loadBase`'s read, kept. */
+async function readBase(root: vscode.Uri): Promise<Policy> {
+	const text = await readText(fileIn(root, policyPath()));
+
+	baseCache = text === undefined ? { ...EMPTY_POLICY } : parsePolicy(text);
 
 	return baseCache;
 }
 
 async function loadOverride(root: vscode.Uri, user: string): Promise<Policy> {
-	if (overrideCache === undefined) {
-		const text = await readText(fileIn(root, userPolicyPath(user)));
+	return overrideCache ?? await readOverride(root, user);
+}
 
-		overrideCache = text === undefined ? { ...EMPTY_POLICY } : parsePolicy(text);
-	}
+/** `loadOverride`'s read, kept. */
+async function readOverride(root: vscode.Uri, user: string): Promise<Policy> {
+	const text = await readText(fileIn(root, userPolicyPath(user)));
+
+	overrideCache = text === undefined ? { ...EMPTY_POLICY } : parsePolicy(text);
 
 	return overrideCache;
 }
@@ -198,7 +212,7 @@ export async function persistOverride(capability: string, resource: string, disp
 }
 
 /** The same rule, whenever it was decided. */
-const sameRule = (a: Rule, b: Rule): boolean => JSON.stringify({ "when": a.when, "then": a.then }) === JSON.stringify({ "when": b.when, "then": b.then });
+const sameRule = (left: Rule, right: Rule): boolean => JSON.stringify({ "when": left.when, "then": left.then }) === JSON.stringify({ "when": right.when, "then": right.then });
 
 /** Change my policy (`policy/<user>.json`) by a rule made in a rule editor: `previous` (the rule edited, if it's mine)
  *  replaced by `rule`, in its place — or, with no `previous` of mine, `rule` added first (a rule just made is the one
@@ -302,9 +316,8 @@ export async function writeStaticSurface(surface: StaticSurface): Promise<void> 
 
 	const sorted: StaticSurface = { "version": surface.version, "capabilities": {} };
 
-	for (const path of Object.keys(surface.capabilities).sort((a, b) => a.localeCompare(b))) {
-		sorted.capabilities[path] = [...surface.capabilities[path]].sort((a, b) =>
-			(a.capability + a.callee + a.resource).localeCompare(b.capability + b.callee + b.resource));
+	for (const path of Object.keys(surface.capabilities).sort((left, right) => left.localeCompare(right))) {
+		sorted.capabilities[path] = [...surface.capabilities[path]].sort((left, right) => (left.capability + left.callee + left.resource).localeCompare(right.capability + right.callee + right.resource));
 	}
 
 	await writeText(fileIn(root, capabilitiesPath()), JSON.stringify(sorted, null, "\t") + "\n");
@@ -328,21 +341,25 @@ let observedCache: ObservedSurface | undefined;
 async function loadObserved(root: vscode.Uri, user: string): Promise<ObservedSurface> {
 	if (observedCache === undefined) {
 		observedCache = { "version": 1, "observed": {} };
-
-		const text = await readText(fileIn(root, observedCapabilitiesPath(user)));
-
-		if (text !== undefined) {
-			try {
-				const parsed = JSON.parse(text) as Partial<ObservedSurface>;
-
-				if (parsed.observed !== undefined && typeof parsed.observed === "object") {
-					observedCache = { "version": parsed.version ?? 1, "observed": parsed.observed };
-				}
-			} catch { /* malformed → empty */ }
-		}
+		await readObserved(root, user);
 	}
 
 	return observedCache;
+}
+
+/** `loadObserved`'s read of the rollup, kept when it parses. */
+async function readObserved(root: vscode.Uri, user: string): Promise<void> {
+	const text = await readText(fileIn(root, observedCapabilitiesPath(user)));
+
+	if (text !== undefined) {
+		try {
+			const parsed = JSON.parse(text) as Partial<ObservedSurface>;
+
+			if (parsed.observed !== undefined && typeof parsed.observed === "object") {
+				observedCache = { "version": parsed.version ?? 1, "observed": parsed.observed };
+			}
+		} catch { /* malformed → empty */ }
+	}
 }
 
 /**
@@ -427,6 +444,9 @@ async function loadRecorded(root: vscode.Uri): Promise<Recorded> {
 	}
 }
 
+/** The record being written, which the next waits for. */
+let recording: Promise<unknown> = Promise.resolve();
+
 /** Keep what a call returned when it ran for real (a preview's fetch: its body, parsed when it's JSON; a script's read of
  *  a workspace file: its text) — the latest of
  *  each call, in `.silo/local/recorded.json`: this machine's only, never committed (a real response can hold secrets). */
@@ -438,9 +458,6 @@ export async function recordResult(capability: string, resource: string, value: 
 
 	return write;
 }
-
-/** The record being written, which the next waits for. */
-let recording: Promise<unknown> = Promise.resolve();
 
 async function recordNow(capability: string, resource: string, value: unknown): Promise<void> {
 	const root = siloRoot();

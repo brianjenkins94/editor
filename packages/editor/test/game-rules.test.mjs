@@ -3,16 +3,16 @@
 // composes the behavior, and the compiled systems reverse-project back to the same rules (the round-trip). Run: tsx --test.
 import assert from "node:assert/strict";
 import test from "node:test";
-import ts from "typescript";
 import { pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import { referTo } from "@brianjenkins94/util/silo/annotations";
+import ts from "typescript";
 import { anchorGame } from "../extensions/event-sheet/anchors.ts";
-import { compileGame, exampleBehaviors, exampleRules, fly } from "../extensions/event-sheet/rules.ts";
 import { recognizeGame } from "../extensions/event-sheet/recognizer.ts";
+import { compileGame, exampleBehaviors, exampleRules, fly } from "../extensions/event-sheet/rules.ts";
 
 /** A reference to the span standing for each range of a text — what the editor's `editor.annotations.refer` answers,
  *  here straight from BABLR and silo (tokens left out of the shapes: these tests look at the ids). */
-const referOf = async (source, file, ranges) => {
+async function referOf(source, file, ranges) {
 	const shapes = spanAnchors(source).filter((span) => span.type !== null).map((span) => ({ ...span, "atoms": [] }));
 
 	return ranges.map((range) => {
@@ -20,7 +20,7 @@ const referOf = async (source, file, ranges) => {
 
 		return id === undefined ? undefined : referTo(shapes, id, file);
 	});
-};
+}
 
 // Minimal schemas + an entity config, so behaviors and objects recognize alongside the compiled rules.
 const SCHEMAS = {

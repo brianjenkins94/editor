@@ -6,11 +6,11 @@
  *
  * The rules, and what's done with them, are the editor's — its commands (rules-view.ts): `silo.rules.list` lists them as
  * the view shows them; a rule opens in the rule editor (`silo.rules.open`, the Rule view below), *New Rule* starts one,
- * *Remove* takes one of mine out, *Re-place at selection* places a lost one at the code selected. Redrawn as the policy
+ * Remove* takes one of mine out, *Re-place at selection* places a lost one at the code selected. Redrawn as the policy
  * files change, and as files are saved (a placed rule follows its code).
  */
-import * as vscode from "vscode";
 import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
+import * as vscode from "vscode";
 
 /** A rule as the editor lists it (`silo.rules.list`). */
 interface Listed {
@@ -28,7 +28,33 @@ type Node = { "kind": "group"; "whose": "mine" | "shared"; "file": string; "rule
 function placing(listed: Listed): "lost" | "uncertain" | undefined {
 	const status = listed.place?.status;
 
-	return status === "orphaned" ? "lost" : status === "uncertain" ? "uncertain" : undefined;
+	if (status === "orphaned") {
+		return "lost";
+	}
+
+	return status === "uncertain" ? "uncertain" : undefined;
+}
+
+/** What the view says over its rules when there are none to show. */
+function emptyMessage(rules: Listed[] | null): string | undefined {
+	if (rules === null) {
+		return "Open a folder to keep rules: they live in its .silo/ folder.";
+	}
+
+	return rules.length === 0 ? "None yet — make one with New Rule above, Rule… at a capability stop, or Mock… on process.argv's row." : undefined;
+}
+
+/** What's to know about a rule's place, for its tooltip. */
+function placeNote(listed: Listed, found: "lost" | "uncertain" | undefined): string | undefined {
+	if (listed.problem !== undefined) {
+		return "Open it to fix it";
+	}
+
+	if (found === "uncertain") {
+		return `Line ${listed.place?.line}, found by a match not sure enough to act on: it doesn't apply until it's placed again`;
+	}
+
+	return listed.place?.line !== undefined ? `Its statement is on line ${listed.place.line} now` : undefined;
 }
 
 export function registerRulesTree(context: vscode.ExtensionContext): void {
@@ -39,6 +65,7 @@ export function registerRulesTree(context: vscode.ExtensionContext): void {
 
 		return listing;
 	};
+
 	const provider: vscode.TreeDataProvider<Node> = {
 		"onDidChangeTreeData": changed.event,
 		"getChildren": async (node) => {
@@ -48,7 +75,7 @@ export function registerRulesTree(context: vscode.ExtensionContext): void {
 
 			const rules = await list();
 
-			view.message = rules === null ? "Open a folder to keep rules: they live in its .silo/ folder." : rules.length === 0 ? "None yet — make one with New Rule above, Rule… at a capability stop, or Mock… on process.argv's row." : undefined;
+			showMessage(emptyMessage(rules));
 
 			if (rules === null || rules.length === 0) {
 				return [];
@@ -58,8 +85,8 @@ export function registerRulesTree(context: vscode.ExtensionContext): void {
 			const shared = rules.filter((listed) => listed.whose === "shared");
 
 			return [
-				...mine.length === 0 ? [] : [{ "kind": "group", "whose": "mine", "file": mine[0]!.file, "rules": mine } as const],
-				...shared.length === 0 ? [] : [{ "kind": "group", "whose": "shared", "file": shared[0]!.file, "rules": shared } as const]
+				...mine.length === 0 ? [] : [{ "kind": "group", "whose": "mine", "file": mine[0].file, "rules": mine } as const],
+				...shared.length === 0 ? [] : [{ "kind": "group", "whose": "shared", "file": shared[0].file, "rules": shared } as const]
 			];
 		},
 		"getTreeItem": (node) => {
@@ -80,7 +107,7 @@ export function registerRulesTree(context: vscode.ExtensionContext): void {
 			item.iconPath = new vscode.ThemeIcon(listed.problem === undefined ? "law" : "error");
 			item.description = listed.place?.line === undefined || listed.problem !== undefined ? undefined : `line ${listed.place.line}${found === "uncertain" ? "?" : ""}`;
 			// (the whole sentence — a narrow sidebar cuts the label short — and what's to know about its place)
-			const note = listed.problem !== undefined ? "Open it to fix it" : found === "uncertain" ? `Line ${listed.place?.line}, found by a match not sure enough to act on: it doesn't apply until it's placed again` : listed.place?.line !== undefined ? `Its statement is on line ${listed.place.line} now` : undefined;
+			const note = placeNote(listed, found);
 
 			item.tooltip = note === undefined ? listed.sentence : `${listed.sentence}\n\n${note}`;
 			item.contextValue = `rule.${listed.whose}${found === undefined ? "" : `.${found}`}`;
@@ -90,10 +117,17 @@ export function registerRulesTree(context: vscode.ExtensionContext): void {
 		}
 	};
 	const view = vscode.window.createTreeView("silo.rules", { "treeDataProvider": provider });
+
+	/** The view's message (getChildren sets it, once the view is made). */
+	function showMessage(message: string | undefined): void {
+		view.message = message;
+	}
+
 	const refresh = (): void => {
 		listing = undefined;
 		changed.fire();
 	};
+
 	const watcher = vscode.workspace.createFileSystemWatcher(POLICY_GLOB);
 
 	context.subscriptions.push(

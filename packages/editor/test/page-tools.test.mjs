@@ -66,7 +66,9 @@ before(async () => {
 	});
 
 	socket = new WebSocket("ws://localhost:" + port);
-	await new Promise((resolve) => { socket.addEventListener("open", resolve, { "once": true }); });
+	await new Promise((resolve) => {
+		socket.addEventListener("open", resolve, { "once": true });
+	});
 	await root.link(websocketTransport(socket)).ready;
 	mcp = await connectTestClient(debugMcp);
 });

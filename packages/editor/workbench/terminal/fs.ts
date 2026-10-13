@@ -57,7 +57,14 @@ function translate(error: unknown, path: string): Error {
 		return fsError("EISDIR", `EISDIR: illegal operation on a directory, '${path}'`);
 	}
 
-	return error instanceof Error ? error : new Error(String(error));
+	if (error instanceof Error) {
+		return error;
+	}
+
+	// What isn't an Error is stringified as it is (a thrown string, if anything else).
+	const thrown = error as string | number | boolean | null | undefined;
+
+	return new Error(String(thrown));
 }
 
 function toBytes(content: FileContent): Uint8Array {
@@ -71,13 +78,9 @@ function resolvePosix(base: string, path: string): string {
 	const stack: string[] = [];
 
 	for (const part of combined.split("/")) {
-		if (part === "" || part === ".") {
-			continue;
-		}
-
 		if (part === "..") {
 			stack.pop();
-		} else {
+		} else if (part !== "" && part !== ".") {
 			stack.push(part);
 		}
 	}
@@ -107,7 +110,13 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 		const isFile = !isDirectory && (stat.type & FILE) !== 0;
 		const writable = ((stat.permissions ?? 0) & READONLY) === 0;
 		// A unix-ish mode for `ls -l` etc.: dir 0o755, file 0o644 (0o444 when the FS marks it read-only).
-		const mode = isDirectory ? 0o040755 : isSymbolicLink ? 0o120777 : 0o100000 | (writable ? 0o644 : 0o444);
+		let mode = 0o100000 | (writable ? 0o644 : 0o444);
+
+		if (isDirectory) {
+			mode = 0o040755;
+		} else if (isSymbolicLink) {
+			mode = 0o120777;
+		}
 
 		return { "isFile": isFile, "isDirectory": isDirectory, "isSymbolicLink": isSymbolicLink, "mode": mode, "size": stat.size, "mtime": new Date(stat.mtime) };
 	};
@@ -252,19 +261,13 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 			return paths;
 		},
 
-		"realpath": async (path: string): Promise<string> => path, // no symlink layer — the path IS the real path
+		"realpath": (path: string): Promise<string> => Promise.resolve(path), // no symlink layer — the path IS the real path
 
 		"chmod": async (): Promise<void> => { /* permissions are the filesystem's call, not the shell's — no-op */ },
 		"utimes": async (): Promise<void> => { /* the store doesn't expose mtime writes — no-op */ },
 
-		"symlink": async (_target: string, linkPath: string): Promise<void> => {
-			throw fsError("ENOSYS", `ENOSYS: symlinks are not supported, '${linkPath}'`);
-		},
-		"link": async (_existingPath: string, newPath: string): Promise<void> => {
-			throw fsError("ENOSYS", `ENOSYS: hard links are not supported, '${newPath}'`);
-		},
-		"readlink": async (path: string): Promise<string> => {
-			throw fsError("EINVAL", `EINVAL: not a symbolic link, '${path}'`);
-		}
+		"symlink": (_target: string, linkPath: string): Promise<void> => Promise.reject(fsError("ENOSYS", `ENOSYS: symlinks are not supported, '${linkPath}'`)),
+		"link": (_existingPath: string, newPath: string): Promise<void> => Promise.reject(fsError("ENOSYS", `ENOSYS: hard links are not supported, '${newPath}'`)),
+		"readlink": (path: string): Promise<string> => Promise.reject(fsError("EINVAL", `EINVAL: not a symbolic link, '${path}'`))
 	};
 }

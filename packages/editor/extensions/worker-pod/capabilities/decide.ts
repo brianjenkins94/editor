@@ -11,15 +11,15 @@
  * Deny); an external program or AI can replace it later behind the same seam. All `.silo/` I/O — the base+override
  * policy merge, the observed-capability rollup, the run firehose — lives in silo-store.ts.
  */
-import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import type { BrokerOptions, CapabilityRequest, GrantStore, Verdict } from "@brianjenkins94/util/silo/enforce/broker";
+import { FS_ASYNC, FS_SYNC } from "@brianjenkins94/almostnode/fs-capabilities";
 import { createRpcClient } from "@brianjenkins94/hub";
 import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker";
 import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
 import { effectiveDisposition, isDangerous } from "@brianjenkins94/util/silo/policy";
+import { loadEffectivePolicy, persistOverride, recordObservation } from "../../../shared/capabilities/silo-store";
 import { podHub } from "../pod";
 import { coalesce } from "./coalesce";
-import { loadEffectivePolicy, persistOverride, recordObservation } from "../../../shared/capabilities/silo-store";
 
 /**
  * The RAW call an interceptor sends — deliberately un-classified so the interceptors stay dumb and decoupled
@@ -93,7 +93,6 @@ function classify(call: CapabilityCall): CapabilityRequest | undefined {
 function capabilityOf(request: CapabilityRequest): string {
 	return request.kind === "fs" ? `fs:${request.op ?? "read"}` : request.kind;
 }
-
 
 /** Session-only store — "Allow once" lives here (a fast-path short-circuit in broker.gate); persisted decisions
  *  live in the policy file (consulted by the decider), so the store itself needs no disk. */

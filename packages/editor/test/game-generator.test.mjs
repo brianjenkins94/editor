@@ -32,8 +32,9 @@ test("generating the example block model emits a complete runnable game", () => 
 
 	assert.ok(typeof level === "string", "the level file is generated");
 	for (const sprite of ["gray_square", "player", "boulder", "target"]) {
-		assert.match(level, new RegExp('addTileset\\("' + sprite + '"', "u"), sprite + " tileset is emitted with its data URL");
+		assert.match(level, new RegExp("addTileset\\(\"" + sprite + "\"", "u"), sprite + " tileset is emitted with its data URL");
 	}
+
 	assert.match(level, /\["player", 10, 6\]/u, "the player is placed where it was authored");
 	assert.equal((level.match(/\["boulder",/gu) ?? []).length, 4, "all four boulders are placed");
 	assert.equal((level.match(/\["target",/gu) ?? []).length, 4, "all four targets are placed");

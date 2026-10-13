@@ -6,9 +6,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import test from "node:test";
 import * as url from "node:url";
-import ts from "typescript";
 import { pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import { referTo } from "@brianjenkins94/util/silo/annotations";
+import ts from "typescript";
 import { anchorGame } from "../extensions/event-sheet/anchors.ts";
 import { recognizeGame } from "../extensions/event-sheet/recognizer.ts";
 
@@ -30,7 +30,7 @@ function readGame(dir, base = dir, out = {}) {
 
 /** A reference to the span standing for each range of a text — what the editor's `editor.annotations.refer` answers,
  *  here straight from BABLR and silo (tokens left out of the shapes: these tests look at the ids). */
-const referOf = async (source, file, ranges) => {
+async function referOf(source, file, ranges) {
 	const shapes = spanAnchors(source).filter((span) => span.type !== null).map((span) => ({ ...span, "atoms": [] }));
 
 	return ranges.map((range) => {
@@ -38,7 +38,7 @@ const referOf = async (source, file, ranges) => {
 
 		return id === undefined ? undefined : referTo(shapes, id, file);
 	});
-};
+}
 
 /** Project + anchor, and return the anchor id for a named behavior. */
 async function behaviorAnchor(files, name) {

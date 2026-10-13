@@ -14,13 +14,14 @@
  *
  * Runs in the workbench realm; writes through VS Code's file system, so an open runs file shows each new line.
  */
-import type * as vscodeApi from "vscode";
 import type { Hub } from "@brianjenkins94/hub";
-import type { Effect, Environment, RunEnvelope, RunQuery } from "@brianjenkins94/util/silo/evidence";
 import type { SiteObservation, StatementCoverage } from "@brianjenkins94/run-contract";
-import type { ModuleEvidence } from "../previews/page-evidence";
+import type { Effect, Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
+import type * as vscodeApi from "vscode";
+import type { ModuleEvidence } from "../shared/preview-evidence";
+import type { RunInfo } from "../shared/runs";
 import type { Bablr } from "./bablr";
-import type { RunInfo, RunRegistry } from "./runs";
+import type { RunRegistry } from "./runs";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR } from "@brianjenkins94/util/silo/layout";
@@ -30,16 +31,51 @@ const ROOT = "/workspace";
 
 interface UserAgentData { "brands"?: { "brand": string; "version": string }[]; "platform"?: string }
 
+/** The engine and its major version, from the first of them the browser names. */
+function engineOf(chromium: string | undefined, firefox: string | undefined, safari: string | undefined): string {
+	if (chromium !== undefined) {
+		return `chromium-${chromium}`;
+	}
+
+	if (firefox !== undefined) {
+		return `firefox-${firefox}`;
+	}
+
+	return safari === undefined ? "unknown" : `webkit-${safari}`;
+}
+
+/** The OS family, from the user agent and the platform (both lowercased). */
+function osOf(ua: string, platform: string): string {
+	if (ua.includes("android")) {
+		return "android";
+	}
+
+	if (/iphone|ipad/u.test(ua)) {
+		return "ios";
+	}
+
+	if (platform.startsWith("mac")) {
+		return "macos";
+	}
+
+	if (platform.startsWith("win")) {
+		return "windows";
+	}
+
+	return platform.includes("linux") ? "linux" : "unknown";
+}
+
 /** The browser this tab runs in, as silo's environment class: engine and major version, OS family, cores, memory. */
 function browserClass(): Omit<Environment, "runtime" | "name"> {
 	const agent = (navigator as Navigator & { "userAgentData"?: UserAgentData }).userAgentData;
 	const ua = navigator.userAgent;
 	const chromium = agent?.brands?.find((brand) => brand.brand === "Chromium")?.version ?? /Chrom(?:e|ium)\/(\d+)/u.exec(ua)?.[1];
 	const firefox = /Firefox\/(\d+)/u.exec(ua)?.[1];
-	const safari = /Version\/(\d+).*Safari/u.exec(ua)?.[1];
-	const engine = chromium !== undefined ? `chromium-${chromium}` : firefox !== undefined ? `firefox-${firefox}` : safari !== undefined ? `webkit-${safari}` : "unknown";
+	const safari = /Version\/(\d+)(?:\D.*)?Safari/u.exec(ua)?.[1];
+	const engine = engineOf(chromium, firefox, safari);
+	// eslint-disable-next-line ts/no-deprecated -- the fallback where userAgentData isn't (Firefox, Safari): it has no replacement there
 	const platform = (agent?.platform ?? navigator.platform ?? "").toLowerCase();
-	const os = /android/u.test(ua.toLowerCase()) ? "android" : /iphone|ipad/u.test(ua.toLowerCase()) ? "ios" : platform.startsWith("mac") ? "macos" : platform.startsWith("win") ? "windows" : platform.includes("linux") ? "linux" : "unknown";
+	const os = osOf(ua.toLowerCase(), platform);
 	const memory = (navigator as Navigator & { "deviceMemory"?: number }).deviceMemory;
 
 	return { "engine": engine, "os": os, "cores": navigator.hardwareConcurrency, ...memory === undefined ? {} : { "memoryGb": memory } };
@@ -64,32 +100,31 @@ function offsets(source: string, statements: { "start": [number, number]; "end":
 
 /** Two pages' totals for one module version, added up: its statements (the same list, in the same order: the same
  *  version), and its sites, matched by range — counts summed, kinds summed, samples joined (at most five). */
-function mergeModules(a: ModuleEvidence, b: ModuleEvidence): ModuleEvidence {
+function mergeModules(first: ModuleEvidence, second: ModuleEvidence): ModuleEvidence {
 	const key = (site: SiteObservation): string => `${site.start.join(":")}-${site.end.join(":")}`;
-	const sites = new Map(a.sites.map((site) => [key(site), site]));
+	const sites = new Map(first.sites.map((site) => [key(site), site]));
 
-	for (const site of b.sites) {
+	for (const site of second.sites) {
 		const known = sites.get(key(site));
 
 		if (known === undefined) {
 			sites.set(key(site), site);
-			continue;
+		} else {
+			const tags = { ...known.tags };
+
+			for (const [tag, count] of Object.entries(site.tags ?? {})) {
+				tags[tag] = (tags[tag] ?? 0) + count;
+			}
+
+			sites.set(key(site), {
+				...known,
+				...known.seen === undefined ? {} : { "seen": known.seen + (site.seen ?? 0), "nullish": (known.nullish ?? 0) + (site.nullish ?? 0), "tags": tags, "samples": [...new Set([...known.samples ?? [], ...site.samples ?? []])].slice(0, 5) },
+				...known.arms === undefined ? {} : { "arms": known.arms.map((count, arm) => count + (site.arms?.[arm] ?? 0)) }
+			});
 		}
-
-		const tags = { ...known.tags };
-
-		for (const [tag, count] of Object.entries(site.tags ?? {})) {
-			tags[tag] = (tags[tag] ?? 0) + count;
-		}
-
-		sites.set(key(site), {
-			...known,
-			...known.seen === undefined ? {} : { "seen": known.seen + (site.seen ?? 0), "nullish": (known.nullish ?? 0) + (site.nullish ?? 0), "tags": tags, "samples": [...new Set([...known.samples ?? [], ...site.samples ?? []])].slice(0, 5) },
-			...known.arms === undefined ? {} : { "arms": known.arms.map((count, arm) => count + (site.arms?.[arm] ?? 0)) }
-		});
 	}
 
-	return { ...a, "statements": a.statements.map((statement, index) => ({ ...statement, "count": statement.count + (b.statements[index]?.count ?? 0) })), "sites": [...sites.values()] };
+	return { ...first, "statements": first.statements.map((statement, index) => ({ ...statement, "count": statement.count + (second.statements[index]?.count ?? 0) })), "sites": [...sites.values()] };
 }
 
 let siloFiles: Promise<void> | undefined;
@@ -117,7 +152,11 @@ export async function ensureSiloFiles(vscode: typeof vscodeApi): Promise<void> {
 
 /** `path` relative to the workspace (the repo root). */
 function repoRelative(path: string): string {
-	return path.startsWith(ROOT + "/") ? path.slice(ROOT.length + 1) : path === ROOT ? "." : path;
+	if (path.startsWith(ROOT + "/")) {
+		return path.slice(ROOT.length + 1);
+	}
+
+	return path === ROOT ? "." : path;
 }
 
 export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunRegistry, bablr: Bablr): void {
@@ -174,6 +213,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			return undefined;
 		}
 	};
+
 	let user: Promise<string> | undefined;
 	// Who you are to git, read once: the repo's own config names you (a slug of your email); `local` until it does.
 	const currentUser = async (): Promise<string> => {
@@ -185,17 +225,92 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 	// One write at a time: each appends to the file the last one wrote.
 	let writing = Promise.resolve();
 
-	const record = async (run: RunInfo): Promise<void> => {
-		const entry = repoRelative(run.entry ?? run.cwd);
-		const covered = coverage.get(run.id);
-		const preview = previews.get(run.id);
+	/** What a run observed of `file` — in each version of it that ran — keyed on spans and folded, once, into what earlier
+	 *  runs in its environment observed of it; its values' samples into this machine's. Code a version didn't change has
+	 *  the same spans in every version, so what each saw there adds up. */
+	const recordFile = async (envelope: RunEnvelope, file: string, versions: Coverage[]): Promise<void> => {
+		const reached: { "span": string; "count": number }[] = [];
+		const sites: (SiteObservation & { "span": string })[] = [];
 
-		coverage.delete(run.id);
-		previews.delete(run.id);
+		for (const covered of versions) {
+			// (an empty source: BABLR has nothing to parse)
+			if (covered.source !== "") {
+				const ids = await bablr.anchors(covered.source, offsets(covered.source, covered.statements));
+				const siteIds = await bablr.anchors(covered.source, offsets(covered.source, covered.sites), true);
 
+				// (either undefined: BABLR's grammar doesn't take this version yet)
+				if (ids !== undefined && siteIds !== undefined) {
+					covered.statements.forEach((statement, index) => {
+						if (typeof ids[index] === "string") {
+							reached.push({ "span": ids[index], "count": statement.count });
+						}
+					});
+					covered.sites.forEach((site, index) => {
+						if (typeof siteIds[index] === "string") {
+							sites.push({ ...site, "span": siteIds[index] });
+						}
+					});
+				}
+			}
+		}
+
+		if (reached.length === 0 && sites.length === 0) {
+			return;
+		}
+
+		const values = sites.filter((site) => site.site !== "branch").map((site) => ({ "span": site.span, "seen": site.seen ?? 0, "nullish": site.nullish ?? 0, "tags": site.tags ?? {} }));
+		const branches = sites.filter((site) => site.site === "branch").map((site) => ({ "span": site.span, "arms": site.arms ?? [] }));
+		const path = evidencePath(envelope.user, envelope.environment, file);
+		const run = { "id": envelope.id, "at": envelope.endedAt };
+		const folded = foldBranches(foldValues(foldReached(parseEvidence(new TextDecoder().decode(await read(path) ?? new Uint8Array())), reached, run), values, run), branches, run);
+
+		await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(folded)));
+
+		// The values themselves, for this machine only — and only for sites the evidence still knows.
+		const samples = sites.flatMap((site) => (site.samples === undefined ? [] : [{ "span": site.span, "values": site.samples }]));
+		const local = samplesPath(file);
+		const known = parseSamples(new TextDecoder().decode(await read(local) ?? new Uint8Array()));
+
+		if (samples.length > 0 || known.length > 0) {
+			await vscode.workspace.fs.writeFile(uri(local), new TextEncoder().encode(samplesText(foldSamples(known, samples, new Set(folded.filter((each) => each.kind === "value").map((each) => each.span))))));
+		}
+	};
+
+	/** A preview run's evidence: every page's totals for each module version added up, each version read against its
+	 *  own source, each file folded once. A version whose source can't be had (the dev server never said) is left out. */
+	const recordPreview = async (envelope: RunEnvelope, preview: NonNullable<ReturnType<typeof previews.get>>): Promise<void> => {
+		const byVersion = new Map<string, ModuleEvidence>();
+
+		for (const modules of preview.pages.values()) {
+			for (const module of modules) {
+				const key = `${module.file}\0${module.version}`;
+				const known = byVersion.get(key);
+
+				byVersion.set(key, known === undefined ? module : mergeModules(known, module));
+			}
+		}
+
+		const byFile = new Map<string, Coverage[]>();
+
+		for (const module of byVersion.values()) {
+			const source = await preview.sources.get(module.version);
+
+			if (source !== undefined) {
+				byFile.set(module.file, [...byFile.get(module.file) ?? [], { "file": module.file, "source": source, "statements": module.statements, "sites": module.sites }]);
+			}
+		}
+
+		for (const [file, versions] of byFile) {
+			await recordFile(envelope, repoRelative(file), versions);
+		}
+	};
+
+	/** A run's envelope: what ran, where, by whom, on what — its entry's file listed as it is now. */
+	const envelopeOf = async (run: RunInfo, entry: string): Promise<RunEnvelope> => {
 		const source = run.entry === undefined ? undefined : await read(entry);
 		const name = vscode.workspace.getConfiguration("silo").get<string>("machine")?.trim();
-		const envelope: RunEnvelope = {
+
+		return {
 			"type": "run",
 			"id": run.id,
 			"title": run.title,
@@ -210,6 +325,17 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			...await headCommit().then((commit) => (commit === undefined ? {} : { "commit": commit })),
 			"files": source === undefined ? {} : { [entry]: await blobOid(new TextDecoder().decode(source)) }
 		};
+	};
+
+	const record = async (run: RunInfo): Promise<void> => {
+		const entry = repoRelative(run.entry ?? run.cwd);
+		const covered = coverage.get(run.id);
+		const preview = previews.get(run.id);
+
+		coverage.delete(run.id);
+		previews.delete(run.id);
+
+		const envelope = await envelopeOf(run, entry);
 
 		// The code a session ran is the source it was given, whatever the file holds now.
 		for (const each of covered ?? []) {
@@ -247,88 +373,6 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		}
 	};
 
-	/** A preview run's evidence: every page's totals for each module version added up, each version read against its
-	 *  own source, each file folded once. A version whose source can't be had (the dev server never said) is left out. */
-	const recordPreview = async (envelope: RunEnvelope, preview: NonNullable<ReturnType<typeof previews.get>>): Promise<void> => {
-		const byVersion = new Map<string, ModuleEvidence>();
-
-		for (const modules of preview.pages.values()) {
-			for (const module of modules) {
-				const key = `${module.file}\0${module.version}`;
-				const known = byVersion.get(key);
-
-				byVersion.set(key, known === undefined ? module : mergeModules(known, module));
-			}
-		}
-
-		const byFile = new Map<string, Coverage[]>();
-
-		for (const module of byVersion.values()) {
-			const source = await preview.sources.get(module.version);
-
-			if (source !== undefined) {
-				byFile.set(module.file, [...byFile.get(module.file) ?? [], { "file": module.file, "source": source, "statements": module.statements, "sites": module.sites }]);
-			}
-		}
-
-		for (const [file, versions] of byFile) {
-			await recordFile(envelope, repoRelative(file), versions);
-		}
-	};
-
-	/** What a run observed of `file` — in each version of it that ran — keyed on spans and folded, once, into what earlier
-	 *  runs in its environment observed of it; its values' samples into this machine's. Code a version didn't change has
-	 *  the same spans in every version, so what each saw there adds up. */
-	const recordFile = async (envelope: RunEnvelope, file: string, versions: Coverage[]): Promise<void> => {
-		const reached: { "span": string; "count": number }[] = [];
-		const sites: (SiteObservation & { "span": string })[] = [];
-
-		for (const covered of versions) {
-			if (covered.source === "") {
-				continue; // BABLR has nothing to parse
-			}
-
-			const ids = await bablr.anchors(covered.source, offsets(covered.source, covered.statements));
-			const siteIds = await bablr.anchors(covered.source, offsets(covered.source, covered.sites), true);
-
-			if (ids === undefined || siteIds === undefined) {
-				continue; // BABLR's grammar doesn't take this version yet
-			}
-
-			covered.statements.forEach((statement, index) => {
-				if (typeof ids[index] === "string") {
-					reached.push({ "span": ids[index], "count": statement.count });
-				}
-			});
-			covered.sites.forEach((site, index) => {
-				if (typeof siteIds[index] === "string") {
-					sites.push({ ...site, "span": siteIds[index] });
-				}
-			});
-		}
-
-		if (reached.length === 0 && sites.length === 0) {
-			return;
-		}
-
-		const values = sites.filter((site) => site.site !== "branch").map((site) => ({ "span": site.span, "seen": site.seen ?? 0, "nullish": site.nullish ?? 0, "tags": site.tags ?? {} }));
-		const branches = sites.filter((site) => site.site === "branch").map((site) => ({ "span": site.span, "arms": site.arms ?? [] }));
-		const path = evidencePath(envelope.user, envelope.environment, file);
-		const run = { "id": envelope.id, "at": envelope.endedAt };
-		const folded = foldBranches(foldValues(foldReached(parseEvidence(new TextDecoder().decode(await read(path) ?? new Uint8Array())), reached, run), values, run), branches, run);
-
-		await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(folded)));
-
-		// The values themselves, for this machine only — and only for sites the evidence still knows.
-		const samples = sites.flatMap((site) => (site.samples === undefined ? [] : [{ "span": site.span, "values": site.samples }]));
-		const local = samplesPath(file);
-		const known = parseSamples(new TextDecoder().decode(await read(local) ?? new Uint8Array()));
-
-		if (samples.length > 0 || known.length > 0) {
-			await vscode.workspace.fs.writeFile(uri(local), new TextEncoder().encode(samplesText(foldSamples(known, samples, new Set(folded.filter((each) => each.kind === "value").map((each) => each.span))))));
-		}
-	};
-
 	runs.onEnd((run) => {
 		writing = writing.then(async () => record(run)).catch(() => { /* evidence never breaks a run */ });
 	});
@@ -342,6 +386,6 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		const files = await vscode.workspace.fs.readDirectory(folder).then((found) => found, () => []);
 		const texts = await Promise.all(files.filter(([name]) => name.endsWith(".jsonl")).map(async ([name]) => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(folder, name)))));
 
-		return queryRuns(texts.flatMap((text) => parseRuns(text)), (query ?? {}) as RunQuery);
+		return queryRuns(texts.flatMap((text) => parseRuns(text)), (query ?? {}));
 	});
 }

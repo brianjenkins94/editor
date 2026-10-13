@@ -9,14 +9,14 @@
  *
  * Runs in the workbench realm (core), with the workbench's own extension API.
  */
-import type * as vscodeApi from "vscode";
-import type { PaneEntry, PaneMark as FrameMark, PaneView } from "@brianjenkins94/monaco-vscode-api/main";
+import type { PaneMark as FrameMark, PaneEntry, PaneView } from "@brianjenkins94/monaco-vscode-api/main";
 import type { PaneAction, PaneAt, PaneCell, PaneCommand, PaneContent, PaneGroup, PaneItem, PaneViewDeclaration } from "@brianjenkins94/run-contract/pane";
-import type { SpanRef } from "@brianjenkins94/run-contract/annotations";
+import type * as vscodeApi from "vscode";
+import type { NativeDrawing } from "./pane-native";
 import { extensionContributions, onExtensionsChanged, renderMarkdown, showPane, showPaneViews } from "@brianjenkins94/monaco-vscode-api/main";
 import { annotations } from "@brianjenkins94/run-contract/annotations";
 import { Anchors } from "./anchors";
-import { installNativeFace, type NativeDrawing } from "./pane-native";
+import { installNativeFace } from "./pane-native";
 
 /** The Margin: core's own view (live-values.ts provides it, as `margin.paneView`). */
 const MARGIN = "margin";
@@ -26,9 +26,6 @@ const CORE_VIEWS: PaneView[] = [{ "id": MARGIN, "label": "Margin", "title": "Val
 
 /** Core's views into another: coverage's marks, into the Margin (coverage.ts). */
 const CORE_INTO: PaneViewDeclaration[] = [{ "id": "coverage", "into": MARGIN }];
-
-/** Every view declared: core's into another, then each extension's. */
-const allDeclared = (): PaneViewDeclaration[] => [...CORE_INTO, ...declared];
 
 /** How a mark's kind is styled in the pane's gutter column (live-values.css). */
 const MARK_CLASSES: Record<string, string> = { "ran": "coverage-ran", "partial": "coverage-partial", "missed": "coverage-missed", "crashed": "run-crashed", "stopped": "run-stopped", "rule": "rule-placed", "rule-uncertain": "rule-placed uncertain" };
@@ -59,6 +56,8 @@ let native = ((): boolean => {
 })();
 let nativeFace: ReturnType<typeof installNativeFace> | undefined;
 let declared: PaneViewDeclaration[] = [];
+/** Every view declared: core's into another, then each extension's. */
+const allDeclared = (): PaneViewDeclaration[] => [...CORE_INTO, ...declared];
 /** Each text that ran, its anchors (by file and text). */
 const anchored = new Map<string, Anchors>();
 /** The latest draw of each file, so an older one finishing late doesn't overwrite it. */
@@ -66,7 +65,7 @@ const drawing = new Map<string, number>();
 
 /** Where each item is now, in `document`: undefined for one whose code is gone. */
 async function placeAll(document: vscodeApi.TextDocument, ats: PaneAt[]): Promise<([number, number] | undefined)[]> {
-	const vscode = api!;
+	const vscode = api;
 	const text = document.getText();
 	const file = vscode.workspace.asRelativePath(document.uri, false);
 	const last = Math.max(document.lineCount - 1, 0);
@@ -75,7 +74,7 @@ async function placeAll(document: vscodeApi.TextDocument, ats: PaneAt[]): Promis
 	const refs = ats.flatMap((at, index) => ("ref" in at ? [{ "index": index, "ref": at.ref }] : []));
 
 	if (refs.length > 0) {
-		const found = await annotations(vscode.commands).resolve(text, file, refs.map(({ ref }) => ref as SpanRef)) ?? [];
+		const found = await annotations(vscode.commands).resolve(text, file, refs.map(({ ref }) => ref)) ?? [];
 
 		refs.forEach(({ index }, at) => {
 			const candidate = found[at]?.status === "orphaned" ? undefined : found[at]?.candidate;
@@ -123,7 +122,7 @@ async function run(command: PaneCommand, ...last: unknown[]): Promise<unknown> {
 
 /** Each row's column widths, lined up with the rows on the lines next to it (or its own line). */
 function columnsOf(placed: Placed[]): Map<string, Columns> {
-	const rows = placed.filter(({ item }) => "cells" in item.content).toSorted((a, b) => a.fromLine - b.fromLine);
+	const rows = placed.filter(({ item }) => "cells" in item.content).toSorted((left, right) => left.fromLine - right.fromLine);
 	const widths = new Map<string, Columns>();
 	let group: Placed[] = [];
 	const close = (): void => {
@@ -132,19 +131,21 @@ function columnsOf(placed: Placed[]): Map<string, Columns> {
 
 		for (const { item } of group) {
 			if ("cells" in item.content) {
-				item.content.cells.forEach((cell, index) => { cells[index] = Math.max(cells[index] ?? 0, cell.text.length); });
+				item.content.cells.forEach((cell, index) => {
+					cells[index] = Math.max(cells[index] ?? 0, cell.text.length);
+				});
 			}
 		}
 
 		for (const { item } of group) {
-			widths.set(item.id, { "run": group[0]!.item.id, "label": label, "cells": cells });
+			widths.set(item.id, { "run": group[0].item.id, "label": label, "cells": cells });
 		}
 
 		group = [];
 	};
 
 	for (const row of rows) {
-		if (group.length > 0 && row.fromLine > group.at(-1)!.toLine + 1) {
+		if (group.length > 0 && row.fromLine > group.at(-1).toLine + 1) {
 			close();
 		}
 
@@ -172,7 +173,9 @@ function cellOf(cell: PaneCell, className: string, width?: number): HTMLSpanElem
 		const { command } = cell;
 
 		span.classList.add("clickable");
-		span.addEventListener("click", () => { void run(command).catch(() => undefined); });
+		span.addEventListener("click", () => {
+			void run(command).catch(() => undefined);
+		});
 	}
 
 	return span;
@@ -191,21 +194,28 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 
 		chosen.classList.add("chosen");
 		void run(command).catch((error: unknown) => {
+			// eslint-disable-next-line ts/no-base-to-string -- a rejection can be any value: String() is the rendering meant, and any cast to quiet this is flagged as unnecessary
 			element.append(Object.assign(document.createElement("div"), { "className": "live-values-ask-error", "textContent": error instanceof Error ? error.message : String(error) }));
 		});
 	};
+
 	const button = (command: PaneCommand, className: string, onClick: (self: HTMLButtonElement) => void): HTMLButtonElement => {
 		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
 		const made = Object.assign(document.createElement("button"), { "className": className, "textContent": command.title, "title": command.tooltip ?? command.title, "disabled": command.disabled === true });
 
-		made.addEventListener("click", () => { onClick(made); });
+		made.addEventListener("click", () => {
+			onClick(made);
+		});
 		buttons.push(made);
 
 		return made;
 	};
+
 	// A button — and, with `more`, ▾ beside it, a menu of the ways it can go.
 	const actionOf = (action: PaneAction): HTMLElement => {
-		const main = button(action, "live-values-choice", (self) => { act(action, self); });
+		const main = button(action, "live-values-choice", (self) => {
+			act(action, self);
+		});
 
 		if (action.more === undefined || action.more.length === 0) {
 			return main;
@@ -220,6 +230,7 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 				document.removeEventListener("keydown", close, true);
 			}
 		};
+
 		const more = button({ "title": "▾", "command": "", "tooltip": `${action.title}: for how long` }, "live-values-choice more", () => {
 			menu.hidden = !menu.hidden;
 
@@ -249,7 +260,7 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 
 		rendered.element.classList.add("pane-markdown");
 		element.append(rendered.element);
-		dispose = rendered.dispose;
+		({ dispose } = rendered);
 	} else {
 		const row = document.createElement("div");
 
@@ -276,8 +287,16 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 				const key = `${columns?.run ?? item.id}#${index}`;
 
 				state.columns.set(key, [...state.columns.get(key) ?? [], span]);
-				span.addEventListener("mouseenter", () => { for (const each of state.columns.get(key) ?? []) { each.classList.add("lit"); } });
-				span.addEventListener("mouseleave", () => { for (const each of state.columns.get(key) ?? []) { each.classList.remove("lit"); } });
+				span.addEventListener("mouseenter", () => {
+					for (const each of state.columns.get(key) ?? []) {
+						each.classList.add("lit");
+					}
+				});
+				span.addEventListener("mouseleave", () => {
+					for (const each of state.columns.get(key) ?? []) {
+						each.classList.remove("lit");
+					}
+				});
 				row.append(span);
 			});
 
@@ -470,6 +489,7 @@ export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable
 			void draw(uri);
 		}
 	};
+
 	const changed = new Map<string, ReturnType<typeof setTimeout>>();
 	// (typing paused: a file's content asked for again)
 	const redrawLater = (uri: string): void => {
@@ -482,7 +502,9 @@ export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable
 
 	showStrip();
 	void read();
-	void onExtensionsChanged(() => { void read(); });
+	void onExtensionsChanged(() => {
+		void read();
+	});
 	nativeFace = installNativeFace(vscode);
 
 	return [

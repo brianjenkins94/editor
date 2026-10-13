@@ -33,9 +33,7 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 		const total = latest("workbench:memory.total");
 
 		if (total !== undefined) {
-			const realms = [...series.keys()].filter((key) => key.startsWith("workbench:memory.") && key !== "workbench:memory.total")
-				.map((key) => [key.slice("workbench:memory.".length), latest(key) ?? 0] as const)
-				.sort((a, b) => b[1] - a[1]);
+			const realms = [...series.keys()].filter((key) => key.startsWith("workbench:memory.") && key !== "workbench:memory.total").map((key) => [key.slice("workbench:memory.".length), latest(key) ?? 0] as const).sort((left, right) => right[1] - left[1]);
 
 			memory.text = "$(pulse) " + formatMB(total);
 			memory.tooltip = "Memory, the whole tab\n\n" + realms.map(([realm, mb]) => `${realm}: ${formatMB(mb)}`).join("\n");
@@ -58,10 +56,7 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 		longFrames.show();
 
 		// Failing operations — a CDN fetch, a type acquisition, an LSP request — show up here only while they fail.
-		const failing = [...series.keys()].filter((key) => key.startsWith("root:spans.") && key.endsWith(".errors"))
-			.map((key) => [key.slice("root:spans.".length, -".errors".length), latest(key) ?? 0] as const)
-			.filter(([, count]) => count > 0)
-			.sort((a, b) => b[1] - a[1]);
+		const failing = [...series.keys()].filter((key) => key.startsWith("root:spans.") && key.endsWith(".errors")).map((key) => [key.slice("root:spans.".length, -".errors".length), latest(key) ?? 0] as const).filter(([, count]) => count > 0).sort((left, right) => right[1] - left[1]);
 
 		if (failing.length > 0) {
 			spanErrors.text = "$(error) " + failing.reduce((sum, [, count]) => sum + count, 0);
@@ -111,14 +106,20 @@ export function registerMonitor(context: vscode.ExtensionContext): void {
 		void view?.webview.postMessage({ "series": Object.fromEntries(series) });
 	};
 
-	const timer = setInterval(() => { void poll(); }, 1000);
+	const timer = setInterval(() => {
+		void poll();
+	}, 1000);
 
-	context.subscriptions.push(memory, workspace, longFrames, spanErrors, { "dispose": () => { clearInterval(timer); } }, vscode.window.registerWebviewViewProvider("insights.monitor", {
+	context.subscriptions.push(memory, workspace, longFrames, spanErrors, { "dispose": () => {
+		clearInterval(timer);
+	} }, vscode.window.registerWebviewViewProvider("insights.monitor", {
 		"resolveWebviewView": (resolved) => {
 			view = resolved;
 			resolved.webview.options = { "enableScripts": true };
 			resolved.webview.html = monitorHtml();
-			resolved.onDidDispose(() => { view = undefined; });
+			resolved.onDidDispose(() => {
+				view = undefined;
+			});
 			void resolved.webview.postMessage({ "series": Object.fromEntries(series) });
 		}
 	}));

@@ -51,7 +51,9 @@ export function windowServerTransport(channel: string, getFallbackTarget: () => 
 
 			globalThis.addEventListener("message", handler as EventListener);
 
-			return () => globalThis.removeEventListener("message", handler as EventListener);
+			return () => {
+				globalThis.removeEventListener("message", handler as EventListener);
+			};
 		}
 	};
 }
@@ -69,7 +71,9 @@ export function windowClientTransport(channel: string, host: Window): Transport 
 
 			globalThis.addEventListener("message", handler as EventListener);
 
-			return () => globalThis.removeEventListener("message", handler as EventListener);
+			return () => {
+				globalThis.removeEventListener("message", handler as EventListener);
+			};
 		}
 	};
 }

@@ -82,7 +82,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			"provideInlayHints": async (document, range, token) => {
 				const hints: vscode.InlayHint[] = [];
 
-				for (let line = range.start.line; line <= range.end.line && !token.isCancellationRequested; line += 1) {
+				for (let { line } = range.start; line <= range.end.line && !token.isCancellationRequested; line += 1) {
 					const hint = await answer(document, line);
 
 					if (hint !== undefined) {

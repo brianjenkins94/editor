@@ -19,13 +19,9 @@ function resolvePosix(base: string, path: string): string {
 	const stack: string[] = [];
 
 	for (const part of combined.split("/")) {
-		if (part === "" || part === ".") {
-			continue;
-		}
-
 		if (part === "..") {
 			stack.pop();
-		} else {
+		} else if (part !== "" && part !== ".") {
 			stack.push(part);
 		}
 	}
@@ -69,7 +65,7 @@ export function invocationOf(config: Juvy): NodeInvocation {
 		return { "unsupported": "node: there's no REPL here yet — `node -e` runs a line of code, `node` with a file runs a program", "exitCode": 0 };
 	}
 
-	return { "file": program[0]!, "args": program.slice(1) };
+	return { "file": program[0], "args": program.slice(1) };
 }
 
 export function create({ runner, writeLive, terminal }: CommandHost): Handler {
@@ -93,7 +89,7 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 			// In the running list as it was asked for: `node app.ts a b`, `node -e …`.
 			const title = "code" in invocation ? `node ${invocation.print ? "-p" : "-e"} ${invocation.code}` : ["node", invocation.file, ...invocation.args].join(" ");
 
-			return await runFile("code" in invocation ? scratch! : invocation.file, invocation.args, title);
+			return await runFile("code" in invocation ? scratch : invocation.file, invocation.args, title);
 		} finally {
 			if (scratch !== undefined) {
 				await ctx.fs.rm(scratch, { "force": true }).catch(() => undefined);
@@ -110,7 +106,9 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 				if (ctx.signal.aborted) {
 					controller.abort();
 				} else {
-					ctx.signal.addEventListener("abort", () => { controller.abort(); }, { "once": true });
+					ctx.signal.addEventListener("abort", () => {
+						controller.abort();
+					}, { "once": true });
 				}
 			}
 
@@ -122,17 +120,23 @@ export function create({ runner, writeLive, terminal }: CommandHost): Handler {
 			// In the running list as it was asked for (`npm run build` runs `node build.ts`). (`npm run` passes the script's
 			// name in the environment it runs it with — ctx.env, not the exported one.)
 			const event = Object.fromEntries(ctx.env)["npm_lifecycle_event"] ?? env["npm_lifecycle_event"];
-			const run = runner.runs.start({ "title": event === undefined ? title : "npm run " + event, "kind": kind, "cwd": ctx.cwd, "origin": { "terminal": terminal }, "entry": file, "runtime": "tsval" }, () => { controller.abort(); });
+			const run = runner.runs.start({ "title": event === undefined ? title : "npm run " + event, "kind": kind, "cwd": ctx.cwd, "origin": { "terminal": terminal }, "entry": file, "runtime": "tsval" }, () => {
+				controller.abort();
+			});
 			const ended = (exitCode: number): { "stdout": string; "stderr": string; "exitCode": number } => {
 				run.end(exitCode, controller.signal.aborted);
 
 				return { "stdout": "", "stderr": "", "exitCode": exitCode };
 			};
 
+			const listening = (port: number): void => {
+				run.update({ "kind": "service", "port": port });
+			};
+
 			try {
 				// In the debugger, as every Run is — breakpoints, step-back, capability stops — its output here, its stdin from
 				// here, the arguments after the file. (`npm run dev` → `vite` is a separate command, the dev server's.)
-				const debugged = await runner.debug(file, ctx.cwd, env, { "runId": run.id, "onOutput": writeLive, "signal": controller.signal, "args": programArgs, "onListening": (port) => { run.update({ "kind": "service", "port": port }); } });
+				const debugged = await runner.debug(file, ctx.cwd, env, { "runId": run.id, "onOutput": writeLive, "signal": controller.signal, "args": programArgs, "onListening": listening });
 
 				if (debugged.attached) {
 					return ended(debugged.exitCode);

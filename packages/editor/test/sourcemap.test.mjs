@@ -11,12 +11,12 @@ import { inlineSourceMap, originalPosition } from "../workbench/sourcemap.ts";
 const compile = (source, fileName) => ts.transpileModule(source, { "fileName": fileName, "compilerOptions": { "jsx": ts.JsxEmit.ReactJSX, "module": ts.ModuleKind.ESNext, "target": ts.ScriptTarget.ES2020, "inlineSourceMap": true, "inlineSources": true } }).outputText;
 
 /** The 0-based line and column of `needle` in `text`. */
-const find = (text, needle) => {
+function find(text, needle) {
 	const lines = text.split("\n");
 	const line = lines.findIndex((candidate) => candidate.includes(needle));
 
 	return { "line": line, "column": lines[line].indexOf(needle) };
-};
+}
 
 const SOURCE = [
 	"interface Options {",

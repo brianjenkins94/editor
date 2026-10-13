@@ -41,13 +41,17 @@ function followChanges(base: URL): void {
 	const changes = new EventSource(new URL("__changes", base));
 	let opened = false;
 
-	changes.addEventListener("open", () => { opened = true; });
+	changes.addEventListener("open", () => {
+		opened = true;
+	});
 	changes.addEventListener("error", () => {
 		if (!opened) {
 			changes.close();
 		}
 	});
-	changes.addEventListener("change", () => { window.top?.location.reload(); });
+	changes.addEventListener("change", () => {
+		window.top?.location.reload();
+	});
 }
 
 /** The site's own extensions (`extensions.json` at its root), as URLs; none when it lists none. */
@@ -73,32 +77,31 @@ export async function loadContributedExtensions(vscode: typeof vscodeApi, log: {
 
 		if (base === undefined) {
 			void vscode.window.showErrorMessage(`Not loading the extension at ${given}: an extension loads from https (or http://localhost on this machine).`);
-			continue;
-		}
+		} else {
+			try {
+				const response = await fetch(new URL("package.json", base));
 
-		try {
-			const response = await fetch(new URL("package.json", base));
+				if (!response.ok) {
+					throw new Error(`its package.json answered ${response.status}`);
+				}
 
-			if (!response.ok) {
-				throw new Error(`its package.json answered ${response.status}`);
+				const manifest = await response.json() as Manifest;
+
+				if (typeof manifest.browser !== "string") {
+					throw new TypeError("its package.json names no `browser` entry (a web extension's)");
+				}
+
+				const entry = manifest.browser.replace(/^\.\//u, "");
+
+				const extension = registerExtension(manifest, ExtensionHostKind.LocalWebWorker);
+
+				extension.registerFileUrl("./" + entry, new URL(entry, base).href);
+				await extension.whenReady();
+				followChanges(base);
+			} catch (error) {
+				log.error("contributed extension failed to load", { "url": base.href, "error": String(error) });
+				void vscode.window.showErrorMessage(`Couldn't load the extension at ${base.href}: ${error instanceof Error ? error.message : String(error)}`);
 			}
-
-			const manifest = await response.json() as Manifest;
-
-			if (typeof manifest.browser !== "string") {
-				throw new TypeError("its package.json names no `browser` entry (a web extension's)");
-			}
-
-			const entry = manifest.browser.replace(/^\.\//u, "");
-
-			const extension = registerExtension(manifest, ExtensionHostKind.LocalWebWorker);
-
-			extension.registerFileUrl("./" + entry, new URL(entry, base).href);
-			await extension.whenReady();
-			followChanges(base);
-		} catch (error) {
-			log.error("contributed extension failed to load", { "url": base.href, "error": String(error) });
-			void vscode.window.showErrorMessage(`Couldn't load the extension at ${base.href}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 }
