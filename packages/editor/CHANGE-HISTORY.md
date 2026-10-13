@@ -102,13 +102,39 @@ vendored monaco component and the contrib template (separate programs), and buil
 Still to do for reach: the run side (the spans recorded runs reached, step 4), and a call graph inside a declaration
 (today using any name in a function is reaching all of it).
 
+## Analysis on TypeScript 7 (built)
+
+Reading code is a compiler's job, so the analysis moves from oxc to TypeScript 7, behind one seam (lib `graph.ts`): a
+`DeclarationGraph` is what reach and history need of a program (each declaration's fingerprint, and where each node
+leads), and an `Analyzer` turns a snapshot's files into one. oxc's (`oxcAnalyzer`) stays the default and the
+browser's; `typescript.ts` is TypeScript's, in Node.
+
+- **One compiler for a whole replay.** The first snapshot is a synthetic program over the snapshot's sources, given as a
+  filesystem layer over the disk (which still serves `node_modules`); each later snapshot is an update with a layer of
+  what changed. Nothing is checked out. (A layer alone doesn't reach a file the program already read: the program is
+  reconfigured with each update.)
+- **What a name is, the checker says.** Imports through re-exports and the tsconfig's `paths`, scopes, method calls:
+  what oxc's name matching approximated. The program's own packages resolve to their sources, not to an installed
+  copy; imports stay nodes, so the module bodies importing runs are reached, as before.
+- **The repository's own TypeScript, 7.1 or later** (`typescript/sync`, stable from 7.1). Without one,
+  `typescriptAnalyzer` answers undefined and `silo history --analyzer auto` (the default) uses oxc.
+
+On this repo's whole history, TypeScript finds 2,362 feature changes to oxc's 2,081, 7 of oxc's not among them, and 331
+silent commits to 336, in 66 seconds to 25. The extra come from what oxc doesn't follow (the tsconfig's paths into the
+vendored monaco component and BABLR's sources). The 7 are methods reached through an object typed by an interface: the
+checker resolves such a call to the interface's member, not the object that implements it, and the API has no "find
+implementations". The browser keeps oxc until TypeScript ships a browser build (the unreleased Playground v2 runs a
+`tsc.wasm` in a worker); BABLR isn't an analyzer: it joins history at the edge, in step 4, for data anchored by it.
+
 ## Building it
 
 In order, each useful on its own:
 
 1. **Reach** (static: built, above). Each feature's static reach from its registration, plus the spans recorded runs
    reached. "Changed" becomes "a span it reaches changed".
-2. **Spans in place of tokens.** Span identity and the cosmetic verdict from BABLR in place of the token compare.
+2. **Analysis on TypeScript 7** (built, above). In place of "BABLR spans in place of tokens", which mixed up analysis
+   with placement: the declaration fingerprints already ignore formatting, and BABLR's anchors are for keeping data on
+   code (step 4's join), not for reading it.
 3. **Live, not only from commits.** Derive from edit bursts as you work. Keep the derived facts in `.silo/`, and the
    bursts only as long as they're needed (today edit-history.ts drops them at each commit).
 4. **Runs.** Exercised and dormant from the run ledger and coverage (RUNTIME-EVIDENCE.md).
@@ -119,10 +145,12 @@ In order, each useful on its own:
 ## Where it lives
 
 - **The logic** is in lib's `util/silo`, pure and browser-portable on oxc: `features.ts` (the ways in, the features they
-  make), `graph.ts` (the declaration graph: what a feature reaches), `history.ts` (the replay, the events, the
-  sentences), and `git-snapshots.ts` (a git history as snapshots, the Node one).
+  make), `graph.ts` (the declaration graph: what a feature reaches, and the analyzer seam), `history.ts` (the replay, the
+  events, the sentences), and the Node ones: `git-snapshots.ts` (a git history as snapshots) and `typescript.ts`
+  (TypeScript 7's analyzer).
 - **The command line** is `packages/silo` in this repo, published from here as `@brianjenkins94/silo` (bin `silo`):
-  `silo features [repo]` and `silo history [repo] [--since …] [--until …]`, each with `--json`. It runs in any desktop
+  `silo features [repo]` and `silo history [repo] [--since …] [--until …] [--analyzer auto|oxc|typescript]`, each with
+  `--json`. It runs in any desktop
   terminal, VS Code's included.
 - **The editor** uses the same internals. In the browser, snapshots come from the editor's own git (isomorphic-git) and
   edit bursts instead of `git cat-file`.
