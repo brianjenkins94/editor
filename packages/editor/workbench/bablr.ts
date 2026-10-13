@@ -10,6 +10,10 @@
  * sheet's anchors) refers to its span, and finds it again, the one way SPAN-ANNOTATIONS.md sets out. One worker for now;
  * if BABLR's cost outgrows it, a pool goes here, behind `request`.
  *
+ * A FILE BABLR CAN'T PARSE IS NEVER DROPPED QUIETLY: `spans` and `anchors` throw Unparsable (why it failed); every call
+ * that knows the file — a run's evidence, an extension's `annotations.refer`/`resolve` — logs it and publishes
+ * `parse.status` ({ file, unparsable }), which the bridge shows as a warning on the file until it parses again.
+ *
  * ABORT: the worker yields between parse chunks, so a cancelled call's signal reaches it mid-run and it bails
  * cooperatively (the worker stays warm); a still-queued call is dropped unsent. A worker that fails to load, or dies,
  * fails what's in flight and every later call.
@@ -20,6 +24,11 @@ import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
 import { fs } from "@zenfs/core";
 import { blobText, status } from "./git-engine";
+
+/** BABLR's grammar doesn't take a text: `message` is why. */
+export class Unparsable extends Error {
+	public override readonly name = "Unparsable";
+}
 
 /** One span of a text: its spanAnchors id and offsets (punctuation left out — it's never a handle). */
 export interface Span { "id": string; "start": number; "end": number }
@@ -40,8 +49,9 @@ export interface Bablr {
 	/** Ask the worker for `bablr.<name>` (bablr-worker.ts), after whatever was asked before. No timeout: the first call
 	 *  waits out the worker's (large) bundle loading, and a parse takes what it takes; `signal` and a dead worker end it. */
 	"request": <T>(name: string, args: unknown, signal?: AbortSignal) => Promise<T>;
-	/** `source`'s spans — from its cached parse — or undefined when BABLR's grammar doesn't take it. */
-	"spans": (source: string, signal?: AbortSignal) => Promise<Span[] | undefined>;
+	/** `source`'s spans — from its cached parse; none for an empty text. Throws Unparsable when BABLR's grammar doesn't
+	 *  take it. */
+	"spans": (source: string, signal?: AbortSignal) => Promise<Span[]>;
 	/** Where span `span` of `baseline` went in `current`, by the structural diff: the same node (`kept`) or the one that
 	 *  replaced it — or undefined, gone. How a span annotation is re-placed from its baseline (SPAN-ANNOTATIONS.md). */
 	"follow": (baseline: string, current: string, span: string) => Promise<{ "id": string; "how": "kept" | "replaced" } | undefined>;
@@ -55,8 +65,9 @@ export interface Bablr {
 	"resolve": (source: string, file: string, refs: SpanRef[], options?: ResolveOptions) => Promise<Resolved[]>;
 	/** The span id standing for each of `ranges` in `source` (bablr-language-ts's pickAnchor), from its cached spans —
 	 *  or, `exact`, the span whose range is exactly the range (the node itself, when several are), and none when no
-	 *  span is: what an observed site keeps, so unrelated sites never pool into one enclosing span. */
-	"anchors": (source: string, ranges: { "start": number; "end": number }[], exact?: boolean) => Promise<(string | undefined)[] | undefined>;
+	 *  span is: what an observed site keeps, so unrelated sites never pool into one enclosing span. Throws Unparsable
+	 *  when BABLR's grammar doesn't take `source` — reported as `file`'s (parse.status) when it's given. */
+	"anchors": (source: string, ranges: { "start": number; "end": number }[], exact?: boolean, file?: string) => Promise<(string | undefined)[]>;
 	"dispose": () => void;
 }
 
@@ -120,16 +131,36 @@ export function startBablr(hub: Hub): Bablr {
 		void fs.promises.rm(old, { "recursive": true, "force": true }).catch(() => undefined);
 	}
 
-	// The last text's spans, so asking twice in a row (a run's statements, then its sites) asks the worker once.
-	let last: { "source": string; "spans": Promise<Span[] | undefined> } | undefined;
+	// Whether each file parsed, as last logged: a file asked about again and again (every resolve of an open document) is
+	// logged once a change. Published every time — a bridge that started later hears it then.
+	const logged = new Map<string, string | undefined>();
 
-	const spans = async (source: string, signal?: AbortSignal): Promise<Span[] | undefined> => {
+	/** `file` parsed (`unparsable` undefined) or didn't, and why: logged, and published for the bridge to show. */
+	const report = (file: string, unparsable: string | undefined): void => {
+		if (unparsable !== undefined && !(logged.has(file) && logged.get(file) === unparsable)) {
+			console.error(`[bablr] can't parse ${file} — no runtime evidence or annotation can attach to it: ${unparsable}`);
+		}
+
+		logged.set(file, unparsable);
+		hub.publish("parse.status", { "file": file, ...unparsable === undefined ? {} : { "unparsable": unparsable } });
+	};
+
+	// The last text's spans, so asking twice in a row (a run's statements, then its sites) asks the worker once.
+	let last: { "source": string; "spans": Promise<Span[]> } | undefined;
+
+	const spans = async (source: string, signal?: AbortSignal): Promise<Span[]> => {
 		if (source === "") {
-			return undefined; // BABLR has nothing to parse
+			return []; // BABLR has nothing to parse
 		}
 
 		if (last?.source !== source) {
-			const asked = request<{ "spans"?: Span[]; "unparsable"?: true }>("spans", { "source": source }, signal).then((answer) => answer.spans);
+			const asked = request<{ "spans"?: Span[]; "unparsable"?: string }>("spans", { "source": source }, signal).then((answer) => {
+				if (answer.unparsable !== undefined || answer.spans === undefined) {
+					throw new Unparsable(answer.unparsable ?? "BABLR can't parse it");
+				}
+
+				return answer.spans;
+			});
 
 			last = { "source": source, "spans": asked };
 			asked.catch(() => {
@@ -142,11 +173,17 @@ export function startBablr(hub: Hub): Bablr {
 		return last.spans;
 	};
 
-	const anchors = async (source: string, ranges: { "start": number; "end": number }[], exact = false): Promise<(string | undefined)[] | undefined> => {
-		const known = await spans(source);
+	const anchors = async (source: string, ranges: { "start": number; "end": number }[], exact = false, file?: string): Promise<(string | undefined)[]> => {
+		const known = await spans(source).catch((error: unknown) => {
+			if (error instanceof Unparsable && file !== undefined) {
+				report(file, error.message);
+			}
 
-		if (known === undefined) {
-			return undefined;
+			throw error;
+		});
+
+		if (file !== undefined) {
+			report(file, undefined);
 		}
 
 		if (exact) {
@@ -172,13 +209,27 @@ export function startBablr(hub: Hub): Bablr {
 	};
 
 	const refer = async (source: string, file: string, ranges: { "start": number; "end": number }[]): Promise<(SpanRef | undefined)[]> => {
-		const { refs } = await request<{ "refs"?: (SpanRef | null)[] }>("refer", { "source": source, "file": file, "ranges": ranges });
+		const { refs, unparsable } = await request<{ "refs"?: (SpanRef | null)[]; "unparsable"?: string }>("refer", { "source": source, "file": file, "ranges": ranges });
+
+		if (source !== "") {
+			report(file, unparsable);
+		}
 
 		return ranges.map((_, index) => refs?.[index] ?? undefined);
 	};
 
 	const resolveRefs = async (source: string, file: string, refs: SpanRef[], { observed = false, types, texts = [] }: ResolveOptions = {}): Promise<Resolved[]> => {
-		const first = (await request<{ "resolutions": Resolved[] }>("resolve", { "source": source, "file": file, "refs": refs, "observed": observed, "types": types })).resolutions;
+		const answer = await request<{ "resolutions": Resolved[]; "unparsable"?: string }>("resolve", { "source": source, "file": file, "refs": refs, "observed": observed, "types": types });
+		const first = answer.resolutions;
+
+		if (source !== "") {
+			report(file, answer.unparsable);
+		}
+
+		if (answer.unparsable !== undefined) {
+			return first;
+		}
+
 		// An authored one its own id didn't find is looked for further: in the other files that differ from HEAD (code
 		// moved to another file changed that file), and followed from its baseline — when git has it (code that was
 		// committed). An observed one fades instead.
@@ -219,7 +270,7 @@ export function startBablr(hub: Hub): Bablr {
 		serve(hub, "annotations.spans", async (args) => {
 			const { source } = (args ?? {}) as { "source"?: unknown };
 
-			return typeof source === "string" && source !== "" ? { "spans": await spans(source) ?? null } : { "spans": null };
+			return typeof source === "string" && source !== "" ? { "spans": await spans(source).catch(() => null) } : { "spans": null };
 		}),
 		serve(hub, "annotations.refer", async (args) => {
 			const { source, file, ranges } = (args ?? {}) as { "source"?: unknown; "file"?: unknown; "ranges"?: unknown };

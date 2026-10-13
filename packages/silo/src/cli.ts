@@ -75,17 +75,12 @@ export async function historyOf(repo: string, options: { "since"?: string; "unti
 }
 
 /** Where each span of a text is, as BABLR names them — the ids runtime evidence is keyed by (the editor's BABLR worker
- *  does the same). Undefined for a text BABLR's grammar doesn't take. */
-async function placeSpans(source: string): Promise<{ "id": string; "start": number; "end": number }[] | undefined> {
+ *  does the same). Throws, with BABLR's reason, for a text its grammar doesn't take. */
+async function placeSpans(source: string): Promise<{ "id": string; "start": number; "end": number }[]> {
 	const bablr = await import("@brianjenkins94/bablr") as { "cstSpansAsync": (source: string, language: string) => Promise<unknown>; "spanAnchors": (source: string, language: string, cst: unknown) => { "id": string; "type": string | null; "start": number; "end": number }[] };
+	const cst = await bablr.cstSpansAsync(source, "Program");
 
-	try {
-		const cst = await bablr.cstSpansAsync(source, "Program");
-
-		return cst === undefined ? undefined : bablr.spanAnchors(source, "Program", cst).filter((span) => span.type !== null).map(({ id, start, end }) => ({ "id": id, "start": start, "end": end }));
-	} catch {
-		return undefined;
-	}
+	return bablr.spanAnchors(source, "Program", cst).filter((span) => span.type !== null).map(({ id, start, end }) => ({ "id": id, "start": start, "end": end }));
 }
 
 /** What the runs committed in a span of the history did, commit by commit (its baseline, the commit before it, first). */
@@ -174,7 +169,7 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "coverage",
-			"description": "What the runs committed in .silo/ ran, commit by commit: what started running, what stopped, and what was reached and never ran — by feature, or by folder where no feature reaches it — and what changed alongside.",
+			"description": "What the runs committed in .silo/ ran, commit by commit: what started running, what stopped, and what was reached and never ran — by feature, or by folder where no feature reaches it — and what changed alongside. Exits 1 when something ran that couldn't be parsed (so isn't counted).",
 			"config": juvy({
 				"repo": repoArgument,
 				"since": { "format": String, "default": "", "doc": "Start of the span: anything git's --since takes. Default: the whole history." },
@@ -191,6 +186,15 @@ export const app = subcommands({
 				const span = since === "" ? steps : steps.slice(1);
 
 				process.stdout.write(config.get("json") ? JSON.stringify(span.map((step) => ({ ...step, "features": Object.fromEntries(step.features) })), undefined, "\t") + "\n" : coverageMarkdown(span, { "title": "Coverage of " + path.basename(repo) }));
+
+				// What ran but isn't counted, because its code couldn't be parsed: said again where it can't be missed, and
+				// the command fails.
+				const unparsed = span.flatMap((step) => Object.entries(step.unparsed).map(([file, why]) => `${step.snapshot.slice(0, 7)} ${file}: ${why}`));
+
+				if (unparsed.length > 0) {
+					process.stderr.write(`silo coverage: ${unparsed.length} file${unparsed.length === 1 ? "" : "s"} ran but couldn't be parsed, so what ran there isn't counted:\n${unparsed.map((line) => "  " + line).join("\n")}\n`);
+					process.exitCode = 1;
+				}
 			}
 		}),
 		command({

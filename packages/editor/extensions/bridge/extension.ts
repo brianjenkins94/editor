@@ -21,10 +21,11 @@ import { registerCapabilityStops } from "./capability-stops";
 import { runProgram, serveDebugControl } from "./debug-control";
 import { registerDebugEvents } from "./debug-events";
 import { registerDebugToolbar } from "./debug-toolbar";
+import { bridgeHub, workspace, workspaceRuntime } from "./hub";
 import { registerLaunch } from "./launch";
 import { registerLiveRuns } from "./live-run";
 import { registerMetricsBridge } from "./metrics-bridge";
-import { bridgeHub, workspace, workspaceRuntime } from "./hub";
+import { registerParseStatus } from "./parse-status";
 import { registerProductionDebug } from "./production-adapter";
 import { registerReplay } from "./replay";
 import { serveRuntimeFiles } from "./runtime-fs";
@@ -78,6 +79,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 	});
 	// The metrics plane's samples, for VS Code's side (the insights monitor reads them by command).
 	registerMetricsBridge(context);
+	registerParseStatus(context);
 
 	// port → preview run id, so a shell-forwarded WS/WebRTC decision (keyed by the preview's port, which is all the
 	// shim knows) attributes to the run that owns that port — the same port→run attribution the SW does for net.

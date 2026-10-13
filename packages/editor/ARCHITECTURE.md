@@ -507,6 +507,7 @@ flowchart LR
 | Bridge | debug | `debug.breakpoints()`, `debug.command`, `debug.explore()`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.pace()`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.stdin()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
 | Bridge | git | `git.changed` |
 | Bridge | node | `node.stdin.*` |
+| Bridge | parse | `parse.status` |
 | Bridge | production | `production.exit.*`, `production.launch`, `production.out.*` |
 | Bridge | rules | `rules.given()`, `rules.list()`, `rules.set()` |
 | Bridge | run | `run.effects()` |

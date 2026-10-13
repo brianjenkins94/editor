@@ -25,6 +25,7 @@ import type { RunRegistry } from "./runs";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, withLines } from "@brianjenkins94/util/silo/layout";
+import { Unparsable } from "./bablr";
 import { blobOid, headCommit } from "./git-engine";
 
 const ROOT = "/workspace";
@@ -242,11 +243,10 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		for (const covered of versions) {
 			// (an empty source: BABLR has nothing to parse)
 			if (covered.source !== "") {
-				const ids = await bablr.anchors(covered.source, offsets(covered.source, covered.statements));
-				const siteIds = await bablr.anchors(covered.source, offsets(covered.source, covered.sites), true);
+				try {
+					const ids = await bablr.anchors(covered.source, offsets(covered.source, covered.statements), false, file);
+					const siteIds = await bablr.anchors(covered.source, offsets(covered.source, covered.sites), true, file);
 
-				// (either undefined: BABLR's grammar doesn't take this version yet)
-				if (ids !== undefined && siteIds !== undefined) {
 					covered.statements.forEach((statement, index) => {
 						if (typeof ids[index] === "string") {
 							reached.push({ "span": ids[index], "count": statement.count });
@@ -257,6 +257,13 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 							sites.push({ ...site, "span": siteIds[index] });
 						}
 					});
+				} catch (error) {
+					if (!(error instanceof Unparsable)) {
+						throw error;
+					}
+
+					// What ran here is lost: said in the envelope, so the run's record says so (silo coverage reports it).
+					envelope.unparsed = { ...envelope.unparsed, [file]: error.message };
 				}
 			}
 		}

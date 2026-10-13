@@ -179,6 +179,7 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "git.diff", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "git.discard", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "git.changed", "from": ["workbench"], "to": ["shell", "bridge"] },
+	{ "pattern": "parse.status", "from": ["workbench"], "to": ["bridge"] },
 	{ "pattern": "history.chunks", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "history.texts", "from": ["bridge"], "to": ["workbench"] },
 	{ "pattern": "tasks.list", "from": ["shell"], "to": ["bridge"] },

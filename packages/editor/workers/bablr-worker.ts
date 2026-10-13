@@ -171,19 +171,40 @@ async function prune(db: IDBDatabase): Promise<void> {
 	}
 }
 
-/** `source`'s parse, from the cache when it's there — or undefined when BABLR's grammar doesn't take it. */
+/** Why BABLR couldn't parse a text, by its cache key: what a caller is told, so a file it can't take is never dropped
+ *  without a word (the cache keeps it too). */
+const failures = new Map<string, string>();
+
+/** The key a text's parse is kept under. */
+async function keyOf(source: string): Promise<string> {
+	return PARSE_VERSION + "/" + await blobOid(source);
+}
+
+/** Why `source` couldn't be parsed (its parse was asked for first). */
+async function failureOf(source: string): Promise<string> {
+	return failures.get(await keyOf(source)) ?? "BABLR can't parse it";
+}
+
+/** `source`'s parse, from the cache when it's there — or undefined when BABLR's grammar doesn't take it (failureOf
+ *  says why). */
 async function parse(source: string, signal?: AbortSignal): Promise<Cst | undefined> {
 	const db = await database;
-	const key = PARSE_VERSION + "/" + await blobOid(source);
+	const key = await keyOf(source);
 
 	if (db !== undefined) {
 		try {
-			const kept = await done(db.transaction("cst").objectStore("cst").get(key)) as Kept | { "unparsable": true } | undefined;
+			const kept = await done(db.transaction("cst").objectStore("cst").get(key)) as Kept | { "unparsable": true; "reason"?: string } | undefined;
 
 			if (kept !== undefined) {
 				db.transaction("meta", "readwrite").objectStore("meta").put({ "key": key, "size": "data" in kept ? kept.data.byteLength : 64, "used": Date.now() }, key);
 
-				return "data" in kept ? unkeep(kept) : undefined;
+				if ("data" in kept) {
+					return unkeep(kept);
+				}
+
+				failures.set(key, kept.reason ?? "BABLR can't parse it");
+
+				return undefined;
 			}
 		} catch { /* unreadable: parse it */ }
 	}
@@ -196,11 +217,13 @@ async function parse(source: string, signal?: AbortSignal): Promise<Cst | undefi
 		if (signal?.aborted === true) {
 			throw error;
 		}
+
+		failures.set(key, error instanceof Error ? error.message : String(error));
 	}
 
 	if (db !== undefined) {
 		try {
-			const kept = cst === undefined ? { "unparsable": true as const } : keep(cst);
+			const kept = cst === undefined ? { "unparsable": true as const, "reason": failures.get(key) } : keep(cst);
 			const stores = db.transaction(["cst", "meta"], "readwrite");
 
 			stores.objectStore("cst").put(kept, key);
@@ -222,7 +245,7 @@ function cachedParse(signal: AbortSignal) {
 		const cst = await parse(source, signal);
 
 		if (cst === undefined) {
-			throw new Error("BABLR can't parse this text");
+			throw new Error(await failureOf(source));
 		}
 
 		return cst;
@@ -263,13 +286,18 @@ serve(hub, "bablr.editGroups", async (args, { signal }) => {
 });
 
 // A source ⇒ every span of it that can be a handle (punctuation never is: pickAnchor skips it) — its id and offsets — or
-// `unparsable` when BABLR's grammar doesn't take it (it covers the subset tsval runs, and grows). From the cached parse.
+// `unparsable` — why — when BABLR's grammar doesn't take it. From the cached parse.
 serve(hub, "bablr.spans", async (args, { signal }) => {
 	const { source } = args as { "source": string };
-	const cst = source === "" ? undefined : await parse(source, signal);
+
+	if (source === "") {
+		return { "spans": [] };
+	}
+
+	const cst = await parse(source, signal);
 
 	if (cst === undefined) {
-		return { "unparsable": true };
+		return { "unparsable": await failureOf(source) };
 	}
 
 	return { "spans": (spanAnchors(source, "Program", cst) as { "type": string | null; "start": number; "end": number; "id": string }[]).filter((span) => span.type !== null).map(({ id, start, end }) => ({ "id": id, "start": start, "end": end })) };
@@ -332,13 +360,13 @@ function shapesOf(source: string, cst: Cst): SpanShape[] {
 }
 
 // A text, ranges in it, and the file's name ⇒ a reference to the span standing for each range (its id, shape and
-// neighbours, and the text's blob oid as its baseline) — what an annotation keeps. Nothing when BABLR can't parse it.
+// neighbours, and the text's blob oid as its baseline) — what an annotation keeps. When BABLR can't parse it, why.
 serve(hub, "bablr.refer", async (args, { signal }) => {
 	const { source, ranges, file } = args as { "source": string; "ranges": { "start": number; "end": number }[]; "file": string };
 	const cst = source === "" ? undefined : await parse(source, signal);
 
 	if (cst === undefined) {
-		return {};
+		return source === "" ? {} : { "unparsable": await failureOf(source) };
 	}
 
 	const shapes = shapesOf(source, cst);
@@ -376,7 +404,7 @@ serve(hub, "bablr.resolve", async (args, { signal }) => {
 	}
 
 	if (cst === undefined) {
-		return { "resolutions": refs.map(() => ({ "status": "orphaned", "alternatives": [] })) };
+		return { "resolutions": refs.map(() => ({ "status": "orphaned", "alternatives": [] })), ...source === "" ? {} : { "unparsable": await failureOf(source) } };
 	}
 
 	const shapes = shapesOf(source, cst);
