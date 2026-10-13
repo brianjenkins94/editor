@@ -6,7 +6,7 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { ArchReporter, NetworkProbeOptions } from "@brianjenkins94/observability";
 import { createArchReporter, installNetworkProbes } from "@brianjenkins94/observability";
-import { classifyUrl, idbOwner } from "./architecture-model";
+import { classifyUrl, idbOwner } from "./architecture-ids";
 
 /** How the editor's realms probe their network: URLs classified by the declared model (`observe(hub, { network })`). */
 export const NETWORK_PROBES: NetworkProbeOptions = { "classifyUrl": classifyUrl, "idbOwner": idbOwner };

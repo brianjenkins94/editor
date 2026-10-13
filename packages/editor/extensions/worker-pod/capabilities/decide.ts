@@ -19,7 +19,7 @@ import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianj
 import { effectiveDisposition, isDangerous } from "@brianjenkins94/util/silo/policy";
 import { podHub } from "../pod";
 import { coalesce } from "./coalesce";
-import { loadEffectivePolicy, persistOverride, recordObservation } from "./silo-store";
+import { loadEffectivePolicy, persistOverride, recordObservation } from "../../../shared/capabilities/silo-store";
 
 /**
  * The RAW call an interceptor sends — deliberately un-classified so the interceptors stay dumb and decoupled

@@ -53,7 +53,7 @@ CDN `node_modules` overlay. Not a place you put feature code. It sits at the pac
 `previews/` (what runs inside a preview's own pages: the page and worker taps, page evidence), and `extensions/<name>/`
 (that extension's host, and the workers it spawns). What more than one realm runs is in `shared/` (the architecture
 model and probes, `virtual-path`, `workspace-changes`, `cpuprofile`, `lifecycle`, `theme`, the capability canary and
-classifier); build-time Vite plugins are in `build/`. What a debugger's worker needs of a run — the values recorder,
+classifier, the `.silo/` stores that more than one extension reads: `evidence-store`, `capabilities/silo-store`); build-time Vite plugins are in `build/`. What a debugger's worker needs of a run — the values recorder,
 recorded values, the gate's verdict — is run-contract's (EXTENSION-POINTS.md), so any debugger imports the same.
 
 ## Cross-realm communication

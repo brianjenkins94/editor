@@ -26,7 +26,7 @@ import { featuresOf, waysInManifest } from "@brianjenkins94/util/silo/features";
 import { exerciseEvents, includeByDefault, Replayer } from "@brianjenkins94/util/silo/history";
 import { SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { analysisOf } from "@brianjenkins94/util/silo/ts-analysis";
-import { evidenceStore } from "../insights/evidence";
+import { evidenceStore } from "../../shared/evidence-store";
 
 /** How long after the last keystroke a burst ends. */
 const IDLE_MS = 1500;

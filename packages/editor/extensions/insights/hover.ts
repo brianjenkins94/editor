@@ -5,7 +5,7 @@
  * how often each arm ran. For a value site, the type TypeScript gives it beside the kinds runs saw (the capabilities
  * tsserver plugin's `_types.at`), so whether the types held is there to read.
  */
-import type { EvidenceStore, Placed, SpanEvidence } from "./evidence";
+import type { EvidenceStore, Placed, SpanEvidence } from "../../shared/evidence-store";
 import * as vscode from "vscode";
 
 const CODE = [{ "scheme": "file", "language": "typescript" }, { "scheme": "file", "language": "typescriptreact" }, { "scheme": "file", "language": "javascript" }, { "scheme": "file", "language": "javascriptreact" }];

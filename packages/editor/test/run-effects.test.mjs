@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { recordEffect, setEffects, takeEffects } from "../extensions/worker-pod/capabilities/run-effects.ts";
+import { recordEffect, setEffects, takeEffects } from "../shared/capabilities/run-effects.ts";
 
 test("the editor's and the debugger's effects, together — a telling replaces only the debugger's", () => {
 	recordEffect("run-1", "fs:read", "/workspace/a.txt", "made");

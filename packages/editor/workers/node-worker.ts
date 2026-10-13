@@ -13,7 +13,7 @@ import { createHub, createRpcClient, portTransport, serve } from "@brianjenkins9
 import { installWorkerProbe, observe } from "@brianjenkins94/observability";
 
 import { NETWORK_PROBES } from "../shared/architecture";
-import { identifyWorker } from "../shared/architecture-model";
+import { identifyWorker } from "../shared/architecture-ids";
 import { ZENFS_NODE } from "../shared/architecture-zenfs";
 import type { WorkspaceChange } from "../shared/workspace-changes";
 import { WORKSPACE_CHANGED } from "../shared/workspace-changes";

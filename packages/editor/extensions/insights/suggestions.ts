@@ -8,7 +8,7 @@
  * start over), across at least `minRuns` runs and `minSeen` tries. Never isn't proof: each says how rare it could still
  * be (`bound`), and how strongly to draw it (`strength`) grows with the tries.
  */
-import type { Placed } from "./evidence";
+import type { Placed } from "../../shared/evidence-store";
 
 /** A suggestion: where to mark (an operator, underlined; code that never ran, tinted), why, and the edit that removes it. */
 export interface Suggestion {

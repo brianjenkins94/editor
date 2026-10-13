@@ -7,7 +7,7 @@
  * profiles.ts. (Coverage is the notes margin's strip, drawn by core: coverage.ts, through this same evidence store.)
  */
 import * as vscode from "vscode";
-import { evidenceStore } from "./evidence";
+import { evidenceStore } from "../../shared/evidence-store";
 import { registerFixes } from "./fixes";
 import { registerHover } from "./hover";
 import { registerMonitor } from "./monitor";

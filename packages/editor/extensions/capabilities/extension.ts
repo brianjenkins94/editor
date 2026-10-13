@@ -19,7 +19,7 @@
 import * as vscode from "vscode";
 
 import { type Disposition, type Effective, type Policy, effectiveDisposition, policyUri, readPolicy, withRule, withoutRule, writePolicy } from "./policy";
-import { type StaticEntry, type StaticSurface, loadStaticSurface, writeStaticSurface } from "../worker-pod/capabilities/silo-store";
+import { type StaticEntry, type StaticSurface, loadStaticSurface, writeStaticSurface } from "../../shared/capabilities/silo-store";
 import { registerPlacedRules } from "./placed-rules";
 import { registerRulesTree } from "./rules-tree";
 

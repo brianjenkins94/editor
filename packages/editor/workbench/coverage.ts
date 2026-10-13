@@ -20,7 +20,7 @@
  */
 import type * as vscodeApi from "vscode";
 import type { PaneMark } from "@brianjenkins94/monaco-vscode-api/main";
-import type { EvidenceStore } from "../extensions/insights/evidence";
+import type { EvidenceStore } from "../shared/evidence-store";
 import type { CoverageEvent as CoverageReport } from "@brianjenkins94/run-contract";
 import type { PaneMark as ContentMark } from "@brianjenkins94/run-contract/pane";
 import { Anchors, offsetOf } from "./anchors";

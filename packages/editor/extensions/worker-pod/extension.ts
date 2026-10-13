@@ -17,10 +17,10 @@ import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
 import { type CapabilityCall, decideCapability } from "./capabilities/decide";
-import { takeEffects } from "./capabilities/run-effects";
-import { recordedResult, recordResult } from "./capabilities/silo-store";
+import { takeEffects } from "../../shared/capabilities/run-effects";
+import { recordedResult, recordResult } from "../../shared/capabilities/silo-store";
 import { observe } from "@brianjenkins94/observability";
-import { identifyWorker } from "../../shared/architecture-model";
+import { identifyWorker } from "../../shared/architecture-ids";
 import { storeNode, ZENFS_NODE } from "../../shared/architecture-zenfs";
 import type { CommandTotals } from "../command-tap";
 import { ARCH_COMMANDS } from "../command-tap";
