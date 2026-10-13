@@ -7,13 +7,13 @@
  * + contents back to the host. `boot`/`registerExtension`/`registerFileSystemOverlay` come from the
  * pre-built monaco-vscode-api bundle, kept external and mapped to the sibling `./main.js`.
  *
- * worker-pod (extensions/worker-pod) is the bridge, and the one way core reaches VS Code: registered as browser CJS by
+ * the bridge (extensions/bridge) is the bridge, and the one way core reaches VS Code: registered as browser CJS by
  * the URL of its served bundle, it is the default API context, and core's `vscode` API is its (the activity bar runs
  * `workbench.view.*` commands through it). Filesystem overlays (CDN node_modules now, real-disk FSA later) layer UNDER the seeded snapshot —
  * they answer only paths the in-memory FS misses, falling through on FileNotFound.
  */
 import type { AuxiliaryWindowRequest, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
-import type { PodBridge } from "../extensions/worker-pod/extension";
+import type { BridgeExports } from "../extensions/bridge/extension";
 import type { ShellDockHost } from "../shared/dock-host";
 import type { SharedWorkspace } from "../shared/playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
@@ -22,6 +22,7 @@ import { boot, closeHostedEditor, ExtensionHostKind, installMonacoProbes, OPEN_A
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import { linkRuntime } from "@brianjenkins94/run-contract/runtime";
 import capabilitiesExtensionPath from "capabilities:extension";
+import cspellExtensionPath from "cspell:extension";
 import settingsDefaults from "editor:settings-defaults";
 import eslintExtensionPath from "eslint:extension";
 import eventSheetExtensionPath from "event-sheet:extension";
@@ -33,8 +34,9 @@ import { render } from "preact";
 import runningExtensionPath from "running:extension";
 import tsvalExtensionPath from "tsval:extension";
 import typeQueriesExtensionPath from "type-queries:extension";
-import workerPodExtensionPath from "worker-pod:extension";
+import bridgeExtensionPath from "bridge:extension";
 import capabilitiesManifest from "../extensions/capabilities/package.json";
+import cspellManifest from "../extensions/cspell/package.json";
 import eslintManifest from "../extensions/eslint/package.json";
 import eventSheetManifest from "../extensions/event-sheet/package.json";
 import historyManifest from "../extensions/history/package.json";
@@ -43,7 +45,7 @@ import notesManifest from "../extensions/notes/package.json";
 import runningManifest from "../extensions/running/package.json";
 import tsvalManifest from "../extensions/tsval/package.json";
 import typeQueriesManifest from "../extensions/type-queries/package.json";
-import workerPodManifest from "../extensions/worker-pod/package.json";
+import bridgeManifest from "../extensions/bridge/package.json";
 import { NETWORK_PROBES } from "../shared/architecture";
 import { classifyUrl, identifyWorker } from "../shared/architecture-ids";
 import { SHELL_DOCK_HOST } from "../shared/dock-host";
@@ -106,7 +108,7 @@ window.addEventListener("scroll", () => {
 }, true);
 
 // The workbench-iframe hub — links UP to the page's root hub over the pane-link window transport (ONE link for the
-// boot handshake below AND the pod/worker span federation), and bridges the extension pod into that same hub
+// boot handshake below AND the bridge/worker span federation), and bridges the extension bridge into that same hub
 // (wireWorkbenchHub, once the ext host is up). The link's `hello` handshake recovers the lossy-window race the old
 // MessagePort was guarding, so no port is needed.
 const workbenchHub = createHub({ "id": "workbench" });
@@ -126,7 +128,7 @@ const { "log": paneLog, architecture } = observe(workbenchHub, { "network": NETW
 
 // A debugger's worker in the web worker extension host (an extension loaded from outside, editor-contrib's) reaches the
 // editor's runtime through the probe there — VS Code leaves its extensions no other way out — linked into this hub, and
-// answered as tsval's is (EXTENSION-POINTS.md, 2: its file calls by worker-pod, its servers by the preview) — linked as
+// answered as tsval's is (EXTENSION-POINTS.md, 2: its file calls by the bridge, its servers by the preview) — linked as
 // every runtime link is (run-contract's linkRuntime: its own id, carrying only the runtime).
 installMonacoProbes(architecture, { "identifyWorker": identifyWorker, "classifyUrl": classifyUrl, "linkRuntime": (port, name, session) => linkRuntime(workbenchHub, port, name, session) });
 registerLiveArchitecture({ "render": (container) => renderArchitectureView(container, workbenchHub) });
@@ -202,7 +204,7 @@ let workbenchContainer: HTMLElement | undefined;
 let init: Init | undefined;
 let booted = false;
 
-// Core's VS Code API — the bridge's (worker-pod's), once it resolves. `runCommand` drives the workbench
+// Core's VS Code API — the bridge's (the bridge's), once it resolves. `runCommand` drives the workbench
 // through it and reads the latest api, so a command issued early still runs once it's captured.
 // eslint-disable-next-line ts/no-explicit-any
 let vscodeApi: any = null;
@@ -392,31 +394,31 @@ async function openProject(files: { "path": string; "contents"?: string; "bytes"
 }
 
 /**
- * Uplink the extension pod's hub to the page's root hub. The ext host is an isolated `extension-file://` realm
- * with no window path out, so the pod rides the worker-pod extension's EXPORTED bridge (a marshaled event +
- * function, see extension.ts PodBridge). A workbench hub links that bridge to the pod and windowTransport(host)
- * to the top page (workbench-entry HAS window access) — so pod/worker spans reach the page's $sys.log.>
- * collector. No-op if the extension exposes no bridge (the pod then stays a standalone root).
+ * Uplink the extension bridge's hub to the page's root hub. The ext host is an isolated `extension-file://` realm
+ * with no window path out, so the bridge rides the bridge extension's EXPORTED bridge (a marshaled event +
+ * function, see extension.ts BridgeExports). A workbench hub links that bridge to the bridge and windowTransport(host)
+ * to the top page (workbench-entry HAS window access) — so bridge/worker spans reach the page's $sys.log.>
+ * collector. No-op if the extension exposes no bridge (the bridge then stays a standalone root).
  */
 function wireWorkbenchHub(workspaceBuffer?: SharedArrayBuffer): void {
-	const workerPod = vscodeApi?.extensions?.getExtension("brianjenkins94.worker-pod");
+	const bridge = vscodeApi?.extensions?.getExtension("brianjenkins94.bridge");
 
-	if (workerPod === undefined) {
+	if (bridge === undefined) {
 		return;
 	}
 
-	(workerPod.activate() as Promise<PodBridge | undefined>).then((bridge) => {
+	(bridge.activate() as Promise<BridgeExports | undefined>).then((bridge) => {
 		if (bridge?.toWorkbench === undefined || bridge.fromWorkbench === undefined) {
 			return;
 		}
 
-		// M3b: hand the pod the shared workspace SharedArrayBuffer, so the cspell worker mounts the SAME
-		// zen-fs the editor + type-checker use (at /workspace). No-op when there's no SAB (no cross-origin isolation).
+		// Hand the bridge the shared workspace SharedArrayBuffer: a debug run's worker mounts the SAME zen-fs the editor uses
+		// (at /workspace), through the workspace runtime. No-op when there's no SAB (no cross-origin isolation).
 		if (workspaceBuffer !== undefined) {
-			(bridge as PodBridge & { "attachWorkspaceBuffer"?: (b: unknown) => void }).attachWorkspaceBuffer?.(workspaceBuffer);
+			(bridge as BridgeExports & { "attachWorkspaceBuffer"?: (b: unknown) => void }).attachWorkspaceBuffer?.(workspaceBuffer);
 		}
 
-		// pod (ext host) <-> workbench, over the extension's exported event/function bridge. (The workbench <->
+		// bridge (ext host) <-> workbench, over the extension's exported event/function bridge. (The workbench <->
 		// top-page link is the transferred MessagePort wired above.)
 		workbenchHub.link({
 			"send": (message) => { bridge.fromWorkbench(message); },
@@ -558,19 +560,19 @@ function maybeBoot(): void {
 				"contributes": { "configurationDefaults": settingsDefaults }
 			});
 
-			// worker-pod — the bridge between the core runtime and VS Code, and the ONE way core reaches VS Code: core's
-			// vscode API is the pod's (getApi), so everything core does in VS Code is done as the bridge, and nothing
+			// the bridge — the bridge between the core runtime and VS Code, and the ONE way core reaches VS Code: core's
+			// vscode API is the bridge's (getApi), so everything core does in VS Code is done as the bridge, and nothing
 			// else of core's crosses. It also hosts the language servers (on the main-thread LocalProcess host, so it
 			// spawns top-level, non-throttled server workers), the debug adapters, tasks and Source Control. Registered
 			// as CJS by the URL of its bundle, served beside this entry (bundledExtension in build.ts), so its code is
 			// fetched on activation rather than carried in workbench.js; the other extensions below register the same way.
-			const workerPodExt = registerExtension(workerPodManifest, ExtensionHostKind.LocalProcess);
+			const bridgeExt = registerExtension(bridgeManifest, ExtensionHostKind.LocalProcess);
 
-			workerPodExt.registerFileUrl("./extension.js", new URL(workerPodExtensionPath, location.href).href);
-			workerPodExt.setAsDefaultApi().catch((error: unknown) => {
+			bridgeExt.registerFileUrl("./extension.js", new URL(bridgeExtensionPath, location.href).href);
+			bridgeExt.setAsDefaultApi().catch((error: unknown) => {
 				bootSpan.error("setAsDefaultApi failed", { "error": errText(error) });
 			});
-			workerPodExt.getApi().then((api: unknown) => {
+			bridgeExt.getApi().then((api: unknown) => {
 				vscodeApi = api;
 				// Unblock the debug bridge (window.__editor.ready / .api). See debug-bridge.ts.
 				markApiReady(); // let a queued openProject (picker) proceed
@@ -609,21 +611,21 @@ function maybeBoot(): void {
 				installCoverage(api as typeof import("vscode"), evidenceStore(api as typeof import("vscode"), []), showMarks, showProfile);
 
 				setTerminalProcessFactory((fire, cwd) => createBashProcess(api as typeof import("vscode"), nodeRunner, workbenchHub, fire, cwd));
-				// And the pod's tasks' terminals: a just-bash process that runs one command, over the hub (terminal/index.ts).
+				// And the bridge's tasks' terminals: a just-bash process that runs one command, over the hub (terminal/index.ts).
 				serveTaskTerminals(api as typeof import("vscode"), nodeRunner, workbenchHub);
 				// The workspace as an agent works in it, as on a local machine — its files read, written, edited, found and
 				// searched; a command run in its shell (workspace-tools.ts; debug-mcp's files_* and shell tools).
 				installWorkspaceTools(api as typeof import("vscode"), workbenchHub, nodeRunner);
 				serveTerminalState(nodeRunner, workbenchHub);
 
-				// Uplink the extension pod to the page: a workbench hub bridges the pod (via the extension's
+				// Uplink the extension bridge to the page: a workbench hub bridges the bridge (via the extension's
 				// exported event/function channel — the ext host has no window path) to the top page over the
-				// window. pod/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.
+				// window. bridge/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.
 				wireWorkbenchHub(workspaceFs?.buffer);
 				// The metrics plane: memory by realm, workspace fill, long frames, hub traffic, storage (editor-metrics.ts).
 				reportWorkbenchMetrics(workbenchHub, workspaceFs?.buffer, architectureStore(workbenchHub));
 				// Git: browser-git (isomorphic-git over the zen-fs workspace), served over the hub (git-service) to the
-					// shell's review panel and VS Code's Source Control view (worker-pod's source-control.ts). See
+					// shell's review panel and VS Code's Source Control view (the bridge's source-control.ts). See
 					// git-service.ts / git-engine.ts.
 					// One classifier, shared by both panes: its verdicts come from the BABLR worker's cached parses
 					// (bablr.ts), so each version of a file is parsed once, across refreshes and reloads.
@@ -658,7 +660,7 @@ function maybeBoot(): void {
 
 			// tsval, the stepping debugger — an extension of its own, in the bridge's host (LocalProcess: it spawns its debug
 			// workers top-level, as the bridge does its servers). It reaches the editor as any debugger does: the run contract,
-			// and the workspace runtime worker-pod exports.
+			// and the workspace runtime the bridge exports.
 			const tsvalExt = registerExtension(tsvalManifest, ExtensionHostKind.LocalProcess);
 
 			tsvalExt.registerFileUrl("./extension.js", new URL(tsvalExtensionPath, location.href).href);
@@ -740,16 +742,25 @@ function maybeBoot(): void {
 			typeQueriesExt.registerFileUrl("./extension.js", new URL(typeQueriesExtensionPath, location.href).href);
 
 			// Notes that stay with their code: durable span annotations, kept in .silo/notes/ and resolved by the editor's
-			// BABLR (worker-pod's editor.annotations.* commands) — public API only.
+			// BABLR (the bridge's editor.annotations.* commands) — public API only.
 			const notesExt = registerExtension(notesManifest, ExtensionHostKind.LocalWebWorker);
 
 			notesExt.registerFileUrl("./extension.js", new URL(notesExtensionPath, location.href).href);
+
+			// cspell: the real cspell engine, a Node program run under almostnode in its own worker — public API only.
+			const cspellExt = registerExtension(cspellManifest, ExtensionHostKind.LocalWebWorker);
+
+			cspellExt.registerFileUrl("./extension.js", new URL(cspellExtensionPath, location.href).href);
+			// (an extension's workers start classic: server.js imports the module worker. A classic script is done at once, so
+			// the client's first messages arrive before the server listens: held until the import resolves — server-host
+			// awaits its server's start — then handed on.)
+			cspellExt.registerFileUrl("./server.js", "data:text/javascript," + encodeURIComponent(`const held = []; const hold = (event) => { held.push(event.data); }; addEventListener("message", hold); import(${JSON.stringify(new URL("./lsp/server-host.js", location.href).href)}).then(() => { removeEventListener("message", hold); for (const data of held) { dispatchEvent(new MessageEvent("message", { "data": data })); } }, (error) => { console.error("[cspell] server failed to load", error); });`));
 
 			// And any from outside the editor, by URL — the site's own (`extensions.json`) and `?extension=`'s:
 			// editor-contrib's interpreters and renderers (contributed-extensions.ts).
 			void apiReady.then(() => loadContributedExtensions(vscodeApi as typeof import("vscode"), paneLog)).then(markContributedLoaded);
 
-			bootSpan.info("extensions registered", { "extensions": ["worker-pod", "eslint", "capabilities", "insights", "running", "event-sheet", "type-queries", "notes"] });
+			bootSpan.info("extensions registered", { "extensions": ["bridge", "tsval", "eslint", "capabilities", "history", "insights", "running", "event-sheet", "type-queries", "notes", "cspell"] });
 			// Tell the host the workbench is up (readiness gating), then close the boot span (its duration
 			// is the time-to-online, relayed to the host console).
 			workbenchHub.publish("workbench.online");

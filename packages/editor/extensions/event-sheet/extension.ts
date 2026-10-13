@@ -133,7 +133,7 @@ function recognizer(context: vscode.ExtensionContext): { "project": (root: strin
 				current.worker.postMessage({ "id": next, "files": files });
 			});
 
-			// Durable span references, from the editor's BABLR (one worker, one cache of parses): worker-pod's command,
+			// Durable span references, from the editor's BABLR (one worker, one cache of parses): the bridge's command,
 			// each file named as the workspace does. Without it (VS Code without the editor), the nodes go unanchored.
 			return anchorGame(files, model, async (source, path, ranges) => annotations(vscode.commands).refer(source, vscode.workspace.asRelativePath(vscode.Uri.file(root + "/" + path), false), ranges));
 		},

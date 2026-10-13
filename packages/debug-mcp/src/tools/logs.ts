@@ -12,7 +12,7 @@ export default ({ store, FROM, named, scoped, withTab }: ToolsContext) => [defin
 		"title": "Query logs",
 		"description": "Query the collected log/span record stream federated from the editor's hub tree. Point events and span boundaries, filtered by source (e.g. 'debug-worker', 'sw', 'workbench'), minimum level, message substring, and time window.",
 		"inputSchema": {
-			"source": z.string().optional().describe("Emitting context, e.g. 'debug-worker', 'sw', 'workbench', 'pod', 'root'."),
+			"source": z.string().optional().describe("Emitting context, e.g. 'debug-worker', 'sw', 'workbench', 'bridge', 'root'."),
 			"minLevel": LEVEL.optional().describe("Only records at or above this level."),
 			"textIncludes": z.string().optional().describe("Substring the message must contain."),
 			"sinceMs": z.number().optional().describe("Only records from the last N milliseconds."),

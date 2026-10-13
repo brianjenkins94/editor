@@ -8,7 +8,7 @@
  * or orphaned when its code changes. This is what "annotate the CST in place with change-resistant anchors" means: the
  * map's identity survives edits.
  *
- * BABLR itself is the editor's (`referOf`: in the extension, worker-pod's `editor.annotations.refer` command — one BABLR
+ * BABLR itself is the editor's (`referOf`: in the extension, the bridge's `editor.annotations.refer` command — one BABLR
  * worker, one cache of parses): per file, one call for the reference standing for each node's range.
  */
 import type { SpanRef } from "@brianjenkins94/util/silo/annotations";

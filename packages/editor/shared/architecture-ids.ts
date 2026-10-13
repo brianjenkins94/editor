@@ -18,9 +18,7 @@ export function identifyWorker(url: string): { "id": string; "label"?: string; "
 		case "node-worker.js":
 			return { "id": "node", "container": "workers", "owner": "workbench" };
 		case "debug-worker.js":
-			return { "id": "debug-worker", "container": "podWorkers", "owner": "pod" };
-		case "server-host.js":
-			return { "id": "worker:server-host", "container": "podWorkers", "owner": "pod" };
+			return { "id": "debug-worker", "container": "debugWorkers", "owner": "bridge" };
 		case "bablr-worker.js":
 			return { "id": "bablr", "container": "workers", "owner": "workbench" };
 		case "provoke-worker.js":

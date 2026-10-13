@@ -39,9 +39,9 @@ also works over desktop's built-in git.
 |---|---|---|---|
 | **Shell** (top window) | `shell/`: `main.tsx`'s `renderShell()` branch → `shell/shell.tsx`, `shell/git-panel.tsx` | DOM, the shell hub; *later* the GitHub token (trust boundary) | Surrounding chrome: LHS project picker, top bar, and the RHS **git review panel** (`shell/git-panel.tsx` — GitHub-Desktop-style changes/diff/commit, a pure hub consumer of `git.*`). Loads the app in an iframe pointing back at the same page. |
 | **App iframe** (`/`) | `app/`: `main.tsx`'s app branch, `app/coi.ts`, `app/vscode.tsx`, `app/samples.ts`, `app/tools/` (the tab's MCP tools) | DOM, `rootHub`, COI bootstrap | Boots the workbench iframe (the preview windows live in the shell; this realm runs their backend — see below) and links it into `rootHub` over the retargeting pane-link transport; serves `project.list` + `workbench.init`, routes `project.open` → `openProject`. Owns the top of the hub tree. |
-| **Workbench iframe** (`/__vscode__/host.html`) | `workbench/`: `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal/`, `node-runner.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()` (VS Code's full workbench lays itself out — its own activity bar, sashes, movable views and remembered layout, minus the menu bar and title bar, which the shell's chrome replaces), mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(Core lives here too: the git engine and service — legitimate browser parity for desktop's built-in git; VS Code's Source Control view on it is worker-pod's — the editor's BABLR (`bablr.ts`: one worker, its parses cached by blob oid, answering the git panel's verdicts, runtime evidence's span ids, and extensions' annotation references and resolutions), and runtime evidence (`evidence.ts`: each run's envelope, and what tsval sessions and preview pages observed, folded into `.silo/`). The cosmetic classifier the git service asks is the part that should become a standalone extension — see the known debt above.)* |
-| **Extension host** (`LocalProcess` / `LocalWebWorker`) | `extensions/*/extension.ts`, `extensions/*/ts-plugin.js` | the vscode API — **no DOM, no zen-fs singleton** | Extensions: `worker-pod` (the bridge: core's vscode API is its; spawns the LSP/debug/node workers; debug adapters, tasks, Source Control; core's BABLR to extensions as `editor.annotations.*`), `running`, `insights` (coverage, the evidence hover and hints), `notes`, `type-queries` and `event-sheet` (public API only). `eslint` + `capabilities` run in the WebWorker host *inside tsserver*, reusing tsserver's own `ts` as TS-plugins; the capabilities plugin also answers `_types.at` (TypeScript's types at ranges, for runtime evidence and the typed annotation strategy). |
-| **Workers** (`dist/lsp/*`) | `workers/` for core's (spawned from the workbench realm: `node-worker`, `provoke-worker`, `bablr-worker`); an extension's own sit in its folder (`extensions/worker-pod/server-host.ts`, `extensions/tsval/debug-worker.ts`, `extensions/event-sheet/recognizer-worker.ts`) — only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode/preview), `debug-worker` (tsval stepping), `server-host`, `bablr-worker` (the editor's BABLR, for `bablr.ts`: parses cached by blob oid in its own IndexedDB; cosmetic verdicts, span ids for runtime evidence, annotation references and resolutions). (The event sheet's recognizer worker is its extension's own, spawned in the extension host.) |
+| **Workbench iframe** (`/__vscode__/host.html`) | `workbench/`: `workbench-entry.tsx`, `workspace-fs.ts`, `ata.ts`, `terminal/`, `node-runner.ts`, `git-service.ts` | **the vscode API *and* zen-fs** (both live here), DOM — but it is OUR boot, so nothing here ports to desktop VS Code | Host-boot glue: the monaco `boot()` (VS Code's full workbench lays itself out — its own activity bar, sashes, movable views and remembered layout, minus the menu bar and title bar, which the shell's chrome replaces), mounting zen-fs, capturing the vscode API, the terminal process factory, registering extensions, spawning the workers. *(Core lives here too: the git engine and service — legitimate browser parity for desktop's built-in git; VS Code's Source Control view on it is the bridge's — the editor's BABLR (`bablr.ts`: one worker, its parses cached by blob oid, answering the git panel's verdicts, runtime evidence's span ids, and extensions' annotation references and resolutions), and runtime evidence (`evidence.ts`: each run's envelope, and what tsval sessions and preview pages observed, folded into `.silo/`). The cosmetic classifier the git service asks is the part that should become a standalone extension — see the known debt above.)* |
+| **Extension hosts** (`LocalProcess`, sharing the workbench's realm; `LocalWebWorker`, a worker) | `extensions/<name>/extension.ts`, `extensions/<name>/ts-plugin.js` | the vscode API (files through `vscode.workspace.fs`) — **no DOM, no zen-fs**; the hub only in `bridge` | One extension per feature (*Extensions: which one, which host*, below). `LocalProcess`: `bridge` (core's vscode API is its, and it's the only extension on the hub: every debugger's run-contract events and capability stops, the workspace runtime, tasks, Source Control, core's BABLR to extensions as `editor.annotations.*`) and `tsval`, which needs what only that host has. `LocalWebWorker`: everything else — `running`, `insights`, `notes`, `history`, `type-queries`, `event-sheet`, `cspell`, `eslint`, `capabilities`, and VS Code's own TypeScript extension. `eslint`, `capabilities` and `history` also run a plugin *inside tsserver*, reusing its `ts` and its Program. |
+| **Workers** (`dist/lsp/*`) | `workers/` for core's (spawned from the workbench realm: `node-worker`, `provoke-worker`, `bablr-worker`); an extension's own sit in its folder (`extensions/tsval/debug-worker.ts`, `extensions/cspell/server-host.ts`, `extensions/event-sheet/recognizer-worker.ts`) — only what is messaged in | nothing host-y | Heavy/blocking compute, off the UI thread: `node-worker` (almostnode: dev servers and previews), `bablr-worker` (the editor's BABLR, for `bablr.ts`: parses cached by blob oid in its own IndexedDB; cosmetic verdicts, span ids for runtime evidence, annotation references and resolutions), `debug-worker` (tsval stepping a program, almostnode for its packages; top-level, from the `LocalProcess` host), and — nested in the `LocalWebWorker` host, as any of its extensions' workers are, each named by its extension (`ext:<extension>/<worker>`) — VS Code's two tsservers, the cspell server (almostnode running cspell) and the event sheet's recognizer. |
 | **Packages** (`packages/*`, plain node) | nothing host-y — pure | — | Engines: `@brianjenkins94/bablr` (upstream BABLR and our grammar, `bablr-language-ts`, bundled: `cstSpans`, span ids, `reidentify`/`follow`, `classifyChange`), `tsval` (the interpreter, and its `observe` hook), `almostnode` (the node runtime and previews' dev server, which instruments workspace modules for runtime evidence), `util/silo` (the shared policy model, runtime evidence and span annotations: pure models and layouts), and the vscode-package-local pure module `capability-breakpoints`. Built/aliased into the realms above. |
 
 There is also a **service worker** (`coi-serviceworker.js`, registered by `app/coi.ts`): one per origin, it stamps the
@@ -61,13 +61,47 @@ realm's folder — or, from an extension, another extension's — is an error. O
 `extensions/`, to register them; `main.tsx`, `build.ts`, `dev.ts` and the tests may reach anywhere. What a debugger's worker needs of a run — the values recorder,
 recorded values, the gate's verdict — is run-contract's (EXTENSION-POINTS.md), so any debugger imports the same.
 
+## Extensions: which one, which host
+
+Two separate questions, and the second is mechanics, not features.
+
+**Is it its own extension?** Yes — one per feature, using the public vscode API only, so it could ship to desktop VS
+Code. A feature split across two extensions is a smell; two features in one extension is one too.
+
+**Which host?** `LocalWebWorker`, unless it needs something only the `LocalProcess` host has:
+
+| needs | why only `LocalProcess` | who |
+|---|---|---|
+| the hub | the hub is core's, and one extension is the way across (`bridge`); feature extensions get no hub, so subscribers don't spread to wherever is convenient | `bridge` |
+| the workspace runtime — the workspace's `SharedArrayBuffer` and a runtime link per worker | `bridge` provides it (`workspaceRuntime()`, run-contract) in its own host; an extension's `exports` don't cross hosts | `tsval` |
+| top-level workers | that host shares the workbench's thread, so a worker it starts isn't nested in an extension-host worker | `tsval`'s debug workers |
+
+And one rule pulls the other way: **a TypeScript Program means a tsserver plugin, and a plugin means `LocalWebWorker`.**
+VS Code's TypeScript extension finds plugins through `vscode.extensions.all`, which only sees its own host, and that host
+is `LocalWebWorker`. A plugin runs inside tsserver with tsserver's own `ts` and its Program — every source file, parsed
+and checked, unsaved edits included — reached from its extension by `typescript.tsserverRequest` (`_`-prefixed
+commands). That's why eslint left the old pod of language servers (b29e2a8: it had bundled a second TypeScript), and why
+`capabilities` and `history` are built the same way.
+
+A Node program that needs neither the hub nor the workspace runs in a worker of its own extension, in `LocalWebWorker`,
+under its own almostnode: `cspell` (its bootstrap holds the client's first messages until the server listens — a classic
+bootstrap's script is done at once, so they'd arrive before it does).
+
+### Two libraries that aren't places
+
+- **almostnode** is Node, emulated — a library each worker that runs Node code creates its own instance of: `node-worker`
+  (dev servers), `debug-worker` (a program's packages), the cspell server. Nothing shares an instance.
+- **TypeScript** comes as two copies. VS Code's is inside its tsservers, and our plugins borrow it. Ours is the
+  `lsp/typescript-*.js` chunk that `debug-worker`, `node-worker` (through almostnode) and the recognizer import: one file
+  to download, but each worker that imports it holds its own instance.
+
 ## Cross-realm communication
 
 - **hub** (`@brianjenkins94/hub`) — the composed message tree for *everything*, including the workbench boot
   handshake: pub/sub + RPC (`createRpcClient` / `serve`). Shape today: shell ↔ app over `windowTransport`; app
   `rootHub` ↔ workbench hub over the **pane-link** transport (`pane-link.ts`) — a `windowTransport` variant that
-  *retargets* to the pane's live window so it survives a pop-out; workbench ↔ extension pod over the pod's exported
-  event/function bridge; pod ↔ its workers over `portTransport`. A message only crosses a link if the far side
+  *retargets* to the pane's live window so it survives a pop-out; workbench ↔ extension bridge over the bridge's exported
+  event/function bridge; bridge ↔ its workers over `portTransport`. A message only crosses a link if the far side
   subscribed, so each realm runs standalone. The app↔workbench boot handshake is just hub messages on that link:
   the pane requests `workbench.init` (RPC, retried until interest settles), then publishes `workbench.online` /
   `workbench.save`, and the host publishes `workbench.openProject`. (This folded the old separate `pane-bus` + a
@@ -125,7 +159,7 @@ wouldn't — so an app can't rely on origin-scoped state crossing ports.
 
 **The service worker keeps no state.** The browser stops an idle service worker and starts a fresh global on the
 next event, so it remembers nothing between requests: it asks the page for a hub link whenever it starts
-(`sw-needs-hub`), and asks the pod for every capability decision (the pod maps a preview's port to its run). Its
+(`sw-needs-hub`), and asks the bridge for every capability decision (the bridge maps a preview's port to its run). Its
 calls wait for a responder (`waitForResponderMs`) instead of publishing into an unlinked hub, and the capability gate
 **fails closed**: with no decider reachable, a preview's data fetch gets a 403 and a node script's write is denied.
 
@@ -145,8 +179,8 @@ hostile code. A real boundary needs the preview on a separate origin with its ow
 ### The workspace filesystem (zen-fs)
 
 The workbench creates a 64 MB `SharedArrayBuffer` zen-fs store (`workspace-fs.ts`) mounted at `/workspace` and hands
-the buffer to the node worker (over the hub, `workspace.buffer`) and the cspell server host (a one-shot control port —
-it has no hub); the provoke child gets it directly, and a debug run in its launch (the pod holds it). All of them read and write the same bytes under an Atomics lock.
+the buffer to the node worker (over the hub, `workspace.buffer`); the provoke child gets it directly, and a debug run
+in its launch (the bridge holds it). All of them read and write the same bytes under an Atomics lock.
 
 Shared memory tells nobody anything, so there is **one change stream** (`workspace-changes.ts`): each realm watches its
 own mount's mutating store operations and reports them, batched, as `workspace.changed`. The workbench persists every
@@ -162,7 +196,7 @@ Beside the logs (`$sys.log`) and the architecture (`$sys.arch`), each context ca
 `$sys.metrics.<source>` (observability's `reportMetrics`: named gauges, read at each sample). The workbench reports
 memory by realm (`measureUserAgentSpecificMemory`, about every 30 s: it waits for a garbage collection), the workspace's fill (read from the zen-fs superblock),
 its time in long animation frames, hub traffic and the origin's storage; the shell reports its own long frames
-(`editor-metrics.ts`). The pod keeps the last five minutes of each and serves them to VS Code as the
+(`editor-metrics.ts`). The bridge keeps the last five minutes of each and serves them to VS Code as the
 `editor.metrics.read` command, which the insights extension's monitor (status bar + a view of sparkline cards) reads —
 so the monitor, like the rest of insights, uses nothing but VS Code's API. Memory is named by realm: the editor's own by
 path, and the `blob:` workers (the web worker extension host, TypeScript's servers, the language servers, monaco's
@@ -181,9 +215,9 @@ the readings when asked), the same numbers the monitor draws.
 Everything that can ride the hub does. What doesn't, and why:
 
 - **the capability decide route** — a node script's `writeFileSync` must block, so it asks with a synchronous XHR the
-  service worker answers; the SW then asks the pod over the hub.
-- **the cspell server host's control port** — it speaks LSP over its worker port and has no hub; the pod hands it the
-  workspace buffer once, at spawn (a respawned worker gets it again).
+  service worker answers; the SW then asks the bridge over the hub.
+- **the cspell language server** — the cspell extension's own worker, spoken to over LSP on its worker port; it reads
+  nothing of the workspace (documents come over LSP), so it has neither the hub nor the buffer.
 - **a preview's HMR posts** — HMR updates go into the iframe as plain posts. Everything else of a preview window —
   its workers' records and questions too, through its page's tap — rides its hub link, confined (the previewed app is
   untrusted: `previewAppPermissions`).
@@ -208,7 +242,7 @@ flowchart TB
     end
   end
 
-  EXT["Extension host — LocalProcess + LocalWebWorker<br/>worker-pod (the bridge) · running · insights · notes · type-queries · event-sheet · eslint + capabilities (run inside tsserver, reuse ts)"]
+  EXT["Extension host — LocalProcess + LocalWebWorker<br/>bridge · tsval · running · insights · notes · history · type-queries · event-sheet · cspell · eslint + capabilities + history (run inside tsserver, reuse ts)"]
 
   NW["node-worker<br/>almostnode · preview dev servers (instrumented)"]
   DW["debug-worker<br/>tsval stepping / time-travel · coverage + observe"]
@@ -250,11 +284,12 @@ Edge styles: **solid arrows** = live message channels; **thick arrows** = a real
 ## Observed architecture (generated by the tour)
 
 The diagram above is the narrative, and says what can't be seen (what's bundled at build time). This one is what the
-**architecture tour** (`test/architecture-tour.mjs`) saw the editor do — every context, extension and store, and what
+**architecture tour** (its shards, `test/architecture-tour-*.mjs`, together) saw the editor do — every context, extension and store, and what
 joined them; then the stores, with who writes and who reads each; then each hub's components — rendered by
 `tourDiagram()` with nothing declared but where things run (DISCOVERED-ARCHITECTURE.md). Instances read as one of a kind
-(`Preview :*`), and there are no counts, so the same tour renders the same block. A local run of the tour rewrites it;
-the architecture workflow re-runs the tour and fails when it differs — so a change that adds a part, a channel or a store
+(`Preview :*`), and there are no counts, so the same tour renders the same block. A local run of the tour (then
+`test/architecture-diagram.mjs`, which merges what its shards saw) rewrites it; the architecture workflow re-runs it and
+fails when it differs — so a change that adds a part, a channel or a store
 shows up here, in the same commit. Hub links are `<==>`, other channels `<-.->` (labelled by their protocol, or
 `undeclared`), an extension's commands `commands`, and a store's edges say whether it's read or written.
 
@@ -277,11 +312,11 @@ flowchart LR
   subgraph c_workbenchIframe["Workbench iframe"]
     n_webview_markdown_preview["markdown.preview"]
     subgraph c_workbench["Main thread"]
+      n_bridge["Bridge"]
+      n_ext_bridge["bridge"]
       n_ext_tsval["tsval"]
       n_ext_vscode["VS Code"]
-      n_ext_worker_pod["worker-pod"]
       n_exthost_LocalProcess_0["Local extension host"]
-      n_pod["Pod"]
       n_workbench["Workbench"]
     end
     subgraph c_editorWorkers["Editor workers"]
@@ -296,26 +331,26 @@ flowchart LR
       n_server__["server:*"]
       n_vite__["Vite dev server :*"]
     end
-    subgraph c_podWorkers["Pod workers"]
+    subgraph c_debugWorkers["Debug workers"]
       n_debug_worker["Debug worker"]
-      n_worker_server_host["LSP server host"]
     end
     subgraph c_extHostIframe["Extension host iframe"]
       n_exthost_iframe["Iframe relay"]
       subgraph c_extHostWorker["Web worker extension host"]
         n_ext_capabilities["capabilities"]
+        n_ext_cspell_cspell["cspell"]
         n_ext_eslint["eslint"]
         n_ext_event_sheet["event-sheet"]
+        n_ext_event_sheet_recognizer_js["recognizer.js"]
         n_ext_history["history"]
         n_ext_insights["insights"]
+        n_ext_json_language_features_jsonServerMain_js["jsonServerMain.js"]
+        n_ext_markdown_language_features_serverWorkerMain_js["serverWorkerMain.js"]
         n_ext_notes["notes"]
         n_ext_running["running"]
+        n_ext_typescript_language_features_TS_semantic_server["TS semantic server"]
+        n_ext_typescript_language_features_TS_syntax_server["TS syntax server"]
         n_exthost_LocalWebWorker_0["Worker extension host"]
-        n_nested_TS_semantic_server["TS semantic server"]
-        n_nested_TS_syntax_server["TS syntax server"]
-        n_nested_jsonServerMain_js["jsonServerMain.js"]
-        n_nested_recognizer_js["recognizer.js"]
-        n_nested_serverWorkerMain_js["serverWorkerMain.js"]
       end
     end
   end
@@ -358,46 +393,48 @@ flowchart LR
   end
   n_bablr <-.->|"IndexedDB"| n_idb
   n_bablr <==> n_workbench
+  n_bridge <==> n_debug_worker
+  n_bridge <==> n_workbench
   n_channel_vscode_indexedDB_vscode_userdata_changes <-.->|"VS Code user-data sync"| n_workbench
   n_channel_vscode_web_state_db_global <-.->|"VS Code storage sync"| n_workbench
   n_channel_vscode_web_state_db_global_shared <-.->|"VS Code storage sync"| n_workbench
   n_debug_mcp <==> n_root
   n_debug_worker <-.->|"in-realm calls"| n_server__
-  n_debug_worker <==> n_pod
+  n_ext_bridge -->|"reads"| n_store__git__file_
+  n_ext_bridge -->|"reads"| n_store__silo__gitignore
+  n_ext_bridge -->|"reads, writes"| n_store__silo__file__json
+  n_ext_bridge -->|"reads, writes"| n_store__silo_capabilities__file__json
+  n_ext_bridge -->|"reads, writes"| n_store__silo_local__file__json
+  n_ext_bridge -->|"reads, writes"| n_store__silo_policy__file__json
+  n_ext_bridge <-.->|"commands"| n_ext_bridge
+  n_ext_bridge <-.->|"commands"| n_ext_event_sheet
+  n_ext_bridge <-.->|"commands"| n_ext_insights
+  n_ext_bridge <-.->|"commands"| n_ext_notes
+  n_ext_bridge <-.->|"commands"| n_ext_tsval
   n_ext_capabilities -->|"reads, writes"| n_store__silo__file__json
   n_ext_capabilities <-.->|"commands"| n_ext_vscode
+  n_ext_cspell_cspell <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_eslint <-.->|"commands"| n_ext_vscode
   n_ext_event_sheet <-.->|"commands"| n_ext_vscode
-  n_ext_event_sheet <-.->|"commands"| n_ext_worker_pod
+  n_ext_event_sheet_recognizer_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_history -->|"reads"| n_store__silo_runs__file__jsonl
   n_ext_history <-.->|"commands"| n_ext_vscode
   n_ext_insights -->|"reads"| n_store__silo_evidence____file__jsonl
   n_ext_insights -->|"reads"| n_store__silo_local____file__jsonl
   n_ext_insights <-.->|"commands"| n_ext_vscode
-  n_ext_insights <-.->|"commands"| n_ext_worker_pod
+  n_ext_json_language_features_jsonServerMain_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
+  n_ext_markdown_language_features_serverWorkerMain_js <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_ext_notes -->|"reads"| n_store__git__file_
   n_ext_notes -->|"reads"| n_store__silo__gitattributes
   n_ext_notes -->|"reads"| n_store__silo_evidence____file__jsonl
   n_ext_notes -->|"reads, writes"| n_store__silo_notes____file__jsonl
   n_ext_notes <-.->|"commands"| n_ext_vscode
-  n_ext_notes <-.->|"commands"| n_ext_worker_pod
   n_ext_tsval <-.->|"commands"| n_ext_vscode
-  n_ext_tsval <-.->|"commands"| n_ext_worker_pod
-  n_ext_worker_pod -->|"reads"| n_store__git__file_
-  n_ext_worker_pod -->|"reads"| n_store__silo__gitignore
-  n_ext_worker_pod -->|"reads, writes"| n_store__silo__file__json
-  n_ext_worker_pod -->|"reads, writes"| n_store__silo_capabilities__file__json
-  n_ext_worker_pod -->|"reads, writes"| n_store__silo_local__file__json
-  n_ext_worker_pod -->|"reads, writes"| n_store__silo_policy__file__json
-  n_ext_worker_pod <-.->|"commands"| n_ext_worker_pod
+  n_ext_typescript_language_features_TS_semantic_server <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
+  n_ext_typescript_language_features_TS_syntax_server <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
   n_exthost_LocalProcess_0 <-.->|"RPCProtocol"| n_workbench
   n_exthost_LocalWebWorker_0 <-.->|"HTTP"| n_sw
   n_exthost_LocalWebWorker_0 <-.->|"RPCProtocol"| n_workbench
-  n_exthost_LocalWebWorker_0 <-.->|"extension defined (LSP, tsserver)"| n_nested_TS_semantic_server
-  n_exthost_LocalWebWorker_0 <-.->|"extension defined (LSP, tsserver)"| n_nested_TS_syntax_server
-  n_exthost_LocalWebWorker_0 <-.->|"extension defined (LSP, tsserver)"| n_nested_jsonServerMain_js
-  n_exthost_LocalWebWorker_0 <-.->|"extension defined (LSP, tsserver)"| n_nested_recognizer_js
-  n_exthost_LocalWebWorker_0 <-.->|"extension defined (LSP, tsserver)"| n_nested_serverWorkerMain_js
   n_exthost_iframe <-.->|"bootstrap handshake"| n_workbench
   n_idb <-.->|"IndexedDB"| n_workbench
   n_idb <-.->|"IndexedDB"| n_zenfs
@@ -410,8 +447,6 @@ flowchart LR
   n_node <-.->|"zen-fs"| n_zenfs
   n_node <==> n_provoke
   n_node <==> n_workbench
-  n_pod <-.->|"LSP (JSON-RPC)"| n_worker_server_host
-  n_pod <==> n_workbench
   n_preview__ <-.->|"HTTP"| n_sw
   n_preview__ <==> n_shell
   n_provoke <-.->|"zen-fs"| n_zenfs
@@ -441,24 +476,23 @@ flowchart LR
   n_workbench <-.->|"WebWorker protocol / postMessage"| n_worker_editorWorkerService
   n_workbench <-.->|"WebWorker protocol / postMessage"| n_worker_perfBaseline
   n_workbench <-.->|"zen-fs"| n_zenfs
-  n_worker_server_host <-.->|"zen-fs"| n_zenfs
 ```
 
 | Store | Written by | Read by |
 | --- | --- | --- |
-| `.git/<file>` | Workbench | Workbench, notes, worker-pod |
+| `.git/<file>` | Workbench | Workbench, bridge, notes |
 | `.git/objects/…/<file>` | Workbench | Workbench |
 | `.git/refs/…/<file>` | Workbench | Workbench |
 | `.silo/.gitattributes` | Workbench | Workbench, notes |
-| `.silo/.gitignore` | Workbench | Workbench, worker-pod |
-| `.silo/<file>.json` | Workbench, capabilities, worker-pod | Workbench, capabilities, worker-pod |
-| `.silo/capabilities/<file>.json` | Workbench, worker-pod | Workbench, worker-pod |
+| `.silo/.gitignore` | Workbench | Workbench, bridge |
+| `.silo/<file>.json` | Workbench, bridge, capabilities | Workbench, bridge, capabilities |
+| `.silo/capabilities/<file>.json` | Workbench, bridge | Workbench, bridge |
 | `.silo/evidence/…/<file>.jsonl` | Workbench | Workbench, insights, notes |
 | `.silo/local/…/<file>.bin` | Workbench | — |
 | `.silo/local/…/<file>.jsonl` | Workbench | Workbench, insights |
-| `.silo/local/<file>.json` | Workbench, worker-pod | Workbench, worker-pod |
+| `.silo/local/<file>.json` | Workbench, bridge | Workbench, bridge |
 | `.silo/notes/…/<file>.jsonl` | Workbench, notes | Workbench, notes |
-| `.silo/policy/<file>.json` | Workbench, worker-pod | Workbench, worker-pod |
+| `.silo/policy/<file>.json` | Workbench, bridge | Workbench, bridge |
 | `.silo/runs/<file>.jsonl` | Workbench | Workbench, history |
 | `IndexedDB bablr` | BABLR worker | BABLR worker, Workbench |
 | `IndexedDB silo-local` | Workspace (zen-fs) | Workspace (zen-fs) |
@@ -471,20 +505,21 @@ flowchart LR
 | Hub | Component | Serves and hears |
 | --- | --- | --- |
 | BABLR worker | bablr | `bablr.editGroups()`, `bablr.follow()`, `bablr.pick()`, `bablr.refer()`, `bablr.resolve()`, `bablr.spans()`, `bablr.verdict()` |
+| Bridge | bridge | `bridge.ready` |
+| Bridge | capability | `capability.decide()`, `capability.record()`, `capability.recorded()` |
+| Bridge | debug | `debug.breakpoints()`, `debug.command`, `debug.explore()`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.pace()`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.stdin()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
+| Bridge | git | `git.changed` |
+| Bridge | node | `node.stdin.*` |
+| Bridge | production | `production.exit.*`, `production.launch`, `production.out.*` |
+| Bridge | rules | `rules.given()`, `rules.list()`, `rules.set()` |
+| Bridge | run | `run.effects()` |
+| Bridge | runtime | `runtime.fs.attach()` |
+| Bridge | stops | `stops.preview` |
+| Bridge | tasks | `tasks.list()`, `tasks.run()` |
+| Debug worker | virtual | `virtual.debug.*()` |
 | Dev-server worker | preview | `preview.close`, `preview.provoke()`, `preview.start()`, `preview.stops()`, `preview.version()` |
 | Dev-server worker | virtual | `virtual.request()` |
 | Dev-server worker | workspace | `workspace.changed` |
-| Pod | capability | `capability.decide()`, `capability.record()`, `capability.recorded()` |
-| Pod | debug | `debug.breakpoints()`, `debug.command`, `debug.explore()`, `debug.launch`, `debug.session.*.decide()`, `debug.session.*.pace()`, `debug.session.*.setValue()`, `debug.session.*.state()`, `debug.session.*.stdin()`, `debug.session.*.step()`, `debug.session.*.stop()`, `debug.sessions()`, `debug.start()`, `debug.stop` |
-| Pod | git | `git.changed` |
-| Pod | node | `node.stdin.*` |
-| Pod | pod | `pod.ready` |
-| Pod | production | `production.exit.*`, `production.launch`, `production.out.*` |
-| Pod | rules | `rules.given()`, `rules.list()`, `rules.set()` |
-| Pod | run | `run.effects()` |
-| Pod | runtime | `runtime.fs.attach()` |
-| Pod | stops | `stops.preview` |
-| Pod | tasks | `tasks.list()`, `tasks.run()` |
 | Preview :* | evidence | `evidence.flush` |
 | Preview :* | tap | `tap.worker.decide()`, `tap.worker.log` |
 | Root | capability | `capability.decide.*()`, `capability.record.*()` |
@@ -562,7 +597,7 @@ The cosmetic-diff feature is the running example — and its git/SCM stack shows
 - `git-engine.ts` + `git-service.ts` — **browser parity for desktop's built-in git** (rule 2b): desktop ships the git
   extension; the browser has no `git` binary, so we rebuilt git over isomorphic-git + zen-fs. The engine lives
   **browser-side** (workbench realm) behind one service on the hub (`git.status`/`git.file`/`git.commit`, `git.changed`),
-  with two faces: VS Code's Source Control view (worker-pod's `source-control.ts`, the bridge's crossing) and the
+  with two faces: VS Code's Source Control view (`extensions/bridge/source-control.ts`, since it crosses the hub) and the
   shell's GitHub-Desktop review panel (`git-panel`). We do not ship SCM to desktop; desktop already has it.
   (`git-engine`'s direct `@zenfs/core` import is fine *here* — it's browser-only.)
 - `bablr-worker.ts` + the cosmetic badge — the **novel** piece (rule 2): desktop has nothing like it. It is

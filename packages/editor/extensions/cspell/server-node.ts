@@ -6,7 +6,7 @@
  * no node backend. It speaks LSP over the worker's message channel (`vscode-languageserver/browser`), so to
  * the client it's an ordinary worker server.
  *
- * cspell-lib and the LSP library are bundled in (see entry.config.ts). The dictionary is too big to bundle, so
+ * cspell-lib and the LSP library are bundled in (bundledNodeServer in build.ts). The dictionary is too big to bundle, so
  * server-host fetches it and writes it to the VFS at DICT_PATH before this server runs.
  */
 import {

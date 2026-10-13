@@ -2,7 +2,7 @@
  * Each bundled extension's commands, as the architecture view discovers them (DISCOVERED-ARCHITECTURE.md): the build hands
  * every extension a `vscode` whose `commands` are these (build.ts, commandTap), so what it registers and what it calls is
  * counted — by the extension, with nothing in its own code. Each extension host keeps one tally for every extension in
- * it, and sends its totals to worker-pod (`editor.arch.commands`) a moment after they change; worker-pod puts them on the
+ * it, and sends its totals to the bridge (`editor.arch.commands`) a moment after they change; the bridge puts them on the
  * view as extensions and the commands between them.
  *
  * `typescript.tsserverRequest` is told with the request it carries (`_types.at`, `_eslint.fixAll`): a tsserver plugin's
@@ -14,7 +14,7 @@
 import type * as vscodeApi from "vscode";
 import { storeShape } from "../shared/architecture-zenfs";
 
-/** worker-pod's command that takes a host's totals; never counted itself. */
+/** the bridge's command that takes a host's totals; never counted itself. */
 export const ARCH_COMMANDS = "editor.arch.commands";
 
 /** How long after a change a host's totals go out. */

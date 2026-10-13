@@ -1,7 +1,7 @@
 /**
  * Span annotations: placing something on code so it stays on that code through edits, reformatting, a branch switch and
  * a move to another file (SPAN-ANNOTATIONS.md in brianjenkins94/editor). The editor's BABLR does the work — one worker,
- * its parses cached by content — and an extension reaches it through three commands worker-pod registers, which these
+ * its parses cached by content — and an extension reaches it through three commands the bridge registers, which these
  * call:
  *
  * - `spans(source)`: the spans of a text an annotation can attach to — each one's id (a content-addressed hash, so it
@@ -31,7 +31,7 @@
  * found by their id alone — one that's lost fades rather than being looked for. `options.types` — by span id, its
  * TypeScript type and the types seen at run time — lets a match prefer spans of the same type.
  *
- * Without the editor (no worker-pod, as on a desktop build today) each call answers `undefined`.
+ * Without the editor (no the bridge, as on a desktop build today) each call answers `undefined`.
  */
 
 import type { Resolution, SpanRef } from "@brianjenkins94/util/silo/annotations";

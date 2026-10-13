@@ -1,8 +1,8 @@
 /**
  * Git service — exposes `git-engine` (+ the cosmetic classifier) over the hub: the one git the editor has, read by the
- * shell's GitHub-Desktop-style review panel and by VS Code's Source Control view (worker-pod's source-control.ts). The
+ * shell's GitHub-Desktop-style review panel and by VS Code's Source Control view (the bridge's source-control.ts). The
  * engine is vscode-free, so each face reads it over the hub without knowing about the other. Runs in the workbench
- * realm (where zen-fs lives); the shell reaches it shell → app → workbench, the Source Control view pod → workbench.
+ * realm (where zen-fs lives); the shell reaches it shell → app → workbench, the Source Control view bridge → workbench.
  */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";

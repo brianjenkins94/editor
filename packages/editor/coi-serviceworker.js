@@ -71,7 +71,7 @@ function recordPreviewRequest(event, pathname, label, responsePromise) {
 }
 
 // The capability gate. The SW holds NO policy: it asks the ext host's decision endpoint over the hub — swHub →
-// root → workbench → podHub reaches worker-pod's "capability.decide" serve, which owns the popup / grant store /
+// root → workbench → bridgeHub reaches the bridge's "capability.decide" serve, which owns the popup / grant store /
 // redline and resolves a preview's port to the run that owns it — then allows or blocks. It FAILS CLOSED: if no
 // decider can be reached (the hub isn't linked yet after a restart and doesn't link within RESPONDER_WAIT_MS, or the
 // call errors), the answer is deny. A long timeout, so a deliberating user isn't cut off.
@@ -131,7 +131,7 @@ async function gateAndFetch(event, request, requestUrl) {
 // The largest body recorded: a result to give back, not a download.
 const RECORD_MAX = 65536;
 
-// Send a preview's fetch result to its tab (capability.record.<tab> → the pod's store): a JSON body parsed, a text body
+// Send a preview's fetch result to its tab (capability.record.<tab> → the bridge's store): a JSON body parsed, a text body
 // as text — not an error, not a body too large or not text. Best-effort: a result not recorded is only not there to give.
 async function record(event, url, response) {
 	if (response === undefined) {

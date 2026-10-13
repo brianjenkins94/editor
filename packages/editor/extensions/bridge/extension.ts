@@ -1,15 +1,9 @@
 /**
- * Worker Pod — the manager extension (runs in the extension host, LocalProcess) that hosts a pod of workers
- * behind one extension. Today it runs NODE language servers off-thread and connects each to the editor with
- * a vscode-languageclient. Debuggers are extensions of their own (tsval: extensions/tsval) — this one gives each the
- * workspace runtime (its export) and reads their runs the one way (debug-events.ts).
- *
- * Each language server worker (a server-host) runs under an almostnode runtime on a zen-fs VFS, so a
- * node-only server (cspell reading its dictionary) works in-browser. It's built + served separately
- * (lsp.config.ts → /__vscode__/lsp/, with COEP) as a normal module graph — not a blob — because almostnode
- * can't be monolithically inlined. The extension can't emit/locate those assets from its data:-URL self, so
- * it spawns them by URL relative to the workbench origin (`location.href`). (eslint moved OUT of this pod to a
- * tsserver plugin — extensions/eslint — that reuses tsserver's typescript; only cspell remains here.)
+ * The bridge between the editor's core runtime and VS Code (runs in the LocalProcess extension host,
+ * which shares the workbench's realm): core's vscode API is this extension's, and everything of core's that VS Code
+ * shows or drives crosses here — the hub's uplink, every debugger's run-contract events and capability stops, the
+ * workspace runtime it gives a debugger (tsval: extensions/tsval), tasks, Source Control, the run picker. Feature
+ * extensions use the public API only; this is the one that touches the hub.
  */
 import type { CommandTotals } from "../command-tap";
 import type { CapabilityCall } from "./capabilities/decide";
@@ -18,9 +12,7 @@ import { observe } from "@brianjenkins94/observability";
 
 import { provideWorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
 import * as vscode from "vscode";
-import { LanguageClient } from "vscode-languageclient/browser";
-import { identifyWorker } from "../../shared/architecture-ids";
-import { storeNode, ZENFS_NODE } from "../../shared/architecture-zenfs";
+import { storeNode } from "../../shared/architecture-zenfs";
 import { takeEffects } from "../../shared/capabilities/run-effects";
 import { recordedResult, recordResult } from "../../shared/capabilities/silo-store";
 import { ARCH_COMMANDS } from "../command-tap";
@@ -32,110 +24,42 @@ import { registerDebugToolbar } from "./debug-toolbar";
 import { registerLaunch } from "./launch";
 import { registerLiveRuns } from "./live-run";
 import { registerMetricsBridge } from "./metrics-bridge";
-import { podHub, workspace, workspaceRuntime } from "./pod";
+import { bridgeHub, workspace, workspaceRuntime } from "./hub";
 import { registerProductionDebug } from "./production-adapter";
 import { registerReplay } from "./replay";
 import { serveRuntimeFiles } from "./runtime-fs";
 import { registerSourceControl } from "./source-control";
 import { registerTasks } from "./tasks";
 
-/** This extension's exports — the pod->workbench half of the hub uplink (ext host is an isolated realm, so it
+/** This extension's exports — the bridge->workbench half of the hub uplink (ext host is an isolated realm, so it
  *  rides the exported API rather than a window transport). See activate + workbench-entry's bridge. */
-export interface PodBridge {
+export interface BridgeExports {
 	"toWorkbench": vscode.Event<unknown>;
 	"fromWorkbench": (message: unknown) => void;
-	/** M3b: the workbench hands over its workspace SharedArrayBuffer (zen-fs SingleBuffer). We forward it to each
-	 *  LSP worker over its control port, so they mount the SAME filesystem at /workspace. SAB survives the exports
-	 *  marshaling (spike-verified). No-op off cross-origin isolation (buffer is undefined). */
+	/** The workbench hands over its workspace SharedArrayBuffer (zen-fs SingleBuffer): what a debug run's worker mounts
+	 *  at /workspace (the workspace runtime's `buffer`). SAB survives the exports marshaling (spike-verified). No-op off
+	 *  cross-origin isolation (buffer is undefined). */
 	"attachWorkspaceBuffer": (buffer: unknown) => void;
 }
 
-interface ServerSpec {
-	"id": string;
-	"name": string;
-	"workerFile": string;
-	"documentSelector": { "language": string }[];
-}
-
-// One worker + client per server. cspell spell-checks prose/identifiers; eslint lints JS/TS. The selectors
-// MUST include the react language ids (typescriptreact/javascriptreact) — the demo opens on App.tsx, whose
-// languageId is `typescriptreact`, not `typescript`; without them the client never forwards .tsx/.jsx docs to
-// the server and no diagnostics ever appear.
-const JS_TS_LANGUAGES = [
-	{ "language": "typescript" },
-	{ "language": "typescriptreact" },
-	{ "language": "javascript" },
-	{ "language": "javascriptreact" }
-];
-const SERVERS: ServerSpec[] = [
-	{ "id": "cspell", "name": "cspell (almostnode)", "workerFile": "./lsp/server-host.js", "documentSelector": [...JS_TS_LANGUAGES, { "language": "plaintext" }, { "language": "markdown" }, { "language": "json" }] }
-	// eslint MOVED to a TS server plugin (extensions/eslint) that runs inside tsserver and reuses tsserver's own
-	// `ts` — no almostnode host, no bundled typescript copy. The old almostnode server (server-host-eslint) is
-	// retired; see workbench-entry's eslint extension registration.
-];
-
-const clients: LanguageClient[] = [];
-// One control port per spawned LSP worker (the workbench end of a MessageChannel), used only to hand the worker
-// the shared workspace SharedArrayBuffer (M3b) — separate from the LSP JSON-RPC channel. `workspace.buffer` (pod.ts) is
-// the SAB once the workbench provides it; a worker that spawns after gets it immediately.
-const controlPorts: { "port": MessagePort; "worker": string }[] = [];
-// The pod's logger (its spans/records ride podHub), its uncaught errors, and its hub's topology/traffic — not its
+// The bridge's logger (its spans/records ride bridgeHub), its uncaught errors, and its hub's topology/traffic — not its
 // network: this extension host shares the workbench realm, whose network is probed there.
-const { "log": podLog, architecture } = observe(podHub);
+const { "log": bridgeLog, architecture } = observe(bridgeHub);
 
-/** Hand a server worker the workspace buffer; it mounts it at /workspace (a worker without a reporter of its own,
- *  so the mount is put on the diagram from here). */
-function shareWorkspace(control: { "port": MessagePort; "worker": string }, buffer: SharedArrayBuffer): void {
-	control.port.postMessage({ "buffer": buffer }); // → the worker's receiveSharedWorkspace → mount at /workspace
-	architecture.record(control.worker, ZENFS_NODE, "lifecycle", "mount /workspace (shared " + Math.round(buffer.byteLength / 1048576) + " MB)");
-}
+export function activate(context: vscode.ExtensionContext): BridgeExports {
+	const rpc = createRpcClient(bridgeHub);
 
-function startServer(context: vscode.ExtensionContext, spec: ServerSpec): void {
-	// The workbench iframe's origin; the LocalProcess ext host shares it. The worker is served next to
-	// host.html under /__vscode__/lsp/ (lsp.config.ts).
-	const worker = new Worker(new URL(spec.workerFile, location.href), { "type": "module" });
-
-	worker.addEventListener("error", (event) => {
-		console.error(`[worker-pod] ${spec.id} worker error:`, event.message, "@", event.filename + ":" + event.lineno);
-	});
-
-	// Hand the worker a dedicated control port BEFORE the LSP client attaches, so the shared-workspace SAB rides
-	// its own channel (never the LSP one). If the buffer's already here, send it now; else attachWorkspaceBuffer does.
-	const channel = new MessageChannel();
-
-	worker.postMessage({ "type": "ws-control" }, [channel.port2]);
-	const control = { "port": channel.port1, "worker": identifyWorker(spec.workerFile)?.id ?? "worker:" + spec.id };
-
-	controlPorts.push(control);
-
-	if (workspace.buffer !== undefined) {
-		shareWorkspace(control, workspace.buffer);
-	}
-
-	const client = new LanguageClient(`lsp-${spec.id}`, spec.name, worker, { "documentSelector": spec.documentSelector });
-
-	clients.push(client);
-	client.start().then(() => {
-		console.log(`[worker-pod] ${spec.id} language client started`);
-	}).catch((error: unknown) => {
-		console.error(`[worker-pod] ${spec.id} client start failed`, error);
-	});
-}
-
-export function activate(context: vscode.ExtensionContext): PodBridge {
-	const rpc = createRpcClient(podHub);
-
-	// The pod->root UPLINK. The ext host is an isolated `extension-file://` realm with no window path to the
-	// page, so podHub can't use windowTransport. Instead it rides the extension's EXPORTED API (spike-verified:
-	// ext-host EventEmitter events + functions marshal bidirectionally to the workbench): podHub links a
+	// The bridge->root UPLINK. The ext host is an isolated `extension-file://` realm with no window path to the
+	// page, so bridgeHub can't use windowTransport. Instead it rides the extension's EXPORTED API (spike-verified:
+	// ext-host EventEmitter events + functions marshal bidirectionally to the workbench): bridgeHub links a
 	// transport whose `send` fires an event the workbench receives, and whose `listen` is fed by a function the
 	// workbench calls. workbench-entry links its own hub to `toWorkbench`/`fromWorkbench` and relays to the top
-	// page over windowTransport. Standalone (no export consumer) → podHub is just a root; the pod still works.
+	// page over windowTransport. Standalone (no export consumer) → bridgeHub is just a root; the bridge still works.
 	const incoming = new vscode.EventEmitter<unknown>();
 	const outgoing = new vscode.EventEmitter<unknown>();
 
 	context.subscriptions.push(incoming, outgoing, {
-		"dispose": podHub.link({
+		"dispose": bridgeHub.link({
 			"send": (message) => { outgoing.fire(message); },
 			"listen": (onMessage) => {
 				const subscription = incoming.event(onMessage);
@@ -145,11 +69,11 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		})
 	});
 
-	// Workers link UP to podHub and announce themselves on `pod.ready`; log each join so pod membership shows
-	// up in the collector (as a `[pod]` record).
+	// Workers link UP to bridgeHub and announce themselves on `bridge.ready`; log each join so bridge membership shows
+	// up in the collector (as a `[bridge]` record).
 	context.subscriptions.push({
-		"dispose": podHub.subscribe("pod.ready", (data) => {
-			podLog.info("worker joined", data as Record<string, unknown>);
+		"dispose": bridgeHub.subscribe("bridge.ready", (data) => {
+			bridgeLog.info("worker joined", data as Record<string, unknown>);
 		})
 	});
 	// The metrics plane's samples, for VS Code's side (the insights monitor reads them by command).
@@ -161,11 +85,11 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 	// ENFORCE — the single capability DECISION ENDPOINT (see ../capabilities/decide). Every thin interceptor
 	// (the service-worker net gate; the WS/WebRTC preview shim; the almostnode fs/exec shim hook) full-round-trips
-	// here over the hub: the SW's swHub → root → workbench → podHub reaches this serve, and the popup/grant-store/
+	// here over the hub: the SW's swHub → root → workbench → bridgeHub reaches this serve, and the popup/grant-store/
 	// redline logic all lives here (the ext host has vscode + workspace.fs), never in an interceptor. A call that
 	// carries a `port` (the preview shim) but no `runId` gets its runId resolved from the port here, so the record
 	// attributes to the right run. Returns true=allow, false=deny.
-	context.subscriptions.push({ "dispose": serve(podHub, "capability.decide", (data) => {
+	context.subscriptions.push({ "dispose": serve(bridgeHub, "capability.decide", (data) => {
 		const call = data as CapabilityCall;
 
 		if (call.runId === undefined && typeof call.port === "number") {
@@ -178,7 +102,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// What a call returned when it ran for real — a preview's fetch, recorded by the service worker's net gate — kept so
 	// a rule can give it back in the debugger instead of the call (RULES.md, slice 2); and asked for by the margin's
 	// Rule… at a capability stop, to prefill it.
-	context.subscriptions.push({ "dispose": serve(podHub, "capability.record", async (data) => {
+	context.subscriptions.push({ "dispose": serve(bridgeHub, "capability.record", async (data) => {
 		const { capability, resource, value } = (data ?? {}) as { "capability"?: unknown; "resource"?: unknown; "value"?: unknown };
 
 		if (typeof capability === "string" && typeof resource === "string") {
@@ -186,7 +110,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		}
 
 		return null;
-	}) }, { "dispose": serve(podHub, "capability.recorded", async (data) => {
+	}) }, { "dispose": serve(bridgeHub, "capability.recorded", async (data) => {
 		const { capability, resource } = (data ?? {}) as { "capability"?: unknown; "resource"?: unknown };
 
 		return typeof capability === "string" && typeof resource === "string" ? await recordedResult(capability, resource) ?? null : null;
@@ -197,14 +121,14 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// workers' file calls are answered by runtime-fs.ts, a debugger's anywhere (the web worker host's come by core's
 	// bootstrap there).
 	provideWorkspaceRuntime(workspaceRuntime());
-	serveRuntimeFiles(context, podHub, podLog);
+	serveRuntimeFiles(context, bridgeHub, bridgeLog);
 	// What every debugger's runs tell core — tsval's, and another extension's (`run.debugger`: an interpreter plugged in
 	// from editor-contrib) — the run contract's events, read the one way; and what Run means for each (debug-events.ts).
 	registerDebugEvents(context);
 	// Every debugger's capability stops: the question in the margin, the answer back to the run (capability-stops.ts).
-	registerCapabilityStops(context, podHub);
+	registerCapabilityStops(context, bridgeHub);
 	// Every debugger's sessions driven over the hub (debug-mcp's debug_* tools): followed and stepped through DAP.
-	serveDebugControl(context, podHub);
+	serveDebugControl(context, bridgeHub);
 	// What there is to run, as tasks run by core's shell (tasks.ts); and the shell's run picker, from them (launch.ts).
 	registerTasks(context);
 	registerLaunch(context);
@@ -296,14 +220,14 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 	// The production debug type — presents an almostnode run (the vite preview) as a debug session with a
 	// run-control controller (Stop + Debug Console). The run's driver publishes `production.launch` (federates
-	// to podHub); we start its session (a launch, so VS Code's toolbar says Stop), and the adapter rides the run's
+	// to bridgeHub); we start its session (a launch, so VS Code's toolbar says Stop), and the adapter rides the run's
 	// `production.*` channels.
-	registerProductionDebug(context, podHub);
+	registerProductionDebug(context, bridgeHub);
 
 	// Mirror the active debug session's toolbar (state out, commands in) so the preview titlebar can host a replica
-	// of VS Code's in-iframe debug controls. See extensions/worker-pod/debug-toolbar.ts + shell-preview.ts.
-	registerDebugToolbar(context, podHub);
-	context.subscriptions.push({ "dispose": podHub.subscribe("production.launch", (data) => {
+	// of VS Code's in-iframe debug controls. See extensions/bridge/debug-toolbar.ts + shell-preview.ts.
+	registerDebugToolbar(context, bridgeHub);
+	context.subscriptions.push({ "dispose": bridgeHub.subscribe("production.launch", (data) => {
 		const info = data as { "id"?: string; "name"?: string; "port"?: number; "target"?: string };
 
 		if (typeof info.id !== "string") {
@@ -328,7 +252,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 		previewRunByPort.set(port, id);
 
-		const off = podHub.subscribe(`production.exit.${id}`, () => {
+		const off = bridgeHub.subscribe(`production.exit.${id}`, () => {
 			off();
 			previewRunByPort.delete(port);
 		});
@@ -336,7 +260,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 
 	// A run's effects, as its envelope is written (evidence.ts): what it made, was denied, skipped or was given — and gone
 	// from here once taken.
-	context.subscriptions.push({ "dispose": serve(podHub, "run.effects", (data) => {
+	context.subscriptions.push({ "dispose": serve(bridgeHub, "run.effects", (data) => {
 		const { id } = (data ?? {}) as { "id"?: unknown };
 
 		return typeof id === "string" ? takeEffects(id) : [];
@@ -347,7 +271,7 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 	// stops). Relay the session's end back on the `node.exit.<runId>` channel the terminal awaits; `debug.stop`
 	// (Ctrl-C) stops it. The runId rides in the launch config so start/terminate can correlate.
 	//
-	// Guarded end-to-end: this must NEVER break activate() (a failed worker-pod activation hangs the whole boot).
+	// Guarded end-to-end: this must NEVER break activate() (a failed bridge activation hangs the whole boot).
 	// If any vscode.debug event API is missing here, we skip wiring AND fail `debug.launch` fast so the terminal
 	// (which awaits node.exit) doesn't hang.
 	try {
@@ -376,12 +300,12 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		}
 
 		context.subscriptions.push(
-			{ "dispose": podHub.subscribe("debug.launch", (data) => {
+			{ "dispose": bridgeHub.subscribe("debug.launch", (data) => {
 				const info = data as { "runId": string; "file": string; "args"?: string[]; "cwd"?: string; "env"?: Record<string, string> };
 
 				// Can't track session end → decline: the terminal says the debugger couldn't take it.
 				if (!canTrack) {
-					podHub.publish(`debug.declined.${info.runId}`, {});
+					bridgeHub.publish(`debug.declined.${info.runId}`, {});
 
 					return;
 				}
@@ -394,11 +318,11 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file.split("/").pop() ?? info.file}`, "program": info.file, ...info.args !== undefined && info.args.length > 0 ? { "args": info.args } : {}, ...info.cwd === undefined ? {} : { "cwd": info.cwd }, ...info.env === undefined ? {} : { "env": info.env }, "internalConsoleOptions": "neverOpen", "__runId": info.runId, "__startedBy": "terminal" }, { "suppressDebugView": true });
 
 					if (started !== true) {
-						podHub.publish(`debug.declined.${info.runId}`, {}); // start failed → the terminal says so
+						bridgeHub.publish(`debug.declined.${info.runId}`, {}); // start failed → the terminal says so
 					}
 				})();
 			}) },
-			{ "dispose": podHub.subscribe("debug.stop", (data) => {
+			{ "dispose": bridgeHub.subscribe("debug.stop", (data) => {
 				const session = debugSessionsByRunId.get((data as { "runId": string }).runId);
 
 				if (session !== undefined && typeof debugApi.stopDebugging === "function") {
@@ -407,35 +331,17 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 			}) }
 		);
 	} catch (error) {
-		podLog.error("auto-attach wiring failed", { "error": String(error) });
+		bridgeLog.error("auto-attach wiring failed", { "error": String(error) });
 	}
 
-	for (const spec of SERVERS) {
-		startServer(context, spec);
-	}
-
-	context.subscriptions.push({
-		"dispose": () => {
-			for (const client of clients) {
-				client.stop().catch(() => undefined);
-			}
-		}
-	});
-
-	// The pod->workbench half of the uplink, as this extension's EXPORTS: workbench-entry links its hub to
+	// The bridge->workbench half of the uplink, as this extension's EXPORTS: workbench-entry links its hub to
 	// `toWorkbench` (ext host → workbench) and `fromWorkbench` (workbench → ext host).
 	const attachWorkspaceBuffer = (buffer: unknown): void => {
 		if (typeof SharedArrayBuffer === "undefined" || !(buffer instanceof SharedArrayBuffer)) {
-			return; // no COI / not shared — the workers keep their local InMemory FS
+			return; // no COI / not shared — a debug run's worker keeps its own InMemory FS
 		}
 
 		workspace.buffer = buffer;
-
-		for (const control of controlPorts) {
-			shareWorkspace(control, buffer);
-		}
-
-		podLog.info("workspace buffer shared with LSP workers", { "workers": controlPorts.length, "mb": Math.round(buffer.byteLength / 1048576) });
 	};
 
 	return {
@@ -445,8 +351,4 @@ export function activate(context: vscode.ExtensionContext): PodBridge {
 		},
 		"attachWorkspaceBuffer": attachWorkspaceBuffer
 	};
-}
-
-export function deactivate(): Promise<void> {
-	return Promise.all(clients.map((client) => client.stop())).then(() => undefined);
 }

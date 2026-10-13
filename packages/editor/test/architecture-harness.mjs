@@ -19,11 +19,12 @@ import { until } from "@brianjenkins94/util/until";
 export const URL_UNDER_TEST = process.env.ARCH_URL ?? "http://localhost:5173/";
 export const TIMEOUT_MS = 120_000;
 /** The realms a booted editor has (the smoke test's `boot`), and how long a session waits for them before giving up. */
-const BOOT_REALMS = ["shell", "root", "sw", "workbench", "pod", "node"];
+const BOOT_REALMS = ["shell", "root", "sw", "workbench", "bridge", "node"];
 const BOOT_TIMEOUT_MS = 90_000;
 
 /** Where the page's debug-mcp socket (:7378) is relayed to: this checkout's debug-mcp (`debugMcp: true` starts one; with
- *  `debugMcp: "external"` the test runs its own there — e.g. in-process, to read its store). */
+ *  `debugMcp: "external"` the test runs its own there — e.g. in-process, to read its store). Suite files that run at the same
+ *  time each want their own (`debugMcpPort`). */
 export const DEBUG_MCP_PORT = 7399;
 
 async function reachable(url) {
@@ -112,8 +113,10 @@ export async function startSession(options = {}) {
 		processes.push(await startProcess("npx", ["tsx", "dev.ts"], new URL("..", import.meta.url), "Local:"));
 	}
 
+	const debugMcpPort = options.debugMcpPort ?? DEBUG_MCP_PORT;
+
 	if (options.debugMcp === true) {
-		processes.push(await startProcess("npx", ["tsx", "src/bin.ts", "--port", String(DEBUG_MCP_PORT)], new URL("../../debug-mcp/", import.meta.url), "listening"));
+		processes.push(await startProcess("npx", ["tsx", "src/bin.ts", "--port", String(debugMcpPort)], new URL("../../debug-mcp/", import.meta.url), "listening"));
 	}
 
 	// (`chromium`: Playwright launch options for the browser — the performance suite's full build and eager measurement.)
@@ -122,7 +125,7 @@ export async function startSession(options = {}) {
 
 	if (options.debugMcp === true || options.debugMcp === "external") {
 		// The page's debug-mcp socket (:7378), relayed to this checkout's debug-mcp.
-		await relayWebSocket(context, /:7378/u, `ws://localhost:${DEBUG_MCP_PORT}`);
+		await relayWebSocket(context, /:7378/u, `ws://localhost:${debugMcpPort}`);
 	} else {
 		await context.routeWebSocket(/:7378/u, (route) => {
 			route.close();

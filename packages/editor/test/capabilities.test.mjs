@@ -49,7 +49,7 @@ test("the canary stands in for every gated method, inertly", async () => {
 });
 
 test("identical decisions asked at once share one answer — one prompt, not one per request", async () => {
-	const { coalesce } = await import("../extensions/worker-pod/capabilities/coalesce.ts");
+	const { coalesce } = await import("../extensions/bridge/capabilities/coalesce.ts");
 	const answers = new Map();
 	let asked = 0;
 	const decide = coalesce((request) => request.scope, (request) => {

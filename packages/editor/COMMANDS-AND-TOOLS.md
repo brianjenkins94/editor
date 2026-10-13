@@ -149,7 +149,7 @@ What's wrong with it beyond the effort:
 ### The layout
 
 The tool and the backend it calls live together, in a folder named after the family. They still run in different
-realms (the tool in the tab's root hub, the backend in the workbench or worker-pod), so the folder holds both files and
+realms (the tool in the tab's root hub, the backend in the workbench or the bridge), so the folder holds both files and
 each realm imports its own:
 
 ```

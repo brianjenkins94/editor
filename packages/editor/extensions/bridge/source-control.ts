@@ -10,14 +10,14 @@
 import type { GitFileChange } from "../../shared/git";
 import { createRpcClient } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
-import { podHub } from "./pod";
+import { bridgeHub } from "./hub";
 
 const DIR = "/workspace";
 /** A read-only scheme serving each file's HEAD version, for the gutters and the diff editor. */
 const HEAD_SCHEME = "git-head";
 
 export function registerSourceControl(context: vscode.ExtensionContext): void {
-	const rpc = createRpcClient(podHub);
+	const rpc = createRpcClient(bridgeHub);
 	const scm = vscode.scm.createSourceControl("git", "Git", vscode.Uri.file(DIR));
 	const staged = scm.createResourceGroup("staged", "Staged Changes");
 	const changes = scm.createResourceGroup("changes", "Changes");
@@ -81,7 +81,7 @@ export function registerSourceControl(context: vscode.ExtensionContext): void {
 		}),
 		vscode.commands.registerCommand("editor.git.refresh", refresh),
 		// The service says when the working tree (or the repository) changed.
-		{ "dispose": podHub.subscribe("git.changed", () => { void refresh(); }) }
+		{ "dispose": bridgeHub.subscribe("git.changed", () => { void refresh(); }) }
 	);
 
 	void refresh();

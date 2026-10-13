@@ -5,7 +5,7 @@
  *
  * Division of labor: the worker owns execution and produces a full snapshot on every stop (frames + scopes +
  * variables); this adapter is a thin translator — it maps DAP requests to worker control messages (debug-protocol.ts,
- * over the pod hub) and answers stackTrace/scopes/variables straight out of the latest snapshot. It also serves the
+ * over the bridge hub) and answers stackTrace/scopes/variables straight out of the latest snapshot. It also serves the
  * session over hub RPC (debug-control.ts), so debug-mcp can drive it too. Inline is the only viable shape in-browser
  * (a DebugAdapterServer needs a socket).
  */
@@ -102,7 +102,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	/** A `setValue` waiting on the worker's answer. */
 	private valueWaiter: ((answer: Extract<WorkerEvent, { "type": "valueSet" }>) => void) | undefined;
 
-	/** The workspace runtime its worker connects to (worker-pod's export, as any debugger's). */
+	/** The workspace runtime its worker connects to (the bridge's export, as any debugger's). */
 	private readonly runtime: WorkspaceRuntime;
 
 	public constructor(session: vscode.DebugSession, runtime: WorkspaceRuntime) {
@@ -883,7 +883,7 @@ export function registerTsvalDebug(context: vscode.ExtensionContext, runtime: Wo
 				await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `debug ${name} (ordering ${picked.index + 1} of ${explored.outcomes.length})`, "program": uri.path, "eventLoop": { ...explored.eventLoop, "schedule": explored.outcomes[picked.index].schedule } });
 			}
 		}),
-		// The same, as data (worker-pod's `debug.explore`, for an agent): the distinct outcomes, each with its schedule.
+		// The same, as data (the bridge's `debug.explore`, for an agent): the distinct outcomes, each with its schedule.
 		vscode.commands.registerCommand("tsval.explore", async (program: unknown, maxRuns?: unknown) => {
 			if (typeof program !== "string") {
 				throw new TypeError("tsval.explore: a program to explore");
@@ -903,7 +903,7 @@ export function registerTsvalDebug(context: vscode.ExtensionContext, runtime: Wo
 		})),
 		vscode.debug.onDidStartDebugSession(() => { void vscode.commands.executeCommand("setContext", "tsval.skipWaits", false); }),
 		// Bare F5, no launch.json: the file open. (What Run means beyond that — an app's file, a rule's process.argv, its
-		// run in the running list — is the editor's, for any debugger: worker-pod's debug-events.ts.)
+		// run in the running list — is the editor's, for any debugger: the bridge's debug-events.ts.)
 		vscode.debug.registerDebugConfigurationProvider("tsval", {
 			"resolveDebugConfiguration": (_folder, config) => {
 				if (config.type === undefined) {

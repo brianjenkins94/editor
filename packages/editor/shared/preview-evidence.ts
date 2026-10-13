@@ -1,7 +1,7 @@
 /**
  * What a preview's pages report (previews/page-evidence.ts records it), as the realms that read it have it: runtime
  * evidence (workbench/evidence.ts), recorded stops (workbench/recorded-stops.ts), and the replays the debugger steps
- * (worker-pod's replay.ts, tsval's replay-run.ts).
+ * (the bridge's replay.ts, tsval's replay-run.ts).
  */
 import type { SiteObservation, StatementCoverage } from "@brianjenkins94/run-contract";
 import type { Encoded } from "@brianjenkins94/run-contract/recorded";

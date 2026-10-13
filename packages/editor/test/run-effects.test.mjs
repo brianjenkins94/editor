@@ -1,5 +1,5 @@
 /**
- * A run's effects (extensions/worker-pod/capabilities/run-effects.ts): what the editor decided itself and what a debugger tells,
+ * A run's effects (extensions/bridge/capabilities/run-effects.ts): what the editor decided itself and what a debugger tells,
  * kept apart while the run goes and merged as its envelope takes them.
  */
 import assert from "node:assert/strict";

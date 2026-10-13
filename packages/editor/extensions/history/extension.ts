@@ -12,7 +12,7 @@
  * Nothing it finds is kept: it's for the session. Once committed, the commit tells what changed (`silo history`), and what
  * runs say is recomputed from the evidence, which is kept.
  *
- * Public API only: the plugin through `typescript.tsserverRequest`, evidence through worker-pod's
+ * Public API only: the plugin through `typescript.tsserverRequest`, evidence through the bridge's
  * `editor.annotations.resolve`. No hub, no core capture: the TypeScript server already sees every edit.
  */
 import type { Exercise, Ran } from "@brianjenkins94/util/silo/exercise";

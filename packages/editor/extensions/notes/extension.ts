@@ -3,7 +3,7 @@
  *
  * A note is kept on the BABLR span it's about, in `.silo/notes/<author>/<file>.jsonl` (silo's annotations layout, in
  * git, everyone's notes beside everyone else's). Each time a file is shown or changes, each note on it is resolved
- * against the text as it is now — by the editor's BABLR, through worker-pod's `editor.annotations.resolve` — and lands:
+ * against the text as it is now — by the editor's BABLR, through the bridge's `editor.annotations.resolve` — and lands:
  *
  *  - on its own span, or followed to it (its code moved or was edited): shown inline, as a comment thread. A note of
  *    yours found any way but its own id is rewritten where it landed, so the next look finds it by id — and one whose

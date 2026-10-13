@@ -29,14 +29,14 @@ const SUPERBLOCK_MAGIC = 0x62732E7A;
  *  attribution may not. */
 const withoutFragment = (url: string): string => url.split("#")[0];
 
-/** A worker's short, reload-stable name from its architecture node: `nested:TS semantic server #1` → `TS semantic
+/** A worker's short, reload-stable name from its architecture node: `ext:typescript-language-features/TS semantic server #1` → `TS semantic
  *  server`, `worker:TextMateWorker` → its label, the web worker extension host → `extension host`. */
 function workerName(id: string, label: string | undefined): string {
 	if (id.startsWith("exthost:LocalWebWorker")) {
 		return "extension host";
 	}
 
-	return (label ?? id.replace(/^(?:nested|worker):/u, "")).replace(/\s+#\d+$/u, "").replace(/\.js$/u, "");
+	return (label ?? id.replace(/^(?:nested:|worker:|ext:[^/]+\/)/u, "")).replace(/\s+#\d+$/u, "").replace(/\.js$/u, "");
 }
 
 /** Each worker's URL → its name, from the architecture store (the probes put a worker's URL on its node). */
@@ -76,7 +76,6 @@ export function realmName(url: string, scope: string, workers = new Map<string, 
 
 	const named: [RegExp, string][] = [
 		[/\/__vscode__\/host\.html$/u, "workbench"],
-		[/\/lsp\/server-host\.js$/u, "server-host"],
 		[/\/lsp\/node-worker\.js$/u, "node"],
 		[/\/lsp\/bablr-worker\.js$/u, "bablr"],
 		[/\/lsp\/debug-worker\.js$/u, "debug-worker"],

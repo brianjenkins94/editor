@@ -55,14 +55,14 @@ Decided 2026-10-05.
 ## How it fits
 
 ```
-debug worker ──(records, in memory)──▶ debug adapter ──pod hub──▶ workbench (core) ──▶ the overlay (component)
-                                        worker-pod                 live-values.ts        registerLiveValues
+debug worker ──(records, in memory)──▶ debug adapter ──bridge hub──▶ workbench (core) ──▶ the overlay (component)
+                                        the bridge                 live-values.ts        registerLiveValues
 ```
 
 - **The debug worker** records as it runs (the next section), and hands the adapter what's new — batched, a few times a
   second, and all of it when the run pauses or ends.
-- **The debug adapter** (worker-pod) passes it on over the pod hub: `values.session.<id>` as it grows, `values.ended`
-  when the session ends. worker-pod stays the only bridge between extensions and core.
+- **The debug adapter** (tsval's) passes it on over the bridge's hub: `values.session.<id>` as it grows, `values.ended`
+  when the session ends. The bridge extension stays the only way between extensions and core.
 - **Core** keeps the latest session's record per file and tells the overlay what to draw for the editor showing it:
   rows by line, columns by iteration, the selection.
 - **The component** draws it, and says what the cursor and the pointer are on (a line, a column), so core can expand
@@ -171,8 +171,8 @@ zone after the span's last line as tall as the difference — the code below mov
 the same gap — so a multi-line note never spills onto lines it isn't about. Notes on overlapping spans stack in one
 cell, the zone tall enough for them all.
 
-How it fits, reusing the bridge: the notes extension sends its placed notes to core through a worker-pod command
-(`editor.pane.notes`, per file), the debug adapter its session's values (already on the pod hub); core renders both into
+How it fits, reusing the bridge: the notes extension sends its placed notes to core through a bridge command
+(`editor.pane.notes`, per file), the debug adapter its session's values (already on the bridge hub); core renders both into
 the component's frame.
 
 ## The margin, always open
@@ -291,7 +291,7 @@ and tsval is fast enough — a small file's run, session and worker included, ta
 - **How long.** A live run ends at its first idle (a server waiting for requests opens no preview), or after a budget
   of steps and a second of wall time, saying so where it stopped — *Run to finish* — rather than running forever.
 
-Built 2026-10-08 (worker-pod's live-run.ts; the debug worker's `liveRun`; the margin's *Skip*), with two things the
+Built 2026-10-08 (the bridge's live-run.ts; the debug worker's `liveRun`; the margin's *Skip*), with two things the
 building turned up:
 
 - **The margin keeps the last run** (revising *Settled*, above): a finished run's values stay until the next run of the
@@ -318,13 +318,13 @@ tour types, pauses and reads the margin (a write skipped, a half-typed edit, an 
    call with its turn, read off the frame stack (a loop counts its turns as it starts its body, so a `for`'s
    incrementor counts in the turn it ends). The binary search traces as the talk shows it (test/vm/trace.test.ts).
    Not yet: a parameter with a default or a pattern, a `for…of` destructuring its element.
-2. **The record in the debug worker**, bounded, handed to the adapter, and on to core over the pod hub; a session's
+2. **The record in the debug worker**, bounded, handed to the adapter, and on to core over the bridge hub; a session's
    inputs from Run with Inputs' remembered ones when its launch config gives none. Done: tsval's trace tells each
-   value's callee too; the debug worker keeps a session's values in a `LiveRecord` (extensions/worker-pod/
+   value's callee too; the debug worker keeps a session's values in a `LiveRecord` (extensions/bridge/
    live-values.ts, pure, tested) — each a preview as code writes it (`'d'`, `['a', 'b', …]`, own data properties only,
    never a getter), its line, call and turns; a call named by its function once; at most 50 turns of a loop, 2000
    values a call and 200 calls, the rest counted as dropped; a replay after stepping back not told twice — and tells
-   the adapter what's new four times a second and before each stop and the end. The adapter publishes it on the pod hub
+   the adapter what's new four times a second and before each stop and the end. The adapter publishes it on the bridge hub
    as `values.session.<id>` (with the file) and `values.ended`. A launch without `args` takes the first set of the
    file's remembered inputs. Seen in the editor: a session over the binary search, every value in its turn.
 3. **The overlay in the component**: a strip, rows by line, columns by iteration, from data it's given; its own test
@@ -370,7 +370,7 @@ tour types, pauses and reads the margin (a write skipped, a half-typed edit, an 
    not kept"). Seen in Brave over a recursive `fib`, a long object and a 60-turn loop.
    Not yet: values on spans (so an edit mid-session doesn't misplace them) — waits for values that outlive a session.
 7. **A tour test**: a note and a session over the binary search, read back from the pane.
-   Done (test/architecture-tour.mjs, "live values"): the talk's binary search with a prose note on its first line, a
+   Done (test/architecture-tour-runs.mjs, "live values"): the talk's binary search with a prose note on its first line, a
    session paused on `return mid`; each values row read back by its line — the parameters named, `mid` and `value`
    a column per turn, each `if`'s arm, `low` and `high` only in the turn that set them — and the note beside them;
    stopped, the values go and the note stays. It leaves the workbench as it found it: a breakpoint's stop puts the
@@ -388,4 +388,4 @@ tour types, pauses and reads the margin (a write skipped, a half-typed edit, an 
    line is armed from the source alone (a literal resource, or none), so a stop now checks the call's actual resource
    against the policy and goes on when it's allowed: an *Allow always* on a variable's value holds on the next run. And
    the worker's breakpoint updates no longer drop the capability lines (they replaced every breakpoint with the
-   user's). The tour test runs all three (test/architecture-tour.mjs, "capability decisions").
+   user's). The tour test runs all three (test/architecture-tour-capabilities.mjs, "capability decisions").

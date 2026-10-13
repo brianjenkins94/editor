@@ -83,10 +83,12 @@ function attachChildProbe(sink: ArchSink, port: MessagePort, ownerId: string, co
 		for (const message of event.data) {
 			switch (message.type) {
 				case "spawn": {
-					const id = "nested:" + message.name;
+					// Named by the extension that started it (`ext:<extension>/<worker>`, beside its extension's `ext:<extension>`),
+					// or — a worker no extension started — by where it was started (`nested:<worker>`).
+					const id = message.owner === undefined ? "nested:" + message.name : `ext:${message.owner}/${message.name}`;
 
 					nested.set(message.id, id);
-					sink.spawn({ "id": id, "role": "nestedWorker", "label": message.name, "container": container, "detail": "spawned by " + ownerId, "dynamic": true, "meta": { "url": message.url } });
+					sink.spawn({ "id": id, "role": "nestedWorker", "label": message.name, "container": container, "detail": message.owner === undefined ? "spawned by " + ownerId : "the " + message.owner + " extension's, in " + ownerId, "dynamic": true, "meta": { "url": message.url } });
 					break;
 				}
 

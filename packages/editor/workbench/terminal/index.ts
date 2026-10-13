@@ -604,8 +604,8 @@ export function serveTerminalState(runner: NodeRunner, hub: Hub): void {
 }
 
 /**
- * The terminals of the pod's tasks (extensions/worker-pod/tasks.ts): VS Code for the web runs a task only through the
- * pseudoterminal its provider gives it, so the pod's asks here for a just-bash process that runs the task's command once.
+ * The terminals of the bridge's tasks (extensions/bridge/tasks.ts): VS Code for the web runs a task only through the
+ * pseudoterminal its provider gives it, so the bridge's asks here for a just-bash process that runs the task's command once.
  * `terminal.run` { id, command, cwd } starts it; its output comes back on `terminal.out.<id>` and its exit code on
  * `terminal.exit.<id>`; typed input goes in on `terminal.in.<id>`, and `terminal.stop.<id>` stops it.
  */

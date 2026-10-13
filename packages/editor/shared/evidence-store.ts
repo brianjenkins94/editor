@@ -5,7 +5,7 @@
  * for, and again when they change.
  *
  * Evidence is an observed span annotation (SPAN-ANNOTATIONS.md): each span is found in the document as it is now by the
- * editor's BABLR, by its id alone (worker-pod's `editor.annotations.resolve`), and one that isn't there fades rather
+ * editor's BABLR, by its id alone (the bridge's `editor.annotations.resolve`), and one that isn't there fades rather
  * than being looked for. A file BABLR's grammar doesn't take yet has none.
  */
 import type { Observation } from "@brianjenkins94/util/silo/evidence";

@@ -1,5 +1,5 @@
-/** The worker-pod extension, bundled to a browser CommonJS file served beside the entry: its path (see bundledExtension in build.ts). */
-declare module "worker-pod:extension" {
+/** The bridge extension, bundled to a browser CommonJS file served beside the entry: its path (see bundledExtension in build.ts). */
+declare module "bridge:extension" {
 	const path: string;
 
 	export default path;
@@ -99,7 +99,6 @@ declare module "type-queries:extension" {
 	export default path;
 }
 
-/** The worker-pod cspell language server bundled to an ESM string (imported by server-host, run by almostnode). */
 declare module "previews:page-tap" {
 	const code: string;
 
@@ -112,10 +111,18 @@ declare module "previews:worker-tap" {
 	export default code;
 }
 
-declare module "worker-pod:server-node" {
+/** The cspell language server bundled to an ESM string (imported by server-host, run by almostnode). */
+declare module "cspell:server-node" {
 	const code: string;
 
 	export default code;
+}
+
+/** The cspell extension, bundled like the others: its path. */
+declare module "cspell:extension" {
+	const path: string;
+
+	export default path;
 }
 
 /** Vite `?raw` imports — file contents as a string (used to register the TS server plugin source). */

@@ -667,7 +667,7 @@ export function installShellPreview(hub: Hub, sink?: ArchSink, makeWindow: PaneW
 		});
 	};
 
-	// The ext-host decider (extensions/worker-pod/capabilities/decide.ts) round-trips here for every TOFU decision — the prompt
+	// The ext-host decider (extensions/bridge/capabilities/decide.ts) round-trips here for every TOFU decision — the prompt
 	// is OUR WebAwesome overlay, never a VS Code notification. It shows on the window whose app triggered it: the
 	// request's `window` when known (the WS/WebRTC shim's requests come from one), else a window of its `port` (the SW
 	// net gate sees only the address, the same in every window of a server — so that port's last used window), else

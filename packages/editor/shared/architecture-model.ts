@@ -91,7 +91,7 @@ export const containers: ContainerSpec[] = [
 	{ "id": "workbench", "label": "Main thread", "caption": "workbench realm (shared with the LocalProcess extension host)", "parent": "workbenchIframe", "kind": "realm" },
 	{ "id": "editorWorkers", "label": "Editor workers", "caption": "monaco's dedicated workers", "parent": "workbenchIframe", "kind": "realm", "collapsed": true },
 	{ "id": "workers", "label": "App workers", "caption": "spawned by the workbench realm (and the node worker's child)", "parent": "workbenchIframe", "kind": "realm" },
-	{ "id": "podWorkers", "label": "Pod workers", "caption": "the worker-pod extension's: its language servers, and a debug worker per tsval session", "parent": "workbenchIframe", "kind": "realm" },
+	{ "id": "debugWorkers", "label": "Debug workers", "caption": "a debug worker per tsval session (spawned top-level from the LocalProcess host)", "parent": "workbenchIframe", "kind": "realm" },
 	{ "id": "extHostIframe", "label": "Extension host iframe", "caption": "hidden iframe · relays its worker", "parent": "workbenchIframe", "kind": "origin" },
 	{ "id": "extHostWorker", "label": "Web worker extension host", "caption": "LocalWebWorker extensions, tsserver", "parent": "extHostIframe", "kind": "realm" },
 	{ "id": "previews", "label": "Preview windows", "caption": "iframes in the shell, any number per server (preview:<port>, preview:<port>~<n>) · served from /__virtual__/<tab>/<port>/ by the service worker", "parent": "shell", "kind": "origin" },
@@ -110,11 +110,10 @@ export const nodes: NodeSpec[] = [
 	{ "id": "sw", "label": "Service worker", "container": "network", "hub": true, "detail": "hub · sw.js", "description": "One per origin, shared by every tab: takes every HTTP request of the pages and workers it controls and makes the upstream one itself — stamping COOP/COEP, serving the CDN node_modules overlay and /__virtual__ previews, gating network access through capability.decide.", "observedBy": "its hub reporter + network probes" },
 	{ "id": "webview-sw", "label": "Webview service worker", "container": "network", "detail": "VS Code's, per webview", "description": "VS Code serves a webview's resources through its own service worker, by a per-webview subdomain a single-origin build can't provide: a webview that asks for one (a Markdown preview's stylesheet) gets an error back. Ours load none.", "observedBy": "the webview probe (load-resource / did-load-resource)", "condition": "when a webview loads a resource by URL" },
 	{ "id": "workbench", "label": "Workbench", "container": "workbench", "hub": true, "detail": "hub · workbench-entry.tsx", "description": "The monaco-vscode-api boot: services, editors, the main side of every extension host, the git service, run targets.", "observedBy": "its hub reporter + the monaco probes + network probes" },
-	{ "id": "exthost:LocalProcess:0", "label": "Local extension host", "container": "workbench", "detail": "worker-pod, tsval", "description": "Extension host sharing the workbench realm: worker-pod, the bridge — core's vscode API is its — and tsval, the stepping debugger, an extension of its own beside it (it spawns its debug workers top-level too).", "observedBy": "RPCProtocol logger on its ExtensionHostManager" },
-	{ "id": "pod", "label": "Pod", "container": "workbench", "hub": true, "detail": "hub · worker-pod extension", "description": "The worker-pod extension's hub (in the LocalProcess extension host): spawns the LSP and debug workers, serves capability.decide.", "observedBy": "its hub reporter" },
+	{ "id": "exthost:LocalProcess:0", "label": "Local extension host", "container": "workbench", "detail": "the bridge, tsval", "description": "Extension host sharing the workbench realm: the bridge, the bridge — core's vscode API is its — and tsval, the stepping debugger, an extension of its own beside it (it spawns its debug workers top-level too).", "observedBy": "RPCProtocol logger on its ExtensionHostManager" },
+	{ "id": "bridge", "label": "Bridge", "container": "workbench", "hub": true, "detail": "hub · the bridge extension", "description": "The bridge extension's hub (in the LocalProcess extension host): the debug workers link to it, and it serves capability.decide.", "observedBy": "its hub reporter" },
 	{ "id": "node", "label": "Dev-server worker", "container": "workers", "hub": true, "detail": "hub · almostnode, preview dev servers", "description": "Hosts the preview dev servers (almostnode's Vite) and answers virtual.request — a debug run's own server's port it hands to that run (virtual.debug.<port>). Never terminated: stopping a run can't take a dev server with it.", "observedBy": "its hub reporter + the Worker probe (non-hub messages)" },
-	{ "id": "debug-worker", "label": "Debug worker", "container": "podWorkers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the pod's debug adapter, which drives it by messages (the debug protocol). Its hub link is the workspace runtime's (run-contract's connectRuntime): a server its program starts answers the preview through it, and its log and spans are the editor's.", "observedBy": "its hub reporter + the Worker probe", "condition": "while debugging" },
-	{ "id": "worker:server-host", "label": "LSP server host", "container": "podWorkers", "detail": "cspell (vscode-languageclient)", "description": "cspell language server, spawned by the pod — JSON-RPC over postMessage plus a ws-control port for the shared filesystem.", "observedBy": "the Worker probe" },
+	{ "id": "debug-worker", "label": "Debug worker", "container": "debugWorkers", "hub": true, "detail": "hub · tsval stepping", "description": "One per tsval debug session, spawned by the bridge's debug adapter, which drives it by messages (the debug protocol). Its hub link is the workspace runtime's (run-contract's connectRuntime): a server its program starts answers the preview through it, and its log and spans are the editor's.", "observedBy": "its hub reporter + the Worker probe", "condition": "while debugging" },
 	{ "id": "bablr", "label": "BABLR worker", "container": "workers", "hub": true, "detail": "hub · the editor's BABLR", "description": "The editor's BABLR, off the UI thread: classifies git changes as cosmetic or semantic and groups edit bursts (the git SCM and the review panel), and finds the span ids runtime evidence keys on.", "observedBy": "its hub reporter + the Worker probe", "condition": "when git classifies a change" },
 	{ "id": "exthost-iframe", "label": "Iframe relay", "container": "extHostIframe", "detail": "webWorkerExtensionHostIframe.html", "description": "Boots the web worker extension host, relays its first messages and hands its MessagePort to the workbench.", "observedBy": "window message listener" },
 	{ "id": "exthost:LocalWebWorker:0", "label": "Worker extension host", "container": "extHostWorker", "detail": "eslint, capabilities, default extensions", "description": "Extension host in a web worker: the default extensions (typescript-language-features and its tsserver), eslint and capabilities.", "observedBy": "RPCProtocol logger + an in-worker probe (its fetches and the workers it spawns)" },
@@ -122,7 +121,7 @@ export const nodes: NodeSpec[] = [
 	{ "id": "net:origin", "label": "Page origin", "container": "network", "detail": "app, node_modules overlay, ATA", "description": "The app's own server (dev server or Pages): bundles, the node_modules CDN overlay, type acquisition.", "observedBy": "the service worker's fetch probe" },
 	{ "id": "net:unpkg.com", "label": "unpkg", "container": "network", "detail": "CDN node_modules", "description": "The service worker's upstream for the node_modules overlay.", "observedBy": "the service worker's fetch probe" },
 	{ "id": "net:registry.npmjs.org", "label": "npm registry", "container": "network", "detail": "type acquisition", "description": "typescript-language-features' automatic type acquisition, from the worker extension host (package metadata for @types lookups).", "observedBy": "the service worker's fetch probe", "condition": "when a file imports a package" },
-	{ "id": "zenfs", "label": "Workspace (zen-fs)", "container": "sharedMemory", "detail": "SingleBuffer at /workspace", "description": "The workspace filesystem: a zen-fs SingleBuffer store in a SharedArrayBuffer the workbench creates and hands to the node worker (over the hub) and the cspell server (a control port), which mount it at /workspace. Same bytes in every realm, guarded by an Atomics lock. Shared memory notifies nobody, so each realm watches its own mount's writes and reports them as workspace.changed; the workbench persists every one to IndexedDB and announces it to VS Code, whoever wrote (the provider, isomorphic-git, the terminal, a node script).", "observedBy": "each realm's /workspace mount (zen-fs StoreFS operations), the provider's change events, the workspace-fs IndexedDB" },
+	{ "id": "zenfs", "label": "Workspace (zen-fs)", "container": "sharedMemory", "detail": "SingleBuffer at /workspace", "description": "The workspace filesystem: a zen-fs SingleBuffer store in a SharedArrayBuffer the workbench creates and hands to the node worker (over the hub) and to each debug run's worker (in its launch), which mount it at /workspace. Same bytes in every realm, guarded by an Atomics lock. Shared memory notifies nobody, so each realm watches its own mount's writes and reports them as workspace.changed; the workbench persists every one to IndexedDB and announces it to VS Code, whoever wrote (the provider, isomorphic-git, the terminal, a node script).", "observedBy": "each realm's /workspace mount (zen-fs StoreFS operations), the provider's change events, the workspace-fs IndexedDB" },
 	{ "id": "provoke", "label": "Provoke worker", "container": "workers", "hub": true, "detail": "hub · cold-start transform repro", "description": "A throwaway child of the node worker (the previews_provoke tool's hardReset): mounts the workspace and transforms modules cold, once.", "observedBy": "its hub reporter + the node worker's Worker probe", "condition": "debug-mcp provoke_transform" },
 	{ "id": "net:brianjenkins94.github.io", "label": "GitHub Pages", "container": "network", "detail": "preview packages", "description": "A previewed app's tarball dependencies (a URL in its package.json — e.g. @brianjenkins94/hub), fetched once by the node worker's dev server and served from /@pkg/.", "observedBy": "the service worker's fetch probe", "condition": "when a previewed app depends on a tarball" },
 	{ "id": "net:esm.sh", "label": "esm.sh", "container": "network", "detail": "preview dependencies", "description": "The previewed app's bare imports (react, react-dom, react-refresh), mapped by the dev server's import map and fetched by the preview through the service worker.", "observedBy": "the service worker's fetch probe", "condition": "while a preview runs" },
@@ -141,17 +140,17 @@ export const hubLinks: [string, string][] = [
 	["root", "workbench"],
 	["root", "sw"],
 	["root", "debug-mcp"],
-	["workbench", "pod"],
+	["workbench", "bridge"],
 	["workbench", "node"],
 	["workbench", "bablr"],
 	["node", "provoke"],
-	["pod", "debug-worker"]
+	["bridge", "debug-worker"]
 ];
 
 export const subjects: SubjectFamily[] = [
 	// ── observability ──
 	{ "pattern": "$sys.log.>", "from": ["*"], "to": ["root", "debug-mcp", "shell"] },
-	{ "pattern": "$sys.metrics.>", "from": ["*"], "to": ["pod", "debug-mcp", "shell"] },
+	{ "pattern": "$sys.metrics.>", "from": ["*"], "to": ["bridge", "debug-mcp", "shell"] },
 	{ "pattern": "$sys.backlog.log", "from": ["root", "preview:*"], "to": ["debug-mcp"] },
 	// The architecture plane itself (observability's arch.ts): every context's reports, to the live view and debug-mcp, and
 	// their ask for full state. Not observed — it's what observation rides — so declared for the source scan's sake.
@@ -173,30 +172,30 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "workbench.save", "from": ["workbench"], "to": ["root"] },
 	{ "pattern": "workbench.files", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "workbench.openProject", "from": ["root"], "to": ["workbench"] },
-	{ "pattern": "git.status", "from": ["shell", "pod", "root"], "to": ["workbench"] },
-	{ "pattern": "git.file", "from": ["shell", "pod"], "to": ["workbench"] },
+	{ "pattern": "git.status", "from": ["shell", "bridge", "root"], "to": ["workbench"] },
+	{ "pattern": "git.file", "from": ["shell", "bridge"], "to": ["workbench"] },
 	{ "pattern": "git.classify", "from": ["shell"], "to": ["workbench"] },
-	{ "pattern": "git.commit", "from": ["shell", "pod", "root"], "to": ["workbench"] },
+	{ "pattern": "git.commit", "from": ["shell", "bridge", "root"], "to": ["workbench"] },
 	{ "pattern": "git.diff", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "git.discard", "from": ["shell"], "to": ["workbench"] },
-	{ "pattern": "git.changed", "from": ["workbench"], "to": ["shell", "pod"] },
+	{ "pattern": "git.changed", "from": ["workbench"], "to": ["shell", "bridge"] },
 	{ "pattern": "history.chunks", "from": ["shell"], "to": ["workbench"] },
-	{ "pattern": "history.texts", "from": ["pod"], "to": ["workbench"] },
-	{ "pattern": "tasks.list", "from": ["shell"], "to": ["pod"] },
-	{ "pattern": "tasks.run", "from": ["shell"], "to": ["pod"] },
-	{ "pattern": "terminal.run", "from": ["pod"], "to": ["workbench"] },
-	{ "pattern": "terminal.out.*", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "terminal.exit.*", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "terminal.in.*", "from": ["pod"], "to": ["workbench"] },
-	{ "pattern": "terminal.stop.*", "from": ["pod"], "to": ["workbench"] },
-	{ "pattern": "runs.list", "from": ["shell", "root", "pod"], "to": ["workbench"] },
+	{ "pattern": "history.texts", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "tasks.list", "from": ["shell"], "to": ["bridge"] },
+	{ "pattern": "tasks.run", "from": ["shell"], "to": ["bridge"] },
+	{ "pattern": "terminal.run", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "terminal.out.*", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "terminal.exit.*", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "terminal.in.*", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "terminal.stop.*", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "runs.list", "from": ["shell", "root", "bridge"], "to": ["workbench"] },
 	{ "pattern": "runs.stop", "from": ["root"], "to": ["workbench"] },
-	{ "pattern": "evidence.observed", "from": ["pod"], "to": ["workbench"] },
-	{ "pattern": "run.effects", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "values.session.*", "from": ["pod"], "to": ["workbench"] },
-	{ "pattern": "values.ended", "from": ["pod"], "to": ["workbench"] },
-	{ "pattern": "capability.ask", "from": ["pod"], "to": ["workbench"] },
-	{ "pattern": "runs.begin", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "evidence.observed", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "run.effects", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "values.session.*", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "values.ended", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "capability.ask", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "runs.begin", "from": ["bridge"], "to": ["workbench"] },
 	{ "pattern": "theme.colorScheme", "from": ["shell"], "to": ["workbench"] },
 	{ "pattern": "dock.openWindow", "from": ["workbench"], "to": ["shell"] },
 	{ "pattern": "dock.closeWindow", "from": ["workbench"], "to": ["shell"] },
@@ -205,16 +204,16 @@ export const subjects: SubjectFamily[] = [
 	// ── previews ──
 	{ "pattern": "preview.start", "from": ["root", "workbench"], "to": ["node"] },
 	{ "pattern": "preview.provoke", "from": ["root", "workbench"], "to": ["node"] },
-	{ "pattern": "preview.open", "from": ["workbench", "shell", "pod"], "to": ["shell", "root"] },
+	{ "pattern": "preview.open", "from": ["workbench", "shell", "bridge"], "to": ["shell", "root"] },
 	{ "pattern": "preview.open", "from": ["preview:*"], "to": ["shell"] },
 	{ "pattern": "preview.ready", "from": ["root"], "to": ["shell"] },
 	{ "pattern": "preview.close", "from": ["workbench", "shell"], "to": ["root", "workbench", "node", "shell"] },
 	{ "pattern": "preview.hmr.*", "from": ["node"], "to": ["shell", "workbench"] },
 	{ "pattern": "evidence.preview", "from": ["preview:*"], "to": ["workbench"] },
-	{ "pattern": "stops.preview", "from": ["preview:*"], "to": ["workbench", "pod"] },
+	{ "pattern": "stops.preview", "from": ["preview:*"], "to": ["workbench", "bridge"] },
 	{ "pattern": "preview.stops", "from": ["workbench"], "to": ["node"] },
 	{ "pattern": "evidence.level", "from": ["node"], "to": ["workbench"] },
-	{ "pattern": "preview.version", "from": ["workbench", "pod"], "to": ["node"] },
+	{ "pattern": "preview.version", "from": ["workbench", "bridge"], "to": ["node"] },
 	{ "pattern": "evidence.flush", "from": ["workbench"], "to": ["preview:*"] },
 	{ "pattern": "preview.decide", "from": ["preview:*"], "to": ["shell"] },
 	{ "pattern": "preview.cdp", "from": ["root", "shell"], "to": ["shell"] },
@@ -227,24 +226,24 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "workspace.changed", "from": ["workbench", "node"], "to": ["workbench", "node"] },
 	{ "pattern": "workspace.buffer", "from": ["node"], "to": ["workbench"] },
 	// ── running node ──
-	{ "pattern": "node.out.*", "from": ["pod"], "to": ["workbench"] },
-	{ "pattern": "node.exit.*", "from": ["pod", "workbench"], "to": ["workbench", "pod"] },
-	{ "pattern": "node.stdin.*", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "node.listening.*", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "node.out.*", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "node.exit.*", "from": ["bridge", "workbench"], "to": ["workbench", "bridge"] },
+	{ "pattern": "node.stdin.*", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "node.listening.*", "from": ["bridge"], "to": ["workbench"] },
 	{ "pattern": "virtual.debug.*", "from": ["node"], "to": ["debug-worker"] },
 	{ "pattern": "provoke.round", "from": ["node"], "to": ["provoke"] },
 	// ── debugging ──
-	{ "pattern": "debug.launch", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "debug.stop", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "debug.declined.*", "from": ["pod"], "to": ["workbench"] },
-	{ "pattern": "debug.state", "from": ["pod"], "to": ["shell"] },
-	{ "pattern": "debug.command", "from": ["shell"], "to": ["pod"] },
-	{ "pattern": "debug.sessions", "from": ["root"], "to": ["pod"] },
-	{ "pattern": "debug.start", "from": ["root", "workbench", "shell"], "to": ["pod"] },
-	{ "pattern": "debug.breakpoints", "from": ["root"], "to": ["pod"] },
-	{ "pattern": "debug.explore", "from": ["root"], "to": ["pod"] },
-	{ "pattern": "debug.session.*.state", "from": ["root"], "to": ["pod"] },
-	{ "pattern": "debug.session.*.step", "from": ["root"], "to": ["pod"] },
+	{ "pattern": "debug.launch", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "debug.stop", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "debug.declined.*", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "debug.state", "from": ["bridge"], "to": ["shell"] },
+	{ "pattern": "debug.command", "from": ["shell"], "to": ["bridge"] },
+	{ "pattern": "debug.sessions", "from": ["root"], "to": ["bridge"] },
+	{ "pattern": "debug.start", "from": ["root", "workbench", "shell"], "to": ["bridge"] },
+	{ "pattern": "debug.breakpoints", "from": ["root"], "to": ["bridge"] },
+	{ "pattern": "debug.explore", "from": ["root"], "to": ["bridge"] },
+	{ "pattern": "debug.session.*.state", "from": ["root"], "to": ["bridge"] },
+	{ "pattern": "debug.session.*.step", "from": ["root"], "to": ["bridge"] },
 	{ "pattern": "margin.state", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "editor.state", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "problems.list", "from": ["root"], "to": ["workbench"] },
@@ -255,41 +254,41 @@ export const subjects: SubjectFamily[] = [
 	{ "pattern": "terminal.state", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "runs.ledger", "from": ["root"], "to": ["workbench"] },
 	{ "pattern": "preview.windows", "from": ["root", "workbench"], "to": ["shell"] },
-	{ "pattern": "debug.session.*.stop", "from": ["root"], "to": ["pod"] },
-	{ "pattern": "debug.session.*.decide", "from": ["root", "workbench"], "to": ["pod"] },
-	{ "pattern": "debug.session.*.setValue", "from": ["root", "workbench"], "to": ["pod"] },
-	{ "pattern": "debug.session.*.pace", "from": ["root"], "to": ["pod"] },
-	{ "pattern": "debug.session.*.stdin", "from": ["root"], "to": ["pod"] },
-	{ "pattern": "rules.given", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "rules.set", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "rules.list", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "rules.make", "from": ["pod"], "to": ["workbench"] },
-	{ "pattern": "pod.ready", "from": ["debug-worker"], "to": ["pod"] },
-	{ "pattern": "runtime.fs.attach", "from": ["debug-worker"], "to": ["pod"] },
-	{ "pattern": "production.launch", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "production.out.*", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "production.exit.*", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "production.stop.*", "from": ["pod"], "to": ["workbench"] },
+	{ "pattern": "debug.session.*.stop", "from": ["root"], "to": ["bridge"] },
+	{ "pattern": "debug.session.*.decide", "from": ["root", "workbench"], "to": ["bridge"] },
+	{ "pattern": "debug.session.*.setValue", "from": ["root", "workbench"], "to": ["bridge"] },
+	{ "pattern": "debug.session.*.pace", "from": ["root"], "to": ["bridge"] },
+	{ "pattern": "debug.session.*.stdin", "from": ["root"], "to": ["bridge"] },
+	{ "pattern": "rules.given", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "rules.set", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "rules.list", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "rules.make", "from": ["bridge"], "to": ["workbench"] },
+	{ "pattern": "bridge.ready", "from": ["debug-worker"], "to": ["bridge"] },
+	{ "pattern": "runtime.fs.attach", "from": ["debug-worker"], "to": ["bridge"] },
+	{ "pattern": "production.launch", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "production.out.*", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "production.exit.*", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "production.stop.*", "from": ["bridge"], "to": ["workbench"] },
 	// ── capabilities ──
 	{ "pattern": "capability.decide.*", "from": ["sw"], "to": ["root"] },
-	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["pod"] },
+	{ "pattern": "capability.decide", "from": ["root", "shell"], "to": ["bridge"] },
 	{ "pattern": "capability.record.*", "from": ["sw"], "to": ["root"] },
-	{ "pattern": "capability.record", "from": ["root"], "to": ["pod"] },
-	{ "pattern": "capability.recorded", "from": ["workbench"], "to": ["pod"] },
-	{ "pattern": "capability.prompt", "from": ["pod"], "to": ["shell"] },
+	{ "pattern": "capability.record", "from": ["root"], "to": ["bridge"] },
+	{ "pattern": "capability.recorded", "from": ["workbench"], "to": ["bridge"] },
+	{ "pattern": "capability.prompt", "from": ["bridge"], "to": ["shell"] },
 	// ── workers ──
 	{ "pattern": "bablr.>", "from": ["workbench"], "to": ["bablr"] },
-	{ "pattern": "annotations.>", "from": ["pod"], "to": ["workbench"] }
+	{ "pattern": "annotations.>", "from": ["bridge"], "to": ["workbench"] }
 ];
 
 export const channels: ChannelSpec[] = [
 	{ "a": "workbench", "b": "worker:*", "protocol": "WebWorker protocol / postMessage", "transport": "Worker.postMessage", "reason": "platform", "description": "monaco's editor workers (request/reply/events) and the workbench's own workers." },
-	{ "a": "pod", "b": "debug-worker", "protocol": "the debug protocol (ToWorker / WorkerEvent); the runtime's file calls (run-contract's mailbox)", "transport": "Worker.postMessage; SharedArrayBuffer + Atomics", "reason": "isolation", "description": "The adapter drives its run by messages of their own — launch, steps, decisions; values, stops, coverage back — not over the hub: the worker's hub link is only the workspace runtime's (run-contract), what any debugger's worker is given. And a debugger's worker reads and writes the workspace synchronously through its mailbox (handed over once, runtime.fs.attach): it writes a call and waits; worker-pod answers it (runtime-fs.ts), the policy deciding the program's calls. tsval's reads its files from the workspace's buffer instead; another debugger's (editor-contrib's) has only the mailbox." },
-	{ "a": "pod", "b": "worker:server-host", "protocol": "LSP (JSON-RPC)", "transport": "Worker.postMessage", "reason": "platform", "description": "vscode-languageclient to the cspell server, plus a one-shot control port (ws-control) that hands it the shared workspace buffer — the server host has no hub." },
+	{ "a": "bridge", "b": "debug-worker", "protocol": "the debug protocol (ToWorker / WorkerEvent); the runtime's file calls (run-contract's mailbox)", "transport": "Worker.postMessage; SharedArrayBuffer + Atomics", "reason": "isolation", "description": "The adapter drives its run by messages of their own — launch, steps, decisions; values, stops, coverage back — not over the hub: the worker's hub link is only the workspace runtime's (run-contract), what any debugger's worker is given. And a debugger's worker reads and writes the workspace synchronously through its mailbox (handed over once, runtime.fs.attach): it writes a call and waits; the bridge answers it (runtime-fs.ts), the policy deciding the program's calls. tsval's reads its files from the workspace's buffer instead; another debugger's (editor-contrib's) has only the mailbox." },
 	{ "a": "workbench", "b": "exthost:LocalProcess:*", "protocol": "RPCProtocol", "transport": "in-memory buffers", "reason": "platform", "description": "MainThread / ExtHost proxies, serialized even in the same realm." },
 	{ "a": "workbench", "b": "exthost-iframe", "protocol": "bootstrap handshake", "transport": "window.postMessage", "reason": "platform", "description": "NLS bootstrap, then the MessagePort handoff." },
 	{ "a": "workbench", "b": "exthost:LocalWebWorker:*", "protocol": "RPCProtocol", "transport": "MessagePort (transferred ArrayBuffers)", "reason": "platform", "description": "MainThread / ExtHost proxies." },
-	{ "a": "exthost:LocalWebWorker:*", "b": "nested:*", "protocol": "extension defined (LSP, tsserver)", "transport": "Worker.postMessage", "reason": "platform", "description": "Workers the web worker extension host's extensions spawn: TypeScript's servers, the event sheet's recognizer." },
+	{ "a": "exthost:LocalWebWorker:*", "b": "ext:*/*", "protocol": "extension defined (LSP, tsserver)", "transport": "Worker.postMessage", "reason": "platform", "description": "Workers the web worker extension host's extensions spawn, each named by its extension (`ext:<extension>/<worker>`): TypeScript's servers, the event sheet's recognizer, the cspell language server." },
+	{ "a": "exthost:LocalWebWorker:*", "b": "nested:*", "protocol": "worker defined", "transport": "Worker.postMessage", "reason": "platform", "description": "A worker the web worker extension host starts that no extension's code did." },
 	// The service worker takes EVERY request from the pages and workers it controls (stamping cross-origin isolation,
 	// answering its own routes, resolving node_modules from the CDN, gating a preview's data fetches) and makes the
 	// upstream one itself — so each context's HTTP goes to `sw`, and only `sw` reaches the network. (WebSockets don't
@@ -318,7 +317,6 @@ export const channels: ChannelSpec[] = [
 	// the workspace filesystem (shared memory)
 	{ "a": "workbench", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (owner)", "reason": "shared memory", "description": "The vscode provider (editor, tsserver, ATA, terminal, extensions) and direct callers (isomorphic-git, the terminal's path walk). Back the other way: provider writes announced as file-change events (5ms batches) — writes from other realms, and direct writes, are NOT announced." },
 	{ "a": "node", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "almostnode: the preview dev servers' module loading and transforms." },
-	{ "a": "worker:server-host", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "Mounted by the cspell server (documents arrive over LSP, so it's mostly idle)." },
 	{ "a": "provoke", "b": "zenfs", "protocol": "zen-fs", "transport": "SharedArrayBuffer (mounted)", "reason": "shared memory", "description": "A cold transform round reads the workspace." },
 	{ "a": "zenfs", "b": "idb", "protocol": "IndexedDB", "transport": "IDBObjectStore (workspace-fs, silo-local)", "reason": "storage", "description": "Provider writes, flushed every 500ms and restored at boot (workspace-fs); and silo's local/, a mount of its own store (silo-local)." }
 ];
@@ -694,9 +692,9 @@ export function appLayout(observed: { "channels": { "a": string; "b": string }[]
 // ── probes' view of the model ─────────────────────────────────────────────────────────────────────────────────
 
 /** An extension, discovered by its commands (extensions/command-tap.ts): `ext:<name>`, or `ext:vscode` for VS Code's own
- *  commands and its built-in extensions'. */
+ *  commands and its built-in extensions'. Not a worker an extension started: `ext:<name>/<worker>`. */
 export function isExtensionNode(id: string): boolean {
-	return id.startsWith("ext:");
+	return id.startsWith("ext:") && !id.includes("/");
 }
 
 /**
@@ -826,7 +824,7 @@ export function dynamicContainer(id: string): string | undefined {
 	return undefined;
 }
 
-/** What a tour observed, as `architecture-tour.json` keeps it (the view's snapshot). */
+/** What a tour observed: its shards' sessions' (the view's snapshots), together (test/architecture-diagram.mjs). */
 export interface TourSnapshot {
 	"nodes": { "id": string; "state": string; "spec"?: { "label"?: string; "container"?: string } }[];
 	"channels": { "a": string; "b": string; "medium"?: string; "labels": Record<string, { "count": number }> }[];
@@ -858,7 +856,7 @@ export function tourDiagram(snapshot: TourSnapshot): string {
 	const reached = new Set(channels.flatMap((channel) => [channel.a, channel.b]));
 	const seen = new Map(snapshot.nodes.filter((node) => node.state !== "declared" && !isAppNode(node.id) && nodeSpec(node.id)?.cacheDependent !== true && (!node.id.startsWith("net:") || reached.has(node.id))).map((node) => [node.id, node]));
 	const general = (id: string): string => generalId(id, seen.get(id)?.spec?.label);
-	const label = (id: string): string => (seen.get(id)?.spec?.label ?? nodeSpec(id)?.label ?? id).replace(/^store:/u, "").replace(/:\d{4,5}\b/u, ":*").replace(/ #\d+$/u, "");
+	const label = (id: string): string => (seen.get(id)?.spec?.label ?? nodeSpec(id)?.label ?? id).replace(/^store:/u, "").replace(/:\d{4,5}\b/u, ":*").replace(/ #\d+$/u, "").replace(/ \(\d+\)$/u, "");
 	// Mermaid reads `<` and `"` as its own.
 	const text = (value: string): string => value.replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "'");
 	const mermaidId = (id: string): string => "n_" + id.replaceAll(/\W/gu, "_");

@@ -18,7 +18,7 @@ import { CapabilityDenied, gate } from "@brianjenkins94/util/silo/enforce/broker
 import { CAP_FS, evalScope, execScope, fsScope, hostOf, netScope } from "@brianjenkins94/util/silo/enforce/intercept";
 import { effectiveDisposition, isDangerous } from "@brianjenkins94/util/silo/policy";
 import { loadEffectivePolicy, persistOverride, recordObservation } from "../../../shared/capabilities/silo-store";
-import { podHub } from "../pod";
+import { bridgeHub } from "../hub";
 import { coalesce } from "./coalesce";
 
 /**
@@ -112,7 +112,7 @@ function windowOf(request: object): { "port"?: number; "window"?: string } {
 	return { ...typeof port === "number" ? { "port": port } : {}, ...typeof window === "string" ? { "window": window } : {} };
 }
 
-const shellRpc = createRpcClient(podHub);
+const shellRpc = createRpcClient(bridgeHub);
 
 /** The TOFU prompt: OUR WebAwesome overlay INSIDE the preview window (shell-preview.ts), reached over the hub —
  *  never a VS Code notification. Returns the user's choice, or undefined if the shell can't be reached at all

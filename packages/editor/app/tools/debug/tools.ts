@@ -1,6 +1,6 @@
 /**
- * The debugger, driven the way VS Code's debug UI does: the worker-pod answers `debug.sessions` / `debug.start` /
- * `debug.breakpoints` / `debug.explore` (extensions/worker-pod/debug-control.ts), and each session its own `debug.session.<id>.step|state|
+ * The debugger, driven the way VS Code's debug UI does: the bridge answers `debug.sessions` / `debug.start` /
+ * `debug.breakpoints` / `debug.explore` (extensions/bridge/debug-control.ts), and each session its own `debug.session.<id>.step|state|
  * stop`. Every session answer is the same shape — state, and while stopped the line, its code, the locals — plus what
  * the program printed.
  */

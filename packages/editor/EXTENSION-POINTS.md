@@ -11,13 +11,13 @@ An extension point is real when **our own code goes through it**. Each one below
 (tsval, the margin, the event sheet, the rules view), so every run of the editor exercises what a contributed extension
 relies on, and a change that breaks one breaks ours first. Where VS Code has the extension point (a debugger, a view, a
 command, `contributes`), we use VS Code's — a documented contract, other people's code already written against it, and
-what's contributed stays portable to the desktop (extension boundaries: the hub is core's; worker-pod is the bridge).
+what's contributed stays portable to the desktop (extension boundaries: the hub is core's, and the bridge extension is the one way across it).
 That's for VS Code augmentations; core's own runtime UI — the shell, previews, the prompt in a preview window — isn't
 one.
 
 What an extension author imports is one package, `packages/run-contract` (released like hub, on the site as
 `packages/run-contract@latest.tgz`): the run contract's types, and the workspace runtime's (`./runtime`). Span references and pane views join it as they're
-published — it's renamed `editor-api` then. editor-contrib depends on it; worker-pod and tsval import the same types.
+published — it's renamed `editor-api` then. editor-contrib depends on it; the bridge and tsval import the same types.
 
 ## 1. The run contract — done
 
@@ -32,7 +32,7 @@ A debugger is a runtime: what it reports goes in the margin, the evidence and th
 - **Configuration:** `__policy` (the policy its gated calls are decided by), `__runId` (its run), `__live` (a live run:
   no effects), `__startedBy: "terminal"` (its output printed there, its stdin read from there).
 
-**Dogfooded:** tsval tells all of it through the contract; worker-pod's debug-events.ts reads every debugger's the one
+**Dogfooded:** tsval tells all of it through the contract; the bridge's debug-events.ts reads every debugger's the one
 way, capability-stops.ts says what each answer at a capability stop means, and debug-control.ts drives any session for
 an agent with DAP's own requests. A debugger in another extension host (editor-contrib's) is followed by what VS Code
 tells every host — no tracker sees it — so an agent doesn't see its output. The performance budgets held with tsval's
@@ -50,11 +50,11 @@ debugger's worker, and (for the editor's own debugger) the workspace's `buffer`.
 program listens on with `serve(port, request => response)`; no subject names.
 Underneath, the port is a link into the editor's hub, so the worker stays a realm of its own: its spans (each step, each
 request its servers answer), its logs and each server's traffic (`server:<port>`) are the editor's to see. The
-extension's own code never joins the hub; worker-pod stays the one bridge.
+extension's own code never joins the hub; the bridge stays the one bridge.
 
 **Dogfooded:** tsval is an extension of its own (`extensions/tsval`), in the bridge's host, contributing the `tsval`
 debugger: VS Code's API, the contract and this export, nothing else — its adapter drives its worker by messages of their
-own. What Run means for any debugger moved to worker-pod (an app's file runs the app, a rule's process.argv and its
+own. What Run means for any debugger moved to the bridge (an app's file runs the app, a rule's process.argv and its
 cases, the run's registration, its exit code from DAP's `exited`). On a desktop build the same interface is Node's own
 `fs` and `net`.
 
@@ -80,11 +80,11 @@ worker on it. What handing a port across hosts meets (measured 2026-10-10, Brave
 A contributed debugger doesn't get the workspace's buffer: it's our storage format (patched zen-fs's SingleBuffer — a
 second zen-fs mounting it can break the filesystem's structure, `.git` and `.silo` with it), and the bytes are below
 everything the editor keeps around a file: an open editor's unsaved text, change events, the policy, the run's effects.
-It gets **synchronous files through core** instead, each call answered by worker-pod:
+It gets **synchronous files through core** instead, each call answered by the bridge:
 
-- **The wire.** `connectRuntime(port, { name })` hands worker-pod a small `SharedArrayBuffer` of its own — a
+- **The wire.** `connectRuntime(port, { name })` hands the bridge a small `SharedArrayBuffer` of its own — a
   mailbox — once (`runtime.fs.attach`, over the runtime's hub link). After that a call is the worker writing its request
-  into the mailbox and waiting on it (`Atomics.wait`); worker-pod, watching it (`Atomics.waitAsync`), makes the call and
+  into the mailbox and waiting on it (`Atomics.wait`); the bridge, watching it (`Atomics.waitAsync`), makes the call and
   writes the answer back. No message a call; one connection (the port), as before. VS Code's TypeScript server on the
   web reads its files the same way. What doesn't fit the mailbox goes in pieces.
 - **The calls** (`runtime.fs`): `readFile`, `writeFile`, `stat`, `readdir`, `mkdir`, `rm`, `rename` — `/workspace` paths,
@@ -99,11 +99,11 @@ It gets **synchronous files through core** instead, each call answered by worker
 - **Effects, kept by core.** Each program call is counted among its run's effects as it's answered (run-effects.ts), so
   a debugger's `effects` event tells only what the editor didn't see — the requests and commands it made itself.
 - **Reaching it from either host.** `workspaceRuntime()` (run-contract's `./runtime`) finds it where core put it: in the
-  bridge's host, worker-pod's — the buffer included, for tsval, our own code built with the same zen-fs; in the web
+  bridge's host, the bridge's — the buffer included, for tsval, our own code built with the same zen-fs; in the web
   worker host, core's (runtime.worker.ts, loaded by core's bootstrap before VS Code's extension host, its ports going up
   core's port into that worker, workerPort.ts — the one the architecture probe reports over too) — no buffer. Its
   `connect(name, session)` gives a port either way.
-- **One way to link it** (run-contract's `linkRuntime`), whichever host the port comes from — into the pod's hub or the
+- **One way to link it** (run-contract's `linkRuntime`), whichever host the port comes from — into the bridge's hub or the
   workbench's: the editor names the worker `<name>#<instance>`, its own id (an answer goes to that worker alone, not to
   every worker of the name; the architecture view counts each as an instance of `<name>`), and the link carries only the
   runtime — the worker's log, architecture and metrics, its mailbox handed over, its servers' requests and answers. No
@@ -118,7 +118,7 @@ It gets **synchronous files through core** instead, each call answered by worker
 ## 3. Span annotations — done (2026-10-10)
 
 Placing something on code that survives edits and reformatting (SPAN-ANNOTATIONS.md): `editor.annotations.refer`,
-`resolve` and `spans`, commands worker-pod registers.
+`resolve` and `spans`, commands the bridge registers.
 
 **The extension point** (packages/run-contract's `./annotations`): `annotations(vscode.commands)` gives typed `spans`,
 `refer` and `resolve`, and the contract is documented there — batch them (one call per text), what each status means
@@ -126,7 +126,7 @@ Placing something on code that survives edits and reformatting (SPAN-ANNOTATIONS
 dismissed), how a lost reference is looked for before it's orphaned, and `undefined` without the editor. `SpanRef` and
 `Resolution` are util/silo's, re-exported.
 
-**Dogfooded:** notes, insights' evidence, tsval's placed rules, worker-pod's rule places and core's run anchors
+**Dogfooded:** notes, insights' evidence, tsval's placed rules, the bridge's rule places and core's run anchors
 (anchors.ts) all call through it — no extension calls the commands by hand.
 
 ## 4. Pane views (the Margin pane's tabs) — done (2026-10-12)
@@ -138,9 +138,9 @@ Margin, whoever's it is:
 
 | In the Margin today | Whose | How it gets there |
 | --- | --- | --- |
-| A run's values (rows of cells, a column per turn), `process.argv`'s input row, values dropped | worker-pod's run contract → core | the hub (`values.session.*`), placed by live-values.ts |
-| A capability stop's question, its buttons, the rule and mock editors it opens | worker-pod → core | the hub (`capability.ask`) |
-| A run's end (crashed, stopped) | worker-pod → core | the hub (`values.ended`) — a gutter mark |
+| A run's values (rows of cells, a column per turn), `process.argv`'s input row, values dropped | the bridge's run contract → core | the hub (`values.session.*`), placed by live-values.ts |
+| A capability stop's question, its buttons, the rule and mock editors it opens | the bridge → core | the hub (`capability.ask`) |
+| A run's end (crashed, stopped) | the bridge → core | the hub (`values.ended`) — a gutter mark |
 | Coverage marks and how often each line ran; the run log | core (coverage.ts) | a function call (`showMarks`, `showProfile`) — since step 3 coverage's own view into the Margin (`coverage.paneView`) |
 | Placed rules | the capabilities extension's rules → core | `rules.placed` — a gutter mark (since step 3: the capabilities extension's own view into the Margin, from `silo.rules.list`) |
 | The program's steps, a card around each | core (tsserver's `_statements`) | computed in live-values.ts |
@@ -289,7 +289,7 @@ decider — an AI, an elicitation, a team's or CI's policy — answers instead, 
 
 What a desktop VS Code extension of this would meet, as the code stands: the feature extensions are hub-free and run as
 they are (but `editor.annotations.*`, which core's BABLR answers); the run contract's layer is DAP and public API. What
-breaks is what worker-pod reaches over the hub, because core isn't there:
+breaks is what the bridge reaches over the hub, because core isn't there:
 
 - **The workspace runtime** → Node's `fs` and `net` (2's interface); tsval's worker → `worker_threads`.
 - **Core's services that are just code** — the run registry, the evidence and run ledger, BABLR's spans, the edit

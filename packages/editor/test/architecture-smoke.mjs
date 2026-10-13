@@ -20,11 +20,10 @@ const PREVIEW = "preview:5173";
 /** Declared channels a boot + preview + save always exercises (`a ⇄ b` exactly as declared in the model). */
 const MUST_SEE_CHANNELS = [
 	"workbench ⇄ worker:*",
-	"pod ⇄ worker:server-host",
 	"workbench ⇄ exthost:LocalProcess:*",
 	"workbench ⇄ exthost-iframe",
 	"workbench ⇄ exthost:LocalWebWorker:*",
-	"exthost:LocalWebWorker:* ⇄ nested:*",
+	"exthost:LocalWebWorker:* ⇄ ext:*/*",
 	"workbench ⇄ sw",
 	"sw ⇄ net:*",
 	"workbench ⇄ idb",
@@ -33,7 +32,6 @@ const MUST_SEE_CHANNELS = [
 	"node ⇄ vite:*",
 	"workbench ⇄ zenfs",
 	"node ⇄ zenfs",
-	"worker:server-host ⇄ zenfs",
 	"zenfs ⇄ idb"
 ];
 
@@ -52,7 +50,7 @@ const MUST_SEE_LABELS = [
 	["zenfs", "workbench", /^onDidChangeFile$/u],
 	["node", "zenfs", /^mount \/workspace/u],
 	// tsserver's synchronous file system (the @vscode/sync-api bridge, over a transferred port)
-	[/^exthost:LocalWebWorker:/u, /^nested:TS /u, /^fileSystem\//u]
+	[/^exthost:LocalWebWorker:/u, /^ext:typescript-language-features\/TS /u, /^fileSystem\//u]
 ];
 
 let session;
@@ -65,11 +63,11 @@ after(async () => {
 });
 
 test("boot: every realm reports", async () => {
-	for (const id of ["shell", "root", "sw", "workbench", "pod", "node"]) {
+	for (const id of ["shell", "root", "sw", "workbench", "bridge", "node"]) {
 		await session.until(id + " alive", alive(id));
 	}
 
-	await session.until("tsserver's sync file system", hasLabel(/^exthost:LocalWebWorker:/u, /^nested:TS /u, /^fileSystem\//u));
+	await session.until("tsserver's sync file system", hasLabel(/^exthost:LocalWebWorker:/u, /^ext:typescript-language-features\/TS /u, /^fileSystem\//u));
 });
 
 test("preview: npm run dev in the terminal serves the demo", async () => {

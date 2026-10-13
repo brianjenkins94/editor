@@ -32,9 +32,9 @@ import { setEffects } from "../../shared/capabilities/run-effects";
 import { recordResult } from "../../shared/capabilities/silo-store";
 import { asked, policyFor } from "./capability-stops";
 import { appRootOf, runApp } from "./launch";
-import { podHub } from "./pod";
+import { bridgeHub } from "./hub";
 
-/** A preview's run: worker-pod's own, made by the preview (extension.ts), and nothing of Run's. */
+/** A preview's run: the bridge's own, made by the preview (extension.ts), and nothing of Run's. */
 const PRODUCTION = "production";
 
 /** How each session ended, as its DAP messages say (a debugger in this extension host — another's isn't seen): its exit
@@ -64,7 +64,7 @@ function caseArgs(given: vscode.DebugConfiguration, cases: string[][] | undefine
 }
 
 export function registerDebugEvents(context: vscode.ExtensionContext): void {
-	const rpc = createRpcClient(podHub);
+	const rpc = createRpcClient(bridgeHub);
 	/** The sessions that told an `ended`: their margins are cleared already. */
 	const ended = new Set<string>();
 	/** Each terminal's run's stdin subscription, by its session. */
@@ -119,12 +119,12 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 
 			switch (event) {
 				case "values":
-					podHub.publish(`values.session.${session.id}`, body as ValuesEvent);
+					bridgeHub.publish(`values.session.${session.id}`, body as ValuesEvent);
 					break;
 
 				case "ended":
 					ended.add(session.id);
-					podHub.publish("values.ended", { "session": session.id, ...body as EndedEvent });
+					bridgeHub.publish("values.ended", { "session": session.id, ...body as EndedEvent });
 					break;
 
 				// A run's evidence is of the text that ran — each of its files with its own (MODULES.md).
@@ -136,7 +136,7 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 					const coverage = body as CoverageEvent;
 					const files = (coverage.files ?? []).map((other) => ({ "file": other.file, "source": other.source ?? "", "statements": other.statements, "sites": other.sites }));
 
-					podHub.publish("evidence.observed", { "runId": runId, "file": coverage.file, "source": coverage.source ?? "", "statements": coverage.statements, "sites": coverage.sites, ...files.length === 0 ? {} : { "files": files } });
+					bridgeHub.publish("evidence.observed", { "runId": runId, "file": coverage.file, "source": coverage.source ?? "", "statements": coverage.statements, "sites": coverage.sites, ...files.length === 0 ? {} : { "files": files }, ...coverage.packages === undefined ? {} : { "packages": coverage.packages } });
 					break;
 				}
 
@@ -148,12 +148,12 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 					break;
 
 				case "ask":
-					asked(podHub, session, body as AskEvent);
+					asked(bridgeHub, session, body as AskEvent);
 					break;
 
 				case "listening":
 					if (typeof runId === "string") {
-						podHub.publish(`node.listening.${runId}`, { "port": (body as ListeningEvent).port });
+						bridgeHub.publish(`node.listening.${runId}`, { "port": (body as ListeningEvent).port });
 					}
 
 					break;
@@ -192,7 +192,7 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 							const category = message.body?.category ?? "console";
 
 							if (category === "stdout" || category === "stderr") {
-								podHub.publish(`node.out.${runId}`, { "stream": category === "stderr" ? "err" : "out", "data": message.body?.output ?? "" });
+								bridgeHub.publish(`node.out.${runId}`, { "stream": category === "stderr" ? "err" : "out", "data": message.body?.output ?? "" });
 							}
 						}
 					},
@@ -208,7 +208,7 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 			const runId = terminalRun(session);
 
 			if (runId !== undefined) {
-				typing.set(session.id, podHub.subscribe(`node.stdin.${runId}`, (data) => {
+				typing.set(session.id, bridgeHub.subscribe(`node.stdin.${runId}`, (data) => {
 					const { "data": text, end } = (data ?? {}) as { "data"?: string; "end"?: boolean };
 
 					void session.customRequest("stdin", { "data": text ?? "", ...end === true ? { "end": true } : {} } satisfies StdinRequest);
@@ -220,7 +220,7 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 			typing.delete(session.id);
 
 			if (!ended.delete(session.id) && session.type !== PRODUCTION && typeof session.configuration["program"] === "string") {
-				podHub.publish("values.ended", { "session": session.id, "file": session.configuration["program"] });
+				bridgeHub.publish("values.ended", { "session": session.id, "file": session.configuration["program"] });
 			}
 
 			const end = ends.get(session.id);
@@ -230,7 +230,7 @@ export function registerDebugEvents(context: vscode.ExtensionContext): void {
 
 			// Its run ends with it, with its exit code.
 			if (typeof config["__runId"] === "string") {
-				podHub.publish(`node.exit.${config["__runId"]}`, { "exitCode": end?.exitCode ?? 0 });
+				bridgeHub.publish(`node.exit.${config["__runId"]}`, { "exitCode": end?.exitCode ?? 0 });
 			}
 
 			// A run of several cases: when one ends, the next starts — unless it was stopped by hand, which stops them all.

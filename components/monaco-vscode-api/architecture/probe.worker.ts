@@ -132,6 +132,17 @@ function keptEnds(transfer: Transferable[] | StructuredSerializeOptions | undefi
 
 let workerIdPool = 0;
 
+/** The extension a worker is an extension's own of: named by the URL it gives (`extension-file://<publisher>.<name>/…`),
+ *  else by its code on the stack — undefined for a worker nothing of an extension's starts. */
+function ownerExtension(url: string): string | undefined {
+	const extension = /extension-file:\/\/[^./\s]+\.([^/\s]+)\//u;
+
+	return extension.exec(url)?.[1] ?? extension.exec(new Error("the worker's owner").stack ?? "")?.[1];
+}
+
+// The owners of workers asked for but not started yet, by worker name, oldest first (see the Worker accessor below).
+const pendingOwners = new Map<string, string[]>();
+
 function workerName(url: string | URL, options?: WorkerOptions): string {
 	// The extension host names nested workers `<its name> -> <name or file>`.
 	const name = options?.name?.split(" -> ").pop();
@@ -153,7 +164,10 @@ if (typeof globalThis.Worker === "function") {
 			const id = String(workerIdPool);
 			const peer: ProbePeer = { "type": "worker", "id": id };
 
-			report({ "type": "spawn", "id": id, "name": workerName(args[0], args[1]), "url": String(args[0]) });
+			const name = workerName(args[0], args[1]);
+			const owner = pendingOwners.get(name)?.shift() ?? ownerExtension(String(args[0]));
+
+			report({ "type": "spawn", "id": id, "name": name, "url": String(args[0]), ...owner === undefined ? {} : { "owner": owner } });
 
 			const postMessage = worker.postMessage.bind(worker) as (message: unknown, transfer?: unknown) => void;
 
@@ -184,6 +198,32 @@ if (typeof globalThis.Worker === "function") {
 			};
 
 			return worker;
+		}
+	});
+
+	// The extension host puts its own `Worker` over this one (its patchWorker): what an extension calls, and which starts
+	// the real worker — this one — later, once it has fetched the script, so by then nothing of the extension is on the
+	// stack. Its owner is taken here instead, as the extension calls the extension host's, and found again by name.
+	let current = globalThis.Worker;
+	const probed = current;
+
+	Object.defineProperty(globalThis, "Worker", {
+		"configurable": true,
+		"get": () => current,
+		"set": (value: typeof Worker) => {
+			current = value === probed ? value : new Proxy(value, {
+				"construct": function(target, args: [string | URL, WorkerOptions?], newTarget) {
+					const owner = ownerExtension(String(args[0]));
+
+					if (owner !== undefined) {
+						const name = workerName(args[0], args[1]);
+
+						pendingOwners.set(name, [...pendingOwners.get(name) ?? [], owner]);
+					}
+
+					return Reflect.construct(target, args, newTarget) as Worker;
+				}
+			});
 		}
 	});
 }

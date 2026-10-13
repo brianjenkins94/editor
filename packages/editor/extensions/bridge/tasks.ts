@@ -12,7 +12,7 @@ import type { TaskDefinition } from "vscode";
 import { createRpcClient } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { lifecycleOfScript } from "../../shared/lifecycle";
-import { podHub } from "./pod";
+import { bridgeHub } from "./hub";
 
 /** A `run` task: a command, as typed in a terminal, and where to run it. */
 export interface RunTaskDefinition extends TaskDefinition {
@@ -22,7 +22,7 @@ export interface RunTaskDefinition extends TaskDefinition {
 }
 
 const WORKSPACE = "/workspace";
-const rpc = createRpcClient(podHub);
+const rpc = createRpcClient(bridgeHub);
 
 /** A task's terminal: core's just-bash running `command` in `cwd`, its output here, its exit code the task's. */
 function taskTerminal(command: string, cwd: string): vscode.Pseudoterminal {
@@ -44,10 +44,10 @@ function taskTerminal(command: string, cwd: string): vscode.Pseudoterminal {
 		"open": () => {
 			offs.push(
 				// The terminal's output comes as text (workbench/terminal: createBashProcess's).
-				podHub.subscribe(`terminal.out.${id}`, (data) => {
+				bridgeHub.subscribe(`terminal.out.${id}`, (data) => {
 					write.fire(data as string);
 				}),
-				podHub.subscribe(`terminal.exit.${id}`, (data) => {
+				bridgeHub.subscribe(`terminal.exit.${id}`, (data) => {
 					done((data as { "code"?: number } | null)?.code ?? 0);
 				})
 			);
@@ -57,8 +57,8 @@ function taskTerminal(command: string, cwd: string): vscode.Pseudoterminal {
 				done(1);
 			});
 		},
-		"handleInput": (data) => { podHub.publish(`terminal.in.${id}`, data); },
-		"close": () => { podHub.publish(`terminal.stop.${id}`, {}); }
+		"handleInput": (data) => { bridgeHub.publish(`terminal.in.${id}`, data); },
+		"close": () => { bridgeHub.publish(`terminal.stop.${id}`, {}); }
 	};
 }
 

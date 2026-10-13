@@ -1,0 +1,20 @@
+{
+  "name": "cspell",
+  "displayName": "cspell",
+  "description": "Spell-checks code and prose with the real cspell engine — a Node program, run under almostnode in a worker of the extension's own, connected as a language server.",
+  "publisher": "brianjenkins94",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "*"
+  },
+  "browser": "extension.js",
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onLanguage:plaintext",
+    "onLanguage:markdown",
+    "onLanguage:json"
+  ]
+}

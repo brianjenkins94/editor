@@ -1,6 +1,6 @@
 /**
  * Runs, as the realms that show them have them: what's running (the core runtime's registry, workbench/runs.ts, serves
- * `runs.list`) and what there is to run (worker-pod's launch.ts serves `tasks.list`) — both read by the shell's run
+ * `runs.list`) and what there is to run (the bridge's launch.ts serves `tasks.list`) — both read by the shell's run
  * picker.
  */
 

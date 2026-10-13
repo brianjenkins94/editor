@@ -6,7 +6,7 @@
 import type { LaunchTarget } from "../../shared/runs";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
-import { podHub } from "./pod";
+import { bridgeHub } from "./hub";
 
 const idOf = (task: vscode.Task): string => `${task.source}:${task.name}`;
 
@@ -61,10 +61,10 @@ export async function appRootOf(path: string): Promise<string | undefined> {
 /** Run the app at `root`: its `dev` script, as a task (its dev server's output in the task's terminal, its preview
  *  opened as `npm run dev` opens it) — or, already running, its preview shown again. */
 export async function runApp(root: string): Promise<void> {
-	const running = await createRpcClient(podHub).request("runs.list", undefined, { "timeoutMs": 5000 }).then((list) => (list as { "state": string; "kind": string; "cwd": string; "port"?: number }[]).find((run) => run.state === "running" && run.kind === "service" && run.cwd === root && run.port !== undefined), () => undefined);
+	const running = await createRpcClient(bridgeHub).request("runs.list", undefined, { "timeoutMs": 5000 }).then((list) => (list as { "state": string; "kind": string; "cwd": string; "port"?: number }[]).find((run) => run.state === "running" && run.kind === "service" && run.cwd === root && run.port !== undefined), () => undefined);
 
 	if (running !== undefined) {
-		podHub.publish("preview.open", { "port": running.port });
+		bridgeHub.publish("preview.open", { "port": running.port });
 
 		return;
 	}
@@ -83,10 +83,10 @@ export async function runApp(root: string): Promise<void> {
 }
 
 export function registerLaunch(context: vscode.ExtensionContext): void {
-	const offList = serve(podHub, "tasks.list", async () => (await vscode.tasks.fetchTasks()).flatMap((task) => targetOf(task) ?? []));
+	const offList = serve(bridgeHub, "tasks.list", async () => (await vscode.tasks.fetchTasks()).flatMap((task) => targetOf(task) ?? []));
 	// A task run (RUNNING.md: through the terminal, each `node` in it a run). Already running: its terminal shown, not a
 	// second copy. One that can't start says why, in the workbench.
-	const offRun = serve(podHub, "tasks.run", async (args) => {
+	const offRun = serve(bridgeHub, "tasks.run", async (args) => {
 		const { id } = (args ?? {}) as { "id"?: unknown };
 
 		try {

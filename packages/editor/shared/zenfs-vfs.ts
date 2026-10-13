@@ -92,7 +92,7 @@ function connectStore(store: object): void {
 	}
 }
 
-/** Hand this realm the workspace SharedArrayBuffer (from the hub, or a control port): mounted at /workspace once
+/** Hand this realm the workspace SharedArrayBuffer (from the hub, or its launch): mounted at /workspace once
  *  zen-fs is configured. A non-shared value (no cross-origin isolation) is ignored — the realm keeps its own root. */
 export function attachSharedWorkspace(buffer: unknown): void {
 	if (typeof SharedArrayBuffer === "undefined" || !(buffer instanceof SharedArrayBuffer)) {
@@ -115,7 +115,7 @@ export function getSharedWorkspaceBuffer(): SharedArrayBuffer | undefined {
 
 /**
  * Mount the workspace SAB into THIS realm's zen-fs and return a VirtualFS adapter over it. For a fresh child
- * worker that received the buffer directly (not over the pod control port) — e.g. the provoke child worker.
+ * worker that received the buffer directly — e.g. the provoke child worker.
  */
 export async function mountWorkspaceVfs(buffer: SharedArrayBuffer): Promise<VirtualFS> {
 	await configure({ "mounts": { "/": InMemory } });
@@ -159,27 +159,4 @@ export async function createZenfsVFS(): Promise<VirtualFS> {
 
 	// Duck-typed: almostnode only calls the public VirtualFS methods, which this delegates to zen-fs.
 	return adapter;
-}
-
-/**
- * Listen — SYNCHRONOUSLY, at module load, before the LSP reader attaches — for the ext host's control port and,
- * over it, the workbench's workspace SharedArrayBuffer; mount it at /workspace when it arrives. Kept off the LSP
- * JSON-RPC channel (a dedicated transferred MessagePort) so the two never collide. Call once at a host's top.
- */
-export function receiveSharedWorkspace(): void {
-	const onControl = (event: MessageEvent): void => {
-		if ((event.data as { "type"?: string } | undefined)?.type !== "ws-control" || event.ports.length === 0) {
-			return;
-		}
-
-		globalThis.removeEventListener("message", onControl);
-		const [port] = event.ports;
-
-		port.addEventListener("message", (message: MessageEvent) => {
-			attachSharedWorkspace((message.data as { "buffer"?: unknown } | undefined)?.buffer);
-		});
-		port.start();
-	};
-
-	globalThis.addEventListener("message", onControl);
 }

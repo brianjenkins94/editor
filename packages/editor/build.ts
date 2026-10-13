@@ -41,7 +41,7 @@ const PROCESS_SHIM = "globalThis.process=globalThis.process||{\"env\":{},\"argv\
  *  every extension shares, where a global `process` makes other extensions (VS Code's TypeScript) take it for Node. */
 const MODULE_PROCESS_SHIM = "var process=globalThis.process||{\"env\":{},\"argv\":[],\"platform\":\"browser\",\"cwd\":function(){return \"/\";}};";
 
-/** Bundle `<folder>/<file>.ts` (a folder of this package, e.g. `extensions/worker-pod`; deps inlined) into a virtual
+/** Bundle `<folder>/<file>.ts` (a folder of this package, e.g. `extensions/bridge`; deps inlined) into a virtual
  *  module `<name>:<id>`, named for the folder's last segment, exposing the built code as a default-export string.
  *  `externals` stay unbundled. `configFile:false` isolates the nested build. */
 function bundledModule(folder: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[] | ((source: string, importer: string | undefined) => boolean), served = false, plugins: Plugin[] = [], banner?: string): Plugin {
@@ -311,7 +311,7 @@ export async function preBuild(): Promise<void> {
 		// just-bash chunk as /browser.js → index.html, "Failed to load module script") — the import itself, relative,
 		// still worked.
 		"base": "./",
-		"plugins": [bundledExtension("worker-pod"), bundledExtension("tsval"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("history"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledModule("extensions/event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin(), polyfillNode(["path", "url"])],
+		"plugins": [bundledExtension("bridge"), bundledExtension("tsval"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("history"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledExtension("cspell"), bundledModule("extensions/event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin(), polyfillNode(["path", "url"])],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
 		// `buffer` → the node-stdlib-browser polyfill: isomorphic-git (the git SCM engine) uses the `Buffer` global,
@@ -349,7 +349,7 @@ export async function preBuild(): Promise<void> {
 		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
 		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
 		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
-		"plugins": [bundledNodeServer("worker-pod"), bundledModule("previews", "page-tap.ts", "page-tap", "iife", []), bundledModule("previews", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
+		"plugins": [bundledNodeServer("cspell"), bundledModule("previews", "page-tap.ts", "page-tap", "iife", []), bundledModule("previews", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
 		"worker": { "rollupOptions": { "output": { "sourcemap": !isCI } } },
 		"build": {
 			"outDir": "dist",
@@ -363,13 +363,13 @@ export async function preBuild(): Promise<void> {
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
 				"input": {
-					"lsp/server-host": resolvePath("./extensions/worker-pod/server-host.ts"),
+					"lsp/server-host": resolvePath("./extensions/cspell/server-host.ts"),
 					"lsp/debug-worker": resolvePath("./extensions/tsval/debug-worker.ts"),
 					"lsp/node-worker": resolvePath("./workers/node-worker.ts"),
 					// provoke child worker (debug affordance): node-worker spawns it per hardReset round to get a cold
 					// almostnode + ts realm. Served at lsp/provoke-worker.js so node-worker's `new URL` resolves it.
 					"lsp/provoke-worker": resolvePath("./workers/provoke-worker.ts"),
-					// The editor's BABLR worker (not part of the LSP pod), served from lsp/ like the other worker chunks.
+					// The editor's BABLR worker (core's, not the bridge's), served from lsp/ like the other worker chunks.
 					// Started and queued by bablr.ts.
 					"lsp/bablr-worker": resolvePath("./workers/bablr-worker.ts"),
 					// The event sheet's recognizer worker — built HERE so its `typescript` shares the deduped ts chunk above

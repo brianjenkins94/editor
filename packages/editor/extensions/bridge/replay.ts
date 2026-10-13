@@ -4,13 +4,13 @@
  * (page-evidence.ts) — and *Step a Recorded Stop* runs it again in the debugger: a tsval session on that call
  * (extensions/tsval/debug-worker.ts `launchReplay`), stopping at the stop, stepped back and forth while the page has gone on.
  *
- * The pod hears what the preview pages report (`stops.preview`, as the margin does: recorded-stops.ts) and keeps each
+ * The bridge hears what the preview pages report (`stops.preview`, as the margin does: recorded-stops.ts) and keeps each
  * file's latest; the text of the version that ran comes from the dev server that served it (`preview.version`).
  */
 import type { RecordedStop, Replay, StopHit } from "../../shared/preview-evidence";
 import { createRpcClient } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
-import { podHub } from "./pod";
+import { bridgeHub } from "./hub";
 
 /** A hit that can be stepped: its stop, the hit, and the preview port it came from. */
 interface Steppable { "stop": RecordedStop; "hit": StopHit & { "replay": Replay }; "port": number }
@@ -29,9 +29,9 @@ function labelOf({ stop, hit }: Steppable): string {
 }
 
 export function registerReplay(context: vscode.ExtensionContext): void {
-	const rpc = createRpcClient(podHub);
+	const rpc = createRpcClient(bridgeHub);
 
-	context.subscriptions.push({ "dispose": podHub.subscribe("stops.preview", (data) => {
+	context.subscriptions.push({ "dispose": bridgeHub.subscribe("stops.preview", (data) => {
 		const { window, stops } = (data ?? {}) as { "window"?: unknown; "stops"?: unknown };
 		const port = Number(/^preview:(\d+)/u.exec(typeof window === "string" ? window : "")?.[1]);
 

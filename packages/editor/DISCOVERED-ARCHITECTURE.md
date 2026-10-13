@@ -23,7 +23,7 @@ on them is discovered from the running editor; the only things declared are the 
   labels its operations by caller (`vscode ·`, `direct ·`, `seed ·`, `restore ·`, `persist ·`).
 
 So the traffic of today's work is already in the view's data: `evidence.preview` from `preview:*` through the shell to
-the workbench, `annotations.resolve` from the pod, `preview.version` from the workbench to the node worker. It isn't
+the workbench, `annotations.resolve` from the bridge, `preview.version` from the workbench to the node worker. It isn't
 drawn as anything.
 
 ## What can be discovered, without reading source
@@ -34,7 +34,7 @@ Each extension gets its own instance of the `vscode` API. Wrapping `commands.reg
 `commands.executeCommand` on each instance attributes every command to the extension that registered it and the one
 that called it. Their names and descriptions come from each extension's manifest. That finds:
 
-- notes → `editor.annotations.resolve` → worker-pod;
+- notes → `editor.annotations.resolve` → the bridge;
 - insights → `typescript.tsserverRequest("_types.at")` → the TypeScript extension → the capabilities plugin;
 - every extension's place on the editor's command surface.
 
@@ -109,8 +109,9 @@ what was discovered. A rule can still carry a sentence of intent where the name 
 
 ## ARCHITECTURE.md's diagram
 
-The diagram is rendered from the last tour's observations, not from declarations. The tour already saves its observed
-snapshot (`architecture-tour.json`); it writes the diagram from it too. The architecture workflow re-runs the tour, so
+The diagram is rendered from the last tour's observations, not from declarations. Each of the tour's shards keeps what
+its session saw (`$TMPDIR/architecture-tour-seen/<shard>.json`); `test/architecture-diagram.mjs` merges them and writes
+the diagram. The architecture workflow re-runs the tour, so
 the committed diagram is checked against a fresh one: a change that adds a component or a flow shows up as a diff to
 the diagram in the same commit.
 
@@ -124,9 +125,9 @@ own — and it waits until discovery has shown how far it gets alone.
 
 1. **Extensions and commands**: the per-extension API wrap; command edges on `$sys.arch`. Done: the build hands every
    bundled extension a `vscode` whose `commands` are counted (extensions/command-tap.ts, build.ts's commandTap); each
-   extension host sends its totals to worker-pod (`editor.arch.commands`), which puts `ext:<name>` nodes and `cmd …`
+   extension host sends its totals to the bridge (`editor.arch.commands`), which puts `ext:<name>` nodes and `cmd …`
    edges on the view; commands nobody bundled registered belong to `ext:vscode`. The tour finds notes and insights →
-   `editor.annotations.*` → worker-pod, insights → `editor.metrics.read`, and notes, insights and eslint → the
+   `editor.annotations.*` → the bridge, insights → `editor.metrics.read`, and notes, insights and eslint → the
    TypeScript plugin's `_types.at` and `_eslint.fixAll`. Only our bundled extensions are tapped; one installed from the
    gallery isn't (yet).
 2. **Stores**: path shapes from the zen-fs probe's writes; an `indexedDB.open` probe in each realm. Done: the zen-fs
@@ -143,7 +144,7 @@ own — and it waits until discovery has shown how far it gets alone.
    its call, and a call a queue defers names what it was queued for (`handlingMessage`, RpcRequestOptions' `cause` —
    core's BABLR queue does). The reporter samples both; observability's `flowsOf` follows them into flows, a message
    with no cause linked, inferred, to the last one its sender received within 50 ms. The tour finds a note's resolve
-   as the pod's `annotations.resolve()` causing core's `bablr.resolve()`, named. A local caveat: a `file:`
+   as the bridge's `annotations.resolve()` causing core's `bablr.resolve()`, named. A local caveat: a `file:`
    dependency's change doesn't reach Vite's dependency cache (`node_modules/.vite`) until it's cleared.
 4. **Components**: the hub records where each handler was registered; namespaces group what a context serves. Done:
    the hub takes a stack trace once, as a handler subscribes, and keeps the first named function outside the hub (an

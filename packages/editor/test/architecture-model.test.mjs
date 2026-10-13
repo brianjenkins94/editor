@@ -10,13 +10,13 @@ import { allowedOnLink, appLayout, appNodes, channels, checkConformance, declare
 const patterns = (from, to) => familiesOnLink(from, to).map((family) => family.pattern);
 
 test("a subject family may only cross the tree links between its senders and receivers", () => {
-	// git.discard runs shell → workbench, through root — and only there (the Source Control view, the pod's, doesn't)
+	// git.discard runs shell → workbench, through root — and only there (the Source Control view, the bridge's, doesn't)
 	assert.ok(patterns("shell", "root").includes("git.discard"));
 	assert.ok(patterns("root", "workbench").includes("git.discard"));
-	assert.ok(!patterns("workbench", "pod").includes("git.discard"));
-	// capability.decide: pod serves, root (for the sw) and shell call — so it crosses root⇄workbench, workbench⇄pod,
-	// shell⇄root; the sw only ever asks its tab's root (capability.decide.<tab>), never the pod directly
-	for (const [from, to] of [["root", "workbench"], ["workbench", "pod"], ["shell", "root"]]) {
+	assert.ok(!patterns("workbench", "bridge").includes("git.discard"));
+	// capability.decide: bridge serves, root (for the sw) and shell call — so it crosses root⇄workbench, workbench⇄bridge,
+	// shell⇄root; the sw only ever asks its tab's root (capability.decide.<tab>), never the bridge directly
+	for (const [from, to] of [["root", "workbench"], ["workbench", "bridge"], ["shell", "root"]]) {
 		assert.ok(patterns(from, to).includes("capability.decide"), `${from}⇄${to}`);
 	}
 
@@ -25,7 +25,7 @@ test("a subject family may only cross the tree links between its senders and rec
 
 	assert.ok(!patterns("workbench", "node").includes("capability.decide"));
 	// logs go everywhere
-	assert.ok(patterns("pod", "debug-worker").includes("$sys.log.>"));
+	assert.ok(patterns("bridge", "debug-worker").includes("$sys.log.>"));
 });
 
 test("and only in its direction: an event or a call from its senders to its receivers, a reply back", () => {
@@ -78,7 +78,7 @@ test("conformance flags undeclared channels, unexpected subjects, duplicate peer
 		"nodes": ["workbench", "mystery", "webview:1", "worker:TextMateWorker"],
 		"channels": [
 			{ "a": "shell", "b": "root", "labels": labels("git.status()", "↩ git.status()", "hello", "$sys.log.shell") },
-			{ "a": "workbench", "b": "pod", "labels": labels("git.discard()") }, // discarding is the shell's alone
+			{ "a": "workbench", "b": "bridge", "labels": labels("git.discard()") }, // discarding is the shell's alone
 			// counted by direction: the shell's git.changed would be the wrong way round
 			{ "a": "root", "b": "shell", "labels": new Map([["git.changed", { "count": 3, "hub": 3, "forward": 2, "backward": 1 }]]) },
 			{ "a": "shell", "b": "node", "labels": labels("x") }, // no such link or channel
@@ -90,7 +90,7 @@ test("conformance flags undeclared channels, unexpected subjects, duplicate peer
 	});
 
 	assert.deepEqual(violations, [
-		{ "type": "unexpected-subject", "a": "workbench", "b": "pod", "subject": "git.discard", "count": 1 },
+		{ "type": "unexpected-subject", "a": "workbench", "b": "bridge", "subject": "git.discard", "count": 1 },
 		{ "type": "unexpected-subject", "a": "shell", "b": "root", "subject": "git.changed", "count": 1 },
 		{ "type": "undeclared-channel", "a": "shell", "b": "node" },
 		{ "type": "duplicate-peer", "hub": "sw", "peer": "root", "links": 2 },
@@ -101,7 +101,7 @@ test("conformance flags undeclared channels, unexpected subjects, duplicate peer
 test("every declared channel endpoint and hub link names a declared node (or a pattern)", () => {
 	const ids = new Set(nodes.map((node) => node.id));
 
-	for (const pair of [["exthost:LocalWebWorker:0", "nested:tsserver"], ["preview:5173", "sw"], ["pod", "worker:server-host"], ["workbench", "webview:abc"]]) {
+	for (const pair of [["exthost:LocalWebWorker:0", "nested:tsserver"], ["preview:5173", "sw"], ["exthost:LocalWebWorker:0", "ext:cspell/cspell"], ["workbench", "webview:abc"]]) {
 		assert.notEqual(declaredBetween(...pair), undefined, pair.join("⇄"));
 	}
 
@@ -111,7 +111,7 @@ test("every declared channel endpoint and hub link names a declared node (or a p
 });
 
 test("workers and URLs map to model ids", () => {
-	assert.deepEqual(identifyWorker("https://x/lsp/debug-worker.js?v=1"), { "id": "debug-worker", "container": "podWorkers", "owner": "pod" });
+	assert.deepEqual(identifyWorker("https://x/lsp/debug-worker.js?v=1"), { "id": "debug-worker", "container": "debugWorkers", "owner": "bridge" });
 	assert.equal(identifyWorker("blob:foo"), undefined);
 	assert.equal(classifyUrl(new URL("ws://localhost:7378")), "debug-mcp");
 	assert.equal(classifyUrl(new URL("https://unpkg.com/react")), "net:unpkg.com");

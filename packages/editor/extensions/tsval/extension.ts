@@ -5,7 +5,7 @@
  *
  * It reaches the editor only as another debugger's extension would: VS Code's API; the run contract
  * (@brianjenkins94/run-contract) — the events that tell the editor what a run did, the requests it answers; and the
- * workspace runtime (`workspaceRuntime()`, which worker-pod provides in this extension host — the one tsval depends on)
+ * workspace runtime (`workspaceRuntime()`, which the bridge provides in this extension host — the one tsval depends on)
  * — its worker reads the workspace through it, and a server its program starts answers the preview through it.
  */
 import type * as vscode from "vscode";

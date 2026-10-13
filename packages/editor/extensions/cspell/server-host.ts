@@ -1,25 +1,21 @@
 /**
- * Spine B worker host — runs almostnode's main-thread Runtime INSIDE this plain worker (no WorkerRuntime,
- * so no nested worker, no Comlink on the channel, no /assets worker asset), then runs the cspell language
- * server (server-node) through it. almostnode gives the server its node runtime (`fs`, `zlib`, dynamic
- * `require`); because almostnode-run code shares this worker's real globalThis (verified), the server's LSP
- * transport (`BrowserMessageReader(globalThis)`) reads/writes the worker's own message channel — which the
- * client connects to directly. So the client sees an ordinary worker server; almostnode is invisible to it.
+ * The cspell language server's worker — the cspell extension's (extension.ts starts it through a classic bootstrap, as an
+ * extension's workers start). It runs almostnode's main-thread Runtime INSIDE this plain worker (no WorkerRuntime, so
+ * no nested worker, no Comlink on the channel), then runs the cspell language server (server-node) through it. almostnode
+ * gives the server its node runtime (`fs`, `zlib`, dynamic `require`); because almostnode-run code shares this worker's
+ * real globalThis, the server's LSP transport (`BrowserMessageReader(globalThis)`) reads and writes the worker's own
+ * message channel — which the client connects to directly. So the client sees an ordinary worker server; almostnode is
+ * invisible to it.
  *
- * almostnode runs on a zen-fs-backed VFS (zenfs-vfs.ts) rather than its own in-memory tree — so one
- * filesystem backs the runtime's module loads AND the server's dictionary I/O, and later the same zen-fs can
- * be shared (SharedArrayBuffer) with the main thread and bound to a vscode FileSystemProvider. Both the
- * server bundle and the dictionary (a gzipped trie, too big to bundle — served next to this worker under
- * /__vscode__/lsp/, resolved relative to this module's URL) are written into zen-fs before the server runs.
+ * almostnode runs on a zen-fs VFS of this worker's own (zenfs-vfs.ts, in memory): the server reads only its dictionary
+ * from it, never the workspace — documents come over LSP. The dictionary (a gzipped trie, too big to bundle — served
+ * next to this worker under /__vscode__/lsp/, resolved relative to this module's URL) and the server bundle are written
+ * into it before the server runs.
  */
 import { createRuntime } from "@brianjenkins94/almostnode";
-// The cspell server (with cspell-lib + the LSP lib), bundled to an ESM string by entry.config.ts; run below.
-import serverNodeCode from "worker-pod:server-node";
-import { createZenfsVFS, receiveSharedWorkspace } from "../../shared/zenfs-vfs.js";
-
-// Catch the shared workspace SAB from the ext host (M3b) BEFORE main()/the LSP reader — a dedicated port, so it
-// never collides with the LSP channel. No-op if none arrives.
-receiveSharedWorkspace();
+// The cspell server (with cspell-lib + the LSP lib), bundled to an ESM string (bundledNodeServer in build.ts); run below.
+import serverNodeCode from "cspell:server-node";
+import { createZenfsVFS } from "../../shared/zenfs-vfs.js";
 
 // Kept in one place, matched by server-node's DICT_PATH.
 const DICT_PATH = "/dicts/en_US.trie.gz";
@@ -59,6 +55,8 @@ async function main(): Promise<void> {
 	await runtime.runFile("/server-node.ts");
 }
 
-main().catch((error: unknown) => {
-	console.error("[worker-pod/server-host] failed to start cspell server under almostnode", error);
+// Awaited, so whoever imports this module (the extension's bootstrap, server.js) knows when the server listens: what the
+// client sent before then is held there and handed on once this resolves.
+await main().catch((error: unknown) => {
+	console.error("[cspell/server-host] failed to start cspell server under almostnode", error);
 });

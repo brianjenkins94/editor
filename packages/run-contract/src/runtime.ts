@@ -34,7 +34,7 @@ export interface WorkspaceRuntime {
 }
 
 /** Where core keeps each runtime link's session, by the id it gave the worker — in core's realm, which both ends that
- *  link runtime ports share (worker-pod's host and the workbench). */
+ *  link runtime ports share (the bridge's host and the workbench). */
 const LINKS = Symbol.for("@brianjenkins94/run-contract/runtimeLinks");
 
 function links(): Map<string, string | undefined> {
@@ -61,7 +61,7 @@ export function linkRuntime(hub: Hub, port: MessagePort, name: string, session?:
 	links().set(id, session);
 
 	const unlink = hub.link(portTransport(port), { "peer": id, "permissions": {
-		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "pod.ready", rpcCallSubject("runtime.fs.attach"), rpcReplySubject("node")],
+		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "bridge.ready", rpcCallSubject("runtime.fs.attach"), rpcReplySubject("node")],
 		"subscribe": ["$sys.arch.sync", rpcCallSubject("virtual.debug.*"), rpcReplySubject(id)]
 	} });
 
@@ -77,7 +77,7 @@ export interface RuntimeRequest { "port": number; "method": string; "url": strin
 /** The server's answer. */
 export interface RuntimeResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
 
-/** Where core puts the workspace runtime in an extension host (worker-pod's, in the bridge's; core's bootstrap's, in
+/** Where core puts the workspace runtime in an extension host (the bridge's, in the bridge's; core's bootstrap's, in
  *  the web worker host). */
 const RUNTIME = Symbol.for("@brianjenkins94/run-contract/workspaceRuntime");
 
@@ -134,10 +134,10 @@ export function connectRuntime(port: MessagePort, { name, network = false }: { "
 
 	const { log, architecture } = observe(hub, { "network": network });
 
-	// (a membership line in worker-pod's log, once it's listening)
-	void hub.whenInterested("pod.ready", 30_000).then((wanted) => {
+	// (a membership line in the bridge's log, once it's listening)
+	void hub.whenInterested("bridge.ready", 30_000).then((wanted) => {
 		if (wanted) {
-			hub.publish("pod.ready", { "worker": hub.id });
+			hub.publish("bridge.ready", { "worker": hub.id });
 		}
 	});
 

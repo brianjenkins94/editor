@@ -125,7 +125,7 @@ interpreter built from editor-contrib's starting point (`contrib/`, kept in bria
 URL (contributed-extensions.ts): listed by the site's own `extensions.json` (editor-contrib's site is this editor's
 package, `packages/editor@latest.tgz` on its site — the built site itself — with the extension added), or a page's `?extension=` while it's developed. Its
 manifest's `configurationDefaults` makes it `run.debugger`. The editor's ▷ and live runs then start that; its sessions are runs like
-tsval's (worker-pod's debug-events.ts asks core for each one's id), and the custom events it sends — the run contract's
+tsval's (the bridge's debug-events.ts asks core for each one's id), and the custom events it sends — the run contract's
 (packages/run-contract: `values`, `coverage`, `effects`, `ended`) — are the margin's, the evidence's and the run ledger's,
 read the one way tsval's are: tsval tells the editor through the same contract. Stepping, breakpoints and the Variables view are the
 Debug Adapter Protocol's. Capability stops are the contract's too: every debugger is given the policy (`__policy`), asks
@@ -136,7 +136,7 @@ it drives tsval (debug-control.ts): followed by its DAP messages — or, in anot
 every host (its start, the frame it stops at, the contract's events, its end; its output, there, an agent doesn't see) —
 and stepped and read with DAP's own requests. What stays tsval's: that a terminal's `node` runs on tsval (it's Node's
 semantics), replay and orderings. tsval itself is an extension of its own (extensions/tsval): the contract, and the
-workspace runtime worker-pod exports to any debugger (EXTENSION-POINTS.md, 2), are all it reaches the editor through. test/contrib.mjs runs contrib/ in a real editor, so a change here that breaks it fails there.
+workspace runtime the bridge exports to any debugger (EXTENSION-POINTS.md, 2), are all it reaches the editor through. test/contrib.mjs runs contrib/ in a real editor, so a change here that breaks it fails there.
 
 ## Entry points, after
 
@@ -229,7 +229,7 @@ that can't start says why). And the two run ledgers become one: every run in `ru
    debugger, while the live page has gone on. Replay, at a function's grain rather than the page's: what made the page
    virtual loop costly, without it. Done: the function a stop is in (a function or an arrow whose arguments can be had —
    not yet a method) is instrumented to record each call of it — on entry its free names, `this` and arguments, each
-   call's result where it was made, all as snapshots (worker-pod snapshot.ts: data as data, a function or a DOM method as
+   call's result where it was made, all as snapshots (build/snapshot.ts: data as data, a function or a DOM method as
    a named stand-in), kept with the latest five hits; *Debug: Step a Recorded Stop* (replay.ts) picks one and starts a
    session on it (debug-worker.ts `launchReplay`, replay-run.ts): the recorded version's text, everything but the
    function blanked so every line is the file's, its free names bound around it, each call to what it couldn't record
