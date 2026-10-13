@@ -367,6 +367,9 @@ export async function preBuild(): Promise<void> {
 				"output": {
 					"chunkFileNames": "lsp/[name]-[hash].js",
 					"assetFileNames": "lsp/[name]-[hash][extname]",
+					// The debug worker bundles util (silo's policy, and util's env with it), which reads `process` as it
+					// loads; it's a realm of its own, with none. Not the almostnode workers: they emulate Node's own.
+					"banner": (chunk) => (chunk.name === "lsp/debug-worker" ? PROCESS_SHIM : ""),
 					// Force `typescript` into ONE shared chunk. The node worker (ViteDevServer transpile) loads it
 					// lazily; the debug worker (tsval) would otherwise INLINE its own ~7MB copy — this makes both
 					// reference the same lsp/typescript-*.js instead of shipping ts twice.
