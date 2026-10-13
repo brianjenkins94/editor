@@ -117,6 +117,29 @@ test("builtinFor: told which module's folder asks — a package's, under its nod
 	assert.deepEqual(asked, ["package /workspace/node_modules/greet", "program /workspace"]);
 });
 
+test("globalFor: a package's own fetch, by its folder; the program and an unanswered module see the real one", () => {
+	const asked: string[] = [];
+	const counted = (): string => "counted";
+	const runtime = runtimeWith({
+		...PACKAGE,
+		"/workspace/node_modules/caller/package.json": JSON.stringify({ "name": "caller", "main": "index.js" }),
+		"/workspace/node_modules/caller/index.js": "module.exports = typeof fetch === 'function' ? fetch() : 'none';",
+		"/workspace/main.js": "module.exports = { 'theirs': require('caller'), 'mine': fetch === globalThis.fetch };"
+	}, {
+		"globalFor": (name, requester, from) => {
+			asked.push(`${name} ${requester} ${from}`);
+
+			return requester === "package" ? counted : undefined;
+		}
+	});
+	const exported = runtime.require("./main.js") as { "theirs": string; "mine": boolean };
+
+	assert.equal(exported.theirs, "counted", "the package called the host's");
+	assert.equal(exported.mine, true, "the program's is the real global");
+	assert.ok(asked.includes("fetch package /workspace/node_modules/caller"));
+	assert.ok(asked.includes("fetch program /workspace"));
+});
+
 test("register: a module the host evaluated is everyone's — a package requiring the program file gets the same one", () => {
 	const runtime = runtimeWith({
 		"/workspace/config.js": "module.exports = { 'evaluated': 'natively' };",

@@ -348,7 +348,10 @@ type Runtime = InstanceType<typeof import("@brianjenkins94/almostnode").Runtime>
 const PACKAGE_CALLS: Record<string, Record<string, string>> = {
 	"fs": Object.fromEntries([...Object.entries(FS_SYNC), ...Object.entries(FS_ASYNC)].map(([method, op]) => [method, "fs:" + op])),
 	"fs/promises": Object.fromEntries(Object.entries(FS_ASYNC).map(([method, op]) => [method, "fs:" + op])),
-	"child_process": Object.fromEntries(["exec", "execSync", "execFile", "execFileSync", "spawn", "spawnSync", "fork"].map((method) => [method, "exec"]))
+	"child_process": Object.fromEntries(["exec", "execSync", "execFile", "execFileSync", "spawn", "spawnSync", "fork"].map((method) => [method, "exec"])),
+	// (almostnode's http and https reach the network through the global fetch — counted here as the package's, by URL)
+	"http": { "request": "net", "get": "net" },
+	"https": { "request": "net", "get": "net" }
 };
 /** A call that didn't happen because it may not: refused (a write: beforeFs), or not possible here (a command). */
 const refused = (error: unknown): boolean => ["EACCES", "EPERM", "ENOSYS"].includes((error as { "code"?: unknown } | undefined)?.code as string);
@@ -356,6 +359,40 @@ const refused = (error: unknown): boolean => ["EACCES", "EPERM", "ENOSYS"].inclu
 const packageBuiltins = new Map<string, unknown>();
 /** almostnode's `packageDirOf`, once the runtime's loaded. */
 let packageDirOf: ((filename: string) => string | undefined) | undefined;
+
+/** The package installed in `dir`, as an effect names it: name@version (packagesRan), or its folder's name. */
+function packageOf(dir: string): string {
+	const ran = packagesRan.get(dir) ?? { "name": dir.slice(dir.lastIndexOf("/node_modules/") + "/node_modules/".length) };
+
+	return ran.version === undefined ? ran.name : `${ran.name}@${ran.version}`;
+}
+
+/** Each package's own `fetch`, by package folder. */
+const packageFetches = new Map<string, typeof fetch>();
+
+/**
+ * The package whose module is in folder `from` gets the real `fetch` — what it reaches is what it reached — each call
+ * counted among the run's effects as that package's (`net`, by URL), as its fs and child_process calls are
+ * (packageBuiltin). Record, don't contain: a package that reaches for `globalThis.fetch` itself isn't told apart.
+ * Undefined for anything that isn't a package's.
+ */
+function packageFetch(from: string): typeof fetch | undefined {
+	const dir = packageDirOf?.(from);
+
+	if (dir === undefined) {
+		return undefined;
+	}
+
+	if (!packageFetches.has(dir)) {
+		packageFetches.set(dir, async (input, init) => {
+			tally("net", reachedBy(input), "made", packageOf(dir));
+
+			return globalThis.fetch(input, init);
+		});
+	}
+
+	return packageFetches.get(dir);
+}
 
 /**
  * The package asking from folder `from` gets almostnode's own `id` — what it does is what it did — with each gated call
@@ -373,8 +410,7 @@ function packageBuiltin(id: string, from: string): unknown {
 	const key = id + "\0" + dir;
 
 	if (!packageBuiltins.has(key)) {
-		const ran = packagesRan.get(dir) ?? { "name": dir.slice(dir.lastIndexOf("/node_modules/") + "/node_modules/".length) };
-		const pkg = ran.version === undefined ? ran.name : `${ran.name}@${ran.version}`;
+		const pkg = packageOf(dir);
 		const real = runtime.require(id, "/workspace", "package") as Record<string, unknown>;
 		const counted = (methods: Record<string, string>, target: Record<string, unknown>): Record<string, unknown> => new Proxy(target, {
 			"get": (object, property, receiver) => {
@@ -472,6 +508,8 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 
 			return Object.hasOwn(programBuiltins, id) ? programBuiltins[id] : undefined;
 		},
+		// …and its own `fetch`, its calls counted as its (the program's `fetch` is its stand-in, as its built-ins are).
+		"globalFor": (_name, requester, from) => (requester === "package" ? packageFetch(from) : undefined),
 		// A program file a package requires: tsval's to evaluate, on the run's machine (a nested run).
 		"evaluateProgram": (module, _require, source) => {
 			if (evaluating === undefined) {
@@ -562,6 +600,13 @@ function reachedBy(argument: unknown): string {
 		const { url } = argument as { "url": string | URL };
 
 		return String(url);
+	}
+
+	// http.request's options: where they reach
+	if (typeof argument === "object" && argument !== null && ("hostname" in argument || "host" in argument)) {
+		const { protocol = "http:", hostname, host, port, path = "" } = argument as { "protocol"?: string; "hostname"?: string; "host"?: string; "port"?: number | string; "path"?: string };
+
+		return `${protocol}//${hostname ?? host}${port === undefined ? "" : ":" + String(port)}${path}`;
 	}
 
 	return "";

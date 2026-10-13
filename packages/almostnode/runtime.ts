@@ -257,6 +257,10 @@ export interface RuntimeOptions {
   // almostnode's own. A debugger gives the program's code capability stand-ins and packages the real shims. `from`: the
   // folder of the module asking (a package's is under its node_modules folder), so a host can tell which package it is.
 	"builtinFor"?: (id: string, requester: Requester, from: string) => unknown;
+  // A global by who reaches for it, as builtinFor is a built-in: the module's own `fetch` (the only one asked for today)
+  // — a debugger gives a package one that counts its calls. `from` as builtinFor's; undefined leaves the real global.
+  // A module still reaches the real one through `globalThis.fetch`: this tells which package called, it doesn't contain.
+	"globalFor"?: (name: "fetch", requester: Requester, from: string) => unknown;
   // Told once per package whose code runs, as its first module is evaluated: its name and version (its package.json's;
   // the folder's name when it has none) and its folder — for a host to record which versions a run ran.
 	"onPackage"?: (pkg: LoadedPackage) => void;
@@ -908,7 +912,7 @@ function createRequire(
     // - import.meta is provided for ESM code that uses it
 		try {
 			const importMetaUrl = "file://" + resolvedPath;
-			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport) {
+			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch) {
 var exports = $exports;
 var require = $require;
 var module = $module;
@@ -918,6 +922,7 @@ var process = $process;
 var console = $console;
 var import_meta = $importMeta;
 var __dynamicImport = $dynamicImport;
+var fetch = $fetch;
 // Set up global.process and globalThis.process for code that accesses them directly
 var global = globalThis;
 globalThis.process = $process;
@@ -950,7 +955,8 @@ ${code}
 				process,
 				consoleWrapper,
 				{ "url": importMetaUrl, "dirname": dirname, "filename": resolvedPath },
-				dynamicImport
+				dynamicImport,
+				options.globalFor?.("fetch", program ? "program" : "package", dirname) ?? globalThis.fetch
 			);
 
 			module.loaded = true;
@@ -1501,7 +1507,7 @@ export class Runtime {
     // Use the same wrapper pattern as loadModule for consistency
 		try {
 			const importMetaUrl = "file://" + filename;
-			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport) {
+			const wrappedCode = `(function($exports, $require, $module, $filename, $dirname, $process, $console, $importMeta, $dynamicImport, $fetch) {
 var exports = $exports;
 var require = $require;
 var module = $module;
@@ -1511,6 +1517,7 @@ var process = $process;
 var console = $console;
 var import_meta = $importMeta;
 var __dynamicImport = $dynamicImport;
+var fetch = $fetch;
 // Set up global.process and globalThis.process for code that accesses them directly
 var global = globalThis;
 globalThis.process = $process;
@@ -1536,7 +1543,8 @@ ${code}
 				this.process,
 				consoleWrapper,
 				{ "url": importMetaUrl, "dirname": dirname, "filename": filename },
-				dynamicImport
+				dynamicImport,
+				this.options.globalFor?.("fetch", "program", dirname) ?? globalThis.fetch
 			);
 
 			module.loaded = true;
