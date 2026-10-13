@@ -13,8 +13,8 @@ export default mergeConfig(defaults, {
 	// `url(/codicon.ttf)` would escape that prefix and 404.
 	"base": "./",
 	"build": {
-		// Minify with vite's own (oxc) minifier — fast and within the default node heap — in CI. (Our own bundles — where
-		// the e.with bad URI originates — are unminified via packages/editor/build.ts instead.)
+		// Minified in CI, by vite's own (oxc) minifier — fast, and within the default node heap; left readable locally,
+		// beside the sourcemaps below. Nothing in the build depends on it either way.
 		"minify": isCI,
 		// Sourcemaps for local debugging only — NEVER in CI (they're ~62MB of @codingame maps + our chunk maps,
 		// debug-only and never fetched at runtime; drop-sourcemaps below strips the copied ones in CI too).
