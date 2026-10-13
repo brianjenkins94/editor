@@ -189,10 +189,11 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 	// Each preview run's evidence, until it ends: every page's latest totals (a page reports all it has counted since it
 	// loaded), and each module version's source — asked of the dev server as soon as a version turns up, while it's
 	// still serving (it can be stopped before the run ends).
-	const previews = new Map<string, { "pages": Map<string, ModuleEvidence[]>; "sources": Map<string, Promise<string | undefined>>; "versions": Map<string, string[]> }>();
+	// (and the packages its pages loaded, by name@version: esm.sh's, not this project's node_modules — no lockfile names them)
+	const previews = new Map<string, { "pages": Map<string, ModuleEvidence[]>; "sources": Map<string, Promise<string | undefined>>; "versions": Map<string, string[]>; "packages": Set<string> }>();
 
 	hub.subscribe("evidence.preview", (data) => {
-		const { window, page, modules } = (data ?? {}) as { "window"?: unknown; "page"?: unknown; "modules"?: unknown };
+		const { window, page, modules, "packages": loaded } = (data ?? {}) as { "window"?: unknown; "page"?: unknown; "modules"?: unknown; "packages"?: unknown };
 		const port = Number(/^preview:(\d+)/u.exec(typeof window === "string" ? window : "")?.[1]);
 		const run = Number.isNaN(port) ? undefined : runs.runningService((candidate) => candidate.port === port);
 
@@ -200,10 +201,16 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			return;
 		}
 
-		const preview = previews.get(run.id) ?? { "pages": new Map(), "sources": new Map(), "versions": new Map() };
+		const preview = previews.get(run.id) ?? { "pages": new Map(), "sources": new Map(), "versions": new Map(), "packages": new Set() };
 
 		previews.set(run.id, preview);
 		preview.pages.set(page, modules as ModuleEvidence[]);
+
+		for (const pkg of Array.isArray(loaded) ? loaded : []) {
+			if (typeof pkg === "string") {
+				preview.packages.add(pkg);
+			}
+		}
 
 		for (const { file, version } of modules as ModuleEvidence[]) {
 			if (!preview.sources.has(version)) {
@@ -394,10 +401,11 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			}
 		}
 
-		// The packages whose code it ran, and which versions: whether anyone ran one later found compromised.
-		const ran = await packagesOf(loaded);
+		// The packages whose code it ran, and which versions: whether anyone ran one later found compromised. (A preview's
+		// pages' are by name@version alone: esm.sh served them, so no lockfile's integrity names them.)
+		const ran = { ...await packagesOf(loaded), ...Object.fromEntries([...preview?.packages ?? []].map((pkg) => [pkg, {}])) };
 
-		if (ran !== undefined && Object.keys(ran).length > 0) {
+		if (Object.keys(ran).length > 0) {
 			envelope.packages = ran;
 		}
 

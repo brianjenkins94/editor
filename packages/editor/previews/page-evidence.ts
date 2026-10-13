@@ -93,7 +93,29 @@ function capped(tags: Record<string, number>): Record<string, number> {
  * Count what the page's instrumented modules tell `globalThis.__evidence`, and call `report` with every version's
  * evidence when it's time. Returns `flush`, which reports now.
  */
-export function installPageEvidence(report: (modules: ModuleEvidence[]) => void, reportStops: (stops: RecordedStop[]) => void = () => undefined): { "flush": () => void } {
+/** The packages a page loaded from esm.sh, by name@version (sorted): each exact version its modules came from — the
+ *  entry URL names a range (`react@^19`), and the stub it answers imports the version it resolved (`/react@19.3.0/…`). */
+export function loadedPackages(urls: string[]): string[] {
+	const found = new Set<string>();
+
+	for (const url of urls) {
+		const parsed = URL.canParse(url) ? new URL(url) : undefined;
+		const match = parsed?.hostname === "esm.sh" ? /^\/(?:(?:v\d+|stable)\/)?\*?((?:@[^/@]+\/)?[^/@]+)@(\d+\.\d+\.\d[^/?&]*)/u.exec(parsed.pathname) : null;
+
+		if (match !== null) {
+			found.add(`${match[1]}@${match[2]}`);
+		}
+	}
+
+	return [...found].toSorted();
+}
+
+/** What this page loaded, as loadedPackages tells it from the page's resource timing. */
+function pagePackages(): string[] {
+	return loadedPackages(performance.getEntriesByType("resource").map((entry) => entry.name));
+}
+
+export function installPageEvidence(report: (modules: ModuleEvidence[], packages: string[]) => void, reportStops: (stops: RecordedStop[]) => void = () => undefined): { "flush": () => void } {
 	const stops = new Map<string, RecordedStop & { "count": number }>();
 	let stopTimer: ReturnType<typeof setTimeout> | undefined;
 	const stopsNow = (): void => {
@@ -324,7 +346,7 @@ export function installPageEvidence(report: (modules: ModuleEvidence[]) => void,
 	const flush = (): void => {
 		if (versions.size > 0) {
 			changed = false;
-			report(evidence());
+			report(evidence(), pagePackages());
 		}
 	};
 

@@ -34,8 +34,9 @@ export interface EditorTap {
 	"connect": () => Transport;
 	/** A worker the page starts joins the window's hub on this port (worker-tap.ts). */
 	"adopt": (port: MessagePort) => void;
-	/** A page's runtime evidence, out on the window's hub: `page` names the page (its frame and its load). */
-	"evidence": (page: string, modules: unknown[]) => void;
+	/** A page's runtime evidence, out on the window's hub: `page` names the page (its frame and its load); with the
+	 *  packages it loaded, by name@version. */
+	"evidence": (page: string, modules: unknown[], packages: string[]) => void;
 	/** A page's recorded stops (RUNNING.md: a breakpoint in a page), out on the window's hub as they're hit. */
 	"stops": (page: string, stops: unknown[]) => void;
 	/** Report now when the editor asks (each of the window's pages registers its flush). */
@@ -126,7 +127,7 @@ function windowTap(host: Window, windowId: string): EditorTap {
 			return theirs;
 		},
 		"adopt": (port) => { hub.link(portTransport(port)); },
-		"evidence": (page, modules) => { hub.publish("evidence.preview", { "window": windowId, "page": page, "modules": modules }); },
+		"evidence": (page, modules, packages) => { hub.publish("evidence.preview", { "window": windowId, "page": page, "modules": modules, "packages": packages }); },
 		"stops": (page, stops) => { hub.publish("stops.preview", { "window": windowId, "page": page, "stops": stops }); },
 		"onFlush": (flush) => { flushes.add(flush); }
 	};
@@ -168,8 +169,8 @@ function install(): void {
 	// This page's runtime evidence, named by its frame and this load (a reload is a page of its own).
 	const page = `${windowId}${frame ?? ""}#${crypto.randomUUID()}`;
 
-	tap.onFlush(installPageEvidence((modules) => {
-		tap.evidence(page, modules);
+	tap.onFlush(installPageEvidence((modules, packages) => {
+		tap.evidence(page, modules, packages);
 	}, (stops) => {
 		tap.stops(page, stops);
 	}).flush);

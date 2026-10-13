@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { evidenceText, foldBranches, foldReached, foldSamples, foldValues, HALF_LIFE_RUNS, MAX_SAMPLES, MAX_TAGS, parseEvidence, parseSamples, samplesText } from "@brianjenkins94/util/silo/evidence";
 import { samplesPath } from "@brianjenkins94/util/silo/layout";
+import { loadedPackages } from "../previews/page-evidence.ts";
 
 const run = (index) => ({ "id": `run-${index}`, "at": `2026-10-04T00:00:0${index}Z` });
 const fade = 2 ** (-1 / HALF_LIFE_RUNS);
@@ -73,4 +74,18 @@ test("samples: this machine's, newest distinct first, only for sites the evidenc
 	known = foldSamples(known, [{ "span": "a", "values": ["up", "left", 1, 2, 3] }], new Set(["a"]));
 	assert.deepEqual(parseSamples(samplesText(known)), [{ "span": "a", "values": ["up", "left", 1, 2, 3].slice(0, MAX_SAMPLES) }]);
 	assert.match(samplesPath("src/world.ts"), /^\.silo\/local\/samples\/src\/world\.ts\.jsonl$/u, "under local/: never committed");
+});
+
+test("a preview's packages: the exact versions esm.sh served it, not the ranges it asked for", () => {
+	assert.deepEqual(loadedPackages([
+		"https://esm.sh/react@^19?dev",
+		"https://esm.sh/react@19.3.0/es2022/react.development.mjs",
+		"https://esm.sh/v135/react-dom@19.3.0/es2022/client.development.mjs",
+		"https://esm.sh/*scheduler@0.27.0/es2022/scheduler.mjs",
+		"https://esm.sh/@tanstack/query-core@5.62.0-beta.1/es2022/query-core.mjs",
+		"https://esm.sh/react@19.3.0/es2022/jsx-runtime.development.mjs",
+		"http://localhost:5173/__virtual__/t/3000/src/App.tsx",
+		"https://cdn.example.com/react@19.3.0/react.js",
+		"not a url"
+	]), ["@tanstack/query-core@5.62.0-beta.1", "react-dom@19.3.0", "react@19.3.0", "scheduler@0.27.0"]);
 });
