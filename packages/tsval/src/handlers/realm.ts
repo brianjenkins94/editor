@@ -1,14 +1,12 @@
 /**
  * The host↔guest boundary: property reads/writes on primitives box in the GUEST realm, CreateDataProperty, guest-realm arrays and `arguments`, ToPrimitive/ToPropertyKey/ToNumeric, error-message helpers that never invoke user code.
  */
-import type { Scope } from "../scope.ts";
 import type { Machine } from "../vm.ts";
 import ts from "typescript";
-import { propertyName } from "./literals.ts";
 
 // TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
 // functions used here are read off it once.
-const { isComputedPropertyName, isIdentifier, isPropertyAccessExpression } = ts;
+const { isIdentifier, isPropertyAccessExpression } = ts;
 
 /** GetValue on a member reference. A primitive base is boxed in the GUEST realm (its
  *  `String.prototype`, not the host's — `"".constructor === String` must hold for the guest's
@@ -254,14 +252,6 @@ export function toPropertyKey(value: unknown): PropertyKey {
 	const primitive = toPrimitive(value, "string");
 
 	return typeof primitive === "symbol" ? primitive : String(primitive);
-}
-
-export function bindingKey(vm: Machine, scope: Scope, name: ts.PropertyName): PropertyKey {
-	if (isComputedPropertyName(name)) {
-		return toPropertyKey(vm.evalNodeSync(name.expression, scope));
-	}
-
-	return propertyName(name);
 }
 
 export function describe(node: ts.Node): string {

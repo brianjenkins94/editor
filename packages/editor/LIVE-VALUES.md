@@ -47,9 +47,9 @@ Decided 2026-10-05.
   tells its own.) No new store, no format in `.silo/`: runtime evidence stays what keeps runs, and this is what the
   last run shows, in memory.
 - **It's started by F5 and a breakpoint**: an ordinary tsval debug session. Not a re-run as you type, for now.
-- **Inputs are pipe-delimited, for now**, as Run with Inputs takes them (`US | CA | FR SPRING10`: runs by `|`, a run's
+- **Inputs are pipe-delimited, for now**, as Run with Inputs took them (`US | CA | FR SPRING10`: runs by `|`, a run's
   arguments by spaces, read as `process.argv`). A session runs one set: the launch config's `args`, or the first of the
-  inputs Run with Inputs remembers for the file. A function the program doesn't call, or calls differently than you
+  inputs a rule gives the file (Run with Inputs, which remembered them, was removed — RULES.md). A function the program doesn't call, or calls differently than you
   want to see, waits for the inputs design (RUNTIME-EVIDENCE.md, the fourth slice).
 
 ## How it fits

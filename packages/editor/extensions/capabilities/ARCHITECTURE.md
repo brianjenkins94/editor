@@ -104,7 +104,7 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
 
 - **Done:** DETECT + RESOLVE (in tsserver, `capabilities-canary.js` ~0.17MB by reusing tsserver's ts) · SURFACE
   (panel with allow/deny/review dispositions + a view badge) · TRIPWIRE surface (denied call → error squiggle) ·
-  the pure core (`policy-core`, `capability-breakpoints`) · unified classification · ENFORCE round-trip
+  the pure core (`@brianjenkins94/util/silo/policy`, `capability-breakpoints`) · unified classification · ENFORCE round-trip
   (`decide.ts` endpoint; net gate in the SW, fs write/delete + read gate in the almostnode shim) · the `.silo/`
   layout (`silo-store.ts`: base+override policy, observed rollup, each run's effects) · production debug adapter.
 - **Next:** persist the STATIC surface to `.silo/capabilities.json` (the panel/engine side) so static-vs-observed

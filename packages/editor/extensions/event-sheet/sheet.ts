@@ -214,14 +214,6 @@ function actionSummary(action: Action): string {
 	}
 }
 
-/** The row's display strings for the event-sheet table: its condition ("when") and its actions ("then"). */
-export function rowLabels(row: EventRow): { "when": string; "then": string } {
-	return {
-		"when": conditionLabel(row.condition),
-		"then": row.actions.length === 0 ? "(no actions)" : row.actions.map(actionSummary).join(", ")
-	};
-}
-
 /** A small, realistic sample sheet — enough to exercise nesting, multi-action rows, and every condition/action kind. */
 export const sampleSheet: EventSheet = {
 	"rows": [

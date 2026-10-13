@@ -8,8 +8,8 @@ This repository is the interpreter only. It exposes the seams a host builds on â
 guard that sees every value and every callable crossing from the host, an `import` resolver, an
 async-invocation hook, fork, breakpoints, an optional TypeChecker â€” and takes no position on what a
 host does with them. (The capability canary that originally motivated those seams lives in its own
-repository.) See [`ASSIGNMENT.md`](./ASSIGNMENT.md) for the original design brief and
-[`PROGRESS.md`](./PROGRESS.md) for current status.
+repository.) [`COMPILE.md`](./COMPILE.md) is the compiled tier, parked; how the editor hosts tsval is in
+`packages/editor` (MODULES.md, RUNNING.md, LIVE-VALUES.md).
 
 ## Requirements
 

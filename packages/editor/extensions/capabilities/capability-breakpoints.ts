@@ -108,34 +108,6 @@ export function shouldBreak(policy: Policy, hit: CapabilityHit): boolean {
 	return effectiveDisposition(policy, hit.capability, hit.resource, hit.dangerous) === "review" && givenResult(policy, { "capability": hit.capability, "resource": hit.resource }) === undefined;
 }
 
-/** A static capability call site in a source file (no args yet → no resource): where a debugger could pre-mark or
- *  pre-arm a capability breakpoint before the run. */
-export interface CapabilitySite {
-	"capability": string;
-	"callee": string;
-	"start": number;
-	"end": number;
-}
-
-/** Walk a SourceFile for every capability call SITE (by callee), for pre-arming breakpoints / gutter markers. */
-export function findCapabilitySites(sourceFile: ts.SourceFile): CapabilitySite[] {
-	const sites: CapabilitySite[] = [];
-
-	(function visit(node: ts.Node): void {
-		if (ts.isCallExpression(node)) {
-			const matcher = matcherFor(node.expression);
-
-			if (matcher !== undefined) {
-				sites.push({ "capability": matcher.capability, "callee": renderCallee(node.expression), "start": node.getStart(sourceFile), "end": node.getEnd() });
-			}
-		}
-
-		node.forEachChild(visit);
-	})(sourceFile);
-
-	return sites;
-}
-
 /**
  * The 1-based source lines a debugger should pre-arm as capability breakpoints under `policy` — every capability
  * call the policy would NOT let pass. The decision is STATIC (the resource is the literal argument when there is

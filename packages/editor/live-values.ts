@@ -132,14 +132,6 @@ let rulesSet: ((previous: EditedRule | undefined, rule: EditedRule | undefined) 
 let runFile: ((path: string, cases: string[][]) => Promise<unknown>) | undefined;
 /** What a rule gives each file's process.argv, as last read (null: nothing; undefined: not read yet). */
 const givenArgv = new Map<string, Given | null>();
-/** Who's told when the policy files change (the Rules view), besides the margin. */
-const rulesChanged = new Set<() => void>();
-
-/** Be told when the policy files change — by a rule editor anywhere, or by hand. */
-export function onRulesChanged(listener: () => void): void {
-	rulesChanged.add(listener);
-}
-
 /** The variables a rule tests or sets (`variables.<name>`), by name. */
 export function variablesOf(rule: EditedRule): string[] {
 	const names = new Set<string>();
@@ -1180,10 +1172,6 @@ export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
 
 			for (const uri of open) {
 				draw(uri);
-			}
-
-			for (const listener of rulesChanged) {
-				listener();
 			}
 		}, 300);
 	};

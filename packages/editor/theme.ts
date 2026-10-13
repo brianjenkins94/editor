@@ -27,7 +27,7 @@ export const palette = {
 	"accent2": "#e0843a"   // secondary series / guide-lines (warm contrast)
 } as const;
 
-export const { css, theme, keyframes, globalCss } = createStitches({
+export const { css, theme, globalCss } = createStitches({
 	"theme": {
 		"colors": { ...palette }
 	}

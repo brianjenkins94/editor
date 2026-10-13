@@ -429,14 +429,14 @@ The point of running a program many times: what none of the runs needed is code 
   most 3/n of the time, 95% sure ("at most 1 in 4, 95% sure"), or too few tries yet under six — and the purple grows
   stronger with the tries (under 30, under 300, more). The thresholds stay `silo.evidence.minRuns` and `minSeen`.
 - **Runs take inputs.** A tsval run's launch config takes `args`, which the program reads as `process.argv` (with an
-  `env` and a `cwd()`; nothing it can do with them); `debug.start` passes them through. *Evidence: Run with Inputs…*
-  (the editor's Run menu, or the palette) runs the file once per set of inputs, one after another — runs separated by
-  `|`, a run's arguments by spaces, quotes keeping a space — and remembers the last ones per file. What none of the
-  inputs reached is what turns purple. A stopgap: where inputs live, sets kept and reused (and shared, in `.silo/`?),
+  `env` and a `cwd()`; nothing it can do with them); `debug.start` passes them through. The first way to give them,
+  *Evidence: Run with Inputs…*, was removed (2026-10-06, RULES.md): a rule now gives `process.argv`, and a run of
+  several cases runs the file once per set — runs separated by `|`, a run's arguments by spaces, quotes keeping a space
+  (worker-pod/inputs.ts). What none of the inputs reached is what turns purple. A stopgap: where inputs live, sets kept and reused (and shared, in `.silo/`?),
   inputs beyond arguments (stdin, files, a function's own arguments), generated ones — that wants a design of its own.
 
-The logic is pure and tested in node (extensions/insights/suggestions.ts, worker-pod/inputs.ts); fixes.ts,
-suggestions-view.ts and run-inputs.ts are the VS Code wiring.
+The logic is pure and tested in node (extensions/insights/suggestions.ts, worker-pod/inputs.ts); fixes.ts and
+suggestions-view.ts are the VS Code wiring.
 
 ## Open questions
 

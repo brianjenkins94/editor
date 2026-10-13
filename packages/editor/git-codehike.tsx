@@ -670,13 +670,3 @@ export async function mountDiff(host: HTMLElement, input: DiffInput): Promise<vo
 
 	root.render(createElement(Diff, { "key": input.docKey, "leftCode": leftCode, "rightCode": rightCode, "rows": input.rows, "foldRegions": foldRegions, "contentKey": contentKey, "deselectedRows": input.deselectedRows, "onRowSelection": input.onRowSelection, "onDiscardRows": input.onDiscardRows, "classify": input.classify }));
 }
-
-/** Tear down the React root (when the diff pane is emptied). */
-export function unmountDiff(host: HTMLElement): void {
-	const root = roots.get(host);
-
-	if (root !== undefined) {
-		root.unmount();
-		roots.delete(host);
-	}
-}

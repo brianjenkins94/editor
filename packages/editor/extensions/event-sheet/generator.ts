@@ -87,10 +87,6 @@ export function libraryComponents(): string[] {
 	return Object.keys(COMPONENT_META);
 }
 
-export function librarySystems(): string[] {
-	return Object.keys(SYSTEM_META);
-}
-
 /** The placeable object archetypes — the object palette. */
 export function objectPresets(): ObjectPreset[] {
 	return OBJECT_PRESETS;
