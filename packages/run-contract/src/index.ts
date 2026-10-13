@@ -99,8 +99,12 @@ export interface SiteObservation {
 }
 
 /** The `coverage` event, sent as a run ends: every statement that could run, with how often it did (0 included), and
- *  every observed site that ran — the entry's, and (`files`) each other file of the program's that ran, with its text. */
-export interface CoverageEvent { "file": string; "source"?: string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "profile"?: StatementProfile[]; "files"?: CoverageEvent[] }
+ *  every observed site that ran — the entry's, and (`files`) each other file of the program's that ran, with its text —
+ *  and (`packages`) each package whose code ran, with its version and its folder as the runtime has it. */
+export interface CoverageEvent { "file": string; "source"?: string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "profile"?: StatementProfile[]; "files"?: CoverageEvent[]; "packages"?: LoadedPackage[] }
+
+/** A package whose code a run ran: its package.json's name and version, and its folder. */
+export interface LoadedPackage { "name": string; "version"?: string; "dir": string }
 
 /** One kind of gated call a run made, and how it went: `made` for real; `denied` (it failed, as a refused call does);
  *  `skipped` (not made — the program went on as if it had done nothing); `given` (a rule's result in its place). A

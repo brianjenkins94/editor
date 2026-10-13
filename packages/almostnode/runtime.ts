@@ -256,7 +256,32 @@ export interface RuntimeOptions {
   // A built-in by who asks: the program (a program file, or a host on its behalf) or a package — undefined for
   // almostnode's own. A debugger gives the program's code capability stand-ins and packages the real shims.
 	"builtinFor"?: (id: string, requester: Requester) => unknown;
+  // Told once per package whose code runs, as its first module is evaluated: its name and version (its package.json's;
+  // the folder's name when it has none) and its folder — for a host to record which versions a run ran.
+	"onPackage"?: (pkg: LoadedPackage) => void;
 }
+
+/** A package whose code ran: what its package.json says it is, and where it's installed. */
+export interface LoadedPackage { "name": string; "version"?: string; "dir": string }
+
+/** The folder of the package a file under node_modules belongs to (`…/node_modules/name`, `…/node_modules/@scope/name`):
+ *  the innermost, so a nested install is its own. */
+function packageDirOf(filename: string): string | undefined {
+	const marker = "/node_modules/";
+	const at = filename.lastIndexOf(marker);
+
+	if (at === -1) {
+		return undefined;
+	}
+
+	const segments = filename.slice(at + marker.length).split("/");
+	const name = segments[0].startsWith("@") ? segments.slice(0, 2).join("/") : segments[0];
+
+	return filename.slice(0, at + marker.length) + name;
+}
+
+/** The package folders each runtime (by its module cache) has told its host of (onPackage). */
+const toldPackages = new WeakMap<Record<string, Module>, Set<string>>();
 
 /** Who asks for a module: the program's own code, or a package's. */
 export type Requester = "program" | "package";
@@ -804,6 +829,21 @@ function createRequire(
 		const rawCode = vfs.readFileSync(resolvedPath, "utf8");
 		const dirname = pathShim.dirname(resolvedPath);
 		const program = isProgram(resolvedPath);
+
+    // A package's code is about to run: its host is told which package, once.
+		if (!program && options.onPackage !== undefined) {
+			const dir = packageDirOf(resolvedPath);
+			const told = toldPackages.get(moduleCache) ?? new Set<string>();
+
+			toldPackages.set(moduleCache, told);
+
+			if (dir !== undefined && !told.has(dir)) {
+				told.add(dir);
+				const manifest = getParsedPackageJson(dir + "/package.json");
+
+				options.onPackage({ "name": manifest?.name ?? dir.slice(dir.lastIndexOf("/node_modules/") + "/node_modules/".length), ...manifest?.version === undefined ? {} : { "version": manifest.version }, "dir": dir });
+			}
+		}
 
     // A program file, evaluated by the host's own evaluator (the tsval debugger), from its source as written
 		if (program && options.evaluateProgram !== undefined) {
@@ -1584,6 +1624,9 @@ ${code}
 		for (const key of Object.keys(this.moduleCache)) {
 			delete this.moduleCache[key];
 		}
+
+    // A package's code runs again from here: its host is told again (onPackage), as for a fresh runtime.
+		toldPackages.delete(this.moduleCache);
 	}
 
   /**

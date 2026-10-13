@@ -15,7 +15,7 @@
  * Runs in the workbench realm; writes through VS Code's file system, so an open runs file shows each new line.
  */
 import type { Hub } from "@brianjenkins94/hub";
-import type { SiteObservation, StatementCoverage } from "@brianjenkins94/run-contract";
+import type { LoadedPackage, SiteObservation, StatementCoverage } from "@brianjenkins94/run-contract";
 import type { Effect, Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
 import type * as vscodeApi from "vscode";
 import type { ModuleEvidence } from "../shared/preview-evidence";
@@ -23,7 +23,7 @@ import type { RunInfo } from "../shared/runs";
 import type { Bablr } from "./bablr";
 import type { RunRegistry } from "./runs";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { blobOid, headCommit } from "./git-engine";
 
@@ -169,12 +169,19 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 	const coverage = new Map<string, Coverage[]>();
 	const coverageOf = (each: Partial<Coverage>): Coverage[] => (typeof each.file === "string" && typeof each.source === "string" && Array.isArray(each.statements) ? [{ "file": each.file, "source": each.source, "statements": each.statements, "sites": Array.isArray(each.sites) ? each.sites : [] }] : []);
 
+	// And the packages whose code it ran, with their versions (the runtime's folder for each).
+	const packages = new Map<string, LoadedPackage[]>();
+
 	hub.subscribe("evidence.observed", (data) => {
-		const { runId, files, ...rest } = (data ?? {}) as Partial<Coverage> & { "runId"?: unknown; "files"?: unknown };
+		const { runId, files, "packages": loaded, ...rest } = (data ?? {}) as Partial<Coverage> & { "runId"?: unknown; "files"?: unknown; "packages"?: unknown };
 		const entry = coverageOf(rest);
 
 		if (typeof runId === "string" && entry.length > 0) {
 			coverage.set(runId, [...entry, ...(Array.isArray(files) ? files as Partial<Coverage>[] : []).flatMap(coverageOf)]);
+		}
+
+		if (typeof runId === "string" && Array.isArray(loaded)) {
+			packages.set(runId, loaded as LoadedPackage[]);
 		}
 	});
 
@@ -305,6 +312,33 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		}
 	};
 
+	/** The packages a run ran, by name@version, each with its install's integrity from its project's package-lock.json
+	 *  (the folder its node_modules is in: an app in the workspace has its own). */
+	const packagesOf = async (loaded: LoadedPackage[]): Promise<RunEnvelope["packages"]> => {
+		const byProject = new Map<string, { "name": string; "version"?: string; "dir": string }[]>();
+
+		for (const { name, version, dir } of loaded) {
+			const relative = repoRelative(dir);
+			const at = relative.indexOf("node_modules/");
+
+			if (at !== -1) {
+				const project = relative.slice(0, at);
+
+				byProject.set(project, [...byProject.get(project) ?? [], { "name": name, ...version === undefined ? {} : { "version": version }, "dir": relative.slice(at) }]);
+			}
+		}
+
+		const ran: NonNullable<RunEnvelope["packages"]> = {};
+
+		for (const [project, installed] of byProject) {
+			const lock = await read(project + "package-lock.json");
+
+			Object.assign(ran, ranPackages(installed, lock === undefined ? undefined : new TextDecoder().decode(lock)));
+		}
+
+		return ran;
+	};
+
 	/** A run's envelope: what ran, where, by whom, on what — its entry's file listed as it is now. */
 	const envelopeOf = async (run: RunInfo, entry: string): Promise<RunEnvelope> => {
 		const source = run.entry === undefined ? undefined : await read(entry);
@@ -331,9 +365,11 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		const entry = repoRelative(run.entry ?? run.cwd);
 		const covered = coverage.get(run.id);
 		const preview = previews.get(run.id);
+		const loaded = packages.get(run.id) ?? [];
 
 		coverage.delete(run.id);
 		previews.delete(run.id);
+		packages.delete(run.id);
 
 		const envelope = await envelopeOf(run, entry);
 
@@ -349,6 +385,13 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			if (oids.length > 1) {
 				envelope.versions = { ...envelope.versions, [repoRelative(file)]: oids };
 			}
+		}
+
+		// The packages whose code it ran, and which versions: whether anyone ran one later found compromised.
+		const ran = await packagesOf(loaded);
+
+		if (ran !== undefined && Object.keys(ran).length > 0) {
+			envelope.packages = ran;
 		}
 
 		// What it did to the world: the pod counted each gated call (run-effects.ts), for whichever run it was.

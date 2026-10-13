@@ -78,6 +78,29 @@ test("builtinFor: the program's code gets the host's built-ins; a package gets a
 	assert.equal(typeof ((runtime.require("greet") as { "fs": { "readFileSync": unknown } }).fs.readFileSync), "function");
 });
 
+test("onPackage: each package whose code runs is told once, with its version — a nested install as its own", () => {
+	const told: unknown[] = [];
+	const runtime = runtimeWith({
+		...PACKAGE,
+		"/workspace/node_modules/greet/package.json": JSON.stringify({ "name": "greet", "version": "1.2.3", "main": "index.js" }),
+		"/workspace/node_modules/greet/extra.js": "module.exports = require('@scope/inner');",
+		"/workspace/node_modules/greet/node_modules/@scope/inner/package.json": JSON.stringify({ "name": "@scope/inner", "version": "0.1.0", "main": "index.js" }),
+		"/workspace/node_modules/greet/node_modules/@scope/inner/index.js": "module.exports = 'inner';",
+		"/workspace/main.js": "require('greet'); module.exports = require('greet/extra.js');"
+	}, { "onPackage": (pkg) => { told.push(pkg); } });
+
+	assert.equal(runtime.require("./main.js"), "inner");
+	assert.deepEqual(told, [
+		{ "name": "greet", "version": "1.2.3", "dir": "/workspace/node_modules/greet" },
+		{ "name": "@scope/inner", "version": "0.1.0", "dir": "/workspace/node_modules/greet/node_modules/@scope/inner" }
+	], "greet once though two of its files ran; the program's own file isn't a package");
+
+	told.length = 0;
+	runtime.clearCache();
+	runtime.require("greet");
+	assert.deepEqual(told, [{ "name": "greet", "version": "1.2.3", "dir": "/workspace/node_modules/greet" }], "after clearCache, told again");
+});
+
 test("register: a module the host evaluated is everyone's — a package requiring the program file gets the same one", () => {
 	const runtime = runtimeWith({
 		"/workspace/config.js": "module.exports = { 'evaluated': 'natively' };",

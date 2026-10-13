@@ -19,7 +19,7 @@
  * the adapter answers stackTrace/scopes/variables from it with no round-trip.
  */
 import type { FsShim } from "@brianjenkins94/almostnode";
-import type { Effect } from "@brianjenkins94/run-contract";
+import type { Effect, LoadedPackage } from "@brianjenkins94/run-contract";
 import type { RuntimeConnection } from "@brianjenkins94/run-contract/runtime";
 import type { Told, Traced } from "@brianjenkins94/run-contract/values";
 import type { LoadedVM, ModuleLoader, TraceEvent } from "@brianjenkins94/tsval";
@@ -123,6 +123,9 @@ let skipNext = false;
 /** A live run (LIVE-VALUES.md, *Live runs, as you type*): the file run again as typing pauses — it stops at nothing,
  *  asks nothing (what it can't make it skips), runs its timers at once, ends at its first idle or its step budget. */
 let liveRun = false;
+/** The packages whose code the run ran (almostnode tells each as its first module runs), by folder: told with its
+ *  coverage, for its envelope (whether anyone ran a version later found compromised). */
+const packagesRan = new Map<string, LoadedPackage>();
 /** The run's effects (the run contract's `Effect`): each gated call it made, was denied, skipped or was given, by its
  *  capability and resource — told the adapter as the run ends, for the run ledger (its envelope's `effects`). */
 const effects = new Map<string, Effect>();
@@ -374,6 +377,7 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 				write(method, path);
 			}
 		},
+		"onPackage": (ran) => { packagesRan.set(ran.dir, ran); },
 		// The program's code gets its stand-ins (`fs`, `child_process`); a package, almostnode's own.
 		"builtinFor": (id, requester) => (requester === "program" && Object.hasOwn(programBuiltins, id) ? programBuiltins[id] : undefined),
 		// A program file a package requires: tsval's to evaluate, on the run's machine (a nested run).
@@ -1435,7 +1439,7 @@ function coverageReport(): CoverageReport {
 
 	const files = [...others].map((file) => ({ ...fileCoverage(file), "source": file.text }));
 
-	return { ...fileCoverage(sourceFile), ...files.length === 0 ? {} : { "files": files } };
+	return { ...fileCoverage(sourceFile), ...files.length === 0 ? {} : { "files": files }, ...packagesRan.size === 0 ? {} : { "packages": [...packagesRan.values()] } };
 }
 
 /** One program file's coverage, its observed sites and its top-level statements' profile. */
@@ -1795,6 +1799,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 
 	programBuiltins = surface.modules;
 	runtime?.clearCache();
+	packagesRan.clear();
 
 	const loaded = createVM(message.source, { "fileName": message.fileName, "onBreakpoint": onBreakpointHook, "coverage": true, "profile": true, "observe": observeSite, "trace": traceValue, "eventLoop": eventLoop, "globals": { ...nodeGlobals, ...surface.globals }, "modules": modules, ...liveRun ? { "maxSteps": LIVE_STEPS } : {} });
 

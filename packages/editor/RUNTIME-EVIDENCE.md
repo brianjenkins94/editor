@@ -47,6 +47,10 @@ and what, and produces observations, each attached to a span.
 - **Where**: an environment class (runtime: tsval, almostnode, preview in Chromium 140; OS family; cores; memory bucket)
   plus a machine name you choose.
 - **What**: the commit, plus the blob sha of each file the run touched, so a run on uncommitted code is pinned exactly.
+- **Packages**: each package whose code it ran, by `name@version`, with its install's integrity when the project's
+  package-lock.json has it, so "did anyone run a version later found compromised?" is a question the committed runs
+  answer (silo's `queryRuns({ package })`). Reported by almostnode as each package's first module runs (`onPackage`);
+  a preview's packages aren't recorded yet.
 - **Outcome**: target, entry, mode, started, ended, exit code.
 
 **An observation** is a kind, a span, and a summary that stays the same size however many runs feed it:
@@ -432,10 +436,10 @@ The point of running a program many times: what none of the runs needed is code 
   `env` and a `cwd()`; nothing it can do with them); `debug.start` passes them through. The first way to give them,
   *Evidence: Run with Inputs…*, was removed (2026-10-06, RULES.md): a rule now gives `process.argv`, and a run of
   several cases runs the file once per set — runs separated by `|`, a run's arguments by spaces, quotes keeping a space
-  (worker-pod/inputs.ts). What none of the inputs reached is what turns purple. A stopgap: where inputs live, sets kept and reused (and shared, in `.silo/`?),
+  (workbench/inputs.ts). What none of the inputs reached is what turns purple. A stopgap: where inputs live, sets kept and reused (and shared, in `.silo/`?),
   inputs beyond arguments (stdin, files, a function's own arguments), generated ones — that wants a design of its own.
 
-The logic is pure and tested in node (extensions/insights/suggestions.ts, worker-pod/inputs.ts); fixes.ts and
+The logic is pure and tested in node (extensions/insights/suggestions.ts, workbench/inputs.ts); fixes.ts and
 suggestions-view.ts are the VS Code wiring.
 
 ## Open questions
