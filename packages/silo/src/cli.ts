@@ -16,10 +16,12 @@ import * as path from "node:path";
 import { isEntry } from "@brianjenkins94/util/env";
 import * as fs from "@brianjenkins94/util/fs";
 import { juvy } from "@brianjenkins94/util/juvy";
-import { ensureBaseline, ensureSiloDir, siloPaths } from "@brianjenkins94/util/silo/audit";
+import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianjenkins94/util/silo/audit";
+import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
+import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
 import { oxcAnalyzer, waysIn } from "@brianjenkins94/util/silo/oxc";
 import { typescriptAnalyzer } from "@brianjenkins94/util/silo/typescript";
@@ -95,6 +97,39 @@ export const app = subcommands({
 				process.stdout.write(created
 					? `Made ${where}: ${imports} imports, ${packages} packages. Commit it: a change to what they can do is drift from here.\n`
 					: `${where} is already there (${imports} imports, ${packages} packages) — left as it is: changing it is approving.\n`);
+			}
+		}),
+		command({
+			"name": "check",
+			"description": "What the runs' packages did that the baseline doesn't account for — a capability not accepted of a package, or a package it doesn't have. Exits 1 when there's any.",
+			"config": juvy({ "repo": repoArgument, "json": jsonFlag }),
+			"handler": (config) => {
+				const paths = siloPaths(repoOf(config.get("repo")));
+
+				if (!fs.existsSync(paths.baseline)) {
+					process.stderr.write("No baseline yet: `silo init` makes one.\n");
+					process.exitCode = 1;
+
+					return;
+				}
+
+				const found = beyondBaseline(loadRuns(paths), loadBaseline(paths).packages);
+
+				if (config.get("json")) {
+					process.stdout.write(JSON.stringify(found, undefined, "\t") + "\n");
+				} else if (found.length === 0) {
+					process.stdout.write("Every package call the runs made is one the baseline accepts.\n");
+				} else {
+					for (const each of found) {
+						const what = each.kind === "new" ? "isn't in the baseline" : `may not ${each.capability}` + (each.accepted === undefined ? "" : ` (accepted at ${each.accepted.version ?? "no version"}: ${each.accepted.caps.join(", ") || "nothing"})`);
+
+						process.stdout.write(`${each.package} ${what} — ${each.capability} ${each.resource}, ${each.how} ×${each.calls}, in ${each.run.user}'s run of ${each.run.entry} (${each.run.endedAt})\n`);
+					}
+				}
+
+				if (found.length > 0) {
+					process.exitCode = 1;
+				}
 			}
 		}),
 		command({
