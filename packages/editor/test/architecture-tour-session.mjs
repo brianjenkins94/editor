@@ -34,6 +34,11 @@ export function tour(name, options = {}) {
 			return;
 		}
 
+		// The end the same everywhere: no debug run still going (a program's server keeps its own up), so the diagram's
+		// hubs still running at the end — whose components it lists — are the ones that always are.
+		// (time-boxed: a run blocked on its stdin doesn't end, and must not hold the shard)
+		await Promise.race([session.workbench().evaluate(() => globalThis.__editor.api.debug.stopDebugging()), session.page.waitForTimeout(10_000)]).catch(() => undefined);
+		await session.until("no debug run going", (snapshot) => !snapshot.nodes.some((node) => node.id.startsWith("debug-worker") && node.state === "alive"), 30_000).catch(() => undefined);
 		await session.until("a last look", () => true);
 		await fs.mkdir(SEEN_DIR, { "recursive": true });
 		fs.writeFileSync(path.join(SEEN_DIR, name + ".json"), JSON.stringify(session.seen()));

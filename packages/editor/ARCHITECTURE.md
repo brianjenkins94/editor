@@ -516,7 +516,6 @@ flowchart LR
 | Bridge | runtime | `runtime.fs.attach()` |
 | Bridge | stops | `stops.preview` |
 | Bridge | tasks | `tasks.list()`, `tasks.run()` |
-| Debug worker | virtual | `virtual.debug.*()` |
 | Dev-server worker | preview | `preview.close`, `preview.provoke()`, `preview.start()`, `preview.stops()`, `preview.version()` |
 | Dev-server worker | virtual | `virtual.request()` |
 | Dev-server worker | workspace | `workspace.changed` |
