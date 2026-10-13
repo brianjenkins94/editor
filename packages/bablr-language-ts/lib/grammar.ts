@@ -44,9 +44,16 @@
 // ║     `__BABLR_RECORD_STRICT__` build define folds to false (set it true to opt back in); stock speed elsewhere.  ║
 // ║     Record FREEZING (the other ~half) is no-op'd in the parse workers: packages/editor/workers/bablr-fast-freeze.ts.    ║
 // ║                                                                                                             ║
-// ║ RUNTIME PATCHES (patches/, this repo only; consumers get stock packages and lose exactly these inputs):     ║
-// ║ U1  astral characters (regex-vm `fromCharCode` truncation + bablr-vm UTF-16 `getSourceLength`).             ║
-// ║ U2  empty input (the root cover `<_>` has no production name, so `emptyables` never applies to it).         ║
+// ║ W7  trivia after an eat is decided by the span the eat ENDS in, trivia before an eat by the span the last   ║
+// ║     one ended in (the enhancer refreshes its state only around eats). So a delimiter that opens text is     ║
+// ║     eaten in a non-Bare span: TemplateString's backtick (`String:Open`), JSX's children `>` (`JSXChildren`). ║
+// ║ W8  a production reached with a node HELD (a label: `L: var x`) must start with a token eat; a `match` first ║
+// ║     fails ("cannot advance literal while holding"). Site: VariableDeclaration.                              ║
+// ║                                                                                                             ║
+// ║ INPUT BABLR's RUNTIME CAN'T TAKE (the patches that fixed U1/U2 aren't carried; lib/spans.ts works around them): ║
+// ║ U1  astral characters, and NUL: parsed as a same-length stand-in (`parseable`), indexed against the source. ║
+// ║ U2  empty input (the root cover `<_>` has no production name, so `emptyables` never applies to it): an empty ║
+// ║     Program, without parsing.                                                                               ║
 // ╚══════════════════════════════════════════════════════════════════════════════════════════════════════════╝
 import * as BListKeyed from "@bablr/agast-helpers/b-map";
 import { arrayValues } from "@bablr/agast-helpers/iterable";
@@ -463,6 +470,13 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
     // `import(…)` and `import.meta` are expressions, not import declarations.
 		if (yield match(m`/(?:import|export|class|var|const|let|async)[a-zA-Z0-9_$]|import[ \t\r\n]*[(.]/`)) {
 			yield eat(m`<ExpressionStatement />`);
+
+			return;
+		}
+
+    // `using x = …` / `await using x = …` (explicit resource management) — not `using(x)` or `using.x`.
+		if (yield match(m`/(?:await[ \t]+)?using[ \t]+[a-zA-Z_$]/`)) {
+			yield eat(m`<VariableDeclaration />`);
 
 			return;
 		}
@@ -979,6 +993,21 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		yield defineAttribute("endsWithBlock", endsWithBlock);
 	}
 
+  // es6's VariableDeclaration, plus `using` and `await using`; the kind is a whole word (the base's `/var|const|let/`
+  // took the `let` of `letter` in a `for (letter = 1; ;)` head). It starts with a token, as the base's does: a labeled
+  // declaration (`L: var x`) arrives with the label held, and only a token eat lets go of it — a `match` first fails.
+	public *VariableDeclaration() {
+		yield eatMatch(m`awaitToken*: <*Keyword /await\b/ />`);
+
+		yield eat(m`sigilToken*: <*Keyword /(?:var|const|let|using)\b/ />`);
+		let sep = true;
+
+		while (sep) {
+			yield eatMatch(m`declarations[]*: <VariableDeclarator />`);
+			sep = yield eatMatch(m`#separatorTokens: <* ',' />`);
+		}
+	}
+
   // es6/es2018's For. The base guards the init subspan with `/;|of|in/`, which fires INSIDE names like `index`;
   // a `\b` does not help because span guards are tested at the current position without the preceding character
   // (`\bof` fires inside `typeof`). Only `;` is needed for declarations: `in` is excluded by `noIn` and `of` is
@@ -1375,7 +1404,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 
   // `<T>(x: T) => x` starts with `<`, which the base's Expression does not dispatch on.
   // Primary forms the base's Expression does not dispatch on: `#x in o`, `<T>(x) => x`, `x => x`,
-  // `async x => x` / `async (x) => x`, `.5`.
+  // `async x => x` / `async (x) => x`, `.5`, and names that start like a unary operator (`deleted`).
 	public *Expression(args) {
 		let res = null;
 
@@ -1400,6 +1429,10 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 				}
 			} else if (yield match(m`/\.\d/`)) {
 				res = yield eat(m`<Number />`);
+			} else if (yield match(m`/(?:delete|void|typeof)[a-zA-Z0-9_$]/`)) {
+				// `deleted`, `voidExpression`: an identifier. The base tries `<UnaryExpression 'delete' />`, and a node
+				// literal COMMITS (W6), so a name that only starts like the operator never got back to being one.
+				res = yield eat(m`<*Identifier />`);
 			} else if (yield match(m`/await(?:[ \t]*[,;)\]}=.]|[ \t]*$)/`)) {
 				res = yield eat(m`<*Identifier />`);
 			} else if (yield match(m`/async[ \t]+function\b/`)) {
@@ -1655,10 +1688,14 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 
   // ── JSX ──────────────────────────────────────────────────────────────────────────────────────────────────
   // `<a b="c" d={e} {...f}>text {g} <h /></a>`, `<>…</>`, `<x.y />`, `<svg:rect />`. Tried at a `<` after a generic
-  // arrow and before a type assertion (`<T>x`, which a .tsx file can't have). Text between tags is a token in a span
-  // of its own, as a string is: an enclosing span's guard would cut it at a `)` (UPSTREAM-WORKAROUND(W1)).
+  // arrow and before a type assertion (`<T>x`, which a .tsx file can't have). Between tags everything is text — a `//`
+  // too — so spans keep trivia to the tags (see TemplateString): a tag's insides are Bare, its children a JSXChildren
+  // span opened before the `>` that starts them, and an element's last token is eaten in the span around the element,
+  // so what follows it is text when the element is a child. Text is a token in a span of its own, as a string is: an
+  // enclosing span's guard would cut it at a `)` (UPSTREAM-WORKAROUND(W1)).
 
 	public *JSXElement() {
+		yield startSpan("Bare");
 		yield eat(m`openToken*: <* '<' />`);
 
 		if (!(yield match(m`'>'`))) {
@@ -1672,11 +1709,15 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 				}
 			}
 
-			if (yield eatMatch(m`selfClosingToken*: <* '/>' />`)) {
+			if (yield match(m`'/>'`)) {
+				yield endSpan();
+				yield eat(m`selfClosingToken*: <* '/>' />`);
+
 				return;
 			}
 		}
 
+		yield startSpan("JSXChildren");
 		yield eat(m`closeToken*: <* '>' />`);
 		yield* jsxChildren();
 		yield eat(m`closingOpenToken*: <* '</' />`);
@@ -1685,6 +1726,8 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 			yield eat(m`closingName$: <JSXName />`);
 		}
 
+		yield endSpan();
+		yield endSpan();
 		yield eat(m`closingCloseToken*: <* '>' />`);
 	}
 
@@ -1729,8 +1772,9 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		yield eat(m`closeToken*: <* '}' />`);
 	}
 
-  // `{expression}`, `{...children}`, or `{/* a comment alone */}`.
+  // `{expression}`, `{...children}`, or `{/* a comment alone */}` — Bare inside, its `}` eaten in the span around it.
 	public *JSXExpressionContainer() {
+		yield startSpan("Bare");
 		yield eat(m`openToken*: <* '{' />`);
 		yield eatMatch(m`spreadToken*: <* '...' />`);
 
@@ -1738,6 +1782,7 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 			yield eat(m`expression+$: <_Expression />`);
 		}
 
+		yield endSpan();
 		yield eat(m`closeToken*: <* '}' />`);
 	}
 
@@ -1881,7 +1926,11 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 			return;
 		}
 
+		// UPSTREAM-WORKAROUND(W1): unguarded, or an enclosing `]` guard (an array literal's) shows `[]` as `[`
+		yield startSpan("Bare");
 		const op = yield match(m`/\[\]|[[|&]|extends\b/`);
+
+		yield endSpan();
 
 		if (!op) {
 			return;
@@ -1939,12 +1988,17 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		yield eatMatch(m`typeArguments$: <TypeArguments '<' />`);
 	}
 
-  // `A`, `A.B.C` — a cover: an Identifier that shifts into QualifiedName on `.` (like MemberExpression).
+  // `A`, `A.B.C`, `import("x").A` — a cover: an Identifier (or an ImportType) that shifts into QualifiedName on `.`
+  // (like MemberExpression).
 	public *TypeName({ s }) {
 		let res;
 
 		if (!s().shifted) {
-			res = yield eat(m`<*Identifier />`, o({ "scoped": false }));
+			if (yield match(m`/import[ \t\r\n]*\(/`)) {
+				res = yield eat(m`<ImportType />`);
+			} else {
+				res = yield eat(m`<*Identifier />`, o({ "scoped": false }));
+			}
 		} else if (yield match(m`'.'`)) {
 			res = yield eat(m`<QualifiedName />`);
 		}
@@ -1952,6 +2006,14 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		if (res && (yield match(m`'.'`))) {
 			return r(shiftMatch(m`<_TypeName />`));
 		}
+	}
+
+  // `import("x")` in a type: the module's namespace, as `typeof import("x")`, `import("x").A<T>`.
+	public *ImportType() {
+		yield eat(m`sigilToken*: <*Keyword 'import' />`);
+		yield eat(m`openToken*: <* '(' />`);
+		yield eat(m`source$: <String />`);
+		yield eat(m`closeToken*: <* ')' />`);
 	}
 
 	public *QualifiedName() {
@@ -2005,9 +2067,11 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 
 	public *ArrayType() {
 		yield eat(m`elementType+$: <_Type />`, o({}), o({ "held": "eat" }));
-    // UPSTREAM-WORKAROUND(W1): one `[]` token rather than an open/close pair, because a separate `]` is cut by an
-    // enclosing `]`-guarded span (an array literal or index).
+    // UPSTREAM-WORKAROUND(W1): one `[]` token in an unguarded span, because an enclosing `]`-guarded span (an array
+    // literal or index) cuts a match at its `]`, a token's too.
+		yield startSpan("Bare");
 		yield eat(m`bracketsToken*: <* '[]' />`);
+		yield endSpan();
 	}
 
 	public *IndexedAccessType() {
@@ -2088,9 +2152,52 @@ export class TypeScriptAtrivial extends ESNext.atrivial {
 		}
 	}
 
+  // es6's TemplateString, with its opening backtick eaten in a span of its own. The trivia enhancer takes trivia after
+  // an eat when the span the eat ENDS in is Bare, and es6 opens the template's span only after the backtick — so a
+  // template starting `//` or `/*` (\`// x\`) read its text as a comment. Spans decide trivia throughout: trivia
+  // after an eat by the span it ends in, trivia before the next by that same span.
+	public *TemplateString({ getState }) {
+		const tagged = Boolean(getState().shifted);
+
+		if (tagged) {
+			yield eat(m`tag+$: <_Expression />`, o({}), o({ "held": "eat" }));
+		}
+
+		yield startSpan("String:Open");
+		yield eat(templateOpenMatcher);
+		yield endSpan();
+		yield startSpan(tagged ? "String:TaggedTemplate" : "String:Template", BT);
+
+		if (!tagged) {
+			yield eat(m`tag+$: null`);
+		}
+
+		while ((yield eat(m`quasis[]*: <*StringContent />`)) && (yield eatMatch(m`interpolations[]$: <StringInterpolation '\u0024{' />`))) { /* consumed by eatMatch above */ }
+		yield eat(templateCloseMatcher);
+		yield endSpan();
+	}
+
+  // A template's text (es6's, for strings and tagged templates). es6's untagged pattern wants a character after each
+  // `$`, and the template's span ends at its closing backtick, so a `$` just before it (`\`${a}$\``) failed; the
+  // tagged pattern's `[$]$` takes it, here too.
+	public *StringContent(args) {
+		if (args.s().span.name !== "String:Template") {
+			return yield* super.StringContent(args);
+		}
+
+		let escape, text;
+
+		do {
+			text = yield eatMatch(m`/(?:[^$\\\u0060]|[$][^{]|[$]$)+/`);
+			escape = yield eatMatch(m`@: <EscapeSequence '\\' />`);
+		} while (escape || text);
+	}
+
   // \`get${P}\` — es6's TemplateString with types in the holes (the string content productions are es6's).
 	public *TemplateLiteralType() {
+		yield startSpan("String:Open");
 		yield eat(templateOpenMatcher);
+		yield endSpan();
 		yield startSpan("String:Template", BT);
 
 		while ((yield eat(m`quasis[]*: <*StringContent />`)) && (yield eatMatch(typeInterpolationMatcher))) { /* consumed by eatMatch above */ }

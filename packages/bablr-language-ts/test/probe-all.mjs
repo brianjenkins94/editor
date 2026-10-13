@@ -4,15 +4,16 @@ import { printSource } from "@bablr/agast-helpers/tree";
 import { m } from "@bablr/helpers/grammar";
 import { treeParse } from "bablr";
 import TypeScript from "../lib/grammar";
+import { parseable } from "../lib/spans";
 
 const lines = readFileSync(process.argv[2], "utf8").split("\n").filter((line) => line.trim() && !line.startsWith("#"));
 let pass = 0;
 
 for (const src of lines) {
 	try {
-		const out = printSource(treeParse(TypeScript, m`<Program />`, src));
+		const out = printSource(treeParse(TypeScript, m`<Program />`, parseable(src)));
 
-		if (out === src) {
+		if (out === parseable(src)) {
 			pass += 1;
 			if (process.env.VERBOSE) {
 				console.log("ok   ", src);

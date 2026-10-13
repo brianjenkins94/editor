@@ -3,16 +3,19 @@
 // statement it's in. The tsval corpora (corpus.mjs) are non-module programs; real code is modules, often with JSX.
 //
 //   tsx test/repo-gaps.mjs <file>...        — prints the failing statements' shapes, most common first
+//   tsx test/repo-gaps.mjs --jsonl <file>...  — one line per file as it's done ({ file, ms, ok, failing }), to merge
+//                                               from several processes: `--merge <jsonl>...` prints the summary
 import { readFileSync } from "node:fs";
 import { printSource } from "@bablr/agast-helpers/tree";
 import { m } from "@bablr/helpers/grammar";
 import { treeParse } from "bablr";
 import ts from "typescript";
 import TypeScript from "../lib/grammar";
+import { parseable } from "../lib/spans";
 
 function parses(source) {
 	try {
-		return printSource(treeParse(TypeScript, m`<Program />`, source)) === source;
+		return printSource(treeParse(TypeScript, m`<Program />`, parseable(source))) === parseable(source);
 	} catch {
 		return false;
 	}
@@ -29,40 +32,106 @@ function shapeOf(statement, text) {
 	return `${ts.SyntaxKind[statement.kind]} · ${head}${hasJsx(statement) ? " · JSX" : ""}`;
 }
 
-const files = process.argv.slice(2);
-const shapes = new Map();
-let whole = 0;
+/** The text a nested node parses as on its own: a statement as it is, a class or interface member inside one. */
+function standalone(node, text) {
+	if (ts.isClassElement(node)) {
+		return `class C {\n${text}\n}\n`;
+	}
 
-/** Count `file`'s failure under `shape`, with `example` the first time it's seen. */
-function count(shape, file, example) {
-	const entry = shapes.get(shape) ?? { "count": 0, "files": new Set(), "example": example };
+	if (ts.isTypeElement(node)) {
+		return `interface I {\n${text}\n}\n`;
+	}
 
-	entry.count += 1;
-	entry.files.add(file);
-	shapes.set(shape, entry);
+	return text + "\n";
 }
 
-for (const file of files) {
-	const source = readFileSync(file, "utf8");
+/** The innermost statement or member under `node` that doesn't parse on its own (`node` itself when none under it
+ *  fails alone): what a failure is really about. */
+function narrow(node, tree, source) {
+	let found = node;
 
-	if (parses(source)) {
-		whole += 1;
-	} else {
-		const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
-		const failing = tree.statements.map((statement) => [statement, source.slice(statement.getStart(tree), statement.end)]).filter(([, text]) => !parses(text + "\n"));
+	const visit = (child) => {
+		if (ts.isStatement(child) || ts.isClassElement(child) || ts.isTypeElement(child)) {
+			const text = source.slice(child.getStart(tree), child.end);
 
-		for (const [statement, text] of failing) {
-			count(shapeOf(statement, text), file, text.split("\n")[0].slice(0, 100));
+			if (!parses(standalone(child, text))) {
+				found = narrow(child, tree, source);
+
+				return true;
+			}
+
+			return false;
 		}
 
-		if (failing.length === 0) {
-			count("(every statement parses alone; the file doesn't)", file, file);
+		return ts.forEachChild(child, visit);
+	};
+
+	ts.forEachChild(node, visit);
+
+	return found;
+}
+
+const args = process.argv.slice(2);
+const jsonl = args[0] === "--jsonl";
+const merge = args[0] === "--merge";
+const files = jsonl || merge ? args.slice(1) : args;
+
+/** One file: whether it parses whole, and if not, each top-level statement that doesn't parse alone. */
+function check(file) {
+	const source = readFileSync(file, "utf8");
+	const started = performance.now();
+
+	if (parses(source)) {
+		return { "file": file, "ms": Math.round(performance.now() - started), "ok": true, "failing": [] };
+	}
+
+	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+	const failing = tree.statements
+		.map((statement) => [statement, source.slice(statement.getStart(tree), statement.end)])
+		.filter(([, text]) => !parses(text + "\n"))
+		.map(([statement]) => narrow(statement, tree, source))
+		.map((node) => [node, source.slice(node.getStart(tree), node.end)])
+		.map(([node, text]) => ({ "shape": shapeOf(node, text), "example": text.replace(/\s+/gu, " ").slice(0, 160) }));
+
+	return { "file": file, "ms": Math.round(performance.now() - started), "ok": false, "failing": failing.length === 0 ? [{ "shape": "(every statement parses alone; the file doesn't)", "example": file }] : failing };
+}
+
+const results = merge ? files.flatMap((each) => readFileSync(each, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line))) : [];
+
+if (!merge) {
+	for (const file of files) {
+		const result = check(file);
+
+		if (jsonl) {
+			console.log(JSON.stringify(result));
+		} else {
+			results.push(result);
 		}
 	}
 }
 
-console.log(`${whole}/${files.length} files parse whole\n`);
+if (!jsonl) {
+	const shapes = new Map();
 
-for (const [shape, entry] of [...shapes].toSorted((left, right) => right[1].count - left[1].count)) {
-	console.log(`${String(entry.count).padStart(4)} in ${String(entry.files.size).padStart(3)} files  ${shape}\n            ${entry.example}`);
+	for (const { file, failing } of results) {
+		for (const { shape, example } of failing) {
+			const entry = shapes.get(shape) ?? { "count": 0, "files": new Set(), "example": example };
+
+			entry.count += 1;
+			entry.files.add(file);
+			shapes.set(shape, entry);
+		}
+	}
+
+	console.log(`${results.filter((each) => each.ok).length}/${results.length} files parse whole\n`);
+
+	for (const [shape, entry] of [...shapes].toSorted((left, right) => right[1].count - left[1].count)) {
+		console.log(`${String(entry.count).padStart(4)} in ${String(entry.files.size).padStart(3)} files  ${shape}\n            ${entry.example}`);
+	}
+
+	console.log("\nslowest:");
+
+	for (const { file, ms, ok } of results.toSorted((left, right) => right.ms - left.ms).slice(0, 8)) {
+		console.log(`${String(ms).padStart(7)} ms  ${ok ? "ok  " : "FAIL"}  ${file}`);
+	}
 }

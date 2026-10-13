@@ -1,0 +1,106 @@
+# found in real code: a $ ending a template, TypeScript import types
+const a = `${b}`
+const a = `${b} ${c}`
+const a = `${b.c} ${d.e}`
+const a = `${b.c}`
+const a = `x${b}y${c}z`
+const a = `$`
+const a = `a$`
+const a = `${b}$`
+const a = `$x`
+const a = `${b}${c}`
+const a = `${parsed.capability} ${parsed.callee} ${parsed.resource}`
+type A = typeof import("x")
+type A = typeof import("x").B
+type A = import("x").B
+type A = import("x").B<C>
+let a: typeof import("vscode")
+# text that looks like a comment: templates, JSX
+x = `// c`
+x = `a // c`
+x = `/ c`
+x = `a\nb`
+x = `\n`
+x = `a\n${s}`
+x = `// c${s}`
+x = "// c"
+x = tag`// c`
+x = tag `a${b}c`
+x = a.b`/* c */`
+type T = `// ${A}`
+x = ` // c`
+x = `${a("b")}`
+x = `${a("b\"")}`
+x = `${"\""}`
+x = `${'\''}`
+x = `${"("}`
+x = `// c\n${s}`
+x = `// header\n${src.replace("fetch(\"", "fetch( \"")}`
+x = `${a + "}"}`
+x = `${a + `${b}`}`
+const a = <div>// not a comment</div>
+const a = <p>  spaced  {x}  </p>
+x = `/* not */ ${a}`
+const a = <a><b />// x</a>
+const a = <a>{x}// y</a>
+const a = <a>{ x }</a>
+const a = <a>{/* c */}</a>
+const a = <a b = "c" >x</a >
+# names that start like a unary operator
+f(deleteX)
+f(voidX)
+f(typeofX)
+f(thisX)
+f(functionX)
+f(newX)
+f(nullX)
+f(trueX)
+f(falseX)
+f(superX)
+f(classX)
+f(awaitX)
+f(yieldX)
+f(asyncX)
+f(inX)
+f(instanceofX)
+f(importX)
+f(letX)
+f(staticX)
+# using declarations; [] types inside array literals
+using a = b
+await using a = b
+using a = b, c = d
+for (using a of b) {}
+for (await using a of b) {}
+using(a)
+using.a = 1
+const using = 1
+x = [...a as B[]]
+x = [...(a as B[])]
+f(...a as B[])
+x = { ...a as B }
+x = [a as B]
+x = a as B[]
+for (letter = 1; ;) {}
+for (const a of b) {}
+for (let i = 0; i < n; i++) {}
+let a = 1, b
+using
+using = 1
+x = [a as B[]]
+x = [...a as B]
+x = [...a]
+x = [b, ...a as B[]]
+let a: B[] = [...c]
+x = a[b as C[]]
+x = [<A[]>b]
+x = [(a: B[]) => a]
+# labeled declarations; await
+L: var x = 0
+L: x = 2
+L: for (;;) {}
+L: let
+L: const x = 0
+for (await x of y) {}
+for (await;;) {}
+x = await y

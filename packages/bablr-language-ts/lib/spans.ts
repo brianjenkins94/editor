@@ -24,6 +24,26 @@ import TypeScript from "./grammar";
 
 const COVER = Symbol.for("_");
 
+/**
+ * `src` as BABLR can parse it, the same length: every UTF-16 surrogate (an astral character's two halves, or a lone
+ * one) as U+FFFD, and every NUL as U+0001. Its runtime miscounts astral characters (the regex VM reads a code point
+ * where the source counts UTF-16 units) and can't advance over a NUL, so one emoji or NUL anywhere — a string, a
+ * comment, JSX text — failed the whole file; the patches that fixed the astral case in BABLR aren't carried (the
+ * grammar runs on stock packages). Each stand-in is legal wherever what it replaces is (U+FFFD in identifiers too)
+ * and keeps every offset; the tree is indexed against the original source, so text and hashes are the source's own.
+ */
+export function parseable(src) {
+	return src.replace(/[\u{10000}-\u{10FFFF}]/gu, "\uFFFD\uFFFD").replace(/[\uD800-\uDFFF]/gu, "\uFFFD").replaceAll("\0", "\u0001");
+}
+
+/** The index of an empty source: a Program with nothing in it. BABLR can't parse "" (its root cover has no production
+ *  name, so `emptyables` never applies to it — the U2 patch, also not carried). */
+function emptyIndex() {
+	const hash = nodeHash("Program", []);
+
+	return { "spans": [{ "type": "Program", "field": null, "start": 0, "end": 0, "token": false, "cover": false, "trivia": false, "hash": hash, "text": null }], "length": 0, "hash": nodeHash(null, [hash]) };
+}
+
 function matcherFor(production) {
 	if (production === "Expression") {
 		return m`<Expression />`;
@@ -97,7 +117,7 @@ function partsOfNode(node) {
 }
 
 /** Index `node` (under `reference`) from `offset` into `spans`, children before parents; its hash and where it ends. */
-function indexNode(node, reference, offset, inTrivia, spans) {
+function indexNode(node, reference, offset, inTrivia, spans, src) {
 	// trivia is what the trivia hook emits under an UNNAMED `#` reference; a named `#` reference such as
 	// `#separatorTokens` is a code token the grammar keeps unbound
 	const trivia = inTrivia || (reference?.type === "#" && (reference.name === null || reference.name === undefined));
@@ -116,11 +136,12 @@ function indexNode(node, reference, offset, inTrivia, spans) {
 	// a self-closing token: its text is inline
 	if (literalValue !== null && literalValue !== undefined) {
 		const end = offset + literalValue.length;
-		const hash = trivia ? null : nodeHash(entry.type, [JSON.stringify(literalValue)]);
+		const literal = src.slice(offset, end);
+		const hash = trivia ? null : nodeHash(entry.type, [JSON.stringify(literal)]);
 
-		spans.push({ ...entry, "text": trivia || !entry.token ? null : literalValue, "end": end, "hash": hash });
+		spans.push({ ...entry, "text": trivia || !entry.token ? null : literal, "end": end, "hash": hash });
 
-		return { "hash": hash, "end": end, "text": literalValue };
+		return { "hash": hash, "end": end, "text": literal };
 	}
 
 	const hashed = [];
@@ -129,14 +150,16 @@ function indexNode(node, reference, offset, inTrivia, spans) {
 
 	for (const part of partsOfNode(node)) {
 		if (part.literal !== undefined) {
-			at += part.literal.length;
-			text += part.literal;
+			const literal = src.slice(at, at + part.literal.length);
+
+			at += literal.length;
+			text += literal;
 
 			if (!trivia) {
-				hashed.push(JSON.stringify(part.literal));
+				hashed.push(JSON.stringify(literal));
 			}
 		} else if (part.node?.type === TreeNode) {
-			const child = indexNode(part.node, part.reference, at, trivia, spans);
+			const child = indexNode(part.node, part.reference, at, trivia, spans, src);
 			const childTrivia = trivia || (part.reference?.type === "#" && (part.reference.name === null || part.reference.name === undefined));
 
 			at = child.end;
@@ -160,7 +183,7 @@ function indexNode(node, reference, offset, inTrivia, spans) {
 /** The index of a parse's tree of `src`. */
 function indexTree(tree, src) {
 	const spans = [];
-	const root = indexNode(tree, null, 0, false, spans);
+	const root = indexNode(tree, null, 0, false, spans, src);
 
 	if (root.end !== src.length) {
 		throw new Error(`cstSpans: walked ${root.end} characters of a ${src.length}-character source`);
@@ -171,7 +194,11 @@ function indexTree(tree, src) {
 
 /** @returns {{ spans: CstSpan[], length: number, hash: string }} spans in close order (children before parents), and the whole parse's hash */
 export function cstSpans(src, production = "Program") {
-	return indexTree(treeParse(TypeScript, matcherFor(production), src), src);
+	if (src === "") {
+		return emptyIndex();
+	}
+
+	return indexTree(treeParse(TypeScript, matcherFor(production), parseable(src)), src);
 }
 
 /**
@@ -192,7 +219,11 @@ export async function cstSpansAsync(src, production = "Program", options = {}) {
 		throw new DOMException("cstSpans aborted", "AbortError");
 	}
 
-	const parse = streamParse(TypeScript, matcherFor(production), src, undefined, freezeRecord({ "tree": true, "emitEffects": false, "spans": null, "holdShiftedNodes": false, "holdUndefinedAttributes": false }))[Symbol.iterator]();
+	if (src === "") {
+		return emptyIndex();
+	}
+
+	const parse = streamParse(TypeScript, matcherFor(production), parseable(src), undefined, freezeRecord({ "tree": true, "emitEffects": false, "spans": null, "holdShiftedNodes": false, "holdUndefinedAttributes": false }))[Symbol.iterator]();
 	let step = parse.next();
 
 	for (let seen = 1; step.done !== true; seen += 1) {

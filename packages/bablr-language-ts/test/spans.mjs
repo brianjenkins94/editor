@@ -71,4 +71,13 @@ for (const src of ["x = \"😀\"; g()", "let 𑈿 = 1 // 😀", `x = \`a\${b}c\`
 
 assert.deepEqual(find(cstSpans("x = \"😀\"; g()").spans, "CallExpression"), [[10, 13]]);
 
+// what BABLR's runtime can't take is parsed as a stand-in of the same length, and read back as the source's own text
+for (const src of ["a = `x\0y`; // \0", "a = \"😀\""]) {
+	const { spans } = cstSpans(src);
+
+	assert.ok(spans.filter((span) => span.text !== null).every((span) => span.text === src.slice(span.start, span.end)), JSON.stringify(src));
+}
+
+assert.notEqual(cstSpans("a = \"😀\"").hash, cstSpans("a = \"👋\"").hash, "a different emoji is a different string");
+
 console.log("spans: ok");
