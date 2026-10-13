@@ -158,9 +158,9 @@ export function capabilityStandins(): { "globals": Record<string, unknown>; "mod
 		...Object.entries(FS_ASYNC).map(([method, op]) => [
 			method,
 			tag("fs:" + op, () => {
-				(fsResults[method] ?? (op === "read" ? () => "" : noop))();
+				const result: () => unknown = fsResults[method] ?? (op === "read" ? () => "" : noop);
 
-				return Promise.resolve();
+				return Promise.resolve(result());
 			})
 		])
 	]);
