@@ -12,7 +12,7 @@
 import type { CoverageEvent, Effect } from "@brianjenkins94/run-contract";
 import type { Policy, Rule } from "@brianjenkins94/util/silo/policy";
 import type { LiveBatch } from "../worker-pod/live-values";
-import type { Replay } from "../worker-pod/page-evidence";
+import type { Replay } from "../../previews/page-evidence";
 
 // The run contract's own (what a debugger tells the editor), as tsval's worker and adapter speak it too.
 export type { RunEnd, SiteObservation, StatementCoverage, StatementProfile } from "@brianjenkins94/run-contract";

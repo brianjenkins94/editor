@@ -11,7 +11,7 @@
 import type { TaskDefinition } from "vscode";
 import { createRpcClient } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
-import { lifecycleOfScript } from "../../lifecycle";
+import { lifecycleOfScript } from "../../shared/lifecycle";
 import { podHub } from "./pod";
 
 /** A `run` task: a command, as typed in a terminal, and where to run it. */

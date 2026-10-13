@@ -27,16 +27,16 @@ import type { CapabilityAsk, Control, CoverageReport, Crash, Explored, SetHook, 
 import type { Effect } from "@brianjenkins94/run-contract";
 import type { Told, Traced } from "../worker-pod/live-values";
 import type { SiteSums } from "./site-sums";
-import type { VirtualRequest } from "../worker-pod/workspace-runtime";
+import type { VirtualRequest } from "../../workers/workspace-runtime";
 
 import { connectRuntime, type RuntimeConnection } from "@brianjenkins94/run-contract/runtime";
 import { createVM, explore, runToEnd, TsvalInternalError, UNCATCHABLE } from "@brianjenkins94/tsval";
 
 import ts from "typescript";
-import { capabilityBreakLines, classifyCall, shouldBreak } from "../capabilities/capability-breakpoints";
+import { capabilityBreakLines, classifyCall, shouldBreak } from "../../shared/capabilities/capability-breakpoints";
 import { verdictOf } from "../worker-pod/gate";
-import { capabilityStandins, givenAs, inert, standinCapability } from "../capabilities/canary";
-import { NETWORK_PROBES } from "../../architecture";
+import { capabilityStandins, givenAs, inert, standinCapability } from "../../shared/capabilities/canary";
+import { NETWORK_PROBES } from "../../shared/architecture";
 import { LiveRecord } from "../worker-pod/live-values";
 import { addObservation, copySums, siteObservations } from "./site-sums";
 import { replayGuard, replayProgram } from "./replay-run";
@@ -284,7 +284,7 @@ async function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<R
 		return runtime;
 	}
 
-	const [{ createFsShim, getServerBridge }, { answerServer, programGlobals, serverOn, workerTapResponse, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../worker-pod/workspace-runtime"), import("../worker-pod/zenfs-vfs.js"), import("../worker-pod/runtime-vfs")]);
+	const [{ createFsShim, getServerBridge }, { answerServer, programGlobals, serverOn, workerTapResponse, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../workers/workspace-runtime"), import("../../workers/zenfs-vfs.js"), import("./runtime-vfs")]);
 
 	// (its files answered once the editor has the worker's mailbox — without it, the runtime's own)
 	if (editorLink !== undefined) {

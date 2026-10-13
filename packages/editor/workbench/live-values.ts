@@ -1,0 +1,1205 @@
+/**
+ * Live values, as notes (LIVE-VALUES.md, step 6): a debug session's values — what each line bound, returned or chose,
+ * a column per turn of the loop around it — beside the code in the pane's Margin, Bret Victor's binary search. The
+ * Margin is a pane view like any extension's (EXTENSION-POINTS.md, 4): this answers `margin.paneView` with its content
+ * as data (marginOf), each thing placed by its range in the text that ran, and pane-views.ts draws it; its buttons and
+ * cells run `margin.*` commands. The debug adapter publishes them on the pod hub (`values.session.<id>` as they grow, `values.ended`);
+ * this keeps the latest session's per file, shows them while the session lives, and takes them away when it ends.
+ *
+ * A function called more than once shows one call — its latest, or the one picked on its first line (`‹ 3/5 ›`).
+ * Columns line up down a call: every line at the same loop depth has the same columns, each as wide as its widest
+ * value, so a turn reads straight down; hovering one lights it on every line, a click holds it. The cursor's line opens
+ * up, its values whole (the margin's cell lit at the cursor: pane.ts). What the bounds left out is said under the last
+ * line.
+ *
+ * A capability stop asks on its line too (step 8): what the call would do — `writeFileSync '/workspace/out.txt'` — and
+ * *Allow once*, *Allow always*, *Deny*, the choice sent back to the session (`debug.session.<id>.decide`), which
+ * resumes it. *Allow this run* lets every call of the capability through until the run ends (a loop asks once), kept
+ * nowhere. *Allow always* needs the resource the call reaches — known even when the line computes it (the worker runs a
+ * fork of the stop to the call to see it).
+ * *Rule…* opens the rule editor in the Rule view (the component's, RULES.md; editInRuleView), prefilled with the call — *capability is*, *resource
+ * is*, *then allow* — to widen or narrow it (*resource matches* a glob) and apply it *Just this once*, or *Save as rule*
+ * in my policy, the run going on as it decides. Or *give* the call's *result* instead of it (RULES.md, slice 2) —
+ * starting from what it returned the last time it ran for real, when that's recorded (`capability.recorded`).
+ *
+ * A variable's row has *Mock…* on hover (LIVE-VALUES.md, "Mocking a value"): the rule editor, in the Rule view, prefilled *program is
+ * <this file>*, *at* <this statement> (a span reference, followed through edits), *then set* it to the value the run
+ * had; the run's other variables are targets too. *Just this once* sets it at this stop and the run goes on with it
+ * (`debug.session.<id>.setValue`, as the Variables view's Set Value does); *Save as rule* keeps it, and each run sets it
+ * each time it gets there, without stopping (the adapter places the rule; the worker sets it after the statement runs).
+ * process.argv's row — on the first line that
+ * reads it, there before any run — has *Mock…*: the rule editor, in the Rule view, prefilled *program is <this file>*, *then give
+ * process.argv* the run's arguments, each value a run of its own; *Run* runs the file with them, once; *Save as rule*
+ * keeps it in my policy, and every run of the file is given them (`rules.set`; the row shows what a rule gives,
+ * `rules.given`).
+ *
+ * The margin is always open beside a JavaScript or TypeScript file, with or without anything to show: it's the file's
+ * runtime column — coverage in its gutter column, left of the code (`showMarks`, from coverage.ts), values,
+ * decisions. In that column too, how the last run ended short: ✕ on the line it crashed on (the error on hover), ■ on
+ * the one it was stopped at — until the file runs again.
+ *
+ * Everything a run put on a line follows its code through edits and cosmetic changes (a reformat, a reindent): each is
+ * anchored by its node's range in the text that ran (anchors.ts, BABLR spans) and drawn where that code is now; what
+ * lost its code goes.
+ */
+import type * as vscodeApi from "vscode";
+import type { Hub } from "@brianjenkins94/hub";
+import type { EditedRule, PaneMark, RuleCatalog, RulePredicate, RuleSchema } from "@brianjenkins94/monaco-vscode-api/main";
+import type { PaneAction, PaneAt, PaneCell, PaneContent, PaneGroup, PaneItem, PaneMark as ContentMark } from "@brianjenkins94/run-contract/pane";
+import type { AskEvent, RunEnd } from "@brianjenkins94/run-contract";
+import type { CapabilityChoice } from "../extensions/worker-pod/capability-stops";
+
+/** A capability stop's question, as the margin shows it on its line (the run contract's `ask`, its file and text apart). */
+type CapabilityAsk = Omit<AskEvent, "file" | "source">;
+import type { LiveBatch, LiveCall, LiveValue } from "../extensions/worker-pod/live-values";
+import type { Range } from "./anchors";
+import type { ProfiledLine } from "./coverage";
+import { Anchors } from "./anchors";
+import { refreshView } from "./pane-views";
+import { editInRuleView } from "./rules-view";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
+import { annotations } from "@brianjenkins94/run-contract/annotations";
+import { parseInputs } from "./inputs";
+import { describeRule, ruleEditor } from "@brianjenkins94/monaco-vscode-api/main";
+import css from "./live-values.css?raw";
+import { POLICY_GLOB } from "@brianjenkins94/util/silo/layout";
+
+
+/** One line of values as drawn: its label (`mid =`), then a value (`inline`) or a cell per column. */
+interface Row { "line": number; "label": string; "name"?: string; "cells": (Cell | undefined)[]; "inline"?: Cell; "group": string; "widths": number[]; "picker"?: Picker; "at"?: Range; "input"?: boolean }
+
+/** What a rule gives a file's process.argv: the rule, and its values, each a run's arguments. */
+interface Given { "rule": EditedRule; "values": string[][] }
+
+/** A function's calls to pick between, on its first line: which (`function:line`), the one shown (0-based), how many. */
+interface Picker { "function": string; "index": number; "count": number }
+
+/** A cell's text and look (`string`, `number`, `boolean`, `branch`). */
+interface Cell { "text": string; "kind": string }
+
+/** A session's values, and what's picked in them: a function's call (by `function:line`; none, its latest) and a held
+ *  column. */
+interface Session { "id": string; "values": LiveValue[]; "calls": Map<number, LiveCall>; "dropped": number; "picked": Map<string, number>; "held"?: string; "anchors"?: Anchors }
+
+/** A column no wider than this many characters; a longer value is cut short, whole on hover. */
+const MAX_WIDTH = 24;
+
+/** What a file's Margin shows, as plain data (the `margin_state` tool, through `margin.state`): set each time it's
+ *  drawn. Lines are 1-based, as an agent reads code. */
+interface MarginState {
+	"file": string;
+	"values": { "line": number; "label": string; "cells": string[] }[];
+	"dropped": number;
+	"ask"?: { "line": number; "call": string; "capability": string; "resource": string; "resolved": boolean };
+	"end"?: { "line": number; "kind": string; "message"?: string };
+	"marks": { "line": number; "kind": string; "title"?: string }[];
+	"cards": { "fromLine": number; "toLine": number; "title": string }[];
+	"runLog"?: RunLog;
+}
+
+/** Each drawn file's MarginState, by URI. */
+const margins = new Map<string, MarginState>();
+
+/** When each file's latest batch of values came (inline values wait for a stop's to come in). */
+const batchedAt = new Map<string, number>();
+
+/** The latest session's values, per file URI — kept once it ends, until the next session of the file tells its own. */
+const sessions = new Map<string, Session>();
+/** Each file's marks for the margin's gutter column (coverage), per file URI. */
+const marked = new Map<string, PaneMark[]>();
+/** Where each file's last run's work went (coverage.ts: tsval's profile), on the lines its statements are on now. */
+const profiles = new Map<string, ProfiledLine[]>();
+/** How each file's last run ended short, per file URI. */
+const ends = new Map<string, RunEnd & { "anchors"?: Anchors }>();
+/** The code files shown in an editor: their margin stays open, empty or not. */
+const open = new Set<string>();
+/** The languages whose files get a margin always. */
+const CODE = new Set(["javascript", "javascriptreact", "typescript", "typescriptreact"]);
+/** The capability stop a session is at, per file URI: what it asks. */
+const asks = new Map<string, { "session": string; "ask": CapabilityAsk; "anchors"?: Anchors }>();
+/** The workbench's extension API (set by `installLiveValues`): the documents' text, BABLR's spans. */
+let api: typeof vscodeApi | undefined;
+/** Sends a capability stop's choice back to its session (set by `installLiveValues`). */
+let choose: ((session: string, choice: CapabilityChoice, rule?: EditedRule, give?: unknown) => Promise<unknown>) | undefined;
+/** What a call returned the last time it ran for real (a preview's fetch, recorded), or null (set by `installLiveValues`). */
+let recordedOf: ((capability: string, resource: string) => Promise<{ "value": unknown; "at": string } | null>) | undefined;
+/** Sets a variable at a session's stop (set by `installLiveValues`). */
+let setValueAt: ((session: string, name: string, value: string) => Promise<unknown>) | undefined;
+/** What a rule gives a file's process.argv, changing my policy by a rule editor's rule, and running a file with given
+ *  arguments, each a run (set by `installLiveValues`). */
+let rulesGiven: ((path: string) => Promise<Given | null>) | undefined;
+let rulesSet: ((previous: EditedRule | undefined, rule: EditedRule | undefined) => Promise<unknown>) | undefined;
+let runFile: ((path: string, cases: string[][]) => Promise<unknown>) | undefined;
+/** What a rule gives each file's process.argv, as last read (null: nothing; undefined: not read yet). */
+const givenArgv = new Map<string, Given | null>();
+/** The variables a rule tests or sets (`variables.<name>`), by name. */
+export function variablesOf(rule: EditedRule): string[] {
+	const names = new Set<string>();
+	const walk = (predicate: RulePredicate): void => {
+		if ("predicates" in predicate) {
+			predicate.predicates.forEach(walk);
+		} else if (predicate.target_id.startsWith("variables.")) {
+			names.add(predicate.target_id.slice("variables.".length));
+		}
+	};
+
+	walk(rule.when);
+
+	for (const action of rule.then) {
+		if (action.target_id?.startsWith("variables.") === true) {
+			names.add(action.target_id.slice("variables.".length));
+		}
+	}
+
+	return [...names];
+}
+
+/** Arguments as a command line, as the Mock box takes them. */
+function commandLine(args: string[]): string {
+	return args.map((arg) => (arg === "" || /[\s"'|]/u.test(arg) ? JSON.stringify(arg) : arg)).join(" ");
+}
+
+/** A value's look, by what it reads as. */
+function kindOf(value: LiveValue): string {
+	// (process.argv's look is `argv`: `live-values-input` is the Mock's box.)
+	if (value.kind === "input") {
+		return "argv";
+	}
+
+	if (value.kind === "branch" || value.kind === "set" || value.kind === "skip") {
+		return value.kind;
+	}
+
+	return /^['"`]/u.test(value.value) ? "string" : /^-?\d/u.test(value.value) ? "number" : value.value === "true" || value.value === "false" ? "boolean" : "";
+}
+
+/** What a value reads as in a cell: a branch its arm, anything else its preview. */
+function textOf(value: LiveValue): string {
+	return value.kind === "branch" ? (value.value === "0" ? "then" : "else") : value.value;
+}
+
+/** A line's values in one turn, as one cell: the value, or `name = value` each when the line binds more than one name. */
+function cellOf(values: LiveValue[], named: boolean): Cell {
+	const last = new Map<string, LiveValue>();
+
+	for (const value of values) {
+		last.delete(value.name);
+		last.set(value.name, value);
+	}
+
+	const shown = [...last.values()];
+
+	return { "text": shown.map((value) => (named ? `${value.name} = ${textOf(value)}` : textOf(value))).join(", "), "kind": shown.length === 1 ? kindOf(shown[0]!) : "" };
+}
+
+/** Turns as a column's key, and in order: outermost loop first, numerically. */
+function compareTurns(a: string, b: string): number {
+	const left = a.split(".").map(Number);
+	const right = b.split(".").map(Number);
+
+	for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+		if ((left[index] ?? -1) !== (right[index] ?? -1)) {
+			return (left[index] ?? -1) - (right[index] ?? -1);
+		}
+	}
+
+	return 0;
+}
+
+/** A line's anchor: the range of the first of its values that has one. */
+function anchorOf(values: LiveValue[]): { "at"?: Range } {
+	const at = values.find((value) => value.at !== undefined)?.at;
+
+	return at === undefined ? {} : { "at": at };
+}
+
+/** Each value set by hand at a stop, moved to its variable's own row — where it was last bound in the same call, in that
+ *  row's turn (none, outside a loop) — rather than the line the run stopped at. */
+function homed(values: LiveValue[]): LiveValue[] {
+	return values.map((value, index) => {
+		if (value.kind !== "set") {
+			return value;
+		}
+
+		const home = values.slice(0, index).findLast((other) => other.kind !== "set" && other.name === value.name && other.call === value.call);
+
+		return home === undefined ? value : { ...value, "line": home.line, "turns": home.turns.length === 0 ? [] : value.turns, ...home.at === undefined ? {} : { "at": home.at } };
+	});
+}
+
+/** A session's rows: a call of each function (its latest, or the one `picked`) and the top level, a row per line that
+ *  has values; a function called more than once has its picker on its first line. */
+export function rowsOf(values: LiveValue[], calls: Map<number, LiveCall>, picked = new Map<string, number>()): Row[] {
+	const byFunction = new Map<string, LiveCall[]>();
+
+	for (const call of calls.values()) {
+		const key = `${call.name}:${call.line}`;
+
+		byFunction.set(key, [...byFunction.get(key) ?? [], call]);
+	}
+
+	const shown = new Map([...byFunction].map(([key, each]) => {
+		const ordered = each.toSorted((left, right) => left.id - right.id);
+		const index = Math.min(picked.get(key) ?? ordered.length - 1, ordered.length - 1);
+
+		return [key, { "call": ordered[index]!, "index": index, "count": ordered.length }];
+	}));
+	const shownCalls = new Set([0, ...[...shown.values()].map((each) => each.call.id)]);
+	const byLine = new Map<number, LiveValue[]>();
+
+	for (const value of homed(values).filter((candidate) => shownCalls.has(candidate.call))) {
+		byLine.set(value.line, [...byLine.get(value.line) ?? [], value]);
+	}
+
+	// Columns per call and loop depth: every turn any line at that depth ran in.
+	const keys = new Map<string, Set<string>>();
+
+	for (const value of [...byLine.values()].flat()) {
+		const group = `${value.call}/${value.turns.length}`;
+
+		keys.set(group, (keys.get(group) ?? new Set()).add(value.turns.join(".")));
+	}
+
+	const ordered = new Map([...keys].map(([group, set]) => [group, [...set].toSorted(compareTurns)]));
+	const rows: Row[] = [];
+
+	for (const [line, lineValues] of [...byLine].toSorted(([a], [b]) => a - b)) {
+		// A line belongs to one call; its loop depth is its deepest value's.
+		const call = lineValues.at(-1)!.call;
+		const depth = Math.max(...lineValues.map((value) => value.turns.length));
+		const inDepth = lineValues.filter((value) => value.turns.length === depth);
+		const names = [...new Set(inDepth.map((value) => value.name))];
+		const named = names.length > 1;
+		const only = inDepth[0]!;
+		const binds = !named && (only.kind === "bind" || only.kind === "set" || only.kind === "input");
+		const label = named ? "" : binds ? `${only.name} =` : only.kind === "return" ? "return" : only.name;
+		const group = `${call}/${depth}`;
+
+		if (depth === 0) {
+			rows.push({ "line": line, "label": label, ...binds ? { "name": only.name } : {}, "cells": [], "inline": cellOf(inDepth, named), "group": group, "widths": [], ...anchorOf(inDepth), ...only.kind === "input" ? { "input": true } : {} });
+
+			continue;
+		}
+
+		const turns = ordered.get(group) ?? [];
+
+		rows.push({ "line": line, "label": label, ...binds ? { "name": only.name } : {}, "cells": turns.map((turn) => {
+			const inTurn = inDepth.filter((value) => value.turns.join(".") === turn);
+
+			return inTurn.length === 0 ? undefined : cellOf(inTurn, named);
+		}), "group": group, "widths": [], ...anchorOf(inDepth) });
+	}
+
+	// A function called more than once: its picker on its first line, a row of its own if nothing's there.
+	for (const [key, { call, index, count }] of shown) {
+		if (count > 1) {
+			const picker = { "function": key, "index": index, "count": count };
+			const row = rows.find((candidate) => candidate.line === call.line);
+
+			if (row === undefined) {
+				rows.push({ "line": call.line, "label": "", "cells": [], "group": `${call.id}/0`, "widths": [], "picker": picker, ...call.at === undefined ? {} : { "at": call.at } });
+			} else {
+				row.picker = picker;
+			}
+		}
+	}
+
+	rows.sort((left, right) => left.line - right.line);
+
+	// Each group's columns as wide as their widest cell.
+	for (const group of new Set(rows.map((row) => row.group))) {
+		const members = rows.filter((row) => row.group === group);
+		const widths = (members[0]?.cells ?? []).map((_, index) => Math.min(MAX_WIDTH, Math.max(1, ...members.map((row) => row.cells[index]?.text.length ?? 0))));
+
+		for (const row of members) {
+			row.widths = widths;
+		}
+	}
+
+	return rows;
+}
+
+/** The rules being made in the Rule view (editInRuleView), by where — a capability stop's session, `<uri>#process.argv`,
+ *  `<uri>#<variable>` — each with how to close it: its button here waits while it's open. */
+const making = new Map<string, () => void>();
+
+export type PolicyModule = typeof import("@brianjenkins94/util/silo/policy");
+
+/** What a rule as edited would do here: said under it, and whether its buttons can act on it. */
+export interface Verdict { "text": string; "ok": boolean; "refused"?: boolean }
+
+/** silo's catalog, as the rule editor takes it. */
+export const catalogOf = (policy: PolicyModule): RuleCatalog => ({ "targets": policy.TARGETS, "types": policy.TYPES, "operators": policy.OPERATORS, "actions": policy.ACTIONS, "argumentSchema": policy.argumentSchema, "actionSchema": policy.actionSchema });
+
+/** A button under a rule: what it does with the rule as edited (resolving once done — the panel's host closes it, or
+ *  its stop goes on and takes it away); `always`, enabled whatever the verdict. */
+export interface PanelButton { "label": string; "className": string; "title": string; "act": (rule: EditedRule) => Promise<unknown>; "always"?: boolean }
+
+/** The rule editor (the component's, RULES.md), with silo's catalog — in the margin, and in the Rules view: under it,
+ *  what the rule as edited would do here (`judge`), then its buttons. silo's policy (and ajv with it) loads on first
+ *  use, not with the workbench. */
+export function rulePanel(policy: PolicyModule, rule: EditedRule, judge: (rule: EditedRule) => Verdict, actions: PanelButton[], catalog: RuleCatalog = catalogOf(policy)): HTMLElement {
+	const panel = Object.assign(document.createElement("div"), { "className": "live-values-rule" });
+	const status = Object.assign(document.createElement("div"), { "className": "live-values-rule-status" });
+	const buttons = Object.assign(document.createElement("div"), { "className": "live-values-choices" });
+	const update = (edited: EditedRule): void => {
+		const verdict = judge(edited);
+
+		status.textContent = verdict.text;
+		status.classList.toggle("refused", verdict.refused === true);
+
+		for (const [index, each] of [...buttons.children].entries()) {
+			(each as HTMLButtonElement).disabled = actions[index]?.always !== true && !verdict.ok;
+		}
+	};
+	const editor = ruleEditor({
+		"catalog": catalog,
+		"rule": rule,
+		"onChange": update
+	});
+
+	for (const { label, className, title, act } of actions) {
+		// eslint-disable-next-line webawesome/prefer-components -- the workbench realm doesn't load Web Awesome (the shell does)
+		const each = Object.assign(document.createElement("button"), { "className": `live-values-choice ${className}`, "textContent": label, "title": title });
+
+		each.addEventListener("click", () => {
+			for (const other of buttons.querySelectorAll("button")) {
+				other.disabled = true;
+			}
+
+			void act(editor.rule()).catch((error: unknown) => {
+				update(editor.rule());
+				status.textContent = error instanceof Error ? error.message : String(error);
+				status.classList.add("refused");
+			});
+		});
+		buttons.append(each);
+	}
+
+	panel.append(editor.element, status, buttons);
+	update(editor.rule());
+
+	return panel;
+}
+
+/** The first allow / deny / ask a rule has. */
+export const decisionOf = (rule: EditedRule): string | undefined => rule.then.find(({ action_id }) => ["allow", "deny", "skip", "ask"].includes(action_id))?.action_id;
+
+/** What a rule as edited would do to a call: whether it covers it (`resolved`: what it reaches is known) and what it
+ *  decides — ok when it allows or denies it. */
+export function callVerdict(policy: PolicyModule, rule: EditedRule, subject: { "capability": string; "resource"?: string }, resolved = true, canGive = false): Verdict {
+	const problem = policy.problemOf(rule);
+	const covers = problem === undefined && policy.ruleMatches(rule, subject);
+	const decision = decisionOf(rule);
+	// A result given instead of the call: only where something stands in for it (the debugger), not a real call.
+	const gives = rule.then.some((action) => action.action_id === "give" && action.target_id === "result");
+
+	return {
+		"text": problem ?? (!covers
+			? `Doesn't cover this call${resolved ? "" : " — what it reaches isn't known before the line runs"}`
+			: gives ? (canGive ? "Covers this call: gives it this result instead" : "A result can only be given in the debugger, where nothing real is called")
+				: decision === "allow" ? "Covers this call: allows it" : decision === "deny" ? "Covers this call: denies it" : decision === "skip" ? "Covers this call: skips it" : decision === "ask" ? "Covers this call, and asks — as now" : "Covers this call, but doesn't decide it"),
+		"ok": covers && (gives ? canGive : decision === "allow" || decision === "deny" || decision === "skip"),
+		"refused": problem !== undefined
+	};
+}
+
+/** The result a rule gives a call, when it gives one. */
+const resultOf = (rule: EditedRule): { "value": unknown } | undefined => {
+	const give = rule.then.find((action) => action.action_id === "give" && action.target_id === "result");
+
+	return give === undefined ? undefined : { "value": give.argument };
+};
+
+/** A rule about a call, as it starts: its capability, its resource (when known), then allow. */
+export const callRule = (capability: string, resource?: string): EditedRule => ({
+	"when": { "logicalType_id": "all", "predicates": [
+		{ "target_id": "capability", "operator_id": "is", "argument": capability },
+		...resource === undefined ? [] : [{ "target_id": "resource", "operator_id": "is", "argument": resource }]
+	] },
+	"then": [{ "action_id": "allow" }]
+});
+
+/** The rule editor at a capability stop, prefilled with the call: whether the rule as edited covers this call and what
+ *  it decides, then *Just this once* (decide this call so), *Save as rule* (in my policy, and decide it so), *Cancel*. */
+async function openRule(session: string, ask: CapabilityAsk, close: () => void): Promise<HTMLElement> {
+	const policy = await import("@brianjenkins94/util/silo/policy");
+	const subject = ask.resolved ? { "capability": ask.capability, "resource": ask.resource } : { "capability": ask.capability };
+	// What this call returned the last time it ran for real (a preview's fetch): given instead, to start with.
+	const recorded = ask.resolved ? await recordedOf?.(ask.capability, ask.resource).catch(() => null) ?? null : null;
+	const rule = callRule(ask.capability, ask.resolved ? ask.resource : undefined);
+
+	if (recorded !== null) {
+		rule.then = [{ "action_id": "give", "target_id": "result", "argument": recorded.value }];
+	}
+
+	return rulePanel(policy, rule, (edited) => {
+		const verdict = callVerdict(policy, edited, subject, ask.resolved, true);
+
+		return recorded !== null && verdict.ok && JSON.stringify(resultOf(edited)?.value) === JSON.stringify(recorded.value) ? { ...verdict, "text": `Covers this call: gives it what it returned on ${new Date(recorded.at).toLocaleString()}` } : verdict;
+	}, [
+		{ "label": "Just this once", "className": "once", "title": "Decide this call as the rule does, and stop here again next time", "act": async (edited) => (resultOf(edited) === undefined ? choose?.(session, decisionOf(edited) === "deny" ? "deny" : decisionOf(edited) === "skip" ? "skip" : "allow-once") : choose?.(session, "give-once", undefined, resultOf(edited)!.value)) },
+		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json), and decide this call by it", "act": async (rule) => choose?.(session, "rule", rule) },
+		{ "label": "Cancel", "className": "cancel", "title": "Back to the choices", "act": async () => { close(); }, "always": true }
+	]);
+}
+
+/** The rule editor on process.argv's row: the rule giving it now, or one prefilled — *program is <this file>*, *then
+ *  give process.argv* the run's own arguments — then whether it covers this file and how many runs it gives, and *Run*
+ *  (with them, once), *Save as rule* (in my policy: every run of the file is given them), *Remove* (the rule giving it
+ *  now), *Cancel*. */
+async function openMock(uri: string, row: Row, close: () => void): Promise<HTMLElement> {
+	const policy = await import("@brianjenkins94/util/silo/policy");
+	const path = api?.Uri.parse(uri).path ?? "";
+	const program = api?.workspace.asRelativePath(api.Uri.parse(uri), false) ?? path;
+	const given = givenArgv.get(uri) ?? undefined;
+	const valuesOf = (rule: EditedRule): string[][] => {
+		const give = rule.then.find((action) => action.action_id === "give" && action.target_id === "process.argv");
+
+		return Array.isArray(give?.argument) ? (give.argument as unknown[]).filter((each): each is string[] => Array.isArray(each)) : [];
+	};
+	const judge = (rule: EditedRule): Verdict => {
+		const problem = policy.problemOf(rule);
+		const covers = problem === undefined && policy.ruleMatches(rule, { "program": program });
+		const runs = valuesOf(rule).length;
+
+		return {
+			"text": problem ?? (!covers ? `Doesn't cover ${program}` : runs === 0 ? "Gives process.argv nothing" : `Gives ${program} ${runs === 1 ? "these arguments" : `${runs} runs, one after another`}`),
+			"ok": covers && runs > 0,
+			"refused": problem !== undefined
+		};
+	};
+	const saved = async (): Promise<void> => {
+		givenArgv.set(uri, await rulesGiven?.(path) ?? null);
+		close();
+	};
+
+	return rulePanel(policy, given?.rule ?? {
+		"when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": program }] },
+		"then": [{ "action_id": "give", "target_id": "process.argv", "argument": [parseInputs(row.inline?.text ?? "")[0] ?? []] }]
+	}, judge, [
+		{ "label": "Run", "className": "once", "title": "Run the file with them, once — each a run of its own", "act": async (rule) => { void runFile?.(path, valuesOf(rule)); close(); } },
+		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json): every run of the file is given them", "act": async (rule) => { await rulesSet?.(given?.rule, rule); await saved(); } },
+		...given === undefined ? [] : [{ "label": "Remove", "className": "remove", "title": "Take the rule away: the file's runs get their own arguments again", "act": async () => { await rulesSet?.(given.rule, undefined); await saved(); }, "always": true }],
+		{ "label": "Cancel", "className": "cancel", "title": "Close it, changing nothing", "act": async () => { close(); }, "always": true }
+	]);
+}
+
+/** A value as a rule holds it, from its text in a cell: a number, a boolean, a string's text, else the text. */
+function valueOf(text: string, kind: string): unknown {
+	switch (kind) {
+		case "number":
+			return Number(text);
+		case "boolean":
+			return text === "true";
+		case "string":
+			return text.startsWith("\"") ? JSON.parse(text) as unknown : text.slice(1, -1).replace(/\\(.)/gu, "$1");
+		default:
+			return text;
+	}
+}
+
+/** The schema of a value of a cell's kind — what a rule's input for it is drawn from. */
+const schemaOfKind = (kind: string): RuleSchema => (kind === "number" || kind === "string" || kind === "boolean" ? { "type": kind } : true);
+
+/** silo's catalog, with `variables.<name>` for each variable `values` saw (its latest value's kind): what a rule placed
+ *  where they're in scope can test, and set. */
+export function withVariables(policy: PolicyModule, values: { "name": string; "kind": string }[]): RuleCatalog {
+	const base = catalogOf(policy);
+	const variables = new Map(values.map(({ name, kind }) => [`variables.${name}`, { "name": name, "kind": kind }]));
+
+	return {
+		...base,
+		"targets": { ...base.targets, ...Object.fromEntries([...variables].map(([id, { name, kind }]) => [id, { "label": name, "type_id": kind === "number" || kind === "boolean" ? kind : "string", "description": `The variable ${name}, where the rule is placed` }])) },
+		"actions": { ...base.actions, "set": { ...base.actions["set"]!, "targets": [...variables.keys()] } },
+		"argumentSchema": (target_id, operator_id) => (variables.has(target_id) ? policy.OPERATORS[operator_id]?.argument(schemaOfKind(variables.get(target_id)!.kind)) : base.argumentSchema(target_id, operator_id)),
+		"actionSchema": (action_id, target_id) => (action_id === "set" && target_id !== undefined && variables.has(target_id) ? schemaOfKind(variables.get(target_id)!.kind) : base.actionSchema(action_id, target_id))
+	};
+}
+
+/** The rule editor on a variable's row: *program is <this file>*, *at* <this statement> (a span reference, followed
+ *  through edits), *then set* <it> to the value the run had — then *Just this once* (set at this stop: the run goes on
+ *  with it), *Save as rule* (in my policy: each run sets it each time it gets here, without stopping), *Cancel*. */
+async function openVariableMock(uri: string, row: Row, name: string, session: Session, close: () => void): Promise<HTMLElement> {
+	const policy = await import("@brianjenkins94/util/silo/policy");
+	const program = api?.workspace.asRelativePath(api.Uri.parse(uri), false) ?? "";
+	const [place] = api === undefined ? [] : await annotations(api.commands).refer(session.anchors!.text, program, [{ "start": row.at![0], "end": row.at![1] }]) ?? [];
+
+	if (place === undefined || place === null) {
+		throw new Error("This line can't be placed: BABLR doesn't read this file");
+	}
+
+	// The variables the run saw, each by its latest value: targets to test, and to set.
+	const latest = new Map<string, LiveValue>();
+
+	for (const value of session.values) {
+		if (value.kind === "bind" || value.kind === "set") {
+			latest.set(value.name, value);
+		}
+	}
+
+	const cell = row.inline ?? row.cells.findLast((each) => each !== undefined);
+	const catalog = withVariables(policy, [...latest].map(([each, value]) => ({ "name": each, "kind": kindOf(value) })));
+	const variables = Object.fromEntries([...latest].map(([each, value]) => [each, valueOf(value.value, kindOf(value))]));
+	const sets = (rule: EditedRule): { "name": string; "value": unknown }[] => rule.then.filter((action) => action.action_id === "set" && action.target_id?.startsWith("variables.") === true).map((action) => ({ "name": action.target_id!.slice("variables.".length), "value": action.argument }));
+	const judge = (rule: EditedRule): Verdict => {
+		const problem = policy.problemOf(rule);
+		const covers = problem === undefined && policy.ruleMatches(rule, { "program": program, "at": place, "variables": variables });
+		const names = sets(rule).map((each) => each.name);
+
+		return {
+			"text": problem ?? (!covers ? "Doesn't cover this place, as the run is now" : names.length === 0 ? "Sets nothing" : `Sets ${names.join(", ")} each time the program gets here`),
+			"ok": covers && names.length > 0,
+			"refused": problem !== undefined
+		};
+	};
+
+	return rulePanel(policy, {
+		"when": { "logicalType_id": "all", "predicates": [{ "target_id": "program", "operator_id": "is", "argument": program }, { "target_id": "at", "operator_id": "is", "argument": place }] },
+		"then": [{ "action_id": "set", "target_id": `variables.${name}`, "argument": valueOf(cell?.text ?? "", cell?.kind ?? "") }]
+	}, judge, [
+		{ "label": "Just this once", "className": "once", "title": "Set it at this stop: the run goes on with it", "act": async (rule) => {
+			for (const each of sets(rule)) {
+				await setValueAt?.(session.id, each.name, JSON.stringify(each.value));
+			}
+
+			close();
+		} },
+		{ "label": "Save as rule", "className": "save", "title": "Keep it in your policy (.silo/policy/<you>.json): each run sets it each time it gets here", "act": async (rule) => { await rulesSet?.(undefined, rule); close(); } },
+		{ "label": "Cancel", "className": "cancel", "title": "Close it, changing nothing", "act": async () => { close(); }, "always": true }
+	], catalog);
+}
+
+let styled = false;
+
+/** live-values.css in the page, once — the margin's, and the rule panel's wherever it's shown. */
+export function ensureStyled(): void {
+	if (!styled) {
+		styled = true;
+		document.head.append(Object.assign(document.createElement("style"), { "textContent": css }));
+	}
+}
+
+/** A top-level statement, as tsserver says it (the capabilities plugin's `_statements`): its range, the `//` comment
+ *  above it, a title and detail (what it declares or calls), and the types of what it declares. */
+interface Statement { "start": number; "end": number; "kind": string; "comment"?: string; "title": string; "detail": string; "declares"?: { "name": string; "type": string | null }[] }
+
+/** A step of the program (PROJECTIONS.md): statements written together, a card around them in the margin. */
+interface Step { "fromLine": number; "toLine": number; "title": string; "detail": string; "declares": { "name": string; "type": string | null }[]; "body": boolean }
+
+/** Each file's top-level statements, by the document version they were read at. */
+const statementsRead = new Map<string, { "version": number; "statements": Promise<Statement[] | undefined> }>();
+/** Each file's tries at its statements while tsserver isn't ready (it isn't, as a file first opens). */
+const statementTries = new Map<string, number>();
+
+/** `document`'s top-level statements, from tsserver — undefined when it can't say yet (it's loading the project). */
+function statementsOf(document: vscodeApi.TextDocument): Promise<Statement[] | undefined> {
+	const uri = document.uri.toString();
+	const known = statementsRead.get(uri);
+
+	if (known?.version === document.version) {
+		return known.statements;
+	}
+
+	const statements = Promise.resolve(api!.commands.executeCommand<{ "body"?: { "statements"?: Statement[] | null } } | undefined>("typescript.tsserverRequest", "_statements", { "file": document.uri })).then((response) => response?.body?.statements ?? undefined, () => undefined);
+
+	statementsRead.set(uri, { "version": document.version, "statements": statements });
+	void statements.then((read) => {
+		// Not yet: forget it, and try again in a while (a few times).
+		if (read === undefined && statementsRead.get(uri)?.statements === statements) {
+			statementsRead.delete(uri);
+
+			const tries = statementTries.get(uri) ?? 0;
+
+			if (tries < 5) {
+				statementTries.set(uri, tries + 1);
+				setTimeout(() => { draw(uri); }, 2000);
+			}
+		}
+	});
+
+	return statements;
+}
+
+/** A file's steps: its top-level statements in paragraphs, the way code is written — those with no blank line between
+ *  them are one step, a `//` comment above a statement starts one (and titles it), and a function or class is a step of
+ *  its own. */
+function stepsOf(document: vscodeApi.TextDocument, statements: Statement[]): Step[] {
+	const text = document.getText();
+	const lines = text.split("\n");
+	const steps: (Step & { "end": number; "count": number; "names": string[] })[] = [];
+	const bodied = (statement: Statement): boolean => statement.kind === "FunctionDeclaration" || statement.kind === "ClassDeclaration";
+
+	for (const statement of statements) {
+		let fromLine = document.positionAt(statement.start).line;
+
+		// Its comment's lines are the step's too.
+		while (statement.comment !== undefined && fromLine > 0 && lines[fromLine - 1]!.trim().startsWith("//")) {
+			fromLine -= 1;
+		}
+
+		const toLine = document.positionAt(statement.end).line;
+		const previous = steps.at(-1);
+		const together = previous !== undefined && !previous.body && !bodied(statement) && statement.comment === undefined && !/\n[ \t]*\r?\n/u.test(text.slice(previous.end, statement.start));
+
+		if (together) {
+			previous.toLine = toLine;
+			previous.end = statement.end;
+			previous.count += 1;
+			previous.declares.push(...statement.declares ?? []);
+			previous.names.push(statement.title);
+			previous.detail = `${previous.count} statements`;
+		} else {
+			steps.push({ "fromLine": fromLine, "toLine": toLine, "end": statement.end, "count": 1, "title": statement.comment ?? "", "names": [statement.title], "detail": statement.detail, "declares": [...statement.declares ?? []], "body": bodied(statement) });
+		}
+	}
+
+	// Untitled, a step is named by what it starts and ends with: `country … total`.
+	return steps.map(({ fromLine, toLine, title, names, detail, declares, body }) => ({ "fromLine": fromLine, "toLine": toLine, "title": title !== "" ? title : names.length <= 2 ? names.join(", ") : `${names[0]} … ${names.at(-1)}`, "detail": detail, "declares": declares, "body": body }));
+}
+
+/** Whether a step ran, from coverage's marks on its lines (as they're drawn: on the lines their code is on now) — a
+ *  function by how often it was called (its body's first mark) — or undefined, with nothing to say. */
+function ranOf(step: Step, marks: PaneMark[]): { "kind": string; "text": string } | undefined {
+	const covered = marks.filter((mark) => mark.kind.startsWith("coverage-") && step.fromLine <= mark.line && mark.line <= step.toLine);
+
+	if (step.body) {
+		const first = covered.filter((mark) => mark.line > step.fromLine).sort((a, b) => a.line - b.line)[0];
+
+		if (first === undefined) {
+			return undefined;
+		}
+
+		const times = /(\d+)×/u.exec(first.title ?? "")?.[1];
+
+		return first.kind === "coverage-missed" ? { "kind": "missed", "text": "not called" } : { "kind": "ran", "text": times === undefined ? "called" : `called ${times}×` };
+	}
+
+	if (covered.length === 0) {
+		return undefined;
+	}
+
+	return covered.every((mark) => mark.kind === "coverage-ran") ? { "kind": "ran", "text": "ran" } : covered.every((mark) => mark.kind === "coverage-missed") ? { "kind": "missed", "text": "didn't run" } : { "kind": "partial", "text": "partly ran" };
+}
+
+/** The last run, step by step (PROJECTIONS.md: the run log): each step that ran, in the order it first did, with its
+ *  share of the run's work (the statements run in its code — the same every run) and any time it waited (a timer, on the
+ *  event loop's clock) — or undefined, with no profile for these steps. */
+interface RunLog { "rows": { "card": number; "title": string; "statements": number; "waited": number }[]; "statements": number; "waited": number }
+
+function runLogOf(steps: Step[], profiled: ProfiledLine[]): RunLog | undefined {
+	const rows = steps.map((step, card) => {
+		const inside = profiled.filter(({ line }) => step.fromLine <= line && line <= step.toLine);
+
+		return { "card": card, "title": step.title, "statements": inside.reduce((sum, each) => sum + each.statements, 0), "waited": inside.reduce((sum, each) => sum + each.waited, 0), "first": Math.min(...inside.map(({ first }) => first)) };
+	}).filter((row) => row.statements > 0).sort((a, b) => a.first - b.first);
+
+	return rows.length === 0 ? undefined : { "rows": rows.map(({ first: _first, ...row }) => row), "statements": rows.reduce((sum, row) => sum + row.statements, 0), "waited": rows.reduce((sum, row) => sum + row.waited, 0) };
+}
+
+/** A count, short: 840, 1.2k, 3.4M. */
+function shortCount(count: number): string {
+	return count < 1000 ? String(count) : count < 1e6 ? `${(count / 1000).toFixed(count < 1e4 ? 1 : 0)}k` : `${(count / 1e6).toFixed(1)}M`;
+}
+
+/** The Margin of `uri` drawn again: pane-views asks for it (`margin.paneView`, marginOf). */
+function draw(uri: string): void {
+	refreshView("margin", uri);
+}
+
+/** `items` moved to the lines their code is on now (`anchors`, by each one's `at`), those whose code is gone dropped —
+ *  as they are when the file is as it ran, or when there's nothing to place them by. (For margin.state, an agent's
+ *  lines: what's drawn is placed by pane-views, from each item's range in the text that ran.) */
+async function relocate<T extends { "line": number; "at"?: Range }>(anchors: Anchors | undefined, text: string | undefined, items: T[]): Promise<T[]> {
+	if (anchors === undefined || text === undefined || text === anchors.text || items.length === 0) {
+		return items;
+	}
+
+	const lines = await anchors.lines(text, items.map((item) => item.at ?? [0, 0]));
+
+	return items.flatMap((item, index) => (item.at === undefined || lines[index] === undefined ? [] : [{ ...item, "line": lines[index] }]));
+}
+
+/** The file's text as it is now, when it's open. */
+function documentText(uri: string): string | undefined {
+	return api?.workspace.textDocuments.find((document) => document.uri.toString() === uri)?.getText();
+}
+
+/** Where something a run put on its line `line` is: its range `at` in the text that ran (`anchors`), followed from it to
+ *  the file as it is by the editor (pane-views) — or, with nothing to follow it from, that line. */
+function placeOf(anchors: Anchors | undefined, line: number, at: Range | undefined): PaneAt {
+	return anchors !== undefined && at !== undefined ? { "ran": { "source": anchors.text, "start": at[0], "end": at[1] } } : { "lines": [line, line] };
+}
+
+/** A cell's look, as the contract names it — the kinds it knows; any other, plain. */
+const CELL_KINDS = new Set(["number", "string", "boolean", "object", "error", "undefined", "branch", "set", "skip", "given"]);
+
+function cellKind(kind: string | undefined): PaneCell["kind"] {
+	return kind !== undefined && CELL_KINDS.has(kind) ? kind as PaneCell["kind"] : undefined;
+}
+
+/** A capability stop's question, as data: the call and what it reaches, then the choices — each for this call, this
+ *  run or always — and *Rule…* (made in the Rule view). */
+function askItem(uri: string, asking: { "session": string; "ask": CapabilityAsk; "anchors"?: Anchors }): PaneItem {
+	const { session, ask } = asking;
+	const always = ask.resolved ? `${ask.capability} on ${ask.resource}, in your policy (.silo/policy/<you>.json)` : undefined;
+	const choice = (verb: string, label: string, lasting: [CapabilityChoice, CapabilityChoice, CapabilityChoice], does: string): PaneAction => ({
+		"title": label,
+		"command": "margin.decide",
+		"arguments": [session, lasting[0]],
+		"tooltip": `${does}: this call — and stop here again next time`,
+		"more": [
+			{ "title": "this call", "command": "margin.decide", "arguments": [session, lasting[0]], "tooltip": `${does}: this call` },
+			{ "title": "this run", "command": "margin.decide", "arguments": [session, lasting[1]], "tooltip": `${does}: every ${ask.capability} call, until this run ends (kept nowhere)` },
+			{ "title": "always", "command": "margin.decide", "arguments": [session, lasting[2]], "tooltip": always === undefined ? "Needs the resource the call reaches, which isn't known before the line runs" : `${does}: ${always}`, ...always === undefined ? { "disabled": true } : {} }
+		]
+	});
+	const code = (text: string): string => `\`${text.replaceAll("`", "'")}\``;
+
+	return {
+		"id": "ask",
+		"at": placeOf(asking.anchors, ask.line, ask.at),
+		"content": { "markdown": `${code(ask.callee)} ${ask.resolved ? code(`'${ask.resource}'`) : `_${ask.resource}_`} ${ask.capability}` },
+		"tone": ask.dangerous ? "warning" : "question",
+		"actions": [
+			choice("allow", "Allow", ["allow-once", "allow-run", "allow-always"], "Let it run, for real"),
+			choice("skip", "Skip", ["skip", "skip-run", "skip-always"], "Don't make it: the run goes on as if it did nothing (the debugger's stand-in answers), the line saying it was skipped"),
+			choice("deny", "Deny", ["deny", "deny-run", "deny-always"], "Fail it, as a denied call does (EACCES)"),
+			{ "title": "Rule…", "command": "margin.rule", "arguments": [uri], "tooltip": making.has(session) ? "Its rule is open in the Rule view" : "Make a rule for calls like this one: which ones, and what to do", ...making.has(session) ? { "disabled": true } : {} }
+		]
+	};
+}
+
+/** A row a run put on a line, as data: a function's call picker, its label, the line's own value, a column a turn of a
+ *  loop (one held lit), and *Mock…* — process.argv's, or a variable's (made in the Rule view). */
+function rowItem(uri: string, row: Row, index: number, session: Session | undefined): PaneItem {
+	const picker = row.picker;
+	const step = (by: number, text: string, title: string): PaneCell => {
+		const to = picker === undefined ? -1 : picker.index + by;
+
+		return { "text": text, "title": title, ...picker !== undefined && to >= 0 && to < picker.count ? { "command": { "title": title, "command": "margin.pick", "arguments": [uri, picker.function, to, picker.count] } } : {} };
+	};
+	const given = row.input === true ? givenArgv.get(uri) : undefined;
+	const key = row.input === true ? `${uri}#process.argv` : row.name === undefined ? undefined : `${uri}#${row.name}`;
+	const mock: PaneAction | undefined = row.input === true
+		? { "title": "Mock…", "command": "margin.mockArgv", "arguments": [uri, row.inline?.text ?? ""], "tooltip": "Give the program arguments of your own: once, or by a rule, every run", ...making.has(key!) ? { "disabled": true } : {} }
+		: row.name === undefined
+			? undefined
+			: { "title": "Mock…", "command": "margin.mockVariable", "arguments": [uri, row.name, row.at ?? null, (row.inline ?? row.cells.findLast((each) => each !== undefined))?.text ?? "", (row.inline ?? row.cells.findLast((each) => each !== undefined))?.kind ?? ""], "tooltip": "Give it another value: at this stop, or by a rule, each time the program gets here", ...making.has(key!) || row.at === undefined || session?.anchors === undefined ? { "disabled": true } : {} };
+
+	return {
+		"id": `values:${index}`,
+		"at": row.input === true && row.at === undefined ? { "lines": [row.line, row.line] } : placeOf(session?.anchors, row.line, row.at),
+		"content": {
+			...row.label === "" ? {} : { "label": row.label },
+			...picker === undefined ? {} : { "lead": [step(-1, "‹", "The call before"), { "text": `${picker.index + 1}/${picker.count}`, "title": `Call ${picker.index + 1} of ${picker.count}` }, step(1, "›", "The call after")] },
+			...row.inline === undefined ? {} : { "value": { "text": row.inline.text, "kind": cellKind(row.inline.kind) } },
+			"cells": given === null || given === undefined
+				? row.cells.map((cell, column) => (cell === undefined ? { "text": "" } : { "text": cell.text, "kind": cellKind(cell.kind), "picked": session?.held === `${row.group}#${column}`, "command": { "title": "Hold", "command": "margin.hold", "arguments": [uri, `${row.group}#${column}`] } }))
+				: [{ "text": given.values.map(commandLine).join("  ·  "), "kind": "given", "title": `Given by a rule in your policy${given.values.length > 1 ? `: ${given.values.length} runs, one after another` : ""}` }]
+		},
+		...mock === undefined ? {} : { "actions": [mock] }
+	};
+}
+
+/** What `uri`'s Margin shows, as data (the contract's PaneContent: pane-views draws it) — or nothing, for a file that
+ *  isn't code with nothing on it. And margin.state's plain account of it, an agent's. */
+async function marginOf(uri: string): Promise<PaneContent | undefined> {
+	ensureStyled();
+
+	const session = sessions.get(uri);
+	const text = documentText(uri);
+	// (a run's rows with nothing to follow them by, once the file's changed from what ran, are gone)
+	const moved = session?.anchors !== undefined && text !== undefined && text !== session.anchors.text;
+	const rows = session === undefined ? [] : rowsOf(session.values, session.calls, session.picked).filter((row) => !moved || row.at !== undefined);
+	const asking = asks.get(uri);
+	const ending = ends.get(uri);
+	// The program's steps, a card around each (PROJECTIONS.md).
+	const shown = api?.workspace.textDocuments.find((each) => each.uri.toString() === uri);
+	const read = shown === undefined || !CODE.has(shown.languageId) ? undefined : await statementsOf(shown);
+	const steps = read === undefined || shown === undefined || shown.getText() !== text ? [] : stepsOf(shown, read);
+
+	// process.argv's row, before any run (or a run that didn't read it yet): on the first line reading it, with the file's
+	// stub if it has one — so the inputs can be written first.
+	const readsArgv = text !== undefined && /\bprocess\.argv\b/u.test(text);
+	const argvAt = !readsArgv || rows.some((row) => row.input === true) ? -1 : text.split("\n").findIndex((each) => /\bprocess\.argv\b/u.test(each));
+
+	// What a rule gives the file's process.argv, read once (then again as it's changed here), for its row.
+	if (readsArgv && !givenArgv.has(uri)) {
+		givenArgv.set(uri, null);
+		void rulesGiven?.(api?.Uri.parse(uri).path ?? "").then((given) => { givenArgv.set(uri, given); draw(uri); }, () => undefined);
+	}
+
+	// (No value of its own: nothing ran. What a rule gives it is beside it.)
+	if (argvAt !== -1) {
+		rows.push({ "line": argvAt, "label": "process.argv =", "name": "process.argv", "cells": [], "inline": { "text": "", "kind": "argv" }, "group": "0/0", "widths": [], "input": true });
+	}
+
+	const last = rows.reduce<Row | undefined>((latest, row) => (latest === undefined || row.line > latest.line ? row : latest), undefined);
+	// The last run, step by step, at the file's end (after the last card).
+	const profiled = profiles.get(uri);
+	const runLog = profiled === undefined || steps.length === 0 ? undefined : runLogOf(steps, profiled);
+	const logLine = shown === undefined ? 0 : Math.max(shown.lineCount - 1, ...steps.map((step) => step.toLine));
+	// Coverage's marks (coverage.ts draws them, into the Margin): each card says from them how its code ran.
+	const lineMarks: PaneMark[] = marked.get(uri) ?? [];
+	const ended = ending?.kind === "crashed" ? `crashed at line ${ending.line + 1}` : ending?.kind === "stopped" ? `stopped at line ${ending.line + 1}` : "completed";
+	const items: PaneItem[] = [
+		// A capability stop's question first on its line: it's what the run waits on.
+		...asking === undefined ? [] : [askItem(uri, asking)],
+		...rows.map((row, index) => rowItem(uri, row, index, session)),
+		// What the bounds left out, under the last line.
+		...last === undefined || session === undefined || session.dropped === 0 ? [] : [{ "id": "values:dropped", "at": rowItem(uri, last, -1, session).at, "content": { "markdown": `… ${session.dropped} more values not kept` }, "tone": "info" } satisfies PaneItem],
+		// The run log: how the run ended, and a line per step that ran — its card's number and title, its share of the
+		// work (statements run, the same every run), what it waited.
+		...runLog === undefined ? [] : [
+			{ "id": "runlog", "at": { "lines": [logLine, logLine] }, "content": { "markdown": `**Last run** · ${shortCount(runLog.statements)} statements${runLog.waited > 0 ? ` · waited ${runLog.waited}ms` : ""} · ${ended}` }, ...ending === undefined ? {} : { "tone": "error" } } satisfies PaneItem,
+			...runLog.rows.map((row, index): PaneItem => {
+				const share = Math.round((row.statements / runLog.statements) * 100);
+
+				return { "id": `runlog:${index}`, "at": { "lines": [logLine, logLine] }, "content": { "lead": [{ "text": String(row.card + 1) }], "label": row.title, "cells": [{ "text": share === 0 ? "<1%" : `${share}%`, "title": `${row.statements} statements` }, ...row.waited > 0 ? [{ "text": `waited ${row.waited}ms` }] : []] } };
+			})
+		]
+	];
+	const marks: ContentMark[] = [
+		...ending === undefined ? [] : [{ "at": placeOf(ending.anchors, ending.line, ending.at), "kind": ending.kind, "title": ending.kind === "crashed" ? `The last run crashed here: ${ending.message ?? "an uncaught error"}` : ending.message === undefined ? "The last run was stopped here" : `The last run stopped here: ${ending.message}` } satisfies ContentMark]
+	];
+	const groups = steps.map((step, index): PaneGroup => {
+		const ran = ranOf(step, lineMarks);
+
+		return {
+			"id": `step:${index}`,
+			"at": { "lines": [step.fromLine, step.toLine] },
+			"label": step.title,
+			...step.detail === "" ? {} : { "detail": step.detail },
+			...step.declares.length === 0 ? {} : { "title": step.declares.map(({ name, type }) => (type === null ? name : `${name}: ${type}`)).join("\n") },
+			...ran === undefined ? {} : { "state": ran.kind as PaneGroup["state"], "stateText": ran.text }
+		};
+	});
+
+	// What an agent reads of it (margin.state): on the lines each is on now.
+	const stated = await relocate(session?.anchors, text, rows);
+	const [askedAt] = asking === undefined ? [] : await relocate(asking.anchors, text, [asking.ask]);
+	const [end] = ending === undefined ? [] : await relocate(ending.anchors, text, [ending]);
+
+	margins.set(uri, {
+		"file": api?.Uri.parse(uri).path ?? uri,
+		"values": stated.map((row) => ({ "line": row.line + 1, "label": row.label, "cells": row.inline === undefined ? row.cells.map((cell) => cell?.text ?? "") : [row.inline.text] })),
+		"dropped": session?.dropped ?? 0,
+		...askedAt === undefined ? {} : { "ask": { "line": askedAt.line + 1, "call": askedAt.callee, "capability": askedAt.capability, "resource": askedAt.resource, "resolved": askedAt.resolved } },
+		...end === undefined ? {} : { "end": { "line": end.line + 1, "kind": end.kind, ...end.message === undefined ? {} : { "message": end.message } } },
+		"marks": [...lineMarks, ...end === undefined ? [] : [{ "line": end.line, "kind": `run-${end.kind}`, ...end.message === undefined ? {} : { "title": end.message } }]].map((mark) => ({ "line": mark.line + 1, "kind": mark.kind, ...mark.title === undefined ? {} : { "title": mark.title } })),
+		"cards": steps.map((step) => ({ "fromLine": step.fromLine + 1, "toLine": step.toLine + 1, "title": step.title })),
+		...runLog === undefined ? {} : { "runLog": runLog }
+	});
+
+	// Only a file that isn't code, with nothing in it, goes without.
+	if (items.length === 0 && !open.has(uri) && marks.length === 0 && steps.length === 0) {
+		return undefined;
+	}
+
+	return { "items": items, "groups": groups, "marks": marks };
+}
+
+/** Where `uri`'s last run's work went (coverage.ts: tsval's profile, on the lines its statements are on now), for the
+ *  run log — or none. */
+export function showProfile(uri: string, lines: ProfiledLine[] | undefined): void {
+	if (lines === undefined || lines.length === 0) {
+		profiles.delete(uri);
+	} else {
+		profiles.set(uri, lines);
+	}
+
+	draw(uri);
+}
+
+/** The marks beside `uri`'s lines in the margin's gutter column (coverage's), replacing its last. */
+export function showMarks(uri: string, marks: PaneMark[]): void {
+	marked.set(uri, marks);
+	draw(uri);
+}
+
+/** Keep a margin beside every code file shown, and follow debug sessions' values and capability stops. */
+export function installLiveValues(hub: Hub, vscode: typeof vscodeApi): void {
+	api = vscode;
+
+	// The Margin, a pane view (EXTENSION-POINTS.md, 4): its content, asked for by pane-views — and what its buttons and
+	// cells run. Each rule it makes opens in the Rule view (editInRuleView); its button waits while it's open there.
+	const uriArg = (value: unknown): string => {
+		if (typeof value !== "string") {
+			throw new TypeError("a file's URI");
+		}
+
+		return value;
+	};
+	const editing = (key: string, uri: string): () => void => () => {
+		making.get(key)?.();
+		making.delete(key);
+		draw(uri);
+	};
+
+	vscode.commands.registerCommand("margin.paneView", async (uri: unknown) => (typeof uri === "string" ? marginOf(uri) : undefined));
+	vscode.commands.registerCommand("margin.decide", async (session: unknown, choice: unknown) => {
+		if (typeof session !== "string" || typeof choice !== "string") {
+			throw new TypeError("margin.decide: a session and a choice");
+		}
+
+		return choose?.(session, choice as CapabilityChoice);
+	});
+	vscode.commands.registerCommand("margin.rule", async (value: unknown) => {
+		const uri = uriArg(value);
+		const asking = asks.get(uri);
+
+		if (asking === undefined) {
+			throw new Error("not stopped at a capability call");
+		}
+
+		making.set(asking.session, editInRuleView(await openRule(asking.session, asking.ask, editing(asking.session, uri))));
+		draw(uri);
+	});
+	vscode.commands.registerCommand("margin.mockArgv", async (value: unknown, text: unknown) => {
+		const uri = uriArg(value);
+		const key = `${uri}#process.argv`;
+
+		making.set(key, editInRuleView(await openMock(uri, { "inline": { "text": typeof text === "string" ? text : "", "kind": "argv" } } as Row, editing(key, uri))));
+		draw(uri);
+	});
+	vscode.commands.registerCommand("margin.mockVariable", async (value: unknown, name: unknown, at: unknown, text: unknown, kind: unknown) => {
+		const uri = uriArg(value);
+		const session = sessions.get(uri);
+
+		if (typeof name !== "string" || !Array.isArray(at) || session === undefined) {
+			throw new Error("nothing to mock here: the run's values are gone");
+		}
+
+		const key = `${uri}#${name}`;
+
+		making.set(key, editInRuleView(await openVariableMock(uri, { "at": at as Range, "inline": { "text": String(text ?? ""), "kind": String(kind ?? "") }, "cells": [] } as unknown as Row, name, session, editing(key, uri))));
+		draw(uri);
+	});
+	// A function's call picked on its first line (the latest is no pick: it follows the calls still coming).
+	vscode.commands.registerCommand("margin.pick", (value: unknown, key: unknown, index: unknown, count: unknown) => {
+		const uri = uriArg(value);
+		const session = sessions.get(uri);
+
+		if (session !== undefined && typeof key === "string" && typeof index === "number" && typeof count === "number") {
+			if (index === count - 1) {
+				session.picked.delete(key);
+			} else {
+				session.picked.set(key, index);
+			}
+
+			draw(uri);
+		}
+	});
+	// A click holds a column lit; another lets it go.
+	vscode.commands.registerCommand("margin.hold", (value: unknown, key: unknown) => {
+		const uri = uriArg(value);
+		const session = sessions.get(uri);
+
+		if (session !== undefined && typeof key === "string") {
+			session.held = session.held === key ? undefined : key;
+			draw(uri);
+		}
+	});
+
+	// At a stop, the values as VS Code's own inline values too (its InlineValuesProvider: the debugger's documented contract
+	// for values beside the code) — each row's latest at the end of its line, on the line its code is on now, as the margin
+	// places it. For the session VS Code stopped in, its frame in focus — whichever debugger's. (A desktop build would show values this way,
+	// with no pane beside the editor.) VS Code asks as it stops, while the stop's last values may still be on their way (by
+	// the hub, not with the stop): so it's answered once they're in — that session's values here, and a moment's quiet.
+	vscode.languages.registerInlineValuesProvider({ "scheme": "file" }, {
+		"provideInlineValues": async (document, viewport) => {
+			const uri = document.uri.toString();
+			// (the session VS Code asks for: its focused frame's — a live run, or another session, may be the active one)
+			const stopped = vscode.debug.activeStackItem?.session.id ?? vscode.debug.activeDebugSession?.id;
+
+			for (let waited = 0; waited < 2000 && (sessions.get(uri)?.id !== stopped || Date.now() - (batchedAt.get(uri) ?? 0) < 200); waited += 50) {
+				await new Promise((resolve) => { setTimeout(resolve, 50); });
+			}
+
+			const session = sessions.get(uri);
+
+			if (session === undefined || session.id !== stopped) {
+				return [];
+			}
+
+			const rows = await relocate(session.anchors, document.getText(), rowsOf(session.values, session.calls, session.picked));
+
+			return rows.flatMap((row) => {
+				const latest = row.inline?.text ?? row.cells.findLast((cell) => cell !== undefined && cell.text !== "")?.text;
+
+				return latest === undefined || row.line < viewport.start.line || row.line > viewport.end.line || row.line >= document.lineCount ? [] : [new vscode.InlineValueText(document.lineAt(row.line).range, row.label === "" ? latest : `${row.label} ${latest}`)];
+			});
+		}
+	});
+
+	const uriOf = (path: string): string => vscode.Uri.file(path).toString();
+	/** The text a session ran, as anchors (the same for its values, its question and its end). */
+	const anchorsFor = (file: string, source: unknown, session?: Session): Anchors | undefined => session?.anchors ?? (typeof source === "string" ? new Anchors(vscode, file, source) : undefined);
+	const follow = (editors: readonly vscodeApi.TextEditor[]): void => {
+		for (const editor of editors) {
+			const uri = editor.document.uri.toString();
+
+			if (CODE.has(editor.document.languageId) && !open.has(uri)) {
+				open.add(uri);
+				draw(uri);
+			}
+		}
+	};
+
+	follow(vscode.window.visibleTextEditors);
+	vscode.window.onDidChangeVisibleTextEditors(follow);
+	// Edited: what a run put on lines moves with its code — drawn again once typing pauses (BABLR re-reads the file).
+	const typing = new Map<string, ReturnType<typeof setTimeout>>();
+
+	vscode.workspace.onDidChangeTextDocument((event) => {
+		const uri = event.document.uri.toString();
+
+		if (event.contentChanges.length > 0 && (sessions.has(uri) || ends.has(uri) || asks.has(uri) || open.has(uri))) {
+			clearTimeout(typing.get(uri));
+			typing.set(uri, setTimeout(() => { draw(uri); }, 300));
+		}
+	});
+
+	// The values drawn ten times a second at most, however often batches come — on a timer, not an animation frame,
+	// which a hidden tab never gives (the session's end would wait until it's looked at).
+	const pending = new Set<string>();
+	let scheduled = false;
+	const redraw = (uri: string): void => {
+		pending.add(uri);
+
+		if (!scheduled) {
+			scheduled = true;
+			setTimeout(() => {
+				scheduled = false;
+
+				for (const each of pending) {
+					draw(each);
+				}
+
+				pending.clear();
+			}, 100);
+		}
+	};
+
+	hub.subscribe("values.session.*", (data, envelope) => {
+		const { file, source, ...batch } = (data ?? {}) as Partial<LiveBatch> & { "file"?: unknown; "source"?: unknown };
+		const id = envelope.subject.slice("values.session.".length);
+
+		if (typeof file !== "string" || !Array.isArray(batch.values)) {
+			return;
+		}
+
+		const uri = uriOf(file);
+		let session = sessions.get(uri);
+
+		// A new session over the file replaces the last one's values, and how the last run ended.
+		if (session?.id !== id) {
+			session = { "id": id, "values": [], "calls": new Map(), "dropped": 0, "picked": new Map() };
+			sessions.set(uri, session);
+			ends.delete(uri);
+		}
+
+		session.anchors ??= anchorsFor(file, source);
+		session.values.push(...batch.values);
+
+		for (const call of batch.calls ?? []) {
+			session.calls.set(call.id, call);
+		}
+
+		session.dropped = batch.dropped ?? session.dropped;
+		batchedAt.set(uri, Date.now());
+		redraw(uri);
+	});
+
+	// The run's end: how it ended goes on its line. Its values stay — the margin shows the file's last run until the next
+	// run of it tells its own (a live run as typing pauses, LIVE-VALUES.md), following its code through edits.
+	hub.subscribe("values.ended", (data) => {
+		const { session, file, source, end } = (data ?? {}) as { "session"?: unknown; "file"?: unknown; "source"?: unknown; "end"?: RunEnd };
+
+		// How it ended — crashed, or stopped on a line — replacing the last run's; a run that finished clears it.
+		if (typeof file === "string") {
+			const ran = sessions.get(uriOf(file));
+
+			if (end === undefined) {
+				ends.delete(uriOf(file));
+			} else {
+				ends.set(uriOf(file), { ...end, "anchors": anchorsFor(file, source, ran?.id === session ? ran : undefined) });
+			}
+
+			redraw(uriOf(file));
+		}
+
+		if (typeof file === "string" && typeof session === "string" && asks.get(uriOf(file))?.session === session) {
+			making.get(session)?.();
+			making.delete(session);
+			asks.delete(uriOf(file));
+			redraw(uriOf(file));
+		}
+	});
+
+	// A capability stop's question, and its answer back: the session resumes on it.
+	const rpc = createRpcClient(hub);
+
+	// What a file's Margin shows (the `margin_state` tool): the file open in the editor, or `file`, once it's been drawn.
+	serve(hub, "margin.state", (args) => {
+		const { file } = (args ?? {}) as { "file"?: unknown };
+		const path = typeof file === "string" && file !== "" ? (file.startsWith("/") ? file : `/workspace/${file}`) : vscode.window.activeTextEditor?.document.uri.path;
+		const state = path === undefined ? undefined : [...margins.values()].find((each) => each.file === path);
+
+		if (state === undefined) {
+			throw new Error(path === undefined ? "no file open in the editor — pass one" : `${path} has no Margin drawn — open it in the editor`);
+		}
+
+		return state;
+	});
+
+	choose = (session, choice, rule, give) => rpc.request(`debug.session.${session}.decide`, { "choice": choice, ...rule === undefined ? {} : { "rule": rule }, ...give === undefined ? {} : { "give": give } }, { "timeoutMs": 24 * 60 * 60_000 });
+	recordedOf = async (capability, resource) => rpc.request("capability.recorded", { "capability": capability, "resource": resource }, { "timeoutMs": 10_000 }) as Promise<{ "value": unknown; "at": string } | null>;
+	setValueAt = (session, name, value) => rpc.request(`debug.session.${session}.setValue`, { "name": name, "value": value }, { "timeoutMs": 30_000 });
+	rulesGiven = async (path) => rpc.request("rules.given", { "program": path, "target": "process.argv" }, { "timeoutMs": 10_000 }) as Promise<Given | null>;
+	rulesSet = async (previous, rule) => rpc.request("rules.set", { ...previous === undefined ? {} : { "previous": previous }, ...rule === undefined ? {} : { "rule": rule } }, { "timeoutMs": 10_000 });
+	// A run answers at its first stop, which can be a while: nobody waits on it here.
+	runFile = async (path, cases) => rpc.request("debug.start", { "program": path, "cases": cases }, { "timeoutMs": 24 * 60 * 60_000 });
+	// The policy files changed: what a rule gives each file's process.argv is read anew (once the pod has), and whoever
+	// lists them is told.
+	const watcher = vscode.workspace.createFileSystemWatcher(POLICY_GLOB);
+	let changed: ReturnType<typeof setTimeout> | undefined;
+	const reread = (): void => {
+		clearTimeout(changed);
+		changed = setTimeout(() => {
+			givenArgv.clear();
+
+			for (const uri of open) {
+				draw(uri);
+			}
+		}, 300);
+	};
+
+	watcher.onDidChange(reread);
+	watcher.onDidCreate(reread);
+	watcher.onDidDelete(reread);
+	hub.subscribe("capability.ask", (data) => {
+		const { session, file, source, ask } = (data ?? {}) as { "session"?: unknown; "file"?: unknown; "source"?: unknown; "ask"?: CapabilityAsk };
+
+		if (typeof session !== "string" || typeof file !== "string") {
+			return;
+		}
+
+		const uri = uriOf(file);
+
+		// A new stop, or none: the rule being made at the last one goes.
+		making.get(session)?.();
+		making.delete(session);
+
+		if (ask !== undefined) {
+			const ran = sessions.get(uri);
+
+			asks.set(uri, { "session": session, "ask": ask, "anchors": anchorsFor(file, source, ran?.id === session ? ran : undefined) });
+		} else if (asks.get(uri)?.session === session) {
+			asks.delete(uri);
+		}
+
+		redraw(uri);
+	});
+}

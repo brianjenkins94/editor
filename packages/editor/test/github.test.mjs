@@ -4,8 +4,8 @@
 // error surface (a 404 is `undefined` for existence checks, a real error otherwise). Run: tsx --test.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { patProvider } from "../github-auth.ts";
-import { createGitHub, decodeBase64ToText, GitHubError } from "../github.ts";
+import { patProvider } from "../shell/github-auth.ts";
+import { createGitHub, decodeBase64ToText, GitHubError } from "../shell/github.ts";
 
 /** A provider (fetch) that records calls and replies from a routing table; parses JSON bodies for assertions. */
 function fakeProvider(routes) {

@@ -16,7 +16,7 @@ import type { Effect } from "@brianjenkins94/run-contract";
 import { serve } from "@brianjenkins94/hub";
 import { answerMailbox, runtimeSession } from "@brianjenkins94/run-contract/runtime";
 import * as vscode from "vscode";
-import { recordEffect } from "../capabilities/run-effects";
+import { recordEffect } from "./capabilities/run-effects";
 import { policyFor, takeOnce } from "./capability-stops";
 import { verdictOf } from "./gate";
 

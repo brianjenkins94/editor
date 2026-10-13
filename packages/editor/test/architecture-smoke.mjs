@@ -13,7 +13,7 @@ import { after, before, test } from "node:test";
 
 import { alive, between, hasLabel, startSession } from "./architecture-harness.mjs";
 
-const { channels, hubLinks, nodes, seenChannels } = await import("../architecture-model.ts");
+const { channels, hubLinks, nodes, seenChannels } = await import("../shared/architecture-model.ts");
 
 const PREVIEW = "preview:5173";
 

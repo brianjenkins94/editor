@@ -5,7 +5,7 @@ import { test } from "node:test";
 import ts from "typescript";
 
 import { addReactRefresh } from "../../almostnode/frameworks/code-transforms.ts";
-import { inlineSourceMap, originalPosition } from "../sourcemap.ts";
+import { inlineSourceMap, originalPosition } from "../workbench/sourcemap.ts";
 
 // Compiled as the preview's dev server compiles it (vite-dev-server.ts's transformCode).
 const compile = (source, fileName) => ts.transpileModule(source, { "fileName": fileName, "compilerOptions": { "jsx": ts.JsxEmit.ReactJSX, "module": ts.ModuleKind.ESNext, "target": ts.ScriptTarget.ES2020, "inlineSourceMap": true, "inlineSources": true } }).outputText;

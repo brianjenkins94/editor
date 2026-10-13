@@ -34,7 +34,7 @@ regex in terminal-session.ts if it streams; plus the `shell` tool's description 
 ### The layout (built: step 1)
 
 ```
-packages/editor/terminal/
+packages/editor/workbench/terminal/
   index.ts            the terminal process: prompt, line editor, OSC 633, sessions; loads each command on first use
   session.ts          statement splitting, the $PWD probe
   fs.ts               just-bash's file system over the workspace
@@ -153,7 +153,7 @@ realms (the tool in the tab's root hub, the backend in the workbench or worker-p
 each realm imports its own:
 
 ```
-packages/editor/tools/
+packages/editor/app/tools/
   tools.ts                the registry: import.meta.glob("./*/tools.ts"); main.tsx serves what it finds
   files/   tools.ts  serve.ts  files.test.mjs     files_read · files_write · files_edit · files_glob · files_grep
   debug/   tools.ts  …                            debug_start · debug_step · debug_state · debug_stop · …
@@ -169,9 +169,9 @@ packages/debug-mcp/src/tools/
 
 ### Step 3 (built)
 
-The editor tab's 25 tools are families under `tools/<family>/tools.ts`, each a list of util/mcp `defineTool`s (zod,
-`ok`/`fail`) over a `ToolHost` (the hub request, with its timeout); `tools/index.ts` finds them by glob and
-`tools/page-tools.ts` serves them as page tools. debug-mcp's own 8 are `src/tools/<family>.ts`, registered from a list,
+The editor tab's 25 tools are families under `app/tools/<family>/tools.ts`, each a list of util/mcp `defineTool`s (zod,
+`ok`/`fail`) over a `ToolHost` (the hub request, with its timeout); `app/tools/index.ts` finds them by glob and
+`app/tools/page-tools.ts` serves them as page tools. debug-mcp's own 8 are `src/tools/<family>.ts`, registered from a list,
 and a page tool that answers with a `ToolResult` passes it through. Names, descriptions and timeouts are unchanged; the
 backends still live with their owning modules (moving them in is step 4's, with the renames).
 

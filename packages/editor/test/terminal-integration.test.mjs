@@ -2,7 +2,7 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { commandFinished, commandLine, workingDirectory } from "../terminal/integration.ts";
+import { commandFinished, commandLine, workingDirectory } from "../workbench/terminal/integration.ts";
 
 // VS Code's own reading of a sequence's value (shellIntegrationAddon.ts, deserializeVSCodeOscMessage).
 const deserialize = (message) => message.replaceAll(/\\(\\|x([0-9a-f]{2}))/giu, (_match, op, hex) => (hex ? String.fromCharCode(Number.parseInt(hex, 16)) : op));

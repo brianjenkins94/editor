@@ -16,7 +16,7 @@ import { Linter } from "eslint/universal";
 import presetData from "eslint:preset";
 import presetPlugins from "eslint:preset-plugins";
 import { createRequire } from "node:module";
-import { gatedEvalRealm } from "../../sandbox/gated-eval";
+import { gatedEvalRealm } from "../../shared/gated-eval";
 
 const linter = new Linter();
 

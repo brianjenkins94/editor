@@ -31,7 +31,7 @@ import { given, placesOf, type Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { annotations, type Resolved, type SpanRef } from "@brianjenkins94/run-contract/annotations";
 
-import { loadEffectivePolicy, loadPolicyFiles, movePlace, replaceRule } from "../capabilities/silo-store";
+import { loadEffectivePolicy, loadPolicyFiles, movePlace, replaceRule } from "./capabilities/silo-store";
 import { appRootOf, runApp, runDebugger } from "./launch";
 
 /** How a stopped session resumes: DAP's own requests. */

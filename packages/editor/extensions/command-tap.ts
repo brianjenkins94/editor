@@ -12,7 +12,7 @@
  * which extension keeps what, which reads what.
  */
 import type * as vscodeApi from "vscode";
-import { storeShape } from "../architecture-zenfs";
+import { storeShape } from "../shared/architecture-zenfs";
 
 /** worker-pod's command that takes a host's totals; never counted itself. */
 export const ARCH_COMMANDS = "editor.arch.commands";

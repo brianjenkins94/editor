@@ -5,7 +5,7 @@
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { instrument } from "../../almostnode/frameworks/instrument.ts";
-import { installPageEvidence } from "../extensions/worker-pod/page-evidence.ts";
+import { installPageEvidence } from "../previews/page-evidence.ts";
 
 const program = `
 interface Body { x: number; y: number; vx: number; vy: number; target?: { x: number; y: number } }

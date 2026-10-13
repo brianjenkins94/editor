@@ -4,7 +4,7 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 import { configure, fs, mounts, SingleBuffer } from "@zenfs/core";
 
-import { watchWorkspaceStore } from "../workspace-changes.ts";
+import { watchWorkspaceStore } from "../shared/workspace-changes.ts";
 
 await configure({ "mounts": { "/workspace": { "backend": SingleBuffer, "buffer": new SharedArrayBuffer(8 * 1024 * 1024) } } });
 

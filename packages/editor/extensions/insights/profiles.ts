@@ -6,9 +6,9 @@
  *
  * The app's frames are the ones in the workspace (`file://…`): the editor's profiles are source-mapped as they're saved.
  */
-import type { CpuProfile, ProfileEntry } from "../../cpuprofile";
+import type { CpuProfile, ProfileEntry } from "../../shared/cpuprofile";
 import * as vscode from "vscode";
-import { summarize } from "../../cpuprofile";
+import { summarize } from "../../shared/cpuprofile";
 
 /** The window a profile is of, from its name: `5173-2026-…` (a port's first window) or `5173-2-2026-…` (its second). */
 function windowOf(uri: vscode.Uri): string {

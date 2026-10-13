@@ -18,7 +18,7 @@ import { EMPTY_POLICY, given as givenBy, placesOf, type Policy, type Rule } from
 import type { WorkspaceRuntime } from "@brianjenkins94/run-contract/runtime";
 import type { SpanRef } from "@brianjenkins94/run-contract/annotations";
 import { annotations } from "@brianjenkins94/run-contract/annotations";
-import type { Replay } from "../worker-pod/page-evidence";
+import type { Replay } from "../../previews/page-evidence";
 import type { CapabilityAsk, Control, CoverageReport, Explored, LoopStart, RunEnd, SetHook, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
 
 interface DapRequest { "seq": number; "type": "request"; "command": string; "arguments"?: Record<string, unknown> }

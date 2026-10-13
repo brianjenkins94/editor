@@ -9,7 +9,7 @@ export default [
 		// generated paths are already dropped by the global `ignores` above.)
 		"files": ["**/*.{ts,tsx,mjs,cjs,js}"],
 		// contrib/ is the editor-contrib template: someone else's extension, drawing its own webview however it likes.
-		"ignores": ["packages/editor/demo/**", "packages/editor/Workbench.tsx", "contrib/**"],
+		"ignores": ["packages/editor/demo/**", "packages/editor/workbench/Workbench.tsx", "contrib/**"],
 		"plugins": { "webawesome": webawesome },
 		"rules": {
 			"webawesome/prefer-components": "error",

@@ -16,12 +16,12 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/browser";
 
-import { type CapabilityCall, decideCapability } from "../capabilities/decide";
-import { takeEffects } from "../capabilities/run-effects";
-import { recordedResult, recordResult } from "../capabilities/silo-store";
+import { type CapabilityCall, decideCapability } from "./capabilities/decide";
+import { takeEffects } from "./capabilities/run-effects";
+import { recordedResult, recordResult } from "./capabilities/silo-store";
 import { observe } from "@brianjenkins94/observability";
-import { identifyWorker } from "../../architecture-model";
-import { storeNode, ZENFS_NODE } from "../../architecture-zenfs";
+import { identifyWorker } from "../../shared/architecture-model";
+import { storeNode, ZENFS_NODE } from "../../shared/architecture-zenfs";
 import type { CommandTotals } from "../command-tap";
 import { ARCH_COMMANDS } from "../command-tap";
 import { registerCapabilityStops } from "./capability-stops";

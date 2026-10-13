@@ -1,0 +1,1130 @@
+/** @jsxImportSource preact */
+/**
+ * The outer SHELL — the app's main layout, built on Web Awesome's `<wa-page>` app-shell (header / navigation / main /
+ * aside), so the chrome is components + theme tokens with almost no hand-rolled layout CSS.
+ *
+ * When index.html loads at the TOP level, main.tsx calls `renderShell()` (dynamically, so this WA chunk never loads in
+ * the editor iframe). It renders the chrome and iframes THIS same page back into the `main` region; that nested
+ * instance sees `window.parent !== window` and takes the app branch, booting the workbench into it (fill mode). One
+ * entry, one bundle; the shell↔app seam is the hub.
+ *
+ * The picker talks to the app over the hub: the app `serve`s `project.list` and subscribes `project.open` (main.tsx);
+ * here we link a shell hub to the app iframe, pull the catalog, and publish the selected id. File contents never cross
+ * this channel — the catalog lives app-side (samples.ts); we send only ids. The RHS review panel (git-panel.ts) is
+ * mounted into the `aside` region as-is; its WA rebuild is a follow-on.
+ */
+import type { Hub } from "@brianjenkins94/hub";
+import type { RunInfo } from "../workbench/runs";
+import type { LaunchTarget } from "../extensions/worker-pod/launch";
+import { createHub, createRpcClient, windowTransport } from "@brianjenkins94/hub";
+import { ChevronLeft, ChevronRight, FolderOpen, GitBranch, GitCommit, History, LogOut, PanelLeft, PanelRight, Play, Share2 } from "lucide";
+import { logger } from "@brianjenkins94/util/logger";
+import { render } from "preact";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { renderGitPanel } from "./git-panel";
+import { reportArchitecture } from "../shared/architecture";
+import { getPat, getRepoBinding, hasPat, setPat, setRepoBinding } from "./github-auth";
+import type { RepoBinding } from "./github-auth";
+import { parsePlaygroundLink, playgroundLink } from "./playground-link";
+import type { SharedWorkspace } from "./playground-link";
+import { reportShellMetrics } from "../shared/editor-metrics";
+import { createShellDock } from "./shell-dock";
+import { installShellPreview } from "./shell-preview";
+import { css, globalCss, iconSvg } from "../shared/theme";
+import "@awesome.me/webawesome/dist/components/page/page.js";
+import "@awesome.me/webawesome/dist/components/button/button.js";
+import "@awesome.me/webawesome/dist/components/card/card.js";
+import "@awesome.me/webawesome/dist/components/divider/divider.js";
+import "@awesome.me/webawesome/dist/components/input/input.js";
+import "./webawesome";
+import "theme"; // our brand tokens, layered on Web Awesome's default theme (must come after it)
+
+// The GitHub data plane's logger — spans + records federate to the `$sys.log.>` observability plane (debug-mcp).
+// The shell owns the token and the network calls, so this is where load/commit/connect are traced.
+const githubLog = logger({ "source": "github" });
+
+const errText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const statusOf = (error: unknown): number | undefined => (typeof (error as { "status"?: unknown }).status === "number" ? (error as { "status": number }).status : undefined);
+
+interface SampleInfo { "id": string; "name": string; "description": string }
+
+// Structural CSS — the little that wa-page doesn't give us: full-viewport height, the editor iframe filling `main`,
+// the diff overlay, and the collapse widths. All via theme tokens (stitches objects, not CSS strings).
+const injectGlobals = globalCss({
+	// Legacy CSS vars the (kept) git-panel.ts still references — mapped onto WA tokens so it follows light/dark too,
+	// until its own WA rebuild.
+	":root": {
+		"--bg": "var(--wa-color-surface-default)",
+		"--chrome": "var(--wa-color-surface-raised)",
+		"--line": "var(--wa-color-surface-border)",
+		"--fg": "var(--wa-color-text-normal)",
+		"--muted": "var(--wa-color-text-quiet)",
+		"--accent": "var(--wa-color-brand-fill-loud)"
+	},
+	// `clip`, not `hidden`: the shell page must never scroll, and a hidden overflow still scrolls programmatically — as
+	// when VS Code focuses an editor in a dock panel mid-layout and the browser scrolls the page to show it.
+	"html, body": { "height": "100%", "margin": 0, "overflow": "clip" },
+	"body": { "backgroundColor": "var(--wa-color-surface-default)", "color": "var(--wa-color-text-normal)", "fontFamily": "var(--wa-font-family-body, system-ui, sans-serif)" },
+	// The shell fills the viewport; its menu/aside widths are theme-driven and collapse to 0 via the classes below.
+	".wa-shell": { "height": "100vh", "--menu-width": "260px", "--aside-width": "380px" },
+	// Collapsed = a slim rail, not hidden (the effect drives the exact value; these are the first-paint fallback).
+	".wa-shell.lhs-collapsed": { "--menu-width": "68px" },
+	".wa-shell.rhs-collapsed": { "--aside-width": "68px" }
+});
+
+// The top bar: branding + icon actions, spread across the header. wa-button (plain) for every control.
+const topBar = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "padding": "0 var(--wa-space-s)", "height": "40px", "borderBottom": "1px solid var(--wa-color-surface-border)" });
+const brand = css({ "fontWeight": "var(--wa-font-weight-semibold)", "marginInlineEnd": "var(--wa-space-s)", "color": "var(--wa-color-text-quiet)" });
+const spacer = css({ "flex": "1 1 auto" });
+
+// Run picker: the top-bar Run button opens a small popover listing what there is to run (VS Code's tasks). A fixed,
+// transparent backdrop closes it on an outside click; the menu sits above it.
+const runWrap = css({ "position": "relative", "display": "inline-flex" });
+// High z-indexes so the popover clears the editor iframe (which sits in a separate app-shell region).
+const runBackdrop = css({ "position": "fixed", "inset": 0, "zIndex": 2147482000 });
+const runMenu = css({
+	"position": "absolute",
+	"top": "calc(100% + 4px)",
+	"insetInlineStart": 0,
+	"zIndex": 2147482001,
+	"minWidth": "240px",
+	"maxHeight": "60vh",
+	"overflowY": "auto",
+	"backgroundColor": "var(--wa-color-surface-raised)",
+	"border": "1px solid var(--wa-color-surface-border)",
+	"borderRadius": "var(--wa-border-radius-m)",
+	"boxShadow": "var(--wa-shadow-l)",
+	"padding": "var(--wa-space-2xs)"
+});
+const runItem = css({
+	"display": "flex",
+	"alignItems": "baseline",
+	"gap": "var(--wa-space-s)",
+	// border-box: at content-box, 100% + padding overflows the menu, whose overflowY:auto then clips the row's end.
+	"boxSizing": "border-box",
+	"width": "100%",
+	"padding": "var(--wa-space-2xs) var(--wa-space-xs)",
+	"borderRadius": "var(--wa-border-radius-s)",
+	"cursor": "pointer",
+	"textAlign": "start",
+	"background": "transparent",
+	"border": 0,
+	"color": "inherit",
+	"font": "inherit",
+	"&:hover": { "backgroundColor": "var(--wa-color-neutral-fill-quiet)" },
+	"&:focus-visible": { "outline": "2px solid var(--wa-color-focus)", "outlineOffset": "-2px" }
+});
+const runItemName = css({ "fontWeight": "var(--wa-font-weight-semibold)" });
+const runItemMeta = css({ "marginInlineStart": "auto", "fontSize": "11px", "color": "var(--wa-color-text-quiet)" });
+const runGroup = css({ "padding": "var(--wa-space-2xs) var(--wa-space-xs) 0", "fontSize": "11px", "fontWeight": "var(--wa-font-weight-semibold)", "color": "var(--wa-color-text-quiet)", "textTransform": "uppercase", "letterSpacing": "0.04em" });
+const runItemLive = css({ "fontSize": "11px", "color": "var(--wa-color-success-on-quiet)" });
+const runEmpty = css({ "padding": "var(--wa-space-xs)", "fontSize": "12px", "color": "var(--wa-color-text-quiet)" });
+
+// GitHub connect popover — same anchored-popover pattern as the run picker, but right-aligned (the button sits on the
+// right of the header) and wider to hold the token field. The PAT is entered here, in the SHELL, and stays here.
+const githubMenu = css({
+	"position": "absolute",
+	"top": "calc(100% + 4px)",
+	"insetInlineEnd": 0,
+	"zIndex": 2147482001,
+	"width": "300px",
+	"maxWidth": "80vw",
+	"backgroundColor": "var(--wa-color-surface-raised)",
+	"border": "1px solid var(--wa-color-surface-border)",
+	"borderRadius": "var(--wa-border-radius-m)",
+	"boxShadow": "var(--wa-shadow-l)",
+	"padding": "var(--wa-space-s)",
+	"display": "flex",
+	"flexDirection": "column",
+	"gap": "var(--wa-space-xs)"
+});
+const ghTitle = css({ "fontWeight": "var(--wa-font-weight-semibold)", "fontSize": "13px" });
+const ghHint = css({ "fontSize": "11px", "color": "var(--wa-color-text-quiet)", "lineHeight": 1.45 });
+const ghLink = css({ "color": "var(--wa-color-brand-fill-loud)", "textDecoration": "none", "whiteSpace": "nowrap", "&:hover": { "textDecoration": "underline" } });
+const ghInput = css({ "width": "100%", "&::part(input)": { "fontFamily": "var(--wa-font-family-code, monospace)" } });
+const ghError = css({ "fontSize": "11px", "color": "var(--wa-color-danger-fill-loud, #d94040)", "lineHeight": 1.4 });
+const ghOk = css({ "fontSize": "11px", "color": "var(--wa-color-success-fill-loud, #3a9d5d)", "lineHeight": 1.4 });
+const ghConnected = css({ "fontSize": "12px", "color": "var(--wa-color-text-normal)" });
+const ghActions = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-xs)", "marginBlockStart": "var(--wa-space-2xs)" });
+
+// The menu/aside regions are full-height flex columns: a fixed header strip, then a scrolling body — so the projects
+// list and the (kept) git-panel each fill their side and scroll internally. `--header-height` is published by wa-page.
+const sideCol = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "flexDirection": "column", "minHeight": 0 });
+// The panes flanking the editor get a border on the edge that meets it: the LHS project pane on its right, the RHS
+// changes pane on its left. `position: relative` anchors the absolute resize grip on that inner edge.
+const navPane = css({ "position": "relative", "borderInlineEnd": "1px solid var(--wa-color-surface-border)" });
+const asidePane = css({ "position": "relative", "borderInlineStart": "1px solid var(--wa-color-surface-border)" });
+
+// A thin drag grip straddling a pane's inner edge (the border meeting the editor) — absolute so it never shifts
+// layout, with a wider hit area than the 1px border and a hover/active accent. Pointer-capture drives the drag so
+// it keeps tracking even as the cursor passes over the editor iframe.
+const resizer = css({
+	"position": "absolute",
+	"top": 0,
+	"bottom": 0,
+	"width": "7px",
+	"zIndex": 5,
+	"cursor": "col-resize",
+	"touchAction": "none",
+	"&:hover": { "backgroundColor": "var(--wa-color-brand-fill-quiet)" },
+	"&:active": { "backgroundColor": "var(--wa-color-brand-fill-loud)" },
+	"&:focus-visible": { "outline": "2px solid var(--wa-color-focus)", "outlineOffset": "-2px" }
+});
+const resizerRight = css({ "insetInlineEnd": "-3px" }); // nav pane: grip on its right edge
+const resizerLeft = css({ "insetInlineStart": "-3px" }); // aside pane: grip on its left edge
+
+// Resizable-pane limits (px). Defaults match the former fixed widths; the min keeps each pane usable, the max caps
+// at a fraction of the viewport so a pane can't swallow the editor.
+const PANE = { "navDefault": 260, "asideDefault": 380, "navMin": 200, "asideMin": 300 };
+const paneMax = (): number => Math.min(600, Math.round(window.innerWidth * 0.45));
+
+/** Pick a file to focus after loading a repo: a top-level README, else the first source/markup file, else the first
+ *  file — so the load is immediately visible. Paths are repo-relative; the caller has rooted them under /workspace. */
+function pickOpenEditors(paths: string[]): string[] {
+	const preferred = paths.find((path) => /^readme\.md$/iu.test(path)) ?? paths.find((path) => /\.(?:tsx?|jsx?|html|md)$/iu.test(path)) ?? paths[0];
+
+	return preferred !== undefined ? ["/workspace/" + preferred] : [];
+}
+
+/** A persisted pane width, clamped later against the live max. Falls back to the default if unset/invalid. */
+function loadPaneWidth(key: string, fallback: number): number {
+	try {
+		const value = Number(localStorage.getItem("shell:" + key));
+
+		return Number.isFinite(value) && value > 0 ? value : fallback;
+	} catch {
+		return fallback;
+	}
+}
+
+// A collapsed pane isn't hidden — it becomes a slim RAIL (WebAwesome vertical social-share pattern): a pill card
+// with a stacked icon-button + tiny caption that reopens the pane. This is the region's width when collapsed.
+const RAIL_WIDTH = 68;
+// A bare vertical column of icon-buttons, top-aligned and centered in the rail — no card, no region padding (the
+// wa-page menu/aside parts already have none), just the stack.
+const railRegion = css({ "height": "calc(100dvh - var(--header-height, 40px))", "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "var(--wa-space-m)", "paddingBlockStart": "var(--wa-space-2xs)", "overflow": "hidden" });
+// Caption hugs its icon (tight) while the gap BETWEEN items (railRegion, above) is larger — so each icon+caption
+// reads as one unit.
+const railItem = css({ "display": "flex", "flexDirection": "column", "alignItems": "center", "gap": "2px" });
+const railCaption = css({ "fontSize": "10px", "lineHeight": 1.1, "color": "var(--wa-color-text-quiet)", "textAlign": "center", "maxWidth": "100%", "overflowWrap": "anywhere" });
+// Keeps an imperatively-mounted region (the git panel) in the DOM but out of view while its pane is collapsed.
+const hiddenBox = css({ "display": "none" });
+const sideBody = css({ "flex": "1 1 0", "minHeight": 0, "overflowY": "auto" });
+const sideHost = css({ "flex": "1 1 0", "minHeight": 0 });
+
+// Navigation (projects) region.
+const navHead = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "padding": "var(--wa-space-2xs) var(--wa-space-xs)", "textTransform": "uppercase", "fontSize": "11px", "letterSpacing": "0.06em", "color": "var(--wa-color-text-quiet)", "flex": "0 0 auto" });
+const navHeadLabel = css({ "flex": "1 1 auto" });
+const picker = css({ "display": "flex", "flexDirection": "column", "gap": "var(--wa-space-2xs)", "padding": "var(--wa-space-xs)" });
+const projectCard = css({
+	"cursor": "pointer",
+	"--spacing": "var(--wa-space-xs)",
+	"&::part(body)": { "display": "block" },
+	"&:hover::part(body)": { "backgroundColor": "var(--wa-color-neutral-fill-quiet)" },
+	"&:focus-visible": { "outline": "2px solid var(--wa-color-focus)", "outlineOffset": "1px" },
+	"&.selected::part(body)": { "backgroundColor": "var(--wa-color-brand-fill-quiet)" },
+	"&.selected": { "borderInlineStart": "2px solid var(--wa-color-brand-fill-loud)" }
+});
+const projectName = css({ "display": "block", "fontWeight": "var(--wa-font-weight-semibold)" });
+const projectDesc = css({ "display": "block", "fontSize": "11px", "color": "var(--wa-color-text-quiet)", "marginBlockStart": "2px", "whiteSpace": "normal" });
+
+// The dock fills the `main` region (the editor iframe is its fixed panel); the diff overlay covers it when a file is opened.
+const dockHostCss = css({ "position": "absolute", "inset": 0 });
+const mainWrap = css({ "position": "relative", "height": "100%" });
+const overlay = css({
+	"position": "absolute",
+	"inset": 0,
+	"zIndex": 20,
+	"display": "none",
+	"flexDirection": "column",
+	"backgroundColor": "var(--wa-color-surface-default)",
+	"&.open": { "display": "flex" }
+});
+const overlayHead = css({ "display": "flex", "alignItems": "center", "gap": "var(--wa-space-2xs)", "height": "34px", "padding": "0 var(--wa-space-2xs) 0 var(--wa-space-s)", "borderBottom": "1px solid var(--wa-color-surface-border)", "flex": "0 0 auto" });
+const overlayTitle = css({ "flex": "1 1 auto", "fontFamily": "var(--wa-font-family-code, monospace)", "fontSize": "12px", "whiteSpace": "nowrap", "overflow": "hidden", "textOverflow": "ellipsis" });
+const overlayBody = css({ "flex": "1 1 auto", "overflow": "auto", "minHeight": 0 });
+
+/** A lucide icon rendered into a Web Awesome button. */
+function Icon({ node }: { "node": Parameters<typeof iconSvg>[0] }) {
+	return <span dangerouslySetInnerHTML={{ "__html": iconSvg(node, { "size": 17 }) }} />;
+}
+
+/** The projects picker — one Web Awesome button per sample, driven by the hub catalog. `samples` is undefined until
+ *  the app answers `project.list`; an empty answer is a real state (no bundled samples), not "still connecting". */
+function Picker({ samples, currentId, onOpen }: { "samples"?: SampleInfo[]; "currentId"?: string; "onOpen": (id: string) => void }) {
+	if (samples === undefined) {
+		return <div class={picker()}>Connecting to editor…</div>;
+	}
+
+	if (samples.length === 0) {
+		return <div class={picker()}>No bundled projects. Load a GitHub repo from the top bar.</div>;
+	}
+
+	return (
+		<div class={picker()}>
+			{samples.map((sample) => (
+				<wa-card
+					key={sample.id}
+					class={projectCard() + (sample.id === currentId ? " selected" : "")}
+					role="button"
+					tabindex={0}
+					aria-current={sample.id === currentId}
+					onClick={() => { onOpen(sample.id); }}
+					onKeyDown={(event: KeyboardEvent) => {
+						if (event.key === "Enter" || event.key === " ") {
+							event.preventDefault();
+							onOpen(sample.id);
+						}
+					}}
+				>
+					<span class={projectName()}>{sample.name}</span>
+
+					<span class={projectDesc()}>{sample.description}</span>
+				</wa-card>
+			))}
+		</div>
+	);
+}
+
+interface RailItem {
+	"node": Parameters<typeof iconSvg>[0];
+	"label": string;
+	"title": string;
+	"onClick": () => void;
+}
+
+/** A collapsed pane's rail: a bare vertical stack of pill icon-buttons with captions (no card). Rendered as a
+ *  fragment straight into the pane's slot region so the region's other content (the imperatively-mounted git panel)
+ *  can stay mounted-but-hidden across collapse. */
+function RailContent({ items }: { "items": RailItem[] }) {
+	return (
+		<>
+			{items.map((item) => (
+				<span key={item.label} class={railItem()}>
+					<wa-button appearance="plain" variant="neutral" size="small" pill title={item.title} aria-label={item.title} onClick={item.onClick}><Icon node={item.node} /></wa-button>
+
+					<span class={railCaption()}>{item.label}</span>
+				</span>
+			))}
+		</>
+	);
+}
+
+/** The shell chrome. Owns the shell hub and, once mounted, links it to the app iframe, mounts the review panel into
+ *  the aside, and installs the (top-frame) preview window. */
+function Shell() {
+	// Both panes start collapsed (as rails) so the editor gets the room by default; expand from the rail when needed.
+	const [lhsCollapsed, setLhsCollapsed] = useState(true);
+	const [rhsCollapsed, setRhsCollapsed] = useState(true);
+	const [samples, setSamples] = useState<SampleInfo[]>();
+	const [currentId, setCurrentId] = useState<string | undefined>(undefined);
+	const [navWidth, setNavWidth] = useState(() => loadPaneWidth("navWidth", PANE.navDefault));
+	const [asideWidth, setAsideWidth] = useState(() => loadPaneWidth("asideWidth", PANE.asideDefault));
+	const [runOpen, setRunOpen] = useState(false);
+	const [targets, setTargets] = useState<LaunchTarget[]>([]);
+	const [runs, setRuns] = useState<RunInfo[]>([]);
+	// GitHub connection: `githubUser` is the logged-in login (undefined = not connected). The heavy client (fido) is
+	// only imported when we actually talk to GitHub, so it code-splits out of the cold-start bundle.
+	const [githubUser, setGithubUser] = useState<string | undefined>(undefined);
+	const [githubOpen, setGithubOpen] = useState(false);
+	const [githubBusy, setGithubBusy] = useState(false);
+	const [githubError, setGithubError] = useState<string | undefined>(undefined);
+	const [patInput, setPatInput] = useState("");
+	const [repoInput, setRepoInput] = useState("");
+	const [loadingRepo, setLoadingRepo] = useState(false);
+	const [loadError, setLoadError] = useState<string | undefined>(undefined);
+	const [boundRepo, setBoundRepo] = useState<RepoBinding | undefined>(() => getRepoBinding());
+	// Commit-back popover (the top-bar Commit button).
+	const [commitOpen, setCommitOpen] = useState(false);
+	const [commitMessage, setCommitMessage] = useState("");
+	const [committing, setCommitting] = useState(false);
+	const [commitError, setCommitError] = useState<string | undefined>(undefined);
+	const [commitResult, setCommitResult] = useState<string | undefined>(undefined);
+	// Share popover (the top-bar Share button): the workspace as a playground link, copied as it opens.
+	const [shareOpen, setShareOpen] = useState(false);
+	const [share, setShare] = useState<{ "url"?: string; "skipped"?: string[]; "copied"?: boolean; "error"?: string } | undefined>(undefined);
+
+	const rpcRef = useRef<ReturnType<typeof createRpcClient>>();
+	const pageRef = useRef<HTMLElement>(null);
+	const dockHostRef = useRef<HTMLDivElement>(null);
+	const gitPanelRef = useRef<HTMLDivElement>(null);
+	const overlayRef = useRef<HTMLDivElement>(null);
+	const overlayTitleRef = useRef<HTMLSpanElement>(null);
+	const overlayBodyRef = useRef<HTMLDivElement>(null);
+	const overlayCloseRef = useRef<HTMLElement>(null);
+	const hubRef = useRef<Hub>();
+
+	// Mount-once wiring: the shell hub linked to the app iframe, the review panel, and the preview window. A LAYOUT
+	// effect, so it runs right after the first render: a plain effect waits for the first paint, which a page opened
+	// in a background tab doesn't get (its timers are throttled to about once a second), and everything the editor
+	// loads waits on this iframe.
+	useLayoutEffect(() => {
+		const dockHost = dockHostRef.current;
+
+		if (dockHost === null) {
+			return;
+		}
+
+		const shellHub = createHub({ "id": "shell" });
+		// The main region is a dock: the editor iframe is its fixed panel, VS Code's new windows dock around it.
+		const dock = createShellDock(dockHost, shellHub);
+		const appFrame = dock.editorFrame;
+
+		// A TypeScript Playground link (playground-link.ts) is a one-shot import: it's opened once the app answers below,
+		// and dropped from the address bar now, so a reload keeps the edits made since instead of importing it again.
+		const playground = parsePlaygroundLink(location.hash, location.search);
+
+		if (playground !== undefined) {
+			history.replaceState(history.state, "", location.pathname + location.search);
+		}
+
+		// Load the SAME page into the iframe; that instance sees `window.parent !== window` → main.tsx boots the app.
+		performance.mark("shell/app-iframe");
+		appFrame.src = location.href;
+
+		const architecture = reportArchitecture(shellHub); // this realm's hub + network (GitHub, Code Hike) on $sys.arch
+		hubRef.current = shellHub;
+		shellHub.link(windowTransport(appFrame.contentWindow));
+
+		// The preview windows live in the top frame so they can roam beyond the editor — every server's (a dev server's, a
+		// program's own), all managed here. See shell-preview.ts.
+		installShellPreview(shellHub, architecture, dock.window);
+		reportShellMetrics(shellHub); // its long frames, on the metrics plane (editor-metrics.ts)
+
+		// The editor (workbench iframe) follows the OS theme too. The shell is the source of truth for the OS
+		// preference — it reliably gets prefers-color-scheme changes, whereas the iframe may not — so publish the
+		// scheme (initially + on change) and let workbench-entry.tsx set the editor theme from it.
+		const scheme = window.matchMedia("(prefers-color-scheme: dark)");
+		const publishScheme = (): void => { shellHub.publish("theme.colorScheme", { "dark": scheme.matches }); };
+
+		publishScheme();
+		scheme.addEventListener("change", publishScheme);
+
+		// The RHS review panel — GitHub-Desktop-style changes + commit; the diff opens in the overlay over the editor.
+		renderGitPanel(gitPanelRef.current, {
+			"el": overlayRef.current,
+			"title": overlayTitleRef.current,
+			"body": overlayBodyRef.current,
+			"close": overlayCloseRef.current
+		}, shellHub, (
+			<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse changes panel" onClick={() => { setRhsCollapsed(true); }}><Icon node={ChevronRight} /></wa-button>
+		));
+
+		const rpc = createRpcClient(shellHub);
+
+		rpcRef.current = rpc; // reused by the run picker
+
+		// Pull the catalog once the app iframe's serve interest arrives (asked before it, the call only times out); the
+		// retry is a backstop.
+		void (async () => {
+			for (let attempt = 0; attempt < 20; attempt += 1) {
+				try {
+					const list = await rpc.request("project.list", undefined, { "timeoutMs": 2000, "waitForResponderMs": 10_000 }) as SampleInfo[];
+
+					if (Array.isArray(list)) {
+						setSamples(list);
+
+						// The app is listening now. A playground project replaces the workspace like a repo load, and isn't
+						// any repo's, so a commit has nowhere to push until one is opened.
+						if (playground !== undefined) {
+							shellHub.publish("project.openFiles", playground);
+							setRepoBinding(undefined);
+							setBoundRepo(undefined);
+						}
+
+						return;
+					}
+				} catch { /* app not linked yet — retry */ }
+
+				await new Promise((resolve) => { setTimeout(resolve, 500); });
+			}
+		})();
+	}, []);
+
+	// Apply the pane widths to wa-page's CSS vars (collapsed → 0). Clamp against the live max so a narrow viewport
+	// can't leave a pane wider than the editor. Inline `setProperty` wins over the static `.wa-shell` defaults.
+	useEffect(() => {
+		const page = pageRef.current;
+
+		if (page === null) {
+			return;
+		}
+
+		const max = paneMax();
+
+		page.style.setProperty("--menu-width", (lhsCollapsed ? RAIL_WIDTH : Math.min(navWidth, max)) + "px");
+		page.style.setProperty("--aside-width", (rhsCollapsed ? RAIL_WIDTH : Math.min(asideWidth, max)) + "px");
+	}, [navWidth, asideWidth, lhsCollapsed, rhsCollapsed]);
+
+	// Persist widths so they survive reloads (per browser; localStorage may be unavailable in private mode).
+	useEffect(() => {
+		try {
+			localStorage.setItem("shell:navWidth", String(navWidth));
+			localStorage.setItem("shell:asideWidth", String(asideWidth));
+		} catch { /* private mode / disabled */ }
+	}, [navWidth, asideWidth]);
+
+	// Drag a pane's inner-edge grip. Pointer capture keeps the drag tracking even over the editor iframe.
+	const startResize = (side: "nav" | "aside") => (event: PointerEvent): void => {
+		event.preventDefault();
+
+		const handle = event.currentTarget as HTMLElement;
+		const min = side === "nav" ? PANE.navMin : PANE.asideMin;
+		const max = paneMax();
+
+		handle.setPointerCapture(event.pointerId);
+
+		const onMove = (move: PointerEvent): void => {
+			const raw = side === "nav" ? move.clientX : window.innerWidth - move.clientX;
+			const width = Math.max(min, Math.min(max, Math.round(raw)));
+
+			if (side === "nav") {
+				setNavWidth(width);
+			} else {
+				setAsideWidth(width);
+			}
+		};
+
+		const onUp = (up: PointerEvent): void => {
+			handle.releasePointerCapture(up.pointerId);
+			handle.removeEventListener("pointermove", onMove);
+			handle.removeEventListener("pointerup", onUp);
+		};
+
+		handle.addEventListener("pointermove", onMove);
+		handle.addEventListener("pointerup", onUp);
+	};
+
+	// Keyboard resize (the grip is a focusable separator): arrows nudge by 16px — nav grows rightward, aside grows
+	// leftward, mirroring the drag direction.
+	const onResizeKey = (side: "nav" | "aside") => (event: KeyboardEvent): void => {
+		if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+			return;
+		}
+
+		event.preventDefault();
+
+		const grow = event.key === "ArrowRight" ? side === "nav" : side !== "nav";
+		const min = side === "nav" ? PANE.navMin : PANE.asideMin;
+		const max = paneMax();
+		const clamp = (value: number): number => Math.max(min, Math.min(max, value + (grow ? 16 : -16)));
+
+		if (side === "nav") {
+			setNavWidth(clamp);
+		} else {
+			setAsideWidth(clamp);
+		}
+	};
+
+	// The run picker: toggle the popover; on open, ask what there is to run — VS Code's tasks, through the pod
+	// (`tasks.list`: the workspace's package.json scripts and its own tasks). Picking one runs it as a task (`tasks.run`).
+	const toggleRun = (): void => {
+		const willOpen = !runOpen;
+
+		setRunOpen(willOpen);
+
+		if (willOpen) {
+			void (async () => {
+				try {
+					const result = await rpcRef.current?.request("tasks.list", undefined, { "timeoutMs": 4000 });
+
+					setTargets(Array.isArray(result) ? result as LaunchTarget[] : []);
+				} catch {
+					setTargets([]);
+				}
+			})();
+			// What's already running, so a running service is offered as itself rather than as a second copy.
+			void rpcRef.current?.request("runs.list", undefined, { "timeoutMs": 4000 }).then((list) => { setRuns(Array.isArray(list) ? list as RunInfo[] : []); }, () => { setRuns([]); });
+		}
+	};
+
+	// A target's run, if it's running now (the registry titles a run as it was typed: `npm run dev`, in its directory).
+	const runOf = (target: LaunchTarget): RunInfo | undefined => runs.find((run) => run.state === "running" && run.title === target.command && run.cwd === target.cwd);
+
+	// A running service is already there: show its preview rather than start a second copy (which `vite` refuses). Any
+	// other is the pod's to run — or, running, to show its terminal; one that can't start says why in the workbench.
+	const runTarget = (target: LaunchTarget): void => {
+		const running = runOf(target);
+
+		if (running?.port !== undefined) {
+			hubRef.current?.publish("preview.open", { "port": running.port });
+		} else {
+			void rpcRef.current?.request("tasks.run", { "id": target.id }, { "timeoutMs": 10000 }).catch(() => undefined);
+		}
+
+		setRunOpen(false);
+	};
+
+	// Run (RUNNING.md): the file in the editor, as every way in runs it — stopping at breakpoints, its process.argv from
+	// the file's stub. It answers at its first stop: nobody waits on it here, and a run that can't start says why in the
+	// workbench (the pod shows it).
+	const runThisFile = (): void => {
+		void rpcRef.current?.request("debug.start", {}, { "timeoutMs": 24 * 60 * 60_000 }).catch(() => undefined);
+		setRunOpen(false);
+	};
+
+	// If a PAT was stored from a past session, quietly confirm it still works and show who we're connected as. A stale
+	// token just leaves us disconnected — no error surfaced until the user actively tries to connect.
+	useEffect(() => {
+		if (!hasPat()) {
+			return;
+		}
+
+		let cancelled = false;
+
+		void (async () => {
+			try {
+				const { createGitHub } = await import("./github");
+				const me = await createGitHub().viewer();
+
+				if (!cancelled) {
+					setGithubUser(me.login);
+				}
+			} catch {
+				/* stale / revoked token — stay disconnected; the user can reconnect from the popover */
+			}
+		})();
+
+		return () => { cancelled = true; };
+	}, []);
+
+	// Connect: store the pasted PAT, then verify it by fetching the viewer (the cheapest authed call). On failure the
+	// token is dropped again so we never keep a bad one. This is the ONLY place the token is read from the UI.
+	const connectGithub = async (): Promise<void> => {
+		const token = patInput.trim();
+
+		if (token === "") {
+			return;
+		}
+
+		setGithubBusy(true);
+		setGithubError(undefined);
+		setPat(token);
+
+		const span = githubLog.span("github.connect");
+
+		try {
+			const { createGitHub } = await import("./github");
+			const me = await createGitHub().viewer();
+
+			setGithubUser(me.login);
+			setPatInput("");
+			setGithubOpen(false);
+			span.info("connected", { "login": me.login });
+		} catch (error) {
+			setPat(undefined);
+			setGithubUser(undefined);
+			setGithubError(error instanceof Error ? error.message : "Could not connect");
+			span.error("connect failed", { "error": errText(error), "status": statusOf(error) });
+		} finally {
+			span.end();
+			setGithubBusy(false);
+		}
+	};
+
+	const disconnectGithub = (): void => {
+		setPat(undefined);
+		setGithubUser(undefined);
+		setGithubError(undefined);
+		setGithubOpen(false);
+	};
+
+	// Load a GitHub repo into the workspace: the SHELL fetches the files (token stays here) and publishes them to the
+	// app over the hub, which writes them into zen-fs. Repo paths are rooted under /workspace. github.ts is lazy so
+	// fido loads only when a repo is actually fetched.
+	const loadRepo = async (): Promise<void> => {
+		const match = /^([^\s/]+)\/([^\s/]+)$/u.exec(repoInput.trim());
+
+		if (match === null) {
+			setLoadError("Use the form owner/repo");
+
+			return;
+		}
+
+		setLoadingRepo(true);
+		setLoadError(undefined);
+
+		const span = githubLog.span("github.loadRepo", { "repo": repoInput.trim() });
+
+		try {
+			const [owner, repo] = [match[1], match[2]];
+			const { createGitHub } = await import("./github");
+			const gh = createGitHub();
+			const meta = await gh.getRepo(owner, repo);
+
+			if (meta === undefined) {
+				setLoadError("Repo not found, or your token can't see it");
+				span.error("repo not found or not visible");
+
+				return;
+			}
+
+			// Clone it — one shallow pack through isomorphic-git's proxy, the PAT along (git-clone.ts) — rather than read
+			// it blob by blob through the API, which fido's limiter holds to 100 requests a minute. The API is the fallback.
+			let files: { "path": string; "bytes": Uint8Array }[];
+
+			try {
+				const { cloneRepo } = await import("./git-clone");
+
+				files = (await cloneRepo(owner, repo, getPat())).files;
+				span.info("cloned", { "files": files.length });
+			} catch (error) {
+				span.warn("clone failed — reading through the API", { "error": errText(error) });
+				files = await gh.readRepo(owner, repo);
+			}
+
+			if (files.length === 0) {
+				setLoadError("That repo has no files");
+				span.error("repo has no files", { "branch": meta.default_branch });
+
+				return;
+			}
+
+			const projectFiles = files.map((file) => ({ "path": "/workspace/" + file.path, "bytes": file.bytes }));
+
+			// A clone's files include its `.git` (git-clone.ts): the workspace becomes the repo, history and all. Editors open
+			// from the working tree only.
+			hubRef.current?.publish("project.openFiles", { "files": projectFiles, "openEditors": pickOpenEditors(files.map((file) => file.path).filter((path) => !path.startsWith(".git/"))) });
+
+			// Remember where this workspace came from so a commit knows where to push.
+			const binding = { "owner": owner, "repo": repo, "branch": meta.default_branch };
+
+			setRepoBinding(binding);
+			setBoundRepo(binding);
+			setGithubOpen(false);
+			setRepoInput("");
+			span.info("loaded", { "branch": meta.default_branch, "files": files.length, "bytes": files.reduce((total, file) => total + file.bytes.length, 0) });
+		} catch (error) {
+			setLoadError(error instanceof Error ? error.message : "Could not load the repo");
+			span.error("load failed", { "error": errText(error), "status": statusOf(error) });
+		} finally {
+			span.end();
+			setLoadingRepo(false);
+		}
+	};
+
+	// Share the workspace as a Playground v2 link (playground-link.ts) on this page's address: ask the app for the files and
+	// the editor in front, encode them, and copy the link. It opens here, or in the TypeScript Playground.
+	const copyShare = async (url: string): Promise<boolean> => navigator.clipboard.writeText(url).then(() => true, () => false);
+	const openShare = async (): Promise<void> => {
+		setShareOpen(true);
+		setShare(undefined);
+
+		try {
+			const workspace = await rpcRef.current?.request("workspace.files", undefined, { "timeoutMs": 20000 }) as SharedWorkspace;
+			const { skipped, url } = playgroundLink(location.origin + location.pathname, workspace);
+
+			setShare({ "url": url, "skipped": skipped, "copied": await copyShare(url) });
+		} catch (error) {
+			setShare({ "error": errText(error) });
+		}
+	};
+
+	// Commit the current workspace back to the bound repo: ask the app for the files (the pane holds the FS), convert
+	// to the Git Data write shape (repo-relative paths; text inline, binary as base64 blobs), and push.
+	const commit = async (): Promise<void> => {
+		const binding = boundRepo;
+
+		if (binding === undefined) {
+			setCommitError("Load a repo first");
+
+			return;
+		}
+
+		const message = commitMessage.trim();
+
+		if (message === "") {
+			setCommitError("Enter a commit message");
+
+			return;
+		}
+
+		setCommitting(true);
+		setCommitError(undefined);
+		setCommitResult(undefined);
+
+		const span = githubLog.span("github.commit", { "repo": binding.owner + "/" + binding.repo, "branch": binding.branch });
+
+		try {
+			const { files } = await rpcRef.current?.request("workspace.files", undefined, { "timeoutMs": 20000 }) as SharedWorkspace;
+			const prefix = "/workspace/";
+			const { bytesToBase64, createGitHub } = await import("./github");
+			const writes = files.map((file) => {
+				const path = file.path.startsWith(prefix) ? file.path.slice(prefix.length) : file.path;
+
+				// A NUL byte means binary (git's own heuristic) → upload as a base64 blob; otherwise inline as text.
+				return file.bytes.includes(0)
+					? { "path": path, "base64": bytesToBase64(file.bytes) }
+					: { "path": path, "content": new TextDecoder().decode(file.bytes) };
+			});
+
+			const sha = await createGitHub().commitFiles(binding.owner, binding.repo, { "branch": binding.branch, "message": message, "files": writes });
+
+			setCommitResult(sha.slice(0, 7));
+			setCommitMessage("");
+			span.info("committed", { "files": writes.length, "bytes": files.reduce((total, file) => total + file.bytes.length, 0), "sha": sha.slice(0, 7) });
+		} catch (error) {
+			setCommitError(error instanceof Error ? error.message : "Commit failed");
+			span.error("commit failed", { "error": errText(error), "status": statusOf(error) });
+		} finally {
+			span.end();
+			setCommitting(false);
+		}
+	};
+
+	const openProject = (id: string): void => {
+		setCurrentId(id);
+		setLhsCollapsed(true); // making a selection collapses the projects pane back to its rail
+		hubRef.current?.publish("project.open", { "id": id });
+	};
+
+	const shellClass = ["wa-shell", lhsCollapsed ? "lhs-collapsed" : "", rhsCollapsed ? "rhs-collapsed" : ""].filter(Boolean).join(" ");
+
+	return (
+		<wa-page ref={pageRef} class={shellClass} mobile-breakpoint="0" disable-navigation-toggle>
+			<div slot="header" class={topBar()}>
+				<span class={brand()}>editor</span>
+
+				<wa-button appearance="plain" size="small" title="Toggle project panel" aria-label="Toggle project panel" onClick={() => { setLhsCollapsed((value) => !value); }}><Icon node={PanelLeft} /></wa-button>
+
+				<wa-button appearance="plain" size="small" title="Open project" aria-label="Open project"><Icon node={FolderOpen} /></wa-button>
+
+				<span class={runWrap()}>
+					<wa-button appearance="plain" size="small" title="Run" aria-label="Run" aria-expanded={runOpen} onClick={toggleRun}><Icon node={Play} /></wa-button>
+
+					{runOpen && (
+						<>
+							<div class={runBackdrop()} onClick={() => { setRunOpen(false); }} />
+
+							<div class={runMenu()} role="menu">
+								<div
+									class={runItem()}
+									role="menuitem"
+									tabIndex={0}
+									title="Run the file in the editor"
+									onClick={runThisFile}
+									onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); runThisFile(); } }}
+								>
+									<span class={runItemName()}>The file in the editor</span>
+								</div>
+
+								{targets.length === 0 ? (
+									<div class={runEmpty()}>No package.json scripts or tasks</div>
+								) : (["service", "task"] as const).map((lifecycle) => {
+									const group = targets.filter((target) => target.lifecycle === lifecycle);
+
+									return group.length === 0 ? null : (
+										<div key={lifecycle} role="group" aria-label={lifecycle === "service" ? "Services" : "Tasks"}>
+											<div class={runGroup()}>{lifecycle === "service" ? "Services" : "Tasks"}</div>
+
+											{group.map((target) => {
+												const running = runOf(target);
+
+												return (
+													<div
+														key={target.id}
+														class={runItem()}
+														role="menuitem"
+														tabIndex={0}
+														title={`${target.command} — in ${target.cwd}`}
+														onClick={() => { runTarget(target); }}
+														onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); runTarget(target); } }}
+													>
+														<span class={runItemName()}>{target.name}</span>
+
+														{running !== undefined && <span class={runItemLive()}>{running.port === undefined ? "running" : `running · :${running.port}`}</span>}
+
+														<span class={runItemMeta()}>{target.package === undefined ? "task" : target.package === "." ? "script" : target.package}</span>
+													</div>
+												);
+											})}
+										</div>
+									);
+								})}
+							</div>
+						</>
+					)}
+				</span>
+
+				<span class={runWrap()}>
+					<wa-button appearance="plain" size="small" title={boundRepo !== undefined ? "Commit to " + boundRepo.owner + "/" + boundRepo.repo : "Commit"} aria-label="Commit" aria-expanded={commitOpen} onClick={() => { setCommitError(undefined); setCommitResult(undefined); setCommitOpen((value) => !value); }}><Icon node={GitCommit} /></wa-button>
+					{commitOpen && (
+						<>
+							<div class={runBackdrop()} onClick={() => { setCommitOpen(false); }} />
+							<div class={githubMenu()} role="dialog" aria-label="Commit to GitHub">
+								<span class={ghTitle()}>Commit</span>
+
+								{githubUser === undefined ? (
+									<span class={ghHint()}>Connect GitHub first.</span>
+								) : boundRepo === undefined ? (
+									<span class={ghHint()}>Load a repo first — commits push back to the repo the workspace came from.</span>
+								) : (
+									<>
+										<span class={ghHint()}>To
+											{" "}
+											<strong>{boundRepo.owner}/{boundRepo.repo}</strong>
+											{" "}
+											on
+											{" "}
+											<strong>{boundRepo.branch}</strong>
+										</span>
+
+										<wa-input
+											class={ghInput()}
+											size="small"
+											placeholder="Commit message"
+											value={commitMessage}
+											aria-label="Commit message"
+											onInput={(event: Event) => { setCommitMessage((event.currentTarget as HTMLInputElement).value); }}
+											onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter") { event.preventDefault(); void commit(); } }}
+										></wa-input>
+
+										{commitError !== undefined && <span class={ghError()}>{commitError}</span>}
+
+										{commitResult !== undefined && <span class={ghOk()}>Committed {commitResult}</span>}
+
+										<div class={ghActions()}>
+											<wa-button variant="brand" size="small" disabled={committing || commitMessage.trim() === ""} onClick={() => { void commit(); }}>{committing ? "Committing…" : "Commit"}</wa-button>
+										</div>
+									</>
+								)}
+							</div>
+						</>
+					)}
+				</span>
+
+				<span class={runWrap()}>
+					<wa-button appearance="plain" size="small" title="Share as a link" aria-label="Share" aria-expanded={shareOpen} onClick={() => { if (shareOpen) { setShareOpen(false); } else { void openShare(); } }}><Icon node={Share2} /></wa-button>
+
+					{shareOpen && (
+						<>
+							<div class={runBackdrop()} onClick={() => { setShareOpen(false); }} />
+
+							<div class={githubMenu()} role="dialog" aria-label="Share">
+								<span class={ghTitle()}>Share</span>
+
+								{share === undefined ? (
+									<span class={ghHint()}>Making a link…</span>
+								) : share.error !== undefined ? (
+									<span class={ghError()}>{share.error}</span>
+								) : (
+									<>
+										<span class={share.copied === true ? ghOk() : ghHint()}>{share.copied === true ? "Link copied." : "Copy this link."} It opens this project here, or in the TypeScript Playground.</span>
+
+										<wa-input class={ghInput()} size="small" readonly value={share.url} aria-label="Share link"></wa-input>
+
+										<span class={ghHint()}>
+											{(share.url.length / 1024).toFixed(1)} KB
+											{share.url.length > 8192 && " — some apps cut links this long"}
+											{share.skipped.length > 0 && ` · ${share.skipped.length} binary ${share.skipped.length === 1 ? "file" : "files"} left out`}
+										</span>
+
+										<div class={ghActions()}>
+											<wa-button size="small" appearance="outlined" onClick={() => { void copyShare(share.url).then((copied) => { setShare({ ...share, "copied": copied }); }); }}>Copy</wa-button>
+										</div>
+									</>
+								)}
+							</div>
+						</>
+					)}
+				</span>
+
+				<span class={spacer()} />
+
+				<span class={runWrap()}>
+					<wa-button appearance="plain" size="small" title={githubUser !== undefined ? "GitHub · " + githubUser : "Connect GitHub"} aria-label="Connect GitHub" aria-expanded={githubOpen} onClick={() => { setGithubOpen((value) => !value); }}><Icon node={GitBranch} /></wa-button>
+
+					{githubOpen && (
+						<>
+							<div class={runBackdrop()} onClick={() => { setGithubOpen(false); }} />
+
+							<div class={githubMenu()} role="dialog" aria-label="GitHub connection">
+								{githubUser !== undefined ? (
+									<>
+										<span class={ghTitle()}>GitHub</span>
+
+										<span class={ghConnected()}>
+											Connected as
+											{" "}
+											<strong>{githubUser}</strong>
+										</span>
+
+										<div class={ghActions()}>
+											<wa-button appearance="outlined" size="small" onClick={disconnectGithub}>
+												<Icon node={LogOut} />
+
+												{" "}
+												Disconnect
+											</wa-button>
+										</div>
+
+										<wa-divider></wa-divider>
+
+										<span class={ghTitle()}>Load a repo</span>
+
+										<span class={ghHint()}>Its files open in the workspace.</span>
+
+										<wa-input
+											class={ghInput()}
+											size="small"
+											placeholder="owner/repo"
+											value={repoInput}
+											autocapitalize="off"
+											autocorrect="off"
+											spellcheck={false}
+											aria-label="Repository to load"
+											onInput={(event: Event) => { setRepoInput((event.currentTarget as HTMLInputElement).value); }}
+											onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter") { event.preventDefault(); void loadRepo(); } }}
+										></wa-input>
+
+										{loadError !== undefined && <span class={ghError()}>{loadError}</span>}
+
+										<div class={ghActions()}>
+											<wa-button variant="brand" size="small" disabled={loadingRepo || repoInput.trim() === ""} onClick={() => { void loadRepo(); }}>{loadingRepo ? "Loading…" : "Load"}</wa-button>
+										</div>
+									</>
+								) : (
+									<>
+										<span class={ghTitle()}>Connect GitHub</span>
+
+										<span class={ghHint()}>
+											Paste a fine-grained token with Contents read/write on your games repo. It stays in this browser and is sent only to GitHub.
+											{" "}
+											<a class={ghLink()} href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer noopener">Create one →</a>
+										</span>
+
+										<wa-input
+											class={ghInput()}
+											size="small"
+											type="password"
+											placeholder="github_pat_…"
+											value={patInput}
+											autocomplete="off"
+											spellcheck={false}
+											aria-label="GitHub personal access token"
+											onInput={(event: Event) => { setPatInput((event.currentTarget as HTMLInputElement).value); }}
+											onKeyDown={(event: KeyboardEvent) => { if (event.key === "Enter") { event.preventDefault(); void connectGithub(); } }}
+										/>
+
+										{githubError !== undefined && <span class={ghError()}>{githubError}</span>}
+
+										<div class={ghActions()}>
+											<wa-button variant="brand" size="small" disabled={githubBusy || patInput.trim() === ""} onClick={() => { void connectGithub(); }}>{githubBusy ? "Connecting…" : "Connect"}</wa-button>
+										</div>
+									</>
+								)}
+							</div>
+						</>
+					)}
+				</span>
+
+				<wa-button appearance="plain" size="small" title="History" aria-label="History"><Icon node={History} /></wa-button>
+
+				<wa-button appearance="plain" size="small" title="Toggle history panel" aria-label="Toggle history panel" onClick={() => { setRhsCollapsed((value) => !value); }}><Icon node={PanelRight} /></wa-button>
+			</div>
+
+			<div slot="navigation" class={lhsCollapsed ? railRegion() : sideCol() + " " + navPane()}>
+				{lhsCollapsed ? (
+					<RailContent items={[
+						{ "node": PanelLeft, "label": "Projects", "title": "Expand project panel", "onClick": () => { setLhsCollapsed(false); } },
+						// placeholders to preview the stacked look — settle final contents next
+						{ "node": FolderOpen, "label": "Open", "title": "Open project", "onClick": () => undefined },
+						{ "node": Play, "label": "Run", "title": "Run the file in the editor", "onClick": runThisFile }
+					]}
+					/>
+				) : (
+					<>
+						<div class={navHead()}>
+							<span class={navHeadLabel()}>Projects</span>
+
+							<wa-button appearance="plain" size="small" title="Collapse" aria-label="Collapse project panel" onClick={() => { setLhsCollapsed(true); }}><Icon node={ChevronLeft} /></wa-button>
+						</div>
+
+						<div class={sideBody()}>
+							<Picker samples={samples} currentId={currentId} onOpen={openProject} />
+						</div>
+
+						<div
+							class={resizer() + " " + resizerRight()}
+							role="separator"
+							aria-orientation="vertical"
+							aria-label="Resize project panel"
+							tabIndex={0}
+							onPointerDown={startResize("nav")}
+							onKeyDown={onResizeKey("nav")}
+						/>
+					</>
+				)}
+			</div>
+
+			<div class={mainWrap()}>
+				<div ref={dockHostRef} class={dockHostCss()} />
+
+				<div ref={overlayRef} class={overlay()}>
+					<div class={overlayHead()}>
+						<span ref={overlayTitleRef} class={overlayTitle()} />
+
+						<wa-button ref={overlayCloseRef} appearance="plain" size="small" title="Close diff" aria-label="Close diff"><Icon node={ChevronRight} /></wa-button>
+					</div>
+
+					{/* `wa-diff-body` scopes the codehike diff grid CSS (git-panel.css). It MUST be declared here in JSX, not
+					    added imperatively by git-panel: preact owns this element's `class`, so any Shell re-render would
+					    otherwise reconcile it back and wipe an imperatively-added class — collapsing the diff grid. */}
+					<div ref={overlayBodyRef} class={overlayBody() + " wa-diff-body"} />
+				</div>
+			</div>
+
+			{/* The aside slot stays mounted across collapse so the imperatively-rendered git panel (mounted once, in
+			    the effect below) survives — collapsed just hides it and shows the rail. Its header (with the collapse
+			    button, passed in above) is the panel's own. The children are KEYED: unkeyed, a sibling swapping in
+			    or out can make preact reuse the git panel's host <div> for another element, stamping that element's
+			    class and children onto it — the panel then renders inside it. */}
+			<div slot="aside" class={rhsCollapsed ? railRegion() : sideCol() + " " + asidePane()}>
+				{rhsCollapsed && (
+					<RailContent key="rail" items={[
+						{ "node": PanelRight, "label": "Changes", "title": "Expand changes panel", "onClick": () => { setRhsCollapsed(false); } },
+						// placeholders to preview the stacked look — settle final contents next
+						{ "node": GitCommit, "label": "Commit", "title": "Commit", "onClick": () => undefined },
+						{ "node": History, "label": "History", "title": "History", "onClick": () => undefined }
+					]}
+					/>
+				)}
+
+				<div key="git-panel" ref={gitPanelRef} class={rhsCollapsed ? hiddenBox() : sideHost()} />
+
+				{!rhsCollapsed && (
+					<div
+						key="resizer"
+						class={resizer() + " " + resizerLeft()}
+						role="separator"
+						aria-orientation="vertical"
+						aria-label="Resize changes panel"
+						tabIndex={0}
+						onPointerDown={startResize("aside")}
+						onKeyDown={onResizeKey("aside")}
+					/>
+				)}
+			</div>
+		</wa-page>
+	);
+}
+
+/** Reflect the OS light/dark preference onto Web Awesome's mode classes (WA switches via `.wa-light` / `.wa-dark`,
+ *  not `prefers-color-scheme`), so the shell theme follows the system and updates live when it changes. */
+function applySystemColorScheme(): void {
+	const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+	document.documentElement.classList.toggle("wa-dark", dark);
+	document.documentElement.classList.toggle("wa-light", !dark);
+}
+
+/** Build the shell chrome, iframe the app, and wire the LHS picker over the hub. */
+export function renderShell(): void {
+	// Load milestones (with main.tsx's shell/import and the app iframe's own), for load investigations.
+	performance.mark("shell/render");
+	document.documentElement.classList.add("wa-theme-default");
+	applySystemColorScheme();
+	window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applySystemColorScheme);
+	injectGlobals();
+	render(<Shell />, document.body);
+}

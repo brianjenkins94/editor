@@ -15,9 +15,9 @@
  * Not every command is a run: a quick `ls` or `cd` would be noise. A command counts when it starts a program (node,
  * npm, vite, …) or keeps going past a second.
  */
-import type { LifecycleGuess } from "../../lifecycle";
+import type { LifecycleGuess } from "../../shared/lifecycle";
 import * as vscode from "vscode";
-import { lifecycleOfScript, lifecycleOfSource } from "../../lifecycle";
+import { lifecycleOfScript, lifecycleOfSource } from "../../shared/lifecycle";
 
 type RunState = "running" | "exited" | "failed" | "stopped" | "ended";
 

@@ -100,13 +100,13 @@ declare module "type-queries:extension" {
 }
 
 /** The worker-pod cspell language server bundled to an ESM string (imported by server-host, run by almostnode). */
-declare module "worker-pod:page-tap" {
+declare module "previews:page-tap" {
 	const code: string;
 
 	export default code;
 }
 
-declare module "worker-pod:worker-tap" {
+declare module "previews:worker-tap" {
 	const code: string;
 
 	export default code;

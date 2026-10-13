@@ -27,8 +27,8 @@
  */
 import { createHub, createRpcClient, portTransport } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
-import { NETWORK_PROBES } from "./architecture";
-import { parseVirtual } from "./virtual-path";
+import { NETWORK_PROBES } from "./shared/architecture";
+import { parseVirtual } from "./shared/virtual-path";
 
 // The SW is a first-class hub node. Its otherwise-invisible lifecycle (CDN fallbacks, dev-server relays,
 // errors) is recorded through a source-scoped logger whose records — timed SPANS included — ride the hub to

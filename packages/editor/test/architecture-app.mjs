@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { until } from "@brianjenkins94/util/until";
 
-import { parseVirtual } from "../virtual-path.ts";
+import { parseVirtual } from "../shared/virtual-path.ts";
 import { DEBUG_MCP_PORT, hasLabel, startSession } from "./architecture-harness.mjs";
 
 const { createDebugMcp } = await import("../../debug-mcp/src/server.ts");
@@ -551,7 +551,7 @@ function override() {
 
 /** appLayout over the view's current store, once `ready` holds for it. */
 async function appLayoutOnce(ready) {
-	const { appLayout } = await import("../architecture-model.ts");
+	const { appLayout } = await import("../shared/architecture-model.ts");
 	let last;
 	const current = await session.until("the app's realms", (latest) => {
 		last = latest;

@@ -10,8 +10,8 @@ import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import stdlib from "node-stdlib-browser";
 import { build } from "vite";
 import { eslintPresetPlugin } from "./extensions/eslint/preset-build";
-import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./snapshot";
-import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./vite";
+import { editorSettingsDefaultsPlugin, editorTypesPlugin, editorVersionsPlugin, editorWorkspacePlugin } from "./build/snapshot";
+import { nodeModulesCdnPlugin, vscodePlugin, workbenchPreloadPlugin } from "./build/vite";
 
 /**
  * The whole packages/editor build, in ONE file — the five vite passes that used to be separate `-c` configs
@@ -41,12 +41,14 @@ const PROCESS_SHIM = "globalThis.process=globalThis.process||{\"env\":{},\"argv\
  *  every extension shares, where a global `process` makes other extensions (VS Code's TypeScript) take it for Node. */
 const MODULE_PROCESS_SHIM = "var process=globalThis.process||{\"env\":{},\"argv\":[],\"platform\":\"browser\",\"cwd\":function(){return \"/\";}};";
 
-/** Bundle `extensions/<name>/<file>.ts` (deps inlined) into a virtual module `<name>:<id>` exposing the built
- *  code as a default-export string. `externals` stay unbundled. `configFile:false` isolates the nested build. */
-function bundledModule(name: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[] | ((source: string, importer: string | undefined) => boolean), served = false, plugins: Plugin[] = [], banner?: string): Plugin {
+/** Bundle `<folder>/<file>.ts` (a folder of this package, e.g. `extensions/worker-pod`; deps inlined) into a virtual
+ *  module `<name>:<id>`, named for the folder's last segment, exposing the built code as a default-export string.
+ *  `externals` stay unbundled. `configFile:false` isolates the nested build. */
+function bundledModule(folder: string, file: string, id: string, format: "cjs" | "es" | "iife", externals: string[] | ((source: string, importer: string | undefined) => boolean), served = false, plugins: Plugin[] = [], banner?: string): Plugin {
+	const name = folder.split("/").at(-1)!;
 	const virtual = `${name}:${id}`;
 	const resolved = "\0" + virtual;
-	const dir = url.fileURLToPath(new URL(`./extensions/${name}/`, import.meta.url));
+	const dir = url.fileURLToPath(new URL(`./${folder}/`, import.meta.url));
 
 	return {
 		"name": `${name}-${id}`,
@@ -97,7 +99,7 @@ function bundledModule(name: string, file: string, id: string, format: "cjs" | "
 function bundledExtension(name: string): Plugin {
 	// `vscode` is external only from the tapped module: the extension's own imports of it go to that module first.
 	// The extension host has no `process`; util reads it as it loads.
-	return bundledModule(name, "extension.ts", "extension", "cjs", (source, importer) => source === "vscode" && importer === TAPPED_VSCODE, true, [commandTap(name)], MODULE_PROCESS_SHIM);
+	return bundledModule("extensions/" + name, "extension.ts", "extension", "cjs", (source, importer) => source === "vscode" && importer === TAPPED_VSCODE, true, [commandTap(name)], MODULE_PROCESS_SHIM);
 }
 
 /** The module an extension's `vscode` imports resolve to (commandTap). */
@@ -122,7 +124,7 @@ function commandTap(name: string): Plugin {
 /** A language server's `<file>` → ESM string (`<name>:<id>`) with ALL NODE BUILTINS EXTERNAL, run by almostnode
  *  in a worker host. */
 function bundledNodeServer(name: string, file = "server-node.ts", id = "server-node"): Plugin {
-	return bundledModule(name, file, id, "es", nodeBuiltins);
+	return bundledModule("extensions/" + name, file, id, "es", nodeBuiltins);
 }
 
 /** Emit the cspell English dictionary (gzipped trie) at a fixed, unhashed URL server-host fetches at runtime. */
@@ -309,7 +311,7 @@ export async function preBuild(): Promise<void> {
 		// just-bash chunk as /browser.js → index.html, "Failed to load module script") — the import itself, relative,
 		// still worked.
 		"base": "./",
-		"plugins": [bundledExtension("worker-pod"), bundledExtension("tsval"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("history"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledModule("event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin(), polyfillNode(["path", "url"])],
+		"plugins": [bundledExtension("worker-pod"), bundledExtension("tsval"), bundledExtension("eslint"), bundledExtension("capabilities"), bundledExtension("history"), bundledExtension("insights"), bundledExtension("running"), bundledExtension("type-queries"), bundledExtension("notes"), bundledExtension("event-sheet"), bundledModule("extensions/event-sheet", "view.ts", "view", "iife", [], true), editorSettingsDefaultsPlugin(), polyfillNode(["path", "url"])],
 		"esbuild": { "jsx": "automatic", "jsxImportSource": "preact" },
 		// One @brianjenkins94/hub / observability instance — CI's pnpm workspace double-instances `file:../hub`.
 		// `buffer` → the node-stdlib-browser polyfill: isomorphic-git (the git SCM engine) uses the `Buffer` global,
@@ -329,7 +331,7 @@ export async function preBuild(): Promise<void> {
 			// the repo's files; never in CI.
 			"sourcemap": !isCI,
 			"rollupOptions": {
-				"input": { "workbench": "workbench-entry.tsx" },
+				"input": { "workbench": "workbench/workbench-entry.tsx" },
 				"external": ["@brianjenkins94/monaco-vscode-api/main"],
 				"output": { "chunkFileNames": "[name].js", "paths": { "@brianjenkins94/monaco-vscode-api/main": "./main.js" } }
 			}
@@ -347,7 +349,7 @@ export async function preBuild(): Promise<void> {
 		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
 		"resolve": { "alias": { "@brianjenkins94/tsval": resolvePath("../tsval/src/index.ts"), "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
 		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
-		"plugins": [bundledNodeServer("worker-pod"), bundledModule("worker-pod", "page-tap.ts", "page-tap", "iife", []), bundledModule("worker-pod", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
+		"plugins": [bundledNodeServer("worker-pod"), bundledModule("previews", "page-tap.ts", "page-tap", "iife", []), bundledModule("previews", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
 		"worker": { "rollupOptions": { "output": { "sourcemap": !isCI } } },
 		"build": {
 			"outDir": "dist",
@@ -363,13 +365,13 @@ export async function preBuild(): Promise<void> {
 				"input": {
 					"lsp/server-host": resolvePath("./extensions/worker-pod/server-host.ts"),
 					"lsp/debug-worker": resolvePath("./extensions/tsval/debug-worker.ts"),
-					"lsp/node-worker": resolvePath("./extensions/worker-pod/node-worker.ts"),
+					"lsp/node-worker": resolvePath("./workers/node-worker.ts"),
 					// provoke child worker (debug affordance): node-worker spawns it per hardReset round to get a cold
 					// almostnode + ts realm. Served at lsp/provoke-worker.js so node-worker's `new URL` resolves it.
-					"lsp/provoke-worker": resolvePath("./extensions/worker-pod/provoke-worker.ts"),
+					"lsp/provoke-worker": resolvePath("./workers/provoke-worker.ts"),
 					// The editor's BABLR worker (not part of the LSP pod), served from lsp/ like the other worker chunks.
 					// Started and queued by bablr.ts.
-					"lsp/bablr-worker": resolvePath("./bablr-worker.ts"),
+					"lsp/bablr-worker": resolvePath("./workers/bablr-worker.ts"),
 					// The event sheet's recognizer worker — built HERE so its `typescript` shares the deduped ts chunk above
 					// (no second copy); the event-sheet extension starts it (extensions/event-sheet/extension.ts).
 					"lsp/recognizer-worker": resolvePath("./extensions/event-sheet/recognizer-worker.ts")
@@ -496,7 +498,7 @@ export async function preBuild(): Promise<void> {
 			"assetsInlineLimit": 0,
 			"rollupOptions": {
 				"preserveEntrySignatures": "strict",
-				"input": { "lsp/capabilities-canary": resolvePath("./extensions/capabilities/canary.ts") },
+				"input": { "lsp/capabilities-canary": resolvePath("./shared/capabilities/canary.ts") },
 				"output": { "banner": PROCESS_SHIM, "chunkFileNames": "lsp/[name]-[hash].js", "assetFileNames": "lsp/[name]-[hash][extname]" }
 			}
 		}

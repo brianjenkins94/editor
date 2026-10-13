@@ -14,7 +14,7 @@ import type { Hub } from "@brianjenkins94/hub";
 import { serve } from "@brianjenkins94/hub";
 import { EMPTY_POLICY, problemOf, ruleMatches, type Policy, type Rule } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { loadEffectivePolicy, persistOverride, replaceRule } from "../capabilities/silo-store";
+import { loadEffectivePolicy, persistOverride, replaceRule } from "./capabilities/silo-store";
 import { controllable, type DebugOutcome } from "./debug-control";
 
 /** The choices at a capability stop, as the preview's prompt words them — and `rule`, a rule made there (the margin's

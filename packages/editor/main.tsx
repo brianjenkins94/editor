@@ -1,15 +1,15 @@
 /** @jsxImportSource preact */
-import type { Preview } from "./preview";
+import type { Preview } from "./app/preview";
 import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
 import moduleVersions from "editor:versions";
-import { ensureCrossOriginIsolated } from "./coi";
-import { hostLog } from "./logging";
+import { ensureCrossOriginIsolated } from "./app/coi";
+import { hostLog } from "./app/logging";
 import { consoleCollector, installHubCollector, installWindowMessageProbe, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "@brianjenkins94/observability";
-import { reportArchitecture } from "./architecture";
-import { reportSpanMetrics } from "./editor-metrics";
-import { describeCommands } from "./terminal/catalog";
-import { sampleById, sampleList } from "./samples";
-import { createVscodeWindow } from "./vscode";
+import { reportArchitecture } from "./shared/architecture";
+import { reportSpanMetrics } from "./shared/editor-metrics";
+import { describeCommands } from "./workbench/terminal/catalog";
+import { sampleById, sampleList } from "./app/samples";
+import { createVscodeWindow } from "./app/vscode";
 
 // Gain cross-origin isolation (SharedArrayBuffer) before booting. A dev server already sends the COOP/COEP
 // headers; on a static host (GitHub Pages) the coi service worker supplies them after one reload. On the
@@ -24,7 +24,7 @@ if (isolated && window.parent === window) {
 	// DYNAMIC import so the shell's WebAwesome chrome (wa-page, wa-button, the theme) lands in a shell-only chunk and
 	// never loads in the app iframe — the editor realm stays WA-free.
 	performance.mark("shell/import");
-	void import("./shell.tsx").then(({ renderShell }) => { renderShell(); });
+	void import("./shell/shell.tsx").then(({ renderShell }) => { renderShell(); });
 } else if (isolated) {
 	// The workbench opens on the bundled demo workspace (snapshot.ts bakes `demo/` in at build time as
 	// `editor:workspace`). The dependency type surface (`editor:types`) is seeded alongside so the
@@ -77,7 +77,7 @@ if (isolated && window.parent === window) {
 	// address one tab of several: every page's page_eval / page_query, and the editor's own (the debugger, the preview's
 	// cold-start provoke, a preview page's Chrome DevTools Protocol — see tools/).
 	// (tools/: a folder per family, each util/mcp's own tools — loaded after boot, so the MCP SDK and zod stay off its path)
-	void import("./tools").then(({ editorTools }) => { servePageTools(rootHub, { "tab": tab, "tools": editorTools(rootHub, { "commands": describeCommands() }) }); });
+	void import("./app/tools").then(({ editorTools }) => { servePageTools(rootHub, { "tab": tab, "tools": editorTools(rootHub, { "commands": describeCommands() }) }); });
 
 	// The live preview BACKEND: runs the demo (a Vite React app) through an in-browser dev server in the node worker,
 	// which hot-reloads on workspace changes. Display-free — the movable window + iframe live in the shell (top
@@ -103,7 +103,7 @@ if (isolated && window.parent === window) {
 			return;
 		}
 
-		import("./preview").then(({ createPreview }) => createPreview({
+		import("./app/preview").then(({ createPreview }) => createPreview({
 			"workspaceFolder": request?.root ?? "/workspace",
 			"swUrl": base + "coi-serviceworker.js",
 			"tab": tab,

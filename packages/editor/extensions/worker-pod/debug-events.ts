@@ -28,8 +28,8 @@ import type { AskEvent, CoverageEvent, EffectsEvent, EndedEvent, ListeningEvent,
 import { createRpcClient } from "@brianjenkins94/hub";
 import { given as givenBy } from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
-import { setEffects } from "../capabilities/run-effects";
-import { recordResult } from "../capabilities/silo-store";
+import { setEffects } from "./capabilities/run-effects";
+import { recordResult } from "./capabilities/silo-store";
 import { asked, policyFor } from "./capability-stops";
 import { appRootOf, runApp } from "./launch";
 import { podHub } from "./pod";

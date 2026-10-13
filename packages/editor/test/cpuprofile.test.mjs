@@ -2,7 +2,7 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { summarize, toCpuProfile } from "../cpuprofile.ts";
+import { summarize, toCpuProfile } from "../shared/cpuprofile.ts";
 
 // main → render → draw, and main → idle: samples every 10 ms.
 const trace = {

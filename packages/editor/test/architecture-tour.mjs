@@ -14,7 +14,7 @@ import { until } from "@brianjenkins94/util/until";
 
 import { alive, hasLabel, startSession } from "./architecture-harness.mjs";
 
-const { channels, seenChannels } = await import("../architecture-model.ts");
+const { channels, seenChannels } = await import("../shared/architecture-model.ts");
 
 let session;
 
@@ -2764,7 +2764,7 @@ test("dock: an editor moved into a new window lands in a panel of the shell's do
 // What the editor keeps, discovered from what was written and read (DISCOVERED-ARCHITECTURE.md): by now the tour has
 // run code (evidence, samples, runs), kept notes, and parsed with BABLR.
 test("stores: discovered from what's written and read", async () => {
-	const { discoveredStores } = await import("../architecture-model.ts");
+	const { discoveredStores } = await import("../shared/architecture-model.ts");
 	const stores = new Map(discoveredStores(session.snapshot()).map((store) => [store.store, store]));
 	const named = (store) => stores.get(store) ?? { "writers": [], "readers": [] };
 
@@ -2780,7 +2780,7 @@ test("stores: discovered from what's written and read", async () => {
 // the function that registered them — or, in a minified build, by namespace — so core's BABLR and its runtime evidence
 // come out as two parts of the workbench, not one.
 test("components: a realm's hub, told apart by who subscribed", async () => {
-	const { componentsOf } = await import("../architecture-model.ts");
+	const { componentsOf } = await import("../shared/architecture-model.ts");
 	const workbench = session.snapshot().topology.workbench;
 	const components = componentsOf(workbench);
 	const holding = (subject) => components.find((component) => component.subjects.includes(subject));
@@ -2795,7 +2795,7 @@ test("components: a realm's hub, told apart by who subscribed", async () => {
 // handles them — a note's resolve lands on core's BABLR component (startBablr, or `annotations` where the build kept no
 // names), not on the workbench as a whole.
 test("components: on the view, a message's line lands on the component that handles it", async () => {
-	const { componentsOf } = await import("../architecture-model.ts");
+	const { componentsOf } = await import("../shared/architecture-model.ts");
 	const name = componentsOf(session.snapshot().topology.workbench).find((component) => component.subjects.includes("annotations.resolve()")).component;
 
 	// The tour's files have taken its tab by now: open it again.
@@ -2824,7 +2824,7 @@ test("conformance: nothing observed needs review", async () => {
 // architecture workflow) a block that differs from a fresh tour's fails.
 test("the diagram: ARCHITECTURE.md's is this tour's", async () => {
 	const { readFile, writeFile } = await import("node:fs/promises");
-	const { tourDiagram } = await import("../architecture-model.ts");
+	const { tourDiagram } = await import("../shared/architecture-model.ts");
 	const file = new URL("../ARCHITECTURE.md", import.meta.url);
 	const doc = await readFile(file, "utf8");
 	const [begin, end] = ["<!-- architecture-tour:begin -->\n", "\n<!-- architecture-tour:end -->"];

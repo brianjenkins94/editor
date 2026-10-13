@@ -2,7 +2,7 @@
 // three lines of context.
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { unifiedDiff } from "../git-service.ts";
+import { unifiedDiff } from "../workbench/git-service.ts";
 
 const lines = (from, to) => Array.from({ "length": to - from + 1 }, (_, index) => String(from + index));
 

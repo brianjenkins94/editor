@@ -7,7 +7,7 @@
  * (git-service.ts) on the hub, which the shell's review panel reads too. This is that service's VS Code face — the
  * bridge's part is the crossing: `git.status`, `git.file`, `git.commit` over the hub, and `git.changed` to refresh.
  */
-import type { GitFileChange } from "../../git-service";
+import type { GitFileChange } from "../../workbench/git-service";
 import { createRpcClient } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 import { podHub } from "./pod";

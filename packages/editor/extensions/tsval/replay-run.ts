@@ -3,7 +3,7 @@
  * the calls it can't make. Pure — the debug worker runs it (debug-worker.ts `launchReplay`), node tests it.
  */
 import type ts from "typescript";
-import type { Replay } from "../worker-pod/page-evidence";
+import type { Replay } from "../../previews/page-evidence";
 import type { Encoded } from "../worker-pod/snapshot";
 import { isGuestFunction } from "@brianjenkins94/tsval";
 import { revive } from "../worker-pod/snapshot";

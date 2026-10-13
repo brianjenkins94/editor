@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 import test from "node:test";
-import { allowedOnLink, appLayout, appNodes, channels, checkConformance, classifyUrl, declaredBetween, declaredOn, familiesOnLink, identifyWorker, nodes, subjectMatches, subjectOfLabel, subjects } from "../architecture-model.ts";
+import { allowedOnLink, appLayout, appNodes, channels, checkConformance, classifyUrl, declaredBetween, declaredOn, familiesOnLink, identifyWorker, nodes, subjectMatches, subjectOfLabel, subjects } from "../shared/architecture-model.ts";
 
 const patterns = (a, b) => familiesOnLink(a, b).map((family) => family.pattern);
 
@@ -117,7 +117,7 @@ test("workers and URLs map to model ids", () => {
 });
 
 test("a subject's component: the one subscribed to it, a call or a folded subject alike", async () => {
-	const { componentFor } = await import("../architecture-model.ts");
+	const { componentFor } = await import("../shared/architecture-model.ts");
 	const root = { "subscriptions": ["$rpc.reply.root", "$rpc.call.virtual.request.fab8e817", "project.open"], "sites": { "project.open": ["serveProjects"] } };
 
 	assert.equal(componentFor(root, "project.open"), "serveProjects", "by its registering function");
@@ -127,7 +127,7 @@ test("a subject's component: the one subscribed to it, a call or a folded subjec
 });
 
 test("the tour's diagram: what was seen, one of a kind each, without counts", async () => {
-	const { tourDiagram } = await import("../architecture-model.ts");
+	const { tourDiagram } = await import("../shared/architecture-model.ts");
 	const node = (id, extra = {}) => ({ "id": id, "state": "alive", ...extra });
 	const snapshot = (count) => ({
 		"nodes": [node("shell"), node("preview:5173", { "spec": { "label": "Preview :5173" } }), node("preview:5174", { "spec": { "label": "Preview :5174" } }), node("workbench"), node("ext:notes", { "spec": { "label": "notes", "container": "extHostWorker" } }), node("store:.silo/notes/…/<file>.jsonl"), node("net:esm.sh", { "state": "declared" }), node("net:ka-f.fontawesome.com")],
@@ -152,7 +152,7 @@ test("the tour's diagram: what was seen, one of a kind each, without counts", as
 });
 
 test("each pair of contexts is declared as one channel (a second one could never be seen)", async () => {
-	const { channels } = await import("../architecture-model.ts");
+	const { channels } = await import("../shared/architecture-model.ts");
 	const pairs = channels.map((channel) => [channel.a, channel.b].sort().join(" ⇄ "));
 	const duplicates = pairs.filter((pair, index) => pairs.indexOf(pair) !== index);
 

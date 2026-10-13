@@ -1,10 +1,10 @@
 /**
- * A run's effects (extensions/capabilities/run-effects.ts): what the editor decided itself and what a debugger tells,
+ * A run's effects (extensions/worker-pod/capabilities/run-effects.ts): what the editor decided itself and what a debugger tells,
  * kept apart while the run goes and merged as its envelope takes them.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { recordEffect, setEffects, takeEffects } from "../extensions/capabilities/run-effects.ts";
+import { recordEffect, setEffects, takeEffects } from "../extensions/worker-pod/capabilities/run-effects.ts";
 
 test("the editor's and the debugger's effects, together — a telling replaces only the debugger's", () => {
 	recordEffect("run-1", "fs:read", "/workspace/a.txt", "made");

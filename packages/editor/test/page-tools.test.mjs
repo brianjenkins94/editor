@@ -13,16 +13,16 @@ import { until } from "@brianjenkins94/util/until";
 import { createDebugMcp } from "../../debug-mcp/src/server.ts";
 import { connectTestClient } from "../../debug-mcp/src/testing.ts";
 import { OBSERVABILITY_PROTOCOL, servePageToolSet, TAB_DISCOVER, TAB_HERE } from "../../observability/src/index.ts";
-import debug from "../tools/debug/tools.ts";
-import editor from "../tools/editor/tools.ts";
-import files from "../tools/files/tools.ts";
-import git from "../tools/git/tools.ts";
-import margin from "../tools/margin/tools.ts";
-import { createToolHost, toPageTools } from "../tools/page-tools.ts";
-import previews from "../tools/previews/tools.ts";
-import rules from "../tools/rules/tools.ts";
-import runs from "../tools/runs/tools.ts";
-import terminal from "../tools/terminal/tools.ts";
+import debug from "../app/tools/debug/tools.ts";
+import editor from "../app/tools/editor/tools.ts";
+import files from "../app/tools/files/tools.ts";
+import git from "../app/tools/git/tools.ts";
+import margin from "../app/tools/margin/tools.ts";
+import { createToolHost, toPageTools } from "../app/tools/page-tools.ts";
+import previews from "../app/tools/previews/tools.ts";
+import rules from "../app/tools/rules/tools.ts";
+import runs from "../app/tools/runs/tools.ts";
+import terminal from "../app/tools/terminal/tools.ts";
 
 /** Every family's tools, as the tab serves them (tools/index.ts finds the families; Node can't read its glob). */
 const FAMILIES = [debug, editor, files, git, margin, previews, rules, runs, terminal];

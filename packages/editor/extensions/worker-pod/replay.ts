@@ -9,7 +9,7 @@
  */
 import * as vscode from "vscode";
 import { createRpcClient } from "@brianjenkins94/hub";
-import type { RecordedStop, Replay, StopHit } from "./page-evidence";
+import type { RecordedStop, Replay, StopHit } from "../../previews/page-evidence";
 import { podHub } from "./pod";
 
 /** A hit that can be stepped: its stop, the hit, and the preview port it came from. */

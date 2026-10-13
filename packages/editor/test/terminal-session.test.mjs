@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Bash, defineCommand } from "just-bash";
 
-import { execInSession, statementsOf } from "../terminal/session.ts";
+import { execInSession, statementsOf } from "../workbench/terminal/session.ts";
 
 /** A long-running command, like `vite`: runs until Ctrl-C, then exits 130. */
 const waiter = defineCommand("waiter", async (_args, ctx) => {

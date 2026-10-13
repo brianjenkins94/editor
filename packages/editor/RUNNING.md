@@ -195,7 +195,7 @@ that can't start says why). And the two run ledgers become one: every run in `ru
    one). A run of an ordering exploring found replays it — its calls the stand-ins they were. Not yet: a package's own
    network is the worker's, unasked (its fs writes are refused) — a package's calls decided too is open.
 3. **The terminal** (done). `node f` always a run: output and stdin in its terminal, its args, cwd and env; the regex no
-   longer decides anything. Done: `node f [args]` (terminal/commands/node/node.ts) is always a debug run — the source's look at what it
+   longer decides anything. Done: `node f [args]` (workbench/terminal/commands/node/node.ts) is always a debug run — the source's look at what it
    does is only the running list's first label, and a run that listens becomes a service with its port; the command
    line's arguments are its `process.argv` (none given: the margin's Mock, as before), the shell's directory its
    `process.cwd()` (a relative path in its fs calls that directory's) and its exports its `process.env`; its output is

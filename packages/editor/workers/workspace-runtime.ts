@@ -1,0 +1,135 @@
+/**
+ * almostnode on the shared workspace, as a run has it (MODULES.md, step 4): the debug worker's (extensions/tsval/debug-worker.ts) — the
+ * workspace's zen-fs, the deploy base, cwd and built-ins, the program's globals; a listening server answered one way,
+ * the preview's taps put in what it serves (the dev-server worker, node-worker.ts, answers its dev servers' requests
+ * with the same `answerServer` and taps). What's passed in: the fs policy, where output goes, the evaluator of the
+ * program's own files and its stand-ins.
+ */
+import type { RuntimeOptions, VirtualFS } from "@brianjenkins94/almostnode";
+import { getServer, Runtime } from "@brianjenkins94/almostnode";
+import pageTap from "previews:page-tap";
+import workerTap from "previews:worker-tap";
+
+/** A preview's request for a port (relayed by the service worker, then the tab's root). Its body crosses as a
+ *  Uint8Array (structured-clone over the worker port). */
+export interface VirtualRequest { "port": number; "method": string; "url": string; "headers": Record<string, string>; "body"?: Uint8Array; /** A worker's entry script (the service worker tells: destination worker, mode same-origin). */ "entry"?: "worker" | "sharedworker" }
+export interface VirtualResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": ArrayLike<number> }
+interface ServerResponse { "statusCode": number; "statusMessage": string; "headers": Record<string, string>; "body": ArrayLike<number> }
+/** What answers a port: a dev server, or a program's own http server (almostnode's). */
+export type RequestHandler = { "handleRequest": (method: string, url: string, headers: Record<string, string>, body?: Uint8Array) => Promise<ServerResponse> };
+
+/** The deploy base (this worker's served URL minus the "/__vscode__/…" tail), so a program's `file://` dynamic import
+ *  resolves under the base-scoped service worker. Same computation as server-host. */
+const here = new URL(import.meta.url);
+const cut = here.pathname.indexOf("/__vscode__/");
+
+export const DEPLOY_BASE = here.origin + (cut === -1 ? "/" : here.pathname.slice(0, cut + 1));
+
+/** A runtime on `vfs` (the workspace's, createZenfsVFS): cwd `/workspace`, the deploy base, and the host's own options. */
+export function workspaceRuntime(vfs: VirtualFS, options: Omit<RuntimeOptions, "base"> = {}): Runtime {
+	return new Runtime(vfs, { "cwd": "/workspace", "env": {}, ...options, "base": DEPLOY_BASE });
+}
+
+/** The web's globals Node has too (a program run natively sees the worker's, which has them). */
+const NODE_WEB_GLOBALS = ["URL", "URLSearchParams", "TextEncoder", "TextDecoder", "structuredClone", "AbortController", "AbortSignal", "atob", "btoa", "Blob", "Event", "EventTarget", "Headers", "Request", "Response", "FormData", "DOMException", "WebAssembly"];
+
+/** The globals a program has on Node beyond ECMAScript's — the web's Node has, and `Buffer` (almostnode's) — for a host
+ *  evaluating the program's files itself (the debug worker: tsval's own are ECMAScript's alone), so a program has the
+ *  same globals however it runs (RUNNING.md). Not what varies run to run (`performance`, `crypto`): a run's clock and
+ *  randomness are its event loop's. */
+export function programGlobals(runtime: Runtime): Record<string, unknown> {
+	const host = globalThis as unknown as Record<string, unknown>;
+	const web = Object.fromEntries(NODE_WEB_GLOBALS.filter((name) => name in host).map((name) => [name, host[name]]));
+
+	return { ...web, "Buffer": (runtime.require("buffer", "/workspace", "package") as { "Buffer": unknown }).Buffer };
+}
+
+/** The program's own http server listening on `port` (almostnode's port registry), if one is. */
+export function serverOn(port: number): RequestHandler | undefined {
+	return getServer(port) as unknown as RequestHandler | undefined;
+}
+
+// The preview taps (page-tap.ts, worker-tap.ts — bundled to script text at build time): a server here puts one first
+// in every page it serves (inline, so it runs before the app's own code — the errors thrown during the app's module
+// eval are exactly the ones we'd otherwise miss) and in every worker's entry script.
+/** Where a server here serves the worker tap as a module: under the preview's own address. */
+export const WORKER_TAP_PATH = "/@editor/worker-tap.js";
+// (Inlined in a <script>: nothing in it may close the element early.)
+// eslint-disable-next-line webawesome/no-html-in-strings -- the page tap SCRIPT injected into a preview page as text, not app chrome
+const PAGE_TAP_SCRIPT = "<script>" + pageTap.replaceAll("</script", "<\\/script") + "</script>";
+
+/** A worker's entry script (`body`, served at `url`) with the worker tap put first — on its FIRST LINE, no newline added,
+ *  so the script's own lines (and its inline source map) don't move: a module worker imports it (the first import runs
+ *  first; a relative path, so it stays under the preview's address), a classic one evaluates it inline. After a leading
+ *  "use strict" directive, which must stay the script's first statement. */
+function injectWorkerTap(body: string, url: string): string {
+	const isModule = /^\s*(?:import\b|export\b)/mu.test(body);
+	const depth = url.split(/[?#]/u)[0]!.split("/").length - 2;
+	const tap = isModule ? `import "./${"../".repeat(Math.max(0, depth))}${WORKER_TAP_PATH.slice(1)}";` : `(0, eval)(${JSON.stringify(workerTap)});`;
+	const directive = /^\s*(["'])use strict\1;?/u.exec(body)?.[0] ?? "";
+
+	return directive + tap + body.slice(directive.length);
+}
+
+/** Inject the observability tap as the first thing inside <head> (fallback: after <html>, else prepend). */
+function injectObsTap(html: string): string {
+	const headMatch = /<head[^>]*>/iu.exec(html);
+
+	if (headMatch !== null) {
+		const at = headMatch.index + headMatch[0].length;
+
+		return html.slice(0, at) + "\n" + PAGE_TAP_SCRIPT + html.slice(at);
+	}
+
+	const htmlMatch = /<html[^>]*>/iu.exec(html);
+
+	if (htmlMatch !== null) {
+		const at = htmlMatch.index + htmlMatch[0].length;
+
+		return html.slice(0, at) + "\n" + PAGE_TAP_SCRIPT + html.slice(at);
+	}
+
+	return PAGE_TAP_SCRIPT + html;
+}
+
+/** The worker tap, asked for as a module (injectWorkerTap imports it from a worker's entry) — undefined for any other URL. */
+export function workerTapResponse(url: string): VirtualResponse | undefined {
+	return url.split("?")[0] === WORKER_TAP_PATH ? { "status": 200, "statusText": "OK", "headers": { "content-type": "text/javascript", "cache-control": "no-cache" }, "body": new TextEncoder().encode(workerTap) } : undefined;
+}
+
+/** `server`'s answer to `request`, as the preview gets it: an HTML document with the page tap first in it, a worker's
+ *  entry script with the worker tap; anything else as it was. `observed` hears the request and its response (the
+ *  architecture's record of the server's traffic). */
+export async function answerServer(server: RequestHandler, request: VirtualRequest, observed?: (direction: "request" | "reply" | "error", label: string, bytes: number) => void): Promise<VirtualResponse> {
+	const { method, url, headers, body, entry } = request;
+	const path = url.split("?")[0]!;
+
+	observed?.("request", method + " " + path, body?.byteLength ?? 0);
+
+	const response = await server.handleRequest(method, url, headers, body);
+
+	observed?.(response.statusCode >= 400 ? "error" : "reply", String(response.statusCode) + " " + path, response.body.length);
+
+	// Re-encoded, with its content-length fixed; only HTML and a worker's entry are touched.
+	const contentType = response.headers["content-type"] ?? response.headers["Content-Type"] ?? "";
+	const rewritten = (text: string): VirtualResponse => {
+		const bytes = new TextEncoder().encode(text);
+		const nextHeaders = { ...response.headers };
+
+		delete nextHeaders["content-length"];
+		delete nextHeaders["Content-Length"];
+		nextHeaders["content-length"] = String(bytes.byteLength);
+
+		return { "status": response.statusCode, "statusText": response.statusMessage, "headers": nextHeaders, "body": bytes };
+	};
+
+	if (entry !== undefined && response.statusCode < 300 && /javascript|typescript/u.test(contentType)) {
+		return rewritten(injectWorkerTap(new TextDecoder().decode(new Uint8Array(response.body)), url));
+	}
+
+	if (contentType.includes("text/html")) {
+		return rewritten(injectObsTap(new TextDecoder().decode(new Uint8Array(response.body))));
+	}
+
+	return { "status": response.statusCode, "statusText": response.statusMessage, "headers": response.headers, "body": response.body };
+}
