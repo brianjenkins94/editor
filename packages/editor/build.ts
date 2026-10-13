@@ -24,12 +24,6 @@ import { eslintPresetPlugin } from "./extensions/eslint/preset-build";
 export const root = url.fileURLToPath(new URL(".", import.meta.url));
 const resolvePath = (relative: string): string => url.fileURLToPath(new URL(relative, import.meta.url));
 
-/** tsval from its source, as its package.json exports it: the interpreter, and its `./typed` and `./values` subpaths. */
-const TSVAL_ALIASES = [
-	{ "find": /^@brianjenkins94\/tsval$/u, "replacement": resolvePath("../tsval/src/index.ts") },
-	{ "find": /^@brianjenkins94\/tsval\/(typed|values)$/u, "replacement": resolvePath("../tsval/src/") + "$1.ts" }
-];
-
 // Every node builtin, bare (`fs`) and `node:`-prefixed — kept external so almostnode resolves them to its own
 // shims at runtime instead of vite bundling/polyfilling them.
 const nodeBuiltins = [...builtinModules, ...builtinModules.map((name) => `node:${name}`)];
@@ -68,7 +62,6 @@ function bundledModule(folder: string, file: string, id: string, format: "cjs" |
 				"configFile": false,
 				"logLevel": "silent",
 				"root": root,
-				"resolve": { "alias": TSVAL_ALIASES },
 				"plugins": plugins,
 				"build": {
 					"write": false,
@@ -354,7 +347,7 @@ export async function preBuild(): Promise<void> {
 		// the fresh dist directly, sidestepping the pnpm file:-dep store staleness that bites workspace packages.
 		// (and hub/observability to the editor's own: a debugger's worker connects through run-contract's runtime helper,
 		// whose own copies are only its dev dependencies — one hub, one set of log sinks)
-		"resolve": { "alias": [...TSVAL_ALIASES, { "find": "@brianjenkins94/bablr", "replacement": resolvePath("../bablr/dist/index.js") }], "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
+		"resolve": { "alias": { "@brianjenkins94/bablr": resolvePath("../bablr/dist/index.js") }, "dedupe": ["typescript", "@brianjenkins94/hub", "@brianjenkins94/observability"] },
 		// The preview taps, as script text the node worker's dev server puts into the app's pages and workers.
 		"plugins": [bundledNodeServer("worker-pod"), bundledModule("previews", "page-tap.ts", "page-tap", "iife", []), bundledModule("previews", "worker-tap.ts", "worker-tap", "iife", []), cspellDict()],
 		"worker": { "rollupOptions": { "output": { "sourcemap": !isCI } } },
@@ -491,7 +484,6 @@ export async function preBuild(): Promise<void> {
 		"base": "./",
 		"resolve": {
 			"alias": [
-				...TSVAL_ALIASES,
 				{ "find": /^typescript(\/.*)?$/u, "replacement": resolvePath("./extensions/capabilities/ts-external.js") }
 			],
 			"conditions": ["browser", "import", "default"]
