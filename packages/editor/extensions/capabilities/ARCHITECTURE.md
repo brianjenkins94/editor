@@ -55,6 +55,8 @@ signal** (a scope OBSERVED with no matching STATIC entry is the alarm; silo must
   capabilities.json         FACTS · static        what analysis (findReach) says code CAN do
   capabilities/<user>.json  FACTS · observed      what actually FIRED for this user — a day-coarsened rollup
   runs/<user>.jsonl         FACTS · observed      the run ledger (evidence.ts): each run's envelope, with its `effects`
+  baseline.json             FACTS · accepted      what each dependency's own code can do, accepted once (workbench/baseline.ts
+                                                  makes it on the first run if absent; never remade, never taught by runs)
   .gitignore                silo-managed          ignores local/
 ```
 
@@ -77,6 +79,7 @@ and "was I exposed to compromised dep X in window W" are QUERIES over the observ
 | `ts-plugin.js` | loads both engines, runs the canary in the background, merges results into diagnostics | tsserver plugin |
 | `ts-external.js` | the `typescript` shim (`= globalThis.__capabilitiesTs`) that lets the canary reuse tsserver's ts | build only |
 | `extension.ts` | the "Capability calls" panel + the tripwire error-surface | ext host |
+| `beyond-baseline.ts` | the "Beyond the baseline" view: what runs saw packages do that `baseline.json` doesn't account for (lib's `beyondBaseline`), a badge, and a warning for a new one | ext host |
 | `policy.ts` | vscode read/write of the base `.silo/policy.json` the panel curates (wraps `silo/policy`) | ext host |
 | `silo-store.ts` | the whole `.silo/` layout: base+override policy merge, observed rollup, run firehose, git-user resolution | ext host |
 | `decide.ts` | the single capability decision endpoint every interceptor round-trips to (classify → gate → decide) | ext host |

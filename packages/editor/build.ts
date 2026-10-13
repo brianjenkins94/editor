@@ -323,7 +323,9 @@ export async function preBuild(): Promise<void> {
 		// The terminal's commands run on juvy, which parses with node:util's parseArgs: @pkgjs/parseargs (Node's own, as a
 		// package). polyfillNode(["path", "url"]) is for util/env, which juvy imports (it reads node:path/url at load), and
 		// gives the bundle `global`/`process` where they're read.
-		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "buffer": stdlib["buffer"], "node:util": "@pkgjs/parseargs", "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
+		// `oxc-parser` → a stand-in that says it isn't here: util/silo/detect imports it for the one function the workbench
+		// never calls (baseline.ts uses detect, regular expressions), so its native binding needn't be bundled.
+		"resolve": { "dedupe": ["@brianjenkins94/hub", "@brianjenkins94/observability"], "alias": { "buffer": stdlib["buffer"], "node:util": "@pkgjs/parseargs", "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js"), "oxc-parser": resolvePath("./workbench/oxc-parser-unavailable.ts") } },
 		"build": {
 			"outDir": "dist",
 			"minify": isCI,

@@ -387,6 +387,7 @@ flowchart LR
     n_net_lighter_codehike_org["Code Hike"]
     n_net_open_vsx_org["Open VSX"]
     n_net_origin["Page origin"]
+    n_net_registry_npmjs_org["npm registry"]
     n_net_unpkg_com["unpkg"]
     n_sw["Service worker"]
   end
@@ -410,6 +411,7 @@ flowchart LR
   n_ext_bridge <-.->|"commands"| n_ext_insights
   n_ext_bridge <-.->|"commands"| n_ext_notes
   n_ext_bridge <-.->|"commands"| n_ext_tsval
+  n_ext_capabilities -->|"reads"| n_store__silo_runs__file__jsonl
   n_ext_capabilities -->|"reads, writes"| n_store__silo__file__json
   n_ext_capabilities <-.->|"commands"| n_ext_vscode
   n_ext_cspell_cspell <-.->|"extension defined (LSP, tsserver)"| n_exthost_LocalWebWorker_0
@@ -441,6 +443,7 @@ flowchart LR
   n_net_lighter_codehike_org <-.->|"HTTP"| n_sw
   n_net_open_vsx_org <-.->|"HTTP"| n_sw
   n_net_origin <-.->|"HTTP"| n_sw
+  n_net_registry_npmjs_org <-.->|"HTTP"| n_sw
   n_net_unpkg_com <-.->|"HTTP"| n_sw
   n_node <-.->|"in-realm calls"| n_vite__
   n_node <-.->|"zen-fs"| n_zenfs
@@ -491,7 +494,7 @@ flowchart LR
 | `.silo/local/<file>.json` | Workbench, bridge | Workbench, bridge |
 | `.silo/notes/…/<file>.jsonl` | Workbench, notes | Workbench, notes |
 | `.silo/policy/<file>.json` | Workbench, bridge | Workbench, bridge |
-| `.silo/runs/<file>.jsonl` | Workbench | Workbench, history |
+| `.silo/runs/<file>.jsonl` | Workbench | Workbench, capabilities, history |
 | `IndexedDB bablr` | BABLR worker | BABLR worker, Workbench |
 | `IndexedDB silo-local` | Workspace (zen-fs) | Workspace (zen-fs) |
 | `IndexedDB vscode-web-db` | Workbench | Workbench |

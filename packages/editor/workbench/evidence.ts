@@ -26,6 +26,7 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldValues, parseEvidence, parseRuns, parseSamples, queryRuns, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, withLines } from "@brianjenkins94/util/silo/layout";
 import { Unparsable } from "./bablr";
+import { ensureBaseline } from "./baseline";
 import { blobOid, headCommit } from "./git-engine";
 
 const ROOT = "/workspace";
@@ -417,6 +418,8 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		}
 
 		await ensureSiloFiles(vscode);
+		// (the first run to keep anything makes the dependency baseline, if there's none: the editor's silo init)
+		void ensureBaseline(vscode);
 
 		for (const each of covered ?? []) {
 			await recordFile(envelope, repoRelative(each.file), [each]);

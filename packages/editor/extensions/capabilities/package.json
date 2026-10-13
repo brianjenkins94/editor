@@ -32,6 +32,11 @@
           "id": "silo.rules",
           "name": "Rules",
           "visibility": "collapsed"
+        },
+        {
+          "id": "silo.beyondBaseline",
+          "name": "Beyond the baseline",
+          "visibility": "collapsed"
         }
       ]
     },
